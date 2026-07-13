@@ -109,6 +109,13 @@ class StateReaderTest {
             ),
         )
         assertEquals(
+            "com.teslacoilsw.launcher",
+            StateReader.parseForegroundPackage(
+                "ResumedActivity: ActivityRecord{56055641 u0 " +
+                    "com.teslacoilsw.launcher/.NovaLauncher t17329}",
+            ),
+        )
+        assertEquals(
             StateReader.BatterySnapshot(level = 42, charging = false),
             StateReader.parseBattery("level: 42\nstatus: 3"),
         )

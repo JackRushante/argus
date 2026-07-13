@@ -87,6 +87,9 @@ class StateReader(private val shell: PrivilegedShell) {
         private val COMPONENT = Regex(
             "([A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+)/[A-Za-z0-9_.$]+",
         )
+        private val RESUMED_ACTIVITY_FIELD = Regex(
+            "\\b(?:topResumedActivity|mResumedActivity|ResumedActivity)\\b",
+        )
 
         fun parseRinger(raw: String): String? = when (raw.trim()) {
             "0" -> "silent"
@@ -138,7 +141,7 @@ class StateReader(private val shell: PrivilegedShell) {
         }
 
         fun parseForegroundPackage(raw: String): String? = raw.lineSequence()
-            .filter { "mResumedActivity" in it || "topResumedActivity" in it }
+            .filter(RESUMED_ACTIVITY_FIELD::containsMatchIn)
             .mapNotNull { COMPONENT.find(it)?.groupValues?.get(1) }
             .firstOrNull()
     }
