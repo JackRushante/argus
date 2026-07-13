@@ -36,6 +36,7 @@ class AndroidCapabilityProbeInstrumentedTest {
                 ?: Build.VERSION.SDK_INT
             assertEquals(Build.MODEL, manifest.deviceModel)
             assertEquals(expectedAndroid, manifest.androidVersion)
+            assertEquals(Build.VERSION.SDK_INT, manifest.androidApi)
             assertEquals(StateKeys.ALL, manifest.stateKeys)
             assertEquals(listOf(contact), manifest.whitelistedContacts)
             assertEquals(

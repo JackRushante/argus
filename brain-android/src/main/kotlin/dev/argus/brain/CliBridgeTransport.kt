@@ -311,7 +311,7 @@ class CliBridgeTransport internal constructor(
 
     private fun CapabilityManifest.toEnvelope() = ManifestEnvelope(
         deviceModel = deviceModel,
-        androidApi = androidVersion,
+        androidApi = androidApi,
         shizukuAvailable = shizukuAvailable,
         grantedPermissions = grantedPermissions,
         availableTools = availableTools,

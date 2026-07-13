@@ -24,7 +24,10 @@ interface ContactWhitelistStore {
 
 data class CapabilityManifest(
     val deviceModel: String,
+    /** Versione commerciale mostrata all'utente (es. Android 16). */
     val androidVersion: Int,
+    /** API level inviato al bridge (es. 36); separato dalla release commerciale. */
+    val androidApi: Int = androidVersion,
     val shizukuAvailable: Boolean,
     val grantedPermissions: List<String>,
     val availableTools: List<String>,

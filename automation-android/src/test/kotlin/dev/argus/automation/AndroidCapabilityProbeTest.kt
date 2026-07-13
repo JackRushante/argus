@@ -46,6 +46,7 @@ class AndroidCapabilityProbeTest {
 
         assertEquals("CPH2747", manifest.deviceModel)
         assertEquals(16, manifest.androidVersion)
+        assertEquals(36, manifest.androidApi)
         assertTrue(manifest.shizukuAvailable)
         assertEquals(StateKeys.ALL, manifest.stateKeys)
         assertEquals(listOf(WhitelistedContact("Moglie", "jid:42")), manifest.whitelistedContacts)
@@ -133,6 +134,7 @@ class AndroidCapabilityProbeTest {
     private fun state() = AndroidCapabilityState(
         deviceModel = "CPH2747",
         androidVersion = 16,
+        androidApi = 36,
         shizukuStatus = ShizukuGatewayStatus.AUTHORIZED,
         shizukuPermissionGranted = true,
         notificationsGranted = false,

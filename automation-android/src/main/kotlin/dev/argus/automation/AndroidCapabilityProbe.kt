@@ -31,6 +31,7 @@ import dev.argus.shizuku.ShizukuGatewayStatus
 internal data class AndroidCapabilityState(
     val deviceModel: String,
     val androidVersion: Int,
+    val androidApi: Int,
     val shizukuStatus: ShizukuGatewayStatus,
     val shizukuPermissionGranted: Boolean,
     val notificationsGranted: Boolean,
@@ -55,6 +56,7 @@ internal class SystemAndroidCapabilityStateSource(
         deviceModel = Build.MODEL.ifBlank { "Android" },
         androidVersion = Build.VERSION.RELEASE.substringBefore('.').toIntOrNull()
             ?: Build.VERSION.SDK_INT,
+        androidApi = Build.VERSION.SDK_INT,
         shizukuStatus = runCatching { shizuku.status() }
             .getOrDefault(ShizukuGatewayStatus.UNSUPPORTED),
         shizukuPermissionGranted = granted(SHIZUKU_PERMISSION),
@@ -105,6 +107,7 @@ class AndroidCapabilityProbe internal constructor(
         return CapabilityManifest(
             deviceModel = resolved.state.deviceModel,
             androidVersion = resolved.state.androidVersion,
+            androidApi = resolved.state.androidApi,
             shizukuAvailable = resolved.state.shizukuStatus == ShizukuGatewayStatus.AUTHORIZED,
             grantedPermissions = grantedPermissionNames(resolved.state),
             availableTools = resolved.availableTools,
