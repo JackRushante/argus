@@ -1,8 +1,13 @@
 # Argus — Agente LLM di automazione Android (design)
 
 > **Nome di lavoro:** *Argus* (il gigante dai molti occhi — agente always-on che "vede" lo schermo). Provvisorio, rinominabile.
-> **Data:** 2026-07-12 · **Rev:** 3 (post analisi critica pre-handoff) · **Autore:** Lorenzo Marci + Claude Code (oneplus)
-> **Stato:** design approvato, pronto per handoff frontend (vedi `handoff-frontend.md`) e per l'esecuzione di P0-A.
+> **Data:** 2026-07-12 · **Rev:** 4 (bridge Argus v1 hardenizzato) · **Autore:** Lorenzo Marci + Claude Code (oneplus) + Codex
+> **Stato:** design approvato; P0-A e handoff frontend completati, P0-B in corso secondo il commander replan.
+>
+> **Changelog rev 4** (rispetto a rev 3):
+> - **Bridge dedicato:** `argus-bridge` separato dalla Guida Bali, loopback-only su Hermes e pubblicato sul tailnet tramite Tailscale Serve HTTPS.
+> - **Contratto v1:** bearer runtime, envelope strict e versionato, request ID/idempotenza, limiti e parsing fail-closed; nessun fallback `/chat`.
+> - **Minimizzazione dati:** il client invia soltanto manifest e `DeviceState` filtrato; le coordinate non lasciano il telefono. Contratto operativo in `docs/design/hermes-bridge-contract.md`.
 >
 > **Changelog rev 3** (rispetto a rev 2):
 > - **Sicurezza:** invariante hard sugli `allowed_tools` di `InvokeLlm` (niente `shell.run` / `automation.*` / tool sempre-conferma); policy esplicita per `run_shell`; rendering **deterministico** della regola in approvazione (mai la parafrasi LLM); gestione **gruppi WhatsApp** (default: solo chat 1:1 per le reply generative).

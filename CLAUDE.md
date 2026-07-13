@@ -6,7 +6,9 @@ Motore di automazione Tasker-class always-on: l'LLM (via Hermes) **compila** ric
 
 | Documento | Contenuto |
 |---|---|
-| `docs/superpowers/specs/2026-07-12-hermes-android-agent-design.md` | Spec di sistema **rev 3** — architettura, schema automazioni, Brain a 2 transport, sicurezza (§10), edge case E1-E15, phasing P0-P3 |
+| `docs/superpowers/specs/2026-07-12-hermes-android-agent-design.md` | Spec di sistema **rev 4** — architettura, schema automazioni, Brain a 2 transport, sicurezza (§10), edge case E1-E15, phasing P0-P3 |
+| `docs/superpowers/plans/2026-07-13-argus-commander-replan.md` | Piano operativo corretto e stato corrente dell'implementazione |
+| `docs/design/hermes-bridge-contract.md` | Contratto v1 e confine di sicurezza del bridge Argus dedicato |
 | `docs/superpowers/specs/2026-07-12-argus-handoff-frontend.md` | Contratti di stato UI completi (6 schermi), direttive sicurezza UI, navigazione, microcopy |
 | `docs/superpowers/plans/2026-07-12-argus-p0a-engine-core.md` | Piano P0-A rev 2: engine core JVM puro, 13 task TDD |
 | `docs/design/README.md` + `docs/design/CLAUDE-CODE-TIPS.md` | Design handoff (Claude Design, rev 1a approvata): token colore §5, modello dati §6, schermi §7, icone §9 |
@@ -43,6 +45,6 @@ Motore di automazione Tasker-class always-on: l'LLM (via Hermes) **compila** ric
 
 ## Fasi
 
-- **M1 / P0-A** (in corso): engine core JVM — piano dedicato.
-- **M2 / UI**: 6 schermi Compose dal design handoff + app demo su fixture.
-- **M3 / P0-B** (prossima sessione): Shizuku executor, Room, AlarmManager, bridge Hermes reale (`http://100.80.142.65:8090`), wiring. Il telefono target è `oneplus` (100.74.117.9, Tailscale).
+- **M1 / P0-A**: engine core JVM completato e coperto da test.
+- **M2 / UI**: 6 schermi Compose e app demo su fixture completati.
+- **M3 / P0-B** (in corso): persistenza/approvazione/audit e bridge Hermes v1 completati; restano scheduler, Shizuku executor e wiring Android. Il bridge Argus e solo `https://hermes.tail04462d.ts.net`; la porta 8090 appartiene alla Guida Bali e non e un fallback. Il telefono target e `oneplus` (100.74.117.9, Tailscale).
