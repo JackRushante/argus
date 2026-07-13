@@ -25,6 +25,14 @@ class CronScheduleTest {
         // 25/10/2026: 03:00 CEST -> 02:00 CET; 02:30 occorre due volte -> prima occorrenza (CEST) = 00:30Z
         assertEquals(Instant.parse("2026-10-25T00:30:00Z"), next("30 2 * * *", "2026-10-24T22:00:00Z"))
     }
+    @Test fun `dst overlap never returns the already-fired earlier occurrence`() {
+        // Dopo la prima 02:30 (00:30Z), la seconda è soppressa: si passa al giorno successivo.
+        assertEquals(Instant.parse("2026-10-26T01:30:00Z"), next("30 2 * * *", "2026-10-25T01:00:00Z"))
+    }
+    @Test fun `dst gap shifted occurrence remains eligible after the clock jump`() {
+        // 02:30 inesistente è definita come 03:30 locale; alle 03:10 deve essere ancora futura.
+        assertEquals(Instant.parse("2026-03-29T01:30:00Z"), next("30 2 * * *", "2026-03-29T01:10:00Z"))
+    }
     @Test fun `step and dow`() {
         assertEquals(Instant.parse("2026-07-12T10:15:00Z"), next("*/15 * * * *", "2026-07-12T10:07:00Z"))
         // 12/07/2026 è domenica -> lunedì 13 alle 09:00 CEST
