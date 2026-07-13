@@ -11,10 +11,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import rikka.shizuku.Shizuku
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -58,9 +60,10 @@ internal class ShizukuUserServiceTransport(
     private val gateway: ShizukuGateway,
 ) : ShellTransport, AutoCloseable {
     private val connectMutex = Mutex()
+    private val lifecycleLock = Any()
     @Volatile private var service: IPrivilegedShellService? = null
     @Volatile private var connection: ServiceConnection? = null
-    @Volatile private var closed = false
+    private val closed = AtomicBoolean(false)
 
     private val serviceArgs = Shizuku.UserServiceArgs(
         ComponentName(context.packageName, PrivilegedShellUserService::class.java.name),
@@ -98,7 +101,7 @@ internal class ShizukuUserServiceTransport(
         } catch (error: CancellationException) {
             throw error
         } catch (_: Exception) {
-            service = null
+            invalidate(remote)
             throw IllegalStateException("UserService Shizuku disconnesso")
         }
         ShellResult(
@@ -112,89 +115,142 @@ internal class ShizukuUserServiceTransport(
     }
 
     private suspend fun connectedService(): IPrivilegedShellService = connectMutex.withLock {
-        check(!closed) { "PrivilegedShell chiusa" }
+        check(!closed.get()) { "PrivilegedShell chiusa" }
         service?.takeIf { it.asBinder().pingBinder() }?.let { return@withLock it }
+        detachConnection()?.let { stale -> unbind(stale, remove = false) }
         check(gateway.status() == ShizukuGatewayStatus.AUTHORIZED) {
             "Shizuku non autorizzato"
         }
-        bindUserService().also { service = it }
+        withTimeoutOrNull(USER_SERVICE_BIND_TIMEOUT_MILLIS) {
+            bindUserService()
+        } ?: throw IllegalStateException("Timeout bind UserService Shizuku")
     }
 
     private suspend fun bindUserService(): IPrivilegedShellService =
         suspendCancellableCoroutine { continuation ->
             val callbackLock = Any()
-            var completed = false
-            var cancelled = false
+            var settled = false
             val candidate = object : ServiceConnection {
                 override fun onServiceConnected(name: ComponentName, binder: IBinder?) {
                     if (binder == null || !binder.pingBinder()) {
-                        synchronized(callbackLock) {
-                            if (!completed && !cancelled && continuation.isActive) {
-                                completed = true
+                        val shouldClean = synchronized(callbackLock) {
+                            if (settled || !continuation.isActive) false else {
+                                settled = true
                                 continuation.resumeWithException(
                                     IllegalStateException("Binder UserService non valido"),
                                 )
+                                true
                             }
                         }
-                        runCatching { Shizuku.unbindUserService(serviceArgs, this, false) }
+                        if (shouldClean) clearConnection(this)
+                        unbind(this, remove = false)
                         return
                     }
                     val connected = IPrivilegedShellService.Stub.asInterface(binder)
                     val accepted = synchronized(callbackLock) {
-                        if (completed || cancelled || closed || !continuation.isActive) {
-                            false
-                        } else {
-                            completed = true
-                            connection = this
-                            service = connected
-                            continuation.resume(connected)
-                            true
+                        if (settled || !continuation.isActive) false else {
+                            val canAccept = synchronized(lifecycleLock) {
+                                !closed.get() && connection === this
+                            }
+                            settled = true
+                            if (canAccept) {
+                                service = connected
+                                continuation.resume(connected)
+                                true
+                            } else {
+                                continuation.resumeWithException(
+                                    IllegalStateException("Bind UserService annullato"),
+                                )
+                                false
+                            }
                         }
                     }
                     if (!accepted) {
-                        runCatching { Shizuku.unbindUserService(serviceArgs, this, false) }
+                        unbind(this, remove = false)
                     }
                 }
 
                 override fun onServiceDisconnected(name: ComponentName) {
-                    if (connection === this) {
-                        connection = null
-                        service = null
-                    }
+                    clearConnection(this)
                 }
             }
-            continuation.invokeOnCancellation {
-                synchronized(callbackLock) {
-                    cancelled = true
-                    if (connection === candidate) connection = null
-                    service = null
+
+            val accepted = synchronized(lifecycleLock) {
+                if (closed.get()) false else {
+                    connection = candidate
+                    true
                 }
-                runCatching { Shizuku.unbindUserService(serviceArgs, candidate, false) }
+            }
+            if (!accepted) {
+                continuation.resumeWithException(IllegalStateException("PrivilegedShell chiusa"))
+                return@suspendCancellableCoroutine
+            }
+
+            continuation.invokeOnCancellation {
+                val shouldClean = synchronized(callbackLock) {
+                    if (settled) false else {
+                        settled = true
+                        true
+                    }
+                }
+                if (shouldClean) {
+                    clearConnection(candidate)
+                    unbind(candidate, remove = false)
+                }
             }
             try {
                 Shizuku.bindUserService(serviceArgs, candidate)
-            } catch (_: Exception) {
-                synchronized(callbackLock) {
-                    if (!completed && !cancelled && continuation.isActive) {
-                        completed = true
+            } catch (error: Exception) {
+                val shouldClean = synchronized(callbackLock) {
+                    if (settled || !continuation.isActive) false else {
+                        settled = true
                         continuation.resumeWithException(
-                            IllegalStateException("Bind UserService fallito"),
+                            IllegalStateException("Bind UserService fallito", error),
                         )
+                        true
                     }
+                }
+                if (shouldClean) {
+                    clearConnection(candidate)
+                    unbind(candidate, remove = false)
                 }
             }
         }
 
-    override fun close() {
-        closed = true
-        connection?.let { current ->
-            runCatching { Shizuku.unbindUserService(serviceArgs, current, true) }
+    private fun invalidate(remote: IPrivilegedShellService) {
+        val stale = synchronized(lifecycleLock) {
+            if (service !== remote) return
+            service = null
+            connection.also { connection = null }
         }
-        connection = null
+        stale?.let { unbind(it, remove = false) }
+    }
+
+    private fun detachConnection(): ServiceConnection? = synchronized(lifecycleLock) {
         service = null
+        connection.also { connection = null }
+    }
+
+    private fun clearConnection(candidate: ServiceConnection) {
+        synchronized(lifecycleLock) {
+            if (connection === candidate) {
+                connection = null
+                service = null
+            }
+        }
+    }
+
+    private fun unbind(candidate: ServiceConnection, remove: Boolean) {
+        runCatching { Shizuku.unbindUserService(serviceArgs, candidate, remove) }
+    }
+
+    override fun close() {
+        if (!closed.compareAndSet(false, true)) return
+        detachConnection()?.let { current -> unbind(current, remove = true) }
     }
 
     private companion object {
         const val USER_SERVICE_VERSION = 1
+        const val USER_SERVICE_BIND_TIMEOUT_MILLIS = 15_000L
     }
 }

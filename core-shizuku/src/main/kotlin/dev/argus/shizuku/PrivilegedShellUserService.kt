@@ -49,8 +49,13 @@ class PrivilegedShellUserService() : IPrivilegedShellService.Stub() {
         if (command.isEmpty() || command.size > MAX_ARGUMENTS ||
             command.sumOf { it.length } > MAX_COMMAND_CHARS
         ) return errorBundle("command_invalid")
+        val outputLimit = if (includeStdout) {
+            PrivilegedShell.DEFAULT_TEXT_OUTPUT_BYTES
+        } else {
+            PrivilegedShell.DEFAULT_FILE_OUTPUT_BYTES
+        }
         if (timeoutMillis !in 1..PrivilegedShell.MAX_TIMEOUT_MILLIS ||
-            maxOutputBytes !in 1..PrivilegedShell.DEFAULT_FILE_OUTPUT_BYTES
+            maxOutputBytes !in 1..outputLimit
         ) return errorBundle("limits_invalid")
 
         val stderr = ByteArrayOutputStream()

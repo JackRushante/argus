@@ -6,7 +6,10 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import rikka.shizuku.Shizuku
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
@@ -112,6 +115,7 @@ class ShizukuGateway internal constructor(
     private val binderReceivedListener: () -> Unit = { refresh() }
     private val binderDeadListener: () -> Unit = { refresh() }
     private val permissionResultListener: (Int, Int) -> Unit = { _, _ -> refresh() }
+    private val permissionRequestMutex = Mutex()
 
     init {
         api.addBinderReceivedListener(binderReceivedListener)
@@ -124,19 +128,23 @@ class ShizukuGateway internal constructor(
 
     fun status(): ShizukuGatewayStatus = resolveStatus().also { state.value = it }
 
-    suspend fun requestPermission(): ShizukuPermissionResult {
+    suspend fun requestPermission(
+        rationaleShown: Boolean = false,
+    ): ShizukuPermissionResult = permissionRequestMutex.withLock {
         when (status()) {
-            ShizukuGatewayStatus.AUTHORIZED -> return ShizukuPermissionResult.GRANTED
+            ShizukuGatewayStatus.AUTHORIZED -> return@withLock ShizukuPermissionResult.GRANTED
             ShizukuGatewayStatus.NOT_INSTALLED,
             ShizukuGatewayStatus.INSTALLED_NOT_RUNNING,
             ShizukuGatewayStatus.UNSUPPORTED,
-            -> return ShizukuPermissionResult.UNAVAILABLE
+            -> return@withLock ShizukuPermissionResult.UNAVAILABLE
             ShizukuGatewayStatus.RUNNING_NOT_AUTHORIZED -> Unit
         }
-        if (api.shouldShowPermissionRationale()) {
-            return ShizukuPermissionResult.RATIONALE_REQUIRED
+        if (api.shouldShowPermissionRationale() && !rationaleShown) {
+            return@withLock ShizukuPermissionResult.RATIONALE_REQUIRED
         }
-        return awaitPermissionResult()
+        withTimeoutOrNull(PERMISSION_REQUEST_TIMEOUT_MILLIS) {
+            awaitPermissionResult()
+        } ?: ShizukuPermissionResult.UNAVAILABLE
     }
 
     private suspend fun awaitPermissionResult(): ShizukuPermissionResult =
@@ -199,5 +207,6 @@ class ShizukuGateway internal constructor(
 
     private companion object {
         val REQUEST_CODES = AtomicInteger(7_000)
+        const val PERMISSION_REQUEST_TIMEOUT_MILLIS = 30_000L
     }
 }
