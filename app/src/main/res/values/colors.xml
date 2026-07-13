@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Sfondo finestra dark (design §5, token background) — evita il flash bianco
+         prima che Compose disegni. -->
+    <color name="argus_window_background">#FF0E1216</color>
+</resources>
