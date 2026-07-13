@@ -9,7 +9,7 @@ import org.junit.Assert.assertEquals
 import org.junit.runner.RunWith
 
 /**
- * Verifica strutturale: claim/audit v2, bozze v3, journal v4 e scheduler v5.
+ * Verifica strutturale: claim/audit v2, bozze v3, journal v4, scheduler v5 e whitelist v6.
  */
 @RunWith(AndroidJUnit4::class)
 class MigrationTest {
@@ -21,34 +21,36 @@ class MigrationTest {
     )
 
     @Test
-    fun migrate_v1_to_v5() {
+    fun migrate_v1_to_v6() {
         helper.createDatabase(TEST_DB_V1, 1).close()
         helper.runMigrationsAndValidate(
             TEST_DB_V1,
-            5,
+            6,
             true,
             ArgusDatabase.MIGRATION_1_2,
             ArgusDatabase.MIGRATION_2_3,
             ArgusDatabase.MIGRATION_3_4,
             ArgusDatabase.MIGRATION_4_5,
+            ArgusDatabase.MIGRATION_5_6,
         ).close()
     }
 
     @Test
-    fun migrate_v2_to_v5() {
+    fun migrate_v2_to_v6() {
         helper.createDatabase(TEST_DB_V2, 2).close()
         helper.runMigrationsAndValidate(
             TEST_DB_V2,
-            5,
+            6,
             true,
             ArgusDatabase.MIGRATION_2_3,
             ArgusDatabase.MIGRATION_3_4,
             ArgusDatabase.MIGRATION_4_5,
+            ArgusDatabase.MIGRATION_5_6,
         ).close()
     }
 
     @Test
-    fun migrate_v3_to_v5() {
+    fun migrate_v3_to_v6() {
         helper.createDatabase(TEST_DB_V3, 3).apply {
             execSQL(
                 "INSERT INTO automations " +
@@ -63,10 +65,11 @@ class MigrationTest {
         }
         helper.runMigrationsAndValidate(
             TEST_DB_V3,
-            5,
+            6,
             true,
             ArgusDatabase.MIGRATION_3_4,
             ArgusDatabase.MIGRATION_4_5,
+            ArgusDatabase.MIGRATION_5_6,
         ).use { db ->
             db.query(
                 "SELECT status, succeededCount, failedCount, submittedCount " +
@@ -82,15 +85,32 @@ class MigrationTest {
     }
 
     @Test
-    fun migrate_v4_to_v5() {
+    fun migrate_v4_to_v6() {
         helper.createDatabase(TEST_DB_V4, 4).close()
         helper.runMigrationsAndValidate(
             TEST_DB_V4,
-            5,
+            6,
             true,
             ArgusDatabase.MIGRATION_4_5,
+            ArgusDatabase.MIGRATION_5_6,
         ).use { db ->
             db.query("SELECT COUNT(*) FROM scheduled_time_alarms").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals(0, cursor.getInt(0))
+            }
+        }
+    }
+
+    @Test
+    fun migrate_v5_to_v6() {
+        helper.createDatabase(TEST_DB_V5, 5).close()
+        helper.runMigrationsAndValidate(
+            TEST_DB_V5,
+            6,
+            true,
+            ArgusDatabase.MIGRATION_5_6,
+        ).use { db ->
+            db.query("SELECT COUNT(*) FROM whitelisted_contacts").use { cursor ->
                 cursor.moveToFirst()
                 assertEquals(0, cursor.getInt(0))
             }
@@ -102,5 +122,6 @@ class MigrationTest {
         const val TEST_DB_V2 = "argus-migration-v2-test.db"
         const val TEST_DB_V3 = "argus-migration-v3-test.db"
         const val TEST_DB_V4 = "argus-migration-v4-test.db"
+        const val TEST_DB_V5 = "argus-migration-v5-test.db"
     }
 }

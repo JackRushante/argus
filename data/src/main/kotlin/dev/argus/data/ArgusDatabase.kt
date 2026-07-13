@@ -9,6 +9,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import dev.argus.data.dao.AuditDao
 import dev.argus.data.dao.AutomationDao
+import dev.argus.data.dao.ContactWhitelistDao
 import dev.argus.data.dao.DraftDao
 import dev.argus.data.dao.ExecutionJournalDao
 import dev.argus.data.dao.ScheduledTimeAlarmDao
@@ -18,6 +19,7 @@ import dev.argus.data.entities.AutomationEntity
 import dev.argus.data.entities.FireClaimEntity
 import dev.argus.data.entities.PendingDraftEntity
 import dev.argus.data.entities.ScheduledTimeAlarmEntity
+import dev.argus.data.entities.WhitelistedContactEntity
 
 @Database(
     entities = [
@@ -27,8 +29,9 @@ import dev.argus.data.entities.ScheduledTimeAlarmEntity
         PendingDraftEntity::class,
         ActionResultEntity::class,
         ScheduledTimeAlarmEntity::class,
+        WhitelistedContactEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -38,6 +41,7 @@ abstract class ArgusDatabase : RoomDatabase() {
     abstract fun draftDao(): DraftDao
     abstract fun executionJournalDao(): ExecutionJournalDao
     abstract fun scheduledTimeAlarmDao(): ScheduledTimeAlarmDao
+    abstract fun contactWhitelistDao(): ContactWhitelistDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -174,9 +178,33 @@ abstract class ArgusDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `whitelisted_contacts` (
+                        `conversationId` TEXT NOT NULL,
+                        `displayName` TEXT NOT NULL,
+                        PRIMARY KEY(`conversationId`)
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_whitelisted_contacts_displayName` " +
+                        "ON `whitelisted_contacts` (`displayName`)",
+                )
+            }
+        }
+
         fun build(context: Context, name: String = "argus.db"): ArgusDatabase =
             Room.databaseBuilder(context, ArgusDatabase::class.java, name)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                .addMigrations(
+                    MIGRATION_1_2,
+                    MIGRATION_2_3,
+                    MIGRATION_3_4,
+                    MIGRATION_4_5,
+                    MIGRATION_5_6,
+                )
                 .build()
 
         fun inMemory(context: Context): ArgusDatabase =
