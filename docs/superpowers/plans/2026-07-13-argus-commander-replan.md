@@ -91,11 +91,13 @@ ADB wireless viene riattivato.
 
 ### H4 — Android scheduling e capability
 
-- [ ] Portare compile/target SDK a 36 e testare predictive back/edge-to-edge.
-- [ ] `SCHEDULE_EXACT_ALARM` solo per regole realmente precise, con fallback inexact.
-- [ ] Reconciliation su boot, time/timezone change, package replace, grant/revoca.
-- [ ] Nessun FGS persistente: componenti event-driven e FGS breve solo se ammesso.
-- [ ] Capability requirements persistite; revoca -> pausa/`NEEDS_REVIEW`.
+- [x] Portare compile/target SDK a 36; smoke predictive back/edge-to-edge su device resta in H7.
+- [x] `SCHEDULE_EXACT_ALARM` solo con `TimePrecision.EXACT`, fallback inexact e race di revoca gestita.
+- [ ] Reconciliation implementata per boot, time/timezone, package replace e grant/revoca;
+  resta da installare il runtime in `Application` (H6) e provarla su device.
+- [x] Scheduler event-driven, nessun FGS persistente.
+- [x] Capability requirements persistite e fingerprintate; resta il probe/reconcile proattivo
+  revoca -> pausa/`NEEDS_REVIEW`.
 
 ### H5 — Shizuku, device-tools ed executor
 
