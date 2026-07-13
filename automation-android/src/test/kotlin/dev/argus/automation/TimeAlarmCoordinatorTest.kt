@@ -543,6 +543,18 @@ private class FakeAutomationStore(vararg initial: Automation) : AutomationStore 
             values.value += id to it.copy(status = AutomationStatus.NEEDS_REVIEW, enabled = false)
         }
     }
+    override suspend fun markNeedsReviewIfApproved(
+        id: AutomationId,
+        fingerprint: ApprovalFingerprint,
+    ): Boolean {
+        val current = values.value[id] ?: return false
+        if (current.status != AutomationStatus.ARMED || !current.enabled ||
+            current.approvalFingerprint != fingerprint ||
+            current.approvalFingerprint != ApprovalFingerprints.of(current)
+        ) return false
+        values.value += id to current.copy(status = AutomationStatus.NEEDS_REVIEW, enabled = false)
+        return true
+    }
     override suspend fun claimFire(request: FireClaimRequest): FireClaimResult = FireClaimResult.Claimed
     override suspend fun recordFired(id: AutomationId, atMillis: Long) = Unit
     override suspend fun lastFiredAt(id: AutomationId): Long? = null

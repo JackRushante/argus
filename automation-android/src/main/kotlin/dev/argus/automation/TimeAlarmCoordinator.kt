@@ -311,7 +311,9 @@ class TimeAlarmCoordinator(
             throw error
         } catch (_: Exception) {
             existing?.let { cancelAndForget(automation.id) }
-            store.markNeedsReview(automation.id)
+            automation.approvalFingerprint?.let { fingerprint ->
+                store.markNeedsReviewIfApproved(automation.id, fingerprint)
+            }
             return ScheduleResult.FAILED
         } ?: run {
             if (existing != null) cancelAndForget(automation.id)

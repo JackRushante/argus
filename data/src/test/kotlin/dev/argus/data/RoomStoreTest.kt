@@ -170,6 +170,25 @@ class RoomStoreTest {
     }
 
     @Test
+    fun `conditional needs review cannot quarantine a newer approved revision`() = runTest {
+        val original = baseArmed("review-versioned")
+        persistForTest(original)
+        val oldFingerprint = requireNotNull(original.approvalFingerprint)
+        val revised = signed(original.copy(name = "revised", approvalFingerprint = null))
+        persistForTest(revised)
+
+        assertTrue(!store.markNeedsReviewIfApproved(original.id, oldFingerprint))
+        assertEquals(revised, store.get(original.id))
+        assertTrue(
+            store.markNeedsReviewIfApproved(
+                revised.id,
+                requireNotNull(revised.approvalFingerprint),
+            ),
+        )
+        assertEquals(AutomationStatus.NEEDS_REVIEW, store.get(revised.id)?.status)
+    }
+
+    @Test
     fun `enable restores only an unchanged approved automation`() = runTest {
         val automation = baseArmed("toggle-safe")
         persistForTest(automation)

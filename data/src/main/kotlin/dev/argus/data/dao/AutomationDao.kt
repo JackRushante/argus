@@ -117,6 +117,21 @@ interface AutomationDao {
     )
     suspend fun markNeedsReview(id: String): Int
 
+    @Query(
+        "UPDATE automations SET status = 'NEEDS_REVIEW', enabled = 0 " +
+            "WHERE id = :id AND status = 'ARMED' AND enabled = 1 " +
+            "AND json = :expectedJson AND name = :expectedName AND priority = :expectedPriority " +
+            "AND cooldownMs = :expectedCooldownMs AND schemaVersion = :expectedSchemaVersion",
+    )
+    suspend fun markNeedsReviewIfUnchanged(
+        id: String,
+        expectedJson: String,
+        expectedName: String,
+        expectedPriority: Int,
+        expectedCooldownMs: Long,
+        expectedSchemaVersion: Int,
+    ): Int
+
     @Query("DELETE FROM automations WHERE id = :id")
     suspend fun delete(id: String): Int
 

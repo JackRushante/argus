@@ -101,6 +101,20 @@ class FakeAutomationStore(seed: List<Automation> = emptyList()) : AutomationStor
         Unit
     }
 
+    override suspend fun markNeedsReviewIfApproved(
+        id: AutomationId,
+        fingerprint: ApprovalFingerprint,
+    ): Boolean = mutex.withLock {
+        val current = map[id] ?: return@withLock false
+        if (current.status != AutomationStatus.ARMED || !current.enabled ||
+            current.approvalFingerprint != fingerprint ||
+            current.approvalFingerprint != ApprovalFingerprints.of(current)
+        ) return@withLock false
+        map[id] = current.copy(status = AutomationStatus.NEEDS_REVIEW, enabled = false)
+        publish()
+        true
+    }
+
     override suspend fun claimFire(request: FireClaimRequest): FireClaimResult = mutex.withLock {
         val key = request.automationId to request.eventId
         claims[key]?.let { return@withLock FireClaimResult.Duplicate(it) }

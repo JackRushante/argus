@@ -73,8 +73,11 @@ class Engine(
                 when (val decision = firePolicy.evaluate(automation, event)) {
                     FirePolicyDecision.Allow -> Unit
                     is FirePolicyDecision.Block -> {
-                        if (decision.needsReview)
-                            store.markNeedsReview(automation.id)
+                        if (decision.needsReview) {
+                            automation.approvalFingerprint?.let { fingerprint ->
+                                store.markNeedsReviewIfApproved(automation.id, fingerprint)
+                            }
+                        }
                         recordAudit(
                             AuditEvent(
                                 automationId = automation.id,

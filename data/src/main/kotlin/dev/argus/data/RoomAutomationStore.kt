@@ -97,6 +97,27 @@ class RoomAutomationStore(private val dao: AutomationDao) : AutomationStore {
         dao.markNeedsReview(id.value)
     }
 
+    override suspend fun markNeedsReviewIfApproved(
+        id: AutomationId,
+        fingerprint: ApprovalFingerprint,
+    ): Boolean {
+        val row = dao.getById(id.value) ?: return false
+        if (row.status != AutomationStatus.ARMED || !row.enabled) return false
+        val domain = toDomain(row)
+        if (domain.status != AutomationStatus.ARMED || !domain.enabled ||
+            domain.approvalFingerprint != fingerprint ||
+            domain.approvalFingerprint != ApprovalFingerprints.of(domain)
+        ) return false
+        return dao.markNeedsReviewIfUnchanged(
+            id = row.id,
+            expectedJson = row.json,
+            expectedName = row.name,
+            expectedPriority = row.priority,
+            expectedCooldownMs = row.cooldownMs,
+            expectedSchemaVersion = row.schemaVersion,
+        ) == 1
+    }
+
     override suspend fun recordFired(id: AutomationId, atMillis: Long) =
         dao.recordFired(id.value, atMillis)
 

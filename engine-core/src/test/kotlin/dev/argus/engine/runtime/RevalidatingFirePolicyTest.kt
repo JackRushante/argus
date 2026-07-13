@@ -125,6 +125,26 @@ class RevalidatingFirePolicyTest {
     }
 
     @Test
+    fun `temporary capability outage blocks without invalidating approval`() = runTest {
+        val automation = automation(
+            Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
+            listOf(Action.SetDnd(DndMode.PRIORITY)),
+        )
+        val block = assertIs<FirePolicyDecision.Block>(
+            policy(
+                FirePolicySnapshot(
+                    knownTools = emptySet(),
+                    availableCapabilities = setOf(CapabilityIds.TRIGGER_TIME),
+                    whitelistedConversationIds = emptySet(),
+                    transientlyUnavailableCapabilities = setOf(ActionCapabilities.SET_DND),
+                ),
+            ).evaluate(automation, timeEvent(automation)),
+        )
+        assertEquals("capability_unavailable", block.code)
+        assertTrue(!block.needsReview)
+    }
+
+    @Test
     fun `notification trigger capability is revalidated even for a deterministic action`() = runTest {
         val automation = automation(
             Trigger.Notification("com.example.mail"),

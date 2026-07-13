@@ -25,6 +25,8 @@ data class FirePolicySnapshot(
     val knownTools: Set<String>,
     val availableCapabilities: Set<String>,
     val whitelistedConversationIds: Set<String>,
+    /** Capability mancanti solo per un outage recuperabile, non per revoca della policy. */
+    val transientlyUnavailableCapabilities: Set<String> = emptySet(),
 )
 
 fun interface FirePolicySnapshotProvider {
@@ -96,8 +98,11 @@ class RevalidatingFirePolicy(
             return FirePolicyDecision.Block("capability_requirements_mismatch", needsReview = true)
 
         val required = automation.requiredCapabilities
-        if (!snapshot.availableCapabilities.containsAll(required))
-            return FirePolicyDecision.Block("capability_unavailable", needsReview = true)
+        val missing = required - snapshot.availableCapabilities
+        if (missing.isNotEmpty()) {
+            val onlyTransient = snapshot.transientlyUnavailableCapabilities.containsAll(missing)
+            return FirePolicyDecision.Block("capability_unavailable", needsReview = !onlyTransient)
+        }
 
         if (automation.actions.any(::canReply)) {
             val notification = event as? TriggerEvent.NotificationPosted
