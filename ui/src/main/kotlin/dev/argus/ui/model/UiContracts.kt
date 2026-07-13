@@ -105,6 +105,8 @@ enum class StatusFilter { ALL, ARMED, PENDING, DISABLED, NEEDS_REVIEW }
 
 interface AutomationListCallbacks {
     fun onOpen(id: String); fun onToggleEnabled(id: String, enabled: Boolean); fun onFilter(f: StatusFilter)
+    fun onEmptyCta() {}     // CTA empty-state "Vai in chat"; default no-op, la nav reale è dell'host (NavHost)
+    fun onBannerTap() {}    // tap sul banner salute → Sistema; default no-op, host-owned
 }
 
 // --- 6.3 Automazione · dettaglio / approvazione ---
@@ -153,7 +155,12 @@ data class LogRow(
 enum class LogOutcome { SUCCESS, PARTIAL, FAILED, SUBMITTED, DEFERRED }
 // SUBMITTED = generativa in corso; DEFERRED = "risposta pronta, consegna manuale" (spec E13)
 
-interface ExecutionLogCallbacks { fun onExpand(id: String); fun onClearFilter(); fun onOpenAutomation(id: String) }
+interface ExecutionLogCallbacks {
+    fun onExpand(id: String); fun onClearFilter(); fun onOpenAutomation(id: String)
+    // E13: "Invia ora" su una riga DEFERRED. Riceve l'id della RIGA di log (non un id
+    // automazione): P0-B risolve la reply differita dalla entry, NON naviga. Default no-op.
+    fun onSendNow(logId: String) {}
+}
 
 // --- 6.5 Sistema (settings) ---
 

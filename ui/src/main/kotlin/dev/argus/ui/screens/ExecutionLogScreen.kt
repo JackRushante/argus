@@ -122,7 +122,7 @@ fun ExecutionLogScreen(
                                         expandedIds[row.id] = !(expandedIds[row.id] ?: false)
                                         callbacks.onExpand(row.id)
                                     },
-                                    onSendNow = { callbacks.onOpenAutomation(row.id) },
+                                    onSendNow = { callbacks.onSendNow(row.id) },
                                 )
                             }
                         }

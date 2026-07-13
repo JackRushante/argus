@@ -100,10 +100,11 @@ fun AutomationListScreen(
                 modifier = Modifier.padding(start = 18.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
             )
 
-            // Banner salute persistente e tappabile → Sistema (nav host-owned).
+            // Banner salute persistente e tappabile → Sistema (nav host-owned via onBannerTap).
             EngineBannerBar(
                 state.banner,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
+                onClick = callbacks::onBannerTap,
             )
 
             FilterChipsRow(state.filter, callbacks::onFilter)
@@ -111,12 +112,13 @@ fun AutomationListScreen(
             val rows = state.rows.sortedBy { StatusRank[it.status] ?: Int.MAX_VALUE }
             if (rows.isEmpty()) {
                 // Empty (§6.2): la CTA cambia tab → Chat; la navigazione è host-owned
-                // (NavHost, Task 12), come le altre affordance di nav di questo modulo.
+                // (NavHost, Task 12) via onEmptyCta, come le altre affordance di nav.
                 EmptyState(
                     icon = Icons.Rounded.Bolt,
                     title = "Nessuna automazione",
                     body = "Chiedila in chat: descrivi cosa vuoi che Argus faccia e proporrà una regola da rivedere e armare.",
                     ctaLabel = "Vai in chat",
+                    onCta = callbacks::onEmptyCta,
                 )
             } else {
                 LazyColumn(
