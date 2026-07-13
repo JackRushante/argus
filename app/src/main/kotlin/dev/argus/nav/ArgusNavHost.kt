@@ -69,11 +69,9 @@ import kotlinx.coroutines.launch
 // toggle lista che riordina, filtri, apertura Dettaglio da chat/lista, Onboarding
 // da Sistema. È una demo su dati finti — nessun engine/rete/Shizuku (P0-B).
 //
-// NOTA (vincolo "schermi immutati"): la CTA empty-state della Lista e il tap del
-// banner salute (EngineBannerBar) NON sono esposti dal contratto di
-// AutomationListScreen (onCta/onClick non inoltrati dallo schermo approvato),
-// quindi non sono cablabili dall'host senza modificare uno schermo congelato.
-// Chat e Sistema restano comunque raggiungibili dalla bottom nav.
+// Le affordance di nav additive sono cablate qui: la CTA empty-state della Lista
+// (onEmptyCta → Chat), il tap del banner salute (onBannerTap → Sistema), il back
+// del Dettaglio (onBack → popBackStack) e "Invia ora" del Log (onSendNow, demo).
 // =============================================================================
 
 private object Routes {
@@ -104,6 +102,14 @@ fun ArgusNavHost() {
     val scope = rememberCoroutineScope()
     val showToast: (String) -> Unit = { msg ->
         scope.launch { snackbarHostState.showSnackbar(message = msg, duration = SnackbarDuration.Short) }
+    }
+    // Cambia tab top-level preservando lo stato (stesso pattern della bottom nav).
+    val switchTab: (String) -> Unit = { route ->
+        navController.navigate(route) {
+            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+            launchSingleTop = true
+            restoreState = true
+        }
     }
 
     // --- Stato demo "vivo", persistente attraverso i cambi di tab ---
@@ -200,7 +206,8 @@ fun ArgusNavHost() {
                     state = AutomationListState(
                         rows = visibleRows,
                         filter = listFilter,
-                        banner = EngineBanner.NONE,
+                        // Demo: banner non-NONE così onBannerTap → Sistema è dimostrabile.
+                        banner = EngineBanner.BATTERY_NOT_EXEMPT,
                         loading = false,
                     ),
                     callbacks = object : AutomationListCallbacks {
@@ -218,6 +225,10 @@ fun ArgusNavHost() {
                             }
                         }
                         override fun onFilter(f: StatusFilter) { listFilter = f }
+                        // Empty-state "Vai in chat" → cambia tab su Chat (nav host-owned).
+                        override fun onEmptyCta() { switchTab(Routes.CHAT) }
+                        // Banner salute → Sistema (nav host-owned).
+                        override fun onBannerTap() { switchTab(Routes.SETTINGS) }
                     },
                 )
             }
@@ -230,8 +241,12 @@ fun ArgusNavHost() {
                         override fun onExpand(id: String) { /* espansione gestita nello schermo (effimera) */ }
                         override fun onClearFilter() { logState = logState.copy(filterAutomationName = null) }
                         override fun onOpenAutomation(id: String) {
-                            // Riga DEFERRED "Invia ora" (E13): consegna manuale simulata.
-                            showToast("Risposta consegnata manualmente")
+                            // Scopo reale (P0-B): apre l'automazione dalla riga di log.
+                            showToast("Apro l'automazione")
+                        }
+                        override fun onSendNow(logId: String) {
+                            // Riga DEFERRED "Invia ora" (E13): consegna manuale simulata (demo).
+                            showToast("Risposta inviata")
                         }
                     },
                 )
@@ -300,6 +315,7 @@ fun ArgusNavHost() {
                                 restoreState = true
                             }
                         }
+                        override fun onBack() { navController.popBackStack() }
                     },
                 )
             }
