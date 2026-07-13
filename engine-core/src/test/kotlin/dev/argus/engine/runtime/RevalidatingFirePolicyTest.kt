@@ -5,6 +5,8 @@ import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.ApprovalFingerprints
+import dev.argus.engine.model.CapabilityIds
+import dev.argus.engine.model.Condition
 import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.DndMode
 import dev.argus.engine.model.Trigger
@@ -17,7 +19,11 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class RevalidatingFirePolicyTest {
-    private fun automation(trigger: Trigger, actions: List<Action>): Automation {
+    private fun automation(
+        trigger: Trigger,
+        actions: List<Action>,
+        conditions: Condition? = null,
+    ): Automation {
         val value = Automation(
             id = AutomationId("a1"),
             name = "test",
@@ -25,6 +31,7 @@ class RevalidatingFirePolicyTest {
             status = AutomationStatus.ARMED,
             trigger = trigger,
             actions = actions,
+            conditions = conditions,
         )
         return value.copy(approvalFingerprint = ApprovalFingerprints.of(value))
     }
@@ -44,7 +51,14 @@ class RevalidatingFirePolicyTest {
             Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
             listOf(Action.SetDnd(DndMode.PRIORITY)),
         )
-        val result = policy(snapshot(availableCapabilities = setOf(ActionCapabilities.SET_DND)))
+        val result = policy(
+            snapshot(
+                availableCapabilities = setOf(
+                    CapabilityIds.TRIGGER_TIME,
+                    ActionCapabilities.SET_DND,
+                ),
+            ),
+        )
             .evaluate(automation, TriggerEvent.TimeFired(automation.id))
         assertEquals(FirePolicyDecision.Allow, result)
     }
@@ -98,11 +112,57 @@ class RevalidatingFirePolicyTest {
             listOf(Action.SetDnd(DndMode.PRIORITY)),
         )
         val block = assertIs<FirePolicyDecision.Block>(
-            policy(snapshot(availableCapabilities = emptySet()))
+            policy(snapshot(availableCapabilities = setOf(CapabilityIds.TRIGGER_TIME)))
                 .evaluate(automation, TriggerEvent.TimeFired(automation.id)),
         )
         assertTrue(block.needsReview)
         assertEquals("capability_unavailable", block.code)
+    }
+
+    @Test
+    fun `notification trigger capability is revalidated even for a deterministic action`() = runTest {
+        val automation = automation(
+            Trigger.Notification("com.example.mail"),
+            listOf(Action.ShowNotification("Argus", "Nuova mail")),
+        )
+        val block = assertIs<FirePolicyDecision.Block>(
+            policy(
+                snapshot(
+                    availableCapabilities = setOf(
+                        CapabilityIds.TRIGGER_TIME,
+                        ActionCapabilities.SHOW_NOTIFICATION,
+                    ),
+                ),
+            )
+                .evaluate(
+                    automation,
+                    TriggerEvent.NotificationPosted("com.example.mail"),
+                ),
+        )
+        assertEquals("capability_unavailable", block.code)
+        assertTrue(block.needsReview)
+    }
+
+    @Test
+    fun `state capability used by a condition is revalidated`() = runTest {
+        val automation = automation(
+            Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
+            listOf(Action.ShowNotification("Argus", "A casa")),
+            Condition.LocationIn(45.46, 9.19, 100.0),
+        )
+        val block = assertIs<FirePolicyDecision.Block>(
+            policy(
+                snapshot(
+                    availableCapabilities = setOf(
+                        CapabilityIds.TRIGGER_TIME,
+                        ActionCapabilities.SHOW_NOTIFICATION,
+                    ),
+                ),
+            )
+                .evaluate(automation, TriggerEvent.TimeFired(automation.id)),
+        )
+        assertEquals("capability_unavailable", block.code)
+        assertTrue(block.needsReview)
     }
 
     @Test
@@ -128,7 +188,10 @@ class RevalidatingFirePolicyTest {
         )
         val policy = policy(
             snapshot(
-                availableCapabilities = setOf(ActionCapabilities.WHATSAPP_REPLY),
+                availableCapabilities = setOf(
+                    CapabilityIds.TRIGGER_NOTIFICATION,
+                    ActionCapabilities.WHATSAPP_REPLY,
+                ),
                 whitelist = setOf("jid:42"),
             ),
         )
@@ -160,6 +223,32 @@ class RevalidatingFirePolicyTest {
         )
         assertEquals("live_confirmation_required", block.code)
         assertTrue(!block.needsReview)
+    }
+
+    @Test
+    fun `stored capability requirements cannot omit a derived capability`() = runTest {
+        val approved = automation(
+            Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
+            listOf(Action.SetDnd(DndMode.PRIORITY)),
+        )
+        val unsigned = approved.copy(
+            approvalFingerprint = null,
+            requiredCapabilities = setOf(CapabilityIds.TRIGGER_TIME),
+        )
+        val inconsistent = unsigned.copy(approvalFingerprint = ApprovalFingerprints.of(unsigned))
+
+        val block = assertIs<FirePolicyDecision.Block>(
+            policy(
+                snapshot(
+                    availableCapabilities = setOf(
+                        CapabilityIds.TRIGGER_TIME,
+                        ActionCapabilities.SET_DND,
+                    ),
+                ),
+            ).evaluate(inconsistent, TriggerEvent.TimeFired(inconsistent.id)),
+        )
+        assertEquals("capability_requirements_mismatch", block.code)
+        assertTrue(block.needsReview)
     }
 
     @Test

@@ -37,6 +37,12 @@ class ApprovalFingerprintTest {
         assertNotEquals(original, ApprovalFingerprints.of(automation(base.copy(cooldownMs = 6_000))))
         assertNotEquals(original, ApprovalFingerprints.of(automation(base).copy(priority = 7)))
         assertNotEquals(original, ApprovalFingerprints.of(automation(base).copy(id = AutomationId("other"))))
+        assertNotEquals(
+            original,
+            ApprovalFingerprints.of(
+                automation(base).copy(requiredCapabilities = setOf(CapabilityIds.TRIGGER_TIME)),
+            ),
+        )
     }
 
     private fun automation(draft: AutomationDraft) = Automation(

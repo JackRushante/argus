@@ -18,6 +18,7 @@ object ApprovalFingerprints {
         val normalized = automation.copy(
             status = AutomationStatus.PENDING_APPROVAL,
             enabled = false,
+            requiredCapabilities = automation.requiredCapabilities.toSortedSet(),
             approvalFingerprint = null,
         )
         val canonical = ArgusJson.encodeToString(

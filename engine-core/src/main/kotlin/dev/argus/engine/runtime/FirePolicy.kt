@@ -4,6 +4,8 @@ import dev.argus.engine.model.Action
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.ApprovalFingerprints
+import dev.argus.engine.model.CapabilityIds
+import dev.argus.engine.model.CapabilityRequirements
 import dev.argus.engine.model.SCHEMA_VERSION
 import dev.argus.engine.safety.DraftValidator
 import dev.argus.engine.safety.Severity
@@ -31,18 +33,18 @@ fun interface FirePolicySnapshotProvider {
 
 /** Nomi stabili condivisi tra policy e capability probe Android. */
 object ActionCapabilities {
-    const val SET_WIFI = "action.set_wifi"
-    const val SET_BLUETOOTH = "action.set_bluetooth"
-    const val SET_DND = "action.set_dnd"
-    const val SET_RINGER = "action.set_ringer"
-    const val LAUNCH_APP = "action.launch_app"
-    const val OPEN_URL = "action.open_url"
-    const val SHOW_NOTIFICATION = "action.show_notification"
-    const val TAP = "action.tap"
-    const val INPUT_TEXT = "action.input_text"
-    const val WHATSAPP_REPLY = "action.whatsapp_reply"
-    const val RUN_SHELL = "action.run_shell"
-    const val INVOKE_LLM = "action.invoke_llm"
+    const val SET_WIFI = CapabilityIds.ACTION_SET_WIFI
+    const val SET_BLUETOOTH = CapabilityIds.ACTION_SET_BLUETOOTH
+    const val SET_DND = CapabilityIds.ACTION_SET_DND
+    const val SET_RINGER = CapabilityIds.ACTION_SET_RINGER
+    const val LAUNCH_APP = CapabilityIds.ACTION_LAUNCH_APP
+    const val OPEN_URL = CapabilityIds.ACTION_OPEN_URL
+    const val SHOW_NOTIFICATION = CapabilityIds.ACTION_SHOW_NOTIFICATION
+    const val TAP = CapabilityIds.ACTION_TAP
+    const val INPUT_TEXT = CapabilityIds.ACTION_INPUT_TEXT
+    const val WHATSAPP_REPLY = CapabilityIds.ACTION_WHATSAPP_REPLY
+    const val RUN_SHELL = CapabilityIds.ACTION_RUN_SHELL
+    const val INVOKE_LLM = CapabilityIds.ACTION_INVOKE_LLM
 }
 
 /**
@@ -85,7 +87,15 @@ class RevalidatingFirePolicy(
         if (automation.actions.any { it is Action.RunShell })
             return FirePolicyDecision.Block("live_confirmation_required", needsReview = false)
 
-        val required = automation.actions.flatMapTo(linkedSetOf(), ::requiredCapabilities)
+        val derivedRequirements = CapabilityRequirements.derive(
+            automation.trigger,
+            automation.actions,
+            automation.conditions,
+        )
+        if (automation.requiredCapabilities != derivedRequirements)
+            return FirePolicyDecision.Block("capability_requirements_mismatch", needsReview = true)
+
+        val required = automation.requiredCapabilities
         if (!snapshot.availableCapabilities.containsAll(required))
             return FirePolicyDecision.Block("capability_unavailable", needsReview = true)
 
@@ -107,21 +117,6 @@ class RevalidatingFirePolicy(
         }
 
         return FirePolicyDecision.Allow
-    }
-
-    private fun requiredCapabilities(action: Action): Set<String> = when (action) {
-        is Action.SetWifi -> setOf(ActionCapabilities.SET_WIFI)
-        is Action.SetBluetooth -> setOf(ActionCapabilities.SET_BLUETOOTH)
-        is Action.SetDnd -> setOf(ActionCapabilities.SET_DND)
-        is Action.SetRinger -> setOf(ActionCapabilities.SET_RINGER)
-        is Action.LaunchApp -> setOf(ActionCapabilities.LAUNCH_APP)
-        is Action.OpenUrl -> setOf(ActionCapabilities.OPEN_URL)
-        is Action.ShowNotification -> setOf(ActionCapabilities.SHOW_NOTIFICATION)
-        is Action.Tap -> setOf(ActionCapabilities.TAP)
-        is Action.InputText -> setOf(ActionCapabilities.INPUT_TEXT)
-        is Action.WhatsAppReply -> setOf(ActionCapabilities.WHATSAPP_REPLY)
-        is Action.RunShell -> setOf(ActionCapabilities.RUN_SHELL)
-        is Action.InvokeLlm -> setOf(ActionCapabilities.INVOKE_LLM) + action.allowedTools
     }
 
     private fun canReply(action: Action): Boolean = when (action) {
