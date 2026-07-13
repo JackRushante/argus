@@ -29,7 +29,9 @@ interface ExecutionJournalDao {
             "succeededCount = :succeededCount, failedCount = :failedCount, " +
             "submittedCount = :submittedCount " +
             "WHERE executionId = :executionId AND (status IN ('RUNNING', 'SUBMITTED') OR " +
-            "(status = :status AND completedAtMillis = :completedAtMillis))",
+            "(status = :status AND completedAtMillis = :completedAtMillis " +
+            "AND succeededCount = :succeededCount AND failedCount = :failedCount " +
+            "AND submittedCount = :submittedCount))",
     )
     suspend fun finish(
         executionId: String,

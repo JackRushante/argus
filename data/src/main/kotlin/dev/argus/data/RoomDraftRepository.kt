@@ -61,6 +61,7 @@ class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository {
             priority = newDraft.priority,
             createdAtMillis = newDraft.atMillis,
             updatedAtMillis = newDraft.atMillis,
+            baseAutomationFingerprint = newDraft.expectedAutomationFingerprint,
         )
         if (drafts.insert(snapshot.toEntity()) != -1L) {
             if (existing == null) return@withTransaction DraftWriteResult.Saved(snapshot)
@@ -113,6 +114,7 @@ class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository {
             priority = priority,
             createdAtMillis = current.createdAtMillis,
             updatedAtMillis = maxOf(atMillis, current.updatedAtMillis),
+            baseAutomationFingerprint = current.baseAutomationFingerprint,
         )
         val changed = drafts.revise(
             id = id.value,
@@ -163,16 +165,22 @@ class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository {
             return@withTransaction DraftArmResult.IntegrityFailure
         val armed = snapshot.armedAutomation()
         val existing = automations.getById(snapshot.automationId.value)
-        if (existing == null) {
+        val baseFingerprint = snapshot.baseAutomationFingerprint
+        if (baseFingerprint == null) {
+            if (existing != null) return@withTransaction DraftArmResult.AutomationConflict
             if (automations.insertAutomation(armed.toEntity()) == -1L)
                 return@withTransaction DraftArmResult.AutomationConflict
         } else {
+            if (existing == null) return@withTransaction DraftArmResult.AutomationConflict
             if (existing.status != AutomationStatus.PENDING_APPROVAL || existing.enabled)
                 return@withTransaction DraftArmResult.AutomationConflict
-            if (verifiedAutomation(existing) == null) {
+            val approved = verifiedAutomation(existing)
+            if (approved == null) {
                 automations.markNeedsReview(existing.id)
                 return@withTransaction DraftArmResult.IntegrityFailure
             }
+            if (approved.approvalFingerprint != baseFingerprint)
+                return@withTransaction DraftArmResult.AutomationConflict
             automations.upsert(armed.toEntity(lastFiredAt = existing.lastFiredAt))
         }
         check(drafts.delete(id.value, expectedRevision) == 1) {
@@ -196,6 +204,14 @@ class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository {
             if (error == null) error = "fingerprint_invalid"
             ZERO_FINGERPRINT
         }
+        var baseAutomationFingerprint: ApprovalFingerprint? = null
+        if (entity.baseAutomationFingerprint != null) {
+            baseAutomationFingerprint = runCatching {
+                ApprovalFingerprint(entity.baseAutomationFingerprint)
+            }.getOrNull()
+            if (error == null && baseAutomationFingerprint == null)
+                error = "base_fingerprint_invalid"
+        }
         val draft = if (error == null) {
             runCatching {
                 ArgusJson.decodeFromString(AutomationDraft.serializer(), entity.draftJson)
@@ -218,6 +234,7 @@ class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository {
             schemaVersion = entity.schemaVersion,
             createdAtMillis = entity.createdAtMillis.coerceAtLeast(0),
             updatedAtMillis = maxOf(entity.updatedAtMillis, entity.createdAtMillis, 0),
+            baseAutomationFingerprint = baseAutomationFingerprint,
             integrityError = error,
         )
         if (error == null && !snapshot.hasValidFingerprint()) {
@@ -238,6 +255,7 @@ class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository {
         priority: Int,
         createdAtMillis: Long,
         updatedAtMillis: Long,
+        baseAutomationFingerprint: ApprovalFingerprint?,
     ): PendingDraft {
         val unsigned = Automation(
             id = automationId,
@@ -263,6 +281,7 @@ class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository {
             schemaVersion = SCHEMA_VERSION,
             createdAtMillis = createdAtMillis,
             updatedAtMillis = updatedAtMillis,
+            baseAutomationFingerprint = baseAutomationFingerprint,
         )
     }
 
@@ -277,6 +296,7 @@ class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository {
         schemaVersion = schemaVersion,
         createdAtMillis = createdAtMillis,
         updatedAtMillis = updatedAtMillis,
+        baseAutomationFingerprint = baseAutomationFingerprint?.value,
         quarantineCode = integrityError,
         draftJson = ArgusJson.encodeToString(AutomationDraft.serializer(), draft),
     )

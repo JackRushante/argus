@@ -103,6 +103,9 @@ abstract class ArgusDatabase : RoomDatabase() {
         val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
+                    "ALTER TABLE `pending_drafts` ADD COLUMN `baseAutomationFingerprint` TEXT",
+                )
+                db.execSQL(
                     "ALTER TABLE `fire_claims` ADD COLUMN `status` TEXT NOT NULL DEFAULT 'INTERRUPTED'",
                 )
                 db.execSQL("ALTER TABLE `fire_claims` ADD COLUMN `completedAtMillis` INTEGER")

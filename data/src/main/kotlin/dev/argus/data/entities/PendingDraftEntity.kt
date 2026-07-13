@@ -23,6 +23,7 @@ data class PendingDraftEntity(
     val schemaVersion: Int,
     val createdAtMillis: Long,
     val updatedAtMillis: Long,
+    val baseAutomationFingerprint: String? = null,
     val quarantineCode: String? = null,
     val draftJson: String,
 )

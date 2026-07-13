@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 4,
-    "identityHash": "6c06b7f429932a1f4c9c24e09e332920",
+    "identityHash": "529a1e52d4d69d70f267621b4f74cbb4",
     "entities": [
       {
         "tableName": "automations",
@@ -289,7 +289,7 @@
       },
       {
         "tableName": "pending_drafts",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `automationId` TEXT NOT NULL, `name` TEXT NOT NULL, `revision` INTEGER NOT NULL, `fingerprint` TEXT NOT NULL, `createdBy` TEXT NOT NULL, `priority` INTEGER NOT NULL, `schemaVersion` INTEGER NOT NULL, `createdAtMillis` INTEGER NOT NULL, `updatedAtMillis` INTEGER NOT NULL, `quarantineCode` TEXT, `draftJson` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `automationId` TEXT NOT NULL, `name` TEXT NOT NULL, `revision` INTEGER NOT NULL, `fingerprint` TEXT NOT NULL, `createdBy` TEXT NOT NULL, `priority` INTEGER NOT NULL, `schemaVersion` INTEGER NOT NULL, `createdAtMillis` INTEGER NOT NULL, `updatedAtMillis` INTEGER NOT NULL, `baseAutomationFingerprint` TEXT, `quarantineCode` TEXT, `draftJson` TEXT NOT NULL, PRIMARY KEY(`id`))",
         "fields": [
           {
             "fieldPath": "id",
@@ -350,6 +350,12 @@
             "columnName": "updatedAtMillis",
             "affinity": "INTEGER",
             "notNull": true
+          },
+          {
+            "fieldPath": "baseAutomationFingerprint",
+            "columnName": "baseAutomationFingerprint",
+            "affinity": "TEXT",
+            "notNull": false
           },
           {
             "fieldPath": "quarantineCode",
@@ -478,7 +484,7 @@
     "views": [],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '6c06b7f429932a1f4c9c24e09e332920')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '529a1e52d4d69d70f267621b4f74cbb4')"
     ]
   }
 }

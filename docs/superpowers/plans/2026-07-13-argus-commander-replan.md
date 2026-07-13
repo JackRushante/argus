@@ -66,10 +66,12 @@ validata sul OnePlus API 36 via instrumentation ADB. Gli event ID sono hashati n
 - [x] Execution journal + action result correlati; retention/redazione.
 - [x] Regole backup Android per escludere segreti, contatti, audit e chat.
 
-Verifica H2 2026-07-13: 92 test engine + 31 test Room verdi. Migrazioni Room
+Verifica H2 2026-07-13: 92 test engine + 32 test Room verdi. Migrazioni Room
 v1/v2/v3→v4 validate sul OnePlus API 36 (`OK (3 tests)`). Una modifica post-review
 o un flip diretto ad ARMED senza fingerprint porta a `NEEDS_REVIEW`; il runtime store
-non espone più alcun `save()` pubblico. App lint/build verdi (resta solo `OldTargetApi`, H4).
+non espone più alcun `save()` pubblico. Gli edit persistono il fingerprint della versione
+base, quindi una regola eliminata durante la review non può essere ricreata dal draft.
+App lint/build verdi (resta solo `OldTargetApi`, H4).
 
 ### H3 — brain/bridge
 

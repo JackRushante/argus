@@ -141,6 +141,31 @@ class RoomDraftRepositoryTest {
     }
 
     @Test
+    fun `deleting an automation under review cannot resurrect it on later arm`() = runTest {
+        val first = assertIs<DraftWriteResult.Saved>(repository.create(candidate("a1"))).snapshot
+        val original = assertIs<DraftArmResult.Armed>(
+            repository.arm(first.id, first.revision, first.fingerprint),
+        ).automation
+        val edit = assertIs<DraftWriteResult.Saved>(
+            repository.create(
+                candidate("a1").copy(
+                    id = DraftId("edit-a1"),
+                    expectedAutomationFingerprint = assertNotNull(original.approvalFingerprint),
+                ),
+            ),
+        ).snapshot
+
+        store.delete(original.id)
+
+        assertEquals(
+            DraftArmResult.AutomationConflict,
+            repository.arm(edit.id, edit.revision, edit.fingerprint),
+        )
+        assertNull(store.get(original.id))
+        assertNotNull(repository.get(edit.id))
+    }
+
+    @Test
     fun `concurrent edits with same expected revision allow only one writer`() = runTest {
         val base = assertIs<DraftWriteResult.Saved>(repository.create(candidate("a1"))).snapshot
 

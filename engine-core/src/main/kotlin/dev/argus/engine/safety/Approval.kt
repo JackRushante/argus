@@ -30,6 +30,8 @@ data class PendingDraft(
     val schemaVersion: Int,
     val createdAtMillis: Long,
     val updatedAtMillis: Long,
+    /** Versione approvata sostituita da questo draft; null per una nuova automazione. */
+    val baseAutomationFingerprint: ApprovalFingerprint? = null,
     val integrityError: String? = null,
 ) {
     init {

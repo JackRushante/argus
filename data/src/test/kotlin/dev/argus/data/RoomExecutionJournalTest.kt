@@ -27,6 +27,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertNull
 
@@ -80,6 +81,13 @@ class RoomExecutionJournalTest {
         assertEquals(1, finished.failedCount)
         assertEquals(listOf(0, 1), db.executionJournalDao().actions(executionId.value).map { it.actionIndex })
         assertEquals("action_failed", db.executionJournalDao().actions(executionId.value)[1].errorCode)
+
+        // Retry identico ammesso; una completion discordante non può riscrivere il terminale.
+        journal.finish(ExecutionCompletion(executionId, ExecutionStatus.PARTIAL, 1_003, 1, 1, 0))
+        assertFailsWith<IllegalStateException> {
+            journal.finish(ExecutionCompletion(executionId, ExecutionStatus.PARTIAL, 1_003, 2, 0, 0))
+        }
+        assertEquals(1, db.executionJournalDao().execution(executionId.value)?.succeededCount)
     }
 
     @Test
