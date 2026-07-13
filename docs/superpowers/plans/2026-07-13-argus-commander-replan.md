@@ -101,10 +101,18 @@ ADB wireless viene riattivato.
 
 ### H5 — Shizuku, device-tools ed executor
 
-- [ ] `core-shizuku` con UserService/gateway verificato su API 36.
-- [ ] Coda single-writer con priority + execution ID, timeout e output cap.
-- [ ] `device-tools` tipizzati e test non distruttivi sul device.
-- [ ] Executor per-action; `RunShell` bloccato finché manca conferma live.
+- [x] `core-shizuku` con UserService/gateway verificato su API 36.
+- [x] Coda single-writer con priority + execution ID, timeout e output cap.
+- [x] `device-tools` tipizzati e test non distruttivi sul device.
+- [x] Executor per-action; `RunShell` bloccato finché manca conferma live.
+
+Verifica H5 2026-07-13: 100 test engine, 10 core-shizuku, 11 device-tools e 51
+automation-android verdi, lint senza errori. Sul OnePlus/API 36 il test UserService ha
+confermato UID 2000 (`OK (1 test)`); il round-trip device-tools ha validato screenshot,
+UI dump multi-window, stato/foreground e DND con ripristino (`OK (1 test)`). `Tap`,
+`InputText` e `WhatsAppReply` restano fail-closed fuori fase; ogni azione mutante P0
+porta execution ID e priorità fino alla coda privilegiata. Dopo il reboot non basta il
+processo manager Shizuku: il daemon va verificato/riavviato, caso da esporre nel wiring H6.
 
 ### H6 — wiring reale e UI
 
