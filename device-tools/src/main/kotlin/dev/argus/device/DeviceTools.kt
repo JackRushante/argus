@@ -155,7 +155,7 @@ class DeviceTools(
         val raw = try {
             runChecked(
                 operation = "dump_ui",
-                command = listOf(UIAUTOMATOR, "dump", "--compressed", remotePath),
+                command = listOf(UIAUTOMATOR, "dump", "--compressed", "--windows", remotePath),
             )
             runToBytes(
                 operation = "dump_ui",
@@ -174,12 +174,7 @@ class DeviceTools(
                 }
             }
         }
-        val start = raw.indexOf("<?xml").takeIf { it >= 0 }
-            ?: raw.indexOf("<hierarchy").takeIf { it >= 0 }
-            ?: throw DeviceToolException("dump_ui_invalid")
-        val end = raw.indexOf(HIERARCHY_END, start)
-        if (end < 0) throw DeviceToolException("dump_ui_invalid")
-        return raw.substring(start, end + HIERARCHY_END.length)
+        return extractUiXmlPayload(raw) ?: throw DeviceToolException("dump_ui_invalid")
     }
 
     private suspend fun runChecked(operation: String, command: List<String>): ShellResult {
@@ -247,10 +242,25 @@ class DeviceTools(
         const val MAX_UI_DUMP_BYTES = 4 * 1024 * 1024
         const val CLEANUP_TIMEOUT_MILLIS = 5_000L
         const val CLEANUP_OUTPUT_BYTES = 4 * 1024
-        const val HIERARCHY_END = "</hierarchy>"
         val COORDINATE_RANGE = 0..10_000
         val HTTP_SCHEMES = setOf("http", "https")
         val PACKAGE_NAME = Regex("^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+$")
         val PNG_MAGIC = byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)
+
     }
+}
+
+internal fun extractUiXmlPayload(raw: String): String? {
+    val xmlStart = raw.indexOf("<?xml").takeIf { it >= 0 }
+    val displaysStart = raw.indexOf("<displays").takeIf { it >= 0 }
+    val hierarchyStart = raw.indexOf("<hierarchy").takeIf { it >= 0 }
+    val start = xmlStart ?: displaysStart ?: hierarchyStart ?: return null
+    val rootEnd = if (displaysStart != null && displaysStart >= start) {
+        "</displays>"
+    } else {
+        "</hierarchy>"
+    }
+    val end = raw.indexOf(rootEnd, start)
+    if (end < 0) return null
+    return raw.substring(start, end + rootEnd.length).takeIf { "<hierarchy" in it }
 }

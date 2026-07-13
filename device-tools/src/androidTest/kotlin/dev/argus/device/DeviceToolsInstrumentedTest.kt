@@ -46,8 +46,9 @@ class DeviceToolsInstrumentedTest {
             assertEquals(0x89.toByte(), png[0])
 
             val hierarchy = withTimeout(40_000) { tools.dumpUi() }
+            assertTrue(hierarchy.contains("<displays"))
             assertTrue(hierarchy.contains("<hierarchy"))
-            assertTrue(hierarchy.endsWith("</hierarchy>"))
+            assertTrue(hierarchy.endsWith("</displays>"))
 
             val state = reader.read(StateKeys.ALL.keys, includeForegroundApp = true)
             assertTrue(state.values.keys.all(StateKeys.ALL::containsKey))

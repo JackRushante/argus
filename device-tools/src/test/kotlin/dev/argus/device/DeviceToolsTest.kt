@@ -93,7 +93,11 @@ class DeviceToolsTest {
         val png = byteArrayOf(
             0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3,
         )
-        val xml = "prefix\n<?xml version=\"1.0\"?><hierarchy><node /></hierarchy>\nsuffix"
+        val xml = """
+            prefix
+            <?xml version="1.0"?><displays><display><window><hierarchy><node /></hierarchy></window></display></displays>
+            suffix
+        """.trimIndent()
         val shell = RecordingShell(fileHandler = { command, destination ->
             destination.writeBytes(
                 if (command.first() == "/system/bin/screencap") png else xml.toByteArray(),
@@ -104,14 +108,18 @@ class DeviceToolsTest {
 
         assertContentEquals(png, tools.capture())
         assertEquals(
-            "<?xml version=\"1.0\"?><hierarchy><node /></hierarchy>",
+            "<?xml version=\"1.0\"?><displays><display><window><hierarchy><node /></hierarchy>" +
+                "</window></display></displays>",
             tools.dumpUi(),
         )
         assertEquals(emptyList(), temporaryDirectory.listDirectoryEntries())
         assertEquals(listOf("/system/bin/screencap", "-p"), shell.calls[0].command)
         val remotePath = shell.calls[1].command.last()
         assertEquals("/system/bin/uiautomator", shell.calls[1].command.first())
-        assertEquals(listOf("dump", "--compressed"), shell.calls[1].command.drop(1).dropLast(1))
+        assertEquals(
+            listOf("dump", "--compressed", "--windows"),
+            shell.calls[1].command.drop(1).dropLast(1),
+        )
         assertEquals(listOf("/system/bin/cat", remotePath), shell.calls[2].command)
         assertEquals(listOf("/system/bin/rm", "-f", remotePath), shell.calls[3].command)
         assertFalse(shell.calls.any { "/dev/tty" in it.command })
@@ -140,6 +148,16 @@ class DeviceToolsTest {
             listOf("/system/bin/rm", "-f", dumpPath),
             shell.calls.single { it.first() == "/system/bin/rm" },
         )
+    }
+
+    @Test
+    fun `UI XML extraction accepts legacy hierarchy and rejects incomplete dumps`() {
+        assertEquals(
+            "<hierarchy><node /></hierarchy>",
+            extractUiXmlPayload("noise<hierarchy><node /></hierarchy>tail"),
+        )
+        assertEquals(null, extractUiXmlPayload("<displays><display /></display"))
+        assertEquals(null, extractUiXmlPayload("<displays><display /></displays>"))
     }
 }
 
