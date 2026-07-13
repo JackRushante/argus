@@ -957,10 +957,11 @@ import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 
-/** Cron 5 campi (min hour dom mon dow). Subset supportato: `*`, `n`, liste `a,b`, range `a-b`, step `*/s` e `a-b/s`.
- *  DOW 0-7 (0 e 7 = domenica). DOM e DOW entrambi ristretti = OR (semantica vixie).
- *  DST: ora locale saltata -> fire spostato avanti della durata del gap; ora duplicata -> una sola
- *  esecuzione al primo offset (comportamento documentato di java.time, testato). */
+// Cron 5 campi (min hour dom mon dow). Subset supportato: `*`, `n`, liste `a,b`, range `a-b`, step `*/s` e `a-b/s`.
+// DOW 0-7 (0 e 7 = domenica). DOM e DOW entrambi ristretti = OR (semantica vixie).
+// DST: ora locale saltata -> fire spostato avanti della durata del gap; ora duplicata -> una sola
+// esecuzione al primo offset (comportamento documentato di java.time, testato).
+// NB: KDoc `//` e non `/** */` — un `*/` letterale dentro `*/s` chiuderebbe il commento a blocco.
 class CronSchedule private constructor(
     private val minutes: Set<Int>, private val hours: Set<Int>,
     private val dom: Set<Int>, private val months: Set<Int>, private val dow: Set<Int>,

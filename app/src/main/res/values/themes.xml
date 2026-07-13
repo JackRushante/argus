@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Tema di lancio per una app Compose-only montata su ComponentActivity: parent
+      framework Material NoActionBar (nessuna dipendenza da MDC/AppCompat). L'aspetto
+      reale è dato da ArgusTheme in Compose; qui serve solo un window background dark
+      e barre di sistema trasparenti per l'edge-to-edge (enableEdgeToEdge()).
+    -->
+    <style name="Theme.Argus" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/argus_window_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>

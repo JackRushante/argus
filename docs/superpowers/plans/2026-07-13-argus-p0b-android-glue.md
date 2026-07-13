@@ -19,9 +19,14 @@
 - **Shizuku è l'unico canale privilegiato.** Nessun `Runtime.exec("su")` diretto: tutto passa da `core-shizuku`. Shell UID 2000 (parità adb) è il privilegio di default.
 - **`engine-core` non cambia** (è la fonte di verità dei tipi/contratti). P0-B *implementa* le sue interfacce, non le riscrive: `ActionExecutor` (con `Submitted` per generative), `AutomationStore`, `AuditSink`, `CapabilityProbe`, `Brain`.
 - **Ogni draft passa dal `DraftValidator` prima dell'arm**; `Severity.ERROR` ⇒ `canArm=false`. Invariante ri-verificato al fire-time sugli `allowed_tools` (difesa in profondità, spec §10.4).
+- **⚠️ (da review P0-A Unit D) Passare SEMPRE la whitelist del manifest a `DraftValidator.validate(draft, whitelistedIds)`.** Il controllo `target_not_whitelisted` scatta *solo se* `whitelistedIds` è non vuota: chiamare `validate(draft)` senza whitelist lascia passare reply generative verso *qualsiasi* `conversationId` 1:1. In P0-B (T8 `ApprovalFlow`, T9 ViewModel) la whitelist reale va sempre threaded; valutare fail-closed su whitelist vuota per le reply generative. Opz. hardening: normalizzare il case dei tool forbidden e vietare il prefisso `automation` nudo (oggi dot-exact/case-sensitive, coperto dall'allowlist deny-by-default ma non stand-alone).
 - **Decode Room fallito o `schemaVersion` incompatibile → `NEEDS_REVIEW`**, mai drop silenzioso (spec E8).
 - **Privacy:** i contenuti (chat, notifiche) escono verso Hermes→upstream; il consenso onboarding (E11) è prerequisito all'uso del Brain.
 - Bridge Hermes: binda **solo sull'interfaccia Tailscale**; il protocollo porta `schema_version` (spec §2 rev 3).
+- **⚠️ (da review finale) `privacyNote` → `UiWarning`.** Quando un ViewModel costruisce `AutomationDetailState.warnings` / `DraftCard.issues`, DEVE riportare `RuleRender.privacyNote` (popolato da `RuleRenderMapper` per le regole generative) come `UiWarning` di privacy — altrimenti la disclosure cloud E11 sparisce silenziosamente dallo schermo di approvazione (il campo del mapper non è reso da alcun componente `ui`).
+- **⚠️ (da review finale) Log send-now id.** `ExecutionLogCallbacks.onSendNow(logId)` riceve l'id di una `LogRow`, **non** di un'automazione; la consegna E13 di P0-B deve risolvere la reply differita dalla entry di log, non navigare (`onOpenAutomation` resta per il suo scopo reale).
+- **⚠️ (da review finale) Engine cancellation.** Quando P0-B tocca `Engine.onTrigger`, **rilanciare `CancellationException`** prima del `catch (e: Exception)`: così com'è inghiottirebbe la cancellazione cooperativa nel foreground service.
+- **⚠️ (da review finale) §10.4 residuo.** Quando il catalogo tool al fire-time cresce in P1, ogni tool del catalogo *always-confirm* deve entrare in `FORBIDDEN_IN_INVOKE_LLM` (oggi solo `shell.run`/`app.install`/`automation.*`).
 
 ## File structure
 
