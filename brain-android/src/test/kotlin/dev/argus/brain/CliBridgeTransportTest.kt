@@ -34,7 +34,8 @@ class CliBridgeTransportTest {
 
     private val manifest = CapabilityManifest(
         deviceModel = "OnePlus CPH2747",
-        androidVersion = 36,
+        androidVersion = 16,
+        androidApi = 36,
         shizukuAvailable = true,
         grantedPermissions = listOf("android.permission.INTERNET"),
         availableTools = listOf("set_dnd", "set_wifi"),
@@ -76,7 +77,8 @@ class CliBridgeTransportTest {
         val root = Json.parseToJsonElement(raw).jsonObject
         assertEquals(1, root.getValue("schema_version").jsonPrimitive.content.toInt())
         assertEquals(REQUEST_ID, root.getValue("request_id").jsonPrimitive.content)
-        assertTrue(root.getValue("manifest") is kotlinx.serialization.json.JsonObject)
+        val sentManifest = root.getValue("manifest").jsonObject
+        assertEquals(36, sentManifest.getValue("android_api").jsonPrimitive.content.toInt())
         val sentState = root.getValue("state").jsonObject
         assertEquals("normal", sentState.getValue("values").jsonObject.getValue("ringer").jsonPrimitive.content)
         assertFalse("battery" in sentState.getValue("values").jsonObject)

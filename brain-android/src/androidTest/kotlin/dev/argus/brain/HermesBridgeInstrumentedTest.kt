@@ -116,7 +116,8 @@ class HermesBridgeInstrumentedTest {
         assumeTrue("compile live non richiesto", arguments.getString("runLiveCompile") == "true")
         val manifest = CapabilityManifest(
             deviceModel = "OnePlus CPH2747",
-            androidVersion = 36,
+            androidVersion = 16,
+            androidApi = 36,
             shizukuAvailable = true,
             grantedPermissions = listOf("android.permission.INTERNET"),
             availableTools = listOf("set_dnd"),

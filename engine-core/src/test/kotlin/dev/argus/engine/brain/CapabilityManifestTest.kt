@@ -5,7 +5,8 @@ import kotlin.test.assertTrue
 class CapabilityManifestTest {
     @Test fun `render lists device, contacts with ids, state keys and disabled tools`() {
         val m = CapabilityManifest(
-            deviceModel = "OnePlus 15", androidVersion = 16, shizukuAvailable = true,
+            deviceModel = "OnePlus 15", androidVersion = 16, androidApi = 36,
+            shizukuAvailable = true,
             grantedPermissions = listOf("notification_listener"),
             availableTools = listOf("screen.capture", "toggle.set", "whatsapp_reply"),
             unavailableTools = mapOf("vision.analyze" to "nessun provider multimodale"),

@@ -20,7 +20,8 @@ class HermesBrainTest {
 
     private val manifest = CapabilityManifest(
         deviceModel = "Pixel-TEST-9",
-        androidVersion = 36,
+        androidVersion = 16,
+        androidApi = 36,
         shizukuAvailable = true,
         grantedPermissions = listOf("android.permission.INTERNET"),
         availableTools = listOf("set_dnd"),
