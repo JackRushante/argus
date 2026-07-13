@@ -192,8 +192,13 @@ object ArgusModule {
 
     @Provides
     @Singleton
-    fun configuredBrain(configuration: BridgeConfigurationStore): ConfiguredBridgeBrain =
-        ConfiguredBridgeBrain(configuration)
+    fun configuredBrain(
+        configuration: BridgeConfigurationStore,
+        preferences: AppPreferencesStore,
+    ): ConfiguredBridgeBrain = ConfiguredBridgeBrain(
+        configuration = configuration,
+        privacyAccepted = { preferences.observe().value.privacyAccepted },
+    )
 
     @Provides
     fun brain(brain: ConfiguredBridgeBrain): Brain = brain

@@ -123,19 +123,17 @@ class AndroidAutomationNotifier(context: Context) : AutomationNotifier {
     }
 
     fun ensureChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            appContext.getSystemService(NotificationManager::class.java).createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_ID,
-                    appContext.getString(R.string.argus_automation_channel_name),
-                    NotificationManager.IMPORTANCE_DEFAULT,
-                ).apply {
-                    description = appContext.getString(
-                        R.string.argus_automation_channel_description,
-                    )
-                },
-            )
-        }
+        appContext.getSystemService(NotificationManager::class.java).createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_ID,
+                appContext.getString(R.string.argus_automation_channel_name),
+                NotificationManager.IMPORTANCE_DEFAULT,
+            ).apply {
+                description = appContext.getString(
+                    R.string.argus_automation_channel_description,
+                )
+            },
+        )
     }
 
     override suspend fun show(title: String, text: String, context: FireContext) {

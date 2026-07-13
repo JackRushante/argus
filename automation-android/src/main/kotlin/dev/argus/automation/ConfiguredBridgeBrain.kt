@@ -24,6 +24,7 @@ sealed interface BridgeHealthResult {
  */
 class ConfiguredBridgeBrain(
     private val configuration: BridgeConfigurationStore,
+    private val privacyAccepted: () -> Boolean,
     private val elapsedRealtimeMillis: () -> Long = SystemClock::elapsedRealtime,
 ) : Brain {
     @Volatile
@@ -33,7 +34,15 @@ class ConfiguredBridgeBrain(
         nl: String,
         manifest: CapabilityManifest,
         state: DeviceState,
-    ): CompileResult = HermesBrain(currentTransport()).compile(nl, manifest, state)
+    ): CompileResult {
+        if (!privacyAccepted()) {
+            throw BridgeException(
+                BridgeErrorKind.CONFIGURATION,
+                "consenso privacy non accettato",
+            )
+        }
+        return HermesBrain(currentTransport()).compile(nl, manifest, state)
+    }
 
     suspend fun health(): BridgeHealthResult {
         val started = elapsedRealtimeMillis()
