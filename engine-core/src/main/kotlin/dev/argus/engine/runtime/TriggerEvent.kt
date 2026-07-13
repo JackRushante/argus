@@ -17,7 +17,8 @@ sealed interface TriggerEvent {
         val sender: String? = null,           // display name
         val title: String? = null,
         val text: String? = null,
-        val isGroup: Boolean = false,
+        /** null = metadata non determinabile. Le policy di reply devono trattarlo come non autorizzato. */
+        val isGroup: Boolean? = null,
         /** Chiave della StatusBarNotification: l'executor la usa per recuperare il RemoteInput
          *  al momento della reply (P1). Senza, WhatsAppReply non è eseguibile. */
         val notificationKey: String? = null,

@@ -22,6 +22,7 @@ class TriggerMatcherTest {
         val spec = Trigger.Notification(pkg = "com.whatsapp", isGroup = false, textMatch = "ciao")
         assertTrue(m.matches(spec, TriggerEvent.NotificationPosted("com.whatsapp", text = "CIAO amore", isGroup = false)))
         assertFalse(m.matches(spec, TriggerEvent.NotificationPosted("com.whatsapp", text = "ciao", isGroup = true)))
+        assertFalse(m.matches(spec, TriggerEvent.NotificationPosted("com.whatsapp", text = "ciao", isGroup = null)))
     }
     @Test fun `time matches by construction`() {
         assertTrue(m.matches(Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"), TriggerEvent.TimeFired(AutomationId("a1"))))
