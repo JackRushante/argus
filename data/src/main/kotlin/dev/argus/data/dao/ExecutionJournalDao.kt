@@ -7,6 +7,7 @@ import androidx.room.Upsert
 import dev.argus.data.entities.ActionResultEntity
 import dev.argus.data.entities.FireClaimEntity
 import dev.argus.engine.runtime.ExecutionStatus
+import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface ExecutionJournalDao {
@@ -47,6 +48,30 @@ interface ExecutionJournalDao {
 
     @Query("SELECT * FROM action_results WHERE executionId = :executionId ORDER BY actionIndex ASC")
     suspend fun actions(executionId: String): List<ActionResultEntity>
+
+    /**
+     * Un'unica invalidation Room evita query N+1 senza caricare l'intera storia del journal.
+     * Il limite è espresso in righe audit perché è lo stesso confine usato dalla timeline UI.
+     */
+    @Query(
+        "SELECT * FROM action_results WHERE executionId IN (" +
+            "SELECT executionId FROM audit WHERE executionId IS NOT NULL " +
+            "ORDER BY atMillis DESC, id DESC LIMIT :auditLimit" +
+            ") ORDER BY atMillis DESC, executionId ASC, actionIndex ASC",
+    )
+    fun observeRecentActions(auditLimit: Int): Flow<List<ActionResultEntity>>
+
+    @Query(
+        "SELECT * FROM action_results WHERE executionId IN (" +
+            "SELECT executionId FROM audit WHERE automationId = :automationId " +
+            "AND executionId IS NOT NULL " +
+            "ORDER BY atMillis DESC, id DESC LIMIT :auditLimit" +
+            ") ORDER BY atMillis DESC, executionId ASC, actionIndex ASC",
+    )
+    fun observeRecentActionsForAutomation(
+        automationId: String,
+        auditLimit: Int,
+    ): Flow<List<ActionResultEntity>>
 
     @Query("SELECT COUNT(*) FROM fire_claims")
     suspend fun executionCount(): Int

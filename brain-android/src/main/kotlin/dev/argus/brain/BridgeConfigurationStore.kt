@@ -17,6 +17,8 @@ import javax.crypto.spec.GCMParameterSpec
 
 interface BridgeConfigurationStore : BridgeAuthProvider {
     fun baseUrl(): String
+    /** Aggiorna URL e token in un solo commit; token null conserva quello cifrato esistente. */
+    suspend fun saveConfiguration(baseUrl: String, bearerToken: String?): Boolean
     suspend fun saveBaseUrl(value: String): Boolean
     suspend fun saveBearerToken(value: String): Boolean
     suspend fun clearBearerToken(): Boolean
@@ -34,6 +36,32 @@ class AndroidBridgeConfigurationStore(context: Context) : BridgeConfigurationSto
     override fun baseUrl(): String = normalizeBridgeBaseUrl(
         preferences.getString(KEY_BASE_URL, null).orEmpty(),
     ) ?: DEFAULT_BASE_URL
+
+    override suspend fun saveConfiguration(
+        baseUrl: String,
+        bearerToken: String?,
+    ): Boolean = withContext(Dispatchers.IO) {
+        val normalized = normalizeBridgeBaseUrl(baseUrl) ?: return@withContext false
+        if (bearerToken != null && !validBearer(bearerToken)) return@withContext false
+        synchronized(lock) {
+            runCatching {
+                val existing = preferences.getString(KEY_BEARER, null)
+                val encoded = if (bearerToken == null) {
+                    existing?.takeIf { stored ->
+                        runCatching { AesGcmTokenCodec.decrypt(stored, encryptionKey()) }
+                            .getOrNull()
+                            ?.let(::validBearer) == true
+                    } ?: return@synchronized false
+                } else {
+                    AesGcmTokenCodec.encrypt(bearerToken, encryptionKey())
+                }
+                preferences.edit()
+                    .putString(KEY_BASE_URL, normalized)
+                    .putString(KEY_BEARER, encoded)
+                    .commit()
+            }.getOrDefault(false)
+        }
+    }
 
     override suspend fun saveBaseUrl(value: String): Boolean = withContext(Dispatchers.IO) {
         val normalized = normalizeBridgeBaseUrl(value) ?: return@withContext false

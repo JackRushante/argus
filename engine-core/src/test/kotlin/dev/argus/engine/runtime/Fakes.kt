@@ -77,10 +77,13 @@ class FakeAutomationStore(seed: List<Automation> = emptyList()) : AutomationStor
         true
     }
 
-    override suspend fun enable(id: AutomationId): Boolean = mutex.withLock {
+    override suspend fun enableIfApproved(
+        id: AutomationId,
+        fingerprint: ApprovalFingerprint,
+    ): Boolean = mutex.withLock {
         val current = map[id] ?: return@withLock false
         if (current.status != AutomationStatus.DISABLED || current.enabled ||
-            current.approvalFingerprint == null ||
+            current.approvalFingerprint != fingerprint ||
             current.approvalFingerprint != ApprovalFingerprints.of(current)
         ) {
             if (current.status == AutomationStatus.DISABLED &&

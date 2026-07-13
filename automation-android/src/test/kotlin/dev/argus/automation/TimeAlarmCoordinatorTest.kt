@@ -537,7 +537,10 @@ private class FakeAutomationStore(vararg initial: Automation) : AutomationStore 
         values.value += id to current.copy(status = AutomationStatus.DISABLED, enabled = false)
         return true
     }
-    override suspend fun enable(id: AutomationId): Boolean = false
+    override suspend fun enableIfApproved(
+        id: AutomationId,
+        fingerprint: ApprovalFingerprint,
+    ): Boolean = false
     override suspend fun markNeedsReview(id: AutomationId) {
         values.value[id]?.let {
             values.value += id to it.copy(status = AutomationStatus.NEEDS_REVIEW, enabled = false)

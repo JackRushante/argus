@@ -185,7 +185,7 @@ private class ReconcileAutomationStore(initial: Automation) : AutomationStore {
     override suspend fun delete(id: AutomationId) { values.value -= id }
     override suspend fun disable(id: AutomationId) = Unit
     override suspend fun disableIfApproved(id: AutomationId, fingerprint: ApprovalFingerprint) = false
-    override suspend fun enable(id: AutomationId) = false
+    override suspend fun enableIfApproved(id: AutomationId, fingerprint: ApprovalFingerprint) = false
     override suspend fun markNeedsReview(id: AutomationId) = Unit
     override suspend fun markNeedsReviewIfApproved(
         id: AutomationId,

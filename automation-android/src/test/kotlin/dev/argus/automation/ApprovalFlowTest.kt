@@ -191,6 +191,126 @@ class ApprovalFlowTest {
         assertEquals(emptyList(), fixture.repository.observeAll().first())
     }
 
+    @Test
+    fun `edit pauses and replaces the exact approved automation id`() = runTest {
+        val original = signed(
+            Automation(
+                id = AutomationId("existing"),
+                name = "Wi-Fi sera",
+                createdBy = CreatedBy.USER,
+                status = AutomationStatus.ARMED,
+                trigger = Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
+                actions = listOf(Action.SetWifi(false)),
+            ),
+        )
+        val fixture = fixture(
+            available = setOf(CapabilityIds.TRIGGER_TIME, ActionCapabilities.SET_WIFI),
+            initial = listOf(original),
+        )
+
+        val ready = assertIs<DraftSubmissionResult.Ready>(
+            fixture.flow.submitEdit(
+                CompileResult(
+                    "Aggiornata",
+                    AutomationDraft(
+                        "Wi-Fi più tardi",
+                        Trigger.Time(cron = "30 23 * * *", tz = "Europe/Rome"),
+                        listOf(Action.SetWifi(false)),
+                    ),
+                    null,
+                ),
+                original.id,
+                requireNotNull(original.approvalFingerprint),
+            ),
+        ).review.draft.snapshot
+
+        assertEquals(original.id, ready.automationId)
+        assertEquals(original.approvalFingerprint, ready.baseAutomationFingerprint)
+        assertEquals(AutomationStatus.PENDING_APPROVAL, fixture.store.get(original.id)?.status)
+
+        val armed = assertIs<FlowArmResult.Armed>(
+            fixture.flow.arm(ready.id, ready.revision, ready.fingerprint),
+        ).automation
+        assertEquals(original.id, armed.id)
+        assertEquals("Wi-Fi più tardi", armed.name)
+    }
+
+    @Test
+    fun `edit rejects a newer approved automation than the displayed fingerprint`() = runTest {
+        val original = signed(
+            Automation(
+                id = AutomationId("edit-stale"),
+                name = "Wi-Fi sera",
+                createdBy = CreatedBy.USER,
+                status = AutomationStatus.ARMED,
+                trigger = Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
+                actions = listOf(Action.SetWifi(false)),
+            ),
+        )
+        val fixture = fixture(
+            available = setOf(CapabilityIds.TRIGGER_TIME, ActionCapabilities.SET_WIFI),
+            initial = listOf(original),
+        )
+        val newer = signed(original.copy(name = "Revisione nuova"))
+        fixture.store.put(newer)
+
+        val result = fixture.flow.submitEdit(
+            CompileResult(
+                "Aggiornata",
+                AutomationDraft(
+                    "Versione da contesto vecchio",
+                    original.trigger,
+                    original.actions,
+                ),
+                null,
+            ),
+            original.id,
+            requireNotNull(original.approvalFingerprint),
+        )
+
+        assertEquals(DraftSubmissionResult.Rejected("automation_stale"), result)
+        assertEquals(newer, fixture.store.get(original.id))
+        assertEquals(emptyList(), fixture.repository.observeAll().first())
+    }
+
+    @Test
+    fun `draft recompilation rejects a stale displayed revision`() = runTest {
+        val fixture = fixture(
+            available = setOf(CapabilityIds.TRIGGER_TIME, ActionCapabilities.SET_WIFI),
+        )
+        val first = assertIs<DraftSubmissionResult.Ready>(
+            fixture.flow.submit(
+                CompileResult(
+                    "prima",
+                    AutomationDraft(
+                        "Wi-Fi",
+                        Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
+                        listOf(Action.SetWifi(false)),
+                    ),
+                    null,
+                ),
+            ),
+        ).review.draft.snapshot
+        assertIs<DraftWriteResult.Saved>(
+            fixture.repository.revise(
+                first.id,
+                first.revision,
+                first.draft.copy(name = "Cambio concorrente"),
+                first.priority,
+                2_000L,
+            ),
+        )
+
+        val result = fixture.flow.submitRevision(
+            CompileResult("seconda", first.draft.copy(name = "Cambio chat"), null),
+            first.id,
+            expectedRevision = first.revision,
+        )
+
+        assertEquals(DraftSubmissionResult.Conflict(currentRevision = 2L), result)
+        assertEquals("Cambio concorrente", fixture.repository.get(first.id)?.draft?.name)
+    }
+
     private fun fixture(
         available: Set<String>,
         transient: Set<String> = emptySet(),
@@ -243,8 +363,21 @@ private class MemoryDraftRepository(
 
     override suspend fun create(newDraft: NewDraft): DraftWriteResult {
         if (newDraft.id in values.value) return DraftWriteResult.Conflict(values.value[newDraft.id]?.revision)
+        val existing = automations.get(newDraft.automationId)
+        if (newDraft.expectedAutomationFingerprint != null) {
+            if (existing?.approvalFingerprint != newDraft.expectedAutomationFingerprint) {
+                return DraftWriteResult.Rejected("automation_stale")
+            }
+        } else if (existing != null) {
+            return DraftWriteResult.Rejected("automation_exists")
+        }
         val snapshot = snapshot(newDraft, revision = 1, draft = newDraft.draft)
         values.value += snapshot.id to snapshot
+        if (existing != null) {
+            automations.put(
+                existing.copy(status = AutomationStatus.PENDING_APPROVAL, enabled = false),
+            )
+        }
         return DraftWriteResult.Saved(snapshot)
     }
 
@@ -265,6 +398,7 @@ private class MemoryDraftRepository(
                 createdBy = current.createdBy,
                 priority = priority,
                 atMillis = current.createdAtMillis,
+                expectedAutomationFingerprint = current.baseAutomationFingerprint,
             ),
             revision = current.revision + 1,
             draft = draft,
@@ -293,7 +427,13 @@ private class MemoryDraftRepository(
         if (!current.hasValidFingerprint() || current.fingerprint != expectedFingerprint) {
             return DraftArmResult.IntegrityFailure
         }
-        if (automations.get(current.automationId) != null) return DraftArmResult.AutomationConflict
+        val existing = automations.get(current.automationId)
+        if (current.baseAutomationFingerprint == null && existing != null) {
+            return DraftArmResult.AutomationConflict
+        }
+        if (current.baseAutomationFingerprint != null &&
+            (existing == null || existing.approvalFingerprint != current.baseAutomationFingerprint)
+        ) return DraftArmResult.AutomationConflict
         val armed = current.armedAutomation()
         automations.put(armed)
         values.value -= id
@@ -317,6 +457,7 @@ private class MemoryDraftRepository(
             schemaVersion = dev.argus.engine.model.SCHEMA_VERSION,
             createdAtMillis = newDraft.atMillis,
             updatedAtMillis = updatedAtMillis,
+            baseAutomationFingerprint = newDraft.expectedAutomationFingerprint,
         )
         return unsigned.copy(fingerprint = ApprovalFingerprints.of(unsigned.pendingAutomation()))
     }
@@ -346,7 +487,7 @@ private class MemoryAutomationStore(initial: List<Automation>) : AutomationStore
         values.value += id to current.copy(status = AutomationStatus.DISABLED, enabled = false)
         return true
     }
-    override suspend fun enable(id: AutomationId) = false
+    override suspend fun enableIfApproved(id: AutomationId, fingerprint: ApprovalFingerprint) = false
     override suspend fun markNeedsReview(id: AutomationId) = Unit
     override suspend fun markNeedsReviewIfApproved(
         id: AutomationId,

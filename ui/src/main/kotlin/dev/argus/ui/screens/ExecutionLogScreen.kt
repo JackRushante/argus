@@ -32,10 +32,12 @@ import androidx.compose.material.icons.rounded.FilterAltOff
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -52,6 +54,8 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import dev.argus.engine.runtime.AuditKind
 import dev.argus.ui.components.EmptyState
+import dev.argus.ui.components.CloudTag
+import dev.argus.ui.components.GenerativeTag
 import dev.argus.ui.model.ExecutionLogCallbacks
 import dev.argus.ui.model.ExecutionLogState
 import dev.argus.ui.model.LogOutcome
@@ -97,7 +101,14 @@ fun ExecutionLogScreen(
                 FilterHeader(name, callbacks::onClearFilter)
             }
 
-            if (state.entries.isEmpty()) {
+            if (state.loading) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator()
+                }
+            } else if (state.entries.isEmpty()) {
                 EmptyState(
                     icon = Icons.Rounded.History,
                     title = "Nessuna esecuzione",
@@ -123,6 +134,9 @@ fun ExecutionLogScreen(
                                         callbacks.onExpand(row.id)
                                     },
                                     onSendNow = { callbacks.onSendNow(row.id) },
+                                    onOpenAutomation = {
+                                        row.automationId?.let(callbacks::onOpenAutomation)
+                                    },
                                 )
                             }
                         }
@@ -193,10 +207,11 @@ private fun LogRowItem(
     expanded: Boolean,
     onToggle: () -> Unit,
     onSendNow: () -> Unit,
+    onOpenAutomation: () -> Unit,
 ) {
     val (icon, color) = outcomeVisual(row)
     val isDeferred = row.kind == AuditKind.FIRED && row.outcome == LogOutcome.DEFERRED
-    val expandable = row.expandedDetail != null || isDeferred
+    val expandable = row.expandedDetail != null || isDeferred || row.automationId != null
     // §6.4: soppressioni / condizioni-non-soddisfatte sono rumore → attenuate.
     val attenuated = row.kind in setOf(
         AuditKind.SUPPRESSED_DUPLICATE,
@@ -223,6 +238,15 @@ private fun LogRowItem(
                     color = MaterialTheme.colorScheme.onSurface,
                     style = MaterialTheme.typography.labelLarge,
                 )
+                if (row.isGenerative) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        GenerativeTag()
+                        CloudTag()
+                    }
+                }
                 // Summary colorato per esito (§7.4): verde/ambra/rosso/grigio.
                 Text(row.summary, color = color, style = MaterialTheme.typography.bodyMedium)
             }
@@ -243,13 +267,18 @@ private fun LogRowItem(
         }
 
         AnimatedVisibility(visible = expanded && expandable) {
-            ExpandedDetail(row, isDeferred, onSendNow)
+            ExpandedDetail(row, isDeferred, onSendNow, onOpenAutomation)
         }
     }
 }
 
 @Composable
-private fun ExpandedDetail(row: LogRow, isDeferred: Boolean, onSendNow: () -> Unit) {
+private fun ExpandedDetail(
+    row: LogRow,
+    isDeferred: Boolean,
+    onSendNow: () -> Unit,
+    onOpenAutomation: () -> Unit,
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -282,6 +311,14 @@ private fun ExpandedDetail(row: LogRow, isDeferred: Boolean, onSendNow: () -> Un
                 Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
                 Text("Invia ora")
+            }
+        }
+        if (row.automationId != null) {
+            TextButton(
+                onClick = onOpenAutomation,
+                modifier = Modifier.heightIn(min = 48.dp),
+            ) {
+                Text("Apri automazione")
             }
         }
     }
@@ -386,9 +423,21 @@ private fun LogExpandedPreview() {
             Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 DayHeader("oggi")
                 // Riga SUCCESS pre-espansa.
-                LogRowItem(previewEntries[2], expanded = true, onToggle = {}, onSendNow = {})
+                LogRowItem(
+                    previewEntries[2],
+                    expanded = true,
+                    onToggle = {},
+                    onSendNow = {},
+                    onOpenAutomation = {},
+                )
                 // Riga DEFERRED pre-espansa → mostra "Invia ora".
-                LogRowItem(previewEntries[1], expanded = true, onToggle = {}, onSendNow = {})
+                LogRowItem(
+                    previewEntries[1],
+                    expanded = true,
+                    onToggle = {},
+                    onSendNow = {},
+                    onOpenAutomation = {},
+                )
             }
         }
     }

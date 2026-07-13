@@ -19,6 +19,7 @@ import dev.argus.engine.safety.DraftArmResult
 import dev.argus.engine.safety.DraftId
 import dev.argus.engine.safety.DraftWriteResult
 import dev.argus.engine.safety.NewDraft
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Before
@@ -123,6 +124,65 @@ class RoomExecutionJournalTest {
             ExecutionStatus.SUPPRESSED_NOT_ELIGIBLE,
             db.executionJournalDao().execution(disabled.value)?.status,
         )
+    }
+
+    @Test
+    fun `reactive UI action query is bounded by the recent audit window`() = runTest {
+        val automationId = arm("bounded-log", listOf(Action.SetWifi(false)))
+        val old = ExecutionId("exec-ui-old")
+        val recent = ExecutionId("exec-ui-recent")
+        store.claimFire(claim(automationId, "event-ui-old", old, 1_000))
+        store.claimFire(claim(automationId, "event-ui-recent", recent, 2_000))
+        journal.recordAction(
+            ActionJournalEntry(old, 0, "old_action", ActionJournalOutcome.SUCCEEDED, 1_001),
+        )
+        journal.recordAction(
+            ActionJournalEntry(recent, 0, "recent_action", ActionJournalOutcome.SUCCEEDED, 2_001),
+        )
+        val sink = RoomAuditSink(db.auditDao())
+        sink.record(AuditEvent(automationId, AuditKind.FIRED, 1_000, executionId = old))
+        sink.record(AuditEvent(automationId, AuditKind.FIRED, 2_000, executionId = recent))
+
+        val visible = db.executionJournalDao().observeRecentActions(auditLimit = 1).first()
+
+        assertEquals(listOf("recent_action"), visible.map { it.actionType })
+    }
+
+    @Test
+    fun `automation action query is not displaced by newer events from other rules`() = runTest {
+        val targetId = arm("target-log", listOf(Action.SetWifi(false)))
+        val noiseId = arm("noise-log", listOf(Action.SetBluetooth(true)))
+        val targetExecution = ExecutionId("exec-target-ui")
+        val noiseExecution = ExecutionId("exec-noise-ui")
+        store.claimFire(claim(targetId, "event-target-ui", targetExecution, 1_000))
+        store.claimFire(claim(noiseId, "event-noise-ui", noiseExecution, 2_000))
+        journal.recordAction(
+            ActionJournalEntry(
+                targetExecution,
+                0,
+                "target_action",
+                ActionJournalOutcome.SUCCEEDED,
+                1_001,
+            ),
+        )
+        journal.recordAction(
+            ActionJournalEntry(
+                noiseExecution,
+                0,
+                "noise_action",
+                ActionJournalOutcome.SUCCEEDED,
+                2_001,
+            ),
+        )
+        val sink = RoomAuditSink(db.auditDao())
+        sink.record(AuditEvent(targetId, AuditKind.FIRED, 1_000, executionId = targetExecution))
+        sink.record(AuditEvent(noiseId, AuditKind.FIRED, 2_000, executionId = noiseExecution))
+
+        val visible = db.executionJournalDao()
+            .observeRecentActionsForAutomation(targetId.value, auditLimit = 1)
+            .first()
+
+        assertEquals(listOf("target_action"), visible.map { it.actionType })
     }
 
     @Test

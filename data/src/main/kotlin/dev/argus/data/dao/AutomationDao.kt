@@ -20,6 +20,12 @@ data class AutomationRuntimeState(
     val lastFiredAt: Long?,
 )
 
+/** Proiezione UI separata dal JSON eseguibile: non entra nel fingerprint approvato. */
+data class AutomationUiMetadata(
+    val id: String,
+    val lastFiredAt: Long?,
+)
+
 @Dao
 interface AutomationDao {
 
@@ -31,6 +37,9 @@ interface AutomationDao {
 
     @Query("SELECT * FROM automations ORDER BY priority ASC, id ASC")
     fun observeAll(): Flow<List<AutomationEntity>>
+
+    @Query("SELECT id, lastFiredAt FROM automations ORDER BY id ASC")
+    fun observeUiMetadata(): Flow<List<AutomationUiMetadata>>
 
     /**
      * Solo ARMED + enabled, in priorità CRESCENTE (spec §5: il più prioritario esegue ultimo e vince).

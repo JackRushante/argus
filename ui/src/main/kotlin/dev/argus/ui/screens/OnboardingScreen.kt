@@ -38,6 +38,10 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -47,6 +51,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import dev.argus.engine.safety.Severity
 import dev.argus.ui.components.WarningBanner
+import dev.argus.ui.components.BridgeConfigurationDialog
 import dev.argus.ui.model.OnboardingCallbacks
 import dev.argus.ui.model.OnboardingState
 import dev.argus.ui.model.OnboardingStepState
@@ -119,6 +124,7 @@ fun OnboardingScreen(
     modifier: Modifier = Modifier,
 ) {
     val step = state.steps.getOrNull(state.currentIndex) ?: return
+    var showBridgeEditor by remember { mutableStateOf(false) }
     Surface(color = MaterialTheme.colorScheme.background, modifier = modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             OnboardingHeader(state.currentIndex, state.steps.size, callbacks::onBack)
@@ -141,7 +147,7 @@ fun OnboardingScreen(
                         UiWarning(
                             Severity.WARNING,
                             "battery_consequence",
-                            "Senza l'esclusione, le risposte AI in background falliranno spesso e il servizio può essere ucciso dal sistema.",
+                            "Senza l'esclusione, OxygenOS può ritardare il lavoro in background. Gli allarmi restano event-driven e non usano un servizio persistente.",
                         ),
                     )
                 }
@@ -156,8 +162,24 @@ fun OnboardingScreen(
                 Spacer(Modifier.height(8.dp))
             }
 
-            OnboardingFooter(state, step, callbacks)
+            OnboardingFooter(
+                state = state,
+                step = step,
+                callbacks = callbacks,
+                onStepCta = { kind ->
+                    if (kind == StepKind.BRAIN_CONFIG) showBridgeEditor = true
+                    else callbacks.onStepCta(kind)
+                },
+            )
         }
+    }
+    if (showBridgeEditor && state.bridgeUrl != null) {
+        BridgeConfigurationDialog(
+            initialUrl = state.bridgeUrl,
+            tokenConfigured = state.bridgeTokenConfigured,
+            onDismiss = { showBridgeEditor = false },
+            onSave = callbacks::onSaveBridge,
+        )
     }
 }
 
@@ -312,7 +334,12 @@ private fun ChecklistRow(step: OnboardingStepState, isCurrent: Boolean) {
 // -----------------------------------------------------------------------------
 
 @Composable
-private fun OnboardingFooter(state: OnboardingState, step: OnboardingStepState, callbacks: OnboardingCallbacks) {
+private fun OnboardingFooter(
+    state: OnboardingState,
+    step: OnboardingStepState,
+    callbacks: OnboardingCallbacks,
+    onStepCta: (StepKind) -> Unit,
+) {
     val isLast = state.currentIndex == state.steps.lastIndex
     Column {
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -332,7 +359,7 @@ private fun OnboardingFooter(state: OnboardingState, step: OnboardingStepState, 
                     // "Avanti" o "Concludi" (gate su canFinish, §6.6).
                     when {
                         step.ctaLabel != null -> Button(
-                            onClick = { callbacks.onStepCta(step.kind) },
+                            onClick = { onStepCta(step.kind) },
                             modifier = Modifier.weight(1f).heightIn(min = 48.dp),
                         ) { Text(step.ctaLabel) }
                         isLast -> Button(
@@ -414,7 +441,7 @@ private object NoopOnboardingCallbacks : OnboardingCallbacks {
 }
 
 @Composable
-private fun previewFor(kind: StepKind, shizuku: ShizukuStatus = ShizukuStatus.RUNNING_NOT_AUTHORIZED) {
+private fun PreviewFor(kind: StepKind, shizuku: ShizukuStatus = ShizukuStatus.RUNNING_NOT_AUTHORIZED) {
     ArgusTheme {
         OnboardingScreen(
             OnboardingState(
@@ -444,17 +471,17 @@ private fun OnboardingPrivacyPreview() {
 @Preview(name = "Onboarding · Shizuku RUNNING_NOT_AUTHORIZED", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)
 @Composable
 private fun OnboardingShizukuPreview() {
-    previewFor(StepKind.SHIZUKU, ShizukuStatus.RUNNING_NOT_AUTHORIZED)
+    PreviewFor(StepKind.SHIZUKU, ShizukuStatus.RUNNING_NOT_AUTHORIZED)
 }
 
 @Preview(name = "Onboarding · Batteria (conseguenza)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)
 @Composable
 private fun OnboardingBatteryPreview() {
-    previewFor(StepKind.BATTERY_OEM)
+    PreviewFor(StepKind.BATTERY_OEM)
 }
 
 @Preview(name = "Onboarding · Posizione (opzionale)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)
 @Composable
 private fun OnboardingLocationPreview() {
-    previewFor(StepKind.BACKGROUND_LOCATION)
+    PreviewFor(StepKind.BACKGROUND_LOCATION)
 }

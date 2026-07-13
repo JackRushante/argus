@@ -18,6 +18,7 @@ import dev.argus.automation.AutomationNotifier
 import dev.argus.automation.ConfiguredBridgeBrain
 import dev.argus.automation.CoordinatorTimeAlarmRuntime
 import dev.argus.automation.CurrentLocationProvider
+import dev.argus.automation.DeviceStateSnapshotProvider
 import dev.argus.automation.EngineTimeEventDispatcher
 import dev.argus.automation.FrameworkCurrentLocationProvider
 import dev.argus.automation.GenerativeLane
@@ -163,6 +164,11 @@ object ArgusModule {
     @Singleton
     fun lazyDeviceState(reader: StateReader, gateway: ShizukuGateway): LazyDeviceStateProvider =
         LazyDeviceStateProvider(reader, gateway)
+
+    @Provides
+    fun deviceStateSnapshotProvider(
+        provider: LazyDeviceStateProvider,
+    ): DeviceStateSnapshotProvider = provider
 
     @Provides
     @Singleton

@@ -194,7 +194,12 @@ class RoomStoreTest {
         persistForTest(automation)
         store.disable(automation.id)
 
-        assertTrue(store.enable(automation.id))
+        assertTrue(
+            store.enableIfApproved(
+                automation.id,
+                requireNotNull(automation.approvalFingerprint),
+            ),
+        )
         assertEquals(AutomationStatus.ARMED, store.get(automation.id)?.status)
         store.disable(automation.id)
 
@@ -202,8 +207,33 @@ class RoomStoreTest {
         persistForTest(
             automation.copy(name = "edit non approvato", status = AutomationStatus.DISABLED, enabled = false),
         )
-        assertTrue(!store.enable(automation.id))
+        assertTrue(
+            !store.enableIfApproved(
+                automation.id,
+                requireNotNull(automation.approvalFingerprint),
+            ),
+        )
         assertEquals(AutomationStatus.NEEDS_REVIEW, store.get(automation.id)?.status)
+    }
+
+    @Test
+    fun `conditional enable cannot arm or quarantine a newer approved revision`() = runTest {
+        val original = baseArmed("enable-versioned")
+        persistForTest(original)
+        store.disable(original.id)
+        val oldFingerprint = requireNotNull(original.approvalFingerprint)
+        val revised = signed(
+            original.copy(
+                name = "revised",
+                status = AutomationStatus.DISABLED,
+                enabled = false,
+                approvalFingerprint = null,
+            ),
+        )
+        persistForTest(revised)
+
+        assertTrue(!store.enableIfApproved(original.id, oldFingerprint))
+        assertEquals(revised, store.get(original.id))
     }
 
     @Test

@@ -72,17 +72,20 @@ class RoomAutomationStore(private val dao: AutomationDao) : AutomationStore {
         ) == 1
     }
 
-    override suspend fun enable(id: AutomationId): Boolean {
+    override suspend fun enableIfApproved(
+        id: AutomationId,
+        fingerprint: ApprovalFingerprint,
+    ): Boolean {
         val row = dao.getById(id.value) ?: return false
         if (row.status != AutomationStatus.DISABLED || row.enabled) return false
         val domain = toDomain(row)
-        if (domain.status != AutomationStatus.DISABLED ||
-            domain.approvalFingerprint == null ||
+        if (domain.status != AutomationStatus.DISABLED || domain.approvalFingerprint == null ||
             domain.approvalFingerprint != ApprovalFingerprints.of(domain)
         ) {
             dao.markNeedsReview(id.value)
             return false
         }
+        if (domain.approvalFingerprint != fingerprint) return false
         return dao.enableIfUnchanged(
             id = row.id,
             expectedJson = row.json,

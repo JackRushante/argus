@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <string name="bridge_dialog_title">Configura Hermes</string>
+    <string name="bridge_url_label">Indirizzo HTTPS del bridge</string>
+    <string name="bridge_token_label">Bearer token</string>
+    <string name="bridge_token_keep_hint">Lascia vuoto per conservare il token protetto</string>
+    <string name="bridge_token_required_hint">Inserisci il bearer token</string>
+    <string name="bridge_token_configured">Token protetto configurato</string>
+    <string name="bridge_token_missing">Token non configurato</string>
+    <string name="action_cancel">Annulla</string>
+    <string name="action_save_and_test">Salva e verifica</string>
+    <string name="delete_dialog_title">Eliminare l’automazione?</string>
+    <string name="delete_dialog_body">La regola e il suo stato verranno rimossi. Questa azione non si può annullare.</string>
+    <string name="action_delete">Elimina</string>
+    <string name="run_now_dialog_title">Eseguire ora?</string>
+    <string name="run_now_dialog_body" tools:ignore="Typos">Le azioni verranno eseguite subito, senza attendere il trigger o valutare le condizioni.</string>
+    <string name="action_run_now">Esegui ora</string>
+    <string name="cloud_processing">Elaborazione cloud</string>
+    <string name="privacy_section_body" tools:ignore="Typos">Il testo inviato in chat può raggiungere Hermes e il provider cloud configurato. Puoi revocare il consenso in qualsiasi momento.</string>
+    <string name="privacy_revoke_action">Revoca consenso</string>
+    <string name="privacy_revoke_title">Revocare il consenso?</string>
+    <string name="privacy_revoke_body">Hermes verrà bloccato subito e l’onboarding sarà richiesto di nuovo. Le automazioni deterministiche già approvate restano locali.</string>
+    <string name="privacy_revoke_confirm">Revoca e blocca Hermes</string>
+</resources>

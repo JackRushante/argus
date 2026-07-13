@@ -45,6 +45,9 @@ class ConfiguredBridgeBrain(
     }
 
     suspend fun health(): BridgeHealthResult {
+        if (!privacyAccepted()) {
+            return BridgeHealthResult.Unreachable(BridgeErrorKind.CONFIGURATION)
+        }
         val started = elapsedRealtimeMillis()
         return try {
             BridgeHealthResult.Reachable(

@@ -36,6 +36,7 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -44,12 +45,17 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -60,6 +66,7 @@ import dev.argus.ui.components.StatusBadgeChip
 import dev.argus.ui.components.WarningBanner
 import dev.argus.ui.components.CloudTag
 import dev.argus.ui.components.GenerativeTag
+import dev.argus.ui.R
 import dev.argus.ui.model.ActionRow
 import dev.argus.ui.model.AutomationDetailCallbacks
 import dev.argus.ui.model.AutomationDetailState
@@ -93,6 +100,8 @@ fun AutomationDetailScreen(
     callbacks: AutomationDetailCallbacks,
     modifier: Modifier = Modifier,
 ) {
+    var confirmDelete by remember { mutableStateOf(false) }
+    var confirmRunNow by remember { mutableStateOf(false) }
     Surface(color = MaterialTheme.colorScheme.background, modifier = modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             DetailHeader(state.status, callbacks::onBack)
@@ -133,8 +142,53 @@ fun AutomationDetailScreen(
                 Spacer(Modifier.height(4.dp))
             }
 
-            DetailFooter(state, callbacks)
+            DetailFooter(
+                state = state,
+                callbacks = callbacks,
+                onDelete = { confirmDelete = true },
+                onRunNow = { if (state.canRunNow) confirmRunNow = true },
+            )
         }
+    }
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text(stringResource(R.string.delete_dialog_title)) },
+            text = { Text(stringResource(R.string.delete_dialog_body)) },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        confirmDelete = false
+                        callbacks.onDelete()
+                    },
+                ) { Text(stringResource(R.string.action_delete)) }
+            },
+        )
+    }
+    if (confirmRunNow) {
+        AlertDialog(
+            onDismissRequest = { confirmRunNow = false },
+            title = { Text(stringResource(R.string.run_now_dialog_title)) },
+            text = { Text(stringResource(R.string.run_now_dialog_body)) },
+            dismissButton = {
+                TextButton(onClick = { confirmRunNow = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        confirmRunNow = false
+                        callbacks.onRunNow()
+                    },
+                ) { Text(stringResource(R.string.action_run_now)) }
+            },
+        )
     }
 }
 
@@ -332,15 +386,21 @@ private fun runVisual(row: LogRow): Pair<ImageVector, Color> {
 // -----------------------------------------------------------------------------
 
 @Composable
-private fun DetailFooter(state: AutomationDetailState, callbacks: AutomationDetailCallbacks) {
+private fun DetailFooter(
+    state: AutomationDetailState,
+    callbacks: AutomationDetailCallbacks,
+    onDelete: () -> Unit,
+    onRunNow: () -> Unit,
+) {
     Column {
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         Surface(color = MaterialTheme.colorScheme.background) {
             Box(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                 when (state.status) {
                     StatusBadge.PENDING_APPROVAL -> PendingFooter(state, callbacks)
-                    StatusBadge.ARMED, StatusBadge.DISABLED -> ReviewableFooter(callbacks)
-                    StatusBadge.NEEDS_REVIEW -> NeedsReviewFooter(callbacks)
+                    StatusBadge.ARMED, StatusBadge.DISABLED ->
+                        ReviewableFooter(state, callbacks, onDelete, onRunNow)
+                    StatusBadge.NEEDS_REVIEW -> NeedsReviewFooter(callbacks, onDelete)
                 }
             }
         }
@@ -387,39 +447,84 @@ private fun PendingFooter(state: AutomationDetailState, callbacks: AutomationDet
  * irreversibile è l'azione di default.
  */
 @Composable
-private fun ReviewableFooter(callbacks: AutomationDetailCallbacks) {
+private fun ReviewableFooter(
+    state: AutomationDetailState,
+    callbacks: AutomationDetailCallbacks,
+    onDelete: () -> Unit,
+    onRunNow: () -> Unit,
+) {
     val semantic = LocalArgusSemantic.current
-    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedButton(
-            onClick = callbacks::onDelete,
-            modifier = Modifier.size(48.dp),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = semantic.error.fg),
-            border = androidx.compose.foundation.BorderStroke(1.dp, semantic.error.fg.copy(alpha = 0.55f)),
+            onClick = { callbacks.onSetEnabled(state.status == StatusBadge.DISABLED) },
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
         ) {
-            Icon(Icons.Rounded.Delete, contentDescription = "Elimina", modifier = Modifier.size(21.dp))
+            Text(
+                if (state.status == StatusBadge.ARMED) "Disattiva automazione"
+                else "Riattiva automazione",
+            )
         }
-        OutlinedButton(onClick = callbacks::onAskEdit, modifier = Modifier.heightIn(min = 48.dp)) { Text("Modifica in chat") }
-        OutlinedButton(
-            onClick = callbacks::onRunNow,
-            modifier = Modifier.weight(1f).heightIn(min = 48.dp),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary),
-        ) {
-            Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(19.dp))
-            Spacer(Modifier.width(6.dp))
-            Text("Esegui ora")
+        if (!state.canRunNow && state.runNowBlockedReason != null) {
+            Text(
+                state.runNowBlockedReason,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedButton(
+                onClick = onDelete,
+                modifier = Modifier.size(48.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = semantic.error.fg),
+                border = androidx.compose.foundation.BorderStroke(1.dp, semantic.error.fg.copy(alpha = 0.55f)),
+            ) {
+                Icon(Icons.Rounded.Delete, contentDescription = "Elimina", modifier = Modifier.size(21.dp))
+            }
+            OutlinedButton(onClick = callbacks::onAskEdit, modifier = Modifier.heightIn(min = 48.dp)) { Text("Modifica in chat") }
+            OutlinedButton(
+                onClick = onRunNow,
+                enabled = state.canRunNow,
+                modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary),
+            ) {
+                Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(19.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Esegui ora")
+            }
         }
     }
 }
 
 @Composable
-private fun NeedsReviewFooter(callbacks: AutomationDetailCallbacks) {
-    // "Ricrea in chat" full-width: la regola non è decodificabile, si ri-chiede in chat (onAskEdit).
-    Button(
-        onClick = callbacks::onAskEdit,
-        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-    ) {
-        Text("Ricrea in chat")
+private fun NeedsReviewFooter(
+    callbacks: AutomationDetailCallbacks,
+    onDelete: () -> Unit,
+) {
+    val semantic = LocalArgusSemantic.current
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        OutlinedButton(
+            onClick = onDelete,
+            modifier = Modifier.size(48.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = semantic.error.fg),
+            border = androidx.compose.foundation.BorderStroke(
+                1.dp,
+                semantic.error.fg.copy(alpha = 0.55f),
+            ),
+        ) {
+            Icon(
+                Icons.Rounded.Delete,
+                contentDescription = stringResource(R.string.action_delete),
+                modifier = Modifier.size(21.dp),
+            )
+        }
+        Button(
+            onClick = callbacks::onAskEdit,
+            modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+        ) {
+            Text("Ricrea in chat")
+        }
     }
 }
 

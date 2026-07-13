@@ -30,11 +30,15 @@ import java.util.concurrent.Executor
 import kotlin.coroutines.resume
 
 /** Legge lo snapshot solo quando l'Engine trova una regola che ne ha davvero bisogno. */
+fun interface DeviceStateSnapshotProvider {
+    suspend fun current(): DeviceState
+}
+
 class LazyDeviceStateProvider(
     private val reader: StateReader,
     private val shizuku: ShizukuGateway,
-) {
-    suspend fun current(): DeviceState {
+) : DeviceStateSnapshotProvider {
+    override suspend fun current(): DeviceState {
         if (shizuku.status() != ShizukuGatewayStatus.AUTHORIZED) return DeviceState()
         return reader.read(StateKeys.ALL.keys, includeForegroundApp = true)
     }

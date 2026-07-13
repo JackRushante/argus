@@ -15,6 +15,7 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "0.1-demo"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildTypes { getByName("debug") { isDebuggable = true } }
     compileOptions {
@@ -37,6 +38,7 @@ dependencies {
     implementation(libs.compose.material.icons.extended)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.process)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.navigation.compose)
@@ -44,4 +46,19 @@ dependencies {
     implementation(libs.hilt.lifecycle.viewmodel.compose)
     ksp(libs.hilt.compiler)
     debugImplementation(libs.compose.ui.tooling)
+    debugImplementation(libs.compose.ui.test.manifest)
+    // Il solo APK debug espone l'entry point Hilt usato dagli E2E di produzione.
+    debugImplementation(project(":brain-android"))
+    debugImplementation(project(":core-shizuku"))
+    debugImplementation(project(":data"))
+    debugImplementation(project(":device-tools"))
+    androidTestImplementation(platform(libs.compose.bom))
+    androidTestImplementation(project(":brain-android"))
+    androidTestImplementation(project(":core-shizuku"))
+    androidTestImplementation(project(":data"))
+    androidTestImplementation(project(":device-tools"))
+    androidTestImplementation(libs.androidx.room.runtime)
+    androidTestImplementation(libs.compose.ui.test.junit4)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.runner)
 }

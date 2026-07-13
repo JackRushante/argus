@@ -34,8 +34,8 @@ interface AutomationStore {
     suspend fun disable(id: AutomationId)
     /** Disattiva solo se la regola è ancora ARMED e coincide con lo snapshot approvato indicato. */
     suspend fun disableIfApproved(id: AutomationId, fingerprint: ApprovalFingerprint): Boolean
-    /** Riattiva solo una regola ancora identica allo snapshot approvato. */
-    suspend fun enable(id: AutomationId): Boolean
+    /** Riattiva solo la revisione DISABLED ancora identica allo snapshot approvato indicato. */
+    suspend fun enableIfApproved(id: AutomationId, fingerprint: ApprovalFingerprint): Boolean
     suspend fun markNeedsReview(id: AutomationId)
     /** Quarantena solo la revisione ARMED ancora identica a quella verificata dal caller. */
     suspend fun markNeedsReviewIfApproved(

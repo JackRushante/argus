@@ -4,6 +4,7 @@ import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
+import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.CapabilityRequirements
 import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.Trigger
@@ -84,6 +85,82 @@ class ApprovalFlow(
     },
 ) {
     suspend fun submit(compile: CompileResult): DraftSubmissionResult {
+        return persistCompile(
+            compile = compile,
+            automationId = newAutomationId(),
+            priority = 0,
+            expectedAutomationFingerprint = null,
+        )
+    }
+
+    /**
+     * Apre una revisione della versione approvata corrente. Il repository mette la regola in
+     * PENDING_APPROVAL nella stessa transazione che salva il draft, senza finestra di esecuzione.
+     */
+    suspend fun submitEdit(
+        compile: CompileResult,
+        automationId: AutomationId,
+        expectedFingerprint: ApprovalFingerprint,
+    ): DraftSubmissionResult {
+        val current = automations.get(automationId)
+            ?: return DraftSubmissionResult.Rejected("automation_missing")
+        val fingerprint = current.approvalFingerprint
+            ?: return DraftSubmissionResult.Rejected("automation_not_approved")
+        if (fingerprint != expectedFingerprint) {
+            return DraftSubmissionResult.Rejected("automation_stale")
+        }
+        if (current.status !in setOf(AutomationStatus.ARMED, AutomationStatus.DISABLED)) {
+            return DraftSubmissionResult.Rejected("automation_not_editable")
+        }
+        return persistCompile(
+            compile = compile,
+            automationId = current.id,
+            priority = current.priority,
+            expectedAutomationFingerprint = expectedFingerprint,
+        )
+    }
+
+    /** Sostituisce esattamente la revisione di bozza mostrata all'utente; un cambio concorrente
+     * torna [DraftSubmissionResult.Conflict] e non viene mai approvato implicitamente. */
+    suspend fun submitRevision(
+        compile: CompileResult,
+        id: DraftId,
+        expectedRevision: Long,
+    ): DraftSubmissionResult {
+        val metaError = compile.metaError
+        if (metaError != null) return DraftSubmissionResult.NoDraft(compile.reply, metaError)
+        val replacement = compile.draft
+            ?: return DraftSubmissionResult.NoDraft(compile.reply, "compile_without_draft")
+        val current = drafts.get(id)
+            ?: return DraftSubmissionResult.Conflict(currentRevision = null)
+        if (current.revision != expectedRevision) {
+            return DraftSubmissionResult.Conflict(current.revision)
+        }
+        return when (
+            val result = drafts.revise(
+                id = id,
+                expectedRevision = expectedRevision,
+                draft = replacement,
+                priority = current.priority,
+                atMillis = nowMillis(),
+            )
+        ) {
+            is DraftWriteResult.Saved -> {
+                val review = review(result.snapshot.id)
+                    ?: return DraftSubmissionResult.Rejected("draft_missing_after_save")
+                DraftSubmissionResult.Ready(review, compile.reply)
+            }
+            is DraftWriteResult.Conflict -> DraftSubmissionResult.Conflict(result.currentRevision)
+            is DraftWriteResult.Rejected -> DraftSubmissionResult.Rejected(result.code)
+        }
+    }
+
+    private suspend fun persistCompile(
+        compile: CompileResult,
+        automationId: AutomationId,
+        priority: Int,
+        expectedAutomationFingerprint: ApprovalFingerprint?,
+    ): DraftSubmissionResult {
         val metaError = compile.metaError
         if (metaError != null) {
             return DraftSubmissionResult.NoDraft(compile.reply, metaError)
@@ -94,10 +171,12 @@ class ApprovalFlow(
             val result = drafts.create(
                 NewDraft(
                     id = newDraftId(),
-                    automationId = newAutomationId(),
+                    automationId = automationId,
                     draft = draft,
                     createdBy = CreatedBy.LLM,
+                    priority = priority,
                     atMillis = nowMillis(),
+                    expectedAutomationFingerprint = expectedAutomationFingerprint,
                 ),
             )
         ) {
@@ -130,7 +209,7 @@ class ApprovalFlow(
     suspend fun arm(
         id: DraftId,
         expectedRevision: Long,
-        expectedFingerprint: dev.argus.engine.model.ApprovalFingerprint,
+        expectedFingerprint: ApprovalFingerprint,
     ): FlowArmResult {
         var currentReview = review(id) ?: return FlowArmResult.Missing
         if (currentReview.draft.snapshot.revision != expectedRevision) {
