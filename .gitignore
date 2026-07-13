@@ -23,3 +23,6 @@ Thumbs.db
 
 # Kotlin
 .kotlin/
+
+# Superpowers SDD scratch (ledger + briefs + reports)
+.superpowers/

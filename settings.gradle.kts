@@ -4,3 +4,5 @@ plugins {
 }
 
 rootProject.name = "argus"
+
+include("engine-core")
