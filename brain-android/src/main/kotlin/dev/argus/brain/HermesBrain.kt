@@ -19,15 +19,12 @@ class HermesBrain(
 ) : Brain {
     override suspend fun compile(nl: String, manifest: CapabilityManifest, state: DeviceState): CompileResult =
         try {
-            // Il contratto del bridge (§2 rev 3) porta {message, manifest, history?}. Lo stato corrente del
-            // dispositivo è già codificato nelle capability del manifest (chiavi/tool disponibili); `state`
-            // resta a disposizione per estensioni future del protocollo.
-            transport.compile(message = nl, manifest = manifest.render())
+            transport.compile(message = nl, manifest = manifest, state = state)
         } catch (e: BridgeException) {
             CompileResult(
                 reply = "Non riesco a contattare l'assistente adesso. Riprova tra poco.",
                 draft = null,
-                metaError = "bridge_${e.kind.name.lowercase()}: ${e.message}",
+                metaError = "bridge_${e.kind.name.lowercase()}",
             )
         }
 }

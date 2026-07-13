@@ -281,7 +281,7 @@ interface OnboardingCallbacks { fun onStepCta(kind: StepKind); fun onSkip(kind: 
 ```
 
 - **WELCOME_PRIVACY** (obbligatorio): informativa E11 in linguaggio piano — "il testo delle notifiche e ciò che chiedi in chat viaggia verso Hermes (tuo server) e da lì verso provider cloud (OpenAI/Nous/…)" — con consenso esplicito.
-- **BRAIN_CONFIG** (obbligatorio): URL bridge Hermes precompilato (`http://100.80.142.65:8090`), bottone test.
+- **BRAIN_CONFIG** (obbligatorio): URL bridge Hermes precompilato (`https://hermes.tail04462d.ts.net`), provisioning del bearer in storage protetto e bottone test. Il token non va mai mostrato dopo il salvataggio.
 - **SHIZUKU**: lo step ha 4 sotto-stati che riusano `ShizukuStatus` (§ tipi condivisi) con copy dedicato (§9). Su device rootato mostrare la via "avvio automatico al boot via root".
 - **BATTERY_OEM**: spiegare la conseguenza reale del rifiuto: "senza, le risposte AI in background falliranno spesso e il servizio può essere ucciso" (spec §9/§15-P1).
 - **BACKGROUND_LOCATION**: richiesto solo quando esiste (o si sta per armare) una regola geofence — lo step in onboarding è presentato come opzionale/futuro (`NOT_NEEDED`).

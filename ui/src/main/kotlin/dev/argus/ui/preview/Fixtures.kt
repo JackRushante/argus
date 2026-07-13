@@ -487,7 +487,7 @@ object Fixtures {
 
     val settingsAllGreen = SettingsState(
         transport = TransportUi.CliBridge(
-            url = "http://100.64.0.1:8090",
+            url = "https://hermes.tail04462d.ts.net",
             reachable = true,
             lastLatencyLabel = "14 s · normale per Hermes",
         ),
@@ -502,7 +502,7 @@ object Fixtures {
     )
 
     val settingsDegraded = SettingsState(
-        transport = TransportUi.CliBridge(url = "http://100.64.0.1:8090", reachable = false, lastLatencyLabel = null),
+        transport = TransportUi.CliBridge(url = "https://hermes.tail04462d.ts.net", reachable = false, lastLatencyLabel = null),
         shizuku = ShizukuStatus.DEGRADED_AFTER_REBOOT,
         batteryExempt = false,
         notificationAccess = true,

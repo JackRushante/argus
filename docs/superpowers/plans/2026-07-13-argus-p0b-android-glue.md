@@ -11,7 +11,7 @@
 > **⚠️ Prerequisiti hardware/sessione (questo piano NON è interamente sviluppabile a secco):**
 > - **Device OnePlus 15** (`oneplus`, Tailscale 100.74.117.9) raggiungibile via `adb` per instrumented test e verifica Shizuku.
 > - **Shizuku** installato e attivo sul device (wireless-debugging o root).
-> - **Hermes** (`ssh hermes`, 100.80.142.65) up, con il bridge HTTP su :8090.
+> - **Hermes** (`ssh hermes`, 100.80.142.65) up, con `argus-bridge` via Tailscale Serve HTTPS.
 > - Alcuni punti sono **da confermare empiricamente** (API Shizuku esatta, schema output bridge). Sono marcati `🔬 VERIFICA`. Non inventare: sondare il device/hermes e adeguare.
 
 **Goal:** Rendere reali gli schermi M2: implementare le interfacce di `engine-core` su Android (Shizuku executor, Room store/audit, AlarmManager Time trigger, capability probe), il transport Hermes CliBridge per il `compile` one-shot, e il flusso di approvazione — così che **l'Esempio 2 funzioni end-to-end** ("dopo le 23 metti DND") e l'Esempio 1 sia pronto lato compile+arm (geofence registrar → P2).
@@ -41,9 +41,9 @@
 | `core-shizuku/` | `ShizukuGateway` (bind, permesso, `PrivilegedShell.run`), coda single-writer con priorità |
 | `device-tools/` | `DeviceTools` (capture/tap/type/dumpUi, toggle wifi/bt/dnd, state read, app install/launch) su `PrivilegedShell` |
 | `data/` | Room: `AutomationEntity`, `AuditEntity`, DAO, `RoomAutomationStore`, `RoomAuditSink`, converters via `ArgusJson` |
-| `brain-android/` | `CliBridgeTransport` (OkHttp → bridge :8090), `HermesBrain : Brain` (usa `CliBridgeParser`) |
+| `brain-android/` | `CliBridgeTransport` (OkHttp → `argus-bridge` HTTPS v1), `HermesBrain : Brain` |
 | `automation-android/` | `ShizukuActionExecutor : ActionExecutor`, `LazyDeviceStateProvider`, `AlarmManagerTimeTrigger`, `AndroidCapabilityProbe`, `ApprovalFlow`, ViewModel (Chat/List/Detail/Log/Settings/Onboarding), `ArgusForegroundService` (minimo), Hilt modules |
-| **Prereq lato Hermes** | `guida-agent/bridge.py` generalizzato con endpoint `/compile` (schema `AutomationDraft` + `schema_version`) |
+| **Prereq lato Hermes** | servizio dedicato `argus-bridge` con `/compile` strict v1, bearer e idempotenza |
 
 **Dipendenze task:** T0 (Hermes bridge) parallelo a T1. T1→T2 (shizuku→device-tools). T3 (Room) indipendente. T4 (brain) dipende T0. T5 (executor) dipende T2. T6 (time trigger) dipende T3. T7 (probe) dipende T2. T8 (ApprovalFlow) dipende T3+T4. T9 (ViewModel+wiring) dipende tutti. T10 (service) dipende T6. T11 (E2E su device) per ultimo.
 
@@ -52,19 +52,19 @@
 ## Task 0: 🔬 Generalizzare il bridge Hermes con endpoint `/compile`
 
 **Files (su `hermes`, via ssh):**
-- Modify: `~/guida-agent/bridge.py` (o nuovo `~/argus-bridge/bridge.py` clonato da quello)
+- Deploy: `~/argus-bridge/bridge.py` + `argus-bridge.service` (sorgenti in `ops/hermes/`)
 
 **Interfaces:**
-- Produces: `POST /compile` → `{ "reply": str, "meta": { "draft": {…AutomationDraft…} | null }, "schema_version": int }`; `GET /health` invariato.
+- Produces: `POST /compile` → envelope v1 con `request_id`, `reply`, `meta.draft/error_code`; `GET /health` v1 autenticato.
 
-Contesto (spec §2/§16): il bridge esistente espone `/chat` e ritorna `{reply, actions[]}` via sentinel `@@META@@`. Per Argus serve un endpoint che, dato un messaggio NL + il `CapabilityManifest` renderizzato, chieda a Hermes di produrre un `AutomationDraft` nello schema di `engine-core`.
+Contesto verificato (spec §2/§16): il bridge Guida Bali esponeva solo `/chat`; per Argus è stato creato un servizio separato che riceve messaggio, manifest strutturato e stato redatto e produce un `AutomationDraft` nello schema di `engine-core`.
 
-- [ ] **Step 1:** 🔬 `ssh lorenzo@100.80.142.65`, rileggi `~/guida-agent/bridge.py` (287 righe) e la firma di `run_gpt(prompt)`. Verifica come inietta il system prompt e il toolset.
-- [ ] **Step 2:** Aggiungi handler `/compile`: costruisce un system prompt che include (a) lo **schema JSON di `AutomationDraft`** (Trigger/Condition/Action con i `type` discriminator di `engine-core`), (b) il `CapabilityManifest.render()` passato dall'app nel body, (c) l'istruzione di terminare con `@@META@@ {"draft": {...}}`. Riusa `run_gpt`. Ritorna `{reply, meta, schema_version: 1}`.
-- [ ] **Step 3:** Test manuale: `curl -XPOST http://100.80.142.65:8090/compile -d '{"message":"dopo le 23 metti dnd","manifest":"..."}'` → verifica che il draft decodifichi con lo schema di `engine-core` (incollalo in un test JVM temporaneo o valida a mano contro i `@SerialName`).
-- [ ] **Step 4:** Documenta il contratto in `docs/design/hermes-bridge-contract.md` (request/response, schema_version, esempi). Commit sul repo argus (solo la doc; il bridge vive su hermes) + backup del bridge nel vault Obsidian `Servizi/hermes-agent.md`.
+- [x] **Step 1:** bridge Guida Bali riletto e rischi reali verificati (auth non inviata dal vecchio client, bind `0.0.0.0`, nessun `/compile`).
+- [x] **Step 2:** creato servizio separato `argus-bridge`: `/compile` strict v1, manifest strutturato, stato redatto, bearer, idempotenza e limiti. Il bridge Guida Bali resta invariato.
+- [x] **Step 3:** test HTTP automatici + compile live: draft Time/DND decodificabile e seconda request con stesso ID servita dalla cache.
+- [x] **Step 4:** contratto documentato in `docs/design/hermes-bridge-contract.md`; server e unit systemd versionati sotto `ops/hermes/` e deployati sulla VM.
 
-> **Fallback** se il `/compile` non è pronto in sessione: `CliBridgeTransport` può puntare a `/chat` e l'app estrae il draft con `CliBridgeParser` (già gestisce il sentinel). Il `/compile` è preferibile ma non bloccante per T4.
+> Il fallback `/chat` è stato rimosso: dati eseguibili accettati solo dal contratto `/compile` versionato.
 
 ---
 
@@ -139,10 +139,10 @@ Contesto (spec §2/§16): il bridge esistente espone `/chat` e ritorna `{reply, 
 - Consumes: `engine-core` (`Brain`, `CompileResult`, `CliBridgeParser`, `CapabilityManifest`, `DeviceState`).
 - Produces: `class HermesBrain(transport) : Brain` (`compile()` implementato; `act()`/`chat()` → `TODO(P1/P3)`).
 
-- [ ] **Step 1:** Test con MockWebServer: risposta `/compile` `{"reply":"ok","meta":{"draft":{…dnd…}},"schema_version":1}` → `HermesBrain.compile("dopo le 23 dnd", manifest, state)` ritorna `CompileResult` con draft `Trigger.Time` corretto; risposta senza draft → `metaError` valorizzato; timeout → eccezione mappata a `CompileResult(metaError=timeout)` o rethrow gestito dal ViewModel.
-- [ ] **Step 2:** `CliBridgeTransport`: OkHttp POST a `http://<hermesHost>:8090/compile` con body `{message, manifest, history?}`, timeout 60 s (latenza 10-30 s attesa). Legge `reply` + `meta`. Se il server espone solo `/chat`, usa il fallback: POST `/chat` e passa `reply` a `CliBridgeParser.parseCompile` (già estrae il sentinel).
-- [ ] **Step 3:** `HermesBrain.compile`: rende il manifest, chiama il transport, ritorna `CompileResult`. `act()`/`chat()` lanciano `TODO("P1")`/`TODO("P3")` — non usati in P0-B.
-- [ ] **Step 4:** Commit `feat(brain): HermesBrain via CliBridge transport (compile one-shot, MockWebServer tested)`.
+- [x] **Step 1:** contract test MockWebServer per happy path, no-draft, schema/request ID/type strict, timeout, auth, body cap e cancellation.
+- [x] **Step 2:** transport unico HTTPS `/compile`; bearer runtime, request id idempotente, manifest strutturato e `DeviceState` redatto. Il fallback `/chat` è stato rimosso fail-closed.
+- [x] **Step 3:** `HermesBrain.compile` inoltra realmente manifest+state e mappa gli errori a codici stabili senza dettagli remoti.
+- [x] **Step 4:** unit test JVM e instrumented test live su OnePlus/API 36 completati.
 
 ---
 
@@ -269,7 +269,7 @@ Questo è il ponte tra il `compile` del Brain e lo stato UI `AutomationDetailSta
 - [ ] Room: round-trip completo, decode-fail → NEEDS_REVIEW.
 - [ ] `DraftValidator` nel percorso di arm; ERROR blocca l'arm in UI.
 - [ ] Shizuku gateway con coda prioritaria; instrumented test verdi sul device.
-- [ ] Bridge Hermes `/compile` documentato (o fallback `/chat` funzionante).
+- [x] Bridge Hermes `/compile` HTTPS, autenticato, documentato e verificato live.
 
 ## Handoff verso P1 / P2
 

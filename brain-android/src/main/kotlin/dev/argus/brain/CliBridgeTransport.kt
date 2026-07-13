@@ -1,21 +1,18 @@
 package dev.argus.brain
 
-import dev.argus.engine.brain.CliBridgeParser
+import dev.argus.engine.brain.CapabilityManifest
 import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.model.ArgusJson
 import dev.argus.engine.model.AutomationDraft
+import dev.argus.engine.runtime.DeviceState
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonNull
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.addJsonObject
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.decodeFromJsonElement
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -23,144 +20,345 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.io.IOException
 import java.io.InterruptedIOException
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-/** Categoria di errore di trasporto, così il ViewModel può distinguere (retry vs. onboarding vs. bug server). */
-enum class BridgeErrorKind { TIMEOUT, NETWORK, HTTP }
+/** Il token arriva da uno store protetto; non viene mai incorporato nel repository o nell'APK. */
+fun interface BridgeAuthProvider {
+    suspend fun bearerToken(): String?
+}
 
-/**
- * Errore tipizzato del trasporto verso il bridge Hermes. È una [IOException] così che si distingua
- * naturalmente da [kotlinx.coroutines.CancellationException] (che NON va mai inghiottita).
- */
+enum class BridgeErrorKind {
+    CONFIGURATION,
+    TIMEOUT,
+    NETWORK,
+    AUTH,
+    HTTP,
+    PROTOCOL,
+}
+
+/** Errore di confine con soli metadati sicuri: il body remoto non entra mai nel messaggio. */
 class BridgeException(
     val kind: BridgeErrorKind,
     message: String,
+    val statusCode: Int? = null,
     cause: Throwable? = null,
 ) : IOException(message, cause)
 
-/** Turno opzionale di history per /compile. Non usato in P0-B (compile one-shot); presente per il protocollo. */
-data class ChatTurn(val role: String, val content: String)
+@Serializable
+private data class CompileRequestEnvelope(
+    @SerialName("schema_version") val schemaVersion: Int,
+    @SerialName("request_id") val requestId: String,
+    val message: String,
+    val manifest: ManifestEnvelope,
+    val state: StateEnvelope,
+)
+
+@Serializable
+private data class ManifestEnvelope(
+    @SerialName("device_model") val deviceModel: String,
+    @SerialName("android_api") val androidApi: Int,
+    @SerialName("shizuku_available") val shizukuAvailable: Boolean,
+    @SerialName("granted_permissions") val grantedPermissions: List<String>,
+    @SerialName("available_tools") val availableTools: List<String>,
+    @SerialName("unavailable_tools") val unavailableTools: Map<String, String>,
+    @SerialName("whitelisted_contacts") val whitelistedContacts: List<ContactEnvelope>,
+    @SerialName("state_keys") val stateKeys: Map<String, String>,
+)
+
+@Serializable
+private data class ContactEnvelope(
+    @SerialName("display_name") val displayName: String,
+    val id: String,
+)
+
+@Serializable
+private data class StateEnvelope(
+    val values: Map<String, String>,
+    @SerialName("foreground_app") val foregroundApp: String?,
+    /** La posizione esatta non lascia il device: "qui" viene risolto solo all'approvazione. */
+    @SerialName("location_available") val locationAvailable: Boolean,
+)
+
+@Serializable
+private data class CompileResponseEnvelope(
+    @SerialName("schema_version") val schemaVersion: Int,
+    @SerialName("request_id") val requestId: String,
+    val reply: String,
+    val meta: CompileMetaEnvelope,
+)
+
+@Serializable
+private data class CompileMetaEnvelope(
+    val draft: JsonElement?,
+    @SerialName("error_code") val errorCode: String? = null,
+)
+
+@Serializable
+data class BridgeHealth(
+    @SerialName("schema_version") val schemaVersion: Int,
+    val status: String,
+    val model: String,
+)
 
 /**
- * Transport HTTP verso il bridge Hermes (spec §2 rev 3, in ascolto sull'interfaccia Tailscale, porta :8090).
- *
- * Due modalità, selezionabili con [useCompileEndpoint]:
- *  - `true`  → POST `/compile`, body `{message, manifest, history?}` → `{reply, meta:{draft…}, schema_version}`.
- *              Modalità PREFERITA: draft strutturato prodotto lato server.
- *  - `false` → POST `/chat` (ciò che il bridge LIVE espone oggi): legge il `reply` grezzo e lo passa a
- *              [CliBridgeParser.parseCompile], che estrae il draft dal sentinel `@@META@@`.
- *
- * Default = `/chat`: il bridge attuale non ha ancora `/compile` (Task 0). Il flip a `true` avverrà via DI
- * (Task 9) quando l'endpoint atterra, senza toccare i chiamanti.
- *
- * @throws BridgeException su timeout / rete / HTTP non-2xx. HermesBrain la mappa a un [CompileResult] con
- *         `metaError` valorizzato, così l'app non crasha mai per un bridge irraggiungibile.
+ * Contratto unico Argus → Hermes: HTTPS, bearer auth, request id idempotente e risposta v1 strict.
+ * Il vecchio fallback `/chat` è intenzionalmente escluso: non è versionato né adatto a un confine
+ * che produce dati eseguibili.
  */
-class CliBridgeTransport(
+class CliBridgeTransport internal constructor(
     baseUrl: String,
-    private val useCompileEndpoint: Boolean = false,
-    private val client: OkHttpClient = defaultClient(),
-    private val parser: CliBridgeParser = CliBridgeParser(),
+    private val authProvider: BridgeAuthProvider,
+    private val client: OkHttpClient,
+    private val allowCleartextForTests: Boolean,
+    private val requestIdFactory: () -> String,
 ) {
-    private val base = baseUrl.trimEnd('/')
+    constructor(
+        baseUrl: String,
+        authProvider: BridgeAuthProvider,
+        client: OkHttpClient = defaultClient(),
+    ) : this(
+        baseUrl = baseUrl,
+        authProvider = authProvider,
+        client = client,
+        allowCleartextForTests = false,
+        requestIdFactory = { UUID.randomUUID().toString() },
+    )
 
-    // Deriva da ArgusJson (classDiscriminator "type" per Trigger/Action) + tollerante come il parser CliBridge.
-    private val json = Json(ArgusJson) { isLenient = true; ignoreUnknownKeys = true }
+    private val base = baseUrl.trimEnd('/').toHttpUrl()
+    private val compileUrl = base.newBuilder().addPathSegment(COMPILE_PATH_SEGMENT).build()
+    private val healthUrl = base.newBuilder().addPathSegment(HEALTH_PATH_SEGMENT).build()
+
+    private val json = Json(ArgusJson) {
+        isLenient = false
+        ignoreUnknownKeys = false
+        coerceInputValues = false
+    }
+
+    init {
+        require(base.username.isEmpty() && base.password.isEmpty()) { "baseUrl non deve contenere credenziali" }
+        require(base.query == null && base.fragment == null) { "baseUrl non deve contenere query o fragment" }
+        require(base.isHttps || allowCleartextForTests && base.host in TEST_HTTP_HOSTS) {
+            "Il bridge Argus richiede HTTPS"
+        }
+    }
 
     suspend fun compile(
         message: String,
-        manifest: String,
-        history: List<ChatTurn> = emptyList(),
+        manifest: CapabilityManifest,
+        state: DeviceState,
     ): CompileResult {
-        val path = if (useCompileEndpoint) COMPILE_PATH else CHAT_PATH
-        val payload = buildJsonObject {
-            put("message", message)
-            put("manifest", manifest)
-            if (history.isNotEmpty()) putJsonArray("history") {
-                history.forEach { addJsonObject { put("role", it.role); put("content", it.content) } }
-            }
-        }.toString()
+        val token = requireToken()
+        val requestId = requestIdFactory().takeIf { REQUEST_ID.matches(it) }
+            ?: throw BridgeException(BridgeErrorKind.CONFIGURATION, "request_id non valido")
+        val cleanMessage = message.trim().takeIf { it.isNotEmpty() && it.length <= MAX_MESSAGE_CHARS }
+            ?: throw BridgeException(BridgeErrorKind.CONFIGURATION, "messaggio vuoto o troppo lungo")
+        val envelope = CompileRequestEnvelope(
+            schemaVersion = PROTOCOL_SCHEMA_VERSION,
+            requestId = requestId,
+            message = cleanMessage,
+            manifest = manifest.toEnvelope(),
+            state = state.toEnvelope(manifest),
+        )
+        val payload = json.encodeToString(envelope)
+        if (payload.toByteArray(Charsets.UTF_8).size > MAX_REQUEST_BYTES) {
+            throw BridgeException(BridgeErrorKind.CONFIGURATION, "richiesta troppo grande")
+        }
         val request = Request.Builder()
-            .url(base + path)
+            .url(compileUrl)
+            .header("Accept", "application/json")
+            .header("Authorization", "Bearer $token")
+            .header("Idempotency-Key", requestId)
             .post(payload.toRequestBody(JSON_MEDIA))
             .build()
-        val body = execute(request)
-        return if (useCompileEndpoint) parseCompileResponse(body)
-        else parser.parseCompile(extractReply(body))
+        return parseCompileResponse(execute(request), expectedRequestId = requestId)
     }
 
-    /** Esegue la chiamata OkHttp in modo coroutine-friendly: cancellabile, timeout→TIMEOUT, il resto→NETWORK/HTTP. */
+    suspend fun health(): BridgeHealth {
+        val token = requireToken()
+        val request = Request.Builder()
+            .url(healthUrl)
+            .header("Accept", "application/json")
+            .header("Authorization", "Bearer $token")
+            .get()
+            .build()
+        val health = try {
+            json.decodeFromString(BridgeHealth.serializer(), execute(request))
+        } catch (error: SerializationException) {
+            throw BridgeException(BridgeErrorKind.PROTOCOL, "health envelope non valido", cause = error)
+        } catch (error: IllegalArgumentException) {
+            throw BridgeException(BridgeErrorKind.PROTOCOL, "health envelope non valido", cause = error)
+        }
+        if (health.schemaVersion != PROTOCOL_SCHEMA_VERSION || health.status != "ok" ||
+            health.model.isBlank() || health.model.length > 128) {
+            throw BridgeException(BridgeErrorKind.PROTOCOL, "health incompatibile")
+        }
+        return health
+    }
+
+    private suspend fun requireToken(): String {
+        val token = authProvider.bearerToken()?.trim()
+        if (token.isNullOrEmpty() || token.length > MAX_TOKEN_CHARS || token.any { it == '\r' || it == '\n' }) {
+            throw BridgeException(BridgeErrorKind.CONFIGURATION, "token bridge non configurato")
+        }
+        return token
+    }
+
     private suspend fun execute(request: Request): String {
         val call = client.newCall(request)
-        return suspendCancellableCoroutine { cont ->
-            cont.invokeOnCancellation { runCatching { call.cancel() } }
+        return suspendCancellableCoroutine { continuation ->
+            continuation.invokeOnCancellation { call.cancel() }
             call.enqueue(object : Callback {
-                override fun onFailure(call: Call, e: IOException) {
-                    if (cont.isCancelled) return
-                    // SocketTimeoutException estende InterruptedIOException; callTimeout lancia InterruptedIOException.
-                    val kind = if (e is InterruptedIOException) BridgeErrorKind.TIMEOUT else BridgeErrorKind.NETWORK
-                    cont.resumeWithException(
-                        BridgeException(kind, "Bridge ${request.url.encodedPath} non raggiungibile: ${e.message}", e)
+                override fun onFailure(call: Call, error: IOException) {
+                    val kind = if (error is InterruptedIOException) BridgeErrorKind.TIMEOUT else BridgeErrorKind.NETWORK
+                    continuation.resumeWithException(
+                        BridgeException(kind, "chiamata bridge fallita", cause = error)
                     )
                 }
 
                 override fun onResponse(call: Call, response: Response) {
-                    response.use { resp ->
-                        if (!resp.isSuccessful) {
-                            cont.resumeWithException(BridgeException(BridgeErrorKind.HTTP, "Bridge HTTP ${resp.code}"))
-                            return
-                        }
-                        cont.resume(resp.body?.string().orEmpty())
-                    }
+                    val result = runCatching { response.use(::readSuccessfulJson) }
+                    result.fold(
+                        onSuccess = { body ->
+                            continuation.resume(body)
+                        },
+                        onFailure = { error ->
+                            val mapped = when (error) {
+                                is BridgeException -> error
+                                is InterruptedIOException -> BridgeException(
+                                    BridgeErrorKind.TIMEOUT, "lettura bridge in timeout", cause = error
+                                )
+                                is IOException -> BridgeException(
+                                    BridgeErrorKind.NETWORK, "lettura bridge fallita", cause = error
+                                )
+                                else -> BridgeException(
+                                    BridgeErrorKind.PROTOCOL, "risposta bridge non valida", cause = error
+                                )
+                            }
+                            continuation.resumeWithException(mapped)
+                        },
+                    )
                 }
             })
         }
     }
 
-    /**
-     * `/compile`: parse a due stadi, fail-soft. Preserva sempre `reply` anche quando il draft è assente o
-     * malformato, e mai lancia (mirror della filosofia di [CliBridgeParser]).
-     */
-    private fun parseCompileResponse(body: String): CompileResult {
-        val root = try {
-            json.parseToJsonElement(body).jsonObject
-        } catch (e: Exception) {
-            return CompileResult(body.trim(), null, "risposta /compile non JSON: ${e.message}")
+    private fun readSuccessfulJson(response: Response): String {
+        if (!response.isSuccessful) {
+            val kind = if (response.code == 401 || response.code == 403) {
+                BridgeErrorKind.AUTH
+            } else {
+                BridgeErrorKind.HTTP
+            }
+            throw BridgeException(kind, "Bridge HTTP ${response.code}", statusCode = response.code)
         }
-        val reply = root["reply"]?.jsonPrimitive?.contentOrNull ?: ""
-        val draftEl = (root["meta"] as? JsonObject)?.get("draft")
-        if (draftEl == null || draftEl is JsonNull) {
-            return CompileResult(reply, null, "risposta /compile senza campo 'draft'")
+        val body = response.body
+            ?: throw BridgeException(BridgeErrorKind.PROTOCOL, "risposta senza body")
+        val mediaType = body.contentType()
+        if (mediaType == null || mediaType.type != "application" ||
+            mediaType.subtype != "json" && !mediaType.subtype.endsWith("+json")) {
+            throw BridgeException(BridgeErrorKind.PROTOCOL, "content-type non JSON")
         }
-        return try {
-            CompileResult(reply, json.decodeFromJsonElement(AutomationDraft.serializer(), draftEl), null)
-        } catch (e: Exception) {
-            CompileResult(reply, null, e.message ?: "draft non valido")
+        val declaredLength = body.contentLength()
+        if (declaredLength > MAX_RESPONSE_BYTES) {
+            throw BridgeException(BridgeErrorKind.PROTOCOL, "risposta troppo grande")
         }
+        val source = body.source()
+        if (source.request(MAX_RESPONSE_BYTES.toLong() + 1L)) {
+            throw BridgeException(BridgeErrorKind.PROTOCOL, "risposta troppo grande")
+        }
+        return source.readUtf8()
     }
 
-    /** `/chat`: estrae il campo `reply` (o usa il body grezzo se non è un oggetto JSON con `reply`). */
-    private fun extractReply(body: String): String = try {
-        json.parseToJsonElement(body).jsonObject["reply"]?.jsonPrimitive?.contentOrNull ?: body
-    } catch (e: Exception) {
-        body
+    private fun parseCompileResponse(body: String, expectedRequestId: String): CompileResult {
+        val envelope = try {
+            json.decodeFromString(CompileResponseEnvelope.serializer(), body)
+        } catch (error: SerializationException) {
+            throw BridgeException(BridgeErrorKind.PROTOCOL, "envelope /compile non valido", cause = error)
+        } catch (error: IllegalArgumentException) {
+            throw BridgeException(BridgeErrorKind.PROTOCOL, "envelope /compile non valido", cause = error)
+        }
+        if (envelope.schemaVersion != PROTOCOL_SCHEMA_VERSION) {
+            throw BridgeException(BridgeErrorKind.PROTOCOL, "schema_version incompatibile")
+        }
+        if (envelope.requestId != expectedRequestId) {
+            throw BridgeException(BridgeErrorKind.PROTOCOL, "request_id non corrispondente")
+        }
+        if (envelope.reply.length > MAX_REPLY_CHARS) {
+            throw BridgeException(BridgeErrorKind.PROTOCOL, "reply troppo lunga")
+        }
+        val errorCode = envelope.meta.errorCode
+        if (errorCode != null && !ERROR_CODE.matches(errorCode)) {
+            throw BridgeException(BridgeErrorKind.PROTOCOL, "error_code non valido")
+        }
+        val draftElement = envelope.meta.draft
+            ?: return CompileResult(envelope.reply, null, errorCode ?: "draft_missing")
+        if (errorCode != null) {
+            throw BridgeException(BridgeErrorKind.PROTOCOL, "draft e error_code non possono coesistere")
+        }
+        val draft = try {
+            json.decodeFromJsonElement(AutomationDraft.serializer(), draftElement)
+        } catch (_: Exception) {
+            return CompileResult(envelope.reply, null, "draft_invalid")
+        }
+        return CompileResult(envelope.reply, draft, null)
+    }
+
+    private fun CapabilityManifest.toEnvelope() = ManifestEnvelope(
+        deviceModel = deviceModel,
+        androidApi = androidVersion,
+        shizukuAvailable = shizukuAvailable,
+        grantedPermissions = grantedPermissions,
+        availableTools = availableTools,
+        unavailableTools = unavailableTools,
+        whitelistedContacts = whitelistedContacts.map { ContactEnvelope(it.displayName, it.id) },
+        stateKeys = stateKeys,
+    )
+
+    private fun DeviceState.toEnvelope(manifest: CapabilityManifest): StateEnvelope {
+        val safeValues = values.entries
+            .asSequence()
+            .filter { (key, value) -> key in manifest.stateKeys && SAFE_STATE_VALUE.matches(value) }
+            .associate { it.key to it.value }
+        val safeForeground = foregroundApp
+            ?.takeIf { it.length <= MAX_PACKAGE_CHARS && PACKAGE_NAME.matches(it) }
+        return StateEnvelope(
+            values = safeValues,
+            foregroundApp = safeForeground,
+            locationAvailable = location != null,
+        )
     }
 
     companion object {
-        const val COMPILE_PATH = "/compile"
-        const val CHAT_PATH = "/chat"
+        const val PROTOCOL_SCHEMA_VERSION = 1
+        const val MAX_REQUEST_BYTES = 256 * 1024
+        const val MAX_RESPONSE_BYTES = 512 * 1024
+        private const val MAX_MESSAGE_CHARS = 8_192
+        private const val MAX_REPLY_CHARS = 32_768
+        private const val MAX_TOKEN_CHARS = 2_048
+        private const val MAX_PACKAGE_CHARS = 255
+        private const val COMPILE_PATH_SEGMENT = "compile"
+        private const val HEALTH_PATH_SEGMENT = "health"
         private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
+        private val TEST_HTTP_HOSTS = setOf("localhost", "127.0.0.1", "::1")
+        private val REQUEST_ID = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+        private val ERROR_CODE = Regex("[a-z][a-z0-9_]{0,63}")
+        private val SAFE_STATE_VALUE = Regex("[A-Za-z0-9._:+-]{1,64}")
+        private val PACKAGE_NAME = Regex("[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z0-9_]+)+")
 
-        /** Timeout 60 s di default: la latenza Hermes attesa è 10-30 s (spec §2). */
         fun defaultClient(timeoutSeconds: Long = 60): OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(timeoutSeconds, TimeUnit.SECONDS)
             .readTimeout(timeoutSeconds, TimeUnit.SECONDS)
             .writeTimeout(timeoutSeconds, TimeUnit.SECONDS)
             .callTimeout(timeoutSeconds, TimeUnit.SECONDS)
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .retryOnConnectionFailure(true)
             .build()
     }
 }

@@ -23,11 +23,12 @@ Esempi target (devono funzionare a fine **P2** — vedi §15 per cosa funziona q
 ## 2. Contesto (verificato empiricamente su `hermes`)
 
 - **Hermes** (VM `hermes` 100.80.142.65, sul tailnet) ha già `computer_use` con **vision-routing**: se il cervello (`gpt-5.5` via `openai-codex`, OAuth) non è multimodale, lo screenshot viene **pre-analizzato dalla pipeline `auxiliary.vision`** (provider `auto` → OpenRouter/Gemini/Claude) e passato come **testo** al cervello, fuso con l'albero accessibilità/SOM. Web search già attiva via **Brave free**. → Vision e web **non richiedono API dirette**; sono capability ausiliarie disaccoppiate dal canale principale.
-- **Transport HTTP verso Hermes — VERIFICATI (risolve il vecchio rischio B5):**
-  - **`guida-agent/bridge.py`** (porta 8090) è un **reference implementation dello stesso pattern di Argus**: riceve `{message, history, state, ...}`, chiama Hermes e ritorna `{reply, actions[], memory[], ...}` in JSON che **il client esegue lato suo**. Invoca il modello via **subprocess CLI** (`hermes_cli.main -z <prompt> --cli --ignore-rules -t web --yolo`), toolset ristretto a `web`. Output strutturato via **sentinel `@@META@@ {json}`** + regex (non tool-call nativi). **Latenza ~10-30 s/chiamata.**
+- **Transport verso Hermes — VERIFICATI (risolve il vecchio rischio B5):**
+  - **`argus-bridge`** espone `POST /compile` v1 tramite Tailscale Serve HTTPS; riceve manifest strutturato + `DeviceState` redatto, chiama Hermes/gpt-5.5 e ritorna un envelope strict con `AutomationDraft`. Bearer runtime, request ID idempotente, limiti body e parser fail-closed. **Latenza ~10-30 s/chiamata.** Contratto: `docs/design/hermes-bridge-contract.md`.
+  - **`guida-agent/bridge.py`** (porta 8090) resta il bridge separato della Guida Bali e non è un fallback Argus.
   - **`hermes proxy`** (OpenAI-compatible, `/v1/chat/completions`, porta 8645) inoltra a upstream **`nous` o `xai`** con le credenziali OAuth di Hermes. **NON** instrada il codex/ChatGPT gpt-5.5 gratuito.
 - **Conseguenza sul transport** (vedi §7): il **gpt-5.5 codex gratis** è raggiungibile **solo** via CLI/bridge (lento, one-shot, testo+JSON). Il **path veloce con tool-call nativi** esiste solo via proxy (Nous/xAI) o LLM diretto (OpenAI/OpenRouter/Gemini), che costa/consuma quota.
-- **Sicurezza del bridge (rev 3):** il bridge binda **solo sull'interfaccia Tailscale** di hermes; nessuna esposizione fuori tailnet. Il protocollo bridge↔app porta un campo `schema_version` così prompt Hermes e parser app restano in sync quando lo schema draft evolve.
+- **Sicurezza del bridge (rev 4):** `argus-bridge` binda solo su loopback (`127.0.0.1:8092`); Tailscale Serve termina TLS sul tailnet. Ogni endpoint richiede bearer e il protocollo lega `schema_version`, `request_id` e `Idempotency-Key`. Nessun cleartext opt-in Android.
 - Il **telefono è già sul tailnet** come `oneplus` (100.74.117.9) → Hermes raggiungibile in rete privata senza esporre nulla.
 - Il OnePlus 15 è **rootabile/rootato** (rilevante per la persistenza di Shizuku, §9/B1).
 
@@ -127,7 +128,7 @@ interface Brain {
 
 | Transport | Raggiunge | Latenza | Output | Vision / Web | Uso |
 |-----------|-----------|---------|--------|--------------|-----|
-| **`CliBridgeTransport`** | Hermes agent → **gpt-5.5 codex (gratis)** via bridge stile `guida-agent/bridge.py` | ~10-30 s/call | testo + JSON (sentinel/schema) | delegate a Hermes (aux-vision, Brave) | **compile** + **InvokeLlm one-shot** (latency-tolerant) |
+| **`CliBridgeTransport`** | Hermes agent → **gpt-5.5 codex (gratis)** via `argus-bridge` HTTPS | ~10-30 s/call | envelope JSON strict v1 | delegate a Hermes (aux-vision, Brave) | **compile** + **InvokeLlm one-shot** (latency-tolerant) |
 | **`OpenAICompatTransport`** | proxy Hermes → **Nous/xAI**, *oppure* **LLM diretto** (OpenAI/OpenRouter/Gemini via OAuth/API) | bassa | tool-call nativi | app-side (`vision.analyze`, `web.search`) o modello multimodale | **loop interattivo computer_use** (P3), Direct brain |
 
 Storia coerente: **gratis dove puoi aspettare** (compile, risposta WhatsApp = one-shot), **veloce/a-pagamento dove serve reattività** (pilotare lo schermo in tempo reale). Il `CliBridgeTransport` è l'MVP primario; l'`OpenAICompatTransport` unifica proxy-Hermes e LLM-diretto nello stesso adapter (cambia `base_url` + auth).
@@ -190,7 +191,7 @@ Punto chiave da non perdere: **l'MVP non ha streaming** — il transport primari
 | B2 | **FGS non avviabile da background** (Android 12+). | **Non avviamo mai un FGS da background senza esenzione**: il service è già persistente; i callback (geofence/alarm) e il NotificationListener (già bindato) lavorano nel service in esecuzione. Il watchdog (B4) dipende dalla battery exemption — nesso esplicitato in §9. |
 | B3 | **Exact alarm revocabile** (Android 13+). | `USE_EXACT_ALARM` (ok per app di automazione sideloaded) o guida a "Sveglie e promemoria"; fallback inexact+WorkManager per timing non critico. |
 | B4 | **OxygenOS uccide il foreground service**. | Battery-optimization exemption (che abilita anche il restart FGS dal background) + wizard auto-launch/lock-recents + `START_STICKY` + **watchdog AlarmManager**. Best-effort documentato: rischio residuo accettato; senza exemption il watchdog è inerte → banner "protezione ridotta". |
-| B5 | ~~Gateway Hermes senza endpoint programmatico~~ | **RISOLTO:** `guida-agent/bridge.py` è un reference impl HTTP funzionante; `hermes proxy` è OpenAI-compatible. Vedi §2/§7. |
+| B5 | ~~Gateway Hermes senza endpoint programmatico~~ | **RISOLTO:** `argus-bridge` `/compile` v1 è live su Tailscale HTTPS, autenticato e testato da Android; `hermes proxy` resta l'opzione P3 OpenAI-compatible. Vedi §2/§7. |
 | B6 | **Aux-vision senza provider multimodale raggiungibile**. | Configurare almeno **una key multimodale** (Gemini free); il probe avvisa e **disabilita** le regole che dipendono dalla visione schermo. |
 | B7 | **Finestre `FLAG_SECURE`** (banking): `screencap` torna nero. | Rilevare e riportare al Brain ("schermo illeggibile: finestra sicura"); provare `uiautomator dump` come fallback (l'albero a11y resta leggibile); non crashare. |
 | B8 | **Latenza del brain gratuito** (CliBridge ~10-30 s/call): inusabile per un loop computer_use multi-turn (200 s+/task). | **Il brain gratuito serve solo one-shot** (compile, InvokeLlm). Il **loop interattivo (P3)** usa `OpenAICompatTransport` con un modello veloce (proxy Nous/xAI o Direct). Trade-off costo/velocità esplicito. |
@@ -246,7 +247,7 @@ Principio: **prima il valore nuovo e latency-tolerant** (automazioni da NL, che 
 
 - **`conversationId` WhatsApp (E15):** verificare empiricamente su device quale chiave stabile espongono le notifiche (candidati: `shortcutId`, `tag`, `EXTRA_PEOPLE_LIST`, sortKey) e come si rileva `isGroupConversation`. Prerequisito P1; se nessuna chiave è affidabile, fallback dichiarato al display name (con warning permanente in UI).
 - **Transport loop interattivo (P3):** quale modello veloce/multimodale per `OpenAICompatTransport` — proxy Nous/xAI (verificare costo/quota e supporto immagini) vs Direct Gemini/OpenRouter. Budget latenza per-turno target.
-- **CliBridge da generalizzare:** riusare/estendere `guida-agent/bridge.py` per esporre `compile`/`act` (schema `AutomationDraft` + `schema_version`) oltre a `/chat`; prompt di sistema con manifest + registry StateKeys + schema JSON del draft.
+- **Argus bridge:** `/compile` v1 completato e isolato dal bridge Guida Bali. Per `act` P1 estendere il contratto Argus con una nuova versione/endpoint, senza riaprire il fallback `/chat`.
 - **B1:** meccanismo esatto di persistenza Shizuku post-reboot sul OnePlus 15 rootato (Magisk module vs init vs opzione root nell'app Shizuku).
 - **B6:** provider multimodale per aux-vision (Gemini free candidato).
 - Policy `USE_EXACT_ALARM` (sideload-only accettabile).

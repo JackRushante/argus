@@ -75,12 +75,19 @@ App lint/build verdi (resta solo `OldTargetApi`, H4).
 
 ### H3 — brain/bridge
 
-- [ ] Parser `/compile` strict: `schema_version` obbligatoria e compatibile.
-- [ ] `reply` type-safe, body limitato, content type verificato, cancellation testata.
-- [ ] Inviare solo lo `DeviceState` richiesto e redatto; eliminare il commento falso.
-- [ ] Bridge Hermes `/compile` versionato, autenticato, idempotente e testato live.
-- [ ] HTTPS o trasporto autenticato equivalente; niente opt-in cleartext globale.
+- [x] Parser `/compile` strict: `schema_version` obbligatoria e compatibile.
+- [x] `reply` type-safe, body limitato, content type verificato, cancellation testata.
+- [x] Inviare solo lo `DeviceState` richiesto e redatto; eliminare il commento falso.
+- [x] Bridge Hermes `/compile` versionato, autenticato, idempotente e testato live.
+- [x] HTTPS o trasporto autenticato equivalente; niente opt-in cleartext globale.
 - [ ] Test Android 16 Local Network Protection/Tailscale e denial path.
+
+Verifica H3 parziale: 15 test JVM `brain-android`, 8 test HTTP server e lint verdi; servizio
+`argus-bridge` su loopback dietro Tailscale Serve HTTPS; auth negativa `401`; compile live + replay
+idempotente; health e compile instrumented sul OnePlus API 36 (`OK (2 tests)`). Il compat flag
+`RESTRICT_LOCAL_NETWORK` è stato abilitato sull'APK test, ma il reboot ha spento `adbd :5555`:
+test Tailscale-via-VPN, denial su LAN diretta e successivo ripristino flag restano da eseguire appena
+ADB wireless viene riattivato.
 
 ### H4 — Android scheduling e capability
 

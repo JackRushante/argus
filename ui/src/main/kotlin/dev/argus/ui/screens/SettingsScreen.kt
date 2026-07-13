@@ -481,7 +481,7 @@ private object NoopSettingsCallbacks : SettingsCallbacks {
 }
 
 private val previewAllGreen = SettingsState(
-    transport = TransportUi.CliBridge(url = "http://100.64.0.1:8090", reachable = true, lastLatencyLabel = "14 s · normale per Hermes"),
+    transport = TransportUi.CliBridge(url = "https://hermes.tail04462d.ts.net", reachable = true, lastLatencyLabel = "14 s · normale per Hermes"),
     shizuku = ShizukuStatus.AUTHORIZED,
     batteryExempt = true,
     notificationAccess = true,
@@ -493,7 +493,7 @@ private val previewAllGreen = SettingsState(
 )
 
 private val previewDegraded = SettingsState(
-    transport = TransportUi.CliBridge(url = "http://100.64.0.1:8090", reachable = false, lastLatencyLabel = null),
+    transport = TransportUi.CliBridge(url = "https://hermes.tail04462d.ts.net", reachable = false, lastLatencyLabel = null),
     shizuku = ShizukuStatus.DEGRADED_AFTER_REBOOT,
     batteryExempt = false,
     notificationAccess = true,

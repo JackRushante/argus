@@ -24,5 +24,9 @@ Thumbs.db
 # Kotlin
 .kotlin/
 
+# Python tooling (Hermes bridge tests)
+__pycache__/
+*.py[cod]
+
 # Superpowers SDD scratch (ledger + briefs + reports)
 .superpowers/
