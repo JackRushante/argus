@@ -38,15 +38,16 @@ sono sostituiti da questo documento.
 - [x] Snapshot branch/remoto e working tree.
 - [x] ADB e Shizuku verificati sul device.
 - [x] Icona isolata in commit dedicato.
-- [ ] Full baseline test/lint su tutti i moduli.
+- [x] Full baseline test/lint su tutti i moduli (96 test debug, 0 failure;
+  APK costruito; lint app: solo `OldTargetApi`).
 
 ### H1 — security/runtime core (prima di Shizuku)
 
-- [ ] Reply policy unica e fail-closed per reply statiche/generative.
-- [ ] Rimuovere il bypass pubblico `replyTargetSender=false` o renderlo non armabile.
-- [ ] Validazione completa di tempo, location, state, limiti e campi azione.
-- [ ] Fix DST con risultato sempre strettamente `> after` e property/regression test.
-- [ ] Engine cancellation-safe, isolamento per azione e timestamp singolo.
+- [x] Reply policy unica e fail-closed per reply statiche/generative.
+- [x] Rimuovere il bypass pubblico `replyTargetSender=false` o renderlo non armabile.
+- [x] Validazione completa di tempo, location, state, limiti e campi azione.
+- [x] Fix DST con risultato sempre strettamente `> after` e regression test.
+- [x] Engine cancellation-safe, isolamento per azione e timestamp singolo.
 - [ ] Event/execution ID e claim/cooldown atomico nel contratto store.
 - [ ] Revalidazione policy/capability al fire-time.
 

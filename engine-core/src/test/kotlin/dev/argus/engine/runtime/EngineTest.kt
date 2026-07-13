@@ -1,9 +1,11 @@
 package dev.argus.engine.runtime
 import dev.argus.engine.model.*
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import java.time.*
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 class EngineTest {
     private fun clock(iso: String) = Clock.fixed(Instant.parse(iso), ZoneOffset.UTC)
@@ -47,7 +49,7 @@ class EngineTest {
             .onTrigger(TriggerEvent.NotificationPosted("com.whatsapp")) { DeviceState() }
         assertEquals(listOf<Action>(Action.SetWifi(false), Action.SetWifi(true)), ex.executed)  // last-writer-wins
     }
-    @Test fun `exception in one automation does not break the batch`() = runTest {
+    @Test fun `exception in one automation is isolated and does not break the batch`() = runTest {
         val bad = armed("bad", Trigger.Notification("com.whatsapp"), listOf(Action.SetWifi(false)), prio = 0)
         val good = armed("good", Trigger.Notification("com.whatsapp"), listOf(Action.SetBluetooth(true)), prio = 1)
         val store = FakeAutomationStore(listOf(bad, good)); val audit = FakeAuditSink()
@@ -61,8 +63,43 @@ class EngineTest {
         val outcomes = engine(store, throwing, "2026-07-12T10:00:00Z", audit)
             .onTrigger(TriggerEvent.NotificationPosted("com.whatsapp")) { DeviceState() }
         assertEquals(listOf<Action>(Action.SetBluetooth(true)), throwing.executed)
-        assertEquals(1, outcomes.size)
-        assertTrue(audit.events.any { it.kind == AuditKind.ERROR && it.automationId == AutomationId("bad") })
+        assertEquals(2, outcomes.size)
+        assertTrue(outcomes.first { it.automation.id == AutomationId("bad") }.results.single() is ActionResult.Failure)
+        assertTrue(audit.events.any { it.kind == AuditKind.FIRED && it.automationId == AutomationId("bad") })
+    }
+    @Test fun `exception in one action becomes failure and remaining actions still run`() = runTest {
+        val a = armed(
+            "a1",
+            Trigger.Notification("com.whatsapp"),
+            listOf(Action.SetWifi(false), Action.SetBluetooth(true)),
+        )
+        val executed = mutableListOf<Action>()
+        val throwing = object : ActionExecutor {
+            override suspend fun execute(action: Action, ctx: FireContext): ActionResult {
+                executed += action
+                if (action is Action.SetWifi) error("wifi failed")
+                return ActionResult.Success
+            }
+        }
+        val outcome = engine(FakeAutomationStore(listOf(a)), throwing, "2026-07-12T10:00:00Z")
+            .onTrigger(TriggerEvent.NotificationPosted("com.whatsapp")) { DeviceState() }
+            .single()
+        assertEquals(a.actions, executed)
+        assertTrue(outcome.results.first() is ActionResult.Failure)
+        assertEquals(ActionResult.Success, outcome.results.last())
+    }
+    @Test fun `cancellation propagates and is never converted to audit error`() = runTest {
+        val a = armed("a1", Trigger.Notification("com.whatsapp"), listOf(Action.SetWifi(false)))
+        val audit = FakeAuditSink()
+        val cancelling = object : ActionExecutor {
+            override suspend fun execute(action: Action, ctx: FireContext): ActionResult =
+                throw CancellationException("cancelled")
+        }
+        assertFailsWith<CancellationException> {
+            engine(FakeAutomationStore(listOf(a)), cancelling, "2026-07-12T10:00:00Z", audit)
+                .onTrigger(TriggerEvent.NotificationPosted("com.whatsapp")) { DeviceState() }
+        }
+        assertEquals(emptyList(), audit.events)
     }
     @Test fun `cooldown suppresses second fire`() = runTest {
         val a = armed("a1", Trigger.Notification("com.whatsapp"), listOf(Action.SetWifi(false)), cooldown = 5000)

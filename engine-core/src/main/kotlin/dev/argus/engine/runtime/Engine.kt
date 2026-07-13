@@ -3,6 +3,7 @@ import dev.argus.engine.model.Action
 import dev.argus.engine.model.ActionTier
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationStatus
+import kotlinx.coroutines.CancellationException
 
 /** @param now fornitore di epoch-millis (iniettato per testabilità; su Android = System::currentTimeMillis). */
 class Engine(
@@ -31,6 +32,9 @@ class Engine(
             // priorità CRESCENTE: il più prioritario esegue ULTIMO e vince sui target condivisi (last-writer-wins, spec §5/C1)
             .sortedWith(compareBy({ it.priority }, { it.id.value }))
 
+        // Un singolo istante identifica l'intero dispatch: cooldown, store e audit non divergono.
+        val batchNow = now()
+
         var cached: DeviceState? = null
         suspend fun state(): DeviceState = cached ?: stateProvider().also { cached = it }
 
@@ -41,21 +45,31 @@ class Engine(
                 val cooldown = effectiveCooldown(a)
                 if (cooldown > 0) {
                     val last = store.lastFiredAt(a.id)
-                    if (last != null && now() - last < cooldown) {
-                        audit.record(AuditEvent(a.id, AuditKind.SUPPRESSED_COOLDOWN, now())); continue
+                    if (last != null && batchNow - last < cooldown) {
+                        audit.record(AuditEvent(a.id, AuditKind.SUPPRESSED_COOLDOWN, batchNow)); continue
                     }
                 }
                 if (a.conditions != null && !evaluator.eval(a.conditions, state())) {
-                    audit.record(AuditEvent(a.id, AuditKind.CONDITIONS_NOT_MET, now())); continue
+                    audit.record(AuditEvent(a.id, AuditKind.CONDITIONS_NOT_MET, batchNow)); continue
                 }
                 val ctx = FireContext(event, state(), a.id)
-                val results = a.actions.map { executor.execute(it, ctx) }   // Failure non interrompe la catena: esito PARTIAL nel log (spec §6)
-                store.recordFired(a.id, now())
-                audit.record(AuditEvent(a.id, AuditKind.FIRED, now(),
+                val results = a.actions.map { action ->
+                    try {
+                        executor.execute(action, ctx)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        ActionResult.Failure(e.message ?: e::class.simpleName ?: "action error")
+                    }
+                }
+                store.recordFired(a.id, batchNow)
+                audit.record(AuditEvent(a.id, AuditKind.FIRED, batchNow,
                     results.joinToString { it::class.simpleName ?: "?" }))
                 outcomes += FireOutcome(a, a.actions, results)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                audit.record(AuditEvent(a.id, AuditKind.ERROR, now(), e.message ?: "error"))
+                audit.record(AuditEvent(a.id, AuditKind.ERROR, batchNow, e.message ?: "error"))
             }
         }
         return outcomes
