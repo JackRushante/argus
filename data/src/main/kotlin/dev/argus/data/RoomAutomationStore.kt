@@ -21,8 +21,7 @@ import kotlinx.coroutines.flow.map
  * [AutomationStore] su Room. Le query girano sui DAO suspend, quindi Room le esegue fuori dal
  * main thread (nessun blocco UI).
  *
- * Mapping entity<->dominio:
- *  - save: serializza l'intera [Automation] in `json` + copia le colonne piatte per query/ordine.
+ * Mapping entity->dominio:
  *  - read: deserializza `json`, poi sovrascrive gli scalari con le colonne piatte (autoritative:
  *    status via setStatus, ecc.).
  *  - **Decode fallito O schemaVersion incompatibile -> [AutomationStatus.NEEDS_REVIEW]** (spec E8):
@@ -42,10 +41,6 @@ class RoomAutomationStore(private val dao: AutomationDao) : AutomationStore {
     override suspend fun armed(): List<Automation> =
         dao.armed().map { toDomain(it) }
             .filter { it.status == AutomationStatus.ARMED && it.enabled }
-
-    override suspend fun save(a: Automation) {
-        dao.upsertPreservingLastFired(toEntity(a, lastFiredAt = null))
-    }
 
     override suspend fun delete(id: AutomationId) {
         dao.delete(id.value)
@@ -99,18 +94,6 @@ class RoomAutomationStore(private val dao: AutomationDao) : AutomationStore {
         )
 
     // --- mapping -------------------------------------------------------------
-
-    private fun toEntity(a: Automation, lastFiredAt: Long?) = AutomationEntity(
-        id = a.id.value,
-        name = a.name,
-        status = a.status,
-        enabled = a.enabled,
-        priority = a.priority,
-        cooldownMs = a.cooldownMs,
-        schemaVersion = a.schemaVersion,
-        lastFiredAt = lastFiredAt,
-        json = ArgusJson.encodeToString(Automation.serializer(), a),
-    )
 
     private suspend fun toDomain(e: AutomationEntity): Automation {
         val decoded: Automation? =

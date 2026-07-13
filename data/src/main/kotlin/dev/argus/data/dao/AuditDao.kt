@@ -16,4 +16,10 @@ interface AuditDao {
 
     @Query("SELECT * FROM audit ORDER BY atMillis DESC, id DESC LIMIT :limit")
     suspend fun recent(limit: Int): List<AuditEntity>
+
+    @Query(
+        "DELETE FROM audit WHERE atMillis < :olderThanMillis OR id NOT IN (" +
+            "SELECT id FROM audit ORDER BY atMillis DESC, id DESC LIMIT :maxRows)",
+    )
+    suspend fun trim(olderThanMillis: Long, maxRows: Int): Int
 }

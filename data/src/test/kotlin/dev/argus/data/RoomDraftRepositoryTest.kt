@@ -1,11 +1,14 @@
 package dev.argus.data
 
 import androidx.test.core.app.ApplicationProvider
+import dev.argus.data.entities.AutomationEntity
 import dev.argus.engine.model.Action
+import dev.argus.engine.model.ArgusJson
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
+import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.safety.ApprovalResult
@@ -91,6 +94,53 @@ class RoomDraftRepositoryTest {
     }
 
     @Test
+    fun `approved automation enters review and is replaced atomically without losing cooldown`() = runTest {
+        val first = assertIs<DraftWriteResult.Saved>(repository.create(candidate("a1"))).snapshot
+        val original = assertIs<DraftArmResult.Armed>(
+            repository.arm(first.id, first.revision, first.fingerprint),
+        ).automation
+        store.recordFired(original.id, 777)
+
+        val edit = candidate("a1").copy(
+            id = DraftId("edit-a1"),
+            draft = draft().copy(name = "DND sera modificato", actions = listOf(Action.SetWifi(true))),
+            expectedAutomationFingerprint = assertNotNull(original.approvalFingerprint),
+        )
+        val pending = assertIs<DraftWriteResult.Saved>(repository.create(edit)).snapshot
+
+        assertEquals(AutomationStatus.PENDING_APPROVAL, store.get(original.id)?.status)
+        assertTrue(store.armed().isEmpty())
+
+        val replacement = assertIs<DraftArmResult.Armed>(
+            repository.arm(pending.id, pending.revision, pending.fingerprint),
+        ).automation
+        assertEquals("DND sera modificato", replacement.name)
+        assertEquals(listOf(Action.SetWifi(true)), replacement.actions)
+        assertEquals(777, store.lastFiredAt(replacement.id))
+        assertNull(repository.get(pending.id))
+    }
+
+    @Test
+    fun `editing an approved automation requires its exact current fingerprint`() = runTest {
+        val first = assertIs<DraftWriteResult.Saved>(repository.create(candidate("a1"))).snapshot
+        val original = assertIs<DraftArmResult.Armed>(
+            repository.arm(first.id, first.revision, first.fingerprint),
+        ).automation
+
+        val rejected = assertIs<DraftWriteResult.Rejected>(
+            repository.create(
+                candidate("a1").copy(
+                    id = DraftId("edit-a1"),
+                    expectedAutomationFingerprint = ApprovalFingerprint("0".repeat(64)),
+                ),
+            ),
+        )
+
+        assertEquals("automation_stale", rejected.code)
+        assertEquals(listOf(original.id), store.armed().map { it.id })
+    }
+
+    @Test
     fun `concurrent edits with same expected revision allow only one writer`() = runTest {
         val base = assertIs<DraftWriteResult.Saved>(repository.create(candidate("a1"))).snapshot
 
@@ -158,7 +208,18 @@ class RoomDraftRepositoryTest {
             actions = listOf(Action.SetWifi(true)),
             enabled = true,
         )
-        store.save(unsigned)
+        db.automationDao().upsert(
+            AutomationEntity(
+                id = unsigned.id.value,
+                name = unsigned.name,
+                status = unsigned.status,
+                enabled = unsigned.enabled,
+                priority = unsigned.priority,
+                cooldownMs = unsigned.cooldownMs,
+                schemaVersion = unsigned.schemaVersion,
+                json = ArgusJson.encodeToString(Automation.serializer(), unsigned),
+            ),
+        )
 
         assertEquals(AutomationStatus.NEEDS_REVIEW, store.get(unsigned.id)?.status)
         assertTrue(store.armed().isEmpty())

@@ -3,6 +3,7 @@ package dev.argus.data
 import androidx.test.core.app.ApplicationProvider
 import dev.argus.data.entities.AutomationEntity
 import dev.argus.engine.model.Action
+import dev.argus.engine.model.ArgusJson
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
@@ -70,7 +71,7 @@ class RoomStoreTest {
             priority = 5,
             cooldownMs = 60_000,
         ))
-        store.save(a)
+        persistForTest(a)
         assertEquals(a, store.get(a.id))
     }
 
@@ -100,7 +101,7 @@ class RoomStoreTest {
             enabled = true,
             priority = 0,
         ))
-        store.save(a)
+        persistForTest(a)
         assertEquals(a, store.get(a.id))
     }
 
@@ -110,7 +111,7 @@ class RoomStoreTest {
             trigger = Trigger.Connectivity(ConnMedium.POWER, ConnState.CONNECTED),
             actions = listOf(Action.SetBluetooth(on = false), Action.ShowNotification("t", "x")),
         ))
-        store.save(a)
+        persistForTest(a)
         assertEquals(a, store.get(a.id))
     }
 
@@ -122,9 +123,9 @@ class RoomStoreTest {
     @Test
     fun `save is idempotent upsert and reflects edits`() = runTest {
         val a = baseArmed("edit-me")
-        store.save(a)
+        persistForTest(a)
         val edited = signed(a.copy(name = "nuovo nome", priority = 9))
-        store.save(edited)
+        persistForTest(edited)
         assertEquals(edited, store.get(a.id))
     }
 
@@ -132,11 +133,11 @@ class RoomStoreTest {
 
     @Test
     fun `armed returns only ARMED and enabled ordered by priority ascending`() = runTest {
-        store.save(signed(baseArmed("p2").copy(priority = 2)))
-        store.save(signed(baseArmed("p1").copy(priority = 1)))
-        store.save(baseArmed("disabled").copy(enabled = false))
-        store.save(baseArmed("pending").copy(status = AutomationStatus.PENDING_APPROVAL))
-        store.save(baseArmed("disabled-status").copy(status = AutomationStatus.DISABLED))
+        persistForTest(signed(baseArmed("p2").copy(priority = 2)))
+        persistForTest(signed(baseArmed("p1").copy(priority = 1)))
+        persistForTest(baseArmed("disabled").copy(enabled = false))
+        persistForTest(baseArmed("pending").copy(status = AutomationStatus.PENDING_APPROVAL))
+        persistForTest(baseArmed("disabled-status").copy(status = AutomationStatus.DISABLED))
 
         val armed = store.armed()
         assertEquals(listOf("p1", "p2"), armed.map { it.id.value })
@@ -146,7 +147,7 @@ class RoomStoreTest {
     @Test
     fun `disable updates status seen by get and drops it from armed`() = runTest {
         val a = baseArmed("toggle")
-        store.save(a)
+        persistForTest(a)
         assertEquals(1, store.armed().size)
 
         store.disable(a.id)
@@ -157,7 +158,7 @@ class RoomStoreTest {
     @Test
     fun `enable restores only an unchanged approved automation`() = runTest {
         val automation = baseArmed("toggle-safe")
-        store.save(automation)
+        persistForTest(automation)
         store.disable(automation.id)
 
         assertTrue(store.enable(automation.id))
@@ -165,15 +166,17 @@ class RoomStoreTest {
         store.disable(automation.id)
 
         // Un edit eseguibile conserva volontariamente la vecchia prova: deve fallire chiuso.
-        store.save(automation.copy(name = "edit non approvato", status = AutomationStatus.DISABLED, enabled = false))
+        persistForTest(
+            automation.copy(name = "edit non approvato", status = AutomationStatus.DISABLED, enabled = false),
+        )
         assertTrue(!store.enable(automation.id))
         assertEquals(AutomationStatus.NEEDS_REVIEW, store.get(automation.id)?.status)
     }
 
     @Test
     fun `all and observeAll expose every rule in stable priority order`() = runTest {
-        store.save(signed(baseArmed("p2").copy(priority = 2)))
-        store.save(signed(baseArmed("p1").copy(priority = 1, status = AutomationStatus.DISABLED)))
+        persistForTest(signed(baseArmed("p2").copy(priority = 2)))
+        persistForTest(signed(baseArmed("p1").copy(priority = 1, status = AutomationStatus.DISABLED)))
 
         assertEquals(listOf("p1", "p2"), store.all().map { it.id.value })
         assertEquals(listOf("p1", "p2"), store.observeAll().first().map { it.id.value })
@@ -182,7 +185,7 @@ class RoomStoreTest {
     @Test
     fun `delete removes automation and cascades its persistent claims`() = runTest {
         val automation = baseArmed("delete-me")
-        store.save(automation)
+        persistForTest(automation)
         assertEquals(FireClaimResult.Claimed, store.claimFire(claim(automation.id, "event-1", 1_000)))
         assertEquals(1, db.automationDao().claimCount(automation.id.value))
 
@@ -197,7 +200,7 @@ class RoomStoreTest {
     @Test
     fun `lastFiredAt is null before firing then returns recorded timestamp`() = runTest {
         val a = baseArmed("fire")
-        store.save(a)
+        persistForTest(a)
         assertNull(store.lastFiredAt(a.id))
 
         store.recordFired(a.id, 1_700_000_000_000)
@@ -207,9 +210,9 @@ class RoomStoreTest {
     @Test
     fun `save preserves lastFiredAt so re-save does not reset the cooldown`() = runTest {
         val a = baseArmed("fire-keep")
-        store.save(a)
+        persistForTest(a)
         store.recordFired(a.id, 42)
-        store.save(signed(a.copy(name = "rinominata"))) // edit approvato dopo lo scatto
+        persistForTest(signed(a.copy(name = "rinominata"))) // edit approvato dopo lo scatto
         assertEquals(42, store.lastFiredAt(a.id))
     }
 
@@ -218,7 +221,7 @@ class RoomStoreTest {
     @Test
     fun `same event is claimed once and remains duplicate after newer events`() = runTest {
         val automation = baseArmed("claim-duplicate")
-        store.save(automation)
+        persistForTest(automation)
 
         assertEquals(FireClaimResult.Claimed, store.claimFire(claim(automation.id, "event-1", 1_000)))
         assertEquals(FireClaimResult.Claimed, store.claimFire(claim(automation.id, "event-2", 2_000)))
@@ -236,7 +239,7 @@ class RoomStoreTest {
     @Test
     fun `cooldown check and update are atomic across concurrent distinct events`() = runTest {
         val automation = baseArmed("claim-cooldown")
-        store.save(automation)
+        persistForTest(automation)
 
         val results = coroutineScope {
             listOf("event-a", "event-b").map { eventId ->
@@ -262,7 +265,7 @@ class RoomStoreTest {
     @Test
     fun `disabled automation cannot acquire a fire claim`() = runTest {
         val automation = baseArmed("claim-disabled").copy(status = AutomationStatus.DISABLED)
-        store.save(automation)
+        persistForTest(automation)
         assertEquals(
             FireClaimResult.NotEligible,
             store.claimFire(claim(automation.id, "event-1", atMillis = 1_000)),
@@ -349,13 +352,42 @@ class RoomStoreTest {
         val rows = db.auditDao().forAutomation(id.value)
         assertEquals(2, rows.size)
         assertEquals(AuditKind.FIRED, rows[0].kind)      // atMillis 200 (più recente)
-        assertEquals("SetDnd", rows[0].detail)
+        assertEquals("", rows[0].detail) // esiti per-azione nel journal, non nel campo libero
         assertEquals(identifierHash("alarm:aud:1"), rows[0].eventIdHash)
         assertEquals("exec-aud-1", rows[0].executionId)
         assertEquals(AuditKind.SUPPRESSED_COOLDOWN, rows[1].kind)
     }
 
+    @Test
+    fun `audit sink redacts arbitrary details but keeps safe cooldown metadata`() = runTest {
+        val id = AutomationId("redaction")
+        sink.record(AuditEvent(id, AuditKind.ERROR, 100, detail = "john@example.org: token segreto"))
+        sink.record(AuditEvent(id, AuditKind.BLOCKED_POLICY, 200, detail = "jid_personale_42"))
+        sink.record(AuditEvent(id, AuditKind.SUPPRESSED_COOLDOWN, 300, detail = "retry_at=123456"))
+
+        val rows = db.auditDao().forAutomation(id.value)
+        assertEquals("retry_at=123456", rows[0].detail)
+        assertEquals("policy_blocked", rows[1].detail)
+        assertEquals("execution_error", rows[2].detail)
+    }
+
     // --- helpers -------------------------------------------------------------
+
+    /** Seed di fixture confinato ai test; il codice applicativo scrive solo via DraftRepository. */
+    private suspend fun persistForTest(automation: Automation) {
+        db.automationDao().upsertPreservingLastFired(
+            AutomationEntity(
+                id = automation.id.value,
+                name = automation.name,
+                status = automation.status,
+                enabled = automation.enabled,
+                priority = automation.priority,
+                cooldownMs = automation.cooldownMs,
+                schemaVersion = automation.schemaVersion,
+                json = ArgusJson.encodeToString(Automation.serializer(), automation),
+            ),
+        )
+    }
 
     private fun baseArmed(id: String) = signed(
         Automation(

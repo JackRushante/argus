@@ -38,6 +38,7 @@ class EngineTest {
         ex: ActionExecutor,
         clockIso: String,
         audit: AuditSink = NoopAuditSink,
+        journal: ExecutionJournal = NoopExecutionJournal,
         policy: FirePolicy = allowAll,
         now: () -> Long = { 1_000 },
     ) = Engine(
@@ -47,6 +48,7 @@ class EngineTest {
         matcher = TriggerMatcher(),
         firePolicy = policy,
         audit = audit,
+        journal = journal,
         now = now,
     )
 
@@ -162,15 +164,65 @@ class EngineTest {
     fun `cancellation propagates and is never converted to audit error`() = runTest {
         val a = armed("a1", Trigger.Notification("com.whatsapp"), listOf(Action.SetWifi(false)))
         val audit = FakeAuditSink()
+        val journal = FakeExecutionJournal()
         val cancelling = object : ActionExecutor {
             override suspend fun execute(action: Action, ctx: FireContext): ActionResult =
                 throw CancellationException("cancelled")
         }
         assertFailsWith<CancellationException> {
-            engine(FakeAutomationStore(listOf(a)), cancelling, "2026-07-12T10:00:00Z", audit)
+            engine(
+                FakeAutomationStore(listOf(a)),
+                cancelling,
+                "2026-07-12T10:00:00Z",
+                audit,
+                journal,
+            )
                 .onTrigger(envelope("sbn:wa:1", TriggerEvent.NotificationPosted("com.whatsapp"))) { DeviceState() }
         }
         assertEquals(emptyList(), audit.events)
+        assertEquals(ExecutionStatus.CANCELLED, journal.completions.single().status)
+    }
+
+    @Test
+    fun `journal correlates ordered action outcomes and redacts failure detail`() = runTest {
+        val a = armed(
+            "a1",
+            Trigger.Notification("com.whatsapp"),
+            listOf(Action.SetWifi(false), Action.SetBluetooth(true)),
+        )
+        val journal = FakeExecutionJournal()
+        val outcomes = engine(
+            FakeAutomationStore(listOf(a)),
+            FakeActionExecutor(fail = setOf("SetWifi")),
+            "2026-07-12T10:00:00Z",
+            journal = journal,
+        ).onTrigger(envelope("sbn:wa:1", TriggerEvent.NotificationPosted("com.whatsapp"))) { DeviceState() }
+
+        val executionId = outcomes.single().executionId
+        assertEquals(listOf(0, 1), journal.actions.map { it.actionIndex })
+        assertTrue(journal.actions.all { it.executionId == executionId })
+        assertEquals(listOf("set_wifi", "set_bluetooth"), journal.actions.map { it.actionType })
+        assertEquals(ActionJournalOutcome.FAILED, journal.actions.first().outcome)
+        assertEquals("action_failed", journal.actions.first().errorCode)
+        val completion = journal.completions.single()
+        assertEquals(ExecutionStatus.PARTIAL, completion.status)
+        assertEquals(1, completion.failedCount)
+        assertEquals(1, completion.succeededCount)
+    }
+
+    @Test
+    fun `audit sink failure cannot change successful execution`() = runTest {
+        val a = armed("a1", Trigger.Notification("com.whatsapp"), listOf(Action.SetWifi(false)))
+        val outcome = engine(
+            FakeAutomationStore(listOf(a)),
+            FakeActionExecutor(),
+            "2026-07-12T10:00:00Z",
+            audit = object : AuditSink {
+                override suspend fun record(e: AuditEvent) = error("audit offline")
+            },
+        ).onTrigger(envelope("sbn:wa:1", TriggerEvent.NotificationPosted("com.whatsapp"))) { DeviceState() }
+
+        assertEquals(ActionResult.Success, outcome.single().results.single())
     }
 
     @Test
@@ -200,8 +252,9 @@ class EngineTest {
         val ex = FakeActionExecutor()
         val store = FakeAutomationStore(listOf(a))
         val audit = FakeAuditSink()
+        val journal = FakeExecutionJournal()
         var now = 1_000L
-        val engine = engine(store, ex, "2026-07-12T10:00:00Z", audit, now = { now })
+        val engine = engine(store, ex, "2026-07-12T10:00:00Z", audit, journal, now = { now })
 
         engine.onTrigger(envelope("sbn:wa:1", TriggerEvent.NotificationPosted("com.whatsapp"))) { DeviceState() }
         now = 2_000L
@@ -209,6 +262,10 @@ class EngineTest {
 
         assertEquals(1, ex.executed.size)
         assertEquals(1, audit.events.count { it.kind == AuditKind.SUPPRESSED_COOLDOWN })
+        assertEquals(
+            listOf(ExecutionStatus.SUCCEEDED, ExecutionStatus.SUPPRESSED_COOLDOWN),
+            journal.completions.map { it.status },
+        )
     }
 
     @Test

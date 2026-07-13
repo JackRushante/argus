@@ -1,8 +1,8 @@
 {
   "formatVersion": 1,
   "database": {
-    "version": 3,
-    "identityHash": "bb3e3472123ed713e0908d9fdf01ad2f",
+    "version": 4,
+    "identityHash": "6c06b7f429932a1f4c9c24e09e332920",
     "entities": [
       {
         "tableName": "automations",
@@ -167,7 +167,7 @@
       },
       {
         "tableName": "fire_claims",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`automationId` TEXT NOT NULL, `eventIdHash` TEXT NOT NULL, `executionId` TEXT NOT NULL, `claimedAtMillis` INTEGER NOT NULL, PRIMARY KEY(`automationId`, `eventIdHash`), FOREIGN KEY(`automationId`) REFERENCES `automations`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`automationId` TEXT NOT NULL, `eventIdHash` TEXT NOT NULL, `executionId` TEXT NOT NULL, `claimedAtMillis` INTEGER NOT NULL, `status` TEXT NOT NULL DEFAULT 'INTERRUPTED', `completedAtMillis` INTEGER, `succeededCount` INTEGER NOT NULL DEFAULT 0, `failedCount` INTEGER NOT NULL DEFAULT 0, `submittedCount` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`automationId`, `eventIdHash`), FOREIGN KEY(`automationId`) REFERENCES `automations`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
         "fields": [
           {
             "fieldPath": "automationId",
@@ -192,6 +192,40 @@
             "columnName": "claimedAtMillis",
             "affinity": "INTEGER",
             "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'INTERRUPTED'"
+          },
+          {
+            "fieldPath": "completedAtMillis",
+            "columnName": "completedAtMillis",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "succeededCount",
+            "columnName": "succeededCount",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "failedCount",
+            "columnName": "failedCount",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "submittedCount",
+            "columnName": "submittedCount",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
           }
         ],
         "primaryKey": {
@@ -219,6 +253,24 @@
             ],
             "orders": [],
             "createSql": "CREATE INDEX IF NOT EXISTS `index_fire_claims_claimedAtMillis` ON `${TABLE_NAME}` (`claimedAtMillis`)"
+          },
+          {
+            "name": "index_fire_claims_status",
+            "unique": false,
+            "columnNames": [
+              "status"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_fire_claims_status` ON `${TABLE_NAME}` (`status`)"
+          },
+          {
+            "name": "index_fire_claims_completedAtMillis",
+            "unique": false,
+            "columnNames": [
+              "completedAtMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_fire_claims_completedAtMillis` ON `${TABLE_NAME}` (`completedAtMillis`)"
           }
         ],
         "foreignKeys": [
@@ -339,12 +391,94 @@
           }
         ],
         "foreignKeys": []
+      },
+      {
+        "tableName": "action_results",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`executionId` TEXT NOT NULL, `actionIndex` INTEGER NOT NULL, `actionType` TEXT NOT NULL, `outcome` TEXT NOT NULL, `atMillis` INTEGER NOT NULL, `errorCode` TEXT, PRIMARY KEY(`executionId`, `actionIndex`), FOREIGN KEY(`executionId`) REFERENCES `fire_claims`(`executionId`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "executionId",
+            "columnName": "executionId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "actionIndex",
+            "columnName": "actionIndex",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "actionType",
+            "columnName": "actionType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "outcome",
+            "columnName": "outcome",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "atMillis",
+            "columnName": "atMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "errorCode",
+            "columnName": "errorCode",
+            "affinity": "TEXT",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "executionId",
+            "actionIndex"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_action_results_executionId",
+            "unique": false,
+            "columnNames": [
+              "executionId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_action_results_executionId` ON `${TABLE_NAME}` (`executionId`)"
+          },
+          {
+            "name": "index_action_results_atMillis",
+            "unique": false,
+            "columnNames": [
+              "atMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_action_results_atMillis` ON `${TABLE_NAME}` (`atMillis`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "fire_claims",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "executionId"
+            ],
+            "referencedColumns": [
+              "executionId"
+            ]
+          }
+        ]
       }
     ],
     "views": [],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'bb3e3472123ed713e0908d9fdf01ad2f')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '6c06b7f429932a1f4c9c24e09e332920')"
     ]
   }
 }

@@ -63,12 +63,13 @@ validata sul OnePlus API 36 via instrumentation ADB. Gli event ID sono hashati n
 - [x] `AutomationStore`: `all/observe/delete/claim` e state machine con arm fingerprintato.
 - [x] Quarantena persistente del JSON corrotto; `armed()` restituisce solo ARMED.
 - [x] Draft repository con revision/fingerprint e arm transazionale.
-- [ ] Execution journal + action result correlati; retention/redazione.
-- [ ] Regole backup Android per escludere segreti, contatti, audit e chat.
+- [x] Execution journal + action result correlati; retention/redazione.
+- [x] Regole backup Android per escludere segreti, contatti, audit e chat.
 
-Verifica H2 parziale 2026-07-13: 90 test engine + 24 test Room verdi. Migrazioni
-Room v1→v3 e v2→v3 validate sul OnePlus API 36 (`OK (2 tests)`). Una modifica
-post-review o un flip diretto ad ARMED senza fingerprint porta a `NEEDS_REVIEW`.
+Verifica H2 2026-07-13: 92 test engine + 31 test Room verdi. Migrazioni Room
+v1/v2/v3→v4 validate sul OnePlus API 36 (`OK (3 tests)`). Una modifica post-review
+o un flip diretto ad ARMED senza fingerprint porta a `NEEDS_REVIEW`; il runtime store
+non espone più alcun `save()` pubblico. App lint/build verdi (resta solo `OldTargetApi`, H4).
 
 ### H3 — brain/bridge
 

@@ -27,8 +27,30 @@ class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository {
     private val automations = db.automationDao()
 
     override suspend fun create(newDraft: NewDraft): DraftWriteResult = db.withTransaction {
-        if (automations.getById(newDraft.automationId.value) != null)
+        if (newDraft.automationId.value.isBlank())
+            return@withTransaction DraftWriteResult.Rejected("automation_id_invalid")
+        if (newDraft.atMillis < 0)
+            return@withTransaction DraftWriteResult.Rejected("timestamp_invalid")
+
+        val existing = automations.getById(newDraft.automationId.value)
+        if (existing == null && newDraft.expectedAutomationFingerprint != null)
+            return@withTransaction DraftWriteResult.Rejected("automation_missing")
+        if (existing != null && newDraft.expectedAutomationFingerprint == null)
             return@withTransaction DraftWriteResult.Rejected("automation_exists")
+
+        if (existing != null) {
+            val approved = verifiedAutomation(existing)
+            if (approved == null) {
+                automations.markNeedsReview(existing.id)
+                return@withTransaction DraftWriteResult.Rejected("automation_integrity_failure")
+            }
+            if (approved.approvalFingerprint != newDraft.expectedAutomationFingerprint)
+                return@withTransaction DraftWriteResult.Rejected("automation_stale")
+            val editable = existing.status == AutomationStatus.ARMED && existing.enabled ||
+                existing.status == AutomationStatus.DISABLED && !existing.enabled
+            if (!editable)
+                return@withTransaction DraftWriteResult.Rejected("automation_not_editable")
+        }
 
         val snapshot = snapshot(
             id = newDraft.id,
@@ -40,8 +62,24 @@ class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository {
             createdAtMillis = newDraft.atMillis,
             updatedAtMillis = newDraft.atMillis,
         )
-        if (drafts.insert(snapshot.toEntity()) != -1L)
-            return@withTransaction DraftWriteResult.Saved(snapshot)
+        if (drafts.insert(snapshot.toEntity()) != -1L) {
+            if (existing == null) return@withTransaction DraftWriteResult.Saved(snapshot)
+
+            val paused = automations.pauseForReviewIfUnchanged(
+                id = existing.id,
+                expectedStatus = existing.status,
+                expectedEnabled = existing.enabled,
+                expectedJson = existing.json,
+                expectedName = existing.name,
+                expectedPriority = existing.priority,
+                expectedCooldownMs = existing.cooldownMs,
+                expectedSchemaVersion = existing.schemaVersion,
+            )
+            if (paused == 1) return@withTransaction DraftWriteResult.Saved(snapshot)
+
+            drafts.delete(snapshot.id.value, snapshot.revision)
+            return@withTransaction DraftWriteResult.Rejected("automation_stale")
+        }
 
         val current = drafts.getById(newDraft.id.value)
             ?: drafts.getByAutomationId(newDraft.automationId.value)
@@ -55,9 +93,12 @@ class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository {
         priority: Int,
         atMillis: Long,
     ): DraftWriteResult = db.withTransaction {
+        if (atMillis < 0) return@withTransaction DraftWriteResult.Rejected("timestamp_invalid")
         val row = drafts.getById(id.value) ?: return@withTransaction DraftWriteResult.Conflict(null)
         if (row.revision != expectedRevision)
             return@withTransaction DraftWriteResult.Conflict(row.revision)
+        if (row.revision == Long.MAX_VALUE)
+            return@withTransaction DraftWriteResult.Rejected("revision_exhausted")
 
         val current = decode(row, persistQuarantine = true)
         if (!current.hasValidFingerprint())
@@ -71,7 +112,7 @@ class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository {
             createdBy = current.createdBy,
             priority = priority,
             createdAtMillis = current.createdAtMillis,
-            updatedAtMillis = atMillis,
+            updatedAtMillis = maxOf(atMillis, current.updatedAtMillis),
         )
         val changed = drafts.revise(
             id = id.value,
@@ -102,8 +143,10 @@ class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository {
             val row = drafts.getById(id.value) ?: return@withTransaction DraftDeleteResult.Missing
             if (row.revision != expectedRevision)
                 return@withTransaction DraftDeleteResult.Stale(row.revision)
-            if (drafts.delete(id.value, expectedRevision) == 1) DraftDeleteResult.Deleted
-            else DraftDeleteResult.Stale(drafts.getById(id.value)?.revision ?: row.revision)
+            if (drafts.delete(id.value, expectedRevision) == 1) {
+                automations.cancelPendingReview(row.automationId)
+                DraftDeleteResult.Deleted
+            } else DraftDeleteResult.Stale(drafts.getById(id.value)?.revision ?: row.revision)
         }
 
     override suspend fun arm(
@@ -118,12 +161,20 @@ class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository {
         val snapshot = decode(row, persistQuarantine = true)
         if (!snapshot.hasValidFingerprint() || snapshot.fingerprint != expectedFingerprint)
             return@withTransaction DraftArmResult.IntegrityFailure
-        if (automations.getById(snapshot.automationId.value) != null)
-            return@withTransaction DraftArmResult.AutomationConflict
-
         val armed = snapshot.armedAutomation()
-        if (automations.insertAutomation(armed.toEntity()) == -1L)
-            return@withTransaction DraftArmResult.AutomationConflict
+        val existing = automations.getById(snapshot.automationId.value)
+        if (existing == null) {
+            if (automations.insertAutomation(armed.toEntity()) == -1L)
+                return@withTransaction DraftArmResult.AutomationConflict
+        } else {
+            if (existing.status != AutomationStatus.PENDING_APPROVAL || existing.enabled)
+                return@withTransaction DraftArmResult.AutomationConflict
+            if (verifiedAutomation(existing) == null) {
+                automations.markNeedsReview(existing.id)
+                return@withTransaction DraftArmResult.IntegrityFailure
+            }
+            automations.upsert(armed.toEntity(lastFiredAt = existing.lastFiredAt))
+        }
         check(drafts.delete(id.value, expectedRevision) == 1) {
             "La bozza è cambiata dentro la transazione di arm"
         }
@@ -137,6 +188,9 @@ class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository {
         var error = entity.quarantineCode
         if (error == null && entity.schemaVersion != SCHEMA_VERSION) error = "schema_incompatible"
         if (error == null && entity.revision < 1) error = "revision_invalid"
+        if (error == null && entity.automationId.isBlank()) error = "automation_id_invalid"
+        if (error == null && (entity.createdAtMillis < 0 || entity.updatedAtMillis < entity.createdAtMillis))
+            error = "timestamp_invalid"
 
         val fingerprint = runCatching { ApprovalFingerprint(entity.fingerprint) }.getOrElse {
             if (error == null) error = "fingerprint_invalid"
@@ -162,8 +216,8 @@ class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository {
             createdBy = entity.createdBy,
             priority = entity.priority,
             schemaVersion = entity.schemaVersion,
-            createdAtMillis = entity.createdAtMillis,
-            updatedAtMillis = entity.updatedAtMillis,
+            createdAtMillis = entity.createdAtMillis.coerceAtLeast(0),
+            updatedAtMillis = maxOf(entity.updatedAtMillis, entity.createdAtMillis, 0),
             integrityError = error,
         )
         if (error == null && !snapshot.hasValidFingerprint()) {
@@ -227,7 +281,7 @@ class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository {
         draftJson = ArgusJson.encodeToString(AutomationDraft.serializer(), draft),
     )
 
-    private fun Automation.toEntity() = AutomationEntity(
+    private fun Automation.toEntity(lastFiredAt: Long? = null) = AutomationEntity(
         id = id.value,
         name = name,
         status = status,
@@ -235,9 +289,28 @@ class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository {
         priority = priority,
         cooldownMs = cooldownMs,
         schemaVersion = schemaVersion,
-        lastFiredAt = null,
+        lastFiredAt = lastFiredAt,
         json = ArgusJson.encodeToString(Automation.serializer(), this),
     )
+
+    /** Verifica sia il JSON sia le colonne indicizzate, che fanno parte del contenuto approvato. */
+    private fun verifiedAutomation(entity: AutomationEntity): Automation? {
+        if (entity.schemaVersion != SCHEMA_VERSION) return null
+        val decoded = runCatching {
+            ArgusJson.decodeFromString(Automation.serializer(), entity.json)
+        }.getOrNull() ?: return null
+        val domain = decoded.copy(
+            id = dev.argus.engine.model.AutomationId(entity.id),
+            name = entity.name,
+            status = entity.status,
+            enabled = entity.enabled,
+            priority = entity.priority,
+            cooldownMs = entity.cooldownMs,
+            schemaVersion = entity.schemaVersion,
+        )
+        val fingerprint = domain.approvalFingerprint ?: return null
+        return domain.takeIf { fingerprint == ApprovalFingerprints.of(domain) }
+    }
 
     private fun placeholder(name: String) = AutomationDraft(
         name = name.ifBlank { "Bozza non leggibile" },

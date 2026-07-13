@@ -69,6 +69,8 @@ data class NewDraft(
     val createdBy: CreatedBy = CreatedBy.LLM,
     val priority: Int = 0,
     val atMillis: Long,
+    /** Obbligatorio per modificare una regola già approvata; null crea un nuovo id. */
+    val expectedAutomationFingerprint: ApprovalFingerprint? = null,
 )
 
 sealed interface DraftWriteResult {

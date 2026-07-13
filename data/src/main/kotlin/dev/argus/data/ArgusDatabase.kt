@@ -10,14 +10,22 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import dev.argus.data.dao.AuditDao
 import dev.argus.data.dao.AutomationDao
 import dev.argus.data.dao.DraftDao
+import dev.argus.data.dao.ExecutionJournalDao
+import dev.argus.data.entities.ActionResultEntity
 import dev.argus.data.entities.AuditEntity
 import dev.argus.data.entities.AutomationEntity
 import dev.argus.data.entities.FireClaimEntity
 import dev.argus.data.entities.PendingDraftEntity
 
 @Database(
-    entities = [AutomationEntity::class, AuditEntity::class, FireClaimEntity::class, PendingDraftEntity::class],
-    version = 3,
+    entities = [
+        AutomationEntity::class,
+        AuditEntity::class,
+        FireClaimEntity::class,
+        PendingDraftEntity::class,
+        ActionResultEntity::class,
+    ],
+    version = 4,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -25,6 +33,7 @@ abstract class ArgusDatabase : RoomDatabase() {
     abstract fun automationDao(): AutomationDao
     abstract fun auditDao(): AuditDao
     abstract fun draftDao(): DraftDao
+    abstract fun executionJournalDao(): ExecutionJournalDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -91,9 +100,57 @@ abstract class ArgusDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE `fire_claims` ADD COLUMN `status` TEXT NOT NULL DEFAULT 'INTERRUPTED'",
+                )
+                db.execSQL("ALTER TABLE `fire_claims` ADD COLUMN `completedAtMillis` INTEGER")
+                db.execSQL(
+                    "ALTER TABLE `fire_claims` ADD COLUMN `succeededCount` INTEGER NOT NULL DEFAULT 0",
+                )
+                db.execSQL(
+                    "ALTER TABLE `fire_claims` ADD COLUMN `failedCount` INTEGER NOT NULL DEFAULT 0",
+                )
+                db.execSQL(
+                    "ALTER TABLE `fire_claims` ADD COLUMN `submittedCount` INTEGER NOT NULL DEFAULT 0",
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_fire_claims_status` ON `fire_claims` (`status`)",
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_fire_claims_completedAtMillis` " +
+                        "ON `fire_claims` (`completedAtMillis`)",
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `action_results` (
+                        `executionId` TEXT NOT NULL,
+                        `actionIndex` INTEGER NOT NULL,
+                        `actionType` TEXT NOT NULL,
+                        `outcome` TEXT NOT NULL,
+                        `atMillis` INTEGER NOT NULL,
+                        `errorCode` TEXT,
+                        PRIMARY KEY(`executionId`, `actionIndex`),
+                        FOREIGN KEY(`executionId`) REFERENCES `fire_claims`(`executionId`)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_action_results_executionId` " +
+                        "ON `action_results` (`executionId`)",
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_action_results_atMillis` " +
+                        "ON `action_results` (`atMillis`)",
+                )
+            }
+        }
+
         fun build(context: Context, name: String = "argus.db"): ArgusDatabase =
             Room.databaseBuilder(context, ArgusDatabase::class.java, name)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
 
         fun inMemory(context: Context): ArgusDatabase =

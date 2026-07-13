@@ -29,7 +29,6 @@ interface AutomationStore {
     suspend fun all(): List<Automation>
     fun observeAll(): Flow<List<Automation>>
     suspend fun armed(): List<Automation>
-    suspend fun save(a: Automation)
     suspend fun delete(id: AutomationId)
     suspend fun disable(id: AutomationId)
     /** Riattiva solo una regola ancora identica allo snapshot approvato. */

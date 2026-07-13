@@ -5,6 +5,8 @@ import dev.argus.engine.model.ActionTier
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationStatus
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 
 /** @param now fornitore di epoch-millis (Android: System::currentTimeMillis). */
 class Engine(
@@ -14,6 +16,7 @@ class Engine(
     private val matcher: TriggerMatcher,
     private val firePolicy: FirePolicy,
     private val audit: AuditSink = NoopAuditSink,
+    private val journal: ExecutionJournal = NoopExecutionJournal,
     private val executionIds: ExecutionIdFactory = StableExecutionIdFactory,
     private val now: () -> Long,
 ) {
@@ -49,6 +52,8 @@ class Engine(
         val outcomes = mutableListOf<FireOutcome>()
         for (automation in candidates) {
             var executionId: ExecutionId? = null
+            var claimed = false
+            val actionResults = mutableListOf<ActionResult>()
             try {
                 if (!matcher.matches(automation.trigger, event)) continue
 
@@ -57,7 +62,7 @@ class Engine(
                     is FirePolicyDecision.Block -> {
                         if (decision.needsReview)
                             store.markNeedsReview(automation.id)
-                        audit.record(
+                        recordAudit(
                             AuditEvent(
                                 automationId = automation.id,
                                 kind = AuditKind.BLOCKED_POLICY,
@@ -71,7 +76,7 @@ class Engine(
                 }
 
                 if (automation.conditions != null && !evaluator.eval(automation.conditions, state())) {
-                    audit.record(
+                    recordAudit(
                         AuditEvent(
                             automation.id,
                             AuditKind.CONDITIONS_NOT_MET,
@@ -94,9 +99,9 @@ class Engine(
                         ),
                     )
                 ) {
-                    FireClaimResult.Claimed -> Unit
+                    FireClaimResult.Claimed -> claimed = true
                     is FireClaimResult.Duplicate -> {
-                        audit.record(
+                        recordAudit(
                             AuditEvent(
                                 automation.id,
                                 AuditKind.SUPPRESSED_DUPLICATE,
@@ -108,7 +113,14 @@ class Engine(
                         continue
                     }
                     is FireClaimResult.Cooldown -> {
-                        audit.record(
+                        finishJournal(
+                            emptyList<ActionResult>().completion(
+                                executionId,
+                                batchNow,
+                                ExecutionStatus.SUPPRESSED_COOLDOWN,
+                            ),
+                        )
+                        recordAudit(
                             AuditEvent(
                                 automation.id,
                                 AuditKind.SUPPRESSED_COOLDOWN,
@@ -121,7 +133,14 @@ class Engine(
                         continue
                     }
                     FireClaimResult.NotEligible -> {
-                        audit.record(
+                        finishJournal(
+                            emptyList<ActionResult>().completion(
+                                executionId,
+                                batchNow,
+                                ExecutionStatus.SUPPRESSED_NOT_ELIGIBLE,
+                            ),
+                        )
+                        recordAudit(
                             AuditEvent(
                                 automation.id,
                                 AuditKind.SUPPRESSED_NOT_ELIGIBLE,
@@ -135,30 +154,47 @@ class Engine(
                 }
 
                 val context = FireContext(event, state(), automation.id, envelope.id, executionId)
-                val results = automation.actions.map { action ->
-                    try {
+                automation.actions.forEachIndexed { index, action ->
+                    val result = try {
                         executor.execute(action, context)
                     } catch (e: CancellationException) {
                         throw e
-                    } catch (e: Exception) {
-                        ActionResult.Failure(e.message ?: e::class.simpleName ?: "action error")
+                    } catch (_: Exception) {
+                        ActionResult.Failure("executor_exception")
                     }
+                    actionResults += result
+                    recordJournalAction(
+                        ActionJournalEntry(
+                            executionId = executionId,
+                            actionIndex = index,
+                            actionType = action.journalType(),
+                            outcome = result.journalOutcome(),
+                            atMillis = batchNow,
+                            errorCode = if (result is ActionResult.Failure) "action_failed" else null,
+                        ),
+                    )
                 }
-                audit.record(
+                finishJournal(actionResults.completion(executionId, batchNow))
+                claimed = false
+                recordAudit(
                     AuditEvent(
                         automation.id,
                         AuditKind.FIRED,
                         batchNow,
-                        detail = results.joinToString { it::class.simpleName ?: "?" },
                         eventId = envelope.id,
                         executionId = executionId,
                     ),
                 )
-                outcomes += FireOutcome(automation, automation.actions, results, envelope.id, executionId)
+                outcomes += FireOutcome(automation, automation.actions, actionResults.toList(), envelope.id, executionId)
             } catch (e: CancellationException) {
+                if (claimed && executionId != null) withContext(NonCancellable) {
+                    finishJournal(actionResults.completion(executionId, batchNow, ExecutionStatus.CANCELLED))
+                }
                 throw e
             } catch (e: Exception) {
-                audit.record(
+                if (claimed && executionId != null)
+                    finishJournal(actionResults.completion(executionId, batchNow, ExecutionStatus.FAILED))
+                recordAudit(
                     AuditEvent(
                         automation.id,
                         AuditKind.ERROR,
@@ -171,6 +207,36 @@ class Engine(
             }
         }
         return outcomes
+    }
+
+    private suspend fun recordAudit(event: AuditEvent) {
+        try {
+            audit.record(event)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // Il logging non deve cambiare l'esito dell'automazione.
+        }
+    }
+
+    private suspend fun recordJournalAction(entry: ActionJournalEntry) {
+        try {
+            journal.recordAction(entry)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // Il claim RUNNING resta recuperabile dalla maintenance se il journal è indisponibile.
+        }
+    }
+
+    private suspend fun finishJournal(completion: ExecutionCompletion) {
+        try {
+            journal.finish(completion)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // Il claim RUNNING verrà marcato INTERRUPTED dalla maintenance.
+        }
     }
 
     private fun effectiveCooldown(automation: Automation): Long =

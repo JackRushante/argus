@@ -48,12 +48,6 @@ class FakeAutomationStore(seed: List<Automation> = emptyList()) : AutomationStor
         map.values.filter { it.status == AutomationStatus.ARMED && it.enabled }
     }
 
-    override suspend fun save(a: Automation): Unit = mutex.withLock {
-        map[a.id] = a
-        publish()
-        Unit
-    }
-
     override suspend fun delete(id: AutomationId): Unit = mutex.withLock {
         map.remove(id)
         fired.remove(id)
@@ -136,5 +130,18 @@ class FakeAuditSink : AuditSink {
     val events: MutableList<AuditEvent> = Collections.synchronizedList(mutableListOf())
     override suspend fun record(e: AuditEvent) {
         events += e
+    }
+}
+
+class FakeExecutionJournal : ExecutionJournal {
+    val actions: MutableList<ActionJournalEntry> = Collections.synchronizedList(mutableListOf())
+    val completions: MutableList<ExecutionCompletion> = Collections.synchronizedList(mutableListOf())
+
+    override suspend fun recordAction(entry: ActionJournalEntry) {
+        actions += entry
+    }
+
+    override suspend fun finish(completion: ExecutionCompletion) {
+        completions += completion
     }
 }

@@ -4,6 +4,8 @@ import androidx.room.TypeConverter
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.runtime.AuditKind
+import dev.argus.engine.runtime.ActionJournalOutcome
+import dev.argus.engine.runtime.ExecutionStatus
 
 /**
  * Enum <-> TEXT. Gli enum sono persistiti col loro [Enum.name] così che le query con literal
@@ -18,4 +20,11 @@ class Converters {
 
     @TypeConverter fun auditKindToString(k: AuditKind): String = k.name
     @TypeConverter fun stringToAuditKind(s: String): AuditKind = AuditKind.valueOf(s)
+
+    @TypeConverter fun executionStatusToString(value: ExecutionStatus): String = value.name
+    @TypeConverter fun stringToExecutionStatus(value: String): ExecutionStatus = ExecutionStatus.valueOf(value)
+
+    @TypeConverter fun actionOutcomeToString(value: ActionJournalOutcome): String = value.name
+    @TypeConverter fun stringToActionOutcome(value: String): ActionJournalOutcome =
+        ActionJournalOutcome.valueOf(value)
 }

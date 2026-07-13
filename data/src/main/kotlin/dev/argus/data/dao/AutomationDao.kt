@@ -10,6 +10,7 @@ import dev.argus.data.entities.AutomationEntity
 import dev.argus.data.entities.FireClaimEntity
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.runtime.ExecutionId
+import dev.argus.engine.runtime.ExecutionStatus
 import dev.argus.engine.runtime.FireClaimResult
 import kotlinx.coroutines.flow.Flow
 
@@ -72,6 +73,30 @@ interface AutomationDao {
     ): Int
 
     @Query(
+        "UPDATE automations SET status = 'PENDING_APPROVAL', enabled = 0 " +
+            "WHERE id = :id AND status = :expectedStatus AND enabled = :expectedEnabled " +
+            "AND json = :expectedJson AND name = :expectedName AND priority = :expectedPriority " +
+            "AND cooldownMs = :expectedCooldownMs AND schemaVersion = :expectedSchemaVersion",
+    )
+    suspend fun pauseForReviewIfUnchanged(
+        id: String,
+        expectedStatus: AutomationStatus,
+        expectedEnabled: Boolean,
+        expectedJson: String,
+        expectedName: String,
+        expectedPriority: Int,
+        expectedCooldownMs: Long,
+        expectedSchemaVersion: Int,
+    ): Int
+
+    /** Annullare un edit non ri-arma implicitamente la vecchia versione. */
+    @Query(
+        "UPDATE automations SET status = 'DISABLED', enabled = 0 " +
+            "WHERE id = :id AND status = 'PENDING_APPROVAL' AND enabled = 0",
+    )
+    suspend fun cancelPendingReview(id: String): Int
+
+    @Query(
         "UPDATE automations SET status = 'NEEDS_REVIEW', enabled = 0 " +
             "WHERE id = :id AND (status != 'NEEDS_REVIEW' OR enabled != 0)",
     )
@@ -111,6 +136,16 @@ interface AutomationDao {
         cooldownMs: Long,
     ): Int
 
+    @Query(
+        "UPDATE fire_claims SET status = :status, completedAtMillis = :atMillis " +
+            "WHERE executionId = :executionId AND status = 'RUNNING'",
+    )
+    suspend fun finishSuppressedClaim(
+        executionId: String,
+        status: ExecutionStatus,
+        atMillis: Long,
+    ): Int
+
     @Query("SELECT status, enabled, lastFiredAt FROM automations WHERE id = :id")
     suspend fun runtimeState(id: String): AutomationRuntimeState?
 
@@ -137,8 +172,22 @@ interface AutomationDao {
         if (current?.status == AutomationStatus.ARMED && current.enabled && current.lastFiredAt != null) {
             val retryAt = if (current.lastFiredAt > Long.MAX_VALUE - cooldownMs) Long.MAX_VALUE
             else current.lastFiredAt + cooldownMs
+            check(
+                finishSuppressedClaim(
+                    claim.executionId,
+                    ExecutionStatus.SUPPRESSED_COOLDOWN,
+                    atMillis,
+                ) == 1,
+            ) { "Claim cooldown non finalizzato" }
             return FireClaimResult.Cooldown(retryAt)
         }
+        check(
+            finishSuppressedClaim(
+                claim.executionId,
+                ExecutionStatus.SUPPRESSED_NOT_ELIGIBLE,
+                atMillis,
+            ) == 1,
+        ) { "Claim non eleggibile non finalizzato" }
         return FireClaimResult.NotEligible
     }
 }
