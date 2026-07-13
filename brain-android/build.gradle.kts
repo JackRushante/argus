@@ -18,6 +18,7 @@ android {
     kotlinOptions { jvmTarget = "17" }
     // Compose OFF: modulo di trasporto HTTP puro, nessuna UI.
     testOptions {
+        targetSdk = 36
         unitTests.isReturnDefaultValues = true
     }
 }

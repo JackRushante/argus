@@ -140,14 +140,23 @@ permission `ACCESS_LOCAL_NETWORK`.
 La definizione ufficiale LNP esclude però le connessioni instradate su una VPN: perciò il bridge
 HTTPS su Tailscale deve restare raggiungibile anche col compat flag attivo. Il denial path va provato
 separatamente verso un endpoint LAN diretto raggiungibile via Wi-Fi, non contro Hermes/Tailscale.
+Sul device Tailscale può diventare la route predefinita anche per gli indirizzi RFC1918: il probe
+deve quindi creare il socket dalla `SocketFactory` della `Network` Wi-Fi; un `Socket()` ordinario
+passerebbe da `tun0`, sarebbe correttamente escluso da LNP e produrrebbe un falso negativo.
+La VPN Android di Tailscale sul device di test è inoltre `bypassable=false`: finché è attiva il
+kernel nega con `EPERM` il binding alla rete Wi-Fi sottostante, prima ancora che intervenga LNP.
+La verifica è quindi intenzionalmente divisa in fasi: si mantiene ADB sull'indirizzo Wi-Fi, si
+sospende Tailscale per misurare il probe LAN diretto, poi si riattiva Tailscale e si esegue
+separatamente il test health autenticato del bridge.
 Il test compat usa:
 
 ```text
 adb shell am compat enable RESTRICT_LOCAL_NETWORK <package>
 ```
 
-Dopo il reboot, il test health Tailscale deve restare verde; il probe LAN diretto deve fallire senza
-crash. Poi il flag viene disabilitato e il device ripristinato. Fonti:
+Dopo il reboot, con Tailscale sospeso il probe LAN diretto deve fallire senza crash; riattivata la
+VPN, il test health Tailscale deve restare verde. Poi il flag viene disabilitato, il device riavviato
+e la baseline LAN ripristinata. Fonti:
 [Android Local Network Permission](https://developer.android.com/privacy-and-security/local-network-permission) e
 [Local Network Definition](https://developer.android.com/privacy-and-security/local-network-definition).
 
