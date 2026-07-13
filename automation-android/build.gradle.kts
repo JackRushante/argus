@@ -31,6 +31,8 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.androidx.lifecycle.viewmodel.ktx)
     implementation(libs.hilt.android)
+    // CliBridgeTransport espone OkHttpClient nel costruttore pubblico: dipendenza compile diretta.
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     ksp(libs.hilt.compiler)
 
     testImplementation(kotlin("test-junit5"))
