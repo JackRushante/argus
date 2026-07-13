@@ -47,8 +47,6 @@ class ShizukuActionExecutorTest {
             Action.LaunchApp("com.example.app"),
             Action.OpenUrl("https://example.com"),
             Action.ShowNotification("Argus", "Completata"),
-            Action.Tap(10, 20),
-            Action.InputText("ciao"),
         )
 
         actions.forEach { action ->
@@ -63,8 +61,6 @@ class ShizukuActionExecutorTest {
                 "ringer:VIBRATE",
                 "launch:com.example.app",
                 "url:https://example.com",
-                "tap:10,20",
-                "text:ciao",
             ),
             tools.calls,
         )
@@ -100,17 +96,23 @@ class ShizukuActionExecutorTest {
     }
 
     @Test
-    fun `run shell and unavailable reply remain fail closed`() = runTest {
+    fun `actions outside P0 and shell remain fail closed`() = runTest {
         val tools = RecordingDeviceController()
         val executor = executor(tools)
 
+        listOf(
+            Action.Tap(10, 20),
+            Action.InputText("ciao"),
+            Action.WhatsAppReply("ciao"),
+        ).forEach { action ->
+            assertEquals(
+                ActionResult.Failure("unsupported_phase"),
+                executor.execute(action, context),
+            )
+        }
         assertEquals(
             ActionResult.Failure("live_confirmation_required"),
             executor.execute(Action.RunShell("id"), context),
-        )
-        assertEquals(
-            ActionResult.Failure("unsupported_phase"),
-            executor.execute(Action.WhatsAppReply("ciao"), context),
         )
         assertEquals(emptyList(), tools.calls)
     }
@@ -133,6 +135,12 @@ class ShizukuActionExecutorTest {
         assertEquals(
             ActionResult.Failure("action_failed"),
             unexpected.execute(Action.SetWifi(true), context),
+        )
+
+        val invalidArgument = executor(ThrowingDeviceController(IllegalArgumentException("bad")))
+        assertEquals(
+            ActionResult.Failure("action_invalid"),
+            invalidArgument.execute(Action.SetWifi(true), context),
         )
 
         val cancelled = executor(ThrowingDeviceController(CancellationException("stop")))

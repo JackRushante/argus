@@ -42,11 +42,12 @@ class ShizukuActionExecutor(
             is Action.ShowNotification -> success {
                 notifier.show(action.title, action.text, ctx)
             }
-            is Action.Tap -> success { tools.tap(action.x, action.y) }
-            is Action.InputText -> success { tools.inputText(action.text) }
-
-            // RemoteInput e verifica notificationKey arrivano in P1: mai simulare una reply.
-            is Action.WhatsAppReply -> ActionResult.Failure("unsupported_phase")
+            // Le azioni UI e RemoteInput non appartengono al percorso P0-B: non eseguirle
+            // soltanto perché il gateway privilegiato sa materialmente inviare input.
+            is Action.Tap,
+            is Action.InputText,
+            is Action.WhatsAppReply,
+            -> ActionResult.Failure("unsupported_phase")
 
             // Difesa in profondità oltre al FirePolicy: nessuna shell senza conferma live.
             is Action.RunShell -> ActionResult.Failure("live_confirmation_required")

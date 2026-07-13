@@ -21,7 +21,7 @@ android {
 dependencies {
     implementation(project(":engine-core"))
     implementation(project(":data"))
-    implementation(project(":device-tools"))
+    api(project(":device-tools"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.room.ktx)
     implementation(libs.kotlinx.coroutines.core)
