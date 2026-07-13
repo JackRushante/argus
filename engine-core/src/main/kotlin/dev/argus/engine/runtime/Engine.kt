@@ -56,7 +56,7 @@ class Engine(
                     FirePolicyDecision.Allow -> Unit
                     is FirePolicyDecision.Block -> {
                         if (decision.needsReview)
-                            store.setStatus(automation.id, AutomationStatus.NEEDS_REVIEW)
+                            store.markNeedsReview(automation.id)
                         audit.record(
                             AuditEvent(
                                 automationId = automation.id,

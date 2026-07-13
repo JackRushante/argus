@@ -13,6 +13,8 @@ import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.runtime.FireClaimRequest
 import dev.argus.engine.runtime.FireClaimResult
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 
 /**
  * [AutomationStore] su Room. Le query girano sui DAO suspend, quindi Room le esegue fuori dal
@@ -28,17 +30,33 @@ import dev.argus.engine.runtime.FireClaimResult
 class RoomAutomationStore(private val dao: AutomationDao) : AutomationStore {
 
     override suspend fun get(id: AutomationId): Automation? =
-        dao.getById(id.value)?.let(::toDomain)
+        dao.getById(id.value)?.let { toDomain(it) }
+
+    override suspend fun all(): List<Automation> =
+        dao.getAll().map { toDomain(it) }
+
+    override fun observeAll(): Flow<List<Automation>> =
+        dao.observeAll().map { rows -> rows.map { toDomain(it) } }
 
     override suspend fun armed(): List<Automation> =
-        dao.armed().map(::toDomain)
+        dao.armed().map { toDomain(it) }
+            .filter { it.status == AutomationStatus.ARMED && it.enabled }
 
     override suspend fun save(a: Automation) {
         dao.upsertPreservingLastFired(toEntity(a, lastFiredAt = null))
     }
 
-    override suspend fun setStatus(id: AutomationId, status: AutomationStatus) =
-        dao.updateStatus(id.value, status)
+    override suspend fun delete(id: AutomationId) {
+        dao.delete(id.value)
+    }
+
+    override suspend fun disable(id: AutomationId) {
+        dao.disable(id.value)
+    }
+
+    override suspend fun markNeedsReview(id: AutomationId) {
+        dao.markNeedsReview(id.value)
+    }
 
     override suspend fun recordFired(id: AutomationId, atMillis: Long) =
         dao.recordFired(id.value, atMillis)
@@ -72,7 +90,7 @@ class RoomAutomationStore(private val dao: AutomationDao) : AutomationStore {
         json = ArgusJson.encodeToString(Automation.serializer(), a),
     )
 
-    private fun toDomain(e: AutomationEntity): Automation {
+    private suspend fun toDomain(e: AutomationEntity): Automation {
         val decoded: Automation? =
             if (e.schemaVersion != SCHEMA_VERSION) null
             else runCatching { ArgusJson.decodeFromString(Automation.serializer(), e.json) }.getOrNull()
@@ -86,7 +104,11 @@ class RoomAutomationStore(private val dao: AutomationDao) : AutomationStore {
             priority = e.priority,
             cooldownMs = e.cooldownMs,
             schemaVersion = e.schemaVersion,
-        ) ?: needsReview(e)
+        ) ?: run {
+            // Quarantena persistente: non basta restituire un placeholder in memoria.
+            dao.markNeedsReview(e.id)
+            needsReview(e)
+        }
     }
 
     /** Placeholder inerte in NEEDS_REVIEW: conserva id/nome per la UI, non è mai armabile. */

@@ -2,7 +2,7 @@ package dev.argus.engine.runtime
 
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
-import dev.argus.engine.model.AutomationStatus
+import kotlinx.coroutines.flow.Flow
 
 data class FireClaimRequest(
     val automationId: AutomationId,
@@ -26,9 +26,13 @@ sealed interface FireClaimResult {
 
 interface AutomationStore {
     suspend fun get(id: AutomationId): Automation?
+    suspend fun all(): List<Automation>
+    fun observeAll(): Flow<List<Automation>>
     suspend fun armed(): List<Automation>
     suspend fun save(a: Automation)
-    suspend fun setStatus(id: AutomationId, status: AutomationStatus)
+    suspend fun delete(id: AutomationId)
+    suspend fun disable(id: AutomationId)
+    suspend fun markNeedsReview(id: AutomationId)
 
     /** Claim idempotente e check+update cooldown DEVONO essere una singola operazione atomica. */
     suspend fun claimFire(request: FireClaimRequest): FireClaimResult

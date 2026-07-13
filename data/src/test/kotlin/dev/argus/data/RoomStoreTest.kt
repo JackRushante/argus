@@ -23,6 +23,7 @@ import dev.argus.engine.runtime.TriggerEventId
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Before
@@ -142,14 +143,36 @@ class RoomStoreTest {
     }
 
     @Test
-    fun `setStatus updates status seen by get and drops it from armed`() = runTest {
+    fun `disable updates status seen by get and drops it from armed`() = runTest {
         val a = baseArmed("toggle")
         store.save(a)
         assertEquals(1, store.armed().size)
 
-        store.setStatus(a.id, AutomationStatus.DISABLED)
+        store.disable(a.id)
         assertEquals(AutomationStatus.DISABLED, store.get(a.id)?.status)
         assertTrue(store.armed().isEmpty())
+    }
+
+    @Test
+    fun `all and observeAll expose every rule in stable priority order`() = runTest {
+        store.save(baseArmed("p2").copy(priority = 2))
+        store.save(baseArmed("p1").copy(priority = 1, status = AutomationStatus.DISABLED))
+
+        assertEquals(listOf("p1", "p2"), store.all().map { it.id.value })
+        assertEquals(listOf("p1", "p2"), store.observeAll().first().map { it.id.value })
+    }
+
+    @Test
+    fun `delete removes automation and cascades its persistent claims`() = runTest {
+        val automation = baseArmed("delete-me")
+        store.save(automation)
+        assertEquals(FireClaimResult.Claimed, store.claimFire(claim(automation.id, "event-1", 1_000)))
+        assertEquals(1, db.automationDao().claimCount(automation.id.value))
+
+        store.delete(automation.id)
+
+        assertNull(store.get(automation.id))
+        assertEquals(0, db.automationDao().claimCount(automation.id.value))
     }
 
     // --- recordFired / lastFiredAt ------------------------------------------
@@ -254,10 +277,12 @@ class RoomStoreTest {
         assertTrue(got.actions.isEmpty())
         assertTrue(!got.enabled)
 
-        // armed() non deve né lanciare né perderla silenziosamente: appare come NEEDS_REVIEW.
+        // La quarantena è persistente e armed() non espone mai placeholder non armabili.
         val armed = store.armed()
-        assertEquals(1, armed.size)
-        assertEquals(AutomationStatus.NEEDS_REVIEW, armed.single().status)
+        assertTrue(armed.isEmpty())
+        val persisted = db.automationDao().getById("corrupt")!!
+        assertEquals(AutomationStatus.NEEDS_REVIEW, persisted.status)
+        assertTrue(!persisted.enabled)
     }
 
     @Test
@@ -281,6 +306,9 @@ class RoomStoreTest {
         assertEquals(AutomationStatus.NEEDS_REVIEW, got.status)
         assertEquals(999, got.schemaVersion) // preservato per eventuale migrazione futura
         assertEquals(a.name, got.name)
+        val persisted = db.automationDao().getById(a.id.value)!!
+        assertEquals(AutomationStatus.NEEDS_REVIEW, persisted.status)
+        assertTrue(!persisted.enabled)
     }
 
     // --- audit sink ----------------------------------------------------------

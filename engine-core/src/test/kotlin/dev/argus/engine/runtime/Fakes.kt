@@ -5,6 +5,9 @@ import dev.argus.engine.model.ActionTier
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.Collections
@@ -32,8 +35,13 @@ class FakeAutomationStore(seed: List<Automation> = emptyList()) : AutomationStor
     private val map = seed.associateBy { it.id }.toMutableMap()
     private val fired = mutableMapOf<AutomationId, Long>()
     private val claims = mutableMapOf<Pair<AutomationId, TriggerEventId>, ExecutionId>()
+    private val changes = MutableStateFlow(sorted())
 
     override suspend fun get(id: AutomationId) = mutex.withLock { map[id] }
+
+    override suspend fun all() = mutex.withLock { sorted() }
+
+    override fun observeAll(): Flow<List<Automation>> = changes.asStateFlow()
 
     override suspend fun armed() = mutex.withLock {
         map.values.filter { it.status == AutomationStatus.ARMED && it.enabled }
@@ -41,11 +49,27 @@ class FakeAutomationStore(seed: List<Automation> = emptyList()) : AutomationStor
 
     override suspend fun save(a: Automation): Unit = mutex.withLock {
         map[a.id] = a
+        publish()
         Unit
     }
 
-    override suspend fun setStatus(id: AutomationId, status: AutomationStatus): Unit = mutex.withLock {
-        map[id]?.let { map[id] = it.copy(status = status) }
+    override suspend fun delete(id: AutomationId): Unit = mutex.withLock {
+        map.remove(id)
+        fired.remove(id)
+        claims.keys.removeAll { it.first == id }
+        publish()
+        Unit
+    }
+
+    override suspend fun disable(id: AutomationId): Unit = mutex.withLock {
+        map[id]?.let { map[id] = it.copy(status = AutomationStatus.DISABLED, enabled = false) }
+        publish()
+        Unit
+    }
+
+    override suspend fun markNeedsReview(id: AutomationId): Unit = mutex.withLock {
+        map[id]?.let { map[id] = it.copy(status = AutomationStatus.NEEDS_REVIEW, enabled = false) }
+        publish()
         Unit
     }
 
@@ -80,6 +104,13 @@ class FakeAutomationStore(seed: List<Automation> = emptyList()) : AutomationStor
 
     private fun saturatingAdd(left: Long, right: Long): Long =
         if (left > Long.MAX_VALUE - right) Long.MAX_VALUE else left + right
+
+    private fun sorted(): List<Automation> =
+        map.values.sortedWith(compareBy({ it.priority }, { it.id.value }))
+
+    private fun publish() {
+        changes.value = sorted()
+    }
 }
 
 class FakeAuditSink : AuditSink {

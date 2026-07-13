@@ -11,6 +11,7 @@ import dev.argus.data.entities.FireClaimEntity
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.runtime.ExecutionId
 import dev.argus.engine.runtime.FireClaimResult
+import kotlinx.coroutines.flow.Flow
 
 data class AutomationRuntimeState(
     val status: AutomationStatus,
@@ -26,6 +27,9 @@ interface AutomationDao {
 
     @Query("SELECT * FROM automations ORDER BY priority ASC, id ASC")
     suspend fun getAll(): List<AutomationEntity>
+
+    @Query("SELECT * FROM automations ORDER BY priority ASC, id ASC")
+    fun observeAll(): Flow<List<AutomationEntity>>
 
     /**
      * Solo ARMED + enabled, in priorità CRESCENTE (spec §5: il più prioritario esegue ultimo e vince).
@@ -43,9 +47,20 @@ interface AutomationDao {
         upsert(entity.copy(lastFiredAt = lastFiredAt(entity.id)))
     }
 
-    /** Aggiorna solo lo status (il converter applica l'enum al bind param). */
-    @Query("UPDATE automations SET status = :status WHERE id = :id")
-    suspend fun updateStatus(id: String, status: AutomationStatus)
+    @Query(
+        "UPDATE automations SET status = 'DISABLED', enabled = 0 " +
+            "WHERE id = :id AND status IN ('ARMED', 'PENDING_APPROVAL')",
+    )
+    suspend fun disable(id: String): Int
+
+    @Query(
+        "UPDATE automations SET status = 'NEEDS_REVIEW', enabled = 0 " +
+            "WHERE id = :id AND (status != 'NEEDS_REVIEW' OR enabled != 0)",
+    )
+    suspend fun markNeedsReview(id: String): Int
+
+    @Query("DELETE FROM automations WHERE id = :id")
+    suspend fun delete(id: String): Int
 
     /** Registra l'ultimo scatto (cooldown); non tocca [AutomationEntity.json]. */
     @Query("UPDATE automations SET lastFiredAt = :atMillis WHERE id = :id")
@@ -62,6 +77,9 @@ interface AutomationDao {
             "WHERE automationId = :automationId AND eventIdHash = :eventIdHash",
     )
     suspend fun claimedExecutionId(automationId: String, eventIdHash: String): String?
+
+    @Query("SELECT COUNT(*) FROM fire_claims WHERE automationId = :automationId")
+    suspend fun claimCount(automationId: String): Int
 
     @Query(
         "UPDATE automations SET lastFiredAt = :atMillis " +
