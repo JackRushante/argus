@@ -33,6 +33,7 @@ class SchemaRoundTripTest {
 
     @Test fun `all deterministic and generative action subtypes round-trip`() {
         val actions: List<Action> = listOf(
+            Action.SetWifi(on = false),
             Action.SetBluetooth(on = true),
             Action.SetDnd(DndMode.TOTAL),
             Action.SetDnd(DndMode.PRIORITY),
