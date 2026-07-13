@@ -91,6 +91,7 @@ data class AutomationListState(
 data class AutomationRow(
     val id: String,
     val name: String,
+    val triggerIconKey: String,             // icona trigger (§6.2): "notification" | "time" | "geofence" | ... (iconFor)
     val triggerSummary: String,             // "Notifica WhatsApp · Moglie" / "Ogni giorno 23:00"
     val status: StatusBadge,
     val enabled: Boolean,                   // toggle inline (solo per ARMED/DISABLED)
