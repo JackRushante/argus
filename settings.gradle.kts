@@ -19,3 +19,4 @@ rootProject.name = "argus"
 include("engine-core", "ui", "app", "data")
 include("brain-android")
 include("automation-android")
+include("core-shizuku")
