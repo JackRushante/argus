@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import dagger.hilt.android.AndroidEntryPoint
 import dev.argus.nav.ArgusNavHost
 import dev.argus.ui.theme.ArgusTheme
 
@@ -15,6 +16,7 @@ import dev.argus.ui.theme.ArgusTheme
 // automazioni (quello è P0-B).
 // =============================================================================
 
+@AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -25,4 +27,5 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
 }

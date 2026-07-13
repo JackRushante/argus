@@ -22,7 +22,7 @@ sealed interface BridgeHealthResult {
  * Facade runtime che ricostruisce soltanto quando cambia l'URL. Il bearer viene invece letto
  * dallo store protetto a ogni richiesta, quindi né URL né token richiedono un riavvio processo.
  */
-internal class ConfiguredBridgeBrain(
+class ConfiguredBridgeBrain(
     private val configuration: BridgeConfigurationStore,
     private val elapsedRealtimeMillis: () -> Long = SystemClock::elapsedRealtime,
 ) : Brain {

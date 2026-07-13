@@ -12,13 +12,13 @@ data class AppPreferences(
     val onboardingCompleted: Boolean,
 )
 
-internal interface AppPreferencesStore {
+interface AppPreferencesStore {
     fun observe(): StateFlow<AppPreferences>
     suspend fun setPrivacyAccepted(accepted: Boolean): Boolean
     suspend fun setOnboardingCompleted(completed: Boolean): Boolean
 }
 
-internal class AndroidAppPreferencesStore(context: Context) : AppPreferencesStore {
+class AndroidAppPreferencesStore(context: Context) : AppPreferencesStore {
     private val preferences = context.applicationContext.getSharedPreferences(
         PREFERENCES_NAME,
         Context.MODE_PRIVATE,

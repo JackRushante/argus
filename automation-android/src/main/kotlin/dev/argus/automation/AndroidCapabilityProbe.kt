@@ -60,8 +60,12 @@ internal class SystemAndroidCapabilityStateSource(
         shizukuStatus = runCatching { shizuku.status() }
             .getOrDefault(ShizukuGatewayStatus.UNSUPPORTED),
         shizukuPermissionGranted = granted(SHIZUKU_PERMISSION),
-        notificationsGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-            granted(Manifest.permission.POST_NOTIFICATIONS),
+        notificationsGranted = (
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                granted(Manifest.permission.POST_NOTIFICATIONS)
+            ) && runCatching {
+            NotificationManagerCompat.from(appContext).areNotificationsEnabled()
+        }.getOrDefault(false),
         notificationListenerGranted = runCatching {
             appContext.packageName in
                 NotificationManagerCompat.getEnabledListenerPackages(appContext)
