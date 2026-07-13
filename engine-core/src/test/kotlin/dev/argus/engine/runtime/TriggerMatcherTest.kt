@@ -33,8 +33,8 @@ class TriggerMatcherTest {
         assertFalse(m.matches(spec, TriggerEvent.ConnectivityChanged(ConnMedium.BT, ConnState.DISCONNECTED, "Casa")))
     }
     @Test fun `phone numbers match across formats`() {
-        val spec = Trigger.PhoneState(PhoneEvent.INCOMING_CALL, number = "+39 393 207 7480")
-        assertTrue(m.matches(spec, TriggerEvent.PhoneStateChanged(PhoneEvent.INCOMING_CALL, "3932077480")))
+        val spec = Trigger.PhoneState(PhoneEvent.INCOMING_CALL, number = "+39 320 000 0000")
+        assertTrue(m.matches(spec, TriggerEvent.PhoneStateChanged(PhoneEvent.INCOMING_CALL, "3200000000")))
         assertFalse(m.matches(spec, TriggerEvent.PhoneStateChanged(PhoneEvent.INCOMING_CALL, "3331112223")))
     }
 }

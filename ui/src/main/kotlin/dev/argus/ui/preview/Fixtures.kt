@@ -487,7 +487,7 @@ object Fixtures {
 
     val settingsAllGreen = SettingsState(
         transport = TransportUi.CliBridge(
-            url = "http://100.80.142.65:8090",
+            url = "http://100.64.0.1:8090",
             reachable = true,
             lastLatencyLabel = "14 s · normale per Hermes",
         ),
@@ -495,14 +495,14 @@ object Fixtures {
         batteryExempt = true,
         notificationAccess = true,
         backgroundLocation = BgLocationState.GRANTED,
-        whitelist = listOf(ContactRow(displayName = "Moglie", conversationId = "wa::393932077480::c1a9")),
+        whitelist = listOf(ContactRow(displayName = "Moglie", conversationId = "wa::393200000000::c1a9")),
         budget = BudgetUi(maxCallsPerHour = 20, usedThisHourLabel = "3 / 20 quest'ora"),
         privacyAccepted = true,
         appVersionLabel = "Argus v0.1-demo · MVP (sideload)",
     )
 
     val settingsDegraded = SettingsState(
-        transport = TransportUi.CliBridge(url = "http://100.80.142.65:8090", reachable = false, lastLatencyLabel = null),
+        transport = TransportUi.CliBridge(url = "http://100.64.0.1:8090", reachable = false, lastLatencyLabel = null),
         shizuku = ShizukuStatus.DEGRADED_AFTER_REBOOT,
         batteryExempt = false,
         notificationAccess = true,
