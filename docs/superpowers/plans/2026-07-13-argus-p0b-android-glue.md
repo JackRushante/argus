@@ -23,6 +23,10 @@
 - **Decode Room fallito o `schemaVersion` incompatibile → `NEEDS_REVIEW`**, mai drop silenzioso (spec E8).
 - **Privacy:** i contenuti (chat, notifiche) escono verso Hermes→upstream; il consenso onboarding (E11) è prerequisito all'uso del Brain.
 - Bridge Hermes: binda **solo sull'interfaccia Tailscale**; il protocollo porta `schema_version` (spec §2 rev 3).
+- **⚠️ (da review finale) `privacyNote` → `UiWarning`.** Quando un ViewModel costruisce `AutomationDetailState.warnings` / `DraftCard.issues`, DEVE riportare `RuleRender.privacyNote` (popolato da `RuleRenderMapper` per le regole generative) come `UiWarning` di privacy — altrimenti la disclosure cloud E11 sparisce silenziosamente dallo schermo di approvazione (il campo del mapper non è reso da alcun componente `ui`).
+- **⚠️ (da review finale) Log send-now id.** `ExecutionLogCallbacks.onSendNow(logId)` riceve l'id di una `LogRow`, **non** di un'automazione; la consegna E13 di P0-B deve risolvere la reply differita dalla entry di log, non navigare (`onOpenAutomation` resta per il suo scopo reale).
+- **⚠️ (da review finale) Engine cancellation.** Quando P0-B tocca `Engine.onTrigger`, **rilanciare `CancellationException`** prima del `catch (e: Exception)`: così com'è inghiottirebbe la cancellazione cooperativa nel foreground service.
+- **⚠️ (da review finale) §10.4 residuo.** Quando il catalogo tool al fire-time cresce in P1, ogni tool del catalogo *always-confirm* deve entrare in `FORBIDDEN_IN_INVOKE_LLM` (oggi solo `shell.run`/`app.install`/`automation.*`).
 
 ## File structure
 
