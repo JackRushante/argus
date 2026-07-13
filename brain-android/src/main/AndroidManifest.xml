@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Il transport verso il bridge Hermes richiede rete; il permesso viaggia col modulo e si fonde nell'app. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+</manifest>
