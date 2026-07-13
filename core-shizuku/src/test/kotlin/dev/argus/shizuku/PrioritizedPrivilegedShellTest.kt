@@ -27,7 +27,7 @@ class PrioritizedPrivilegedShellTest {
             active++
             maxActive = maxOf(maxActive, active)
             val name = request.command.single()
-            started += name
+            started += "${request.executionId}:$name"
             if (name == "running") gate.await()
             active--
             ShellResult(0, stdout = name.toByteArray())
@@ -37,10 +37,16 @@ class PrioritizedPrivilegedShellTest {
             CoroutineScope(SupervisorJob() + dispatcher),
         )
 
-        val running = async(dispatcher) { shell.run(listOf("running")) }
+        val running = async(dispatcher) {
+            shell.run(listOf("running"), executionId = "execution-running")
+        }
         runCurrent()
-        val low = async(dispatcher) { shell.run(listOf("low"), priority = 1) }
-        val high = async(dispatcher) { shell.run(listOf("high"), priority = 10) }
+        val low = async(dispatcher) {
+            shell.run(listOf("low"), priority = 1, executionId = "execution-low")
+        }
+        val high = async(dispatcher) {
+            shell.run(listOf("high"), priority = 10, executionId = "execution-high")
+        }
         runCurrent()
         gate.complete(Unit)
         runCurrent()
@@ -48,7 +54,14 @@ class PrioritizedPrivilegedShellTest {
         assertEquals("running", running.await().stdoutText)
         assertEquals("high", high.await().stdoutText)
         assertEquals("low", low.await().stdoutText)
-        assertEquals(listOf("running", "high", "low"), started)
+        assertEquals(
+            listOf(
+                "execution-running:running",
+                "execution-high:high",
+                "execution-low:low",
+            ),
+            started,
+        )
         assertEquals(1, maxActive)
         shell.close()
     }
@@ -66,6 +79,9 @@ class PrioritizedPrivilegedShellTest {
             shell.run(listOf("id"), timeoutMillis = 0)
         }
         assertFailsWith<IllegalArgumentException> {
+            shell.run(listOf("id"), executionId = " ")
+        }
+        assertFailsWith<IllegalArgumentException> {
             shell.runToFile(
                 listOf("screencap"),
                 File("unused"),
@@ -73,6 +89,24 @@ class PrioritizedPrivilegedShellTest {
             )
         }
         assertEquals(0, calls)
+        shell.close()
+    }
+
+    @Test
+    fun `execution id reaches privileged transport and correlated result`() = runTest {
+        var captured: ShellRequest? = null
+        val shell = PrioritizedPrivilegedShell(
+            ShellTransport { request ->
+                captured = request
+                ShellResult(0)
+            },
+            this,
+        )
+
+        val result = shell.run(listOf("id"), executionId = "execution-42")
+
+        assertEquals("execution-42", captured?.executionId)
+        assertEquals("execution-42", result.executionId)
         shell.close()
     }
 

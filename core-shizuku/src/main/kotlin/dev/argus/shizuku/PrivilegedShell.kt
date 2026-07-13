@@ -18,6 +18,8 @@ data class ShellResult(
     val timedOut: Boolean = false,
     val truncated: Boolean = false,
     val errorCode: String? = null,
+    /** Correlazione locale: non viene inviata al processo remoto né inclusa nei log. */
+    val executionId: String? = null,
 ) {
     val stdoutText: String get() = stdout.toString(StandardCharsets.UTF_8)
     val stderrText: String get() = stderr.toString(StandardCharsets.UTF_8)
@@ -30,6 +32,7 @@ interface PrivilegedShell {
         priority: Int = 0,
         timeoutMillis: Long = DEFAULT_TIMEOUT_MILLIS,
         maxOutputBytes: Int = DEFAULT_TEXT_OUTPUT_BYTES,
+        executionId: String? = null,
     ): ShellResult
 
     /** Scrive stdout su un FD aperto dall'app: evita il limite di transazione Binder sui PNG. */
@@ -39,6 +42,7 @@ interface PrivilegedShell {
         priority: Int = 0,
         timeoutMillis: Long = DEFAULT_TIMEOUT_MILLIS,
         maxOutputBytes: Int = DEFAULT_FILE_OUTPUT_BYTES,
+        executionId: String? = null,
     ): ShellResult
 
     companion object {
@@ -54,6 +58,7 @@ internal data class ShellRequest(
     val timeoutMillis: Long,
     val maxOutputBytes: Int,
     val destination: File?,
+    val executionId: String?,
 ) {
     init {
         require(command.isNotEmpty()) { "Comando vuoto" }
@@ -66,6 +71,10 @@ internal data class ShellRequest(
             PrivilegedShell.DEFAULT_FILE_OUTPUT_BYTES
         }
         require(maxOutputBytes in 1..cap) { "Output cap non valido" }
+        if (executionId != null) {
+            require(executionId.isNotBlank()) { "Execution ID vuoto" }
+            require(executionId.length <= 128) { "Execution ID troppo lungo" }
+        }
     }
 }
 
@@ -102,8 +111,15 @@ internal class PrioritizedPrivilegedShell(
         priority: Int,
         timeoutMillis: Long,
         maxOutputBytes: Int,
+        executionId: String?,
     ): ShellResult = enqueue(
-        ShellRequest(command.toList(), timeoutMillis, maxOutputBytes, destination = null),
+        ShellRequest(
+            command.toList(),
+            timeoutMillis,
+            maxOutputBytes,
+            destination = null,
+            executionId = executionId,
+        ),
         priority,
     )
 
@@ -113,8 +129,9 @@ internal class PrioritizedPrivilegedShell(
         priority: Int,
         timeoutMillis: Long,
         maxOutputBytes: Int,
+        executionId: String?,
     ): ShellResult = enqueue(
-        ShellRequest(command.toList(), timeoutMillis, maxOutputBytes, destination),
+        ShellRequest(command.toList(), timeoutMillis, maxOutputBytes, destination, executionId),
         priority,
     )
 
@@ -141,7 +158,10 @@ internal class PrioritizedPrivilegedShell(
                         generateSequence { queue.poll() }.firstOrNull { it.result.isActive }
                     } ?: break
                     try {
-                        pending.result.complete(transport.execute(pending.request))
+                        val result = transport.execute(pending.request).copy(
+                            executionId = pending.request.executionId,
+                        )
+                        pending.result.complete(result)
                     } catch (error: CancellationException) {
                         pending.result.cancel(error)
                         throw error

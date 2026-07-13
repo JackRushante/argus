@@ -320,7 +320,12 @@ class EngineTest {
 
     @Test
     fun `execution identity is deterministic and reaches action context and outcome`() = runTest {
-        val a = armed("a1", Trigger.Notification("com.whatsapp"), listOf(Action.SetWifi(false)))
+        val a = armed(
+            "a1",
+            Trigger.Notification("com.whatsapp"),
+            listOf(Action.SetWifi(false)),
+            prio = 7,
+        )
         var captured: FireContext? = null
         val executor = ActionExecutor { _, ctx ->
             captured = ctx
@@ -332,6 +337,7 @@ class EngineTest {
 
         assertEquals(TriggerEventId("sbn:wa:stable"), captured?.eventId)
         assertEquals(outcome.executionId, captured?.executionId)
+        assertEquals(7, captured?.priority)
         assertEquals(
             StableExecutionIdFactory.create(a.id, TriggerEventId("sbn:wa:stable")),
             outcome.executionId,

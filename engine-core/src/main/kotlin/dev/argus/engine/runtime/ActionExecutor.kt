@@ -9,6 +9,7 @@ data class FireContext(
     val automationId: AutomationId,
     val eventId: TriggerEventId,
     val executionId: ExecutionId,
+    val priority: Int = 0,
 )
 
 sealed interface ActionResult {

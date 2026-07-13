@@ -33,7 +33,8 @@ class ShizukuPrivilegedShell(
         priority: Int,
         timeoutMillis: Long,
         maxOutputBytes: Int,
-    ): ShellResult = queue.run(command, priority, timeoutMillis, maxOutputBytes)
+        executionId: String?,
+    ): ShellResult = queue.run(command, priority, timeoutMillis, maxOutputBytes, executionId)
 
     override suspend fun runToFile(
         command: List<String>,
@@ -41,12 +42,14 @@ class ShizukuPrivilegedShell(
         priority: Int,
         timeoutMillis: Long,
         maxOutputBytes: Int,
+        executionId: String?,
     ): ShellResult = queue.runToFile(
         command,
         destination,
         priority,
         timeoutMillis,
         maxOutputBytes,
+        executionId,
     )
 
     override fun close() {

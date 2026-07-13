@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.argus.engine.model.DndMode
 import dev.argus.engine.model.StateKeys
+import dev.argus.engine.runtime.ExecutionId
 import dev.argus.shizuku.ShizukuGateway
 import dev.argus.shizuku.ShizukuGatewayStatus
 import dev.argus.shizuku.ShizukuPermissionResult
@@ -67,7 +68,7 @@ class DeviceToolsInstrumentedTest {
                 listOf("/system/bin/settings", "get", "global", "zen_mode"),
             ).stdoutText.trim().toInt()
             try {
-                tools.setDnd(DndMode.TOTAL)
+                tools.setDnd(DndMode.TOTAL, ExecutionId("device-tools-instrumentation"))
                 val observed = withTimeout(5_000) {
                     var value: String?
                     do {

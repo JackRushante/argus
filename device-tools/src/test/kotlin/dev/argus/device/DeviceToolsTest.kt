@@ -1,6 +1,7 @@
 package dev.argus.device
 
 import dev.argus.engine.model.DndMode
+import dev.argus.engine.runtime.ExecutionId
 import dev.argus.shizuku.PrivilegedShell
 import dev.argus.shizuku.ShellResult
 import kotlinx.coroutines.test.runTest
@@ -24,17 +25,17 @@ class DeviceToolsTest {
         val shell = RecordingShell()
         val tools = DeviceTools(shell, temporaryDirectory.toFile())
 
-        tools.setWifi(true)
-        tools.setWifi(false)
-        tools.setBluetooth(true)
-        tools.setDnd(DndMode.OFF)
-        tools.setDnd(DndMode.PRIORITY)
-        tools.setDnd(DndMode.TOTAL)
-        tools.setRinger(RingerMode.VIBRATE)
-        tools.launchApp("com.example.app")
-        tools.openUrl("https://example.com/a?q=uno%20due")
-        tools.tap(123, 456)
-        tools.inputText("ciao mondo")
+        tools.setWifi(true, EXECUTION_ID, PRIORITY)
+        tools.setWifi(false, EXECUTION_ID, PRIORITY)
+        tools.setBluetooth(true, EXECUTION_ID, PRIORITY)
+        tools.setDnd(DndMode.OFF, EXECUTION_ID, PRIORITY)
+        tools.setDnd(DndMode.PRIORITY, EXECUTION_ID, PRIORITY)
+        tools.setDnd(DndMode.TOTAL, EXECUTION_ID, PRIORITY)
+        tools.setRinger(RingerMode.VIBRATE, EXECUTION_ID, PRIORITY)
+        tools.launchApp("com.example.app", EXECUTION_ID, PRIORITY)
+        tools.openUrl("https://example.com/a?q=uno%20due", EXECUTION_ID, PRIORITY)
+        tools.tap(123, 456, EXECUTION_ID, PRIORITY)
+        tools.inputText("ciao mondo", EXECUTION_ID, PRIORITY)
 
         assertEquals(
             listOf(
@@ -72,6 +73,8 @@ class DeviceToolsTest {
             ),
             shell.calls.map { it.command },
         )
+        assertEquals(setOf(EXECUTION_ID.value), shell.calls.mapNotNull { it.executionId }.toSet())
+        assertEquals(setOf(PRIORITY), shell.calls.map { it.priority }.toSet())
         assertFalse(shell.calls.any { it.command.firstOrNull() in setOf("sh", "/system/bin/sh") })
     }
 
@@ -80,11 +83,13 @@ class DeviceToolsTest {
         val shell = RecordingShell()
         val tools = DeviceTools(shell, temporaryDirectory.toFile())
 
-        assertFailsWith<IllegalArgumentException> { tools.launchApp("bad package") }
-        assertFailsWith<IllegalArgumentException> { tools.openUrl("javascript:alert(1)") }
-        assertFailsWith<IllegalArgumentException> { tools.tap(-1, 2) }
-        assertFailsWith<IllegalArgumentException> { tools.inputText("riga\nnuova") }
-        assertFailsWith<IllegalArgumentException> { tools.inputText("letterale %s") }
+        assertFailsWith<IllegalArgumentException> { tools.launchApp("bad package", EXECUTION_ID) }
+        assertFailsWith<IllegalArgumentException> {
+            tools.openUrl("javascript:alert(1)", EXECUTION_ID)
+        }
+        assertFailsWith<IllegalArgumentException> { tools.tap(-1, 2, EXECUTION_ID) }
+        assertFailsWith<IllegalArgumentException> { tools.inputText("riga\nnuova", EXECUTION_ID) }
+        assertFailsWith<IllegalArgumentException> { tools.inputText("letterale %s", EXECUTION_ID) }
         assertEquals(emptyList(), shell.calls)
     }
 
@@ -130,7 +135,7 @@ class DeviceToolsTest {
         val shell = RecordingShell(result = ShellResult(1, stderr = "sensitive".toByteArray()))
         val tools = DeviceTools(shell, temporaryDirectory.toFile())
 
-        val error = assertFailsWith<DeviceToolException> { tools.setWifi(true) }
+        val error = assertFailsWith<DeviceToolException> { tools.setWifi(true, EXECUTION_ID) }
 
         assertEquals("set_wifi_failed", error.code)
         assertFalse(error.message.orEmpty().contains("sensitive"))
@@ -161,7 +166,15 @@ class DeviceToolsTest {
     }
 }
 
-private data class ShellCall(val command: List<String>, val destination: File?)
+private val EXECUTION_ID = ExecutionId("execution-device-tools")
+private const val PRIORITY = 9
+
+private data class ShellCall(
+    val command: List<String>,
+    val destination: File?,
+    val executionId: String?,
+    val priority: Int,
+)
 
 private class RecordingShell(
     private val fileHandler: ((List<String>, File) -> ShellResult)? = null,
@@ -174,8 +187,9 @@ private class RecordingShell(
         priority: Int,
         timeoutMillis: Long,
         maxOutputBytes: Int,
+        executionId: String?,
     ): ShellResult {
-        calls += ShellCall(command, null)
+        calls += ShellCall(command, null, executionId, priority)
         return result
     }
 
@@ -185,8 +199,9 @@ private class RecordingShell(
         priority: Int,
         timeoutMillis: Long,
         maxOutputBytes: Int,
+        executionId: String?,
     ): ShellResult {
-        calls += ShellCall(command, destination)
+        calls += ShellCall(command, destination, executionId, priority)
         return fileHandler?.invoke(command, destination) ?: result
     }
 }
@@ -199,6 +214,7 @@ private class CancellingDumpShell : PrivilegedShell {
         priority: Int,
         timeoutMillis: Long,
         maxOutputBytes: Int,
+        executionId: String?,
     ): ShellResult {
         calls += command
         return ShellResult(0)
@@ -210,6 +226,7 @@ private class CancellingDumpShell : PrivilegedShell {
         priority: Int,
         timeoutMillis: Long,
         maxOutputBytes: Int,
+        executionId: String?,
     ): ShellResult {
         calls += command
         throw CancellationException("cancelled")

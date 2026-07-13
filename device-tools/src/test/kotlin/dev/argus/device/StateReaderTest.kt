@@ -129,6 +129,7 @@ class StateReaderTest {
                 priority: Int,
                 timeoutMillis: Long,
                 maxOutputBytes: Int,
+                executionId: String?,
             ): ShellResult = throw CancellationException("cancelled")
 
             override suspend fun runToFile(
@@ -137,6 +138,7 @@ class StateReaderTest {
                 priority: Int,
                 timeoutMillis: Long,
                 maxOutputBytes: Int,
+                executionId: String?,
             ): ShellResult = error("non usato")
         }
 
@@ -160,6 +162,7 @@ private class FakeStateShell(
         priority: Int,
         timeoutMillis: Long,
         maxOutputBytes: Int,
+        executionId: String?,
     ): ShellResult {
         calls += command
         if (command in failing) throw IllegalStateException("transport")
@@ -172,5 +175,6 @@ private class FakeStateShell(
         priority: Int,
         timeoutMillis: Long,
         maxOutputBytes: Int,
+        executionId: String?,
     ): ShellResult = error("non usato")
 }

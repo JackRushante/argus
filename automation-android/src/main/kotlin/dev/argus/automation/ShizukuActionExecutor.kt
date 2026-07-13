@@ -29,16 +29,20 @@ class ShizukuActionExecutor(
 ) : ActionExecutor {
     override suspend fun execute(action: Action, ctx: FireContext): ActionResult = try {
         when (action) {
-            is Action.SetWifi -> success { tools.setWifi(action.on) }
-            is Action.SetBluetooth -> success { tools.setBluetooth(action.on) }
-            is Action.SetDnd -> success { tools.setDnd(action.mode) }
+            is Action.SetWifi -> success { tools.setWifi(action.on, ctx.executionId, ctx.priority) }
+            is Action.SetBluetooth -> success {
+                tools.setBluetooth(action.on, ctx.executionId, ctx.priority)
+            }
+            is Action.SetDnd -> success { tools.setDnd(action.mode, ctx.executionId, ctx.priority) }
             is Action.SetRinger -> {
                 val mode = RingerMode.fromEngineValue(action.mode)
                     ?: return ActionResult.Failure("ringer_mode_invalid")
-                success { tools.setRinger(mode) }
+                success { tools.setRinger(mode, ctx.executionId, ctx.priority) }
             }
-            is Action.LaunchApp -> success { tools.launchApp(action.pkg) }
-            is Action.OpenUrl -> success { tools.openUrl(action.url) }
+            is Action.LaunchApp -> success {
+                tools.launchApp(action.pkg, ctx.executionId, ctx.priority)
+            }
+            is Action.OpenUrl -> success { tools.openUrl(action.url, ctx.executionId, ctx.priority) }
             is Action.ShowNotification -> success {
                 notifier.show(action.title, action.text, ctx)
             }

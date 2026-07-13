@@ -25,6 +25,7 @@ class ShizukuActionExecutorTest {
         automationId = AutomationId("automation-1"),
         eventId = TriggerEventId("event-1"),
         executionId = ExecutionId("execution-1"),
+        priority = 7,
     )
 
     @Test
@@ -64,6 +65,8 @@ class ShizukuActionExecutorTest {
             ),
             tools.calls,
         )
+        assertEquals(List(6) { context.executionId }, tools.executionIds)
+        assertEquals(List(6) { context.priority }, tools.priorities)
         assertEquals(
             listOf(Triple("Argus", "Completata", ExecutionId("execution-1"))),
             notifications,
@@ -161,25 +164,41 @@ class ShizukuActionExecutorTest {
 
 private class RecordingDeviceController : DeviceController {
     val calls = mutableListOf<String>()
+    val executionIds = mutableListOf<ExecutionId>()
+    val priorities = mutableListOf<Int>()
 
-    override suspend fun setWifi(on: Boolean) { calls += "wifi:$on" }
-    override suspend fun setBluetooth(on: Boolean) { calls += "bluetooth:$on" }
-    override suspend fun setDnd(mode: DndMode) { calls += "dnd:$mode" }
-    override suspend fun setRinger(mode: RingerMode) { calls += "ringer:$mode" }
-    override suspend fun launchApp(packageName: String) { calls += "launch:$packageName" }
-    override suspend fun openUrl(url: String) { calls += "url:$url" }
-    override suspend fun tap(x: Int, y: Int) { calls += "tap:$x,$y" }
-    override suspend fun inputText(text: String) { calls += "text:$text" }
+    private fun record(executionId: ExecutionId, priority: Int, call: String) {
+        executionIds += executionId
+        priorities += priority
+        calls += call
+    }
+
+    override suspend fun setWifi(on: Boolean, executionId: ExecutionId, priority: Int) =
+        record(executionId, priority, "wifi:$on")
+    override suspend fun setBluetooth(on: Boolean, executionId: ExecutionId, priority: Int) =
+        record(executionId, priority, "bluetooth:$on")
+    override suspend fun setDnd(mode: DndMode, executionId: ExecutionId, priority: Int) =
+        record(executionId, priority, "dnd:$mode")
+    override suspend fun setRinger(mode: RingerMode, executionId: ExecutionId, priority: Int) =
+        record(executionId, priority, "ringer:$mode")
+    override suspend fun launchApp(packageName: String, executionId: ExecutionId, priority: Int) =
+        record(executionId, priority, "launch:$packageName")
+    override suspend fun openUrl(url: String, executionId: ExecutionId, priority: Int) =
+        record(executionId, priority, "url:$url")
+    override suspend fun tap(x: Int, y: Int, executionId: ExecutionId, priority: Int) =
+        record(executionId, priority, "tap:$x,$y")
+    override suspend fun inputText(text: String, executionId: ExecutionId, priority: Int) =
+        record(executionId, priority, "text:$text")
 }
 
 private class ThrowingDeviceController(private val failure: RuntimeException) : DeviceController {
     private fun fail(): Nothing = throw failure
-    override suspend fun setWifi(on: Boolean) = fail()
-    override suspend fun setBluetooth(on: Boolean) = fail()
-    override suspend fun setDnd(mode: DndMode) = fail()
-    override suspend fun setRinger(mode: RingerMode) = fail()
-    override suspend fun launchApp(packageName: String) = fail()
-    override suspend fun openUrl(url: String) = fail()
-    override suspend fun tap(x: Int, y: Int) = fail()
-    override suspend fun inputText(text: String) = fail()
+    override suspend fun setWifi(on: Boolean, executionId: ExecutionId, priority: Int) = fail()
+    override suspend fun setBluetooth(on: Boolean, executionId: ExecutionId, priority: Int) = fail()
+    override suspend fun setDnd(mode: DndMode, executionId: ExecutionId, priority: Int) = fail()
+    override suspend fun setRinger(mode: RingerMode, executionId: ExecutionId, priority: Int) = fail()
+    override suspend fun launchApp(packageName: String, executionId: ExecutionId, priority: Int) = fail()
+    override suspend fun openUrl(url: String, executionId: ExecutionId, priority: Int) = fail()
+    override suspend fun tap(x: Int, y: Int, executionId: ExecutionId, priority: Int) = fail()
+    override suspend fun inputText(text: String, executionId: ExecutionId, priority: Int) = fail()
 }

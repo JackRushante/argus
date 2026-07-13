@@ -166,7 +166,14 @@ class Engine(
                     }
                 }
 
-                val context = FireContext(event, state(), automation.id, envelope.id, executionId)
+                val context = FireContext(
+                    event = event,
+                    state = state(),
+                    automationId = automation.id,
+                    eventId = envelope.id,
+                    executionId = executionId,
+                    priority = automation.priority,
+                )
                 automation.actions.forEachIndexed { index, action ->
                     val result = try {
                         executor.execute(action, context)
