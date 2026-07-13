@@ -69,7 +69,7 @@ class TimeAlarmCoordinatorTest {
 
         assertEquals(listOf(automation.id), report.scheduled)
         assertEquals(ScheduledAlarmMode.EXACT, state.get(automation.id)?.scheduledMode)
-        assertTrue(automation.id in backend.cancelled)
+        assertEquals(emptyList(), backend.cancelled)
     }
 
     @Test
@@ -83,8 +83,48 @@ class TimeAlarmCoordinatorTest {
             .reconcile(ReconcileReason.BOOT)
 
         assertEquals(listOf(automation.id), report.scheduled)
-        assertEquals(listOf(automation.id), backend.cancelled)
+        assertEquals(emptyList(), backend.cancelled)
         assertEquals(listOf(dueAt), backend.scheduled.map { it.eventAtMillis })
+    }
+
+    @Test
+    fun `failed replacement keeps the previous registration recoverable`() = runTest {
+        val old = automation(Trigger.Time(at = "2026-07-13T22:00", tz = "UTC"))
+        val current = automation(Trigger.Time(at = "2026-07-13T23:00", tz = "UTC"))
+        val oldAt = Instant.parse("2026-07-13T22:00:00Z").toEpochMilli()
+        val previous = record(old, oldAt)
+        val state = FakeTimeAlarmStateStore(previous)
+        val backend = FakeTimeAlarmBackend(failSchedules = true)
+
+        val report = coordinator(FakeAutomationStore(current), state, backend)
+            .reconcile(ReconcileReason.APP_START)
+
+        assertEquals(listOf(current.id), report.failed)
+        assertEquals(previous, state.get(current.id))
+        assertEquals(emptyList(), backend.cancelled)
+    }
+
+    @Test
+    fun `Room failure after OS replacement restores previous registration`() = runTest {
+        val old = automation(Trigger.Time(at = "2026-07-13T22:00", tz = "UTC"))
+        val current = automation(Trigger.Time(at = "2026-07-13T23:00", tz = "UTC"))
+        val oldAt = Instant.parse("2026-07-13T22:00:00Z").toEpochMilli()
+        val previous = record(old, oldAt)
+        val state = FakeTimeAlarmStateStore(previous, failUpserts = true)
+        val backend = FakeTimeAlarmBackend()
+
+        val report = coordinator(FakeAutomationStore(current), state, backend)
+            .reconcile(ReconcileReason.APP_START)
+
+        assertEquals(listOf(current.id), report.failed)
+        assertEquals(previous, state.get(current.id))
+        assertEquals(
+            listOf(
+                Instant.parse("2026-07-13T23:00:00Z").toEpochMilli(),
+                oldAt,
+            ),
+            backend.scheduled.map { it.eventAtMillis },
+        )
     }
 
     @Test
@@ -197,6 +237,36 @@ class TimeAlarmCoordinatorTest {
     }
 
     @Test
+    fun `revision arriving during conditional disable is rescheduled`() = runTest {
+        val old = automation(Trigger.Time(at = "2026-07-13T20:00", tz = "UTC"))
+        val unsignedNew = old.copy(
+            name = "future revision",
+            trigger = Trigger.Time(at = "2026-07-13T22:00", tz = "UTC"),
+            approvalFingerprint = null,
+        )
+        val revised = unsignedNew.copy(approvalFingerprint = ApprovalFingerprints.of(unsignedNew))
+        val dueAt = Instant.parse("2026-07-13T20:00:00Z").toEpochMilli()
+        val store = FakeAutomationStore(old).apply {
+            beforeConditionalDisable = { replace(revised) }
+        }
+        val state = FakeTimeAlarmStateStore(record(old, dueAt))
+        val backend = FakeTimeAlarmBackend()
+
+        val result = coordinator(store, state, backend).onAlarm(
+            old.id,
+            requireNotNull(old.approvalFingerprint),
+            dueAt,
+        )
+
+        assertIs<AlarmDeliveryResult.Delivered>(result)
+        assertEquals(revised.approvalFingerprint, state.get(revised.id)?.approvalFingerprint)
+        assertEquals(
+            Instant.parse("2026-07-13T22:00:00Z").toEpochMilli(),
+            state.get(revised.id)?.eventAtMillis,
+        )
+    }
+
+    @Test
     fun `failed delivery keeps the due record for recovery with the same event id`() = runTest {
         val automation = automation(Trigger.Time(at = "2026-07-13T20:00", tz = "UTC"))
         val dueAt = Instant.parse("2026-07-13T20:00:00Z").toEpochMilli()
@@ -226,6 +296,26 @@ class TimeAlarmCoordinatorTest {
         val eventId = "time:${requireNotNull(automation.approvalFingerprint).value}:$dueAt"
         assertEquals(listOf(eventId, eventId), dispatched)
         assertEquals(AutomationStatus.DISABLED, store.get(automation.id)?.status)
+    }
+
+    @Test
+    fun `failed recurring reschedule keeps due record and reports recovery needed`() = runTest {
+        val automation = automation(Trigger.Time(cron = "1 20 * * *", tz = "UTC"))
+        val dueAt = Instant.parse("2026-07-13T20:00:00Z").toEpochMilli()
+        val previous = record(automation, dueAt)
+        val state = FakeTimeAlarmStateStore(previous)
+        val backend = FakeTimeAlarmBackend(failSchedules = true)
+        val coordinator = coordinator(FakeAutomationStore(automation), state, backend)
+
+        assertEquals(
+            AlarmDeliveryResult.Failed("reschedule_failed"),
+            coordinator.onAlarm(
+                automation.id,
+                requireNotNull(automation.approvalFingerprint),
+                dueAt,
+            ),
+        )
+        assertEquals(previous, state.get(automation.id))
     }
 
     @Test
@@ -383,6 +473,7 @@ class TimeAlarmCoordinatorTest {
 
 private class FakeTimeAlarmBackend(
     var exactAllowed: Boolean = true,
+    var failSchedules: Boolean = false,
 ) : TimeAlarmBackend {
     val scheduled = mutableListOf<TimeAlarmRegistration>()
     val cancelled = mutableListOf<AutomationId>()
@@ -390,6 +481,7 @@ private class FakeTimeAlarmBackend(
     override fun canScheduleExact(): Boolean = exactAllowed
 
     override fun schedule(registration: TimeAlarmRegistration): ScheduledAlarmMode {
+        if (failSchedules) error("forced schedule failure")
         scheduled += registration
         return if (registration.requestedPrecision == TimePrecision.EXACT && exactAllowed) {
             ScheduledAlarmMode.EXACT
@@ -405,17 +497,22 @@ private class FakeTimeAlarmBackend(
 
 private class FakeTimeAlarmStateStore(
     vararg initial: ScheduledTimeAlarm,
+    private val failUpserts: Boolean = false,
 ) : TimeAlarmStateStore {
     private val values = initial.associateByTo(linkedMapOf()) { it.automationId }
 
     override suspend fun get(automationId: AutomationId): ScheduledTimeAlarm? = values[automationId]
     override suspend fun all(): List<ScheduledTimeAlarm> = values.values.toList()
-    override suspend fun upsert(alarm: ScheduledTimeAlarm) { values[alarm.automationId] = alarm }
+    override suspend fun upsert(alarm: ScheduledTimeAlarm) {
+        if (failUpserts) error("forced upsert failure")
+        values[alarm.automationId] = alarm
+    }
     override suspend fun delete(automationId: AutomationId) { values.remove(automationId) }
 }
 
 private class FakeAutomationStore(vararg initial: Automation) : AutomationStore {
     private val values = MutableStateFlow(initial.associateBy { it.id })
+    var beforeConditionalDisable: (() -> Unit)? = null
 
     override suspend fun get(id: AutomationId): Automation? = values.value[id]
     override suspend fun all(): List<Automation> = values.value.values.toList()
@@ -431,6 +528,7 @@ private class FakeAutomationStore(vararg initial: Automation) : AutomationStore 
         id: AutomationId,
         fingerprint: ApprovalFingerprint,
     ): Boolean {
+        beforeConditionalDisable?.also { beforeConditionalDisable = null }?.invoke()
         val current = values.value[id] ?: return false
         if (current.status != AutomationStatus.ARMED || !current.enabled ||
             current.approvalFingerprint != fingerprint ||

@@ -71,6 +71,34 @@ class AndroidTimeAlarmBackendTest {
     }
 
     @Test
+    fun `same automation replaces its previous OS alarm without a cancellation gap`() {
+        val alarmManager = context.getSystemService(AlarmManager::class.java)
+        val shadow = shadowOf(alarmManager)
+        val backend = AndroidTimeAlarmBackend(context)
+        val id = AutomationId("replace")
+
+        backend.schedule(
+            TimeAlarmRegistration(
+                automationId = id,
+                approvalFingerprint = ApprovalFingerprint("1".repeat(64)),
+                eventAtMillis = 1_900_000_000_000,
+                requestedPrecision = TimePrecision.FLEXIBLE,
+            ),
+        )
+        backend.schedule(
+            TimeAlarmRegistration(
+                automationId = id,
+                approvalFingerprint = ApprovalFingerprint("2".repeat(64)),
+                eventAtMillis = 1_900_000_060_000,
+                requestedPrecision = TimePrecision.FLEXIBLE,
+            ),
+        )
+
+        assertEquals(1, shadow.scheduledAlarms.size)
+        assertEquals(1_900_000_060_000, shadow.scheduledAlarms.single().triggerAtMs)
+    }
+
+    @Test
     fun `signal parser binds uri id fingerprint and occurrence`() {
         val id = AutomationId("rule/with space")
         val fingerprint = ApprovalFingerprint("a".repeat(64))

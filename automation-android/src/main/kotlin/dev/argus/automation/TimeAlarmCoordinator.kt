@@ -218,26 +218,26 @@ class TimeAlarmCoordinator(
             return AlarmDeliveryResult.Ignored
         }
         if (automation.approvalFingerprint != eventFingerprint) {
-            if (persisted != null) cancelAndForget(automationId)
-            scheduleLocked(automation, currentNow, existing = null)
-            return AlarmDeliveryResult.Ignored
+            return when (scheduleLocked(automation, currentNow, existing = persisted)) {
+                ScheduleResult.FAILED -> AlarmDeliveryResult.Failed("reschedule_failed")
+                else -> AlarmDeliveryResult.Ignored
+            }
         }
 
+        val recoveryRecord = persisted ?: ScheduledTimeAlarm(
+            automationId = automationId,
+            approvalFingerprint = eventFingerprint,
+            eventAtMillis = eventAtMillis,
+            wakeAtMillis = eventAtMillis,
+            requestedPrecision = trigger.precision,
+            scheduledMode = if (
+                trigger.precision == TimePrecision.EXACT && backend.canScheduleExact()
+            ) ScheduledAlarmMode.EXACT else ScheduledAlarmMode.INEXACT,
+            updatedAtMillis = currentNow.toEpochMilli(),
+        )
         if (persisted == null) {
             try {
-                state.upsert(
-                    ScheduledTimeAlarm(
-                        automationId = automationId,
-                        approvalFingerprint = eventFingerprint,
-                        eventAtMillis = eventAtMillis,
-                        wakeAtMillis = eventAtMillis,
-                        requestedPrecision = trigger.precision,
-                        scheduledMode = if (
-                            trigger.precision == TimePrecision.EXACT && backend.canScheduleExact()
-                        ) ScheduledAlarmMode.EXACT else ScheduledAlarmMode.INEXACT,
-                        updatedAtMillis = currentNow.toEpochMilli(),
-                    ),
-                )
+                state.upsert(recoveryRecord)
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
@@ -258,15 +258,45 @@ class TimeAlarmCoordinator(
             return AlarmDeliveryResult.Failed("dispatch_failed")
         }
 
-        state.delete(automationId)
-        if (trigger.at != null) {
-            store.disableIfApproved(automationId, eventFingerprint)
+        val latest = store.get(automationId)
+        val latestTrigger = latest?.trigger as? Trigger.Time
+        if (latest == null || latestTrigger == null || latest.status != AutomationStatus.ARMED ||
+            !latest.enabled
+        ) {
+            cancelAndForget(automationId)
             return AlarmDeliveryResult.Delivered
+        }
+        if (latest.approvalFingerprint != eventFingerprint) {
+            return when (scheduleLocked(latest, currentNow, existing = recoveryRecord)) {
+                ScheduleResult.FAILED -> AlarmDeliveryResult.Failed("reschedule_failed")
+                else -> AlarmDeliveryResult.Delivered
+            }
+        }
+        if (latestTrigger.at != null) {
+            if (store.disableIfApproved(automationId, eventFingerprint)) {
+                cancelAndForget(automationId)
+                return AlarmDeliveryResult.Delivered
+            }
+            val revised = store.get(automationId)
+            val revisedTrigger = revised?.trigger as? Trigger.Time
+            if (revised == null || revisedTrigger == null ||
+                revised.status != AutomationStatus.ARMED || !revised.enabled
+            ) {
+                cancelAndForget(automationId)
+                return AlarmDeliveryResult.Delivered
+            }
+            return when (scheduleLocked(revised, currentNow, existing = recoveryRecord)) {
+                ScheduleResult.FAILED -> AlarmDeliveryResult.Failed("reschedule_failed")
+                else -> AlarmDeliveryResult.Delivered
+            }
         }
 
         val after = Instant.ofEpochMilli(maxOf(currentNow.toEpochMilli(), eventAtMillis))
-        scheduleLocked(automation, after, existing = null)
-        return AlarmDeliveryResult.Delivered
+        return when (scheduleLocked(latest, after, existing = recoveryRecord)) {
+            ScheduleResult.SCHEDULED, ScheduleResult.UNCHANGED -> AlarmDeliveryResult.Delivered
+            ScheduleResult.EXPIRED -> AlarmDeliveryResult.Failed("reschedule_expired")
+            ScheduleResult.FAILED -> AlarmDeliveryResult.Failed("reschedule_failed")
+        }
     }
 
     private suspend fun scheduleLocked(
@@ -299,7 +329,6 @@ class TimeAlarmCoordinator(
             existing.scheduledMode == desiredMode
         ) return ScheduleResult.UNCHANGED
 
-        if (existing != null) cancelAndForget(automation.id)
         return try {
             val actualMode = backend.schedule(registration)
             state.upsert(
@@ -315,10 +344,29 @@ class TimeAlarmCoordinator(
             )
             ScheduleResult.SCHEDULED
         } catch (error: CancellationException) {
+            existing?.let(::restoreRegistration)
             throw error
         } catch (_: Exception) {
-            state.delete(automation.id)
+            if (existing == null) {
+                state.delete(automation.id)
+            } else {
+                restoreRegistration(existing)
+            }
             ScheduleResult.FAILED
+        }
+    }
+
+    private fun restoreRegistration(alarm: ScheduledTimeAlarm) {
+        runCatching {
+            backend.schedule(
+                TimeAlarmRegistration(
+                    automationId = alarm.automationId,
+                    approvalFingerprint = alarm.approvalFingerprint,
+                    eventAtMillis = alarm.eventAtMillis,
+                    wakeAtMillis = alarm.wakeAtMillis,
+                    requestedPrecision = alarm.requestedPrecision,
+                ),
+            )
         }
     }
 
