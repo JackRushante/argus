@@ -12,6 +12,22 @@ class TriggerSerializationTest {
         val json = ArgusJson.encodeToString(Trigger.serializer(), t)
         assertEquals(t, ArgusJson.decodeFromString(Trigger.serializer(), json))
     }
+    @Test fun `time precision is explicit and legacy drafts remain flexible`() {
+        val exact: Trigger = Trigger.Time(
+            at = "2026-07-15T08:00",
+            tz = "Europe/Rome",
+            precision = TimePrecision.EXACT,
+        )
+        val encoded = ArgusJson.encodeToString(Trigger.serializer(), exact)
+        assert(encoded.contains("\"precision\":\"EXACT\"")) { encoded }
+        assertEquals(exact, ArgusJson.decodeFromString(Trigger.serializer(), encoded))
+
+        val legacy = """{"type":"time","cron":"0 23 * * *","tz":"Europe/Rome"}"""
+        assertEquals(
+            TimePrecision.FLEXIBLE,
+            (ArgusJson.decodeFromString(Trigger.serializer(), legacy) as Trigger.Time).precision,
+        )
+    }
     @Test fun `notification trigger keeps discriminator and identity fields`() {
         val t: Trigger = Trigger.Notification(pkg = "com.whatsapp", conversationId = "id:42", isGroup = false)
         val json = ArgusJson.encodeToString(Trigger.serializer(), t)

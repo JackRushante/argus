@@ -40,6 +40,20 @@ class ApprovalFingerprintTest {
         assertNotEquals(
             original,
             ApprovalFingerprints.of(
+                automation(
+                    base.copy(
+                        trigger = Trigger.Time(
+                            cron = "0 23 * * *",
+                            tz = "Europe/Rome",
+                            precision = TimePrecision.EXACT,
+                        ),
+                    ),
+                ),
+            ),
+        )
+        assertNotEquals(
+            original,
+            ApprovalFingerprints.of(
                 automation(base).copy(requiredCapabilities = setOf(CapabilityIds.TRIGGER_TIME)),
             ),
         )

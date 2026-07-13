@@ -43,14 +43,22 @@ class BridgeTest(unittest.TestCase):
     def test_model_output_parses_only_available_actions(self):
         output = (
             'Va bene.\n@@META@@ {"draft":{"name":"DND sera",'
-            '"trigger":{"type":"time","cron":"0 23 * * *","tz":"Europe/Rome"},'
+            '"trigger":{"type":"time","cron":"0 23 * * *","tz":"Europe/Rome","precision":"EXACT"},'
             '"actions":[{"type":"set_dnd","mode":"PRIORITY"}]},"error_code":null}'
         )
         reply, draft, error = bridge.parse_model_output(output, {"set_dnd"}, {"ringer"}, set())
         self.assertEqual("Va bene.", reply)
         self.assertEqual("set_dnd", draft["actions"][0]["type"])
+        self.assertEqual("EXACT", draft["trigger"]["precision"])
         self.assertIsNone(error)
         _, draft, error = bridge.parse_model_output(output, {"set_wifi"}, {"ringer"}, set())
+        self.assertIsNone(draft)
+        self.assertEqual("draft_invalid", error)
+
+        invalid_precision = output.replace('"precision":"EXACT"', '"precision":"SECOND"')
+        _, draft, error = bridge.parse_model_output(
+            invalid_precision, {"set_dnd"}, {"ringer"}, set()
+        )
         self.assertIsNone(draft)
         self.assertEqual("draft_invalid", error)
 

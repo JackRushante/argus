@@ -83,7 +83,7 @@ Risposta v1:
   "meta": {
     "draft": {
       "name": "DND sera",
-      "trigger": {"type":"time","cron":"0 23 * * *","at":null,"tz":"Europe/Rome"},
+      "trigger": {"type":"time","cron":"0 23 * * *","at":null,"tz":"Europe/Rome","precision":"FLEXIBLE"},
       "actions": [{"type":"set_dnd","mode":"PRIORITY"}]
     },
     "error_code": null

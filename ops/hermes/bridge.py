@@ -68,8 +68,11 @@ AutomationDraft JSON (nomi e maiuscole sono esatti):
 }
 
 Trigger, discriminato da "type":
-- {"type":"time", "cron":string|null, "at":string|null, "tz":string}
+- {"type":"time", "cron":string|null, "at":string|null, "tz":string,
+   "precision":"FLEXIBLE"|"EXACT"}
   Esattamente uno tra cron e at. at e' ISO locale, es. 2026-07-15T23:00.
+  Ometti precision o usa FLEXIBLE normalmente; EXACT solo se l'utente chiede
+  esplicitamente puntualita' esatta.
 - {"type":"geofence", "lat":number, "lng":number, "radiusM":number,
    "transition":"ENTER"|"EXIT"|"DWELL", "loiteringDelayMs":integer,
    "resolveCurrentLocation":boolean}
@@ -337,10 +340,14 @@ def validate_trigger(value: Any, whitelisted_contact_ids: set[str]) -> bool:
         return False
     kind = value["type"]
     if kind == "time":
-        if not _exact_keys(value, {"type", "tz"}, {"cron", "at"}) or not _string(value["tz"], 128):
+        if not _exact_keys(value, {"type", "tz"}, {"cron", "at", "precision"}) or not _string(value["tz"], 128):
             return False
         cron, at = value.get("cron"), value.get("at")
-        return (cron is None) != (at is None) and _string(cron or at, 256)
+        return (
+            (cron is None) != (at is None)
+            and _string(cron or at, 256)
+            and value.get("precision", "FLEXIBLE") in {"FLEXIBLE", "EXACT"}
+        )
     if kind == "geofence":
         if not _exact_keys(
             value, {"type", "radiusM", "transition"},
