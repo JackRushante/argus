@@ -7,6 +7,7 @@ import dev.argus.engine.model.ArgusJson
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
+import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.ApprovalFingerprints
 import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.SCHEMA_VERSION
@@ -48,6 +49,27 @@ class RoomAutomationStore(private val dao: AutomationDao) : AutomationStore {
 
     override suspend fun disable(id: AutomationId) {
         dao.disable(id.value)
+    }
+
+    override suspend fun disableIfApproved(
+        id: AutomationId,
+        fingerprint: ApprovalFingerprint,
+    ): Boolean {
+        val row = dao.getById(id.value) ?: return false
+        if (row.status != AutomationStatus.ARMED || !row.enabled) return false
+        val domain = toDomain(row)
+        if (domain.status != AutomationStatus.ARMED || !domain.enabled ||
+            domain.approvalFingerprint != fingerprint ||
+            domain.approvalFingerprint != ApprovalFingerprints.of(domain)
+        ) return false
+        return dao.disableIfUnchanged(
+            id = row.id,
+            expectedJson = row.json,
+            expectedName = row.name,
+            expectedPriority = row.priority,
+            expectedCooldownMs = row.cooldownMs,
+            expectedSchemaVersion = row.schemaVersion,
+        ) == 1
     }
 
     override suspend fun enable(id: AutomationId): Boolean {

@@ -9,7 +9,7 @@ import org.junit.Assert.assertEquals
 import org.junit.runner.RunWith
 
 /**
- * Verifica strutturale: claim/audit v2, bozze v3 e journal per-azione v4.
+ * Verifica strutturale: claim/audit v2, bozze v3, journal v4 e scheduler v5.
  */
 @RunWith(AndroidJUnit4::class)
 class MigrationTest {
@@ -21,32 +21,34 @@ class MigrationTest {
     )
 
     @Test
-    fun migrate_v1_to_v4() {
+    fun migrate_v1_to_v5() {
         helper.createDatabase(TEST_DB_V1, 1).close()
         helper.runMigrationsAndValidate(
             TEST_DB_V1,
-            4,
+            5,
             true,
             ArgusDatabase.MIGRATION_1_2,
             ArgusDatabase.MIGRATION_2_3,
             ArgusDatabase.MIGRATION_3_4,
+            ArgusDatabase.MIGRATION_4_5,
         ).close()
     }
 
     @Test
-    fun migrate_v2_to_v4() {
+    fun migrate_v2_to_v5() {
         helper.createDatabase(TEST_DB_V2, 2).close()
         helper.runMigrationsAndValidate(
             TEST_DB_V2,
-            4,
+            5,
             true,
             ArgusDatabase.MIGRATION_2_3,
             ArgusDatabase.MIGRATION_3_4,
+            ArgusDatabase.MIGRATION_4_5,
         ).close()
     }
 
     @Test
-    fun migrate_v3_to_v4() {
+    fun migrate_v3_to_v5() {
         helper.createDatabase(TEST_DB_V3, 3).apply {
             execSQL(
                 "INSERT INTO automations " +
@@ -59,7 +61,13 @@ class MigrationTest {
             )
             close()
         }
-        helper.runMigrationsAndValidate(TEST_DB_V3, 4, true, ArgusDatabase.MIGRATION_3_4).use { db ->
+        helper.runMigrationsAndValidate(
+            TEST_DB_V3,
+            5,
+            true,
+            ArgusDatabase.MIGRATION_3_4,
+            ArgusDatabase.MIGRATION_4_5,
+        ).use { db ->
             db.query(
                 "SELECT status, succeededCount, failedCount, submittedCount " +
                     "FROM fire_claims WHERE executionId = 'legacy-execution'",
@@ -73,9 +81,26 @@ class MigrationTest {
         }
     }
 
+    @Test
+    fun migrate_v4_to_v5() {
+        helper.createDatabase(TEST_DB_V4, 4).close()
+        helper.runMigrationsAndValidate(
+            TEST_DB_V4,
+            5,
+            true,
+            ArgusDatabase.MIGRATION_4_5,
+        ).use { db ->
+            db.query("SELECT COUNT(*) FROM scheduled_time_alarms").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals(0, cursor.getInt(0))
+            }
+        }
+    }
+
     private companion object {
         const val TEST_DB_V1 = "argus-migration-v1-test.db"
         const val TEST_DB_V2 = "argus-migration-v2-test.db"
         const val TEST_DB_V3 = "argus-migration-v3-test.db"
+        const val TEST_DB_V4 = "argus-migration-v4-test.db"
     }
 }

@@ -11,11 +11,13 @@ import dev.argus.data.dao.AuditDao
 import dev.argus.data.dao.AutomationDao
 import dev.argus.data.dao.DraftDao
 import dev.argus.data.dao.ExecutionJournalDao
+import dev.argus.data.dao.ScheduledTimeAlarmDao
 import dev.argus.data.entities.ActionResultEntity
 import dev.argus.data.entities.AuditEntity
 import dev.argus.data.entities.AutomationEntity
 import dev.argus.data.entities.FireClaimEntity
 import dev.argus.data.entities.PendingDraftEntity
+import dev.argus.data.entities.ScheduledTimeAlarmEntity
 
 @Database(
     entities = [
@@ -24,8 +26,9 @@ import dev.argus.data.entities.PendingDraftEntity
         FireClaimEntity::class,
         PendingDraftEntity::class,
         ActionResultEntity::class,
+        ScheduledTimeAlarmEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -34,6 +37,7 @@ abstract class ArgusDatabase : RoomDatabase() {
     abstract fun auditDao(): AuditDao
     abstract fun draftDao(): DraftDao
     abstract fun executionJournalDao(): ExecutionJournalDao
+    abstract fun scheduledTimeAlarmDao(): ScheduledTimeAlarmDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -151,9 +155,28 @@ abstract class ArgusDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `scheduled_time_alarms` (
+                        `automationId` TEXT NOT NULL,
+                        `approvalFingerprint` TEXT NOT NULL,
+                        `eventAtMillis` INTEGER NOT NULL,
+                        `wakeAtMillis` INTEGER NOT NULL,
+                        `requestedPrecision` TEXT NOT NULL,
+                        `scheduledMode` TEXT NOT NULL,
+                        `updatedAtMillis` INTEGER NOT NULL,
+                        PRIMARY KEY(`automationId`)
+                    )
+                    """.trimIndent(),
+                )
+            }
+        }
+
         fun build(context: Context, name: String = "argus.db"): ArgusDatabase =
             Room.databaseBuilder(context, ArgusDatabase::class.java, name)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .build()
 
         fun inMemory(context: Context): ArgusDatabase =

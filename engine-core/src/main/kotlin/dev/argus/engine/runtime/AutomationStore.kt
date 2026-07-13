@@ -2,6 +2,7 @@ package dev.argus.engine.runtime
 
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
+import dev.argus.engine.model.ApprovalFingerprint
 import kotlinx.coroutines.flow.Flow
 
 data class FireClaimRequest(
@@ -31,6 +32,8 @@ interface AutomationStore {
     suspend fun armed(): List<Automation>
     suspend fun delete(id: AutomationId)
     suspend fun disable(id: AutomationId)
+    /** Disattiva solo se la regola è ancora ARMED e coincide con lo snapshot approvato indicato. */
+    suspend fun disableIfApproved(id: AutomationId, fingerprint: ApprovalFingerprint): Boolean
     /** Riattiva solo una regola ancora identica allo snapshot approvato. */
     suspend fun enable(id: AutomationId): Boolean
     suspend fun markNeedsReview(id: AutomationId)

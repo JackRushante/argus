@@ -39,8 +39,7 @@ class Engine(
     ): List<FireOutcome> {
         val event = envelope.event
         val candidates = when (event) {
-            is TriggerEvent.TimeFired -> listOfNotNull(store.get(event.automationId))
-            is TriggerEvent.GeofenceTransitioned -> listOfNotNull(store.get(event.automationId))
+            is TriggerEvent.Registered -> listOfNotNull(store.get(event.automationId))
             else -> store.armed()
         }.filter { it.status == AutomationStatus.ARMED && it.enabled }
             .sortedWith(compareBy({ it.priority }, { it.id.value }))
@@ -55,6 +54,20 @@ class Engine(
             var claimed = false
             val actionResults = mutableListOf<ActionResult>()
             try {
+                if (event is TriggerEvent.Registered &&
+                    automation.approvalFingerprint != event.approvalFingerprint
+                ) {
+                    recordAudit(
+                        AuditEvent(
+                            automationId = automation.id,
+                            kind = AuditKind.BLOCKED_POLICY,
+                            atMillis = batchNow,
+                            detail = "stale_trigger_registration",
+                            eventId = envelope.id,
+                        ),
+                    )
+                    continue
+                }
                 if (!matcher.matches(automation.trigger, event)) continue
 
                 when (val decision = firePolicy.evaluate(automation, event)) {

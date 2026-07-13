@@ -16,6 +16,8 @@ class EndToEndTest {
     private fun engine(store: AutomationStore, ex: ActionExecutor, clockIso: String) =
         Engine(store, ex, ConditionEvaluator(clock(clockIso)), TriggerMatcher(), allowAll, NoopAuditSink) { 1000 }
     private val validator = DraftValidator(knownTools = setOf("whatsapp_reply", "notify.show"))
+    private fun approved(value: Automation) =
+        value.copy(approvalFingerprint = ApprovalFingerprints.of(value))
 
     @Test fun `example2 - compile, validate, arm, fire DND after 23`() = runTest {
         // 1) compile: output Hermes -> draft
@@ -26,14 +28,21 @@ class EndToEndTest {
         // 2) validator verde
         assertEquals(emptyList(), validator.validate(draft, emptySet()).filter { it.severity == Severity.ERROR })
         // 3) approva -> Automation ARMED
-        val auto = Automation(AutomationId("a1"), draft.name, CreatedBy.LLM, AutomationStatus.ARMED,
-            draft.trigger, draft.actions, draft.conditions)
+        val auto = approved(
+            Automation(AutomationId("a1"), draft.name, CreatedBy.LLM, AutomationStatus.ARMED,
+                draft.trigger, draft.actions, draft.conditions),
+        )
         // 4) next-fire calcolabile (P0-B lo passa ad AlarmManager)
         assertNotNull(TimeSpecs.nextFire(draft.trigger as Trigger.Time, Instant.parse("2026-07-12T10:00:00Z")))
         // 5) fire alle 23:30 con suoneria "normal"
         val ex = FakeActionExecutor(); val store = FakeAutomationStore(listOf(auto))
         engine(store, ex, "2026-07-12T21:30:00Z")
-            .onTrigger(TriggerEnvelope(TriggerEventId("alarm:a1:1"), TriggerEvent.TimeFired(AutomationId("a1")))) {
+            .onTrigger(
+                TriggerEnvelope(
+                    TriggerEventId("alarm:a1:1"),
+                    TriggerEvent.TimeFired(auto.id, requireNotNull(auto.approvalFingerprint)),
+                ),
+            ) {
                 DeviceState(values = mapOf("ringer" to "normal"))
             }
         assertEquals(listOf<Action>(Action.SetDnd(DndMode.PRIORITY)), ex.executed)
@@ -49,12 +58,18 @@ class EndToEndTest {
         assertTrue(issues.any { it.code == "radius_small" })
         // all'ARM l'app risolve le coordinate correnti
         val resolved = (draft.trigger as Trigger.Geofence).copy(lat = 45.4, lng = 11.0, resolveCurrentLocation = false)
-        val auto = Automation(AutomationId("g1"), draft.name, CreatedBy.LLM, AutomationStatus.ARMED, resolved, draft.actions)
+        val auto = approved(
+            Automation(AutomationId("g1"), draft.name, CreatedBy.LLM, AutomationStatus.ARMED, resolved, draft.actions),
+        )
         val ex = FakeActionExecutor(); val store = FakeAutomationStore(listOf(auto))
         engine(store, ex, "2026-07-12T10:00:00Z")
             .onTrigger(TriggerEnvelope(
                 TriggerEventId("geofence:g1:1"),
-                TriggerEvent.GeofenceTransitioned(AutomationId("g1"), Transition.EXIT),
+                TriggerEvent.GeofenceTransitioned(
+                    auto.id,
+                    Transition.EXIT,
+                    requireNotNull(auto.approvalFingerprint),
+                ),
             )) { DeviceState() }
         assertEquals(listOf<Action>(Action.SetWifi(false), Action.SetBluetooth(true)), ex.executed)
     }

@@ -156,6 +156,20 @@ class RoomStoreTest {
     }
 
     @Test
+    fun `conditional disable cannot consume a newer approved revision`() = runTest {
+        val original = baseArmed("toggle-versioned")
+        persistForTest(original)
+        val originalFingerprint = requireNotNull(original.approvalFingerprint)
+        val revised = signed(original.copy(name = "revised", approvalFingerprint = null))
+        persistForTest(revised)
+
+        assertTrue(!store.disableIfApproved(original.id, originalFingerprint))
+        assertEquals(revised, store.get(original.id))
+        assertTrue(store.disableIfApproved(revised.id, requireNotNull(revised.approvalFingerprint)))
+        assertEquals(AutomationStatus.DISABLED, store.get(revised.id)?.status)
+    }
+
+    @Test
     fun `enable restores only an unchanged approved automation`() = runTest {
         val automation = baseArmed("toggle-safe")
         persistForTest(automation)

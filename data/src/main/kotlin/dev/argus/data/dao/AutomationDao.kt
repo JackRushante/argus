@@ -58,6 +58,21 @@ interface AutomationDao {
     suspend fun disable(id: String): Int
 
     @Query(
+        "UPDATE automations SET status = 'DISABLED', enabled = 0 " +
+            "WHERE id = :id AND status = 'ARMED' AND enabled = 1 " +
+            "AND json = :expectedJson AND name = :expectedName AND priority = :expectedPriority " +
+            "AND cooldownMs = :expectedCooldownMs AND schemaVersion = :expectedSchemaVersion",
+    )
+    suspend fun disableIfUnchanged(
+        id: String,
+        expectedJson: String,
+        expectedName: String,
+        expectedPriority: Int,
+        expectedCooldownMs: Long,
+        expectedSchemaVersion: Int,
+    ): Int
+
+    @Query(
         "UPDATE automations SET status = 'ARMED', enabled = 1 " +
             "WHERE id = :id AND status = 'DISABLED' AND enabled = 0 " +
             "AND json = :expectedJson AND name = :expectedName AND priority = :expectedPriority " +

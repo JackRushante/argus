@@ -25,7 +25,12 @@ class TriggerMatcherTest {
         assertFalse(m.matches(spec, TriggerEvent.NotificationPosted("com.whatsapp", text = "ciao", isGroup = null)))
     }
     @Test fun `time matches by construction`() {
-        assertTrue(m.matches(Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"), TriggerEvent.TimeFired(AutomationId("a1"))))
+        assertTrue(
+            m.matches(
+                Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
+                TriggerEvent.TimeFired(AutomationId("a1"), ApprovalFingerprint("0".repeat(64))),
+            ),
+        )
     }
     @Test fun `connectivity matches medium state and name`() {
         val spec = Trigger.Connectivity(ConnMedium.WIFI, ConnState.DISCONNECTED, match = "Casa")

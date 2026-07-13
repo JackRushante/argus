@@ -23,9 +23,17 @@ class EngineTest {
         cond: Condition? = null,
         cooldown: Long = 0,
         prio: Int = 0,
-    ) = Automation(
-        AutomationId(id), id, CreatedBy.LLM, AutomationStatus.ARMED, t, acts, cond,
-        cooldownMs = cooldown, priority = prio,
+    ): Automation {
+        val unsigned = Automation(
+            AutomationId(id), id, CreatedBy.LLM, AutomationStatus.ARMED, t, acts, cond,
+            cooldownMs = cooldown, priority = prio,
+        )
+        return unsigned.copy(approvalFingerprint = ApprovalFingerprints.of(unsigned))
+    }
+
+    private fun timeEvent(automation: Automation) = TriggerEvent.TimeFired(
+        automation.id,
+        requireNotNull(automation.approvalFingerprint),
     )
 
     private val allowAll = FirePolicy { _, _ -> FirePolicyDecision.Allow }
@@ -63,7 +71,7 @@ class EngineTest {
         val ex = FakeActionExecutor()
         val store = FakeAutomationStore(listOf(a))
         engine(store, ex, "2026-07-12T21:30:00Z")
-            .onTrigger(envelope("alarm:a1:1", TriggerEvent.TimeFired(AutomationId("a1")))) {
+            .onTrigger(envelope("alarm:a1:1", timeEvent(a))) {
                 DeviceState(values = mapOf("ringer" to "normal"))
             }
         assertEquals(listOf<Action>(Action.SetDnd(DndMode.PRIORITY)), ex.executed)
@@ -81,7 +89,7 @@ class EngineTest {
         val store = FakeAutomationStore(listOf(a))
         val audit = FakeAuditSink()
         engine(store, ex, "2026-07-12T21:30:00Z", audit)
-            .onTrigger(envelope("alarm:a1:1", TriggerEvent.TimeFired(AutomationId("a1")))) {
+            .onTrigger(envelope("alarm:a1:1", timeEvent(a))) {
                 DeviceState(values = mapOf("ringer" to "normal"))
             }
         assertEquals(emptyList<Action>(), ex.executed)
@@ -328,5 +336,32 @@ class EngineTest {
             StableExecutionIdFactory.create(a.id, TriggerEventId("sbn:wa:stable")),
             outcome.executionId,
         )
+    }
+
+    @Test
+    fun `stale scheduled trigger cannot execute a newly approved automation`() = runTest {
+        val unsigned = armed(
+            "a1",
+            Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
+            listOf(Action.SetDnd(DndMode.TOTAL)),
+        )
+        val current = unsigned.copy(approvalFingerprint = ApprovalFingerprints.of(unsigned))
+        val executor = FakeActionExecutor()
+        val audit = FakeAuditSink()
+
+        engine(FakeAutomationStore(listOf(current)), executor, "2026-07-12T21:30:00Z", audit)
+            .onTrigger(
+                envelope(
+                    "alarm:stale",
+                    TriggerEvent.TimeFired(
+                        current.id,
+                        ApprovalFingerprint("0".repeat(64)),
+                    ),
+                ),
+            ) { DeviceState() }
+
+        assertEquals(emptyList(), executor.executed)
+        assertEquals(AuditKind.BLOCKED_POLICY, audit.events.single().kind)
+        assertEquals("stale_trigger_registration", audit.events.single().detail)
     }
 }

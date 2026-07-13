@@ -45,6 +45,11 @@ class RevalidatingFirePolicyTest {
     private fun policy(value: FirePolicySnapshot) =
         RevalidatingFirePolicy(FirePolicySnapshotProvider { value })
 
+    private fun timeEvent(automation: Automation) = TriggerEvent.TimeFired(
+        automation.id,
+        requireNotNull(automation.approvalFingerprint),
+    )
+
     @Test
     fun `valid deterministic automation is allowed when capability is live`() = runTest {
         val automation = automation(
@@ -59,7 +64,7 @@ class RevalidatingFirePolicyTest {
                 ),
             ),
         )
-            .evaluate(automation, TriggerEvent.TimeFired(automation.id))
+            .evaluate(automation, timeEvent(automation))
         assertEquals(FirePolicyDecision.Allow, result)
     }
 
@@ -113,7 +118,7 @@ class RevalidatingFirePolicyTest {
         )
         val block = assertIs<FirePolicyDecision.Block>(
             policy(snapshot(availableCapabilities = setOf(CapabilityIds.TRIGGER_TIME)))
-                .evaluate(automation, TriggerEvent.TimeFired(automation.id)),
+                .evaluate(automation, timeEvent(automation)),
         )
         assertTrue(block.needsReview)
         assertEquals("capability_unavailable", block.code)
@@ -159,7 +164,7 @@ class RevalidatingFirePolicyTest {
                     ),
                 ),
             )
-                .evaluate(automation, TriggerEvent.TimeFired(automation.id)),
+                .evaluate(automation, timeEvent(automation)),
         )
         assertEquals("capability_unavailable", block.code)
         assertTrue(block.needsReview)
@@ -174,7 +179,7 @@ class RevalidatingFirePolicyTest {
         val editedWithoutApproval = approved.copy(actions = listOf(Action.SetDnd(DndMode.TOTAL)))
         val block = assertIs<FirePolicyDecision.Block>(
             policy(snapshot(availableCapabilities = setOf(ActionCapabilities.SET_DND)))
-                .evaluate(editedWithoutApproval, TriggerEvent.TimeFired(approved.id)),
+                .evaluate(editedWithoutApproval, timeEvent(approved)),
         )
         assertEquals("approval_fingerprint_mismatch", block.code)
         assertTrue(block.needsReview)
@@ -219,7 +224,7 @@ class RevalidatingFirePolicyTest {
         )
         val block = assertIs<FirePolicyDecision.Block>(
             policy(snapshot(availableCapabilities = setOf(ActionCapabilities.RUN_SHELL)))
-                .evaluate(automation, TriggerEvent.TimeFired(automation.id)),
+                .evaluate(automation, timeEvent(automation)),
         )
         assertEquals("live_confirmation_required", block.code)
         assertTrue(!block.needsReview)
@@ -245,7 +250,7 @@ class RevalidatingFirePolicyTest {
                         ActionCapabilities.SET_DND,
                     ),
                 ),
-            ).evaluate(inconsistent, TriggerEvent.TimeFired(inconsistent.id)),
+            ).evaluate(inconsistent, timeEvent(inconsistent)),
         )
         assertEquals("capability_requirements_mismatch", block.code)
         assertTrue(block.needsReview)
@@ -259,7 +264,7 @@ class RevalidatingFirePolicyTest {
         )
         val failed = RevalidatingFirePolicy(FirePolicySnapshotProvider { error("probe down") })
         val block = assertIs<FirePolicyDecision.Block>(
-            failed.evaluate(automation, TriggerEvent.TimeFired(automation.id)),
+            failed.evaluate(automation, timeEvent(automation)),
         )
         assertEquals("capability_snapshot_unavailable", block.code)
         assertTrue(!block.needsReview)
@@ -268,7 +273,7 @@ class RevalidatingFirePolicyTest {
             FirePolicySnapshotProvider { throw CancellationException("stop") },
         )
         assertFailsWith<CancellationException> {
-            cancelled.evaluate(automation, TriggerEvent.TimeFired(automation.id))
+            cancelled.evaluate(automation, timeEvent(automation))
         }
     }
 }
