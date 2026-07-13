@@ -197,7 +197,7 @@ private fun GenerativeHeader(rule: RuleRender) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun CompactRuleCard(rule: RuleRender, modifier: Modifier) {
+private fun CompactRuleCard(rule: RuleRender, modifier: Modifier, showGenerativeHeader: Boolean) {
     Card(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -205,7 +205,7 @@ private fun CompactRuleCard(rule: RuleRender, modifier: Modifier) {
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            GenerativeHeader(rule)
+            if (showGenerativeHeader) GenerativeHeader(rule)
             TriggerLine(rule)
             if (rule.actions.isNotEmpty()) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -217,9 +217,9 @@ private fun CompactRuleCard(rule: RuleRender, modifier: Modifier) {
 }
 
 @Composable
-private fun ExtendedRuleCard(rule: RuleRender, modifier: Modifier) {
+private fun ExtendedRuleCard(rule: RuleRender, modifier: Modifier, showGenerativeHeader: Boolean) {
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        GenerativeHeader(rule)
+        if (showGenerativeHeader) GenerativeHeader(rule)
         RuleSection("QUANDO") { TriggerLine(rule) }
         if (rule.conditionLines.isNotEmpty()) {
             RuleSection("SOLO SE") {
@@ -250,10 +250,23 @@ private fun ExtendedRuleCard(rule: RuleRender, modifier: Modifier) {
  * Card regola: variante `compact` (chat/lista) = trigger + chip azioni + badge;
  * variante estesa (dettaglio) = blocchi QUANDO/SOLO SE/ALLORA. La verità visiva
  * è SEMPRE `rule` (RuleRender), mai la prosa LLM (§5.1).
+ *
+ * [showGenerativeHeader] = false sopprime la coppia GenerativeTag+CloudTag interna:
+ * il Dettaglio la rende già nella riga badge dell'header (§5.4), quindi la disattiva
+ * qui per non duplicarla (design §7.3). Ogni altro chiamante usa il default (true).
  */
 @Composable
-fun RuleCard(rule: RuleRender, compact: Boolean, modifier: Modifier = Modifier) {
-    if (compact) CompactRuleCard(rule, modifier) else ExtendedRuleCard(rule, modifier)
+fun RuleCard(
+    rule: RuleRender,
+    compact: Boolean,
+    modifier: Modifier = Modifier,
+    showGenerativeHeader: Boolean = true,
+) {
+    if (compact) {
+        CompactRuleCard(rule, modifier, showGenerativeHeader)
+    } else {
+        ExtendedRuleCard(rule, modifier, showGenerativeHeader)
+    }
 }
 
 // ---------------------------------------------------------------------------------------------

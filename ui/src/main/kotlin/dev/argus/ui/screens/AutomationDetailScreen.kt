@@ -2,6 +2,7 @@ package dev.argus.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -94,7 +95,7 @@ fun AutomationDetailScreen(
 ) {
     Surface(color = MaterialTheme.colorScheme.background, modifier = modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            DetailHeader(state.status)
+            DetailHeader(state.status, callbacks::onBack)
 
             // Corpo scrollabile: warning -> regola -> stima -> rationale -> runs.
             Column(
@@ -112,7 +113,9 @@ fun AutomationDetailScreen(
                 state.warnings.forEach { WarningBanner(it) }
 
                 // §5.1: la verità visiva è SEMPRE RuleRender (QUANDO/SOLO SE/ALLORA).
-                RuleCard(state.rule, compact = false)
+                // showGenerativeHeader=false: la coppia generativa+cloud è già nella riga
+                // badge dell'header (TitleAndBadges); qui va soppressa per non duplicarla.
+                RuleCard(state.rule, compact = false, showGenerativeHeader = false)
 
                 // Geofence: label al posto delle coordinate (§6.3, resolveCurrentLocation).
                 state.geofencePreviewLabel?.let { GeofencePreviewRow(it) }
@@ -140,7 +143,7 @@ fun AutomationDetailScreen(
 // -----------------------------------------------------------------------------
 
 @Composable
-private fun DetailHeader(status: StatusBadge) {
+private fun DetailHeader(status: StatusBadge, onBack: () -> Unit) {
     // "Approvazione" in review (PENDING), "Dettaglio" in ispezione (design §7.3).
     val kind = if (status == StatusBadge.PENDING_APPROVAL) "Approvazione" else "Dettaglio"
     Row(
@@ -150,8 +153,11 @@ private fun DetailHeader(status: StatusBadge) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        // Affordance back visiva: la nav reale è dell'host (nessun onBack nel contratto §6.3).
-        Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+        // Affordance back: onBack è additivo (default no-op nel contratto §6.3); l'host cabla il pop.
+        Box(
+            Modifier.size(48.dp).clip(RoundedCornerShape(24.dp)).clickable { onBack() },
+            contentAlignment = Alignment.Center,
+        ) {
             Icon(
                 Icons.AutoMirrored.Rounded.ArrowBack,
                 contentDescription = "Indietro",
@@ -229,7 +235,7 @@ private fun RationaleQuote(text: String) {
         )
         Column(modifier = Modifier.padding(start = 13.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
-                "Descrizione del modello",
+                "descrizione del modello",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.labelSmall,
             )
@@ -337,12 +343,14 @@ private fun DetailFooter(state: AutomationDetailState, callbacks: AutomationDeta
 private fun PendingFooter(state: AutomationDetailState, callbacks: AutomationDetailCallbacks) {
     val semantic = LocalArgusSemantic.current
     Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-        // §5.2: quando l'arm è bloccato, il motivo è visibile accanto al bottone disabilitato.
-        if (!state.canArm && state.armBlockedReason != null) {
+        // §5.2: quando l'arm è bloccato il motivo è SEMPRE visibile accanto al bottone
+        // disabilitato — con fallback generico se l'host non ha valorizzato il motivo.
+        if (!state.canArm) {
+            val reason = state.armBlockedReason ?: "Regola non armabile"
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Top) {
                 Icon(Icons.Rounded.Block, contentDescription = null, tint = semantic.error.fg, modifier = Modifier.size(16.dp))
                 Text(
-                    "Arma bloccato: ${state.armBlockedReason}",
+                    "Arma bloccato: $reason",
                     color = semantic.error.fg,
                     style = MaterialTheme.typography.bodyMedium,
                 )

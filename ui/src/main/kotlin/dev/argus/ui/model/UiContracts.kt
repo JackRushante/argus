@@ -129,6 +129,7 @@ interface AutomationDetailCallbacks {
     fun onAskEdit()                          // torna in chat con contesto ("modifica questa regola…")
     fun onRunNow()                           // test manuale: esegue le azioni ORA saltando trigger/condizioni (conferma prima)
     fun onOpenFullLog()
+    fun onBack() {}                          // affordance back nell'header; default no-op, la nav reale è dell'host (NavHost)
 }
 
 // --- 6.4 Log esecuzioni ---
