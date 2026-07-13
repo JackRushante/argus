@@ -146,7 +146,7 @@ data class LogRow(
     val id: String,
     val timeLabel: String,                  // "oggi 23:00"
     val automationName: String,
-    val kind: AuditKind,                    // FIRED | SUPPRESSED_COOLDOWN | CONDITIONS_NOT_MET | ERROR
+    val kind: AuditKind,
     val outcome: LogOutcome,                // solo per FIRED
     val summary: String,                    // "2/2 azioni ok" / "soppressa (cooldown)" / "risposta inviata a Moglie"
     val expandedDetail: List<String>?,      // righe per-azione al tap (incl. esito lane generativa, anche DEFERRED E13)

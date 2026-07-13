@@ -12,8 +12,9 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 class EndToEndTest {
     private fun clock(iso: String) = Clock.fixed(Instant.parse(iso), ZoneOffset.UTC)
+    private val allowAll = FirePolicy { _, _ -> FirePolicyDecision.Allow }
     private fun engine(store: AutomationStore, ex: ActionExecutor, clockIso: String) =
-        Engine(store, ex, ConditionEvaluator(clock(clockIso)), TriggerMatcher(), NoopAuditSink) { 1000 }
+        Engine(store, ex, ConditionEvaluator(clock(clockIso)), TriggerMatcher(), allowAll, NoopAuditSink) { 1000 }
     private val validator = DraftValidator(knownTools = setOf("whatsapp_reply", "notify.show"))
 
     @Test fun `example2 - compile, validate, arm, fire DND after 23`() = runTest {
@@ -32,7 +33,9 @@ class EndToEndTest {
         // 5) fire alle 23:30 con suoneria "normal"
         val ex = FakeActionExecutor(); val store = FakeAutomationStore(listOf(auto))
         engine(store, ex, "2026-07-12T21:30:00Z")
-            .onTrigger(TriggerEvent.TimeFired(AutomationId("a1"))) { DeviceState(values = mapOf("ringer" to "normal")) }
+            .onTrigger(TriggerEnvelope(TriggerEventId("alarm:a1:1"), TriggerEvent.TimeFired(AutomationId("a1")))) {
+                DeviceState(values = mapOf("ringer" to "normal"))
+            }
         assertEquals(listOf<Action>(Action.SetDnd(DndMode.PRIORITY)), ex.executed)
     }
 
@@ -49,7 +52,10 @@ class EndToEndTest {
         val auto = Automation(AutomationId("g1"), draft.name, CreatedBy.LLM, AutomationStatus.ARMED, resolved, draft.actions)
         val ex = FakeActionExecutor(); val store = FakeAutomationStore(listOf(auto))
         engine(store, ex, "2026-07-12T10:00:00Z")
-            .onTrigger(TriggerEvent.GeofenceTransitioned(AutomationId("g1"), Transition.EXIT)) { DeviceState() }
+            .onTrigger(TriggerEnvelope(
+                TriggerEventId("geofence:g1:1"),
+                TriggerEvent.GeofenceTransitioned(AutomationId("g1"), Transition.EXIT),
+            )) { DeviceState() }
         assertEquals(listOf<Action>(Action.SetWifi(false), Action.SetBluetooth(true)), ex.executed)
     }
 
@@ -60,8 +66,11 @@ class EndToEndTest {
             conditions = Condition.TimeWindow("18:00", "22:00", "Europe/Rome"))
         val ex = FakeActionExecutor(); val store = FakeAutomationStore(listOf(auto))
         val outcomes = engine(store, ex, "2026-07-12T16:30:00Z")   // 18:30 CEST, dentro la finestra
-            .onTrigger(TriggerEvent.NotificationPosted("com.whatsapp", conversationId = "jid:42",
-                sender = "Moglie", text = "ciao", isGroup = false, notificationKey = "sbn:1")) { DeviceState() }
+            .onTrigger(TriggerEnvelope(
+                TriggerEventId("sbn:wa:1"),
+                TriggerEvent.NotificationPosted("com.whatsapp", conversationId = "jid:42",
+                    sender = "Moglie", text = "ciao", isGroup = false, notificationKey = "sbn:1"),
+            )) { DeviceState() }
         assertEquals(1, ex.executed.size)
         assertEquals(ActionTier.GENERATIVE, ex.executed.first().tier)
         assertEquals(listOf<ActionResult>(ActionResult.Submitted), outcomes.single().results)  // lane async, engine non blocca

@@ -14,6 +14,8 @@ class RoomAuditSink(private val dao: AuditDao) : AuditSink {
                 kind = e.kind,
                 atMillis = e.atMillis,
                 detail = e.detail,
+                eventIdHash = e.eventId?.value?.let(::identifierHash),
+                executionId = e.executionId?.value,
             )
         )
     }

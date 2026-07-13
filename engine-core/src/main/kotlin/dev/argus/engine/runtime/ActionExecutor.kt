@@ -3,7 +3,13 @@ package dev.argus.engine.runtime
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.AutomationId
 
-data class FireContext(val event: TriggerEvent, val state: DeviceState, val automationId: AutomationId)
+data class FireContext(
+    val event: TriggerEvent,
+    val state: DeviceState,
+    val automationId: AutomationId,
+    val eventId: TriggerEventId,
+    val executionId: ExecutionId,
+)
 
 sealed interface ActionResult {
     /** Azione deterministica completata in modo sincrono. */
@@ -14,4 +20,4 @@ sealed interface ActionResult {
     data class Failure(val reason: String) : ActionResult
 }
 
-interface ActionExecutor { suspend fun execute(action: Action, ctx: FireContext): ActionResult }
+fun interface ActionExecutor { suspend fun execute(action: Action, ctx: FireContext): ActionResult }

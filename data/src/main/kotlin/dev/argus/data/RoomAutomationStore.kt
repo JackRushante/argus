@@ -2,6 +2,7 @@ package dev.argus.data
 
 import dev.argus.data.dao.AutomationDao
 import dev.argus.data.entities.AutomationEntity
+import dev.argus.data.entities.FireClaimEntity
 import dev.argus.engine.model.ArgusJson
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
@@ -10,6 +11,8 @@ import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.SCHEMA_VERSION
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.AutomationStore
+import dev.argus.engine.runtime.FireClaimRequest
+import dev.argus.engine.runtime.FireClaimResult
 
 /**
  * [AutomationStore] su Room. Le query girano sui DAO suspend, quindi Room le esegue fuori dal
@@ -31,10 +34,7 @@ class RoomAutomationStore(private val dao: AutomationDao) : AutomationStore {
         dao.armed().map(::toDomain)
 
     override suspend fun save(a: Automation) {
-        // Preserva lastFiredAt di un'eventuale riga esistente: una ri-save (edit) non deve
-        // azzerare il cooldown in corso.
-        val existingLastFired = dao.lastFiredAt(a.id.value)
-        dao.upsert(toEntity(a, existingLastFired))
+        dao.upsertPreservingLastFired(toEntity(a, lastFiredAt = null))
     }
 
     override suspend fun setStatus(id: AutomationId, status: AutomationStatus) =
@@ -45,6 +45,18 @@ class RoomAutomationStore(private val dao: AutomationDao) : AutomationStore {
 
     override suspend fun lastFiredAt(id: AutomationId): Long? =
         dao.lastFiredAt(id.value)
+
+    override suspend fun claimFire(request: FireClaimRequest): FireClaimResult =
+        dao.claimFire(
+            claim = FireClaimEntity(
+                automationId = request.automationId.value,
+                eventIdHash = identifierHash(request.eventId.value),
+                executionId = request.executionId.value,
+                claimedAtMillis = request.atMillis,
+            ),
+            atMillis = request.atMillis,
+            cooldownMs = request.cooldownMs,
+        )
 
     // --- mapping -------------------------------------------------------------
 

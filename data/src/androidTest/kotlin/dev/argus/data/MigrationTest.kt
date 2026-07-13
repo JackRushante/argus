@@ -8,9 +8,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * Scaffolding migrazioni (T3 Step 4). Con lo schema v1 esportato in assets, valida che aprire un
- * DB v1 sia un no-op (nessuna migrazione ancora). Le future v1->v2 aggiungono `addMigrations(...)`
- * qui. Richiede un device/emulatore (instrumented) — fuori dallo scope del dry-run unit.
+ * Verifica strutturale della migrazione che introduce claim idempotenti e correlazione audit.
  */
 @RunWith(AndroidJUnit4::class)
 class MigrationTest {
@@ -22,10 +20,9 @@ class MigrationTest {
     )
 
     @Test
-    fun migrate_v1_isNoOp() {
+    fun migrate_v1_to_v2() {
         helper.createDatabase(TEST_DB, 1).close()
-        // Nessuna migrazione registrata: riaprire/validare a v1 deve riuscire invariato.
-        helper.runMigrationsAndValidate(TEST_DB, 1, true).close()
+        helper.runMigrationsAndValidate(TEST_DB, 2, true, ArgusDatabase.MIGRATION_1_2).close()
     }
 
     private companion object {

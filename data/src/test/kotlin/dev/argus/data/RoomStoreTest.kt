@@ -16,6 +16,13 @@ import dev.argus.engine.model.Transition
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.AuditEvent
 import dev.argus.engine.runtime.AuditKind
+import dev.argus.engine.runtime.ExecutionId
+import dev.argus.engine.runtime.FireClaimRequest
+import dev.argus.engine.runtime.FireClaimResult
+import dev.argus.engine.runtime.TriggerEventId
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Before
@@ -166,6 +173,62 @@ class RoomStoreTest {
         assertEquals(42, store.lastFiredAt(a.id))
     }
 
+    // --- atomic fire claim / idempotency ------------------------------------
+
+    @Test
+    fun `same event is claimed once and remains duplicate after newer events`() = runTest {
+        val automation = baseArmed("claim-duplicate")
+        store.save(automation)
+
+        assertEquals(FireClaimResult.Claimed, store.claimFire(claim(automation.id, "event-1", 1_000)))
+        assertEquals(FireClaimResult.Claimed, store.claimFire(claim(automation.id, "event-2", 2_000)))
+        assertEquals(
+            FireClaimResult.Duplicate(ExecutionId("exec-event-1")),
+            store.claimFire(claim(automation.id, "event-1", 3_000)),
+        )
+        assertNull(db.automationDao().claimedExecutionId(automation.id.value, "event-1"))
+        assertEquals(
+            "exec-event-1",
+            db.automationDao().claimedExecutionId(automation.id.value, identifierHash("event-1")),
+        )
+    }
+
+    @Test
+    fun `cooldown check and update are atomic across concurrent distinct events`() = runTest {
+        val automation = baseArmed("claim-cooldown")
+        store.save(automation)
+
+        val results = coroutineScope {
+            listOf("event-a", "event-b").map { eventId ->
+                async {
+                    eventId to store.claimFire(
+                        claim(automation.id, eventId, atMillis = 10_000, cooldownMs = 5_000),
+                    )
+                }
+            }.awaitAll()
+        }
+
+        assertEquals(1, results.count { it.second == FireClaimResult.Claimed })
+        assertEquals(1, results.count { it.second is FireClaimResult.Cooldown })
+        assertEquals(10_000, store.lastFiredAt(automation.id))
+
+        val suppressedEvent = results.single { it.second is FireClaimResult.Cooldown }.first
+        assertEquals(
+            FireClaimResult.Duplicate(ExecutionId("exec-$suppressedEvent")),
+            store.claimFire(claim(automation.id, suppressedEvent, atMillis = 20_000, cooldownMs = 5_000)),
+        )
+    }
+
+    @Test
+    fun `disabled automation cannot acquire a fire claim`() = runTest {
+        val automation = baseArmed("claim-disabled").copy(status = AutomationStatus.DISABLED)
+        store.save(automation)
+        assertEquals(
+            FireClaimResult.NotEligible,
+            store.claimFire(claim(automation.id, "event-1", atMillis = 1_000)),
+        )
+    }
+
     // --- decode-fail / schemaVersion → NEEDS_REVIEW (spec E8) ----------------
 
     @Test
@@ -226,13 +289,24 @@ class RoomStoreTest {
     fun `audit sink records events retrievable per automation newest first`() = runTest {
         val id = AutomationId("aud")
         sink.record(AuditEvent(id, AuditKind.SUPPRESSED_COOLDOWN, atMillis = 100))
-        sink.record(AuditEvent(id, AuditKind.FIRED, atMillis = 200, detail = "SetDnd"))
+        sink.record(
+            AuditEvent(
+                id,
+                AuditKind.FIRED,
+                atMillis = 200,
+                detail = "SetDnd",
+                eventId = TriggerEventId("alarm:aud:1"),
+                executionId = ExecutionId("exec-aud-1"),
+            ),
+        )
         sink.record(AuditEvent(AutomationId("other"), AuditKind.ERROR, atMillis = 150))
 
         val rows = db.auditDao().forAutomation(id.value)
         assertEquals(2, rows.size)
         assertEquals(AuditKind.FIRED, rows[0].kind)      // atMillis 200 (più recente)
         assertEquals("SetDnd", rows[0].detail)
+        assertEquals(identifierHash("alarm:aud:1"), rows[0].eventIdHash)
+        assertEquals("exec-aud-1", rows[0].executionId)
         assertEquals(AuditKind.SUPPRESSED_COOLDOWN, rows[1].kind)
     }
 
@@ -247,5 +321,18 @@ class RoomStoreTest {
         actions = listOf(Action.SetWifi(on = true)),
         conditions = null,
         enabled = true,
+    )
+
+    private fun claim(
+        automationId: AutomationId,
+        eventId: String,
+        atMillis: Long,
+        cooldownMs: Long = 0,
+    ) = FireClaimRequest(
+        automationId = automationId,
+        eventId = TriggerEventId(eventId),
+        executionId = ExecutionId("exec-$eventId"),
+        atMillis = atMillis,
+        cooldownMs = cooldownMs,
     )
 }

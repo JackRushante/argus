@@ -48,15 +48,18 @@ sono sostituiti da questo documento.
 - [x] Validazione completa di tempo, location, state, limiti e campi azione.
 - [x] Fix DST con risultato sempre strettamente `> after` e regression test.
 - [x] Engine cancellation-safe, isolamento per azione e timestamp singolo.
-- [ ] Event/execution ID e claim/cooldown atomico nel contratto store.
-- [ ] Revalidazione policy/capability al fire-time.
+- [x] Event/execution ID e claim/cooldown atomico nel contratto store.
+- [x] Revalidazione policy/capability al fire-time.
 
 Gate H1: tutti i bypass e i casi DST dell'audit devono essere test verdi; nessun
 consumer Android può aggirare la policy.
 
+Verifica 2026-07-13: 87 test engine + 15 test Room verdi; migrazione Room v1→v2
+validata sul OnePlus API 36 via instrumentation ADB. Gli event ID sono hashati nel DB.
+
 ### H2 — persistenza, approvazione e audit
 
-- [ ] Fix TOCTOU `save()` in transazione.
+- [x] Fix TOCTOU `save()` in transazione.
 - [ ] `AutomationStore`: `all/observe/delete/claim` e state machine coerente.
 - [ ] Quarantena persistente del JSON corrotto; `armed()` restituisce solo ARMED.
 - [ ] Draft repository con revision/fingerprint e arm transazionale.

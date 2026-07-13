@@ -280,7 +280,12 @@ private fun RecentRunsSection(runs: List<LogRow>, onOpenFullLog: () -> Unit) {
 private fun RunRow(row: LogRow) {
     val (icon, color) = runVisual(row)
     // §6.4: soppressioni/condizioni-non-soddisfatte sono rumore utile -> attenuate.
-    val attenuated = row.kind == AuditKind.SUPPRESSED_COOLDOWN || row.kind == AuditKind.CONDITIONS_NOT_MET
+    val attenuated = row.kind in setOf(
+        AuditKind.SUPPRESSED_DUPLICATE,
+        AuditKind.SUPPRESSED_COOLDOWN,
+        AuditKind.SUPPRESSED_NOT_ELIGIBLE,
+        AuditKind.CONDITIONS_NOT_MET,
+    )
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -307,7 +312,10 @@ private fun runVisual(row: LogRow): Pair<ImageVector, Color> {
     val faint = MaterialTheme.colorScheme.onSurfaceVariant
     return when (row.kind) {
         AuditKind.ERROR -> Icons.Rounded.Error to s.error.fg
+        AuditKind.BLOCKED_POLICY -> Icons.Rounded.Error to s.error.fg
+        AuditKind.SUPPRESSED_DUPLICATE,
         AuditKind.SUPPRESSED_COOLDOWN -> Icons.Rounded.Block to faint
+        AuditKind.SUPPRESSED_NOT_ELIGIBLE -> Icons.Rounded.Block to faint
         AuditKind.CONDITIONS_NOT_MET -> Icons.Rounded.FilterAltOff to faint
         AuditKind.FIRED -> when (row.outcome) {
             LogOutcome.SUCCESS -> Icons.Rounded.CheckCircle to s.armed.fg

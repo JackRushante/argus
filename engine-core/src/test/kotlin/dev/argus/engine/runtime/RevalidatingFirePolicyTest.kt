@@ -1,0 +1,166 @@
+package dev.argus.engine.runtime
+
+import dev.argus.engine.model.Action
+import dev.argus.engine.model.Automation
+import dev.argus.engine.model.AutomationId
+import dev.argus.engine.model.AutomationStatus
+import dev.argus.engine.model.CreatedBy
+import dev.argus.engine.model.DndMode
+import dev.argus.engine.model.Trigger
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.test.runTest
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertIs
+import kotlin.test.assertTrue
+
+class RevalidatingFirePolicyTest {
+    private fun automation(trigger: Trigger, actions: List<Action>) = Automation(
+        id = AutomationId("a1"),
+        name = "test",
+        createdBy = CreatedBy.LLM,
+        status = AutomationStatus.ARMED,
+        trigger = trigger,
+        actions = actions,
+    )
+
+    private fun snapshot(
+        knownTools: Set<String> = setOf("whatsapp_reply", "state.read"),
+        availableCapabilities: Set<String>,
+        whitelist: Set<String> = emptySet(),
+    ) = FirePolicySnapshot(knownTools, availableCapabilities, whitelist)
+
+    private fun policy(value: FirePolicySnapshot) =
+        RevalidatingFirePolicy(FirePolicySnapshotProvider { value })
+
+    @Test
+    fun `valid deterministic automation is allowed when capability is live`() = runTest {
+        val automation = automation(
+            Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
+            listOf(Action.SetDnd(DndMode.PRIORITY)),
+        )
+        val result = policy(snapshot(availableCapabilities = setOf(ActionCapabilities.SET_DND)))
+            .evaluate(automation, TriggerEvent.TimeFired(automation.id))
+        assertEquals(FirePolicyDecision.Allow, result)
+    }
+
+    @Test
+    fun `policy revalidates forbidden generative tools after approval`() = runTest {
+        val automation = automation(
+            Trigger.Notification("com.whatsapp", conversationId = "jid:42", isGroup = false),
+            listOf(Action.InvokeLlm("reply", listOf("notification"), listOf("whatsapp_reply", "shell.run"), true)),
+        )
+        val result = policy(
+            snapshot(
+                knownTools = setOf("whatsapp_reply", "shell.run"),
+                availableCapabilities = setOf(ActionCapabilities.INVOKE_LLM, "whatsapp_reply", "shell.run"),
+                whitelist = setOf("jid:42"),
+            ),
+        ).evaluate(
+            automation,
+            TriggerEvent.NotificationPosted(
+                "com.whatsapp", "jid:42", isGroup = false, notificationKey = "sbn:1",
+            ),
+        )
+        val block = assertIs<FirePolicyDecision.Block>(result)
+        assertTrue(block.needsReview)
+        assertEquals("validation_failed", block.code)
+    }
+
+    @Test
+    fun `revoked whitelist fails closed at fire time`() = runTest {
+        val automation = automation(
+            Trigger.Notification("com.whatsapp", conversationId = "jid:42", isGroup = false),
+            listOf(Action.WhatsAppReply("ok")),
+        )
+        val result = policy(
+            snapshot(availableCapabilities = setOf(ActionCapabilities.WHATSAPP_REPLY), whitelist = emptySet()),
+        ).evaluate(
+            automation,
+            TriggerEvent.NotificationPosted(
+                "com.whatsapp", "jid:42", isGroup = false, notificationKey = "sbn:1",
+            ),
+        )
+        val block = assertIs<FirePolicyDecision.Block>(result)
+        assertTrue(block.needsReview)
+        assertEquals("validation_failed", block.code)
+    }
+
+    @Test
+    fun `revoked action capability pauses the automation`() = runTest {
+        val automation = automation(
+            Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
+            listOf(Action.SetDnd(DndMode.PRIORITY)),
+        )
+        val block = assertIs<FirePolicyDecision.Block>(
+            policy(snapshot(availableCapabilities = emptySet()))
+                .evaluate(automation, TriggerEvent.TimeFired(automation.id)),
+        )
+        assertTrue(block.needsReview)
+        assertEquals("capability_unavailable", block.code)
+    }
+
+    @Test
+    fun `reply requires verified one-to-one metadata and live notification key`() = runTest {
+        val automation = automation(
+            Trigger.Notification("com.whatsapp", conversationId = "jid:42", isGroup = false),
+            listOf(Action.WhatsAppReply("ok")),
+        )
+        val policy = policy(
+            snapshot(
+                availableCapabilities = setOf(ActionCapabilities.WHATSAPP_REPLY),
+                whitelist = setOf("jid:42"),
+            ),
+        )
+
+        val unknownGroup = policy.evaluate(
+            automation,
+            TriggerEvent.NotificationPosted("com.whatsapp", "jid:42", isGroup = null, notificationKey = "sbn:1"),
+        )
+        assertEquals("reply_event_unverified", assertIs<FirePolicyDecision.Block>(unknownGroup).code)
+
+        val missingKey = policy.evaluate(
+            automation,
+            TriggerEvent.NotificationPosted("com.whatsapp", "jid:42", isGroup = false, notificationKey = null),
+        )
+        val transient = assertIs<FirePolicyDecision.Block>(missingKey)
+        assertEquals("reply_notification_unavailable", transient.code)
+        assertTrue(!transient.needsReview)
+    }
+
+    @Test
+    fun `run shell remains blocked without a live confirmation flow`() = runTest {
+        val automation = automation(
+            Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
+            listOf(Action.RunShell("id")),
+        )
+        val block = assertIs<FirePolicyDecision.Block>(
+            policy(snapshot(availableCapabilities = setOf(ActionCapabilities.RUN_SHELL)))
+                .evaluate(automation, TriggerEvent.TimeFired(automation.id)),
+        )
+        assertEquals("live_confirmation_required", block.code)
+        assertTrue(!block.needsReview)
+    }
+
+    @Test
+    fun `snapshot failure is fail closed and coroutine cancellation propagates`() = runTest {
+        val automation = automation(
+            Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
+            listOf(Action.SetDnd(DndMode.PRIORITY)),
+        )
+        val failed = RevalidatingFirePolicy(FirePolicySnapshotProvider { error("probe down") })
+        val block = assertIs<FirePolicyDecision.Block>(
+            failed.evaluate(automation, TriggerEvent.TimeFired(automation.id)),
+        )
+        assertEquals("capability_snapshot_unavailable", block.code)
+        assertTrue(!block.needsReview)
+
+        val cancelled = RevalidatingFirePolicy(
+            FirePolicySnapshotProvider { throw CancellationException("stop") },
+        )
+        assertFailsWith<CancellationException> {
+            cancelled.evaluate(automation, TriggerEvent.TimeFired(automation.id))
+        }
+    }
+}

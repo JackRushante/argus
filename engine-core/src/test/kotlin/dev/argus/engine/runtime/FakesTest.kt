@@ -6,7 +6,12 @@ import kotlin.test.assertEquals
 class FakesTest {
     @Test fun `fake executor records calls and submits generative`() = runTest {
         val ex = FakeActionExecutor()
-        val ctx = FireContext(TriggerEvent.TimeFired(AutomationId("a1")), DeviceState(), AutomationId("a1"))
+        val eventId = TriggerEventId("alarm:a1:1")
+        val automationId = AutomationId("a1")
+        val ctx = FireContext(
+            TriggerEvent.TimeFired(automationId), DeviceState(), automationId, eventId,
+            StableExecutionIdFactory.create(automationId, eventId),
+        )
         assertEquals(ActionResult.Success, ex.execute(Action.SetWifi(false), ctx))
         assertEquals(ActionResult.Submitted, ex.execute(Action.InvokeLlm("g", listOf(), listOf("whatsapp_reply"), true), ctx))
         assertEquals(2, ex.executed.size)
