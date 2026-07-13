@@ -1,5 +1,11 @@
 # Argus — Piano P0-B: Glue Android (Shizuku, Room, AlarmManager, bridge Hermes)
 
+> **⚠️ Emendamento Commander (2026-07-13):** questo piano va eseguito insieme a
+> [`2026-07-13-argus-commander-replan.md`](2026-07-13-argus-commander-replan.md).
+> Il gate di hardening del core/contratti viene prima di Shizuku; il vincolo
+> “`engine-core` non cambia” è revocato. Il FGS persistente e `USE_EXACT_ALARM`
+> non fanno più parte dell'architettura approvata.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 > **⚠️ Prerequisiti hardware/sessione (questo piano NON è interamente sviluppabile a secco):**
@@ -17,7 +23,7 @@
 ## Global Constraints
 
 - **Shizuku è l'unico canale privilegiato.** Nessun `Runtime.exec("su")` diretto: tutto passa da `core-shizuku`. Shell UID 2000 (parità adb) è il privilegio di default.
-- **`engine-core` non cambia** (è la fonte di verità dei tipi/contratti). P0-B *implementa* le sue interfacce, non le riscrive: `ActionExecutor` (con `Submitted` per generative), `AutomationStore`, `AuditSink`, `CapabilityProbe`, `Brain`.
+- **`engine-core` cambia solo tramite il gate di hardening documentato nel replan**: sicurezza fail-closed, DST, cancellation, idempotenza e contratti store/audit vengono corretti prima del wiring Android. Dopo il gate, le interfacce tornano congelate per l'implementazione P0-B.
 - **Ogni draft passa dal `DraftValidator` prima dell'arm**; `Severity.ERROR` ⇒ `canArm=false`. Invariante ri-verificato al fire-time sugli `allowed_tools` (difesa in profondità, spec §10.4).
 - **⚠️ (da review P0-A Unit D) Passare SEMPRE la whitelist del manifest a `DraftValidator.validate(draft, whitelistedIds)`.** Il controllo `target_not_whitelisted` scatta *solo se* `whitelistedIds` è non vuota: chiamare `validate(draft)` senza whitelist lascia passare reply generative verso *qualsiasi* `conversationId` 1:1. In P0-B (T8 `ApprovalFlow`, T9 ViewModel) la whitelist reale va sempre threaded; valutare fail-closed su whitelist vuota per le reply generative. Opz. hardening: normalizzare il case dei tool forbidden e vietare il prefisso `automation` nudo (oggi dot-exact/case-sensitive, coperto dall'allowlist deny-by-default ma non stand-alone).
 - **Decode Room fallito o `schemaVersion` incompatibile → `NEEDS_REVIEW`**, mai drop silenzioso (spec E8).

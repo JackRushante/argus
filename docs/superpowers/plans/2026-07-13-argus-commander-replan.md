@@ -1,0 +1,117 @@
+# Argus — Commander replan: hardening e completamento P0-B
+
+Data: 2026-07-13  
+Base verificata: `5a993d1` + icona `8950bc1`  
+Device: OnePlus CPH2747, Android 16/API 36, ADB `100.74.117.9:5555`, Shizuku 13.6 attivo.
+
+## Perché esiste questo emendamento
+
+Le review P0-A/P0-B hanno verificato la conformità ai brief, ma i brief conservano
+assunzioni che non reggono alla frontiera di sicurezza reale. Sono riproducibili:
+
+- whitelist reply fail-open e bypass con `replyTargetSender=false`;
+- `WhatsAppReply` statico privo delle stesse barriere destinatario;
+- cron DST che può restituire un istante non strettamente futuro;
+- cooldown check/record non atomico e nessuna idempotenza evento/esecuzione;
+- eccezione di una singola azione che interrompe le successive e cancellation inghiottita;
+- `/compile` che ignora `schema_version`, `DeviceState` non inviato e body illimitato;
+- store/audit insufficienti per ViewModel, recovery e lane generativa;
+- FGS persistente e `USE_EXACT_ALARM` incompatibili con il modello Android corrente.
+
+Il piano originale resta utile come catalogo dei task, ma l'ordine e alcuni contratti
+sono sostituiti da questo documento.
+
+## Regole di esecuzione
+
+1. Un solo writer; commit piccoli e reversibili.
+2. Ogni bug riprodotto diventa un test rosso prima del fix.
+3. Nessun effetto privilegiato senza execution ID, policy e audit correlabile.
+4. Sicurezza fail-closed: metadata sconosciuto, capability revocata o schema futuro
+   bloccano l'arm/esecuzione e portano a `NEEDS_REVIEW` quando opportuno.
+5. Verifica sul OnePlus dopo ogni modulo Android; niente modifica manuale dell'orologio.
+6. Payload sensibili minimizzati; niente testo notifica/contact ID nei log diagnostici.
+
+## Sequenza vincolante
+
+### H0 — baseline e piano
+
+- [x] Snapshot branch/remoto e working tree.
+- [x] ADB e Shizuku verificati sul device.
+- [x] Icona isolata in commit dedicato.
+- [ ] Full baseline test/lint su tutti i moduli.
+
+### H1 — security/runtime core (prima di Shizuku)
+
+- [ ] Reply policy unica e fail-closed per reply statiche/generative.
+- [ ] Rimuovere il bypass pubblico `replyTargetSender=false` o renderlo non armabile.
+- [ ] Validazione completa di tempo, location, state, limiti e campi azione.
+- [ ] Fix DST con risultato sempre strettamente `> after` e property/regression test.
+- [ ] Engine cancellation-safe, isolamento per azione e timestamp singolo.
+- [ ] Event/execution ID e claim/cooldown atomico nel contratto store.
+- [ ] Revalidazione policy/capability al fire-time.
+
+Gate H1: tutti i bypass e i casi DST dell'audit devono essere test verdi; nessun
+consumer Android può aggirare la policy.
+
+### H2 — persistenza, approvazione e audit
+
+- [ ] Fix TOCTOU `save()` in transazione.
+- [ ] `AutomationStore`: `all/observe/delete/claim` e state machine coerente.
+- [ ] Quarantena persistente del JSON corrotto; `armed()` restituisce solo ARMED.
+- [ ] Draft repository con revision/fingerprint e arm transazionale.
+- [ ] Execution journal + action result correlati; retention/redazione.
+- [ ] Regole backup Android per escludere segreti, contatti, audit e chat.
+
+### H3 — brain/bridge
+
+- [ ] Parser `/compile` strict: `schema_version` obbligatoria e compatibile.
+- [ ] `reply` type-safe, body limitato, content type verificato, cancellation testata.
+- [ ] Inviare solo lo `DeviceState` richiesto e redatto; eliminare il commento falso.
+- [ ] Bridge Hermes `/compile` versionato, autenticato, idempotente e testato live.
+- [ ] HTTPS o trasporto autenticato equivalente; niente opt-in cleartext globale.
+- [ ] Test Android 16 Local Network Protection/Tailscale e denial path.
+
+### H4 — Android scheduling e capability
+
+- [ ] Portare compile/target SDK a 36 e testare predictive back/edge-to-edge.
+- [ ] `SCHEDULE_EXACT_ALARM` solo per regole realmente precise, con fallback inexact.
+- [ ] Reconciliation su boot, time/timezone change, package replace, grant/revoca.
+- [ ] Nessun FGS persistente: componenti event-driven e FGS breve solo se ammesso.
+- [ ] Capability requirements persistite; revoca -> pausa/`NEEDS_REVIEW`.
+
+### H5 — Shizuku, device-tools ed executor
+
+- [ ] `core-shizuku` con UserService/gateway verificato su API 36.
+- [ ] Coda single-writer con priority + execution ID, timeout e output cap.
+- [ ] `device-tools` tipizzati e test non distruttivi sul device.
+- [ ] Executor per-action; `RunShell` bloccato finché manca conferma live.
+
+### H6 — wiring reale e UI
+
+- [ ] ViewModel/Hilt con Flow e recovery process-death.
+- [ ] Correggere log ID/generative, privacy note, CloudTag, loading e conferme.
+- [ ] Bloccare in UI le capability/fasi non implementate.
+- [ ] String resources, accessibilità e test Compose/navigation essenziali.
+
+### H7 — E2E e merge
+
+- [ ] Chat -> compile -> review -> fingerprint -> arm -> alarm -> DND -> journal.
+- [ ] Negative E2E: denial/revoca, duplicate event, crash/retry, Shizuku down,
+  schema futuro, bridge lento/malformato, reboot/process death e DST.
+- [ ] Full test/lint/build, install pulita su OnePlus e smoke UI.
+- [ ] Aggiornare spec/ledger, push backup, review finale e merge no-ff su master.
+
+## Decisioni Android 16
+
+- Baseline di sviluppo: compile/target 36; minSdk resta 30.
+- Le connessioni Tailscale devono essere provate anche con compat flag
+  `RESTRICT_LOCAL_NETWORK`; il range CGNAT `100.64.0.0/10` è rilevante per la
+  protezione LAN, anche se il traffico passa da VPN.
+- I job avviati da FGS rispettano comunque le quote su Android 16; un service
+  “sempre vivo” non è una scorciatoia valida.
+- Network Security Config deve negare cleartext per default.
+
+## Definition of Done P0-B
+
+P0-B è completo solo quando l'E2E deterministico DND passa sul device e i negative
+gate H1-H3 sono verdi. Un APK che compila o una demo UI non costituiscono completion.
