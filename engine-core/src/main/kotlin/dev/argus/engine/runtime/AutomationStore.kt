@@ -32,6 +32,8 @@ interface AutomationStore {
     suspend fun save(a: Automation)
     suspend fun delete(id: AutomationId)
     suspend fun disable(id: AutomationId)
+    /** Riattiva solo una regola ancora identica allo snapshot approvato. */
+    suspend fun enable(id: AutomationId): Boolean
     suspend fun markNeedsReview(id: AutomationId)
 
     /** Claim idempotente e check+update cooldown DEVONO essere una singola operazione atomica. */

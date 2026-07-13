@@ -41,6 +41,9 @@ interface AutomationDao {
     @Upsert
     suspend fun upsert(entity: AutomationEntity)
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertAutomation(entity: AutomationEntity): Long
+
     /** Evita il lost update fra edit/save e claim del cooldown. */
     @Transaction
     suspend fun upsertPreservingLastFired(entity: AutomationEntity) {
@@ -52,6 +55,21 @@ interface AutomationDao {
             "WHERE id = :id AND status IN ('ARMED', 'PENDING_APPROVAL')",
     )
     suspend fun disable(id: String): Int
+
+    @Query(
+        "UPDATE automations SET status = 'ARMED', enabled = 1 " +
+            "WHERE id = :id AND status = 'DISABLED' AND enabled = 0 " +
+            "AND json = :expectedJson AND name = :expectedName AND priority = :expectedPriority " +
+            "AND cooldownMs = :expectedCooldownMs AND schemaVersion = :expectedSchemaVersion",
+    )
+    suspend fun enableIfUnchanged(
+        id: String,
+        expectedJson: String,
+        expectedName: String,
+        expectedPriority: Int,
+        expectedCooldownMs: Long,
+        expectedSchemaVersion: Int,
+    ): Int
 
     @Query(
         "UPDATE automations SET status = 'NEEDS_REVIEW', enabled = 0 " +

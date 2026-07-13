@@ -3,6 +3,7 @@ package dev.argus.engine.runtime
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationDraft
+import dev.argus.engine.model.ApprovalFingerprints
 import dev.argus.engine.model.SCHEMA_VERSION
 import dev.argus.engine.safety.DraftValidator
 import dev.argus.engine.safety.Severity
@@ -63,6 +64,9 @@ class RevalidatingFirePolicy(
 
         if (automation.schemaVersion != SCHEMA_VERSION)
             return FirePolicyDecision.Block("schema_incompatible", needsReview = true)
+        if (automation.approvalFingerprint == null ||
+            automation.approvalFingerprint != ApprovalFingerprints.of(automation)
+        ) return FirePolicyDecision.Block("approval_fingerprint_mismatch", needsReview = true)
 
         val draft = AutomationDraft(
             name = automation.name,

@@ -2,6 +2,7 @@ package dev.argus.data
 
 import androidx.room.TypeConverter
 import dev.argus.engine.model.AutomationStatus
+import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.runtime.AuditKind
 
 /**
@@ -11,6 +12,9 @@ import dev.argus.engine.runtime.AuditKind
 class Converters {
     @TypeConverter fun statusToString(s: AutomationStatus): String = s.name
     @TypeConverter fun stringToStatus(s: String): AutomationStatus = AutomationStatus.valueOf(s)
+
+    @TypeConverter fun createdByToString(value: CreatedBy): String = value.name
+    @TypeConverter fun stringToCreatedBy(value: String): CreatedBy = CreatedBy.valueOf(value)
 
     @TypeConverter fun auditKindToString(k: AuditKind): String = k.name
     @TypeConverter fun stringToAuditKind(s: String): AuditKind = AuditKind.valueOf(s)

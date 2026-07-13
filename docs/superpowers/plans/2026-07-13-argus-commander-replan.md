@@ -60,11 +60,15 @@ validata sul OnePlus API 36 via instrumentation ADB. Gli event ID sono hashati n
 ### H2 — persistenza, approvazione e audit
 
 - [x] Fix TOCTOU `save()` in transazione.
-- [ ] `AutomationStore`: `all/observe/delete/claim` completati; chiudere la state machine con l'arm fingerprintato.
+- [x] `AutomationStore`: `all/observe/delete/claim` e state machine con arm fingerprintato.
 - [x] Quarantena persistente del JSON corrotto; `armed()` restituisce solo ARMED.
-- [ ] Draft repository con revision/fingerprint e arm transazionale.
+- [x] Draft repository con revision/fingerprint e arm transazionale.
 - [ ] Execution journal + action result correlati; retention/redazione.
 - [ ] Regole backup Android per escludere segreti, contatti, audit e chat.
+
+Verifica H2 parziale 2026-07-13: 90 test engine + 24 test Room verdi. Migrazioni
+Room v1→v3 e v2→v3 validate sul OnePlus API 36 (`OK (2 tests)`). Una modifica
+post-review o un flip diretto ad ARMED senza fingerprint porta a `NEEDS_REVIEW`.
 
 ### H3 — brain/bridge
 

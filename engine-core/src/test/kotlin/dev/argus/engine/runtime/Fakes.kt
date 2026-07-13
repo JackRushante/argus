@@ -5,6 +5,7 @@ import dev.argus.engine.model.ActionTier
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
+import dev.argus.engine.model.ApprovalFingerprints
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -65,6 +66,24 @@ class FakeAutomationStore(seed: List<Automation> = emptyList()) : AutomationStor
         map[id]?.let { map[id] = it.copy(status = AutomationStatus.DISABLED, enabled = false) }
         publish()
         Unit
+    }
+
+    override suspend fun enable(id: AutomationId): Boolean = mutex.withLock {
+        val current = map[id] ?: return@withLock false
+        if (current.status != AutomationStatus.DISABLED || current.enabled ||
+            current.approvalFingerprint == null ||
+            current.approvalFingerprint != ApprovalFingerprints.of(current)
+        ) {
+            if (current.status == AutomationStatus.DISABLED &&
+                (current.approvalFingerprint == null ||
+                    current.approvalFingerprint != ApprovalFingerprints.of(current))
+            ) map[id] = current.copy(status = AutomationStatus.NEEDS_REVIEW, enabled = false)
+            publish()
+            return@withLock false
+        }
+        map[id] = current.copy(status = AutomationStatus.ARMED, enabled = true)
+        publish()
+        true
     }
 
     override suspend fun markNeedsReview(id: AutomationId): Unit = mutex.withLock {

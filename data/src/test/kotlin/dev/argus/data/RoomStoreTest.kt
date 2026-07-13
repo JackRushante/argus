@@ -6,6 +6,7 @@ import dev.argus.engine.model.Action
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
+import dev.argus.engine.model.ApprovalFingerprints
 import dev.argus.engine.model.CmpOp
 import dev.argus.engine.model.Condition
 import dev.argus.engine.model.ConnMedium
@@ -57,7 +58,7 @@ class RoomStoreTest {
 
     @Test
     fun `round-trips a Time trigger with SetDnd action and TimeWindow condition`() = runTest {
-        val a = Automation(
+        val a = signed(Automation(
             id = AutomationId("dnd-night"),
             name = "Dopo le 23 → DND",
             createdBy = CreatedBy.LLM,
@@ -68,14 +69,14 @@ class RoomStoreTest {
             enabled = true,
             priority = 5,
             cooldownMs = 60_000,
-        )
+        ))
         store.save(a)
         assertEquals(a, store.get(a.id))
     }
 
     @Test
     fun `round-trips a Geofence trigger with generative action and nested conditions`() = runTest {
-        val a = Automation(
+        val a = signed(Automation(
             id = AutomationId("home-arrive"),
             name = "A casa: wifi + riepilogo",
             createdBy = CreatedBy.USER,
@@ -98,17 +99,17 @@ class RoomStoreTest {
             ),
             enabled = true,
             priority = 0,
-        )
+        ))
         store.save(a)
         assertEquals(a, store.get(a.id))
     }
 
     @Test
     fun `round-trips a Connectivity trigger`() = runTest {
-        val a = baseArmed("power-plug").copy(
+        val a = signed(baseArmed("power-plug").copy(
             trigger = Trigger.Connectivity(ConnMedium.POWER, ConnState.CONNECTED),
             actions = listOf(Action.SetBluetooth(on = false), Action.ShowNotification("t", "x")),
-        )
+        ))
         store.save(a)
         assertEquals(a, store.get(a.id))
     }
@@ -122,7 +123,7 @@ class RoomStoreTest {
     fun `save is idempotent upsert and reflects edits`() = runTest {
         val a = baseArmed("edit-me")
         store.save(a)
-        val edited = a.copy(name = "nuovo nome", priority = 9)
+        val edited = signed(a.copy(name = "nuovo nome", priority = 9))
         store.save(edited)
         assertEquals(edited, store.get(a.id))
     }
@@ -131,8 +132,8 @@ class RoomStoreTest {
 
     @Test
     fun `armed returns only ARMED and enabled ordered by priority ascending`() = runTest {
-        store.save(baseArmed("p2").copy(priority = 2))
-        store.save(baseArmed("p1").copy(priority = 1))
+        store.save(signed(baseArmed("p2").copy(priority = 2)))
+        store.save(signed(baseArmed("p1").copy(priority = 1)))
         store.save(baseArmed("disabled").copy(enabled = false))
         store.save(baseArmed("pending").copy(status = AutomationStatus.PENDING_APPROVAL))
         store.save(baseArmed("disabled-status").copy(status = AutomationStatus.DISABLED))
@@ -154,9 +155,25 @@ class RoomStoreTest {
     }
 
     @Test
+    fun `enable restores only an unchanged approved automation`() = runTest {
+        val automation = baseArmed("toggle-safe")
+        store.save(automation)
+        store.disable(automation.id)
+
+        assertTrue(store.enable(automation.id))
+        assertEquals(AutomationStatus.ARMED, store.get(automation.id)?.status)
+        store.disable(automation.id)
+
+        // Un edit eseguibile conserva volontariamente la vecchia prova: deve fallire chiuso.
+        store.save(automation.copy(name = "edit non approvato", status = AutomationStatus.DISABLED, enabled = false))
+        assertTrue(!store.enable(automation.id))
+        assertEquals(AutomationStatus.NEEDS_REVIEW, store.get(automation.id)?.status)
+    }
+
+    @Test
     fun `all and observeAll expose every rule in stable priority order`() = runTest {
-        store.save(baseArmed("p2").copy(priority = 2))
-        store.save(baseArmed("p1").copy(priority = 1, status = AutomationStatus.DISABLED))
+        store.save(signed(baseArmed("p2").copy(priority = 2)))
+        store.save(signed(baseArmed("p1").copy(priority = 1, status = AutomationStatus.DISABLED)))
 
         assertEquals(listOf("p1", "p2"), store.all().map { it.id.value })
         assertEquals(listOf("p1", "p2"), store.observeAll().first().map { it.id.value })
@@ -192,7 +209,7 @@ class RoomStoreTest {
         val a = baseArmed("fire-keep")
         store.save(a)
         store.recordFired(a.id, 42)
-        store.save(a.copy(name = "rinominata")) // edit dopo lo scatto
+        store.save(signed(a.copy(name = "rinominata"))) // edit approvato dopo lo scatto
         assertEquals(42, store.lastFiredAt(a.id))
     }
 
@@ -340,16 +357,21 @@ class RoomStoreTest {
 
     // --- helpers -------------------------------------------------------------
 
-    private fun baseArmed(id: String) = Automation(
-        id = AutomationId(id),
-        name = "auto-$id",
-        createdBy = CreatedBy.USER,
-        status = AutomationStatus.ARMED,
-        trigger = Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
-        actions = listOf(Action.SetWifi(on = true)),
-        conditions = null,
-        enabled = true,
+    private fun baseArmed(id: String) = signed(
+        Automation(
+            id = AutomationId(id),
+            name = "auto-$id",
+            createdBy = CreatedBy.USER,
+            status = AutomationStatus.ARMED,
+            trigger = Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+            actions = listOf(Action.SetWifi(on = true)),
+            conditions = null,
+            enabled = true,
+        ),
     )
+
+    private fun signed(value: Automation): Automation =
+        value.copy(approvalFingerprint = ApprovalFingerprints.of(value))
 
     private fun claim(
         automationId: AutomationId,

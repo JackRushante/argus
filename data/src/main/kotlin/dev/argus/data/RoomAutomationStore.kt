@@ -7,6 +7,7 @@ import dev.argus.engine.model.ArgusJson
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
+import dev.argus.engine.model.ApprovalFingerprints
 import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.SCHEMA_VERSION
 import dev.argus.engine.model.Trigger
@@ -54,6 +55,27 @@ class RoomAutomationStore(private val dao: AutomationDao) : AutomationStore {
         dao.disable(id.value)
     }
 
+    override suspend fun enable(id: AutomationId): Boolean {
+        val row = dao.getById(id.value) ?: return false
+        if (row.status != AutomationStatus.DISABLED || row.enabled) return false
+        val domain = toDomain(row)
+        if (domain.status != AutomationStatus.DISABLED ||
+            domain.approvalFingerprint == null ||
+            domain.approvalFingerprint != ApprovalFingerprints.of(domain)
+        ) {
+            dao.markNeedsReview(id.value)
+            return false
+        }
+        return dao.enableIfUnchanged(
+            id = row.id,
+            expectedJson = row.json,
+            expectedName = row.name,
+            expectedPriority = row.priority,
+            expectedCooldownMs = row.cooldownMs,
+            expectedSchemaVersion = row.schemaVersion,
+        ) == 1
+    }
+
     override suspend fun markNeedsReview(id: AutomationId) {
         dao.markNeedsReview(id.value)
     }
@@ -95,8 +117,8 @@ class RoomAutomationStore(private val dao: AutomationDao) : AutomationStore {
             if (e.schemaVersion != SCHEMA_VERSION) null
             else runCatching { ArgusJson.decodeFromString(Automation.serializer(), e.json) }.getOrNull()
 
-        // Le colonne piatte sono autoritative sugli scalari (status via setStatus, ecc.).
-        return decoded?.copy(
+        // Le colonne piatte sono autoritative sugli scalari mutabili.
+        val domain = decoded?.copy(
             id = AutomationId(e.id),
             name = e.name,
             status = e.status,
@@ -104,11 +126,17 @@ class RoomAutomationStore(private val dao: AutomationDao) : AutomationStore {
             priority = e.priority,
             cooldownMs = e.cooldownMs,
             schemaVersion = e.schemaVersion,
-        ) ?: run {
+        )
+        if (domain == null ||
+            domain.status == AutomationStatus.ARMED &&
+            (domain.approvalFingerprint == null ||
+                domain.approvalFingerprint != ApprovalFingerprints.of(domain))
+        ) {
             // Quarantena persistente: non basta restituire un placeholder in memoria.
             dao.markNeedsReview(e.id)
-            needsReview(e)
+            return needsReview(e)
         }
+        return domain
     }
 
     /** Placeholder inerte in NEEDS_REVIEW: conserva id/nome per la UI, non è mai armabile. */

@@ -4,6 +4,7 @@ import dev.argus.engine.model.Action
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
+import dev.argus.engine.model.ApprovalFingerprints
 import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.DndMode
 import dev.argus.engine.model.Trigger
@@ -16,14 +17,17 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class RevalidatingFirePolicyTest {
-    private fun automation(trigger: Trigger, actions: List<Action>) = Automation(
-        id = AutomationId("a1"),
-        name = "test",
-        createdBy = CreatedBy.LLM,
-        status = AutomationStatus.ARMED,
-        trigger = trigger,
-        actions = actions,
-    )
+    private fun automation(trigger: Trigger, actions: List<Action>): Automation {
+        val value = Automation(
+            id = AutomationId("a1"),
+            name = "test",
+            createdBy = CreatedBy.LLM,
+            status = AutomationStatus.ARMED,
+            trigger = trigger,
+            actions = actions,
+        )
+        return value.copy(approvalFingerprint = ApprovalFingerprints.of(value))
+    }
 
     private fun snapshot(
         knownTools: Set<String> = setOf("whatsapp_reply", "state.read"),
@@ -99,6 +103,21 @@ class RevalidatingFirePolicyTest {
         )
         assertTrue(block.needsReview)
         assertEquals("capability_unavailable", block.code)
+    }
+
+    @Test
+    fun `edit after approval invalidates the fingerprint`() = runTest {
+        val approved = automation(
+            Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
+            listOf(Action.SetDnd(DndMode.PRIORITY)),
+        )
+        val editedWithoutApproval = approved.copy(actions = listOf(Action.SetDnd(DndMode.TOTAL)))
+        val block = assertIs<FirePolicyDecision.Block>(
+            policy(snapshot(availableCapabilities = setOf(ActionCapabilities.SET_DND)))
+                .evaluate(editedWithoutApproval, TriggerEvent.TimeFired(approved.id)),
+        )
+        assertEquals("approval_fingerprint_mismatch", block.code)
+        assertTrue(block.needsReview)
     }
 
     @Test
