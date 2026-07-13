@@ -21,6 +21,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ScheduleSend
+import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
@@ -28,8 +30,6 @@ import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.FilterAltOff
 import androidx.compose.material.icons.rounded.History
-import androidx.compose.material.icons.rounded.ScheduleSend
-import androidx.compose.material.icons.rounded.Send
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -279,7 +279,7 @@ private fun ExpandedDetail(row: LogRow, isDeferred: Boolean, onSendNow: () -> Un
                     contentColor = MaterialTheme.colorScheme.onPrimary,
                 ),
             ) {
-                Icon(Icons.Rounded.Send, contentDescription = null, modifier = Modifier.size(18.dp))
+                Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
                 Text("Invia ora")
             }
@@ -303,8 +303,8 @@ private fun outcomeVisual(row: LogRow): Pair<ImageVector, Color> {
             LogOutcome.SUCCESS -> Icons.Rounded.CheckCircle to s.armed.fg
             LogOutcome.PARTIAL -> Icons.Rounded.CheckCircle to s.pending.fg
             LogOutcome.FAILED -> Icons.Rounded.Error to s.error.fg
-            LogOutcome.SUBMITTED -> Icons.Rounded.ScheduleSend to MaterialTheme.colorScheme.primary
-            LogOutcome.DEFERRED -> Icons.Rounded.ScheduleSend to s.cloud.fg
+            LogOutcome.SUBMITTED -> Icons.AutoMirrored.Rounded.ScheduleSend to MaterialTheme.colorScheme.primary
+            LogOutcome.DEFERRED -> Icons.AutoMirrored.Rounded.ScheduleSend to s.cloud.fg
         }
     }
 }

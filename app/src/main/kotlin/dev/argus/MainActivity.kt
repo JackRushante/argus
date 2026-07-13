@@ -17,8 +17,8 @@ import dev.argus.ui.theme.ArgusTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
-        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         setContent {
             ArgusTheme {
                 ArgusNavHost()

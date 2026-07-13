@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "dev.argus.ui"
-    compileSdk = 35
+    compileSdk = 36
     defaultConfig { minSdk = 30 }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

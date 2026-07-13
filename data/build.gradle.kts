@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "dev.argus.data"
-    compileSdk = 35
+    compileSdk = 36
     defaultConfig {
         minSdk = 30
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

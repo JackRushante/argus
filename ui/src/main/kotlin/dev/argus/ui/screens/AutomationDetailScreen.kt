@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.ScheduleSend
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Delete
@@ -32,7 +33,6 @@ import androidx.compose.material.icons.rounded.FilterAltOff
 import androidx.compose.material.icons.rounded.Insights
 import androidx.compose.material.icons.rounded.Place
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.ScheduleSend
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -321,8 +321,8 @@ private fun runVisual(row: LogRow): Pair<ImageVector, Color> {
             LogOutcome.SUCCESS -> Icons.Rounded.CheckCircle to s.armed.fg
             LogOutcome.PARTIAL -> Icons.Rounded.CheckCircle to s.pending.fg
             LogOutcome.FAILED -> Icons.Rounded.Error to s.error.fg
-            LogOutcome.SUBMITTED -> Icons.Rounded.ScheduleSend to MaterialTheme.colorScheme.primary
-            LogOutcome.DEFERRED -> Icons.Rounded.ScheduleSend to s.cloud.fg
+            LogOutcome.SUBMITTED -> Icons.AutoMirrored.Rounded.ScheduleSend to MaterialTheme.colorScheme.primary
+            LogOutcome.DEFERRED -> Icons.AutoMirrored.Rounded.ScheduleSend to s.cloud.fg
         }
     }
 }
