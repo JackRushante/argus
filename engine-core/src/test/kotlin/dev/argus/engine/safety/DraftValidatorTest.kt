@@ -22,6 +22,17 @@ class DraftValidatorTest {
         val e = errors(v.validate(d, setOf("jid:42")))
         assertEquals(2, e.count { it == "tool_forbidden" })
     }
+    @Test fun `app_install and bare automation and mixed case are all forbidden`() {
+        // app.install è vietato quanto shell.run (oggi solo shell.run+automation.create erano asseriti).
+        val install = validGenerative.copy(actions = listOf(Action.InvokeLlm("g", listOf(), listOf("app.install"), true)))
+        assertTrue("tool_forbidden" in errors(v.validate(install, setOf("jid:42"))))
+        // Prefisso nudo "automation" (senza punto) — non deve cadere in tool_unknown.
+        val bare = validGenerative.copy(actions = listOf(Action.InvokeLlm("g", listOf(), listOf("automation"), true)))
+        assertTrue("tool_forbidden" in errors(v.validate(bare, setOf("jid:42"))))
+        // Case non deve aggirare il gate.
+        val upper = validGenerative.copy(actions = listOf(Action.InvokeLlm("g", listOf(), listOf("SHELL.RUN", "Automation.Create"), true)))
+        assertEquals(2, errors(v.validate(upper, setOf("jid:42"))).count { it == "tool_forbidden" })
+    }
     @Test fun `generative reply on group or without conversationId is rejected`() {
         val group = validGenerative.copy(trigger = Trigger.Notification("com.whatsapp", conversationId = "jid:g", isGroup = null))
         assertTrue("reply_target_group" in errors(v.validate(group, setOf("jid:g"))))

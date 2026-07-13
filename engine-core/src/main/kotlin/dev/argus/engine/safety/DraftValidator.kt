@@ -17,6 +17,8 @@ class DraftValidator(
         /** Mai ammessi al fire-time generativo (spec §7): eseguirebbero azioni arbitrarie mai approvate. */
         val FORBIDDEN_IN_INVOKE_LLM = setOf("shell.run", "app.install")
         const val FORBIDDEN_PREFIX = "automation."
+        /** Prefisso nudo (senza punto): anche `automation` da solo è vietato. */
+        const val FORBIDDEN_PREFIX_BARE = "automation"
     }
 
     fun validate(d: AutomationDraft, whitelistedIds: Set<String> = emptySet()): List<ValidationIssue> {
@@ -82,7 +84,12 @@ class DraftValidator(
     ) {
         if (a.allowedTools.isEmpty()) err("no_tools", "InvokeLlm senza allowed_tools")
         for (tool in a.allowedTools) {
-            if (tool in FORBIDDEN_IN_INVOKE_LLM || tool.startsWith(FORBIDDEN_PREFIX))
+            // Case-insensitive: "SHELL.RUN"/"Automation.Create" non aggirano il gate.
+            val norm = tool.lowercase()
+            val forbidden = norm in FORBIDDEN_IN_INVOKE_LLM ||
+                norm == FORBIDDEN_PREFIX_BARE ||
+                norm.startsWith(FORBIDDEN_PREFIX)
+            if (forbidden)
                 err("tool_forbidden", "Tool '$tool' vietato al fire-time generativo (spec §7/§10.4)")
             else if (tool !in knownTools) err("tool_unknown", "Tool '$tool' non nel catalogo")
         }
