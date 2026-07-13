@@ -23,7 +23,7 @@ class EndToEndTest {
             "\"actions\":[{\"type\":\"set_dnd\",\"mode\":\"PRIORITY\"}]}}"
         val draft = assertNotNull(CliBridgeParser().parseCompile(raw).draft)
         // 2) validator verde
-        assertEquals(emptyList(), validator.validate(draft).filter { it.severity == Severity.ERROR })
+        assertEquals(emptyList(), validator.validate(draft, emptySet()).filter { it.severity == Severity.ERROR })
         // 3) approva -> Automation ARMED
         val auto = Automation(AutomationId("a1"), draft.name, CreatedBy.LLM, AutomationStatus.ARMED,
             draft.trigger, draft.actions, draft.conditions)
@@ -41,7 +41,7 @@ class EndToEndTest {
         val draft = AutomationDraft("geo casa",
             Trigger.Geofence(radiusM = 50.0, transition = Transition.EXIT, resolveCurrentLocation = true),
             listOf(Action.SetWifi(false), Action.SetBluetooth(true)))
-        val issues = validator.validate(draft)
+        val issues = validator.validate(draft, emptySet())
         assertEquals(emptyList(), issues.filter { it.severity == Severity.ERROR })
         assertTrue(issues.any { it.code == "radius_small" })
         // all'ARM l'app risolve le coordinate correnti
