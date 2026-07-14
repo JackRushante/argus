@@ -129,6 +129,10 @@ Commit della ripresa Claude serale (P1-6 → P1-7 reale → P1-8), tutti pushati
     - anti-eco strutturale: skip self-authored + eventId sul message timestamp.
 23. `758f5e9 feat(ui): review shows trusted whitelist names instead of conversation hashes`
     - P1-8: review/lista/dettaglio mostrano il nome whitelistato fidato al posto dell'hash.
+24. `3e52599`+`e359b4b`+`d3c93a7`+`e865201` — doc di chiusura: §21 P1-7 reale, riconciliazione
+    dei tre Markdown Codex, gate esterni chiusi nell'audit/CLAUDE/contract, §22 P1-8.
+25. **`8f283ca` — MERGE no-ff di `feat/argus-p0b-dry` su `master`** (2026-07-14, tutti i gate
+    verdi), pushato sull'hub. Da qui lo sviluppo riparte da `master`.
 
 Commit P0-B immediatamente precedenti utili per il contesto:
 
