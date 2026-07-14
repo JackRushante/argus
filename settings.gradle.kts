@@ -16,4 +16,8 @@ plugins {
 }
 
 rootProject.name = "argus"
-include("engine-core", "ui", "app")
+include("engine-core", "ui", "app", "data")
+include("brain-android")
+include("automation-android")
+include("core-shizuku")
+include("device-tools")

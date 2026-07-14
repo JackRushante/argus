@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Il bridge accetta solo HTTPS; nessun fallback HTTP è ammesso nel runtime. -->
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>

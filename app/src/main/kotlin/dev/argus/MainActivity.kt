@@ -4,21 +4,17 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import dagger.hilt.android.AndroidEntryPoint
 import dev.argus.nav.ArgusNavHost
 import dev.argus.ui.theme.ArgusTheme
 
-// =============================================================================
-// Host Compose dell'APK demo (M2 Task 12). Monta ArgusTheme + ArgusNavHost, che
-// cabla i 6 schermi stateless su `Fixtures` (dati finti). Edge-to-edge: le barre
-// di sistema sono trasparenti (tema) e gli inset sono gestiti dallo Scaffold del
-// NavHost. NIENTE ViewModel/Room/Shizuku/rete: è una demo della UI, non esegue
-// automazioni (quello è P0-B).
-// =============================================================================
+/** Host Compose edge-to-edge. Il runtime reale viene inizializzato da [ArgusApplication]. */
 
+@AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
-        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         setContent {
             ArgusTheme {
                 ArgusNavHost()

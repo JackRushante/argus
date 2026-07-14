@@ -1,0 +1,23 @@
+[Unit]
+Description=Argus - Hermes one-shot bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/argus-bridge
+EnvironmentFile=%h/argus-bridge/argus-bridge.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 %h/argus-bridge/bridge.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+TasksMax=64
+MemoryMax=1G
+UMask=0077
+
+[Install]
+WantedBy=default.target

@@ -7,6 +7,7 @@ enum class PhoneEvent { INCOMING_CALL, CALL_ENDED, SMS_RECEIVED }
 enum class ConnMedium { WIFI, BT, POWER }
 /** Per POWER: CONNECTED = alimentazione collegata. */
 enum class ConnState { CONNECTED, DISCONNECTED }
+enum class TimePrecision { FLEXIBLE, EXACT }
 
 @Serializable
 sealed interface Trigger {
@@ -21,7 +22,13 @@ sealed interface Trigger {
     /** Esattamente uno tra [cron] e [at] (enforced dal DraftValidator).
      *  [at] = datetime ISO locale ("2026-07-15T08:00") interpretato in [tz], one-shot. */
     @Serializable @SerialName("time")
-    data class Time(val cron: String? = null, val at: String? = null, val tz: String) : Trigger
+    data class Time(
+        val cron: String? = null,
+        val at: String? = null,
+        val tz: String,
+        /** EXACT solo se l'utente richiede esplicitamente puntualità; altrimenti allarme inexact. */
+        val precision: TimePrecision = TimePrecision.FLEXIBLE,
+    ) : Trigger
 
     @Serializable @SerialName("notification")
     data class Notification(

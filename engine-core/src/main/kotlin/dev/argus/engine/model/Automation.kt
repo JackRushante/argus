@@ -21,6 +21,10 @@ data class Automation(
     val priority: Int = 0,
     val cooldownMs: Long = 0,
     val schemaVersion: Int = SCHEMA_VERSION,
+    /** Snapshot derivato e fingerprintato di trigger, condizioni e azioni richiesti a runtime. */
+    val requiredCapabilities: Set<String> = CapabilityRequirements.derive(trigger, actions, conditions),
+    /** Hash dei dati eseguibili approvati; ogni edit lo rende non più corrispondente. */
+    val approvalFingerprint: ApprovalFingerprint? = null,
 )
 
 /** Bozza proposta dall'LLM: come Automation ma senza id/status (li assegna l'app all'approvazione). */

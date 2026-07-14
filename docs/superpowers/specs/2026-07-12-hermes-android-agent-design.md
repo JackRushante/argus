@@ -1,8 +1,13 @@
 # Argus — Agente LLM di automazione Android (design)
 
 > **Nome di lavoro:** *Argus* (il gigante dai molti occhi — agente always-on che "vede" lo schermo). Provvisorio, rinominabile.
-> **Data:** 2026-07-12 · **Rev:** 3 (post analisi critica pre-handoff) · **Autore:** Lorenzo Marci + Claude Code (oneplus)
-> **Stato:** design approvato, pronto per handoff frontend (vedi `handoff-frontend.md`) e per l'esecuzione di P0-A.
+> **Data:** 2026-07-12 · **Rev:** 4 (bridge Argus v1 hardenizzato) · **Autore:** Lorenzo Marci + Claude Code (oneplus) + Codex
+> **Stato:** design approvato; P0-A e handoff frontend completati, P0-B in chiusura secondo il commander replan. In caso di conflitto, il replan 2026-07-13 prevale sulle sezioni storiche.
+>
+> **Changelog rev 4** (rispetto a rev 3):
+> - **Bridge dedicato:** `argus-bridge` separato dalla Guida Bali, loopback-only su Hermes e pubblicato sul tailnet tramite Tailscale Serve HTTPS.
+> - **Contratto v1:** bearer runtime, envelope strict e versionato, request ID/idempotenza, limiti e parsing fail-closed; nessun fallback `/chat`.
+> - **Minimizzazione dati:** il client invia soltanto manifest e `DeviceState` filtrato; le coordinate non lasciano il telefono. Contratto operativo in `docs/design/hermes-bridge-contract.md`.
 >
 > **Changelog rev 3** (rispetto a rev 2):
 > - **Sicurezza:** invariante hard sugli `allowed_tools` di `InvokeLlm` (niente `shell.run` / `automation.*` / tool sempre-conferma); policy esplicita per `run_shell`; rendering **deterministico** della regola in approvazione (mai la parafrasi LLM); gestione **gruppi WhatsApp** (default: solo chat 1:1 per le reply generative).
@@ -23,13 +28,16 @@ Esempi target (devono funzionare a fine **P2** — vedi §15 per cosa funziona q
 ## 2. Contesto (verificato empiricamente su `hermes`)
 
 - **Hermes** (VM `hermes` 100.80.142.65, sul tailnet) ha già `computer_use` con **vision-routing**: se il cervello (`gpt-5.5` via `openai-codex`, OAuth) non è multimodale, lo screenshot viene **pre-analizzato dalla pipeline `auxiliary.vision`** (provider `auto` → OpenRouter/Gemini/Claude) e passato come **testo** al cervello, fuso con l'albero accessibilità/SOM. Web search già attiva via **Brave free**. → Vision e web **non richiedono API dirette**; sono capability ausiliarie disaccoppiate dal canale principale.
-- **Transport HTTP verso Hermes — VERIFICATI (risolve il vecchio rischio B5):**
-  - **`guida-agent/bridge.py`** (porta 8090) è un **reference implementation dello stesso pattern di Argus**: riceve `{message, history, state, ...}`, chiama Hermes e ritorna `{reply, actions[], memory[], ...}` in JSON che **il client esegue lato suo**. Invoca il modello via **subprocess CLI** (`hermes_cli.main -z <prompt> --cli --ignore-rules -t web --yolo`), toolset ristretto a `web`. Output strutturato via **sentinel `@@META@@ {json}`** + regex (non tool-call nativi). **Latenza ~10-30 s/chiamata.**
+- **Transport verso Hermes — VERIFICATI (risolve il vecchio rischio B5):**
+  - **`argus-bridge`** espone `POST /compile` v1 tramite Tailscale Serve HTTPS; riceve manifest strutturato + `DeviceState` redatto, chiama Hermes/gpt-5.5 e ritorna un envelope strict con `AutomationDraft`. Bearer runtime, request ID idempotente, limiti body e parser fail-closed. **Latenza ~10-30 s/chiamata.** Contratto: `docs/design/hermes-bridge-contract.md`.
+  - **`guida-agent/bridge.py`** (porta 8090) resta il bridge separato della Guida Bali e non è un fallback Argus.
   - **`hermes proxy`** (OpenAI-compatible, `/v1/chat/completions`, porta 8645) inoltra a upstream **`nous` o `xai`** con le credenziali OAuth di Hermes. **NON** instrada il codex/ChatGPT gpt-5.5 gratuito.
 - **Conseguenza sul transport** (vedi §7): il **gpt-5.5 codex gratis** è raggiungibile **solo** via CLI/bridge (lento, one-shot, testo+JSON). Il **path veloce con tool-call nativi** esiste solo via proxy (Nous/xAI) o LLM diretto (OpenAI/OpenRouter/Gemini), che costa/consuma quota.
-- **Sicurezza del bridge (rev 3):** il bridge binda **solo sull'interfaccia Tailscale** di hermes; nessuna esposizione fuori tailnet. Il protocollo bridge↔app porta un campo `schema_version` così prompt Hermes e parser app restano in sync quando lo schema draft evolve.
+- **Sicurezza del bridge (rev 4):** `argus-bridge` binda solo su loopback (`127.0.0.1:8092`); Tailscale Serve termina TLS sul tailnet. Ogni endpoint richiede bearer e il protocollo lega `schema_version`, `request_id` e `Idempotency-Key`. Nessun cleartext opt-in Android.
 - Il **telefono è già sul tailnet** come `oneplus` (100.74.117.9) → Hermes raggiungibile in rete privata senza esporre nulla.
-- Il OnePlus 15 è **rootabile/rootato** (rilevante per la persistenza di Shizuku, §9/B1).
+- Il OnePlus 15 di test è attualmente **non-root** (`su` assente): Shizuku viene avviato via ADB
+  e il daemon non sopravvive al reboot. L'app deve quindi degradare in modo esplicito finché il
+  daemon non viene riattivato; non può promettere un auto-start privilegiato.
 
 ## 3. Decisioni di design
 
@@ -127,7 +135,7 @@ interface Brain {
 
 | Transport | Raggiunge | Latenza | Output | Vision / Web | Uso |
 |-----------|-----------|---------|--------|--------------|-----|
-| **`CliBridgeTransport`** | Hermes agent → **gpt-5.5 codex (gratis)** via bridge stile `guida-agent/bridge.py` | ~10-30 s/call | testo + JSON (sentinel/schema) | delegate a Hermes (aux-vision, Brave) | **compile** + **InvokeLlm one-shot** (latency-tolerant) |
+| **`CliBridgeTransport`** | Hermes agent → **gpt-5.5 codex (gratis)** via `argus-bridge` HTTPS | ~10-30 s/call | envelope JSON strict v1 | delegate a Hermes (aux-vision, Brave) | **compile** + **InvokeLlm one-shot** (latency-tolerant) |
 | **`OpenAICompatTransport`** | proxy Hermes → **Nous/xAI**, *oppure* **LLM diretto** (OpenAI/OpenRouter/Gemini via OAuth/API) | bassa | tool-call nativi | app-side (`vision.analyze`, `web.search`) o modello multimodale | **loop interattivo computer_use** (P3), Direct brain |
 
 Storia coerente: **gratis dove puoi aspettare** (compile, risposta WhatsApp = one-shot), **veloce/a-pagamento dove serve reattività** (pilotare lo schermo in tempo reale). Il `CliBridgeTransport` è l'MVP primario; l'`OpenAICompatTransport` unifica proxy-Hermes e LLM-diretto nello stesso adapter (cambia `base_url` + auth).
@@ -149,15 +157,15 @@ Unico punto che tocca Shizuku. Espone `PrivilegedShell.run(cmd): Result` + op ti
 
 Principio: appoggiarsi ai meccanismi **OS-managed** che scattano anche in Doze, non tenere vivo un loop.
 
-- **Foreground service** (`specialUse`/`dataSync`) con notifica persistente a bassa priorità — ospita engine e listener.
-- **Time** → `AlarmManager` `setExactAndAllowWhileIdle` + WorkManager per job tolleranti. Next-fire calcolato da `TimeSpecs.nextFire` (engine-core, DST-safe).
+- **Baseline P0-B event-driven** → `Application` inizializza registry/reconciliation; AlarmManager e receiver risvegliano il processo; Room conserva stato logico e journal. Nessun FGS persistente.
+- **Time** → `AlarmManager`: exact solo per `TimePrecision.EXACT` con special access `SCHEDULE_EXACT_ALARM`, altrimenti fallback inexact. Next-fire calcolato da `TimeSpecs.nextFire` (engine-core, DST-safe).
 - **Geofence** → Play Services Geofencing (OS-managed, sopravvive a Doze). **Richiede `ACCESS_BACKGROUND_LOCATION` ("Consenti sempre")**, permesso a sé notorio su Android 11+ → step dedicato nell'onboarding. Aspettative oneste in §13/E14 (raggio min consigliato 100 m, exit con minuti di ritardo).
 - **Notifiche/WhatsApp** → `NotificationListenerService` (bindato, resiste) + **WhatsApp direct-reply via RemoteInput**.
-- **Watchdog** → AlarmManager heartbeat che resuscita il service se ucciso (`START_STICKY`). **Nota (rev 3):** su Android 12+ il riavvio del FGS dal background è consentito **solo grazie** alla battery-optimization exemption (senza, `ForegroundServiceStartNotAllowedException`); se l'utente la nega, il watchdog è inerte → la UI deve mostrare lo stato "protezione ridotta" (vedi handoff frontend, banner engine).
+- **Lavoro lungo** → il budget breve di `BroadcastReceiver.goAsync()` non è adatto a catene lente. In P2 misurare e spostare tali esecuzioni in un worker durevole o FGS **short-lived** con tipo corretto; mai usare un service sempre vivo come scorciatoia.
 - **Boot** → receiver `BOOT_COMPLETED` re-idrata le automazioni armate e ri-registra i trigger.
 - **Onboarding OEM** → wizard OxygenOS (battery-optimization exemption, auto-launch, lock in recents). **L'exemption è richiesta già in P1** (senza, le chiamate `InvokeLlm` in Doze falliscono — rete negata in background).
 
-> **Onestà batteria:** "batteria bassa" è **relativo**. Il design evita il costo grosso (loop vision continuo) e legge lo stato **lazy** (solo se un trigger matcha una regola armata — rev 3), ma un processo residente 24/7 + NotificationListener ha un **baseline non-zero**. L'obiettivo è "trascurabile per un'app di automazione", non "zero".
+> **Onestà batteria:** "batteria bassa" è **relativo**. Il design evita il costo grosso (loop vision continuo) e legge lo stato **lazy**. P0-B non mantiene un processo residente; NotificationListener e lane generativa P1 introdurranno comunque un baseline non-zero da misurare.
 
 ## 10. Modello di sicurezza
 
@@ -186,11 +194,11 @@ Punto chiave da non perdere: **l'MVP non ha streaming** — il transport primari
 
 | # | Barriera | Soluzione |
 |---|----------|-----------|
-| B1 | **Shizuku muore al reboot** (non-root): un'app non può ri-concedersi Shizuku da sola. | **Root = percorso supportato** (OnePlus rootato): auto-start Shizuku via servizio Magisk/init al boot. Non-root = **degradato** (self-start Wireless-ADB ove possibile, altrimenti coda azioni shell + notifica "riattiva Shizuku"; le azioni via API Android normali continuano). Stato `DEGRADED_AFTER_REBOOT` visibile in UI. |
-| B2 | **FGS non avviabile da background** (Android 12+). | **Non avviamo mai un FGS da background senza esenzione**: il service è già persistente; i callback (geofence/alarm) e il NotificationListener (già bindato) lavorano nel service in esecuzione. Il watchdog (B4) dipende dalla battery exemption — nesso esplicitato in §9. |
-| B3 | **Exact alarm revocabile** (Android 13+). | `USE_EXACT_ALARM` (ok per app di automazione sideloaded) o guida a "Sveglie e promemoria"; fallback inexact+WorkManager per timing non critico. |
-| B4 | **OxygenOS uccide il foreground service**. | Battery-optimization exemption (che abilita anche il restart FGS dal background) + wizard auto-launch/lock-recents + `START_STICKY` + **watchdog AlarmManager**. Best-effort documentato: rischio residuo accettato; senza exemption il watchdog è inerte → banner "protezione ridotta". |
-| B5 | ~~Gateway Hermes senza endpoint programmatico~~ | **RISOLTO:** `guida-agent/bridge.py` è un reference impl HTTP funzionante; `hermes proxy` è OpenAI-compatible. Vedi §2/§7. |
+| B1 | **Shizuku muore al reboot** (non-root): un'app non può riavviare autonomamente il daemon ADB né ri-concedersi accesso. | Sul OnePlus corrente il percorso supportato è **degradato fail-closed**: trigger e allarmi restano registrati, ma un evento che richiede Shizuku viene bloccato e auditato. P0-B non lo riproduce più tardi: eseguire fuori tempo un comando può essere pericoloso. Le ricorrenze future restano attive; retry/expiry configurabili e notifica del mancato scatto sono P2. La UI guida al ripristino; nessuna falsa promessa di auto-start. |
+| B2 | **FGS non avviabile da background** (Android 12+). | P0-B non ha FGS persistente: alarm e receiver fanno lavoro breve event-driven. Un eventuale worker/FGS short-lived P2 parte solo attraverso un percorso consentito e con failure visibile. |
+| B3 | **Exact alarm revocabile** (Android 13+). | `SCHEDULE_EXACT_ALARM` + guida a "Sveglie e promemoria"; exact solo se richiesto e concesso, fallback inexact per non perdere la regola. |
+| B4 | **OxygenOS può uccidere il processo**. | Alarm OS-managed + stato Room + reconcile su app-start/boot/package replace. Battery exemption e hardening OEM arrivano quando P1/P2 introducono lavoro più lungo; stato degradato resta visibile. |
+| B5 | ~~Gateway Hermes senza endpoint programmatico~~ | **RISOLTO:** `argus-bridge` `/compile` v1 è live su Tailscale HTTPS, autenticato e testato da Android; `hermes proxy` resta l'opzione P3 OpenAI-compatible. Vedi §2/§7. |
 | B6 | **Aux-vision senza provider multimodale raggiungibile**. | Configurare almeno **una key multimodale** (Gemini free); il probe avvisa e **disabilita** le regole che dipendono dalla visione schermo. |
 | B7 | **Finestre `FLAG_SECURE`** (banking): `screencap` torna nero. | Rilevare e riportare al Brain ("schermo illeggibile: finestra sicura"); provare `uiautomator dump` come fallback (l'albero a11y resta leggibile); non crashare. |
 | B8 | **Latenza del brain gratuito** (CliBridge ~10-30 s/call): inusabile per un loop computer_use multi-turn (200 s+/task). | **Il brain gratuito serve solo one-shot** (compile, InvokeLlm). Il **loop interattivo (P3)** usa `OpenAICompatTransport` con un modello veloce (proxy Nous/xAI o Direct). Trade-off costo/velocità esplicito. |
@@ -212,11 +220,11 @@ Punto chiave da non perdere: **l'MVP non ha streaming** — il transport primari
 | E2 | **Tap per coordinate rotto** da risoluzione/orientamento/tema. | Preferire targeting via `uiautomator dump` (elemento per testo/id + bounds); coord ultima spiaggia; re-dump prima di agire + check stato atteso. |
 | E3 | **RemoteInput WhatsApp assente** (notifica senza reply action). | Primario = RemoteInput; fallback tier-2 = automazione UI (più fragile); se nessuno → notifica "impossibile auto-rispondere". |
 | E4 | **Ban/ToS WhatsApp** per invio "come utente". | Preferire RemoteInput (indistinguibile da reply normale) all'UI injection; rate-limit; uso personale; whitelist-gated. Rischio documentato. |
-| E5 | **Permesso revocato a runtime**. | Capability probe ad ogni scatto + periodico; regola con capability mancante → **pausa** (non fail silenzioso) + notifica; visibile in UI. |
+| E5 | **Permesso revocato a runtime**. | Capability probe ad ogni scatto + su foreground/cambio Shizuku. Revoca strutturale → `NEEDS_REVIEW`; outage transitorio → regola ancora approvata ma scatto bloccato e auditato. La notifica proattiva e una policy esplicita retry/expiry sono P2. |
 | E6 | **Timezone/DST per cron**. | Cron con **TZ esplicita**; next-fire calcolato in engine-core (`CronSchedule`, unit-testato sui casi DST): ora saltata → fire spostato avanti della durata del gap; ora duplicata → **una sola** esecuzione (prima occorrenza). |
 | E7 | **Ambiguità nome contatto** ("Moglie" → contatto sbagliato). | Whitelist per **`conversationId`/numero**; il binding avviene al compile **scegliendo dalla whitelist nel manifest** (coppie nome+id — niente tool contatti necessario); mostrato in approvazione. |
 | E8 | **Migrazione schema automazioni** dopo update app. | `schemaVersion` + Room migrations; decode fallito o versione incompatibile → regola `needs_review` (mai drop silenzioso). |
-| E9 | **Recovery post-reboot** dei trigger. | Receiver `BOOT_COMPLETED` re-idrata e ri-registra (richiede Shizuku up — vedi B1). |
+| E9 | **Recovery post-reboot** dei trigger. | Receiver `BOOT_COMPLETED` re-idrata e ri-registra anche con Shizuku down; la capability policy blocca e audita gli scatti privilegiati finché B1 non viene risolto, senza replay tardivo implicito. |
 | E10 | **OAuth token DirectLlmBrain scaduto/ruotato**. | Refresh flow; fallback a CliBridge/Hermes se configurato, altrimenti notifica re-auth. Direct è **secondario** (P3). |
 | E11 | **Privacy — i contenuti escono dall'homelab** (WhatsApp/schermo → Hermes → upstream Nous/xAI/OpenRouter/OpenAI). | Informativa esplicita nell'onboarding (step WELCOME_PRIVACY, consenso) + warning per-regola sulle azioni generative. Opzione futura: upstream self-hosted/locale per contenuti sensibili. Redazione opzionale di campi sensibili prima dell'invio. |
 | E12 | **Contesto WhatsApp limitato alla notifica** (non l'intera conversazione). | Documentato: la risposta generativa vede solo il testo notificato; per più contesto servirebbe UI automation più pesante (fuori MVP). |
@@ -239,17 +247,18 @@ Principio: **prima il valore nuovo e latency-tolerant** (automazioni da NL, che 
 - **P0-A — Engine core (JVM puro):** modelli + matcher + evaluator + engine + **cron/DST** + **validator** + conflitti + parser + manifest + interfacce. Piano dedicato nel bundle. *(Nessun risultato utente-visibile: fondamenta testate.)*
 - **P0-B — Fondamenta Android + compile one-shot:** `core-shizuku` + `device-tools` + capability probe + `Brain`(CliBridge) + agent-loop one-shot + Room store + trigger **Time** + azioni deterministiche + gate approvazione + UI minima. **Risultato: Es. 2 funziona end-to-end** (chat "crea automazione" → approva → esegue). L'Es. 1 è pronto lato compile+engine ma **scatta davvero solo da P2** (registrar geofence). Niente vision, niente loop interattivo.
 - **P1 — Generativo + notifiche:** trigger **Notification** (WhatsApp RemoteInput, estrazione `conversationId`/`isGroup`) + azione **`InvokeLlm` one-shot** (lane async + `Submitted`) + whitelist contatti + `reply_target` binding + fallback E13 + **battery-optimization exemption** (richiesta qui, non in P2: senza, le chiamate LLM in Doze falliscono). **Risultato: Es. 3 funziona.**
-- **P2 — Hardening background:** `foreground-service` + anti-Doze + watchdog + boot recovery + wizard OEM/background-location + trigger **Geofence** (→ **Es. 1 end-to-end**) e **PhoneState**/**Connectivity** + resilienza Shizuku + (opz.) `triggers-ui`.
+- **P2 — Hardening background:** esecuzione durevole/FGS short-lived solo dove necessario, boot recovery reale, wizard OEM/background-location + trigger **Geofence** (→ **Es. 1 end-to-end**) e **PhoneState**/**Connectivity** + resilienza Shizuku + (opz.) `triggers-ui`.
 - **P3 — Interattivo + secondo brain + sicurezza avanzata:** **loop computer_use interattivo** via `OpenAICompatTransport` (modello veloce/multimodale) + `DirectLlmBrain` (OAuth) + tool app-side `web.search`/`vision.analyze` + conferma-irreversibili live + budget guard UI + streaming chat.
 
 ## 16. Rischi aperti da confermare in planning
 
 - **`conversationId` WhatsApp (E15):** verificare empiricamente su device quale chiave stabile espongono le notifiche (candidati: `shortcutId`, `tag`, `EXTRA_PEOPLE_LIST`, sortKey) e come si rileva `isGroupConversation`. Prerequisito P1; se nessuna chiave è affidabile, fallback dichiarato al display name (con warning permanente in UI).
 - **Transport loop interattivo (P3):** quale modello veloce/multimodale per `OpenAICompatTransport` — proxy Nous/xAI (verificare costo/quota e supporto immagini) vs Direct Gemini/OpenRouter. Budget latenza per-turno target.
-- **CliBridge da generalizzare:** riusare/estendere `guida-agent/bridge.py` per esporre `compile`/`act` (schema `AutomationDraft` + `schema_version`) oltre a `/chat`; prompt di sistema con manifest + registry StateKeys + schema JSON del draft.
-- **B1:** meccanismo esatto di persistenza Shizuku post-reboot sul OnePlus 15 rootato (Magisk module vs init vs opzione root nell'app Shizuku).
+- **Argus bridge:** `/compile` v1 completato e isolato dal bridge Guida Bali. Per `act` P1 estendere il contratto Argus con una nuova versione/endpoint, senza riaprire il fallback `/chat`.
+- **B1:** UX e procedura esatta di ripristino Shizuku via Wireless ADB sul OnePlus 15 non-root;
+  auto-start root/Magisk soltanto su un futuro device realmente rootato.
 - **B6:** provider multimodale per aux-vision (Gemini free candidato).
-- Policy `USE_EXACT_ALARM` (sideload-only accettabile).
+- Policy `SCHEDULE_EXACT_ALARM`: special access revocabile, exact opt-in per regola e fallback inexact.
 
 ## 17. Fuori scope (YAGNI)
 

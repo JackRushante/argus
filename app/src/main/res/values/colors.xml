@@ -3,4 +3,5 @@
     <!-- Sfondo finestra dark (design §5, token background) — evita il flash bianco
          prima che Compose disegni. -->
     <color name="argus_window_background">#FF0E1216</color>
+    <color name="argus_icon_background">#FF0E1216</color>
 </resources>

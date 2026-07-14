@@ -27,6 +27,7 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -37,6 +38,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import dev.argus.ui.components.EmptyState
@@ -110,7 +113,14 @@ fun AutomationListScreen(
             FilterChipsRow(state.filter, callbacks::onFilter)
 
             val rows = state.rows.sortedBy { StatusRank[it.status] ?: Int.MAX_VALUE }
-            if (rows.isEmpty()) {
+            if (state.loading) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator()
+                }
+            } else if (rows.isEmpty()) {
                 // Empty (§6.2): la CTA cambia tab → Chat; la navigazione è host-owned
                 // (NavHost, Task 12) via onEmptyCta, come le altre affordance di nav.
                 EmptyState(
@@ -250,6 +260,13 @@ private fun AutomationCard(
                 Switch(
                     checked = row.enabled,
                     onCheckedChange = onToggleEnabled,
+                    modifier = Modifier.semantics {
+                        contentDescription = if (row.enabled) {
+                            "Disattiva ${row.name}"
+                        } else {
+                            "Riattiva ${row.name}"
+                        }
+                    },
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
                         checkedTrackColor = MaterialTheme.colorScheme.primary,

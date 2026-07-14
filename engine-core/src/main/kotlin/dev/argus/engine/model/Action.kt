@@ -5,23 +5,54 @@ import kotlinx.serialization.Serializable
 enum class DndMode { OFF, PRIORITY, TOTAL }
 enum class ActionTier { DETERMINISTIC, GENERATIVE }
 
+/** Discriminatori wire stabili condivisi da JSON, manifest capability e journal. */
+object ActionTypeIds {
+    const val SET_WIFI = "set_wifi"
+    const val SET_BLUETOOTH = "set_bluetooth"
+    const val SET_DND = "set_dnd"
+    const val SET_RINGER = "set_ringer"
+    const val LAUNCH_APP = "launch_app"
+    const val OPEN_URL = "open_url"
+    const val SHOW_NOTIFICATION = "show_notification"
+    const val TAP = "tap"
+    const val INPUT_TEXT = "input_text"
+    const val WHATSAPP_REPLY = "whatsapp_reply"
+    const val RUN_SHELL = "run_shell"
+    const val INVOKE_LLM = "invoke_llm"
+}
+
+/**
+ * Profilo P1 dell'azione generativa: l'unico contratto InvokeLlm che la lane esegue davvero.
+ * Validator, derivazione capability e lane devono restare allineati a queste costanti.
+ */
+object GenerativeContract {
+    const val CONTEXT_NOTIFICATION = "notification"
+    const val CONTEXT_STATE = "state"
+    /** Tool wire di reply: coincide con ActionTypeIds.WHATSAPP_REPLY. */
+    const val TOOL_WHATSAPP_REPLY = ActionTypeIds.WHATSAPP_REPLY
+    /** Tool raw richiesto a runtime quando il contesto include lo stato device. */
+    const val TOOL_STATE_READ = "state.read"
+    val CONTEXT_SOURCES: Set<String> = setOf(CONTEXT_NOTIFICATION, CONTEXT_STATE)
+    val ALLOWED_TOOLS: List<String> = listOf(TOOL_WHATSAPP_REPLY)
+}
+
 @Serializable
 sealed interface Action {
     val tier: ActionTier get() = if (this is InvokeLlm) ActionTier.GENERATIVE else ActionTier.DETERMINISTIC
 
-    @Serializable @SerialName("set_wifi") data class SetWifi(val on: Boolean) : Action
-    @Serializable @SerialName("set_bluetooth") data class SetBluetooth(val on: Boolean) : Action
-    @Serializable @SerialName("set_dnd") data class SetDnd(val mode: DndMode) : Action
-    @Serializable @SerialName("set_ringer") data class SetRinger(val mode: String) : Action
-    @Serializable @SerialName("launch_app") data class LaunchApp(val pkg: String) : Action
-    @Serializable @SerialName("open_url") data class OpenUrl(val url: String) : Action
-    @Serializable @SerialName("show_notification") data class ShowNotification(val title: String, val text: String) : Action
-    @Serializable @SerialName("tap") data class Tap(val x: Int, val y: Int) : Action
-    @Serializable @SerialName("input_text") data class InputText(val text: String) : Action
-    @Serializable @SerialName("whatsapp_reply") data class WhatsAppReply(val text: String) : Action
-    @Serializable @SerialName("run_shell") data class RunShell(val cmd: String) : Action
+    @Serializable @SerialName(ActionTypeIds.SET_WIFI) data class SetWifi(val on: Boolean) : Action
+    @Serializable @SerialName(ActionTypeIds.SET_BLUETOOTH) data class SetBluetooth(val on: Boolean) : Action
+    @Serializable @SerialName(ActionTypeIds.SET_DND) data class SetDnd(val mode: DndMode) : Action
+    @Serializable @SerialName(ActionTypeIds.SET_RINGER) data class SetRinger(val mode: String) : Action
+    @Serializable @SerialName(ActionTypeIds.LAUNCH_APP) data class LaunchApp(val pkg: String) : Action
+    @Serializable @SerialName(ActionTypeIds.OPEN_URL) data class OpenUrl(val url: String) : Action
+    @Serializable @SerialName(ActionTypeIds.SHOW_NOTIFICATION) data class ShowNotification(val title: String, val text: String) : Action
+    @Serializable @SerialName(ActionTypeIds.TAP) data class Tap(val x: Int, val y: Int) : Action
+    @Serializable @SerialName(ActionTypeIds.INPUT_TEXT) data class InputText(val text: String) : Action
+    @Serializable @SerialName(ActionTypeIds.WHATSAPP_REPLY) data class WhatsAppReply(val text: String) : Action
+    @Serializable @SerialName(ActionTypeIds.RUN_SHELL) data class RunShell(val cmd: String) : Action
 
-    @Serializable @SerialName("invoke_llm")
+    @Serializable @SerialName(ActionTypeIds.INVOKE_LLM)
     data class InvokeLlm(
         val goal: String,
         val contextSources: List<String>,

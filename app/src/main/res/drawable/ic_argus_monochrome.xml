@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Mask monocromatica reale: il launcher applica il colore del tema all'alpha. -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M22,54 C30,40 42,31 54,29 C66,31 78,40 86,54 C78,68 66,77 54,79 C42,77 30,68 22,54 Z"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="5" />
+
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M54,36 C64,36 72,44 72,54 C72,64 64,72 54,72 C49,72 45,70 42,67"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="5" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M42,64 L35,75 L48,72 Z" />
+
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M54,44 L47,57 L61,57 Z"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="3" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M54,40 C56.21,40 58,41.79 58,44 C58,46.21 56.21,48 54,48 C51.79,48 50,46.21 50,44 C50,41.79 51.79,40 54,40 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M47,53 C49.21,53 51,54.79 51,57 C51,59.21 49.21,61 47,61 C44.79,61 43,59.21 43,57 C43,54.79 44.79,53 47,53 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M61,53 C63.21,53 65,54.79 65,57 C65,59.21 63.21,61 61,61 C58.79,61 57,59.21 57,57 C57,54.79 58.79,53 61,53 Z" />
+</vector>

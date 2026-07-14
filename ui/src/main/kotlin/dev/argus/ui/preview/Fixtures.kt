@@ -30,7 +30,7 @@ import dev.argus.ui.model.UiWarning
 import dev.argus.ui.screens.shizukuOnboardingCopy
 
 // =============================================================================
-// Fixture centralizzate per i @Preview e la demo `app` (M2 Task 12).
+// Fixture centralizzate per i @Preview e i test UI; il runtime `app` usa dati reali.
 //
 // Fonte unica di dati finti REALISTICI per tutti e 6 gli schermi. Copre:
 //  - i 3 esempi della spec: geofence Wi-Fi/BT in uscita (a1), DND 23:00 (a2),
@@ -487,30 +487,32 @@ object Fixtures {
 
     val settingsAllGreen = SettingsState(
         transport = TransportUi.CliBridge(
-            url = "http://100.64.0.1:8090",
+            url = "https://hermes.tail04462d.ts.net",
             reachable = true,
             lastLatencyLabel = "14 s · normale per Hermes",
         ),
         shizuku = ShizukuStatus.AUTHORIZED,
         batteryExempt = true,
-        notificationAccess = true,
+        notificationsGranted = true,
+        notificationListenerGranted = true,
         backgroundLocation = BgLocationState.GRANTED,
         whitelist = listOf(ContactRow(displayName = "Moglie", conversationId = "wa::393200000000::c1a9")),
         budget = BudgetUi(maxCallsPerHour = 20, usedThisHourLabel = "3 / 20 quest'ora"),
         privacyAccepted = true,
-        appVersionLabel = "Argus v0.1-demo · MVP (sideload)",
+        appVersionLabel = "Argus v0.1.0 · MVP (sideload)",
     )
 
     val settingsDegraded = SettingsState(
-        transport = TransportUi.CliBridge(url = "http://100.64.0.1:8090", reachable = false, lastLatencyLabel = null),
+        transport = TransportUi.CliBridge(url = "https://hermes.tail04462d.ts.net", reachable = false, lastLatencyLabel = null),
         shizuku = ShizukuStatus.DEGRADED_AFTER_REBOOT,
         batteryExempt = false,
-        notificationAccess = true,
+        notificationsGranted = true,
+        notificationListenerGranted = true,
         backgroundLocation = BgLocationState.DENIED,
         whitelist = emptyList(),
         budget = BudgetUi(maxCallsPerHour = 20, usedThisHourLabel = "17 / 20 quest'ora"),
         privacyAccepted = true,
-        appVersionLabel = "Argus v0.1-demo · MVP (sideload)",
+        appVersionLabel = "Argus v0.1.0 · MVP (sideload)",
     )
 
     // -------------------------------------------------------------------------

@@ -86,6 +86,8 @@ data class AutomationListState(
     val filter: StatusFilter,               // ALL | ARMED | PENDING | DISABLED | NEEDS_REVIEW (chips)
     val banner: EngineBanner,
     val loading: Boolean,
+    val pendingCount: Int = rows.count { it.status == StatusBadge.PENDING_APPROVAL },
+    val needsReviewCount: Int = rows.count { it.status == StatusBadge.NEEDS_REVIEW },
 )
 
 data class AutomationRow(
@@ -123,6 +125,9 @@ data class AutomationDetailState(
     val estimatedLlmCallsPerDay: String?,   // solo generative: "stimate ~5 chiamate/giorno" (spec §10.5)
     val recentRuns: List<LogRow>,           // ultime 3-5 esecuzioni (stesso tipo del Log §6.4)
     val geofencePreviewLabel: String?,      // "Posizione: attuale al momento dell'attivazione" (resolveCurrentLocation)
+    /** P0-B non espone un percorso manuale sicuro: il controllo resta fail-closed finché non esiste. */
+    val canRunNow: Boolean = false,
+    val runNowBlockedReason: String? = "Esecuzione manuale non disponibile in questa fase",
 )
 
 interface AutomationDetailCallbacks {
@@ -146,10 +151,14 @@ data class LogRow(
     val id: String,
     val timeLabel: String,                  // "oggi 23:00"
     val automationName: String,
-    val kind: AuditKind,                    // FIRED | SUPPRESSED_COOLDOWN | CONDITIONS_NOT_MET | ERROR
+    val kind: AuditKind,
     val outcome: LogOutcome,                // solo per FIRED
     val summary: String,                    // "2/2 azioni ok" / "soppressa (cooldown)" / "risposta inviata a Moglie"
     val expandedDetail: List<String>?,      // righe per-azione al tap (incl. esito lane generativa, anche DEFERRED E13)
+    /** Id dominio distinto da [id], che identifica invece la riga audit. Null se la regola non esiste più. */
+    val automationId: String? = null,
+    /** La riga appartiene a un'esecuzione con almeno un'azione generativa/cloud. */
+    val isGenerative: Boolean = false,
 )
 
 enum class LogOutcome { SUCCESS, PARTIAL, FAILED, SUBMITTED, DEFERRED }
@@ -168,16 +177,27 @@ data class SettingsState(
     val transport: TransportUi,
     val shizuku: ShizukuStatus,
     val batteryExempt: Boolean,
-    val notificationAccess: Boolean,
+    /** Permesso di PUBBLICARE notifiche (esiti/avvisi Argus). */
+    val notificationsGranted: Boolean,
+    /** Accesso notification listener: lettura notifiche WhatsApp e canale di reply (P1). */
+    val notificationListenerGranted: Boolean,
     val backgroundLocation: BgLocationState,   // GRANTED | WHILE_IN_USE | DENIED | NOT_NEEDED (nessuna regola geofence)
     val whitelist: List<ContactRow>,
+    /** Conversazioni 1:1 osservate (solo WhatsApp) proposte dal picker whitelist. */
+    val observedCandidates: List<ContactRow> = emptyList(),
     val budget: BudgetUi,
     val privacyAccepted: Boolean,
     val appVersionLabel: String,
 )
 
 sealed interface TransportUi {
-    data class CliBridge(val url: String, val reachable: Boolean?, val lastLatencyLabel: String?) : TransportUi
+    data class CliBridge(
+        val url: String,
+        val reachable: Boolean?,
+        val lastLatencyLabel: String?,
+        /** Indica solo la presenza nel Keystore; il bearer non entra mai nello stato UI. */
+        val tokenConfigured: Boolean = false,
+    ) : TransportUi
     data class OpenAICompat(val baseUrl: String, val model: String, val authState: AuthState) : TransportUi  // P3, mostrare come "in arrivo"
 }
 enum class AuthState { OK, EXPIRED, NOT_CONFIGURED }
@@ -188,10 +208,17 @@ data class BudgetUi(val maxCallsPerHour: Int, val usedThisHourLabel: String) // 
 
 interface SettingsCallbacks {
     fun onEditBridgeUrl(url: String); fun onTestConnection()
+    /** Token null/vuoto = conserva quello già configurato; non viene mai precompilato dalla UI. */
+    fun onSaveBridge(url: String, bearerToken: String?) { onEditBridgeUrl(url) }
     fun onOpenShizukuFix()      // deep-link allo step onboarding giusto per lo stato corrente
     fun onOpenBatteryFix(); fun onOpenNotificationAccessFix(); fun onOpenLocationFix()
+    /** Apre le impostazioni di sistema per l'accesso notification listener (lettura, P1). */
+    fun onOpenNotificationListenerFix() {}
     fun onRemoveContact(conversationId: String); fun onAddContact()   // picker → risoluzione conversationId
+    /** Selezione dal picker delle conversazioni 1:1 osservate. */
+    fun onAddObservedContact(contact: ContactRow) {}
     fun onBudgetChange(maxPerHour: Int)
+    fun onRevokePrivacy()
     fun onRerunOnboarding()
 }
 
@@ -201,6 +228,8 @@ data class OnboardingState(
     val steps: List<OnboardingStepState>,
     val currentIndex: Int,
     val canFinish: Boolean,     // WELCOME_PRIVACY e BRAIN_CONFIG obbligatori; il resto skippabile (degradato)
+    val bridgeUrl: String? = null,
+    val bridgeTokenConfigured: Boolean = false,
 )
 
 data class OnboardingStepState(
@@ -215,4 +244,7 @@ data class OnboardingStepState(
 enum class StepKind { WELCOME_PRIVACY, BRAIN_CONFIG, SHIZUKU, NOTIFICATION_ACCESS, BATTERY_OEM, BACKGROUND_LOCATION }
 enum class StepStatus { TODO, IN_PROGRESS, DONE, SKIPPED, BLOCKED }
 
-interface OnboardingCallbacks { fun onStepCta(kind: StepKind); fun onSkip(kind: StepKind); fun onNext(); fun onBack(); fun onFinish() }
+interface OnboardingCallbacks {
+    fun onStepCta(kind: StepKind); fun onSkip(kind: StepKind); fun onNext(); fun onBack(); fun onFinish()
+    fun onSaveBridge(url: String, bearerToken: String?) {}
+}

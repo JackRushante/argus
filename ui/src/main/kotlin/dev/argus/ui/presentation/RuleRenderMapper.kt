@@ -33,18 +33,27 @@ object RuleRenderMapper {
     private const val PRIVACY_NOTE =
         "Il testo delle notifiche verrà inviato a Hermes e ai provider cloud per generare la risposta."
 
-    fun map(a: Automation): RuleRender = render(a.trigger, a.actions, a.conditions)
+    /**
+     * [conversationLabels] mappa conversationId → display name proveniente dallo store whitelist
+     * FIDATO (mai dalla prosa LLM): quando il trigger punta a un id whitelistato la review mostra
+     * il nome leggibile al posto dell'hash. Lookup deterministico, opzionale per i caller che non
+     * hanno accesso allo store (fallback: hash integrale, onesto).
+     */
+    fun map(a: Automation, conversationLabels: Map<String, String> = emptyMap()): RuleRender =
+        render(a.trigger, a.actions, a.conditions, conversationLabels)
 
-    fun mapDraft(d: AutomationDraft): RuleRender = render(d.trigger, d.actions, d.conditions)
+    fun mapDraft(d: AutomationDraft, conversationLabels: Map<String, String> = emptyMap()): RuleRender =
+        render(d.trigger, d.actions, d.conditions, conversationLabels)
 
     private fun render(
         trigger: Trigger,
         actions: List<Action>,
         conditions: Condition?,
+        conversationLabels: Map<String, String>,
     ): RuleRender {
         val isGenerative = actions.any { it.tier == ActionTier.GENERATIVE }
         return RuleRender(
-            triggerLine = triggerLine(trigger),
+            triggerLine = triggerLine(trigger, conversationLabels),
             triggerIconKey = triggerIconKey(trigger),
             conditionLines = conditions?.let { flattenConditions(it, 0) } ?: emptyList(),
             actions = actions.map { actionRow(it) },
@@ -65,22 +74,30 @@ object RuleRenderMapper {
         is Trigger.Connectivity -> "connectivity"
     }
 
-    private fun triggerLine(t: Trigger): String = when (t) {
-        is Trigger.Notification -> notificationLine(t)
+    private fun triggerLine(t: Trigger, conversationLabels: Map<String, String>): String = when (t) {
+        is Trigger.Notification -> notificationLine(t, conversationLabels)
         is Trigger.Time -> timeLine(t)
         is Trigger.Geofence -> geofenceLine(t)
         is Trigger.PhoneState -> phoneStateLine(t)
         is Trigger.Connectivity -> connectivityLine(t)
     }
 
-    private fun notificationLine(t: Trigger.Notification): String {
-        val who = t.sender ?: t.conversationId ?: "chiunque"
+    private fun notificationLine(t: Trigger.Notification, conversationLabels: Map<String, String>): String {
         val chat = when (t.isGroup) {
             true -> "gruppo"
             false -> "chat 1:1"
             null -> "chat 1:1 o gruppo"
         }
-        val base = "Quando: notifica ${appLabel(t.pkg)} da $who ($chat)"
+        // Il TriggerMatcher dà al conversationId precedenza ESCLUSIVA sul sender: quando l'id è
+        // whitelistato il nome fidato descrive il criterio di match reale meglio del sender LLM
+        // o dell'hash. Senza label si mostra l'hash INTEGRALE: onesto, mai abbreviato (§5).
+        val trusted = t.conversationId?.let(conversationLabels::get)
+        val base = if (trusted != null) {
+            "Quando: notifica ${appLabel(t.pkg)} da $trusted (identità verificata, $chat)"
+        } else {
+            val who = t.sender ?: t.conversationId ?: "chiunque"
+            "Quando: notifica ${appLabel(t.pkg)} da $who ($chat)"
+        }
         // Non nascondere i filtri che restringono quando la regola scatta (§5: non "softare" nulla).
         val title = t.titleMatch?.let { " · titolo \"$it\"" } ?: ""
         val text = t.textMatch?.let { " · testo \"$it\"" } ?: ""

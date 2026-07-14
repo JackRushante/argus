@@ -27,20 +27,29 @@ import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Hub
 import androidx.compose.material.icons.rounded.MyLocation
 import androidx.compose.material.icons.rounded.Notifications
+import androidx.compose.material.icons.rounded.PrivacyTip
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Terminal
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
@@ -52,6 +61,8 @@ import dev.argus.ui.model.SettingsCallbacks
 import dev.argus.ui.model.SettingsState
 import dev.argus.ui.model.ShizukuStatus
 import dev.argus.ui.model.TransportUi
+import dev.argus.ui.components.BridgeConfigurationDialog
+import dev.argus.ui.R
 import dev.argus.ui.theme.ArgusTheme
 import dev.argus.ui.theme.LocalArgusSemantic
 
@@ -74,6 +85,8 @@ fun SettingsScreen(
     callbacks: SettingsCallbacks,
     modifier: Modifier = Modifier,
 ) {
+    var showBridgeEditor by remember { mutableStateOf(false) }
+    var confirmPrivacyRevoke by remember { mutableStateOf(false) }
     Surface(color = MaterialTheme.colorScheme.background, modifier = modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
@@ -92,7 +105,8 @@ fun SettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(18.dp),
             ) {
                 HealthSection(state, callbacks)
-                TransportSection(state.transport, callbacks)
+                TransportSection(state.transport, callbacks) { showBridgeEditor = true }
+                PrivacySection(state.privacyAccepted) { confirmPrivacyRevoke = true }
                 WhitelistSection(state.whitelist, callbacks)
                 BudgetSection(state.budget)
                 RerunRow(callbacks::onRerunOnboarding)
@@ -100,6 +114,35 @@ fun SettingsScreen(
                 Spacer(Modifier.size(8.dp))
             }
         }
+    }
+    val bridge = state.transport as? TransportUi.CliBridge
+    if (showBridgeEditor && bridge != null) {
+        BridgeConfigurationDialog(
+            initialUrl = bridge.url,
+            tokenConfigured = bridge.tokenConfigured,
+            onDismiss = { showBridgeEditor = false },
+            onSave = callbacks::onSaveBridge,
+        )
+    }
+    if (confirmPrivacyRevoke) {
+        AlertDialog(
+            onDismissRequest = { confirmPrivacyRevoke = false },
+            title = { Text(stringResource(R.string.privacy_revoke_title)) },
+            text = { Text(stringResource(R.string.privacy_revoke_body)) },
+            dismissButton = {
+                TextButton(onClick = { confirmPrivacyRevoke = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        confirmPrivacyRevoke = false
+                        callbacks.onRevokePrivacy()
+                    },
+                ) { Text(stringResource(R.string.privacy_revoke_confirm)) }
+            },
+        )
     }
 }
 
@@ -160,15 +203,25 @@ private fun HealthSection(state: SettingsState, callbacks: SettingsCallbacks) {
             )
             HealthRow(
                 Icons.Rounded.BatterySaver, "Ottimizzazione batteria",
-                if (state.batteryExempt) "esclusa — il servizio resta vivo in background" else "attiva — le azioni in background possono fallire",
+                if (state.batteryExempt) "esclusa — minore rischio di ritardi in background" else "attiva — OxygenOS può ritardare il lavoro in background",
                 if (state.batteryExempt) HealthLevel.OK else HealthLevel.WARN,
                 onFix = callbacks::onOpenBatteryFix,
             )
             HealthRow(
-                Icons.Rounded.Notifications, "Accesso alle notifiche",
-                if (state.notificationAccess) "concesso" else "non concesso — le regole su notifica non scattano",
-                if (state.notificationAccess) HealthLevel.OK else HealthLevel.WARN,
+                Icons.Rounded.Notifications, "Notifiche Argus",
+                if (state.notificationsGranted) "consentite" else "non consentite — esiti e avvisi non saranno visibili",
+                if (state.notificationsGranted) HealthLevel.OK else HealthLevel.WARN,
                 onFix = callbacks::onOpenNotificationAccessFix,
+            )
+            HealthRow(
+                Icons.Rounded.Notifications, "Lettura notifiche",
+                if (state.notificationListenerGranted) {
+                    "attiva — trigger WhatsApp e risposte disponibili"
+                } else {
+                    "non attiva — trigger WhatsApp e risposte non armabili"
+                },
+                if (state.notificationListenerGranted) HealthLevel.OK else HealthLevel.WARN,
+                onFix = callbacks::onOpenNotificationListenerFix,
             )
             HealthRow(
                 Icons.Rounded.MyLocation, "Posizione in background", locSub, locLevel,
@@ -217,7 +270,7 @@ private fun HealthRow(
             HealthLevel.NEUTRAL ->
                 Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp))
             HealthLevel.WARN ->
-                OutlinedButton(onClick = onFix, modifier = Modifier.heightIn(min = 44.dp)) { Text("Correggi") }
+                OutlinedButton(onClick = onFix, modifier = Modifier.heightIn(min = 48.dp)) { Text("Correggi") }
         }
     }
 }
@@ -227,7 +280,11 @@ private fun HealthRow(
 // -----------------------------------------------------------------------------
 
 @Composable
-private fun TransportSection(transport: TransportUi, callbacks: SettingsCallbacks) {
+private fun TransportSection(
+    transport: TransportUi,
+    callbacks: SettingsCallbacks,
+    onEditBridge: () -> Unit,
+) {
     val semantic = LocalArgusSemantic.current
     SettingsSection("BRAIN · TRANSPORT") {
         SectionCard {
@@ -250,7 +307,7 @@ private fun TransportSection(transport: TransportUi, callbacks: SettingsCallback
                             .clip(RoundedCornerShape(10.dp))
                             .background(MaterialTheme.colorScheme.background)
                             .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
-                            .clickable { callbacks.onEditBridgeUrl(transport.url) }
+                            .clickable(onClick = onEditBridge)
                             .heightIn(min = 48.dp)
                             .padding(horizontal = 12.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -263,8 +320,16 @@ private fun TransportSection(transport: TransportUi, callbacks: SettingsCallback
                             fontFamily = FontFamily.Monospace,
                             modifier = Modifier.weight(1f),
                         )
-                        Icon(Icons.Rounded.Edit, contentDescription = "Modifica indirizzo", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Rounded.Edit, contentDescription = "Modifica bridge Hermes", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                     }
+                    Text(
+                        stringResource(
+                            if (transport.tokenConfigured) R.string.bridge_token_configured
+                            else R.string.bridge_token_missing,
+                        ),
+                        color = if (transport.tokenConfigured) semantic.armed.fg else semantic.error.fg,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(
                             transport.lastLatencyLabel?.let { "Ultima latenza: $it" } ?: "Latenza non ancora misurata",
@@ -272,7 +337,7 @@ private fun TransportSection(transport: TransportUi, callbacks: SettingsCallback
                             style = MaterialTheme.typography.bodyMedium,
                             modifier = Modifier.weight(1f),
                         )
-                        OutlinedButton(onClick = callbacks::onTestConnection, modifier = Modifier.heightIn(min = 44.dp)) {
+                        OutlinedButton(onClick = callbacks::onTestConnection, modifier = Modifier.heightIn(min = 48.dp)) {
                             Text("Test connessione")
                         }
                     }
@@ -313,6 +378,43 @@ private fun InArrivoChip() {
             .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(20.dp))
             .padding(horizontal = 10.dp, vertical = 4.dp),
     )
+}
+
+@Composable
+private fun PrivacySection(accepted: Boolean, onRevoke: () -> Unit) {
+    SettingsSection("PRIVACY") {
+        SectionCard {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Icon(
+                    Icons.Rounded.PrivacyTip,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(22.dp),
+                )
+                Text(
+                    if (accepted) "Consenso Hermes attivo" else "Consenso non accettato",
+                    color = MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
+            Text(
+                stringResource(R.string.privacy_section_body),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            if (accepted) {
+                OutlinedButton(
+                    onClick = onRevoke,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                ) {
+                    Text(stringResource(R.string.privacy_revoke_action))
+                }
+            }
+        }
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -477,14 +579,16 @@ private object NoopSettingsCallbacks : SettingsCallbacks {
     override fun onRemoveContact(conversationId: String) {}
     override fun onAddContact() {}
     override fun onBudgetChange(maxPerHour: Int) {}
+    override fun onRevokePrivacy() {}
     override fun onRerunOnboarding() {}
 }
 
 private val previewAllGreen = SettingsState(
-    transport = TransportUi.CliBridge(url = "http://100.64.0.1:8090", reachable = true, lastLatencyLabel = "14 s · normale per Hermes"),
+    transport = TransportUi.CliBridge(url = "https://hermes.tail04462d.ts.net", reachable = true, lastLatencyLabel = "14 s · normale per Hermes"),
     shizuku = ShizukuStatus.AUTHORIZED,
     batteryExempt = true,
-    notificationAccess = true,
+    notificationsGranted = true,
+    notificationListenerGranted = true,
     backgroundLocation = BgLocationState.GRANTED,
     whitelist = previewContacts,
     budget = BudgetUi(maxCallsPerHour = 20, usedThisHourLabel = "3 / 20 quest'ora"),
@@ -493,10 +597,11 @@ private val previewAllGreen = SettingsState(
 )
 
 private val previewDegraded = SettingsState(
-    transport = TransportUi.CliBridge(url = "http://100.64.0.1:8090", reachable = false, lastLatencyLabel = null),
+    transport = TransportUi.CliBridge(url = "https://hermes.tail04462d.ts.net", reachable = false, lastLatencyLabel = null),
     shizuku = ShizukuStatus.DEGRADED_AFTER_REBOOT,
     batteryExempt = false,
-    notificationAccess = true,
+    notificationsGranted = true,
+    notificationListenerGranted = true,
     backgroundLocation = BgLocationState.DENIED,
     whitelist = emptyList(),
     budget = BudgetUi(maxCallsPerHour = 20, usedThisHourLabel = "17 / 20 quest'ora"),

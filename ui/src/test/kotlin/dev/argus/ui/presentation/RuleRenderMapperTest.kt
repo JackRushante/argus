@@ -104,6 +104,44 @@ class RuleRenderMapperTest {
         assertTrue(r.triggerLine.contains("*/15 9-17 * * 1-5"), r.triggerLine)
     }
 
+    @Test fun `whitelisted conversation renders trusted display name instead of hash`() {
+        val hash = "shortcut:com.whatsapp:62be4c2af7a1d9e30b5c46ab12cd34ef56ab78cd90ef12ab34cd56ef78ab90cd"
+        val a = Automation(
+            AutomationId("w2"), "Rispondi a Ottica Marci", CreatedBy.LLM, AutomationStatus.PENDING_APPROVAL,
+            Trigger.Notification("com.whatsapp", conversationId = hash, isGroup = false),
+            listOf(Action.InvokeLlm("rispondi che sono occupato", listOf("notification"), listOf("whatsapp_reply"), true)),
+        )
+        val labels = mapOf(hash to "Ottica Marci")
+
+        // Lookup deterministico dallo store fidato: nome leggibile + provenienza dell'identità.
+        assertEquals(
+            "Quando: notifica WhatsApp da Ottica Marci (identità verificata, chat 1:1)",
+            RuleRenderMapper.map(a, labels).triggerLine,
+        )
+
+        // La label fidata vince anche sul sender proposto dall'LLM: il TriggerMatcher ignora il
+        // sender quando c'è il conversationId, quindi il nome whitelistato È il criterio reale.
+        val withSender = a.copy(
+            trigger = Trigger.Notification(
+                "com.whatsapp", conversationId = hash, sender = "ottica", isGroup = false,
+            ),
+        )
+        assertTrue(RuleRenderMapper.map(withSender, labels).triggerLine.contains("Ottica Marci (identità verificata"))
+
+        // Senza label fidata l'hash resta visibile INTEGRALE: review onesta, mai abbreviata.
+        assertTrue(RuleRenderMapper.map(a).triggerLine.contains(hash))
+    }
+
+    @Test fun `draft review resolves trusted labels the same way`() {
+        val hash = "shortcut:com.whatsapp:aabbccdd"
+        val d = AutomationDraft(
+            "Rispondi", Trigger.Notification("com.whatsapp", conversationId = hash, isGroup = false),
+            listOf(Action.WhatsAppReply("ok")),
+        )
+        val line = RuleRenderMapper.mapDraft(d, mapOf(hash to "Moglie")).triggerLine
+        assertEquals("Quando: notifica WhatsApp da Moglie (identità verificata, chat 1:1)", line)
+    }
+
     @Test fun `geofence enter on current location renders resolved-location line`() {
         val a = Automation(
             AutomationId("g1"), "arrivo casa", CreatedBy.LLM, AutomationStatus.PENDING_APPROVAL,

@@ -4,7 +4,6 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
-import java.time.temporal.ChronoUnit
 
 // Cron 5 campi (min hour dom mon dow). Subset supportato: `*`, `n`, liste `a,b`, range `a-b`, step `*/s` e `a-b/s`.
 // DOW 0-7 (0 e 7 = domenica). DOM e DOW entrambi ristretti = OR (semantica vixie).
@@ -17,14 +16,23 @@ class CronSchedule private constructor(
 ) {
     /** Prossimo scatto STRETTAMENTE dopo [after], o null se non esiste entro 5 anni. */
     fun nextFireAfter(after: Instant, zone: ZoneId): Instant? {
-        var t = LocalDateTime.ofInstant(after, zone).truncatedTo(ChronoUnit.MINUTES).plusMinutes(1)
-        val limit = t.plusYears(5)
-        while (t < limit) {
-            if (t.monthValue !in months) { t = t.plusMonths(1).withDayOfMonth(1).truncatedTo(ChronoUnit.DAYS); continue }
-            if (!dayMatches(t.toLocalDate())) { t = t.plusDays(1).truncatedTo(ChronoUnit.DAYS); continue }
-            if (t.hour !in hours) { t = t.plusHours(1).truncatedTo(ChronoUnit.HOURS); continue }
-            if (t.minute !in minutes) { t = t.plusMinutes(1); continue }
-            return t.atZone(zone).toInstant()   // gap -> shift avanti; overlap -> primo offset
+        var date = LocalDateTime.ofInstant(after, zone).toLocalDate()
+        val limit = date.plusYears(5)
+        val sortedHours = hours.sorted()
+        val sortedMinutes = minutes.sorted()
+
+        while (!date.isAfter(limit)) {
+            if (date.monthValue in months && dayMatches(date)) {
+                // Un gap può spostare 02:30 dopo una regolare 03:15: si raccolgono tutti
+                // i candidati del giorno e si sceglie il primo Instant, non il primo local-time.
+                var best: Instant? = null
+                for (hour in sortedHours) for (minute in sortedMinutes) {
+                    val candidate = resolveScheduledLocal(date.atTime(hour, minute), zone)
+                    if (candidate > after && (best == null || candidate < best)) best = candidate
+                }
+                if (best != null) return best
+            }
+            date = date.plusDays(1)
         }
         return null
     }
@@ -86,6 +94,26 @@ class CronSchedule private constructor(
     }
 }
 
+/**
+ * Risolve la semantica Argus per un orario locale pianificato:
+ * - gap DST: trasla avanti della durata del gap;
+ * - overlap DST: usa solo la prima occorrenza (offset precedente), mai la seconda.
+ */
+private fun resolveScheduledLocal(local: LocalDateTime, zone: ZoneId): Instant {
+    val rules = zone.rules
+    val offsets = rules.getValidOffsets(local)
+    return when {
+        offsets.size == 1 -> local.toInstant(offsets.single())
+        offsets.size >= 2 -> local.toInstant(offsets.first())
+        else -> {
+            val transition = requireNotNull(rules.getTransition(local)) {
+                "Transizione DST assente per local-time non valido $local in $zone"
+            }
+            local.plusSeconds(transition.duration.seconds).toInstant(transition.offsetAfter)
+        }
+    }
+}
+
 /** Entry-point unico per P0-B (AlarmManagerTimeTrigger): gestisce cron e at. */
 object TimeSpecs {
     /** Prossimo scatto strettamente dopo [after], o null (one-shot passato / cron senza occorrenze).
@@ -95,7 +123,7 @@ object TimeSpecs {
         val zone = ZoneId.of(t.tz)
         return when {
             t.cron != null -> CronSchedule.parse(t.cron).nextFireAfter(after, zone)
-            t.at != null -> LocalDateTime.parse(t.at).atZone(zone).toInstant().takeIf { it > after }
+            t.at != null -> resolveScheduledLocal(LocalDateTime.parse(t.at), zone).takeIf { it > after }
             else -> null
         }
     }

@@ -12,9 +12,12 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 class EndToEndTest {
     private fun clock(iso: String) = Clock.fixed(Instant.parse(iso), ZoneOffset.UTC)
+    private val allowAll = FirePolicy { _, _ -> FirePolicyDecision.Allow }
     private fun engine(store: AutomationStore, ex: ActionExecutor, clockIso: String) =
-        Engine(store, ex, ConditionEvaluator(clock(clockIso)), TriggerMatcher(), NoopAuditSink) { 1000 }
+        Engine(store, ex, ConditionEvaluator(clock(clockIso)), TriggerMatcher(), allowAll, NoopAuditSink) { 1000 }
     private val validator = DraftValidator(knownTools = setOf("whatsapp_reply", "notify.show"))
+    private fun approved(value: Automation) =
+        value.copy(approvalFingerprint = ApprovalFingerprints.of(value))
 
     @Test fun `example2 - compile, validate, arm, fire DND after 23`() = runTest {
         // 1) compile: output Hermes -> draft
@@ -23,16 +26,25 @@ class EndToEndTest {
             "\"actions\":[{\"type\":\"set_dnd\",\"mode\":\"PRIORITY\"}]}}"
         val draft = assertNotNull(CliBridgeParser().parseCompile(raw).draft)
         // 2) validator verde
-        assertEquals(emptyList(), validator.validate(draft).filter { it.severity == Severity.ERROR })
+        assertEquals(emptyList(), validator.validate(draft, emptySet()).filter { it.severity == Severity.ERROR })
         // 3) approva -> Automation ARMED
-        val auto = Automation(AutomationId("a1"), draft.name, CreatedBy.LLM, AutomationStatus.ARMED,
-            draft.trigger, draft.actions, draft.conditions)
+        val auto = approved(
+            Automation(AutomationId("a1"), draft.name, CreatedBy.LLM, AutomationStatus.ARMED,
+                draft.trigger, draft.actions, draft.conditions),
+        )
         // 4) next-fire calcolabile (P0-B lo passa ad AlarmManager)
         assertNotNull(TimeSpecs.nextFire(draft.trigger as Trigger.Time, Instant.parse("2026-07-12T10:00:00Z")))
         // 5) fire alle 23:30 con suoneria "normal"
         val ex = FakeActionExecutor(); val store = FakeAutomationStore(listOf(auto))
         engine(store, ex, "2026-07-12T21:30:00Z")
-            .onTrigger(TriggerEvent.TimeFired(AutomationId("a1"))) { DeviceState(values = mapOf("ringer" to "normal")) }
+            .onTrigger(
+                TriggerEnvelope(
+                    TriggerEventId("alarm:a1:1"),
+                    TriggerEvent.TimeFired(auto.id, requireNotNull(auto.approvalFingerprint)),
+                ),
+            ) {
+                DeviceState(values = mapOf("ringer" to "normal"))
+            }
         assertEquals(listOf<Action>(Action.SetDnd(DndMode.PRIORITY)), ex.executed)
     }
 
@@ -41,27 +53,41 @@ class EndToEndTest {
         val draft = AutomationDraft("geo casa",
             Trigger.Geofence(radiusM = 50.0, transition = Transition.EXIT, resolveCurrentLocation = true),
             listOf(Action.SetWifi(false), Action.SetBluetooth(true)))
-        val issues = validator.validate(draft)
+        val issues = validator.validate(draft, emptySet())
         assertEquals(emptyList(), issues.filter { it.severity == Severity.ERROR })
         assertTrue(issues.any { it.code == "radius_small" })
         // all'ARM l'app risolve le coordinate correnti
         val resolved = (draft.trigger as Trigger.Geofence).copy(lat = 45.4, lng = 11.0, resolveCurrentLocation = false)
-        val auto = Automation(AutomationId("g1"), draft.name, CreatedBy.LLM, AutomationStatus.ARMED, resolved, draft.actions)
+        val auto = approved(
+            Automation(AutomationId("g1"), draft.name, CreatedBy.LLM, AutomationStatus.ARMED, resolved, draft.actions),
+        )
         val ex = FakeActionExecutor(); val store = FakeAutomationStore(listOf(auto))
         engine(store, ex, "2026-07-12T10:00:00Z")
-            .onTrigger(TriggerEvent.GeofenceTransitioned(AutomationId("g1"), Transition.EXIT)) { DeviceState() }
+            .onTrigger(TriggerEnvelope(
+                TriggerEventId("geofence:g1:1"),
+                TriggerEvent.GeofenceTransitioned(
+                    auto.id,
+                    Transition.EXIT,
+                    requireNotNull(auto.approvalFingerprint),
+                ),
+            )) { DeviceState() }
         assertEquals(listOf<Action>(Action.SetWifi(false), Action.SetBluetooth(true)), ex.executed)
     }
 
     @Test fun `example3 - whatsapp 1-1 from whitelisted conversation triggers generative reply as Submitted`() = runTest {
-        val auto = Automation(AutomationId("w1"), "reply", CreatedBy.LLM, AutomationStatus.ARMED,
-            Trigger.Notification("com.whatsapp", conversationId = "jid:42", isGroup = false),
-            listOf(Action.InvokeLlm("rispondi", listOf("notification"), listOf("whatsapp_reply"), replyTargetSender = true)),
-            conditions = Condition.TimeWindow("18:00", "22:00", "Europe/Rome"))
+        val auto = approved(
+            Automation(AutomationId("w1"), "reply", CreatedBy.LLM, AutomationStatus.ARMED,
+                Trigger.Notification("com.whatsapp", conversationId = "jid:42", isGroup = false),
+                listOf(Action.InvokeLlm("rispondi", listOf("notification"), listOf("whatsapp_reply"), replyTargetSender = true)),
+                conditions = Condition.TimeWindow("18:00", "22:00", "Europe/Rome")),
+        )
         val ex = FakeActionExecutor(); val store = FakeAutomationStore(listOf(auto))
         val outcomes = engine(store, ex, "2026-07-12T16:30:00Z")   // 18:30 CEST, dentro la finestra
-            .onTrigger(TriggerEvent.NotificationPosted("com.whatsapp", conversationId = "jid:42",
-                sender = "Moglie", text = "ciao", isGroup = false, notificationKey = "sbn:1")) { DeviceState() }
+            .onTrigger(TriggerEnvelope(
+                TriggerEventId("sbn:wa:1"),
+                TriggerEvent.NotificationPosted("com.whatsapp", conversationId = "jid:42",
+                    sender = "Moglie", text = "ciao", isGroup = false, notificationKey = "sbn:1"),
+            )) { DeviceState() }
         assertEquals(1, ex.executed.size)
         assertEquals(ActionTier.GENERATIVE, ex.executed.first().tier)
         assertEquals(listOf<ActionResult>(ActionResult.Submitted), outcomes.single().results)  // lane async, engine non blocca

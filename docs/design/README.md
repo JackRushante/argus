@@ -3,6 +3,10 @@
 > Pacchetto di handoff per implementare in un vero codebase la UI di **Argus**,
 > l'agente LLM di automazione Android descritto in `spec-argus-design-rev3.md`
 > e `handoff-frontend.md`. Rev design: **1a** (approvata).
+>
+> **Stato 2026-07-14:** riferimento autorevole per visual, copy e stati UI. Le parti che
+> descrivono FGS/notifica persistente o comportamento runtime sono storiche: prevalgono
+> `docs/superpowers/plans/2026-07-13-argus-commander-replan.md` e l'audit P0-B finale.
 
 ---
 
@@ -183,7 +187,7 @@ Riferimenti visivi in `screenshots/`. Ordine bottom nav: **Chat · Automazioni �
 - **Espansione**: le righe con dettaglio si aprono (chevron ruota 180°) mostrando i passi (`SetWifi(off) → ok`, …). Le righe **DEFERRED** mostrano un bottone **"Invia ora"** (E13).
 
 ### 7.5 Sistema — `05-sistema.png` (§6.5)
-- **Sezioni** (card raggruppate): **Salute** permessi (Shizuku, ottimizzazione batteria, accesso notifiche, posizione background — l'ultima con warning ambra + "Correggi"); **Brain · transport** (CliBridge/Hermes, indirizzo mono `http://100.80.142.65:8090`, stato "raggiungibile", latenza, "Test connessione"); **Whitelist contatti** (nota "memorizzati per conversationId, non per nome — spoofabile", riga contatto con avatar + id mascherato, "Aggiungi contatto"); **Budget LLM** (barra "3 / 20 chiamate quest'ora"); riga "Ripeti configurazione"; footer versione.
+- **Sezioni** (card raggruppate): **Salute** permessi (Shizuku, ottimizzazione batteria, accesso notifiche, posizione background — l'ultima con warning ambra + "Correggi"); **Brain · transport** (CliBridge/Hermes, indirizzo mono `https://hermes.tail04462d.ts.net`, stato "raggiungibile", latenza, "Test connessione"); **Whitelist contatti** (nota "memorizzati per conversationId, non per nome — spoofabile", riga contatto con avatar + id mascherato, "Aggiungi contatto"); **Budget LLM** (barra "3 / 20 chiamate quest'ora"); riga "Ripeti configurazione"; footer versione.
 
 ### 7.6 Onboarding / permessi — `06-onboarding.png` (§6.6)
 - **Wizard 6 step**: Privacy → Hermes → Shizuku → Notifiche → Batteria → Posizione.

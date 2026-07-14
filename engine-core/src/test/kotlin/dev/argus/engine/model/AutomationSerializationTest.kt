@@ -2,6 +2,8 @@ package dev.argus.engine.model
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
 class AutomationSerializationTest {
     @Test fun `automation with generative action round-trips`() {
         val a = Automation(
@@ -16,6 +18,29 @@ class AutomationSerializationTest {
         )
         val json = ArgusJson.encodeToString(Automation.serializer(), a)
         assertEquals(a, ArgusJson.decodeFromString(Automation.serializer(), json))
+        assertEquals(
+            setOf(
+                CapabilityIds.TRIGGER_NOTIFICATION,
+                CapabilityIds.ACTION_INVOKE_LLM,
+                "whatsapp_reply",
+            ),
+            a.requiredCapabilities,
+        )
+    }
+    @Test fun `legacy json without capability snapshot derives it fail closed`() {
+        val automation = Automation(
+            id = AutomationId("legacy"), name = "DND",
+            createdBy = CreatedBy.USER, status = AutomationStatus.PENDING_APPROVAL,
+            trigger = Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
+            actions = listOf(Action.SetDnd(DndMode.PRIORITY)),
+        )
+        val encoded = ArgusJson.encodeToJsonElement(Automation.serializer(), automation).jsonObject
+        val legacy = JsonObject(encoded - "requiredCapabilities")
+        val decoded = ArgusJson.decodeFromJsonElement(Automation.serializer(), legacy)
+        assertEquals(
+            setOf(CapabilityIds.TRIGGER_TIME, CapabilityIds.ACTION_SET_DND),
+            decoded.requiredCapabilities,
+        )
     }
     @Test fun `tier classification`() {
         assertTrue(Action.SetWifi(true).tier == ActionTier.DETERMINISTIC)

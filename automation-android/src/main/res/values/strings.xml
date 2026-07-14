@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="argus_automation_channel_name">Automazioni Argus</string>
+    <string name="argus_automation_channel_description">Avvisi generati dalle regole approvate</string>
+</resources>
