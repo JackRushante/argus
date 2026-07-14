@@ -104,6 +104,18 @@ class RuleRenderMapperTest {
         assertTrue(r.triggerLine.contains("*/15 9-17 * * 1-5"), r.triggerLine)
     }
 
+    @Test fun `sms trigger renders its text filter integrally`() {
+        val a = Automation(
+            AutomationId("s2"), "SMS prova", CreatedBy.LLM, AutomationStatus.PENDING_APPROVAL,
+            Trigger.PhoneState(PhoneEvent.SMS_RECEIVED, textMatch = "prova argus"),
+            listOf(Action.ShowNotification("Argus", "SMS ricevuto!")),
+        )
+        assertEquals(
+            "Quando: SMS ricevuto da chiunque · testo \"prova argus\"",
+            RuleRenderMapper.map(a).triggerLine,
+        )
+    }
+
     @Test fun `whitelisted conversation renders trusted display name instead of hash`() {
         val hash = "shortcut:com.whatsapp:62be4c2af7a1d9e30b5c46ab12cd34ef56ab78cd90ef12ab34cd56ef78ab90cd"
         val a = Automation(

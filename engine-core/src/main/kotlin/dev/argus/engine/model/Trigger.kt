@@ -43,7 +43,12 @@ sealed interface Trigger {
     ) : Trigger
 
     @Serializable @SerialName("phone_state")
-    data class PhoneState(val event: PhoneEvent, val number: String? = null) : Trigger
+    data class PhoneState(
+        val event: PhoneEvent,
+        val number: String? = null,
+        /** Filtro contains case-insensitive sul testo dell'SMS: valido solo con SMS_RECEIVED. */
+        val textMatch: String? = null,
+    ) : Trigger
 
     @Serializable @SerialName("connectivity")
     data class Connectivity(val medium: ConnMedium, val state: ConnState, val match: String? = null) : Trigger

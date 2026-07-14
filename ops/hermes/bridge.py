@@ -89,7 +89,8 @@ Trigger, discriminato da "type":
    "sender":string|null, "isGroup":boolean|null, "titleMatch":string|null,
    "textMatch":string|null}
 - {"type":"phone_state", "event":"INCOMING_CALL"|"CALL_ENDED"|"SMS_RECEIVED",
-   "number":string|null}
+   "number":string|null, "textMatch":string|null (contains case-insensitive sul testo
+   dell'SMS; SOLO con event SMS_RECEIVED)}
 - {"type":"connectivity", "medium":"WIFI"|"BT"|"POWER",
    "state":"CONNECTED"|"DISCONNECTED", "match":string|null}
 
@@ -543,7 +544,7 @@ def validate_trigger(value: Any, whitelisted_contact_ids: set[str]) -> bool:
         )
     specs: dict[str, tuple[set[str], set[str]]] = {
         "notification": ({"type", "pkg"}, {"conversationId", "sender", "isGroup", "titleMatch", "textMatch"}),
-        "phone_state": ({"type", "event"}, {"number"}),
+        "phone_state": ({"type", "event"}, {"number", "textMatch"}),
         "connectivity": ({"type", "medium", "state"}, {"match"}),
     }
     if kind not in specs or not _exact_keys(value, *specs[kind]):
@@ -557,8 +558,13 @@ def validate_trigger(value: Any, whitelisted_contact_ids: set[str]) -> bool:
             conversation_id is None or conversation_id in whitelisted_contact_ids
         )
     if kind == "phone_state":
+        text_match = value.get("textMatch")
         return value["event"] in {"INCOMING_CALL", "CALL_ENDED", "SMS_RECEIVED"} and (
             value.get("number") is None or _string(value["number"], 64)
+        ) and (
+            # Filtro sul testo: solo per gli SMS (le chiamate non hanno un corpo).
+            text_match is None
+            or (value["event"] == "SMS_RECEIVED" and _string(text_match, 512))
         )
     return value["medium"] in {"WIFI", "BT", "POWER"} and value["state"] in {
         "CONNECTED", "DISCONNECTED"

@@ -43,4 +43,34 @@ class TriggerMatcherTest {
         assertTrue(m.matches(spec, TriggerEvent.PhoneStateChanged(PhoneEvent.INCOMING_CALL, "3200000000")))
         assertFalse(m.matches(spec, TriggerEvent.PhoneStateChanged(PhoneEvent.INCOMING_CALL, "3331112223")))
     }
+    @Test fun `sms text match is contains case-insensitive and fails closed without text`() {
+        val spec = Trigger.PhoneState(PhoneEvent.SMS_RECEIVED, textMatch = "prova argus")
+        assertTrue(
+            m.matches(
+                spec,
+                TriggerEvent.PhoneStateChanged(
+                    PhoneEvent.SMS_RECEIVED, "+39001", smsText = "Ecco la PROVA Argus di stasera",
+                ),
+            ),
+        )
+        assertFalse(
+            m.matches(
+                spec,
+                TriggerEvent.PhoneStateChanged(PhoneEvent.SMS_RECEIVED, "+39001", smsText = "altro"),
+            ),
+        )
+        // Evento senza testo (mai per gli SMS reali, sempre per le chiamate): fail-closed.
+        assertFalse(
+            m.matches(spec, TriggerEvent.PhoneStateChanged(PhoneEvent.SMS_RECEIVED, "+39001")),
+        )
+
+        // Senza filtro: ogni SMS matcha, comprese le consegne senza testo.
+        val any = Trigger.PhoneState(PhoneEvent.SMS_RECEIVED)
+        assertTrue(
+            m.matches(
+                any,
+                TriggerEvent.PhoneStateChanged(PhoneEvent.SMS_RECEIVED, "+39001", smsText = "x"),
+            ),
+        )
+    }
 }

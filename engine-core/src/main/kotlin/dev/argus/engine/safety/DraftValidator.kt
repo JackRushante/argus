@@ -122,7 +122,12 @@ class DraftValidator(
                 validateOptionalText(trigger.textMatch, "text_match_invalid", err)
             }
 
-            is Trigger.PhoneState -> validateOptionalText(trigger.number, "number_invalid", err)
+            is Trigger.PhoneState -> {
+                validateOptionalText(trigger.number, "number_invalid", err)
+                validateOptionalText(trigger.textMatch, "sms_text_match_invalid", err)
+                if (trigger.textMatch != null && trigger.event != PhoneEvent.SMS_RECEIVED)
+                    err("sms_text_match_invalid", "Il filtro sul testo vale solo per gli SMS in arrivo")
+            }
             is Trigger.Connectivity -> validateOptionalText(trigger.match, "match_invalid", err)
         }
     }

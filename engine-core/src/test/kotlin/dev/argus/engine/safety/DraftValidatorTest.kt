@@ -17,6 +17,20 @@ class DraftValidatorTest {
     @Test fun `valid generative draft has no errors`() {
         assertEquals(emptyList(), errors(v.validate(validGenerative, whitelistedIds = setOf("jid:42"))))
     }
+    @Test fun `sms text match is valid only on SMS_RECEIVED`() {
+        val sms = AutomationDraft(
+            name = "sms prova",
+            trigger = Trigger.PhoneState(PhoneEvent.SMS_RECEIVED, textMatch = "prova argus"),
+            actions = listOf(Action.ShowNotification("Argus", "SMS ricevuto!")),
+        )
+        assertEquals(emptyList(), errors(v.validate(sms, emptySet())))
+
+        // Le chiamate non hanno testo: un textMatch lì è un draft incoerente, non un warning.
+        val call = sms.copy(
+            trigger = Trigger.PhoneState(PhoneEvent.INCOMING_CALL, textMatch = "x"),
+        )
+        assertTrue("sms_text_match_invalid" in errors(v.validate(call, emptySet())))
+    }
     @Test fun `forbidden tools in InvokeLlm are rejected`() {
         val d = validGenerative.copy(actions = listOf(Action.InvokeLlm("g", listOf(), listOf("shell.run", "automation.create"), true)))
         val e = errors(v.validate(d, setOf("jid:42")))
