@@ -3,6 +3,7 @@ package dev.argus.automation.notification
 import android.app.Notification
 import android.app.Person
 import androidx.test.core.app.ApplicationProvider
+import dev.argus.engine.notification.NotificationSnapshot
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -57,6 +58,37 @@ class AndroidNotificationSnapshotFactoryTest {
         assertEquals("tel:+39002", snapshot.personUris.first())
         assertEquals(false, snapshot.isGroup)
         assertFalse(snapshot.isGroupSummary)
+    }
+
+    @Test
+    fun `latest message metadata exposes timestamp and self authorship`() {
+        val localUser = Person.Builder().setName("Io").setUri("tel:+39000").build()
+        val wife = Person.Builder().setName("Moglie").setUri("tel:+39002").build()
+
+        fun snapshotWithLatest(sender: Person?): NotificationSnapshot {
+            val style = Notification.MessagingStyle(localUser)
+                .addMessage("in arrivo", 5L, wife)
+            style.addMessage(Notification.MessagingStyle.Message("eco della reply", 9L, sender))
+            val notification = Notification.Builder(context, "test")
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setShortcutId("shortcut-42")
+                .setStyle(style)
+                .build()
+            return factory.from(notification, "com.whatsapp", "sbn:9", postedAtMillis = 100L)
+        }
+
+        // L'eco della risposta (Argus o l'utente) ha come mittente la user Person dello style:
+        // non è un messaggio in arrivo e non deve diventare un evento.
+        val selfEcho = snapshotWithLatest(localUser)
+        assertTrue(selfEcho.latestMessageFromSelf)
+        assertEquals(9L, selfEcho.latestMessageTimestampMillis)
+
+        // Per convenzione MessagingStyle un sender null è l'utente stesso.
+        assertTrue(snapshotWithLatest(null).latestMessageFromSelf)
+
+        val incoming = snapshotWithLatest(wife)
+        assertFalse(incoming.latestMessageFromSelf)
+        assertEquals(9L, incoming.latestMessageTimestampMillis)
     }
 
     @Test

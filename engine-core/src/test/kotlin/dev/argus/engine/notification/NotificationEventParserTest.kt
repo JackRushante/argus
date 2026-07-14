@@ -110,6 +110,48 @@ class NotificationEventParserTest {
         assertFalse(parsed.envelope.id.value.contains("50V0XCj31HQ4"), "la key resta fuori dall'event ID")
     }
 
+    @Test
+    fun `self authored updates never become events`() {
+        // L'eco della reply inviata (da Argus o a mano) riappare come update della notifica:
+        // "quando X mi scrive" non include mai "quando io scrivo a X" — niente evento, niente loop.
+        assertNull(parser.parse(snapshot(latestMessageFromSelf = true)))
+    }
+
+    @Test
+    fun `event id is stable across cosmetic reposts of the same message`() {
+        val first = assertNotNull(
+            parser.parse(
+                snapshot(title = "Moglie", postedAtMillis = 1_000L, latestMessageTimestampMillis = 500L),
+            ),
+        )
+        val reposted = assertNotNull(
+            parser.parse(
+                snapshot(
+                    title = "2 nuovi messaggi",
+                    postedAtMillis = 9_000L,
+                    latestMessageTimestampMillis = 500L,
+                ),
+            ),
+        )
+        assertEquals(
+            first.envelope.id,
+            reposted.envelope.id,
+            "stesso messaggio ripubblicato ⇒ stesso evento ⇒ SUPPRESSED_DUPLICATE onesto",
+        )
+
+        val newMessage = assertNotNull(
+            parser.parse(
+                snapshot(postedAtMillis = 9_000L, latestMessageTimestampMillis = 600L),
+            ),
+        )
+        assertNotEquals(first.envelope.id, newMessage.envelope.id, "messaggio nuovo ⇒ evento nuovo")
+
+        // Senza timestamp del messaggio (notifiche non-chat) resta il comportamento per postTime.
+        val legacyA = assertNotNull(parser.parse(snapshot(postedAtMillis = 1_000L)))
+        val legacyB = assertNotNull(parser.parse(snapshot(postedAtMillis = 2_000L)))
+        assertNotEquals(legacyA.envelope.id, legacyB.envelope.id)
+    }
+
     private fun snapshot(
         packageName: String = "com.whatsapp",
         notificationKey: String = "sbn:private",
@@ -121,6 +163,9 @@ class NotificationEventParserTest {
         fallbackText: String? = "fallback",
         isGroup: Boolean? = false,
         isGroupSummary: Boolean = false,
+        postedAtMillis: Long = 1_000L,
+        latestMessageTimestampMillis: Long? = null,
+        latestMessageFromSelf: Boolean = false,
     ) = NotificationSnapshot(
         packageName = packageName,
         notificationKey = notificationKey,
@@ -132,6 +177,8 @@ class NotificationEventParserTest {
         fallbackText = fallbackText,
         isGroup = isGroup,
         isGroupSummary = isGroupSummary,
-        postedAtMillis = 1_000L,
+        postedAtMillis = postedAtMillis,
+        latestMessageTimestampMillis = latestMessageTimestampMillis,
+        latestMessageFromSelf = latestMessageFromSelf,
     )
 }

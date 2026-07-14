@@ -51,8 +51,33 @@ class AndroidNotificationSnapshotFactory {
             isGroup = explicitGroup,
             isGroupSummary = notification.flags and Notification.FLAG_GROUP_SUMMARY != 0,
             postedAtMillis = postedAtMillis,
+            latestMessageTimestampMillis = latestMessage?.timestamp,
+            latestMessageFromSelf = latestMessage?.let { fromSelf(it, extras) } ?: false,
         )
     }
+
+    /** Convenzione MessagingStyle: sender null = utente; altrimenti confronto con la user Person. */
+    private fun fromSelf(
+        message: Notification.MessagingStyle.Message,
+        extras: Bundle,
+    ): Boolean {
+        val sender = message.senderPerson ?: return true
+        val user = runCatching { messagingUser(extras) }.getOrNull() ?: return false
+        val senderUri = sender.uri
+        val userUri = user.uri
+        if (senderUri != null && userUri != null) return senderUri == userUri
+        val senderName = sender.name?.toString()
+        val userName = user.name?.toString()
+        return senderName != null && senderName == userName
+    }
+
+    @Suppress("DEPRECATION")
+    private fun messagingUser(extras: Bundle): Person? =
+        if (Build.VERSION.SDK_INT >= 33) {
+            extras.getParcelable(Notification.EXTRA_MESSAGING_PERSON, Person::class.java)
+        } else {
+            extras.getParcelable(Notification.EXTRA_MESSAGING_PERSON)
+        }
 
     @Suppress("DEPRECATION")
     private fun messageBundles(extras: Bundle): Array<out Parcelable>? =

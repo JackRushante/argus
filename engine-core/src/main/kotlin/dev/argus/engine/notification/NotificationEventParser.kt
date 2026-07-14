@@ -22,6 +22,10 @@ data class NotificationSnapshot(
     val isGroup: Boolean?,
     val isGroupSummary: Boolean,
     val postedAtMillis: Long,
+    /** Timestamp dell'ultimo messaggio MessagingStyle: stabile attraverso i repost cosmetici. */
+    val latestMessageTimestampMillis: Long? = null,
+    /** true se l'ultimo messaggio è dell'utente stesso (eco di una reply, anche di Argus). */
+    val latestMessageFromSelf: Boolean = false,
 )
 
 enum class ConversationIdentitySource(val wireName: String) {
@@ -79,6 +83,10 @@ class NotificationEventParser(
         if (!PACKAGE_NAME.matches(packageName) || packageName in deniedPackages || snapshot.isGroupSummary) {
             return null
         }
+        // L'eco di una reply inviata (da Argus o dall'utente) riappare come update della stessa
+        // notifica: non è un messaggio in arrivo e non deve mai diventare un evento (anti-loop
+        // strutturale, non delegato al solo cooldown).
+        if (snapshot.latestMessageFromSelf) return null
         // La key è un identificatore opaco DI SISTEMA e può contenere caratteri di controllo:
         // il tag WhatsApp reale è Base64 con newline finale (caratterizzazione P1-7). Va
         // conservata intatta per il matching di registry/gateway; nell'event ID entra solo
@@ -102,14 +110,18 @@ class NotificationEventParser(
             isGroup = snapshot.isGroup,
             notificationKey = notificationKey,
         )
+        // Identità dell'evento = il MESSAGGIO, non la pubblicazione: il timestamp MessagingStyle
+        // resta stabile quando WhatsApp ripubblica la stessa notifica (contatori, eco reply),
+        // così i repost diventano SUPPRESSED_DUPLICATE onesti. Il title resta fuori dal digest
+        // perché cambia con i contatori ("2 nuovi messaggi") senza che il messaggio cambi.
+        val eventInstantMillis = snapshot.latestMessageTimestampMillis ?: snapshot.postedAtMillis
         val eventId = TriggerEventId(
             "notification:" + digest(
                 packageName,
                 notificationKey,
-                snapshot.postedAtMillis.coerceAtLeast(0).toString(),
+                eventInstantMillis.coerceAtLeast(0).toString(),
                 conversationId.orEmpty(),
                 sender.orEmpty(),
-                title.orEmpty(),
                 text,
                 snapshot.isGroup?.toString().orEmpty(),
             ),
