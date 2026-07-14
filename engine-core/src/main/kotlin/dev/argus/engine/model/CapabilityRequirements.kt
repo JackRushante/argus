@@ -5,7 +5,9 @@ object CapabilityIds {
     const val TRIGGER_TIME = "trigger.time"
     const val TRIGGER_GEOFENCE = "trigger.geofence"
     const val TRIGGER_NOTIFICATION = "trigger.notification"
-    const val TRIGGER_PHONE_STATE = "trigger.phone_state"
+    // Granulari per evento: i grant OS differiscono (RECEIVE_SMS vs READ_PHONE_STATE).
+    const val TRIGGER_PHONE_SMS = "trigger.phone_state.sms"
+    const val TRIGGER_PHONE_CALL = "trigger.phone_state.call"
     const val TRIGGER_CONNECTIVITY = "trigger.connectivity"
 
     const val STATE_FOREGROUND_APP = "state.foreground_app"
@@ -46,7 +48,10 @@ object CapabilityRequirements {
         is Trigger.Time -> setOf(CapabilityIds.TRIGGER_TIME)
         is Trigger.Geofence -> setOf(CapabilityIds.TRIGGER_GEOFENCE, CapabilityIds.STATE_LOCATION)
         is Trigger.Notification -> setOf(CapabilityIds.TRIGGER_NOTIFICATION)
-        is Trigger.PhoneState -> setOf(CapabilityIds.TRIGGER_PHONE_STATE)
+        is Trigger.PhoneState -> when (trigger.event) {
+            PhoneEvent.SMS_RECEIVED -> setOf(CapabilityIds.TRIGGER_PHONE_SMS)
+            PhoneEvent.INCOMING_CALL, PhoneEvent.CALL_ENDED -> setOf(CapabilityIds.TRIGGER_PHONE_CALL)
+        }
         is Trigger.Connectivity -> setOf(CapabilityIds.TRIGGER_CONNECTIVITY)
     }
 

@@ -68,6 +68,16 @@ class EngineNotificationEventDispatcher(
     }
 }
 
+/** Stesso pattern per la telefonia (P2-2): l'engine matcha, deduplica e decide da solo. */
+class EnginePhoneEventDispatcher(
+    private val engine: Engine,
+    private val state: DeviceStateSnapshotProvider,
+) : dev.argus.automation.phone.PhoneEventDispatcher {
+    override suspend fun dispatch(envelope: TriggerEnvelope) {
+        engine.onTrigger(envelope) { state.current() }
+    }
+}
+
 /**
  * Registrar per-trigger senza service persistente: Time registra presso AlarmManager tramite il
  * coordinator; Notification non ha una registrazione OS per-rule e richiede soltanto il grant

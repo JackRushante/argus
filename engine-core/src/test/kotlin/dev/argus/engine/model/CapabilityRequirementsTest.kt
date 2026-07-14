@@ -98,6 +98,33 @@ class CapabilityRequirementsTest {
     }
 
     @Test
+    fun `phone state derives granular capabilities per event kind`() {
+        // I grant OS differiscono (RECEIVE_SMS vs READ_PHONE_STATE): la capability persistita
+        // deve distinguere, così la probe pubblica solo ciò che il grant reale copre.
+        assertEquals(
+            setOf(CapabilityIds.TRIGGER_PHONE_SMS),
+            CapabilityRequirements.derive(
+                trigger = Trigger.PhoneState(PhoneEvent.SMS_RECEIVED),
+                actions = emptyList(),
+            ),
+        )
+        assertEquals(
+            setOf(CapabilityIds.TRIGGER_PHONE_CALL),
+            CapabilityRequirements.derive(
+                trigger = Trigger.PhoneState(PhoneEvent.INCOMING_CALL, number = "333"),
+                actions = emptyList(),
+            ),
+        )
+        assertEquals(
+            setOf(CapabilityIds.TRIGGER_PHONE_CALL),
+            CapabilityRequirements.derive(
+                trigger = Trigger.PhoneState(PhoneEvent.CALL_ENDED),
+                actions = emptyList(),
+            ),
+        )
+    }
+
+    @Test
     fun `nested conditions retain every state dependency`() {
         val conditions = Condition.And(
             listOf(

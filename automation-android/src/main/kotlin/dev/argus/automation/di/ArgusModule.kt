@@ -29,6 +29,7 @@ import dev.argus.automation.PersistentDeferredReplySink
 import dev.argus.automation.PrivacyRevocationCoordinator
 import dev.argus.automation.DeviceStateSnapshotProvider
 import dev.argus.automation.EngineNotificationEventDispatcher
+import dev.argus.automation.EnginePhoneEventDispatcher
 import dev.argus.automation.EngineTimeEventDispatcher
 import dev.argus.automation.FrameworkCurrentLocationProvider
 import dev.argus.automation.GenerativeLane
@@ -65,7 +66,10 @@ import dev.argus.device.StateReader
 import dev.argus.engine.brain.Brain
 import dev.argus.engine.brain.CapabilityProbe
 import dev.argus.engine.brain.ContactWhitelistStore
+import dev.argus.automation.phone.PhoneEventIngress
+import dev.argus.automation.phone.PrefsCallStateStore
 import dev.argus.engine.notification.NotificationEventParser
+import dev.argus.engine.phone.PhoneEventParser
 import dev.argus.engine.notification.ObservedConversationStore
 import dev.argus.engine.runtime.ActionExecutor
 import dev.argus.engine.runtime.AuditSink
@@ -435,6 +439,18 @@ object ArgusModule {
         conversations,
         dispatcher,
         privacyAccepted = { preferences.observe().value.privacyAccepted },
+    )
+
+    @Provides
+    @Singleton
+    fun phoneEventIngress(
+        engine: Engine,
+        state: DeviceStateSnapshotProvider,
+        @ApplicationContext context: Context,
+    ): PhoneEventIngress = PhoneEventIngress(
+        parser = PhoneEventParser(),
+        callState = PrefsCallStateStore(context),
+        dispatcher = EnginePhoneEventDispatcher(engine, state),
     )
 
     @Provides
