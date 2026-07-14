@@ -169,6 +169,39 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun `clear conversation removes messages but keeps pending draft cards`() = runTest(dispatcher) {
+        val brain = QueuedBrain()
+        val viewModel = chatViewModel(brain)
+
+        viewModel.onInputChange("dopo le 23 metti non disturbare")
+        viewModel.onSend()
+        runCurrent()
+        brain.removeFirst().response.complete(
+            CompileResult(
+                reply = "Regola pronta",
+                draft = AutomationDraft(
+                    name = "DND sera",
+                    trigger = Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
+                    actions = listOf(Action.SetDnd(DndMode.PRIORITY)),
+                ),
+                metaError = null,
+            ),
+        )
+        advanceUntilIdle()
+        assertTrue(viewModel.state.value.items.any { it is ChatItem.UserMessage })
+        assertTrue(viewModel.state.value.items.any { it is ChatItem.AssistantMessage })
+        assertTrue(viewModel.state.value.items.any { it is ChatItem.DraftCard })
+
+        viewModel.onClearConversation()
+
+        // La chat si svuota ma le proposte in sospeso restano: sono il canale di approvazione,
+        // non cronologia (§3 — l'arm passa dalla review, mai dai messaggi).
+        val items = viewModel.state.value.items
+        assertTrue(items.all { it is ChatItem.DraftCard }, "restano solo le card: $items")
+        assertTrue(items.isNotEmpty())
+    }
+
+    @Test
     fun `edit prompt carries the complete current draft without persisting it`() {
         val base = AutomationDraft(
             name = "DND sera",
