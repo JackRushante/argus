@@ -12,6 +12,12 @@ Remote di backup: `origin` → hub Git su Unraid
 
 HEAD al momento dell'handoff: `19bc294 feat(runtime): add guarded generative action lane`
 
+> **AGGIORNAMENTO 2026-07-14 pomeriggio (Claude Fable, sessione `negozio`)**: P1-5 è stata
+> completata in quattro commit atomici più il gate device, tutti pushati sull'hub.
+> HEAD attuale: `b5d9578 test(automation): gate probe capabilities on real device grants`.
+> Stato esecutivo, ledger, known issues e checklist sotto sono stati aggiornati di conseguenza;
+> il dettaglio completo della ripresa è nel §18 in fondo. La prossima slice è **P1-6**.
+
 ## 1. Scopo e motivo dello stop
 
 Questo handoff chiude una sessione di implementazione autonoma iniziata dall'audit di Argus. Lo stop
@@ -52,8 +58,8 @@ stato incoerente. P1-4 è invece chiusa su un commit atomico, testato e pushato.
 | P1-3 listener + reply gateway | Completo | Commit `d200b8c`, test host e RemoteInput sintetico device |
 | P1-4 lane generativa | Core completo | Commit `19bc294`, TOCTOU/CAS/queue/timeout testati |
 | E13 deferred durabile | **Non implementato per scelta sicura** | Il sink produzione è unavailable; `channel_expired` resta `FAILED`, mai falso `DEFERRED` |
-| P1-5 capability/arm/bootstrap | Prossima slice | Audit già svolto; piano preciso al §9 |
-| P1-6 settings/whitelist/deferred UI | Da fare | Include lo store cifrato necessario a E13 |
+| P1-5 capability/arm/bootstrap | **Completa (Claude 2026-07-14)** | Commit `e266fd9`+`b7c25e7`+`8c857fd`+`9a84c3b`+`b5d9578`; gate host verde (114+45+90 test, lint 0 err, APK) e gate device OK (2 test instrumented su CPH2747); dettagli §18 |
+| P1-6 settings/whitelist/deferred UI | **Prossima slice** | Include lo store cifrato necessario a E13; residui privacy elencati al §18.4 |
 | P1-7 E2E WhatsApp | Da fare con Lorenzo | Caratterizzazione reale e test positivi/negativi |
 | P1-8 chiusura | Da fare | Full gate, documentazione, review e merge solo dopo i gate esterni |
 
@@ -84,6 +90,25 @@ Ordine cronologico rilevante:
      sincrona fallita deve restare `SUBMITTED`, altrimenti la action asincrona non può convergere.
 9. `19bc294 feat(runtime): add guarded generative action lane`
    - P1-4 core, lane single-consumer, doppia rivalidazione e completamento CAS.
+
+Commit della ripresa Claude (P1-5, 2026-07-14 pomeriggio), tutti pushati:
+
+10. `b58c01a docs(argus): add detailed Claude handoff` — questo documento.
+11. `e266fd9 feat(engine): align generative requirements and validator with P1 lane`
+    - P1-5a: `state.read` derivato dal context source `state`; validator ristretto al profilo
+      P1 reale della lane; costanti condivise in `GenerativeContract` (engine-core).
+12. `b7c25e7 feat(automation): gate generative capabilities behind real readiness`
+    - P1-5b: probe pubblica trigger/tool/invoke_llm da grant e readiness reali; gate privacy
+      sincrono nell'ingress; handle e observed rows solo WhatsApp trusted; collector privacy
+      nel runtime controller (registry clear + reconcile immediato).
+13. `8c857fd feat(automation): execute static WhatsApp reply through the reply gateway`
+    - P1-5c: `Action.WhatsAppReply` eseguita via `NotificationReplyGateway` col target congelato
+      dal trigger; `action.whatsapp_reply` pubblicata solo ora che l'executor esiste.
+14. `9a84c3b feat(automation): generalize armed registrar for notification triggers`
+    - P1-5d: `AndroidArmedAutomationRegistrar` per-trigger, Notification senza subscription
+      per-rule, altri trigger fail-closed.
+15. `b5d9578 test(automation): gate probe capabilities on real device grants`
+    - Gate device P1-5 su OnePlus reale: listener/battery fail-closed, `OK (2 tests)`.
 
 Commit P0-B immediatamente precedenti utili per il contesto:
 
@@ -311,7 +336,12 @@ rivalidazioni già presenti.
 Non sostituire il sink con memoria volatile, preferences in chiaro o un no-op che ritorna successo.
 E13 si chiude soltanto in P1-6 con persistenza cifrata, TTL, UI e cancellazione su privacy revoke.
 
-## 10. Prossima slice esatta: P1-5 capability, arm e bootstrap
+## 10. P1-5 capability, arm e bootstrap — **COMPLETATA (Claude, 2026-07-14)**
+
+> Questa sezione era il piano della slice; è stata eseguita integralmente secondo la sequenza
+> a/b/c/d raccomandata, inclusa la decisione consigliata di implementare subito la action
+> statica (P1-5c). Vedere §18 per le decisioni, l'evidenza e i residui rimandati a P1-6.
+> Il testo originale resta sotto come riferimento del contratto implementato.
 
 L'audit del codice corrente è già stato svolto. Questi sono i gap osservati, non ipotesi:
 
@@ -609,25 +639,27 @@ non un dettaglio automatizzabile.
 
 ## 14. Known issues e rischi da non perdere
 
-- `Action.WhatsAppReply` statica è modellata ma non eseguita: decidere in P1-5, senza advertising
-  falso.
-- Probe e requirements sono oggi disallineati per la lane generativa: è il primo blocker funzionale.
-- Validator e lane hanno contratti diversi: una rule oggi può superare review ma fallire al fire.
-- E13 non esiste in produzione; il fallimento onesto corrente è corretto.
+Aggiornato dopo P1-5 (Claude, 2026-07-14) — i punti risolti sono marcati.
+
+- ~~`Action.WhatsAppReply` statica è modellata ma non eseguita~~ → **RISOLTO in P1-5c**: eseguita
+  via `NotificationReplyGateway`, capability pubblicata solo col listener grant.
+- ~~Probe e requirements disallineati per la lane generativa~~ → **RISOLTO in P1-5a/b**: derivazione
+  e set available/transient ora coprono trigger, invoke_llm, tool raw (incl. Shizuku) e `state.read`.
+- ~~Validator e lane hanno contratti diversi~~ → **RISOLTO in P1-5a**: il validator impone il
+  profilo esatto della lane (`GenerativeContract`); una rule non conforme non supera più la review.
+- E13 non esiste in produzione; il fallimento onesto corrente è corretto. (Invariato → P1-6.)
 - La lane tenta E13 soltanto su `channel_expired`; remove/update della notifica genera invece
   `reply_channel_unavailable`. Senza ampliare il set defer-eligible, il caso E13 più comune non offrirà
-  la CTA manuale anche dopo avere implementato lo store cifrato.
-- **Privacy blocker:** `NotificationIngress.persistAndDispatch()` oggi registra la conversazione e
-  dispatcha senza consultare `privacyAccepted`; il listener Android può quindi continuare a
-  processare metadata dopo una revoca se il grant di sistema resta attivo. Aggiungere un gate
-  sincrono prima della registrazione handle e un secondo gate prima di persist/dispatch.
-- **Minimizzazione dati:** il parser generico accetta qualunque package valido non-self e
-  `persistAndDispatch()` salva ogni observed conversation con identità stabile. Per il P1 WhatsApp,
-  filtrare la persistenza/picker ai package WhatsApp trusted senza rompere il matching Notification
-  generico. Il gateway di invio è già correttamente ristretto.
-- `SettingsViewModel.revokePrivacy()` oggi cambia soltanto la preference. Non svuota il registry, non
-  purga observed conversations/whitelist/deferred e non forza reconcile mentre l'app resta
-  foreground. Risolvere con un coordinator idempotente e test dei fallimenti parziali.
+  la CTA manuale anche dopo avere implementato lo store cifrato. (Invariato → P1-6.)
+- ~~**Privacy blocker** su `NotificationIngress`~~ → **RISOLTO in P1-5b**: gate sincrono in
+  `registerPosted()`/`rehydrate()` e ricontrollo in `persistAndDispatch()`; test dedicati.
+- **Minimizzazione dati:** → **Parzialmente risolto in P1-5b**: handle RemoteInput e righe
+  `observed_conversations` ora solo per package WhatsApp trusted; il matching Notification generico
+  resta intatto. Restano P1-6: retention/TTL, delete-on-revoke e filtro 1:1 del picker.
+- `SettingsViewModel.revokePrivacy()` → **Parzialmente risolto in P1-5b**: un collector sullo
+  `StateFlow` preferences in `ArgusRuntimeController` svuota il reply registry e riconcilia
+  immediatamente (l'ingress è comunque chiuso dal gate sincrono). Resta P1-6 il coordinator
+  completo: purge observed conversations/whitelist/deferred e UX della revoca.
 - Il DB conserva fino a 200 display name di conversazioni osservate in chiaro. Il backup Android è
   correttamente disabilitato/escluso, ma retention e delete-on-revoke sono ancora una decisione P1-6.
 - L'identità preferisce shortcut e ripiega su Person URI. Se WhatsApp espone metadata diversi tra due
@@ -647,19 +679,27 @@ non un dettaglio automatizzabile.
   senza costruire un budget manager fuori scope.
 - Il merge resta bloccato dal gate reboot/LNP anche se P1 venisse completata prima.
 
-## 15. Prima checklist per Claude
+## 15. Prima checklist per Claude — ESEGUITA (2026-07-14); checklist per la ripresa successiva
 
-1. Leggere integralmente questo handoff e il piano P1 corretto commit `eb3f506`.
-2. Eseguire `git status --short`, verificare branch e sync remote.
-3. Non assorbire i tre Markdown concorrenti.
-4. Leggere i test di `GenerativeActionLaneTest`, `RoomExecutionJournalTest`,
-   `NotificationReplyGatewayTest` e `AndroidCapabilityProbeTest` prima di cambiare contratti.
-5. Aprire P1-5 con test requirements/validator, poi probe/readiness, poi executor/registrar.
-6. Tenere un solo commit per sotto-slice e pushare sull'hub Unraid dopo gate verde.
-7. Se una decisione cambia il modello di sicurezza o l'UX (specialmente static reply o E13), chiedere a
-   Lorenzo; per dettagli implementativi coerenti col piano procedere autonomamente.
-8. Non dichiarare completion sulla base dei soli test host: i gate device esplicitamente elencati sono
-   parte della Definition of Done.
+La checklist originale (1-8) è stata eseguita integralmente: handoff+piano letti, git verificato,
+tre Markdown concorrenti preservati, i quattro test contrattuali letti prima di toccare i contratti,
+P1-5 aperta in ordine a→b→c→d con TDD, un commit per sotto-slice pushato dopo gate verde, nessuna
+decisione fuori piano (la static reply era la scelta consigliata dal piano stesso), e il gate device
+è stato eseguito davvero sul OnePlus.
+
+Checklist per chi riprende (P1-6):
+
+1. Leggere il §18 di questo handoff e ripetere `git status --short` + verifica sync (`0 0`).
+2. Non assorbire i tre Markdown concorrenti (§2): sono ancora nel working tree, intatti.
+3. Prima di P1-6 leggere: `SettingsViewModel`, `OnboardingViewModel`, `ExecutionLogViewModel`,
+   `AndroidUiHealth`, `RoomObservedConversationStore`, la sezione §11 (P1-6) qui e il piano P1.
+4. P1-6 include: coordinator revoca privacy completo (purge observed/whitelist/deferred),
+   store E13 cifrato + `DEFERRED` azionabile, defer-eligible esteso a `reply_channel_unavailable`,
+   CTA separate `POST_NOTIFICATIONS` / listener / battery (manifest permission inclusa),
+   picker whitelist dalle conversazioni osservate 1:1, retention/TTL, copy budget corretto.
+5. Il contratto capability/validator è ora fonte di verità condivisa (`GenerativeContract`):
+   non allargarlo senza aggiornare insieme lane, validator, requirements e probe con test.
+6. Il gate reboot/LNP P0-B resta aperto e richiede Lorenzo fisicamente presente (§5.3).
 
 ## 16. Definition of Done complessiva per la ripresa
 
@@ -685,3 +725,119 @@ La ripresa può dirsi conclusa soltanto quando:
 - Subject del commit handoff: `docs(argus): add detailed Claude handoff`.
 - Verifica richiesta dopo il push:
   `git rev-list --left-right --count origin/feat/argus-p0b-dry...HEAD` deve restituire `0 0`.
+
+## 18. Ripresa Claude 2026-07-14 — P1-5 completata
+
+Sessione Claude Fable (Claude Code, macchina `negozio`), stesso branch, TDD per ogni slice
+(test rossi verificati prima del codice; per il registrar anche una mutation check).
+
+### 18.1 Cosa è stato implementato
+
+**P1-5a (`e266fd9`, engine-core).** Nuovo `object GenerativeContract` in
+`engine-core/.../model/Action.kt`: costanti condivise del profilo P1
+(`notification|state`, `allowed_tools == ["whatsapp_reply"]`, `state.read`).
+`CapabilityRequirements.forAction(InvokeLlm)` ora deriva anche `state.read` quando i
+`contextSources` includono `state`. `DraftValidator.validateInvokeLlm` impone il profilo esatto
+della lane con codici nuovi: `context_sources_empty`, `context_notification_required`,
+`context_sources_duplicated`, `context_source_unsupported`, `allowed_tools_unsupported`
+(nessuna normalizzazione case/alias). I codici esistenti (`tool_forbidden`, `tool_unknown`,
+`reply_target_unbound`, ecc.) restano invariati, così come i loro test.
+
+**P1-5b (`b7c25e7`, automation-android).** Nuovo boundary suspend
+`GenerativeRuntimeReadiness` (+ impl `AndroidGenerativeRuntimeReadiness`: bearer via
+`BridgeConfigurationStore.bearerToken()` fail-closed, privacy da `AppPreferencesStore`
+StateFlow — niente runBlocking). `AndroidCapabilityProbe` (nuovo 4° parametro costruttore):
+- `trigger.notification` e tool raw `whatsapp_reply` ⟺ listener grant; reason esatta
+  `REASON_NOTIFICATION_LISTENER = "accesso alle notifiche non concesso"` nel manifest;
+- `action.invoke_llm` ⟺ bearer + privacy + battery exemption (structural, mai transient);
+- i raw tool Shizuku (`state.read`, `screen.*`, `toggle.set`, `app.launch`) ora stanno negli
+  stessi set available/transient delle capability typed (la subtlety di fine §10 è chiusa);
+- `whatsapp_reply` rimosso da `PHASE_UNAVAILABLE_TOOLS` (la reason "disponibile da P1" era
+  falsa), mantenuto in `KNOWN_TOOLS` via `GenerativeContract`.
+`NotificationIngress` riceve un gate sincrono `privacyAccepted: () -> Boolean`
+(StateFlow.value dal DI): `registerPosted()` e `rehydrate()` non creano handle senza consenso,
+`persistAndDispatch()` lo ricontrolla prima di record/dispatch.
+`NotificationReplyHandleFactory.from()` conserva handle solo per package WhatsApp trusted;
+`persistAndDispatch` filtra le observed conversations agli stessi package (i trigger
+Notification generici continuano a dispatch-are). `ArgusRuntimeController` ora prende
+`Flow<ShizukuGatewayStatus>` + `AppPreferencesStore` + `ActiveNotificationReplyRegistry` e
+colleziona il flow privacy: alla revoca svuota il registry e riconcilia subito (serializzato
+dal mutex esistente), senza aspettare ON_START.
+
+**P1-5c (`8c857fd`).** `ShizukuActionExecutor` riceve `NotificationReplyGateway`;
+`Action.WhatsAppReply` esce da `unsupported_phase` e invia il testo approvato dello snapshot al
+target congelato dal `FireContext` (package/key/conversation/eventId del trigger verificato).
+Eventi non-Notification → `reply_event_unverified`; i codici del gateway passano invariati
+(`reply_channel_unavailable`, `channel_expired`, ecc.), one-shot invariato. Solo ora la probe
+pubblica `action.whatsapp_reply`, sotto lo stesso listener grant del tool raw.
+
+**P1-5d (`9a84c3b`).** `TimeAlarmArmedAutomationRegistrar` → `AndroidArmedAutomationRegistrar`
+(stesso file `RuntimeAdapters.kt`, nuovo parametro `FirePolicySnapshotProvider`): Time invariato
+via coordinator AlarmManager; Notification verifica `trigger.notification` nello snapshot
+capability + riga persistita ARMED/enabled, senza subscription OS per-rule né service; trigger
+non implementati e failure dello snapshot → `false` (ApprovalFlow esegue già il rollback onesto).
+La quarantena post-arm passa dal `CapabilityReconciler` esistente, che con la probe nuova vede
+le revoche listener/privacy/token/battery come structural missing → `NEEDS_REVIEW` con CAS.
+
+**Gate device (`b5d9578`).** `AndroidCapabilityProbeInstrumentedTest` aggiornato al costruttore
+readiness-aware + nuovo test: sul OnePlus reale (package instrumentato senza grant) le letture
+listener/battery API 36 rispondono false senza lanciare e la probe non pubblica nulla di
+notification/generativo, con la reason esatta nel manifest. Eseguito con il workaround §12
+(install + `am instrument` diretto): `OK (2 tests)`; package di test disinstallato, `zen_mode=0`,
+nessun grant modificato.
+
+### 18.2 Evidenza gate
+
+- Host (ripetuto dopo ogni slice e a fine lavoro): `:engine-core:test` 114/114,
+  `:data:testDebugUnitTest` 45/45, `:automation-android:testDebugUnitTest` 90/90,
+  `lintDebug` 0 errori (9 warning preesistenti), `:app:assembleDebug` ok.
+- Device: `OK (2 tests)` su CPH2747 / Android 16 / API 36 via ADB wireless.
+- Matrice §10: righe Requirements/Validator/Probe/Reconciler/Ingress privacy/Data minimization/
+  Handle minimization/Executor statico coperte da test host; "Revoca privacy con Brain in corso"
+  coperta dalla coppia collector-test (registry ripulito) + `GenerativeActionLaneTest` esistente
+  (rivalidazione finale blocca l'invio); "due foreground + Shizuku concorrenti" resta garantita
+  dal `reconcileMutex` (invariato).
+
+### 18.3 Decisioni prese (tutte dentro il perimetro del piano)
+
+1. Static reply implementata subito (P1-5c), come consigliato dal piano — nessuna domanda aperta.
+2. `action.whatsapp_reply` segue il **solo** listener grant: il consenso privacy chiude già
+   l'ingest a monte (nessun handle ⇒ nessun evento ⇒ fail-closed al fire), coerente col §10.
+3. Il filtro observed-conversations ai package WhatsApp è stato fatto qui (la matrice §10 lo
+   chiedeva per P1-5); retention/TTL/purge-on-revoke restano P1-6 come da piano.
+4. Il collector privacy vive in `ArgusRuntimeController` (opzione "collector sullo StateFlow"
+   suggerita dal §10 P1-5d): niente coordinator nuovo prima di P1-6.
+5. Nessuna modifica a lane, journal, bridge o Hermes: contratti P1-0…P1-4 intatti.
+
+### 18.4 Residui espliciti per P1-6 (oltre al §11)
+
+- Coordinator revoca privacy completo: purge `observed_conversations`, whitelist e deferred
+  (il registry e il reconcile immediato sono già coperti dal controller).
+- Store E13 cifrato + `onSendNow` + defer-eligible esteso a `reply_channel_unavailable`.
+- CTA/salute separati per `POST_NOTIFICATIONS`, listener access e battery exemption
+  (manifest: manca ancora `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`, da aggiungere con la CTA).
+- Picker whitelist dalle osservate 1:1; retention/TTL e display name in chiaro (200 righe).
+- Copy budget "disponibile da P1" in `SettingsViewModel.onBudgetChange()` (è P3, correggere).
+- La UI Settings usa ancora `notificationsGranted` per lo step "accesso notifiche" (§gap 10 del
+  piano P1): non toccato in P1-5, è materia P1-6.
+
+### 18.5 Note operative per chi riprende (Windows/questa macchina)
+
+- **PowerShell + Gradle**: mai chiudere la pipeline con `Select-Object -First N` su un comando
+  gradle in corsa — PowerShell stacca la pipe e il build continua orfano (o muore a metà),
+  l'exit code letto non è affidabile e i timestamp ingannano. Pattern usato e affidabile:
+  `gradlew ... *> file.log; $LASTEXITCODE; Select-String file.log`.
+- A inizio sessione la cache `~/.gradle/caches/8.13/transforms` era corrotta (metadata.bin
+  illeggibili, probabilmente daemon della sessione precedente): risolto con `gradlew --stop` +
+  delete della sola directory `transforms` (si rigenera).
+- ADB wireless attivo su `100.74.117.9:5555` per tutta la sessione; un solo comando ADB alla
+  volta, come da §12.
+
+### 18.6 Stato consegna
+
+- HEAD: `b5d9578`; `git rev-list --left-right --count origin/feat/argus-p0b-dry...HEAD` = `0 0`.
+- Working tree: soltanto i tre Markdown concorrenti del §2 (intatti, mai staged) più questo
+  aggiornamento dell'handoff.
+- Device: ADB raggiungibile, Shizuku attivo, DND off, nessun package di test residuo di questa
+  sessione (restano i package P0-B elencati al §5.2, non toccati).
+- Gate esterni invariati: reboot/LNP P0-B (§5.3) e P1-7 reale richiedono Lorenzo.
