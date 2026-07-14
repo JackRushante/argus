@@ -87,14 +87,24 @@ il binder non arriva.
 
 ## Fasi
 
-### P2-0 — Spike su device (mezza giornata, esiti scritti QUI)
+### P2-0 — Spike su device (esiti)
 
-1. `setPrimaryClip` da background su Android 16 reale (instrumented minimale, poi rimosso):
-   decide il ramo di D3.
-2. `addProximityAlert` su OnePlus 15: il PendingIntent scatta con app in cached/Doze? Con
-   quale latenza/raggio? Decide D1-geofence (alternativa: FGS + LocationListener bilanciato).
-3. Receiver manifest `PHONE_STATE` e `SMS_RECEIVED` su API 36: consegna reale con app cached.
-4. Esito → aggiornare questa sezione con le decisioni finali PRIMA di P2-1.
+1. ~~`setPrimaryClip` da background su Android 16 reale~~ → **RISOLTO (2026-07-14 sera)**:
+   scrittura riuscita da processo instrumentation SENZA focus (OK 1 test, nessuna
+   SecurityException) e **verificata da Lorenzo con un incolla reale** ("SPIKE-123456").
+   D3 procede col design pulito: copia diretta in background, il fallback CTA resta solo
+   come degradazione se l'E2E P2-3 con l'app vera in cached smentisse (improbabile).
+   Spike pulito (clearPrimaryClip + uninstall test package); il file di spike si rimuove
+   col primo commit P2-3.
+2. `addProximityAlert` su OnePlus 15 → spostato all'APERTURA di P2-4 (il PendingIntent
+   scatta con app cached/Doze? latenza/raggio?). Decide D1-geofence.
+3. Receiver manifest `PHONE_STATE`/`SMS_RECEIVED` con app cached → si valida direttamente
+   nell'E2E di P2-2 con SMS reale (niente spike separato: il receiver è il deliverable).
+
+**Ordine di esecuzione aggiornato (valore prima del warm-up)**: P2-2 (PhoneState/SMS) →
+P2-3 (OTP, la feature di Lorenzo) → P2-1 (Connectivity) → P2-4 (Geofence) → P2-5 (chiusura).
+Il pattern receiver→dispatcher→engine è già consolidato dal listener P1: il warm-up
+connectivity non è necessario.
 
 ### P2-1 — Connectivity (BT/Power subito, Wi-Fi con FGS)
 
