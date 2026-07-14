@@ -15,6 +15,7 @@ import dev.argus.engine.brain.WhitelistedContact
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationDraft
+import dev.argus.engine.model.ActionTypeIds
 import dev.argus.engine.model.CapabilityIds
 import dev.argus.engine.model.CapabilityRequirements
 import dev.argus.engine.model.StateKeys
@@ -146,15 +147,23 @@ class AndroidCapabilityProbe internal constructor(
         val transient = if (shizukuTransient) SHIZUKU_CAPABILITIES else emptySet()
 
         val availableTools = buildList {
-            if (shizukuAvailable) addAll(SHIZUKU_TOOLS)
-            if (state.notificationsGranted) add(TOOL_NOTIFY_SHOW)
+            if (shizukuAvailable) {
+                addAll(SHIZUKU_ACTION_TYPES)
+                addAll(SHIZUKU_TOOLS)
+            }
+            if (state.notificationsGranted) {
+                add(ActionTypeIds.SHOW_NOTIFICATION)
+                add(TOOL_NOTIFY_SHOW)
+            }
         }.sorted()
         val unavailableTools = linkedMapOf<String, String>()
         if (!shizukuAvailable) {
             val reason = shizukuReason(state.shizukuStatus)
+            SHIZUKU_ACTION_TYPES.forEach { unavailableTools[it] = reason }
             SHIZUKU_TOOLS.forEach { unavailableTools[it] = reason }
         }
         if (!state.notificationsGranted) {
+            unavailableTools[ActionTypeIds.SHOW_NOTIFICATION] = "permesso notifiche mancante"
             unavailableTools[TOOL_NOTIFY_SHOW] = "permesso notifiche mancante"
         }
         PHASE_UNAVAILABLE_TOOLS.forEach { (tool, reason) -> unavailableTools[tool] = reason }
@@ -200,6 +209,14 @@ class AndroidCapabilityProbe internal constructor(
             TOOL_SCREEN_DUMP_UI,
             TOOL_TOGGLE_SET,
             TOOL_APP_LAUNCH,
+        )
+        val SHIZUKU_ACTION_TYPES = setOf(
+            ActionTypeIds.SET_WIFI,
+            ActionTypeIds.SET_BLUETOOTH,
+            ActionTypeIds.SET_DND,
+            ActionTypeIds.SET_RINGER,
+            ActionTypeIds.LAUNCH_APP,
+            ActionTypeIds.OPEN_URL,
         )
         val PHASE_UNAVAILABLE_TOOLS = linkedMapOf(
             "screen.tap" to "azione UI fuori fase P0-B",

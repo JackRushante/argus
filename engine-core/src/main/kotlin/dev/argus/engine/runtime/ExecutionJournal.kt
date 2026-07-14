@@ -1,6 +1,7 @@
 package dev.argus.engine.runtime
 
 import dev.argus.engine.model.Action
+import dev.argus.engine.model.ActionTypeIds
 
 enum class ExecutionStatus {
     RUNNING,
@@ -63,18 +64,18 @@ object NoopExecutionJournal : ExecutionJournal {
 }
 
 internal fun Action.journalType(): String = when (this) {
-    is Action.SetWifi -> "set_wifi"
-    is Action.SetBluetooth -> "set_bluetooth"
-    is Action.SetDnd -> "set_dnd"
-    is Action.SetRinger -> "set_ringer"
-    is Action.LaunchApp -> "launch_app"
-    is Action.OpenUrl -> "open_url"
-    is Action.ShowNotification -> "show_notification"
-    is Action.Tap -> "tap"
-    is Action.InputText -> "input_text"
-    is Action.WhatsAppReply -> "whatsapp_reply"
-    is Action.RunShell -> "run_shell"
-    is Action.InvokeLlm -> "invoke_llm"
+    is Action.SetWifi -> ActionTypeIds.SET_WIFI
+    is Action.SetBluetooth -> ActionTypeIds.SET_BLUETOOTH
+    is Action.SetDnd -> ActionTypeIds.SET_DND
+    is Action.SetRinger -> ActionTypeIds.SET_RINGER
+    is Action.LaunchApp -> ActionTypeIds.LAUNCH_APP
+    is Action.OpenUrl -> ActionTypeIds.OPEN_URL
+    is Action.ShowNotification -> ActionTypeIds.SHOW_NOTIFICATION
+    is Action.Tap -> ActionTypeIds.TAP
+    is Action.InputText -> ActionTypeIds.INPUT_TEXT
+    is Action.WhatsAppReply -> ActionTypeIds.WHATSAPP_REPLY
+    is Action.RunShell -> ActionTypeIds.RUN_SHELL
+    is Action.InvokeLlm -> ActionTypeIds.INVOKE_LLM
 }
 
 internal fun ActionResult.journalOutcome(): ActionJournalOutcome = when (this) {

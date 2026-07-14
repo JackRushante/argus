@@ -3,6 +3,7 @@ package dev.argus.automation
 import dev.argus.engine.brain.ContactWhitelistStore
 import dev.argus.engine.brain.WhitelistedContact
 import dev.argus.engine.model.Action
+import dev.argus.engine.model.ActionTypeIds
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
@@ -53,6 +54,9 @@ class AndroidCapabilityProbeTest {
         assertTrue("notification_listener" in manifest.grantedPermissions)
         assertTrue(AndroidCapabilityProbe.TOOL_STATE_READ in manifest.availableTools)
         assertTrue(AndroidCapabilityProbe.TOOL_NOTIFY_SHOW in manifest.availableTools)
+        assertTrue(ActionTypeIds.SET_DND in manifest.availableTools)
+        assertTrue(ActionTypeIds.SET_WIFI in manifest.availableTools)
+        assertTrue(ActionTypeIds.SHOW_NOTIFICATION in manifest.availableTools)
         assertTrue("vision.analyze" in manifest.unavailableTools)
         assertTrue(ActionCapabilities.SET_DND in snapshot.availableCapabilities)
         assertTrue(ActionCapabilities.SHOW_NOTIFICATION in snapshot.availableCapabilities)
@@ -71,15 +75,25 @@ class AndroidCapabilityProbeTest {
         ).current()
         assertFalse(ActionCapabilities.SET_DND in stopped.availableCapabilities)
         assertTrue(ActionCapabilities.SET_DND in stopped.transientlyUnavailableCapabilities)
+        assertFalse(ActionTypeIds.SET_DND in probe(
+            state().copy(
+                shizukuStatus = ShizukuGatewayStatus.INSTALLED_NOT_RUNNING,
+                shizukuPermissionGranted = true,
+            ),
+        ).probe(DeviceState()).availableTools)
 
-        val revoked = probe(
+        val revokedProbe = probe(
             state().copy(
                 shizukuStatus = ShizukuGatewayStatus.RUNNING_NOT_AUTHORIZED,
                 shizukuPermissionGranted = false,
             ),
-        ).current()
+        )
+        val revoked = revokedProbe.current()
         assertFalse(ActionCapabilities.SET_DND in revoked.availableCapabilities)
         assertFalse(ActionCapabilities.SET_DND in revoked.transientlyUnavailableCapabilities)
+        val revokedManifest = revokedProbe.probe(DeviceState())
+        assertFalse(ActionTypeIds.SET_DND in revokedManifest.availableTools)
+        assertTrue(ActionTypeIds.SET_DND in revokedManifest.unavailableTools)
     }
 
     @Test

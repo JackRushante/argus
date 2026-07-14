@@ -53,7 +53,7 @@ Request v1:
     "android_api": 36,
     "shizuku_available": true,
     "granted_permissions": ["android.permission.INTERNET"],
-    "available_tools": ["set_dnd"],
+    "available_tools": ["set_dnd", "state.read", "toggle.set"],
     "unavailable_tools": {},
     "whitelisted_contacts": [],
     "state_keys": {"dnd": "off|priority|total"}
@@ -65,6 +65,12 @@ Request v1:
   }
 }
 ```
+
+`available_tools` contiene sia i discriminatori delle azioni compilabili (`set_dnd`,
+`show_notification`, …), usati dal validator del bridge, sia gli eventuali tool di contesto/runtime
+(`state.read`, `screen.capture`, …) selezionabili da azioni generative. Il probe Android deve
+derivare entrambi dallo stesso snapshot di capability: un'azione non disponibile va esclusa e
+riportata in `unavailable_tools` con il motivo.
 
 Redazione device state:
 
