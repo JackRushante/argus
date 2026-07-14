@@ -9,7 +9,8 @@ import org.junit.Assert.assertEquals
 import org.junit.runner.RunWith
 
 /**
- * Verifica strutturale: claim/audit v2, bozze v3, journal v4/v7, scheduler v5 e whitelist v6.
+ * Verifica strutturale: claim/audit v2, bozze v3, journal v4/v7, scheduler v5, whitelist v6
+ * e conversazioni osservate v8.
  */
 @RunWith(AndroidJUnit4::class)
 class MigrationTest {
@@ -21,11 +22,11 @@ class MigrationTest {
     )
 
     @Test
-    fun migrate_v1_to_v7() {
+    fun migrate_v1_to_v8() {
         helper.createDatabase(TEST_DB_V1, 1).close()
         helper.runMigrationsAndValidate(
             TEST_DB_V1,
-            7,
+            8,
             true,
             ArgusDatabase.MIGRATION_1_2,
             ArgusDatabase.MIGRATION_2_3,
@@ -33,26 +34,28 @@ class MigrationTest {
             ArgusDatabase.MIGRATION_4_5,
             ArgusDatabase.MIGRATION_5_6,
             ArgusDatabase.MIGRATION_6_7,
+            ArgusDatabase.MIGRATION_7_8,
         ).close()
     }
 
     @Test
-    fun migrate_v2_to_v7() {
+    fun migrate_v2_to_v8() {
         helper.createDatabase(TEST_DB_V2, 2).close()
         helper.runMigrationsAndValidate(
             TEST_DB_V2,
-            7,
+            8,
             true,
             ArgusDatabase.MIGRATION_2_3,
             ArgusDatabase.MIGRATION_3_4,
             ArgusDatabase.MIGRATION_4_5,
             ArgusDatabase.MIGRATION_5_6,
             ArgusDatabase.MIGRATION_6_7,
+            ArgusDatabase.MIGRATION_7_8,
         ).close()
     }
 
     @Test
-    fun migrate_v3_to_v7() {
+    fun migrate_v3_to_v8() {
         helper.createDatabase(TEST_DB_V3, 3).apply {
             execSQL(
                 "INSERT INTO automations " +
@@ -67,12 +70,13 @@ class MigrationTest {
         }
         helper.runMigrationsAndValidate(
             TEST_DB_V3,
-            7,
+            8,
             true,
             ArgusDatabase.MIGRATION_3_4,
             ArgusDatabase.MIGRATION_4_5,
             ArgusDatabase.MIGRATION_5_6,
             ArgusDatabase.MIGRATION_6_7,
+            ArgusDatabase.MIGRATION_7_8,
         ).use { db ->
             db.query(
                 "SELECT status, succeededCount, failedCount, submittedCount, deferredCount " +
@@ -89,15 +93,16 @@ class MigrationTest {
     }
 
     @Test
-    fun migrate_v4_to_v7() {
+    fun migrate_v4_to_v8() {
         helper.createDatabase(TEST_DB_V4, 4).close()
         helper.runMigrationsAndValidate(
             TEST_DB_V4,
-            7,
+            8,
             true,
             ArgusDatabase.MIGRATION_4_5,
             ArgusDatabase.MIGRATION_5_6,
             ArgusDatabase.MIGRATION_6_7,
+            ArgusDatabase.MIGRATION_7_8,
         ).use { db ->
             db.query("SELECT COUNT(*) FROM scheduled_time_alarms").use { cursor ->
                 cursor.moveToFirst()
@@ -107,14 +112,15 @@ class MigrationTest {
     }
 
     @Test
-    fun migrate_v5_to_v7() {
+    fun migrate_v5_to_v8() {
         helper.createDatabase(TEST_DB_V5, 5).close()
         helper.runMigrationsAndValidate(
             TEST_DB_V5,
-            7,
+            8,
             true,
             ArgusDatabase.MIGRATION_5_6,
             ArgusDatabase.MIGRATION_6_7,
+            ArgusDatabase.MIGRATION_7_8,
         ).use { db ->
             db.query("SELECT COUNT(*) FROM whitelisted_contacts").use { cursor ->
                 cursor.moveToFirst()
@@ -124,16 +130,44 @@ class MigrationTest {
     }
 
     @Test
-    fun migrate_v6_to_v7() {
+    fun migrate_v6_to_v8() {
         helper.createDatabase(TEST_DB_V6, 6).close()
         helper.runMigrationsAndValidate(
             TEST_DB_V6,
-            7,
+            8,
             true,
             ArgusDatabase.MIGRATION_6_7,
+            ArgusDatabase.MIGRATION_7_8,
         ).use { db ->
             db.query("SELECT deferredCount FROM fire_claims").use { cursor ->
                 assertEquals(0, cursor.count)
+            }
+        }
+    }
+
+    @Test
+    fun migrate_v7_to_v8() {
+        helper.createDatabase(TEST_DB_V7, 7).close()
+        helper.runMigrationsAndValidate(
+            TEST_DB_V7,
+            8,
+            true,
+            ArgusDatabase.MIGRATION_7_8,
+        ).use { db ->
+            db.execSQL(
+                "INSERT INTO observed_conversations " +
+                    "(conversationId, packageName, displayName, isGroup, lastSeenAtMillis) " +
+                    "VALUES ('shortcut:com.whatsapp:hash', 'com.whatsapp', 'Fixture', 0, 123)",
+            )
+            db.query(
+                "SELECT packageName, displayName, isGroup, lastSeenAtMillis " +
+                    "FROM observed_conversations",
+            ).use { cursor ->
+                cursor.moveToFirst()
+                assertEquals("com.whatsapp", cursor.getString(0))
+                assertEquals("Fixture", cursor.getString(1))
+                assertEquals(0, cursor.getInt(2))
+                assertEquals(123L, cursor.getLong(3))
             }
         }
     }
@@ -145,5 +179,6 @@ class MigrationTest {
         const val TEST_DB_V4 = "argus-migration-v4-test.db"
         const val TEST_DB_V5 = "argus-migration-v5-test.db"
         const val TEST_DB_V6 = "argus-migration-v6-test.db"
+        const val TEST_DB_V7 = "argus-migration-v7-test.db"
     }
 }

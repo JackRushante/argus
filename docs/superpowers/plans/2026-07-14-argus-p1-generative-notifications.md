@@ -44,9 +44,10 @@ Portare l'Esempio 3 della spec a un E2E reale e fail-closed:
 
 ## Decisioni corrette prima del codice
 
-- L'identità primaria è `Notification.shortcutId`, namespaced col package. In sua assenza si può
-  usare una `Person.uri` osservata e namespaced; `tag`, titolo e display name non diventano mai ID
-  trusted. Se nessuna fonte stabile è presente, `conversationId=null` e le reply restano bloccate.
+- L'identità primaria è `Notification.shortcutId`, hashata e namespaced col package. In sua assenza
+  si può usare una `Person.uri` osservata, anch'essa hashata e namespaced; i valori raw non vengono
+  persistiti. `tag`, titolo e display name non diventano mai ID trusted. Se nessuna fonte stabile è
+  presente, `conversationId=null` e le reply restano bloccate.
 - `Notification.EXTRA_IS_GROUP_CONVERSATION` è autorevole solo se presente. Assenza → `null` e
   quindi nessuna reply automatica.
 - `StatusBarNotification.key`, `Notification.Action`, `RemoteInput` e `PendingIntent` sono handle
@@ -107,7 +108,7 @@ idempotency replay e cancellation.
 ### P1-2 — Parser notifiche e identità conversazione
 
 - Parser puro/testabile da una snapshot platform a `TriggerEvent.NotificationPosted`.
-- Priorità ID: shortcut namespaced → Person URI namespaced → null.
+- Priorità ID: shortcut hashato/namespaced → Person URI hashata/namespaced → null.
 - Estrarre `isGroup` soltanto da metadata esplicito; testo dall'ultimo MessagingStyle con fallback
   bounded a `EXTRA_TEXT`; rimuovere control chars e applicare cap.
 - Event ID digest; ignorare package Argus, group summary e notifiche prive di payload utile.

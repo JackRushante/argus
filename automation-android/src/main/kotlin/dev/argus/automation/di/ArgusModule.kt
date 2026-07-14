@@ -41,12 +41,14 @@ import dev.argus.data.RoomContactWhitelistStore
 import dev.argus.data.RoomDraftRepository
 import dev.argus.data.RoomExecutionJournal
 import dev.argus.data.RoomJournalMaintenance
+import dev.argus.data.RoomObservedConversationStore
 import dev.argus.device.DeviceController
 import dev.argus.device.DeviceTools
 import dev.argus.device.StateReader
 import dev.argus.engine.brain.Brain
 import dev.argus.engine.brain.CapabilityProbe
 import dev.argus.engine.brain.ContactWhitelistStore
+import dev.argus.engine.notification.ObservedConversationStore
 import dev.argus.engine.runtime.ActionExecutor
 import dev.argus.engine.runtime.AuditSink
 import dev.argus.engine.runtime.AutomationStore
@@ -132,6 +134,16 @@ object ArgusModule {
 
     @Provides
     fun approvalWhitelistBoundary(store: RoomContactWhitelistStore): ApprovalWhitelistProvider = store
+
+    @Provides
+    @Singleton
+    fun observedConversationStore(database: ArgusDatabase): RoomObservedConversationStore =
+        RoomObservedConversationStore(database.observedConversationDao())
+
+    @Provides
+    fun observedConversationStoreBoundary(
+        store: RoomObservedConversationStore,
+    ): ObservedConversationStore = store
 
     @Provides
     @Singleton
