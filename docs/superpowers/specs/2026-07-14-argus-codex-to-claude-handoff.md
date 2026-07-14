@@ -142,6 +142,32 @@ Commit della ripresa Claude serale (P1-6 → P1-7 reale → P1-8), tutti pushati
     scattata ISTANTANEA — lane deterministica senza rete — e "Esegui" maiuscolo ha matchato
     (textMatch contains case-insensitive by design, `TriggerMatcher`).
 
+## 23. Osservazioni di campo post-merge e backlog P2 (feedback Lorenzo, 2026-07-14 sera)
+
+- **Race Shizuku osservata una volta**: alle 18:29 un compile ha avuto il manifest SENZA
+  `run_shell` ("Shizuku non in esecuzione") benché server e permission fossero a posto; alle
+  18:37 Sistema era verde e tutto ok. Causa più probabile: `Shizuku.pingBinder()` false nel
+  processo appena riavviato (binder sticky non ancora ricevuto dopo un force-stop ADB). Non
+  riprodotta dopo. Se ricapita a un utente: la riga Shizuku in Sistema È la verità del
+  momento; eventualmente valutare in P2 un retry/attesa binder nel probe al primo compile.
+- **Guardrail confermati dal vivo**: (a) comando shell parametrizzato dal CONTENUTO del
+  messaggio → correttamente non compilabile (il cmd nel draft è statico e mostrato integrale
+  in review; il contenuto notifica non può cambiare formato/tool/destinatario — contract);
+  (b) trigger accelerometro/sensori + azione modalità aereo → `unsupported_capability`
+  onesto (non esistono nel modello).
+- **Backlog P2 da feedback reale** (in ordine di valore):
+  1. **Auto-copy OTP da SMS**: trigger notifica dell'app SMS (o `SMS_RECEIVED`) + estrazione
+     REGEX deterministica nel draft (codice 4-8 cifre, esclusi numeri di telefono) + nuova
+     azione `copy_to_clipboard` con `EXTRA_IS_SENSITIVE` (pattern clipboard sensibile già
+     pronto dal lavoro E13). Oggi inesprimibile: manca l'azione clipboard e nessuna azione
+     legge il payload del trigger; il trigger phone_state è fail-closed in P1.
+  2. Geofence + phone_state + connectivity armabili (già a piano P2) — il primo esempio
+     della home torna quando c'è.
+  3. Azione "modalità aereo" via shell statico (`cmd connectivity airplane-mode enable`):
+     GIÀ possibile oggi con Shizuku dentro run_shell; valutare un'azione tipizzata dedicata.
+  4. Trigger sensori (accelerometro/caduta): P3+ eventuale, richiede listener always-on
+     (FGS + battery) — fuori scope P2.
+
 Commit P0-B immediatamente precedenti utili per il contesto:
 
 - `9f2861c fix(bridge): surface provider quota failures safely`
