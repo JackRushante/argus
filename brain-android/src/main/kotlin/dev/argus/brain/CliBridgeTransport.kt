@@ -74,6 +74,8 @@ private data class ManifestEnvelope(
     @SerialName("unavailable_tools") val unavailableTools: Map<String, String>,
     @SerialName("whitelisted_contacts") val whitelistedContacts: List<ContactEnvelope>,
     @SerialName("state_keys") val stateKeys: Map<String, String>,
+    /** Trigger armabili ora (P2-2): il server li vincola nel prompt di compilazione. */
+    @SerialName("available_triggers") val availableTriggers: List<String>,
 )
 
 @Serializable
@@ -451,6 +453,7 @@ class CliBridgeTransport internal constructor(
         unavailableTools = unavailableTools,
         whitelistedContacts = whitelistedContacts.map { ContactEnvelope(it.displayName, it.id) },
         stateKeys = stateKeys,
+        availableTriggers = availableTriggers,
     )
 
     private fun DeviceState.toEnvelope(manifest: CapabilityManifest): StateEnvelope {

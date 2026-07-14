@@ -40,6 +40,32 @@ class BridgeTest(unittest.TestCase):
         with self.assertRaises(bridge.RequestError):
             bridge.validate_request(request, "req-test-1")
 
+    def test_manifest_available_triggers_is_optional_and_bounded(self):
+        # Client pre-P2: campo assente, accettato (retrocompatibilita').
+        legacy = self.request()
+        self.assertIs(legacy, bridge.validate_request(legacy, "req-test-1"))
+
+        # Client P2: lista di wire name, accettata e usata dal prompt (REGOLA 10).
+        current = self.request()
+        current["manifest"]["available_triggers"] = ["time", "notification", "phone_state.sms"]
+        self.assertIs(current, bridge.validate_request(current, "req-test-1"))
+        prompt = bridge.build_prompt(current)
+        self.assertIn("available_triggers", prompt)
+        self.assertIn("phone_state.sms", prompt)
+
+        # Malformata o fuori bounds: rifiutata.
+        for bad in (["x" * 65], "not-a-list", ["ok"] * 33):
+            broken = self.request()
+            broken["manifest"]["available_triggers"] = bad
+            with self.assertRaises(bridge.RequestError):
+                bridge.validate_request(broken, "req-test-1")
+
+        # Chiavi sconosciute restano vietate: solo available_triggers e' opzionale.
+        unknown = self.request()
+        unknown["manifest"]["surprise"] = True
+        with self.assertRaises(bridge.RequestError):
+            bridge.validate_request(unknown, "req-test-1")
+
     def test_act_request_is_strict_minimal_and_reply_only(self):
         request = self.act_request()
         self.assertIs(request, bridge.validate_act_request(request, "act-test-1"))

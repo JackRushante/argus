@@ -244,7 +244,18 @@ def validate_manifest(value: Any) -> None:
         "device_model", "android_api", "shizuku_available", "granted_permissions",
         "available_tools", "unavailable_tools", "whitelisted_contacts", "state_keys",
     }
-    if not isinstance(value, dict) or not _exact_keys(value, required):
+    # available_triggers e' opzionale: i client pre-P2 non lo inviano (default: nessun vincolo
+    # aggiuntivo oltre alle regole del prompt).
+    optional = {"available_triggers"}
+    if not isinstance(value, dict):
+        raise RequestError(400, "invalid_manifest")
+    keys = set(value.keys())
+    if not (required <= keys <= (required | optional)):
+        raise RequestError(400, "invalid_manifest")
+    triggers = value.get("available_triggers", [])
+    if not isinstance(triggers, list) or len(triggers) > 32 or not all(
+        _string(x, 64) for x in triggers
+    ):
         raise RequestError(400, "invalid_manifest")
     if not _string(value["device_model"], 256) or not _is_int(value["android_api"]):
         raise RequestError(400, "invalid_manifest")
@@ -319,6 +330,11 @@ REGOLE VINCOLANTI:
    GENERATA usa invoke_llm con contextSources ["notification"] (aggiungi "state" solo se serve
    lo stato del device), allowedTools esattamente ["whatsapp_reply"] e replyTargetSender=true;
    usa whatsapp_reply statica solo se l'utente detta il testo esatto della risposta.
+10. Se manifest.available_triggers e' presente, usa SOLO i trigger elencati:
+    "phone_state.sms" = trigger phone_state con event SMS_RECEIVED, "phone_state.call" =
+    phone_state con INCOMING_CALL o CALL_ENDED. Un trigger richiesto ma non in lista NON va
+    compilato: spiega in una frase quale permesso abilitarlo richiede (Sistema -> Trigger
+    SMS/chiamate) e restituisci draft null con error_code "unsupported_capability".
 
 Ora locale Europe/Rome: {now}
 
