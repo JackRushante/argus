@@ -91,6 +91,24 @@ class RoomDeferredReplyStoreTest {
     }
 
     @Test
+    fun `maintenance trims observed conversations past retention`() = runTest {
+        val store = RoomObservedConversationStore(db.observedConversationDao())
+        store.record(observed("shortcut:com.whatsapp:old", lastSeenAtMillis = 100))
+        store.record(observed("shortcut:com.whatsapp:fresh", lastSeenAtMillis = 4_500))
+
+        val result = RoomJournalMaintenance(
+            db,
+            JournalRetentionPolicy(maxAgeMillis = 1_000, runningStaleAfterMillis = 100),
+        ).run(nowMillis = 5_000)
+
+        assertEquals(1, result.trimmedObservedConversations)
+        assertEquals(
+            listOf("shortcut:com.whatsapp:fresh"),
+            store.recent(10).map { it.id },
+        )
+    }
+
+    @Test
     fun `journal retention cascades to deferred payloads`() = runTest {
         val executionId = claimedExecution("exec-cascade", atMillis = 1_200)
         db.executionJournalDao().let { journal ->
@@ -153,4 +171,13 @@ class RoomDeferredReplyStoreTest {
         consumedAtMillis = null,
         payload = payload,
     )
+
+    private fun observed(id: String, lastSeenAtMillis: Long) =
+        dev.argus.engine.notification.ObservedConversation(
+            id = id,
+            packageName = "com.whatsapp",
+            displayName = "Contatto",
+            isGroup = false,
+            lastSeenAtMillis = lastSeenAtMillis,
+        )
 }

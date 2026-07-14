@@ -19,6 +19,7 @@ data class JournalMaintenanceResult(
     val deletedExecutions: Int,
     val deletedAuditRows: Int,
     val purgedDeferredReplies: Int = 0,
+    val trimmedObservedConversations: Int = 0,
 )
 
 class RoomJournalMaintenance(
@@ -35,7 +36,15 @@ class RoomJournalMaintenance(
             val deletedAuditRows = db.auditDao().trim(olderThan, policy.maxAuditRows)
             // Il ciphertext di una reply consumata o scaduta non deve sopravvivere al suo TTL.
             val purgedDeferred = db.deferredReplyDao().purge(nowMillis)
-            JournalMaintenanceResult(interrupted, deletedExecutions, deletedAuditRows, purgedDeferred)
+            // Retention del picker: display name osservati oltre l'età massima escono dal DB.
+            val trimmedObserved = db.observedConversationDao().deleteSeenBefore(olderThan)
+            JournalMaintenanceResult(
+                interrupted,
+                deletedExecutions,
+                deletedAuditRows,
+                purgedDeferred,
+                trimmedObserved,
+            )
         }
     }
 }

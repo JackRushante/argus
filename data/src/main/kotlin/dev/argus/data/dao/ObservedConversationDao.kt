@@ -50,6 +50,10 @@ interface ObservedConversationDao {
     @Query("DELETE FROM observed_conversations")
     suspend fun clear(): Int
 
+    /** Retention: una conversazione mai più vista dopo il cutoff esce dal picker. */
+    @Query("DELETE FROM observed_conversations WHERE lastSeenAtMillis < :cutoffMillis")
+    suspend fun deleteSeenBefore(cutoffMillis: Long): Int
+
     @Transaction
     suspend fun record(conversation: ObservedConversationEntity, maximumRows: Int) {
         if (insertIfAbsent(conversation) == -1L) {
