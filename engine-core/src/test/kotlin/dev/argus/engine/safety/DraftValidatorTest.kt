@@ -45,6 +45,52 @@ class DraftValidatorTest {
     @Test fun `empty whitelist is fail closed for generative replies`() {
         assertTrue("target_not_whitelisted" in errors(v.validate(validGenerative, emptySet())))
     }
+    @Test fun `valid generative draft with state context has no errors`() {
+        val withState = validGenerative.copy(actions = listOf(
+            Action.InvokeLlm("g", listOf("notification", "state"), listOf("whatsapp_reply"), true)
+        ))
+        assertEquals(emptyList(), errors(v.validate(withState, whitelistedIds = setOf("jid:42"))))
+    }
+    @Test fun `generative context sources must be present and include notification`() {
+        val empty = validGenerative.copy(actions = listOf(
+            Action.InvokeLlm("g", listOf(), listOf("whatsapp_reply"), true)
+        ))
+        assertTrue("context_sources_empty" in errors(v.validate(empty, setOf("jid:42"))))
+
+        val withoutNotification = validGenerative.copy(actions = listOf(
+            Action.InvokeLlm("g", listOf("state"), listOf("whatsapp_reply"), true)
+        ))
+        assertTrue("context_notification_required" in errors(v.validate(withoutNotification, setOf("jid:42"))))
+    }
+    @Test fun `generative context sources must be distinct and known`() {
+        val duplicated = validGenerative.copy(actions = listOf(
+            Action.InvokeLlm("g", listOf("notification", "notification"), listOf("whatsapp_reply"), true)
+        ))
+        assertTrue("context_sources_duplicated" in errors(v.validate(duplicated, setOf("jid:42"))))
+
+        val unknown = validGenerative.copy(actions = listOf(
+            Action.InvokeLlm("g", listOf("notification", "screen"), listOf("whatsapp_reply"), true)
+        ))
+        assertTrue("context_source_unsupported" in errors(v.validate(unknown, setOf("jid:42"))))
+    }
+    @Test fun `generative tools must be exactly whatsapp_reply without aliases`() {
+        // Tool extra oltre il profilo P1: la lane lo rifiuterebbe al fire con action_contract_invalid.
+        val extra = validGenerative.copy(actions = listOf(
+            Action.InvokeLlm("g", listOf("notification"), listOf("whatsapp_reply", "state.read"), true)
+        ))
+        assertTrue("allowed_tools_unsupported" in errors(v.validate(extra, setOf("jid:42"))))
+
+        // Nessuna normalizzazione permissiva di case o alias.
+        val aliased = validGenerative.copy(actions = listOf(
+            Action.InvokeLlm("g", listOf("notification"), listOf("WhatsApp_Reply"), true)
+        ))
+        assertTrue("allowed_tools_unsupported" in errors(v.validate(aliased, setOf("jid:42"))))
+
+        val withoutReply = validGenerative.copy(actions = listOf(
+            Action.InvokeLlm("g", listOf("notification"), listOf("state.read"), true)
+        ))
+        assertTrue("allowed_tools_unsupported" in errors(v.validate(withoutReply, setOf("jid:42"))))
+    }
     @Test fun `reply tool cannot disable sender binding`() {
         val unbound = validGenerative.copy(actions = listOf(
             Action.InvokeLlm("g", listOf("notification"), listOf("whatsapp_reply"), replyTargetSender = false)

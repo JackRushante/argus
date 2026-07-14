@@ -227,6 +227,26 @@ class DraftValidator(
         validateRequiredText(action.goal, MAX_TEXT_LENGTH, "goal_invalid", err)
         if (action.contextSources.size > MAX_TOOL_COUNT || action.contextSources.any { it.isBlank() || it.length > 120 })
             err("context_sources_invalid", "Context sources non valide o troppe")
+
+        // Contratto P1: l'unico profilo che la lane generativa esegue davvero al fire-time.
+        // Un draft più permissivo passerebbe la review e fallirebbe poi con action_contract_invalid.
+        if (action.contextSources.isEmpty()) {
+            err("context_sources_empty", "InvokeLlm richiede almeno la context source 'notification'")
+        } else {
+            if (GenerativeContract.CONTEXT_NOTIFICATION !in action.contextSources)
+                err("context_notification_required", "Il contesto InvokeLlm deve includere 'notification'")
+            if (action.contextSources.size != action.contextSources.distinct().size)
+                err("context_sources_duplicated", "Context sources duplicate in InvokeLlm")
+            action.contextSources.filterNot { it in GenerativeContract.CONTEXT_SOURCES }.forEach { source ->
+                err("context_source_unsupported", "Context source '$source' non supportata in P1")
+            }
+        }
+        if (action.allowedTools != GenerativeContract.ALLOWED_TOOLS)
+            err(
+                "allowed_tools_unsupported",
+                "In P1 allowed_tools deve essere esattamente [${GenerativeContract.TOOL_WHATSAPP_REPLY}], senza alias",
+            )
+
         if (action.allowedTools.isEmpty()) err("no_tools", "InvokeLlm senza allowed_tools")
         if (action.allowedTools.size > MAX_TOOL_COUNT) err("too_many_tools", "Troppi tool in InvokeLlm")
         if (action.timeoutMs !in 1_000..MAX_LLM_TIMEOUT_MS)

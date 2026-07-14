@@ -21,6 +21,21 @@ object ActionTypeIds {
     const val INVOKE_LLM = "invoke_llm"
 }
 
+/**
+ * Profilo P1 dell'azione generativa: l'unico contratto InvokeLlm che la lane esegue davvero.
+ * Validator, derivazione capability e lane devono restare allineati a queste costanti.
+ */
+object GenerativeContract {
+    const val CONTEXT_NOTIFICATION = "notification"
+    const val CONTEXT_STATE = "state"
+    /** Tool wire di reply: coincide con ActionTypeIds.WHATSAPP_REPLY. */
+    const val TOOL_WHATSAPP_REPLY = ActionTypeIds.WHATSAPP_REPLY
+    /** Tool raw richiesto a runtime quando il contesto include lo stato device. */
+    const val TOOL_STATE_READ = "state.read"
+    val CONTEXT_SOURCES: Set<String> = setOf(CONTEXT_NOTIFICATION, CONTEXT_STATE)
+    val ALLOWED_TOOLS: List<String> = listOf(TOOL_WHATSAPP_REPLY)
+}
+
 @Serializable
 sealed interface Action {
     val tier: ActionTier get() = if (this is InvokeLlm) ActionTier.GENERATIVE else ActionTier.DETERMINISTIC

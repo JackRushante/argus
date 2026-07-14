@@ -75,6 +75,9 @@ object CapabilityRequirements {
         is Action.InvokeLlm -> buildSet {
             add(CapabilityIds.ACTION_INVOKE_LLM)
             addAll(action.allowedTools)
+            if (GenerativeContract.CONTEXT_STATE in action.contextSources) {
+                add(GenerativeContract.TOOL_STATE_READ)
+            }
         }
     }
 }

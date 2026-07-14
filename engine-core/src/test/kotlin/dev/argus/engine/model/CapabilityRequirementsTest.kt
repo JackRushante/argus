@@ -21,6 +21,83 @@ class CapabilityRequirementsTest {
     }
 
     @Test
+    fun `generative reply rule derives trigger llm and raw tool capabilities`() {
+        assertEquals(
+            setOf(
+                CapabilityIds.TRIGGER_NOTIFICATION,
+                CapabilityIds.ACTION_INVOKE_LLM,
+                GenerativeContract.TOOL_WHATSAPP_REPLY,
+            ),
+            CapabilityRequirements.derive(
+                trigger = Trigger.Notification(
+                    "com.whatsapp",
+                    conversationId = "jid:42",
+                    isGroup = false,
+                ),
+                actions = listOf(
+                    Action.InvokeLlm(
+                        goal = "rispondi",
+                        contextSources = listOf("notification"),
+                        allowedTools = listOf("whatsapp_reply"),
+                        replyTargetSender = true,
+                    ),
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun `state context source adds the state read requirement exactly once`() {
+        assertEquals(
+            setOf(
+                CapabilityIds.TRIGGER_NOTIFICATION,
+                CapabilityIds.ACTION_INVOKE_LLM,
+                GenerativeContract.TOOL_WHATSAPP_REPLY,
+                GenerativeContract.TOOL_STATE_READ,
+            ),
+            CapabilityRequirements.derive(
+                trigger = Trigger.Notification(
+                    "com.whatsapp",
+                    conversationId = "jid:42",
+                    isGroup = false,
+                ),
+                actions = listOf(
+                    Action.InvokeLlm(
+                        goal = "rispondi",
+                        contextSources = listOf("notification", "state"),
+                        allowedTools = listOf("whatsapp_reply"),
+                        replyTargetSender = true,
+                    ),
+                    Action.InvokeLlm(
+                        goal = "riassumi",
+                        contextSources = listOf("notification", "state"),
+                        allowedTools = listOf("whatsapp_reply"),
+                        replyTargetSender = true,
+                    ),
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun `notification only context does not require state read`() {
+        assertEquals(
+            emptySet<String>(),
+            CapabilityRequirements.derive(
+                trigger = Trigger.Notification("com.whatsapp"),
+                actions = listOf(
+                    Action.InvokeLlm(
+                        goal = "rispondi",
+                        contextSources = listOf("notification"),
+                        allowedTools = listOf("whatsapp_reply"),
+                        replyTargetSender = true,
+                    ),
+                ),
+            ).filter { it == GenerativeContract.TOOL_STATE_READ }.toSet(),
+        )
+    }
+
+    @Test
     fun `nested conditions retain every state dependency`() {
         val conditions = Condition.And(
             listOf(
