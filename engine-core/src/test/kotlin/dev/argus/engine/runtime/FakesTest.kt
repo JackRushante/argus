@@ -9,9 +9,13 @@ class FakesTest {
         val eventId = TriggerEventId("alarm:a1:1")
         val automationId = AutomationId("a1")
         val ctx = FireContext(
-            TriggerEvent.TimeFired(automationId, ApprovalFingerprint("0".repeat(64))),
-            DeviceState(), automationId, eventId,
-            StableExecutionIdFactory.create(automationId, eventId),
+            event = TriggerEvent.TimeFired(automationId, ApprovalFingerprint("0".repeat(64))),
+            state = DeviceState(),
+            automationId = automationId,
+            approvalFingerprint = ApprovalFingerprint("0".repeat(64)),
+            eventId = eventId,
+            executionId = StableExecutionIdFactory.create(automationId, eventId),
+            actionIndex = 0,
         )
         assertEquals(ActionResult.Success, ex.execute(Action.SetWifi(false), ctx))
         assertEquals(ActionResult.Submitted, ex.execute(Action.InvokeLlm("g", listOf(), listOf("whatsapp_reply"), true), ctx))

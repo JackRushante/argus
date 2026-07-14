@@ -108,6 +108,7 @@ private fun Int?.orZero(): Int = this ?: 0
 private fun ExecutionStatus?.toLogOutcome(kind: AuditKind): LogOutcome = when {
     kind == AuditKind.ERROR || kind == AuditKind.BLOCKED_POLICY -> LogOutcome.FAILED
     this == ExecutionStatus.PARTIAL -> LogOutcome.PARTIAL
+    this == ExecutionStatus.DEFERRED -> LogOutcome.DEFERRED
     this in setOf(
         ExecutionStatus.FAILED,
         ExecutionStatus.CANCELLED,
@@ -122,10 +123,12 @@ private fun auditSummary(record: AuditLogRecord): String = when (record.kind) {
         val succeeded = record.succeededCount ?: 0
         val failed = record.failedCount ?: 0
         val submitted = record.submittedCount ?: 0
-        val total = succeeded + failed + submitted
+        val deferred = record.deferredCount ?: 0
+        val total = succeeded + failed + submitted + deferred
         when (record.executionStatus) {
             ExecutionStatus.RUNNING -> "esecuzione in corso"
             ExecutionStatus.SUBMITTED -> "$submitted/$total azioni accodate"
+            ExecutionStatus.DEFERRED -> "$deferred/$total risposte da inviare manualmente"
             ExecutionStatus.SUCCEEDED -> "$succeeded/$total azioni riuscite"
             ExecutionStatus.PARTIAL -> "$succeeded/$total azioni riuscite · $failed fallite"
             ExecutionStatus.FAILED -> "esecuzione fallita · $failed/$total azioni fallite"
@@ -151,6 +154,7 @@ private fun actionDetail(action: ActionResultEntity): String {
     val outcome = when (action.outcome) {
         ActionJournalOutcome.SUCCEEDED -> "ok"
         ActionJournalOutcome.SUBMITTED -> "accodata"
+        ActionJournalOutcome.DEFERRED -> "differita"
         ActionJournalOutcome.FAILED -> "fallita"
     }
     val error = action.errorCode?.let { " · ${it.safeDiagnostic()}" }.orEmpty()

@@ -5,6 +5,7 @@ import dev.argus.device.DeviceToolException
 import dev.argus.device.RingerMode
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.AutomationId
+import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.DndMode
 import dev.argus.engine.runtime.ActionResult
 import dev.argus.engine.runtime.DeviceState
@@ -23,8 +24,10 @@ class ShizukuActionExecutorTest {
         event = TriggerEvent.NotificationPosted("com.example"),
         state = DeviceState(),
         automationId = AutomationId("automation-1"),
+        approvalFingerprint = ApprovalFingerprint("0".repeat(64)),
         eventId = TriggerEventId("event-1"),
         executionId = ExecutionId("execution-1"),
+        actionIndex = 0,
         priority = 7,
     )
 

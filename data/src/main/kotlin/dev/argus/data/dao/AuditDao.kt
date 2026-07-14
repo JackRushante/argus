@@ -20,6 +20,7 @@ data class AuditLogRecord(
     val succeededCount: Int?,
     val failedCount: Int?,
     val submittedCount: Int?,
+    val deferredCount: Int? = null,
 )
 
 @Dao
@@ -41,7 +42,8 @@ interface AuditDao {
             "fire_claims.status AS executionStatus, " +
             "fire_claims.succeededCount AS succeededCount, " +
             "fire_claims.failedCount AS failedCount, " +
-            "fire_claims.submittedCount AS submittedCount " +
+            "fire_claims.submittedCount AS submittedCount, " +
+            "fire_claims.deferredCount AS deferredCount " +
             "FROM audit " +
             "LEFT JOIN automations ON automations.id = audit.automationId " +
             "LEFT JOIN fire_claims ON fire_claims.executionId = audit.executionId " +
@@ -56,7 +58,8 @@ interface AuditDao {
             "fire_claims.status AS executionStatus, " +
             "fire_claims.succeededCount AS succeededCount, " +
             "fire_claims.failedCount AS failedCount, " +
-            "fire_claims.submittedCount AS submittedCount " +
+            "fire_claims.submittedCount AS submittedCount, " +
+            "fire_claims.deferredCount AS deferredCount " +
             "FROM audit " +
             "LEFT JOIN automations ON automations.id = audit.automationId " +
             "LEFT JOIN fire_claims ON fire_claims.executionId = audit.executionId " +

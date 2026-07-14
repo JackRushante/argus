@@ -14,7 +14,11 @@ import dev.argus.engine.runtime.ExecutionId
 import dev.argus.engine.runtime.ExecutionStatus
 import dev.argus.engine.runtime.FireClaimRequest
 import dev.argus.engine.runtime.FireClaimResult
+import dev.argus.engine.runtime.SubmittedActionCompletion
 import dev.argus.engine.runtime.TriggerEventId
+import kotlinx.coroutines.async
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.advanceUntilIdle
 import dev.argus.engine.safety.DraftArmResult
 import dev.argus.engine.safety.DraftId
 import dev.argus.engine.safety.DraftWriteResult
@@ -28,12 +32,15 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
+@OptIn(ExperimentalCoroutinesApi::class)
 class RoomExecutionJournalTest {
     private lateinit var db: ArgusDatabase
     private lateinit var store: RoomAutomationStore
@@ -123,6 +130,167 @@ class RoomExecutionJournalTest {
         assertEquals(
             ExecutionStatus.SUPPRESSED_NOT_ELIGIBLE,
             db.executionJournalDao().execution(disabled.value)?.status,
+        )
+    }
+
+    @Test
+    fun `async action waits for submitted handshake and resolves exactly once as deferred`() = runTest {
+        val automationId = arm("async-deferred", listOf(Action.InvokeLlm(
+            goal = "rispondi",
+            contextSources = listOf("notification"),
+            allowedTools = listOf("whatsapp_reply"),
+            replyTargetSender = true,
+        )))
+        val executionId = ExecutionId("exec-async-deferred")
+        store.claimFire(claim(automationId, "event-async", executionId, 1_000))
+
+        val ready = async {
+            journal.observeSubmission(executionId, actionIndex = 0)
+                .first { it?.ready == true }
+        }
+        advanceUntilIdle()
+        assertFalse(ready.isCompleted)
+
+        journal.recordAction(
+            ActionJournalEntry(
+                executionId,
+                0,
+                "invoke_llm",
+                ActionJournalOutcome.SUBMITTED,
+                1_001,
+            ),
+        )
+        advanceUntilIdle()
+        assertFalse(ready.isCompleted, "La sola action row non basta finché l'Engine è RUNNING")
+
+        journal.finish(
+            ExecutionCompletion(executionId, ExecutionStatus.SUBMITTED, 1_002, 0, 0, 1),
+        )
+        assertTrue(ready.await()?.ready == true)
+
+        val completion = SubmittedActionCompletion(
+            executionId = executionId,
+            actionIndex = 0,
+            outcome = ActionJournalOutcome.DEFERRED,
+            atMillis = 1_100,
+            errorCode = "reply_channel_expired",
+        )
+        assertTrue(journal.resolveSubmitted(completion))
+        assertFalse(journal.resolveSubmitted(completion), "La completion non può essere applicata due volte")
+
+        val action = db.executionJournalDao().actions(executionId.value).single()
+        assertEquals(ActionJournalOutcome.DEFERRED, action.outcome)
+        assertEquals("reply_channel_expired", action.errorCode)
+        val execution = db.executionJournalDao().execution(executionId.value)!!
+        assertEquals(ExecutionStatus.DEFERRED, execution.status)
+        assertEquals(0, execution.submittedCount)
+        assertEquals(1, execution.deferredCount)
+    }
+
+    @Test
+    fun `async actions keep execution submitted until the last result then recompute aggregate`() = runTest {
+        val generative = Action.InvokeLlm(
+            goal = "rispondi",
+            contextSources = listOf("notification"),
+            allowedTools = listOf("whatsapp_reply"),
+            replyTargetSender = true,
+        )
+        val automationId = arm("async-aggregate", listOf(generative, generative))
+        val executionId = ExecutionId("exec-async-aggregate")
+        store.claimFire(claim(automationId, "event-async-aggregate", executionId, 1_000))
+        repeat(2) { index ->
+            journal.recordAction(
+                ActionJournalEntry(
+                    executionId,
+                    index,
+                    "invoke_llm",
+                    ActionJournalOutcome.SUBMITTED,
+                    1_001,
+                ),
+            )
+        }
+        journal.finish(
+            ExecutionCompletion(executionId, ExecutionStatus.SUBMITTED, 1_002, 0, 0, 2),
+        )
+
+        assertFalse(
+            journal.resolveSubmitted(
+                SubmittedActionCompletion(
+                    executionId,
+                    actionIndex = 2,
+                    outcome = ActionJournalOutcome.SUCCEEDED,
+                    atMillis = 1_050,
+                ),
+            ),
+            "Un indice azione estraneo all'esecuzione non può essere risolto",
+        )
+        assertTrue(
+            journal.resolveSubmitted(
+                SubmittedActionCompletion(
+                    executionId,
+                    actionIndex = 0,
+                    outcome = ActionJournalOutcome.SUCCEEDED,
+                    atMillis = 1_100,
+                ),
+            ),
+        )
+        db.executionJournalDao().execution(executionId.value)!!.also { pending ->
+            assertEquals(ExecutionStatus.SUBMITTED, pending.status)
+            assertEquals(1, pending.succeededCount)
+            assertEquals(1, pending.submittedCount)
+        }
+
+        assertTrue(
+            journal.resolveSubmitted(
+                SubmittedActionCompletion(
+                    executionId,
+                    actionIndex = 1,
+                    outcome = ActionJournalOutcome.FAILED,
+                    atMillis = 1_200,
+                    errorCode = "brain_failed",
+                ),
+            ),
+        )
+        db.executionJournalDao().execution(executionId.value)!!.also { finished ->
+            assertEquals(ExecutionStatus.PARTIAL, finished.status)
+            assertEquals(1, finished.succeededCount)
+            assertEquals(1, finished.failedCount)
+            assertEquals(0, finished.submittedCount)
+        }
+    }
+
+    @Test
+    fun `maintenance interrupts stale submitted work and never leaves it pending forever`() = runTest {
+        val automationId = arm("stale-submitted", listOf(Action.InvokeLlm(
+            "rispondi",
+            listOf("notification"),
+            listOf("whatsapp_reply"),
+            true,
+        )))
+        val executionId = ExecutionId("exec-stale-submitted")
+        store.claimFire(claim(automationId, "event-stale-submitted", executionId, 1_000))
+        journal.recordAction(
+            ActionJournalEntry(
+                executionId,
+                0,
+                "invoke_llm",
+                ActionJournalOutcome.SUBMITTED,
+                1_001,
+            ),
+        )
+        journal.finish(
+            ExecutionCompletion(executionId, ExecutionStatus.SUBMITTED, 1_002, 0, 0, 1),
+        )
+
+        val result = RoomJournalMaintenance(
+            db,
+            JournalRetentionPolicy(runningStaleAfterMillis = 100),
+        ).run(nowMillis = 2_000)
+
+        assertEquals(1, result.interrupted)
+        assertEquals(
+            ExecutionStatus.INTERRUPTED,
+            db.executionJournalDao().execution(executionId.value)?.status,
         )
     }
 

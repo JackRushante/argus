@@ -169,15 +169,21 @@ class Engine(
                     }
                 }
 
-                val context = FireContext(
-                    event = event,
-                    state = state(),
-                    automationId = automation.id,
-                    eventId = envelope.id,
-                    executionId = executionId,
-                    priority = automation.priority,
-                )
+                val fireState = state()
+                val approvalFingerprint = requireNotNull(automation.approvalFingerprint) {
+                    "Automazione approvata priva di fingerprint"
+                }
                 automation.actions.forEachIndexed { index, action ->
+                    val context = FireContext(
+                        event = event,
+                        state = fireState,
+                        automationId = automation.id,
+                        approvalFingerprint = approvalFingerprint,
+                        eventId = envelope.id,
+                        executionId = executionId,
+                        actionIndex = index,
+                        priority = automation.priority,
+                    )
                     val result = try {
                         executor.execute(action, context)
                     } catch (e: CancellationException) {

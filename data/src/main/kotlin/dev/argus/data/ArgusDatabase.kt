@@ -31,7 +31,7 @@ import dev.argus.data.entities.WhitelistedContactEntity
         ScheduledTimeAlarmEntity::class,
         WhitelistedContactEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -196,6 +196,15 @@ abstract class ArgusDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE `fire_claims` ADD COLUMN `deferredCount` " +
+                        "INTEGER NOT NULL DEFAULT 0",
+                )
+            }
+        }
+
         fun build(context: Context, name: String = "argus.db"): ArgusDatabase =
             Room.databaseBuilder(context, ArgusDatabase::class.java, name)
                 .addMigrations(
@@ -204,6 +213,7 @@ abstract class ArgusDatabase : RoomDatabase() {
                     MIGRATION_3_4,
                     MIGRATION_4_5,
                     MIGRATION_5_6,
+                    MIGRATION_6_7,
                 )
                 .build()
 

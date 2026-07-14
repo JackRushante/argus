@@ -40,4 +40,5 @@ data class FireClaimEntity(
     @ColumnInfo(defaultValue = "0") val succeededCount: Int = 0,
     @ColumnInfo(defaultValue = "0") val failedCount: Int = 0,
     @ColumnInfo(defaultValue = "0") val submittedCount: Int = 0,
+    @ColumnInfo(defaultValue = "0") val deferredCount: Int = 0,
 )

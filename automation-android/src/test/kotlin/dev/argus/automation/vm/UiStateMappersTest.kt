@@ -58,6 +58,39 @@ class UiStateMappersTest {
     }
 
     @Test
+    fun `deferred reply is surfaced as manual delivery instead of success`() {
+        val row = AuditLogRecord(
+            id = 43L,
+            automationId = "automation-7",
+            automationName = "Risposta AI",
+            kind = AuditKind.FIRED,
+            atMillis = 1_100L,
+            detail = "",
+            executionId = "execution-10",
+            executionStatus = ExecutionStatus.DEFERRED,
+            succeededCount = 0,
+            failedCount = 0,
+            submittedCount = 0,
+            deferredCount = 1,
+        ).toLogRow(
+            listOf(
+                ActionResultEntity(
+                    executionId = "execution-10",
+                    actionIndex = 0,
+                    actionType = "invoke_llm",
+                    outcome = ActionJournalOutcome.DEFERRED,
+                    atMillis = 1_100L,
+                    errorCode = "reply_channel_expired",
+                ),
+            ),
+        )
+
+        assertEquals(dev.argus.ui.model.LogOutcome.DEFERRED, row.outcome)
+        assertTrue(row.summary.contains("manualmente"))
+        assertTrue(assertNotNull(row.expandedDetail).single().contains("differita"))
+    }
+
+    @Test
     fun `deleted automation cannot be opened from an audit row`() {
         val row = AuditLogRecord(
             id = 9L,

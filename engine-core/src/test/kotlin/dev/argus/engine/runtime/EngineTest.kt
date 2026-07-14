@@ -337,6 +337,8 @@ class EngineTest {
 
         assertEquals(TriggerEventId("sbn:wa:stable"), captured?.eventId)
         assertEquals(outcome.executionId, captured?.executionId)
+        assertEquals(a.approvalFingerprint, captured?.approvalFingerprint)
+        assertEquals(0, captured?.actionIndex)
         assertEquals(7, captured?.priority)
         assertEquals(
             StableExecutionIdFactory.create(a.id, TriggerEventId("sbn:wa:stable")),

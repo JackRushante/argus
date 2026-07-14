@@ -2,6 +2,7 @@ package dev.argus.engine.runtime
 
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.ActionTypeIds
+import kotlinx.coroutines.flow.Flow
 
 enum class ExecutionStatus {
     RUNNING,
@@ -9,13 +10,14 @@ enum class ExecutionStatus {
     PARTIAL,
     FAILED,
     SUBMITTED,
+    DEFERRED,
     CANCELLED,
     SUPPRESSED_COOLDOWN,
     SUPPRESSED_NOT_ELIGIBLE,
     INTERRUPTED,
 }
 
-enum class ActionJournalOutcome { SUCCEEDED, FAILED, SUBMITTED }
+enum class ActionJournalOutcome { SUCCEEDED, FAILED, SUBMITTED, DEFERRED }
 
 data class ActionJournalEntry(
     val executionId: ExecutionId,
@@ -43,12 +45,43 @@ data class ExecutionCompletion(
     val succeededCount: Int,
     val failedCount: Int,
     val submittedCount: Int,
+    val deferredCount: Int = 0,
 ) {
     init {
         require(status != ExecutionStatus.RUNNING) { "Una completion non può restare RUNNING" }
         require(completedAtMillis >= 0) { "completedAtMillis non può essere negativo" }
-        require(succeededCount >= 0 && failedCount >= 0 && submittedCount >= 0) {
+        require(
+            succeededCount >= 0 && failedCount >= 0 && submittedCount >= 0 && deferredCount >= 0,
+        ) {
             "I contatori azione non possono essere negativi"
+        }
+    }
+}
+
+data class SubmittedActionState(
+    val executionStatus: ExecutionStatus,
+    val actionOutcome: ActionJournalOutcome?,
+) {
+    val ready: Boolean
+        get() = executionStatus == ExecutionStatus.SUBMITTED &&
+            actionOutcome == ActionJournalOutcome.SUBMITTED
+}
+
+data class SubmittedActionCompletion(
+    val executionId: ExecutionId,
+    val actionIndex: Int,
+    val outcome: ActionJournalOutcome,
+    val atMillis: Long,
+    val errorCode: String? = null,
+) {
+    init {
+        require(actionIndex >= 0) { "actionIndex non può essere negativo" }
+        require(outcome != ActionJournalOutcome.SUBMITTED) {
+            "La risoluzione async non può restare SUBMITTED"
+        }
+        require(atMillis >= 0) { "atMillis non può essere negativo" }
+        require(errorCode == null || errorCode.matches(Regex("^[a-z][a-z0-9_]{0,63}$"))) {
+            "errorCode non valido"
         }
     }
 }
@@ -56,6 +89,16 @@ data class ExecutionCompletion(
 interface ExecutionJournal {
     suspend fun recordAction(entry: ActionJournalEntry)
     suspend fun finish(completion: ExecutionCompletion)
+}
+
+/** Completion CAS delle azioni generative, separata dal percorso sincrono dell'Engine. */
+interface SubmittedActionJournal {
+    fun observeSubmission(
+        executionId: ExecutionId,
+        actionIndex: Int,
+    ): Flow<SubmittedActionState?>
+
+    suspend fun resolveSubmitted(completion: SubmittedActionCompletion): Boolean
 }
 
 object NoopExecutionJournal : ExecutionJournal {
@@ -98,5 +141,5 @@ internal fun List<ActionResult>.completion(
         submitted > 0 -> ExecutionStatus.SUBMITTED
         else -> ExecutionStatus.SUCCEEDED
     }
-    return ExecutionCompletion(executionId, status, atMillis, succeeded, failed, submitted)
+    return ExecutionCompletion(executionId, status, atMillis, succeeded, failed, submitted, 0)
 }

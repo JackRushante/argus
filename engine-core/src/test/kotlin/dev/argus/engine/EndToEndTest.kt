@@ -75,10 +75,12 @@ class EndToEndTest {
     }
 
     @Test fun `example3 - whatsapp 1-1 from whitelisted conversation triggers generative reply as Submitted`() = runTest {
-        val auto = Automation(AutomationId("w1"), "reply", CreatedBy.LLM, AutomationStatus.ARMED,
-            Trigger.Notification("com.whatsapp", conversationId = "jid:42", isGroup = false),
-            listOf(Action.InvokeLlm("rispondi", listOf("notification"), listOf("whatsapp_reply"), replyTargetSender = true)),
-            conditions = Condition.TimeWindow("18:00", "22:00", "Europe/Rome"))
+        val auto = approved(
+            Automation(AutomationId("w1"), "reply", CreatedBy.LLM, AutomationStatus.ARMED,
+                Trigger.Notification("com.whatsapp", conversationId = "jid:42", isGroup = false),
+                listOf(Action.InvokeLlm("rispondi", listOf("notification"), listOf("whatsapp_reply"), replyTargetSender = true)),
+                conditions = Condition.TimeWindow("18:00", "22:00", "Europe/Rome")),
+        )
         val ex = FakeActionExecutor(); val store = FakeAutomationStore(listOf(auto))
         val outcomes = engine(store, ex, "2026-07-12T16:30:00Z")   // 18:30 CEST, dentro la finestra
             .onTrigger(TriggerEnvelope(

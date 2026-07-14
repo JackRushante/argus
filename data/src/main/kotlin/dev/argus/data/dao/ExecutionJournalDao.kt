@@ -7,12 +7,36 @@ import androidx.room.Upsert
 import dev.argus.data.entities.ActionResultEntity
 import dev.argus.data.entities.FireClaimEntity
 import dev.argus.engine.runtime.ExecutionStatus
+import dev.argus.engine.runtime.ActionJournalOutcome
+import dev.argus.engine.runtime.SubmittedActionCompletion
+import dev.argus.engine.runtime.SubmittedActionState
 import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface ExecutionJournalDao {
     @Upsert
     suspend fun upsertAction(entity: ActionResultEntity)
+
+    @Query(
+        "SELECT fire_claims.status AS executionStatus, " +
+            "action_results.outcome AS actionOutcome FROM fire_claims " +
+            "LEFT JOIN action_results ON action_results.executionId = fire_claims.executionId " +
+            "AND action_results.actionIndex = :actionIndex " +
+            "WHERE fire_claims.executionId = :executionId",
+    )
+    fun observeSubmission(
+        executionId: String,
+        actionIndex: Int,
+    ): Flow<SubmittedActionState?>
+
+    @Query(
+        "SELECT fire_claims.status AS executionStatus, " +
+            "action_results.outcome AS actionOutcome FROM fire_claims " +
+            "LEFT JOIN action_results ON action_results.executionId = fire_claims.executionId " +
+            "AND action_results.actionIndex = :actionIndex " +
+            "WHERE fire_claims.executionId = :executionId",
+    )
+    suspend fun submission(executionId: String, actionIndex: Int): SubmittedActionState?
 
     @Query("SELECT status FROM fire_claims WHERE executionId = :executionId")
     suspend fun status(executionId: String): ExecutionStatus?
@@ -28,11 +52,11 @@ interface ExecutionJournalDao {
     @Query(
         "UPDATE fire_claims SET status = :status, completedAtMillis = :completedAtMillis, " +
             "succeededCount = :succeededCount, failedCount = :failedCount, " +
-            "submittedCount = :submittedCount " +
+            "submittedCount = :submittedCount, deferredCount = :deferredCount " +
             "WHERE executionId = :executionId AND (status IN ('RUNNING', 'SUBMITTED') OR " +
             "(status = :status AND completedAtMillis = :completedAtMillis " +
             "AND succeededCount = :succeededCount AND failedCount = :failedCount " +
-            "AND submittedCount = :submittedCount))",
+            "AND submittedCount = :submittedCount AND deferredCount = :deferredCount))",
     )
     suspend fun finish(
         executionId: String,
@@ -41,7 +65,64 @@ interface ExecutionJournalDao {
         succeededCount: Int,
         failedCount: Int,
         submittedCount: Int,
+        deferredCount: Int,
     ): Int
+
+    @Query(
+        "UPDATE fire_claims SET status = :status, completedAtMillis = :completedAtMillis, " +
+            "succeededCount = :succeededCount, failedCount = :failedCount, " +
+            "submittedCount = :submittedCount, deferredCount = :deferredCount " +
+            "WHERE executionId = :executionId AND status = 'SUBMITTED'",
+    )
+    suspend fun resolveExecution(
+        executionId: String,
+        status: ExecutionStatus,
+        completedAtMillis: Long,
+        succeededCount: Int,
+        failedCount: Int,
+        submittedCount: Int,
+        deferredCount: Int,
+    ): Int
+
+    @Transaction
+    suspend fun resolveSubmitted(completion: SubmittedActionCompletion): Boolean {
+        val state = submission(completion.executionId.value, completion.actionIndex)
+        if (state?.ready != true) return false
+        val current = actions(completion.executionId.value)
+            .firstOrNull { it.actionIndex == completion.actionIndex }
+            ?: return false
+        upsertAction(
+            current.copy(
+                outcome = completion.outcome,
+                atMillis = completion.atMillis,
+                errorCode = completion.errorCode,
+            ),
+        )
+        val resolved = actions(completion.executionId.value)
+        val succeeded = resolved.count { it.outcome == ActionJournalOutcome.SUCCEEDED }
+        val failed = resolved.count { it.outcome == ActionJournalOutcome.FAILED }
+        val submitted = resolved.count { it.outcome == ActionJournalOutcome.SUBMITTED }
+        val deferred = resolved.count { it.outcome == ActionJournalOutcome.DEFERRED }
+        val status = when {
+            submitted > 0 -> ExecutionStatus.SUBMITTED
+            deferred > 0 -> ExecutionStatus.DEFERRED
+            failed == resolved.size && resolved.isNotEmpty() -> ExecutionStatus.FAILED
+            failed > 0 -> ExecutionStatus.PARTIAL
+            else -> ExecutionStatus.SUCCEEDED
+        }
+        check(
+            resolveExecution(
+                executionId = completion.executionId.value,
+                status = status,
+                completedAtMillis = completion.atMillis,
+                succeededCount = succeeded,
+                failedCount = failed,
+                submittedCount = submitted,
+                deferredCount = deferred,
+            ) == 1,
+        ) { "Esecuzione async non più risolvibile" }
+        return true
+    }
 
     @Query("SELECT * FROM fire_claims WHERE executionId = :executionId")
     suspend fun execution(executionId: String): FireClaimEntity?
@@ -81,12 +162,12 @@ interface ExecutionJournalDao {
 
     @Query(
         "UPDATE fire_claims SET status = 'INTERRUPTED', completedAtMillis = :atMillis " +
-            "WHERE status = 'RUNNING' AND claimedAtMillis < :staleBeforeMillis",
+            "WHERE status IN ('RUNNING', 'SUBMITTED') AND claimedAtMillis < :staleBeforeMillis",
     )
     suspend fun interruptStale(staleBeforeMillis: Long, atMillis: Long): Int
 
     @Query(
-        "DELETE FROM fire_claims WHERE status != 'RUNNING' AND (" +
+        "DELETE FROM fire_claims WHERE status NOT IN ('RUNNING', 'SUBMITTED') AND (" +
             "claimedAtMillis < :olderThanMillis OR executionId NOT IN (" +
             "SELECT executionId FROM fire_claims ORDER BY claimedAtMillis DESC, executionId DESC LIMIT :maxRows))",
     )
