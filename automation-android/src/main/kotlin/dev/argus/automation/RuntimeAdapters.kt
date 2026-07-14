@@ -199,11 +199,3 @@ class AndroidAutomationNotifier(context: Context) : AutomationNotifier {
         const val MAX_TEXT_CHARS = 4_096
     }
 }
-
-/** La lane generativa appartiene a P1: P0-B deve rifiutarla in modo esplicito. */
-object UnavailableGenerativeLane : GenerativeLane {
-    override fun trySubmit(
-        context: FireContext,
-        action: dev.argus.engine.model.Action.InvokeLlm,
-    ): Boolean = false
-}

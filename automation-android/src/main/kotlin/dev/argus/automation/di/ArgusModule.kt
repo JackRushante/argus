@@ -9,6 +9,7 @@ import dagger.hilt.components.SingletonComponent
 import dev.argus.automation.AndroidAppPreferencesStore
 import dev.argus.automation.AndroidAutomationNotifier
 import dev.argus.automation.AndroidCapabilityProbe
+import dev.argus.automation.AndroidGenerativeLane
 import dev.argus.automation.AndroidTimeAlarmBackend
 import dev.argus.automation.AppPreferencesStore
 import dev.argus.automation.ApprovalFlow
@@ -18,6 +19,7 @@ import dev.argus.automation.AutomationNotifier
 import dev.argus.automation.ConfiguredBridgeBrain
 import dev.argus.automation.CoordinatorTimeAlarmRuntime
 import dev.argus.automation.CurrentLocationProvider
+import dev.argus.automation.DeferredReplySink
 import dev.argus.automation.DeviceStateSnapshotProvider
 import dev.argus.automation.EngineNotificationEventDispatcher
 import dev.argus.automation.EngineTimeEventDispatcher
@@ -33,7 +35,7 @@ import dev.argus.automation.TimeAlarmCoordinator
 import dev.argus.automation.TimeAlarmRuntime
 import dev.argus.automation.TimeAlarmStateStore
 import dev.argus.automation.TimeEventDispatcher
-import dev.argus.automation.UnavailableGenerativeLane
+import dev.argus.automation.UnavailableDeferredReplySink
 import dev.argus.automation.notification.ActiveNotificationReplyRegistry
 import dev.argus.automation.notification.AndroidNotificationReplyGateway
 import dev.argus.automation.notification.AndroidNotificationSnapshotFactory
@@ -64,8 +66,10 @@ import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.runtime.ConditionEvaluator
 import dev.argus.engine.runtime.Engine
 import dev.argus.engine.runtime.ExecutionJournal
+import dev.argus.engine.runtime.FirePolicy
 import dev.argus.engine.runtime.FirePolicySnapshotProvider
 import dev.argus.engine.runtime.RevalidatingFirePolicy
+import dev.argus.engine.runtime.SubmittedActionJournal
 import dev.argus.engine.runtime.TriggerMatcher
 import dev.argus.engine.safety.ApprovalService
 import dev.argus.engine.safety.ApprovalWhitelistProvider
@@ -127,6 +131,9 @@ object ArgusModule {
 
     @Provides
     fun executionJournalBoundary(journal: RoomExecutionJournal): ExecutionJournal = journal
+
+    @Provides
+    fun submittedActionJournalBoundary(journal: RoomExecutionJournal): SubmittedActionJournal = journal
 
     @Provides
     @Singleton
@@ -238,6 +245,15 @@ object ArgusModule {
 
     @Provides
     @Singleton
+    fun revalidatingFirePolicy(
+        snapshots: FirePolicySnapshotProvider,
+    ): RevalidatingFirePolicy = RevalidatingFirePolicy(snapshots)
+
+    @Provides
+    fun firePolicyBoundary(policy: RevalidatingFirePolicy): FirePolicy = policy
+
+    @Provides
+    @Singleton
     fun capabilityReconciler(
         store: AutomationStore,
         snapshots: FirePolicySnapshotProvider,
@@ -275,7 +291,30 @@ object ArgusModule {
     fun notifierBoundary(notifier: AndroidAutomationNotifier): AutomationNotifier = notifier
 
     @Provides
-    fun generativeLane(): GenerativeLane = UnavailableGenerativeLane
+    fun deferredReplySink(): DeferredReplySink = UnavailableDeferredReplySink
+
+    @Provides
+    @Singleton
+    fun androidGenerativeLane(
+        @ApplicationScope scope: CoroutineScope,
+        journal: SubmittedActionJournal,
+        automations: AutomationStore,
+        policy: FirePolicy,
+        brain: Brain,
+        replies: NotificationReplyGateway,
+        deferredReplies: DeferredReplySink,
+    ): AndroidGenerativeLane = AndroidGenerativeLane(
+        scope,
+        journal,
+        automations,
+        policy,
+        brain,
+        replies,
+        deferredReplies,
+    )
+
+    @Provides
+    fun generativeLane(lane: AndroidGenerativeLane): GenerativeLane = lane
 
     @Provides
     @Singleton
@@ -293,7 +332,7 @@ object ArgusModule {
     fun engine(
         store: AutomationStore,
         executor: ActionExecutor,
-        snapshots: FirePolicySnapshotProvider,
+        firePolicy: FirePolicy,
         audit: AuditSink,
         journal: ExecutionJournal,
     ): Engine = Engine(
@@ -301,7 +340,7 @@ object ArgusModule {
         executor = executor,
         evaluator = ConditionEvaluator(Clock.systemDefaultZone()),
         matcher = TriggerMatcher(),
-        firePolicy = RevalidatingFirePolicy(snapshots),
+        firePolicy = firePolicy,
         audit = audit,
         journal = journal,
         now = System::currentTimeMillis,
