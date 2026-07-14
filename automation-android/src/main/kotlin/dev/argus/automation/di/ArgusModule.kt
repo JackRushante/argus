@@ -22,7 +22,9 @@ import dev.argus.automation.AutomationNotifier
 import dev.argus.automation.ConfiguredBridgeBrain
 import dev.argus.automation.CoordinatorTimeAlarmRuntime
 import dev.argus.automation.CurrentLocationProvider
+import dev.argus.automation.DeferredReplyCipher
 import dev.argus.automation.DeferredReplySink
+import dev.argus.automation.PersistentDeferredReplySink
 import dev.argus.automation.DeviceStateSnapshotProvider
 import dev.argus.automation.EngineNotificationEventDispatcher
 import dev.argus.automation.EngineTimeEventDispatcher
@@ -37,7 +39,6 @@ import dev.argus.automation.TimeAlarmCoordinator
 import dev.argus.automation.TimeAlarmRuntime
 import dev.argus.automation.TimeAlarmStateStore
 import dev.argus.automation.TimeEventDispatcher
-import dev.argus.automation.UnavailableDeferredReplySink
 import dev.argus.automation.notification.ActiveNotificationReplyRegistry
 import dev.argus.automation.notification.AndroidNotificationReplyGateway
 import dev.argus.automation.notification.AndroidNotificationSnapshotFactory
@@ -47,6 +48,8 @@ import dev.argus.automation.notification.NotificationReplyHandleFactory
 import dev.argus.brain.AndroidBridgeConfigurationStore
 import dev.argus.brain.BridgeConfigurationStore
 import dev.argus.data.ArgusDatabase
+import dev.argus.data.DeferredReplyStore
+import dev.argus.data.RoomDeferredReplyStore
 import dev.argus.data.RoomAuditSink
 import dev.argus.data.RoomAutomationStore
 import dev.argus.data.RoomContactWhitelistStore
@@ -301,7 +304,14 @@ object ArgusModule {
     fun notifierBoundary(notifier: AndroidAutomationNotifier): AutomationNotifier = notifier
 
     @Provides
-    fun deferredReplySink(): DeferredReplySink = UnavailableDeferredReplySink
+    @Singleton
+    fun deferredReplyStore(database: ArgusDatabase): DeferredReplyStore =
+        RoomDeferredReplyStore(database.deferredReplyDao())
+
+    @Provides
+    @Singleton
+    fun deferredReplySink(store: DeferredReplyStore): DeferredReplySink =
+        PersistentDeferredReplySink(store, DeferredReplyCipher.withKeystoreKey())
 
     @Provides
     @Singleton

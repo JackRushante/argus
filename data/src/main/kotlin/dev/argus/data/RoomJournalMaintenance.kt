@@ -18,6 +18,7 @@ data class JournalMaintenanceResult(
     val interrupted: Int,
     val deletedExecutions: Int,
     val deletedAuditRows: Int,
+    val purgedDeferredReplies: Int = 0,
 )
 
 class RoomJournalMaintenance(
@@ -32,7 +33,9 @@ class RoomJournalMaintenance(
             val interrupted = db.executionJournalDao().interruptStale(staleBefore, nowMillis)
             val deletedExecutions = db.executionJournalDao().trim(olderThan, policy.maxExecutions)
             val deletedAuditRows = db.auditDao().trim(olderThan, policy.maxAuditRows)
-            JournalMaintenanceResult(interrupted, deletedExecutions, deletedAuditRows)
+            // Il ciphertext di una reply consumata o scaduta non deve sopravvivere al suo TTL.
+            val purgedDeferred = db.deferredReplyDao().purge(nowMillis)
+            JournalMaintenanceResult(interrupted, deletedExecutions, deletedAuditRows, purgedDeferred)
         }
     }
 }

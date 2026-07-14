@@ -27,13 +27,9 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
 
-/** Il sink P1-6 deve cifrare prima di restituire true e mostrare la CTA locale E13. */
+/** Ritorna true soltanto se il testo è stato cifrato e persistito davvero (E13). */
 fun interface DeferredReplySink {
     suspend fun defer(context: FireContext, text: String): Boolean
-}
-
-object UnavailableDeferredReplySink : DeferredReplySink {
-    override suspend fun defer(context: FireContext, text: String): Boolean = false
 }
 
 /**
@@ -142,8 +138,8 @@ class AndroidGenerativeLane(
                 complete(queued, ActionJournalOutcome.SUCCEEDED, null)
 
             is NotificationReplyDelivery.Failed -> {
-                if (delivery.code == "channel_expired" && deferSafely(queued.context, text)) {
-                    complete(queued, ActionJournalOutcome.DEFERRED, "channel_expired")
+                if (delivery.code in DEFER_ELIGIBLE_CODES && deferSafely(queued.context, text)) {
+                    complete(queued, ActionJournalOutcome.DEFERRED, delivery.code)
                 } else {
                     complete(
                         queued,
@@ -236,5 +232,12 @@ class AndroidGenerativeLane(
         val P1_CONTEXT_SOURCES = setOf("notification", "state")
         val PENDING_EXECUTION_STATES = setOf(ExecutionStatus.RUNNING, ExecutionStatus.SUBMITTED)
         val ERROR_CODE = Regex("^[a-z][a-z0-9_]{0,63}$")
+
+        /**
+         * Esiti del gateway per cui la risposta generata resta consegnabile a mano (E13):
+         * PendingIntent scaduto oppure notifica rimossa/aggiornata/registry perso durante la
+         * latenza Hermes. Tutto il resto (package untrusted, testo invalido) resta FAILED.
+         */
+        val DEFER_ELIGIBLE_CODES = setOf("channel_expired", "reply_channel_unavailable")
     }
 }

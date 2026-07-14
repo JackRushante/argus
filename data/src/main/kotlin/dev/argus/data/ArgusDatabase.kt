@@ -10,6 +10,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import dev.argus.data.dao.AuditDao
 import dev.argus.data.dao.AutomationDao
 import dev.argus.data.dao.ContactWhitelistDao
+import dev.argus.data.dao.DeferredReplyDao
 import dev.argus.data.dao.DraftDao
 import dev.argus.data.dao.ExecutionJournalDao
 import dev.argus.data.dao.ObservedConversationDao
@@ -17,6 +18,7 @@ import dev.argus.data.dao.ScheduledTimeAlarmDao
 import dev.argus.data.entities.ActionResultEntity
 import dev.argus.data.entities.AuditEntity
 import dev.argus.data.entities.AutomationEntity
+import dev.argus.data.entities.DeferredReplyEntity
 import dev.argus.data.entities.FireClaimEntity
 import dev.argus.data.entities.PendingDraftEntity
 import dev.argus.data.entities.ObservedConversationEntity
@@ -33,8 +35,9 @@ import dev.argus.data.entities.WhitelistedContactEntity
         ScheduledTimeAlarmEntity::class,
         WhitelistedContactEntity::class,
         ObservedConversationEntity::class,
+        DeferredReplyEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -46,6 +49,7 @@ abstract class ArgusDatabase : RoomDatabase() {
     abstract fun scheduledTimeAlarmDao(): ScheduledTimeAlarmDao
     abstract fun contactWhitelistDao(): ContactWhitelistDao
     abstract fun observedConversationDao(): ObservedConversationDao
+    abstract fun deferredReplyDao(): DeferredReplyDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -230,6 +234,31 @@ abstract class ArgusDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `deferred_replies` (
+                        `executionId` TEXT NOT NULL,
+                        `actionIndex` INTEGER NOT NULL,
+                        `packageName` TEXT NOT NULL,
+                        `createdAtMillis` INTEGER NOT NULL,
+                        `expiresAtMillis` INTEGER NOT NULL,
+                        `consumedAtMillis` INTEGER,
+                        `payload` TEXT NOT NULL,
+                        PRIMARY KEY(`executionId`, `actionIndex`),
+                        FOREIGN KEY(`executionId`) REFERENCES `fire_claims`(`executionId`)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_deferred_replies_expiresAtMillis` " +
+                        "ON `deferred_replies` (`expiresAtMillis`)",
+                )
+            }
+        }
+
         fun build(context: Context, name: String = "argus.db"): ArgusDatabase =
             Room.databaseBuilder(context, ArgusDatabase::class.java, name)
                 .addMigrations(
@@ -240,6 +269,7 @@ abstract class ArgusDatabase : RoomDatabase() {
                     MIGRATION_5_6,
                     MIGRATION_6_7,
                     MIGRATION_7_8,
+                    MIGRATION_8_9,
                 )
                 .build()
 

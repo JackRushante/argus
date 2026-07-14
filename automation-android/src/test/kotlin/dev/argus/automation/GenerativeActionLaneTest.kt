@@ -161,6 +161,56 @@ class GenerativeActionLaneTest {
     }
 
     @Test
+    fun `unavailable reply channel is defer eligible like an expired pending intent`() = runTest {
+        // Remove/update della notifica o registry perso durante la latenza Hermes: è il caso E13
+        // più comune e deve offrire la stessa consegna manuale del canale scaduto.
+        var deferredText: String? = null
+        val fixture = fixture(
+            delivery = NotificationReplyDelivery.Failed("reply_channel_unavailable"),
+            deferred = DeferredReplySink { _, text ->
+                deferredText = text
+                true
+            },
+        )
+        fixture.lane.trySubmit(fixture.context, fixture.action)
+        fixture.journal.ready()
+        runCurrent()
+
+        assertEquals("risposta", deferredText)
+        fixture.journal.completions.single().also { completion ->
+            assertEquals(ActionJournalOutcome.DEFERRED, completion.outcome)
+            assertEquals("reply_channel_unavailable", completion.errorCode)
+        }
+    }
+
+    @Test
+    fun `defer ineligible failures and failed sink storage stay failed`() = runTest {
+        val untrusted = fixture(
+            delivery = NotificationReplyDelivery.Failed("reply_package_untrusted"),
+            deferred = DeferredReplySink { _, _ -> true },
+        )
+        untrusted.lane.trySubmit(untrusted.context, untrusted.action)
+        untrusted.journal.ready()
+        runCurrent()
+        untrusted.journal.completions.single().also { completion ->
+            assertEquals(ActionJournalOutcome.FAILED, completion.outcome)
+            assertEquals("reply_package_untrusted", completion.errorCode)
+        }
+
+        val sinkDown = fixture(
+            delivery = NotificationReplyDelivery.Failed("reply_channel_unavailable"),
+            deferred = DeferredReplySink { _, _ -> false },
+        )
+        sinkDown.lane.trySubmit(sinkDown.context, sinkDown.action)
+        sinkDown.journal.ready()
+        runCurrent()
+        sinkDown.journal.completions.single().also { completion ->
+            assertEquals(ActionJournalOutcome.FAILED, completion.outcome)
+            assertEquals("reply_channel_unavailable", completion.errorCode)
+        }
+    }
+
+    @Test
     fun `unsupported generative contract fails before contacting brain`() = runTest {
         val invalid = action().copy(allowedTools = listOf("state.read"))
         val fixture = fixture(action = invalid, automation = approvedAutomation(invalid))
