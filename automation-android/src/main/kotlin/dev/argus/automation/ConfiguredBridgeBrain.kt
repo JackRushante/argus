@@ -8,9 +8,11 @@ import dev.argus.brain.BridgeHealth
 import dev.argus.brain.CliBridgeTransport
 import dev.argus.brain.HermesBrain
 import dev.argus.engine.brain.Brain
+import dev.argus.engine.brain.ActResult
 import dev.argus.engine.brain.CapabilityManifest
 import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.runtime.DeviceState
+import dev.argus.engine.runtime.FireContext
 import kotlinx.coroutines.CancellationException
 
 sealed interface BridgeHealthResult {
@@ -44,6 +46,16 @@ class ConfiguredBridgeBrain(
         return HermesBrain(currentTransport()).compile(nl, manifest, state)
     }
 
+    override suspend fun act(
+        context: FireContext,
+        goal: String,
+        contextSources: List<String>,
+        allowedTools: List<String>,
+    ): ActResult {
+        requirePrivacyConsent()
+        return HermesBrain(currentTransport()).act(context, goal, contextSources, allowedTools)
+    }
+
     suspend fun health(): BridgeHealthResult {
         if (!privacyAccepted()) {
             return BridgeHealthResult.Unreachable(BridgeErrorKind.CONFIGURATION)
@@ -73,6 +85,15 @@ class ConfiguredBridgeBrain(
                 baseUrl = baseUrl,
                 authProvider = configuration,
             ).also { cached = baseUrl to it }
+        }
+    }
+
+    private fun requirePrivacyConsent() {
+        if (!privacyAccepted()) {
+            throw BridgeException(
+                BridgeErrorKind.CONFIGURATION,
+                "consenso privacy non accettato",
+            )
         }
     }
 }

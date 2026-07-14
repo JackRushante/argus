@@ -8,9 +8,15 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.argus.engine.brain.CapabilityManifest
 import dev.argus.engine.model.Action
+import dev.argus.engine.model.ApprovalFingerprint
+import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.DndMode
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.DeviceState
+import dev.argus.engine.runtime.ExecutionId
+import dev.argus.engine.runtime.FireContext
+import dev.argus.engine.runtime.TriggerEvent
+import dev.argus.engine.runtime.TriggerEventId
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -134,6 +140,35 @@ class HermesBridgeInstrumentedTest {
         val draft = requireNotNull(result.draft)
         assertTrue(draft.trigger is Trigger.Time)
         assertEquals(Action.SetDnd(DndMode.PRIORITY), draft.actions.single())
+    }
+
+    @Test fun liveActReturnsTextWithoutRemoteTarget(): Unit = runBlocking {
+        assumeTrue("act live non richiesto", arguments.getString("runLiveAct") == "true")
+        val context = FireContext(
+            event = TriggerEvent.NotificationPosted(
+                pkg = "com.whatsapp",
+                sender = "Contatto test",
+                title = "Contatto test",
+                text = "Arrivo tra dieci minuti",
+                isGroup = false,
+            ),
+            state = DeviceState(),
+            automationId = AutomationId("live-act-automation"),
+            approvalFingerprint = ApprovalFingerprint("0".repeat(64)),
+            eventId = TriggerEventId("live-act-event"),
+            executionId = ExecutionId("live-act-20260714-1"),
+            actionIndex = 0,
+        )
+
+        val result = HermesBrain(transport()).act(
+            context = context,
+            goal = "Rispondi in italiano in modo cordiale e molto conciso",
+            contextSources = listOf("notification"),
+            allowedTools = listOf("whatsapp_reply"),
+        )
+
+        assertNull(result.metaError)
+        assertTrue(requireNotNull(result.text).length in 1..4_096)
     }
 
     private fun bridgeToken(): String {

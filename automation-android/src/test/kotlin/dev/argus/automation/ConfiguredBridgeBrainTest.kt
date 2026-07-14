@@ -4,7 +4,13 @@ import dev.argus.brain.BridgeConfigurationStore
 import dev.argus.brain.BridgeErrorKind
 import dev.argus.brain.BridgeException
 import dev.argus.engine.brain.CapabilityManifest
+import dev.argus.engine.model.ApprovalFingerprint
+import dev.argus.engine.model.AutomationId
 import dev.argus.engine.runtime.DeviceState
+import dev.argus.engine.runtime.ExecutionId
+import dev.argus.engine.runtime.FireContext
+import dev.argus.engine.runtime.TriggerEvent
+import dev.argus.engine.runtime.TriggerEventId
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -63,6 +69,39 @@ class ConfiguredBridgeBrainTest {
             BridgeHealthResult.Unreachable(BridgeErrorKind.CONFIGURATION),
             brain.health(),
         )
+        assertEquals(0, configuration.baseUrlReads)
+    }
+
+    @Test
+    fun `act is blocked before privacy consent without exposing notification context`() = runTest {
+        val configuration = FakeBridgeConfiguration().apply {
+            token = "a-valid-bridge-token"
+        }
+        val brain = ConfiguredBridgeBrain(configuration, privacyAccepted = { false })
+        val context = FireContext(
+            event = TriggerEvent.NotificationPosted(
+                pkg = "com.whatsapp",
+                text = "privato",
+                isGroup = false,
+            ),
+            state = DeviceState(),
+            automationId = AutomationId("automation-1"),
+            approvalFingerprint = ApprovalFingerprint("0".repeat(64)),
+            eventId = TriggerEventId("event-1"),
+            executionId = ExecutionId("execution-1"),
+            actionIndex = 0,
+        )
+
+        val error = assertFailsWith<BridgeException> {
+            brain.act(
+                context,
+                "rispondi",
+                listOf("notification"),
+                listOf("whatsapp_reply"),
+            )
+        }
+
+        assertEquals(BridgeErrorKind.CONFIGURATION, error.kind)
         assertEquals(0, configuration.baseUrlReads)
     }
 }

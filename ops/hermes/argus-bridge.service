@@ -1,5 +1,5 @@
 [Unit]
-Description=Argus - Hermes compile bridge
+Description=Argus - Hermes one-shot bridge
 After=network-online.target
 Wants=network-online.target
 

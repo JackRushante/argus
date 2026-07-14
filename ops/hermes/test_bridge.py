@@ -40,6 +40,38 @@ class BridgeTest(unittest.TestCase):
         with self.assertRaises(bridge.RequestError):
             bridge.validate_request(request, "req-test-1")
 
+    def test_act_request_is_strict_minimal_and_reply_only(self):
+        request = self.act_request()
+        self.assertIs(request, bridge.validate_act_request(request, "act-test-1"))
+
+        request["context"]["notification"]["conversation_id"] = "must-not-cross"
+        with self.assertRaises(bridge.RequestError):
+            bridge.validate_act_request(request, "act-test-1")
+
+        for mutation in (
+            lambda value: value.update(allowed_tools=["shell.run"]),
+            lambda value: value.update(context_sources=["notification", "screen"]),
+            lambda value: value["context"]["notification"].update(is_group=True),
+            lambda value: value["context"].update(state=None),
+        ):
+            request = self.act_request()
+            mutation(request)
+            with self.assertRaises(bridge.RequestError):
+                bridge.validate_act_request(request, "act-test-1")
+
+    def test_act_output_accepts_only_bounded_text_without_target(self):
+        output = '@@META@@ {"reply_text":"Ciao, a dopo.","error_code":null}'
+        self.assertEqual(("Ciao, a dopo.", None), bridge.parse_act_model_output(output))
+
+        for invalid in (
+            '@@META@@ {"reply_text":"Ciao","target":"altro","error_code":null}',
+            '@@META@@ {"reply_text":"","error_code":null}',
+            '@@META@@ {"reply_text":null,"error_code":null}',
+            '@@META@@ {"reply_text":"Ciao","error_code":"refused"}',
+        ):
+            with self.assertRaises(bridge.ModelProcessError):
+                bridge.parse_act_model_output(invalid)
+
     def test_model_output_parses_only_available_actions(self):
         output = (
             'Va bene.\n@@META@@ {"draft":{"name":"DND sera",'
@@ -133,6 +165,29 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(502, raised.exception.status)
         self.assertEqual("model_invalid_output", raised.exception.code)
 
+    @staticmethod
+    def act_request():
+        return {
+            "schema_version": 1,
+            "request_id": "act-test-1",
+            "goal": "rispondi in modo cordiale",
+            "context_sources": ["notification", "state"],
+            "allowed_tools": ["whatsapp_reply"],
+            "context": {
+                "notification": {
+                    "package": "com.whatsapp",
+                    "sender": "Moglie",
+                    "title": "Moglie",
+                    "text": "ciao",
+                    "is_group": False,
+                },
+                "state": {
+                    "values": {"ringer": "normal"},
+                    "foreground_app": "com.whatsapp",
+                },
+            },
+        }
+
 
 class BridgeHttpTest(unittest.TestCase):
     def setUp(self):
@@ -140,6 +195,8 @@ class BridgeHttpTest(unittest.TestCase):
 
         def runner(_prompt):
             self.calls += 1
+            if "GENERATORE ONE-SHOT" in _prompt:
+                return '@@META@@ {"reply_text":"Ciao, a dopo.","error_code":null}'
             return (
                 'Regola pronta.\n@@META@@ {"draft":{"name":"dnd sera",'
                 '"trigger":{"type":"time","cron":"0 23 * * *","tz":"Europe/Rome"},'
@@ -198,6 +255,29 @@ class BridgeHttpTest(unittest.TestCase):
         self.assertEqual(409, status)
         self.assertEqual("idempotency_conflict", body["error"])
 
+    def test_act_is_strict_idempotent_and_never_returns_a_target(self):
+        request = self.valid_act_request()
+        status, first = self.request(
+            "/act", request, request_id=request["request_id"]
+        )
+        self.assertEqual(200, status)
+        self.assertEqual(
+            {"schema_version", "request_id", "result", "error_code"}, set(first)
+        )
+        self.assertEqual({"text"}, set(first["result"]))
+        self.assertEqual(
+            first,
+            self.request("/act", request, request_id=request["request_id"])[1],
+        )
+        self.assertEqual(1, self.calls)
+
+        changed = self.valid_act_request(goal="stessa chiave, altro goal")
+        status, body = self.request(
+            "/act", changed, request_id=changed["request_id"]
+        )
+        self.assertEqual(409, status)
+        self.assertEqual("idempotency_conflict", body["error"])
+
     def test_invalid_contract_never_calls_model(self):
         request = self.valid_request()
         request["surprise"] = True
@@ -245,6 +325,26 @@ class BridgeHttpTest(unittest.TestCase):
                 "values": {"dnd": "off"},
                 "foreground_app": None,
                 "location_available": False,
+            },
+        }
+
+    @staticmethod
+    def valid_act_request(goal="rispondi in modo cordiale"):
+        return {
+            "schema_version": 1,
+            "request_id": "act-http-1",
+            "goal": goal,
+            "context_sources": ["notification"],
+            "allowed_tools": ["whatsapp_reply"],
+            "context": {
+                "notification": {
+                    "package": "com.whatsapp",
+                    "sender": "Moglie",
+                    "title": "Moglie",
+                    "text": "ciao",
+                    "is_group": False,
+                },
+                "state": None,
             },
         }
 

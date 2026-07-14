@@ -1,6 +1,6 @@
 # Contratto Argus ↔ Hermes bridge
 
-Stato: protocollo v1 operativo dal 2026-07-13.
+Stato: protocollo v1 `/compile` operativo dal 2026-07-13; `/act` aggiunto il 2026-07-14.
 
 ## Endpoint e confine di sicurezza
 
@@ -111,14 +111,74 @@ Il client accetta il draft soltanto se:
 La decodifica non equivale all'approvazione: `DraftValidator`, fingerprint, conferma utente e
 revalidazione al fire-time restano obbligatori.
 
+## `POST /act`
+
+`/act` è il confine one-shot P1 per generare il solo testo di una reply. Usa gli stessi header,
+schema v1, bearer, limiti e regole di idempotenza di `/compile`. Il `request_id` Android è
+deterministico: `act-` seguito dal digest SHA-256 di `executionId + NUL + actionIndex`.
+
+Request v1:
+
+```json
+{
+  "schema_version": 1,
+  "request_id": "act-<sha256>",
+  "goal": "Rispondi in modo cordiale e conciso",
+  "context_sources": ["notification", "state"],
+  "allowed_tools": ["whatsapp_reply"],
+  "context": {
+    "notification": {
+      "package": "com.whatsapp",
+      "sender": "Moglie",
+      "title": "Moglie",
+      "text": "Arrivo tra dieci minuti",
+      "is_group": false
+    },
+    "state": {
+      "values": {"ringer": "normal"},
+      "foreground_app": "com.whatsapp"
+    }
+  }
+}
+```
+
+Invarianti del request:
+
+- `context_sources` accetta soltanto `notification` e `state`; `notification` è obbligatorio;
+- `state` deve essere `null` se la regola non lo ha richiesto;
+- in P1 l'unico `allowed_tools` accettato è esattamente `whatsapp_reply`;
+- package ammessi: WhatsApp e WhatsApp Business; `is_group` deve essere `false` esplicito;
+- `conversationId`, `StatusBarNotification.key`, fingerprint, coordinate e handle `RemoteInput`
+  non attraversano mai il bridge;
+- il server tratta goal e contesto come dati delimitati; il contenuto della notifica non può
+  cambiare formato, tool o destinatario.
+
+Risposta v1:
+
+```json
+{
+  "schema_version": 1,
+  "request_id": "act-<sha256>",
+  "result": {"text": "Perfetto, a dopo!"},
+  "error_code": null
+}
+```
+
+`result` contiene esclusivamente `text`, massimo 4096 caratteri. Il modello non restituisce e non
+può scegliere un target: conversazione, notifica attiva e invio restano vincolati localmente sul
+telefono. In caso di rifiuto semantico `result` è `null` e `error_code` è uno snake_case bounded;
+esattamente uno dei due deve essere valorizzato. Campi sconosciuti, target aggiunti, body incoerenti,
+versione o request ID diversi sono errori di protocollo fail-closed.
+
 ## Idempotenza e limiti
 
-- Il server lega `request_id`, `Idempotency-Key` e SHA-256 dei byte del request.
+- Il server lega endpoint, `request_id`, `Idempotency-Key` e SHA-256 dei byte del request. Le cache
+  `/compile` e `/act` sono namespace separate, quindi lo stesso ID non collide tra operazioni.
 - La stessa richiesta entro 15 minuti restituisce la risposta cached senza richiamare il modello;
   due duplicati concorrenti attendono lo stesso risultato e producono una sola chiamata Hermes.
 - Riutilizzare lo stesso ID con un body diverso restituisce `409 idempotency_conflict`.
-- Cache massima: 128 richieste; un solo compile Hermes concorrente; richieste con ID diverso durante
-  un compile ricevono `429`, senza aprire un secondo processo modello.
+- Cache massima: 128 richieste; un solo processo modello concorrente condiviso tra compile e act;
+  richieste con ID diverso durante una chiamata ricevono `429`, senza aprire un secondo processo.
 - Request massimo 256 KiB; response massimo 512 KiB; timeout server 55 s, client 60 s.
 - I log contengono solo prefisso del request ID, status e durata: mai messaggio, stato, contatti o token.
 

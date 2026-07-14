@@ -90,7 +90,8 @@ Gate: test rossi prima del fix per race worker-before-journal, doppia completion
 
 ### P1-1 — Contratto `/act` Android e Hermes
 
-- Estendere `Brain` con `act(FireContext, goal, allowedTools)` e un `ActResult` typed.
+- Estendere `Brain` con `act(FireContext, goal, contextSources, allowedTools)` e un `ActResult`
+  typed: `contextSources` è esplicito per impedire che lo stato venga inviato quando non approvato.
 - Request `/act` v1 strict, autenticata e idempotente; request ID deterministico da
   execution-id + action-index.
 - Payload minimizzato: goal approvato, notification text/title/sender come blocco untrusted,
@@ -195,4 +196,3 @@ Gate: ViewModel/Compose test e nessuna reply plaintext nei DB/log di diagnostica
 - Nessun testo/target/token in logcat, CLI, audit diagnostico o backup.
 - Battery exemption e notification listener sono verificati separatamente e visibili in UI.
 - Nessun service persistente, replay tardivo o fallback UI automatico introdotto fuori scope.
-

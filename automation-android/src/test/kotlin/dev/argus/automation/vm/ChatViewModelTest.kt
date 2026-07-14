@@ -218,6 +218,13 @@ private class QueuedBrain : Brain {
         return request.response.await()
     }
 
+    override suspend fun act(
+        context: dev.argus.engine.runtime.FireContext,
+        goal: String,
+        contextSources: List<String>,
+        allowedTools: List<String>,
+    ): dev.argus.engine.brain.ActResult = error("act non usato dai test chat")
+
     fun removeFirst(): Request = requests.removeFirst()
 }
 

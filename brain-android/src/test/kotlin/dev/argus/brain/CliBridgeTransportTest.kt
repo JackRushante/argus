@@ -2,8 +2,14 @@ package dev.argus.brain
 
 import dev.argus.engine.brain.CapabilityManifest
 import dev.argus.engine.brain.WhitelistedContact
+import dev.argus.engine.model.ApprovalFingerprint
+import dev.argus.engine.model.AutomationId
 import dev.argus.engine.runtime.DeviceState
+import dev.argus.engine.runtime.ExecutionId
+import dev.argus.engine.runtime.FireContext
 import dev.argus.engine.runtime.GeoPoint
+import dev.argus.engine.runtime.TriggerEvent
+import dev.argus.engine.runtime.TriggerEventId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
@@ -18,6 +24,7 @@ import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.SocketPolicy
+import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -99,6 +106,89 @@ class CliBridgeTransportTest {
         val request = assertNotNull(server.takeRequest(2, TimeUnit.SECONDS))
         assertEquals("/health", request.path)
         assertEquals("Bearer $TOKEN", request.getHeader("Authorization"))
+    }
+
+    @Test fun `act is deterministic minimal and never sends local reply handles or target ids`(): Unit = runBlocking {
+        val expectedRequestId = actRequestId("execution-1", 0)
+        server.enqueue(jsonResponse(
+            """{"schema_version":1,"request_id":"$expectedRequestId","result":{"text":"Va bene, a dopo."},"error_code":null}""",
+        ))
+
+        val result = transport().act(
+            context = fireContext(),
+            goal = "rispondi in modo cordiale",
+            contextSources = listOf("notification", "state"),
+            allowedTools = listOf("whatsapp_reply"),
+        )
+
+        assertEquals("Va bene, a dopo.", result.text)
+        assertNull(result.metaError)
+        val request = assertNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("/act", request.path)
+        assertEquals(expectedRequestId, request.getHeader("Idempotency-Key"))
+        val raw = request.body.readUtf8()
+        val root = Json.parseToJsonElement(raw).jsonObject
+        assertEquals(expectedRequestId, root.getValue("request_id").jsonPrimitive.content)
+        assertFalse(raw.contains("jid:private"))
+        assertFalse(raw.contains("sbn:private"))
+        assertFalse(raw.contains("45.123"))
+        assertFalse(raw.contains("11.456"))
+        assertFalse(raw.contains("private_state"))
+        val context = root.getValue("context").jsonObject
+        val notification = context.getValue("notification").jsonObject
+        assertEquals("com.whatsapp", notification.getValue("package").jsonPrimitive.content)
+        assertEquals("ciao", notification.getValue("text").jsonPrimitive.content)
+        val state = assertNotNull(context["state"]).jsonObject
+        assertEquals("normal", state.getValue("values").jsonObject.getValue("ringer").jsonPrimitive.content)
+    }
+
+    @Test fun `act omits state unless explicitly approved and rejects unsafe lanes before network`(): Unit = runBlocking {
+        val expectedRequestId = actRequestId("execution-1", 0)
+        server.enqueue(jsonResponse(
+            """{"schema_version":1,"request_id":"$expectedRequestId","result":{"text":"Ciao"},"error_code":null}""",
+        ))
+
+        transport().act(
+            context = fireContext(),
+            goal = "rispondi",
+            contextSources = listOf("notification"),
+            allowedTools = listOf("whatsapp_reply"),
+        )
+        val body = Json.parseToJsonElement(
+            assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
+        ).jsonObject
+        assertTrue(body.getValue("context").jsonObject.getValue("state").jsonPrimitive.content == "null")
+
+        val invalid = listOf(
+            Triple(listOf("notification", "screen"), listOf("whatsapp_reply"), fireContext()),
+            Triple(listOf("notification"), listOf("shell.run"), fireContext()),
+            Triple(listOf("notification"), listOf("whatsapp_reply"), fireContext(isGroup = true)),
+        )
+        invalid.forEach { (sources, tools, context) ->
+            val error = assertFailsWith<BridgeException> {
+                transport().act(context, "rispondi", sources, tools)
+            }
+            assertEquals(BridgeErrorKind.CONFIGURATION, error.kind)
+        }
+        assertNull(server.takeRequest(200, TimeUnit.MILLISECONDS))
+    }
+
+    @Test fun `act response cannot choose a target or smuggle unknown fields`(): Unit = runBlocking {
+        val requestId = actRequestId("execution-1", 0)
+        server.enqueue(jsonResponse(
+            """{"schema_version":1,"request_id":"$requestId","result":{"text":"Ciao","target":"altro"},"error_code":null}""",
+        ))
+
+        val error = assertFailsWith<BridgeException> {
+            transport().act(
+                fireContext(),
+                "rispondi",
+                listOf("notification"),
+                listOf("whatsapp_reply"),
+            )
+        }
+
+        assertEquals(BridgeErrorKind.PROTOCOL, error.kind)
     }
 
     @Test fun `valid strict response decodes a draft`(): Unit = runBlocking {
@@ -250,6 +340,35 @@ class CliBridgeTransportTest {
     private fun jsonResponse(body: String) = MockResponse()
         .addHeader("Content-Type", "application/json; charset=utf-8")
         .setBody(body)
+
+    private fun fireContext(isGroup: Boolean = false) = FireContext(
+        event = TriggerEvent.NotificationPosted(
+            pkg = "com.whatsapp",
+            conversationId = "jid:private",
+            sender = "Moglie",
+            title = "Moglie",
+            text = "ciao",
+            isGroup = isGroup,
+            notificationKey = "sbn:private",
+        ),
+        state = DeviceState(
+            values = mapOf("ringer" to "normal", "private_state" to "secret"),
+            foregroundApp = "com.whatsapp",
+            location = GeoPoint(45.123, 11.456),
+        ),
+        automationId = AutomationId("automation-1"),
+        approvalFingerprint = ApprovalFingerprint("0".repeat(64)),
+        eventId = TriggerEventId("event-1"),
+        executionId = ExecutionId("execution-1"),
+        actionIndex = 0,
+    )
+
+    private fun actRequestId(executionId: String, actionIndex: Int): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest("$executionId\u0000$actionIndex".toByteArray())
+            .joinToString("") { "%02x".format(it) }
+        return "act-$digest"
+    }
 
     private companion object {
         const val TOKEN = "test-token"
