@@ -3,6 +3,7 @@ package dev.argus.automation.vm
 import android.content.ClipboardManager
 import android.content.Context
 import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.viewModelScope
 import androidx.test.core.app.ApplicationProvider
 import dev.argus.automation.DeferredReplyCipher
 import dev.argus.automation.DeferredReplyManager
@@ -27,8 +28,11 @@ import dev.argus.engine.safety.DraftWriteResult
 import dev.argus.engine.safety.NewDraft
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -53,6 +57,7 @@ import kotlin.test.assertTrue
 class ExecutionLogViewModelTest {
     private val dispatcher = UnconfinedTestDispatcher()
     private lateinit var db: ArgusDatabase
+    private lateinit var lastViewModel: ExecutionLogViewModel
     private val cipher = DeferredReplyCipher(
         KeyGenerator.getInstance("AES").apply { init(256) }.generateKey().let { key -> { key } },
     )
@@ -65,6 +70,13 @@ class ExecutionLogViewModelTest {
 
     @After
     fun tearDown() {
+        // Il viewModelScope vive su Main: va spento e atteso PRIMA di resetMain, altrimenti
+        // "Dispatchers.Main is used concurrently with setting it" (flake reale osservato).
+        if (::lastViewModel.isInitialized) {
+            runBlocking {
+                lastViewModel.viewModelScope.coroutineContext[Job]?.cancelAndJoin()
+            }
+        }
         db.close()
         Dispatchers.resetMain()
     }
@@ -142,7 +154,7 @@ class ExecutionLogViewModelTest {
             RoomDeferredReplyStore(db.deferredReplyDao()),
             cipher,
         ) { NOW_MILLIS },
-    )
+    ).also { lastViewModel = it }
 
     private suspend fun seedDeferredExecution(
         id: String,
