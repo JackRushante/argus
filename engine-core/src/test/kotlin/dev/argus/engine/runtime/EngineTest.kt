@@ -219,6 +219,37 @@ class EngineTest {
     }
 
     @Test
+    fun `submitted action keeps mixed execution open despite synchronous failure`() = runTest {
+        val generative = Action.InvokeLlm(
+            goal = "rispondi",
+            contextSources = listOf("notification"),
+            allowedTools = listOf("whatsapp_reply"),
+            replyTargetSender = true,
+        )
+        val automation = armed(
+            "a1",
+            Trigger.Notification("com.whatsapp"),
+            listOf(generative, Action.SetWifi(false)),
+        )
+        val journal = FakeExecutionJournal()
+
+        engine(
+            FakeAutomationStore(listOf(automation)),
+            FakeActionExecutor(fail = setOf("SetWifi")),
+            "2026-07-12T10:00:00Z",
+            journal = journal,
+        ).onTrigger(envelope("sbn:wa:mixed", TriggerEvent.NotificationPosted("com.whatsapp"))) {
+            DeviceState()
+        }
+
+        journal.completions.single().also { completion ->
+            assertEquals(ExecutionStatus.SUBMITTED, completion.status)
+            assertEquals(1, completion.submittedCount)
+            assertEquals(1, completion.failedCount)
+        }
+    }
+
+    @Test
     fun `audit sink failure cannot change successful execution`() = runTest {
         val a = armed("a1", Trigger.Notification("com.whatsapp"), listOf(Action.SetWifi(false)))
         val outcome = engine(

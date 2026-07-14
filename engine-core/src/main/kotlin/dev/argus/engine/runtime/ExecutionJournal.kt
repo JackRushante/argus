@@ -136,9 +136,9 @@ internal fun List<ActionResult>.completion(
     val failed = count { it is ActionResult.Failure }
     val submitted = count { it == ActionResult.Submitted }
     val status = forcedStatus ?: when {
+        submitted > 0 -> ExecutionStatus.SUBMITTED
         failed == size && size > 0 -> ExecutionStatus.FAILED
         failed > 0 -> ExecutionStatus.PARTIAL
-        submitted > 0 -> ExecutionStatus.SUBMITTED
         else -> ExecutionStatus.SUCCEEDED
     }
     return ExecutionCompletion(executionId, status, atMillis, succeeded, failed, submitted, 0)
