@@ -17,6 +17,19 @@ class DraftValidatorTest {
     @Test fun `valid generative draft has no errors`() {
         assertEquals(emptyList(), errors(v.validate(validGenerative, whitelistedIds = setOf("jid:42"))))
     }
+    @Test fun `notification action needs a title while the body may stay empty`() {
+        // Il bridge accetta text vuoto (una notifica di solo titolo è legittima su Android):
+        // il validator client deve essere allineato, non più severo del canale reale.
+        fun draft(title: String, text: String) = AutomationDraft(
+            name = "notifica",
+            trigger = Trigger.Time(cron = "0 8 * * *", tz = "Europe/Rome"),
+            actions = listOf(Action.ShowNotification(title, text)),
+        )
+        assertEquals(emptyList(), errors(v.validate(draft("SMS ricevuto!", ""), emptySet())))
+        assertTrue("title_invalid" in errors(v.validate(draft("", "corpo"), emptySet())))
+        assertTrue("text_invalid" in errors(v.validate(draft("ok", "z".repeat(5_000)), emptySet())))
+    }
+
     @Test fun `sms text match is valid only on SMS_RECEIVED`() {
         val sms = AutomationDraft(
             name = "sms prova",

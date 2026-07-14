@@ -205,7 +205,10 @@ class DraftValidator(
                 err("url_invalid", "URL non valido o schema non consentito")
             is Action.ShowNotification -> {
                 validateRequiredText(action.title, 120, "title_invalid", err)
-                validateRequiredText(action.text, MAX_TEXT_LENGTH, "text_invalid", err)
+                // Il corpo può restare vuoto (notifica di solo titolo, come ammette il bridge):
+                // qui conta solo il bound.
+                if (action.text.length > MAX_TEXT_LENGTH)
+                    err("text_invalid", "Testo notifica oltre $MAX_TEXT_LENGTH caratteri")
             }
             is Action.Tap -> if (action.x !in 0..10_000 || action.y !in 0..10_000)
                 err("coordinates_invalid", "Coordinate tap fuori intervallo")
