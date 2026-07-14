@@ -4,10 +4,13 @@ import android.content.Context
 import android.os.Build
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import dev.argus.brain.AndroidBridgeConfigurationStore
 import dev.argus.engine.brain.ContactWhitelistStore
 import dev.argus.engine.brain.WhitelistedContact
 import dev.argus.engine.model.CapabilityIds
+import dev.argus.engine.model.GenerativeContract
 import dev.argus.engine.model.StateKeys
+import dev.argus.engine.runtime.ActionCapabilities
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.shizuku.ShizukuGateway
 import dev.argus.shizuku.ShizukuGatewayStatus
@@ -28,7 +31,12 @@ class AndroidCapabilityProbeInstrumentedTest {
         val gateway = ShizukuGateway(context)
         try {
             val contact = WhitelistedContact("Fixture", "fixture:conversation")
-            val probe = AndroidCapabilityProbe(context, gateway, StaticWhitelist(contact))
+            val probe = AndroidCapabilityProbe(
+                context,
+                gateway,
+                StaticWhitelist(contact),
+                realReadiness(context),
+            )
             val manifest = probe.probe(DeviceState())
             val policy = probe.current()
 
@@ -50,6 +58,48 @@ class AndroidCapabilityProbeInstrumentedTest {
             gateway.close()
         }
     }
+
+    /**
+     * Gate device P1-5: il package instrumentato non ha listener access né battery exemption.
+     * Le letture reali API 36 devono rispondere false senza lanciare — mai default permissivi —
+     * e la probe non deve pubblicare capability notification o generative. Nessun grant globale
+     * viene modificato da questo test.
+     */
+    @Test
+    fun listenerAndBatteryGateCapabilitiesFailClosedOnRealDevice() = runBlocking {
+        val context: Context = ApplicationProvider.getApplicationContext()
+        val gateway = ShizukuGateway(context)
+        try {
+            val state = SystemAndroidCapabilityStateSource(context, gateway).read()
+            assertFalse(state.notificationListenerGranted)
+            assertFalse(state.batteryOptimizationExempt)
+
+            val probe = AndroidCapabilityProbe(
+                context,
+                gateway,
+                StaticWhitelist(WhitelistedContact("Fixture", "fixture:conversation")),
+                realReadiness(context),
+            )
+            val policy = probe.current()
+            assertFalse(CapabilityIds.TRIGGER_NOTIFICATION in policy.availableCapabilities)
+            assertFalse(CapabilityIds.ACTION_INVOKE_LLM in policy.availableCapabilities)
+            assertFalse(ActionCapabilities.WHATSAPP_REPLY in policy.availableCapabilities)
+            assertFalse(GenerativeContract.TOOL_WHATSAPP_REPLY in policy.availableCapabilities)
+            assertEquals(
+                AndroidCapabilityProbe.REASON_NOTIFICATION_LISTENER,
+                probe.probe(DeviceState())
+                    .unavailableTools[GenerativeContract.TOOL_WHATSAPP_REPLY],
+            )
+        } finally {
+            gateway.close()
+        }
+    }
+
+    /** Store reali del package di test: bearer assente e privacy mai accettata → not ready. */
+    private fun realReadiness(context: Context) = AndroidGenerativeRuntimeReadiness(
+        AndroidBridgeConfigurationStore(context),
+        AndroidAppPreferencesStore(context),
+    )
 }
 
 private class StaticWhitelist(
