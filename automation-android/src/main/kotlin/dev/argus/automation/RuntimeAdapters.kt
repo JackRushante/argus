@@ -53,6 +53,19 @@ class EngineTimeEventDispatcher(
     }
 }
 
+fun interface NotificationEventDispatcher {
+    suspend fun dispatch(envelope: TriggerEnvelope)
+}
+
+class EngineNotificationEventDispatcher(
+    private val engine: Engine,
+    private val state: DeviceStateSnapshotProvider,
+) : NotificationEventDispatcher {
+    override suspend fun dispatch(envelope: TriggerEnvelope) {
+        engine.onTrigger(envelope) { state.current() }
+    }
+}
+
 /** In P0-B l'unico trigger registrabile è Time; ogni altro tipo resta fail-closed. */
 class TimeAlarmArmedAutomationRegistrar(
     private val coordinator: TimeAlarmCoordinator,

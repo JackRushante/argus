@@ -19,10 +19,12 @@ import dev.argus.automation.ConfiguredBridgeBrain
 import dev.argus.automation.CoordinatorTimeAlarmRuntime
 import dev.argus.automation.CurrentLocationProvider
 import dev.argus.automation.DeviceStateSnapshotProvider
+import dev.argus.automation.EngineNotificationEventDispatcher
 import dev.argus.automation.EngineTimeEventDispatcher
 import dev.argus.automation.FrameworkCurrentLocationProvider
 import dev.argus.automation.GenerativeLane
 import dev.argus.automation.LazyDeviceStateProvider
+import dev.argus.automation.NotificationEventDispatcher
 import dev.argus.automation.RoomTimeAlarmStateStore
 import dev.argus.automation.ShizukuActionExecutor
 import dev.argus.automation.TimeAlarmArmedAutomationRegistrar
@@ -32,6 +34,12 @@ import dev.argus.automation.TimeAlarmRuntime
 import dev.argus.automation.TimeAlarmStateStore
 import dev.argus.automation.TimeEventDispatcher
 import dev.argus.automation.UnavailableGenerativeLane
+import dev.argus.automation.notification.ActiveNotificationReplyRegistry
+import dev.argus.automation.notification.AndroidNotificationReplyGateway
+import dev.argus.automation.notification.AndroidNotificationSnapshotFactory
+import dev.argus.automation.notification.NotificationIngress
+import dev.argus.automation.notification.NotificationReplyGateway
+import dev.argus.automation.notification.NotificationReplyHandleFactory
 import dev.argus.brain.AndroidBridgeConfigurationStore
 import dev.argus.brain.BridgeConfigurationStore
 import dev.argus.data.ArgusDatabase
@@ -48,6 +56,7 @@ import dev.argus.device.StateReader
 import dev.argus.engine.brain.Brain
 import dev.argus.engine.brain.CapabilityProbe
 import dev.argus.engine.brain.ContactWhitelistStore
+import dev.argus.engine.notification.NotificationEventParser
 import dev.argus.engine.notification.ObservedConversationStore
 import dev.argus.engine.runtime.ActionExecutor
 import dev.argus.engine.runtime.AuditSink
@@ -144,6 +153,37 @@ object ArgusModule {
     fun observedConversationStoreBoundary(
         store: RoomObservedConversationStore,
     ): ObservedConversationStore = store
+
+    @Provides
+    @Singleton
+    fun notificationEventParser(): NotificationEventParser = NotificationEventParser()
+
+    @Provides
+    @Singleton
+    fun notificationSnapshotFactory(): AndroidNotificationSnapshotFactory =
+        AndroidNotificationSnapshotFactory()
+
+    @Provides
+    @Singleton
+    fun notificationReplyHandleFactory(): NotificationReplyHandleFactory =
+        NotificationReplyHandleFactory()
+
+    @Provides
+    @Singleton
+    fun notificationReplyRegistry(): ActiveNotificationReplyRegistry =
+        ActiveNotificationReplyRegistry()
+
+    @Provides
+    @Singleton
+    fun notificationReplyGateway(
+        @ApplicationContext context: Context,
+        registry: ActiveNotificationReplyRegistry,
+    ): AndroidNotificationReplyGateway = AndroidNotificationReplyGateway(context, registry)
+
+    @Provides
+    fun notificationReplyGatewayBoundary(
+        gateway: AndroidNotificationReplyGateway,
+    ): NotificationReplyGateway = gateway
 
     @Provides
     @Singleton
@@ -275,6 +315,36 @@ object ArgusModule {
     @Provides
     fun timeEventDispatcherBoundary(dispatcher: EngineTimeEventDispatcher): TimeEventDispatcher =
         dispatcher
+
+    @Provides
+    @Singleton
+    fun notificationEventDispatcher(
+        engine: Engine,
+        state: DeviceStateSnapshotProvider,
+    ): EngineNotificationEventDispatcher = EngineNotificationEventDispatcher(engine, state)
+
+    @Provides
+    fun notificationEventDispatcherBoundary(
+        dispatcher: EngineNotificationEventDispatcher,
+    ): NotificationEventDispatcher = dispatcher
+
+    @Provides
+    @Singleton
+    fun notificationIngress(
+        snapshots: AndroidNotificationSnapshotFactory,
+        parser: NotificationEventParser,
+        handles: NotificationReplyHandleFactory,
+        registry: ActiveNotificationReplyRegistry,
+        conversations: ObservedConversationStore,
+        dispatcher: NotificationEventDispatcher,
+    ): NotificationIngress = NotificationIngress(
+        snapshots,
+        parser,
+        handles,
+        registry,
+        conversations,
+        dispatcher,
+    )
 
     @Provides
     @Singleton

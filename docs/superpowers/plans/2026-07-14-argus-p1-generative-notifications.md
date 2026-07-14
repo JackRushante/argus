@@ -124,8 +124,9 @@ Gate: fixture 1:1/gruppo/senza metadata/spoof/update duplicato e zero PII nei di
 - Al connect reidrata solo gli handle delle notifiche attive, senza ridispatchare eventi vecchi.
 - Al post aggiorna il registry e invia l'envelope all'Engine su application scope; al remove elimina
   l'handle.
-- Gateway reply ricontrolla package, key attiva, conversationId, `isGroup=false`, RemoteInput
-  free-form e PendingIntent; `CanceledException` diventa `channel_expired`, mai successo fittizio.
+- Gateway reply ricontrolla package, key attiva, conversationId, `TriggerEventId` della versione
+  corrente, `isGroup=false`, RemoteInput free-form e PendingIntent; `CanceledException` diventa
+  `channel_expired`, mai successo fittizio. L'handle è one-shot e viene consumato atomicamente.
 
 Gate: Robolectric/parser + instrumented notification sintetica; il test reale WhatsApp richiede
 grant esplicito di Lorenzo e non stampa il messaggio.
