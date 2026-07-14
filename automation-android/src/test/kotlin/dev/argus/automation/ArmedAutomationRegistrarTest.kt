@@ -10,6 +10,7 @@ import dev.argus.engine.model.CapabilityIds
 import dev.argus.engine.model.ConnMedium
 import dev.argus.engine.model.ConnState
 import dev.argus.engine.model.CreatedBy
+import dev.argus.engine.model.PhoneEvent
 import dev.argus.engine.model.TimePrecision
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.AutomationStore
@@ -84,6 +85,45 @@ class ArmedAutomationRegistrarTest {
                 capabilities = setOf(CapabilityIds.TRIGGER_CONNECTIVITY),
             ).register(connectivity),
             "trigger senza registrar reale restano fail-closed",
+        )
+    }
+
+    @Test
+    fun `phone state rule registers only with its granular grant capability`() = runTest {
+        val sms = signed(
+            rule("sms").copy(
+                trigger = Trigger.PhoneState(PhoneEvent.SMS_RECEIVED),
+                actions = listOf(Action.ShowNotification("Argus", "sms")),
+            ),
+        )
+        assertTrue(
+            registrar(
+                store = SingleRuleStore(sms),
+                capabilities = setOf(CapabilityIds.TRIGGER_PHONE_SMS),
+            ).register(sms),
+        )
+        assertFalse(
+            registrar(
+                store = SingleRuleStore(sms),
+                capabilities = setOf(CapabilityIds.TRIGGER_PHONE_CALL),
+            ).register(sms),
+            "il grant chiamate non copre gli SMS: capability granulari",
+        )
+
+        val call = signed(
+            rule("call").copy(
+                trigger = Trigger.PhoneState(PhoneEvent.INCOMING_CALL),
+                actions = listOf(Action.ShowNotification("Argus", "chiamata")),
+            ),
+        )
+        assertTrue(
+            registrar(
+                store = SingleRuleStore(call),
+                capabilities = setOf(CapabilityIds.TRIGGER_PHONE_CALL),
+            ).register(call),
+        )
+        assertFalse(
+            registrar(store = SingleRuleStore(call), capabilities = emptySet()).register(call),
         )
     }
 

@@ -42,6 +42,8 @@ internal data class AndroidCapabilityState(
     val backgroundLocationGranted: Boolean,
     val exactAlarmsGranted: Boolean,
     val batteryOptimizationExempt: Boolean,
+    val receiveSmsGranted: Boolean = false,
+    val readPhoneStateGranted: Boolean = false,
 )
 
 internal fun interface AndroidCapabilityStateSource {
@@ -79,6 +81,8 @@ internal class SystemAndroidCapabilityStateSource(
             appContext.getSystemService(AlarmManager::class.java).canScheduleExactAlarms(),
         batteryOptimizationExempt = appContext.getSystemService(PowerManager::class.java)
             .isIgnoringBatteryOptimizations(appContext.packageName),
+        receiveSmsGranted = granted(Manifest.permission.RECEIVE_SMS),
+        readPhoneStateGranted = granted(Manifest.permission.READ_PHONE_STATE),
     )
 
     private fun granted(permission: String): Boolean =
@@ -122,7 +126,16 @@ class AndroidCapabilityProbe internal constructor(
             unavailableTools = resolved.unavailableTools,
             whitelistedContacts = resolved.contacts,
             stateKeys = StateKeys.ALL,
+            availableTriggers = availableTriggers(resolved.state),
         )
+    }
+
+    /** Wire name dei trigger armabili ORA: Hermes non deve mai proporre un trigger morto. */
+    private fun availableTriggers(state: AndroidCapabilityState): List<String> = buildList {
+        add("time")
+        if (state.notificationListenerGranted) add("notification")
+        if (state.receiveSmsGranted) add("phone_state.sms")
+        if (state.readPhoneStateGranted) add("phone_state.call")
     }
 
     override suspend fun current(): FirePolicySnapshot {
@@ -163,6 +176,9 @@ class AndroidCapabilityProbe internal constructor(
                 // stesso canale del tool raw, quindi stesso grant.
                 add(ActionCapabilities.WHATSAPP_REPLY)
             }
+            // Telefonia (P2-2): grant runtime distinti per evento.
+            if (state.receiveSmsGranted) add(CapabilityIds.TRIGGER_PHONE_SMS)
+            if (state.readPhoneStateGranted) add(CapabilityIds.TRIGGER_PHONE_CALL)
             if (generativeReady) add(CapabilityIds.ACTION_INVOKE_LLM)
         }
         val transient = if (shizukuTransient) SHIZUKU_CAPABILITIES + SHIZUKU_TOOLS else emptySet()
@@ -216,6 +232,8 @@ class AndroidCapabilityProbe internal constructor(
         if (state.backgroundLocationGranted) add("location_background")
         if (state.exactAlarmsGranted) add("exact_alarms")
         if (state.batteryOptimizationExempt) add("battery_optimization_exempt")
+        if (state.receiveSmsGranted) add("receive_sms")
+        if (state.readPhoneStateGranted) add("read_phone_state")
     }
 
     private fun shizukuReason(status: ShizukuGatewayStatus): String = when (status) {

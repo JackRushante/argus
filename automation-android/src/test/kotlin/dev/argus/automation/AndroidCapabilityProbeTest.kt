@@ -209,6 +209,39 @@ class AndroidCapabilityProbeTest {
     }
 
     @Test
+    fun `telephony triggers follow their distinct runtime grants`() = runTest {
+        val both = probe(
+            state().copy(receiveSmsGranted = true, readPhoneStateGranted = true),
+        ).current()
+        assertTrue(CapabilityIds.TRIGGER_PHONE_SMS in both.availableCapabilities)
+        assertTrue(CapabilityIds.TRIGGER_PHONE_CALL in both.availableCapabilities)
+
+        val smsOnly = probe(state().copy(receiveSmsGranted = true)).current()
+        assertTrue(CapabilityIds.TRIGGER_PHONE_SMS in smsOnly.availableCapabilities)
+        assertFalse(CapabilityIds.TRIGGER_PHONE_CALL in smsOnly.availableCapabilities)
+
+        val none = probe(state()).current()
+        assertFalse(CapabilityIds.TRIGGER_PHONE_SMS in none.availableCapabilities)
+        assertFalse(CapabilityIds.TRIGGER_PHONE_CALL in none.availableCapabilities)
+    }
+
+    @Test
+    fun `manifest lists armable triggers so hermes never proposes a dead one`() = runTest {
+        val manifest = probe(
+            state().copy(notificationListenerGranted = true, receiveSmsGranted = true),
+        ).probe(DeviceState())
+
+        assertEquals(
+            listOf("time", "notification", "phone_state.sms"),
+            manifest.availableTriggers,
+        )
+        assertTrue("TRIGGER DISPONIBILI" in manifest.render())
+
+        // Retrocompatibilità: senza lista la riga non compare (manifest legacy nei test brain).
+        assertFalse("TRIGGER DISPONIBILI" in manifest.copy(availableTriggers = emptyList()).render())
+    }
+
+    @Test
     fun `shizuku raw tools stay aligned between manifest and policy snapshot`() = runTest {
         val authorized = probe(state()).current()
         AndroidCapabilityProbe.SHIZUKU_TOOLS.forEach { tool ->

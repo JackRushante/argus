@@ -15,6 +15,7 @@ import dev.argus.device.StateReader
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.CapabilityIds
+import dev.argus.engine.model.CapabilityRequirements
 import dev.argus.engine.model.StateKeys
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.AutomationStore
@@ -91,6 +92,9 @@ class AndroidArmedAutomationRegistrar(
     override suspend fun register(automation: Automation): Boolean = when (automation.trigger) {
         is Trigger.Time -> registerTime(automation)
         is Trigger.Notification -> registerNotification(automation)
+        // I receiver manifest sono sempre attivi: la registrazione OS è il grant runtime
+        // stesso, verificato qui con la capability granulare dell'evento (sms vs call).
+        is Trigger.PhoneState -> registerBroadcastBacked(automation)
         else -> false
     }
 
@@ -109,6 +113,18 @@ class AndroidArmedAutomationRegistrar(
         val snapshot = snapshots.current()
         val persisted = store.get(automation.id)
         CapabilityIds.TRIGGER_NOTIFICATION in snapshot.availableCapabilities &&
+            persisted?.status == AutomationStatus.ARMED && persisted.enabled
+    } catch (error: CancellationException) {
+        throw error
+    } catch (_: Exception) {
+        false
+    }
+
+    private suspend fun registerBroadcastBacked(automation: Automation): Boolean = try {
+        val snapshot = snapshots.current()
+        val persisted = store.get(automation.id)
+        val required = CapabilityRequirements.derive(automation.trigger, emptyList())
+        required.all { it in snapshot.availableCapabilities } &&
             persisted?.status == AutomationStatus.ARMED && persisted.enabled
     } catch (error: CancellationException) {
         throw error
