@@ -95,6 +95,21 @@ class NotificationEventParserTest {
         assertEquals("Moglie", parsed.observedConversation?.displayName)
     }
 
+    @Test
+    fun `system notification keys with embedded newlines stay usable`() {
+        // Caratterizzazione WhatsApp reale (P1-7): il tag è Base64 con newline finale, quindi
+        // la key di sistema contiene un carattere di controllo. È un identificatore opaco del
+        // sistema: va accettato e conservato INTATTO per il matching di registry e gateway.
+        val whatsappKey = "0|com.whatsapp|1|50V0XCj31HQ4wDorL8SwIw3yYoKJHj2Q6L42gBAmoIw=\n|10390"
+        val parsed = assertNotNull(parser.parse(snapshot(notificationKey = whatsappKey)))
+        val event = parsed.envelope.event as TriggerEvent.NotificationPosted
+
+        assertEquals(whatsappKey, event.notificationKey)
+        assertNotNull(event.conversationId)
+        assertNotNull(parsed.observedConversation)
+        assertFalse(parsed.envelope.id.value.contains("50V0XCj31HQ4"), "la key resta fuori dall'event ID")
+    }
+
     private fun snapshot(
         packageName: String = "com.whatsapp",
         notificationKey: String = "sbn:private",

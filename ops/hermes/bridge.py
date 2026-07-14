@@ -313,6 +313,12 @@ REGOLE VINCOLANTI:
    {SENTINEL} {{"draft":<oggetto-o-null>,"error_code":<string-o-null>}}
 8. Se draft non e' null, error_code deve essere null. Se draft e' null usa
    "clarification_required" oppure un codice snake_case breve.
+9. Reply WhatsApp (whatsapp_reply oppure invoke_llm con replyTargetSender): il trigger deve
+   essere notification con pkg WhatsApp, conversationId preso dalla whitelist e isGroup=false
+   ESPLICITO (mai null: le reply valgono solo su chat 1:1 verificate). Per una risposta
+   GENERATA usa invoke_llm con contextSources ["notification"] (aggiungi "state" solo se serve
+   lo stato del device), allowedTools esattamente ["whatsapp_reply"] e replyTargetSender=true;
+   usa whatsapp_reply statica solo se l'utente detta il testo esatto della risposta.
 
 Ora locale Europe/Rome: {now}
 

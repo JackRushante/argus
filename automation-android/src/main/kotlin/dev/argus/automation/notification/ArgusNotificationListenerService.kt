@@ -2,6 +2,7 @@ package dev.argus.automation.notification
 
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import android.util.Log
 import dagger.hilt.android.AndroidEntryPoint
 import dev.argus.automation.NotificationEventDispatcher
 import dev.argus.automation.di.ApplicationScope
@@ -26,12 +27,15 @@ class NotificationIngress(
     private val privacyAccepted: () -> Boolean,
 ) {
     fun registerPosted(notification: StatusBarNotification): ParsedNotification? {
+        // Diagnostica privacy-safe: solo package ed esiti booleani, mai testo/identità.
         if (!privacyAccepted()) {
+            Log.d(TAG, "posted scartata (privacy off): pkg=${notification.packageName}")
             registry.remove(notification.key)
             return null
         }
         val parsed = parse(notification)
         if (parsed == null) {
+            Log.d(TAG, "posted non parsabile: pkg=${notification.packageName}")
             registry.remove(notification.key)
             return null
         }
@@ -41,6 +45,11 @@ class NotificationIngress(
         } else {
             registry.replace(handle)
         }
+        Log.d(
+            TAG,
+            "posted accettata: pkg=${notification.packageName} " +
+                "conv=${parsed.observedConversation != null} handle=${handle != null}",
+        )
         return parsed
     }
 
@@ -70,13 +79,19 @@ class NotificationIngress(
             ?.let { conversation ->
                 try {
                     observedConversations.record(conversation)
+                    Log.d(TAG, "conversazione osservata registrata: pkg=${conversation.packageName}")
                 } catch (error: CancellationException) {
                     throw error
-                } catch (_: Exception) {
+                } catch (error: Exception) {
                     // Il picker è best-effort: un errore locale non deve perdere il trigger.
+                    Log.w(TAG, "record osservata fallita: ${error::class.java.simpleName}")
                 }
             }
         dispatcher.dispatch(parsed.envelope)
+    }
+
+    private companion object {
+        const val TAG = "ArgusIngress"
     }
 
     private fun parse(notification: StatusBarNotification): ParsedNotification? = try {

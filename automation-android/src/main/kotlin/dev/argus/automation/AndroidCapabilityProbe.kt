@@ -177,6 +177,9 @@ class AndroidCapabilityProbe internal constructor(
                 add(TOOL_NOTIFY_SHOW)
             }
             if (listenerGranted) add(GenerativeContract.TOOL_WHATSAPP_REPLY)
+            // Il compilatore usa SOLO manifest.available_tools: invoke_llm deve comparire qui,
+            // altrimenti Hermes ripiega su una reply statica anche quando il runtime è pronto.
+            if (generativeReady) add(ActionTypeIds.INVOKE_LLM)
         }.sorted()
         val unavailableTools = linkedMapOf<String, String>()
         if (!shizukuAvailable) {
@@ -190,6 +193,9 @@ class AndroidCapabilityProbe internal constructor(
         }
         if (!listenerGranted) {
             unavailableTools[GenerativeContract.TOOL_WHATSAPP_REPLY] = REASON_NOTIFICATION_LISTENER
+        }
+        if (!generativeReady) {
+            unavailableTools[ActionTypeIds.INVOKE_LLM] = REASON_GENERATIVE_RUNTIME
         }
         PHASE_UNAVAILABLE_TOOLS.forEach { (tool, reason) -> unavailableTools[tool] = reason }
 
@@ -222,6 +228,8 @@ class AndroidCapabilityProbe internal constructor(
 
     internal companion object {
         const val REASON_NOTIFICATION_LISTENER = "accesso alle notifiche non concesso"
+        const val REASON_GENERATIVE_RUNTIME =
+            "runtime generativo non pronto (bearer, privacy o esenzione batteria mancanti)"
         const val TOOL_STATE_READ = "state.read"
         const val TOOL_SCREEN_CAPTURE = "screen.capture"
         const val TOOL_SCREEN_DUMP_UI = "screen.dump_ui"

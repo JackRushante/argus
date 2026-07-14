@@ -176,6 +176,38 @@ class NotificationReplyGatewayTest {
     }
 
     @Test
+    fun `real whatsapp keys with trailing newline in the tag flow end to end`() {
+        // Il tag WhatsApp è Base64.DEFAULT con newline finale: la key di sistema lo contiene.
+        val whatsappKey = "0|com.whatsapp|1|50V0XCj31HQ4wDorL8SwIw3yYoKJHj2Q6L42gBAmoIw=\n|10390"
+        val registry = ActiveNotificationReplyRegistry()
+        registry.replace(
+            NotificationReplyHandle(
+                packageName = "com.whatsapp",
+                notificationKey = whatsappKey,
+                conversationId = CONVERSATION_ID,
+                eventId = EVENT_ID,
+                isGroup = false,
+                remoteInput = remoteInput(),
+                pendingIntent = pendingIntent(requestCode = 7),
+            ),
+        )
+        val gateway = AndroidNotificationReplyGateway(context, registry)
+
+        assertIs<NotificationReplyDelivery.Sent>(
+            gateway.send(
+                NotificationReplyRequest(
+                    packageName = "com.whatsapp",
+                    notificationKey = whatsappKey,
+                    conversationId = CONVERSATION_ID,
+                    eventId = EVENT_ID,
+                    text = "risposta sicura",
+                ),
+            ),
+        )
+        assertEquals(0, registry.size())
+    }
+
+    @Test
     fun `privacy gate blocks handles observed rows and dispatch`() = runTest {
         val registry = ActiveNotificationReplyRegistry()
         val conversations = FakeObservedConversationStore()

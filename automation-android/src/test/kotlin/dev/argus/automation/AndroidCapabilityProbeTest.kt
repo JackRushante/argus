@@ -168,7 +168,30 @@ class AndroidCapabilityProbeTest {
         assertTrue(GenerativeContract.TOOL_WHATSAPP_REPLY in snapshot.availableCapabilities)
         // La reply statica ha un executor reale via NotificationReplyGateway: segue il listener.
         assertTrue(ActionCapabilities.WHATSAPP_REPLY in snapshot.availableCapabilities)
-        assertTrue(GenerativeContract.TOOL_WHATSAPP_REPLY in probe.probe(DeviceState()).availableTools)
+
+        // Il compilatore Hermes usa SOLO manifest.available_tools: senza invoke_llm lì il
+        // modello ripiega su una reply statica (bug osservato live nella P1-7 reale).
+        val manifest = probe.probe(DeviceState())
+        assertTrue(GenerativeContract.TOOL_WHATSAPP_REPLY in manifest.availableTools)
+        assertTrue(ActionTypeIds.INVOKE_LLM in manifest.availableTools)
+        assertFalse(ActionTypeIds.INVOKE_LLM in manifest.unavailableTools)
+    }
+
+    @Test
+    fun `generative runtime not ready keeps invoke_llm out of the manifest with a reason`() = runTest {
+        val manifest = probe(
+            state().copy(
+                notificationsGranted = true,
+                notificationListenerGranted = true,
+                batteryOptimizationExempt = false,
+            ),
+        ).probe(DeviceState())
+
+        assertFalse(ActionTypeIds.INVOKE_LLM in manifest.availableTools)
+        assertEquals(
+            AndroidCapabilityProbe.REASON_GENERATIVE_RUNTIME,
+            manifest.unavailableTools[ActionTypeIds.INVOKE_LLM],
+        )
     }
 
     @Test

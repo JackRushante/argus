@@ -144,9 +144,10 @@ class AndroidNotificationReplyGateway(
     }
 
     private fun validMetadata(request: NotificationReplyRequest): Boolean =
+        // La notification key è opaca e può contenere control chars (tag WhatsApp = Base64 con
+        // newline finale); il conversationId invece è un nostro hash namespaced e resta severo.
         request.notificationKey.isNotBlank() &&
             request.notificationKey.length <= MAX_NOTIFICATION_KEY_CHARS &&
-            request.notificationKey.none(Char::isISOControl) &&
             request.conversationId.isNotBlank() &&
             request.conversationId.length <= MAX_CONVERSATION_ID_CHARS &&
             request.conversationId.none(Char::isISOControl)

@@ -79,8 +79,12 @@ class NotificationEventParser(
         if (!PACKAGE_NAME.matches(packageName) || packageName in deniedPackages || snapshot.isGroupSummary) {
             return null
         }
+        // La key è un identificatore opaco DI SISTEMA e può contenere caratteri di controllo:
+        // il tag WhatsApp reale è Base64 con newline finale (caratterizzazione P1-7). Va
+        // conservata intatta per il matching di registry/gateway; nell'event ID entra solo
+        // come digest e non tocca mai log o persistenza in chiaro.
         val notificationKey = snapshot.notificationKey.takeIf {
-            it.isNotBlank() && it.length <= MAX_NOTIFICATION_KEY_CHARS && it.none(Char::isISOControl)
+            it.isNotBlank() && it.length <= MAX_NOTIFICATION_KEY_CHARS
         } ?: return null
         val text = snapshot.messageText.safeText(MAX_TEXT_CHARS)
             ?: snapshot.fallbackText.safeText(MAX_TEXT_CHARS)
