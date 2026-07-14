@@ -236,21 +236,24 @@ class OnboardingViewModel @Inject constructor(
             StepKind.WELCOME_PRIVACY to sources.preferences.privacyAccepted,
             StepKind.BRAIN_CONFIG to configured,
             StepKind.SHIZUKU to (sources.shizuku == ShizukuGatewayStatus.AUTHORIZED),
-            StepKind.NOTIFICATION_ACCESS to health.notificationsGranted,
+            // Lo step notifiche è "fatto" solo con pubblicazione E lettura: le CTA arrivano in
+            // quest'ordine e restano skippabili (le regole WhatsApp resteranno non armabili).
+            StepKind.NOTIFICATION_ACCESS to
+                (health.notificationsGranted && health.notificationListenerGranted),
             StepKind.BATTERY_OEM to health.batteryExempt,
             StepKind.BACKGROUND_LOCATION to
                 (!sources.geofenceNeeded || health.backgroundLocationGranted),
         )
         val index = requestedIndex.coerceIn(0, STEP_ORDER.lastIndex)
         val steps = STEP_ORDER.mapIndexed { stepIndex, kind ->
-            step(kind, uiShizuku, sources.geofenceNeeded).copy(
+            step(kind, uiShizuku, sources.geofenceNeeded, health).copy(
                 status = when {
                     done.getValue(kind) -> StepStatus.DONE
                     kind.name in skipped -> StepStatus.SKIPPED
                     stepIndex == index -> StepStatus.IN_PROGRESS
                     else -> StepStatus.TODO
                 },
-                ctaLabel = step(kind, uiShizuku, sources.geofenceNeeded).ctaLabel
+                ctaLabel = step(kind, uiShizuku, sources.geofenceNeeded, health).ctaLabel
                     .takeUnless { done.getValue(kind) },
             )
         }
@@ -267,6 +270,7 @@ class OnboardingViewModel @Inject constructor(
         kind: StepKind,
         shizukuStatus: ShizukuStatus,
         geofenceNeeded: Boolean,
+        health: AndroidUiHealth,
     ): OnboardingStepState {
         val (shizukuBody, shizukuCta) = shizukuOnboardingCopy(shizukuStatus)
         return when (kind) {
@@ -297,9 +301,15 @@ class OnboardingViewModel @Inject constructor(
             StepKind.NOTIFICATION_ACCESS -> OnboardingStepState(
                 kind,
                 StepStatus.TODO,
-                "Notifiche Argus",
-                "Consenti ad Argus di mostrare esiti e avvisi. La lettura delle notifiche arriverà con il trigger P1.",
-                "Concedi",
+                "Notifiche",
+                if (!health.notificationsGranted) {
+                    "Prima consenti ad Argus di mostrare esiti e avvisi. Poi servirà l'accesso " +
+                        "alle notifiche per leggere i messaggi WhatsApp e rispondere."
+                } else {
+                    "Esiti e avvisi sono attivi. Ora concedi l'accesso alle notifiche: serve a " +
+                        "leggere i messaggi WhatsApp in arrivo e a rispondere dalle regole approvate."
+                },
+                if (!health.notificationsGranted) "Concedi" else "Consenti lettura notifiche",
                 null,
             )
             StepKind.BATTERY_OEM -> OnboardingStepState(

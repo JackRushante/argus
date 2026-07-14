@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dev.argus.automation.AndroidCapabilityProbe
+import dev.argus.automation.AppPreferences
 import dev.argus.automation.AppPreferencesStore
 import dev.argus.automation.BridgeHealthResult
 import dev.argus.automation.ConfiguredBridgeBrain
@@ -14,10 +15,15 @@ import dev.argus.automation.PrivacyRevocationResult
 import dev.argus.brain.BridgeConfigurationStore
 import dev.argus.engine.brain.ContactWhitelistStore
 import dev.argus.engine.brain.WhitelistedContact
+import dev.argus.engine.model.Automation
 import dev.argus.engine.model.CapabilityRequirements
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.notification.ObservedConversation
+import dev.argus.engine.notification.ObservedConversationStore
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.safety.DraftRepository
+import dev.argus.engine.safety.DraftValidator
+import dev.argus.engine.safety.PendingDraft
 import dev.argus.shizuku.ShizukuGateway
 import dev.argus.shizuku.ShizukuGatewayStatus
 import dev.argus.shizuku.ShizukuPermissionResult
@@ -48,7 +54,27 @@ private data class SettingsSources(
     val geofenceNeeded: Boolean,
     val shizukuNeeded: Boolean,
     val shizukuStatus: ShizukuGatewayStatus,
+    val observedCandidates: List<ContactRow>,
 )
+
+/**
+ * Candidate del picker whitelist: solo conversazioni WhatsApp confermate 1:1, non ancora in
+ * whitelist, più recenti prima. L'inserimento manuale dell'hash resta diagnostica avanzata.
+ */
+internal fun observedWhitelistCandidates(
+    observed: List<ObservedConversation>,
+    whitelisted: List<WhitelistedContact>,
+    limit: Int = 20,
+): List<ContactRow> {
+    val taken = whitelisted.mapTo(hashSetOf()) { it.id }
+    return observed.asSequence()
+        .filter { it.packageName in DraftValidator.WHATSAPP_PACKAGES }
+        .filter { it.isGroup == false }
+        .filterNot { it.id in taken }
+        .take(limit)
+        .map { ContactRow(displayName = it.displayName, conversationId = it.id) }
+        .toList()
+}
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
@@ -58,6 +84,7 @@ class SettingsViewModel @Inject constructor(
     private val whitelist: ContactWhitelistStore,
     private val preferences: AppPreferencesStore,
     private val privacyRevocation: PrivacyRevocationCoordinator,
+    observedConversations: ObservedConversationStore,
     automations: AutomationStore,
     drafts: DraftRepository,
     private val shizuku: ShizukuGateway,
@@ -76,7 +103,21 @@ class SettingsViewModel @Inject constructor(
         automations.observeAll(),
         drafts.observeAll(),
         shizuku.observeStatus(),
-    ) { contacts, appPreferences, rules, pending, shizukuStatus ->
+        observedConversations.observeRecent(),
+    ) { values ->
+        @Suppress("UNCHECKED_CAST")
+        val contacts = values[0] as List<WhitelistedContact>
+        val appPreferences = values[1] as AppPreferences
+
+        @Suppress("UNCHECKED_CAST")
+        val rules = values[2] as List<Automation>
+
+        @Suppress("UNCHECKED_CAST")
+        val pending = values[3] as List<PendingDraft>
+        val shizukuStatus = values[4] as ShizukuGatewayStatus
+
+        @Suppress("UNCHECKED_CAST")
+        val observed = values[5] as List<ObservedConversation>
         val geofenceNeeded = rules.any { it.trigger is Trigger.Geofence } ||
             pending.any { it.draft.trigger is Trigger.Geofence }
         val shizukuNeeded = rules.any { rule ->
@@ -94,6 +135,7 @@ class SettingsViewModel @Inject constructor(
             geofenceNeeded = geofenceNeeded,
             shizukuNeeded = shizukuNeeded,
             shizukuStatus = shizukuStatus,
+            observedCandidates = observedWhitelistCandidates(observed, contacts),
         )
     }
 
@@ -116,12 +158,14 @@ class SettingsViewModel @Inject constructor(
                     values.shizukuStatus == ShizukuGatewayStatus.INSTALLED_NOT_RUNNING,
             ),
             batteryExempt = health.batteryExempt,
-            notificationAccess = health.notificationsGranted,
+            notificationsGranted = health.notificationsGranted,
+            notificationListenerGranted = health.notificationListenerGranted,
             backgroundLocation = health.backgroundLocationState(values.geofenceNeeded),
             whitelist = values.contacts.map { ContactRow(it.displayName, it.id) },
+            observedCandidates = values.observedCandidates,
             budget = BudgetUi(
                 maxCallsPerHour = 0,
-                usedThisHourLabel = "non disponibile in P0-B",
+                usedThisHourLabel = "cooldown 60 s per regola · budget globale in P3",
             ),
             privacyAccepted = values.privacyAccepted,
             appVersionLabel = appVersionLabel(),
@@ -227,7 +271,10 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun onBudgetChange(maxPerHour: Int) {
-        mutableMessages.tryEmit("Il budget per la lane generativa sarà disponibile da P1.")
+        mutableMessages.tryEmit(
+            "Il budget globale arriverà in una fase successiva (P3); " +
+                "in P1 ogni regola generativa ha un cooldown minimo di 60 secondi.",
+        )
     }
 
     fun revokePrivacy() {
@@ -290,10 +337,11 @@ class SettingsViewModel @Inject constructor(
             ),
             shizuku = shizuku.status().toUiStatus(false),
             batteryExempt = health.batteryExempt,
-            notificationAccess = health.notificationsGranted,
+            notificationsGranted = health.notificationsGranted,
+            notificationListenerGranted = health.notificationListenerGranted,
             backgroundLocation = health.backgroundLocationState(false),
             whitelist = emptyList(),
-            budget = BudgetUi(0, "non disponibile in P0-B"),
+            budget = BudgetUi(0, "cooldown 60 s per regola · budget globale in P3"),
             privacyAccepted = false,
             appVersionLabel = appVersionLabel(),
         )

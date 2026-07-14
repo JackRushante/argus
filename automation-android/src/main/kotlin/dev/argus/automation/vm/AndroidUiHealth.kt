@@ -13,7 +13,7 @@ import dev.argus.ui.model.ShizukuStatus
 
 internal data class AndroidUiHealth(
     val batteryExempt: Boolean,
-    val notificationAccess: Boolean,
+    val notificationListenerGranted: Boolean,
     val notificationsGranted: Boolean,
     val foregroundLocationGranted: Boolean,
     val backgroundLocationGranted: Boolean,
@@ -29,7 +29,7 @@ internal fun readAndroidUiHealth(context: Context): AndroidUiHealth {
             app.getSystemService(PowerManager::class.java)
                 .isIgnoringBatteryOptimizations(app.packageName)
         }.getOrDefault(false),
-        notificationAccess = runCatching {
+        notificationListenerGranted = runCatching {
             app.packageName in NotificationManagerCompat.getEnabledListenerPackages(app)
         }.getOrDefault(false),
         notificationsGranted = (

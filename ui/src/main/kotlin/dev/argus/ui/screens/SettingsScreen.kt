@@ -209,9 +209,19 @@ private fun HealthSection(state: SettingsState, callbacks: SettingsCallbacks) {
             )
             HealthRow(
                 Icons.Rounded.Notifications, "Notifiche Argus",
-                if (state.notificationAccess) "consentite" else "non consentite — esiti e avvisi non saranno visibili",
-                if (state.notificationAccess) HealthLevel.OK else HealthLevel.WARN,
+                if (state.notificationsGranted) "consentite" else "non consentite — esiti e avvisi non saranno visibili",
+                if (state.notificationsGranted) HealthLevel.OK else HealthLevel.WARN,
                 onFix = callbacks::onOpenNotificationAccessFix,
+            )
+            HealthRow(
+                Icons.Rounded.Notifications, "Lettura notifiche",
+                if (state.notificationListenerGranted) {
+                    "attiva — trigger WhatsApp e risposte disponibili"
+                } else {
+                    "non attiva — trigger WhatsApp e risposte non armabili"
+                },
+                if (state.notificationListenerGranted) HealthLevel.OK else HealthLevel.WARN,
+                onFix = callbacks::onOpenNotificationListenerFix,
             )
             HealthRow(
                 Icons.Rounded.MyLocation, "Posizione in background", locSub, locLevel,
@@ -577,7 +587,8 @@ private val previewAllGreen = SettingsState(
     transport = TransportUi.CliBridge(url = "https://hermes.tail04462d.ts.net", reachable = true, lastLatencyLabel = "14 s · normale per Hermes"),
     shizuku = ShizukuStatus.AUTHORIZED,
     batteryExempt = true,
-    notificationAccess = true,
+    notificationsGranted = true,
+    notificationListenerGranted = true,
     backgroundLocation = BgLocationState.GRANTED,
     whitelist = previewContacts,
     budget = BudgetUi(maxCallsPerHour = 20, usedThisHourLabel = "3 / 20 quest'ora"),
@@ -589,7 +600,8 @@ private val previewDegraded = SettingsState(
     transport = TransportUi.CliBridge(url = "https://hermes.tail04462d.ts.net", reachable = false, lastLatencyLabel = null),
     shizuku = ShizukuStatus.DEGRADED_AFTER_REBOOT,
     batteryExempt = false,
-    notificationAccess = true,
+    notificationsGranted = true,
+    notificationListenerGranted = true,
     backgroundLocation = BgLocationState.DENIED,
     whitelist = emptyList(),
     budget = BudgetUi(maxCallsPerHour = 20, usedThisHourLabel = "17 / 20 quest'ora"),

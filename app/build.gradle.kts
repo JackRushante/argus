@@ -62,4 +62,9 @@ dependencies {
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.kotlinx.serialization.json)
+
+    testImplementation(kotlin("test-junit5"))
+    testImplementation("org.junit.jupiter:junit-jupiter:5.11.3")
 }
+
+tasks.withType<Test>().configureEach { useJUnitPlatform() }

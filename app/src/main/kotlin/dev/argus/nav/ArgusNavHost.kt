@@ -5,10 +5,12 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +18,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.ChatBubble
@@ -53,6 +57,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationManagerCompat
@@ -80,6 +85,7 @@ import dev.argus.automation.vm.SettingsViewModel
 import dev.argus.ui.model.AutomationDetailCallbacks
 import dev.argus.ui.model.AutomationListCallbacks
 import dev.argus.ui.model.ChatCallbacks
+import dev.argus.ui.model.ContactRow
 import dev.argus.ui.model.ExecutionLogCallbacks
 import dev.argus.ui.model.OnboardingCallbacks
 import dev.argus.ui.model.SettingsCallbacks
@@ -138,6 +144,7 @@ fun ArgusNavHost() {
     val settingsState by settingsViewModel.state.collectAsStateWithLifecycle()
 
     var showContactEditor by rememberSaveable { mutableStateOf(false) }
+    var showContactPicker by rememberSaveable { mutableStateOf(false) }
     val backStackEntry by navController.currentBackStackEntryAsState()
     val destinationRoute = backStackEntry?.destination?.route
     val currentBaseRoute = destinationRoute?.substringBefore('?')?.substringBefore('/')
@@ -200,10 +207,24 @@ fun ArgusNavHost() {
         }
     }
     val openBatterySettings = {
-        // L'esenzione diretta appartiene a P1 ed è policy-sensitive sul Play Store.
-        // In P0-B apriamo soltanto la pagina di sistema, lasciando la scelta esplicita all'utente.
-        openIntent(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+        // Richiesta package-specific consentita solo da gesto utente (app personale sideloaded);
+        // se il dialogo diretto non è disponibile si ripiega sulla lista di sistema.
+        val exempt = runCatching {
+            context.getSystemService(PowerManager::class.java)
+                .isIgnoringBatteryOptimizations(context.packageName)
+        }.getOrDefault(false)
+        val direct = Intent(
+            Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+            Uri.parse("package:${context.packageName}"),
+        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val opened = !exempt && runCatching { context.startActivity(direct) }.isSuccess
+        if (!opened) {
+            openIntent(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+        }
         Unit
+    }
+    val openNotificationListenerSettings = {
+        openIntent(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
     }
     val openLocationSettings = {
         openIntent(
@@ -366,12 +387,22 @@ fun ArgusNavHost() {
                             openBatterySettings()
                         }
                         override fun onOpenNotificationAccessFix() = requestNotificationAccess()
+                        override fun onOpenNotificationListenerFix() {
+                            openNotificationListenerSettings()
+                        }
                         override fun onOpenLocationFix() = requestLocationAccess()
                         override fun onRemoveContact(conversationId: String) {
                             settingsViewModel.removeContact(conversationId)
                         }
                         override fun onAddContact() {
-                            showContactEditor = true
+                            showContactPicker = true
+                        }
+                        override fun onAddObservedContact(contact: ContactRow) {
+                            settingsViewModel.addContact(
+                                contact.displayName,
+                                contact.conversationId,
+                            )
+                            showContactPicker = false
                         }
                         override fun onBudgetChange(maxPerHour: Int) {
                             settingsViewModel.onBudgetChange(maxPerHour)
@@ -480,7 +511,22 @@ fun ArgusNavHost() {
                                         else -> openShizukuManager()
                                     }
                                 }
-                                StepKind.NOTIFICATION_ACCESS -> requestNotificationAccess()
+                                StepKind.NOTIFICATION_ACCESS -> {
+                                    // Ordine delle CTA: prima il permesso di pubblicazione,
+                                    // poi l'accesso listener per lettura/reply WhatsApp.
+                                    val canPost = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                                        ContextCompat.checkSelfPermission(
+                                            context,
+                                            Manifest.permission.POST_NOTIFICATIONS,
+                                        ) == PackageManager.PERMISSION_GRANTED
+                                    if (!canPost ||
+                                        !NotificationManagerCompat.from(context).areNotificationsEnabled()
+                                    ) {
+                                        requestNotificationAccess()
+                                    } else {
+                                        openNotificationListenerSettings()
+                                    }
+                                }
                                 StepKind.BATTERY_OEM -> openBatterySettings()
                                 StepKind.BACKGROUND_LOCATION -> requestLocationAccess()
                             }
@@ -499,6 +545,20 @@ fun ArgusNavHost() {
         }
     }
 
+    if (showContactPicker) {
+        ContactPickerDialog(
+            candidates = settingsState.observedCandidates,
+            onDismiss = { showContactPicker = false },
+            onPick = { contact ->
+                settingsViewModel.addContact(contact.displayName, contact.conversationId)
+                showContactPicker = false
+            },
+            onManualEntry = {
+                showContactPicker = false
+                showContactEditor = true
+            },
+        )
+    }
     if (showContactEditor) {
         ContactEditorDialog(
             onDismiss = { showContactEditor = false },
@@ -509,6 +569,70 @@ fun ArgusNavHost() {
         )
     }
 }
+
+/**
+ * Picker whitelist (P1): propone le conversazioni WhatsApp 1:1 osservate dal listener.
+ * I gruppi non compaiono mai; l'inserimento manuale dell'hash resta diagnostica avanzata.
+ */
+@Composable
+private fun ContactPickerDialog(
+    candidates: List<ContactRow>,
+    onDismiss: () -> Unit,
+    onPick: (ContactRow) -> Unit,
+    onManualEntry: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Aggiungi alla whitelist") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (candidates.isEmpty()) {
+                    Text(
+                        "Nessuna conversazione 1:1 osservata finora. Ricevi un messaggio " +
+                            "WhatsApp dal contatto (con lettura notifiche attiva) e riprova, " +
+                            "oppure usa l'inserimento manuale.",
+                    )
+                } else {
+                    Text("Conversazioni 1:1 osservate di recente:")
+                    Column(
+                        modifier = Modifier
+                            .heightIn(max = 320.dp)
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        candidates.forEach { contact ->
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onPick(contact) }
+                                    .padding(vertical = 10.dp, horizontal = 4.dp),
+                            ) {
+                                Text(
+                                    contact.displayName,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                )
+                                Text(
+                                    maskConversationId(contact.conversationId),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onManualEntry) { Text("Inserimento manuale") }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Chiudi") }
+        },
+    )
+}
+
+private fun maskConversationId(value: String): String =
+    if (value.length <= 18) value else "${value.take(14)}…${value.takeLast(4)}"
 
 @Composable
 private fun MessageEffect(messages: Flow<String>, host: SnackbarHostState) {

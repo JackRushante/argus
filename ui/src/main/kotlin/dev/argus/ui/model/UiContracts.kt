@@ -177,9 +177,14 @@ data class SettingsState(
     val transport: TransportUi,
     val shizuku: ShizukuStatus,
     val batteryExempt: Boolean,
-    val notificationAccess: Boolean,
+    /** Permesso di PUBBLICARE notifiche (esiti/avvisi Argus). */
+    val notificationsGranted: Boolean,
+    /** Accesso notification listener: lettura notifiche WhatsApp e canale di reply (P1). */
+    val notificationListenerGranted: Boolean,
     val backgroundLocation: BgLocationState,   // GRANTED | WHILE_IN_USE | DENIED | NOT_NEEDED (nessuna regola geofence)
     val whitelist: List<ContactRow>,
+    /** Conversazioni 1:1 osservate (solo WhatsApp) proposte dal picker whitelist. */
+    val observedCandidates: List<ContactRow> = emptyList(),
     val budget: BudgetUi,
     val privacyAccepted: Boolean,
     val appVersionLabel: String,
@@ -207,7 +212,11 @@ interface SettingsCallbacks {
     fun onSaveBridge(url: String, bearerToken: String?) { onEditBridgeUrl(url) }
     fun onOpenShizukuFix()      // deep-link allo step onboarding giusto per lo stato corrente
     fun onOpenBatteryFix(); fun onOpenNotificationAccessFix(); fun onOpenLocationFix()
+    /** Apre le impostazioni di sistema per l'accesso notification listener (lettura, P1). */
+    fun onOpenNotificationListenerFix() {}
     fun onRemoveContact(conversationId: String); fun onAddContact()   // picker → risoluzione conversationId
+    /** Selezione dal picker delle conversazioni 1:1 osservate. */
+    fun onAddObservedContact(contact: ContactRow) {}
     fun onBudgetChange(maxPerHour: Int)
     fun onRevokePrivacy()
     fun onRerunOnboarding()
