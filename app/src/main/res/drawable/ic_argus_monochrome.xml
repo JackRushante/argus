@@ -8,11 +8,11 @@
     <!-- Mask monocromatica reale: il launcher applica il colore del tema all'alpha. -->
     <path
         android:fillColor="@android:color/transparent"
-        android:pathData="M18,54 C27,38 41,28 54,26 C67,28 81,38 90,54 C81,70 67,80 54,82 C41,80 27,70 18,54 Z"
+        android:pathData="M22,54 C30,40 42,31 54,29 C66,31 78,40 86,54 C78,68 66,77 54,79 C42,77 30,68 22,54 Z"
         android:strokeColor="#FFFFFFFF"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:strokeWidth="6" />
+        android:strokeWidth="5" />
 
     <path
         android:fillColor="@android:color/transparent"

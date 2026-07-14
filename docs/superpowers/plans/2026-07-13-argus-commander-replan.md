@@ -80,21 +80,26 @@ App lint/build verdi (resta solo `OldTargetApi`, H4).
 - [x] Inviare solo lo `DeviceState` richiesto e redatto; eliminare il commento falso.
 - [x] Bridge Hermes `/compile` versionato, autenticato, idempotente e testato live.
 - [x] HTTPS o trasporto autenticato equivalente; niente opt-in cleartext globale.
-- [ ] Test Android 16 Local Network Protection/Tailscale e denial path.
+- [x] Probe Android 16 preliminare: Hermes via VPN Tailscale resta raggiungibile e il client
+  gestisce il denial LAN senza crash.
+- [ ] Test Local Network Protection autorevole: enable compat flag → reboot → denial LAN;
+  disable flag → reboot → baseline LAN positiva, con Hermes verde dopo il ripristino.
 
-Verifica H3 parziale: 15 test JVM `brain-android`, 8 test HTTP server e lint verdi; servizio
+Verifica H3 parziale: 17 test JVM `brain-android`, 8 test HTTP server e lint senza errori; servizio
 `argus-bridge` su loopback dietro Tailscale Serve HTTPS; auth negativa `401`; compile live + replay
-idempotente; health e compile instrumented sul OnePlus API 36 (`OK (2 tests)`). Il compat flag
-`RESTRICT_LOCAL_NETWORK` è stato abilitato sull'APK test, ma il reboot ha spento `adbd :5555`:
-test Tailscale-via-VPN, denial su LAN diretta e successivo ripristino flag restano da eseguire appena
-ADB wireless viene riattivato.
+idempotente; health e compile instrumented sul OnePlus API 36 (`OK (2 tests)`). Il probe
+pre-reboot ha osservato health HTTPS via Tailscale e denial LAN diretta, ma non viene contato come
+prova LNP conclusiva: la procedura Android richiede un reboot dopo il cambio compat. L'override è
+ora disabilitato; denial autorevole e baseline positiva restano nel gate reboot H7.
 
 ### H4 — Android scheduling e capability
 
 - [x] Portare compile/target SDK a 36; smoke predictive back/edge-to-edge su device resta in H7.
 - [x] `SCHEDULE_EXACT_ALARM` solo con `TimePrecision.EXACT`, fallback inexact e race di revoca gestita.
-- [ ] Reconciliation implementata per boot, time/timezone, package replace e grant/revoca;
-  resta da installare il runtime in `Application` (H6) e provarla su device.
+- [x] Reconciliation implementata per boot, time/timezone, package replace e grant/revoca;
+  runtime installato in `Application`, capability reconcile proattivo e test scheduler su device.
+- [x] Recovery reale dopo morte processo verificata con alarm OS-managed e PID target diverso.
+- [ ] Recovery reale attraverso reboot da chiudere nel gate H7.
 - [x] Scheduler event-driven, nessun FGS persistente.
 - [x] Capability requirements persistite e fingerprintate; resta il probe/reconcile proattivo
   revoca -> pausa/`NEEDS_REVIEW`.
@@ -116,18 +121,36 @@ processo manager Shizuku: il daemon va verificato/riavviato, caso da esporre nel
 
 ### H6 — wiring reale e UI
 
-- [ ] ViewModel/Hilt con Flow e recovery process-death.
-- [ ] Correggere log ID/generative, privacy note, CloudTag, loading e conferme.
-- [ ] Bloccare in UI le capability/fasi non implementate.
-- [ ] String resources, accessibilità e test Compose/navigation essenziali.
+- [x] ViewModel/Hilt reali con Flow Room bounded, bootstrap runtime e recovery applicativa.
+- [x] Correggere log ID/generative, privacy note, CloudTag, loading e conferme.
+- [x] Bloccare in UI le capability/fasi non implementate.
+- [x] String resources, accessibilità e test Compose/navigation essenziali.
+
+Verifica H6 2026-07-14: commit `10bf5de` pushato; 243 test JVM/Robolectric verdi,
+`test lintDebug assembleDebug assembleDebugAndroidTest` verde; sul OnePlus/API 36 navigazione
+`OK (4)`, secure bridge store `OK (3)`, Shizuku `OK (1)`, device-tools `OK (1)` e scheduler/probe
+`OK (4)`. Il package finale è autorizzato in Shizuku; dopo la risincronizzazione del daemon il
+gateway è `AUTHORIZED` e gli E2E H7 privilegiati sono passati.
 
 ### H7 — E2E e merge
 
-- [ ] Chat -> compile -> review -> fingerprint -> arm -> alarm -> DND -> journal.
-- [ ] Negative E2E: denial/revoca, duplicate event, crash/retry, Shizuku down,
-  schema futuro, bridge lento/malformato, reboot/process death e DST.
-- [ ] Full test/lint/build, install pulita su OnePlus e smoke UI.
+- [x] Chat -> compile -> review -> fingerprint -> arm -> alarm -> DND -> journal; duplicate
+  delivery ignorata e one-shot disabilitata.
+- [x] Negative non-reboot: denial/revoca, duplicate event, crash/retry, Shizuku down,
+  schema futuro, bridge lento/malformato, process death e DST.
+- [ ] Reboot reale: boot recovery, stato degradato Shizuku e ciclo LNP compat on/off.
+- [x] Installazione pulita dell'APK `0.1.0` e smoke dei sei schermi, inclusa card Room reale →
+  dettaglio (`OK (4)`).
+- [x] Full test/lint/build conclusivo: 750 task forzati senza cache, 243/243 test e zero errori
+  lint; APK main/androidTest prodotti e hashati.
 - [ ] Aggiornare spec/ledger, push backup, review finale e merge no-ff su master.
+
+Verifica H7 parziale 2026-07-14: E2E produzione Hermes/DND `OK (1)`, process-death bifase
+`schedule`/`am kill`/`verify` verde con PID diverso e un solo `FIRED`, outage reale del daemon
+Shizuku verde con `BLOCKED_POLICY/capability_unavailable`, zero mutazioni e nessun replay tardivo.
+Cleanup verificato: DND `off`, exact-alarm `default`, Shizuku nuovamente attivo.
+Lo smoke pulito ha inoltre trovato e corretto un drift binario Compose 1.7.6/1.8.2 che causava
+`NoSuchMethodError` sulla prima `FlowRow`; BOM allineato e regressione device verde.
 
 ## Decisioni Android 16
 
@@ -143,3 +166,7 @@ processo manager Shizuku: il daemon va verificato/riavviato, caso da esporre nel
 
 P0-B è completo solo quando l'E2E deterministico DND passa sul device e i negative
 gate H1-H3 sono verdi. Un APK che compila o una demo UI non costituiscono completion.
+
+Nota di scope corretta: il geofence è compilabile e validabile in P0-B, ma resta non armabile
+in produzione finché il registrar Play Services non viene implementato in P2. Armare una regola
+che il runtime non può registrare sarebbe un comportamento fail-open.

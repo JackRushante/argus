@@ -3,6 +3,10 @@
 > Pacchetto di handoff per implementare in un vero codebase la UI di **Argus**,
 > l'agente LLM di automazione Android descritto in `spec-argus-design-rev3.md`
 > e `handoff-frontend.md`. Rev design: **1a** (approvata).
+>
+> **Stato 2026-07-14:** riferimento autorevole per visual, copy e stati UI. Le parti che
+> descrivono FGS/notifica persistente o comportamento runtime sono storiche: prevalgono
+> `docs/superpowers/plans/2026-07-13-argus-commander-replan.md` e l'audit P0-B finale.
 
 ---
 

@@ -5,6 +5,8 @@
 > Il gate di hardening del core/contratti viene prima di Shizuku; il vincolo
 > “`engine-core` non cambia” è revocato. Il FGS persistente e `USE_EXACT_ALARM`
 > non fanno più parte dell'architettura approvata.
+> Le checkbox storiche sotto descrivono il brief originario e non sono il ledger di esecuzione:
+> stato e prove aggiornati vivono nel commander replan e in `.superpowers/sdd/progress.md`.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -16,7 +18,7 @@
 
 **Goal:** Rendere reali gli schermi M2: implementare le interfacce di `engine-core` su Android (Shizuku executor, Room store/audit, AlarmManager Time trigger, capability probe), il transport Hermes CliBridge per il `compile` one-shot, e il flusso di approvazione — così che **l'Esempio 2 funzioni end-to-end** ("dopo le 23 metti DND") e l'Esempio 1 sia pronto lato compile+arm (geofence registrar → P2).
 
-**Architecture:** Nuovi moduli Android: `core-shizuku` (gateway privilegiato unico), `device-tools` (capacità tipizzate su Shizuku), `data` (Room), `brain-android` (transport HTTP), `automation-android` (wiring engine↔Android + ViewModel). Hilt per DI. Gli schermi `ui` restano invariati: i ViewModel espongono i contratti `XxxState` che già consumano. Il foreground service è **minimo** in P0-B (host di AlarmManager + registrazione trigger); l'hardening completo è P2.
+**Architecture:** Nuovi moduli Android: `core-shizuku` (gateway privilegiato unico), `device-tools` (capacità tipizzate su Shizuku), `data` (Room), `brain-android` (transport HTTP), `automation-android` (wiring engine↔Android + ViewModel). Hilt per DI. Gli schermi `ui` restano invariati: i ViewModel espongono i contratti `XxxState` che già consumano. P0-B è **event-driven**: `Application` inizializza il runtime, AlarmManager/receiver lo risvegliano e Room consente il recovery; nessun FGS persistente.
 
 **Tech Stack:** Kotlin 2.1.0, Shizuku API (`dev.rikka.shizuku:api`, `:provider`), Room 2.6.x + KSP, OkHttp 4.12, Hilt 2.52, WorkManager/AlarmManager, kotlinx-coroutines. Min SDK 30.
 
@@ -42,7 +44,7 @@
 | `device-tools/` | `DeviceTools` (capture/tap/type/dumpUi, toggle wifi/bt/dnd, state read, app install/launch) su `PrivilegedShell` |
 | `data/` | Room: `AutomationEntity`, `AuditEntity`, DAO, `RoomAutomationStore`, `RoomAuditSink`, converters via `ArgusJson` |
 | `brain-android/` | `CliBridgeTransport` (OkHttp → `argus-bridge` HTTPS v1), `HermesBrain : Brain` |
-| `automation-android/` | `ShizukuActionExecutor : ActionExecutor`, `LazyDeviceStateProvider`, `AlarmManagerTimeTrigger`, `AndroidCapabilityProbe`, `ApprovalFlow`, ViewModel (Chat/List/Detail/Log/Settings/Onboarding), `ArgusForegroundService` (minimo), Hilt modules |
+| `automation-android/` | `ShizukuActionExecutor : ActionExecutor`, `LazyDeviceStateProvider`, scheduler/receiver AlarmManager, `AndroidCapabilityProbe`, `ApprovalFlow`, ViewModel (Chat/List/Detail/Log/Settings/Onboarding), bootstrap event-driven, Hilt modules |
 | **Prereq lato Hermes** | servizio dedicato `argus-bridge` con `/compile` strict v1, bearer e idempotenza |
 
 **Dipendenze task:** T0 (Hermes bridge) parallelo a T1. T1→T2 (shizuku→device-tools). T3 (Room) indipendente. T4 (brain) dipende T0. T5 (executor) dipende T2. T6 (time trigger) dipende T3. T7 (probe) dipende T2. T8 (ApprovalFlow) dipende T3+T4. T9 (ViewModel+wiring) dipende tutti. T10 (service) dipende T6. T11 (E2E su device) per ultimo.
@@ -175,7 +177,7 @@ Contesto verificato (spec §2/§16): il bridge Guida Bali esponeva solo `/chat`;
 
 - [ ] **Step 1:** Test JVM: data una `Automation` con `Trigger.Time(cron="0 23 * * *")`, `nextFireAt(now)` usa `TimeSpecs.nextFire` e produce l'istante atteso (riusa i casi di `CronScheduleTest`). La registrazione AlarmManager è mockata (verifica che `setExactAndAllowWhileIdle` sia chiamato con l'epoch giusto).
 - [ ] **Step 2:** Impl: per ogni automazione armata con trigger Time, calcola next-fire e registra un exact alarm (`PendingIntent` con `automationId`). `onAlarm` → `engine.onTrigger(TimeFired(id)) { lazyState }` → ri-registra il prossimo. `BootReceiver` (`BOOT_COMPLETED`) → `rescheduleAll()` (richiede Shizuku up, B1/E9).
-- [ ] **Step 3:** Manifest: `RECEIVE_BOOT_COMPLETED`, `USE_EXACT_ALARM` (sideload accettabile, spec B3), receiver.
+- [x] **Step 3 (corretto):** Manifest: `RECEIVE_BOOT_COMPLETED`, `SCHEDULE_EXACT_ALARM`, receiver. Exact è usato solo per `TimePrecision.EXACT`; in assenza dello special access il backend registra inexact senza crash.
 - [ ] **Step 4:** Commit `feat(automation): AlarmManager exact Time trigger (TimeSpecs-driven) + boot recovery`.
 
 ---
@@ -234,18 +236,16 @@ Questo è il ponte tra il `compile` del Brain e lo stato UI `AutomationDetailSta
 
 ---
 
-## Task 10: `ArgusForegroundService` (minimo) + notifica persistente
+## Task 10 (sostituito): bootstrap event-driven e recovery
 
-**Files:**
-- Create: `automation-android/src/main/kotlin/dev/argus/automation/ArgusForegroundService.kt`
-- Modify: `app/AndroidManifest.xml` (service `foregroundServiceType`, permessi FGS + notifiche)
+Il FGS persistente del brief è stato rimosso dal commander replan: non è necessario per ricevere
+AlarmManager e aumenterebbe vincoli, consumo e failure mode Android 12–16.
 
-**Interfaces:**
-- Produces: service che ospita AlarmManager registration + engine dispatch; notifica persistente bassa priorità ("Argus attivo — N regole armate" / degradato "Shizuku non attivo").
-
-- [ ] **Step 1:** Service `specialUse`/`dataSync` (spec §9) con notifica low-priority; all'avvio `rescheduleAll()` dei Time trigger; `START_STICKY`. In P0-B **non** avvia da background senza esenzione (B2) — parte dall'app. L'anti-Doze/watchdog completo è **P2**.
-- [ ] **Step 2:** La notifica riflette `ShizukuStatus` (degradato → testo "azioni shell in pausa", tap → Sistema).
-- [ ] **Step 3:** Commit `feat(automation): minimal foreground service + persistent status notification`.
+- [x] `ArgusApplication` installa il runtime Hilt e avvia reconciliation/maintenance idempotenti.
+- [x] Receiver `goAsync()` per alarm, boot, time/timezone, package replace e cambio exact access.
+- [x] Room conserva registrazione logica e journal per retry/process-death; nessun loop residente.
+- [ ] P2: se azioni lunghe non rientreranno nel budget breve del receiver, introdurre un worker
+  durevole o FGS **short-lived** con tipo e policy corretti, non un service sempre vivo.
 
 ---
 
@@ -256,7 +256,9 @@ Questo è il ponte tra il `compile` del Brain e lo stato UI `AutomationDetailSta
 - [ ] **Step 1:** Build+install: `./gradlew :app:installDebug` sul device (`adb -s <oneplus>`). Concedi Shizuku + notifiche + batteria via onboarding.
 - [ ] **Step 2:** In chat: "dopo le 23 controlla la suoneria e metti DND". Verifica: appare la `DraftCard`, il Dettaglio mostra `RuleRender` corretto (trigger 23:00, condizione ringer≠silent, azione SetDnd), `canArm=true`. Arma.
 - [ ] **Step 3:** Sposta l'orologio o abbassa il cron a `now+2min` (fixture di test), suoneria non-silent → all'orario l'engine esegue `SetDnd(PRIORITY)` via Shizuku → verifica `cmd notification get_dnd` == priority. Log mostra `FIRED · 1/1 azioni ok`. Con suoneria silent → `CONDITIONS_NOT_MET` nel log.
-- [ ] **Step 4:** 🔬 Esempio 1 (parziale): "geofence sulla posizione attuale, uscendo wifi off / bt on" → compile+validator+arm ok (warning raggio<100m), coordinate risolte all'arm. Lo **scatto reale** del geofence è P2 (registrar Play Services): qui verifica solo fino all'arm.
+- [ ] **Step 4 (corretto):** Esempio 1 compile+validator mostra il warning sotto 100 m, ma la UI
+  blocca l'arm finché manca il registrar Play Services P2. Non persistere come ARMED una regola
+  che il runtime non può registrare.
 - [ ] **Step 5:** Commit `test(e2e): Example 2 DND-after-23 works end-to-end on device`.
 
 ---
@@ -264,8 +266,9 @@ Questo è il ponte tra il `compile` del Brain e lo stato UI `AutomationDetailSta
 ## Definition of Done (P0-B)
 
 - [ ] Esempio 2 funziona **end-to-end sul device**: chat → compile (Hermes) → approvazione → arm → AlarmManager → esecuzione DND via Shizuku → log.
-- [ ] Esempio 1 pronto fino all'arm (registrar geofence = P2).
-- [ ] Tutte le interfacce di `engine-core` implementate su Android; `engine-core` invariato.
+- [ ] Esempio 1 pronto fino alla review fail-closed; arm e scatto geofence = P2.
+- [ ] Tutte le interfacce di `engine-core` implementate su Android; gli hardening del core ammessi
+  dal commander replan restano coperti dai test JVM.
 - [ ] Room: round-trip completo, decode-fail → NEEDS_REVIEW.
 - [ ] `DraftValidator` nel percorso di arm; ERROR blocca l'arm in UI.
 - [ ] Shizuku gateway con coda prioritaria; instrumented test verdi sul device.
@@ -274,7 +277,7 @@ Questo è il ponte tra il `compile` del Brain e lo stato UI `AutomationDetailSta
 ## Handoff verso P1 / P2
 
 - **P1:** trigger Notification (NotificationListenerService, 🔬 estrazione `conversationId`/`isGroup`/`notificationKey` — spec §16), WhatsApp RemoteInput, lane generativa reale (`InvokeLlm` async + fallback E13), whitelist contatti UI, **battery-optimization exemption** (anticipata qui, spec §15). → Esempio 3.
-- **P2:** geofence (Play Services) → Esempio 1 end-to-end; PhoneState/Connectivity; foreground-service hardening + watchdog + anti-Doze; wizard OEM/background-location; resilienza Shizuku post-reboot.
+- **P2:** geofence (Play Services) → Esempio 1 end-to-end; PhoneState/Connectivity; esecuzione durevole/FGS short-lived solo dove misurato necessario; wizard OEM/background-location; resilienza Shizuku post-reboot.
 - **P3:** loop `computer_use` interattivo (`OpenAICompatTransport`), `DirectLlmBrain` OAuth, streaming chat, budget guard UI.
 
 ## Self-review (fatta)

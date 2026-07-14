@@ -30,7 +30,7 @@ import dev.argus.ui.model.UiWarning
 import dev.argus.ui.screens.shizukuOnboardingCopy
 
 // =============================================================================
-// Fixture centralizzate per i @Preview e la demo `app` (M2 Task 12).
+// Fixture centralizzate per i @Preview e i test UI; il runtime `app` usa dati reali.
 //
 // Fonte unica di dati finti REALISTICI per tutti e 6 gli schermi. Copre:
 //  - i 3 esempi della spec: geofence Wi-Fi/BT in uscita (a1), DND 23:00 (a2),
@@ -498,7 +498,7 @@ object Fixtures {
         whitelist = listOf(ContactRow(displayName = "Moglie", conversationId = "wa::393200000000::c1a9")),
         budget = BudgetUi(maxCallsPerHour = 20, usedThisHourLabel = "3 / 20 quest'ora"),
         privacyAccepted = true,
-        appVersionLabel = "Argus v0.1-demo · MVP (sideload)",
+        appVersionLabel = "Argus v0.1.0 · MVP (sideload)",
     )
 
     val settingsDegraded = SettingsState(
@@ -510,7 +510,7 @@ object Fixtures {
         whitelist = emptyList(),
         budget = BudgetUi(maxCallsPerHour = 20, usedThisHourLabel = "17 / 20 quest'ora"),
         privacyAccepted = true,
-        appVersionLabel = "Argus v0.1-demo · MVP (sideload)",
+        appVersionLabel = "Argus v0.1.0 · MVP (sideload)",
     )
 
     // -------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 # Argus — Handoff Frontend per Claude Design (rev 1, 2026-07-12)
 
-> Complemento operativo di `spec-argus-design-rev3.md` §12. **Questo è il documento di lavoro per la UI**: la spec dà il contesto di sistema, qui ci sono navigazione, contratti di stato, comportamenti, stati d'errore e direttive di sicurezza UI. In caso di conflitto tra i due, vale questo documento.
+> Complemento operativo di `spec-argus-design-rev3.md` §12. **Questo è il documento di lavoro per la UI**: la spec dà il contesto di sistema, qui ci sono navigazione, contratti di stato, comportamenti, stati d'errore e direttive di sicurezza UI. Per visual/copy/contratti UI prevale questo documento; per architettura runtime e phasing prevalgono il commander replan 2026-07-13 e l'audit P0-B finale. I riferimenti storici a FGS/notifica persistente non descrivono P0-B.
 
 ## 1. Contesto in breve
 
