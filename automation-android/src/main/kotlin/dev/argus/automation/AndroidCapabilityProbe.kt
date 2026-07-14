@@ -162,6 +162,8 @@ class AndroidCapabilityProbe internal constructor(
 
         val available = buildSet {
             add(CapabilityIds.TRIGGER_TIME)
+            // Clipboard locale: nessun permesso OS richiesto (scrittura verificata su device).
+            add(ActionCapabilities.COPY_TO_CLIPBOARD)
             if (state.notificationsGranted) add(ActionCapabilities.SHOW_NOTIFICATION)
             // CapabilityRequirements persiste anche i raw tool approvati: il set del fire-time
             // deve contenere gli stessi nomi wire, senza alias con le capability typed.
@@ -184,6 +186,7 @@ class AndroidCapabilityProbe internal constructor(
         val transient = if (shizukuTransient) SHIZUKU_CAPABILITIES + SHIZUKU_TOOLS else emptySet()
 
         val availableTools = buildList {
+            add(ActionTypeIds.COPY_TO_CLIPBOARD)
             if (shizukuAvailable) {
                 addAll(SHIZUKU_ACTION_TYPES)
                 addAll(SHIZUKU_TOOLS)

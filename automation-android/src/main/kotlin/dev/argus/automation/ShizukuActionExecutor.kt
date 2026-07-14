@@ -31,6 +31,7 @@ class ShizukuActionExecutor(
     private val notifier: AutomationNotifier,
     private val generativeLane: GenerativeLane,
     private val replies: NotificationReplyGateway,
+    private val clipboard: ClipboardCopier,
 ) : ActionExecutor {
     override suspend fun execute(action: Action, ctx: FireContext): ActionResult = try {
         when (action) {
@@ -61,6 +62,9 @@ class ShizukuActionExecutor(
 
             // Difesa in profondità oltre al FirePolicy: nessuna shell senza conferma live.
             is Action.RunShell -> ActionResult.Failure("live_confirmation_required")
+
+            // Clipboard: locale, senza privilegi; il payload arriva dall'evento del trigger.
+            is Action.CopyToClipboard -> clipboard.copy(ctx.event, action.extractionRegex)
 
             is Action.InvokeLlm -> if (generativeLane.trySubmit(ctx, action)) {
                 ActionResult.Submitted

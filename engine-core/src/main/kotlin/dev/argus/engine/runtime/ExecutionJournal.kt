@@ -118,6 +118,7 @@ internal fun Action.journalType(): String = when (this) {
     is Action.InputText -> ActionTypeIds.INPUT_TEXT
     is Action.WhatsAppReply -> ActionTypeIds.WHATSAPP_REPLY
     is Action.RunShell -> ActionTypeIds.RUN_SHELL
+    is Action.CopyToClipboard -> ActionTypeIds.COPY_TO_CLIPBOARD
     is Action.InvokeLlm -> ActionTypeIds.INVOKE_LLM
 }
 

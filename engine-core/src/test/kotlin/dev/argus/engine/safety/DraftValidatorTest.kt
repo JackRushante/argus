@@ -30,6 +30,33 @@ class DraftValidatorTest {
         assertTrue("text_invalid" in errors(v.validate(draft("ok", "z".repeat(5_000)), emptySet())))
     }
 
+    @Test fun `copy to clipboard needs a textual trigger and a compilable bounded regex`() {
+        fun draft(trigger: Trigger, regex: String? = "(\\d{4,8})") = AutomationDraft(
+            name = "otp",
+            trigger = trigger,
+            actions = listOf(Action.CopyToClipboard(extractionRegex = regex)),
+        )
+        val sms = Trigger.PhoneState(PhoneEvent.SMS_RECEIVED)
+        val notification = Trigger.Notification("com.whatsapp", conversationId = "jid:1", isGroup = false)
+        val time = Trigger.Time(cron = "0 8 * * *", tz = "Europe/Rome")
+
+        assertEquals(emptyList(), errors(v.validate(draft(sms), emptySet())))
+        assertEquals(emptyList(), errors(v.validate(draft(notification), emptySet())))
+        // Senza regex si copia il testo integrale del messaggio: lecito.
+        assertEquals(emptyList(), errors(v.validate(draft(sms, regex = null), emptySet())))
+
+        // Un trigger senza payload testuale non ha nulla da copiare: draft incoerente.
+        assertTrue("clipboard_source_missing" in errors(v.validate(draft(time), emptySet())))
+        val call = Trigger.PhoneState(PhoneEvent.INCOMING_CALL)
+        assertTrue("clipboard_source_missing" in errors(v.validate(draft(call), emptySet())))
+
+        // Regex non compilabile o fuori bounds.
+        assertTrue("extraction_regex_invalid" in errors(v.validate(draft(sms, regex = "(unclosed"), emptySet())))
+        assertTrue(
+            "extraction_regex_invalid" in errors(v.validate(draft(sms, regex = "a".repeat(600)), emptySet())),
+        )
+    }
+
     @Test fun `sms text match is valid only on SMS_RECEIVED`() {
         val sms = AutomationDraft(
             name = "sms prova",

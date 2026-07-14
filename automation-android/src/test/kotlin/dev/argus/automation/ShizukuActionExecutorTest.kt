@@ -45,6 +45,7 @@ class ShizukuActionExecutorTest {
             },
             generativeLane = GenerativeLane { _, _ -> true },
             replies = RecordingReplyGateway(NotificationReplyDelivery.Sent),
+            clipboard = { _, _ -> ActionResult.Success },
         )
 
         val actions = listOf(
@@ -232,6 +233,7 @@ class ShizukuActionExecutorTest {
         notifier = AutomationNotifier { _, _, _ -> },
         generativeLane = lane,
         replies = replies,
+        clipboard = { _, _ -> ActionResult.Success },
     )
 
     private class RecordingReplyGateway(

@@ -18,6 +18,7 @@ object ActionTypeIds {
     const val INPUT_TEXT = "input_text"
     const val WHATSAPP_REPLY = "whatsapp_reply"
     const val RUN_SHELL = "run_shell"
+    const val COPY_TO_CLIPBOARD = "copy_to_clipboard"
     const val INVOKE_LLM = "invoke_llm"
 }
 
@@ -51,6 +52,12 @@ sealed interface Action {
     @Serializable @SerialName(ActionTypeIds.INPUT_TEXT) data class InputText(val text: String) : Action
     @Serializable @SerialName(ActionTypeIds.WHATSAPP_REPLY) data class WhatsAppReply(val text: String) : Action
     @Serializable @SerialName(ActionTypeIds.RUN_SHELL) data class RunShell(val cmd: String) : Action
+
+    /** Copia negli appunti il payload testuale del trigger (SMS o notifica), opzionalmente
+     *  ridotto al primo capture group della regex (P2-3, OTP). Estrazione DETERMINISTICA:
+     *  il testo non lascia mai il telefono. */
+    @Serializable @SerialName(ActionTypeIds.COPY_TO_CLIPBOARD)
+    data class CopyToClipboard(val extractionRegex: String? = null) : Action
 
     @Serializable @SerialName(ActionTypeIds.INVOKE_LLM)
     data class InvokeLlm(

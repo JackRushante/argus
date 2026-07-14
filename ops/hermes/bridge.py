@@ -116,6 +116,9 @@ Action, discriminata da "type":
 - {"type":"input_text", "text":string}
 - {"type":"whatsapp_reply", "text":string}
 - {"type":"run_shell", "cmd":string}
+- {"type":"copy_to_clipboard", "extractionRegex":string|null (regex deterministica: copia il
+   primo capture group — o il match intero — dal testo del trigger SMS/notifica; null = testo
+   integrale; per gli OTP usa "(?<!\\+)\\b(\\d{4,8})\\b")}
 - {"type":"invoke_llm", "goal":string, "contextSources":[string,...],
    "allowedTools":[string,...], "replyTargetSender":boolean, "timeoutMs":integer}
 """.strip()
@@ -622,6 +625,7 @@ def validate_action(value: Any, available_tools: set[str]) -> bool:
         "input_text": ({"type", "text"}, set()),
         "whatsapp_reply": ({"type", "text"}, set()),
         "run_shell": ({"type", "cmd"}, set()),
+        "copy_to_clipboard": ({"type"}, {"extractionRegex"}),
         "invoke_llm": ({"type", "goal", "contextSources", "allowedTools", "replyTargetSender"}, {"timeoutMs"}),
     }
     if kind not in fields or not _exact_keys(value, *fields[kind]):
@@ -641,6 +645,17 @@ def validate_action(value: Any, available_tools: set[str]) -> bool:
             and isinstance(value["replyTargetSender"], bool)
             and _is_int(value.get("timeoutMs", 60_000))
         )
+    if kind == "copy_to_clipboard":
+        pattern = value.get("extractionRegex")
+        if pattern is None:
+            return True
+        if not _string(pattern, 512):
+            return False
+        try:
+            re.compile(pattern)
+        except re.error:
+            return False
+        return True
     field_name = {
         "set_ringer": "mode", "launch_app": "pkg", "open_url": "url",
         "input_text": "text", "whatsapp_reply": "text", "run_shell": "cmd",

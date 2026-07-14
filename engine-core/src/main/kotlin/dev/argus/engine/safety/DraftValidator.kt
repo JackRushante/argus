@@ -36,6 +36,7 @@ class DraftValidator(
         private const val MAX_CONDITION_DEPTH = 8
         private const val MAX_TEXT_LENGTH = 4_000
         private const val MAX_COMMAND_LENGTH = 8_192
+        private const val MAX_REGEX_LENGTH = 512
         private const val MAX_TOOL_COUNT = 32
         private const val MAX_GEOFENCE_RADIUS_M = 100_000.0
         private const val MAX_LOITERING_MS = 86_400_000L
@@ -220,6 +221,18 @@ class DraftValidator(
             is Action.RunShell -> {
                 validateRequiredText(action.cmd, MAX_COMMAND_LENGTH, "shell_invalid", err)
                 warn("shell_review", "Comando shell autonomo solo dopo approvazione del comando letterale")
+            }
+            is Action.CopyToClipboard -> {
+                val textual = trigger is Trigger.Notification ||
+                    (trigger is Trigger.PhoneState && trigger.event == PhoneEvent.SMS_RECEIVED)
+                if (!textual)
+                    err("clipboard_source_missing", "Copia negli appunti richiede un trigger con testo (SMS o notifica)")
+                action.extractionRegex?.let { pattern ->
+                    val compilable = pattern.length <= MAX_REGEX_LENGTH &&
+                        runCatching { Regex(pattern) }.isSuccess
+                    if (!compilable)
+                        err("extraction_regex_invalid", "Regex di estrazione non valida o oltre $MAX_REGEX_LENGTH caratteri")
+                }
             }
             is Action.InvokeLlm -> validateInvokeLlm(action, trigger, whitelist, err, warn)
         }

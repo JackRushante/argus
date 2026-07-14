@@ -40,6 +40,18 @@ class BridgeTest(unittest.TestCase):
         with self.assertRaises(bridge.RequestError):
             bridge.validate_request(request, "req-test-1")
 
+    def test_copy_to_clipboard_action_requires_a_compilable_regex(self):
+        tools = {"copy_to_clipboard"}
+        ok = {"type": "copy_to_clipboard", "extractionRegex": r"(?<!\+)\b(\d{4,8})\b"}
+        self.assertTrue(bridge.validate_action(ok, tools))
+        self.assertTrue(bridge.validate_action({"type": "copy_to_clipboard"}, tools))
+        self.assertFalse(
+            bridge.validate_action({"type": "copy_to_clipboard", "extractionRegex": "(broken"}, tools)
+        )
+        self.assertFalse(
+            bridge.validate_action({"type": "copy_to_clipboard", "extractionRegex": "x" * 600}, tools)
+        )
+
     def test_manifest_available_triggers_is_optional_and_bounded(self):
         # Client pre-P2: campo assente, accettato (retrocompatibilita').
         legacy = self.request()

@@ -28,6 +28,8 @@ import dev.argus.automation.DeferredReplySink
 import dev.argus.automation.PersistentDeferredReplySink
 import dev.argus.automation.PrivacyRevocationCoordinator
 import dev.argus.automation.DeviceStateSnapshotProvider
+import dev.argus.automation.AndroidClipboardCopier
+import dev.argus.automation.ClipboardCopier
 import dev.argus.automation.EngineNotificationEventDispatcher
 import dev.argus.automation.EnginePhoneEventDispatcher
 import dev.argus.automation.EngineTimeEventDispatcher
@@ -371,12 +373,19 @@ object ArgusModule {
 
     @Provides
     @Singleton
+    fun clipboardCopier(@ApplicationContext context: Context): ClipboardCopier =
+        AndroidClipboardCopier(context)
+
+    @Provides
+    @Singleton
     fun actionExecutor(
         tools: DeviceController,
         notifier: AutomationNotifier,
         generativeLane: GenerativeLane,
         replies: NotificationReplyGateway,
-    ): ShizukuActionExecutor = ShizukuActionExecutor(tools, notifier, generativeLane, replies)
+        clipboard: ClipboardCopier,
+    ): ShizukuActionExecutor =
+        ShizukuActionExecutor(tools, notifier, generativeLane, replies, clipboard)
 
     @Provides
     fun actionExecutorBoundary(executor: ShizukuActionExecutor): ActionExecutor = executor

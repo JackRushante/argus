@@ -147,7 +147,13 @@ class GenerativeEndToEndInstrumentedTest {
         )
         val engine = Engine(
             store = automations,
-            executor = ShizukuActionExecutor(InertDeviceController(), { _, _, _ -> }, lane, gateway),
+            executor = ShizukuActionExecutor(
+                InertDeviceController(),
+                { _, _, _ -> },
+                lane,
+                gateway,
+                { _, _ -> dev.argus.engine.runtime.ActionResult.Success },
+            ),
             evaluator = ConditionEvaluator(java.time.Clock.systemDefaultZone()),
             matcher = TriggerMatcher(),
             firePolicy = policy,

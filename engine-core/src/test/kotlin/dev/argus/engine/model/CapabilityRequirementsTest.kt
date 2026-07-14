@@ -125,6 +125,17 @@ class CapabilityRequirementsTest {
     }
 
     @Test
+    fun `copy to clipboard derives its own action capability`() {
+        assertEquals(
+            setOf(CapabilityIds.TRIGGER_PHONE_SMS, CapabilityIds.ACTION_COPY_TO_CLIPBOARD),
+            CapabilityRequirements.derive(
+                trigger = Trigger.PhoneState(PhoneEvent.SMS_RECEIVED),
+                actions = listOf(Action.CopyToClipboard(extractionRegex = "(\\d{4,8})")),
+            ),
+        )
+    }
+
+    @Test
     fun `nested conditions retain every state dependency`() {
         val conditions = Condition.And(
             listOf(

@@ -46,6 +46,7 @@ object ActionCapabilities {
     const val INPUT_TEXT = CapabilityIds.ACTION_INPUT_TEXT
     const val WHATSAPP_REPLY = CapabilityIds.ACTION_WHATSAPP_REPLY
     const val RUN_SHELL = CapabilityIds.ACTION_RUN_SHELL
+    const val COPY_TO_CLIPBOARD = CapabilityIds.ACTION_COPY_TO_CLIPBOARD
     const val INVOKE_LLM = CapabilityIds.ACTION_INVOKE_LLM
 }
 

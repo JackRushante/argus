@@ -255,6 +255,12 @@ object RuleRenderMapper {
             shellCommand = a.cmd, // integrale, mai troncato (invariante §5.4)
             requiresLiveConfirm = true,
         )
+        is Action.CopyToClipboard -> row(
+            iconKey = "clipboard",
+            label = "Copia negli appunti",
+            // §5: la regex è il criterio reale di estrazione, resta visibile integrale.
+            detail = a.extractionRegex?.let { "estrazione: $it" } ?: "il testo integrale del messaggio",
+        )
         is Action.InvokeLlm -> row(
             iconKey = "generative",
             label = "Rispondi con l'AI",
