@@ -54,6 +54,7 @@ merge.
   device-tools 1/1, scheduler/capability 4/4
 - E2E API 36: produzione Hermes/DND 1/1; process-death 2 fasi; outage Shizuku 3 fasi;
   stato esterno finale DND `off`, exact-alarm `default`, daemon Shizuku attivo
+- Bridge server: 12/12 test; health post-deploy da Android `OK (1)`
 
 ## Problemi bloccanti trovati e corretti
 
@@ -84,8 +85,8 @@ merge.
     (`746668b`).
 12. **Bearer nel comando di instrumentation.** Un primo harness diagnostico passava il token con
     `am instrument -e`, la cui command line può finire nei log di adbd. Il token è stato ruotato,
-    logcat ripulito e l'E2E ora consuma una sola volta un file privato `run-as`, eliminato prima
-    della chiamata di rete; nessun segreto transita più negli argomenti ADB.
+    logcat ripulito e tutti gli E2E live ora consumano una sola volta un file privato `run-as`,
+    eliminato prima della chiamata di rete; nessun segreto transita più negli argomenti ADB.
 13. **Icona tematica non valida.** Il layer monochrome era la bitmap opaca tinta di bianco e il tag
     API 33 viveva nel resource base. Ora usa un mask vector entro la safe zone e resource `-v33`,
     mantenendo la variante adaptive a colori per API 30–32 (`82fa87f` + hardening finale).
@@ -93,6 +94,10 @@ merge.
     `FlowRow`: `ui` compilava contro Foundation 1.7.6, mentre Hilt portava nell'APK la 1.8.2. Il BOM
     è ora allineato a Compose `2025.05.01`/Foundation 1.8.2 e lo smoke card→dettaglio resta come
     regressione su device.
+15. **Errori provider scambiati per compile valido.** La CLI Hermes può terminare con exit `0` ma
+    testo diagnostico privo di `@@META@@`; il bridge lo trasformava in `200/draft_missing`. Ora
+    output senza protocollo è `502`, quota riconosciuta è `503` idempotente e stdout/stderr non
+    vengono esposti. Fix distribuito su Hermes e coperto da 12 test.
 
 ## Correzioni ai piani/spec
 
@@ -105,6 +110,14 @@ merge.
 - Le azioni P1/P2/P3 restano visibili come capability indisponibili, non simulate.
 
 ## Rischi e miglioramenti non bloccanti
+
+### Dipendenza operativa corrente
+
+- Al momento dell'audit l'account Codex usato da Hermes risponde `429` per quota esaurita e non è
+  configurato un provider alternativo. Il precedente E2E compile è valido, health e bridge sono
+  verdi, ma nuove compilazioni restano indisponibili finché la quota non si rinnova o Lorenzo non
+  sceglie un fallback. Il bridge ora espone correttamente l'indisponibilità come `503`, mai come
+  bozza valida.
 
 ### Da affrontare in P1
 

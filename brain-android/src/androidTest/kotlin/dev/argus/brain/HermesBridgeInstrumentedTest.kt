@@ -24,19 +24,17 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
-/** Test live opt-in: i segreti arrivano solo come instrumentation arguments e non finiscono nell'APK. */
+/** Test live opt-in: il bearer arriva da un file privato one-shot, mai dalla command line ADB. */
 @RunWith(AndroidJUnit4::class)
 class HermesBridgeInstrumentedTest {
     private val arguments get() = InstrumentationRegistry.getArguments()
 
     private fun transport(): CliBridgeTransport {
         val baseUrl = arguments.getString("bridgeBaseUrl")
-        val token = arguments.getString("bridgeToken")
         assumeTrue("bridgeBaseUrl non fornita", !baseUrl.isNullOrBlank())
-        assumeTrue("bridgeToken non fornito", !token.isNullOrBlank())
         return CliBridgeTransport(
             baseUrl = requireNotNull(baseUrl),
-            authProvider = BridgeAuthProvider { requireNotNull(token) },
+            authProvider = BridgeAuthProvider { bridgeToken() },
             client = CliBridgeTransport.defaultClient(
                 timeoutSeconds = if (arguments.getString("expectNetworkDenied") == "true") 5 else 65
             ),
@@ -136,5 +134,37 @@ class HermesBridgeInstrumentedTest {
         val draft = requireNotNull(result.draft)
         assertTrue(draft.trigger is Trigger.Time)
         assertEquals(Action.SetDnd(DndMode.PRIORITY), draft.actions.single())
+    }
+
+    private fun bridgeToken(): String {
+        cachedBridgeToken?.let { return it }
+        return synchronized(tokenLock) {
+            cachedBridgeToken ?: consumeBridgeToken().also { cachedBridgeToken = it }
+        }
+    }
+
+    private fun consumeBridgeToken(): String {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val file = context.getFileStreamPath(BRIDGE_TOKEN_FILE)
+        assumeTrue("token bridge live non predisposto nel file privato", file.isFile)
+        val tokenResult = runCatching {
+            context.openFileInput(BRIDGE_TOKEN_FILE).bufferedReader().use { it.readText().trim() }
+        }
+        if (tokenResult.isFailure) {
+            context.deleteFile(BRIDGE_TOKEN_FILE)
+            error("Token bridge live non leggibile")
+        }
+        check(context.deleteFile(BRIDGE_TOKEN_FILE)) { "Token bridge live non eliminato" }
+        return tokenResult.getOrThrow().also {
+            require(it.isNotBlank()) { "Token bridge live vuoto" }
+        }
+    }
+
+    private companion object {
+        const val BRIDGE_TOKEN_FILE = "argus-e2e-bridge-token"
+        val tokenLock = Any()
+
+        @Volatile
+        var cachedBridgeToken: String? = null
     }
 }

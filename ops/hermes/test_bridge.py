@@ -105,6 +105,34 @@ class BridgeTest(unittest.TestCase):
             bridge.run_gpt("prompt")
         self.assertNotIn("ARGUS_BRIDGE_TOKEN", run.call_args.kwargs["env"])
 
+    @mock.patch("bridge.subprocess.run")
+    def test_provider_quota_never_becomes_model_output(self, run):
+        run.return_value = mock.Mock(
+            returncode=0,
+            stdout="Codex provider quota exhausted (429); retry later.",
+            stderr="",
+        )
+        with self.assertRaises(bridge.ModelProcessError) as raised:
+            bridge.run_gpt("prompt")
+        self.assertEqual(503, raised.exception.status)
+        self.assertEqual("provider_quota_exhausted", raised.exception.code)
+
+    @mock.patch("bridge.subprocess.run")
+    def test_quota_words_in_valid_protocol_output_are_not_misclassified(self, run):
+        output = (
+            "Quota exhausted è solo il nome richiesto.\n"
+            '@@META@@ {"draft":null,"error_code":"clarification_required"}'
+        )
+        run.return_value = mock.Mock(returncode=0, stdout=output, stderr="")
+        self.assertEqual(output, bridge.run_gpt("prompt"))
+
+    @mock.patch("bridge.run_gpt", return_value="risposta senza metadati")
+    def test_compile_rejects_missing_meta_as_upstream_failure(self, _run):
+        with self.assertRaises(bridge.ModelProcessError) as raised:
+            bridge.compile_request(self.request())
+        self.assertEqual(502, raised.exception.status)
+        self.assertEqual("model_invalid_output", raised.exception.code)
+
 
 class BridgeHttpTest(unittest.TestCase):
     def setUp(self):
@@ -179,6 +207,23 @@ class BridgeHttpTest(unittest.TestCase):
         status, _ = self.request("/compile", self.valid_request(), content_type="text/plain")
         self.assertEqual(415, status)
         self.assertEqual(0, self.calls)
+
+    def test_provider_quota_is_service_unavailable_and_idempotent(self):
+        request = self.valid_request()
+        request["request_id"] = "req-http-quota"
+        failure = bridge.ModelProcessError(503, "provider_quota_exhausted")
+        with mock.patch.object(bridge, "run_gpt", side_effect=failure) as run:
+            status, body = self.request(
+                "/compile", request, request_id="req-http-quota"
+            )
+            self.assertEqual(503, status)
+            self.assertEqual({"error": "provider_quota_exhausted"}, body)
+            status, body = self.request(
+                "/compile", request, request_id="req-http-quota"
+            )
+        self.assertEqual(503, status)
+        self.assertEqual({"error": "provider_quota_exhausted"}, body)
+        run.assert_called_once()
 
     @staticmethod
     def valid_request(message="dopo le 23 metti dnd"):

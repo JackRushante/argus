@@ -131,11 +131,14 @@ revalidazione al fire-time restano obbligatori.
 | `409` | schema incompatibile o stesso request ID con contenuto diverso |
 | `413` / `415` | body troppo grande / content type errato |
 | `429` | compile già in corso |
-| `503` | cache idempotenza temporaneamente piena |
+| `503` | cache idempotenza temporaneamente piena oppure quota provider esaurita |
 | `502` / `504` | modello fallito / timeout |
 
 Il client non legge né propaga i body degli errori HTTP. `HermesBrain` espone solo codici stabili come
 `bridge_auth`, `bridge_timeout`, `bridge_network`, `bridge_http` e `bridge_protocol`.
+Un output CLI senza `@@META@@` o con metadati illeggibili è un errore upstream `502`, non una
+risposta compile `200`; i marker diagnostici di quota diventano `503` e vengono cacheati in modo
+idempotente senza includere stdout/stderr nella risposta.
 
 ## Android Local Network Protection
 

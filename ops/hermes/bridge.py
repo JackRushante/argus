@@ -36,6 +36,8 @@ MAX_REPLY_CHARS = 32_768
 MAX_MODEL_OUTPUT_CHARS = 256 * 1024
 MAX_CONCURRENT_MODEL_CALLS = 1
 SENTINEL = "@@META@@"
+PROVIDER_QUOTA_MARKERS = ("quota exhausted", "usage_limit_reached")
+MODEL_PROTOCOL_ERRORS = frozenset({"draft_missing", "meta_invalid"})
 
 HOME = Path.home()
 HERMES_PYTHON = HOME / ".hermes" / "hermes-agent" / "venv" / "bin" / "python"
@@ -129,6 +131,15 @@ def _exact_keys(value: dict[str, Any], required: set[str], optional: set[str] = 
 
 
 class RequestError(ValueError):
+    def __init__(self, status: int, code: str):
+        super().__init__(code)
+        self.status = status
+        self.code = code
+
+
+class ModelProcessError(RuntimeError):
+    """Errore upstream ridotto a metadati sicuri, senza propagare stdout/stderr."""
+
     def __init__(self, status: int, code: str):
         super().__init__(code)
         self.status = status
@@ -265,11 +276,18 @@ def run_gpt(prompt: str) -> str:
         cwd=HERMES_HOME,
         env=environment,
     )
-    if completed.returncode != 0:
-        raise RuntimeError(f"hermes_exit_{completed.returncode}")
     output = completed.stdout or ""
     if len(output) > MAX_MODEL_OUTPUT_CHARS:
-        raise RuntimeError("model_output_too_large")
+        raise ModelProcessError(502, "model_output_too_large")
+    structured_success = completed.returncode == 0 and SENTINEL in output
+    if not structured_success:
+        diagnostic = f"{output}\n{completed.stderr or ''}".lower()
+        if any(marker in diagnostic for marker in PROVIDER_QUOTA_MARKERS):
+            raise ModelProcessError(503, "provider_quota_exhausted")
+    if completed.returncode != 0:
+        raise ModelProcessError(502, "model_failure")
+    if not output.strip():
+        raise ModelProcessError(502, "model_empty_output")
     return output.strip()
 
 
@@ -508,6 +526,8 @@ class IdempotencyCache:
                 entry.result = producer()
             except subprocess.TimeoutExpired:
                 entry.result = (504, {"error": "model_timeout"})
+            except ModelProcessError as error:
+                entry.result = (error.status, {"error": error.code})
             except Exception:
                 entry.result = (502, {"error": "model_failure"})
             finally:
@@ -535,6 +555,8 @@ def compile_request(data: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         set(data["manifest"]["state_keys"]),
         {contact["id"] for contact in data["manifest"]["whitelisted_contacts"]},
     )
+    if error_code in MODEL_PROTOCOL_ERRORS:
+        raise ModelProcessError(502, "model_invalid_output")
     return 200, {
         "schema_version": SCHEMA_VERSION,
         "request_id": data["request_id"],

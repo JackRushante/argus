@@ -85,7 +85,7 @@ App lint/build verdi (resta solo `OldTargetApi`, H4).
 - [ ] Test Local Network Protection autorevole: enable compat flag → reboot → denial LAN;
   disable flag → reboot → baseline LAN positiva, con Hermes verde dopo il ripristino.
 
-Verifica H3 parziale: 17 test JVM `brain-android`, 8 test HTTP server e lint senza errori; servizio
+Verifica H3: 17 test JVM `brain-android`, 12 test HTTP server e lint senza errori; servizio
 `argus-bridge` su loopback dietro Tailscale Serve HTTPS; auth negativa `401`; compile live + replay
 idempotente; health e compile instrumented sul OnePlus API 36 (`OK (2 tests)`). Il probe
 pre-reboot ha osservato health HTTPS via Tailscale e denial LAN diretta, ma non viene contato come
@@ -151,6 +151,9 @@ Shizuku verde con `BLOCKED_POLICY/capability_unavailable`, zero mutazioni e ness
 Cleanup verificato: DND `off`, exact-alarm `default`, Shizuku nuovamente attivo.
 Lo smoke pulito ha inoltre trovato e corretto un drift binario Compose 1.7.6/1.8.2 che causava
 `NoSuchMethodError` sulla prima `FlowRow`; BOM allineato e regressione device verde.
+Il bridge è stato inoltre hardenizzato contro quota/provider output senza protocollo: `502/503`
+invece di falso `200`, 12/12 test server e health Android post-deploy verde. La quota Codex corrente
+è un vincolo operativo esterno; nessun fallback provider è stato scelto automaticamente.
 
 ## Decisioni Android 16
 
