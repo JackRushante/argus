@@ -166,9 +166,23 @@ class AndroidCapabilityProbeTest {
         assertTrue(CapabilityIds.TRIGGER_NOTIFICATION in snapshot.availableCapabilities)
         assertTrue(CapabilityIds.ACTION_INVOKE_LLM in snapshot.availableCapabilities)
         assertTrue(GenerativeContract.TOOL_WHATSAPP_REPLY in snapshot.availableCapabilities)
-        // La reply statica non ha ancora un executor: pubblicarla sarebbe advertising falso.
-        assertFalse(ActionCapabilities.WHATSAPP_REPLY in snapshot.availableCapabilities)
+        // La reply statica ha un executor reale via NotificationReplyGateway: segue il listener.
+        assertTrue(ActionCapabilities.WHATSAPP_REPLY in snapshot.availableCapabilities)
         assertTrue(GenerativeContract.TOOL_WHATSAPP_REPLY in probe.probe(DeviceState()).availableTools)
+    }
+
+    @Test
+    fun `static reply capability follows the listener grant`() = runTest {
+        val withoutListener = probe(
+            state().copy(
+                notificationListenerGranted = false,
+                batteryOptimizationExempt = true,
+            ),
+        ).current()
+        assertFalse(ActionCapabilities.WHATSAPP_REPLY in withoutListener.availableCapabilities)
+        assertFalse(
+            ActionCapabilities.WHATSAPP_REPLY in withoutListener.transientlyUnavailableCapabilities,
+        )
     }
 
     @Test

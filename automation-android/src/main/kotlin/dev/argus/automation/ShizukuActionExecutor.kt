@@ -1,5 +1,8 @@
 package dev.argus.automation
 
+import dev.argus.automation.notification.NotificationReplyDelivery
+import dev.argus.automation.notification.NotificationReplyGateway
+import dev.argus.automation.notification.NotificationReplyRequest
 import dev.argus.device.DeviceController
 import dev.argus.device.DeviceToolException
 import dev.argus.device.RingerMode
@@ -7,6 +10,7 @@ import dev.argus.engine.model.Action
 import dev.argus.engine.runtime.ActionExecutor
 import dev.argus.engine.runtime.ActionResult
 import dev.argus.engine.runtime.FireContext
+import dev.argus.engine.runtime.TriggerEvent
 import kotlinx.coroutines.CancellationException
 
 /** Boundary Android per le notifiche prodotte da una regola. */
@@ -26,6 +30,7 @@ class ShizukuActionExecutor(
     private val tools: DeviceController,
     private val notifier: AutomationNotifier,
     private val generativeLane: GenerativeLane,
+    private val replies: NotificationReplyGateway,
 ) : ActionExecutor {
     override suspend fun execute(action: Action, ctx: FireContext): ActionResult = try {
         when (action) {
@@ -46,12 +51,13 @@ class ShizukuActionExecutor(
             is Action.ShowNotification -> success {
                 notifier.show(action.title, action.text, ctx)
             }
-            // Le azioni UI e RemoteInput non appartengono al percorso P0-B: non eseguirle
-            // soltanto perché il gateway privilegiato sa materialmente inviare input.
+            // Le azioni UI non appartengono a questa fase: non eseguirle soltanto perché il
+            // gateway privilegiato sa materialmente inviare input.
             is Action.Tap,
             is Action.InputText,
-            is Action.WhatsAppReply,
             -> ActionResult.Failure("unsupported_phase")
+
+            is Action.WhatsAppReply -> staticReply(action, ctx)
 
             // Difesa in profondità oltre al FirePolicy: nessuna shell senza conferma live.
             is Action.RunShell -> ActionResult.Failure("live_confirmation_required")
@@ -70,6 +76,29 @@ class ShizukuActionExecutor(
         ActionResult.Failure("action_invalid")
     } catch (_: Exception) {
         ActionResult.Failure("action_failed")
+    }
+
+    /**
+     * Reply statica: testo approvato nello snapshot e destinatario congelato dal trigger
+     * verificato. Il gateway ripete package trusted, key/conversation/event esatti, 1:1 e
+     * consumo one-shot: gruppo, handle stale o canale scaduto restano fallimenti tipizzati.
+     */
+    private fun staticReply(action: Action.WhatsAppReply, ctx: FireContext): ActionResult {
+        val notification = ctx.event as? TriggerEvent.NotificationPosted
+            ?: return ActionResult.Failure("reply_event_unverified")
+        val delivery = replies.send(
+            NotificationReplyRequest(
+                packageName = notification.pkg,
+                notificationKey = notification.notificationKey.orEmpty(),
+                conversationId = notification.conversationId.orEmpty(),
+                eventId = ctx.eventId,
+                text = action.text,
+            ),
+        )
+        return when (delivery) {
+            NotificationReplyDelivery.Sent -> ActionResult.Success
+            is NotificationReplyDelivery.Failed -> ActionResult.Failure(delivery.code)
+        }
     }
 
     private suspend inline fun success(block: () -> Unit): ActionResult {

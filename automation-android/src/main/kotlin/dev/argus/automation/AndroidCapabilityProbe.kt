@@ -159,10 +159,11 @@ class AndroidCapabilityProbe internal constructor(
             if (listenerGranted) {
                 add(CapabilityIds.TRIGGER_NOTIFICATION)
                 add(GenerativeContract.TOOL_WHATSAPP_REPLY)
+                // La reply statica è eseguita da ShizukuActionExecutor via NotificationReplyGateway:
+                // stesso canale del tool raw, quindi stesso grant.
+                add(ActionCapabilities.WHATSAPP_REPLY)
             }
             if (generativeReady) add(CapabilityIds.ACTION_INVOKE_LLM)
-            // CapabilityIds.ACTION_WHATSAPP_REPLY resta assente finché l'executor statico
-            // non esiste: nessuna capability advertised senza implementation path.
         }
         val transient = if (shizukuTransient) SHIZUKU_CAPABILITIES + SHIZUKU_TOOLS else emptySet()
 

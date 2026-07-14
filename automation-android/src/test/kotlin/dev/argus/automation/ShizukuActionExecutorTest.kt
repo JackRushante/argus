@@ -1,5 +1,8 @@
 package dev.argus.automation
 
+import dev.argus.automation.notification.NotificationReplyDelivery
+import dev.argus.automation.notification.NotificationReplyGateway
+import dev.argus.automation.notification.NotificationReplyRequest
 import dev.argus.device.DeviceController
 import dev.argus.device.DeviceToolException
 import dev.argus.device.RingerMode
@@ -41,6 +44,7 @@ class ShizukuActionExecutorTest {
                 notifications += Triple(title, text, fireContext.executionId)
             },
             generativeLane = GenerativeLane { _, _ -> true },
+            replies = RecordingReplyGateway(NotificationReplyDelivery.Sent),
         )
 
         val actions = listOf(
@@ -109,7 +113,6 @@ class ShizukuActionExecutorTest {
         listOf(
             Action.Tap(10, 20),
             Action.InputText("ciao"),
-            Action.WhatsAppReply("ciao"),
         ).forEach { action ->
             assertEquals(
                 ActionResult.Failure("unsupported_phase"),
@@ -121,6 +124,69 @@ class ShizukuActionExecutorTest {
             executor.execute(Action.RunShell("id"), context),
         )
         assertEquals(emptyList(), tools.calls)
+    }
+
+    @Test
+    fun `static whatsapp reply sends only the approved text to the trigger target`() = runTest {
+        val gateway = RecordingReplyGateway(NotificationReplyDelivery.Sent)
+        val notification = TriggerEvent.NotificationPosted(
+            pkg = "com.whatsapp",
+            conversationId = "shortcut:com.whatsapp:hash",
+            sender = "Moglie",
+            text = "arrivo tardi",
+            isGroup = false,
+            notificationKey = "sbn:wa:7",
+        )
+        val replyContext = context.copy(event = notification)
+        val executor = executor(replies = gateway)
+
+        assertEquals(
+            ActionResult.Success,
+            executor.execute(Action.WhatsAppReply("ok, a dopo"), replyContext),
+        )
+
+        val request = gateway.requests.single()
+        assertEquals("com.whatsapp", request.packageName)
+        assertEquals("sbn:wa:7", request.notificationKey)
+        assertEquals("shortcut:com.whatsapp:hash", request.conversationId)
+        assertEquals(replyContext.eventId, request.eventId)
+        assertEquals("ok, a dopo", request.text)
+    }
+
+    @Test
+    fun `static whatsapp reply without a verified notification event fails closed`() = runTest {
+        val gateway = RecordingReplyGateway(NotificationReplyDelivery.Sent)
+        val timeContext = context.copy(
+            event = TriggerEvent.TimeFired(
+                context.automationId,
+                context.approvalFingerprint,
+            ),
+        )
+
+        assertEquals(
+            ActionResult.Failure("reply_event_unverified"),
+            executor(replies = gateway).execute(Action.WhatsAppReply("ciao"), timeContext),
+        )
+        assertEquals(emptyList(), gateway.requests)
+    }
+
+    @Test
+    fun `static whatsapp reply surfaces typed gateway failures`() = runTest {
+        val notification = TriggerEvent.NotificationPosted(
+            pkg = "com.whatsapp",
+            conversationId = "shortcut:com.whatsapp:hash",
+            isGroup = false,
+            notificationKey = "sbn:wa:7",
+        )
+        val replyContext = context.copy(event = notification)
+
+        for (code in listOf("reply_channel_unavailable", "channel_expired")) {
+            val gateway = RecordingReplyGateway(NotificationReplyDelivery.Failed(code))
+            assertEquals(
+                ActionResult.Failure(code),
+                executor(replies = gateway).execute(Action.WhatsAppReply("ciao"), replyContext),
+            )
+        }
     }
 
     @Test
@@ -158,11 +224,26 @@ class ShizukuActionExecutorTest {
     private fun executor(
         tools: DeviceController = RecordingDeviceController(),
         lane: GenerativeLane = GenerativeLane { _, _ -> false },
+        replies: NotificationReplyGateway = RecordingReplyGateway(
+            NotificationReplyDelivery.Failed("reply_channel_unavailable"),
+        ),
     ) = ShizukuActionExecutor(
         tools = tools,
         notifier = AutomationNotifier { _, _, _ -> },
         generativeLane = lane,
+        replies = replies,
     )
+
+    private class RecordingReplyGateway(
+        private val delivery: NotificationReplyDelivery,
+    ) : NotificationReplyGateway {
+        val requests = mutableListOf<NotificationReplyRequest>()
+
+        override fun send(request: NotificationReplyRequest): NotificationReplyDelivery {
+            requests += request
+            return delivery
+        }
+    }
 }
 
 private class RecordingDeviceController : DeviceController {

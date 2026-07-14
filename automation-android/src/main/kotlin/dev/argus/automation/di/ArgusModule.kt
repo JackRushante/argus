@@ -332,7 +332,8 @@ object ArgusModule {
         tools: DeviceController,
         notifier: AutomationNotifier,
         generativeLane: GenerativeLane,
-    ): ShizukuActionExecutor = ShizukuActionExecutor(tools, notifier, generativeLane)
+        replies: NotificationReplyGateway,
+    ): ShizukuActionExecutor = ShizukuActionExecutor(tools, notifier, generativeLane, replies)
 
     @Provides
     fun actionExecutorBoundary(executor: ShizukuActionExecutor): ActionExecutor = executor
