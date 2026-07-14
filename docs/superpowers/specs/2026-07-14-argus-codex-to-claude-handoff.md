@@ -55,7 +55,7 @@ stato incoerente. P1-4 è invece chiusa su un commit atomico, testato e pushato.
 | --- | --- | --- |
 | P0-B runtime Android | Codice e gate principali verdi | Produzione Hermes→compile→review→arm→AlarmManager→Shizuku→DND→journal passata su OnePlus |
 | P0-B process death / outage | Provato su device | Ricreazione processo e Shizuku outage fail-closed passati |
-| P0-B reboot + Android 16 LNP | **Gate esterno aperto** | Richiede Lorenzo presente perché il reboot può spegnere `adbd :5555` |
+| P0-B reboot + Android 16 LNP | **CHIUSO (Claude+Lorenzo, 2026-07-14 sera)** | Tutti e 4 i punti §5.3 verdi: `verify` OK (boot 35→36, registrazione ricreata da BOOT, DND intatto), fail-closed con Shizuku giù (`OK (2 tests)`), LNP flag attivo → LAN negata + Hermes/Tailscale ok dall'app (46 ms), reset+secondo boot → baseline LAN ripristinata; dettagli §20 |
 | P1-0 journal asincrono | Completo | Commit `72b69e4` + correzione mixed outcome `0690723` |
 | P1-1 `/act` Android/Hermes | Completo e deployato | Commit `ce96c4c`, test server/JVM/device e smoke live |
 | P1-2 parser notifiche | Completo | Commit `bb26927`, Room v8 e migrazioni device |
@@ -935,3 +935,36 @@ servizi.
 3. **P1-8**: full gate senza cache, clean install, smoke sei schermi, riconciliazione dei tre
    Markdown concorrenti, aggiornamento spec/bridge contract/audit, review, merge (solo con
    tutti i gate verdi).
+
+## 20. Gate reboot P0-B — CHIUSO (Claude + Lorenzo, 2026-07-14 sera)
+
+Sessione live con Lorenzo fisicamente al telefono, protocollo §5.3/§12 seguito integralmente.
+
+1. **Recovery time alarm (§5.3.1)**: `schedule` OK (regola sentinella EXACT a +2h, marker
+   verificati), riavvio fisico (boot 35→36), Shizuku riattivato via starter nativo
+   (`libshizuku.so` dall'APK dir — lo `start.sh` classico non esiste su questo device),
+   `verify` OK: registrazione AlarmManager ricreata da BOOT_COMPLETED (`updatedAtMillis`
+   avanzato, stesso fingerprint/eventAt, EXACT), processo ricreato, regola mai scattata,
+   DND invariato, cleanup completo.
+2. **Degradato fail-closed (§5.3.2)**: con Shizuku giù post-boot,
+   `AndroidCapabilityProbeInstrumentedTest` → `OK (2 tests)` (manifest coerente, niente
+   capability Shizuku pubblicate, listener/battery fail-closed).
+3. **LNP Android 16 (§5.3.3)**: flag `RESTRICT_LOCAL_NETWORK` abilitato PRIMA del riavvio;
+   post-boot con Tailscale sospeso il nuovo `LocalNetworkProbeInstrumentedTest`
+   (socket dalla SocketFactory della Network Wi-Fi, endpoint 192.168.0.1:80) → **denied**
+   pulito; con Tailscale riattivato e flag ancora attivo, health dall'app → **Hermes
+   raggiungibile, 46 ms**. Nota: la prima esecuzione del probe è fallita per
+   `ACCESS_NETWORK_STATE` mancante nel manifest (ora aggiunta, permission normal).
+4. **Ripristino (§5.3.4)**: `am compat reset` non basta a runtime (le regole di rete
+   per-UID restano fino al riavvio, come il contratto bridge prevedeva) → secondo riavvio →
+   baseline **allowed** (17 ms). Flag pulito (`dumpsys platform_compat`: nessun override per
+   `dev.argus`; resta un vecchio override innocuo `dev.argus.brain.test=false` di P0-B).
+
+Stato device a fine gate: Shizuku attivo, `SCHEDULE_EXACT_ALARM: default`, `zen_mode=0`,
+ADB ripristinato su `:5555`, onboarding produzione COMPLETATO da Lorenzo (privacy, bearer
+Hermes configurato — trasferito via pipe ssh→stdin→file one-shot sul device, mai in
+chat/command line, file poi cancellato — listener access e battery exemption concessi con le
+CTA nuove P1-6). Commit tooling: `2ca4a10`.
+
+**Il blocker principale del merge è caduto.** Restano per il merge: P1-7 reale
+(caratterizzazione WhatsApp + Esempio 3 live, in corso nella stessa serata) e P1-8.
