@@ -77,6 +77,9 @@ interface ChatCallbacks {
     fun onInputChange(text: String); fun onSend(); fun onCancelPending()
     fun onOpenDraft(draftId: String)   // push al Dettaglio §6.3
     fun onRetry()
+    // Menu overflow dell'header (prima era solo decorativo: feedback Lorenzo 2026-07-14).
+    fun onClearConversation()
+    fun onCheckConnection()
 }
 
 // --- 6.2 Automazioni · lista ---

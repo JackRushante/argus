@@ -504,24 +504,36 @@ private fun maskConversationId(id: String): String {
 
 @Composable
 private fun BudgetSection(budget: BudgetUi) {
-    val used = budget.usedThisHourLabel.trim().substringBefore(' ').toIntOrNull()
-    val fraction = if (budget.maxCallsPerHour > 0 && used != null) {
-        (used.toFloat() / budget.maxCallsPerHour).coerceIn(0f, 1f)
-    } else {
-        0f
-    }
     SettingsSection("BUDGET LLM") {
         SectionCard {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Chiamate al cervello", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
-                Text(budget.usedThisHourLabel, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace)
+            // Con maxCallsPerHour <= 0 nessun contatore orario è attivo: la label è una FRASE
+            // descrittiva e va resa come testo normale a piena larghezza (il layout contatore
+            // la sillabava in una colonna illeggibile — feedback Lorenzo 2026-07-14).
+            if (budget.maxCallsPerHour <= 0) {
+                Text("Chiamate al cervello", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge)
+                Text(
+                    budget.usedThisHourLabel,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            } else {
+                val used = budget.usedThisHourLabel.trim().substringBefore(' ').toIntOrNull()
+                val fraction = if (used != null) {
+                    (used.toFloat() / budget.maxCallsPerHour).coerceIn(0f, 1f)
+                } else {
+                    0f
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Chiamate al cervello", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+                    Text(budget.usedThisHourLabel, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace)
+                }
+                LinearProgressIndicator(
+                    progress = { fraction },
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.background,
+                )
             }
-            LinearProgressIndicator(
-                progress = { fraction },
-                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)),
-                color = MaterialTheme.colorScheme.primary,
-                trackColor = MaterialTheme.colorScheme.background,
-            )
         }
     }
 }

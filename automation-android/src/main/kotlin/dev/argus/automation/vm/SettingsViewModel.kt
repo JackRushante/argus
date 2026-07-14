@@ -165,7 +165,9 @@ class SettingsViewModel @Inject constructor(
             observedCandidates = values.observedCandidates,
             budget = BudgetUi(
                 maxCallsPerHour = 0,
-                usedThisHourLabel = "cooldown 60 s per regola · budget globale in P3",
+                usedThisHourLabel = "Ogni regola con risposta AI può scattare al massimo " +
+                    "una volta ogni 60 secondi. Un limite orario complessivo di chiamate " +
+                    "arriverà in una versione futura.",
             ),
             privacyAccepted = values.privacyAccepted,
             appVersionLabel = appVersionLabel(),
@@ -341,7 +343,12 @@ class SettingsViewModel @Inject constructor(
             notificationListenerGranted = health.notificationListenerGranted,
             backgroundLocation = health.backgroundLocationState(false),
             whitelist = emptyList(),
-            budget = BudgetUi(0, "cooldown 60 s per regola · budget globale in P3"),
+            budget = BudgetUi(
+                0,
+                "Ogni regola con risposta AI può scattare al massimo una volta ogni " +
+                    "60 secondi. Un limite orario complessivo di chiamate arriverà in " +
+                    "una versione futura.",
+            ),
             privacyAccepted = false,
             appVersionLabel = appVersionLabel(),
         )

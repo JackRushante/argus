@@ -167,6 +167,18 @@ class ChatViewModel @Inject constructor(
         checkHealth()
     }
 
+    /** Svuota messaggi e avvisi; le proposte in sospeso restano (sono il canale di approvazione). */
+    fun onClearConversation() {
+        if (state.value.sending) onCancelPending()
+        lastPrompt = null
+        mutableState.update { current ->
+            current.copy(
+                items = current.items.filterIsInstance<ChatItem.DraftCard>(),
+                error = null,
+            )
+        }
+    }
+
     fun onCancelPending() {
         if (!state.value.sending) return
         requestGeneration += 1

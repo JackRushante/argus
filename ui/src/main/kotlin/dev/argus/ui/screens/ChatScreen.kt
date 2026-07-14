@@ -33,8 +33,11 @@ import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Pending
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -52,6 +55,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
@@ -84,11 +88,15 @@ import dev.argus.ui.theme.RolePair
 // Stateless: solo (state, callbacks). L'overflow in header è nav host-owned.
 // =============================================================================
 
-/** I 3 esempi della spec (verbatim dal prototipo approvato §1a). */
+/**
+ * Esempi cliccabili dell'empty state. Rivisti su feedback di Lorenzo (2026-07-14): niente
+ * riferimenti personali e SOLO regole armabili con le capability correnti (trigger time o
+ * notification — il geofence del prototipo §1a torna quando P2 ne abilita la registrazione).
+ */
 private val ChatSuggestions = listOf(
-    "Crea un geofence sulla mia posizione attuale ±50 m: quando esco disattiva il Wi-Fi e attiva il Bluetooth.",
+    "Ogni giorno alle 8 togli il Non disturbare e alza la suoneria.",
     "Dopo le 23 controlla la suoneria e metti Non disturbare.",
-    "Se Moglie manda un WhatsApp in questa fascia oraria, rispondile tu nel tono X.",
+    "Se un contatto in whitelist scrive su WhatsApp tra le 9 e le 18, rispondi tu che sono occupato.",
 )
 
 @Composable
@@ -102,7 +110,10 @@ fun ChatScreen(
 
     Surface(color = MaterialTheme.colorScheme.background, modifier = modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            ChatHeader()
+            ChatHeader(
+                onClearConversation = callbacks::onClearConversation,
+                onCheckConnection = callbacks::onCheckConnection,
+            )
 
             // Zona messaggi (o empty state coi suggerimenti).
             Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -154,7 +165,11 @@ fun ChatScreen(
 // -----------------------------------------------------------------------------
 
 @Composable
-private fun ChatHeader() {
+private fun ChatHeader(
+    onClearConversation: () -> Unit,
+    onCheckConnection: () -> Unit,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -169,9 +184,26 @@ private fun ChatHeader() {
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
-        // Overflow visivo: menu di competenza dell'host (nessun callback nel contratto §6.1).
-        Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-            Icon(Icons.Rounded.MoreVert, contentDescription = "Altro", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(24.dp))
+        Box {
+            IconButton(onClick = { menuOpen = true }, modifier = Modifier.testTag("chat_overflow")) {
+                Icon(Icons.Rounded.MoreVert, contentDescription = "Altro", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(24.dp))
+            }
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenuItem(
+                    text = { Text("Svuota conversazione") },
+                    onClick = {
+                        menuOpen = false
+                        onClearConversation()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("Verifica connessione Hermes") },
+                    onClick = {
+                        menuOpen = false
+                        onCheckConnection()
+                    },
+                )
+            }
         }
     }
 }
@@ -543,6 +575,8 @@ private object NoopChatCallbacks : ChatCallbacks {
     override fun onCancelPending() {}
     override fun onOpenDraft(draftId: String) {}
     override fun onRetry() {}
+    override fun onClearConversation() {}
+    override fun onCheckConnection() {}
 }
 
 @Preview(name = "Chat · conversazione + DraftCard", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)

@@ -317,6 +317,8 @@ fun ArgusNavHost() {
                             navController.navigate(Routes.detail(draftId))
                         }
                         override fun onRetry() = chatViewModel.onRetry()
+                        override fun onClearConversation() = chatViewModel.onClearConversation()
+                        override fun onCheckConnection() = chatViewModel.refreshHealth()
                     },
                     modifier = Modifier.testTag("screen_chat"),
                 )
