@@ -33,6 +33,10 @@ class RoomObservedConversationStore(
         )
     }
 
+    override suspend fun clear() {
+        dao.clear()
+    }
+
     private fun validateLimit(limit: Int) {
         require(limit in 1..MAXIMUM_ROWS) { "limit conversazioni fuori intervallo" }
     }

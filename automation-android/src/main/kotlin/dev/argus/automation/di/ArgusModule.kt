@@ -23,8 +23,10 @@ import dev.argus.automation.ConfiguredBridgeBrain
 import dev.argus.automation.CoordinatorTimeAlarmRuntime
 import dev.argus.automation.CurrentLocationProvider
 import dev.argus.automation.DeferredReplyCipher
+import dev.argus.automation.DeferredReplyManager
 import dev.argus.automation.DeferredReplySink
 import dev.argus.automation.PersistentDeferredReplySink
+import dev.argus.automation.PrivacyRevocationCoordinator
 import dev.argus.automation.DeviceStateSnapshotProvider
 import dev.argus.automation.EngineNotificationEventDispatcher
 import dev.argus.automation.EngineTimeEventDispatcher
@@ -310,8 +312,35 @@ object ArgusModule {
 
     @Provides
     @Singleton
-    fun deferredReplySink(store: DeferredReplyStore): DeferredReplySink =
-        PersistentDeferredReplySink(store, DeferredReplyCipher.withKeystoreKey())
+    fun deferredReplyCipher(): DeferredReplyCipher = DeferredReplyCipher.withKeystoreKey()
+
+    @Provides
+    @Singleton
+    fun deferredReplySink(
+        store: DeferredReplyStore,
+        cipher: DeferredReplyCipher,
+    ): DeferredReplySink = PersistentDeferredReplySink(store, cipher)
+
+    @Provides
+    @Singleton
+    fun deferredReplyManager(
+        store: DeferredReplyStore,
+        cipher: DeferredReplyCipher,
+    ): DeferredReplyManager = DeferredReplyManager(store, cipher)
+
+    @Provides
+    @Singleton
+    fun privacyRevocationCoordinator(
+        preferences: AppPreferencesStore,
+        replyRegistry: ActiveNotificationReplyRegistry,
+        conversations: ObservedConversationStore,
+        deferredReplies: DeferredReplyStore,
+    ): PrivacyRevocationCoordinator = PrivacyRevocationCoordinator(
+        preferences,
+        replyRegistry,
+        conversations,
+        deferredReplies,
+    )
 
     @Provides
     @Singleton

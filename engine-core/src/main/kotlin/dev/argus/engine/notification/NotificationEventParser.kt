@@ -57,6 +57,8 @@ interface ObservedConversationStore {
     suspend fun recent(limit: Int = 200): List<ObservedConversation>
     fun observeRecent(limit: Int = 200): Flow<List<ObservedConversation>>
     suspend fun record(conversation: ObservedConversation)
+    /** Cancellazione integrale dei metadati osservati: usata dalla revoca del consenso. */
+    suspend fun clear()
 }
 
 data class ParsedNotification(

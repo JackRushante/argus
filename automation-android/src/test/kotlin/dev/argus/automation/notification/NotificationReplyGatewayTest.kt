@@ -317,6 +317,10 @@ class NotificationReplyGatewayTest {
         override suspend fun record(conversation: ObservedConversation) {
             values.value = listOf(conversation)
         }
+
+        override suspend fun clear() {
+            values.value = emptyList()
+        }
     }
 
     private companion object {

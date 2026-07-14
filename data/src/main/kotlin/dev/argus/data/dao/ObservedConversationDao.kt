@@ -47,6 +47,9 @@ interface ObservedConversationDao {
     )
     suspend fun trim(maximumRows: Int): Int
 
+    @Query("DELETE FROM observed_conversations")
+    suspend fun clear(): Int
+
     @Transaction
     suspend fun record(conversation: ObservedConversationEntity, maximumRows: Int) {
         if (insertIfAbsent(conversation) == -1L) {

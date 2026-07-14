@@ -9,6 +9,8 @@ import dev.argus.automation.AndroidCapabilityProbe
 import dev.argus.automation.AppPreferencesStore
 import dev.argus.automation.BridgeHealthResult
 import dev.argus.automation.ConfiguredBridgeBrain
+import dev.argus.automation.PrivacyRevocationCoordinator
+import dev.argus.automation.PrivacyRevocationResult
 import dev.argus.brain.BridgeConfigurationStore
 import dev.argus.engine.brain.ContactWhitelistStore
 import dev.argus.engine.brain.WhitelistedContact
@@ -55,6 +57,7 @@ class SettingsViewModel @Inject constructor(
     private val brain: ConfiguredBridgeBrain,
     private val whitelist: ContactWhitelistStore,
     private val preferences: AppPreferencesStore,
+    private val privacyRevocation: PrivacyRevocationCoordinator,
     automations: AutomationStore,
     drafts: DraftRepository,
     private val shizuku: ShizukuGateway,
@@ -230,8 +233,15 @@ class SettingsViewModel @Inject constructor(
     fun revokePrivacy() {
         viewModelScope.launch {
             try {
-                if (!preferences.setPrivacyAccepted(false)) {
-                    message("Impossibile revocare il consenso privacy.")
+                when (privacyRevocation.revoke()) {
+                    PrivacyRevocationResult.Revoked -> message(
+                        "Consenso revocato: conversazioni osservate e risposte differite eliminate.",
+                    )
+                    PrivacyRevocationResult.RevokedWithResidualData -> message(
+                        "Consenso revocato, ma alcuni dati locali non sono stati eliminati: riprova.",
+                    )
+                    PrivacyRevocationResult.Failed ->
+                        message("Impossibile revocare il consenso privacy.")
                 }
             } catch (error: CancellationException) {
                 throw error
