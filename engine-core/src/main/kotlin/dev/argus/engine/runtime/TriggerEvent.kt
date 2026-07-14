@@ -38,6 +38,12 @@ sealed interface TriggerEvent {
          *  al momento della reply (P1). Senza, WhatsAppReply non è eseguibile. */
         val notificationKey: String? = null,
     ) : TriggerEvent
-    data class PhoneStateChanged(val event: PhoneEvent, val number: String?) : TriggerEvent
+    data class PhoneStateChanged(
+        val event: PhoneEvent,
+        val number: String?,
+        /** Testo SMS VOLATILE: vive in RAM per la durata del dispatch (serve all'azione
+         *  clipboard P2-3). MAI persistito, MAI loggato, MAI in chiaro nell'event id. */
+        val smsText: String? = null,
+    ) : TriggerEvent
     data class ConnectivityChanged(val medium: ConnMedium, val state: ConnState, val name: String?) : TriggerEvent
 }
