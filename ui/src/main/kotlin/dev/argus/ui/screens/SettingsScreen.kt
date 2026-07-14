@@ -193,7 +193,7 @@ private fun HealthSection(state: SettingsState, callbacks: SettingsCallbacks) {
         BgLocationState.GRANTED -> HealthLevel.OK to "sempre — i geofence sono affidabili"
         BgLocationState.WHILE_IN_USE -> HealthLevel.WARN to "solo mentre in uso — serve «Consenti sempre» per i geofence"
         BgLocationState.DENIED -> HealthLevel.WARN to "negata — i geofence non funzionano"
-        BgLocationState.NOT_NEEDED -> HealthLevel.NEUTRAL to "non necessaria — nessuna regola geofence"
+        BgLocationState.NOT_NEEDED -> HealthLevel.NEUTRAL to "non necessaria — nessuna regola geofence; tocca per concederla in anticipo"
     }
 
     SettingsSection("SALUTE") {
@@ -276,6 +276,9 @@ private fun HealthRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
+            // Tutta la riga è tappabile, in QUALSIASI stato: apre il pannello/permesso
+            // relativo (feedback Lorenzo: le righe verdi/grigie erano mute al tocco).
+            .clickable { onFix() }
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .background(tintBg)
             .border(1.dp, borderColor, RoundedCornerShape(12.dp))
