@@ -64,7 +64,7 @@ stato incoerente. P1-4 è invece chiusa su un commit atomico, testato e pushato.
 | E13 deferred durabile | **Implementato (Claude, P1-6)** | Store cifrato Keystore + CTA "Invia ora" reale; defer-eligible = `channel_expired` **e** `reply_channel_unavailable`; TTL 24h e purge |
 | P1-5 capability/arm/bootstrap | **Completa (Claude 2026-07-14)** | Commit `e266fd9`+`b7c25e7`+`8c857fd`+`9a84c3b`+`b5d9578`; gate host verde (114+45+90 test, lint 0 err, APK) e gate device OK (2 test instrumented su CPH2747); dettagli §18 |
 | P1-6 settings/whitelist/deferred UI | **Completa (Claude 2026-07-14)** | Commit `7d91fb4`+`262310a`+`1ec7b2b`+`e0dba9c`; E13 cifrato+azionabile, coordinator revoca, picker whitelist, CTA reali; Room v9 migrata sul device (`OK (8 tests)`); dettagli §19 |
-| P1-7 E2E WhatsApp | Da fare con Lorenzo | Caratterizzazione reale e test positivi/negativi |
+| P1-7 E2E WhatsApp | **Sintetico completato (Claude)**; reale da fare con Lorenzo | Commit `81750f2`: pipeline reale host (3 scenari, mutation-checked) + instrumented sul OnePlus `OK (1 test)`; restano caratterizzazione WhatsApp vera, Esempio 3 live e negativi on-device |
 | P1-8 chiusura | Da fare | Full gate, documentazione, review e merge solo dopo i gate esterni |
 
 Non dichiarare P0-B o P1 “completi” finché i rispettivi residui non sono verdi.
@@ -922,11 +922,16 @@ servizi.
 
 ### 19.5 Prossimi passi esatti (per chi riprende)
 
-1. **P1-7 sintetico** (fattibile senza Lorenzo): E2E con notifica di test controllata →
-   parser → arm → lane → Hermes `/act` (o fake) → RemoteInput receiver locale → journal.
-   I mattoni esistono già tutti (`NotificationReplyGatewayInstrumentedTest` è il riferimento
-   per il receiver sintetico).
-2. **P1-7 reale + gate reboot P0-B**: unica sessione con Lorenzo (§5.3 e §11 P1-7).
+1. ~~**P1-7 sintetico**~~ → **FATTO (`81750f2`)**: `GenerativeEndToEndTest` (host Robolectric,
+   componenti di produzione reali, tre scenari: happy path con journal convergente e duplicate
+   soppresso, notifica rimossa durante la generazione → `DEFERRED` cifrato, gruppo → zero
+   fire; mutation check sul wiring) + `GenerativeEndToEndInstrumentedTest` eseguito sul
+   OnePlus (`OK (1 test)`, RemoteInput consegnato davvero dal sistema, Brain locale, nessun
+   grant modificato, package di test rimosso). Fixato anche un flake reale in
+   `ExecutionLogViewModelTest` (cancel+join del viewModelScope prima di `resetMain`).
+2. **P1-7 reale + gate reboot P0-B**: unica sessione con Lorenzo (§5.3 e §11 P1-7) —
+   caratterizzazione WhatsApp vera (1:1 + gruppo, stabilità identità), Esempio 3 live con
+   contatto whitelistato via picker, negativi on-device, misure Doze.
 3. **P1-8**: full gate senza cache, clean install, smoke sei schermi, riconciliazione dei tre
    Markdown concorrenti, aggiornamento spec/bridge contract/audit, review, merge (solo con
    tutti i gate verdi).
