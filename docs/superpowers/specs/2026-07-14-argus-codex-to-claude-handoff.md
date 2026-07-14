@@ -64,8 +64,8 @@ stato incoerente. P1-4 è invece chiusa su un commit atomico, testato e pushato.
 | E13 deferred durabile | **Implementato (Claude, P1-6)** | Store cifrato Keystore + CTA "Invia ora" reale; defer-eligible = `channel_expired` **e** `reply_channel_unavailable`; TTL 24h e purge |
 | P1-5 capability/arm/bootstrap | **Completa (Claude 2026-07-14)** | Commit `e266fd9`+`b7c25e7`+`8c857fd`+`9a84c3b`+`b5d9578`; gate host verde (114+45+90 test, lint 0 err, APK) e gate device OK (2 test instrumented su CPH2747); dettagli §18 |
 | P1-6 settings/whitelist/deferred UI | **Completa (Claude 2026-07-14)** | Commit `7d91fb4`+`262310a`+`1ec7b2b`+`e0dba9c`; E13 cifrato+azionabile, coordinator revoca, picker whitelist, CTA reali; Room v9 migrata sul device (`OK (8 tests)`); dettagli §19 |
-| P1-7 E2E WhatsApp | **Sintetico completato (Claude)**; reale da fare con Lorenzo | Commit `81750f2`: pipeline reale host (3 scenari, mutation-checked) + instrumented sul OnePlus `OK (1 test)`; restano caratterizzazione WhatsApp vera, Esempio 3 live e negativi on-device |
-| P1-8 chiusura | Da fare | Full gate, documentazione, review e merge solo dopo i gate esterni |
+| P1-7 E2E WhatsApp | **COMPLETA (Claude+Lorenzo, 2026-07-14 sera)** | Sintetico `81750f2`; reale: Esempio 3 live VERDE (8,5 s e2e, act 7,4 s), gruppo/cooldown verificati sul campo, 4 bug reali fixati (`a34b6d6`, `b445761`, bridge REGOLA 9); residui minori non bloccanti (Doze, verifica eco live) — dettagli §21 |
+| P1-8 chiusura | **In corso (Claude, questa sessione)** | Fix UX nomi whitelistati `758f5e9`; restano full gate no-cache, smoke sei schermi, doc/audit, riconciliazione Markdown, review e merge |
 
 Non dichiarare P0-B o P1 “completi” finché i rispettivi residui non sono verdi.
 
@@ -113,6 +113,22 @@ Commit della ripresa Claude (P1-5, 2026-07-14 pomeriggio), tutti pushati:
       per-rule, altri trigger fail-closed.
 15. `b5d9578 test(automation): gate probe capabilities on real device grants`
     - Gate device P1-5 su OnePlus reale: listener/battery fail-closed, `OK (2 tests)`.
+
+Commit della ripresa Claude serale (P1-6 → P1-7 reale → P1-8), tutti pushati:
+
+16. `7d91fb4`+`262310a`+`1ec7b2b`+`e0dba9c` — P1-6 (E13 cifrato, coordinator revoca, settings
+    e picker whitelist, retention observed); dettagli §19.
+17. `81750f2 test(automation): prove the generative pipeline end to end` — P1-7 sintetico.
+18. `4b1151a docs(argus): record synthetic P1-7 completion in the handoff`
+19. `2ca4a10 test(app): add LNP wifi probe and network state permission` — tooling gate reboot.
+20. `df15f94 docs(argus): close the P0-B reboot and LNP gate in the handoff`
+21. `a34b6d6 fix(notification): survive real WhatsApp metadata and advertise invoke_llm`
+    - caratterizzazione reale: key opaca con newline accettata, `invoke_llm` pubblicato con
+      readiness, log ingress privacy-safe, REGOLA 9 bridge (isGroup esplicito), fix IME NavHost.
+22. `b445761 fix(notification): never fire on reply echoes and key events by message time`
+    - anti-eco strutturale: skip self-authored + eventId sul message timestamp.
+23. `758f5e9 feat(ui): review shows trusted whitelist names instead of conversation hashes`
+    - P1-8: review/lista/dettaglio mostrano il nome whitelistato fidato al posto dell'hash.
 
 Commit P0-B immediatamente precedenti utili per il contesto:
 
@@ -968,3 +984,71 @@ CTA nuove P1-6). Commit tooling: `2ca4a10`.
 
 **Il blocker principale del merge è caduto.** Restano per il merge: P1-7 reale
 (caratterizzazione WhatsApp + Esempio 3 live, in corso nella stessa serata) e P1-8.
+
+## 21. P1-7 reale — COMPLETATA (Claude + Lorenzo, 2026-07-14 sera)
+
+Stessa sessione live del §20, subito dopo la chiusura del gate reboot. Lorenzo al telefono,
+contatto reale "Ottica Marci" (secondo numero suo) whitelistato via picker P1-6.
+**Esempio 3 della spec è passato dal vivo**, e la caratterizzazione ha scovato quattro bug
+reali, tutti fixati in TDD nella stessa serata.
+
+### 21.1 Esempio 3 live — VERDE
+
+Regola compilata da Hermes in linguaggio naturale ("rispondi tu a Ottica Marci tra le 9-13 /
+16-20..."), armata da Lorenzo dalla review, messaggio WhatsApp vero in fascia oraria:
+
+- risposta generativa consegnata su WhatsApp in **8 520 ms end-to-end** (journal SUCCEEDED,
+  CAS one-shot); lato bridge `act ... elapsed_ms=7398` su gpt-5.5; compile precedente 12 272 ms;
+- nessun testo/target/token nei log Android né nell'audit (verificato durante la sessione);
+- negativo gruppo: stesso contatto whitelistato dentro un gruppo nuovo → conversazione
+  osservata con `isGroup=1`, **zero FIRED** (fail-closed strutturale confermato dal vivo);
+- cooldown 60 s osservato sul campo (vedi eco sotto: il secondo evento è stato soppresso).
+
+### 21.2 Quattro bug reali trovati dalla caratterizzazione (tutti fixati)
+
+1. **Tag WhatsApp = Base64 con newline finale** → la notification key conteneva un control
+   char e il parser la rifiutava: nessuna conversazione osservata, picker vuoto. Fix
+   (`a34b6d6`): la key è un identificatore opaco DI SISTEMA — accettata intatta (solo
+   blank/length), il `conversationId` resta severo; test di caratterizzazione con la key
+   reale. Nel debug sono stati aggiunti log ingress privacy-safe (`ArgusIngress`, solo
+   package + booleani).
+2. **`invoke_llm` assente da `manifest.availableTools`** → Hermes (regola 1 del prompt: usa
+   SOLO i tool elencati) ripiegava su una `whatsapp_reply` statica: "Draft con risposta
+   fissa". Fix (`a34b6d6`): la probe pubblica `invoke_llm` quando il runtime generativo è
+   pronto (bearer+privacy+battery), in `unavailableTools` con motivo altrimenti.
+3. **Hermes lasciava `isGroup=null` sul trigger** → arm bloccato ("reply solo su chat 1:1
+   verificata"). Fix (`a34b6d6`, `ops/hermes/bridge.py` REGOLA 9): reply WhatsApp richiedono
+   `conversationId` whitelistato E `isGroup=false` ESPLICITO; deploy atomico su hermes
+   (backup `bridge.py.pre-isgroup-rule-20260714`, 15/15 test, unit restartata).
+4. **Eco della reply = "doppio arm sul singolo messaggio"** (scoperto da Lorenzo): ~8,5 s
+   dopo l'invio WhatsApp ripubblica la notifica con la NOSTRA risposta come ultimo messaggio;
+   per il vecchio eventId (postTime nel digest) era un evento nuovo — solo il cooldown ha
+   evitato il fire (un loop senza cooldown sarebbe stato possibile). Fix strutturale
+   (`b445761`), doppio: (a) update con ultimo messaggio self-authored
+   (`latestMessageFromSelf`, sender null o match con `EXTRA_MESSAGING_PERSON`) → MAI un
+   evento; (b) eventId keyed sul **timestamp del messaggio** MessagingStyle
+   (`latestMessageTimestampMillis ?: postedAtMillis`), title fuori dal digest → i repost
+   cosmetici ("2 nuovi messaggi") diventano `SUPPRESSED_DUPLICATE` onesti. Mutation check
+   eseguito. Chiude la riga DoD "duplicate event fail-closed" senza dipendere dal cooldown.
+
+### 21.3 Fix UX della stessa sessione
+
+- **Campo chat coperto dalla tastiera** (segnalato da Lorenzo, target 36 edge-to-edge):
+  `padding(innerPadding) + consumeWindowInsets + imePadding` sul NavHost (`a34b6d6`).
+- **Hash nella review** ("sta sbobba di numeri", promesso a Lorenzo, consegnato in P1-8):
+  `RuleRenderMapper` accetta una mappa conversationId→displayName risolta da
+  `ContactWhitelistStore` (store fidato, mai prosa LLM) e la review/lista/dettaglio mostrano
+  "da **Ottica Marci** (identità verificata, chat 1:1)"; senza label l'hash resta integrale.
+  Fedele per costruzione: il `TriggerMatcher` dà al conversationId precedenza esclusiva sul
+  sender. Commit `758f5e9`.
+
+### 21.4 Residui P1-7 (minori, non bloccanti per il merge)
+
+- **Misura Doze/schermo spento**: non eseguita formalmente (telefono in uso tutta la
+  sessione). La battery exemption è attiva; la misura si completa da sola alla prima
+  risposta con schermo spento da tempo — Lorenzo la osserva nell'uso quotidiano.
+- **Verifica live del fix anti-eco** (`b445761` installato sul device a fine sessione,
+  listener ribound): al prossimo messaggio reale l'eco NON deve produrre alcun evento
+  (né FIRED né SUPPRESSED_COOLDOWN spurio). Attesa dall'uso normale.
+- La regola "Rispondi a Ottica Marci quando occupato" è rimasta ARMATA sul telefono per
+  scelta di Lorenzo (funziona; risponderà nelle fasce orarie configurate).
