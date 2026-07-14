@@ -161,6 +161,8 @@ class SettingsViewModel @Inject constructor(
             notificationsGranted = health.notificationsGranted,
             notificationListenerGranted = health.notificationListenerGranted,
             backgroundLocation = health.backgroundLocationState(values.geofenceNeeded),
+            smsTriggerGranted = health.receiveSmsGranted,
+            callTriggerGranted = health.readPhoneStateGranted,
             whitelist = values.contacts.map { ContactRow(it.displayName, it.id) },
             observedCandidates = values.observedCandidates,
             budget = BudgetUi(

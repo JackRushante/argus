@@ -17,6 +17,8 @@ internal data class AndroidUiHealth(
     val notificationsGranted: Boolean,
     val foregroundLocationGranted: Boolean,
     val backgroundLocationGranted: Boolean,
+    val receiveSmsGranted: Boolean = false,
+    val readPhoneStateGranted: Boolean = false,
 )
 
 internal fun readAndroidUiHealth(context: Context): AndroidUiHealth {
@@ -41,6 +43,8 @@ internal fun readAndroidUiHealth(context: Context): AndroidUiHealth {
         foregroundLocationGranted = granted(Manifest.permission.ACCESS_FINE_LOCATION) ||
             granted(Manifest.permission.ACCESS_COARSE_LOCATION),
         backgroundLocationGranted = granted(Manifest.permission.ACCESS_BACKGROUND_LOCATION),
+        receiveSmsGranted = granted(Manifest.permission.RECEIVE_SMS),
+        readPhoneStateGranted = granted(Manifest.permission.READ_PHONE_STATE),
     )
 }
 

@@ -25,8 +25,10 @@ import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Hub
+import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material.icons.rounded.MyLocation
 import androidx.compose.material.icons.rounded.Notifications
+import androidx.compose.material.icons.rounded.Sms
 import androidx.compose.material.icons.rounded.PrivacyTip
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Terminal
@@ -226,6 +228,28 @@ private fun HealthSection(state: SettingsState, callbacks: SettingsCallbacks) {
             HealthRow(
                 Icons.Rounded.MyLocation, "Posizione in background", locSub, locLevel,
                 onFix = callbacks::onOpenLocationFix,
+            )
+            // Telefonia (P2-2): opt-in, non un problema di salute — NEUTRAL finché non
+            // concesso, il tap lancia direttamente la richiesta runtime.
+            HealthRow(
+                Icons.Rounded.Sms, "Trigger SMS",
+                if (state.smsTriggerGranted) {
+                    "attivi — le regole sugli SMS in arrivo sono armabili"
+                } else {
+                    "non attivi — tocca per consentire le regole sugli SMS in arrivo"
+                },
+                if (state.smsTriggerGranted) HealthLevel.OK else HealthLevel.NEUTRAL,
+                onFix = callbacks::onRequestSmsPermission,
+            )
+            HealthRow(
+                Icons.Rounded.Call, "Trigger chiamate",
+                if (state.callTriggerGranted) {
+                    "attivi — squillo e fine chiamata armabili"
+                } else {
+                    "non attivi — tocca per consentire le regole sulle chiamate"
+                },
+                if (state.callTriggerGranted) HealthLevel.OK else HealthLevel.NEUTRAL,
+                onFix = callbacks::onRequestCallPermissions,
             )
         }
     }
