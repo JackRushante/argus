@@ -165,10 +165,15 @@ merge.
 
 1. ~~Autorizzare Shizuku ed eseguire E2E Hermes/DND/journal con duplicate delivery.~~ Fatto.
 2. ~~Eseguire E2E bifase con morte processo reale e outage Shizuku.~~ Fatto.
-3. Reboot: verificare boot recovery/degraded Shizuku, denial LNP dopo compat+reboot, baseline LAN
-   dopo disable+reboot e Hermes/Tailscale dopo il ripristino.
+3. ~~Reboot: verificare boot recovery/degraded Shizuku, denial LNP dopo compat+reboot, baseline LAN
+   dopo disable+reboot e Hermes/Tailscale dopo il ripristino.~~ **Fatto (2026-07-14 sera, con
+   Lorenzo)**: tutti e 4 i punti verdi — recovery AlarmManager post-boot, degraded fail-closed,
+   LNP denial con flag attivo + Hermes/Tailscale ok (46 ms), baseline LAN dopo secondo boot
+   (17 ms). Dettagli: handoff §20.
 4. ~~Installazione pulita e smoke dei sei schermi.~~ Fatto sulla `0.1.0`, `OK (4)`.
 5. ~~Full gate finale.~~ Fatto: 750 task eseguiti, 243/243 test e zero errori lint.
-6. Ripetere il compile live post-clean-install quando la quota Hermes si rinnova o viene scelto un
-   fallback; il path di indisponibilità `503` è già verificato e fail-closed.
+6. ~~Ripetere il compile live post-clean-install quando la quota Hermes si rinnova o viene scelto
+   un fallback; il path di indisponibilità `503` è già verificato e fail-closed.~~ **Fatto
+   (2026-07-14 sera)**: quota gpt-5.5 rinnovata, compile live 12,3 s + `/act` 7,4 s durante
+   l'Esempio 3 reale di P1-7 (handoff §21); nessun fallback provider introdotto.
 7. Aggiornamento ledger, commit/push, review e merge no-ff su `master` dopo il gate reboot.

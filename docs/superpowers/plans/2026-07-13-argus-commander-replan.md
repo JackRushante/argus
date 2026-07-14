@@ -143,8 +143,10 @@ gateway è `AUTHORIZED` e gli E2E H7 privilegiati sono passati.
   dettaglio (`OK (4)`).
 - [x] Full test/lint/build conclusivo: 750 task forzati senza cache, 243/243 test e zero errori
   lint; APK main/androidTest prodotti e hashati.
-- [ ] Ripetere il compile reale post-clean-install quando il provider Hermes torna disponibile;
+- [x] Ripetere il compile reale post-clean-install quando il provider Hermes torna disponibile;
   l'attuale quota è esposta correttamente come `503` e non produce draft o mutazioni.
+  **Fatto (2026-07-14 sera)**: quota rinnovata, compile live 12,3 s + `/act` 7,4 s
+  nell'Esempio 3 reale di P1-7 (handoff §21).
 - [ ] Aggiornare spec/ledger, push backup, review finale e merge no-ff su master.
 
 Verifica H7 parziale 2026-07-14: E2E produzione Hermes/DND `OK (1)`, process-death bifase

@@ -111,6 +111,18 @@ Il client accetta il draft soltanto se:
 La decodifica non equivale all'approvazione: `DraftValidator`, fingerprint, conferma utente e
 revalidazione al fire-time restano obbligatori.
 
+### Regole del prompt di compilazione (server)
+
+Il prompt di sistema in `bridge.py` vincola il modello, tra l'altro, a: usare SOLO i tool di
+`available_tools` (regola 1 — un tool assente equivale a non esistente, quindi il probe Android
+deve pubblicare `invoke_llm` quando il runtime generativo è pronto); e — **REGOLA 9, aggiunta
+il 2026-07-14 dopo la caratterizzazione reale** — per le reply WhatsApp il trigger deve avere
+`conversationId` scelto tra i `whitelisted_contacts` e `isGroup=false` ESPLICITO (mai null);
+le risposte generate usano il profilo `invoke_llm` P1 esatto, mentre `whatsapp_reply` statica è
+riservata a testi dettati letteralmente dall'utente. Il draft resta comunque soggetto al
+`DraftValidator` locale: la regola serve a produrre draft armabili al primo colpo, non a
+sostituire i controlli.
+
 ## `POST /act`
 
 `/act` è il confine one-shot P1 per generare il solo testo di una reply. Usa gli stessi header,
