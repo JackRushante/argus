@@ -10,6 +10,8 @@ import dev.argus.automation.AndroidAppPreferencesStore
 import dev.argus.automation.AndroidAutomationNotifier
 import dev.argus.automation.AndroidCapabilityProbe
 import dev.argus.automation.AndroidGenerativeLane
+import dev.argus.automation.AndroidGenerativeRuntimeReadiness
+import dev.argus.automation.GenerativeRuntimeReadiness
 import dev.argus.automation.AndroidTimeAlarmBackend
 import dev.argus.automation.AppPreferencesStore
 import dev.argus.automation.ApprovalFlow
@@ -231,11 +233,19 @@ object ArgusModule {
 
     @Provides
     @Singleton
+    fun generativeRuntimeReadiness(
+        configuration: BridgeConfigurationStore,
+        preferences: AppPreferencesStore,
+    ): GenerativeRuntimeReadiness = AndroidGenerativeRuntimeReadiness(configuration, preferences)
+
+    @Provides
+    @Singleton
     fun capabilityProbe(
         @ApplicationContext context: Context,
         gateway: ShizukuGateway,
         whitelist: ContactWhitelistStore,
-    ): AndroidCapabilityProbe = AndroidCapabilityProbe(context, gateway, whitelist)
+        readiness: GenerativeRuntimeReadiness,
+    ): AndroidCapabilityProbe = AndroidCapabilityProbe(context, gateway, whitelist, readiness)
 
     @Provides
     fun capabilityProbeBoundary(probe: AndroidCapabilityProbe): CapabilityProbe = probe
@@ -376,6 +386,7 @@ object ArgusModule {
         registry: ActiveNotificationReplyRegistry,
         conversations: ObservedConversationStore,
         dispatcher: NotificationEventDispatcher,
+        preferences: AppPreferencesStore,
     ): NotificationIngress = NotificationIngress(
         snapshots,
         parser,
@@ -383,6 +394,7 @@ object ArgusModule {
         registry,
         conversations,
         dispatcher,
+        privacyAccepted = { preferences.observe().value.privacyAccepted },
     )
 
     @Provides
@@ -464,11 +476,15 @@ object ArgusModule {
         capabilities: dev.argus.automation.CapabilityReconciler,
         maintenance: RoomJournalMaintenance,
         shizuku: ShizukuGateway,
+        preferences: AppPreferencesStore,
+        replyRegistry: ActiveNotificationReplyRegistry,
     ): ArgusRuntimeController = ArgusRuntimeController(
         scope,
         scheduler,
         capabilities,
         maintenance,
-        shizuku,
+        shizuku.observeStatus(),
+        preferences,
+        replyRegistry,
     )
 }

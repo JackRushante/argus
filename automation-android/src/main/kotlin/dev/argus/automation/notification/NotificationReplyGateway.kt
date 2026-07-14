@@ -84,6 +84,9 @@ class NotificationReplyHandleFactory {
         parsed: ParsedNotification,
     ): NotificationReplyHandle? {
         val event = parsed.envelope.event as? TriggerEvent.NotificationPosted ?: return null
+        // I trigger Notification generici non hanno bisogno di un canale di reply: conservare
+        // handle RemoteInput solo per i package che il gateway potrà davvero usare.
+        if (event.pkg !in DraftValidator.WHATSAPP_PACKAGES) return null
         val key = event.notificationKey?.takeIf(String::isNotBlank) ?: return null
         val conversationId = event.conversationId?.takeIf(String::isNotBlank) ?: return null
         val candidate = notification.actions.orEmpty().asSequence().filterNotNull().mapNotNull { action ->

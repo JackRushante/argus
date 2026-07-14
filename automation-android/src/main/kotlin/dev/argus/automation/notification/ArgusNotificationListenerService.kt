@@ -8,6 +8,7 @@ import dev.argus.automation.di.ApplicationScope
 import dev.argus.engine.notification.NotificationEventParser
 import dev.argus.engine.notification.ObservedConversationStore
 import dev.argus.engine.notification.ParsedNotification
+import dev.argus.engine.safety.DraftValidator
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -21,8 +22,14 @@ class NotificationIngress(
     private val registry: ActiveNotificationReplyRegistry,
     private val observedConversations: ObservedConversationStore,
     private val dispatcher: NotificationEventDispatcher,
+    /** Gate sincrono sul consenso: letto da StateFlow.value, mai con I/O sul callback thread. */
+    private val privacyAccepted: () -> Boolean,
 ) {
     fun registerPosted(notification: StatusBarNotification): ParsedNotification? {
+        if (!privacyAccepted()) {
+            registry.remove(notification.key)
+            return null
+        }
         val parsed = parse(notification)
         if (parsed == null) {
             registry.remove(notification.key)
@@ -40,6 +47,7 @@ class NotificationIngress(
     /** Ricostruisce soltanto i canali attivi: nessun evento preesistente viene ridispatchato. */
     fun rehydrate(activeNotifications: Iterable<StatusBarNotification>) {
         registry.clear()
+        if (!privacyAccepted()) return
         activeNotifications.forEach { notification ->
             val parsed = parse(notification) ?: return@forEach
             handleFactory.from(notification.notification, parsed)?.let(registry::replace)
@@ -55,15 +63,19 @@ class NotificationIngress(
     }
 
     suspend fun persistAndDispatch(parsed: ParsedNotification) {
-        parsed.observedConversation?.let { conversation ->
-            try {
-                observedConversations.record(conversation)
-            } catch (error: CancellationException) {
-                throw error
-            } catch (_: Exception) {
-                // Il picker è best-effort: un errore locale non deve perdere il trigger.
+        // Ricontrollo del gate: la revoca può avvenire tra il callback main thread e questa coroutine.
+        if (!privacyAccepted()) return
+        parsed.observedConversation
+            ?.takeIf { it.packageName in DraftValidator.WHATSAPP_PACKAGES }
+            ?.let { conversation ->
+                try {
+                    observedConversations.record(conversation)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (_: Exception) {
+                    // Il picker è best-effort: un errore locale non deve perdere il trigger.
+                }
             }
-        }
         dispatcher.dispatch(parsed.envelope)
     }
 

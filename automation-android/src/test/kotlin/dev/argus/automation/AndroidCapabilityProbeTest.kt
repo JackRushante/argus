@@ -12,6 +12,7 @@ import dev.argus.engine.model.ApprovalFingerprints
 import dev.argus.engine.model.CapabilityIds
 import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.DndMode
+import dev.argus.engine.model.GenerativeContract
 import dev.argus.engine.model.StateKeys
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.ActionCapabilities
@@ -97,6 +98,133 @@ class AndroidCapabilityProbeTest {
     }
 
     @Test
+    fun `missing listener grant keeps notification trigger and raw reply unavailable with exact reason`() = runTest {
+        val probe = probe(
+            state().copy(
+                notificationsGranted = true,
+                notificationListenerGranted = false,
+                batteryOptimizationExempt = true,
+            ),
+        )
+
+        val snapshot = probe.current()
+        assertFalse(CapabilityIds.TRIGGER_NOTIFICATION in snapshot.availableCapabilities)
+        assertFalse(GenerativeContract.TOOL_WHATSAPP_REPLY in snapshot.availableCapabilities)
+        assertFalse(CapabilityIds.TRIGGER_NOTIFICATION in snapshot.transientlyUnavailableCapabilities)
+        // Il runtime generativo è pronto: solo il canale notification/reply resta strutturalmente giù.
+        assertTrue(CapabilityIds.ACTION_INVOKE_LLM in snapshot.availableCapabilities)
+
+        val manifest = probe.probe(DeviceState())
+        assertFalse(GenerativeContract.TOOL_WHATSAPP_REPLY in manifest.availableTools)
+        assertEquals(
+            AndroidCapabilityProbe.REASON_NOTIFICATION_LISTENER,
+            manifest.unavailableTools[GenerativeContract.TOOL_WHATSAPP_REPLY],
+        )
+    }
+
+    @Test
+    fun `listener grant without generative readiness keeps invoke_llm unavailable`() = runTest {
+        for (
+        notReady in listOf(
+            GenerativeReadiness(bridgeConfigured = false, privacyAccepted = true),
+            GenerativeReadiness(bridgeConfigured = true, privacyAccepted = false),
+        )
+        ) {
+            val snapshot = probe(
+                state().copy(
+                    notificationListenerGranted = true,
+                    batteryOptimizationExempt = true,
+                ),
+                readiness = notReady,
+            ).current()
+            assertTrue(CapabilityIds.TRIGGER_NOTIFICATION in snapshot.availableCapabilities)
+            assertTrue(GenerativeContract.TOOL_WHATSAPP_REPLY in snapshot.availableCapabilities)
+            assertFalse(CapabilityIds.ACTION_INVOKE_LLM in snapshot.availableCapabilities)
+            assertFalse(CapabilityIds.ACTION_INVOKE_LLM in snapshot.transientlyUnavailableCapabilities)
+        }
+
+        val withoutBattery = probe(
+            state().copy(
+                notificationListenerGranted = true,
+                batteryOptimizationExempt = false,
+            ),
+        ).current()
+        assertFalse(CapabilityIds.ACTION_INVOKE_LLM in withoutBattery.availableCapabilities)
+    }
+
+    @Test
+    fun `ready generative runtime publishes trigger raw reply and invoke_llm`() = runTest {
+        val probe = probe(
+            state().copy(
+                notificationsGranted = true,
+                notificationListenerGranted = true,
+                batteryOptimizationExempt = true,
+            ),
+        )
+
+        val snapshot = probe.current()
+        assertTrue(CapabilityIds.TRIGGER_NOTIFICATION in snapshot.availableCapabilities)
+        assertTrue(CapabilityIds.ACTION_INVOKE_LLM in snapshot.availableCapabilities)
+        assertTrue(GenerativeContract.TOOL_WHATSAPP_REPLY in snapshot.availableCapabilities)
+        // La reply statica non ha ancora un executor: pubblicarla sarebbe advertising falso.
+        assertFalse(ActionCapabilities.WHATSAPP_REPLY in snapshot.availableCapabilities)
+        assertTrue(GenerativeContract.TOOL_WHATSAPP_REPLY in probe.probe(DeviceState()).availableTools)
+    }
+
+    @Test
+    fun `shizuku raw tools stay aligned between manifest and policy snapshot`() = runTest {
+        val authorized = probe(state()).current()
+        AndroidCapabilityProbe.SHIZUKU_TOOLS.forEach { tool ->
+            assertTrue(tool in authorized.availableCapabilities, "manca $tool")
+        }
+
+        val stopped = probe(
+            state().copy(
+                shizukuStatus = ShizukuGatewayStatus.INSTALLED_NOT_RUNNING,
+                shizukuPermissionGranted = true,
+            ),
+        ).current()
+        AndroidCapabilityProbe.SHIZUKU_TOOLS.forEach { tool ->
+            assertFalse(tool in stopped.availableCapabilities)
+            assertTrue(tool in stopped.transientlyUnavailableCapabilities, "manca transiente $tool")
+        }
+    }
+
+    @Test
+    fun `reconciler quarantines generative rule on privacy or listener revocation`() = runTest {
+        val rule = generativeRule("generative")
+        val contacts = listOf(WhitelistedContact("Moglie", CONVERSATION_ID))
+        val readyState = state().copy(
+            notificationListenerGranted = true,
+            batteryOptimizationExempt = true,
+        )
+
+        val healthyStore = ReconcileAutomationStore(rule)
+        val healthy = CapabilityReconciler(healthyStore, probe(readyState, contacts)).reconcile()
+        assertEquals(emptyList(), healthy.needsReview)
+        assertEquals(AutomationStatus.ARMED, healthyStore.get(rule.id)?.status)
+
+        val privacyRevokedStore = ReconcileAutomationStore(rule)
+        val privacyRevoked = CapabilityReconciler(
+            privacyRevokedStore,
+            probe(
+                readyState,
+                contacts,
+                readiness = GenerativeReadiness(bridgeConfigured = true, privacyAccepted = false),
+            ),
+        ).reconcile()
+        assertEquals(listOf(rule.id), privacyRevoked.needsReview)
+        assertEquals(AutomationStatus.NEEDS_REVIEW, privacyRevokedStore.get(rule.id)?.status)
+
+        val listenerRevokedStore = ReconcileAutomationStore(rule)
+        val listenerRevoked = CapabilityReconciler(
+            listenerRevokedStore,
+            probe(readyState.copy(notificationListenerGranted = false), contacts),
+        ).reconcile()
+        assertEquals(listOf(rule.id), listenerRevoked.needsReview)
+    }
+
+    @Test
     fun `reconciler quarantines revocation but preserves temporary outage`() = runTest {
         val rule = signedRule("dnd")
         val revokedStore = ReconcileAutomationStore(rule)
@@ -143,7 +271,15 @@ class AndroidCapabilityProbeTest {
     private fun probe(
         state: AndroidCapabilityState,
         contacts: List<WhitelistedContact> = emptyList(),
-    ) = AndroidCapabilityProbe(AndroidCapabilityStateSource { state }, FakeWhitelist(contacts))
+        readiness: GenerativeReadiness = GenerativeReadiness(
+            bridgeConfigured = true,
+            privacyAccepted = true,
+        ),
+    ) = AndroidCapabilityProbe(
+        AndroidCapabilityStateSource { state },
+        FakeWhitelist(contacts),
+        GenerativeRuntimeReadiness { readiness },
+    )
 
     private fun state() = AndroidCapabilityState(
         deviceModel = "CPH2747",
@@ -170,8 +306,35 @@ class AndroidCapabilityProbeTest {
         ),
     )
 
+    private fun generativeRule(id: String): Automation = sign(
+        Automation(
+            id = AutomationId(id),
+            name = id,
+            createdBy = CreatedBy.USER,
+            status = AutomationStatus.ARMED,
+            trigger = Trigger.Notification(
+                pkg = "com.whatsapp",
+                conversationId = CONVERSATION_ID,
+                isGroup = false,
+            ),
+            actions = listOf(
+                Action.InvokeLlm(
+                    goal = "rispondi",
+                    contextSources = listOf("notification"),
+                    allowedTools = listOf("whatsapp_reply"),
+                    replyTargetSender = true,
+                ),
+            ),
+            cooldownMs = 60_000,
+        ),
+    )
+
     private fun sign(value: Automation): Automation =
         value.copy(approvalFingerprint = ApprovalFingerprints.of(value))
+
+    private companion object {
+        const val CONVERSATION_ID = "shortcut:com.whatsapp:hash"
+    }
 }
 
 private class FakeWhitelist(initial: List<WhitelistedContact>) : ContactWhitelistStore {

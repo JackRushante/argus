@@ -18,6 +18,7 @@ import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.ActionTypeIds
 import dev.argus.engine.model.CapabilityIds
 import dev.argus.engine.model.CapabilityRequirements
+import dev.argus.engine.model.GenerativeContract
 import dev.argus.engine.model.StateKeys
 import dev.argus.engine.runtime.ActionCapabilities
 import dev.argus.engine.runtime.AutomationStore
@@ -100,12 +101,14 @@ private data class ResolvedCapabilities(
 class AndroidCapabilityProbe internal constructor(
     private val source: AndroidCapabilityStateSource,
     private val whitelist: ContactWhitelistStore,
+    private val readiness: GenerativeRuntimeReadiness,
 ) : CapabilityProbe, FirePolicySnapshotProvider {
     constructor(
         context: Context,
         shizuku: ShizukuGateway,
         whitelist: ContactWhitelistStore,
-    ) : this(SystemAndroidCapabilityStateSource(context, shizuku), whitelist)
+        readiness: GenerativeRuntimeReadiness,
+    ) : this(SystemAndroidCapabilityStateSource(context, shizuku), whitelist, readiness)
 
     override suspend fun probe(currentState: DeviceState): CapabilityManifest {
         val resolved = resolve()
@@ -135,16 +138,33 @@ class AndroidCapabilityProbe internal constructor(
     private suspend fun resolve(): ResolvedCapabilities {
         val state = source.read()
         val contacts = whitelist.all()
+        val generative = readiness.current()
         val shizukuAvailable = state.shizukuStatus == ShizukuGatewayStatus.AUTHORIZED
         val shizukuTransient = state.shizukuStatus == ShizukuGatewayStatus.INSTALLED_NOT_RUNNING &&
             state.shizukuPermissionGranted
+        val listenerGranted = state.notificationListenerGranted
+        // Requisiti runtime della lane generativa oltre al canale notification/reply.
+        val generativeReady = generative.bridgeConfigured && generative.privacyAccepted &&
+            state.batteryOptimizationExempt
 
         val available = buildSet {
             add(CapabilityIds.TRIGGER_TIME)
             if (state.notificationsGranted) add(ActionCapabilities.SHOW_NOTIFICATION)
-            if (shizukuAvailable) addAll(SHIZUKU_CAPABILITIES)
+            // CapabilityRequirements persiste anche i raw tool approvati: il set del fire-time
+            // deve contenere gli stessi nomi wire, senza alias con le capability typed.
+            if (shizukuAvailable) {
+                addAll(SHIZUKU_CAPABILITIES)
+                addAll(SHIZUKU_TOOLS)
+            }
+            if (listenerGranted) {
+                add(CapabilityIds.TRIGGER_NOTIFICATION)
+                add(GenerativeContract.TOOL_WHATSAPP_REPLY)
+            }
+            if (generativeReady) add(CapabilityIds.ACTION_INVOKE_LLM)
+            // CapabilityIds.ACTION_WHATSAPP_REPLY resta assente finché l'executor statico
+            // non esiste: nessuna capability advertised senza implementation path.
         }
-        val transient = if (shizukuTransient) SHIZUKU_CAPABILITIES else emptySet()
+        val transient = if (shizukuTransient) SHIZUKU_CAPABILITIES + SHIZUKU_TOOLS else emptySet()
 
         val availableTools = buildList {
             if (shizukuAvailable) {
@@ -155,6 +175,7 @@ class AndroidCapabilityProbe internal constructor(
                 add(ActionTypeIds.SHOW_NOTIFICATION)
                 add(TOOL_NOTIFY_SHOW)
             }
+            if (listenerGranted) add(GenerativeContract.TOOL_WHATSAPP_REPLY)
         }.sorted()
         val unavailableTools = linkedMapOf<String, String>()
         if (!shizukuAvailable) {
@@ -165,6 +186,9 @@ class AndroidCapabilityProbe internal constructor(
         if (!state.notificationsGranted) {
             unavailableTools[ActionTypeIds.SHOW_NOTIFICATION] = "permesso notifiche mancante"
             unavailableTools[TOOL_NOTIFY_SHOW] = "permesso notifiche mancante"
+        }
+        if (!listenerGranted) {
+            unavailableTools[GenerativeContract.TOOL_WHATSAPP_REPLY] = REASON_NOTIFICATION_LISTENER
         }
         PHASE_UNAVAILABLE_TOOLS.forEach { (tool, reason) -> unavailableTools[tool] = reason }
 
@@ -196,6 +220,7 @@ class AndroidCapabilityProbe internal constructor(
     }
 
     internal companion object {
+        const val REASON_NOTIFICATION_LISTENER = "accesso alle notifiche non concesso"
         const val TOOL_STATE_READ = "state.read"
         const val TOOL_SCREEN_CAPTURE = "screen.capture"
         const val TOOL_SCREEN_DUMP_UI = "screen.dump_ui"
@@ -219,17 +244,16 @@ class AndroidCapabilityProbe internal constructor(
             ActionTypeIds.OPEN_URL,
         )
         val PHASE_UNAVAILABLE_TOOLS = linkedMapOf(
-            "screen.tap" to "azione UI fuori fase P0-B",
-            "screen.swipe" to "azione UI fuori fase P0-B",
-            "screen.type" to "azione UI fuori fase P0-B",
+            "screen.tap" to "azione UI non disponibile in questa fase",
+            "screen.swipe" to "azione UI non disponibile in questa fase",
+            "screen.type" to "azione UI non disponibile in questa fase",
             "app.install" to "installazione app non implementata",
             "shell.run" to "conferma live non implementata",
-            "whatsapp_reply" to "disponibile da P1",
             "web.search" to "provider non configurato",
             "vision.analyze" to "provider multimodale non configurato",
         )
         val KNOWN_TOOLS: Set<String> = SHIZUKU_TOOLS + TOOL_NOTIFY_SHOW +
-            PHASE_UNAVAILABLE_TOOLS.keys
+            GenerativeContract.TOOL_WHATSAPP_REPLY + PHASE_UNAVAILABLE_TOOLS.keys
         val SHIZUKU_CAPABILITIES: Set<String> = buildSet {
             add(ActionCapabilities.SET_WIFI)
             add(ActionCapabilities.SET_BLUETOOTH)

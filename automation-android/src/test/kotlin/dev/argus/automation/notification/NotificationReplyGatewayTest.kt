@@ -124,6 +124,7 @@ class NotificationReplyGatewayTest {
             registry = registry,
             observedConversations = conversations,
             dispatcher = NotificationEventDispatcher { dispatched += it.id.value },
+            privacyAccepted = { true },
         )
         val notification = statusBarNotification(pendingIntent())
 
@@ -174,9 +175,70 @@ class NotificationReplyGatewayTest {
         assertEquals(0, registry.size())
     }
 
+    @Test
+    fun `privacy gate blocks handles observed rows and dispatch`() = runTest {
+        val registry = ActiveNotificationReplyRegistry()
+        val conversations = FakeObservedConversationStore()
+        val dispatched = mutableListOf<String>()
+        var privacy = false
+        val ingress = NotificationIngress(
+            snapshotFactory = AndroidNotificationSnapshotFactory(),
+            parser = NotificationEventParser(),
+            handleFactory = NotificationReplyHandleFactory(),
+            registry = registry,
+            observedConversations = conversations,
+            dispatcher = NotificationEventDispatcher { dispatched += it.id.value },
+            privacyAccepted = { privacy },
+        )
+        val notification = statusBarNotification(pendingIntent())
+
+        assertEquals(null, ingress.registerPosted(notification))
+        assertEquals(0, registry.size())
+
+        ingress.rehydrate(listOf(notification))
+        assertEquals(0, registry.size())
+
+        // La revoca può avvenire tra il callback main thread e la coroutine di dispatch.
+        privacy = true
+        val parsed = assertNotNull(ingress.registerPosted(notification))
+        assertEquals(1, registry.size())
+        privacy = false
+        ingress.persistAndDispatch(parsed)
+        assertEquals(0, conversations.values.value.size)
+        assertEquals(emptyList(), dispatched)
+    }
+
+    @Test
+    fun `non whatsapp packages dispatch generic events without reply handles or picker rows`() = runTest {
+        val registry = ActiveNotificationReplyRegistry()
+        val conversations = FakeObservedConversationStore()
+        val dispatched = mutableListOf<String>()
+        val ingress = NotificationIngress(
+            snapshotFactory = AndroidNotificationSnapshotFactory(),
+            parser = NotificationEventParser(),
+            handleFactory = NotificationReplyHandleFactory(),
+            registry = registry,
+            observedConversations = conversations,
+            dispatcher = NotificationEventDispatcher { dispatched += it.id.value },
+            privacyAccepted = { true },
+        )
+        val notification = statusBarNotification(pendingIntent(), packageName = "com.example.chat")
+
+        val parsed = assertNotNull(ingress.registerPosted(notification))
+        assertEquals(0, registry.size(), "handle RemoteInput solo per package WhatsApp trusted")
+
+        ingress.persistAndDispatch(parsed)
+        assertEquals(0, conversations.values.value.size, "il picker P1 osserva solo WhatsApp")
+        assertEquals(listOf(parsed.envelope.id.value), dispatched)
+
+        ingress.rehydrate(listOf(notification))
+        assertEquals(0, registry.size())
+    }
+
     private fun statusBarNotification(
         replyIntent: PendingIntent,
         message: String = "messaggio",
+        packageName: String = "com.whatsapp",
     ): StatusBarNotification {
         val sender = Person.Builder().setName("Moglie").setUri("tel:+39000").build()
         val notification = Notification.Builder(context, "test")
@@ -196,8 +258,8 @@ class NotificationReplyGatewayTest {
             .build()
             .also { it.extras.putBoolean(Notification.EXTRA_IS_GROUP_CONVERSATION, false) }
         return StatusBarNotification(
-            "com.whatsapp",
-            "com.whatsapp",
+            packageName,
+            packageName,
             42,
             "tag",
             Process.myUid(),
