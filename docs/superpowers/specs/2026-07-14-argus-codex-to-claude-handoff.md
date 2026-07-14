@@ -1049,6 +1049,35 @@ Regola compilata da Hermes in linguaggio naturale ("rispondi tu a Ottica Marci t
   risposta con schermo spento da tempo — Lorenzo la osserva nell'uso quotidiano.
 - **Verifica live del fix anti-eco** (`b445761` installato sul device a fine sessione,
   listener ribound): al prossimo messaggio reale l'eco NON deve produrre alcun evento
-  (né FIRED né SUPPRESSED_COOLDOWN spurio). Attesa dall'uso normale.
+  (né FIRED né SUPPRESSED_COOLDOWN spurio). Attesa dall'uso normale. Primo indizio
+  positivo già visto: al rehydrate del listener le notifiche in shade (inclusa quella con
+  la reply come ultimo messaggio) vengono scartate dal parser senza generare eventi.
 - La regola "Rispondi a Ottica Marci quando occupato" è rimasta ARMATA sul telefono per
   scelta di Lorenzo (funziona; risponderà nelle fasce orarie configurate).
+
+## 22. P1-8 — CHIUSA (Claude + Lorenzo, 2026-07-14)
+
+1. **Fix UX nomi whitelistati** (`758f5e9`, TDD): vedi §21.3.
+2. **Full gate senza cache**: `clean` + test degli 8 moduli + lint (automation-android e
+   app) + `assembleDebug`, `--no-build-cache`: **BUILD SUCCESSFUL in 1m49s, 344 task
+   eseguiti, 331 test verdi** (engine-core 117, automation-android 111, data 49,
+   brain-android 21, device-tools 11, core-shizuku 10, ui 9, app 3), lint 0 errori.
+3. **Riconciliazione dei tre Markdown concorrenti**: erano modifiche Codex della sessione
+   P0-B (rerun post-clean-install fermato dalla quota provider, caveat UID/grant Shizuku).
+   Preservate verbatim in `e359b4b`; residui chiusi in `d3c93a7` (le condizioni audit 3 e 6
+   sono soddisfatte dai fatti della serata: gate reboot §20 e compile live §21).
+4. **Doc aggiornata** (`d3c93a7`): audit (condizioni 3+6 ✓), `CLAUDE.md` (P0-B gate tutti
+   chiusi + stato P1), bridge contract (regole prompt server, REGOLA 9), replan checkbox.
+5. **Smoke sul device di produzione** (APK del full gate, install `-r` SENZA wipe del setup
+   di Lorenzo): cold start 338 ms senza crash; navigazione read-only via ADB con screenshot
+   verificati di Chat, Automazioni (card con "da Ottica Marci (identità verificata,
+   chat 1:1)" — fix UX live), Dettaglio (badge cloud, privacy note, condizioni orarie,
+   goal generativo), Log (Esempio 3 FIRED 1/1 + eco storica soppressa dal cooldown),
+   Sistema (salute tutta verde, due righe notifiche distinte, token protetto configurato).
+   L'onboarding (sesto schermo) è stato eseguito DAL VIVO da Lorenzo in questa stessa
+   serata (privacy → bearer → listener → battery). **Nota per chi riprende**:
+   `ArgusNavigationInstrumentedTest` NON va lanciato su questo device configurato — il suo
+   tearDown resetta privacy/onboarding (pensato per install pulite da laboratorio).
+6. **Merge su master**: eseguito a valle di questa chiusura con tutti i gate verdi
+   (P0-B esterni §20, P1-7 reale §21, full gate e smoke qui sopra); hash e dettagli
+   annotati nel ledger §4 con il commit di merge.
