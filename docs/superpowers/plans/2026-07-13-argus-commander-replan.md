@@ -143,6 +143,8 @@ gateway è `AUTHORIZED` e gli E2E H7 privilegiati sono passati.
   dettaglio (`OK (4)`).
 - [x] Full test/lint/build conclusivo: 750 task forzati senza cache, 243/243 test e zero errori
   lint; APK main/androidTest prodotti e hashati.
+- [ ] Ripetere il compile reale post-clean-install quando il provider Hermes torna disponibile;
+  l'attuale quota è esposta correttamente come `503` e non produce draft o mutazioni.
 - [ ] Aggiornare spec/ledger, push backup, review finale e merge no-ff su master.
 
 Verifica H7 parziale 2026-07-14: E2E produzione Hermes/DND `OK (1)`, process-death bifase
@@ -154,6 +156,8 @@ Lo smoke pulito ha inoltre trovato e corretto un drift binario Compose 1.7.6/1.8
 Il bridge è stato inoltre hardenizzato contro quota/provider output senza protocollo: `502/503`
 invece di falso `200`, 12/12 test server e health Android post-deploy verde. La quota Codex corrente
 è un vincolo operativo esterno; nessun fallback provider è stato scelto automaticamente.
+La reinstallazione ha inoltre cambiato l'UID applicativo: il vecchio grant Shizuku non è stato
+riusato e il gateway è tornato `AUTHORIZED` solo dopo una nuova autorizzazione/riallineamento.
 
 ## Decisioni Android 16
 

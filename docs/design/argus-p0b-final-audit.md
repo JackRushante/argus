@@ -49,12 +49,14 @@ merge.
 - Totale JVM/Robolectric debug: **243**, zero failure/error
 - `test lintDebug assembleDebug assembleDebugAndroidTest`: verde
 - Gate conclusivo forzato senza cache: **750 task eseguiti**, `BUILD SUCCESSFUL`
-- Lint: zero errori; warning residui solo dependency/version catalog e due suggerimenti KTX
+- Lint: zero errori; 52 warning manutentivi (dependency/version catalog e 4 suggerimenti KTX)
 - Device API 36: navigation 4/4, bridge store 3/3, Shizuku 1/1,
   device-tools 1/1, scheduler/capability 4/4
 - E2E API 36: produzione Hermes/DND 1/1; process-death 2 fasi; outage Shizuku 3 fasi;
   stato esterno finale DND `off`, exact-alarm `default`, daemon Shizuku attivo
 - Bridge server: 12/12 test; health post-deploy da Android `OK (1)`
+- Rerun produzione post-clean-install: Shizuku riallineato al nuovo UID; compile fermato dalla
+  quota provider prima di draft/arm/allarme, con DND `off` ed exact-alarm ripristinato a `default`
 
 ## Problemi bloccanti trovati e corretti
 
@@ -154,6 +156,10 @@ merge.
   eventuale CAS-delete sarebbe hardening additivo, non un bypass attuale.
 - I test ViewModel sono selettivi: i confini safety sono coperti nei servizi sottostanti e la
   navigazione reale è strumentata; ampliare solo quando emergono regressioni concrete.
+- Dopo uninstall/reinstall Android assegna un nuovo UID, mentre Shizuku Manager può conservare la
+  grant associata al vecchio. La produzione deve richiedere nuovamente l'autorizzazione tramite il
+  flusso supportato e resta fail-closed; l'edit mirato del JSON Shizuku è solo una procedura del
+  laboratorio E2E con backup, non una funzione dell'app.
 
 ## Condizioni per chiudere P0-B
 
@@ -163,4 +169,6 @@ merge.
    dopo disable+reboot e Hermes/Tailscale dopo il ripristino.
 4. ~~Installazione pulita e smoke dei sei schermi.~~ Fatto sulla `0.1.0`, `OK (4)`.
 5. ~~Full gate finale.~~ Fatto: 750 task eseguiti, 243/243 test e zero errori lint.
-6. Aggiornamento ledger, commit/push, review e merge no-ff su `master` dopo il gate reboot.
+6. Ripetere il compile live post-clean-install quando la quota Hermes si rinnova o viene scelto un
+   fallback; il path di indisponibilità `503` è già verificato e fail-closed.
+7. Aggiornamento ledger, commit/push, review e merge no-ff su `master` dopo il gate reboot.
