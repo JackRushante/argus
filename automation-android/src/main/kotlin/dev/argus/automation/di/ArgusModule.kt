@@ -10,6 +10,7 @@ import dev.argus.automation.AndroidAppPreferencesStore
 import dev.argus.automation.AndroidAutomationNotifier
 import dev.argus.automation.AndroidCapabilityProbe
 import dev.argus.automation.AndroidGenerativeLane
+import dev.argus.automation.AndroidArmedAutomationRegistrar
 import dev.argus.automation.AndroidGenerativeRuntimeReadiness
 import dev.argus.automation.GenerativeRuntimeReadiness
 import dev.argus.automation.AndroidTimeAlarmBackend
@@ -31,7 +32,6 @@ import dev.argus.automation.LazyDeviceStateProvider
 import dev.argus.automation.NotificationEventDispatcher
 import dev.argus.automation.RoomTimeAlarmStateStore
 import dev.argus.automation.ShizukuActionExecutor
-import dev.argus.automation.TimeAlarmArmedAutomationRegistrar
 import dev.argus.automation.TimeAlarmBackend
 import dev.argus.automation.TimeAlarmCoordinator
 import dev.argus.automation.TimeAlarmRuntime
@@ -433,7 +433,8 @@ object ArgusModule {
     fun registrar(
         coordinator: TimeAlarmCoordinator,
         store: AutomationStore,
-    ): ArmedAutomationRegistrar = TimeAlarmArmedAutomationRegistrar(coordinator, store)
+        snapshots: FirePolicySnapshotProvider,
+    ): ArmedAutomationRegistrar = AndroidArmedAutomationRegistrar(coordinator, store, snapshots)
 
     @Provides
     @Singleton

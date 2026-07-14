@@ -14,12 +14,14 @@ import androidx.core.content.ContextCompat
 import dev.argus.device.StateReader
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationStatus
+import dev.argus.engine.model.CapabilityIds
 import dev.argus.engine.model.StateKeys
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.Engine
 import dev.argus.engine.runtime.FireContext
+import dev.argus.engine.runtime.FirePolicySnapshotProvider
 import dev.argus.engine.runtime.TriggerEnvelope
 import dev.argus.shizuku.ShizukuGateway
 import dev.argus.shizuku.ShizukuGatewayStatus
@@ -66,23 +68,42 @@ class EngineNotificationEventDispatcher(
     }
 }
 
-/** In P0-B l'unico trigger registrabile è Time; ogni altro tipo resta fail-closed. */
-class TimeAlarmArmedAutomationRegistrar(
+/**
+ * Registrar per-trigger senza service persistente: Time registra presso AlarmManager tramite il
+ * coordinator; Notification non ha una registrazione OS per-rule e richiede soltanto il grant
+ * globale del listener più lo snapshot persistito ARMED. Ogni altro trigger resta fail-closed.
+ */
+class AndroidArmedAutomationRegistrar(
     private val coordinator: TimeAlarmCoordinator,
     private val store: AutomationStore,
+    private val snapshots: FirePolicySnapshotProvider,
 ) : ArmedAutomationRegistrar {
-    override suspend fun register(automation: Automation): Boolean {
-        if (automation.trigger !is Trigger.Time) return false
-        return try {
-            val report = coordinator.reconcile(ReconcileReason.CAPABILITY_CHANGED)
-            val persisted = store.get(automation.id)
-            automation.id !in report.failed && persisted?.status == AutomationStatus.ARMED &&
-                persisted.enabled
-        } catch (error: CancellationException) {
-            throw error
-        } catch (_: Exception) {
-            false
-        }
+    override suspend fun register(automation: Automation): Boolean = when (automation.trigger) {
+        is Trigger.Time -> registerTime(automation)
+        is Trigger.Notification -> registerNotification(automation)
+        else -> false
+    }
+
+    private suspend fun registerTime(automation: Automation): Boolean = try {
+        val report = coordinator.reconcile(ReconcileReason.CAPABILITY_CHANGED)
+        val persisted = store.get(automation.id)
+        automation.id !in report.failed && persisted?.status == AutomationStatus.ARMED &&
+            persisted.enabled
+    } catch (error: CancellationException) {
+        throw error
+    } catch (_: Exception) {
+        false
+    }
+
+    private suspend fun registerNotification(automation: Automation): Boolean = try {
+        val snapshot = snapshots.current()
+        val persisted = store.get(automation.id)
+        CapabilityIds.TRIGGER_NOTIFICATION in snapshot.availableCapabilities &&
+            persisted?.status == AutomationStatus.ARMED && persisted.enabled
+    } catch (error: CancellationException) {
+        throw error
+    } catch (_: Exception) {
+        false
     }
 }
 
