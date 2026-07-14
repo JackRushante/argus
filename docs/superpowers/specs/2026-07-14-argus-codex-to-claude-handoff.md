@@ -133,6 +133,14 @@ Commit della ripresa Claude serale (P1-6 → P1-7 reale → P1-8), tutti pushati
     dei tre Markdown Codex, gate esterni chiusi nell'audit/CLAUDE/contract, §22 P1-8.
 25. **`8f283ca` — MERGE no-ff di `feat/argus-p0b-dry` su `master`** (2026-07-14, tutti i gate
     verdi), pushato sull'hub. Da qui lo sviluppo riparte da `master`.
+26. `c7db615` — merge `fix/p1-ux-polish` (post-P1, feedback live di Lorenzo): menu overflow
+    chat reale (`542f979`: "Svuota conversazione" tiene le card pending — TDD sul VM — e
+    "Verifica connessione Hermes"), card budget leggibile senza gergo "P3" e senza layout
+    contatore quando nessun limite orario è attivo, esempi home impersonali e armabili con
+    le capability correnti (`8d252ed` — il geofence torna con P2). Verificato su device.
+    Nota di campo: una regola statica multi-toggle (BT+Wi-Fi off su textMatch "esegui") è
+    scattata ISTANTANEA — lane deterministica senza rete — e "Esegui" maiuscolo ha matchato
+    (textMatch contains case-insensitive by design, `TriggerMatcher`).
 
 Commit P0-B immediatamente precedenti utili per il contesto:
 
