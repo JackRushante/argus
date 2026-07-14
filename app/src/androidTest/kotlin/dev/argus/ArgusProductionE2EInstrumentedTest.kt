@@ -7,6 +7,7 @@ import dev.argus.automation.AlarmDeliveryResult
 import dev.argus.automation.DraftSubmissionResult
 import dev.argus.automation.FlowArmResult
 import dev.argus.automation.ReconcileReason
+import dev.argus.automation.ScheduledAlarmMode
 import dev.argus.brain.AndroidBridgeConfigurationStore
 import dev.argus.data.dao.AuditLogRecord
 import dev.argus.engine.brain.CompileResult
@@ -118,7 +119,7 @@ class ArgusProductionE2EInstrumentedTest {
             val deterministicCompile = CompileResult(
                 reply = compiled.reply,
                 draft = draft.copy(
-                    name = "Argus E2E DND ${System.currentTimeMillis()}",
+                    name = "$E2E_AUTOMATION_PREFIX ${System.currentTimeMillis()}",
                     trigger = Trigger.Time(
                         cron = null,
                         at = fireAt.toString(),
@@ -144,6 +145,11 @@ class ArgusProductionE2EInstrumentedTest {
             automationId = armed.id
             assertNotNull(armed.approvalFingerprint)
             assertEquals(AutomationStatus.ARMED, store.get(armed.id)?.status)
+            assertEquals(
+                "L'E2E richiede una registrazione AlarmManager realmente exact",
+                ScheduledAlarmMode.EXACT.name,
+                database.scheduledTimeAlarmDao().get(armed.id.value)?.scheduledMode,
+            )
 
             val fired = withTimeout(FIRE_TIMEOUT_MILLIS) {
                 database.auditDao().observeLogForAutomation(armed.id.value, 20)
@@ -208,6 +214,54 @@ class ArgusProductionE2EInstrumentedTest {
         }
     }
 
+    /**
+     * Cleanup host-driven da usare se ADB o l'instrumentation vengono interrotti prima che il
+     * `finally` del test principale possa girare. È intenzionalmente limitato alle automazioni con
+     * il prefisso E2E e ripristina anche configurazione privata e DND del package di laboratorio.
+     */
+    @Test
+    fun cleanupInterruptedHostRun(): Unit = runBlocking {
+        val store = services.automationStore()
+        val backend = services.timeAlarmBackend()
+        val runtime = services.timeAlarmRuntime()
+        val configuration = services.bridgeConfigurationStore()
+        val preferences = services.appPreferencesStore()
+        val failures = mutableListOf<String>()
+
+        store.all()
+            .filter { it.name.startsWith(E2E_AUTOMATION_PREFIX) }
+            .forEach { automation ->
+                runCatching { backend.cancel(automation.id) }
+                    .onFailure { failures += "cancel:${automation.id.value}" }
+                runCatching { store.delete(automation.id) }
+                    .onFailure { failures += "delete:${automation.id.value}" }
+            }
+        runCatching { runtime.reconcile(ReconcileReason.CAPABILITY_CHANGED) }
+            .onFailure { failures += "reconcile" }
+        runCatching {
+            configuration.clearBearerToken() &&
+                configuration.saveBaseUrl(AndroidBridgeConfigurationStore.DEFAULT_BASE_URL)
+        }.onFailure { failures += "bridge" }
+            .onSuccess { restored -> if (!restored) failures += "bridge" }
+        runCatching {
+            preferences.setOnboardingCompleted(false) && preferences.setPrivacyAccepted(false)
+        }.onFailure { failures += "preferences" }
+            .onSuccess { restored -> if (!restored) failures += "preferences" }
+        runCatching {
+            services.deviceController().setDnd(DndMode.OFF, ExecutionId("e2e-host-cleanup"))
+            awaitDnd(DndMode.OFF)
+        }.onFailure { failures += "dnd" }
+
+        assertTrue(
+            "Cleanup host E2E incompleto: ${failures.joinToString()}",
+            failures.isEmpty(),
+        )
+        assertTrue(
+            "Sono rimaste automazioni E2E",
+            store.all().none { it.name.startsWith(E2E_AUTOMATION_PREFIX) },
+        )
+    }
+
     private suspend fun readDnd(): DndMode {
         val raw = services.deviceStateSnapshotProvider().current().values[StateKeys.DND]
         return when (raw) {
@@ -253,6 +307,7 @@ class ArgusProductionE2EInstrumentedTest {
     }
 
     private companion object {
+        const val E2E_AUTOMATION_PREFIX = "Argus E2E DND"
         const val BRIDGE_TOKEN_FILE = "argus-e2e-bridge-token"
         const val FIRE_DELAY_SECONDS = 45L
         const val FIRE_TIMEOUT_MILLIS = 120_000L
