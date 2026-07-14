@@ -14,9 +14,13 @@ HEAD al momento dell'handoff: `19bc294 feat(runtime): add guarded generative act
 
 > **AGGIORNAMENTO 2026-07-14 pomeriggio (Claude Fable, sessione `negozio`)**: P1-5 è stata
 > completata in quattro commit atomici più il gate device, tutti pushati sull'hub.
-> HEAD attuale: `b5d9578 test(automation): gate probe capabilities on real device grants`.
 > Stato esecutivo, ledger, known issues e checklist sotto sono stati aggiornati di conseguenza;
-> il dettaglio completo della ripresa è nel §18 in fondo. La prossima slice è **P1-6**.
+> il dettaglio completo della ripresa è nel §18 in fondo.
+>
+> **SECONDO AGGIORNAMENTO (stessa sessione, sera)**: anche **P1-6 è completata** in quattro
+> commit (`7d91fb4`, `262310a`, `1ec7b2b`, `e0dba9c`), con migrazioni v1…v8→v9 verdi sul
+> OnePlus reale (`OK (8 tests)`). Dettaglio al §19. HEAD attuale: vedere `git log`; la
+> prossima slice è **P1-7** (E2E sintetico subito, caratterizzazione reale con Lorenzo).
 
 ## 1. Scopo e motivo dello stop
 
@@ -57,9 +61,9 @@ stato incoerente. P1-4 è invece chiusa su un commit atomico, testato e pushato.
 | P1-2 parser notifiche | Completo | Commit `bb26927`, Room v8 e migrazioni device |
 | P1-3 listener + reply gateway | Completo | Commit `d200b8c`, test host e RemoteInput sintetico device |
 | P1-4 lane generativa | Core completo | Commit `19bc294`, TOCTOU/CAS/queue/timeout testati |
-| E13 deferred durabile | **Non implementato per scelta sicura** | Il sink produzione è unavailable; `channel_expired` resta `FAILED`, mai falso `DEFERRED` |
+| E13 deferred durabile | **Implementato (Claude, P1-6)** | Store cifrato Keystore + CTA "Invia ora" reale; defer-eligible = `channel_expired` **e** `reply_channel_unavailable`; TTL 24h e purge |
 | P1-5 capability/arm/bootstrap | **Completa (Claude 2026-07-14)** | Commit `e266fd9`+`b7c25e7`+`8c857fd`+`9a84c3b`+`b5d9578`; gate host verde (114+45+90 test, lint 0 err, APK) e gate device OK (2 test instrumented su CPH2747); dettagli §18 |
-| P1-6 settings/whitelist/deferred UI | **Prossima slice** | Include lo store cifrato necessario a E13; residui privacy elencati al §18.4 |
+| P1-6 settings/whitelist/deferred UI | **Completa (Claude 2026-07-14)** | Commit `7d91fb4`+`262310a`+`1ec7b2b`+`e0dba9c`; E13 cifrato+azionabile, coordinator revoca, picker whitelist, CTA reali; Room v9 migrata sul device (`OK (8 tests)`); dettagli §19 |
 | P1-7 E2E WhatsApp | Da fare con Lorenzo | Caratterizzazione reale e test positivi/negativi |
 | P1-8 chiusura | Da fare | Full gate, documentazione, review e merge solo dopo i gate esterni |
 
@@ -841,3 +845,88 @@ nessun grant modificato.
 - Device: ADB raggiungibile, Shizuku attivo, DND off, nessun package di test residuo di questa
   sessione (restano i package P0-B elencati al §5.2, non toccati).
 - Gate esterni invariati: reboot/LNP P0-B (§5.3) e P1-7 reale richiedono Lorenzo.
+
+## 19. Ripresa Claude 2026-07-14 sera — P1-6 completata
+
+Stessa sessione del §18, proseguita su mandato esplicito di Lorenzo. Quattro commit, TDD, gate
+host completo dopo ogni slice (ora include anche `:app:testDebugUnitTest`), mutation check sul
+sink (payload in chiaro ⇒ test rossi).
+
+### 19.1 Cosa è stato implementato
+
+**P1-6a (`7d91fb4`).** Room v9: tabella `deferred_replies` — una riga per action generativa,
+PK (executionId, actionIndex), `packageName` (solo per aprire l'app giusta al tap),
+`createdAt/expiresAt/consumedAt` e `payload` che contiene ESCLUSIVAMENTE ciphertext AES-GCM
+(chiave dedicata non esportabile, alias `argus_deferred_reply_aes_v1`, cipher in
+`DeferredReplyCrypto.kt` con key provider iniettabile per i test). FK CASCADE su
+`fire_claims`: la retention del journal elimina anche il ciphertext orfano; la maintenance
+purga scadute e consumate. `PersistentDeferredReplySink` sostituisce il sink unavailable
+(rimosso): `DEFERRED` esiste solo dopo persistenza cifrata confermata, TTL 24h
+(`DEFAULT_TTL_MILLIS`). La lane ora considera defer-eligible `channel_expired` **e**
+`reply_channel_unavailable` (`DEFER_ELIGIBLE_CODES`); tutto il resto resta FAILED, sink
+fallito ⇒ FAILED onesto. Migrazione 8→9 con `MigrationTest` esteso (ogni versione legacy → 9,
+inclusa la verifica FK CASCADE su v8→v9).
+
+**P1-6b (`262310a`).** `DeferredReplyManager` risolve la CTA E13: audit row → executionId
+(mappa interna del ViewModel, mai esposta) → riga valida → decrypt SOLO dopo il tap →
+clipboard con flag `EXTRA_IS_SENSITIVE` → apertura WhatsApp (mai invio automatico) →
+`markConsumed` CAS one-shot. Il testo non entra in messaggi UI, log o stato
+(`DeliverableReply` non è una data class). `PrivacyRevocationCoordinator` centralizza la
+revoca: chiude il gate (preference) PRIMA, poi svuota il reply registry, `clear()` su
+observed conversations (nuovo metodo del boundary engine-core) e sulle deferred; esiti
+tipizzati `Revoked | RevokedWithResidualData | Failed`, idempotente e richiamabile su purge
+parziale. **Decisione documentata**: la whitelist contatti si CONSERVA alla revoca (è
+configurazione esplicita dell'utente; le regole generative armate vengono comunque
+quarantenate dal reconcile). `SettingsViewModel.revokePrivacy()` usa il coordinator.
+
+**P1-6c (`1ec7b2b`).** `SettingsState` separa `notificationsGranted` (pubblicazione) da
+`notificationListenerGranted` (lettura/reply) con due righe salute e CTA distinte
+(`onOpenNotificationListenerFix` → `ACTION_NOTIFICATION_LISTENER_SETTINGS`); fix del gap 10
+del piano (la UI usava il dato sbagliato). Onboarding: lo step notifiche completa solo con
+entrambi i grant e la CTA è a due stadi nell'ordine prescritto. Battery: manifest
+`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` + dialogo package-specific da gesto utente con
+fallback alla lista; `ManifestHardeningTest` (nuovo unit test del modulo app) blinda
+allowBackup=false, dataExtractionRules e la nuova permission. Picker whitelist:
+`observedWhitelistCandidates()` filtra WhatsApp trusted, `isGroup == false`, non già in
+whitelist, limite 20; dialog nel NavHost con id mascherati; l'editor raw resta "Inserimento
+manuale". Copy budget corretto (cooldown 60 s per regola · budget globale P3).
+
+**Retention (`e0dba9c`).** Le observed conversations condividono la max-age del journal
+(30 giorni): oltre al bound 200 righe e al delete-on-revoke, un display name non più visto
+esce dal DB alla maintenance.
+
+### 19.2 Evidenza
+
+- Gate host per ogni slice: engine-core 114, data 49, automation-android 106, app 3
+  (ManifestHardeningTest), lint 0 errori, `app:assembleDebug` ok (conteggi finali).
+- Device (CPH2747, via `am instrument` §12): `dev.argus.data.MigrationTest` → `OK (8 tests)`
+  (migrazioni reali v1…v8→v9 con dati legacy e FK CASCADE); package test disinstallato.
+- Mutation check: sink senza cifratura ⇒ 2 test rossi; ripristinato.
+
+### 19.3 Residui P1-6 → P1-7/P1-8
+
+- Il flusso `onSendNow` è coperto da unit test Robolectric (clipboard + consumo one-shot);
+  la verifica visiva della CTA sul device rientra nello smoke dei sei schermi di P1-8.
+- Il picker si popola solo con listener grant e privacy attivi: la prova live è parte della
+  caratterizzazione P1-7 con Lorenzo.
+- Nessun nuovo residuo privacy: i punti del §11 risultano tutti implementati o
+  esplicitamente decisi (whitelist conservata alla revoca).
+
+### 19.4 Nota infrastruttura macchina `negozio`
+
+Durante la sessione Tailscale è morto: il servizio Windows **Helper IP (`iphlpsvc`)**
+risultava DISABILITATO (dipendenza di Tailscale). Ripristinato con
+`Set-Service iphlpsvc -StartupType Automatic; Start-Service iphlpsvc; Start-Service Tailscale`.
+Se il push verso l'hub fallisce con timeout su `100.73.8.92:22`, controllare prima questi due
+servizi.
+
+### 19.5 Prossimi passi esatti (per chi riprende)
+
+1. **P1-7 sintetico** (fattibile senza Lorenzo): E2E con notifica di test controllata →
+   parser → arm → lane → Hermes `/act` (o fake) → RemoteInput receiver locale → journal.
+   I mattoni esistono già tutti (`NotificationReplyGatewayInstrumentedTest` è il riferimento
+   per il receiver sintetico).
+2. **P1-7 reale + gate reboot P0-B**: unica sessione con Lorenzo (§5.3 e §11 P1-7).
+3. **P1-8**: full gate senza cache, clean install, smoke sei schermi, riconciliazione dei tre
+   Markdown concorrenti, aggiornamento spec/bridge contract/audit, review, merge (solo con
+   tutti i gate verdi).
