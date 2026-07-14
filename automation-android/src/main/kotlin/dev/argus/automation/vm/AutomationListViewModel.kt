@@ -11,6 +11,7 @@ import dev.argus.automation.ApprovalFlow
 import dev.argus.automation.AutomationEnablementCoordinator
 import dev.argus.automation.EnablementResult
 import dev.argus.data.ArgusDatabase
+import dev.argus.engine.brain.ContactWhitelistStore
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.CapabilityRequirements
@@ -41,6 +42,7 @@ class AutomationListViewModel @Inject constructor(
     private val enablement: AutomationEnablementCoordinator,
     shizuku: ShizukuGateway,
     database: ArgusDatabase,
+    whitelist: ContactWhitelistStore,
     private val savedStateHandle: SavedStateHandle,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
@@ -49,23 +51,26 @@ class AutomationListViewModel @Inject constructor(
     val messages = mutableMessages.asSharedFlow()
 
     val state: StateFlow<AutomationListState> = combine(
-        store.observeAll(),
+        // Il combine tipizzato arriva a 5 flow: automazioni e nomi whitelist viaggiano in coppia.
+        store.observeAll().combine(whitelist.observeAll()) { automations, contacts ->
+            automations to contacts.associate { it.id to it.displayName }
+        },
         drafts.observeAll(),
         filter,
         shizuku.observeStatus(),
         database.automationDao().observeUiMetadata(),
-    ) { automations, pending, activeFilter, shizukuStatus, metadata ->
+    ) { (automations, conversationLabels), pending, activeFilter, shizukuStatus, metadata ->
         val now = System.currentTimeMillis()
         val lastFiredById = metadata.associate { it.id to it.lastFiredAt }
         val pendingAutomationIds = pending.mapTo(hashSetOf()) { it.automationId }
         val automationRows = automations
             .filterNot { it.id in pendingAutomationIds }
             .map { automation ->
-                automation.toAutomationRow(lastFiredById[automation.id.value], now)
+                automation.toAutomationRow(lastFiredById[automation.id.value], now, conversationLabels)
             }
         val pendingRows = pending.map { snapshot ->
             val review = cancellationSafeOrNull { approvals.review(snapshot.id) }
-            snapshot.toAutomationRow(review)
+            snapshot.toAutomationRow(review, conversationLabels)
         }
         val allRows = pendingRows + automationRows
         val visibleRows = allRows.filter { it.matches(activeFilter) }

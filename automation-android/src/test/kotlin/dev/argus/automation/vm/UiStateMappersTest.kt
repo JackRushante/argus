@@ -6,8 +6,10 @@ import dev.argus.data.entities.ActionResultEntity
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.ApprovalFingerprints
+import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.AutomationId
+import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.SCHEMA_VERSION
 import dev.argus.engine.model.Trigger
@@ -108,6 +110,39 @@ class UiStateMappersTest {
 
         assertEquals("9", row.id)
         assertNull(row.automationId)
+    }
+
+    @Test
+    fun `list rows resolve the trusted whitelist name instead of the conversation hash`() {
+        val hash = "shortcut:com.whatsapp:feedbeef00aabbcc"
+        val labels = mapOf(hash to "Ottica Marci")
+        val trigger = Trigger.Notification("com.whatsapp", conversationId = hash, isGroup = false)
+
+        val armedRow = Automation(
+            AutomationId("a1"), "Rispondi a Ottica", CreatedBy.LLM, AutomationStatus.ARMED,
+            trigger, listOf(Action.WhatsAppReply("ok")),
+        ).toAutomationRow(lastFiredAt = null, nowMillis = 0L, conversationLabels = labels)
+        assertTrue(armedRow.triggerSummary.contains("Ottica Marci (identità verificata, chat 1:1)"))
+        assertTrue(!armedRow.triggerSummary.contains(hash))
+
+        val draft = AutomationDraft("Rispondi", trigger, listOf(Action.WhatsAppReply("ok")))
+        val unsigned = PendingDraft(
+            id = DraftId("draft-w"),
+            automationId = AutomationId("automation-w"),
+            revision = 1L,
+            fingerprint = ApprovalFingerprint("0".repeat(64)),
+            draft = draft,
+            createdBy = CreatedBy.LLM,
+            priority = 0,
+            schemaVersion = SCHEMA_VERSION,
+            createdAtMillis = 1_000L,
+            updatedAtMillis = 1_000L,
+        )
+        val pendingRow = unsigned
+            .copy(fingerprint = ApprovalFingerprints.of(unsigned.pendingAutomation()))
+            .toAutomationRow(review = null, conversationLabels = labels)
+        assertTrue(pendingRow.triggerSummary.contains("Ottica Marci (identità verificata, chat 1:1)"))
+        assertTrue(!pendingRow.triggerSummary.contains(hash))
     }
 
     @Test

@@ -12,6 +12,7 @@ import dev.argus.automation.ReconcileReason
 import dev.argus.automation.TimeAlarmRuntime
 import dev.argus.data.ArgusDatabase
 import dev.argus.data.dao.AuditLogRecord
+import dev.argus.engine.brain.ContactWhitelistStore
 import dev.argus.data.entities.ActionResultEntity
 import dev.argus.engine.model.ActionTier
 import dev.argus.engine.model.Automation
@@ -69,11 +70,13 @@ private data class DetailSources(
     val automation: Automation?,
     val log: List<AuditLogRecord>,
     val actionsByExecution: Map<String, List<ActionResultEntity>>,
+    val conversationLabels: Map<String, String>,
 )
 
 private data class DetailTarget(
     val draft: PendingDraft?,
     val automation: Automation?,
+    val conversationLabels: Map<String, String>,
 ) {
     val automationId: String? = (automation?.id ?: draft?.automationId)?.value
 }
@@ -88,6 +91,7 @@ class AutomationDetailViewModel @Inject constructor(
     private val enablement: AutomationEnablementCoordinator,
     private val scheduler: TimeAlarmRuntime,
     private val database: ArgusDatabase,
+    private val whitelist: ContactWhitelistStore,
 ) : ViewModel() {
     private val routeId = requireNotNull(savedStateHandle.get<String>("id")) {
         "Dettaglio senza id"
@@ -107,18 +111,25 @@ class AutomationDetailViewModel @Inject constructor(
             combine(
                 drafts.observeAll(),
                 store.observeAll(),
-            ) { pending, automations ->
+                whitelist.observeAll(),
+            ) { pending, automations, contacts ->
                 val draft = pending.firstOrNull { it.id.value == routeId }
                     ?: pending.firstOrNull { it.automationId.value == routeId }
                 val automation = automations.firstOrNull { it.id.value == routeId }
                     ?: draft?.let { snapshot ->
                         automations.firstOrNull { it.id == snapshot.automationId }
                     }
-                DetailTarget(draft, automation)
+                DetailTarget(draft, automation, contacts.associate { it.id to it.displayName })
             }.flatMapLatest { target ->
                 val automationId = target.automationId
                     ?: return@flatMapLatest flowOf(
-                        DetailSources(target.draft, target.automation, emptyList(), emptyMap()),
+                        DetailSources(
+                            target.draft,
+                            target.automation,
+                            emptyList(),
+                            emptyMap(),
+                            target.conversationLabels,
+                        ),
                     )
                 combine(
                     database.auditDao().observeLogForAutomation(
@@ -135,6 +146,7 @@ class AutomationDetailViewModel @Inject constructor(
                         target.automation,
                         log,
                         actions.groupBy { it.executionId },
+                        target.conversationLabels,
                     )
                 }
             }.collectLatest { sources ->
@@ -145,11 +157,13 @@ class AutomationDetailViewModel @Inject constructor(
                         sources.draft,
                         sources.log,
                         sources.actionsByExecution,
+                        sources.conversationLabels,
                     )
                     sources.automation != null -> automationState(
                         sources.automation,
                         sources.log,
                         sources.actionsByExecution,
+                        sources.conversationLabels,
                     )
                     else -> DetailViewState(loading = false, missing = true)
                 }
@@ -292,9 +306,10 @@ class AutomationDetailViewModel @Inject constructor(
         snapshot: PendingDraft,
         records: List<AuditLogRecord>,
         actionsByExecution: Map<String, List<ActionResultEntity>>,
+        conversationLabels: Map<String, String>,
     ): DetailViewState {
         val review = cancellationSafeOrNull { approvals.review(snapshot.id) }
-        val rule = RuleRenderMapper.mapDraft(snapshot.draft)
+        val rule = RuleRenderMapper.mapDraft(snapshot.draft, conversationLabels)
         val warnings = if (review == null) {
             listOf(
                 UiWarning(
@@ -335,8 +350,9 @@ class AutomationDetailViewModel @Inject constructor(
         automation: Automation,
         records: List<AuditLogRecord>,
         actionsByExecution: Map<String, List<ActionResultEntity>>,
+        conversationLabels: Map<String, String>,
     ): DetailViewState {
-        val rule = RuleRenderMapper.map(automation)
+        val rule = RuleRenderMapper.map(automation, conversationLabels)
         val warnings = buildList {
             rule.privacyNote?.let {
                 add(UiWarning(Severity.WARNING, "privacy_generative", it))

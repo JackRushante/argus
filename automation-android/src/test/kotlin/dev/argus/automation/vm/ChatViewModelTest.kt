@@ -11,6 +11,8 @@ import dev.argus.engine.brain.Brain
 import dev.argus.engine.brain.CapabilityManifest
 import dev.argus.engine.brain.CapabilityProbe
 import dev.argus.engine.brain.CompileResult
+import dev.argus.engine.brain.ContactWhitelistStore
+import dev.argus.engine.brain.WhitelistedContact
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.ApprovalFingerprints
@@ -123,6 +125,50 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun `draft cards show the trusted whitelist name instead of the conversation hash`() = runTest(dispatcher) {
+        val hash = "shortcut:com.whatsapp:" + "62be4c2af7a1d9e3".repeat(4)
+        val brain = QueuedBrain()
+        val whitelist = ViewModelWhitelistStore(WhitelistedContact("Ottica Marci", hash))
+        val viewModel = chatViewModel(brain, whitelist)
+
+        viewModel.onInputChange("rispondi a ottica quando sono occupato")
+        viewModel.onSend()
+        runCurrent()
+        brain.removeFirst().response.complete(
+            CompileResult(
+                reply = "Regola pronta",
+                draft = AutomationDraft(
+                    name = "Rispondi a Ottica Marci",
+                    trigger = Trigger.Notification(
+                        "com.whatsapp",
+                        conversationId = hash,
+                        isGroup = false,
+                    ),
+                    actions = listOf(
+                        Action.InvokeLlm(
+                            "rispondi che sono occupato",
+                            listOf("notification"),
+                            listOf("whatsapp_reply"),
+                            true,
+                        ),
+                    ),
+                ),
+                metaError = null,
+            ),
+        )
+        advanceUntilIdle()
+
+        // La review è un security control: il criterio di match reale (id whitelistato) va
+        // descritto col nome fidato dallo store, mai con la "sbobba" dell'hash.
+        val card = viewModel.state.value.items.filterIsInstance<ChatItem.DraftCard>().single()
+        assertTrue(
+            card.rule.triggerLine.contains("da Ottica Marci (identità verificata, chat 1:1)"),
+            card.rule.triggerLine,
+        )
+        assertFalse(card.rule.triggerLine.contains(hash), card.rule.triggerLine)
+    }
+
+    @Test
     fun `edit prompt carries the complete current draft without persisting it`() {
         val base = AutomationDraft(
             name = "DND sera",
@@ -140,7 +186,10 @@ class ChatViewModelTest {
         assertTrue(prompt.endsWith("spostala alle 22"))
     }
 
-    private fun chatViewModel(brain: Brain): ChatViewModel {
+    private fun chatViewModel(
+        brain: Brain,
+        whitelist: ContactWhitelistStore = ViewModelWhitelistStore(),
+    ): ChatViewModel {
         val automations = ViewModelAutomationStore()
         val drafts = ViewModelDraftRepository()
         val policy = FirePolicySnapshot(
@@ -154,7 +203,7 @@ class ChatViewModelTest {
         val approvals = ApprovalService(
             drafts,
             DraftValidator(policy.knownTools),
-            ApprovalWhitelistProvider { emptySet() },
+            ApprovalWhitelistProvider { whitelist.all().mapTo(hashSetOf()) { it.id } },
         )
         var nextId = 0
         val flow = ApprovalFlow(
@@ -183,6 +232,7 @@ class ChatViewModelTest {
             deviceState = DeviceStateSnapshotProvider { DeviceState() },
             approvalFlow = flow,
             drafts = drafts,
+            whitelist = whitelist,
         )
     }
 
@@ -226,6 +276,19 @@ private class QueuedBrain : Brain {
     ): dev.argus.engine.brain.ActResult = error("act non usato dai test chat")
 
     fun removeFirst(): Request = requests.removeFirst()
+}
+
+private class ViewModelWhitelistStore(vararg contacts: WhitelistedContact) : ContactWhitelistStore {
+    private val values = MutableStateFlow(contacts.toList())
+
+    override suspend fun all(): List<WhitelistedContact> = values.value
+    override fun observeAll(): Flow<List<WhitelistedContact>> = values
+    override suspend fun upsert(contact: WhitelistedContact) {
+        values.value = values.value.filterNot { it.id == contact.id } + contact
+    }
+    override suspend fun remove(conversationId: String) {
+        values.value = values.value.filterNot { it.id == conversationId }
+    }
 }
 
 private class ViewModelBridgeConfiguration : BridgeConfigurationStore {

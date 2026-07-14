@@ -35,8 +35,9 @@ internal fun AutomationStatus.toStatusBadge(): StatusBadge = when (this) {
 internal fun Automation.toAutomationRow(
     lastFiredAt: Long?,
     nowMillis: Long,
+    conversationLabels: Map<String, String> = emptyMap(),
 ): AutomationRow {
-    val render = RuleRenderMapper.map(this)
+    val render = RuleRenderMapper.map(this, conversationLabels)
     return AutomationRow(
         id = id.value,
         name = name,
@@ -51,8 +52,11 @@ internal fun Automation.toAutomationRow(
     )
 }
 
-internal fun PendingDraft.toAutomationRow(review: ApprovalFlowReview?): AutomationRow {
-    val render = RuleRenderMapper.mapDraft(draft)
+internal fun PendingDraft.toAutomationRow(
+    review: ApprovalFlowReview?,
+    conversationLabels: Map<String, String> = emptyMap(),
+): AutomationRow {
+    val render = RuleRenderMapper.mapDraft(draft, conversationLabels)
     return AutomationRow(
         id = id.value,
         name = draft.name,

@@ -12,6 +12,7 @@ import dev.argus.brain.BridgeErrorKind
 import dev.argus.brain.BridgeException
 import dev.argus.engine.brain.Brain
 import dev.argus.engine.brain.CapabilityProbe
+import dev.argus.engine.brain.ContactWhitelistStore
 import dev.argus.engine.safety.DraftId
 import dev.argus.engine.safety.DraftRepository
 import dev.argus.engine.model.ApprovalFingerprint
@@ -33,6 +34,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
@@ -49,7 +51,10 @@ class ChatViewModel @Inject constructor(
     private val deviceState: DeviceStateSnapshotProvider,
     private val approvalFlow: ApprovalFlow,
     drafts: DraftRepository,
+    whitelist: ContactWhitelistStore,
 ) : ViewModel() {
+    /** conversationId → nome fidato dallo store whitelist: le card mostrano nomi, non hash. */
+    private val conversationLabels = MutableStateFlow<Map<String, String>>(emptyMap())
     private val mutableState = MutableStateFlow(
         ChatState(
             items = emptyList(),
@@ -71,26 +76,34 @@ class ChatViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            drafts.observeAll().collectLatest { pending ->
-                val pendingIds = pending.mapTo(hashSetOf()) { it.id.value }
-                mutableState.update { current ->
-                    current.copy(
-                        items = current.items.filterNot {
-                            it is ChatItem.DraftCard && it.draftId !in pendingIds
-                        },
-                    )
-                }
-                pending.forEach { snapshot ->
-                    val review = approvalFlow.review(snapshot.id) ?: return@forEach
-                    val card = ChatItem.DraftCard(
-                        draftId = snapshot.id.value,
-                        rule = RuleRenderMapper.mapDraft(snapshot.draft),
-                        issues = reviewWarnings(review),
-                        status = DraftCardStatus.PROPOSED,
-                    )
-                    upsertDraftCard(card)
-                }
+            whitelist.observeAll().collect { contacts ->
+                conversationLabels.value = contacts.associate { it.id to it.displayName }
             }
+        }
+        viewModelScope.launch {
+            // combine con le label: se la whitelist cambia mentre una card è visibile,
+            // il nome fidato si aggiorna senza dover rigenerare la bozza.
+            combine(drafts.observeAll(), conversationLabels, ::Pair)
+                .collectLatest { (pending, labels) ->
+                    val pendingIds = pending.mapTo(hashSetOf()) { it.id.value }
+                    mutableState.update { current ->
+                        current.copy(
+                            items = current.items.filterNot {
+                                it is ChatItem.DraftCard && it.draftId !in pendingIds
+                            },
+                        )
+                    }
+                    pending.forEach { snapshot ->
+                        val review = approvalFlow.review(snapshot.id) ?: return@forEach
+                        val card = ChatItem.DraftCard(
+                            draftId = snapshot.id.value,
+                            rule = RuleRenderMapper.mapDraft(snapshot.draft, labels),
+                            issues = reviewWarnings(review),
+                            status = DraftCardStatus.PROPOSED,
+                        )
+                        upsertDraftCard(card)
+                    }
+                }
         }
         refreshHealth()
     }
@@ -275,7 +288,7 @@ class ChatViewModel @Inject constructor(
                     add(
                         ChatItem.DraftCard(
                             draftId = snapshot.id.value,
-                            rule = RuleRenderMapper.mapDraft(snapshot.draft),
+                            rule = RuleRenderMapper.mapDraft(snapshot.draft, conversationLabels.value),
                             issues = reviewWarnings(result.review),
                             status = DraftCardStatus.PROPOSED,
                         ),
