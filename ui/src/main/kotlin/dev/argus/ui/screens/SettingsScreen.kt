@@ -236,20 +236,22 @@ private fun HealthSection(state: SettingsState, callbacks: SettingsCallbacks) {
                 if (state.smsTriggerGranted) {
                     "attivi — le regole sugli SMS in arrivo sono armabili"
                 } else {
-                    "non attivi — tocca per consentire le regole sugli SMS in arrivo"
+                    "non attivi — consenti per armare regole sugli SMS in arrivo"
                 },
                 if (state.smsTriggerGranted) HealthLevel.OK else HealthLevel.NEUTRAL,
                 onFix = callbacks::onRequestSmsPermission,
+                actionLabel = if (state.smsTriggerGranted) null else "Attiva",
             )
             HealthRow(
                 Icons.Rounded.Call, "Trigger chiamate",
                 if (state.callTriggerGranted) {
                     "attivi — squillo e fine chiamata armabili"
                 } else {
-                    "non attivi — tocca per consentire le regole sulle chiamate"
+                    "non attivi — consenti per armare regole sulle chiamate"
                 },
                 if (state.callTriggerGranted) HealthLevel.OK else HealthLevel.NEUTRAL,
                 onFix = callbacks::onRequestCallPermissions,
+                actionLabel = if (state.callTriggerGranted) null else "Attiva",
             )
         }
     }
@@ -262,6 +264,9 @@ private fun HealthRow(
     subtitle: String,
     level: HealthLevel,
     onFix: () -> Unit,
+    /** Azione esplicita per le righe opt-in (es. "Attiva"): senza, NEUTRAL/OK non sono
+     *  cliccabili e onFix vive solo nel "Correggi" dello stato WARN. */
+    actionLabel: String? = null,
 ) {
     val semantic = LocalArgusSemantic.current
     val warn = level == HealthLevel.WARN
@@ -288,13 +293,15 @@ private fun HealthRow(
             Text(title, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge)
             Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
         }
-        when (level) {
-            HealthLevel.OK ->
-                Icon(Icons.Rounded.CheckCircle, contentDescription = "ok", tint = semantic.armed.fg, modifier = Modifier.size(22.dp))
-            HealthLevel.NEUTRAL ->
-                Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp))
-            HealthLevel.WARN ->
+        when {
+            level == HealthLevel.WARN ->
                 OutlinedButton(onClick = onFix, modifier = Modifier.heightIn(min = 48.dp)) { Text("Correggi") }
+            actionLabel != null ->
+                OutlinedButton(onClick = onFix, modifier = Modifier.heightIn(min = 48.dp)) { Text(actionLabel) }
+            level == HealthLevel.OK ->
+                Icon(Icons.Rounded.CheckCircle, contentDescription = "ok", tint = semantic.armed.fg, modifier = Modifier.size(22.dp))
+            else ->
+                Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp))
         }
     }
 }
