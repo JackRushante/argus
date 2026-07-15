@@ -57,7 +57,7 @@ Atteso dopo il push di questo handoff: branch e origin allineati, working tree p
 
 ## 3. Evidenza verificata in questa presa in carico
 
-### 3.1 Gate host fino a `a7ee8b3`
+### 3.1 Full gate host su HEAD con `e5f77a7`
 
 Gate indipendente forzato, non dalla cache:
 
@@ -66,7 +66,11 @@ Gate indipendente forzato, non dalla cache:
   --no-build-cache --rerun-tasks --no-parallel --console=plain
 ```
 
-Esito: `BUILD SUCCESSFUL`, 758 task eseguiti, 2m19s, nessun errore test/lint/build.
+Esito iniziale fino ad `a7ee8b3`: `BUILD SUCCESSFUL`, 758 task eseguiti, 2m19s.
+
+**Aggiornamento successivo alla conferma SMS/OTP:** lo stesso gate è stato rieseguito su HEAD con
+`e5f77a7` incluso: `BUILD SUCCESSFUL`, 758/758 task eseguiti, 2m09s, nessun errore
+test/lint/build. Il residuo “full gate dopo RE2” è quindi chiuso.
 
 Prima del full gate è passato anche il gruppo mirato di recovery:
 
@@ -99,9 +103,9 @@ Esito: 20/20.
 L'APK con RE2 è stato costruito alle 12:52 e installato sul OnePlus. `dumpsys package dev.argus`
 ha riportato `versionName=0.1.0`, target 36 e `lastUpdateTime=2026-07-15 12:56:14`.
 
-**Confine dell'evidenza:** non è stato rieseguito il full gate 758-task dopo `e5f77a7`, né il test
-clipboard instrumented dopo l'installazione RE2. Il primo task Claude deve quindi essere un full
-gate finale su HEAD; non presentare `e5f77a7` come full-gated finché non passa.
+**Confine dell'evidenza:** il full gate su `e5f77a7` è verde. Il test clipboard instrumented non è
+stato rieseguito dopo l'installazione RE2, ma Lorenzo ha successivamente confermato l'intero bordo
+reale SMS telephony → OTP → clipboard → incolla.
 
 ### 3.3 Hermes dopo `e5f77a7`
 
@@ -216,47 +220,30 @@ radio/fisici descritti al §7.
 7. **P0/P1 reboot/LNP.** Restano gate esterni storici. Non riavviare il telefono finché Lorenzo
    non è fisicamente presente e può riattivare ADB TCP/Shizuku.
 
-## 6. La frase utente non ancora classificata
+## 6. Chiarimento utente successivo
 
-Lorenzo ha scritto: **“provato e ha funzionato perfettamente”**. Non è stato chiarito se si
-riferisse a:
-
-- SMS telephony/OTP;
-- collegamento/scollegamento cavo;
-- ACL Bluetooth;
-- geofence reale.
-
-Nessun log recente era rimasto nei tag `ArgusPhone`, `ArgusConnectivity`, `ArgusGeofence`, quindi
-non assegnare quella frase a un gate a intuito. La prima domanda a Lorenzo deve essere soltanto:
-
-> Quale prova era: SMS vero/OTP, cavo, Bluetooth oppure geofence?
-
-Poi aggiornare piano/ledger con l'evidenza esatta, senza chiedergli di ripetere un test già valido.
+Lorenzo ha chiarito che **“provato e ha funzionato perfettamente”** si riferiva a **SMS e OTP**:
+un SMS telephony reale ha attivato entrambe le automazioni e l'OTP è stato copiato e incollato con
+successo. È evidenza manuale positiva di Lorenzo, non osservazione indipendente Codex; registrarla
+come tale e **non chiedergli di ripetere il test**.
 
 ## 7. Cosa NON è ancora provato
 
-1. SMS telephony reale ricevuto dal modem con `SMS_RECEIVED`, app cached.
-2. `textMatch` su SMS reale e OTP copiato, poi incollato da Lorenzo in un'altra app.
-3. Negativo OTP live: SMS senza codice → `otp_not_found`, clipboard precedente intatta.
-4. Chiamata reale: INCOMING_CALL e CALL_ENDED, inclusa regola filtrata per numero.
-5. Inserimento/rimozione cavo reale con regola POWER.
-6. Connessione/disconnessione ACL di un dispositivo Bluetooth reale.
-7. Attraversamento fisico geofence, latenza cached/Doze/OxygenOS e missed-edge recovery.
-8. Esempio 1 completo: “esco da casa” → Wi-Fi off + Bluetooth on, con raggio almeno 100 m se
+1. Negativo OTP live: SMS senza codice → `otp_not_found`, clipboard precedente intatta.
+2. Chiamata reale: INCOMING_CALL e CALL_ENDED, inclusa regola filtrata per numero.
+3. Inserimento/rimozione cavo reale con regola POWER.
+4. Connessione/disconnessione ACL di un dispositivo Bluetooth reale.
+5. Attraversamento fisico geofence, latenza cached/Doze/OxygenOS e missed-edge recovery.
+6. Esempio 1 completo: “esco da casa” → Wi-Fi off + Bluetooth on, con raggio almeno 100 m se
    possibile e aspettative di latenza realistiche.
-9. Full gate completo su HEAD dopo `e5f77a7`.
 
 ## 8. Ordine consigliato per Claude
 
-1. Chiarire quale test manuale Lorenzo ha già completato e marcarlo nel ledger.
-2. Verificare `git status` pulito e origin allineato.
-3. Eseguire il full gate su HEAD con il comando del §3.1.
-4. Rieseguire **solo se necessario** `ArgusPhoneIngressInstrumentedTest` per provare il packaging
-   RE2; mai `ArgusNavigationInstrumentedTest` sul telefono configurato.
-5. Eseguire i bordi fisici rimasti con Lorenzo, uno alla volta, raccogliendo prima log/audit.
-6. Aggiornare piano P2, contract, design, audit e ledger con verificato vs ragionato.
-7. Fare un audit finale del diff `master..HEAD`, in particolare manifest/permissions/FGS/privacy.
-8. Solo con DoD accettata: full gate finale, merge non distruttivo su `master`, push e smoke.
+1. Verificare `git status` pulito e origin allineato.
+2. Eseguire i bordi fisici rimasti con Lorenzo, uno alla volta, raccogliendo prima log/audit.
+3. Aggiornare piano P2, contract, design, audit e ledger con verificato vs ragionato.
+4. Fare un audit finale del diff `master..HEAD`, in particolare manifest/permissions/FGS/privacy.
+5. Solo con DoD accettata: full gate finale, merge non distruttivo su `master`, push e smoke.
 
 Non aggiungere nuove feature durante questa chiusura. Export/import e worker resumable vanno in un
 piano successivo con decisione esplicita.
@@ -309,14 +296,14 @@ repo/host. Non configurare automaticamente provider a pagamento.
 
 | Requisito | Codice | Gate sintetico/framework | Gate fisico/live |
 | --- | --- | --- | --- |
-| PhoneState/SMS armabile e fail-closed | completo | `OK (1)` production path | aperto salvo chiarimento utente |
-| OTP autocopy e privacy | completo | host + device sintetico | aperto salvo chiarimento utente |
+| PhoneState/SMS armabile e fail-closed | completo | `OK (1)` production path | SMS reale PASS manuale; chiamate aperte |
+| OTP autocopy e privacy | completo | host + device sintetico | OTP+incolla PASS manuale Lorenzo |
 | Connectivity | completo | POWER production `OK (1)` | cavo/BT aperti salvo chiarimento |
 | Geofence ENTER/EXIT | completo | registrazione OS + pipeline `OK (1)` | attraversamento/Esempio 1 aperti |
 | Shell trusted-only | completo | host + Shizuku positivo/negativo | completo per lo scope P2 |
 | FGS solo on-demand | completo | start/stop e cleanup verificati | OxygenOS/Doze osservazionale |
 | Crash-consistency edge | completo | unit/integration/device | resumability per-action fuori scope |
-| Regex OTP non-ReDoS | completo (`e5f77a7`) | host + APK install + bridge 20/20 | full gate HEAD ancora da fare |
+| Regex OTP non-ReDoS | completo (`e5f77a7`) | full gate 758 task + APK + bridge 20/20 | positivo live confermato |
 | Migrazioni/regole esistenti intatte | nessuna nuova migration P2 finale | gate precedenti verdi | ricontrollare prima del merge |
 
 ## 11. File chiave

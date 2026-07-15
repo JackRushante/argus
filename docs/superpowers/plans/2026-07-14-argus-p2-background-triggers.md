@@ -142,8 +142,9 @@ connectivity non è necessario.
 
 ### P2-2 — PhoneState (chiamate + SMS)
 
-**Stato 2026-07-15: implementazione, gate host e SMS sintetico nel processo di produzione sul
-OnePlus completi; resta il bordo osservazionale con un SMS telephony reale e le chiamate reali.**
+**Stato 2026-07-15: implementazione e gate host/device completi; Lorenzo ha confermato sul campo
+che un SMS telephony reale ha attivato correttamente entrambe le automazioni SMS/OTP. Restano da
+provare le chiamate reali.**
 
 - Permissions: `RECEIVE_SMS` + `READ_PHONE_STATE` runtime, richieste SOLO quando una regola le
   richiede (arm gate → CTA come battery P1-6); righe salute in Sistema; onboarding INVARIATO
@@ -158,13 +159,13 @@ OnePlus completi; resta il bordo osservazionale con un SMS telephony reale e le 
   hashati, MAI in chiaro. EventId chiamata: identità della transizione, indipendente dal numero,
   così i doppi broadcast anonimo/numerato restano idempotenti ma le regole filtrate possono fare
   match quando il numero arriva in ritardo.
-- Registrar/probe/validator/bridge aggiornati. Test: unit + Robolectric + device con SMS vero
-  (numero di Lorenzo).
+- Registrar/probe/validator/bridge aggiornati. Test: unit + Robolectric + production-path device;
+  conferma manuale Lorenzo su SMS telephony reale ricevuto dal modem.
 
 ### P2-3 — OTP autocopy (la feature di Lorenzo)
 
-**Stato 2026-07-15: implementazione e pipeline sintetica-device complete; resta la verifica live
-SMS telephony → textMatch/regex → clipboard con incolla da parte di Lorenzo.**
+**Stato 2026-07-15: completo. Lorenzo ha verificato live SMS telephony → textMatch/regex →
+clipboard e incolla reale in un'altra app; entrambe le automazioni hanno funzionato perfettamente.**
 
 - engine-core: `Action.CopyToClipboard` (D3) + validator + `CapabilityRequirements` + render
   review ("Copia negli appunti · estrazione: `regex`" — regex integrale, §5 non si soffia).
@@ -175,8 +176,9 @@ SMS telephony → textMatch/regex → clipboard con incolla da parte di Lorenzo.
   prefissi telefonici (il vecchio pattern lookbehind resta migrato in modo compatibile; da
   raffinare in TDD con corpus di SMS reali di esempio, inclusi falsi positivi: importi, anni,
   numeri parziali).
-- E2E live con Lorenzo: SMS OTP vero (es. codice di test) → clipboard entro pochi secondi,
-  audit senza contenuto. Negativo: SMS senza codice → FAILED `otp_not_found`, nessuna copia.
+- ~~E2E positivo live con Lorenzo: SMS OTP vero → clipboard entro pochi secondi + incolla reale.~~
+  **PASS manuale 2026-07-15.** Resta osservazionale il negativo live: SMS senza codice → FAILED
+  `otp_not_found`, nessuna copia; il comportamento è già coperto dai test Robolectric.
 
 ### P2-4 — Geofence (Es. 1 end-to-end)
 
@@ -227,7 +229,8 @@ e [limiti location in background](https://developer.android.com/develop/sensors-
 ## Definition of Done P2
 
 - Es. 1 della spec passa live (geofence reale, multi-azione).
-- OTP autocopy passa live su SMS vero; il contenuto SMS non appare MAI in log/DB/audit.
+- ~~OTP autocopy passa live su SMS vero.~~ **PASS manuale Lorenzo 2026-07-15**; redazione del
+  contenuto da log/DB/audit coperta separatamente da code review e gate automatizzati.
 - Trigger connectivity e phone_state armabili, verificati on-device, fail-closed senza grant.
 - Nessun service persistente quando nessuna regola armata lo richiede; il FGS sentinella si
   spegne da solo ed è dichiarato in Sistema.

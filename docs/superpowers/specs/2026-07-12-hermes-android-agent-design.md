@@ -2,7 +2,7 @@
 
 > **Nome di lavoro:** *Argus* (il gigante dai molti occhi — agente always-on che "vede" lo schermo). Provvisorio, rinominabile.
 > **Data:** 2026-07-12 · **Rev:** 4 (bridge Argus v1 hardenizzato) · **Autore:** Lorenzo Marci + Claude Code (oneplus) + Codex
-> **Stato:** design approvato; P0-A e handoff frontend completati, P0-B in chiusura secondo il commander replan. In caso di conflitto, il replan 2026-07-13 prevale sulle sezioni storiche.
+> **Stato 2026-07-15:** design approvato; P0/P1 completati; implementazione P2 sul branch `feat/argus-p2-background`, con i gate fisici elencati nel handoff Codex ancora aperti. In caso di conflitto prevalgono il piano P2 e l'handoff più recenti sulle sezioni storiche.
 >
 > **Changelog rev 4** (rispetto a rev 3):
 > - **Bridge dedicato:** `argus-bridge` separato dalla Guida Bali, loopback-only su Hermes e pubblicato sul tailnet tramite Tailscale Serve HTTPS.
@@ -243,7 +243,7 @@ Punto chiave da non perdere: **l'MVP non ha streaming** — il transport primari
 ## 14. Strategia di test
 
 - **Unit (table-driven):** interprete regole (match trigger, condizioni AND/OR/NOT, dispatch, priorità/last-writer-wins, isolamento errori, cooldown minimo generativo), **CronSchedule/TimeSpecs (incl. DST gap/overlap Europe/Rome)**, `DraftValidator` (incl. invarianti sicurezza), (de)serializzazione schema + migrazioni, euristica conflitti (incl. soppressione coppie complementari), parser output CliBridge (sentinel/JSON bilanciato, fail-soft).
-- **Instrumented (device reale):** op Shizuku (screencap/tap/shell/install/uiautomator), registrar trigger, boot recovery, **estrazione `conversationId`/`isGroup` dalle notifiche WhatsApp reali** (E15).
+- **Instrumented (device reale):** op Shizuku (screencap/tap/shell/install/uiautomator), registrar trigger e recovery phased/sintetico; il **reboot fisico resta un gate distinto**. Verificare inoltre l'estrazione `conversationId`/`isGroup` dalle notifiche WhatsApp reali (E15).
 - **Contract test Brain:** risposte mockate per entrambi i transport → tool-call/JSON attesi.
 - **Injection test:** contenuto untrusted non escala oltre `allowed_tools`, non cambia `reply_target`, e un draft con tool vietati **viene rifiutato dal validator** (e ri-bloccato al fire-time).
 - **Golden/eval:** i 3 prompt NL → `AutomationDraft` atteso (Brain mockato) → `DraftValidator` verde.
@@ -255,14 +255,14 @@ Principio: **prima il valore nuovo e latency-tolerant** (automazioni da NL, che 
 - **P0-A — Engine core (JVM puro):** modelli + matcher + evaluator + engine + **cron/DST** + **validator** + conflitti + parser + manifest + interfacce. Piano dedicato nel bundle. *(Nessun risultato utente-visibile: fondamenta testate.)*
 - **P0-B — Fondamenta Android + compile one-shot:** `core-shizuku` + `device-tools` + capability probe + `Brain`(CliBridge) + agent-loop one-shot + Room store + trigger **Time** + azioni deterministiche + gate approvazione + UI minima. **Risultato: Es. 2 funziona end-to-end** (chat "crea automazione" → approva → esegue). L'Es. 1 è pronto lato compile+engine ma **scatta davvero solo da P2** (registrar geofence). Niente vision, niente loop interattivo.
 - **P1 — Generativo + notifiche:** trigger **Notification** (WhatsApp RemoteInput, estrazione `conversationId`/`isGroup`) + azione **`InvokeLlm` one-shot** (lane async + `Submitted`) + whitelist contatti + `reply_target` binding + fallback E13 + **battery-optimization exemption** (richiesta qui, non in P2: senza, le chiamate LLM in Doze falliscono). **Risultato: Es. 3 funziona.**
-- **P2 — Hardening background:** esecuzione durevole/FGS short-lived solo dove necessario, boot recovery reale, wizard OEM/background-location + trigger **Geofence** (→ **Es. 1 end-to-end**) e **PhoneState**/**Connectivity** + resilienza Shizuku + (opz.) `triggers-ui`.
+- **P2 — Hardening background:** esecuzione durevole/FGS short-lived solo dove necessario, recovery su boot/package-replace implementato e coperto sinteticamente (**il reboot fisico resta un gate osservazionale separato, eseguibile solo con Lorenzo presente**), wizard OEM/background-location + trigger **Geofence** (→ **Es. 1 end-to-end**) e **PhoneState**/**Connectivity** + resilienza Shizuku + (opz.) `triggers-ui`.
 - **P3 — Interattivo + secondo brain + sicurezza avanzata:** **loop computer_use interattivo** via `OpenAICompatTransport` (modello veloce/multimodale) + `DirectLlmBrain` (OAuth) + tool app-side `web.search`/`vision.analyze` + conferma-irreversibili live + budget guard UI + streaming chat.
 
 ## 16. Rischi aperti da confermare in planning
 
 - **`conversationId` WhatsApp (E15):** verificare empiricamente su device quale chiave stabile espongono le notifiche (candidati: `shortcutId`, `tag`, `EXTRA_PEOPLE_LIST`, sortKey) e come si rileva `isGroupConversation`. Prerequisito P1; se nessuna chiave è affidabile, fallback dichiarato al display name (con warning permanente in UI).
 - **Transport loop interattivo (P3):** quale modello veloce/multimodale per `OpenAICompatTransport` — proxy Nous/xAI (verificare costo/quota e supporto immagini) vs Direct Gemini/OpenRouter. Budget latenza per-turno target.
-- **Argus bridge:** `/compile` v1 completato e isolato dal bridge Guida Bali. Per `act` P1 estendere il contratto Argus con una nuova versione/endpoint, senza riaprire il fallback `/chat`.
+- **Argus bridge:** `/compile` v1 e `/act` v1 sono completati, isolati dal bridge Guida Bali, deployati e consumati dai rispettivi path Android. Le evoluzioni P3 devono versionare il contratto senza riaprire il fallback `/chat`.
 - **B1:** UX e procedura esatta di ripristino Shizuku via Wireless ADB sul OnePlus 15 non-root;
   auto-start root/Magisk soltanto su un futuro device realmente rootato.
 - **B6:** provider multimodale per aux-vision (Gemini free candidato).
@@ -273,7 +273,7 @@ Principio: **prima il valore nuovo e latency-tolerant** (automazioni da NL, che 
 - Play Store distribution (app sideloaded personale).
 - Multi-utente / multi-profilo.
 - Editor visuale di regole drag-and-drop (le regole le crea l'LLM; la UI le mostra/approva).
-- Sync cloud delle automazioni (locale; **export/import JSON locale** invece è quasi gratis — nice-to-have P2, assicura contro un wipe).
+- Sync cloud delle automazioni. Anche **export/import JSON locale è differito oltre P2**: non è una feature “quasi gratis” perché richiede contratto di schema/versione, redazione dei dati sensibili, SAF, gestione collisioni e ri-approvazione fail-closed dopo l'import.
 - Trigger `Time.interval` arbitrario (i periodici comuni sono esprimibili in cron; interval non-cron eventualmente via WorkManager, se mai servirà).
 - Loop computer_use interattivo su brain gratuito (impedito dalla latenza — vedi B8).
 - Reply generative nei gruppi WhatsApp (vietate in MVP — §10.3).
