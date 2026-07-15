@@ -206,7 +206,11 @@ private fun HealthSection(state: SettingsState, callbacks: SettingsCallbacks) {
             )
             HealthRow(
                 Icons.Rounded.BatterySaver, "Ottimizzazione batteria",
-                if (state.batteryExempt) "esclusa — minore rischio di ritardi in background" else "attiva — OxygenOS può ritardare il lavoro in background",
+                if (state.batteryExempt) {
+                    "esclusione Android concessa — i controlli attività in background/avvio automatico OxygenOS restano manuali"
+                } else {
+                    "attiva — concedi l'esclusione e verifica anche attività in background/avvio automatico in OxygenOS"
+                },
                 if (state.batteryExempt) HealthLevel.OK else HealthLevel.WARN,
                 onFix = callbacks::onOpenBatteryFix,
             )
@@ -235,9 +239,9 @@ private fun HealthSection(state: SettingsState, callbacks: SettingsCallbacks) {
             HealthRow(
                 Icons.Rounded.Sms, "Trigger SMS",
                 if (state.smsTriggerGranted) {
-                    "attivi — le regole sugli SMS in arrivo sono armabili"
+                    "attivi per SMS telefonici — chat RCS e MMS non emettono questo trigger"
                 } else {
-                    "non attivi — consenti per armare regole sugli SMS in arrivo"
+                    "non attivi — solo SMS telefonici, non chat RCS o MMS"
                 },
                 if (state.smsTriggerGranted) HealthLevel.OK else HealthLevel.NEUTRAL,
                 onFix = callbacks::onRequestSmsPermission,

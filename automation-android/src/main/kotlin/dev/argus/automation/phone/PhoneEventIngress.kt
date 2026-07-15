@@ -18,7 +18,9 @@ data class CallStateSnapshot(
 
 interface CallStateStore {
     fun last(): CallStateSnapshot?
-    fun record(snapshot: CallStateSnapshot)
+    fun pending(): TriggerEnvelope?
+    fun record(snapshot: CallStateSnapshot, pending: TriggerEnvelope? = null)
+    fun complete(eventId: String)
 }
 
 fun interface PhoneEventDispatcher {
@@ -51,12 +53,15 @@ class PhoneEventIngress(
     }
 
     suspend fun onCallStateChanged(state: String, number: String?, atMillis: Long) {
-        val envelope = callMutex.withLock {
-            if (state !in VALID_STATES) return@withLock null
+        callMutex.withLock {
+            if (state !in VALID_STATES) return@withLock
+            val pending = callState.pending()
+            if (pending != null) deliverCall(pending)
             val safeAtMillis = atMillis.coerceAtLeast(0)
             val stored = callState.last()
             val previous = stored?.takeUnless {
-                safeAtMillis - it.transitionAtMillis > MAX_CALL_STATE_AGE_MILLIS
+                val ageMillis = safeAtMillis - it.transitionAtMillis
+                ageMillis < 0 || ageMillis > MAX_CALL_STATE_AGE_MILLIS
             }
 
             if (state == previous?.state) {
@@ -66,15 +71,16 @@ class PhoneEventIngress(
                 // fare match.
                 if (state == STATE_RINGING && previous.number == null && number != null) {
                     val enriched = previous.copy(number = number)
-                    callState.record(enriched)
-                    return@withLock parser.parse(
+                    val envelope = parser.parse(
                         PhoneEvent.INCOMING_CALL,
                         number,
                         smsText = null,
                         atMillis = enriched.transitionAtMillis,
                     )
+                    callState.record(enriched, envelope)
+                    envelope?.let { deliverCall(it) }
                 }
-                return@withLock null
+                return@withLock
             }
 
             val retainedNumber = number ?: previous?.number
@@ -83,9 +89,7 @@ class PhoneEventIngress(
                 number = retainedNumber.takeUnless { state == STATE_IDLE },
                 transitionAtMillis = safeAtMillis,
             )
-            callState.record(snapshot)
-
-            when {
+            val envelope = when {
                 state == STATE_RINGING -> parser.parse(
                     PhoneEvent.INCOMING_CALL,
                     retainedNumber,
@@ -101,8 +105,20 @@ class PhoneEventIngress(
                     )
                 else -> null
             }
+            callState.record(snapshot, envelope)
+            envelope?.let { deliverCall(it) }
         }
-        envelope?.let { dispatcher.dispatch(it) }
+    }
+
+    suspend fun recoverPending(): Boolean = callMutex.withLock {
+        val pending = callState.pending() ?: return@withLock false
+        deliverCall(pending)
+        true
+    }
+
+    private suspend fun deliverCall(envelope: TriggerEnvelope) {
+        dispatcher.dispatch(envelope)
+        callState.complete(envelope.id.value)
     }
 
     private companion object {

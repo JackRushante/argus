@@ -142,12 +142,18 @@ connectivity non è necessario.
 
 ### P2-2 — PhoneState (chiamate + SMS)
 
+**Stato 2026-07-15: implementazione, gate host e SMS sintetico nel processo di produzione sul
+OnePlus completi; resta il bordo osservazionale con un SMS telephony reale e le chiamate reali.**
+
 - Permissions: `RECEIVE_SMS` + `READ_PHONE_STATE` runtime, richieste SOLO quando una regola le
   richiede (arm gate → CTA come battery P1-6); righe salute in Sistema; onboarding INVARIATO
   (non tutti vogliono SMS).
 - Receiver manifest: PHONE_STATE (RINGING→INCOMING_CALL, IDLE dopo OFFHOOK/RINGING→CALL_ENDED,
   number quando disponibile e permesso) e SMS_RECEIVED (number + smsText volatile D2, multipart
   ricomposti).
+- Confine canale esplicito: `SMS_RECEIVED` copre soltanto SMS telephony. Le chat RCS di Google
+  Messaggi e gli MMS non passano da questo receiver e non possono attivare OTP/textMatch; la UI
+  lo dichiara senza chiamarli genericamente "messaggi".
 - Matcher: `numbersMatch` esiste già (suffisso ≥7 cifre). EventId SMS: digest include numero+testo
   hashati, MAI in chiaro. EventId chiamata: identità della transizione, indipendente dal numero,
   così i doppi broadcast anonimo/numerato restano idempotenti ma le regole filtrate possono fare
@@ -156,6 +162,9 @@ connectivity non è necessario.
   (numero di Lorenzo).
 
 ### P2-3 — OTP autocopy (la feature di Lorenzo)
+
+**Stato 2026-07-15: implementazione e pipeline sintetica-device complete; resta la verifica live
+SMS telephony → textMatch/regex → clipboard con incolla da parte di Lorenzo.**
 
 - engine-core: `Action.CopyToClipboard` (D3) + validator + `CapabilityRequirements` + render
   review ("Copia negli appunti · estrazione: `regex`" — regex integrale, §5 non si soffia).
@@ -197,9 +206,15 @@ e [limiti location in background](https://developer.android.com/develop/sensors-
 
 - ~~D4 shell statica: gate host + device Shizuku e regressioni su trigger esterni.~~ **Completo**
   (`cfc0ef4`, positivo e negativo su OnePlus; Notification/PhoneState fail-closed).
-- Wizard OEM: nota/CTA per la gestione batteria OnePlus (documentare, niente magia).
-- Export/import JSON locale delle automazioni (nice-to-have §17: assicura contro un wipe;
-  import = draft da ri-approvare UNO A UNO, mai arm diretto — fingerprint non trasferibile).
+- ~~Wizard OEM: nota/CTA per la gestione batteria OnePlus (documentare, niente magia).~~ **Completo**:
+  UI distingue l'esenzione Android dai toggle OxygenOS manuali, che Argus non può verificare.
+- **Hardening crash-consistency completo:** Connectivity e chiamate persistono atomicamente
+  snapshot + envelope pending digest-only prima del dispatch, recuperano lo stesso event-id ad
+  `APP_START` e continuano il drain delle altre sorgenti se una fallisce. Gli SMS restano
+  intenzionalmente solo in RAM: nessun testo viene scritto in preferences/Room/log.
+- **Export/import JSON locale differito oltre P2:** era nice-to-have, non Definition of Done. Farlo
+  bene richiede Storage Access Framework, schema/versioning/redazione e import sempre PENDING da
+  ri-approvare uno a uno; non viene inserito di fretta nella chiusura dei trigger background.
 - Full gate senza cache, smoke, aggiornamento handoff/CLAUDE/contract/audit, merge su master.
 
 ## Definition of Done P2

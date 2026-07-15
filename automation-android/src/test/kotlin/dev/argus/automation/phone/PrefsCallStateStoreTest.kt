@@ -1,11 +1,16 @@
 package dev.argus.automation.phone
 
 import androidx.test.core.app.ApplicationProvider
+import dev.argus.engine.model.PhoneEvent
+import dev.argus.engine.runtime.TriggerEnvelope
+import dev.argus.engine.runtime.TriggerEvent
+import dev.argus.engine.runtime.TriggerEventId
 import org.junit.After
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 
 @RunWith(RobolectricTestRunner::class)
 class PrefsCallStateStoreTest {
@@ -32,5 +37,21 @@ class PrefsCallStateStoreTest {
         store.record(CallStateSnapshot("IDLE", null, 13_000L))
 
         assertEquals(CallStateSnapshot("IDLE", null, 13_000L), store.last())
+    }
+
+    @Test
+    fun `pending call event retains only bounded call metadata until completion`() {
+        val envelope = TriggerEnvelope(
+            TriggerEventId("phone:${"d".repeat(64)}"),
+            TriggerEvent.PhoneStateChanged(PhoneEvent.CALL_ENDED, "+3932077480"),
+        )
+        store.record(CallStateSnapshot("IDLE", null, 13_000L), envelope)
+
+        PrefsCallStateStore(context).apply {
+            assertEquals(envelope, pending())
+            assertNull(last()?.number)
+            complete(envelope.id.value)
+            assertNull(pending())
+        }
     }
 }

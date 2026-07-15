@@ -89,4 +89,40 @@ class GeofenceEventIngressTest {
             assertNull(state.pending(id, fingerprint))
             assertEquals(Transition.EXIT, state.get(id)?.lastTransition)
         }
+
+    @Test
+    fun `recovery attempts every registration even when the first pending dispatch fails`() =
+        runTest {
+            val firstId = AutomationId("a-home")
+            val secondId = AutomationId("b-office")
+            val firstFingerprint = ApprovalFingerprint("e".repeat(64))
+            val secondFingerprint = ApprovalFingerprint("f".repeat(64))
+            val state = MemoryGeofenceStateStore().apply {
+                prepare(GeofenceRegistration(firstId, firstFingerprint, 45.0, 9.0, 150f))
+                activate(firstId, firstFingerprint)
+                prepare(GeofenceRegistration(secondId, secondFingerprint, 46.0, 10.0, 150f))
+                activate(secondId, secondFingerprint)
+            }
+            val alwaysFail = GeofenceEventIngress(state) { error("process dies") }
+            assertFailsWith<IllegalStateException> {
+                alwaysFail.onTransition(firstId, firstFingerprint, Transition.EXIT)
+            }
+            assertFailsWith<IllegalStateException> {
+                alwaysFail.onTransition(secondId, secondFingerprint, Transition.ENTER)
+            }
+            val attempted = mutableListOf<AutomationId>()
+            val recovering = GeofenceEventIngress(state) { envelope ->
+                val id = (envelope.event as TriggerEvent.GeofenceTransitioned).automationId
+                attempted += id
+                if (id == firstId) error("first registration unavailable")
+            }
+
+            assertFailsWith<IllegalStateException> {
+                recovering.recoverPending(setOf(firstId, secondId))
+            }
+
+            assertEquals(listOf(firstId, secondId), attempted)
+            assertEquals(Transition.EXIT, state.pending(firstId, firstFingerprint)?.transition)
+            assertNull(state.pending(secondId, secondFingerprint))
+        }
 }

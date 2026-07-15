@@ -7,6 +7,7 @@ import dev.argus.engine.runtime.TriggerEvent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -110,16 +111,54 @@ class PhoneEventIngressTest {
     }
 
     @Test
+    fun `future persisted ringing after clock rollback never creates a false call ended`() =
+        runTest {
+            callState.record(CallStateSnapshot("RINGING", "3932077480", 10_000L))
+
+            ingress.onCallStateChanged("IDLE", number = null, atMillis = 9_000L)
+
+            assertTrue(dispatched.isEmpty())
+            assertEquals(CallStateSnapshot("IDLE", null, 9_000L), callState.last())
+        }
+
+    @Test
     fun `empty sms bodies are dropped`() = runTest {
         ingress.onSms(listOf(SmsPart(sender = "+39001", body = "   ", atMillis = 1L)))
         assertTrue(dispatched.isEmpty())
+    }
+
+    @Test
+    fun `failed call dispatch survives process death with the exact same event id`() = runTest {
+        var failedId: String? = null
+        val failing = PhoneEventIngress(PhoneEventParser(), callState) { envelope ->
+            failedId = envelope.id.value
+            error("process dies")
+        }
+
+        assertFailsWith<IllegalStateException> {
+            failing.onCallStateChanged("RINGING", "3932077480", 1_000L)
+        }
+        assertEquals(failedId, callState.pending()?.id?.value)
+
+        val retried = mutableListOf<TriggerEnvelope>()
+        val restarted = PhoneEventIngress(PhoneEventParser(), callState) { retried += it }
+        assertTrue(restarted.recoverPending())
+        assertEquals(failedId, retried.single().id.value)
+        assertNull(callState.pending())
     }
 }
 
 private class InMemoryCallStateStore : CallStateStore {
     private var value: CallStateSnapshot? = null
+    private var pending: TriggerEnvelope? = null
     override fun last(): CallStateSnapshot? = value
-    override fun record(snapshot: CallStateSnapshot) {
+    override fun pending(): TriggerEnvelope? = pending
+    override fun record(snapshot: CallStateSnapshot, pending: TriggerEnvelope?) {
         value = snapshot
+        this.pending = pending
+    }
+    override fun complete(eventId: String) {
+        require(pending?.id?.value == eventId)
+        pending = null
     }
 }

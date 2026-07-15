@@ -6,6 +6,7 @@ import dev.argus.engine.model.Transition
 import dev.argus.engine.runtime.TriggerEnvelope
 import dev.argus.engine.runtime.TriggerEvent
 import dev.argus.engine.runtime.TriggerEventId
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -46,14 +47,22 @@ class GeofenceEventIngress(
     suspend fun recoverPending(allowedIds: Set<AutomationId>): List<AutomationId> =
         mutex.withLock {
             val recovered = mutableListOf<AutomationId>()
+            var firstFailure: Exception? = null
             state.knownIds().sortedBy { it.value }.forEach { id ->
                 if (id !in allowedIds) return@forEach
                 val registration = state.get(id) ?: return@forEach
                 val pending = state.pending(id, registration.approvalFingerprint)
                     ?: return@forEach
-                deliver(id, registration.approvalFingerprint, pending)
-                recovered += id
+                try {
+                    deliver(id, registration.approvalFingerprint, pending)
+                    recovered += id
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    if (firstFailure == null) firstFailure = error
+                }
             }
+            firstFailure?.let { throw it }
             recovered
         }
 

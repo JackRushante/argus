@@ -317,7 +317,9 @@ class OnboardingViewModel @Inject constructor(
                 kind,
                 StepStatus.TODO,
                 "Ottimizzazione batteria",
-                "Opzionale: riduce il rischio che OxygenOS ritardi il lavoro in background. Gli allarmi pianificati restano event-driven.",
+                "Consigliato: concedi l'esclusione Android, poi verifica manualmente in OxygenOS " +
+                    "attività in background e avvio automatico, se presenti. Argus non può leggere " +
+                    "né cambiare in modo affidabile questi interruttori OEM.",
                 "Apri impostazioni",
                 null,
             )

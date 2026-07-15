@@ -687,6 +687,8 @@ object ArgusModule {
         replyRegistry: ActiveNotificationReplyRegistry,
         connectivity: ConnectivityTriggerRuntime,
         geofence: GeofenceTriggerRuntime,
+        connectivityIngress: ConnectivityEventIngress,
+        phoneIngress: PhoneEventIngress,
     ): ArgusRuntimeController = ArgusRuntimeController(
         scope,
         scheduler,
@@ -697,5 +699,7 @@ object ArgusModule {
         replyRegistry,
         connectivity,
         geofence,
+        connectivityIngress,
+        phoneIngress,
     )
 }

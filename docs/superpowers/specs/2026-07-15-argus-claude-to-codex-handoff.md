@@ -261,6 +261,10 @@ Implementazione **completa e installata**. Manca **solo la verifica live**, che 
 la sessione si è fermata: Lorenzo stava per mandarsi un SMS `"prova argus 345798"` dal secondo
 numero. Cosa deve succedere:
 
+**Aggiornamento Codex:** il tentativo osservato era RCS, non un SMS telephony (nessun record nuovo
+nell'inbox SMS e nessun `SMS_RECEIVED`). Anche MMS è fuori dal receiver implementato. Il gate live
+va fatto forzando esplicitamente l'invio come **SMS**; UI e piano ora dichiarano questo confine.
+
 - `logcat -s ArgusPhone` → `sms ricevuto: parts=1`
 - regola "Notifica SMS prova Argus" (già armata sul device) → notifica **"SMS ricevuto!"** + `FIRED` nel Log
 - se anche la regola OTP è armata → **`345798` negli appunti**, incollabile

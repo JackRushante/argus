@@ -59,6 +59,7 @@ class ConnectivitySentinelService : Service() {
     private var wifiCallback: ConnectivityManager.NetworkCallback? = null
     private var powerReceiverRegistered = false
     private var lastWifiName: String? = null
+    private var startupFailed = false
 
     private val powerReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -93,7 +94,8 @@ class ConnectivitySentinelService : Service() {
         }
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int =
+        if (startupFailed) START_NOT_STICKY else START_STICKY
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -341,6 +343,7 @@ class ConnectivitySentinelService : Service() {
     }
 
     private fun failStartup(error: RuntimeException) {
+        startupFailed = true
         Log.e(TAG, "avvio sentinella fallito: ${error::class.java.simpleName}")
         cleanupRegistrations()
         status.setActive(false)

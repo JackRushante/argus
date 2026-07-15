@@ -8,7 +8,9 @@ import dev.argus.engine.runtime.TriggerEvent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class ConnectivityEventIngressTest {
@@ -110,6 +112,65 @@ class ConnectivityEventIngressTest {
         )
     }
 
+    @Test
+    fun `failed dispatch stays pending and process recovery reuses the exact event id`() = runTest {
+        val store = MemoryConnectivityStateStore()
+        var failedId: String? = null
+        val failing = ConnectivityEventIngress(
+            ConnectivityEventParser(),
+            store,
+        ) { envelope ->
+            failedId = envelope.id.value
+            error("process dies")
+        }
+
+        assertFailsWith<IllegalStateException> {
+            failing.observe(ConnMedium.BT, ConnState.CONNECTED, "Auto", "AA:BB", 100)
+        }
+        assertEquals(failedId, store.pending().single().second.id.value)
+
+        val recovered = mutableListOf<TriggerEnvelope>()
+        val restarted = ingress(store, recovered)
+        assertEquals(1, restarted.recoverPending().size)
+        assertEquals(failedId, recovered.single().id.value)
+        assertTrue(store.pending().isEmpty())
+    }
+
+    @Test
+    fun `recovery attempts every source even when the first pending dispatch fails`() = runTest {
+        val store = MemoryConnectivityStateStore()
+        val parser = ConnectivityEventParser()
+        val firstKey = "a".repeat(64)
+        val secondKey = "b".repeat(64)
+        val first = requireNotNull(
+            parser.parse(ConnMedium.BT, ConnState.CONNECTED, "Auto", "AA:BB", 100),
+        )
+        val second = requireNotNull(
+            parser.parse(ConnMedium.POWER, ConnState.CONNECTED, null, "power", 101),
+        )
+        store.record(
+            firstKey,
+            ConnectivityStateSnapshot(ConnState.CONNECTED, "Auto", 100),
+            first,
+        )
+        store.record(
+            secondKey,
+            ConnectivityStateSnapshot(ConnState.CONNECTED, null, 101),
+            second,
+        )
+        val attempted = mutableListOf<String>()
+        val ingress = ConnectivityEventIngress(parser, store) { envelope ->
+            attempted += envelope.id.value
+            if (envelope.id == first.id) error("first source unavailable")
+        }
+
+        assertFailsWith<IllegalStateException> { ingress.recoverPending() }
+
+        assertEquals(listOf(first.id.value, second.id.value), attempted)
+        assertEquals(first.id, store.pending(firstKey)?.id)
+        assertNull(store.pending(secondKey))
+    }
+
     private fun ingress(
         store: ConnectivityStateStore,
         events: MutableList<TriggerEnvelope>,
@@ -122,11 +183,24 @@ class ConnectivityEventIngressTest {
 
 private class MemoryConnectivityStateStore : ConnectivityStateStore {
     private val values = mutableMapOf<String, ConnectivityStateSnapshot>()
+    private val pending = mutableMapOf<String, TriggerEnvelope>()
     val keys: Set<String> get() = values.keys
 
     override fun last(sourceKey: String): ConnectivityStateSnapshot? = values[sourceKey]
+    override fun pending(sourceKey: String): TriggerEnvelope? = pending[sourceKey]
+    override fun pending(): List<Pair<String, TriggerEnvelope>> = pending.toList()
 
-    override fun record(sourceKey: String, snapshot: ConnectivityStateSnapshot) {
+    override fun record(
+        sourceKey: String,
+        snapshot: ConnectivityStateSnapshot,
+        pending: TriggerEnvelope?,
+    ) {
         values[sourceKey] = snapshot
+        if (pending == null) this.pending.remove(sourceKey) else this.pending[sourceKey] = pending
+    }
+
+    override fun complete(sourceKey: String, eventId: String) {
+        require(pending[sourceKey]?.id?.value == eventId)
+        pending.remove(sourceKey)
     }
 }
