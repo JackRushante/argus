@@ -39,6 +39,7 @@ import dev.argus.automation.LazyDeviceStateProvider
 import dev.argus.automation.NotificationEventDispatcher
 import dev.argus.automation.RoomTimeAlarmStateStore
 import dev.argus.automation.ShizukuActionExecutor
+import dev.argus.automation.ShizukuStaticShellRunner
 import dev.argus.automation.TimeAlarmBackend
 import dev.argus.automation.TimeAlarmCoordinator
 import dev.argus.automation.TimeAlarmRuntime
@@ -378,14 +379,27 @@ object ArgusModule {
 
     @Provides
     @Singleton
+    fun staticShellRunner(shell: PrivilegedShell): ShizukuStaticShellRunner =
+        ShizukuStaticShellRunner(shell)
+
+    @Provides
+    @Singleton
     fun actionExecutor(
         tools: DeviceController,
+        staticShell: ShizukuStaticShellRunner,
         notifier: AutomationNotifier,
         generativeLane: GenerativeLane,
         replies: NotificationReplyGateway,
         clipboard: ClipboardCopier,
     ): ShizukuActionExecutor =
-        ShizukuActionExecutor(tools, notifier, generativeLane, replies, clipboard)
+        ShizukuActionExecutor(
+            tools,
+            notifier,
+            generativeLane,
+            replies,
+            clipboard,
+            staticShell,
+        )
 
     @Provides
     fun actionExecutorBoundary(executor: ShizukuActionExecutor): ActionExecutor = executor

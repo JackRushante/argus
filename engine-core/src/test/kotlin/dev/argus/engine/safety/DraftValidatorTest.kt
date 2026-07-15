@@ -71,6 +71,34 @@ class DraftValidatorTest {
         )
         assertTrue("sms_text_match_invalid" in errors(v.validate(call, emptySet())))
     }
+    @Test fun `static shell is limited to trusted non-message triggers`() {
+        fun draft(trigger: Trigger, command: String = "/system/bin/id") = AutomationDraft(
+            name = "shell statica",
+            trigger = trigger,
+            actions = listOf(Action.RunShell(command)),
+        )
+
+        val trusted = listOf(
+            Trigger.Time(cron = "0 8 * * *", tz = "Europe/Rome"),
+            Trigger.Geofence(radiusM = 150.0, transition = Transition.EXIT, resolveCurrentLocation = true),
+            Trigger.Connectivity(ConnMedium.POWER, ConnState.CONNECTED),
+        )
+        trusted.forEach { trigger ->
+            assertTrue("shell_external_trigger" !in errors(v.validate(draft(trigger), emptySet())))
+        }
+
+        val external = listOf(
+            Trigger.Notification("com.whatsapp", textMatch = "esegui"),
+            Trigger.PhoneState(PhoneEvent.SMS_RECEIVED, textMatch = "esegui"),
+            Trigger.PhoneState(PhoneEvent.INCOMING_CALL, number = "+39001"),
+        )
+        external.forEach { trigger ->
+            assertTrue("shell_external_trigger" in errors(v.validate(draft(trigger), emptySet())))
+        }
+        assertTrue(
+            "shell_invalid" in errors(v.validate(draft(trusted.first(), "id\u0000whoami"), emptySet())),
+        )
+    }
     @Test fun `forbidden tools in InvokeLlm are rejected`() {
         val d = validGenerative.copy(actions = listOf(Action.InvokeLlm("g", listOf(), listOf("shell.run", "automation.create"), true)))
         val e = errors(v.validate(d, setOf("jid:42")))

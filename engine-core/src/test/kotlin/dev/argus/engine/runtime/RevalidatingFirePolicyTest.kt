@@ -237,17 +237,71 @@ class RevalidatingFirePolicyTest {
     }
 
     @Test
-    fun `run shell remains blocked without a live confirmation flow`() = runTest {
+    fun `approved static shell is allowed for a trusted trigger`() = runTest {
         val automation = automation(
             Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
             listOf(Action.RunShell("id")),
         )
-        val block = assertIs<FirePolicyDecision.Block>(
-            policy(snapshot(availableCapabilities = setOf(ActionCapabilities.RUN_SHELL)))
+        assertEquals(
+            FirePolicyDecision.Allow,
+            policy(
+                snapshot(
+                    availableCapabilities = setOf(
+                        CapabilityIds.TRIGGER_TIME,
+                        ActionCapabilities.RUN_SHELL,
+                    ),
+                ),
+            )
                 .evaluate(automation, timeEvent(automation)),
         )
-        assertEquals("live_confirmation_required", block.code)
-        assertTrue(!block.needsReview)
+    }
+
+    @Test
+    fun `shell stays fail closed for message triggers and mismatched live events`() = runTest {
+        val external = automation(
+            Trigger.PhoneState(dev.argus.engine.model.PhoneEvent.SMS_RECEIVED),
+            listOf(Action.RunShell("id")),
+        )
+        val structural = assertIs<FirePolicyDecision.Block>(
+            policy(
+                snapshot(
+                    availableCapabilities = setOf(
+                        CapabilityIds.TRIGGER_PHONE_SMS,
+                        ActionCapabilities.RUN_SHELL,
+                    ),
+                ),
+            ).evaluate(
+                external,
+                TriggerEvent.PhoneStateChanged(
+                    dev.argus.engine.model.PhoneEvent.SMS_RECEIVED,
+                    number = "+39001",
+                    smsText = "untrusted",
+                ),
+            ),
+        )
+        assertEquals("shell_external_trigger", structural.code)
+        assertTrue(structural.needsReview)
+
+        val trusted = automation(
+            Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
+            listOf(Action.RunShell("id")),
+        )
+        val mismatchedEvent = assertIs<FirePolicyDecision.Block>(
+            policy(
+                snapshot(
+                    availableCapabilities = setOf(
+                        CapabilityIds.TRIGGER_TIME,
+                        ActionCapabilities.RUN_SHELL,
+                    ),
+                ),
+            )
+                .evaluate(
+                    trusted,
+                    TriggerEvent.NotificationPosted("com.example", text = "untrusted"),
+                ),
+        )
+        assertEquals("shell_external_trigger", mismatchedEvent.code)
+        assertTrue(!mismatchedEvent.needsReview)
     }
 
     @Test

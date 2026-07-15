@@ -115,7 +115,8 @@ Action, discriminata da "type":
 - {"type":"tap", "x":integer, "y":integer}
 - {"type":"input_text", "text":string}
 - {"type":"whatsapp_reply", "text":string}
-- {"type":"run_shell", "cmd":string}
+- {"type":"run_shell", "cmd":string}  // comando letterale, massimo 8192 caratteri;
+  solo con trigger time/geofence/connectivity, mai notification/phone_state
 - {"type":"copy_to_clipboard", "extractionRegex":string|null (regex deterministica: copia il
    primo capture group — o il match intero — dal testo del trigger SMS/notifica; null = testo
    integrale; per gli OTP usa "(?<!\\+)\\b(\\d{4,8})\\b")}
@@ -339,6 +340,9 @@ REGOLE VINCOLANTI:
     phone_state con INCOMING_CALL o CALL_ENDED. Un trigger richiesto ma non in lista NON va
     compilato: spiega in una frase quale permesso abilitarlo richiede (Sistema -> Trigger
     SMS/chiamate) e restituisci draft null con error_code "unsupported_capability".
+11. run_shell e' una shell autonoma con comando STATICO mostrato integralmente in review: usala
+    solo con trigger time, geofence o connectivity; mai con notification o phone_state e mai
+    incorporando contenuti di messaggi/notifiche nel comando.
 
 Ora locale Europe/Rome: {now}
 
@@ -506,6 +510,10 @@ def validate_draft(
         validate_action(action, available_tools) for action in actions
     ):
         return False
+    if any(action["type"] == "run_shell" for action in actions) and value["trigger"]["type"] not in {
+        "time", "geofence", "connectivity"
+    }:
+        return False
     condition = value.get("conditions")
     if condition is not None and not validate_condition(condition, 0, allowed_state_keys):
         return False
@@ -656,9 +664,12 @@ def validate_action(value: Any, available_tools: set[str]) -> bool:
         except re.error:
             return False
         return True
+    if kind == "run_shell":
+        command = value["cmd"]
+        return _string(command, 8_192) and "\x00" not in command
     field_name = {
         "set_ringer": "mode", "launch_app": "pkg", "open_url": "url",
-        "input_text": "text", "whatsapp_reply": "text", "run_shell": "cmd",
+        "input_text": "text", "whatsapp_reply": "text",
     }[kind]
     return _string(value[field_name], 4_096)
 

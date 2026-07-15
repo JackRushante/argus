@@ -272,6 +272,7 @@ class AndroidCapabilityProbe internal constructor(
             ActionTypeIds.SET_RINGER,
             ActionTypeIds.LAUNCH_APP,
             ActionTypeIds.OPEN_URL,
+            ActionTypeIds.RUN_SHELL,
         )
         val PHASE_UNAVAILABLE_TOOLS = linkedMapOf(
             "screen.tap" to "azione UI non disponibile in questa fase",
@@ -291,6 +292,7 @@ class AndroidCapabilityProbe internal constructor(
             add(ActionCapabilities.SET_RINGER)
             add(ActionCapabilities.LAUNCH_APP)
             add(ActionCapabilities.OPEN_URL)
+            add(ActionCapabilities.RUN_SHELL)
             add(CapabilityIds.STATE_FOREGROUND_APP)
             StateKeys.ALL.keys.forEach { add(CapabilityIds.state(it)) }
         }

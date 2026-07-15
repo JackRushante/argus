@@ -125,7 +125,7 @@ object Fixtures {
                 isShell = true,
                 shellCommand = "rsync -a --delete /sdcard/DCIM/Camera/ /mnt/nas/immich/foto/",
                 isGenerative = false,
-                requiresLiveConfirm = true,
+                requiresLiveConfirm = false,
             ),
         ),
         isGenerative = false,

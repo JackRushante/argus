@@ -41,6 +41,7 @@ class RuleRenderMapperTest {
         val row = RuleRenderMapper.map(a).actions.single()
         assertTrue(row.isShell)
         assertEquals("cp -r /sdcard/DCIM /sdcard/backup", row.shellCommand)
+        assertEquals(false, row.requiresLiveConfirm)
     }
 
     /** Helper: automazione con un solo `action` e trigger notifica plausibile. */
@@ -51,9 +52,11 @@ class RuleRenderMapperTest {
     )
 
     @Test fun `requiresLiveConfirm matches the always-confirm catalog per action`() {
-        // Tap/InputText/WhatsAppReply = conferma live; InvokeLlm (lane generativa) = NO.
+        // Tap/InputText/WhatsAppReply = conferma live. InvokeLlm e il comando shell statico,
+        // già approvato integralmente insieme alla regola, non la richiedono al fire-time.
         val table: List<Pair<Action, Boolean>> = listOf(
             Action.InvokeLlm("rispondi", listOf("notification"), listOf("whatsapp_reply"), true) to false,
+            Action.RunShell("/system/bin/id >/dev/null") to false,
             Action.WhatsAppReply("ok") to true,
             Action.Tap(120, 340) to true,
             Action.InputText("ciao") to true,

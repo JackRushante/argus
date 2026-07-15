@@ -11,6 +11,7 @@ import dev.argus.engine.runtime.ActionExecutor
 import dev.argus.engine.runtime.ActionResult
 import dev.argus.engine.runtime.FireContext
 import dev.argus.engine.runtime.TriggerEvent
+import dev.argus.engine.safety.StaticShellSafety
 import kotlinx.coroutines.CancellationException
 
 /** Boundary Android per le notifiche prodotte da una regola. */
@@ -32,6 +33,9 @@ class ShizukuActionExecutor(
     private val generativeLane: GenerativeLane,
     private val replies: NotificationReplyGateway,
     private val clipboard: ClipboardCopier,
+    private val staticShell: StaticShellRunner = StaticShellRunner { _, _ ->
+        ActionResult.Failure("shell_unavailable")
+    },
 ) : ActionExecutor {
     override suspend fun execute(action: Action, ctx: FireContext): ActionResult = try {
         when (action) {
@@ -60,8 +64,11 @@ class ShizukuActionExecutor(
 
             is Action.WhatsAppReply -> staticReply(action, ctx)
 
-            // Difesa in profondità oltre al FirePolicy: nessuna shell senza conferma live.
-            is Action.RunShell -> ActionResult.Failure("live_confirmation_required")
+            is Action.RunShell -> if (StaticShellSafety.allows(ctx.event)) {
+                staticShell.run(action.cmd, ctx)
+            } else {
+                ActionResult.Failure("shell_external_trigger")
+            }
 
             // Clipboard: locale, senza privilegi; il payload arriva dall'evento del trigger.
             is Action.CopyToClipboard -> clipboard.copy(ctx.event, action.extractionRegex)

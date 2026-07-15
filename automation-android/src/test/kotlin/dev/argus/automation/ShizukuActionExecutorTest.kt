@@ -107,7 +107,7 @@ class ShizukuActionExecutorTest {
     }
 
     @Test
-    fun `actions outside P0 and shell remain fail closed`() = runTest {
+    fun `actions outside P0 and shell from an external event remain fail closed`() = runTest {
         val tools = RecordingDeviceController()
         val executor = executor(tools)
 
@@ -121,10 +121,34 @@ class ShizukuActionExecutorTest {
             )
         }
         assertEquals(
-            ActionResult.Failure("live_confirmation_required"),
+            ActionResult.Failure("shell_external_trigger"),
             executor.execute(Action.RunShell("id"), context),
         )
         assertEquals(emptyList(), tools.calls)
+    }
+
+    @Test
+    fun `trusted event delegates the exact approved shell literal`() = runTest {
+        val calls = mutableListOf<Pair<String, FireContext>>()
+        val runner = StaticShellRunner { command, fireContext ->
+            calls += command to fireContext
+            ActionResult.Success
+        }
+        val trustedContext = context.copy(
+            event = TriggerEvent.TimeFired(
+                context.automationId,
+                context.approvalFingerprint,
+            ),
+        )
+
+        assertEquals(
+            ActionResult.Success,
+            executor(staticShell = runner).execute(
+                Action.RunShell("/system/bin/id >/dev/null"),
+                trustedContext,
+            ),
+        )
+        assertEquals(listOf("/system/bin/id >/dev/null" to trustedContext), calls)
     }
 
     @Test
@@ -228,12 +252,16 @@ class ShizukuActionExecutorTest {
         replies: NotificationReplyGateway = RecordingReplyGateway(
             NotificationReplyDelivery.Failed("reply_channel_unavailable"),
         ),
+        staticShell: StaticShellRunner = StaticShellRunner { _, _ ->
+            ActionResult.Failure("shell_unavailable")
+        },
     ) = ShizukuActionExecutor(
         tools = tools,
         notifier = AutomationNotifier { _, _, _ -> },
         generativeLane = lane,
         replies = replies,
         clipboard = { _, _ -> ActionResult.Success },
+        staticShell = staticShell,
     )
 
     private class RecordingReplyGateway(

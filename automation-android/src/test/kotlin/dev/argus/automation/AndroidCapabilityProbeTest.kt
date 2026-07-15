@@ -57,9 +57,11 @@ class AndroidCapabilityProbeTest {
         assertTrue(AndroidCapabilityProbe.TOOL_NOTIFY_SHOW in manifest.availableTools)
         assertTrue(ActionTypeIds.SET_DND in manifest.availableTools)
         assertTrue(ActionTypeIds.SET_WIFI in manifest.availableTools)
+        assertTrue(ActionTypeIds.RUN_SHELL in manifest.availableTools)
         assertTrue(ActionTypeIds.SHOW_NOTIFICATION in manifest.availableTools)
         assertTrue("vision.analyze" in manifest.unavailableTools)
         assertTrue(ActionCapabilities.SET_DND in snapshot.availableCapabilities)
+        assertTrue(ActionCapabilities.RUN_SHELL in snapshot.availableCapabilities)
         assertTrue(ActionCapabilities.SHOW_NOTIFICATION in snapshot.availableCapabilities)
         assertTrue(CapabilityIds.state(StateKeys.RINGER) in snapshot.availableCapabilities)
         assertEquals(setOf("jid:42"), snapshot.whitelistedConversationIds)
@@ -95,6 +97,8 @@ class AndroidCapabilityProbeTest {
         val revokedManifest = revokedProbe.probe(DeviceState())
         assertFalse(ActionTypeIds.SET_DND in revokedManifest.availableTools)
         assertTrue(ActionTypeIds.SET_DND in revokedManifest.unavailableTools)
+        assertFalse(ActionTypeIds.RUN_SHELL in revokedManifest.availableTools)
+        assertTrue(ActionTypeIds.RUN_SHELL in revokedManifest.unavailableTools)
     }
 
     @Test

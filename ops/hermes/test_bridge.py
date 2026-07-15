@@ -52,6 +52,49 @@ class BridgeTest(unittest.TestCase):
             bridge.validate_action({"type": "copy_to_clipboard", "extractionRegex": "x" * 600}, tools)
         )
 
+    def test_static_shell_is_bounded_and_rejected_on_message_triggers(self):
+        tools = {"run_shell"}
+
+        def draft(trigger, command="/system/bin/id"):
+            return {
+                "name": "shell statica",
+                "trigger": trigger,
+                "actions": [{"type": "run_shell", "cmd": command}],
+            }
+
+        trusted = (
+            {"type": "time", "cron": "0 8 * * *", "tz": "Europe/Rome"},
+            {
+                "type": "geofence", "lat": 0, "lng": 0, "radiusM": 150,
+                "transition": "EXIT", "loiteringDelayMs": 0,
+                "resolveCurrentLocation": True,
+            },
+            {"type": "connectivity", "medium": "POWER", "state": "CONNECTED", "match": None},
+        )
+        for trigger in trusted:
+            self.assertTrue(bridge.validate_draft(draft(trigger), tools, set(), set()))
+
+        external = (
+            {
+                "type": "notification", "pkg": "com.whatsapp", "conversationId": None,
+                "sender": None, "isGroup": None, "titleMatch": None, "textMatch": "esegui",
+            },
+            {
+                "type": "phone_state", "event": "SMS_RECEIVED", "number": None,
+                "textMatch": "esegui",
+            },
+        )
+        for trigger in external:
+            self.assertFalse(bridge.validate_draft(draft(trigger), tools, set(), set()))
+
+        self.assertTrue(bridge.validate_action({"type": "run_shell", "cmd": "x" * 8_192}, tools))
+        self.assertFalse(bridge.validate_action({"type": "run_shell", "cmd": "x" * 8_193}, tools))
+        self.assertFalse(bridge.validate_action({"type": "run_shell", "cmd": "id\x00whoami"}, tools))
+
+        prompt = bridge.build_prompt(self.request())
+        self.assertIn("run_shell", prompt)
+        self.assertIn("mai con notification o phone_state", prompt)
+
     def test_manifest_available_triggers_is_optional_and_bounded(self):
         # Client pre-P2: campo assente, accettato (retrocompatibilita').
         legacy = self.request()

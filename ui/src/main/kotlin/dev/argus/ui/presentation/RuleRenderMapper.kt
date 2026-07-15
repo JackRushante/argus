@@ -253,7 +253,6 @@ object RuleRenderMapper {
             label = "Esegui comando shell",
             isShell = true,
             shellCommand = a.cmd, // integrale, mai troncato (invariante §5.4)
-            requiresLiveConfirm = true,
         )
         is Action.CopyToClipboard -> row(
             iconKey = "clipboard",

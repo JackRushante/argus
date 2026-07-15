@@ -316,7 +316,7 @@ private val previewShell = RuleRender(
             isShell = true,
             shellCommand = "settings put global airplane_mode_on 1 && am broadcast -a android.intent.action.AIRPLANE_MODE --ez state true",
             isGenerative = false,
-            requiresLiveConfirm = true,
+            requiresLiveConfirm = false,
         ),
     ),
     isGenerative = false,

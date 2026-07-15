@@ -14,6 +14,8 @@ esplicite raccolte sul campo:
 
 Riferimenti: design master §15 (P2 = hardening background + Geofence → Es. 1 + PhoneState/
 Connectivity + resilienza Shizuku), handoff §23 (backlog dal feedback), piano P1 per il metodo.
+La diagnosi iniziale della "race Shizuku" è stata poi smentita dal codice e dal test live:
+vedi D4 corretto sotto.
 
 ## Metodo (invariato da P1)
 
@@ -69,12 +71,16 @@ contenuto.
 Il prompt del bridge impara il tool `copy_to_clipboard` (manifest available_tools + regola
 d'uso: regex deterministica nel draft, mai estrazione via LLM).
 
-### D4 — Resilienza Shizuku (race osservata sul campo, handoff §23)
+### D4 — Shell statica approvata; nessuna falsa "race Shizuku"
 
-Al primo `resolve()` della probe dopo il process start, se lo status è `INSTALLED_NOT_RUNNING`
-ma la permission risulta concessa, attendere il binder sticky fino a ~2 s (poll breve) prima di
-rispondere: elimina il falso "shell non disponibile" visto alle 18:29. Fail-closed invariato se
-il binder non arriva.
+La mancata esecuzione osservata alle 18:29 era strutturale: `run_shell` non era pubblicato dal
+probe, la FirePolicy lo bloccava e l'executor restituiva `live_confirmation_required`. Non esiste
+e non va implementato alcun retry binder per correggere quell'episodio.
+
+`run_shell` diventa eseguibile solo quando Shizuku è `AUTHORIZED`, con tre difese concordi:
+comando letterale nel fingerprint e mostrato integralmente in review; trigger ammessi soltanto
+Time/Geofence/Connectivity; blocco ripetuto da validator, FirePolicy ed executor per ogni evento
+Notification/PhoneState. Il tool generativo raw `shell.run` resta vietato.
 
 ### D5 — Cosa NON cambia
 
@@ -126,8 +132,10 @@ connectivity non è necessario.
 - Receiver manifest: PHONE_STATE (RINGING→INCOMING_CALL, IDLE dopo OFFHOOK/RINGING→CALL_ENDED,
   number quando disponibile e permesso) e SMS_RECEIVED (number + smsText volatile D2, multipart
   ricomposti).
-- Matcher: `numbersMatch` esiste già (suffisso ≥7 cifre). EventId: digest include number+testo
-  hashati, MAI in chiaro.
+- Matcher: `numbersMatch` esiste già (suffisso ≥7 cifre). EventId SMS: digest include numero+testo
+  hashati, MAI in chiaro. EventId chiamata: identità della transizione, indipendente dal numero,
+  così i doppi broadcast anonimo/numerato restano idempotenti ma le regole filtrate possono fare
+  match quando il numero arriva in ritardo.
 - Registrar/probe/validator/bridge aggiornati. Test: unit + Robolectric + device con SMS vero
   (numero di Lorenzo).
 
@@ -159,7 +167,7 @@ connectivity non è necessario.
 
 ### P2-5 — Hardening e chiusura
 
-- D4 retry binder Shizuku nel probe (test con fake clock).
+- D4 shell statica: gate host + device Shizuku e regressioni su trigger esterni.
 - Wizard OEM: nota/CTA per la gestione batteria OnePlus (documentare, niente magia).
 - Export/import JSON locale delle automazioni (nice-to-have §17: assicura contro un wipe;
   import = draft da ri-approvare UNO A UNO, mai arm diretto — fingerprint non trasferibile).
@@ -172,5 +180,6 @@ connectivity non è necessario.
 - Trigger connectivity e phone_state armabili, verificati on-device, fail-closed senza grant.
 - Nessun service persistente quando nessuna regola armata lo richiede; il FGS sentinella si
   spegne da solo ed è dichiarato in Sistema.
-- La race Shizuku del primo compile non è più riproducibile (retry binder).
+- `run_shell` statico passa live via Shizuku solo da trigger trusted; messaggi/notifiche restano
+  bloccati e `shell.run` non compare mai nella lane generativa.
 - Regole esistenti di Lorenzo (WhatsApp generative + "esegui") intatte a ogni migrazione.

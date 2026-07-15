@@ -220,6 +220,13 @@ class DraftValidator(
             }
             is Action.RunShell -> {
                 validateRequiredText(action.cmd, MAX_COMMAND_LENGTH, "shell_invalid", err)
+                if ('\u0000' in action.cmd)
+                    err("shell_invalid", "Il comando shell contiene un carattere NUL non eseguibile")
+                if (!StaticShellSafety.allows(trigger))
+                    err(
+                        "shell_external_trigger",
+                        "La shell autonoma è ammessa solo con trigger Time, Geofence o Connectivity",
+                    )
                 warn("shell_review", "Comando shell autonomo solo dopo approvazione del comando letterale")
             }
             is Action.CopyToClipboard -> {
