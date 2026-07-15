@@ -144,6 +144,13 @@ Commit della ripresa Claude serale (P1-6 → P1-7 reale → P1-8), tutti pushati
 
 ## 23. Osservazioni di campo post-merge e backlog P2 (feedback Lorenzo, 2026-07-14 sera)
 
+> ⚠️ **CORREZIONE (2026-07-15)**: il primo punto qui sotto — la "race Shizuku" — è una **diagnosi
+> errata**. Il rifiuto delle 18:29 era **strutturale**: `run_shell` non compare mai in
+> `availableTools` e l'executor risponde `live_confirmation_required` per design. Non esiste
+> nessuna race da indagare. Riferimenti al codice in
+> `2026-07-15-argus-claude-to-codex-handoff.md` §5.2. Anche il punto 4 del backlog (trigger
+> sensori) è **chiuso per sempre** per decisione esplicita di Lorenzo, non "P3+ eventuale".
+
 - **Race Shizuku osservata una volta**: alle 18:29 un compile ha avuto il manifest SENZA
   `run_shell` ("Shizuku non in esecuzione") benché server e permission fossero a posto; alle
   18:37 Sistema era verde e tutto ok. Causa più probabile: `Shizuku.pingBinder()` false nel
