@@ -10,6 +10,7 @@ import dev.argus.engine.model.Action
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.DndMode
+import dev.argus.engine.model.PhoneEvent
 import dev.argus.engine.runtime.ActionResult
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.ExecutionId
@@ -152,6 +153,60 @@ class ShizukuActionExecutorTest {
     }
 
     @Test
+    fun `a whitelisted whatsapp contact can trigger the approved shell literal`() = runTest {
+        val calls = mutableListOf<Pair<String, FireContext>>()
+        val runner = StaticShellRunner { command, fireContext ->
+            calls += command to fireContext
+            ActionResult.Success
+        }
+        val whitelisted = context.copy(event = whatsappEvent())
+
+        assertEquals(
+            ActionResult.Success,
+            executor(staticShell = runner, whitelistedIds = { setOf(WHITELISTED_ID) })
+                .execute(Action.RunShell("/system/bin/id >/dev/null"), whitelisted),
+        )
+        assertEquals(listOf("/system/bin/id >/dev/null" to whitelisted), calls)
+    }
+
+    @Test
+    fun `a whatsapp contact outside the whitelist cannot trigger the shell`() = runTest {
+        val calls = mutableListOf<String>()
+        val runner = StaticShellRunner { command, _ -> calls += command; ActionResult.Success }
+
+        assertEquals(
+            ActionResult.Failure("shell_external_trigger"),
+            executor(staticShell = runner, whitelistedIds = { setOf("un-altro-contatto") })
+                .execute(Action.RunShell("id"), context.copy(event = whatsappEvent())),
+        )
+        assertEquals(emptyList(), calls)
+    }
+
+    /** L'identità SMS è spoofabile: nessuna whitelist può trasformarla in una prova. */
+    @Test
+    fun `an sms cannot trigger the shell even with a whitelist`() = runTest {
+        val calls = mutableListOf<String>()
+        val runner = StaticShellRunner { command, _ -> calls += command; ActionResult.Success }
+        val sms = context.copy(
+            event = TriggerEvent.PhoneStateChanged(PhoneEvent.SMS_RECEIVED, "+391234567", "esegui"),
+        )
+
+        assertEquals(
+            ActionResult.Failure("shell_external_trigger"),
+            executor(staticShell = runner, whitelistedIds = { setOf(WHITELISTED_ID) })
+                .execute(Action.RunShell("id"), sms),
+        )
+        assertEquals(emptyList(), calls)
+    }
+
+    private fun whatsappEvent() = TriggerEvent.NotificationPosted(
+        pkg = "com.whatsapp",
+        conversationId = WHITELISTED_ID,
+        isGroup = false,
+        text = "esegui",
+    )
+
+    @Test
     fun `static whatsapp reply sends only the approved text to the trigger target`() = runTest {
         val gateway = RecordingReplyGateway(NotificationReplyDelivery.Sent)
         val notification = TriggerEvent.NotificationPosted(
@@ -255,6 +310,7 @@ class ShizukuActionExecutorTest {
         staticShell: StaticShellRunner = StaticShellRunner { _, _ ->
             ActionResult.Failure("shell_unavailable")
         },
+        whitelistedIds: suspend () -> Set<String> = { emptySet() },
     ) = ShizukuActionExecutor(
         tools = tools,
         notifier = AutomationNotifier { _, _, _ -> },
@@ -262,6 +318,7 @@ class ShizukuActionExecutorTest {
         replies = replies,
         clipboard = { _, _ -> ActionResult.Success },
         staticShell = staticShell,
+        whitelistedIds = whitelistedIds,
     )
 
     private class RecordingReplyGateway(
@@ -273,6 +330,10 @@ class ShizukuActionExecutorTest {
             requests += request
             return delivery
         }
+    }
+
+    private companion object {
+        const val WHITELISTED_ID = "shortcut:com.whatsapp:ottica"
     }
 }
 

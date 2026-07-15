@@ -189,7 +189,10 @@ class ArgusPhysicalGateHarness {
                     "PII sospetta nel campo detail di ${automation.name} (${record.kind})",
                     !DIGIT_RUN.containsMatchIn(record.detail),
                 )
-                println("$TAG     ${record.kind} status=${record.executionStatus} detail-pulito=true")
+                println(
+                    "$TAG     ${record.kind} at=${record.atMillis} " +
+                        "status=${record.executionStatus} detail-pulito=true",
+                )
                 record.executionId?.let { executionId ->
                     services.database().executionJournalDao().actions(executionId).forEach {
                         println("$TAG       azione ${it.actionType} -> ${it.outcome}")
@@ -238,11 +241,21 @@ class ArgusPhysicalGateHarness {
         name: String,
         trigger: Trigger,
         actions: List<Action> = listOf(Action.ShowNotification(name, "gate fisico P2")),
+        // Il default 0 di AutomationDraft lascia una regola geofence esposta al flapping del
+        // motore di posizione (trovato sul campo il 2026-07-15: due EXIT in 3 minuti, con un
+        // ENTER invisibile in mezzo perché una regola solo-EXIT non lo matcha). C2 del design
+        // prescrive proprio un cooldown per-regola: qui lo applichiamo a tutti i gate.
+        cooldownMs: Long = GATE_COOLDOWN_MS,
     ) {
         val submission = services.approvalFlow().submit(
             CompileResult(
                 reply = "diagnostic",
-                draft = AutomationDraft(name = name, trigger = trigger, actions = actions),
+                draft = AutomationDraft(
+                    name = name,
+                    trigger = trigger,
+                    actions = actions,
+                    cooldownMs = cooldownMs,
+                ),
                 metaError = null,
             ),
         )
@@ -259,6 +272,14 @@ class ArgusPhysicalGateHarness {
     private companion object {
         const val GATE_PREFIX = "Argus GATE"
         const val TAG = "ArgusGate:"
+
+        /**
+         * Assorbe il ping-pong ravvicinato senza nascondere un attraversamento vero, che dura
+         * molto più di cinque minuti. NON è la soluzione del flapping: mitiga la frequenza, non
+         * la causa (le due EXIT osservate distavano 3 minuti e questo cooldown le avrebbe
+         * fermate, ma un flap a 6 minuti passerebbe comunque).
+         */
+        const val GATE_COOLDOWN_MS = 5 * 60 * 1000L
 
         /** 4+ cifre consecutive: coprono sia un OTP sia il suffisso usato dal match numero. */
         val DIGIT_RUN = Regex("\\d{4,}")

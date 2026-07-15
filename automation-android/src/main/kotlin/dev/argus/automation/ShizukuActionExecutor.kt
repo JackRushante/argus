@@ -36,6 +36,11 @@ class ShizukuActionExecutor(
     private val staticShell: StaticShellRunner = StaticShellRunner { _, _ ->
         ActionResult.Failure("shell_unavailable")
     },
+    /**
+     * Identità autorizzate a innescare la shell già approvata. Default **vuoto**: un caller che
+     * dimentica di cablare la whitelist ottiene il comportamento chiuso, mai quello aperto.
+     */
+    private val whitelistedIds: suspend () -> Set<String> = { emptySet() },
 ) : ActionExecutor {
     override suspend fun execute(action: Action, ctx: FireContext): ActionResult = try {
         when (action) {
@@ -64,7 +69,9 @@ class ShizukuActionExecutor(
 
             is Action.WhatsAppReply -> staticReply(action, ctx)
 
-            is Action.RunShell -> if (StaticShellSafety.allows(ctx.event)) {
+            // Ultima linea dopo validator e FirePolicy: l'identità si verifica sull'evento
+            // realmente arrivato, non su quella dichiarata nella regola.
+            is Action.RunShell -> if (StaticShellSafety.allows(ctx.event, whitelistedIds())) {
                 staticShell.run(action.cmd, ctx)
             } else {
                 ActionResult.Failure("shell_external_trigger")

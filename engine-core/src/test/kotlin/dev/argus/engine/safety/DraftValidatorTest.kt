@@ -107,6 +107,21 @@ class DraftValidatorTest {
         external.forEach { trigger ->
             assertTrue("shell_external_trigger" in errors(v.validate(draft(trigger), emptySet())))
         }
+
+        // Contatto whitelistato: ammesso, ma la review deve dire che qualcuno può innescarlo.
+        val verified = Trigger.Notification(
+            "com.whatsapp",
+            conversationId = "chat-ottica",
+            isGroup = false,
+            textMatch = "esegui",
+        )
+        val verifiedIssues = v.validate(draft(verified), setOf("chat-ottica"))
+        assertTrue("shell_external_trigger" !in errors(verifiedIssues))
+        assertTrue("shell_contact_trigger" in verifiedIssues.map { it.code })
+        // Fuori whitelist resta un errore, non un semplice avviso.
+        assertTrue(
+            "shell_external_trigger" in errors(v.validate(draft(verified), setOf("altra-chat"))),
+        )
         assertTrue(
             "shell_invalid" in errors(v.validate(draft(trusted.first(), "id\u0000whoami"), emptySet())),
         )

@@ -108,7 +108,49 @@ class BridgeTest(unittest.TestCase):
 
         prompt = bridge.build_prompt(self.request())
         self.assertIn("run_shell", prompt)
-        self.assertIn("mai con notification o phone_state", prompt)
+        self.assertIn("Mai con phone_state", prompt)
+
+    def test_whitelisted_whatsapp_contact_can_trigger_static_shell(self):
+        """Decisione Lorenzo 2026-07-15: un contatto verificato puo' innescare un comando gia'
+        approvato. Il cmd resta statico, quindi nessuna injection: cambia solo chi preme
+        l'interruttore. SMS e chiamate restano fuori perche' l'identita' e' falsificabile."""
+        tools = {"run_shell"}
+        whitelisted = {"shortcut:com.whatsapp:ottica"}
+
+        def draft(trigger):
+            return {
+                "name": "shell da contatto",
+                "trigger": trigger,
+                "actions": [{"type": "run_shell", "cmd": "/system/bin/id"}],
+            }
+
+        def notification(conversation_id, is_group=False, pkg="com.whatsapp"):
+            return {
+                "type": "notification", "pkg": pkg, "conversationId": conversation_id,
+                "sender": None, "isGroup": is_group, "titleMatch": None, "textMatch": "esegui",
+            }
+
+        self.assertTrue(
+            bridge.validate_draft(
+                draft(notification("shortcut:com.whatsapp:ottica")), tools, set(), whitelisted
+            )
+        )
+
+        for trigger in (
+            notification("shortcut:com.whatsapp:sconosciuto"),
+            notification("shortcut:com.whatsapp:ottica", is_group=True),
+            notification(None),
+            notification("shortcut:com.whatsapp:ottica", pkg="com.example.spoof"),
+        ):
+            self.assertFalse(bridge.validate_draft(draft(trigger), tools, set(), whitelisted))
+
+        self.assertFalse(
+            bridge.validate_draft(
+                draft({"type": "phone_state", "event": "SMS_RECEIVED", "number": None,
+                       "textMatch": "esegui"}),
+                tools, set(), whitelisted,
+            )
+        )
 
     def test_geofence_rejects_unimplemented_dwell_and_loitering(self):
         base = {

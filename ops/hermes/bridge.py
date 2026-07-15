@@ -115,8 +115,8 @@ Action, discriminata da "type":
 - {"type":"tap", "x":integer, "y":integer}
 - {"type":"input_text", "text":string}
 - {"type":"whatsapp_reply", "text":string}
-- {"type":"run_shell", "cmd":string}  // comando letterale, massimo 8192 caratteri;
-  solo con trigger time/geofence/connectivity, mai notification/phone_state
+- {"type":"run_shell", "cmd":string}  // comando letterale, massimo 8192 caratteri; solo con
+  trigger time/geofence/connectivity o con una chat WhatsApp 1:1 whitelistata; mai phone_state
 - {"type":"copy_to_clipboard", "extractionRegex":string|null (regex deterministica: copia il
    primo capture group — o il match intero — dal testo del trigger SMS/notifica; null = testo
    integrale; per gli OTP usa "(?:^|[^+0-9])([0-9]{4,8})(?:[^0-9]|$)")}
@@ -343,9 +343,12 @@ REGOLE VINCOLANTI:
     Un trigger richiesto ma non in lista NON va compilato: indica brevemente il grant o il
     meccanismo mancante in Sistema e restituisci draft null con error_code
     "unsupported_capability".
-11. run_shell e' una shell autonoma con comando STATICO mostrato integralmente in review: usala
-    solo con trigger time, geofence o connectivity; mai con notification o phone_state e mai
-    incorporando contenuti di messaggi/notifiche nel comando.
+11. run_shell e' una shell autonoma con comando STATICO mostrato integralmente in review. Usala
+    con trigger time, geofence o connectivity, oppure con notification se e' una chat WhatsApp
+    1:1 (isGroup=false) il cui conversationId e' in whitelist: un contatto verificato puo'
+    innescare un comando gia' approvato. Mai con phone_state (mittente SMS e caller ID sono
+    falsificabili) e mai incorporando contenuti di messaggi/notifiche dentro il comando: il
+    cmd e' sempre letterale, il messaggio e' solo un interruttore.
 12. I geofence supportano soltanto ENTER/EXIT e loiteringDelayMs deve essere 0: non proporre
     DWELL, che il runtime framework corrente non può implementare onestamente.
 
@@ -501,6 +504,28 @@ def parse_act_model_output(output: str) -> tuple[str | None, str | None]:
     return reply_text, error_code
 
 
+def _shell_trigger_allowed(trigger: Any, whitelisted_contact_ids: set[str]) -> bool:
+    """Chi puo' innescare un comando gia' approvato letteralmente.
+
+    Il cmd resta statico, quindi nessuna injection: il messaggio e' un interruttore, non
+    sceglie il comando. Time/geofence/connectivity non hanno un mittente; una chat WhatsApp
+    1:1 con contatto in whitelist ha un'identita' verificata (conversationId, E15).
+    SMS e chiamate restano esclusi: mittente e caller ID sono falsificabili, quindi nessuna
+    whitelist puo' trasformarli in una prova d'identita'.
+    Rispecchia StaticShellSafety lato Android, che resta la fonte autorevole.
+    """
+    kind = trigger.get("type")
+    if kind in {"time", "geofence", "connectivity"}:
+        return True
+    if kind != "notification":
+        return False
+    return (
+        trigger.get("pkg") in WHATSAPP_PACKAGES
+        and trigger.get("isGroup") is False
+        and trigger.get("conversationId") in whitelisted_contact_ids
+    )
+
+
 def validate_draft(
     value: Any,
     available_tools: set[str],
@@ -523,9 +548,9 @@ def validate_draft(
         validate_action(action, available_tools) for action in actions
     ):
         return False
-    if any(action["type"] == "run_shell" for action in actions) and value["trigger"]["type"] not in {
-        "time", "geofence", "connectivity"
-    }:
+    if any(action["type"] == "run_shell" for action in actions) and not _shell_trigger_allowed(
+        value["trigger"], whitelisted_contact_ids
+    ):
         return False
     condition = value.get("conditions")
     if condition is not None and not validate_condition(condition, 0, allowed_state_keys):

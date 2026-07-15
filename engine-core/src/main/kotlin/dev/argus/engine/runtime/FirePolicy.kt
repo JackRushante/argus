@@ -75,8 +75,9 @@ class RevalidatingFirePolicy(
         ) return FirePolicyDecision.Block("approval_fingerprint_mismatch", needsReview = true)
 
         val hasStaticShell = automation.actions.any { it is Action.RunShell }
-        if (hasStaticShell && !StaticShellSafety.allows(automation.trigger))
-            return FirePolicyDecision.Block("shell_external_trigger", needsReview = true)
+        if (hasStaticShell &&
+            !StaticShellSafety.allows(automation.trigger, snapshot.whitelistedConversationIds)
+        ) return FirePolicyDecision.Block("shell_external_trigger", needsReview = true)
 
         val draft = AutomationDraft(
             name = automation.name,
@@ -91,9 +92,10 @@ class RevalidatingFirePolicy(
         if (validationErrors)
             return FirePolicyDecision.Block("validation_failed", needsReview = true)
 
-        // Difesa sul dato live oltre al trigger approvato: una regressione di routing non deve
-        // mai far arrivare contenuto Notification/PhoneState alla lane shell.
-        if (hasStaticShell && !StaticShellSafety.allows(event))
+        // Difesa sul dato live oltre al trigger approvato: l'identità va verificata sull'evento
+        // realmente arrivato, non solo su quella dichiarata nella regola. Una regressione di
+        // routing non deve mai far innescare la shell da un mittente non verificato.
+        if (hasStaticShell && !StaticShellSafety.allows(event, snapshot.whitelistedConversationIds))
             return FirePolicyDecision.Block("shell_external_trigger", needsReview = false)
 
         val derivedRequirements = CapabilityRequirements.derive(

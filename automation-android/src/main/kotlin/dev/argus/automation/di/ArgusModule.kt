@@ -410,6 +410,7 @@ object ArgusModule {
         generativeLane: GenerativeLane,
         replies: NotificationReplyGateway,
         clipboard: ClipboardCopier,
+        whitelist: ContactWhitelistStore,
     ): ShizukuActionExecutor =
         ShizukuActionExecutor(
             tools,
@@ -418,6 +419,9 @@ object ArgusModule {
             replies,
             clipboard,
             staticShell,
+            // Riletta a ogni scatto, non memoizzata: togliere un contatto dalla whitelist deve
+            // revocargli la shell subito, senza attendere un riavvio del processo.
+            whitelistedIds = { whitelist.all().mapTo(mutableSetOf()) { it.id } },
         )
 
     @Provides

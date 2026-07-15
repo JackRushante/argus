@@ -235,16 +235,27 @@ class DraftValidator(
                 validateRequiredText(action.cmd, MAX_COMMAND_LENGTH, "shell_invalid", err)
                 if ('\u0000' in action.cmd)
                     err("shell_invalid", "Il comando shell contiene un carattere NUL non eseguibile")
-                if (!StaticShellSafety.allows(trigger))
+                if (!StaticShellSafety.allows(trigger, whitelist))
                     err(
                         "shell_external_trigger",
-                        "La shell autonoma è ammessa solo con trigger Time, Geofence o Connectivity",
+                        "La shell autonoma è ammessa con trigger Time, Geofence o Connectivity, " +
+                            "oppure da una chat WhatsApp 1:1 con contatto in whitelist. SMS e " +
+                            "chiamate restano esclusi: mittente e caller ID sono falsificabili",
                     )
                 warn(
                     "shell_review",
                     "Comando autonomo approvato letteralmente; limite operativo 30 s e, per " +
                         "trigger broadcast, preferire comandi brevi",
                 )
+                // Il rischio non è più solo "cosa esegue" ma "chi può farlo partire": con un
+                // trigger notification il comando parte quando decide il contatto, non tu.
+                if (trigger is Trigger.Notification)
+                    warn(
+                        "shell_contact_trigger",
+                        "Questo comando potrà essere avviato dal contatto in whitelist ogni " +
+                            "volta che il messaggio corrisponde: il comando resta quello " +
+                            "approvato, ma il momento lo sceglie lui",
+                    )
             }
             is Action.CopyToClipboard -> {
                 val textual = trigger is Trigger.Notification ||
