@@ -46,6 +46,7 @@ class PhoneEventIngressTest {
         val events = dispatched.map { it.event }.filterIsInstance<TriggerEvent.PhoneStateChanged>()
         assertEquals(listOf(PhoneEvent.INCOMING_CALL, PhoneEvent.CALL_ENDED), events.map { it.event })
         assertEquals("3932077480", events.first().number)
+        assertEquals("3932077480", events.last().number)
         assertNull(events.last().smsText)
     }
 
@@ -64,16 +65,48 @@ class PhoneEventIngressTest {
     }
 
     @Test
-    fun `duplicate framework broadcasts of the same call state fire once`() = runTest {
-        // PHONE_STATE arriva due volte (con e senza numero, a seconda dei grant): una sola
-        // transizione RINGING deve produrre UN solo evento, non uno per broadcast.
+    fun `anonymous then numbered ringing enriches the same execution identity`() = runTest {
+        // PHONE_STATE arriva due volte (con e senza numero, ordine non garantito). Il secondo
+        // envelope permette alle regole filtrate di fare match, ma conserva lo stesso event id:
+        // una regola generica viene quindi claimata una sola volta dall'engine.
         ingress.onCallStateChanged("RINGING", number = null, atMillis = 1_000L)
         ingress.onCallStateChanged("RINGING", number = "3932077480", atMillis = 1_050L)
         ingress.onCallStateChanged("IDLE", number = null, atMillis = 5_000L)
         ingress.onCallStateChanged("IDLE", number = null, atMillis = 5_050L)
 
-        val events = dispatched.map { it.event }.filterIsInstance<TriggerEvent.PhoneStateChanged>()
-        assertEquals(listOf(PhoneEvent.INCOMING_CALL, PhoneEvent.CALL_ENDED), events.map { it.event })
+        val events = dispatched.map { it.event as TriggerEvent.PhoneStateChanged }
+        assertEquals(
+            listOf(PhoneEvent.INCOMING_CALL, PhoneEvent.INCOMING_CALL, PhoneEvent.CALL_ENDED),
+            events.map { it.event },
+        )
+        assertNull(events[0].number)
+        assertEquals("3932077480", events[1].number)
+        assertEquals("3932077480", events[2].number)
+        assertEquals(dispatched[0].id, dispatched[1].id)
+    }
+
+    @Test
+    fun `numbered then anonymous duplicate is ignored`() = runTest {
+        ingress.onCallStateChanged("RINGING", number = "3932077480", atMillis = 1_000L)
+        ingress.onCallStateChanged("RINGING", number = null, atMillis = 1_050L)
+
+        assertEquals(1, dispatched.size)
+        val event = dispatched.single().event as TriggerEvent.PhoneStateChanged
+        assertEquals("3932077480", event.number)
+    }
+
+    @Test
+    fun `stale persisted ringing never creates a false call ended`() = runTest {
+        callState.record(CallStateSnapshot("RINGING", "3932077480", 1L))
+
+        ingress.onCallStateChanged(
+            "IDLE",
+            number = null,
+            atMillis = 24 * 60 * 60 * 1_000L + 2L,
+        )
+
+        assertTrue(dispatched.isEmpty())
+        assertEquals(CallStateSnapshot("IDLE", null, 24 * 60 * 60 * 1_000L + 2L), callState.last())
     }
 
     @Test
@@ -84,9 +117,9 @@ class PhoneEventIngressTest {
 }
 
 private class InMemoryCallStateStore : CallStateStore {
-    private var value: String? = null
-    override fun lastState(): String? = value
-    override fun record(state: String) {
-        value = state
+    private var value: CallStateSnapshot? = null
+    override fun last(): CallStateSnapshot? = value
+    override fun record(snapshot: CallStateSnapshot) {
+        value = snapshot
     }
 }

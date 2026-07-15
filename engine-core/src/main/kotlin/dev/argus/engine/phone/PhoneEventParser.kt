@@ -31,14 +31,21 @@ class PhoneEventParser {
             ?.trim()
             ?.take(MAX_TEXT_CHARS)
             ?.takeIf(String::isNotEmpty)
-        val id = TriggerEventId(
-            "phone:" + digest(
+        val identityFields = when (event) {
+            PhoneEvent.SMS_RECEIVED -> arrayOf(
                 event.name,
                 safeNumber.orEmpty(),
                 safeText.orEmpty(),
                 atMillis.coerceAtLeast(0).toString(),
-            ),
-        )
+            )
+            // PHONE_STATE può consegnare la stessa transizione due volte, prima anonima e poi
+            // col numero. Il numero è payload per il matcher, non identità della chiamata.
+            PhoneEvent.INCOMING_CALL, PhoneEvent.CALL_ENDED -> arrayOf(
+                event.name,
+                atMillis.coerceAtLeast(0).toString(),
+            )
+        }
+        val id = TriggerEventId("phone:" + digest(*identityFields))
         return TriggerEnvelope(
             id,
             TriggerEvent.PhoneStateChanged(event = event, number = safeNumber, smsText = safeText),

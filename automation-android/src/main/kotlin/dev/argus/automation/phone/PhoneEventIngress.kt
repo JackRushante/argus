@@ -3,14 +3,22 @@ package dev.argus.automation.phone
 import dev.argus.engine.model.PhoneEvent
 import dev.argus.engine.phone.PhoneEventParser
 import dev.argus.engine.runtime.TriggerEnvelope
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /** Frammento di SMS come arriva dal framework: i multipart vanno ricomposti per mittente. */
 data class SmsPart(val sender: String?, val body: String?, val atMillis: Long)
 
-/** Ultimo stato chiamata visto: i receiver manifest possono rinascere in un processo nuovo. */
+/** Ultima transizione chiamata: sopravvive al processo per dedupe e numero su CALL_ENDED. */
+data class CallStateSnapshot(
+    val state: String,
+    val number: String?,
+    val transitionAtMillis: Long,
+)
+
 interface CallStateStore {
-    fun lastState(): String?
-    fun record(state: String)
+    fun last(): CallStateSnapshot?
+    fun record(snapshot: CallStateSnapshot)
 }
 
 fun interface PhoneEventDispatcher {
@@ -28,6 +36,8 @@ class PhoneEventIngress(
     private val callState: CallStateStore,
     private val dispatcher: PhoneEventDispatcher,
 ) {
+    private val callMutex = Mutex()
+
     suspend fun onSms(parts: List<SmsPart>) {
         parts
             .filter { !it.body.isNullOrBlank() }
@@ -41,29 +51,65 @@ class PhoneEventIngress(
     }
 
     suspend fun onCallStateChanged(state: String, number: String?, atMillis: Long) {
-        val previous = callState.lastState()
-        when (state) {
-            STATE_RINGING, STATE_OFFHOOK, STATE_IDLE -> {
-                // Il framework consegna lo stesso stato più volte (broadcast con/senza numero
-                // a seconda dei grant): conta la TRANSIZIONE, non la consegna.
-                if (state == previous) return
-                callState.record(state)
+        val envelope = callMutex.withLock {
+            if (state !in VALID_STATES) return@withLock null
+            val safeAtMillis = atMillis.coerceAtLeast(0)
+            val stored = callState.last()
+            val previous = stored?.takeUnless {
+                safeAtMillis - it.transitionAtMillis > MAX_CALL_STATE_AGE_MILLIS
             }
-            else -> return
+
+            if (state == previous?.state) {
+                // Su RINGING il framework può consegnare prima il broadcast anonimo e poi quello
+                // col numero. Riemettiamo l'envelope arricchito con la STESSA identità: le regole
+                // generiche restano idempotenti, quelle filtrate per numero possono finalmente
+                // fare match.
+                if (state == STATE_RINGING && previous.number == null && number != null) {
+                    val enriched = previous.copy(number = number)
+                    callState.record(enriched)
+                    return@withLock parser.parse(
+                        PhoneEvent.INCOMING_CALL,
+                        number,
+                        smsText = null,
+                        atMillis = enriched.transitionAtMillis,
+                    )
+                }
+                return@withLock null
+            }
+
+            val retainedNumber = number ?: previous?.number
+            val snapshot = CallStateSnapshot(
+                state = state,
+                number = retainedNumber.takeUnless { state == STATE_IDLE },
+                transitionAtMillis = safeAtMillis,
+            )
+            callState.record(snapshot)
+
+            when {
+                state == STATE_RINGING -> parser.parse(
+                    PhoneEvent.INCOMING_CALL,
+                    retainedNumber,
+                    smsText = null,
+                    atMillis = safeAtMillis,
+                )
+                state == STATE_IDLE && previous?.state in setOf(STATE_RINGING, STATE_OFFHOOK) ->
+                    parser.parse(
+                        PhoneEvent.CALL_ENDED,
+                        retainedNumber,
+                        smsText = null,
+                        atMillis = safeAtMillis,
+                    )
+                else -> null
+            }
         }
-        val event = when {
-            state == STATE_RINGING -> PhoneEvent.INCOMING_CALL
-            state == STATE_IDLE && (previous == STATE_RINGING || previous == STATE_OFFHOOK) ->
-                PhoneEvent.CALL_ENDED
-            else -> return
-        }
-        parser.parse(event, number, smsText = null, atMillis = atMillis)
-            ?.let { dispatcher.dispatch(it) }
+        envelope?.let { dispatcher.dispatch(it) }
     }
 
     private companion object {
         const val STATE_RINGING = "RINGING"
         const val STATE_OFFHOOK = "OFFHOOK"
         const val STATE_IDLE = "IDLE"
+        val VALID_STATES = setOf(STATE_RINGING, STATE_OFFHOOK, STATE_IDLE)
+        const val MAX_CALL_STATE_AGE_MILLIS = 24 * 60 * 60 * 1_000L
     }
 }
