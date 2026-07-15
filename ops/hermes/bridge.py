@@ -335,11 +335,14 @@ REGOLE VINCOLANTI:
    GENERATA usa invoke_llm con contextSources ["notification"] (aggiungi "state" solo se serve
    lo stato del device), allowedTools esattamente ["whatsapp_reply"] e replyTargetSender=true;
    usa whatsapp_reply statica solo se l'utente detta il testo esatto della risposta.
-10. Se manifest.available_triggers e' presente, usa SOLO i trigger elencati:
-    "phone_state.sms" = trigger phone_state con event SMS_RECEIVED, "phone_state.call" =
-    phone_state con INCOMING_CALL o CALL_ENDED. Un trigger richiesto ma non in lista NON va
-    compilato: spiega in una frase quale permesso abilitarlo richiede (Sistema -> Trigger
-    SMS/chiamate) e restituisci draft null con error_code "unsupported_capability".
+10. Se manifest.available_triggers e' presente e non vuoto, usa SOLO i trigger elencati:
+    "time", "notification", "geofence"; "phone_state.sms" = SMS_RECEIVED;
+    "phone_state.call" = INCOMING_CALL/CALL_ENDED; "connectivity.wifi",
+    "connectivity.bt" e "connectivity.power" corrispondono esattamente al rispettivo medium;
+    un match SSID Wi-Fi richiede anche "connectivity.wifi.identity".
+    Un trigger richiesto ma non in lista NON va compilato: indica brevemente il grant o il
+    meccanismo mancante in Sistema e restituisci draft null con error_code
+    "unsupported_capability".
 11. run_shell e' una shell autonoma con comando STATICO mostrato integralmente in review: usala
     solo con trigger time, geofence o connectivity; mai con notification o phone_state e mai
     incorporando contenuti di messaggi/notifiche nel comando.
@@ -428,6 +431,7 @@ def parse_model_output(
     available_tools: set[str],
     allowed_state_keys: set[str],
     whitelisted_contact_ids: set[str],
+    available_triggers: set[str] | None = None,
 ) -> tuple[str, dict[str, Any] | None, str | None]:
     if SENTINEL not in output:
         return output.strip()[:MAX_REPLY_CHARS], None, "draft_missing"
@@ -451,7 +455,11 @@ def parse_model_output(
     if draft is None:
         return reply.strip()[:MAX_REPLY_CHARS], None, error_code or "draft_missing"
     if error_code is not None or not validate_draft(
-        draft, available_tools, allowed_state_keys, whitelisted_contact_ids
+        draft,
+        available_tools,
+        allowed_state_keys,
+        whitelisted_contact_ids,
+        available_triggers,
     ):
         return reply.strip()[:MAX_REPLY_CHARS], None, "draft_invalid"
     return reply.strip()[:MAX_REPLY_CHARS], draft, None
@@ -496,6 +504,7 @@ def validate_draft(
     available_tools: set[str],
     allowed_state_keys: set[str],
     whitelisted_contact_ids: set[str],
+    available_triggers: set[str] | None = None,
 ) -> bool:
     if not isinstance(value, dict) or not _exact_keys(
         value, {"name", "trigger", "actions"}, {"conditions", "rationale", "cooldownMs"}
@@ -504,6 +513,8 @@ def validate_draft(
     if not _string(value["name"], 256) or not validate_trigger(
         value["trigger"], whitelisted_contact_ids
     ):
+        return False
+    if available_triggers and not trigger_allowed(value["trigger"], available_triggers):
         return False
     actions = value["actions"]
     if not isinstance(actions, list) or not (1 <= len(actions) <= 32) or not all(
@@ -521,6 +532,25 @@ def validate_draft(
         return False
     cooldown = value.get("cooldownMs", 0)
     return _is_int(cooldown) and 0 <= cooldown <= 31_536_000_000
+
+
+def trigger_allowed(value: dict[str, Any], available_triggers: set[str]) -> bool:
+    kind = value["type"]
+    if kind == "phone_state":
+        required = (
+            "phone_state.sms"
+            if value["event"] == "SMS_RECEIVED"
+            else "phone_state.call"
+        )
+    elif kind == "connectivity":
+        required = f"connectivity.{value['medium'].lower()}"
+        if required == "connectivity.wifi" and value.get("match") is not None:
+            return required in available_triggers and (
+                "connectivity.wifi.identity" in available_triggers
+            )
+    else:
+        required = kind
+    return required in available_triggers
 
 
 def validate_trigger(value: Any, whitelisted_contact_ids: set[str]) -> bool:
@@ -744,6 +774,7 @@ def compile_request(data: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         set(data["manifest"]["available_tools"]),
         set(data["manifest"]["state_keys"]),
         {contact["id"] for contact in data["manifest"]["whitelisted_contacts"]},
+        set(data["manifest"].get("available_triggers", [])),
     )
     if error_code in MODEL_PROTOCOL_ERRORS:
         raise ModelProcessError(502, "model_invalid_output")

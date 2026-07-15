@@ -44,6 +44,8 @@ internal data class AndroidCapabilityState(
     val batteryOptimizationExempt: Boolean,
     val receiveSmsGranted: Boolean = false,
     val readPhoneStateGranted: Boolean = false,
+    val readCallLogGranted: Boolean = false,
+    val bluetoothConnectGranted: Boolean = false,
 )
 
 internal fun interface AndroidCapabilityStateSource {
@@ -83,6 +85,9 @@ internal class SystemAndroidCapabilityStateSource(
             .isIgnoringBatteryOptimizations(appContext.packageName),
         receiveSmsGranted = granted(Manifest.permission.RECEIVE_SMS),
         readPhoneStateGranted = granted(Manifest.permission.READ_PHONE_STATE),
+        readCallLogGranted = granted(Manifest.permission.READ_CALL_LOG),
+        bluetoothConnectGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+            granted(Manifest.permission.BLUETOOTH_CONNECT),
     )
 
     private fun granted(permission: String): Boolean =
@@ -135,7 +140,13 @@ class AndroidCapabilityProbe internal constructor(
         add("time")
         if (state.notificationListenerGranted) add("notification")
         if (state.receiveSmsGranted) add("phone_state.sms")
-        if (state.readPhoneStateGranted) add("phone_state.call")
+        if (state.readPhoneStateGranted && state.readCallLogGranted) add("phone_state.call")
+        add("connectivity.wifi")
+        if (state.foregroundLocationGranted && state.backgroundLocationGranted) {
+            add("connectivity.wifi.identity")
+        }
+        if (state.bluetoothConnectGranted) add("connectivity.bt")
+        add("connectivity.power")
     }
 
     override suspend fun current(): FirePolicySnapshot {
@@ -162,6 +173,12 @@ class AndroidCapabilityProbe internal constructor(
 
         val available = buildSet {
             add(CapabilityIds.TRIGGER_TIME)
+            add(CapabilityIds.TRIGGER_CONNECTIVITY_WIFI)
+            add(CapabilityIds.TRIGGER_CONNECTIVITY_POWER)
+            if (state.bluetoothConnectGranted) add(CapabilityIds.TRIGGER_CONNECTIVITY_BT)
+            if (state.foregroundLocationGranted && state.backgroundLocationGranted) {
+                add(CapabilityIds.TRIGGER_CONNECTIVITY_WIFI_IDENTITY)
+            }
             // Clipboard locale: nessun permesso OS richiesto (scrittura verificata su device).
             add(ActionCapabilities.COPY_TO_CLIPBOARD)
             if (state.notificationsGranted) add(ActionCapabilities.SHOW_NOTIFICATION)
@@ -180,7 +197,9 @@ class AndroidCapabilityProbe internal constructor(
             }
             // Telefonia (P2-2): grant runtime distinti per evento.
             if (state.receiveSmsGranted) add(CapabilityIds.TRIGGER_PHONE_SMS)
-            if (state.readPhoneStateGranted) add(CapabilityIds.TRIGGER_PHONE_CALL)
+            if (state.readPhoneStateGranted && state.readCallLogGranted) {
+                add(CapabilityIds.TRIGGER_PHONE_CALL)
+            }
             if (generativeReady) add(CapabilityIds.ACTION_INVOKE_LLM)
         }
         val transient = if (shizukuTransient) SHIZUKU_CAPABILITIES + SHIZUKU_TOOLS else emptySet()
@@ -237,6 +256,8 @@ class AndroidCapabilityProbe internal constructor(
         if (state.batteryOptimizationExempt) add("battery_optimization_exempt")
         if (state.receiveSmsGranted) add("receive_sms")
         if (state.readPhoneStateGranted) add("read_phone_state")
+        if (state.readCallLogGranted) add("read_call_log")
+        if (state.bluetoothConnectGranted) add("bluetooth_connect")
     }
 
     private fun shizukuReason(status: ShizukuGatewayStatus): String = when (status) {

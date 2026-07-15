@@ -10,6 +10,8 @@ import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.runtime.FireClaimRequest
 import dev.argus.engine.runtime.FireClaimResult
+import dev.argus.automation.connectivity.ConnectivityReconcileReport
+import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
@@ -91,12 +93,39 @@ class AutomationEnablementCoordinatorTest {
         assertEquals(1, runtime.reconcileCalls)
     }
 
+    @Test
+    fun `connectivity registration failure after enable rolls back atomically`() = runTest {
+        val store = ToggleStore(enableResult = true)
+        val scheduler = RecordingRuntime { report() }
+        val connectivity = RecordingConnectivityRuntime { call ->
+            if (call == 1) {
+                ConnectivityReconcileReport(listOf(id), active = false, failed = listOf(id))
+            } else {
+                ConnectivityReconcileReport(emptyList(), active = false)
+            }
+        }
+
+        val result = AutomationEnablementCoordinator(store, scheduler, connectivity)
+            .setEnabled(id, true)
+
+        assertEquals(EnablementResult.SchedulingFailed, result)
+        assertEquals(AutomationStatus.DISABLED, store.currentStatus)
+        assertEquals(2, connectivity.reconcileCalls)
+    }
+
     private fun report(failed: List<AutomationId> = emptyList()) = ReconcileReport(
         scheduled = emptyList(),
         cancelled = emptyList(),
         recovered = emptyList(),
         failed = failed,
     )
+}
+
+private class RecordingConnectivityRuntime(
+    private val result: suspend (Int) -> ConnectivityReconcileReport,
+) : ConnectivityTriggerRuntime {
+    var reconcileCalls = 0
+    override suspend fun reconcile(): ConnectivityReconcileReport = result(++reconcileCalls)
 }
 
 private class RecordingRuntime(

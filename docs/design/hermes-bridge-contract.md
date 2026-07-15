@@ -54,6 +54,11 @@ Request v1:
     "shizuku_available": true,
     "granted_permissions": ["android.permission.INTERNET"],
     "available_tools": ["set_dnd", "state.read", "toggle.set"],
+    "available_triggers": [
+      "time", "notification", "phone_state.sms", "phone_state.call",
+      "connectivity.wifi", "connectivity.wifi.identity",
+      "connectivity.bt", "connectivity.power"
+    ],
     "unavailable_tools": {},
     "whitelisted_contacts": [],
     "state_keys": {"dnd": "off|priority|total"}
@@ -71,6 +76,13 @@ Request v1:
 (`state.read`, `screen.capture`, …) selezionabili da azioni generative. Il probe Android deve
 derivare entrambi dallo stesso snapshot di capability: un'azione non disponibile va esclusa e
 riportata in `unavailable_tools` con il motivo.
+
+`available_triggers` è opzionale soltanto per retrocompatibilità con i client pre-P2. Quando è
+presente e non vuoto, il prompt e il validator del bridge rifiutano fail-closed ogni draft il cui
+trigger non è nella lista. PhoneState è distinto in `.sms`/`.call`; Connectivity in `.wifi`,
+`.bt`, `.power`. Un filtro SSID (`Connectivity.match`) richiede inoltre
+`connectivity.wifi.identity`, pubblicato solo con location foreground+background. Il controllo
+server non sostituisce la rivalidazione delle capability sul telefono.
 
 Redazione device state:
 

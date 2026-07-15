@@ -215,18 +215,65 @@ class AndroidCapabilityProbeTest {
     @Test
     fun `telephony triggers follow their distinct runtime grants`() = runTest {
         val both = probe(
-            state().copy(receiveSmsGranted = true, readPhoneStateGranted = true),
+            state().copy(
+                receiveSmsGranted = true,
+                readPhoneStateGranted = true,
+                readCallLogGranted = true,
+            ),
         ).current()
         assertTrue(CapabilityIds.TRIGGER_PHONE_SMS in both.availableCapabilities)
         assertTrue(CapabilityIds.TRIGGER_PHONE_CALL in both.availableCapabilities)
+        assertTrue(
+            "phone_state.call" in probe(
+                state().copy(readPhoneStateGranted = true, readCallLogGranted = true),
+            ).probe(DeviceState()).availableTriggers,
+        )
 
         val smsOnly = probe(state().copy(receiveSmsGranted = true)).current()
         assertTrue(CapabilityIds.TRIGGER_PHONE_SMS in smsOnly.availableCapabilities)
         assertFalse(CapabilityIds.TRIGGER_PHONE_CALL in smsOnly.availableCapabilities)
 
+        val phoneStateOnly = probe(state().copy(readPhoneStateGranted = true)).current()
+        assertFalse(
+            CapabilityIds.TRIGGER_PHONE_CALL in phoneStateOnly.availableCapabilities,
+            "senza READ_CALL_LOG il numero chiamante non è disponibile",
+        )
+        assertFalse(
+            "phone_state.call" in probe(state().copy(readPhoneStateGranted = true))
+                .probe(DeviceState()).availableTriggers,
+        )
+
         val none = probe(state()).current()
         assertFalse(CapabilityIds.TRIGGER_PHONE_SMS in none.availableCapabilities)
         assertFalse(CapabilityIds.TRIGGER_PHONE_CALL in none.availableCapabilities)
+    }
+
+    @Test
+    fun `connectivity capabilities separate always available media from runtime grants`() = runTest {
+        val base = probe(state()).current().availableCapabilities
+        assertTrue(CapabilityIds.TRIGGER_CONNECTIVITY_WIFI in base)
+        assertTrue(CapabilityIds.TRIGGER_CONNECTIVITY_POWER in base)
+        assertFalse(CapabilityIds.TRIGGER_CONNECTIVITY_BT in base)
+        assertFalse(CapabilityIds.TRIGGER_CONNECTIVITY_WIFI_IDENTITY in base)
+
+        val nearby = probe(state().copy(bluetoothConnectGranted = true))
+            .current().availableCapabilities
+        assertTrue(CapabilityIds.TRIGGER_CONNECTIVITY_BT in nearby)
+
+        val location = probe(
+            state().copy(
+                foregroundLocationGranted = true,
+                backgroundLocationGranted = true,
+            ),
+        ).current().availableCapabilities
+        assertTrue(CapabilityIds.TRIGGER_CONNECTIVITY_WIFI_IDENTITY in location)
+        val locationManifest = probe(
+            state().copy(
+                foregroundLocationGranted = true,
+                backgroundLocationGranted = true,
+            ),
+        ).probe(DeviceState())
+        assertTrue("connectivity.wifi.identity" in locationManifest.availableTriggers)
     }
 
     @Test
@@ -236,7 +283,13 @@ class AndroidCapabilityProbeTest {
         ).probe(DeviceState())
 
         assertEquals(
-            listOf("time", "notification", "phone_state.sms"),
+            listOf(
+                "time",
+                "notification",
+                "phone_state.sms",
+                "connectivity.wifi",
+                "connectivity.power",
+            ),
             manifest.availableTriggers,
         )
         assertTrue("TRIGGER DISPONIBILI" in manifest.render())

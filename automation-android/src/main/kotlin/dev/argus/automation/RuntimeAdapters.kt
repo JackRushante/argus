@@ -12,6 +12,10 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import dev.argus.device.StateReader
+import dev.argus.automation.connectivity.ConnectivityEventDispatcher
+import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
+import dev.argus.automation.connectivity.NoopConnectivityTriggerRuntime
+import dev.argus.engine.model.ConnMedium
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.CapabilityIds
@@ -79,6 +83,15 @@ class EnginePhoneEventDispatcher(
     }
 }
 
+class EngineConnectivityEventDispatcher(
+    private val engine: Engine,
+    private val state: DeviceStateSnapshotProvider,
+) : ConnectivityEventDispatcher {
+    override suspend fun dispatch(envelope: TriggerEnvelope) {
+        engine.onTrigger(envelope) { state.current() }
+    }
+}
+
 /**
  * Registrar per-trigger senza service persistente: Time registra presso AlarmManager tramite il
  * coordinator; Notification non ha una registrazione OS per-rule e richiede soltanto il grant
@@ -88,6 +101,7 @@ class AndroidArmedAutomationRegistrar(
     private val coordinator: TimeAlarmCoordinator,
     private val store: AutomationStore,
     private val snapshots: FirePolicySnapshotProvider,
+    private val connectivity: ConnectivityTriggerRuntime = NoopConnectivityTriggerRuntime,
 ) : ArmedAutomationRegistrar {
     override suspend fun register(automation: Automation): Boolean = when (automation.trigger) {
         is Trigger.Time -> registerTime(automation)
@@ -95,6 +109,7 @@ class AndroidArmedAutomationRegistrar(
         // I receiver manifest sono sempre attivi: la registrazione OS è il grant runtime
         // stesso, verificato qui con la capability granulare dell'evento (sms vs call).
         is Trigger.PhoneState -> registerBroadcastBacked(automation)
+        is Trigger.Connectivity -> registerConnectivity(automation)
         else -> false
     }
 
@@ -130,6 +145,20 @@ class AndroidArmedAutomationRegistrar(
         throw error
     } catch (_: Exception) {
         false
+    }
+
+    private suspend fun registerConnectivity(automation: Automation): Boolean {
+        if (!registerBroadcastBacked(automation)) return false
+        val medium = (automation.trigger as Trigger.Connectivity).medium
+        if (medium == ConnMedium.BT) return true
+        return try {
+            val report = connectivity.reconcile()
+            report.active && automation.id in report.requiredBy && automation.id !in report.failed
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            false
+        }
     }
 }
 

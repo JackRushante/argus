@@ -33,14 +33,20 @@ in log. Instrumented via `am instrument` diretto (workaround UTP/Windows, handof
 | Trigger | Meccanismo | Processo |
 | --- | --- | --- |
 | PhoneState SMS_RECEIVED | receiver manifest `SMS_RECEIVED_ACTION` + runtime permission `RECEIVE_SMS` | no service |
-| PhoneState INCOMING_CALL / CALL_ENDED | receiver manifest `PHONE_STATE` + `READ_PHONE_STATE` | no service |
-| Connectivity POWER | receiver manifest `ACTION_POWER_CONNECTED/DISCONNECTED` (esenti dalle restrizioni implicit broadcast) | no service |
+| PhoneState INCOMING_CALL / CALL_ENDED | receiver manifest `PHONE_STATE` + `READ_PHONE_STATE` + `READ_CALL_LOG` (serve per il numero) | no service |
+| Connectivity POWER | receiver dinamico `ACTION_POWER_CONNECTED/DISCONNECTED` dentro la sentinella condivisa | FGS solo se armato |
 | Connectivity BT | receiver manifest `BluetoothDevice.ACTION_ACL_CONNECTED/DISCONNECTED` (esenti) | no service |
 | Connectivity WIFI | `NetworkCallback` → richiede processo vivo → **FGS sentinella** | FGS solo se armato |
 | Geofence | da spike P2-0: `LocationManager.addProximityAlert` (PendingIntent, no GMS dep) vs alternativa | no service se proximity |
 
+**Correzione verificata il 2026-07-15:** POWER non è tra le eccezioni agli implicit broadcast
+manifest su Android moderno; il vecchio assunto era falso. Il receiver è quindi dinamico e vive
+nella stessa sentinella del Wi-Fi. BT ACL resta invece manifest-safe. Riferimenti ufficiali:
+[implicit broadcast exceptions](https://developer.android.com/develop/background-work/background-tasks/broadcasts/broadcast-exceptions)
+e [broadcast overview](https://developer.android.com/develop/background-work/background-tasks/broadcasts).
+
 **FGS sentinella**: parte SOLO quando esiste almeno una regola ARMED+enabled il cui trigger lo
-richiede (oggi: solo Wi-Fi connectivity); si spegne al reconcile quando non serve più. Tipo FGS
+richiede (Wi-Fi o POWER); si spegne al reconcile quando non serve più. Tipo FGS
 `specialUse` (API 36 li richiede), notifica persistente minima e onesta. Nessun service quando
 nessuna regola lo richiede (invariante P0/P1 preservata).
 
@@ -114,15 +120,23 @@ connectivity non è necessario.
 
 ### P2-1 — Connectivity (BT/Power subito, Wi-Fi con FGS)
 
-- engine-core: nessun cambio modello (Trigger.Connectivity esiste); `CapabilityIds.TRIGGER_CONNECTIVITY`
-  e derivazione requirements se mancante.
-- automation-android: receiver manifest BT/power → `TriggerEvent.ConnectivityChanged` → engine
-  (pattern del listener P1: dispatcher + dedup eventId); FGS sentinella + NetworkCallback per
-  Wi-Fi; registrar esteso (`Trigger.Connectivity` armabile quando il grant/meccanismo c'è);
-  probe pubblica capability e tool; reconcile accende/spegne il FGS.
-- UI: riga salute "Servizio sentinella" in Sistema SOLO quando attivo (onestà FGS).
-- Test: unit (registrar/probe/dispatcher), Robolectric E2E sintetico, instrumented su device
-  (BT on/off reale, cavo alimentazione reale). Bridge prompt: esempi connectivity.
+**Stato 2026-07-15: implementazione e gate sintetico-device completi; restano i due bordi fisici.**
+
+- engine-core: capability granulari `connectivity.wifi`, `.wifi.identity`, `.bt`, `.power`;
+  parser eventId digest-only (mai SSID/address in chiaro) e requirement per medium/match.
+- automation-android: receiver manifest solo BT; POWER dinamico + `NetworkCallback` Wi-Fi dentro
+  un unico FGS `specialUse`; snapshot transizioni persistito con chiavi hashate, seed senza falso
+  fire, recupero del bordo perso a processo morto e dedup dei callback ripetuti.
+- coordinator single-writer: FGS richiesto solo da regole ARMED+enabled Wi-Fi/POWER; registrar,
+  enable rollback, disable cleanup e bootstrap riconciliano il servizio in modo fail-closed.
+- probe/UI: permission `BLUETOOTH_CONNECT` opt-in; SSID richiede location foreground+background;
+  riga "Sentinella connettività" visibile solo quando il servizio è realmente attivo.
+- Hermes: prompt e validator server-side applicano `available_triggers` granulari; un match SSID
+  richiede anche `connectivity.wifi.identity`. Deploy con backup e suite 19/19 verde.
+- gate OnePlus: regola POWER temporanea → FGS reale → ingress/Engine/Room → `/system/bin/true`
+  via Shizuku → journal success → cleanup e stop FGS, `OK (1)`. Restano da provare sul campo:
+  ACL Bluetooth reale e collegamento/scollegamento cavo reale. Non spegnere il Wi-Fi via ADB,
+  perché è il trasporto ADB/Tailscale del laboratorio.
 
 ### P2-2 — PhoneState (chiamate + SMS)
 

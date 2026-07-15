@@ -175,6 +175,63 @@ class BridgeTest(unittest.TestCase):
         self.assertIsNone(draft)
         self.assertEqual("draft_invalid", error)
 
+    def test_model_output_enforces_granular_available_triggers(self):
+        output = (
+            'Pronto.\n@@META@@ {"draft":{"name":"Bluetooth auto",'
+            '"trigger":{"type":"connectivity","medium":"BT","state":"CONNECTED"},'
+            '"actions":[{"type":"run_shell","cmd":"/system/bin/true"}]},'
+            '"error_code":null}'
+        )
+        _, draft, error = bridge.parse_model_output(
+            output,
+            {"run_shell"},
+            set(),
+            set(),
+            {"connectivity.power"},
+        )
+        self.assertIsNone(draft)
+        self.assertEqual("draft_invalid", error)
+
+        _, draft, error = bridge.parse_model_output(
+            output,
+            {"run_shell"},
+            set(),
+            set(),
+            {"connectivity.bt"},
+        )
+        self.assertEqual("BT", draft["trigger"]["medium"])
+        self.assertIsNone(error)
+
+        # Manifest legacy/empty: nessun vincolo aggiuntivo, per retrocompatibilita'.
+        _, legacy, error = bridge.parse_model_output(
+            output, {"run_shell"}, set(), set(), set()
+        )
+        self.assertIsNotNone(legacy)
+        self.assertIsNone(error)
+
+        wifi_named = output.replace(
+            '"medium":"BT"',
+            '"medium":"WIFI","match":"Casa"',
+        )
+        _, draft, error = bridge.parse_model_output(
+            wifi_named,
+            {"run_shell"},
+            set(),
+            set(),
+            {"connectivity.wifi"},
+        )
+        self.assertIsNone(draft)
+        self.assertEqual("draft_invalid", error)
+        _, draft, error = bridge.parse_model_output(
+            wifi_named,
+            {"run_shell"},
+            set(),
+            set(),
+            {"connectivity.wifi", "connectivity.wifi.identity"},
+        )
+        self.assertEqual("Casa", draft["trigger"]["match"])
+        self.assertIsNone(error)
+
     def test_missing_or_malformed_meta_fails_soft(self):
         self.assertEqual(
             ("testo", None, "draft_missing"),

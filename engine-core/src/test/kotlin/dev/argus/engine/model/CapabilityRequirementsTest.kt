@@ -136,6 +136,41 @@ class CapabilityRequirementsTest {
     }
 
     @Test
+    fun `connectivity requirements are granular and wifi identity needs location`() {
+        assertEquals(
+            setOf(CapabilityIds.TRIGGER_CONNECTIVITY_POWER),
+            CapabilityRequirements.derive(
+                trigger = Trigger.Connectivity(ConnMedium.POWER, ConnState.CONNECTED),
+                actions = emptyList(),
+            ),
+        )
+        assertEquals(
+            setOf(CapabilityIds.TRIGGER_CONNECTIVITY_BT),
+            CapabilityRequirements.derive(
+                trigger = Trigger.Connectivity(ConnMedium.BT, ConnState.CONNECTED, "Auto"),
+                actions = emptyList(),
+            ),
+        )
+        assertEquals(
+            setOf(CapabilityIds.TRIGGER_CONNECTIVITY_WIFI),
+            CapabilityRequirements.derive(
+                trigger = Trigger.Connectivity(ConnMedium.WIFI, ConnState.CONNECTED),
+                actions = emptyList(),
+            ),
+        )
+        assertEquals(
+            setOf(
+                CapabilityIds.TRIGGER_CONNECTIVITY_WIFI,
+                CapabilityIds.TRIGGER_CONNECTIVITY_WIFI_IDENTITY,
+            ),
+            CapabilityRequirements.derive(
+                trigger = Trigger.Connectivity(ConnMedium.WIFI, ConnState.CONNECTED, "Casa"),
+                actions = emptyList(),
+            ),
+        )
+    }
+
+    @Test
     fun `nested conditions retain every state dependency`() {
         val conditions = Condition.And(
             listOf(
@@ -151,7 +186,7 @@ class CapabilityRequirementsTest {
 
         assertEquals(
             setOf(
-                CapabilityIds.TRIGGER_CONNECTIVITY,
+                CapabilityIds.TRIGGER_CONNECTIVITY_POWER,
                 CapabilityIds.state(StateKeys.RINGER),
                 CapabilityIds.STATE_FOREGROUND_APP,
                 CapabilityIds.state(StateKeys.WIFI),

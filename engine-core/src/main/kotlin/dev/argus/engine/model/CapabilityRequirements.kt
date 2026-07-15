@@ -8,7 +8,12 @@ object CapabilityIds {
     // Granulari per evento: i grant OS differiscono (RECEIVE_SMS vs READ_PHONE_STATE).
     const val TRIGGER_PHONE_SMS = "trigger.phone_state.sms"
     const val TRIGGER_PHONE_CALL = "trigger.phone_state.call"
-    const val TRIGGER_CONNECTIVITY = "trigger.connectivity"
+    // Granulari per medium: Bluetooth ha un grant runtime distinto, mentre l'identità Wi-Fi
+    // (SSID) richiede accesso location e non deve bloccare una regola Wi-Fi generica.
+    const val TRIGGER_CONNECTIVITY_WIFI = "trigger.connectivity.wifi"
+    const val TRIGGER_CONNECTIVITY_WIFI_IDENTITY = "trigger.connectivity.wifi.identity"
+    const val TRIGGER_CONNECTIVITY_BT = "trigger.connectivity.bt"
+    const val TRIGGER_CONNECTIVITY_POWER = "trigger.connectivity.power"
 
     const val STATE_FOREGROUND_APP = "state.foreground_app"
     const val STATE_LOCATION = "state.location"
@@ -53,7 +58,14 @@ object CapabilityRequirements {
             PhoneEvent.SMS_RECEIVED -> setOf(CapabilityIds.TRIGGER_PHONE_SMS)
             PhoneEvent.INCOMING_CALL, PhoneEvent.CALL_ENDED -> setOf(CapabilityIds.TRIGGER_PHONE_CALL)
         }
-        is Trigger.Connectivity -> setOf(CapabilityIds.TRIGGER_CONNECTIVITY)
+        is Trigger.Connectivity -> when (trigger.medium) {
+            ConnMedium.WIFI -> buildSet {
+                add(CapabilityIds.TRIGGER_CONNECTIVITY_WIFI)
+                if (trigger.match != null) add(CapabilityIds.TRIGGER_CONNECTIVITY_WIFI_IDENTITY)
+            }
+            ConnMedium.BT -> setOf(CapabilityIds.TRIGGER_CONNECTIVITY_BT)
+            ConnMedium.POWER -> setOf(CapabilityIds.TRIGGER_CONNECTIVITY_POWER)
+        }
     }
 
     private fun forCondition(condition: Condition): Set<String> = when (condition) {

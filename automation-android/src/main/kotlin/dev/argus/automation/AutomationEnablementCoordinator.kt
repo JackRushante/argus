@@ -11,6 +11,8 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
+import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
+import dev.argus.automation.connectivity.NoopConnectivityTriggerRuntime
 
 sealed interface EnablementResult {
     data object Updated : EnablementResult
@@ -24,6 +26,7 @@ sealed interface EnablementResult {
 class AutomationEnablementCoordinator @Inject constructor(
     private val store: AutomationStore,
     private val scheduler: TimeAlarmRuntime,
+    private val connectivity: ConnectivityTriggerRuntime = NoopConnectivityTriggerRuntime,
 ) {
     private val mutex = Mutex()
 
@@ -39,8 +42,9 @@ class AutomationEnablementCoordinator @Inject constructor(
                 return@withLock EnablementResult.ReviewRequired
             }
             return@withLock try {
-                scheduler.reconcile(ReconcileReason.CAPABILITY_CHANGED)
-                EnablementResult.Updated
+                val schedulerClean = runCleanupReconcile()
+                if (schedulerClean) EnablementResult.Updated
+                else EnablementResult.DisableCleanupDeferred
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
@@ -56,7 +60,8 @@ class AutomationEnablementCoordinator @Inject constructor(
         }
         return@withLock try {
             val report = scheduler.reconcile(ReconcileReason.CAPABILITY_CHANGED)
-            if (id in report.failed) {
+            val connectivityReport = connectivity.reconcile()
+            if (id in report.failed || id in connectivityReport.failed) {
                 rollbackEnable(id, fingerprint)
                 EnablementResult.SchedulingFailed
             } else {
@@ -81,5 +86,30 @@ class AutomationEnablementCoordinator @Inject constructor(
         } catch (_: Exception) {
             // La sorgente di verità è già DISABLED; il bootstrap ritenterà la pulizia OS.
         }
+        try {
+            connectivity.reconcile()
+        } catch (_: Exception) {
+            // Stesso recovery al prossimo bootstrap; non riabilitare mai la regola.
+        }
+    }
+
+    /** In disable tenta entrambe le pulizie anche se la prima fallisce. */
+    private suspend fun runCleanupReconcile(): Boolean {
+        var clean = true
+        try {
+            scheduler.reconcile(ReconcileReason.CAPABILITY_CHANGED)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            clean = false
+        }
+        try {
+            if (!connectivity.reconcile().cleanupSucceeded) clean = false
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            clean = false
+        }
+        return clean
     }
 }

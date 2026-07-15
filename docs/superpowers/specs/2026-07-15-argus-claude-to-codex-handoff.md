@@ -280,8 +280,10 @@ Direttiva di Lorenzo (§5.6.2). Lavoro previsto:
 
 ### #21 — P2-1 trigger Connectivity
 
-Receiver BT/Power manifest-exempt; per il Wi-Fi serve un **FGS sentinella** (`specialUse`) acceso
-**solo** quando esistono regole armate che lo richiedono. Il costo batteria è il motivo del design.
+**Correzione Codex 2026-07-15:** BT ACL è manifest-exempt, POWER no. POWER usa quindi un receiver
+dinamico dentro lo stesso **FGS sentinella** (`specialUse`) del Wi-Fi, acceso **solo** quando una
+regola ARMED+enabled Wi-Fi/POWER lo richiede. L'assunto originale BT/Power entrambi exempt non va
+ereditato.
 
 ### #22 — P2-4 Geofence
 

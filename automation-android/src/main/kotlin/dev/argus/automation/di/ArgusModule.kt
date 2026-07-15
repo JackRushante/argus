@@ -32,6 +32,7 @@ import dev.argus.automation.AndroidClipboardCopier
 import dev.argus.automation.ClipboardCopier
 import dev.argus.automation.EngineNotificationEventDispatcher
 import dev.argus.automation.EnginePhoneEventDispatcher
+import dev.argus.automation.EngineConnectivityEventDispatcher
 import dev.argus.automation.EngineTimeEventDispatcher
 import dev.argus.automation.FrameworkCurrentLocationProvider
 import dev.argus.automation.GenerativeLane
@@ -71,6 +72,15 @@ import dev.argus.engine.brain.CapabilityProbe
 import dev.argus.engine.brain.ContactWhitelistStore
 import dev.argus.automation.phone.PhoneEventIngress
 import dev.argus.automation.phone.PrefsCallStateStore
+import dev.argus.automation.connectivity.ConnectivityEventDispatcher
+import dev.argus.automation.connectivity.ConnectivityEventIngress
+import dev.argus.automation.connectivity.AndroidConnectivitySentinelBackend
+import dev.argus.automation.connectivity.ConnectivitySentinelBackend
+import dev.argus.automation.connectivity.ConnectivitySentinelCoordinator
+import dev.argus.automation.connectivity.ConnectivitySentinelStatus
+import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
+import dev.argus.automation.connectivity.PrefsConnectivityStateStore
+import dev.argus.engine.connectivity.ConnectivityEventParser
 import dev.argus.engine.notification.NotificationEventParser
 import dev.argus.engine.phone.PhoneEventParser
 import dev.argus.engine.notification.ObservedConversationStore
@@ -478,6 +488,57 @@ object ArgusModule {
 
     @Provides
     @Singleton
+    fun connectivityEventDispatcher(
+        engine: Engine,
+        state: DeviceStateSnapshotProvider,
+    ): EngineConnectivityEventDispatcher = EngineConnectivityEventDispatcher(engine, state)
+
+    @Provides
+    fun connectivityEventDispatcherBoundary(
+        dispatcher: EngineConnectivityEventDispatcher,
+    ): ConnectivityEventDispatcher = dispatcher
+
+    @Provides
+    @Singleton
+    fun connectivityEventIngress(
+        @ApplicationContext context: Context,
+        dispatcher: ConnectivityEventDispatcher,
+    ): ConnectivityEventIngress = ConnectivityEventIngress(
+        parser = ConnectivityEventParser(),
+        state = PrefsConnectivityStateStore(context),
+        dispatcher = dispatcher,
+    )
+
+    @Provides
+    @Singleton
+    fun connectivitySentinelStatus(): ConnectivitySentinelStatus = ConnectivitySentinelStatus()
+
+    @Provides
+    @Singleton
+    fun connectivitySentinelBackend(
+        @ApplicationContext context: Context,
+        status: ConnectivitySentinelStatus,
+    ): AndroidConnectivitySentinelBackend = AndroidConnectivitySentinelBackend(context, status)
+
+    @Provides
+    fun connectivitySentinelBackendBoundary(
+        backend: AndroidConnectivitySentinelBackend,
+    ): ConnectivitySentinelBackend = backend
+
+    @Provides
+    @Singleton
+    fun connectivitySentinelCoordinator(
+        store: AutomationStore,
+        backend: ConnectivitySentinelBackend,
+    ): ConnectivitySentinelCoordinator = ConnectivitySentinelCoordinator(store, backend)
+
+    @Provides
+    fun connectivityTriggerRuntime(
+        coordinator: ConnectivitySentinelCoordinator,
+    ): ConnectivityTriggerRuntime = coordinator
+
+    @Provides
+    @Singleton
     fun timeAlarmState(database: ArgusDatabase): RoomTimeAlarmStateStore =
         RoomTimeAlarmStateStore(database)
 
@@ -512,7 +573,13 @@ object ArgusModule {
         coordinator: TimeAlarmCoordinator,
         store: AutomationStore,
         snapshots: FirePolicySnapshotProvider,
-    ): ArmedAutomationRegistrar = AndroidArmedAutomationRegistrar(coordinator, store, snapshots)
+        connectivity: ConnectivityTriggerRuntime,
+    ): ArmedAutomationRegistrar = AndroidArmedAutomationRegistrar(
+        coordinator,
+        store,
+        snapshots,
+        connectivity,
+    )
 
     @Provides
     @Singleton
@@ -558,6 +625,7 @@ object ArgusModule {
         shizuku: ShizukuGateway,
         preferences: AppPreferencesStore,
         replyRegistry: ActiveNotificationReplyRegistry,
+        connectivity: ConnectivityTriggerRuntime,
     ): ArgusRuntimeController = ArgusRuntimeController(
         scope,
         scheduler,
@@ -566,5 +634,6 @@ object ArgusModule {
         shizuku.observeStatus(),
         preferences,
         replyRegistry,
+        connectivity,
     )
 }

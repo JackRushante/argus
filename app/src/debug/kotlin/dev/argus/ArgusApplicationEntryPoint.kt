@@ -7,6 +7,9 @@ import dev.argus.automation.AppPreferencesStore
 import dev.argus.automation.ApprovalFlow
 import dev.argus.automation.DeviceStateSnapshotProvider
 import dev.argus.automation.phone.PhoneEventIngress
+import dev.argus.automation.connectivity.ConnectivityEventIngress
+import dev.argus.automation.connectivity.ConnectivitySentinelStatus
+import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
 import dev.argus.automation.ShizukuStaticShellRunner
 import dev.argus.automation.TimeAlarmBackend
 import dev.argus.automation.TimeAlarmRuntime
@@ -29,6 +32,9 @@ interface ArgusApplicationEntryPoint {
     fun capabilityProbe(): CapabilityProbe
     fun deviceStateSnapshotProvider(): DeviceStateSnapshotProvider
     fun phoneEventIngress(): PhoneEventIngress
+    fun connectivityEventIngress(): ConnectivityEventIngress
+    fun connectivitySentinelStatus(): ConnectivitySentinelStatus
+    fun connectivityTriggerRuntime(): ConnectivityTriggerRuntime
     fun staticShellRunner(): ShizukuStaticShellRunner
     fun approvalFlow(): ApprovalFlow
     fun automationStore(): AutomationStore

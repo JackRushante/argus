@@ -19,6 +19,8 @@ import dev.argus.engine.runtime.FirePolicySnapshot
 import dev.argus.engine.runtime.FirePolicySnapshotProvider
 import dev.argus.engine.runtime.TriggerEventId
 import dev.argus.shizuku.ShizukuGatewayStatus
+import dev.argus.automation.connectivity.ConnectivityReconcileReport
+import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -52,6 +54,7 @@ class ArgusRuntimeControllerTest {
                 val registry = ActiveNotificationReplyRegistry()
                 registry.replace(handle(context))
                 val scheduler = RecordingTimeAlarmRuntime()
+                val connectivity = RecordingConnectivityRuntime()
                 val controller = ArgusRuntimeController(
                     scope = scope,
                     scheduler = scheduler,
@@ -65,11 +68,13 @@ class ArgusRuntimeControllerTest {
                     shizukuStatus = MutableStateFlow(ShizukuGatewayStatus.AUTHORIZED),
                     preferences = preferences,
                     replyRegistry = registry,
+                    connectivity = connectivity,
                     nowMillis = { 1_000L },
                 )
 
                 controller.start()
                 awaitUntil("bootstrap APP_START") { scheduler.reconcileCount() >= 1 }
+                awaitUntil("bootstrap connectivity") { connectivity.reconcileCount() >= 1 }
                 assertEquals(1, registry.size())
                 val beforeRevoke = scheduler.reconcileCount()
 
@@ -158,6 +163,15 @@ class ArgusRuntimeControllerTest {
         override suspend fun reconcile(reason: ReconcileReason): ReconcileReport {
             reasons += reason
             return ReconcileReport(emptyList(), emptyList(), emptyList(), emptyList())
+        }
+    }
+
+    private class RecordingConnectivityRuntime : ConnectivityTriggerRuntime {
+        private val calls = java.util.concurrent.atomic.AtomicInteger()
+        fun reconcileCount(): Int = calls.get()
+        override suspend fun reconcile(): ConnectivityReconcileReport {
+            calls.incrementAndGet()
+            return ConnectivityReconcileReport(emptyList(), active = false)
         }
     }
 

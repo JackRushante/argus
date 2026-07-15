@@ -2,4 +2,8 @@
 <resources>
     <string name="argus_automation_channel_name">Automazioni Argus</string>
     <string name="argus_automation_channel_description">Avvisi generati dalle regole approvate</string>
+    <string name="argus_connectivity_channel_name">Trigger connettività</string>
+    <string name="argus_connectivity_channel_description">Monitora Wi-Fi e alimentazione per le automazioni armate</string>
+    <string name="argus_connectivity_notification_title">Argus è in ascolto</string>
+    <string name="argus_connectivity_notification_text">Monitoraggio Wi-Fi e alimentazione per automazioni armate</string>
 </resources>

@@ -14,6 +14,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.atomic.AtomicBoolean
+import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
+import dev.argus.automation.connectivity.NoopConnectivityTriggerRuntime
 
 /** Bootstrap idempotente del runtime event-driven, condiviso da Application e lifecycle processo. */
 class ArgusRuntimeController(
@@ -24,6 +26,7 @@ class ArgusRuntimeController(
     private val shizukuStatus: Flow<ShizukuGatewayStatus>,
     private val preferences: AppPreferencesStore,
     private val replyRegistry: ActiveNotificationReplyRegistry,
+    private val connectivity: ConnectivityTriggerRuntime = NoopConnectivityTriggerRuntime,
     private val nowMillis: () -> Long = System::currentTimeMillis,
 ) {
     private val started = AtomicBoolean(false)
@@ -67,6 +70,10 @@ class ArgusRuntimeController(
         runCatchingPreservingCancellation { scheduler.reconcile(reason) }
             .onFailure { error ->
                 Log.w(TAG, "reconcile scheduler fallito: ${error::class.java.simpleName}")
+            }
+        runCatchingPreservingCancellation { connectivity.reconcile() }
+            .onFailure { error ->
+                Log.w(TAG, "reconcile connectivity fallito: ${error::class.java.simpleName}")
             }
         Unit
     }

@@ -13,6 +13,8 @@ import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.PhoneEvent
 import dev.argus.engine.model.TimePrecision
 import dev.argus.engine.model.Trigger
+import dev.argus.automation.connectivity.ConnectivityReconcileReport
+import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.runtime.FireClaimRequest
 import dev.argus.engine.runtime.FireClaimResult
@@ -82,7 +84,7 @@ class ArmedAutomationRegistrarTest {
         assertFalse(
             registrar(
                 store = SingleRuleStore(connectivity),
-                capabilities = setOf(CapabilityIds.TRIGGER_CONNECTIVITY),
+                capabilities = setOf(CapabilityIds.TRIGGER_CONNECTIVITY_WIFI),
             ).register(connectivity),
             "trigger senza registrar reale restano fail-closed",
         )
@@ -128,6 +130,47 @@ class ArmedAutomationRegistrarTest {
     }
 
     @Test
+    fun `connectivity uses granular capability and sentinel only for wifi or power`() = runTest {
+        val wifi = signed(
+            rule("wifi").copy(
+                trigger = Trigger.Connectivity(ConnMedium.WIFI, ConnState.CONNECTED),
+                actions = listOf(Action.ShowNotification("Argus", "wifi")),
+            ),
+        )
+        val activeRuntime = ConnectivityTriggerRuntime {
+            ConnectivityReconcileReport(requiredBy = listOf(wifi.id), active = true)
+        }
+        assertTrue(
+            registrar(
+                store = SingleRuleStore(wifi),
+                capabilities = setOf(CapabilityIds.TRIGGER_CONNECTIVITY_WIFI),
+                connectivity = activeRuntime,
+            ).register(wifi),
+        )
+        assertFalse(
+            registrar(
+                store = SingleRuleStore(wifi),
+                capabilities = setOf(CapabilityIds.TRIGGER_CONNECTIVITY_BT),
+                connectivity = activeRuntime,
+            ).register(wifi),
+        )
+
+        val bluetooth = signed(
+            rule("bt").copy(
+                trigger = Trigger.Connectivity(ConnMedium.BT, ConnState.CONNECTED),
+                actions = listOf(Action.ShowNotification("Argus", "bt")),
+            ),
+        )
+        assertTrue(
+            registrar(
+                store = SingleRuleStore(bluetooth),
+                capabilities = setOf(CapabilityIds.TRIGGER_CONNECTIVITY_BT),
+            ).register(bluetooth),
+            "il receiver Bluetooth manifest non deve avviare la sentinella",
+        )
+    }
+
+    @Test
     fun `time rule still registers through the alarm coordinator`() = runTest {
         val rule = signed(
             rule("time").copy(
@@ -146,6 +189,7 @@ class ArmedAutomationRegistrarTest {
     private fun registrar(
         store: AutomationStore,
         capabilities: Set<String> = emptySet(),
+        connectivity: ConnectivityTriggerRuntime = dev.argus.automation.connectivity.NoopConnectivityTriggerRuntime,
     ) = AndroidArmedAutomationRegistrar(
         coordinator = coordinator(store),
         store = store,
@@ -156,6 +200,7 @@ class ArmedAutomationRegistrarTest {
                 whitelistedConversationIds = setOf(CONVERSATION_ID),
             )
         },
+        connectivity = connectivity,
     )
 
     private fun coordinator(store: AutomationStore) = TimeAlarmCoordinator(

@@ -10,6 +10,7 @@ import dev.argus.automation.AppPreferences
 import dev.argus.automation.AppPreferencesStore
 import dev.argus.automation.BridgeHealthResult
 import dev.argus.automation.ConfiguredBridgeBrain
+import dev.argus.automation.connectivity.ConnectivitySentinelStatus
 import dev.argus.automation.PrivacyRevocationCoordinator
 import dev.argus.automation.PrivacyRevocationResult
 import dev.argus.brain.BridgeConfigurationStore
@@ -88,6 +89,7 @@ class SettingsViewModel @Inject constructor(
     automations: AutomationStore,
     drafts: DraftRepository,
     private val shizuku: ShizukuGateway,
+    private val connectivitySentinelStatus: ConnectivitySentinelStatus,
 ) : ViewModel() {
     private val refreshSignal = MutableStateFlow(0L)
     private val bridgeHealth = MutableStateFlow(BridgeUiHealth())
@@ -144,7 +146,8 @@ class SettingsViewModel @Inject constructor(
         bridgeHealth,
         tokenConfigured,
         refreshSignal,
-    ) { values, bridge, hasToken, _ ->
+        connectivitySentinelStatus.active,
+    ) { values, bridge, hasToken, _, sentinelActive ->
         val health = readAndroidUiHealth(context)
         SettingsState(
             transport = TransportUi.CliBridge(
@@ -162,7 +165,9 @@ class SettingsViewModel @Inject constructor(
             notificationListenerGranted = health.notificationListenerGranted,
             backgroundLocation = health.backgroundLocationState(values.geofenceNeeded),
             smsTriggerGranted = health.receiveSmsGranted,
-            callTriggerGranted = health.readPhoneStateGranted,
+            callTriggerGranted = health.readPhoneStateGranted && health.readCallLogGranted,
+            bluetoothTriggerGranted = health.bluetoothConnectGranted,
+            connectivitySentinelActive = sentinelActive,
             whitelist = values.contacts.map { ContactRow(it.displayName, it.id) },
             observedCandidates = values.observedCandidates,
             budget = BudgetUi(
@@ -344,6 +349,10 @@ class SettingsViewModel @Inject constructor(
             notificationsGranted = health.notificationsGranted,
             notificationListenerGranted = health.notificationListenerGranted,
             backgroundLocation = health.backgroundLocationState(false),
+            smsTriggerGranted = health.receiveSmsGranted,
+            callTriggerGranted = health.readPhoneStateGranted && health.readCallLogGranted,
+            bluetoothTriggerGranted = health.bluetoothConnectGranted,
+            connectivitySentinelActive = connectivitySentinelStatus.active.value,
             whitelist = emptyList(),
             budget = BudgetUi(
                 0,

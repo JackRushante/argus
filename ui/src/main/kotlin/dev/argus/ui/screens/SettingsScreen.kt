@@ -20,6 +20,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.BatterySaver
+import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
@@ -253,6 +254,26 @@ private fun HealthSection(state: SettingsState, callbacks: SettingsCallbacks) {
                 onFix = callbacks::onRequestCallPermissions,
                 actionLabel = if (state.callTriggerGranted) null else "Attiva",
             )
+            HealthRow(
+                Icons.Rounded.Bluetooth, "Trigger Bluetooth",
+                if (state.bluetoothTriggerGranted) {
+                    "attivi — connessione e disconnessione dei dispositivi sono armabili"
+                } else {
+                    "non attivi — consenti Dispositivi nelle vicinanze per armare le regole"
+                },
+                if (state.bluetoothTriggerGranted) HealthLevel.OK else HealthLevel.NEUTRAL,
+                onFix = callbacks::onRequestBluetoothPermission,
+                actionLabel = if (state.bluetoothTriggerGranted) null else "Attiva",
+            )
+            if (state.connectivitySentinelActive) {
+                HealthRow(
+                    Icons.Rounded.Hub,
+                    "Sentinella connettività",
+                    "attiva — monitora Wi-Fi e alimentazione per le regole armate",
+                    HealthLevel.OK,
+                    onFix = {},
+                )
+            }
         }
     }
 }

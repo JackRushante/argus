@@ -198,6 +198,12 @@ fun ArgusNavHost() {
         permissionRefresh += 1
         settingsViewModel.refresh()
     }
+    val bluetoothPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) {
+        permissionRefresh += 1
+        settingsViewModel.refresh()
+    }
     val requestNotificationAccess = {
         val runtimePermissionMissing = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(
@@ -418,6 +424,14 @@ fun ArgusNavHost() {
                                     Manifest.permission.READ_CALL_LOG,
                                 ),
                             )
+                        }
+                        override fun onRequestBluetoothPermission() {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                bluetoothPermission.launch(Manifest.permission.BLUETOOTH_CONNECT)
+                            } else {
+                                permissionRefresh += 1
+                                settingsViewModel.refresh()
+                            }
                         }
                         override fun onRemoveContact(conversationId: String) {
                             settingsViewModel.removeContact(conversationId)
