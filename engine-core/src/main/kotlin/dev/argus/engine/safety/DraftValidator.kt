@@ -36,7 +36,6 @@ class DraftValidator(
         private const val MAX_CONDITION_DEPTH = 8
         private const val MAX_TEXT_LENGTH = 4_000
         private const val MAX_COMMAND_LENGTH = 8_192
-        private const val MAX_REGEX_LENGTH = 512
         private const val MAX_TOOL_COUNT = 32
         private const val MAX_GEOFENCE_RADIUS_M = 100_000.0
         private const val MAX_LOITERING_MS = 86_400_000L
@@ -241,7 +240,11 @@ class DraftValidator(
                         "shell_external_trigger",
                         "La shell autonoma è ammessa solo con trigger Time, Geofence o Connectivity",
                     )
-                warn("shell_review", "Comando shell autonomo solo dopo approvazione del comando letterale")
+                warn(
+                    "shell_review",
+                    "Comando autonomo approvato letteralmente; limite operativo 30 s e, per " +
+                        "trigger broadcast, preferire comandi brevi",
+                )
             }
             is Action.CopyToClipboard -> {
                 val textual = trigger is Trigger.Notification ||
@@ -249,10 +252,12 @@ class DraftValidator(
                 if (!textual)
                     err("clipboard_source_missing", "Copia negli appunti richiede un trigger con testo (SMS o notifica)")
                 action.extractionRegex?.let { pattern ->
-                    val compilable = pattern.length <= MAX_REGEX_LENGTH &&
-                        runCatching { Regex(pattern) }.isSuccess
-                    if (!compilable)
-                        err("extraction_regex_invalid", "Regex di estrazione non valida o oltre $MAX_REGEX_LENGTH caratteri")
+                    if (!SafeExtractionRegex.isValid(pattern))
+                        err(
+                            "extraction_regex_invalid",
+                            "Regex non sicura/compatibile RE2 o oltre " +
+                                "${SafeExtractionRegex.MAX_PATTERN_CHARS} caratteri",
+                        )
                 }
             }
             is Action.InvokeLlm -> validateInvokeLlm(action, trigger, whitelist, err, warn)

@@ -170,8 +170,9 @@ SMS telephony → textMatch/regex → clipboard con incolla da parte di Lorenzo.
   review ("Copia negli appunti · estrazione: `regex`" — regex integrale, §5 non si soffia).
 - automation-android: executor clipboard sensibile (o fallback CTA da spike); wiring FireContext
   → payload testuale del trigger (SMS/notifica).
-- bridge: tool `copy_to_clipboard` + REGOLA: estrazione SOLO via regex nel draft; suggerire il
-  pattern OTP di default `(?<!\+)\b(\d{4,8})\b` con esclusione prefissi telefonici (da
+- bridge: tool `copy_to_clipboard` + REGOLA: estrazione SOLO via regex RE2 lineare nel draft;
+  suggerire il pattern OTP di default `(?:^|[^+0-9])([0-9]{4,8})(?:[^0-9]|$)` con esclusione
+  prefissi telefonici (il vecchio pattern lookbehind resta migrato in modo compatibile; da
   raffinare in TDD con corpus di SMS reali di esempio, inclusi falsi positivi: importi, anni,
   numeri parziali).
 - E2E live con Lorenzo: SMS OTP vero (es. codice di test) → clipboard entro pochi secondi,
@@ -209,12 +210,18 @@ e [limiti location in background](https://developer.android.com/develop/sensors-
 - ~~Wizard OEM: nota/CTA per la gestione batteria OnePlus (documentare, niente magia).~~ **Completo**:
   UI distingue l'esenzione Android dai toggle OxygenOS manuali, che Argus non può verificare.
 - **Hardening crash-consistency completo:** Connectivity e chiamate persistono atomicamente
-  snapshot + envelope pending digest-only prima del dispatch, recuperano lo stesso event-id ad
-  `APP_START` e continuano il drain delle altre sorgenti se una fallisce. Gli SMS restano
-  intenzionalmente solo in RAM: nessun testo viene scritto in preferences/Room/log.
+  snapshot + payload pending minimale e bounded prima del dispatch, recuperano lo stesso event-id
+  ad `APP_START` e continuano il drain delle altre sorgenti se una fallisce. Chiavi sorgente ed
+  event-id sono digest-only; nome rete/device e numero, necessari al matcher, restano soltanto
+  nelle preferences private. Gli SMS restano intenzionalmente solo in RAM: nessun testo viene
+  scritto in preferences/Room/log.
 - **Export/import JSON locale differito oltre P2:** era nice-to-have, non Definition of Done. Farlo
   bene richiede Storage Access Framework, schema/versioning/redazione e import sempre PENDING da
   ri-approvare uno a uno; non viene inserito di fretta nella chiusura dei trigger background.
+- **Residuo dichiarato, non mascherato:** `RunShell` può durare fino a 30 s, oltre il budget tipico
+  di un receiver. I pending recuperano l'evento ma il claim Engine resta at-most-once: morte processo
+  durante una sequenza può lasciare `PARTIAL/INTERRUPTED`. La review raccomanda comandi brevi; una
+  vera resumability per-action/worker o FGS short-lived richiede design e test cached/Doze dedicati.
 - Full gate senza cache, smoke, aggiornamento handoff/CLAUDE/contract/audit, merge su master.
 
 ## Definition of Done P2

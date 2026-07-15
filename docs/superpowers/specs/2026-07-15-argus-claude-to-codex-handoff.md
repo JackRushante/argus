@@ -154,7 +154,9 @@ appunti"*.
 - `EXTRA_IS_SENSITIVE` su `ClipData.description.extras` → Android non mostra l'anteprima del codice.
 - Fallimenti **onesti**: `otp_not_found`, `clipboard_source_missing`, e in entrambi i casi la
   **clipboard resta intatta** (testato in Robolectric: `ClipboardCopierTest`).
-- Pattern OTP suggerito lato bridge: `(?<!\+)\b(\d{4,8})\b` — il lookbehind esclude i prefissi.
+- Pattern OTP originario suggerito lato bridge: `(?<!\+)\b(\d{4,8})\b`. **Hardening Codex:**
+  l'esecuzione usa ora RE2/J lineare su input non fidato; quel pattern storico viene tradotto in
+  modo compatibile, mentre i nuovi draft usano `(?:^|[^+0-9])([0-9]{4,8})(?:[^0-9]|$)`.
 - Validator: `clipboard_source_missing` se il trigger non è Notification né PhoneState(SMS_RECEIVED)
   — cioè un `copy_to_clipboard` senza una fonte di testo **non è compilabile**, non fallisce a runtime.
 

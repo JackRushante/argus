@@ -89,7 +89,8 @@ Trigger =
 | Time{cron | at, tz}                          // rev 3: exactly-one; `at` = one-shot ISO local; niente `interval` (YAGNI)
 | Notification{package, conversationId?, sender?, isGroup?, titleMatch?, textMatch?}
                                                // rev 3: conversationId = chiave stabile (shortcutId/JID), preferita al display name
-| PhoneState{event(incoming_call|call_ended|sms_received), number?}   // match numeri normalizzato (suffisso cifre)
+| PhoneState{event(incoming_call|call_ended|sms_received), number?, textMatch?}
+                                               // textMatch solo per SMS telephony; match numero a suffisso cifre
 | Connectivity{medium(wifi|bt|power), state(connected|disconnected), match?}
                                                // rev 3: direzione esplicita; per power: connected=alimentazione collegata
 
@@ -98,7 +99,8 @@ Condition = TimeWindow{tz} | StateEquals(key,op,val) | LocationIn | AppInForegro
 
 Action(tier=deterministic) =
   SetWifi|SetBluetooth|SetDnd|SetRinger|LaunchApp|OpenUrl|ShowNotification   // rev 3: ShowNotification (feedback/avvisi)
-| Tap|InputText|WhatsAppReply(RemoteInput,text)|RunShell(cmd)                // jolly shell
+| Tap|InputText|WhatsAppReply(RemoteInput,text)|RunShell(cmd)                // jolly shell statico approvato
+| CopyToClipboard(extractionRegex?)          // regex RE2 lineare su testo SMS/notifica non fidato
 Action(tier=generative) =
   InvokeLlm{ goal, context_sources:[screen|notification|state|...],
              allowed_tools:[...],              // rev 3: MAI shell.run / automation.* / tool sempre-conferma (invariante hard, DraftValidator)
@@ -111,6 +113,10 @@ Action(tier=generative) =
 - **`priority`**: nello stesso batch di trigger le automazioni eseguono in ordine di priorità **crescente** → la più prioritaria scrive **per ultima** e vince sui target condivisi (last-writer-wins coerente con C1).
 - **Cooldown generativo minimo**: se `actions` contiene `InvokeLlm`, l'engine impone `effective_cooldown = max(cooldown_ms, 60 000)`.
 - Whitelist contatti/target memorizzano **`conversationId`/numero**, non il display name (§13/E7, E15).
+- `SMS_RECEIVED` indica soltanto SMS telephony: RCS e MMS non attraversano quel receiver. Il testo
+  SMS vive solo nel dispatch RAM (mai preferences/Room/log); l'estrazione clipboard accetta solo
+  sintassi RE2 a tempo lineare. Il pattern OTP legacy è tradotto internamente senza cambiare i
+  fingerprint già approvati.
 
 ## 6. Due tier di esecuzione
 
@@ -231,6 +237,8 @@ Punto chiave da non perdere: **l'MVP non ha streaming** — il transport primari
 | E13 | **(Rev 3) RemoteInput invalidato durante la latenza LLM** (10-30 s: l'utente legge sul PC → notifica dismessa → canale reply morto). Caso **frequente**, non teorico. | La lane async ri-verifica la notifica prima dell'invio; se sparita → **notifica locale "Risposta pronta — tocca per inviare"** (apre WhatsApp con testo in clipboard o re-invia se la notifica ricompare). Mai far finta di aver risposto: l'audit registra `FAILED(canale scaduto)` o `DEFERRED(consegna manuale)`. |
 | E14 | **Geofence: aspettative realistiche.** La posizione è approssimata; attraversamenti brevi possono non produrre callback e gli eventi in background possono arrivare con **minuti** di ritardo. La [guida Android](https://developer.android.com/develop/sensors-and-location/location/geofencing#choose-the-optimal-radius-for-your-geofence) consiglia tipicamente almeno 100–150 m. | Il validator emette WARNING sotto i 100 m; l'Es. 1 con ±50 m resta accettato ma non va presentato come istantaneo. Il runtime non inventa DWELL e non genera un EXIT iniziale se la regola nasce mentre il device è già fuori. |
 | E15 | **(Rev 3) Sender di notifica spoofabile** (il display name è controllato dal mittente: chiunque può chiamarsi "Moglie"). | Match preferito su **`conversationId`** (chiave stabile della conversazione: shortcutId/JID — da confermare empiricamente in P1, vedi §16); il match per display name resta come fallback ma il validator lo marca WARNING ("match per nome, spoofabile"). Le regole generative **richiedono** conversationId whitelistato. |
+| E16 | **ReDoS nell'estrazione OTP**: pattern approvato ma applicato a SMS/notifiche controllati da un mittente può bloccare un engine regex backtracking. | Validator ed executor usano **RE2/J**, tempo lineare e niente lookaround/backreference. Il bridge propone sintassi equivalente; il solo pattern OTP legacy noto viene tradotto in modo sicuro per compatibilità. |
+| E17 | **Budget `BroadcastReceiver.goAsync()` vs `RunShell` fino a 30 s.** Un processo ucciso dopo il claim Engine può lasciare una sequenza multi-azione parziale; la redelivery dello stesso event-id è at-most-once e non ripete l'azione incerta. | Limite dichiarato in review e comandi brevi raccomandati sui trigger broadcast. I pending P2 recuperano il bordo perso prima/durante il dispatch, ma **non costituiscono resumability per-action**. Prima di promettere comandi lunghi cached/Doze serve misura reale e poi worker/FGS short-lived conforme con semantica per-action; non aumentare il timeout. |
 
 ## 14. Strategia di test
 

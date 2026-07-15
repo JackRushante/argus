@@ -8,6 +8,7 @@ import android.os.PersistableBundle
 import dev.argus.engine.model.PhoneEvent
 import dev.argus.engine.runtime.ActionResult
 import dev.argus.engine.runtime.TriggerEvent
+import dev.argus.engine.safety.SafeExtractionRegex
 
 /** Boundary dell'azione clipboard: l'executor deterministico resta testabile in JVM puro. */
 fun interface ClipboardCopier {
@@ -37,10 +38,13 @@ class AndroidClipboardCopier(context: Context) : ClipboardCopier {
         val value = if (extractionRegex == null) {
             payload
         } else {
-            val regex = runCatching { Regex(extractionRegex) }.getOrNull()
-                ?: return ActionResult.Failure("extraction_regex_invalid")
-            val match = regex.find(payload) ?: return ActionResult.Failure("otp_not_found")
-            match.groupValues.getOrNull(1)?.takeIf(String::isNotEmpty) ?: match.value
+            when (val result = SafeExtractionRegex.extract(extractionRegex, payload)) {
+                SafeExtractionRegex.Result.InvalidPattern ->
+                    return ActionResult.Failure("extraction_regex_invalid")
+                SafeExtractionRegex.Result.NoMatch ->
+                    return ActionResult.Failure("otp_not_found")
+                is SafeExtractionRegex.Result.Match -> result.value
+            }
         }
 
         val clip = ClipData.newPlainText("argus", value).apply {

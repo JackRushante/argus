@@ -41,6 +41,10 @@ class DraftValidatorTest {
         val time = Trigger.Time(cron = "0 8 * * *", tz = "Europe/Rome")
 
         assertEquals(emptyList(), errors(v.validate(draft(sms), emptySet())))
+        assertEquals(
+            emptyList(),
+            errors(v.validate(draft(sms, SafeExtractionRegex.LEGACY_OTP_PATTERN), emptySet())),
+        )
         assertEquals(emptyList(), errors(v.validate(draft(notification), emptySet())))
         // Senza regex si copia il testo integrale del messaggio: lecito.
         assertEquals(emptyList(), errors(v.validate(draft(sms, regex = null), emptySet())))
@@ -54,6 +58,14 @@ class DraftValidatorTest {
         assertTrue("extraction_regex_invalid" in errors(v.validate(draft(sms, regex = "(unclosed"), emptySet())))
         assertTrue(
             "extraction_regex_invalid" in errors(v.validate(draft(sms, regex = "a".repeat(600)), emptySet())),
+        )
+        assertTrue(
+            "extraction_regex_invalid" in
+                errors(v.validate(draft(sms, regex = "(?<!foo)\\d+"), emptySet())),
+        )
+        assertTrue(
+            "extraction_regex_invalid" in
+                errors(v.validate(draft(sms, regex = "(\\d+)\\1"), emptySet())),
         )
     }
 

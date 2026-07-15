@@ -54,8 +54,8 @@ sealed interface Action {
     @Serializable @SerialName(ActionTypeIds.RUN_SHELL) data class RunShell(val cmd: String) : Action
 
     /** Copia negli appunti il payload testuale del trigger (SMS o notifica), opzionalmente
-     *  ridotto al primo capture group della regex (P2-3, OTP). Estrazione DETERMINISTICA:
-     *  il testo non lascia mai il telefono. */
+     *  ridotto al primo capture group di una regex RE2 lineare (P2-3, OTP). Estrazione
+     *  DETERMINISTICA: il testo non lascia mai il telefono. */
     @Serializable @SerialName(ActionTypeIds.COPY_TO_CLIPBOARD)
     data class CopyToClipboard(val extractionRegex: String? = null) : Action
 

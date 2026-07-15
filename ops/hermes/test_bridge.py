@@ -42,8 +42,23 @@ class BridgeTest(unittest.TestCase):
 
     def test_copy_to_clipboard_action_requires_a_compilable_regex(self):
         tools = {"copy_to_clipboard"}
-        ok = {"type": "copy_to_clipboard", "extractionRegex": r"(?<!\+)\b(\d{4,8})\b"}
+        ok = {
+            "type": "copy_to_clipboard",
+            "extractionRegex": r"(?:^|[^+0-9])([0-9]{4,8})(?:[^0-9]|$)",
+        }
         self.assertTrue(bridge.validate_action(ok, tools))
+        self.assertTrue(bridge.validate_action({
+            "type": "copy_to_clipboard",
+            "extractionRegex": r"(?<!\+)\b(\d{4,8})\b",
+        }, tools))
+        self.assertFalse(bridge.validate_action({
+            "type": "copy_to_clipboard",
+            "extractionRegex": r"(?<!foo)\d+",
+        }, tools))
+        self.assertFalse(bridge.validate_action({
+            "type": "copy_to_clipboard",
+            "extractionRegex": r"(\d+)\1",
+        }, tools))
         self.assertTrue(bridge.validate_action({"type": "copy_to_clipboard"}, tools))
         self.assertFalse(
             bridge.validate_action({"type": "copy_to_clipboard", "extractionRegex": "(broken"}, tools)

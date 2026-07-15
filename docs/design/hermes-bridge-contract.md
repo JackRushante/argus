@@ -88,6 +88,11 @@ server non sostituisce la rivalidazione delle capability sul telefono.
 contratto v1 accetta esclusivamente `transition=ENTER|EXIT` e `loiteringDelayMs=0`: il backend
 framework Android non offre DWELL e il bridge non deve prometterlo.
 
+`phone_state.sms` indica soltanto SMS telephony, non RCS/MMS. `copy_to_clipboard.extractionRegex`
+deve usare il sottoinsieme RE2 a tempo lineare, perché viene applicata a testo controllato dal
+mittente. Il bridge propone `(?:^|[^+0-9])([0-9]{4,8})(?:[^0-9]|$)` per gli OTP; Android resta
+l'autorità finale sul parsing e conserva compatibilità solo col precedente pattern OTP noto.
+
 Redazione device state:
 
 - `values` contiene soltanto chiavi presenti in `manifest.state_keys` e valori primitivi ammessi;

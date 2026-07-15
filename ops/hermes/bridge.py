@@ -119,7 +119,7 @@ Action, discriminata da "type":
   solo con trigger time/geofence/connectivity, mai notification/phone_state
 - {"type":"copy_to_clipboard", "extractionRegex":string|null (regex deterministica: copia il
    primo capture group — o il match intero — dal testo del trigger SMS/notifica; null = testo
-   integrale; per gli OTP usa "(?<!\\+)\\b(\\d{4,8})\\b")}
+   integrale; per gli OTP usa "(?:^|[^+0-9])([0-9]{4,8})(?:[^0-9]|$)")}
 - {"type":"invoke_llm", "goal":string, "contextSources":[string,...],
    "allowedTools":[string,...], "replyTargetSender":boolean, "timeoutMs":integer}
 """.strip()
@@ -690,6 +690,12 @@ def validate_action(value: Any, available_tools: set[str]) -> bool:
         if pattern is None:
             return True
         if not _string(pattern, 512):
+            return False
+        legacy_otp = r"(?<!\+)\b(\d{4,8})\b"
+        unsupported_re2 = ("(?=", "(?!", "(?<=", "(?<!", "(?P=", r"\k<")
+        if pattern != legacy_otp and any(token in pattern for token in unsupported_re2):
+            return False
+        if re.search(r"\\[1-9]", pattern):
             return False
         try:
             re.compile(pattern)
