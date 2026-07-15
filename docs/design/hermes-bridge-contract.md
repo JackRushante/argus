@@ -54,6 +54,11 @@ Request v1:
     "shizuku_available": true,
     "granted_permissions": ["android.permission.INTERNET"],
     "available_tools": ["set_dnd", "state.read", "toggle.set"],
+    "available_triggers": [
+      "time", "notification", "geofence", "phone_state.sms", "phone_state.call",
+      "connectivity.wifi", "connectivity.wifi.identity",
+      "connectivity.bt", "connectivity.power"
+    ],
     "unavailable_tools": {},
     "whitelisted_contacts": [],
     "state_keys": {"dnd": "off|priority|total"}
@@ -71,6 +76,22 @@ Request v1:
 (`state.read`, `screen.capture`, …) selezionabili da azioni generative. Il probe Android deve
 derivare entrambi dallo stesso snapshot di capability: un'azione non disponibile va esclusa e
 riportata in `unavailable_tools` con il motivo.
+
+`available_triggers` è opzionale soltanto per retrocompatibilità con i client pre-P2. Quando è
+presente e non vuoto, il prompt e il validator del bridge rifiutano fail-closed ogni draft il cui
+trigger non è nella lista. PhoneState è distinto in `.sms`/`.call`; Connectivity in `.wifi`,
+`.bt`, `.power`. Un filtro SSID (`Connectivity.match`) richiede inoltre
+`connectivity.wifi.identity`, pubblicato solo con location foreground+background. Il controllo
+server non sostituisce la rivalidazione delle capability sul telefono.
+
+`geofence` viene pubblicato soltanto con posizione **precisa** e accesso in background. Nel
+contratto v1 accetta esclusivamente `transition=ENTER|EXIT` e `loiteringDelayMs=0`: il backend
+framework Android non offre DWELL e il bridge non deve prometterlo.
+
+`phone_state.sms` indica soltanto SMS telephony, non RCS/MMS. `copy_to_clipboard.extractionRegex`
+deve usare il sottoinsieme RE2 a tempo lineare, perché viene applicata a testo controllato dal
+mittente. Il bridge propone `(?:^|[^+0-9])([0-9]{4,8})(?:[^0-9]|$)` per gli OTP; Android resta
+l'autorità finale sul parsing e conserva compatibilità solo col precedente pattern OTP noto.
 
 Redazione device state:
 

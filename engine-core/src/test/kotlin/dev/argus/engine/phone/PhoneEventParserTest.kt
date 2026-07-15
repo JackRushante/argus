@@ -1,0 +1,95 @@
+package dev.argus.engine.phone
+
+import dev.argus.engine.model.PhoneEvent
+import dev.argus.engine.runtime.TriggerEvent
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+
+class PhoneEventParserTest {
+    private val parser = PhoneEventParser()
+
+    @Test
+    fun `sms event carries volatile text and never leaks it into the event id`() {
+        val parsed = assertNotNull(
+            parser.parse(
+                event = PhoneEvent.SMS_RECEIVED,
+                number = "+39 393 207-7480",
+                smsText = "Il tuo codice di verifica è 482913",
+                atMillis = 1_000L,
+            ),
+        )
+        val event = parsed.event as TriggerEvent.PhoneStateChanged
+
+        assertEquals(PhoneEvent.SMS_RECEIVED, event.event)
+        assertEquals("+39 393 207-7480", event.number)
+        assertEquals("Il tuo codice di verifica è 482913", event.smsText)
+        // Privacy: né il testo né il numero compaiono MAI in chiaro nell'event id.
+        assertFalse(parsed.id.value.contains("482913"), parsed.id.value)
+        assertFalse(parsed.id.value.contains("7480"), parsed.id.value)
+    }
+
+    @Test
+    fun `same sms delivery is a duplicate while new content or time is a new event`() {
+        fun envelope(text: String = "codice 111222", at: Long = 5_000L) = assertNotNull(
+            parser.parse(PhoneEvent.SMS_RECEIVED, "+390001", text, at),
+        )
+
+        assertEquals(envelope().id, envelope().id, "stessa consegna ⇒ duplicate onesto")
+        assertNotEquals(envelope().id, envelope(text = "codice 333444").id)
+        assertNotEquals(envelope().id, envelope(at = 6_000L).id)
+    }
+
+    @Test
+    fun `same call transition keeps identity when the number arrives later`() {
+        val anonymous = assertNotNull(
+            parser.parse(PhoneEvent.INCOMING_CALL, number = null, smsText = null, atMillis = 9L),
+        )
+        val numbered = assertNotNull(
+            parser.parse(PhoneEvent.INCOMING_CALL, number = "3932077480", smsText = null, atMillis = 9L),
+        )
+
+        assertEquals(anonymous.id, numbered.id)
+        assertNotEquals(
+            numbered.id,
+            parser.parse(PhoneEvent.INCOMING_CALL, "3932077480", null, 10L)?.id,
+        )
+    }
+
+    @Test
+    fun `calls have no text and blank inputs stay null`() {
+        val call = assertNotNull(
+            parser.parse(PhoneEvent.INCOMING_CALL, number = "3932077480", smsText = null, atMillis = 9L),
+        )
+        val event = call.event as TriggerEvent.PhoneStateChanged
+        assertEquals(PhoneEvent.INCOMING_CALL, event.event)
+        assertNull(event.smsText)
+
+        val anonymous = assertNotNull(
+            parser.parse(PhoneEvent.CALL_ENDED, number = "  ", smsText = "  ", atMillis = 9L),
+        )
+        val anonymousEvent = anonymous.event as TriggerEvent.PhoneStateChanged
+        assertNull(anonymousEvent.number)
+        assertNull(anonymousEvent.smsText)
+    }
+
+    @Test
+    fun `text and number are bounded and control characters stripped`() {
+        val parsed = assertNotNull(
+            parser.parse(
+                event = PhoneEvent.SMS_RECEIVED,
+                number = "+39\u0000001122334455667788990011223344",
+                smsText = "x\u0007y" + "z".repeat(10_000),
+                atMillis = 1L,
+            ),
+        )
+        val event = parsed.event as TriggerEvent.PhoneStateChanged
+        assertEquals(4_096, event.smsText?.length)
+        assertFalse(event.smsText.orEmpty().any(Char::isISOControl))
+        assertFalse(event.number.orEmpty().any(Char::isISOControl))
+        assertEquals(32, event.number?.length)
+    }
+}

@@ -17,6 +17,10 @@ internal data class AndroidUiHealth(
     val notificationsGranted: Boolean,
     val foregroundLocationGranted: Boolean,
     val backgroundLocationGranted: Boolean,
+    val receiveSmsGranted: Boolean = false,
+    val readPhoneStateGranted: Boolean = false,
+    val readCallLogGranted: Boolean = false,
+    val bluetoothConnectGranted: Boolean = false,
 )
 
 internal fun readAndroidUiHealth(context: Context): AndroidUiHealth {
@@ -38,9 +42,13 @@ internal fun readAndroidUiHealth(context: Context): AndroidUiHealth {
             ) && runCatching {
             app.getSystemService(NotificationManager::class.java).areNotificationsEnabled()
         }.getOrDefault(false),
-        foregroundLocationGranted = granted(Manifest.permission.ACCESS_FINE_LOCATION) ||
-            granted(Manifest.permission.ACCESS_COARSE_LOCATION),
+        foregroundLocationGranted = granted(Manifest.permission.ACCESS_FINE_LOCATION),
         backgroundLocationGranted = granted(Manifest.permission.ACCESS_BACKGROUND_LOCATION),
+        receiveSmsGranted = granted(Manifest.permission.RECEIVE_SMS),
+        readPhoneStateGranted = granted(Manifest.permission.READ_PHONE_STATE),
+        readCallLogGranted = granted(Manifest.permission.READ_CALL_LOG),
+        bluetoothConnectGranted = android.os.Build.VERSION.SDK_INT <
+            android.os.Build.VERSION_CODES.S || granted(Manifest.permission.BLUETOOTH_CONNECT),
     )
 }
 
@@ -58,7 +66,7 @@ internal fun ShizukuGatewayStatus.toUiStatus(degradedAfterReboot: Boolean): Shiz
 
 internal fun AndroidUiHealth.backgroundLocationState(needed: Boolean): BgLocationState = when {
     !needed -> BgLocationState.NOT_NEEDED
-    backgroundLocationGranted -> BgLocationState.GRANTED
+    backgroundLocationGranted && foregroundLocationGranted -> BgLocationState.GRANTED
     foregroundLocationGranted -> BgLocationState.WHILE_IN_USE
     else -> BgLocationState.DENIED
 }

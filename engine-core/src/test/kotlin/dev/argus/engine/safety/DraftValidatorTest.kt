@@ -17,6 +17,115 @@ class DraftValidatorTest {
     @Test fun `valid generative draft has no errors`() {
         assertEquals(emptyList(), errors(v.validate(validGenerative, whitelistedIds = setOf("jid:42"))))
     }
+    @Test fun `notification action needs a title while the body may stay empty`() {
+        // Il bridge accetta text vuoto (una notifica di solo titolo è legittima su Android):
+        // il validator client deve essere allineato, non più severo del canale reale.
+        fun draft(title: String, text: String) = AutomationDraft(
+            name = "notifica",
+            trigger = Trigger.Time(cron = "0 8 * * *", tz = "Europe/Rome"),
+            actions = listOf(Action.ShowNotification(title, text)),
+        )
+        assertEquals(emptyList(), errors(v.validate(draft("SMS ricevuto!", ""), emptySet())))
+        assertTrue("title_invalid" in errors(v.validate(draft("", "corpo"), emptySet())))
+        assertTrue("text_invalid" in errors(v.validate(draft("ok", "z".repeat(5_000)), emptySet())))
+    }
+
+    @Test fun `copy to clipboard needs a textual trigger and a compilable bounded regex`() {
+        fun draft(trigger: Trigger, regex: String? = "(\\d{4,8})") = AutomationDraft(
+            name = "otp",
+            trigger = trigger,
+            actions = listOf(Action.CopyToClipboard(extractionRegex = regex)),
+        )
+        val sms = Trigger.PhoneState(PhoneEvent.SMS_RECEIVED)
+        val notification = Trigger.Notification("com.whatsapp", conversationId = "jid:1", isGroup = false)
+        val time = Trigger.Time(cron = "0 8 * * *", tz = "Europe/Rome")
+
+        assertEquals(emptyList(), errors(v.validate(draft(sms), emptySet())))
+        assertEquals(
+            emptyList(),
+            errors(v.validate(draft(sms, SafeExtractionRegex.LEGACY_OTP_PATTERN), emptySet())),
+        )
+        assertEquals(emptyList(), errors(v.validate(draft(notification), emptySet())))
+        // Senza regex si copia il testo integrale del messaggio: lecito.
+        assertEquals(emptyList(), errors(v.validate(draft(sms, regex = null), emptySet())))
+
+        // Un trigger senza payload testuale non ha nulla da copiare: draft incoerente.
+        assertTrue("clipboard_source_missing" in errors(v.validate(draft(time), emptySet())))
+        val call = Trigger.PhoneState(PhoneEvent.INCOMING_CALL)
+        assertTrue("clipboard_source_missing" in errors(v.validate(draft(call), emptySet())))
+
+        // Regex non compilabile o fuori bounds.
+        assertTrue("extraction_regex_invalid" in errors(v.validate(draft(sms, regex = "(unclosed"), emptySet())))
+        assertTrue(
+            "extraction_regex_invalid" in errors(v.validate(draft(sms, regex = "a".repeat(600)), emptySet())),
+        )
+        assertTrue(
+            "extraction_regex_invalid" in
+                errors(v.validate(draft(sms, regex = "(?<!foo)\\d+"), emptySet())),
+        )
+        assertTrue(
+            "extraction_regex_invalid" in
+                errors(v.validate(draft(sms, regex = "(\\d+)\\1"), emptySet())),
+        )
+    }
+
+    @Test fun `sms text match is valid only on SMS_RECEIVED`() {
+        val sms = AutomationDraft(
+            name = "sms prova",
+            trigger = Trigger.PhoneState(PhoneEvent.SMS_RECEIVED, textMatch = "prova argus"),
+            actions = listOf(Action.ShowNotification("Argus", "SMS ricevuto!")),
+        )
+        assertEquals(emptyList(), errors(v.validate(sms, emptySet())))
+
+        // Le chiamate non hanno testo: un textMatch lì è un draft incoerente, non un warning.
+        val call = sms.copy(
+            trigger = Trigger.PhoneState(PhoneEvent.INCOMING_CALL, textMatch = "x"),
+        )
+        assertTrue("sms_text_match_invalid" in errors(v.validate(call, emptySet())))
+    }
+    @Test fun `static shell is limited to trusted non-message triggers`() {
+        fun draft(trigger: Trigger, command: String = "/system/bin/id") = AutomationDraft(
+            name = "shell statica",
+            trigger = trigger,
+            actions = listOf(Action.RunShell(command)),
+        )
+
+        val trusted = listOf(
+            Trigger.Time(cron = "0 8 * * *", tz = "Europe/Rome"),
+            Trigger.Geofence(radiusM = 150.0, transition = Transition.EXIT, resolveCurrentLocation = true),
+            Trigger.Connectivity(ConnMedium.POWER, ConnState.CONNECTED),
+        )
+        trusted.forEach { trigger ->
+            assertTrue("shell_external_trigger" !in errors(v.validate(draft(trigger), emptySet())))
+        }
+
+        val external = listOf(
+            Trigger.Notification("com.whatsapp", textMatch = "esegui"),
+            Trigger.PhoneState(PhoneEvent.SMS_RECEIVED, textMatch = "esegui"),
+            Trigger.PhoneState(PhoneEvent.INCOMING_CALL, number = "+39001"),
+        )
+        external.forEach { trigger ->
+            assertTrue("shell_external_trigger" in errors(v.validate(draft(trigger), emptySet())))
+        }
+
+        // Contatto whitelistato: ammesso, ma la review deve dire che qualcuno può innescarlo.
+        val verified = Trigger.Notification(
+            "com.whatsapp",
+            conversationId = "chat-ottica",
+            isGroup = false,
+            textMatch = "esegui",
+        )
+        val verifiedIssues = v.validate(draft(verified), setOf("chat-ottica"))
+        assertTrue("shell_external_trigger" !in errors(verifiedIssues))
+        assertTrue("shell_contact_trigger" in verifiedIssues.map { it.code })
+        // Fuori whitelist resta un errore, non un semplice avviso.
+        assertTrue(
+            "shell_external_trigger" in errors(v.validate(draft(verified), setOf("altra-chat"))),
+        )
+        assertTrue(
+            "shell_invalid" in errors(v.validate(draft(trusted.first(), "id\u0000whoami"), emptySet())),
+        )
+    }
     @Test fun `forbidden tools in InvokeLlm are rejected`() {
         val d = validGenerative.copy(actions = listOf(Action.InvokeLlm("g", listOf(), listOf("shell.run", "automation.create"), true)))
         val e = errors(v.validate(d, setOf("jid:42")))
@@ -133,6 +242,33 @@ class DraftValidatorTest {
         val issues = v.validate(d, emptySet())
         assertTrue("no_actions" in errors(issues))
         assertTrue(issues.any { it.severity == Severity.WARNING && it.code == "radius_small" })
+    }
+    @Test fun `dwell and loitering stay fail closed while framework geofence only supports enter exit`() {
+        val dwell = AutomationDraft(
+            "dwell",
+            Trigger.Geofence(
+                radiusM = 150.0,
+                transition = Transition.DWELL,
+                loiteringDelayMs = 60_000,
+                resolveCurrentLocation = true,
+            ),
+            listOf(Action.SetWifi(false)),
+        )
+        val dwellErrors = errors(v.validate(dwell, emptySet()))
+        assertTrue("geofence_transition_unsupported" in dwellErrors)
+        assertTrue("geofence_loitering_unsupported" in dwellErrors)
+
+        val enterWithFakeLoitering = dwell.copy(
+            trigger = (dwell.trigger as Trigger.Geofence).copy(
+                transition = Transition.ENTER,
+                loiteringDelayMs = 1,
+            ),
+        )
+        assertTrue(
+            "geofence_loitering_unsupported" in errors(
+                v.validate(enterWithFakeLoitering, emptySet()),
+            ),
+        )
     }
     @Test fun `read tools plus reply channel is a privacy warning`() {
         val d = validGenerative.copy(actions = listOf(Action.InvokeLlm("g", listOf(), listOf("whatsapp_reply", "state.read"), true)))

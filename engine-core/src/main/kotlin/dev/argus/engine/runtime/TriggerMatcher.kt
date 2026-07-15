@@ -9,7 +9,12 @@ class TriggerMatcher {
         spec is Trigger.Geofence && event is TriggerEvent.GeofenceTransitioned -> spec.transition == event.transition
         spec is Trigger.Notification && event is TriggerEvent.NotificationPosted -> matchesNotification(spec, event)
         spec is Trigger.PhoneState && event is TriggerEvent.PhoneStateChanged ->
-            spec.event == event.event && (spec.number == null || numbersMatch(spec.number, event.number))
+            spec.event == event.event &&
+                (spec.number == null || numbersMatch(spec.number, event.number)) &&
+                (
+                    spec.textMatch == null ||
+                        event.smsText?.contains(spec.textMatch, ignoreCase = true) == true
+                    )
         spec is Trigger.Connectivity && event is TriggerEvent.ConnectivityChanged ->
             spec.medium == event.medium && spec.state == event.state &&
                 (spec.match == null || spec.match == event.name)

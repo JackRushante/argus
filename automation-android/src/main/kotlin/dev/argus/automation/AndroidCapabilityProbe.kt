@@ -42,6 +42,10 @@ internal data class AndroidCapabilityState(
     val backgroundLocationGranted: Boolean,
     val exactAlarmsGranted: Boolean,
     val batteryOptimizationExempt: Boolean,
+    val receiveSmsGranted: Boolean = false,
+    val readPhoneStateGranted: Boolean = false,
+    val readCallLogGranted: Boolean = false,
+    val bluetoothConnectGranted: Boolean = false,
 )
 
 internal fun interface AndroidCapabilityStateSource {
@@ -72,13 +76,19 @@ internal class SystemAndroidCapabilityStateSource(
             appContext.packageName in
                 NotificationManagerCompat.getEnabledListenerPackages(appContext)
         }.getOrDefault(false),
-        foregroundLocationGranted = granted(Manifest.permission.ACCESS_FINE_LOCATION) ||
-            granted(Manifest.permission.ACCESS_COARSE_LOCATION),
+        // Geofence e identità Wi-Fi richiedono accesso preciso: il solo COARSE non va
+        // pubblicato a Hermes come capacità realmente armabile.
+        foregroundLocationGranted = granted(Manifest.permission.ACCESS_FINE_LOCATION),
         backgroundLocationGranted = granted(Manifest.permission.ACCESS_BACKGROUND_LOCATION),
         exactAlarmsGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
             appContext.getSystemService(AlarmManager::class.java).canScheduleExactAlarms(),
         batteryOptimizationExempt = appContext.getSystemService(PowerManager::class.java)
             .isIgnoringBatteryOptimizations(appContext.packageName),
+        receiveSmsGranted = granted(Manifest.permission.RECEIVE_SMS),
+        readPhoneStateGranted = granted(Manifest.permission.READ_PHONE_STATE),
+        readCallLogGranted = granted(Manifest.permission.READ_CALL_LOG),
+        bluetoothConnectGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+            granted(Manifest.permission.BLUETOOTH_CONNECT),
     )
 
     private fun granted(permission: String): Boolean =
@@ -122,7 +132,23 @@ class AndroidCapabilityProbe internal constructor(
             unavailableTools = resolved.unavailableTools,
             whitelistedContacts = resolved.contacts,
             stateKeys = StateKeys.ALL,
+            availableTriggers = availableTriggers(resolved.state),
         )
+    }
+
+    /** Wire name dei trigger armabili ORA: Hermes non deve mai proporre un trigger morto. */
+    private fun availableTriggers(state: AndroidCapabilityState): List<String> = buildList {
+        add("time")
+        if (state.notificationListenerGranted) add("notification")
+        if (state.foregroundLocationGranted && state.backgroundLocationGranted) add("geofence")
+        if (state.receiveSmsGranted) add("phone_state.sms")
+        if (state.readPhoneStateGranted && state.readCallLogGranted) add("phone_state.call")
+        add("connectivity.wifi")
+        if (state.foregroundLocationGranted && state.backgroundLocationGranted) {
+            add("connectivity.wifi.identity")
+        }
+        if (state.bluetoothConnectGranted) add("connectivity.bt")
+        add("connectivity.power")
     }
 
     override suspend fun current(): FirePolicySnapshot {
@@ -149,6 +175,17 @@ class AndroidCapabilityProbe internal constructor(
 
         val available = buildSet {
             add(CapabilityIds.TRIGGER_TIME)
+            if (state.foregroundLocationGranted && state.backgroundLocationGranted) {
+                add(CapabilityIds.TRIGGER_GEOFENCE)
+            }
+            add(CapabilityIds.TRIGGER_CONNECTIVITY_WIFI)
+            add(CapabilityIds.TRIGGER_CONNECTIVITY_POWER)
+            if (state.bluetoothConnectGranted) add(CapabilityIds.TRIGGER_CONNECTIVITY_BT)
+            if (state.foregroundLocationGranted && state.backgroundLocationGranted) {
+                add(CapabilityIds.TRIGGER_CONNECTIVITY_WIFI_IDENTITY)
+            }
+            // Clipboard locale: nessun permesso OS richiesto (scrittura verificata su device).
+            add(ActionCapabilities.COPY_TO_CLIPBOARD)
             if (state.notificationsGranted) add(ActionCapabilities.SHOW_NOTIFICATION)
             // CapabilityRequirements persiste anche i raw tool approvati: il set del fire-time
             // deve contenere gli stessi nomi wire, senza alias con le capability typed.
@@ -163,11 +200,17 @@ class AndroidCapabilityProbe internal constructor(
                 // stesso canale del tool raw, quindi stesso grant.
                 add(ActionCapabilities.WHATSAPP_REPLY)
             }
+            // Telefonia (P2-2): grant runtime distinti per evento.
+            if (state.receiveSmsGranted) add(CapabilityIds.TRIGGER_PHONE_SMS)
+            if (state.readPhoneStateGranted && state.readCallLogGranted) {
+                add(CapabilityIds.TRIGGER_PHONE_CALL)
+            }
             if (generativeReady) add(CapabilityIds.ACTION_INVOKE_LLM)
         }
         val transient = if (shizukuTransient) SHIZUKU_CAPABILITIES + SHIZUKU_TOOLS else emptySet()
 
         val availableTools = buildList {
+            add(ActionTypeIds.COPY_TO_CLIPBOARD)
             if (shizukuAvailable) {
                 addAll(SHIZUKU_ACTION_TYPES)
                 addAll(SHIZUKU_TOOLS)
@@ -216,6 +259,10 @@ class AndroidCapabilityProbe internal constructor(
         if (state.backgroundLocationGranted) add("location_background")
         if (state.exactAlarmsGranted) add("exact_alarms")
         if (state.batteryOptimizationExempt) add("battery_optimization_exempt")
+        if (state.receiveSmsGranted) add("receive_sms")
+        if (state.readPhoneStateGranted) add("read_phone_state")
+        if (state.readCallLogGranted) add("read_call_log")
+        if (state.bluetoothConnectGranted) add("bluetooth_connect")
     }
 
     private fun shizukuReason(status: ShizukuGatewayStatus): String = when (status) {
@@ -251,6 +298,7 @@ class AndroidCapabilityProbe internal constructor(
             ActionTypeIds.SET_RINGER,
             ActionTypeIds.LAUNCH_APP,
             ActionTypeIds.OPEN_URL,
+            ActionTypeIds.RUN_SHELL,
         )
         val PHASE_UNAVAILABLE_TOOLS = linkedMapOf(
             "screen.tap" to "azione UI non disponibile in questa fase",
@@ -270,6 +318,7 @@ class AndroidCapabilityProbe internal constructor(
             add(ActionCapabilities.SET_RINGER)
             add(ActionCapabilities.LAUNCH_APP)
             add(ActionCapabilities.OPEN_URL)
+            add(ActionCapabilities.RUN_SHELL)
             add(CapabilityIds.STATE_FOREGROUND_APP)
             StateKeys.ALL.keys.forEach { add(CapabilityIds.state(it)) }
         }

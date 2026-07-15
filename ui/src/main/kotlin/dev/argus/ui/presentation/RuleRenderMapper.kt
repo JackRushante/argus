@@ -139,7 +139,9 @@ object RuleRenderMapper {
             PhoneEvent.SMS_RECEIVED -> "SMS ricevuto"
         }
         val from = t.number?.let { "da $it" } ?: "da chiunque"
-        return "Quando: $event $from"
+        // §5: i filtri che restringono il match restano visibili integrali in review.
+        val text = t.textMatch?.let { " · testo \"$it\"" } ?: ""
+        return "Quando: $event $from$text"
     }
 
     private fun connectivityLine(t: Trigger.Connectivity): String {
@@ -251,7 +253,12 @@ object RuleRenderMapper {
             label = "Esegui comando shell",
             isShell = true,
             shellCommand = a.cmd, // integrale, mai troncato (invariante §5.4)
-            requiresLiveConfirm = true,
+        )
+        is Action.CopyToClipboard -> row(
+            iconKey = "clipboard",
+            label = "Copia negli appunti",
+            // §5: la regex è il criterio reale di estrazione, resta visibile integrale.
+            detail = a.extractionRegex?.let { "estrazione: $it" } ?: "il testo integrale del messaggio",
         )
         is Action.InvokeLlm -> row(
             iconKey = "generative",

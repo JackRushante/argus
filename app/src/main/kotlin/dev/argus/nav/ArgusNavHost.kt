@@ -190,6 +190,20 @@ fun ArgusNavHost() {
         permissionRefresh += 1
         settingsViewModel.refresh()
     }
+    // Telefonia (P2-2): chiamate chiede anche READ_CALL_LOG, senza cui il broadcast
+    // PHONE_STATE non porta il numero e le regole "chiamata da X" non possono matchare.
+    val telephonyPermissions = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) {
+        permissionRefresh += 1
+        settingsViewModel.refresh()
+    }
+    val bluetoothPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) {
+        permissionRefresh += 1
+        settingsViewModel.refresh()
+    }
     val requestNotificationAccess = {
         val runtimePermissionMissing = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(
@@ -400,6 +414,25 @@ fun ArgusNavHost() {
                             openNotificationListenerSettings()
                         }
                         override fun onOpenLocationFix() = requestLocationAccess()
+                        override fun onRequestSmsPermission() {
+                            telephonyPermissions.launch(arrayOf(Manifest.permission.RECEIVE_SMS))
+                        }
+                        override fun onRequestCallPermissions() {
+                            telephonyPermissions.launch(
+                                arrayOf(
+                                    Manifest.permission.READ_PHONE_STATE,
+                                    Manifest.permission.READ_CALL_LOG,
+                                ),
+                            )
+                        }
+                        override fun onRequestBluetoothPermission() {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                bluetoothPermission.launch(Manifest.permission.BLUETOOTH_CONNECT)
+                            } else {
+                                permissionRefresh += 1
+                                settingsViewModel.refresh()
+                            }
+                        }
                         override fun onRemoveContact(conversationId: String) {
                             settingsViewModel.removeContact(conversationId)
                         }

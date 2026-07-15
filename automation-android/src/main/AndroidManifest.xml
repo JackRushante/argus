@@ -4,8 +4,19 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <!-- Telefonia (P2-2): runtime grant richiesti SOLO quando una regola li usa. -->
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <!-- Senza READ_CALL_LOG il broadcast PHONE_STATE non porta il numero chiamante. -->
+    <uses-permission android:name="android.permission.READ_CALL_LOG" />
+    <!-- Connectivity BT (API 31+): grant runtime opt-in, separato da Wi-Fi/alimentazione. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
     <application>
         <service
@@ -18,8 +29,23 @@
             </intent-filter>
         </service>
 
+        <service
+            android:name="dev.argus.automation.connectivity.ConnectivitySentinelService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="continuous_wifi_and_power_transition_monitoring_for_user_armed_automations" />
+        </service>
+
         <receiver
             android:name=".TimeAlarmReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
+        <receiver
+            android:name="dev.argus.automation.geofence.GeofenceTransitionReceiver"
             android:enabled="true"
             android:exported="false" />
 
@@ -33,6 +59,39 @@
                 <action android:name="android.intent.action.TIMEZONE_CHANGED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
                 <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- exported richiesto dai broadcast di sistema; BROADCAST_SMS limita il mittente
+             al sistema stesso (nessuna app può forgiare un SMS_RECEIVED). -->
+        <receiver
+            android:name="dev.argus.automation.phone.SmsBroadcastReceiver"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name="dev.argus.automation.phone.PhoneStateBroadcastReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.PHONE_STATE" />
+            </intent-filter>
+        </receiver>
+
+        <!-- ACL_CONNECTED/DISCONNECTED sono broadcast protetti di sistema ed esenti dai
+             limiti sugli implicit receiver. Nessun receiver manifest per POWER: non è esente. -->
+        <receiver
+            android:name="dev.argus.automation.connectivity.BluetoothConnectivityReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.bluetooth.device.action.ACL_CONNECTED" />
+                <action android:name="android.bluetooth.device.action.ACL_DISCONNECTED" />
             </intent-filter>
         </receiver>
     </application>

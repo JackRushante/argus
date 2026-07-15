@@ -57,9 +57,11 @@ class AndroidCapabilityProbeTest {
         assertTrue(AndroidCapabilityProbe.TOOL_NOTIFY_SHOW in manifest.availableTools)
         assertTrue(ActionTypeIds.SET_DND in manifest.availableTools)
         assertTrue(ActionTypeIds.SET_WIFI in manifest.availableTools)
+        assertTrue(ActionTypeIds.RUN_SHELL in manifest.availableTools)
         assertTrue(ActionTypeIds.SHOW_NOTIFICATION in manifest.availableTools)
         assertTrue("vision.analyze" in manifest.unavailableTools)
         assertTrue(ActionCapabilities.SET_DND in snapshot.availableCapabilities)
+        assertTrue(ActionCapabilities.RUN_SHELL in snapshot.availableCapabilities)
         assertTrue(ActionCapabilities.SHOW_NOTIFICATION in snapshot.availableCapabilities)
         assertTrue(CapabilityIds.state(StateKeys.RINGER) in snapshot.availableCapabilities)
         assertEquals(setOf("jid:42"), snapshot.whitelistedConversationIds)
@@ -95,6 +97,8 @@ class AndroidCapabilityProbeTest {
         val revokedManifest = revokedProbe.probe(DeviceState())
         assertFalse(ActionTypeIds.SET_DND in revokedManifest.availableTools)
         assertTrue(ActionTypeIds.SET_DND in revokedManifest.unavailableTools)
+        assertFalse(ActionTypeIds.RUN_SHELL in revokedManifest.availableTools)
+        assertTrue(ActionTypeIds.RUN_SHELL in revokedManifest.unavailableTools)
     }
 
     @Test
@@ -206,6 +210,108 @@ class AndroidCapabilityProbeTest {
         assertFalse(
             ActionCapabilities.WHATSAPP_REPLY in withoutListener.transientlyUnavailableCapabilities,
         )
+    }
+
+    @Test
+    fun `telephony triggers follow their distinct runtime grants`() = runTest {
+        val both = probe(
+            state().copy(
+                receiveSmsGranted = true,
+                readPhoneStateGranted = true,
+                readCallLogGranted = true,
+            ),
+        ).current()
+        assertTrue(CapabilityIds.TRIGGER_PHONE_SMS in both.availableCapabilities)
+        assertTrue(CapabilityIds.TRIGGER_PHONE_CALL in both.availableCapabilities)
+        assertTrue(
+            "phone_state.call" in probe(
+                state().copy(readPhoneStateGranted = true, readCallLogGranted = true),
+            ).probe(DeviceState()).availableTriggers,
+        )
+
+        val smsOnly = probe(state().copy(receiveSmsGranted = true)).current()
+        assertTrue(CapabilityIds.TRIGGER_PHONE_SMS in smsOnly.availableCapabilities)
+        assertFalse(CapabilityIds.TRIGGER_PHONE_CALL in smsOnly.availableCapabilities)
+
+        val phoneStateOnly = probe(state().copy(readPhoneStateGranted = true)).current()
+        assertFalse(
+            CapabilityIds.TRIGGER_PHONE_CALL in phoneStateOnly.availableCapabilities,
+            "senza READ_CALL_LOG il numero chiamante non è disponibile",
+        )
+        assertFalse(
+            "phone_state.call" in probe(state().copy(readPhoneStateGranted = true))
+                .probe(DeviceState()).availableTriggers,
+        )
+
+        val none = probe(state()).current()
+        assertFalse(CapabilityIds.TRIGGER_PHONE_SMS in none.availableCapabilities)
+        assertFalse(CapabilityIds.TRIGGER_PHONE_CALL in none.availableCapabilities)
+    }
+
+    @Test
+    fun `connectivity capabilities separate always available media from runtime grants`() = runTest {
+        val base = probe(state()).current().availableCapabilities
+        assertTrue(CapabilityIds.TRIGGER_CONNECTIVITY_WIFI in base)
+        assertTrue(CapabilityIds.TRIGGER_CONNECTIVITY_POWER in base)
+        assertFalse(CapabilityIds.TRIGGER_CONNECTIVITY_BT in base)
+        assertFalse(CapabilityIds.TRIGGER_CONNECTIVITY_WIFI_IDENTITY in base)
+
+        val nearby = probe(state().copy(bluetoothConnectGranted = true))
+            .current().availableCapabilities
+        assertTrue(CapabilityIds.TRIGGER_CONNECTIVITY_BT in nearby)
+
+        val location = probe(
+            state().copy(
+                foregroundLocationGranted = true,
+                backgroundLocationGranted = true,
+            ),
+        ).current().availableCapabilities
+        assertTrue(CapabilityIds.TRIGGER_CONNECTIVITY_WIFI_IDENTITY in location)
+        val locationManifest = probe(
+            state().copy(
+                foregroundLocationGranted = true,
+                backgroundLocationGranted = true,
+            ),
+        ).probe(DeviceState())
+        assertTrue("connectivity.wifi.identity" in locationManifest.availableTriggers)
+    }
+
+    @Test
+    fun `geofence is advertised only with precise foreground and background location`() = runTest {
+        val none = probe(state()).probe(DeviceState())
+        assertFalse("geofence" in none.availableTriggers)
+        assertFalse(CapabilityIds.TRIGGER_GEOFENCE in probe(state()).current().availableCapabilities)
+
+        val foregroundOnly = state().copy(foregroundLocationGranted = true)
+        assertFalse(
+            CapabilityIds.TRIGGER_GEOFENCE in probe(foregroundOnly).current().availableCapabilities,
+        )
+
+        val ready = foregroundOnly.copy(backgroundLocationGranted = true)
+        assertTrue(CapabilityIds.TRIGGER_GEOFENCE in probe(ready).current().availableCapabilities)
+        assertTrue("geofence" in probe(ready).probe(DeviceState()).availableTriggers)
+    }
+
+    @Test
+    fun `manifest lists armable triggers so hermes never proposes a dead one`() = runTest {
+        val manifest = probe(
+            state().copy(notificationListenerGranted = true, receiveSmsGranted = true),
+        ).probe(DeviceState())
+
+        assertEquals(
+            listOf(
+                "time",
+                "notification",
+                "phone_state.sms",
+                "connectivity.wifi",
+                "connectivity.power",
+            ),
+            manifest.availableTriggers,
+        )
+        assertTrue("TRIGGER DISPONIBILI" in manifest.render())
+
+        // Retrocompatibilità: senza lista la riga non compare (manifest legacy nei test brain).
+        assertFalse("TRIGGER DISPONIBILI" in manifest.copy(availableTriggers = emptyList()).render())
     }
 
     @Test

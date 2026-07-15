@@ -2,7 +2,9 @@
 
 > **Nome di lavoro:** *Argus* (il gigante dai molti occhi — agente always-on che "vede" lo schermo). Provvisorio, rinominabile.
 > **Data:** 2026-07-12 · **Rev:** 4 (bridge Argus v1 hardenizzato) · **Autore:** Lorenzo Marci + Claude Code (oneplus) + Codex
-> **Stato:** design approvato; P0-A e handoff frontend completati, P0-B in chiusura secondo il commander replan. In caso di conflitto, il replan 2026-07-13 prevale sulle sezioni storiche.
+> **Stato 2026-07-15 (sera):** design approvato; P0/P1 completati; **P2 completata e mergiata**. I gate fisici di chiamata, cavo e Bluetooth sono passati sul campo; l'Esempio 1 geofence è passato con posizione simulata e il suo attraversamento **fisico** resta un gate osservazionale post-merge, con rischio residuo accettato esplicitamente da Lorenzo. In caso di conflitto prevale il piano P2 sulle sezioni storiche.
+>
+> **Changelog rev 5** (2026-07-15): **D0** registra la direttiva fondativa di Lorenzo (limiti solo etici) con la tassonomia delle quattro classi; **B8 declassata** da barriera invalicabile a trade-off di latenza (loop interattivo a due tier, quello a pagamento è opzionale); **§10.2** — la shell è innescabile anche da una chat WhatsApp 1:1 whitelistata, mentre PhoneState resta escluso perché mittente e caller ID sono falsificabili; **C2/E14** — l'isteresi geofence copre ora anche il percorso framework, dopo un flapping osservato sul campo a device fermo; **sensori** riaperti da Lorenzo (erano una classe 4, non una legge).
 >
 > **Changelog rev 4** (rispetto a rev 3):
 > - **Bridge dedicato:** `argus-bridge` separato dalla Guida Bali, loopback-only su Hermes e pubblicato sul tailnet tramite Tailscale Serve HTTPS.
@@ -41,6 +43,27 @@ Esempi target (devono funzionare a fine **P2** — vedi §15 per cosa funziona q
 
 ## 3. Decisioni di design
 
+> ### D0 — Principio fondativo (direttiva Lorenzo, 2026-07-15)
+>
+> **L'app non deve avere limiti tecnici, solo etici.** Obiettivo dichiarato: la stessa
+> combinatoria di Tasker (action / if / then / and / or / trigger / condizioni), ma creata e armata
+> **via LLM**. Il confine etico è **uno solo** e riguarda l'injection: contenuto esterno non fidato
+> (WhatsApp/SMS/schermo) non può parametrizzare l'esecuzione né l'instradamento. **E finisce lì.**
+>
+> **Non esistono NON assoluti: esistono "non conviene" e "non è fattibile".** Chi scrive in questi
+> documenti che qualcosa "non si può" deve dichiararne la classe:
+>
+> 1. **invariante etica** (injection) — l'unica non negoziabile;
+> 2. **non conviene ORA** — sequenziamento di fase, priorità;
+> 3. **non è fattibile OGGI** — limite reale di Android/API, con il costo per aggirarlo;
+> 4. **scelta di valore di Lorenzo** — sua, e revocabile da lui.
+>
+> Mai presentare 2/3/4 come 1. Il rischio non è teorico: al 2026-07-15 questo documento conteneva
+> **B8 classificata come "barriera invalicabile"** quando era una classe 2, i sensori marcati
+> "scartati per sempre" quando erano una classe 4, e DWELL scritto come principio quando è una
+> classe 3. Nessuna di queste era una decisione sbagliata quando fu presa: erano **abitudini non
+> riesaminate**, ed è così che l'app perde potenza senza che nessuno lo decida.
+
 | # | Decisione | Scelta |
 |---|-----------|--------|
 | D1 | Dove vive il cervello | **App standalone con Brain pluggable**; l'app è sempre padrona del loop, il Brain è puro servizio di ragionamento |
@@ -53,7 +76,7 @@ Esempi target (devono funzionare a fine **P2** — vedi §15 per cosa funziona q
 
 ## 4. Architettura
 
-**Stack:** Kotlin, Jetpack Compose (UI), Room (persistenza), Hilt (DI), Coroutines/Flow, OkHttp/Ktor (Brain client), EncryptedSharedPreferences (segreti/token), AlarmManager + WorkManager, Play Services Location (geofencing), Shizuku API (`dev.rikka.shizuku`). Min SDK 30.
+**Stack:** Kotlin, Jetpack Compose (UI), Room (persistenza), Hilt (DI), Coroutines/Flow, OkHttp/Ktor (Brain client), EncryptedSharedPreferences (segreti/token), AlarmManager + WorkManager, framework `LocationManager` (proximity alert), Shizuku API (`dev.rikka.shizuku`). Min SDK 30.
 
 **Moduli (responsabilità singola, interfacce nette):**
 
@@ -63,10 +86,10 @@ Esempi target (devono funzionare a fine **P2** — vedi §15 per cosa funziona q
 | `core-shizuku` | Unico gateway privilegiato: shell UID via Shizuku (`newProcess`/user-service) + op tipizzate (screencap, input, pm, settings, dumpsys, svc, cmd, **uiautomator dump**). Coda single-writer con priorità | P0-B |
 | `device-tools` | Catalogo capacità tipizzate su Shizuku: schermo (capture / tap / swipe / type / **dump_ui via uiautomator**), stati (wifi/bt/dnd/batteria/foreground/gps), toggle, app (install/launch/intent) | P0-B |
 | `automation-engine` | Wiring Android di engine-core: Room store, state provider **lazy**, audit su Room | P0-B–P1 |
-| `triggers` | Registrar OS-managed: Time (AlarmManager exact via `TimeSpecs.nextFire`) → P0-B; Notification (NotificationListenerService + WhatsApp RemoteInput) → P1; Geofence (Play Services) + PhoneState (TelephonyCallback) + Connectivity/Power → P2 | P0-B→P2 |
+| `triggers` | Registrar OS-managed: Time (AlarmManager exact via `TimeSpecs.nextFire`) → P0-B; Notification (NotificationListenerService + WhatsApp RemoteInput) → P1; Geofence (`LocationManager.addProximityAlert`) + PhoneState (receiver SMS/PHONE_STATE) + Connectivity/Power → P2 | P0-B→P2 |
 | `brain` | Interfaccia `Brain` + **transport** `CliBridgeTransport` / `OpenAICompatTransport` | P0-B |
 | `agent-loop` | Orchestrazione tool-calling: one-shot (compile / InvokeLlm) → P0-B–P1; loop interattivo computer_use → P3 | P0-B→P3 |
-| `foreground-service` | Servizio persistente: engine + trigger + anti-Doze + watchdog + boot recovery | P2 |
+| `foreground-service` | Sentinella `specialUse` solo per regole Wi-Fi/POWER armate; gli altri trigger restano OS-managed/receiver | P2 |
 | `security` | Gate approvazione, allowlist irreversibili, whitelist contatti, difese injection, budget guard, audit UI | P1–P3 |
 | `triggers-ui` *(opzionale)* | AccessibilityService per trigger su **eventi UI** e gesture senza shell. **Non serve al core** (lettura schermo = `uiautomator dump`, tap = `input`) | P2+ |
 | `ui` *(Claude Design)* | Chat, lista/dettaglio/approvazione automazioni, log, settings, wizard permessi — **contratti completi in `handoff-frontend.md`** | tutte |
@@ -85,11 +108,12 @@ Automation {
 
 Trigger =
   Geofence{lat, lng, radius_m, transition(enter|exit|dwell), loiteringDelay_ms,
-           resolveCurrentLocation: Bool}      // rev 3: true = coordinate risolte all'ARM
+           resolveCurrentLocation: Bool}      // DWELL resta nello schema storico ma P2 lo rifiuta fail-closed
 | Time{cron | at, tz}                          // rev 3: exactly-one; `at` = one-shot ISO local; niente `interval` (YAGNI)
 | Notification{package, conversationId?, sender?, isGroup?, titleMatch?, textMatch?}
                                                // rev 3: conversationId = chiave stabile (shortcutId/JID), preferita al display name
-| PhoneState{event(incoming_call|call_ended|sms_received), number?}   // match numeri normalizzato (suffisso cifre)
+| PhoneState{event(incoming_call|call_ended|sms_received), number?, textMatch?}
+                                               // textMatch solo per SMS telephony; match numero a suffisso cifre
 | Connectivity{medium(wifi|bt|power), state(connected|disconnected), match?}
                                                // rev 3: direzione esplicita; per power: connected=alimentazione collegata
 
@@ -98,7 +122,8 @@ Condition = TimeWindow{tz} | StateEquals(key,op,val) | LocationIn | AppInForegro
 
 Action(tier=deterministic) =
   SetWifi|SetBluetooth|SetDnd|SetRinger|LaunchApp|OpenUrl|ShowNotification   // rev 3: ShowNotification (feedback/avvisi)
-| Tap|InputText|WhatsAppReply(RemoteInput,text)|RunShell(cmd)                // jolly shell
+| Tap|InputText|WhatsAppReply(RemoteInput,text)|RunShell(cmd)                // jolly shell statico approvato
+| CopyToClipboard(extractionRegex?)          // regex RE2 lineare su testo SMS/notifica non fidato
 Action(tier=generative) =
   InvokeLlm{ goal, context_sources:[screen|notification|state|...],
              allowed_tools:[...],              // rev 3: MAI shell.run / automation.* / tool sempre-conferma (invariante hard, DraftValidator)
@@ -111,6 +136,10 @@ Action(tier=generative) =
 - **`priority`**: nello stesso batch di trigger le automazioni eseguono in ordine di priorità **crescente** → la più prioritaria scrive **per ultima** e vince sui target condivisi (last-writer-wins coerente con C1).
 - **Cooldown generativo minimo**: se `actions` contiene `InvokeLlm`, l'engine impone `effective_cooldown = max(cooldown_ms, 60 000)`.
 - Whitelist contatti/target memorizzano **`conversationId`/numero**, non il display name (§13/E7, E15).
+- `SMS_RECEIVED` indica soltanto SMS telephony: RCS e MMS non attraversano quel receiver. Il testo
+  SMS vive solo nel dispatch RAM (mai preferences/Room/log); l'estrazione clipboard accetta solo
+  sintassi RE2 a tempo lineare. Il pattern OTP legacy è tradotto internamente senza cambiare i
+  fingerprint già approvati.
 
 ## 6. Due tier di esecuzione
 
@@ -159,7 +188,7 @@ Principio: appoggiarsi ai meccanismi **OS-managed** che scattano anche in Doze, 
 
 - **Baseline P0-B event-driven** → `Application` inizializza registry/reconciliation; AlarmManager e receiver risvegliano il processo; Room conserva stato logico e journal. Nessun FGS persistente.
 - **Time** → `AlarmManager`: exact solo per `TimePrecision.EXACT` con special access `SCHEDULE_EXACT_ALARM`, altrimenti fallback inexact. Next-fire calcolato da `TimeSpecs.nextFire` (engine-core, DST-safe).
-- **Geofence** → Play Services Geofencing (OS-managed, sopravvive a Doze). **Richiede `ACCESS_BACKGROUND_LOCATION` ("Consenti sempre")**, permesso a sé notorio su Android 11+ → step dedicato nell'onboarding. Aspettative oneste in §13/E14 (raggio min consigliato 100 m, exit con minuti di ritardo).
+- **Geofence** → framework `LocationManager.addProximityAlert` con PendingIntent per-rule (OS-managed, nessuna dipendenza GMS e nessun service). **Richiede posizione precisa + `ACCESS_BACKGROUND_LOCATION` ("Consenti sempre")**. P2 supporta ENTER/EXIT; DWELL/loitering sono rifiutati. Registry e transizione pending sono persistenti, le registrazioni vengono ricreate a process start/boot/update e un fix one-shot con isteresi recupera i bordi persi. Aspettative oneste in §13/E14.
 - **Notifiche/WhatsApp** → `NotificationListenerService` (bindato, resiste) + **WhatsApp direct-reply via RemoteInput**.
 - **Lavoro lungo** → il budget breve di `BroadcastReceiver.goAsync()` non è adatto a catene lente. In P2 misurare e spostare tali esecuzioni in un worker durevole o FGS **short-lived** con tipo corretto; mai usare un service sempre vivo come scorciatoia.
 - **Boot** → receiver `BOOT_COMPLETED` re-idrata le automazioni armate e ri-registra i trigger.
@@ -170,7 +199,7 @@ Principio: appoggiarsi ai meccanismi **OS-managed** che scattano anche in Doze, 
 ## 10. Modello di sicurezza
 
 1. **Gate approvazione**: automazione creata dall'LLM nasce `pending_approval`; la UI mostra la regola in chiaro; l'utente **arma** con un tap. Modifica LLM di una regola armata → torna `pending_approval`. **(Rev 3)** La regola mostrata è **renderizzata deterministicamente dai tipi** (`RuleRender`), mai dalla parafrasi dell'LLM: la prosa del modello è visivamente subordinata ("commento"), perché potrebbe non corrispondere al JSON. Il draft passa dal **`DraftValidator`**: ERROR → bottone Arma disabilitato con motivo; WARNING → mostrati inline.
-2. **Catalogo sempre-conferma** (irreversibili): `pm uninstall`, factory reset, invio a contatti **non** whitelistati, pagamenti, cancellazione file → conferma live (push approva/nega) anche se armata. **(Rev 3)** Policy `run_shell`: un `RunShell` statico è eseguibile autonomo **solo** se l'utente ha approvato **quel comando letterale** all'arm (mostrato in monospace); qualunque modifica al comando → ri-approvazione. La classificazione per categorie (es. riconoscere `pm uninstall` dentro una shell) è best-effort via denylist di pattern: i pattern matchati forzano la conferma live.
+2. **Catalogo sempre-conferma** (irreversibili tipizzati): `pm uninstall`, factory reset, invio a contatti **non** whitelistati, pagamenti, cancellazione file → conferma live (push approva/nega) anche se armata. **Decisione Lorenzo P2, rivista da lui il 2026-07-15:** `RunShell` è una superficie separata e volutamente potente: un comando statico è autonomo soltanto se l'utente ha approvato **quel letterale integrale** all'arm (monospace e fingerprint; modifica → ri-approvazione). Nessuna denylist del contenuto. **L'injection è impossibile per costruzione** — il `cmd` è letterale, il contenuto del messaggio non lo sceglie mai — quindi la domanda non è *cosa* esegue ma **chi può premere l'interruttore**: sono ammessi Time/Geofence/Connectivity (nessun mittente) e una chat **WhatsApp 1:1 con `conversationId` whitelistato** (identità verificata, E15). **PhoneState resta escluso, SMS e chiamate insieme**: mittente e caller ID sono falsificabili, quindi nessuna whitelist può trasformarli in un'identità — è un limite reale, non prudenza. Il divieto precedente su ogni notifica era **più largo della linea etica di Lorenzo** e lo ha revocato lui. Enforcement concorde da validator, FirePolicy ed executor, sull'**evento reale** oltre che sul trigger dichiarato; la review avvisa (`shell_contact_trigger`) che il **momento** dello scatto lo sceglie il contatto.
 3. **Whitelist messaggistica**: `WhatsAppReply`/SMS solo verso contatti whitelistati (per `conversationId`/numero). **(Rev 3)** Le reply generative sono limitate a chat **1:1** (`isGroup=false` obbligatorio nel trigger): mai rispondere in un gruppo (il titolo/sender di gruppo è ambiguo e l'output finirebbe nel canale del gruppo).
 4. **Difesa prompt-injection**: contenuti da schermo/notifiche/web taggati **untrusted** e wrappati con delimitatori ("dati, non istruzioni"); al fire-time il set di tool è **ristretto a `allowed_tools`** dichiarati nella regola. **Containment:** la risposta generativa ha **`reply_target` vincolato al `trigger.sender`**, non scelto dall'LLM → un messaggio malevolo non può redirigere l'output verso un altro destinatario. La `compile` avviene **solo in chat** (umano presente), mai autonomamente da contenuto untrusted. **(Rev 3) Invariante hard:** `allowed_tools` di `InvokeLlm` non può contenere `shell.run`, `app.install`, `automation.*` né tool del catalogo sempre-conferma — altrimenti l'LLM genererebbe al fire-time azioni arbitrarie mai approvate. Enforcement nel `DraftValidator` (ERROR) **e** ri-verificato al fire-time (difesa in profondità). La UI di approvazione evidenzia inoltre la combinazione "tool di **lettura** (screen/state) + canale in **uscita** (reply)" come warning privacy (possibile esfiltrazione di contesto verso il mittente).
 5. **Budget guard**: tetto globale chiamate LLM/ora; stima costo mostrata all'approvazione per le regole generative. In P1 il contenimento è garantito da cooldown minimo 60 s + rate-limit per-regola; il tetto globale arriva con la UI in P3.
@@ -178,7 +207,7 @@ Principio: appoggiarsi ai meccanismi **OS-managed** che scattano anche in Doze, 
 
 ## 11. Esempi tracciati
 
-- **Es. 1** — `compile` (CliBridge, one-shot) produce `Automation{trigger:Geofence(resolveCurrentLocation=true, 50m→**warning raggio piccolo**, exit), actions:[SetWifi(off),SetBluetooth(on)]}` → all'**arm** l'app legge il GPS e fissa lat/lng → Play Services registra il geofence → scatto = 2 azioni deterministiche. Zero LLM a regime. *(End-to-end da P2 — il registrar geofence è P2; compile+engine pronti da P0.)*
+- **Es. 1** — `compile` (CliBridge, one-shot) produce `Automation{trigger:Geofence(resolveCurrentLocation=true, 50m→**warning raggio piccolo**, exit), actions:[SetWifi(off),SetBluetooth(on)]}` → all'**arm** l'app legge una posizione one-shot e fissa lat/lng → `LocationManager` registra il proximity alert → scatto = 2 azioni deterministiche. Zero LLM a regime. *(Pipeline e registrar P2 verificati; resta il bordo da spostamento reale.)*
 - **Es. 2** — `Automation{trigger:Time(cron "0 23 * * *", tz), conditions:StateEquals(ringer,!=,silent), actions:[SetDnd(priority)]}` → AlarmManager exact (next-fire da `TimeSpecs`) sveglia l'engine, valuta condizione, esegue. Deterministico. *(End-to-end da P0.)*
 - **Es. 3** — `Automation{trigger:Notification(pkg=whatsapp, conversationId=<id conv Moglie>, isGroup=false), conditions:TimeWindow(X), actions:[InvokeLlm{goal, context:[notification], allowed_tools:[whatsapp_reply], reply_target=trigger.sender, output:reply}]}` → NotificationListener scatta → executor ritorna `Submitted`, lane async → agent-loop (CliBridge one-shot) con tool ristretti → Brain compone → invio via RemoteInput al mittente (fallback E13 se la notifica è sparita nel frattempo). LLM al fire-time, solo per generare, solo quel tool, solo verso quella conversazione 1:1. *(End-to-end da P1.)*
 
@@ -201,14 +230,14 @@ Punto chiave da non perdere: **l'MVP non ha streaming** — il transport primari
 | B5 | ~~Gateway Hermes senza endpoint programmatico~~ | **RISOLTO:** `argus-bridge` `/compile` v1 è live su Tailscale HTTPS, autenticato e testato da Android; `hermes proxy` resta l'opzione P3 OpenAI-compatible. Vedi §2/§7. |
 | B6 | **Aux-vision senza provider multimodale raggiungibile**. | Configurare almeno **una key multimodale** (Gemini free); il probe avvisa e **disabilita** le regole che dipendono dalla visione schermo. |
 | B7 | **Finestre `FLAG_SECURE`** (banking): `screencap` torna nero. | Rilevare e riportare al Brain ("schermo illeggibile: finestra sicura"); provare `uiautomator dump` come fallback (l'albero a11y resta leggibile); non crashare. |
-| B8 | **Latenza del brain gratuito** (CliBridge ~10-30 s/call): inusabile per un loop computer_use multi-turn (200 s+/task). | **Il brain gratuito serve solo one-shot** (compile, InvokeLlm). Il **loop interattivo (P3)** usa `OpenAICompatTransport` con un modello veloce (proxy Nous/xAI o Direct). Trade-off costo/velocità esplicito. |
+| ~~B8~~ | ~~**Latenza del brain gratuito** (CliBridge ~10-30 s/call): inusabile per un loop computer_use multi-turn (200 s+/task).~~ **DECLASSATA il 2026-07-15: non era una barriera.** | **"Inusabile" era un assunto sulla tolleranza alla latenza, non un fatto.** Decisione di Lorenzo: per automazione **non presidiata** 200 s vanno benissimo — nessuno sta aspettando. Il loop interattivo diventa quindi a **due tier**: (a) **lento e gratuito** via CliBridge, default consigliato in onboarding per chi usa Hermes o API proprie; (b) **veloce e a pagamento** via `OpenAICompatTransport`, **opzionale**, solo per uso presidiato in cui guardi lo schermo e aspetti. Il tier (b) non è più un prerequisito di P3. Nota tecnica: dove l'albero a11y è leggibile (es. WhatsApp) usare `uiautomator dump` — deterministico e gratis — e tenere la vision come **fallback** per UI opache (canvas/giochi). |
 
 ### Conflitti
 
 | # | Conflitto | Soluzione |
 |---|-----------|-----------|
 | C1 | **Automazioni contraddittorie** (A: wifi off su exit; B: wifi on a orario) → thrash. | **Euristica trigger-aware** all'arm-time (rev 3): stesso target-key + valori opposti → warning, **ma le coppie complementari legittime sono soppresse** (stesso geofence con transizioni opposte; stessa connectivity con state opposti) — altrimenti ogni normale coppia on/off genererebbe rumore e il warning perderebbe significato. **Non** analisi statica completa (indecidibile). Runtime: **last-writer-wins con `priority` crescente = il più prioritario esegue ultimo e vince** (semantica definita, §5) + action log. |
-| C2 | **Trigger storm** (spam notifiche; geofence flapping). | **Debounce/cooldown per-regola** (`cooldown_ms`), **minimo 60 s imposto per regole generative** (rev 3 — evita anche il ping-pong conversazionale), geofence `dwell`+`loiteringDelay`+isteresi, rate-limit su `InvokeLlm`. Denylist del proprio package nel trigger Notification (anti auto-trigger). |
+| C2 | **Trigger storm** (spam notifiche; geofence flapping). | **Debounce/cooldown per-regola** (`cooldown_ms`), **minimo 60 s imposto per regole generative** (rev 3 — evita anche il ping-pong conversazionale), dedup persistente dei bordi geofence + isteresi **su entrambi i percorsi** (recupero post-crash **e** callback framework), rate-limit su `InvokeLlm`. DWELL non viene simulato. Denylist del proprio package nel trigger Notification (anti auto-trigger). **Lezione di campo (2026-07-15):** l'isteresi esisteva solo nel recupero, e il percorso normale si fidava del booleano del framework: risultato, due EXIT in tre minuti con il device **fermo al centro** dell'area. Il dedup non poteva vederlo (fra i due EXIT arrivava un ENTER altrettanto spurio, reale per lo store). Fix in `4339244`: un bordo smentito dalla posizione non viene creduto **e non avanza la sequenza**. Fail-open senza posizione leggibile. |
 | C3 | **Fire concorrenti** sull'unica shell Shizuku. | Executor a **coda single-writer con priorità**; azioni generative → **`ActionResult.Submitted`** e lane async (contratto esplicito, rev 3): l'engine non blocca mai su un InvokeLlm. Un'eccezione su una regola **non interrompe il batch** (isolamento per-automazione). |
 | C4 | **Runaway costo/batteria** da regola generativa mal configurata. | Cooldown minimo 60 s (engine) + **budget guard** globale (max chiamate/ora, P3) + stima costo all'approvazione + warning UI. |
 
@@ -229,13 +258,15 @@ Punto chiave da non perdere: **l'MVP non ha streaming** — il transport primari
 | E11 | **Privacy — i contenuti escono dall'homelab** (WhatsApp/schermo → Hermes → upstream Nous/xAI/OpenRouter/OpenAI). | Informativa esplicita nell'onboarding (step WELCOME_PRIVACY, consenso) + warning per-regola sulle azioni generative. Opzione futura: upstream self-hosted/locale per contenuti sensibili. Redazione opzionale di campi sensibili prima dell'invio. |
 | E12 | **Contesto WhatsApp limitato alla notifica** (non l'intera conversazione). | Documentato: la risposta generativa vede solo il testo notificato; per più contesto servirebbe UI automation più pesante (fuori MVP). |
 | E13 | **(Rev 3) RemoteInput invalidato durante la latenza LLM** (10-30 s: l'utente legge sul PC → notifica dismessa → canale reply morto). Caso **frequente**, non teorico. | La lane async ri-verifica la notifica prima dell'invio; se sparita → **notifica locale "Risposta pronta — tocca per inviare"** (apre WhatsApp con testo in clipboard o re-invia se la notifica ricompare). Mai far finta di aver risposto: l'audit registra `FAILED(canale scaduto)` o `DEFERRED(consegna manuale)`. |
-| E14 | **(Rev 3) Geofence: aspettative realistiche.** Play Services raccomanda raggio ≥100 m; l'exit può arrivare con **minuti** di ritardo (batching a schermo spento). | Il validator emette WARNING sotto i 100 m; la UI di approvazione mostra "scatto entro ~2-15 min dall'uscita". L'Es. 1 con ±50 m è accettato ma con aspettative dichiarate. |
+| E14 | **Geofence: aspettative realistiche.** La posizione è approssimata; attraversamenti brevi possono non produrre callback e gli eventi in background possono arrivare con **minuti** di ritardo. La [guida Android](https://developer.android.com/develop/sensors-and-location/location/geofencing#choose-the-optimal-radius-for-your-geofence) consiglia tipicamente almeno 100–150 m. | Il validator emette WARNING sotto i 100 m; l'Es. 1 con ±50 m resta accettato ma non va presentato come istantaneo. Il runtime non inventa DWELL e non genera un EXIT iniziale se la regola nasce mentre il device è già fuori. **Aggiornamento 2026-07-15:** "approssimata" è più forte di come suonava — il framework può annunciare bordi **falsi a device fermo**, non solo mancarne di veri. Da `4339244` ogni bordo viene confrontato con la posizione reale (isteresi 25 m) prima di essere creduto. Nota sul posizionamento: al chiuso il GNSS spesso non vede il cielo e il fix pesa su Wi-Fi/celle, dove il rumore è massimo; all'aperto e in movimento — cioè quando il geofence serve — domina il GNSS. Spegnere il Wi-Fi (Es. 1) **non** azzera il posizionamento: `Wifi scanning is always available` resta attivo. |
 | E15 | **(Rev 3) Sender di notifica spoofabile** (il display name è controllato dal mittente: chiunque può chiamarsi "Moglie"). | Match preferito su **`conversationId`** (chiave stabile della conversazione: shortcutId/JID — da confermare empiricamente in P1, vedi §16); il match per display name resta come fallback ma il validator lo marca WARNING ("match per nome, spoofabile"). Le regole generative **richiedono** conversationId whitelistato. |
+| E16 | **ReDoS nell'estrazione OTP**: pattern approvato ma applicato a SMS/notifiche controllati da un mittente può bloccare un engine regex backtracking. | Validator ed executor usano **RE2/J**, tempo lineare e niente lookaround/backreference. Il bridge propone sintassi equivalente; il solo pattern OTP legacy noto viene tradotto in modo sicuro per compatibilità. |
+| E17 | **Budget `BroadcastReceiver.goAsync()` vs `RunShell` fino a 30 s.** Un processo ucciso dopo il claim Engine può lasciare una sequenza multi-azione parziale; la redelivery dello stesso event-id è at-most-once e non ripete l'azione incerta. | Limite dichiarato in review e comandi brevi raccomandati sui trigger broadcast. I pending P2 recuperano il bordo perso prima/durante il dispatch, ma **non costituiscono resumability per-action**. Prima di promettere comandi lunghi cached/Doze serve misura reale e poi worker/FGS short-lived conforme con semantica per-action; non aumentare il timeout. |
 
 ## 14. Strategia di test
 
 - **Unit (table-driven):** interprete regole (match trigger, condizioni AND/OR/NOT, dispatch, priorità/last-writer-wins, isolamento errori, cooldown minimo generativo), **CronSchedule/TimeSpecs (incl. DST gap/overlap Europe/Rome)**, `DraftValidator` (incl. invarianti sicurezza), (de)serializzazione schema + migrazioni, euristica conflitti (incl. soppressione coppie complementari), parser output CliBridge (sentinel/JSON bilanciato, fail-soft).
-- **Instrumented (device reale):** op Shizuku (screencap/tap/shell/install/uiautomator), registrar trigger, boot recovery, **estrazione `conversationId`/`isGroup` dalle notifiche WhatsApp reali** (E15).
+- **Instrumented (device reale):** op Shizuku (screencap/tap/shell/install/uiautomator), registrar trigger e recovery phased/sintetico; il **reboot fisico resta un gate distinto**. Verificare inoltre l'estrazione `conversationId`/`isGroup` dalle notifiche WhatsApp reali (E15).
 - **Contract test Brain:** risposte mockate per entrambi i transport → tool-call/JSON attesi.
 - **Injection test:** contenuto untrusted non escala oltre `allowed_tools`, non cambia `reply_target`, e un draft con tool vietati **viene rifiutato dal validator** (e ri-bloccato al fire-time).
 - **Golden/eval:** i 3 prompt NL → `AutomationDraft` atteso (Brain mockato) → `DraftValidator` verde.
@@ -247,14 +278,14 @@ Principio: **prima il valore nuovo e latency-tolerant** (automazioni da NL, che 
 - **P0-A — Engine core (JVM puro):** modelli + matcher + evaluator + engine + **cron/DST** + **validator** + conflitti + parser + manifest + interfacce. Piano dedicato nel bundle. *(Nessun risultato utente-visibile: fondamenta testate.)*
 - **P0-B — Fondamenta Android + compile one-shot:** `core-shizuku` + `device-tools` + capability probe + `Brain`(CliBridge) + agent-loop one-shot + Room store + trigger **Time** + azioni deterministiche + gate approvazione + UI minima. **Risultato: Es. 2 funziona end-to-end** (chat "crea automazione" → approva → esegue). L'Es. 1 è pronto lato compile+engine ma **scatta davvero solo da P2** (registrar geofence). Niente vision, niente loop interattivo.
 - **P1 — Generativo + notifiche:** trigger **Notification** (WhatsApp RemoteInput, estrazione `conversationId`/`isGroup`) + azione **`InvokeLlm` one-shot** (lane async + `Submitted`) + whitelist contatti + `reply_target` binding + fallback E13 + **battery-optimization exemption** (richiesta qui, non in P2: senza, le chiamate LLM in Doze falliscono). **Risultato: Es. 3 funziona.**
-- **P2 — Hardening background:** esecuzione durevole/FGS short-lived solo dove necessario, boot recovery reale, wizard OEM/background-location + trigger **Geofence** (→ **Es. 1 end-to-end**) e **PhoneState**/**Connectivity** + resilienza Shizuku + (opz.) `triggers-ui`.
+- **P2 — Hardening background:** esecuzione durevole/FGS short-lived solo dove necessario, recovery su boot/package-replace implementato e coperto sinteticamente (**il reboot fisico resta un gate osservazionale separato, eseguibile solo con Lorenzo presente**), wizard OEM/background-location + trigger **Geofence** (→ **Es. 1 end-to-end**) e **PhoneState**/**Connectivity** + resilienza Shizuku + (opz.) `triggers-ui`.
 - **P3 — Interattivo + secondo brain + sicurezza avanzata:** **loop computer_use interattivo** via `OpenAICompatTransport` (modello veloce/multimodale) + `DirectLlmBrain` (OAuth) + tool app-side `web.search`/`vision.analyze` + conferma-irreversibili live + budget guard UI + streaming chat.
 
 ## 16. Rischi aperti da confermare in planning
 
 - **`conversationId` WhatsApp (E15):** verificare empiricamente su device quale chiave stabile espongono le notifiche (candidati: `shortcutId`, `tag`, `EXTRA_PEOPLE_LIST`, sortKey) e come si rileva `isGroupConversation`. Prerequisito P1; se nessuna chiave è affidabile, fallback dichiarato al display name (con warning permanente in UI).
 - **Transport loop interattivo (P3):** quale modello veloce/multimodale per `OpenAICompatTransport` — proxy Nous/xAI (verificare costo/quota e supporto immagini) vs Direct Gemini/OpenRouter. Budget latenza per-turno target.
-- **Argus bridge:** `/compile` v1 completato e isolato dal bridge Guida Bali. Per `act` P1 estendere il contratto Argus con una nuova versione/endpoint, senza riaprire il fallback `/chat`.
+- **Argus bridge:** `/compile` v1 e `/act` v1 sono completati, isolati dal bridge Guida Bali, deployati e consumati dai rispettivi path Android. Le evoluzioni P3 devono versionare il contratto senza riaprire il fallback `/chat`.
 - **B1:** UX e procedura esatta di ripristino Shizuku via Wireless ADB sul OnePlus 15 non-root;
   auto-start root/Magisk soltanto su un futuro device realmente rootato.
 - **B6:** provider multimodale per aux-vision (Gemini free candidato).
@@ -265,7 +296,7 @@ Principio: **prima il valore nuovo e latency-tolerant** (automazioni da NL, che 
 - Play Store distribution (app sideloaded personale).
 - Multi-utente / multi-profilo.
 - Editor visuale di regole drag-and-drop (le regole le crea l'LLM; la UI le mostra/approva).
-- Sync cloud delle automazioni (locale; **export/import JSON locale** invece è quasi gratis — nice-to-have P2, assicura contro un wipe).
+- Sync cloud delle automazioni. Anche **export/import JSON locale è differito oltre P2**: non è una feature “quasi gratis” perché richiede contratto di schema/versione, redazione dei dati sensibili, SAF, gestione collisioni e ri-approvazione fail-closed dopo l'import.
 - Trigger `Time.interval` arbitrario (i periodici comuni sono esprimibili in cron; interval non-cron eventualmente via WorkManager, se mai servirà).
 - Loop computer_use interattivo su brain gratuito (impedito dalla latenza — vedi B8).
 - Reply generative nei gruppi WhatsApp (vietate in MVP — §10.3).

@@ -42,6 +42,7 @@ class RoomAuditSink(private val dao: AuditDao) : AuditSink {
             "reply_event_unverified",
             "reply_notification_unavailable",
             "schema_incompatible",
+            "shell_external_trigger",
             "validation_failed",
         )
     }

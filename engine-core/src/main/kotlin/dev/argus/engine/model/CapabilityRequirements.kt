@@ -5,8 +5,15 @@ object CapabilityIds {
     const val TRIGGER_TIME = "trigger.time"
     const val TRIGGER_GEOFENCE = "trigger.geofence"
     const val TRIGGER_NOTIFICATION = "trigger.notification"
-    const val TRIGGER_PHONE_STATE = "trigger.phone_state"
-    const val TRIGGER_CONNECTIVITY = "trigger.connectivity"
+    // Granulari per evento: i grant OS differiscono (RECEIVE_SMS vs READ_PHONE_STATE).
+    const val TRIGGER_PHONE_SMS = "trigger.phone_state.sms"
+    const val TRIGGER_PHONE_CALL = "trigger.phone_state.call"
+    // Granulari per medium: Bluetooth ha un grant runtime distinto, mentre l'identità Wi-Fi
+    // (SSID) richiede accesso location e non deve bloccare una regola Wi-Fi generica.
+    const val TRIGGER_CONNECTIVITY_WIFI = "trigger.connectivity.wifi"
+    const val TRIGGER_CONNECTIVITY_WIFI_IDENTITY = "trigger.connectivity.wifi.identity"
+    const val TRIGGER_CONNECTIVITY_BT = "trigger.connectivity.bt"
+    const val TRIGGER_CONNECTIVITY_POWER = "trigger.connectivity.power"
 
     const val STATE_FOREGROUND_APP = "state.foreground_app"
     const val STATE_LOCATION = "state.location"
@@ -22,6 +29,7 @@ object CapabilityIds {
     const val ACTION_INPUT_TEXT = "action.input_text"
     const val ACTION_WHATSAPP_REPLY = "action.whatsapp_reply"
     const val ACTION_RUN_SHELL = "action.run_shell"
+    const val ACTION_COPY_TO_CLIPBOARD = "action.copy_to_clipboard"
     const val ACTION_INVOKE_LLM = "action.invoke_llm"
 
     fun state(key: String): String = "state.$key"
@@ -44,10 +52,22 @@ object CapabilityRequirements {
 
     private fun forTrigger(trigger: Trigger): Set<String> = when (trigger) {
         is Trigger.Time -> setOf(CapabilityIds.TRIGGER_TIME)
-        is Trigger.Geofence -> setOf(CapabilityIds.TRIGGER_GEOFENCE, CapabilityIds.STATE_LOCATION)
+        // La registrazione è OS-managed e non legge DeviceState/Shizuku. STATE_LOCATION serve
+        // solo a una Condition.LocationIn, derivata separatamente qui sotto.
+        is Trigger.Geofence -> setOf(CapabilityIds.TRIGGER_GEOFENCE)
         is Trigger.Notification -> setOf(CapabilityIds.TRIGGER_NOTIFICATION)
-        is Trigger.PhoneState -> setOf(CapabilityIds.TRIGGER_PHONE_STATE)
-        is Trigger.Connectivity -> setOf(CapabilityIds.TRIGGER_CONNECTIVITY)
+        is Trigger.PhoneState -> when (trigger.event) {
+            PhoneEvent.SMS_RECEIVED -> setOf(CapabilityIds.TRIGGER_PHONE_SMS)
+            PhoneEvent.INCOMING_CALL, PhoneEvent.CALL_ENDED -> setOf(CapabilityIds.TRIGGER_PHONE_CALL)
+        }
+        is Trigger.Connectivity -> when (trigger.medium) {
+            ConnMedium.WIFI -> buildSet {
+                add(CapabilityIds.TRIGGER_CONNECTIVITY_WIFI)
+                if (trigger.match != null) add(CapabilityIds.TRIGGER_CONNECTIVITY_WIFI_IDENTITY)
+            }
+            ConnMedium.BT -> setOf(CapabilityIds.TRIGGER_CONNECTIVITY_BT)
+            ConnMedium.POWER -> setOf(CapabilityIds.TRIGGER_CONNECTIVITY_POWER)
+        }
     }
 
     private fun forCondition(condition: Condition): Set<String> = when (condition) {
@@ -72,6 +92,7 @@ object CapabilityRequirements {
         is Action.InputText -> setOf(CapabilityIds.ACTION_INPUT_TEXT)
         is Action.WhatsAppReply -> setOf(CapabilityIds.ACTION_WHATSAPP_REPLY)
         is Action.RunShell -> setOf(CapabilityIds.ACTION_RUN_SHELL)
+        is Action.CopyToClipboard -> setOf(CapabilityIds.ACTION_COPY_TO_CLIPBOARD)
         is Action.InvokeLlm -> buildSet {
             add(CapabilityIds.ACTION_INVOKE_LLM)
             addAll(action.allowedTools)

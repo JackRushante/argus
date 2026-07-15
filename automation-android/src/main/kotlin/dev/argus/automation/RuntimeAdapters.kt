@@ -12,9 +12,17 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import dev.argus.device.StateReader
+import dev.argus.automation.connectivity.ConnectivityEventDispatcher
+import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
+import dev.argus.automation.connectivity.NoopConnectivityTriggerRuntime
+import dev.argus.automation.geofence.GeofenceEventDispatcher
+import dev.argus.automation.geofence.GeofenceTriggerRuntime
+import dev.argus.automation.geofence.NoopGeofenceTriggerRuntime
+import dev.argus.engine.model.ConnMedium
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.CapabilityIds
+import dev.argus.engine.model.CapabilityRequirements
 import dev.argus.engine.model.StateKeys
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.AutomationStore
@@ -68,6 +76,34 @@ class EngineNotificationEventDispatcher(
     }
 }
 
+/** Stesso pattern per la telefonia (P2-2): l'engine matcha, deduplica e decide da solo. */
+class EnginePhoneEventDispatcher(
+    private val engine: Engine,
+    private val state: DeviceStateSnapshotProvider,
+) : dev.argus.automation.phone.PhoneEventDispatcher {
+    override suspend fun dispatch(envelope: TriggerEnvelope) {
+        engine.onTrigger(envelope) { state.current() }
+    }
+}
+
+class EngineConnectivityEventDispatcher(
+    private val engine: Engine,
+    private val state: DeviceStateSnapshotProvider,
+) : ConnectivityEventDispatcher {
+    override suspend fun dispatch(envelope: TriggerEnvelope) {
+        engine.onTrigger(envelope) { state.current() }
+    }
+}
+
+class EngineGeofenceEventDispatcher(
+    private val engine: Engine,
+    private val state: DeviceStateSnapshotProvider,
+) : GeofenceEventDispatcher {
+    override suspend fun dispatch(envelope: TriggerEnvelope) {
+        engine.onTrigger(envelope) { state.current() }
+    }
+}
+
 /**
  * Registrar per-trigger senza service persistente: Time registra presso AlarmManager tramite il
  * coordinator; Notification non ha una registrazione OS per-rule e richiede soltanto il grant
@@ -77,10 +113,17 @@ class AndroidArmedAutomationRegistrar(
     private val coordinator: TimeAlarmCoordinator,
     private val store: AutomationStore,
     private val snapshots: FirePolicySnapshotProvider,
+    private val connectivity: ConnectivityTriggerRuntime = NoopConnectivityTriggerRuntime,
+    private val geofence: GeofenceTriggerRuntime = NoopGeofenceTriggerRuntime,
 ) : ArmedAutomationRegistrar {
     override suspend fun register(automation: Automation): Boolean = when (automation.trigger) {
         is Trigger.Time -> registerTime(automation)
         is Trigger.Notification -> registerNotification(automation)
+        // I receiver manifest sono sempre attivi: la registrazione OS è il grant runtime
+        // stesso, verificato qui con la capability granulare dell'evento (sms vs call).
+        is Trigger.PhoneState -> registerBroadcastBacked(automation)
+        is Trigger.Connectivity -> registerConnectivity(automation)
+        is Trigger.Geofence -> registerGeofence(automation)
         else -> false
     }
 
@@ -105,6 +148,44 @@ class AndroidArmedAutomationRegistrar(
     } catch (_: Exception) {
         false
     }
+
+    private suspend fun registerBroadcastBacked(automation: Automation): Boolean = try {
+        val snapshot = snapshots.current()
+        val persisted = store.get(automation.id)
+        val required = CapabilityRequirements.derive(automation.trigger, emptyList())
+        required.all { it in snapshot.availableCapabilities } &&
+            persisted?.status == AutomationStatus.ARMED && persisted.enabled
+    } catch (error: CancellationException) {
+        throw error
+    } catch (_: Exception) {
+        false
+    }
+
+    private suspend fun registerConnectivity(automation: Automation): Boolean {
+        if (!registerBroadcastBacked(automation)) return false
+        val medium = (automation.trigger as Trigger.Connectivity).medium
+        if (medium == ConnMedium.BT) return true
+        return try {
+            val report = connectivity.reconcile()
+            report.active && automation.id in report.requiredBy && automation.id !in report.failed
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private suspend fun registerGeofence(automation: Automation): Boolean {
+        if (!registerBroadcastBacked(automation)) return false
+        return try {
+            val report = geofence.reconcile(recreateOsRegistrations = false)
+            automation.id in report.requiredBy && automation.id !in report.failed
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            false
+        }
+    }
 }
 
 /** Posizione one-shot, senza cache e senza inventare coordinate in assenza di grant/provider. */
@@ -118,10 +199,16 @@ class FrameworkCurrentLocationProvider(context: Context) : CurrentLocationProvid
         val coarse = granted(Manifest.permission.ACCESS_COARSE_LOCATION)
         if (!fine && !coarse) return@withTimeoutOrNull null
         val provider = when {
-            fine && manager.isProviderEnabled(LocationManager.GPS_PROVIDER) ->
-                LocationManager.GPS_PROVIDER
-            manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) ->
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                manager.hasProvider(LocationManager.FUSED_PROVIDER) &&
+                manager.isProviderEnabled(LocationManager.FUSED_PROVIDER) ->
+                LocationManager.FUSED_PROVIDER
+            manager.hasProviderCompat(LocationManager.NETWORK_PROVIDER) &&
+                manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) ->
                 LocationManager.NETWORK_PROVIDER
+            fine && manager.hasProviderCompat(LocationManager.GPS_PROVIDER) &&
+                manager.isProviderEnabled(LocationManager.GPS_PROVIDER) ->
+                LocationManager.GPS_PROVIDER
             else -> return@withTimeoutOrNull null
         }
         suspendCancellableCoroutine { continuation ->
@@ -146,6 +233,13 @@ class FrameworkCurrentLocationProvider(context: Context) : CurrentLocationProvid
 
     private fun granted(permission: String): Boolean =
         ContextCompat.checkSelfPermission(appContext, permission) == PackageManager.PERMISSION_GRANTED
+
+    private fun LocationManager.hasProviderCompat(provider: String): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            hasProvider(provider)
+        } else {
+            provider in allProviders
+        }
 
     private companion object {
         const val LOCATION_TIMEOUT_MILLIS = 15_000L

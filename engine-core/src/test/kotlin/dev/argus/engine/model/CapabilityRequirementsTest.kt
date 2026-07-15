@@ -5,6 +5,22 @@ import kotlin.test.assertEquals
 
 class CapabilityRequirementsTest {
     @Test
+    fun `geofence trigger is OS managed and does not require Shizuku state location`() {
+        assertEquals(
+            setOf(CapabilityIds.TRIGGER_GEOFENCE, CapabilityIds.ACTION_SET_WIFI),
+            CapabilityRequirements.derive(
+                trigger = Trigger.Geofence(
+                    lat = 45.0,
+                    lng = 9.0,
+                    radiusM = 150.0,
+                    transition = Transition.EXIT,
+                ),
+                actions = listOf(Action.SetWifi(false)),
+            ),
+        )
+    }
+
+    @Test
     fun `requirements include trigger condition and action capabilities`() {
         assertEquals(
             setOf(
@@ -98,6 +114,79 @@ class CapabilityRequirementsTest {
     }
 
     @Test
+    fun `phone state derives granular capabilities per event kind`() {
+        // I grant OS differiscono (RECEIVE_SMS vs READ_PHONE_STATE): la capability persistita
+        // deve distinguere, così la probe pubblica solo ciò che il grant reale copre.
+        assertEquals(
+            setOf(CapabilityIds.TRIGGER_PHONE_SMS),
+            CapabilityRequirements.derive(
+                trigger = Trigger.PhoneState(PhoneEvent.SMS_RECEIVED),
+                actions = emptyList(),
+            ),
+        )
+        assertEquals(
+            setOf(CapabilityIds.TRIGGER_PHONE_CALL),
+            CapabilityRequirements.derive(
+                trigger = Trigger.PhoneState(PhoneEvent.INCOMING_CALL, number = "333"),
+                actions = emptyList(),
+            ),
+        )
+        assertEquals(
+            setOf(CapabilityIds.TRIGGER_PHONE_CALL),
+            CapabilityRequirements.derive(
+                trigger = Trigger.PhoneState(PhoneEvent.CALL_ENDED),
+                actions = emptyList(),
+            ),
+        )
+    }
+
+    @Test
+    fun `copy to clipboard derives its own action capability`() {
+        assertEquals(
+            setOf(CapabilityIds.TRIGGER_PHONE_SMS, CapabilityIds.ACTION_COPY_TO_CLIPBOARD),
+            CapabilityRequirements.derive(
+                trigger = Trigger.PhoneState(PhoneEvent.SMS_RECEIVED),
+                actions = listOf(Action.CopyToClipboard(extractionRegex = "(\\d{4,8})")),
+            ),
+        )
+    }
+
+    @Test
+    fun `connectivity requirements are granular and wifi identity needs location`() {
+        assertEquals(
+            setOf(CapabilityIds.TRIGGER_CONNECTIVITY_POWER),
+            CapabilityRequirements.derive(
+                trigger = Trigger.Connectivity(ConnMedium.POWER, ConnState.CONNECTED),
+                actions = emptyList(),
+            ),
+        )
+        assertEquals(
+            setOf(CapabilityIds.TRIGGER_CONNECTIVITY_BT),
+            CapabilityRequirements.derive(
+                trigger = Trigger.Connectivity(ConnMedium.BT, ConnState.CONNECTED, "Auto"),
+                actions = emptyList(),
+            ),
+        )
+        assertEquals(
+            setOf(CapabilityIds.TRIGGER_CONNECTIVITY_WIFI),
+            CapabilityRequirements.derive(
+                trigger = Trigger.Connectivity(ConnMedium.WIFI, ConnState.CONNECTED),
+                actions = emptyList(),
+            ),
+        )
+        assertEquals(
+            setOf(
+                CapabilityIds.TRIGGER_CONNECTIVITY_WIFI,
+                CapabilityIds.TRIGGER_CONNECTIVITY_WIFI_IDENTITY,
+            ),
+            CapabilityRequirements.derive(
+                trigger = Trigger.Connectivity(ConnMedium.WIFI, ConnState.CONNECTED, "Casa"),
+                actions = emptyList(),
+            ),
+        )
+    }
+
+    @Test
     fun `nested conditions retain every state dependency`() {
         val conditions = Condition.And(
             listOf(
@@ -113,7 +202,7 @@ class CapabilityRequirementsTest {
 
         assertEquals(
             setOf(
-                CapabilityIds.TRIGGER_CONNECTIVITY,
+                CapabilityIds.TRIGGER_CONNECTIVITY_POWER,
                 CapabilityIds.state(StateKeys.RINGER),
                 CapabilityIds.STATE_FOREGROUND_APP,
                 CapabilityIds.state(StateKeys.WIFI),

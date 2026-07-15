@@ -41,6 +41,7 @@ class RuleRenderMapperTest {
         val row = RuleRenderMapper.map(a).actions.single()
         assertTrue(row.isShell)
         assertEquals("cp -r /sdcard/DCIM /sdcard/backup", row.shellCommand)
+        assertEquals(false, row.requiresLiveConfirm)
     }
 
     /** Helper: automazione con un solo `action` e trigger notifica plausibile. */
@@ -51,9 +52,11 @@ class RuleRenderMapperTest {
     )
 
     @Test fun `requiresLiveConfirm matches the always-confirm catalog per action`() {
-        // Tap/InputText/WhatsAppReply = conferma live; InvokeLlm (lane generativa) = NO.
+        // Tap/InputText/WhatsAppReply = conferma live. InvokeLlm e il comando shell statico,
+        // già approvato integralmente insieme alla regola, non la richiedono al fire-time.
         val table: List<Pair<Action, Boolean>> = listOf(
             Action.InvokeLlm("rispondi", listOf("notification"), listOf("whatsapp_reply"), true) to false,
+            Action.RunShell("/system/bin/id >/dev/null") to false,
             Action.WhatsAppReply("ok") to true,
             Action.Tap(120, 340) to true,
             Action.InputText("ciao") to true,
@@ -102,6 +105,34 @@ class RuleRenderMapperTest {
         assertEquals("time", r.triggerIconKey)
         assertTrue(r.triggerLine.startsWith("Cron '"), r.triggerLine)
         assertTrue(r.triggerLine.contains("*/15 9-17 * * 1-5"), r.triggerLine)
+    }
+
+    @Test fun `copy to clipboard renders the extraction regex integrally`() {
+        val a = Automation(
+            AutomationId("otp"), "OTP autocopy", CreatedBy.LLM, AutomationStatus.PENDING_APPROVAL,
+            Trigger.PhoneState(PhoneEvent.SMS_RECEIVED),
+            listOf(Action.CopyToClipboard(extractionRegex = "(\\d{4,8})")),
+        )
+        val row = RuleRenderMapper.map(a).actions.single()
+        assertEquals("Copia negli appunti", row.label)
+        assertEquals("estrazione: (\\d{4,8})", row.detail)
+
+        val whole = RuleRenderMapper.map(
+            a.copy(actions = listOf(Action.CopyToClipboard(extractionRegex = null))),
+        ).actions.single()
+        assertEquals("il testo integrale del messaggio", whole.detail)
+    }
+
+    @Test fun `sms trigger renders its text filter integrally`() {
+        val a = Automation(
+            AutomationId("s2"), "SMS prova", CreatedBy.LLM, AutomationStatus.PENDING_APPROVAL,
+            Trigger.PhoneState(PhoneEvent.SMS_RECEIVED, textMatch = "prova argus"),
+            listOf(Action.ShowNotification("Argus", "SMS ricevuto!")),
+        )
+        assertEquals(
+            "Quando: SMS ricevuto da chiunque · testo \"prova argus\"",
+            RuleRenderMapper.map(a).triggerLine,
+        )
     }
 
     @Test fun `whitelisted conversation renders trusted display name instead of hash`() {

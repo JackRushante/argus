@@ -9,6 +9,7 @@ import dev.argus.engine.model.CapabilityRequirements
 import dev.argus.engine.model.SCHEMA_VERSION
 import dev.argus.engine.safety.DraftValidator
 import dev.argus.engine.safety.Severity
+import dev.argus.engine.safety.StaticShellSafety
 import kotlinx.coroutines.CancellationException
 
 sealed interface FirePolicyDecision {
@@ -46,6 +47,7 @@ object ActionCapabilities {
     const val INPUT_TEXT = CapabilityIds.ACTION_INPUT_TEXT
     const val WHATSAPP_REPLY = CapabilityIds.ACTION_WHATSAPP_REPLY
     const val RUN_SHELL = CapabilityIds.ACTION_RUN_SHELL
+    const val COPY_TO_CLIPBOARD = CapabilityIds.ACTION_COPY_TO_CLIPBOARD
     const val INVOKE_LLM = CapabilityIds.ACTION_INVOKE_LLM
 }
 
@@ -72,6 +74,11 @@ class RevalidatingFirePolicy(
             automation.approvalFingerprint != ApprovalFingerprints.of(automation)
         ) return FirePolicyDecision.Block("approval_fingerprint_mismatch", needsReview = true)
 
+        val hasStaticShell = automation.actions.any { it is Action.RunShell }
+        if (hasStaticShell &&
+            !StaticShellSafety.allows(automation.trigger, snapshot.whitelistedConversationIds)
+        ) return FirePolicyDecision.Block("shell_external_trigger", needsReview = true)
+
         val draft = AutomationDraft(
             name = automation.name,
             trigger = automation.trigger,
@@ -85,9 +92,11 @@ class RevalidatingFirePolicy(
         if (validationErrors)
             return FirePolicyDecision.Block("validation_failed", needsReview = true)
 
-        // P0-B non dispone ancora del flusso di conferma live: mai eseguire shell privilegiata.
-        if (automation.actions.any { it is Action.RunShell })
-            return FirePolicyDecision.Block("live_confirmation_required", needsReview = false)
+        // Difesa sul dato live oltre al trigger approvato: l'identità va verificata sull'evento
+        // realmente arrivato, non solo su quella dichiarata nella regola. Una regressione di
+        // routing non deve mai far innescare la shell da un mittente non verificato.
+        if (hasStaticShell && !StaticShellSafety.allows(event, snapshot.whitelistedConversationIds))
+            return FirePolicyDecision.Block("shell_external_trigger", needsReview = false)
 
         val derivedRequirements = CapabilityRequirements.derive(
             automation.trigger,

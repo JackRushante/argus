@@ -96,10 +96,24 @@ class DraftValidator(
                 if (!trigger.radiusM.isFinite() || trigger.radiusM <= 0 || trigger.radiusM > MAX_GEOFENCE_RADIUS_M)
                     err("radius_invalid", "Raggio geofence deve essere finito e compreso tra 0 e ${MAX_GEOFENCE_RADIUS_M.toInt()} m")
                 else if (trigger.radiusM < 100)
-                    warn("radius_small", "Raggio ${trigger.radiusM.toInt()} m sotto i 100 m consigliati")
+                    warn(
+                        "radius_small",
+                        "Raggio ${trigger.radiusM.toInt()} m sotto i 100 m consigliati; " +
+                            "lo scatto in background può arrivare con minuti di ritardo",
+                    )
 
                 if (trigger.loiteringDelayMs < 0 || trigger.loiteringDelayMs > MAX_LOITERING_MS)
                     err("loitering_invalid", "Loitering delay fuori intervallo")
+                if (trigger.transition == Transition.DWELL)
+                    err(
+                        "geofence_transition_unsupported",
+                        "Il runtime geofence supporta ENTER/EXIT; DWELL non è disponibile",
+                    )
+                if (trigger.loiteringDelayMs != 0L)
+                    err(
+                        "geofence_loitering_unsupported",
+                        "Il loitering delay richiede DWELL, non disponibile nel runtime corrente",
+                    )
 
                 if (!trigger.resolveCurrentLocation) {
                     val valid = trigger.lat.isFinite() && trigger.lng.isFinite() &&
@@ -122,7 +136,12 @@ class DraftValidator(
                 validateOptionalText(trigger.textMatch, "text_match_invalid", err)
             }
 
-            is Trigger.PhoneState -> validateOptionalText(trigger.number, "number_invalid", err)
+            is Trigger.PhoneState -> {
+                validateOptionalText(trigger.number, "number_invalid", err)
+                validateOptionalText(trigger.textMatch, "sms_text_match_invalid", err)
+                if (trigger.textMatch != null && trigger.event != PhoneEvent.SMS_RECEIVED)
+                    err("sms_text_match_invalid", "Il filtro sul testo vale solo per gli SMS in arrivo")
+            }
             is Trigger.Connectivity -> validateOptionalText(trigger.match, "match_invalid", err)
         }
     }
@@ -200,7 +219,10 @@ class DraftValidator(
                 err("url_invalid", "URL non valido o schema non consentito")
             is Action.ShowNotification -> {
                 validateRequiredText(action.title, 120, "title_invalid", err)
-                validateRequiredText(action.text, MAX_TEXT_LENGTH, "text_invalid", err)
+                // Il corpo può restare vuoto (notifica di solo titolo, come ammette il bridge):
+                // qui conta solo il bound.
+                if (action.text.length > MAX_TEXT_LENGTH)
+                    err("text_invalid", "Testo notifica oltre $MAX_TEXT_LENGTH caratteri")
             }
             is Action.Tap -> if (action.x !in 0..10_000 || action.y !in 0..10_000)
                 err("coordinates_invalid", "Coordinate tap fuori intervallo")
@@ -211,7 +233,43 @@ class DraftValidator(
             }
             is Action.RunShell -> {
                 validateRequiredText(action.cmd, MAX_COMMAND_LENGTH, "shell_invalid", err)
-                warn("shell_review", "Comando shell autonomo solo dopo approvazione del comando letterale")
+                if ('\u0000' in action.cmd)
+                    err("shell_invalid", "Il comando shell contiene un carattere NUL non eseguibile")
+                if (!StaticShellSafety.allows(trigger, whitelist))
+                    err(
+                        "shell_external_trigger",
+                        "La shell autonoma è ammessa con trigger Time, Geofence o Connectivity, " +
+                            "oppure da una chat WhatsApp 1:1 con contatto in whitelist. SMS e " +
+                            "chiamate restano esclusi: mittente e caller ID sono falsificabili",
+                    )
+                warn(
+                    "shell_review",
+                    "Comando autonomo approvato letteralmente; limite operativo 30 s e, per " +
+                        "trigger broadcast, preferire comandi brevi",
+                )
+                // Il rischio non è più solo "cosa esegue" ma "chi può farlo partire": con un
+                // trigger notification il comando parte quando decide il contatto, non tu.
+                if (trigger is Trigger.Notification)
+                    warn(
+                        "shell_contact_trigger",
+                        "Questo comando potrà essere avviato dal contatto in whitelist ogni " +
+                            "volta che il messaggio corrisponde: il comando resta quello " +
+                            "approvato, ma il momento lo sceglie lui",
+                    )
+            }
+            is Action.CopyToClipboard -> {
+                val textual = trigger is Trigger.Notification ||
+                    (trigger is Trigger.PhoneState && trigger.event == PhoneEvent.SMS_RECEIVED)
+                if (!textual)
+                    err("clipboard_source_missing", "Copia negli appunti richiede un trigger con testo (SMS o notifica)")
+                action.extractionRegex?.let { pattern ->
+                    if (!SafeExtractionRegex.isValid(pattern))
+                        err(
+                            "extraction_regex_invalid",
+                            "Regex non sicura/compatibile RE2 o oltre " +
+                                "${SafeExtractionRegex.MAX_PATTERN_CHARS} caratteri",
+                        )
+                }
             }
             is Action.InvokeLlm -> validateInvokeLlm(action, trigger, whitelist, err, warn)
         }

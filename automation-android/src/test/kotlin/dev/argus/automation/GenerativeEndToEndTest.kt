@@ -327,6 +327,7 @@ class GenerativeEndToEndTest {
                 notifier = { _, _, _ -> },
                 generativeLane = lane,
                 replies = gateway,
+                clipboard = AndroidClipboardCopier(context),
             ),
             evaluator = ConditionEvaluator(java.time.Clock.systemDefaultZone()),
             matcher = TriggerMatcher(),

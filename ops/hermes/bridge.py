@@ -83,13 +83,14 @@ Trigger, discriminato da "type":
   Ometti precision o usa FLEXIBLE normalmente; EXACT solo se l'utente chiede
   esplicitamente puntualita' esatta.
 - {"type":"geofence", "lat":number, "lng":number, "radiusM":number,
-   "transition":"ENTER"|"EXIT"|"DWELL", "loiteringDelayMs":integer,
+   "transition":"ENTER"|"EXIT", "loiteringDelayMs":0,
    "resolveCurrentLocation":boolean}
 - {"type":"notification", "pkg":string, "conversationId":string|null,
    "sender":string|null, "isGroup":boolean|null, "titleMatch":string|null,
    "textMatch":string|null}
 - {"type":"phone_state", "event":"INCOMING_CALL"|"CALL_ENDED"|"SMS_RECEIVED",
-   "number":string|null}
+   "number":string|null, "textMatch":string|null (contains case-insensitive sul testo
+   dell'SMS; SOLO con event SMS_RECEIVED)}
 - {"type":"connectivity", "medium":"WIFI"|"BT"|"POWER",
    "state":"CONNECTED"|"DISCONNECTED", "match":string|null}
 
@@ -114,7 +115,11 @@ Action, discriminata da "type":
 - {"type":"tap", "x":integer, "y":integer}
 - {"type":"input_text", "text":string}
 - {"type":"whatsapp_reply", "text":string}
-- {"type":"run_shell", "cmd":string}
+- {"type":"run_shell", "cmd":string}  // comando letterale, massimo 8192 caratteri; solo con
+  trigger time/geofence/connectivity o con una chat WhatsApp 1:1 whitelistata; mai phone_state
+- {"type":"copy_to_clipboard", "extractionRegex":string|null (regex deterministica: copia il
+   primo capture group — o il match intero — dal testo del trigger SMS/notifica; null = testo
+   integrale; per gli OTP usa "(?:^|[^+0-9])([0-9]{4,8})(?:[^0-9]|$)")}
 - {"type":"invoke_llm", "goal":string, "contextSources":[string,...],
    "allowedTools":[string,...], "replyTargetSender":boolean, "timeoutMs":integer}
 """.strip()
@@ -244,7 +249,18 @@ def validate_manifest(value: Any) -> None:
         "device_model", "android_api", "shizuku_available", "granted_permissions",
         "available_tools", "unavailable_tools", "whitelisted_contacts", "state_keys",
     }
-    if not isinstance(value, dict) or not _exact_keys(value, required):
+    # available_triggers e' opzionale: i client pre-P2 non lo inviano (default: nessun vincolo
+    # aggiuntivo oltre alle regole del prompt).
+    optional = {"available_triggers"}
+    if not isinstance(value, dict):
+        raise RequestError(400, "invalid_manifest")
+    keys = set(value.keys())
+    if not (required <= keys <= (required | optional)):
+        raise RequestError(400, "invalid_manifest")
+    triggers = value.get("available_triggers", [])
+    if not isinstance(triggers, list) or len(triggers) > 32 or not all(
+        _string(x, 64) for x in triggers
+    ):
         raise RequestError(400, "invalid_manifest")
     if not _string(value["device_model"], 256) or not _is_int(value["android_api"]):
         raise RequestError(400, "invalid_manifest")
@@ -319,6 +335,22 @@ REGOLE VINCOLANTI:
    GENERATA usa invoke_llm con contextSources ["notification"] (aggiungi "state" solo se serve
    lo stato del device), allowedTools esattamente ["whatsapp_reply"] e replyTargetSender=true;
    usa whatsapp_reply statica solo se l'utente detta il testo esatto della risposta.
+10. Se manifest.available_triggers e' presente e non vuoto, usa SOLO i trigger elencati:
+    "time", "notification", "geofence"; "phone_state.sms" = SMS_RECEIVED;
+    "phone_state.call" = INCOMING_CALL/CALL_ENDED; "connectivity.wifi",
+    "connectivity.bt" e "connectivity.power" corrispondono esattamente al rispettivo medium;
+    un match SSID Wi-Fi richiede anche "connectivity.wifi.identity".
+    Un trigger richiesto ma non in lista NON va compilato: indica brevemente il grant o il
+    meccanismo mancante in Sistema e restituisci draft null con error_code
+    "unsupported_capability".
+11. run_shell e' una shell autonoma con comando STATICO mostrato integralmente in review. Usala
+    con trigger time, geofence o connectivity, oppure con notification se e' una chat WhatsApp
+    1:1 (isGroup=false) il cui conversationId e' in whitelist: un contatto verificato puo'
+    innescare un comando gia' approvato. Mai con phone_state (mittente SMS e caller ID sono
+    falsificabili) e mai incorporando contenuti di messaggi/notifiche dentro il comando: il
+    cmd e' sempre letterale, il messaggio e' solo un interruttore.
+12. I geofence supportano soltanto ENTER/EXIT e loiteringDelayMs deve essere 0: non proporre
+    DWELL, che il runtime framework corrente non può implementare onestamente.
 
 Ora locale Europe/Rome: {now}
 
@@ -404,6 +436,7 @@ def parse_model_output(
     available_tools: set[str],
     allowed_state_keys: set[str],
     whitelisted_contact_ids: set[str],
+    available_triggers: set[str] | None = None,
 ) -> tuple[str, dict[str, Any] | None, str | None]:
     if SENTINEL not in output:
         return output.strip()[:MAX_REPLY_CHARS], None, "draft_missing"
@@ -427,7 +460,11 @@ def parse_model_output(
     if draft is None:
         return reply.strip()[:MAX_REPLY_CHARS], None, error_code or "draft_missing"
     if error_code is not None or not validate_draft(
-        draft, available_tools, allowed_state_keys, whitelisted_contact_ids
+        draft,
+        available_tools,
+        allowed_state_keys,
+        whitelisted_contact_ids,
+        available_triggers,
     ):
         return reply.strip()[:MAX_REPLY_CHARS], None, "draft_invalid"
     return reply.strip()[:MAX_REPLY_CHARS], draft, None
@@ -467,11 +504,34 @@ def parse_act_model_output(output: str) -> tuple[str | None, str | None]:
     return reply_text, error_code
 
 
+def _shell_trigger_allowed(trigger: Any, whitelisted_contact_ids: set[str]) -> bool:
+    """Chi puo' innescare un comando gia' approvato letteralmente.
+
+    Il cmd resta statico, quindi nessuna injection: il messaggio e' un interruttore, non
+    sceglie il comando. Time/geofence/connectivity non hanno un mittente; una chat WhatsApp
+    1:1 con contatto in whitelist ha un'identita' verificata (conversationId, E15).
+    SMS e chiamate restano esclusi: mittente e caller ID sono falsificabili, quindi nessuna
+    whitelist puo' trasformarli in una prova d'identita'.
+    Rispecchia StaticShellSafety lato Android, che resta la fonte autorevole.
+    """
+    kind = trigger.get("type")
+    if kind in {"time", "geofence", "connectivity"}:
+        return True
+    if kind != "notification":
+        return False
+    return (
+        trigger.get("pkg") in WHATSAPP_PACKAGES
+        and trigger.get("isGroup") is False
+        and trigger.get("conversationId") in whitelisted_contact_ids
+    )
+
+
 def validate_draft(
     value: Any,
     available_tools: set[str],
     allowed_state_keys: set[str],
     whitelisted_contact_ids: set[str],
+    available_triggers: set[str] | None = None,
 ) -> bool:
     if not isinstance(value, dict) or not _exact_keys(
         value, {"name", "trigger", "actions"}, {"conditions", "rationale", "cooldownMs"}
@@ -481,9 +541,15 @@ def validate_draft(
         value["trigger"], whitelisted_contact_ids
     ):
         return False
+    if available_triggers and not trigger_allowed(value["trigger"], available_triggers):
+        return False
     actions = value["actions"]
     if not isinstance(actions, list) or not (1 <= len(actions) <= 32) or not all(
         validate_action(action, available_tools) for action in actions
+    ):
+        return False
+    if any(action["type"] == "run_shell" for action in actions) and not _shell_trigger_allowed(
+        value["trigger"], whitelisted_contact_ids
     ):
         return False
     condition = value.get("conditions")
@@ -493,6 +559,25 @@ def validate_draft(
         return False
     cooldown = value.get("cooldownMs", 0)
     return _is_int(cooldown) and 0 <= cooldown <= 31_536_000_000
+
+
+def trigger_allowed(value: dict[str, Any], available_triggers: set[str]) -> bool:
+    kind = value["type"]
+    if kind == "phone_state":
+        required = (
+            "phone_state.sms"
+            if value["event"] == "SMS_RECEIVED"
+            else "phone_state.call"
+        )
+    elif kind == "connectivity":
+        required = f"connectivity.{value['medium'].lower()}"
+        if required == "connectivity.wifi" and value.get("match") is not None:
+            return required in available_triggers and (
+                "connectivity.wifi.identity" in available_triggers
+            )
+    else:
+        required = kind
+    return required in available_triggers
 
 
 def validate_trigger(value: Any, whitelisted_contact_ids: set[str]) -> bool:
@@ -518,16 +603,16 @@ def validate_trigger(value: Any, whitelisted_contact_ids: set[str]) -> bool:
         has_coordinates = "lat" in value and "lng" in value
         return (
             _is_number(value["radiusM"]) and 0 < value["radiusM"] <= 100_000
-            and value["transition"] in {"ENTER", "EXIT", "DWELL"}
+            and value["transition"] in {"ENTER", "EXIT"}
             and _is_number(value.get("lat", 0.0)) and _is_number(value.get("lng", 0.0))
             and -90 <= value.get("lat", 0.0) <= 90 and -180 <= value.get("lng", 0.0) <= 180
-            and _is_int(value.get("loiteringDelayMs", 0)) and 0 <= value.get("loiteringDelayMs", 0) <= 86_400_000
+            and _is_int(value.get("loiteringDelayMs", 0)) and value.get("loiteringDelayMs", 0) == 0
             and isinstance(resolve_current, bool)
             and (resolve_current or has_coordinates)
         )
     specs: dict[str, tuple[set[str], set[str]]] = {
         "notification": ({"type", "pkg"}, {"conversationId", "sender", "isGroup", "titleMatch", "textMatch"}),
-        "phone_state": ({"type", "event"}, {"number"}),
+        "phone_state": ({"type", "event"}, {"number", "textMatch"}),
         "connectivity": ({"type", "medium", "state"}, {"match"}),
     }
     if kind not in specs or not _exact_keys(value, *specs[kind]):
@@ -541,8 +626,13 @@ def validate_trigger(value: Any, whitelisted_contact_ids: set[str]) -> bool:
             conversation_id is None or conversation_id in whitelisted_contact_ids
         )
     if kind == "phone_state":
+        text_match = value.get("textMatch")
         return value["event"] in {"INCOMING_CALL", "CALL_ENDED", "SMS_RECEIVED"} and (
             value.get("number") is None or _string(value["number"], 64)
+        ) and (
+            # Filtro sul testo: solo per gli SMS (le chiamate non hanno un corpo).
+            text_match is None
+            or (value["event"] == "SMS_RECEIVED" and _string(text_match, 512))
         )
     return value["medium"] in {"WIFI", "BT", "POWER"} and value["state"] in {
         "CONNECTED", "DISCONNECTED"
@@ -600,6 +690,7 @@ def validate_action(value: Any, available_tools: set[str]) -> bool:
         "input_text": ({"type", "text"}, set()),
         "whatsapp_reply": ({"type", "text"}, set()),
         "run_shell": ({"type", "cmd"}, set()),
+        "copy_to_clipboard": ({"type"}, {"extractionRegex"}),
         "invoke_llm": ({"type", "goal", "contextSources", "allowedTools", "replyTargetSender"}, {"timeoutMs"}),
     }
     if kind not in fields or not _exact_keys(value, *fields[kind]):
@@ -619,9 +710,29 @@ def validate_action(value: Any, available_tools: set[str]) -> bool:
             and isinstance(value["replyTargetSender"], bool)
             and _is_int(value.get("timeoutMs", 60_000))
         )
+    if kind == "copy_to_clipboard":
+        pattern = value.get("extractionRegex")
+        if pattern is None:
+            return True
+        if not _string(pattern, 512):
+            return False
+        legacy_otp = r"(?<!\+)\b(\d{4,8})\b"
+        unsupported_re2 = ("(?=", "(?!", "(?<=", "(?<!", "(?P=", r"\k<")
+        if pattern != legacy_otp and any(token in pattern for token in unsupported_re2):
+            return False
+        if re.search(r"\\[1-9]", pattern):
+            return False
+        try:
+            re.compile(pattern)
+        except re.error:
+            return False
+        return True
+    if kind == "run_shell":
+        command = value["cmd"]
+        return _string(command, 8_192) and "\x00" not in command
     field_name = {
         "set_ringer": "mode", "launch_app": "pkg", "open_url": "url",
-        "input_text": "text", "whatsapp_reply": "text", "run_shell": "cmd",
+        "input_text": "text", "whatsapp_reply": "text",
     }[kind]
     return _string(value[field_name], 4_096)
 
@@ -696,6 +807,7 @@ def compile_request(data: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         set(data["manifest"]["available_tools"]),
         set(data["manifest"]["state_keys"]),
         {contact["id"] for contact in data["manifest"]["whitelisted_contacts"]},
+        set(data["manifest"].get("available_triggers", [])),
     )
     if error_code in MODEL_PROTOCOL_ERRORS:
         raise ModelProcessError(502, "model_invalid_output")

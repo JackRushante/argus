@@ -427,11 +427,13 @@ class RoomStoreTest {
         sink.record(AuditEvent(id, AuditKind.ERROR, 100, detail = "john@example.org: token segreto"))
         sink.record(AuditEvent(id, AuditKind.BLOCKED_POLICY, 200, detail = "jid_personale_42"))
         sink.record(AuditEvent(id, AuditKind.SUPPRESSED_COOLDOWN, 300, detail = "retry_at=123456"))
+        sink.record(AuditEvent(id, AuditKind.BLOCKED_POLICY, 400, detail = "shell_external_trigger"))
 
         val rows = db.auditDao().forAutomation(id.value)
-        assertEquals("retry_at=123456", rows[0].detail)
-        assertEquals("policy_blocked", rows[1].detail)
-        assertEquals("execution_error", rows[2].detail)
+        assertEquals("shell_external_trigger", rows[0].detail)
+        assertEquals("retry_at=123456", rows[1].detail)
+        assertEquals("policy_blocked", rows[2].detail)
+        assertEquals("execution_error", rows[3].detail)
     }
 
     // --- helpers -------------------------------------------------------------

@@ -40,6 +40,159 @@ class BridgeTest(unittest.TestCase):
         with self.assertRaises(bridge.RequestError):
             bridge.validate_request(request, "req-test-1")
 
+    def test_copy_to_clipboard_action_requires_a_compilable_regex(self):
+        tools = {"copy_to_clipboard"}
+        ok = {
+            "type": "copy_to_clipboard",
+            "extractionRegex": r"(?:^|[^+0-9])([0-9]{4,8})(?:[^0-9]|$)",
+        }
+        self.assertTrue(bridge.validate_action(ok, tools))
+        self.assertTrue(bridge.validate_action({
+            "type": "copy_to_clipboard",
+            "extractionRegex": r"(?<!\+)\b(\d{4,8})\b",
+        }, tools))
+        self.assertFalse(bridge.validate_action({
+            "type": "copy_to_clipboard",
+            "extractionRegex": r"(?<!foo)\d+",
+        }, tools))
+        self.assertFalse(bridge.validate_action({
+            "type": "copy_to_clipboard",
+            "extractionRegex": r"(\d+)\1",
+        }, tools))
+        self.assertTrue(bridge.validate_action({"type": "copy_to_clipboard"}, tools))
+        self.assertFalse(
+            bridge.validate_action({"type": "copy_to_clipboard", "extractionRegex": "(broken"}, tools)
+        )
+        self.assertFalse(
+            bridge.validate_action({"type": "copy_to_clipboard", "extractionRegex": "x" * 600}, tools)
+        )
+
+    def test_static_shell_is_bounded_and_rejected_on_message_triggers(self):
+        tools = {"run_shell"}
+
+        def draft(trigger, command="/system/bin/id"):
+            return {
+                "name": "shell statica",
+                "trigger": trigger,
+                "actions": [{"type": "run_shell", "cmd": command}],
+            }
+
+        trusted = (
+            {"type": "time", "cron": "0 8 * * *", "tz": "Europe/Rome"},
+            {
+                "type": "geofence", "lat": 0, "lng": 0, "radiusM": 150,
+                "transition": "EXIT", "loiteringDelayMs": 0,
+                "resolveCurrentLocation": True,
+            },
+            {"type": "connectivity", "medium": "POWER", "state": "CONNECTED", "match": None},
+        )
+        for trigger in trusted:
+            self.assertTrue(bridge.validate_draft(draft(trigger), tools, set(), set()))
+
+        external = (
+            {
+                "type": "notification", "pkg": "com.whatsapp", "conversationId": None,
+                "sender": None, "isGroup": None, "titleMatch": None, "textMatch": "esegui",
+            },
+            {
+                "type": "phone_state", "event": "SMS_RECEIVED", "number": None,
+                "textMatch": "esegui",
+            },
+        )
+        for trigger in external:
+            self.assertFalse(bridge.validate_draft(draft(trigger), tools, set(), set()))
+
+        self.assertTrue(bridge.validate_action({"type": "run_shell", "cmd": "x" * 8_192}, tools))
+        self.assertFalse(bridge.validate_action({"type": "run_shell", "cmd": "x" * 8_193}, tools))
+        self.assertFalse(bridge.validate_action({"type": "run_shell", "cmd": "id\x00whoami"}, tools))
+
+        prompt = bridge.build_prompt(self.request())
+        self.assertIn("run_shell", prompt)
+        self.assertIn("Mai con phone_state", prompt)
+
+    def test_whitelisted_whatsapp_contact_can_trigger_static_shell(self):
+        """Decisione Lorenzo 2026-07-15: un contatto verificato puo' innescare un comando gia'
+        approvato. Il cmd resta statico, quindi nessuna injection: cambia solo chi preme
+        l'interruttore. SMS e chiamate restano fuori perche' l'identita' e' falsificabile."""
+        tools = {"run_shell"}
+        whitelisted = {"shortcut:com.whatsapp:ottica"}
+
+        def draft(trigger):
+            return {
+                "name": "shell da contatto",
+                "trigger": trigger,
+                "actions": [{"type": "run_shell", "cmd": "/system/bin/id"}],
+            }
+
+        def notification(conversation_id, is_group=False, pkg="com.whatsapp"):
+            return {
+                "type": "notification", "pkg": pkg, "conversationId": conversation_id,
+                "sender": None, "isGroup": is_group, "titleMatch": None, "textMatch": "esegui",
+            }
+
+        self.assertTrue(
+            bridge.validate_draft(
+                draft(notification("shortcut:com.whatsapp:ottica")), tools, set(), whitelisted
+            )
+        )
+
+        for trigger in (
+            notification("shortcut:com.whatsapp:sconosciuto"),
+            notification("shortcut:com.whatsapp:ottica", is_group=True),
+            notification(None),
+            notification("shortcut:com.whatsapp:ottica", pkg="com.example.spoof"),
+        ):
+            self.assertFalse(bridge.validate_draft(draft(trigger), tools, set(), whitelisted))
+
+        self.assertFalse(
+            bridge.validate_draft(
+                draft({"type": "phone_state", "event": "SMS_RECEIVED", "number": None,
+                       "textMatch": "esegui"}),
+                tools, set(), whitelisted,
+            )
+        )
+
+    def test_geofence_rejects_unimplemented_dwell_and_loitering(self):
+        base = {
+            "type": "geofence",
+            "lat": 45.0,
+            "lng": 9.0,
+            "radiusM": 150,
+            "transition": "EXIT",
+            "loiteringDelayMs": 0,
+            "resolveCurrentLocation": False,
+        }
+        self.assertTrue(bridge.validate_trigger(base, set()))
+        self.assertFalse(bridge.validate_trigger({**base, "transition": "DWELL"}, set()))
+        self.assertFalse(bridge.validate_trigger({**base, "loiteringDelayMs": 60_000}, set()))
+        self.assertIn("soltanto ENTER/EXIT", bridge.build_prompt(self.request()))
+
+    def test_manifest_available_triggers_is_optional_and_bounded(self):
+        # Client pre-P2: campo assente, accettato (retrocompatibilita').
+        legacy = self.request()
+        self.assertIs(legacy, bridge.validate_request(legacy, "req-test-1"))
+
+        # Client P2: lista di wire name, accettata e usata dal prompt (REGOLA 10).
+        current = self.request()
+        current["manifest"]["available_triggers"] = ["time", "notification", "phone_state.sms"]
+        self.assertIs(current, bridge.validate_request(current, "req-test-1"))
+        prompt = bridge.build_prompt(current)
+        self.assertIn("available_triggers", prompt)
+        self.assertIn("phone_state.sms", prompt)
+
+        # Malformata o fuori bounds: rifiutata.
+        for bad in (["x" * 65], "not-a-list", ["ok"] * 33):
+            broken = self.request()
+            broken["manifest"]["available_triggers"] = bad
+            with self.assertRaises(bridge.RequestError):
+                bridge.validate_request(broken, "req-test-1")
+
+        # Chiavi sconosciute restano vietate: solo available_triggers e' opzionale.
+        unknown = self.request()
+        unknown["manifest"]["surprise"] = True
+        with self.assertRaises(bridge.RequestError):
+            bridge.validate_request(unknown, "req-test-1")
+
     def test_act_request_is_strict_minimal_and_reply_only(self):
         request = self.act_request()
         self.assertIs(request, bridge.validate_act_request(request, "act-test-1"))
@@ -93,6 +246,63 @@ class BridgeTest(unittest.TestCase):
         )
         self.assertIsNone(draft)
         self.assertEqual("draft_invalid", error)
+
+    def test_model_output_enforces_granular_available_triggers(self):
+        output = (
+            'Pronto.\n@@META@@ {"draft":{"name":"Bluetooth auto",'
+            '"trigger":{"type":"connectivity","medium":"BT","state":"CONNECTED"},'
+            '"actions":[{"type":"run_shell","cmd":"/system/bin/true"}]},'
+            '"error_code":null}'
+        )
+        _, draft, error = bridge.parse_model_output(
+            output,
+            {"run_shell"},
+            set(),
+            set(),
+            {"connectivity.power"},
+        )
+        self.assertIsNone(draft)
+        self.assertEqual("draft_invalid", error)
+
+        _, draft, error = bridge.parse_model_output(
+            output,
+            {"run_shell"},
+            set(),
+            set(),
+            {"connectivity.bt"},
+        )
+        self.assertEqual("BT", draft["trigger"]["medium"])
+        self.assertIsNone(error)
+
+        # Manifest legacy/empty: nessun vincolo aggiuntivo, per retrocompatibilita'.
+        _, legacy, error = bridge.parse_model_output(
+            output, {"run_shell"}, set(), set(), set()
+        )
+        self.assertIsNotNone(legacy)
+        self.assertIsNone(error)
+
+        wifi_named = output.replace(
+            '"medium":"BT"',
+            '"medium":"WIFI","match":"Casa"',
+        )
+        _, draft, error = bridge.parse_model_output(
+            wifi_named,
+            {"run_shell"},
+            set(),
+            set(),
+            {"connectivity.wifi"},
+        )
+        self.assertIsNone(draft)
+        self.assertEqual("draft_invalid", error)
+        _, draft, error = bridge.parse_model_output(
+            wifi_named,
+            {"run_shell"},
+            set(),
+            set(),
+            {"connectivity.wifi", "connectivity.wifi.identity"},
+        )
+        self.assertEqual("Casa", draft["trigger"]["match"])
+        self.assertIsNone(error)
 
     def test_missing_or_malformed_meta_fails_soft(self):
         self.assertEqual(

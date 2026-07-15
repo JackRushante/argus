@@ -34,11 +34,16 @@ data class CapabilityManifest(
     val unavailableTools: Map<String, String>,   // tool -> motivo
     val whitelistedContacts: List<WhitelistedContact>,
     val stateKeys: Map<String, String> = StateKeys.ALL,
+    /** Trigger realmente armabili ora (wire name, es. "time", "phone_state.sms").
+     *  Vuota nei manifest legacy: la riga non viene emessa. */
+    val availableTriggers: List<String> = emptyList(),
 ) {
     fun render(): String = buildString {
         appendLine("DISPOSITIVO: $deviceModel, Android $androidVersion")
         appendLine("SHIZUKU: ${if (shizukuAvailable) "attivo (privilegi shell)" else "NON attivo — azioni shell in coda"}")
         appendLine("PERMESSI: ${grantedPermissions.joinToString().ifEmpty { "nessuno" }}")
+        if (availableTriggers.isNotEmpty())
+            appendLine("TRIGGER DISPONIBILI (usa SOLO questi): ${availableTriggers.joinToString()}")
         appendLine("TOOL DISPONIBILI: ${availableTools.joinToString()}")
         if (unavailableTools.isNotEmpty())
             appendLine("TOOL NON DISPONIBILI: " + unavailableTools.entries.joinToString { "${it.key} (${it.value})" })

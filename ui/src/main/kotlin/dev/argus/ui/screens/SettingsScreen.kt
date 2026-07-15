@@ -20,13 +20,16 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.BatterySaver
+import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Hub
+import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material.icons.rounded.MyLocation
 import androidx.compose.material.icons.rounded.Notifications
+import androidx.compose.material.icons.rounded.Sms
 import androidx.compose.material.icons.rounded.PrivacyTip
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Terminal
@@ -190,8 +193,8 @@ private fun HealthSection(state: SettingsState, callbacks: SettingsCallbacks) {
     val (locLevel, locSub) = when (state.backgroundLocation) {
         BgLocationState.GRANTED -> HealthLevel.OK to "sempre — i geofence sono affidabili"
         BgLocationState.WHILE_IN_USE -> HealthLevel.WARN to "solo mentre in uso — serve «Consenti sempre» per i geofence"
-        BgLocationState.DENIED -> HealthLevel.WARN to "negata — i geofence non funzionano"
-        BgLocationState.NOT_NEEDED -> HealthLevel.NEUTRAL to "non necessaria — nessuna regola geofence"
+        BgLocationState.DENIED -> HealthLevel.WARN to "negata o non precisa — i geofence non funzionano"
+        BgLocationState.NOT_NEEDED -> HealthLevel.NEUTRAL to "non necessaria — nessuna regola geofence; tocca per concederla in anticipo"
     }
 
     SettingsSection("SALUTE") {
@@ -203,7 +206,11 @@ private fun HealthSection(state: SettingsState, callbacks: SettingsCallbacks) {
             )
             HealthRow(
                 Icons.Rounded.BatterySaver, "Ottimizzazione batteria",
-                if (state.batteryExempt) "esclusa — minore rischio di ritardi in background" else "attiva — OxygenOS può ritardare il lavoro in background",
+                if (state.batteryExempt) {
+                    "esclusione Android concessa — i controlli attività in background/avvio automatico OxygenOS restano manuali"
+                } else {
+                    "attiva — concedi l'esclusione e verifica anche attività in background/avvio automatico in OxygenOS"
+                },
                 if (state.batteryExempt) HealthLevel.OK else HealthLevel.WARN,
                 onFix = callbacks::onOpenBatteryFix,
             )
@@ -227,6 +234,50 @@ private fun HealthSection(state: SettingsState, callbacks: SettingsCallbacks) {
                 Icons.Rounded.MyLocation, "Posizione in background", locSub, locLevel,
                 onFix = callbacks::onOpenLocationFix,
             )
+            // Telefonia (P2-2): opt-in, non un problema di salute — NEUTRAL finché non
+            // concesso, il tap lancia direttamente la richiesta runtime.
+            HealthRow(
+                Icons.Rounded.Sms, "Trigger SMS",
+                if (state.smsTriggerGranted) {
+                    "attivi per SMS telefonici — chat RCS e MMS non emettono questo trigger"
+                } else {
+                    "non attivi — solo SMS telefonici, non chat RCS o MMS"
+                },
+                if (state.smsTriggerGranted) HealthLevel.OK else HealthLevel.NEUTRAL,
+                onFix = callbacks::onRequestSmsPermission,
+                actionLabel = if (state.smsTriggerGranted) null else "Attiva",
+            )
+            HealthRow(
+                Icons.Rounded.Call, "Trigger chiamate",
+                if (state.callTriggerGranted) {
+                    "attivi — squillo e fine chiamata armabili"
+                } else {
+                    "non attivi — consenti per armare regole sulle chiamate"
+                },
+                if (state.callTriggerGranted) HealthLevel.OK else HealthLevel.NEUTRAL,
+                onFix = callbacks::onRequestCallPermissions,
+                actionLabel = if (state.callTriggerGranted) null else "Attiva",
+            )
+            HealthRow(
+                Icons.Rounded.Bluetooth, "Trigger Bluetooth",
+                if (state.bluetoothTriggerGranted) {
+                    "attivi — connessione e disconnessione dei dispositivi sono armabili"
+                } else {
+                    "non attivi — consenti Dispositivi nelle vicinanze per armare le regole"
+                },
+                if (state.bluetoothTriggerGranted) HealthLevel.OK else HealthLevel.NEUTRAL,
+                onFix = callbacks::onRequestBluetoothPermission,
+                actionLabel = if (state.bluetoothTriggerGranted) null else "Attiva",
+            )
+            if (state.connectivitySentinelActive) {
+                HealthRow(
+                    Icons.Rounded.Hub,
+                    "Sentinella connettività",
+                    "attiva — monitora Wi-Fi e alimentazione per le regole armate",
+                    HealthLevel.OK,
+                    onFix = {},
+                )
+            }
         }
     }
 }
@@ -238,6 +289,9 @@ private fun HealthRow(
     subtitle: String,
     level: HealthLevel,
     onFix: () -> Unit,
+    /** Azione esplicita per le righe opt-in (es. "Attiva"): senza, NEUTRAL/OK non sono
+     *  cliccabili e onFix vive solo nel "Correggi" dello stato WARN. */
+    actionLabel: String? = null,
 ) {
     val semantic = LocalArgusSemantic.current
     val warn = level == HealthLevel.WARN
@@ -247,6 +301,9 @@ private fun HealthRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
+            // Tutta la riga è tappabile, in QUALSIASI stato: apre il pannello/permesso
+            // relativo (feedback Lorenzo: le righe verdi/grigie erano mute al tocco).
+            .clickable { onFix() }
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .background(tintBg)
             .border(1.dp, borderColor, RoundedCornerShape(12.dp))
@@ -264,13 +321,15 @@ private fun HealthRow(
             Text(title, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge)
             Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
         }
-        when (level) {
-            HealthLevel.OK ->
-                Icon(Icons.Rounded.CheckCircle, contentDescription = "ok", tint = semantic.armed.fg, modifier = Modifier.size(22.dp))
-            HealthLevel.NEUTRAL ->
-                Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp))
-            HealthLevel.WARN ->
+        when {
+            level == HealthLevel.WARN ->
                 OutlinedButton(onClick = onFix, modifier = Modifier.heightIn(min = 48.dp)) { Text("Correggi") }
+            actionLabel != null ->
+                OutlinedButton(onClick = onFix, modifier = Modifier.heightIn(min = 48.dp)) { Text(actionLabel) }
+            level == HealthLevel.OK ->
+                Icon(Icons.Rounded.CheckCircle, contentDescription = "ok", tint = semantic.armed.fg, modifier = Modifier.size(22.dp))
+            else ->
+                Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp))
         }
     }
 }

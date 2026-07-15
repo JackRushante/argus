@@ -91,7 +91,7 @@ import dev.argus.ui.theme.RolePair
 /**
  * Esempi cliccabili dell'empty state. Rivisti su feedback di Lorenzo (2026-07-14): niente
  * riferimenti personali e SOLO regole armabili con le capability correnti (trigger time o
- * notification — il geofence del prototipo §1a torna quando P2 ne abilita la registrazione).
+ * notification; il geofence del prototipo §1a è disponibile quando i permessi posizione sono verdi).
  */
 private val ChatSuggestions = listOf(
     "Ogni giorno alle 8 togli il Non disturbare e alza la suoneria.",

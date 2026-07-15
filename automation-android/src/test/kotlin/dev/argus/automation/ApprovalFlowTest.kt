@@ -108,7 +108,6 @@ class ApprovalFlowTest {
         val fixture = fixture(
             available = setOf(
                 CapabilityIds.TRIGGER_GEOFENCE,
-                CapabilityIds.STATE_LOCATION,
                 ActionCapabilities.SET_WIFI,
             ),
             location = DeviceLocation(45.4642, 9.1900),

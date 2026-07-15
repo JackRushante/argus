@@ -185,6 +185,13 @@ data class SettingsState(
     /** Accesso notification listener: lettura notifiche WhatsApp e canale di reply (P1). */
     val notificationListenerGranted: Boolean,
     val backgroundLocation: BgLocationState,   // GRANTED | WHILE_IN_USE | DENIED | NOT_NEEDED (nessuna regola geofence)
+    /** Trigger telefonia (P2-2): opt-in permanente, righe sempre azionabili in Sistema. */
+    val smsTriggerGranted: Boolean = false,
+    val callTriggerGranted: Boolean = false,
+    /** Trigger ACL Bluetooth (P2-3): runtime grant NEARBY_DEVICES su Android 12+. */
+    val bluetoothTriggerGranted: Boolean = false,
+    /** Visibile solo mentre il monitor condiviso Wi-Fi/alimentazione è realmente attivo. */
+    val connectivitySentinelActive: Boolean = false,
     val whitelist: List<ContactRow>,
     /** Conversazioni 1:1 osservate (solo WhatsApp) proposte dal picker whitelist. */
     val observedCandidates: List<ContactRow> = emptyList(),
@@ -217,6 +224,10 @@ interface SettingsCallbacks {
     fun onOpenBatteryFix(); fun onOpenNotificationAccessFix(); fun onOpenLocationFix()
     /** Apre le impostazioni di sistema per l'accesso notification listener (lettura, P1). */
     fun onOpenNotificationListenerFix() {}
+    /** Richieste runtime dei trigger telefonia (P2-2): RECEIVE_SMS e READ_PHONE_STATE(+CALL_LOG). */
+    fun onRequestSmsPermission() {}
+    fun onRequestCallPermissions() {}
+    fun onRequestBluetoothPermission() {}
     fun onRemoveContact(conversationId: String); fun onAddContact()   // picker → risoluzione conversationId
     /** Selezione dal picker delle conversazioni 1:1 osservate. */
     fun onAddObservedContact(contact: ContactRow) {}

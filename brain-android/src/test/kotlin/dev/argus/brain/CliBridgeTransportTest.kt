@@ -18,6 +18,7 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
@@ -48,6 +49,7 @@ class CliBridgeTransportTest {
         availableTools = listOf("set_dnd", "set_wifi"),
         unavailableTools = mapOf("vision.analyze" to "provider assente"),
         whitelistedContacts = listOf(WhitelistedContact("Moglie", "jid:42")),
+        availableTriggers = listOf("time", "notification", "phone_state.sms"),
     )
 
     @BeforeTest fun setUp() { server = MockWebServer().apply { start() } }
@@ -86,6 +88,11 @@ class CliBridgeTransportTest {
         assertEquals(REQUEST_ID, root.getValue("request_id").jsonPrimitive.content)
         val sentManifest = root.getValue("manifest").jsonObject
         assertEquals(36, sentManifest.getValue("android_api").jsonPrimitive.content.toInt())
+        // I trigger armabili viaggiano nel wire: Hermes non propone trigger morti (P2-2).
+        assertEquals(
+            listOf("time", "notification", "phone_state.sms"),
+            sentManifest.getValue("available_triggers").jsonArray.map { it.jsonPrimitive.content },
+        )
         val sentState = root.getValue("state").jsonObject
         assertEquals("normal", sentState.getValue("values").jsonObject.getValue("ringer").jsonPrimitive.content)
         assertFalse("battery" in sentState.getValue("values").jsonObject)

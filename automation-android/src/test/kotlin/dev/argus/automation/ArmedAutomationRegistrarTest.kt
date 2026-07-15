@@ -10,8 +10,14 @@ import dev.argus.engine.model.CapabilityIds
 import dev.argus.engine.model.ConnMedium
 import dev.argus.engine.model.ConnState
 import dev.argus.engine.model.CreatedBy
+import dev.argus.engine.model.PhoneEvent
 import dev.argus.engine.model.TimePrecision
 import dev.argus.engine.model.Trigger
+import dev.argus.automation.connectivity.ConnectivityReconcileReport
+import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
+import dev.argus.automation.geofence.GeofenceReconcileReport
+import dev.argus.automation.geofence.GeofenceTriggerRuntime
+import dev.argus.automation.geofence.NoopGeofenceTriggerRuntime
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.runtime.FireClaimRequest
 import dev.argus.engine.runtime.FireClaimResult
@@ -81,9 +87,89 @@ class ArmedAutomationRegistrarTest {
         assertFalse(
             registrar(
                 store = SingleRuleStore(connectivity),
-                capabilities = setOf(CapabilityIds.TRIGGER_CONNECTIVITY),
+                capabilities = setOf(CapabilityIds.TRIGGER_CONNECTIVITY_WIFI),
             ).register(connectivity),
             "trigger senza registrar reale restano fail-closed",
+        )
+    }
+
+    @Test
+    fun `phone state rule registers only with its granular grant capability`() = runTest {
+        val sms = signed(
+            rule("sms").copy(
+                trigger = Trigger.PhoneState(PhoneEvent.SMS_RECEIVED),
+                actions = listOf(Action.ShowNotification("Argus", "sms")),
+            ),
+        )
+        assertTrue(
+            registrar(
+                store = SingleRuleStore(sms),
+                capabilities = setOf(CapabilityIds.TRIGGER_PHONE_SMS),
+            ).register(sms),
+        )
+        assertFalse(
+            registrar(
+                store = SingleRuleStore(sms),
+                capabilities = setOf(CapabilityIds.TRIGGER_PHONE_CALL),
+            ).register(sms),
+            "il grant chiamate non copre gli SMS: capability granulari",
+        )
+
+        val call = signed(
+            rule("call").copy(
+                trigger = Trigger.PhoneState(PhoneEvent.INCOMING_CALL),
+                actions = listOf(Action.ShowNotification("Argus", "chiamata")),
+            ),
+        )
+        assertTrue(
+            registrar(
+                store = SingleRuleStore(call),
+                capabilities = setOf(CapabilityIds.TRIGGER_PHONE_CALL),
+            ).register(call),
+        )
+        assertFalse(
+            registrar(store = SingleRuleStore(call), capabilities = emptySet()).register(call),
+        )
+    }
+
+    @Test
+    fun `connectivity uses granular capability and sentinel only for wifi or power`() = runTest {
+        val wifi = signed(
+            rule("wifi").copy(
+                trigger = Trigger.Connectivity(ConnMedium.WIFI, ConnState.CONNECTED),
+                actions = listOf(Action.ShowNotification("Argus", "wifi")),
+            ),
+        )
+        val activeRuntime = ConnectivityTriggerRuntime {
+            ConnectivityReconcileReport(requiredBy = listOf(wifi.id), active = true)
+        }
+        assertTrue(
+            registrar(
+                store = SingleRuleStore(wifi),
+                capabilities = setOf(CapabilityIds.TRIGGER_CONNECTIVITY_WIFI),
+                connectivity = activeRuntime,
+            ).register(wifi),
+        )
+        assertFalse(
+            registrar(
+                store = SingleRuleStore(wifi),
+                capabilities = setOf(CapabilityIds.TRIGGER_CONNECTIVITY_BT),
+                connectivity = activeRuntime,
+            ).register(wifi),
+        )
+
+        val bluetooth = signed(
+            rule("bt").copy(
+                trigger = Trigger.Connectivity(ConnMedium.BT, ConnState.CONNECTED),
+                actions = listOf(Action.ShowNotification("Argus", "bt")),
+            ),
+        )
+        assertTrue(
+            registrar(
+                store = SingleRuleStore(bluetooth),
+                capabilities = setOf(CapabilityIds.TRIGGER_CONNECTIVITY_BT),
+            ).register(bluetooth),
+            "il receiver Bluetooth manifest non deve avviare la sentinella",
         )
     }
 
@@ -103,9 +189,56 @@ class ArmedAutomationRegistrarTest {
         assertTrue(registrar(store = store).register(rule))
     }
 
+    @Test
+    fun `geofence requires location capability and a tracked OS registration`() = runTest {
+        val geofenceRule = signed(
+            rule("geo").copy(
+                trigger = Trigger.Geofence(
+                    lat = 45.0,
+                    lng = 9.0,
+                    radiusM = 150.0,
+                    transition = dev.argus.engine.model.Transition.EXIT,
+                ),
+                actions = listOf(Action.ShowNotification("Argus", "uscita")),
+            ),
+        )
+        val active = GeofenceTriggerRuntime {
+            GeofenceReconcileReport(requiredBy = listOf(geofenceRule.id))
+        }
+
+        assertTrue(
+            registrar(
+                store = SingleRuleStore(geofenceRule),
+                capabilities = setOf(CapabilityIds.TRIGGER_GEOFENCE),
+                geofence = active,
+            ).register(geofenceRule),
+        )
+        assertFalse(
+            registrar(
+                store = SingleRuleStore(geofenceRule),
+                capabilities = emptySet(),
+                geofence = active,
+            ).register(geofenceRule),
+        )
+        assertFalse(
+            registrar(
+                store = SingleRuleStore(geofenceRule),
+                capabilities = setOf(CapabilityIds.TRIGGER_GEOFENCE),
+                geofence = GeofenceTriggerRuntime {
+                    GeofenceReconcileReport(
+                        requiredBy = listOf(geofenceRule.id),
+                        failed = listOf(geofenceRule.id),
+                    )
+                },
+            ).register(geofenceRule),
+        )
+    }
+
     private fun registrar(
         store: AutomationStore,
         capabilities: Set<String> = emptySet(),
+        connectivity: ConnectivityTriggerRuntime = dev.argus.automation.connectivity.NoopConnectivityTriggerRuntime,
+        geofence: GeofenceTriggerRuntime = NoopGeofenceTriggerRuntime,
     ) = AndroidArmedAutomationRegistrar(
         coordinator = coordinator(store),
         store = store,
@@ -116,6 +249,8 @@ class ArmedAutomationRegistrarTest {
                 whitelistedConversationIds = setOf(CONVERSATION_ID),
             )
         },
+        connectivity = connectivity,
+        geofence = geofence,
     )
 
     private fun coordinator(store: AutomationStore) = TimeAlarmCoordinator(
