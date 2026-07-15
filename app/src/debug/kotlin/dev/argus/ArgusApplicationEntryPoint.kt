@@ -6,6 +6,7 @@ import dagger.hilt.components.SingletonComponent
 import dev.argus.automation.AppPreferencesStore
 import dev.argus.automation.ApprovalFlow
 import dev.argus.automation.DeviceStateSnapshotProvider
+import dev.argus.automation.phone.PhoneEventIngress
 import dev.argus.automation.TimeAlarmBackend
 import dev.argus.automation.TimeAlarmRuntime
 import dev.argus.brain.BridgeConfigurationStore
@@ -26,6 +27,7 @@ interface ArgusApplicationEntryPoint {
     fun brain(): Brain
     fun capabilityProbe(): CapabilityProbe
     fun deviceStateSnapshotProvider(): DeviceStateSnapshotProvider
+    fun phoneEventIngress(): PhoneEventIngress
     fun approvalFlow(): ApprovalFlow
     fun automationStore(): AutomationStore
     fun draftRepository(): DraftRepository
