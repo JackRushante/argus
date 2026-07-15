@@ -286,6 +286,31 @@ e [limiti location in background](https://developer.android.com/develop/sensors-
   vera resumability per-action/worker o FGS short-lived richiede design e test cached/Doze dedicati.
 - Full gate senza cache, smoke, aggiornamento handoff/CLAUDE/contract/audit, merge su master.
 
+## Audit pre-merge (Claude, 2026-07-15 sera)
+
+Dodici punti richiesti dall'handoff Codex §5. `master..HEAD` = 97 file, +8254/−92.
+**Nessun finding bloccante.** Le righe marcate *ereditato* non sono state rieseguite: sono prove di
+Codex che non ho ri-verificato in modo indipendente, e vanno lette come tali.
+
+| # | Punto | Esito | Come |
+|---|-------|-------|------|
+| 1 | Nessun file inatteso o segreto nel diff | **PASS** | unico non-sorgente: `engine-core/build.gradle.kts` (+ RE2/J 1.8, atteso). Ricerca di bearer/api-key/token: solo fixture di test che verificano il NON-leak di stderr. `git diff --check` pulito |
+| 2 | Manifest coerente | **PASS** | SMS receiver `exported` ma protetto da `BROADCAST_SMS` (nessuna app può forgiare un SMS); PHONE_STATE e ACL Bluetooth sono broadcast protetti dal framework; **nessun receiver POWER nel manifest** (non è esente, sta nella sentinella); FGS `specialUse` con `PROPERTY_SPECIAL_USE_FGS_SUBTYPE`; geofence receiver non esportato. Difeso da `PhoneManifestHardeningTest` e `ConnectivityManifestHardeningTest` |
+| 3 | Capability matrix concorde | **PASS** | `phone_state.call` richiede **sia** `READ_PHONE_STATE` **sia** `READ_CALL_LOG`, coerente in `availableTriggers` e `availableCapabilities`. `StaticShellSafety` è **fonte unica** con due overload (trigger dichiarato + evento runtime), entrambi `when` **esaustivi** su sealed: una nuova famiglia di trigger non compila finché non si decide se la shell è ammessa |
+| 4 | Privacy | **PASS** | `smsText` **assente da tutto `data/`**: mai persistito. `PrefsCallStateStore` ha un `require(smsText == null && event != SMS_RECEIVED)` — invariante a runtime, non un commento. Log: solo conteggi (`parts=N`), booleani (`number=`, `named=`) e **nomi di classe** d'eccezione, mai i messaggi. Audit `detail`: assertione automatica sui record reali dei gate, nessun run di 4+ cifre |
+| 5 | Persistenza pending/ack, corruzione fail-closed | **ereditato** | test di Codex (`a7ee8b3`), non rieseguiti |
+| 6 | Lifecycle: app-start, boot/update, revoca grant | **ereditato** | test di Codex; il **reboot fisico** resta un gate esterno storico |
+| 7 | Cleanup indipendente | **PASS** | `onDelete` tenta scheduler, connectivity e geofence **separatamente** via `cancellationSafeOrNull`; un fallimento non salta gli altri; esito onesto in UI ("pulizia runtime rinviata") |
+| 8 | Cancellation rilanciata | **PASS** | `catch (error: CancellationException) { throw error }` prima del catch generico |
+| 9 | Hermes: attivo, suite, hash, backup | **PASS** | verificato oggi: `is-active` → `active`; hash `bridge.py` e `test_bridge.py` **identici** fra repo e host |
+| 10 | Device pulito | **PASS** | verificato oggi: nessun FGS residuo, `mock_location` a `default`, test provider rimossi, Wi-Fi riacceso, `BLUETOOTH_CONNECT` revocato. Restano armati **di proposito** i due geofence del gate fisico |
+| 11 | Regole di Lorenzo intatte | **PASS con nota** | vedi riga 9 della DoD |
+| 12 | Documenti coerenti verificato/ragionato/non provato | **PASS** | questo giro: piano P2 e design master aggiornati; B8, sensori e DWELL riportati alla classe reale |
+
+**Gate host su questo HEAD**: `test lintDebug assembleDebug assembleDebugAndroidTest
+--no-build-cache --rerun-tasks --no-parallel` → **`BUILD SUCCESSFUL`, 758/758 task, EXIT=0**
+(2m23s), stesso conteggio di Codex ⇒ nessuna regressione.
+
 ## Definition of Done P2
 
 Stato al 2026-07-15 sera. **Un solo punto resta aperto.**
