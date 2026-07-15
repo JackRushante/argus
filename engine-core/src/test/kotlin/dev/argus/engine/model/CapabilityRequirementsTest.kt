@@ -5,6 +5,22 @@ import kotlin.test.assertEquals
 
 class CapabilityRequirementsTest {
     @Test
+    fun `geofence trigger is OS managed and does not require Shizuku state location`() {
+        assertEquals(
+            setOf(CapabilityIds.TRIGGER_GEOFENCE, CapabilityIds.ACTION_SET_WIFI),
+            CapabilityRequirements.derive(
+                trigger = Trigger.Geofence(
+                    lat = 45.0,
+                    lng = 9.0,
+                    radiusM = 150.0,
+                    transition = Transition.EXIT,
+                ),
+                actions = listOf(Action.SetWifi(false)),
+            ),
+        )
+    }
+
+    @Test
     fun `requirements include trigger condition and action capabilities`() {
         assertEquals(
             setOf(

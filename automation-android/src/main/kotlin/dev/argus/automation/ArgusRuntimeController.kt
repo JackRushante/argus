@@ -16,6 +16,8 @@ import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.atomic.AtomicBoolean
 import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
 import dev.argus.automation.connectivity.NoopConnectivityTriggerRuntime
+import dev.argus.automation.geofence.GeofenceTriggerRuntime
+import dev.argus.automation.geofence.NoopGeofenceTriggerRuntime
 
 /** Bootstrap idempotente del runtime event-driven, condiviso da Application e lifecycle processo. */
 class ArgusRuntimeController(
@@ -27,6 +29,7 @@ class ArgusRuntimeController(
     private val preferences: AppPreferencesStore,
     private val replyRegistry: ActiveNotificationReplyRegistry,
     private val connectivity: ConnectivityTriggerRuntime = NoopConnectivityTriggerRuntime,
+    private val geofence: GeofenceTriggerRuntime = NoopGeofenceTriggerRuntime,
     private val nowMillis: () -> Long = System::currentTimeMillis,
 ) {
     private val started = AtomicBoolean(false)
@@ -75,6 +78,14 @@ class ArgusRuntimeController(
             .onFailure { error ->
                 Log.w(TAG, "reconcile connectivity fallito: ${error::class.java.simpleName}")
             }
+        runCatchingPreservingCancellation {
+            geofence.reconcile(
+                recreateOsRegistrations = reason == ReconcileReason.APP_START ||
+                    reason.recreateOsRegistration,
+            )
+        }.onFailure { error ->
+            Log.w(TAG, "reconcile geofence fallito: ${error::class.java.simpleName}")
+        }
         Unit
     }
 

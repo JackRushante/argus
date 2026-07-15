@@ -10,6 +10,9 @@ import dev.argus.automation.phone.PhoneEventIngress
 import dev.argus.automation.connectivity.ConnectivityEventIngress
 import dev.argus.automation.connectivity.ConnectivitySentinelStatus
 import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
+import dev.argus.automation.geofence.GeofenceEventIngress
+import dev.argus.automation.geofence.GeofenceStateStore
+import dev.argus.automation.geofence.GeofenceTriggerRuntime
 import dev.argus.automation.ShizukuStaticShellRunner
 import dev.argus.automation.TimeAlarmBackend
 import dev.argus.automation.TimeAlarmRuntime
@@ -35,6 +38,9 @@ interface ArgusApplicationEntryPoint {
     fun connectivityEventIngress(): ConnectivityEventIngress
     fun connectivitySentinelStatus(): ConnectivitySentinelStatus
     fun connectivityTriggerRuntime(): ConnectivityTriggerRuntime
+    fun geofenceEventIngress(): GeofenceEventIngress
+    fun geofenceStateStore(): GeofenceStateStore
+    fun geofenceTriggerRuntime(): GeofenceTriggerRuntime
     fun staticShellRunner(): ShizukuStaticShellRunner
     fun approvalFlow(): ApprovalFlow
     fun automationStore(): AutomationStore

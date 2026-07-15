@@ -193,7 +193,7 @@ private fun HealthSection(state: SettingsState, callbacks: SettingsCallbacks) {
     val (locLevel, locSub) = when (state.backgroundLocation) {
         BgLocationState.GRANTED -> HealthLevel.OK to "sempre — i geofence sono affidabili"
         BgLocationState.WHILE_IN_USE -> HealthLevel.WARN to "solo mentre in uso — serve «Consenti sempre» per i geofence"
-        BgLocationState.DENIED -> HealthLevel.WARN to "negata — i geofence non funzionano"
+        BgLocationState.DENIED -> HealthLevel.WARN to "negata o non precisa — i geofence non funzionano"
         BgLocationState.NOT_NEEDED -> HealthLevel.NEUTRAL to "non necessaria — nessuna regola geofence; tocca per concederla in anticipo"
     }
 

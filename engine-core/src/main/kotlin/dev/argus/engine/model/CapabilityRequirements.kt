@@ -52,7 +52,9 @@ object CapabilityRequirements {
 
     private fun forTrigger(trigger: Trigger): Set<String> = when (trigger) {
         is Trigger.Time -> setOf(CapabilityIds.TRIGGER_TIME)
-        is Trigger.Geofence -> setOf(CapabilityIds.TRIGGER_GEOFENCE, CapabilityIds.STATE_LOCATION)
+        // La registrazione è OS-managed e non legge DeviceState/Shizuku. STATE_LOCATION serve
+        // solo a una Condition.LocationIn, derivata separatamente qui sotto.
+        is Trigger.Geofence -> setOf(CapabilityIds.TRIGGER_GEOFENCE)
         is Trigger.Notification -> setOf(CapabilityIds.TRIGGER_NOTIFICATION)
         is Trigger.PhoneState -> when (trigger.event) {
             PhoneEvent.SMS_RECEIVED -> setOf(CapabilityIds.TRIGGER_PHONE_SMS)

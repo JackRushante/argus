@@ -15,6 +15,9 @@ import dev.argus.engine.model.TimePrecision
 import dev.argus.engine.model.Trigger
 import dev.argus.automation.connectivity.ConnectivityReconcileReport
 import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
+import dev.argus.automation.geofence.GeofenceReconcileReport
+import dev.argus.automation.geofence.GeofenceTriggerRuntime
+import dev.argus.automation.geofence.NoopGeofenceTriggerRuntime
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.runtime.FireClaimRequest
 import dev.argus.engine.runtime.FireClaimResult
@@ -186,10 +189,56 @@ class ArmedAutomationRegistrarTest {
         assertTrue(registrar(store = store).register(rule))
     }
 
+    @Test
+    fun `geofence requires location capability and a tracked OS registration`() = runTest {
+        val geofenceRule = signed(
+            rule("geo").copy(
+                trigger = Trigger.Geofence(
+                    lat = 45.0,
+                    lng = 9.0,
+                    radiusM = 150.0,
+                    transition = dev.argus.engine.model.Transition.EXIT,
+                ),
+                actions = listOf(Action.ShowNotification("Argus", "uscita")),
+            ),
+        )
+        val active = GeofenceTriggerRuntime {
+            GeofenceReconcileReport(requiredBy = listOf(geofenceRule.id))
+        }
+
+        assertTrue(
+            registrar(
+                store = SingleRuleStore(geofenceRule),
+                capabilities = setOf(CapabilityIds.TRIGGER_GEOFENCE),
+                geofence = active,
+            ).register(geofenceRule),
+        )
+        assertFalse(
+            registrar(
+                store = SingleRuleStore(geofenceRule),
+                capabilities = emptySet(),
+                geofence = active,
+            ).register(geofenceRule),
+        )
+        assertFalse(
+            registrar(
+                store = SingleRuleStore(geofenceRule),
+                capabilities = setOf(CapabilityIds.TRIGGER_GEOFENCE),
+                geofence = GeofenceTriggerRuntime {
+                    GeofenceReconcileReport(
+                        requiredBy = listOf(geofenceRule.id),
+                        failed = listOf(geofenceRule.id),
+                    )
+                },
+            ).register(geofenceRule),
+        )
+    }
+
     private fun registrar(
         store: AutomationStore,
         capabilities: Set<String> = emptySet(),
         connectivity: ConnectivityTriggerRuntime = dev.argus.automation.connectivity.NoopConnectivityTriggerRuntime,
+        geofence: GeofenceTriggerRuntime = NoopGeofenceTriggerRuntime,
     ) = AndroidArmedAutomationRegistrar(
         coordinator = coordinator(store),
         store = store,
@@ -201,6 +250,7 @@ class ArmedAutomationRegistrarTest {
             )
         },
         connectivity = connectivity,
+        geofence = geofence,
     )
 
     private fun coordinator(store: AutomationStore) = TimeAlarmCoordinator(

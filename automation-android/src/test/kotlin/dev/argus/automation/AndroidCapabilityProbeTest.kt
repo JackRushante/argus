@@ -277,6 +277,22 @@ class AndroidCapabilityProbeTest {
     }
 
     @Test
+    fun `geofence is advertised only with precise foreground and background location`() = runTest {
+        val none = probe(state()).probe(DeviceState())
+        assertFalse("geofence" in none.availableTriggers)
+        assertFalse(CapabilityIds.TRIGGER_GEOFENCE in probe(state()).current().availableCapabilities)
+
+        val foregroundOnly = state().copy(foregroundLocationGranted = true)
+        assertFalse(
+            CapabilityIds.TRIGGER_GEOFENCE in probe(foregroundOnly).current().availableCapabilities,
+        )
+
+        val ready = foregroundOnly.copy(backgroundLocationGranted = true)
+        assertTrue(CapabilityIds.TRIGGER_GEOFENCE in probe(ready).current().availableCapabilities)
+        assertTrue("geofence" in probe(ready).probe(DeviceState()).availableTriggers)
+    }
+
+    @Test
     fun `manifest lists armable triggers so hermes never proposes a dead one`() = runTest {
         val manifest = probe(
             state().copy(notificationListenerGranted = true, receiveSmsGranted = true),

@@ -33,6 +33,7 @@ import dev.argus.automation.ClipboardCopier
 import dev.argus.automation.EngineNotificationEventDispatcher
 import dev.argus.automation.EnginePhoneEventDispatcher
 import dev.argus.automation.EngineConnectivityEventDispatcher
+import dev.argus.automation.EngineGeofenceEventDispatcher
 import dev.argus.automation.EngineTimeEventDispatcher
 import dev.argus.automation.FrameworkCurrentLocationProvider
 import dev.argus.automation.GenerativeLane
@@ -80,6 +81,14 @@ import dev.argus.automation.connectivity.ConnectivitySentinelCoordinator
 import dev.argus.automation.connectivity.ConnectivitySentinelStatus
 import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
 import dev.argus.automation.connectivity.PrefsConnectivityStateStore
+import dev.argus.automation.geofence.AndroidGeofenceBackend
+import dev.argus.automation.geofence.GeofenceBackend
+import dev.argus.automation.geofence.GeofenceCoordinator
+import dev.argus.automation.geofence.GeofenceEventDispatcher
+import dev.argus.automation.geofence.GeofenceEventIngress
+import dev.argus.automation.geofence.GeofenceStateStore
+import dev.argus.automation.geofence.GeofenceTriggerRuntime
+import dev.argus.automation.geofence.PrefsGeofenceStateStore
 import dev.argus.engine.connectivity.ConnectivityEventParser
 import dev.argus.engine.notification.NotificationEventParser
 import dev.argus.engine.phone.PhoneEventParser
@@ -539,6 +548,55 @@ object ArgusModule {
 
     @Provides
     @Singleton
+    fun geofenceState(@ApplicationContext context: Context): PrefsGeofenceStateStore =
+        PrefsGeofenceStateStore(context)
+
+    @Provides
+    fun geofenceStateBoundary(state: PrefsGeofenceStateStore): GeofenceStateStore = state
+
+    @Provides
+    @Singleton
+    fun geofenceBackend(@ApplicationContext context: Context): AndroidGeofenceBackend =
+        AndroidGeofenceBackend(context)
+
+    @Provides
+    fun geofenceBackendBoundary(backend: AndroidGeofenceBackend): GeofenceBackend = backend
+
+    @Provides
+    @Singleton
+    fun geofenceEventDispatcher(
+        engine: Engine,
+        state: DeviceStateSnapshotProvider,
+    ): EngineGeofenceEventDispatcher = EngineGeofenceEventDispatcher(engine, state)
+
+    @Provides
+    fun geofenceEventDispatcherBoundary(
+        dispatcher: EngineGeofenceEventDispatcher,
+    ): GeofenceEventDispatcher = dispatcher
+
+    @Provides
+    @Singleton
+    fun geofenceEventIngress(
+        state: GeofenceStateStore,
+        dispatcher: GeofenceEventDispatcher,
+    ): GeofenceEventIngress = GeofenceEventIngress(state, dispatcher)
+
+    @Provides
+    @Singleton
+    fun geofenceCoordinator(
+        store: AutomationStore,
+        state: GeofenceStateStore,
+        backend: GeofenceBackend,
+        location: CurrentLocationProvider,
+        ingress: GeofenceEventIngress,
+    ): GeofenceCoordinator = GeofenceCoordinator(store, state, backend, location, ingress)
+
+    @Provides
+    fun geofenceTriggerRuntime(coordinator: GeofenceCoordinator): GeofenceTriggerRuntime =
+        coordinator
+
+    @Provides
+    @Singleton
     fun timeAlarmState(database: ArgusDatabase): RoomTimeAlarmStateStore =
         RoomTimeAlarmStateStore(database)
 
@@ -574,11 +632,13 @@ object ArgusModule {
         store: AutomationStore,
         snapshots: FirePolicySnapshotProvider,
         connectivity: ConnectivityTriggerRuntime,
+        geofence: GeofenceTriggerRuntime,
     ): ArmedAutomationRegistrar = AndroidArmedAutomationRegistrar(
         coordinator,
         store,
         snapshots,
         connectivity,
+        geofence,
     )
 
     @Provides
@@ -626,6 +686,7 @@ object ArgusModule {
         preferences: AppPreferencesStore,
         replyRegistry: ActiveNotificationReplyRegistry,
         connectivity: ConnectivityTriggerRuntime,
+        geofence: GeofenceTriggerRuntime,
     ): ArgusRuntimeController = ArgusRuntimeController(
         scope,
         scheduler,
@@ -635,5 +696,6 @@ object ArgusModule {
         preferences,
         replyRegistry,
         connectivity,
+        geofence,
     )
 }

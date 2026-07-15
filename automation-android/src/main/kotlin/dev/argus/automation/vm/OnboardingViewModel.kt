@@ -242,7 +242,8 @@ class OnboardingViewModel @Inject constructor(
                 (health.notificationsGranted && health.notificationListenerGranted),
             StepKind.BATTERY_OEM to health.batteryExempt,
             StepKind.BACKGROUND_LOCATION to
-                (!sources.geofenceNeeded || health.backgroundLocationGranted),
+                (!sources.geofenceNeeded ||
+                    (health.foregroundLocationGranted && health.backgroundLocationGranted)),
         )
         val index = requestedIndex.coerceIn(0, STEP_ORDER.lastIndex)
         val steps = STEP_ORDER.mapIndexed { stepIndex, kind ->
@@ -325,9 +326,9 @@ class OnboardingViewModel @Inject constructor(
                 StepStatus.TODO,
                 "Posizione in background",
                 if (geofenceNeeded) {
-                    "Una bozza geofence richiede la posizione; il trigger resta non armabile finché la fase P2 non è disponibile."
+                    "Una regola geofence richiede posizione precisa e «Consenti sempre» per rilevare entrate e uscite anche a schermo spento."
                 } else {
-                    "Non necessaria in P0-B: i trigger geofence saranno abilitati in P2."
+                    "Non necessaria finché non crei una regola basata su entrata o uscita da un luogo."
                 },
                 if (geofenceNeeded) "Apri permessi" else null,
                 null,

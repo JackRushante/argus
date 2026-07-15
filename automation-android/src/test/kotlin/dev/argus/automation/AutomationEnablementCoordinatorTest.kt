@@ -12,6 +12,8 @@ import dev.argus.engine.runtime.FireClaimRequest
 import dev.argus.engine.runtime.FireClaimResult
 import dev.argus.automation.connectivity.ConnectivityReconcileReport
 import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
+import dev.argus.automation.geofence.GeofenceReconcileReport
+import dev.argus.automation.geofence.GeofenceTriggerRuntime
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
@@ -113,12 +115,43 @@ class AutomationEnablementCoordinatorTest {
         assertEquals(2, connectivity.reconcileCalls)
     }
 
+    @Test
+    fun `geofence registration failure after enable rolls back and cleans the pending intent`() = runTest {
+        val store = ToggleStore(enableResult = true)
+        val scheduler = RecordingRuntime { report() }
+        val geofence = RecordingGeofenceRuntime { call ->
+            if (call == 1) {
+                GeofenceReconcileReport(requiredBy = listOf(id), failed = listOf(id))
+            } else {
+                GeofenceReconcileReport()
+            }
+        }
+
+        val result = AutomationEnablementCoordinator(
+            store,
+            scheduler,
+            geofence = geofence,
+        ).setEnabled(id, true)
+
+        assertEquals(EnablementResult.SchedulingFailed, result)
+        assertEquals(AutomationStatus.DISABLED, store.currentStatus)
+        assertEquals(2, geofence.reconcileCalls)
+    }
+
     private fun report(failed: List<AutomationId> = emptyList()) = ReconcileReport(
         scheduled = emptyList(),
         cancelled = emptyList(),
         recovered = emptyList(),
         failed = failed,
     )
+}
+
+private class RecordingGeofenceRuntime(
+    private val result: suspend (Int) -> GeofenceReconcileReport,
+) : GeofenceTriggerRuntime {
+    var reconcileCalls = 0
+    override suspend fun reconcile(recreateOsRegistrations: Boolean): GeofenceReconcileReport =
+        result(++reconcileCalls)
 }
 
 private class RecordingConnectivityRuntime(

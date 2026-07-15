@@ -95,6 +95,21 @@ class BridgeTest(unittest.TestCase):
         self.assertIn("run_shell", prompt)
         self.assertIn("mai con notification o phone_state", prompt)
 
+    def test_geofence_rejects_unimplemented_dwell_and_loitering(self):
+        base = {
+            "type": "geofence",
+            "lat": 45.0,
+            "lng": 9.0,
+            "radiusM": 150,
+            "transition": "EXIT",
+            "loiteringDelayMs": 0,
+            "resolveCurrentLocation": False,
+        }
+        self.assertTrue(bridge.validate_trigger(base, set()))
+        self.assertFalse(bridge.validate_trigger({**base, "transition": "DWELL"}, set()))
+        self.assertFalse(bridge.validate_trigger({**base, "loiteringDelayMs": 60_000}, set()))
+        self.assertIn("soltanto ENTER/EXIT", bridge.build_prompt(self.request()))
+
     def test_manifest_available_triggers_is_optional_and_bounded(self):
         # Client pre-P2: campo assente, accettato (retrocompatibilita').
         legacy = self.request()

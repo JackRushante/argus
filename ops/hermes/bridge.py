@@ -83,7 +83,7 @@ Trigger, discriminato da "type":
   Ometti precision o usa FLEXIBLE normalmente; EXACT solo se l'utente chiede
   esplicitamente puntualita' esatta.
 - {"type":"geofence", "lat":number, "lng":number, "radiusM":number,
-   "transition":"ENTER"|"EXIT"|"DWELL", "loiteringDelayMs":integer,
+   "transition":"ENTER"|"EXIT", "loiteringDelayMs":0,
    "resolveCurrentLocation":boolean}
 - {"type":"notification", "pkg":string, "conversationId":string|null,
    "sender":string|null, "isGroup":boolean|null, "titleMatch":string|null,
@@ -346,6 +346,8 @@ REGOLE VINCOLANTI:
 11. run_shell e' una shell autonoma con comando STATICO mostrato integralmente in review: usala
     solo con trigger time, geofence o connectivity; mai con notification o phone_state e mai
     incorporando contenuti di messaggi/notifiche nel comando.
+12. I geofence supportano soltanto ENTER/EXIT e loiteringDelayMs deve essere 0: non proporre
+    DWELL, che il runtime framework corrente non può implementare onestamente.
 
 Ora locale Europe/Rome: {now}
 
@@ -576,10 +578,10 @@ def validate_trigger(value: Any, whitelisted_contact_ids: set[str]) -> bool:
         has_coordinates = "lat" in value and "lng" in value
         return (
             _is_number(value["radiusM"]) and 0 < value["radiusM"] <= 100_000
-            and value["transition"] in {"ENTER", "EXIT", "DWELL"}
+            and value["transition"] in {"ENTER", "EXIT"}
             and _is_number(value.get("lat", 0.0)) and _is_number(value.get("lng", 0.0))
             and -90 <= value.get("lat", 0.0) <= 90 and -180 <= value.get("lng", 0.0) <= 180
-            and _is_int(value.get("loiteringDelayMs", 0)) and 0 <= value.get("loiteringDelayMs", 0) <= 86_400_000
+            and _is_int(value.get("loiteringDelayMs", 0)) and value.get("loiteringDelayMs", 0) == 0
             and isinstance(resolve_current, bool)
             and (resolve_current or has_coordinates)
         )

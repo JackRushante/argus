@@ -13,6 +13,8 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
 import dev.argus.automation.connectivity.NoopConnectivityTriggerRuntime
+import dev.argus.automation.geofence.GeofenceTriggerRuntime
+import dev.argus.automation.geofence.NoopGeofenceTriggerRuntime
 
 sealed interface EnablementResult {
     data object Updated : EnablementResult
@@ -27,6 +29,7 @@ class AutomationEnablementCoordinator @Inject constructor(
     private val store: AutomationStore,
     private val scheduler: TimeAlarmRuntime,
     private val connectivity: ConnectivityTriggerRuntime = NoopConnectivityTriggerRuntime,
+    private val geofence: GeofenceTriggerRuntime = NoopGeofenceTriggerRuntime,
 ) {
     private val mutex = Mutex()
 
@@ -61,7 +64,10 @@ class AutomationEnablementCoordinator @Inject constructor(
         return@withLock try {
             val report = scheduler.reconcile(ReconcileReason.CAPABILITY_CHANGED)
             val connectivityReport = connectivity.reconcile()
-            if (id in report.failed || id in connectivityReport.failed) {
+            val geofenceReport = geofence.reconcile(recreateOsRegistrations = false)
+            if (id in report.failed || id in connectivityReport.failed ||
+                id in geofenceReport.failed
+            ) {
                 rollbackEnable(id, fingerprint)
                 EnablementResult.SchedulingFailed
             } else {
@@ -91,6 +97,11 @@ class AutomationEnablementCoordinator @Inject constructor(
         } catch (_: Exception) {
             // Stesso recovery al prossimo bootstrap; non riabilitare mai la regola.
         }
+        try {
+            geofence.reconcile(recreateOsRegistrations = false)
+        } catch (_: Exception) {
+            // Stesso recovery: il receiver controlla comunque id e fingerprint approvati.
+        }
     }
 
     /** In disable tenta entrambe le pulizie anche se la prima fallisce. */
@@ -105,6 +116,13 @@ class AutomationEnablementCoordinator @Inject constructor(
         }
         try {
             if (!connectivity.reconcile().cleanupSucceeded) clean = false
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            clean = false
+        }
+        try {
+            if (!geofence.reconcile(recreateOsRegistrations = false).cleanupSucceeded) clean = false
         } catch (error: CancellationException) {
             throw error
         } catch (_: Exception) {

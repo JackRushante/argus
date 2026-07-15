@@ -97,10 +97,24 @@ class DraftValidator(
                 if (!trigger.radiusM.isFinite() || trigger.radiusM <= 0 || trigger.radiusM > MAX_GEOFENCE_RADIUS_M)
                     err("radius_invalid", "Raggio geofence deve essere finito e compreso tra 0 e ${MAX_GEOFENCE_RADIUS_M.toInt()} m")
                 else if (trigger.radiusM < 100)
-                    warn("radius_small", "Raggio ${trigger.radiusM.toInt()} m sotto i 100 m consigliati")
+                    warn(
+                        "radius_small",
+                        "Raggio ${trigger.radiusM.toInt()} m sotto i 100 m consigliati; " +
+                            "lo scatto in background può arrivare con minuti di ritardo",
+                    )
 
                 if (trigger.loiteringDelayMs < 0 || trigger.loiteringDelayMs > MAX_LOITERING_MS)
                     err("loitering_invalid", "Loitering delay fuori intervallo")
+                if (trigger.transition == Transition.DWELL)
+                    err(
+                        "geofence_transition_unsupported",
+                        "Il runtime geofence supporta ENTER/EXIT; DWELL non è disponibile",
+                    )
+                if (trigger.loiteringDelayMs != 0L)
+                    err(
+                        "geofence_loitering_unsupported",
+                        "Il loitering delay richiede DWELL, non disponibile nel runtime corrente",
+                    )
 
                 if (!trigger.resolveCurrentLocation) {
                     val valid = trigger.lat.isFinite() && trigger.lng.isFinite() &&

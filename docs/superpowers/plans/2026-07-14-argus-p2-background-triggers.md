@@ -37,7 +37,7 @@ in log. Instrumented via `am instrument` diretto (workaround UTP/Windows, handof
 | Connectivity POWER | receiver dinamico `ACTION_POWER_CONNECTED/DISCONNECTED` dentro la sentinella condivisa | FGS solo se armato |
 | Connectivity BT | receiver manifest `BluetoothDevice.ACTION_ACL_CONNECTED/DISCONNECTED` (esenti) | no service |
 | Connectivity WIFI | `NetworkCallback` → richiede processo vivo → **FGS sentinella** | FGS solo se armato |
-| Geofence | da spike P2-0: `LocationManager.addProximityAlert` (PendingIntent, no GMS dep) vs alternativa | no service se proximity |
+| Geofence | `LocationManager.addProximityAlert` + PendingIntent esplicito/mutable, senza dipendenza GMS | nessun service |
 
 **Correzione verificata il 2026-07-15:** POWER non è tra le eccezioni agli implicit broadcast
 manifest su Android moderno; il vecchio assunto era falso. Il receiver è quindi dinamico e vive
@@ -108,8 +108,10 @@ Notification/PhoneState. Il tool generativo raw `shell.run` resta vietato.
    come degradazione se l'E2E P2-3 con l'app vera in cached smentisse (improbabile).
    Spike pulito (clearPrimaryClip + uninstall test package); il file di spike si rimuove
    col primo commit P2-3.
-2. `addProximityAlert` su OnePlus 15 → spostato all'APERTURA di P2-4 (il PendingIntent
-   scatta con app cached/Doze? latenza/raggio?). Decide D1-geofence.
+2. ~~`addProximityAlert` su OnePlus 15~~ → **SCELTO E PROVATO (2026-07-15)**: registrazione
+   framework reale, pipeline Room→ingress→Engine→Shizuku e cleanup verificati su device (`OK (1)`,
+   nessun id residuo). Il test usa un ingresso sintetico dopo la registrazione: callback ENTER/EXIT
+   da spostamento reale, latenza cached/Doze e comportamento OEM restano gate osservazionali P2-4.
 3. Receiver manifest `PHONE_STATE`/`SMS_RECEIVED` con app cached → si valida direttamente
    nell'E2E di P2-2 con SMS reale (niente spike separato: il receiver è il deliverable).
 
@@ -168,20 +170,33 @@ connectivity non è necessario.
 
 ### P2-4 — Geofence (Es. 1 end-to-end)
 
-- Meccanismo da spike P2-0. `resolveCurrentLocation` all'arm esiste già
-  (`FrameworkCurrentLocationProvider`).
-- Wizard background location: grant `ACCESS_BACKGROUND_LOCATION` già presente sul device di
-  Lorenzo; riga salute già esistente diventa azionabile (CTA settings) quando una regola
-  geofence la richiede.
-- Registrar: registrazione per-rule (lat/lng/radius congelati nel draft approvato), unregister
-  al disable/delete/revoca; boot recovery: ri-registrazione post-BOOT (pattern AlarmManager
-  P0-B §5.3).
-- ENTER/EXIT; DWELL secondo D5. Es. 1 live: "quando esco da casa ±50 m disattiva il Wi-Fi e
-  attiva il Bluetooth" (multi-azione!).
+**Stato 2026-07-15: implementazione, gate host e gate framework-device completi; resta il bordo
+fisico dell'Esempio 1.**
+
+- Backend framework `LocationManager.addProximityAlert`: un PendingIntent esplicito, interno e
+  mutable per regola; `ACCESS_FINE_LOCATION` precisa + `ACCESS_BACKGROUND_LOCATION` obbligatorie.
+  Nessuna dipendenza Google Play Services e nessun service residente.
+- Registrar per-rule con coordinate/raggio congelati nel draft approvato; unregister indipendente
+  al disable/delete/revoca; ri-registrazione a process start, BOOT e package replacement.
+- Registry sincrono persistente: identità preparata prima della chiamata OS, sequenza e transizione
+  pending salvate prima del dispatch, retry con lo stesso event-id dopo crash e dedup nel journal.
+- Recupero del bordo perso durante process death tramite posizione one-shot soltanto quando esiste
+  uno stato precedente; isteresi di 25 m al confine per non inventare ENTER/EXIT da rumore GPS.
+- Semantica onesta: solo ENTER/EXIT, `DWELL` e loitering non-zero rifiutati da validator Android e
+  bridge. Da stato iniziale ignoto: ENTER se già dentro; nessun EXIT iniziale se già fuori.
+- Gate OnePlus: registrazione framework reale → ingresso diagnostico → Engine/Room →
+  `/system/bin/true` via Shizuku → journal success → dedup → cleanup, `OK (1)` e ids OS vuoti.
+- Resta da provare sul campo l'Esempio 1: "quando esco da casa" (meglio ≥100 m; 50 m resta
+  accettato con warning) → Wi-Fi off + Bluetooth on. Il callback può arrivare con minuti di ritardo.
+
+Riferimenti verificati: [`LocationManager.addProximityAlert`](https://developer.android.com/reference/android/location/LocationManager#addProximityAlert(double,double,float,long,android.app.PendingIntent)),
+[`ACCESS_BACKGROUND_LOCATION`](https://developer.android.com/develop/sensors-and-location/location/permissions/background)
+e [limiti location in background](https://developer.android.com/develop/sensors-and-location/location/background).
 
 ### P2-5 — Hardening e chiusura
 
-- D4 shell statica: gate host + device Shizuku e regressioni su trigger esterni.
+- ~~D4 shell statica: gate host + device Shizuku e regressioni su trigger esterni.~~ **Completo**
+  (`cfc0ef4`, positivo e negativo su OnePlus; Notification/PhoneState fail-closed).
 - Wizard OEM: nota/CTA per la gestione batteria OnePlus (documentare, niente magia).
 - Export/import JSON locale delle automazioni (nice-to-have §17: assicura contro un wipe;
   import = draft da ri-approvare UNO A UNO, mai arm diretto — fingerprint non trasferibile).

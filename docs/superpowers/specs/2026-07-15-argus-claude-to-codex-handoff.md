@@ -290,10 +290,18 @@ ereditato.
 Spike `addProximityAlert` → registrar per-rule con unregister e boot recovery → wizard background
 location → Esempio 1 della home live.
 
+**Aggiornamento Codex 2026-07-15:** backend framework, registrar, cleanup, recovery boot/process,
+dedup persistente e retry crash-safe implementati. Gate host verde e gate OnePlus `OK (1)` sulla
+pipeline reale fino a Shizuku; nessuna registrazione diagnostica residua. Il test forza l'ingresso
+dopo una vera registrazione OS, quindi NON prova ancora un callback prodotto da uno spostamento
+fisico né la latenza cached/Doze. Restano questi ultimi gate e l'Esempio 1 multi-azione sul campo.
+
 ### #23 — P2-5 hardening e chiusura
 
-Retry binder Shizuku nel probe, wizard OEM, export/import JSON, full gate no-cache, **aggiornamento
-del ledger con tutta P2** (§3), CLAUDE/contract/audit, merge su master.
+Wizard OEM, decisione esplicita sull'export/import JSON nice-to-have, full gate no-cache,
+**aggiornamento del ledger con tutta P2** (§3), CLAUDE/contract/audit e merge su master. Il retry
+binder Shizuku non è un task: la vecchia diagnosi di race era errata e `run_shell` è già passato
+live con il modello fail-closed concordato.
 
 ### Residui osservazionali da P1
 

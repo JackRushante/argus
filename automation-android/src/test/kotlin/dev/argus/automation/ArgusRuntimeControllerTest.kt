@@ -21,6 +21,8 @@ import dev.argus.engine.runtime.TriggerEventId
 import dev.argus.shizuku.ShizukuGatewayStatus
 import dev.argus.automation.connectivity.ConnectivityReconcileReport
 import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
+import dev.argus.automation.geofence.GeofenceReconcileReport
+import dev.argus.automation.geofence.GeofenceTriggerRuntime
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -55,6 +57,7 @@ class ArgusRuntimeControllerTest {
                 registry.replace(handle(context))
                 val scheduler = RecordingTimeAlarmRuntime()
                 val connectivity = RecordingConnectivityRuntime()
+                val geofence = RecordingGeofenceRuntime()
                 val controller = ArgusRuntimeController(
                     scope = scope,
                     scheduler = scheduler,
@@ -69,12 +72,15 @@ class ArgusRuntimeControllerTest {
                     preferences = preferences,
                     replyRegistry = registry,
                     connectivity = connectivity,
+                    geofence = geofence,
                     nowMillis = { 1_000L },
                 )
 
                 controller.start()
                 awaitUntil("bootstrap APP_START") { scheduler.reconcileCount() >= 1 }
                 awaitUntil("bootstrap connectivity") { connectivity.reconcileCount() >= 1 }
+                awaitUntil("bootstrap geofence") { geofence.recreateFlags().isNotEmpty() }
+                assertEquals(true, geofence.recreateFlags().first())
                 assertEquals(1, registry.size())
                 val beforeRevoke = scheduler.reconcileCount()
 
@@ -84,6 +90,10 @@ class ArgusRuntimeControllerTest {
                 awaitUntil("reconcile immediato alla revoca") {
                     scheduler.reconcileCount() > beforeRevoke
                 }
+                awaitUntil("geofence riconciliato alla revoca") {
+                    geofence.recreateFlags().size >= 2
+                }
+                assertEquals(false, geofence.recreateFlags().last())
 
                 val beforeAccept = scheduler.reconcileCount()
                 preferences.setPrivacy(true)
@@ -172,6 +182,17 @@ class ArgusRuntimeControllerTest {
         override suspend fun reconcile(): ConnectivityReconcileReport {
             calls.incrementAndGet()
             return ConnectivityReconcileReport(emptyList(), active = false)
+        }
+    }
+
+    private class RecordingGeofenceRuntime : GeofenceTriggerRuntime {
+        private val flags = CopyOnWriteArrayList<Boolean>()
+        fun recreateFlags(): List<Boolean> = flags.toList()
+        override suspend fun reconcile(
+            recreateOsRegistrations: Boolean,
+        ): GeofenceReconcileReport {
+            flags += recreateOsRegistrations
+            return GeofenceReconcileReport()
         }
     }
 

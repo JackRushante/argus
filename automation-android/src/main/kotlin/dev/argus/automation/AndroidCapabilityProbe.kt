@@ -76,8 +76,9 @@ internal class SystemAndroidCapabilityStateSource(
             appContext.packageName in
                 NotificationManagerCompat.getEnabledListenerPackages(appContext)
         }.getOrDefault(false),
-        foregroundLocationGranted = granted(Manifest.permission.ACCESS_FINE_LOCATION) ||
-            granted(Manifest.permission.ACCESS_COARSE_LOCATION),
+        // Geofence e identità Wi-Fi richiedono accesso preciso: il solo COARSE non va
+        // pubblicato a Hermes come capacità realmente armabile.
+        foregroundLocationGranted = granted(Manifest.permission.ACCESS_FINE_LOCATION),
         backgroundLocationGranted = granted(Manifest.permission.ACCESS_BACKGROUND_LOCATION),
         exactAlarmsGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
             appContext.getSystemService(AlarmManager::class.java).canScheduleExactAlarms(),
@@ -139,6 +140,7 @@ class AndroidCapabilityProbe internal constructor(
     private fun availableTriggers(state: AndroidCapabilityState): List<String> = buildList {
         add("time")
         if (state.notificationListenerGranted) add("notification")
+        if (state.foregroundLocationGranted && state.backgroundLocationGranted) add("geofence")
         if (state.receiveSmsGranted) add("phone_state.sms")
         if (state.readPhoneStateGranted && state.readCallLogGranted) add("phone_state.call")
         add("connectivity.wifi")
@@ -173,6 +175,9 @@ class AndroidCapabilityProbe internal constructor(
 
         val available = buildSet {
             add(CapabilityIds.TRIGGER_TIME)
+            if (state.foregroundLocationGranted && state.backgroundLocationGranted) {
+                add(CapabilityIds.TRIGGER_GEOFENCE)
+            }
             add(CapabilityIds.TRIGGER_CONNECTIVITY_WIFI)
             add(CapabilityIds.TRIGGER_CONNECTIVITY_POWER)
             if (state.bluetoothConnectGranted) add(CapabilityIds.TRIGGER_CONNECTIVITY_BT)

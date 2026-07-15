@@ -10,6 +10,8 @@ import dev.argus.automation.EnablementResult
 import dev.argus.automation.FlowArmResult
 import dev.argus.automation.ReconcileReason
 import dev.argus.automation.TimeAlarmRuntime
+import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
+import dev.argus.automation.geofence.GeofenceTriggerRuntime
 import dev.argus.data.ArgusDatabase
 import dev.argus.data.dao.AuditLogRecord
 import dev.argus.engine.brain.ContactWhitelistStore
@@ -92,6 +94,8 @@ class AutomationDetailViewModel @Inject constructor(
     private val scheduler: TimeAlarmRuntime,
     private val database: ArgusDatabase,
     private val whitelist: ContactWhitelistStore,
+    private val connectivity: ConnectivityTriggerRuntime,
+    private val geofence: GeofenceTriggerRuntime,
 ) : ViewModel() {
     private val routeId = requireNotNull(savedStateHandle.get<String>("id")) {
         "Dettaglio senza id"
@@ -248,13 +252,20 @@ class AutomationDetailViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 store.delete(automation.id)
-                val reconciled = cancellationSafeOrNull {
+                // Tenta tutte le pulizie: un AlarmManager guasto non deve impedire lo stop
+                // della sentinella né l'unregister del PendingIntent geofence.
+                var reconciled = true
+                if (cancellationSafeOrNull {
                     scheduler.reconcile(ReconcileReason.CAPABILITY_CHANGED)
-                } != null
+                } == null) reconciled = false
+                if (cancellationSafeOrNull { connectivity.reconcile() } == null) reconciled = false
+                if (cancellationSafeOrNull {
+                    geofence.reconcile(recreateOsRegistrations = false)
+                } == null) reconciled = false
                 mutableEvents.emit(
                     DetailEvent.Close(
                         if (reconciled) "Regola eliminata."
-                        else "Regola eliminata; pulizia scheduler rinviata.",
+                        else "Regola eliminata; pulizia runtime rinviata.",
                     ),
                 )
             } catch (error: CancellationException) {

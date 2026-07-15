@@ -55,7 +55,7 @@ Request v1:
     "granted_permissions": ["android.permission.INTERNET"],
     "available_tools": ["set_dnd", "state.read", "toggle.set"],
     "available_triggers": [
-      "time", "notification", "phone_state.sms", "phone_state.call",
+      "time", "notification", "geofence", "phone_state.sms", "phone_state.call",
       "connectivity.wifi", "connectivity.wifi.identity",
       "connectivity.bt", "connectivity.power"
     ],
@@ -83,6 +83,10 @@ trigger non è nella lista. PhoneState è distinto in `.sms`/`.call`; Connectivi
 `.bt`, `.power`. Un filtro SSID (`Connectivity.match`) richiede inoltre
 `connectivity.wifi.identity`, pubblicato solo con location foreground+background. Il controllo
 server non sostituisce la rivalidazione delle capability sul telefono.
+
+`geofence` viene pubblicato soltanto con posizione **precisa** e accesso in background. Nel
+contratto v1 accetta esclusivamente `transition=ENTER|EXIT` e `loiteringDelayMs=0`: il backend
+framework Android non offre DWELL e il bridge non deve prometterlo.
 
 Redazione device state:
 

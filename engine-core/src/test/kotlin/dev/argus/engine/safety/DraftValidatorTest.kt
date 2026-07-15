@@ -216,6 +216,33 @@ class DraftValidatorTest {
         assertTrue("no_actions" in errors(issues))
         assertTrue(issues.any { it.severity == Severity.WARNING && it.code == "radius_small" })
     }
+    @Test fun `dwell and loitering stay fail closed while framework geofence only supports enter exit`() {
+        val dwell = AutomationDraft(
+            "dwell",
+            Trigger.Geofence(
+                radiusM = 150.0,
+                transition = Transition.DWELL,
+                loiteringDelayMs = 60_000,
+                resolveCurrentLocation = true,
+            ),
+            listOf(Action.SetWifi(false)),
+        )
+        val dwellErrors = errors(v.validate(dwell, emptySet()))
+        assertTrue("geofence_transition_unsupported" in dwellErrors)
+        assertTrue("geofence_loitering_unsupported" in dwellErrors)
+
+        val enterWithFakeLoitering = dwell.copy(
+            trigger = (dwell.trigger as Trigger.Geofence).copy(
+                transition = Transition.ENTER,
+                loiteringDelayMs = 1,
+            ),
+        )
+        assertTrue(
+            "geofence_loitering_unsupported" in errors(
+                v.validate(enterWithFakeLoitering, emptySet()),
+            ),
+        )
+    }
     @Test fun `read tools plus reply channel is a privacy warning`() {
         val d = validGenerative.copy(actions = listOf(Action.InvokeLlm("g", listOf(), listOf("whatsapp_reply", "state.read"), true)))
         assertTrue(v.validate(d, setOf("jid:42")).any { it.code == "read_plus_reply" && it.severity == Severity.WARNING })
