@@ -13,6 +13,53 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 
 class GeofenceEventIngressTest {
+    /**
+     * Bug trovato sul campo il 2026-07-15: il framework ha annunciato EXIT mentre il device era
+     * fermo al centro del geofence. Il dedup non poteva vederlo — per lo store quell'ENTER
+     * intermedio era reale — quindi la difesa deve stare prima: se la posizione contraddice il
+     * bordo, il bordo non esiste.
+     */
+    @Test
+    fun `a transition contradicted by the real position is dropped`() = runTest {
+        val id = AutomationId("home")
+        val fingerprint = ApprovalFingerprint("a".repeat(64))
+        val state = MemoryGeofenceStateStore().apply {
+            prepare(GeofenceRegistration(id, fingerprint, 45.0, 9.0, 150f))
+            activate(id, fingerprint)
+        }
+        val delivered = mutableListOf<TriggerEnvelope>()
+        val ingress = GeofenceEventIngress(
+            state,
+            GeofenceEventDispatcher { delivered += it },
+            verifier = { _, _ -> false },
+        )
+
+        assertEquals(false, ingress.onTransition(id, fingerprint, Transition.EXIT))
+        assertTrue(delivered.isEmpty())
+        // Lo stato non deve avanzare: un bordo scartato non è un bordo avvenuto.
+        assertNull(state.get(id)?.lastTransition)
+    }
+
+    /** Fail-open esplicito: perdere un attraversamento vero è peggio che accettarne uno spurio. */
+    @Test
+    fun `an unverifiable position keeps the framework edge`() = runTest {
+        val id = AutomationId("far")
+        val fingerprint = ApprovalFingerprint("b".repeat(64))
+        val state = MemoryGeofenceStateStore().apply {
+            prepare(GeofenceRegistration(id, fingerprint, 45.0, 9.0, 150f))
+            activate(id, fingerprint)
+        }
+        val delivered = mutableListOf<TriggerEnvelope>()
+        val ingress = GeofenceEventIngress(
+            state,
+            GeofenceEventDispatcher { delivered += it },
+            verifier = { _, _ -> true },
+        )
+
+        assertTrue(ingress.onTransition(id, fingerprint, Transition.ENTER))
+        assertEquals(1, delivered.size)
+    }
+
     @Test
     fun `alternating transitions get stable sequence ids while duplicate callbacks are suppressed`() = runTest {
         val id = AutomationId("home")
@@ -71,10 +118,13 @@ class GeofenceEventIngressTest {
                 activate(id, fingerprint)
             }
             var failedId: String? = null
-            val failing = GeofenceEventIngress(state) {
-                failedId = it.id.value
-                error("process dies before completion")
-            }
+            val failing = GeofenceEventIngress(
+                state,
+                GeofenceEventDispatcher {
+                    failedId = it.id.value
+                    error("process dies before completion")
+                },
+            )
 
             assertFailsWith<IllegalStateException> {
                 failing.onTransition(id, fingerprint, Transition.EXIT)
@@ -83,7 +133,7 @@ class GeofenceEventIngressTest {
             assertEquals(Transition.EXIT, state.pending(id, fingerprint)?.transition)
 
             val retried = mutableListOf<TriggerEnvelope>()
-            val restarted = GeofenceEventIngress(state) { retried += it }
+            val restarted = GeofenceEventIngress(state, GeofenceEventDispatcher { retried += it })
             assertEquals(listOf(id), restarted.recoverPending(setOf(id)))
             assertEquals(failedId, retried.single().id.value)
             assertNull(state.pending(id, fingerprint))
@@ -103,7 +153,7 @@ class GeofenceEventIngressTest {
                 prepare(GeofenceRegistration(secondId, secondFingerprint, 46.0, 10.0, 150f))
                 activate(secondId, secondFingerprint)
             }
-            val alwaysFail = GeofenceEventIngress(state) { error("process dies") }
+            val alwaysFail = GeofenceEventIngress(state, GeofenceEventDispatcher { error("process dies") })
             assertFailsWith<IllegalStateException> {
                 alwaysFail.onTransition(firstId, firstFingerprint, Transition.EXIT)
             }
@@ -111,11 +161,14 @@ class GeofenceEventIngressTest {
                 alwaysFail.onTransition(secondId, secondFingerprint, Transition.ENTER)
             }
             val attempted = mutableListOf<AutomationId>()
-            val recovering = GeofenceEventIngress(state) { envelope ->
-                val id = (envelope.event as TriggerEvent.GeofenceTransitioned).automationId
-                attempted += id
-                if (id == firstId) error("first registration unavailable")
-            }
+            val recovering = GeofenceEventIngress(
+                state,
+                GeofenceEventDispatcher { envelope ->
+                    val id = (envelope.event as TriggerEvent.GeofenceTransitioned).automationId
+                    attempted += id
+                    if (id == firstId) error("first registration unavailable")
+                },
+            )
 
             assertFailsWith<IllegalStateException> {
                 recovering.recoverPending(setOf(firstId, secondId))

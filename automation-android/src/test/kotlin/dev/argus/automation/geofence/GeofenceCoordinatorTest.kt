@@ -76,7 +76,7 @@ class GeofenceCoordinatorTest {
             }
         }
         val envelopes = mutableListOf<TriggerEnvelope>()
-        val ingress = GeofenceEventIngress(state) { envelopes += it }
+        val ingress = GeofenceEventIngress(state, GeofenceEventDispatcher { envelopes += it })
         val current = CurrentLocationProvider { DeviceLocation(46.0, 10.0) }
 
         val report = GeofenceCoordinator(
@@ -104,7 +104,7 @@ class GeofenceCoordinatorTest {
             }
         }
         val envelopes = mutableListOf<TriggerEnvelope>()
-        val ingress = GeofenceEventIngress(state) { envelopes += it }
+        val ingress = GeofenceEventIngress(state, GeofenceEventDispatcher { envelopes += it })
         // ~160 m dal centro con raggio 150 m: fuori nominalmente, ma entro i 25 m di guardia.
         val current = CurrentLocationProvider { DeviceLocation(45.00144, 9.0) }
 
@@ -144,7 +144,7 @@ class GeofenceCoordinatorTest {
             locationReads += 1
             DeviceLocation(45.0, 9.0)
         }
-        val ingress = GeofenceEventIngress(MemoryGeofenceStateStore()) { }
+        val ingress = GeofenceEventIngress(MemoryGeofenceStateStore(), GeofenceEventDispatcher { })
 
         GeofenceCoordinator(
             RulesStore(emptyList()),

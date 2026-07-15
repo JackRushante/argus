@@ -87,6 +87,7 @@ import dev.argus.automation.geofence.GeofenceCoordinator
 import dev.argus.automation.geofence.GeofenceEventDispatcher
 import dev.argus.automation.geofence.GeofenceEventIngress
 import dev.argus.automation.geofence.GeofenceStateStore
+import dev.argus.automation.geofence.LocationBackedTransitionVerifier
 import dev.argus.automation.geofence.GeofenceTriggerRuntime
 import dev.argus.automation.geofence.PrefsGeofenceStateStore
 import dev.argus.engine.connectivity.ConnectivityEventParser
@@ -583,7 +584,13 @@ object ArgusModule {
     fun geofenceEventIngress(
         state: GeofenceStateStore,
         dispatcher: GeofenceEventDispatcher,
-    ): GeofenceEventIngress = GeofenceEventIngress(state, dispatcher)
+        store: AutomationStore,
+        location: CurrentLocationProvider,
+    ): GeofenceEventIngress = GeofenceEventIngress(
+        state,
+        dispatcher,
+        LocationBackedTransitionVerifier({ store.get(it)?.trigger }, location),
+    )
 
     @Provides
     @Singleton
