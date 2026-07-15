@@ -1,5 +1,6 @@
 package dev.argus.ui.presentation
 
+import java.util.Locale
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.ActionTier
 import dev.argus.engine.model.Automation
@@ -123,7 +124,7 @@ object RuleRenderMapper {
                 Transition.DWELL -> "Quando ti trattieni nella posizione attuale (±$r m)"
             }
         } else {
-            val loc = "${t.lat},${t.lng}"
+            val loc = "${fmtCoord(t.lat)},${fmtCoord(t.lng)}"
             when (t.transition) {
                 Transition.ENTER -> "Quando entri in $loc (±$r m)"
                 Transition.EXIT -> "Quando esci da $loc (±$r m)"
@@ -335,4 +336,13 @@ object RuleRenderMapper {
     /** Mostra i Double "interi" senza `.0` (es. raggio 100.0 -> "100"), preservando i decimali reali. */
     private fun fmtNum(d: Double): String =
         if (d == d.toLong().toDouble()) d.toLong().toString() else d.toString()
+
+    /**
+     * `Double.toString()` mostra la rappresentazione binaria (`15.266659599999999`) e la review
+     * deve essere leggibile da un umano, non fedele all'IEEE 754. Cinque decimali valgono ~1 m:
+     * su raggi da decine o centinaia di metri, il resto è rumore. `Locale.ROOT` tiene il punto
+     * decimale, che è il separatore atteso per le coordinate.
+     */
+    private fun fmtCoord(d: Double): String =
+        String.format(Locale.ROOT, "%.5f", d).trimEnd('0').trimEnd('.')
 }

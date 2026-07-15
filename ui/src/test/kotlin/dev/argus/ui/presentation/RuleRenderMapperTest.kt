@@ -183,4 +183,26 @@ class RuleRenderMapperTest {
         assertEquals("geofence", r.triggerIconKey)
         assertEquals("Quando entri nella posizione attuale (±75 m)", r.triggerLine)
     }
+
+    /**
+     * Trovato da Lorenzo sul device: la review mostrava `15.266659599999999`, cioè la
+     * rappresentazione binaria del Double sbattuta in faccia all'utente. Su un raggio di ±200 m
+     * i decimali oltre il quinto (~1 m) non aggiungono informazione, solo rumore.
+     */
+    @Test fun `geofence coordinates are rounded to a readable precision`() {
+        val a = Automation(
+            AutomationId("g2"), "arrivo casa", CreatedBy.LLM, AutomationStatus.PENDING_APPROVAL,
+            Trigger.Geofence(
+                lat = 37.0978322,
+                lng = 15.266659599999999,
+                radiusM = 200.0,
+                transition = Transition.ENTER,
+            ),
+            listOf(Action.SetWifi(true)),
+        )
+        assertEquals(
+            "Quando entri in 37.09783,15.26666 (±200 m)",
+            RuleRenderMapper.map(a).triggerLine,
+        )
+    }
 }

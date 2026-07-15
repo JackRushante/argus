@@ -258,11 +258,22 @@ infondato su questo setup.
 Cleanup verificato: test provider rimossi, `mock_location` riportato a `default`, Wi-Fi riacceso,
 nessuna registrazione geofence residua nel framework.
 
-**(b) APERTO — attraversamento fisico reale.** Armate con `armWorkExitScenario` (EXIT 200 m sulla
-posizione del LAVORO → Wi-Fi off + BT on + notifica) e `armHomeArrivalScenario` (ENTER 200 m su
-Via Avola 28, geocodificata ON-DEVICE → Wi-Fi on + notifica). Attenzione al modello mentale:
+**(b) PASS — attraversamento fisico reale, 2026-07-15 sera.** `armWorkExitScenario` (EXIT 200 m
+sulla posizione del LAVORO → Wi-Fi off + BT on + notifica) e `armHomeArrivalScenario` (ENTER 200 m
+su Via Avola 28, geocodificata ON-DEVICE → Wi-Fi on + notifica). Attenzione al modello mentale:
 `resolveCurrentLocation` congela all'arm, quindi l'uscita scatta **lasciando il lavoro**, non
 arrivando a casa.
+
+Esito, con Lorenzo che si sposta davvero:
+- **20:03:13** `uscito dal lavoro` → `FIRED` ×1, `set_wifi` + `set_bluetooth` + `show_notification`
+  tutte SUCCEEDED;
+- **20:08:17** `arrivato a casa` → `FIRED` ×1, `set_wifi` + `show_notification` SUCCEEDED.
+
+**Una volta ciascuna.** Il valore di questa prova non è che ha funzionato: è che le **stesse
+regole, stesso raggio, stesso posto** due ore prima scattavano due volte in tre minuti a device
+fermo. Il fix `4339244` regge dove il bug era stato osservato. Entrambi i bordi sono arrivati entro
+il minuto dall'attraversamento — ma una coppia non è una statistica, e l'aspettativa dichiarata
+resta quella di E14.
 
 **Restano non provati** e sono esattamente ciò che il mock NON può dare: latenza GPS reale,
 comportamento in Doze/OxygenOS, recupero del bordo perso.
@@ -387,7 +398,7 @@ Stato al 2026-07-15 sera. **Un solo punto resta aperto.**
 
 | # | Requisito | Stato | Classe di evidenza |
 |---|-----------|-------|--------------------|
-| 1 | Es. 1 della spec passa live (geofence, multi-azione) | **RISCHIO RESIDUO ACCETTATO da Lorenzo** | passato con posizione **simulata** (framework-driven synthetic) + stato device reale verificato. L'attraversamento **fisico** è armato e in attesa: Lorenzo ha deciso esplicitamente di **non far slittare il merge** e di valutarlo dopo. **Non è un PASS**: un test non eseguito non diventa un PASS perché ci conviene |
+| 1 | Es. 1 della spec passa live (geofence, multi-azione) | **PASS — physical/radio E2E** | **chiuso il 2026-07-15, 20:03 e 20:08**, poche ore dopo il merge, con l'attraversamento **fisico reale** di Lorenzo. `uscito dal lavoro` → **`FIRED` ×1** (`set_wifi` + `set_bluetooth` + `show_notification`, tutte SUCCEEDED); `arrivato a casa` → **`FIRED` ×1** (`set_wifi` + `show_notification`). **Una volta ciascuna: nessun flapping**, con lo stesso raggio e le stesse regole che due ore prima scattavano due volte a device fermo ⇒ il fix `4339244` è confermato **sul campo**, non solo negli unit test |
 | 2 | OTP autocopy passa live su SMS vero | **PASS** | manuale Lorenzo (evidenza utente, non trace forense) |
 | 3 | Chiamata reale (INCOMING_CALL + CALL_ENDED) | **PASS** | physical/radio E2E, journal osservato |
 | 4 | Cavo POWER reale | **PASS** | physical E2E, journal osservato |
@@ -401,7 +412,9 @@ Stato al 2026-07-15 sera. **Un solo punto resta aperto.**
 di 4+ cifre nel campo `detail`. Numero chiamante, SSID e nome/address Bluetooth non sono mai
 arrivati nell'audit.
 
-**Non provati, dichiarati**: latenza GPS reale e Doze/OxygenOS; recupero del bordo perso; regola
-chiamata filtrata per numero; match per nome del device BT; CTA UI reale per `BLUETOOTH_CONNECT`
-(concesso via `pm grant` nel gate, poi revocato); negativo OTP live (`otp_not_found`), coperto dai
-soli test Robolectric.
+**Non provati, dichiarati**: recupero del bordo perso; regola chiamata filtrata per numero; match
+per nome del device BT; CTA UI reale per `BLUETOOTH_CONNECT` (concesso via `pm grant` nel gate,
+poi revocato); negativo OTP live (`otp_not_found`), coperto dai soli test Robolectric; percorso
+device live della shell da contatto whitelistato. La **latenza GPS reale** non è più teorica: i due
+bordi del 2026-07-15 sono arrivati entro il minuto dell'attraversamento, ma **una singola coppia
+non è una statistica** — l'aspettativa onesta resta quella di E14 (anche minuti di ritardo).
