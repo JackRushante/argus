@@ -93,9 +93,15 @@ Notification/PhoneState. Il tool generativo raw `shell.run` resta vietato.
 - Reply/observed/picker: solo WhatsApp. Nessun reply su SMS (né su altri package).
 - Nessun comando shell parametrizzato da contenuti esterni (il validator già non lo permette:
   `cmd` statico). Nessuna denylist aggiunta.
-- Trigger sensori: fuori scope definitivo.
-- DWELL geofence: se proximity alert non lo supporta nativamente, P2 consegna ENTER/EXIT e
-  DWELL resta dichiarato non supportato dal validator (niente finti dwell).
+- ~~Trigger sensori: fuori scope definitivo.~~ **RIAPERTI da Lorenzo il 2026-07-15** → P3
+  (fuori scope di P2, che è cosa diversa da "definitivo"). La motivazione batteria valeva solo per
+  l'accelerometro grezzo always-on: `TYPE_SIGNIFICANT_MOTION` è hardware e one-shot, il batching
+  con `maxReportLatencyUs` lascia dormire la CPU, e la sentinella FGS `specialUse` esiste già.
+- DWELL geofence: P2 consegna ENTER/EXIT e il validator dichiara DWELL non supportato (niente
+  finti dwell). **Precisazione sulla classe**: è un limite del **backend scelto**
+  (`addProximityAlert`), non un principio — il `GeofencingClient` di GMS ha DWELL nativo con
+  `loiteringDelay`, e in alternativa si implementa (ENTER → allarme a T → nessun EXIT ⇒ DWELL).
+  Va scritto come "non disponibile con questo runtime", mai come "non si può".
 
 ## Fasi
 
@@ -122,7 +128,22 @@ connectivity non è necessario.
 
 ### P2-1 — Connectivity (BT/Power subito, Wi-Fi con FGS)
 
-**Stato 2026-07-15: implementazione e gate sintetico-device completi; restano i due bordi fisici.**
+**Stato 2026-07-15 sera: CHIUSA — entrambi i bordi fisici passati con Lorenzo.**
+
+`ArgusPhysicalGateHarness#armPowerGate` e `#armBluetoothGate`, azioni fisiche reali:
+`cavo collegato` / `cavo scollegato` / `bt connesso` / `bt disconnesso` → **`FIRED` ×1 ciascuna**,
+`show_notification -> SUCCEEDED`, **nessun doppio scatto**, `detail` senza PII (assertione
+automatica: né SSID né nome/address Bluetooth nell'audit).
+
+**FGS on-demand verificato sul device**, non solo nel codice: prima dell'arm era attivo solo il
+`NotificationListenerService`; dopo l'arm delle regole POWER è comparso
+`ConnectivitySentinelService isForeground=true types=0x40000000` (`specialUse`); dopo
+`cleanupGates` la sentinella è sparita e il listener è rimasto bindato. L'invariante "nessun
+service quando nessuna regola lo richiede" regge sul campo.
+
+**Nota onesta su BLUETOOTH_CONNECT**: era `granted=false` (opt-in corretto by design) ed è stato
+concesso via `pm grant` per il gate, poi revocato. La **CTA UI reale non è stata esercitata** in
+questo giro. Non provato: match per nome del device BT (solo regola generica).
 
 - engine-core: capability granulari `connectivity.wifi`, `.wifi.identity`, `.bt`, `.power`;
   parser eventId digest-only (mai SSID/address in chiaro) e requirement per medium/match.
@@ -142,9 +163,21 @@ connectivity non è necessario.
 
 ### P2-2 — PhoneState (chiamate + SMS)
 
-**Stato 2026-07-15: implementazione e gate host/device completi; Lorenzo ha confermato sul campo
-che un SMS telephony reale ha attivato correttamente entrambe le automazioni SMS/OTP. Restano da
-provare le chiamate reali.**
+**Stato 2026-07-15 sera: CHIUSA — physical/radio E2E passato anche sulle chiamate.**
+
+SMS telephony reale: PASS manuale Lorenzo. **Chiamata reale: PASS osservato nel journal**
+(harness `ArgusPhysicalGateHarness#armCallGate`; Lorenzo ha chiamato dal secondo numero):
+
+- `Argus GATE chiamata in arrivo` → **`FIRED` ×1 + `SUPPRESSED_DUPLICATE`**: il secondo broadcast
+  (anonimo→numerato) ha riusato lo stesso event-id. Il fix `dea6f79` è quindi confermato SUL CAMPO,
+  non solo negli unit test.
+- `Argus GATE chiamata terminata` → `FIRED` ×1 (RINGING→IDLE).
+- Entrambe `show_notification -> SUCCEEDED`; notifiche viste da Lorenzo.
+- Privacy: assertione automatica su ogni record audit (nessun run di 4+ cifre in `detail`) →
+  **il numero non è mai arrivato nell'audit**.
+
+**Non provato**: regola filtrata per numero. Richiederebbe il numero come argomento, che non deve
+passare da CLI/log; la via pulita per il futuro è leggerlo on-device dal CallLog e armare da lì.
 
 - Permissions: `RECEIVE_SMS` + `READ_PHONE_STATE` runtime, richieste SOLO quando una regola le
   richiede (arm gate → CTA come battery P1-6); righe salute in Sistema; onboarding INVARIATO
@@ -182,8 +215,35 @@ clipboard e incolla reale in un'altra app; entrambe le automazioni hanno funzion
 
 ### P2-4 — Geofence (Es. 1 end-to-end)
 
-**Stato 2026-07-15: implementazione, gate host e gate framework-device completi; resta il bordo
-fisico dell'Esempio 1.**
+**Stato 2026-07-15 sera: Esempio 1 PASSATO con posizione simulata; l'attraversamento FISICO è
+armato e in attesa.** La distinzione sotto è deliberata: vedi handoff Codex §3.2, "un test
+sintetico non è il bordo reale".
+
+**(a) PASS — `production-path synthetic` GUIDATO DAL FRAMEWORK** (etichetta corretta: NON è
+physical/radio E2E). Metodo: test provider `fused`+`gps` via `cmd location providers`, posizione
+fissata dentro il geofence e poi spostata a ~500 m. **Il `GeofencingService` del framework ha
+valutato la posizione e fatto scattare il NOSTRO PendingIntent** — non abbiamo iniettato l'ingress,
+che è ciò che rende questa prova più forte del gate precedente. Journal:
+- `uscita geofence` → `FIRED` + `show_notification -> SUCCEEDED`;
+- `esempio 1` → `FIRED` + **`set_wifi -> SUCCEEDED` + `set_bluetooth -> SUCCEEDED`**.
+
+**Stato REALE del device confermato dopo lo scatto** (il journal da solo non basta):
+`settings get global wifi_on` → `0` ("Wifi is disabled"), `bluetooth_on` → `1`. L'Esempio 1
+multi-azione ha davvero agito sul telefono. Nota utile: **ADB è sopravvissuto allo spegnimento del
+Wi-Fi** perché Tailscale gira su LTE — il timore "spegnere il Wi-Fi ci fa perdere il device" è
+infondato su questo setup.
+
+Cleanup verificato: test provider rimossi, `mock_location` riportato a `default`, Wi-Fi riacceso,
+nessuna registrazione geofence residua nel framework.
+
+**(b) APERTO — attraversamento fisico reale.** Armate con `armWorkExitScenario` (EXIT 200 m sulla
+posizione del LAVORO → Wi-Fi off + BT on + notifica) e `armHomeArrivalScenario` (ENTER 200 m su
+Via Avola 28, geocodificata ON-DEVICE → Wi-Fi on + notifica). Attenzione al modello mentale:
+`resolveCurrentLocation` congela all'arm, quindi l'uscita scatta **lasciando il lavoro**, non
+arrivando a casa.
+
+**Restano non provati** e sono esattamente ciò che il mock NON può dare: latenza GPS reale,
+comportamento in Doze/OxygenOS, recupero del bordo perso.
 
 - Backend framework `LocationManager.addProximityAlert`: un PendingIntent esplicito, interno e
   mutable per regola; `ACCESS_FINE_LOCATION` precisa + `ACCESS_BACKGROUND_LOCATION` obbligatorie.
@@ -228,12 +288,25 @@ e [limiti location in background](https://developer.android.com/develop/sensors-
 
 ## Definition of Done P2
 
-- Es. 1 della spec passa live (geofence reale, multi-azione).
-- ~~OTP autocopy passa live su SMS vero.~~ **PASS manuale Lorenzo 2026-07-15**; redazione del
-  contenuto da log/DB/audit coperta separatamente da code review e gate automatizzati.
-- Trigger connectivity e phone_state armabili, verificati on-device, fail-closed senza grant.
-- Nessun service persistente quando nessuna regola armata lo richiede; il FGS sentinella si
-  spegne da solo ed è dichiarato in Sistema.
-- `run_shell` statico passa live via Shizuku solo da trigger trusted; messaggi/notifiche restano
-  bloccati e `shell.run` non compare mai nella lane generativa.
-- Regole esistenti di Lorenzo (WhatsApp generative + "esegui") intatte a ogni migrazione.
+Stato al 2026-07-15 sera. **Un solo punto resta aperto.**
+
+| # | Requisito | Stato | Classe di evidenza |
+|---|-----------|-------|--------------------|
+| 1 | Es. 1 della spec passa live (geofence, multi-azione) | **APERTO** | passato con posizione **simulata** (framework-driven synthetic) + stato device reale verificato; **attraversamento fisico armato, in attesa** |
+| 2 | OTP autocopy passa live su SMS vero | **PASS** | manuale Lorenzo (evidenza utente, non trace forense) |
+| 3 | Chiamata reale (INCOMING_CALL + CALL_ENDED) | **PASS** | physical/radio E2E, journal osservato |
+| 4 | Cavo POWER reale | **PASS** | physical E2E, journal osservato |
+| 5 | ACL Bluetooth reale | **PASS** | physical E2E, journal osservato |
+| 6 | Connectivity e phone_state armabili, fail-closed senza grant | **PASS** | on-device |
+| 7 | Nessun service persistente se nessuna regola lo richiede; FGS si spegne da solo | **PASS** | osservato sul device: assente → presente dopo l'arm → assente dopo il cleanup |
+| 8 | `run_shell` statico solo da trigger trusted; `shell.run` mai nella lane generativa | **PASS** | host + OnePlus, positivo e negativo (`cfc0ef4`) |
+| 9 | Regole esistenti di Lorenzo intatte | **PASS con nota** | inventario on-device: la regola OTP è intatta; Lorenzo ha confermato di aver cancellato lui "prova argus". Le WhatsApp generative e la "esegui" non risultano — probabile cancellazione sua precedente, **non ricostruibile** perché l'audit non traccia il lifecycle delle regole (→ è la motivazione del backlog P3 sui log) |
+
+**Privacy, trasversale a 3/4/5**: assertione automatica su ogni record audit dei gate — nessun run
+di 4+ cifre nel campo `detail`. Numero chiamante, SSID e nome/address Bluetooth non sono mai
+arrivati nell'audit.
+
+**Non provati, dichiarati**: latenza GPS reale e Doze/OxygenOS; recupero del bordo perso; regola
+chiamata filtrata per numero; match per nome del device BT; CTA UI reale per `BLUETOOTH_CONNECT`
+(concesso via `pm grant` nel gate, poi revocato); negativo OTP live (`otp_not_found`), coperto dai
+soli test Robolectric.

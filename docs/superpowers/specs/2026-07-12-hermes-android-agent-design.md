@@ -41,6 +41,27 @@ Esempi target (devono funzionare a fine **P2** — vedi §15 per cosa funziona q
 
 ## 3. Decisioni di design
 
+> ### D0 — Principio fondativo (direttiva Lorenzo, 2026-07-15)
+>
+> **L'app non deve avere limiti tecnici, solo etici.** Obiettivo dichiarato: la stessa
+> combinatoria di Tasker (action / if / then / and / or / trigger / condizioni), ma creata e armata
+> **via LLM**. Il confine etico è **uno solo** e riguarda l'injection: contenuto esterno non fidato
+> (WhatsApp/SMS/schermo) non può parametrizzare l'esecuzione né l'instradamento. **E finisce lì.**
+>
+> **Non esistono NON assoluti: esistono "non conviene" e "non è fattibile".** Chi scrive in questi
+> documenti che qualcosa "non si può" deve dichiararne la classe:
+>
+> 1. **invariante etica** (injection) — l'unica non negoziabile;
+> 2. **non conviene ORA** — sequenziamento di fase, priorità;
+> 3. **non è fattibile OGGI** — limite reale di Android/API, con il costo per aggirarlo;
+> 4. **scelta di valore di Lorenzo** — sua, e revocabile da lui.
+>
+> Mai presentare 2/3/4 come 1. Il rischio non è teorico: al 2026-07-15 questo documento conteneva
+> **B8 classificata come "barriera invalicabile"** quando era una classe 2, i sensori marcati
+> "scartati per sempre" quando erano una classe 4, e DWELL scritto come principio quando è una
+> classe 3. Nessuna di queste era una decisione sbagliata quando fu presa: erano **abitudini non
+> riesaminate**, ed è così che l'app perde potenza senza che nessuno lo decida.
+
 | # | Decisione | Scelta |
 |---|-----------|--------|
 | D1 | Dove vive il cervello | **App standalone con Brain pluggable**; l'app è sempre padrona del loop, il Brain è puro servizio di ragionamento |
@@ -207,7 +228,7 @@ Punto chiave da non perdere: **l'MVP non ha streaming** — il transport primari
 | B5 | ~~Gateway Hermes senza endpoint programmatico~~ | **RISOLTO:** `argus-bridge` `/compile` v1 è live su Tailscale HTTPS, autenticato e testato da Android; `hermes proxy` resta l'opzione P3 OpenAI-compatible. Vedi §2/§7. |
 | B6 | **Aux-vision senza provider multimodale raggiungibile**. | Configurare almeno **una key multimodale** (Gemini free); il probe avvisa e **disabilita** le regole che dipendono dalla visione schermo. |
 | B7 | **Finestre `FLAG_SECURE`** (banking): `screencap` torna nero. | Rilevare e riportare al Brain ("schermo illeggibile: finestra sicura"); provare `uiautomator dump` come fallback (l'albero a11y resta leggibile); non crashare. |
-| B8 | **Latenza del brain gratuito** (CliBridge ~10-30 s/call): inusabile per un loop computer_use multi-turn (200 s+/task). | **Il brain gratuito serve solo one-shot** (compile, InvokeLlm). Il **loop interattivo (P3)** usa `OpenAICompatTransport` con un modello veloce (proxy Nous/xAI o Direct). Trade-off costo/velocità esplicito. |
+| ~~B8~~ | ~~**Latenza del brain gratuito** (CliBridge ~10-30 s/call): inusabile per un loop computer_use multi-turn (200 s+/task).~~ **DECLASSATA il 2026-07-15: non era una barriera.** | **"Inusabile" era un assunto sulla tolleranza alla latenza, non un fatto.** Decisione di Lorenzo: per automazione **non presidiata** 200 s vanno benissimo — nessuno sta aspettando. Il loop interattivo diventa quindi a **due tier**: (a) **lento e gratuito** via CliBridge, default consigliato in onboarding per chi usa Hermes o API proprie; (b) **veloce e a pagamento** via `OpenAICompatTransport`, **opzionale**, solo per uso presidiato in cui guardi lo schermo e aspetti. Il tier (b) non è più un prerequisito di P3. Nota tecnica: dove l'albero a11y è leggibile (es. WhatsApp) usare `uiautomator dump` — deterministico e gratis — e tenere la vision come **fallback** per UI opache (canvas/giochi). |
 
 ### Conflitti
 
