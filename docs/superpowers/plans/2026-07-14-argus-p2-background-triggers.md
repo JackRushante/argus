@@ -84,9 +84,31 @@ probe, la FirePolicy lo bloccava e l'executor restituiva `live_confirmation_requ
 e non va implementato alcun retry binder per correggere quell'episodio.
 
 `run_shell` diventa eseguibile solo quando Shizuku è `AUTHORIZED`, con tre difese concordi:
-comando letterale nel fingerprint e mostrato integralmente in review; trigger ammessi soltanto
-Time/Geofence/Connectivity; blocco ripetuto da validator, FirePolicy ed executor per ogni evento
-Notification/PhoneState. Il tool generativo raw `shell.run` resta vietato.
+comando letterale nel fingerprint e mostrato integralmente in review; trigger ammessi; blocco
+ripetuto da validator, FirePolicy ed executor. Il tool generativo raw `shell.run` resta vietato.
+
+**AGGIORNAMENTO 2026-07-15 — Lorenzo revoca il proprio divieto** (`f29e8fa`). *"Del resto abbiamo
+la whitelist... i miei contatti whitelist possono fare tutto"*, con la sola eccezione che ha posto
+lui stesso: *"eccetto spoofing via sms ovviamente"*.
+
+La regola precedente (solo Time/Geofence/Connectivity) era **più larga della sua linea etica**:
+vietava anche di far **partire** un comando statico, non solo di sceglierlo. L'injection resta
+impossibile per costruzione — il `cmd` è letterale nel fingerprint, il messaggio è un
+interruttore. Cambia solo **chi può premerlo**.
+
+| Trigger | Shell | Perché |
+|---|---|---|
+| Time, Geofence, Connectivity | **sì** | nessun mittente |
+| WhatsApp + `conversationId` whitelistato + `isGroup=false` | **sì** | identità verificata (E15) |
+| Notification non-WhatsApp o id non whitelistato | no | qualunque app può postare notifiche |
+| PhoneState (SMS **e chiamate**) | no | **mittente SMS e caller ID sono spoofabili**: nessuna whitelist può renderli un'identità. Classe 3, non prudenza |
+
+L'identità è verificata **tre volte in modo concorde** (validator, FirePolicy, executor) e
+sull'**evento reale**, non solo sul trigger dichiarato. L'executor riceve la whitelist con default
+**vuoto** (chi dimentica di cablarla ottiene il comportamento chiuso) e la rilegge a ogni scatto,
+così rimuovere un contatto gli revoca la shell subito. Nuovo warning di review
+`shell_contact_trigger`: il rischio nuovo non è *cosa* esegue — quello è approvato — ma che il
+**momento** lo scelga il contatto.
 
 ### D5 — Cosa NON cambia
 
@@ -245,6 +267,45 @@ arrivando a casa.
 **Restano non provati** e sono esattamente ciò che il mock NON può dare: latenza GPS reale,
 comportamento in Doze/OxygenOS, recupero del bordo perso.
 
+#### (c) BUG DI CAMPO trovato e corretto: flapping — `4339244`
+
+**Il valore del gate fisico, in un caso solo.** Alle 18:31 e alle 18:34, con Lorenzo **fermo alla
+scrivania**, la regola "uscito dal lavoro" (200 m, centrata sulla sua posizione reale) è scattata
+**due volte**, spegnendogli il Wi-Fi. Il mock non avrebbe mai potuto mostrarlo: lì la posizione la
+decide il test.
+
+**Diagnosi provata, non ipotizzata**:
+- Due EXIT consecutive sono **impossibili per costruzione** (`beginTransition` ritorna null se
+  `lastTransition == transition`) ⇒ **in mezzo c'è stato un ENTER**: è flapping.
+- L'ENTER è invisibile nel journal perché `TriggerMatcher` richiede `spec.transition ==
+  event.transition`: una regola solo-EXIT lo riceve, aggiorna lo stato, **non produce audit**. Il
+  journal mostrava metà del ping-pong.
+- Escluso il residuo mock (83 min dopo l'arm; centro = posizione reale; fix reale `hAcc=12.8`
+  contro `accuracy=5` del mock). Escluso il recupero (mappa EXIT→ENTER, mai EXIT→EXIT). Il dedup
+  funzionava correttamente.
+
+**Causa prossima**: il design prometteva isteresi contro il rumore (C2/E14) ma la implementava
+**solo nel recupero post-crash**; il percorso framework si fidava del booleano
+`KEY_PROXIMITY_ENTERING` senza mai confrontarlo con la posizione.
+
+**Fix**: `LocationBackedTransitionVerifier` chiede una seconda opinione alla posizione prima di
+accettare il bordo, con lo **stesso margine di 25 m** del recupero (una sola definizione di
+"rumore"). Un bordo smentito **non avanza la sequenza**, altrimenti il dedup lo tratterebbe come
+avvenuto. **Fail-open deliberato**: senza posizione leggibile il bordo passa — perdere un
+attraversamento vero è peggio che accettarne uno spurio — e dentro l'isteresi l'ultima parola
+resta al framework, che lì è più accurato di noi.
+
+**Correzione a una nostra analisi frettolosa**: avevamo scritto che l'Esempio 1 "sabota il sensore
+da cui dipende" spegnendo il Wi-Fi. È **molto più debole di così**: `cmd wifi status` sullo stesso
+device dice `Wifi scanning is always available` — il sistema continua a scansionare per la
+posizione anche a Wi-Fi spento. L'evidenza era già nel nostro output e l'avevamo ignorata a favore
+di una narrazione elegante. Resta vera solo la sfumatura: **al chiuso** il GNSS non vede il cielo e
+il posizionamento pesa su Wi-Fi/celle, dove il rumore è massimo; **all'aperto e in movimento** —
+cioè quando il geofence serve — domina il GNSS.
+
+**Mitigazione secondaria**: l'harness armava con `cooldownMs = 0`, ignorando la contromisura che
+C2 già prescriveva; ora arma con 5 minuti. Riduce la frequenza, **non** la causa.
+
 - Backend framework `LocationManager.addProximityAlert`: un PendingIntent esplicito, interno e
   mutable per regola; `ACCESS_FINE_LOCATION` precisa + `ACCESS_BACKGROUND_LOCATION` obbligatorie.
   Nessuna dipendenza Google Play Services e nessun service residente.
@@ -307,9 +368,18 @@ Codex che non ho ri-verificato in modo indipendente, e vanno lette come tali.
 | 11 | Regole di Lorenzo intatte | **PASS con nota** | vedi riga 9 della DoD |
 | 12 | Documenti coerenti verificato/ragionato/non provato | **PASS** | questo giro: piano P2 e design master aggiornati; B8, sensori e DWELL riportati alla classe reale |
 
-**Gate host su questo HEAD**: `test lintDebug assembleDebug assembleDebugAndroidTest
---no-build-cache --rerun-tasks --no-parallel` → **`BUILD SUCCESSFUL`, 758/758 task, EXIT=0**
-(2m23s), stesso conteggio di Codex ⇒ nessuna regressione.
+**Gate host**: `test lintDebug assembleDebug assembleDebugAndroidTest --no-build-cache
+--rerun-tasks --no-parallel` → **`BUILD SUCCESSFUL`, 758/758 task, EXIT=0**, stesso conteggio di
+Codex ⇒ nessuna regressione. Rieseguito dopo **ogni** cambiamento di codice successivo
+(`f29e8fa` whitelist shell, `4339244` fix flapping): verde tutte e tre le volte.
+
+**Delta successivi all'audit**, entrambi coperti dal gate e dai propri test TDD:
+- `f29e8fa` — cambia il **modello di sicurezza** della shell (punto 3 della tabella): la matrice
+  resta concorde su validator/FirePolicy/executor, i `when` restano esaustivi sui sealed, e
+  l'identità è ora verificata anche sull'evento reale. Bridge riallineato e ridispiegato con
+  backup `bridge.py.pre-shell-whitelist-20260715`, suite 21/21 locale e remota, hash repo==host.
+- `4339244` — fix del flapping geofence. Non tocca privacy né capability; aggiunge una lettura di
+  posizione sul percorso di transizione (costo dichiarato, fail-open).
 
 ## Definition of Done P2
 
@@ -317,14 +387,14 @@ Stato al 2026-07-15 sera. **Un solo punto resta aperto.**
 
 | # | Requisito | Stato | Classe di evidenza |
 |---|-----------|-------|--------------------|
-| 1 | Es. 1 della spec passa live (geofence, multi-azione) | **APERTO** | passato con posizione **simulata** (framework-driven synthetic) + stato device reale verificato; **attraversamento fisico armato, in attesa** |
+| 1 | Es. 1 della spec passa live (geofence, multi-azione) | **RISCHIO RESIDUO ACCETTATO da Lorenzo** | passato con posizione **simulata** (framework-driven synthetic) + stato device reale verificato. L'attraversamento **fisico** è armato e in attesa: Lorenzo ha deciso esplicitamente di **non far slittare il merge** e di valutarlo dopo. **Non è un PASS**: un test non eseguito non diventa un PASS perché ci conviene |
 | 2 | OTP autocopy passa live su SMS vero | **PASS** | manuale Lorenzo (evidenza utente, non trace forense) |
 | 3 | Chiamata reale (INCOMING_CALL + CALL_ENDED) | **PASS** | physical/radio E2E, journal osservato |
 | 4 | Cavo POWER reale | **PASS** | physical E2E, journal osservato |
 | 5 | ACL Bluetooth reale | **PASS** | physical E2E, journal osservato |
 | 6 | Connectivity e phone_state armabili, fail-closed senza grant | **PASS** | on-device |
 | 7 | Nessun service persistente se nessuna regola lo richiede; FGS si spegne da solo | **PASS** | osservato sul device: assente → presente dopo l'arm → assente dopo il cleanup |
-| 8 | `run_shell` statico solo da trigger trusted; `shell.run` mai nella lane generativa | **PASS** | host + OnePlus, positivo e negativo (`cfc0ef4`) |
+| 8 | `run_shell` statico solo da trigger fidati; `shell.run` mai nella lane generativa | **PASS con perimetro cambiato** | host + OnePlus, positivo e negativo (`cfc0ef4`). Dal 2026-07-15 "fidato" include anche una chat WhatsApp 1:1 whitelistata (`f29e8fa`, decisione di Lorenzo): host verde su validator/FirePolicy/executor e bridge 21/21, ma il **percorso device live** (contatto whitelistato → shell) **non è stato eseguito** |
 | 9 | Regole esistenti di Lorenzo intatte | **PASS con nota** | inventario on-device: la regola OTP è intatta; Lorenzo ha confermato di aver cancellato lui "prova argus". Le WhatsApp generative e la "esegui" non risultano — probabile cancellazione sua precedente, **non ricostruibile** perché l'audit non traccia il lifecycle delle regole (→ è la motivazione del backlog P3 sui log) |
 
 **Privacy, trasversale a 3/4/5**: assertione automatica su ogni record audit dei gate — nessun run
