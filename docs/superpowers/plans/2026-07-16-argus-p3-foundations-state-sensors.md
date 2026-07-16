@@ -246,6 +246,34 @@ Gate: misura consumo e tempo FGS prima/dopo; se non misurabile, stato NOT PROVEN
 5. Checklist dichiarazioni Play e disclosure in-app; nessuna dichiarazione di approvazione finché
    non esiste una review reale Play Console.
 
+### Stato 2026-07-16 (Claude): sotto-slice A/B1/B2 landed (dormienti), gate host verdi
+
+Tutti e tre i commit sono **additivi e non attivi**: il default preserva il comportamento legacy,
+quindi il device di Lorenzo non cambia finché il DI non attiva il tier base (B4).
+
+- **A — `ActionPrivilege` (engine-core)** `a586556`: router chiuso azione→tier (BASE vs PRIVILEGED),
+  `when` esaustivo senza `else`. `ActionPrivileges.of/requiresShizuku`. Test `ActionPrivilegeTest`.
+- **B1 — `AndroidBaseActionExecutor` (automation-android)** `326043c`: esegue DND/Ringer/LaunchApp/
+  OpenUrl con API normali dietro il seam `BaseActionSurface`; grant mancante → fallimento tipizzato
+  (`dnd_policy_unavailable`/`ringer_policy_unavailable`), URL/package validati JVM-puri. Host-test.
+- **B2 — routing nell'executor** `e23c9dc`: `ShizukuActionExecutor` prende un
+  `AndroidBaseActionExecutor?` opzionale; se presente le base non passano più da Shizuku, le
+  privilegiate restano su `tools`. Default `null` = legacy. Test routing + regressioni verdi.
+
+**Restano (B3 autonomo, B4 SERVE LORENZO)**:
+- **B3** — probe capability per-azione: sostituire il blocco unico `shizukuAvailable` in
+  `AndroidCapabilityProbe` così le capability BASE si pubblicano anche senza Shizuku (DND/Ringer
+  gated sul grant policy; LaunchApp/OpenUrl/notifica/clipboard sempre) e le PRIVILEGED solo con
+  Shizuku autorizzato. Contratto condiviso col manifest Hermes → coordinare con Codex.
+- **B4** (device + grant) — adapter reale `BaseActionSurface` (NotificationManager/AudioManager/
+  PackageManager/Intent), wiring DI che inietta `baseActions`, **flip di `ArgusShizukuOutageE2E`**
+  (una base come DND deve CONTINUARE in outage se il grant c'è; blocca solo la privilegiata), e
+  soprattutto il **grant `ACCESS_NOTIFICATION_POLICY` sul telefono di Lorenzo**: senza, le sue
+  regole DND/Ringer passerebbero da Shizuku a normal-API e fallirebbero `*_policy_unavailable`.
+  Questa è la **decisione di prodotto** del tier base — richiede onboarding/consenso, non va
+  attivata di soppiatto.
+- Flavors `personal-full`/`play-core` (§4) e checklist Play (§5) dopo B3/B4.
+
 ## P3-4 — audit lifecycle e TTS
 
 - Eventi arm/edit/enable/disable/delete/quarantine con actor, timestamp, fingerprint prefix e reason;
