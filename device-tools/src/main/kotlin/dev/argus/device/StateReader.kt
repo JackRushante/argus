@@ -10,37 +10,74 @@ class StateReader(private val shell: PrivilegedShell) {
     suspend fun read(
         keys: Set<String>,
         includeForegroundApp: Boolean = false,
+    ): DeviceState = readInternal(
+        keys = keys,
+        includeForegroundApp = includeForegroundApp,
+        timeoutMillis = PrivilegedShell.DEFAULT_TIMEOUT_MILLIS,
+        scalarOutputBytes = 64 * 1024,
+        foregroundOutputBytes = PrivilegedShell.DEFAULT_TEXT_OUTPUT_BYTES,
+    )
+
+    /** Variante usata dai reader parametrici: stesso parser, limiti espliciti per ogni processo. */
+    internal suspend fun readBounded(
+        keys: Set<String>,
+        includeForegroundApp: Boolean = false,
+        timeoutMillis: Long,
+        maxOutputBytes: Int,
+    ): DeviceState = readInternal(
+        keys,
+        includeForegroundApp,
+        timeoutMillis,
+        maxOutputBytes,
+        maxOutputBytes,
+    )
+
+    private suspend fun readInternal(
+        keys: Set<String>,
+        includeForegroundApp: Boolean,
+        timeoutMillis: Long,
+        scalarOutputBytes: Int,
+        foregroundOutputBytes: Int,
     ): DeviceState {
         require(keys.all(StateKeys.ALL::containsKey)) { "Chiave di stato fuori registry" }
         val values = linkedMapOf<String, String>()
 
         if (StateKeys.RINGER in keys) {
-            readSetting("global", "mode_ringer")?.let(::parseRinger)?.let {
+            readSetting("global", "mode_ringer", timeoutMillis, scalarOutputBytes)
+                ?.let(::parseRinger)?.let {
                 values[StateKeys.RINGER] = it
             }
         }
         if (StateKeys.WIFI in keys) {
-            readSetting("global", "wifi_on")?.let(::parseWifi)?.let {
+            readSetting("global", "wifi_on", timeoutMillis, scalarOutputBytes)
+                ?.let(::parseWifi)?.let {
                 values[StateKeys.WIFI] = it
             }
         }
         if (StateKeys.BLUETOOTH in keys) {
-            readSetting("global", "bluetooth_on")?.let(::parseBluetooth)?.let {
+            readSetting("global", "bluetooth_on", timeoutMillis, scalarOutputBytes)
+                ?.let(::parseBluetooth)?.let {
                 values[StateKeys.BLUETOOTH] = it
             }
         }
         if (StateKeys.DND in keys) {
-            readSetting("global", "zen_mode")?.let(::parseDnd)?.let {
+            readSetting("global", "zen_mode", timeoutMillis, scalarOutputBytes)
+                ?.let(::parseDnd)?.let {
                 values[StateKeys.DND] = it
             }
         }
         if (StateKeys.AIRPLANE in keys) {
-            readSetting("global", "airplane_mode_on")?.let(::parseBooleanSetting)?.let {
+            readSetting("global", "airplane_mode_on", timeoutMillis, scalarOutputBytes)
+                ?.let(::parseBooleanSetting)?.let {
                 values[StateKeys.AIRPLANE] = it
             }
         }
         if (StateKeys.BATTERY in keys || StateKeys.CHARGING in keys) {
-            commandOutput(listOf(DUMPSYS, "battery"))?.let(::parseBattery)?.let { battery ->
+            commandOutput(
+                listOf(DUMPSYS, "battery"),
+                timeoutMillis,
+                scalarOutputBytes,
+            )?.let(::parseBattery)?.let { battery ->
                 if (StateKeys.BATTERY in keys && battery.level != null) {
                     values[StateKeys.BATTERY] = battery.level.toString()
                 }
@@ -53,7 +90,8 @@ class StateReader(private val shell: PrivilegedShell) {
         val foregroundApp = if (includeForegroundApp) {
             commandOutput(
                 command = listOf(DUMPSYS, "activity", "activities"),
-                maxOutputBytes = PrivilegedShell.DEFAULT_TEXT_OUTPUT_BYTES,
+                timeoutMillis = timeoutMillis,
+                maxOutputBytes = foregroundOutputBytes,
             )?.let(::parseForegroundPackage)
         } else {
             null
@@ -61,16 +99,29 @@ class StateReader(private val shell: PrivilegedShell) {
         return DeviceState(values = values, foregroundApp = foregroundApp)
     }
 
-    private suspend fun readSetting(namespace: String, key: String): String? =
-        commandOutput(listOf(SETTINGS, "get", namespace, key))?.trim()?.takeUnless {
-            it.isEmpty() || it == "null"
-        }
+    private suspend fun readSetting(
+        namespace: String,
+        key: String,
+        timeoutMillis: Long,
+        maxOutputBytes: Int,
+    ): String? = commandOutput(
+        listOf(SETTINGS, "get", namespace, key),
+        timeoutMillis,
+        maxOutputBytes,
+    )?.trim()?.takeUnless {
+        it.isEmpty() || it == "null"
+    }
 
     private suspend fun commandOutput(
         command: List<String>,
+        timeoutMillis: Long = PrivilegedShell.DEFAULT_TIMEOUT_MILLIS,
         maxOutputBytes: Int = 64 * 1024,
     ): String? = try {
-        shell.run(command, maxOutputBytes = maxOutputBytes).takeIf {
+        shell.run(
+            command,
+            timeoutMillis = timeoutMillis,
+            maxOutputBytes = maxOutputBytes,
+        ).takeIf {
             it.successful && !it.truncated
         }?.stdoutText
     } catch (error: CancellationException) {

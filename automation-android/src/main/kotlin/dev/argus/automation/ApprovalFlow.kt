@@ -7,7 +7,10 @@ import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.CapabilityRequirements
 import dev.argus.engine.model.CreatedBy
+import dev.argus.engine.model.StateQueryFamily
+import dev.argus.engine.model.StateValueType
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.stateComparisons
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.runtime.FirePolicySnapshotProvider
 import dev.argus.engine.safety.ApprovalResult
@@ -63,9 +66,17 @@ fun interface ArmedAutomationRegistrar {
 data class ApprovalFlowReview(
     val draft: DraftReview,
     val conflicts: List<ConflictWarning>,
+    /** Esito positivo redatto: identifica query e tipo, mai il valore campione letto. */
+    val verifiedStateQueries: List<StateQueryProbeEvidence> = emptyList(),
 ) {
     val canArm: Boolean = draft.canArm
 }
+
+data class StateQueryProbeEvidence(
+    val queryId: String,
+    val family: StateQueryFamily,
+    val valueType: StateValueType,
+)
 
 sealed interface DraftSubmissionResult {
     data class Ready(val review: ApprovalFlowReview, val reply: String) : DraftSubmissionResult
@@ -93,6 +104,7 @@ class ApprovalFlow(
     private val capabilities: FirePolicySnapshotProvider,
     private val location: CurrentLocationProvider,
     private val registrar: ArmedAutomationRegistrar,
+    private val stateQueries: StateQueryProbe = FailClosedStateQueryProbe,
     private val conflicts: ConflictDetector = ConflictDetector(),
     private val nowMillis: () -> Long = System::currentTimeMillis,
     private val newDraftId: () -> DraftId = { DraftId(UUID.randomUUID().toString()) },
@@ -209,6 +221,11 @@ class ApprovalFlow(
     suspend fun review(id: DraftId): ApprovalFlowReview? {
         val base = approvals.review(id) ?: return null
         val capabilityIssues = capabilityIssues(base.snapshot)
+        val queryReport = if (capabilityIssues.any { it.severity == Severity.ERROR }) {
+            StateQueryProbeReport()
+        } else {
+            stateQueryReport(base.snapshot)
+        }
         val candidate = base.snapshot.pendingAutomation()
         val active = automations.all().filter {
             it.status == AutomationStatus.ARMED && it.enabled
@@ -217,8 +234,12 @@ class ApprovalFlow(
             candidate.id in it.automationIds
         }
         return ApprovalFlowReview(
-            draft = DraftReview(base.snapshot, (base.issues + capabilityIssues).distinct()),
+            draft = DraftReview(
+                base.snapshot,
+                (base.issues + capabilityIssues + queryReport.issues).distinct(),
+            ),
             conflicts = conflictWarnings,
+            verifiedStateQueries = queryReport.verified,
         )
     }
 
@@ -322,6 +343,42 @@ class ApprovalFlow(
         }
     }
 
+    private suspend fun stateQueryReport(snapshot: PendingDraft): StateQueryProbeReport {
+        val issues = mutableListOf<ValidationIssue>()
+        val verified = mutableListOf<StateQueryProbeEvidence>()
+        snapshot.draft.conditions?.stateComparisons().orEmpty()
+            .distinctBy { it.query.canonicalId to it.valueType }
+            .forEach { condition ->
+                when (probeStateQuery(condition)) {
+                    StateQueryProbeResult.AVAILABLE -> verified += StateQueryProbeEvidence(
+                        queryId = condition.query.canonicalId,
+                        family = condition.query.family,
+                        valueType = condition.valueType,
+                    )
+                    StateQueryProbeResult.UNAVAILABLE -> issues += ValidationIssue(
+                            Severity.ERROR,
+                            "state_query_unavailable",
+                            "Reader non disponibile sul dispositivo: ${condition.query.family.wireName}",
+                        )
+                    StateQueryProbeResult.TYPE_MISMATCH -> issues += ValidationIssue(
+                            Severity.ERROR,
+                            "state_query_type_mismatch",
+                            "Il reader non restituisce il tipo dichiarato: ${condition.valueType.name.lowercase()}",
+                        )
+                }
+            }
+        return StateQueryProbeReport(issues = issues, verified = verified)
+    }
+
+    private suspend fun probeStateQuery(condition: dev.argus.engine.model.Condition.StateCompare) =
+        try {
+            stateQueries.probe(condition)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            StateQueryProbeResult.UNAVAILABLE
+        }
+
     private suspend fun currentLocation(): DeviceLocation? = try {
         location.current()?.takeIf(DeviceLocation::valid)
     } catch (error: CancellationException) {
@@ -352,3 +409,8 @@ class ApprovalFlow(
         return errors.takeIf(List<ValidationIssue>::isNotEmpty)?.let(FlowArmResult::ValidationFailed)
     }
 }
+
+private data class StateQueryProbeReport(
+    val issues: List<ValidationIssue> = emptyList(),
+    val verified: List<StateQueryProbeEvidence> = emptyList(),
+)

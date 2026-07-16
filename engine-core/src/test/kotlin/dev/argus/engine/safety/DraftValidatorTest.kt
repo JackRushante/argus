@@ -287,6 +287,101 @@ class DraftValidatorTest {
         assertTrue("time_window_invalid" in e)
         assertEquals(2, e.count { it == "state_value_invalid" })
     }
+
+    @Test fun `typed state query families accept only bounded read-only parameters`() {
+        fun draft(condition: Condition) = AutomationDraft(
+            "reader",
+            Trigger.Time(cron = "0 8 * * *", tz = "Europe/Rome"),
+            listOf(Action.ShowNotification("Argus", "reader")),
+            conditions = condition,
+        )
+        val valid = listOf(
+            Condition.StateCompare(
+                StateQuery.Builtin(StateKeys.WIFI),
+                StateValueType.TEXT,
+                CmpOp.EQ,
+                "on",
+            ),
+            Condition.StateCompare(
+                StateQuery.Setting(SettingNamespace.GLOBAL, "airplane_mode_on"),
+                StateValueType.BOOLEAN,
+                CmpOp.EQ,
+                "true",
+            ),
+            Condition.StateCompare(
+                StateQuery.SystemProperty("ro.build.version.sdk"),
+                StateValueType.NUMBER,
+                CmpOp.GT,
+                "30",
+            ),
+            Condition.StateCompare(
+                StateQuery.Sysfs("/sys/class/power_supply/battery/voltage_now"),
+                StateValueType.NUMBER,
+                CmpOp.GT,
+                "0",
+            ),
+            Condition.StateCompare(
+                StateQuery.DumpsysField("battery", "voltage"),
+                StateValueType.NUMBER,
+                CmpOp.LT,
+                "5000",
+            ),
+        )
+        valid.forEach { assertEquals(emptyList(), errors(v.validate(draft(it), emptySet()))) }
+
+        val invalidQueries = listOf<StateQuery>(
+            StateQuery.Builtin("unknown"),
+            StateQuery.Setting(SettingNamespace.SECURE, "bad\nkey"),
+            StateQuery.SystemProperty("bad/property"),
+            StateQuery.Sysfs("/proc/version"),
+            StateQuery.Sysfs("/sys/../data/local/tmp/value"),
+            StateQuery.DumpsysField("battery;id", "voltage"),
+            StateQuery.DumpsysField("battery", "bad\nfield"),
+        )
+        invalidQueries.forEach { query ->
+            val condition = Condition.StateCompare(
+                query,
+                StateValueType.TEXT,
+                CmpOp.EQ,
+                "x",
+            )
+            assertTrue("state_query_invalid" in errors(v.validate(draft(condition), emptySet())))
+        }
+    }
+
+    @Test fun `typed state comparisons reject mismatched operators and expected values`() {
+        fun errorsFor(type: StateValueType, op: CmpOp, expected: String): List<String> = errors(
+            v.validate(
+                AutomationDraft(
+                    "reader",
+                    Trigger.Time(cron = "0 8 * * *", tz = "Europe/Rome"),
+                    listOf(Action.ShowNotification("Argus", "reader")),
+                    conditions = Condition.StateCompare(
+                        StateQuery.SystemProperty("ro.build.version.sdk"),
+                        type,
+                        op,
+                        expected,
+                    ),
+                ),
+                emptySet(),
+            ),
+        )
+
+        assertTrue("state_compare_invalid" in errorsFor(StateValueType.NUMBER, CmpOp.CONTAINS, "3"))
+        assertTrue("state_compare_invalid" in errorsFor(StateValueType.NUMBER, CmpOp.GT, "NaN"))
+        assertTrue("state_compare_invalid" in errorsFor(StateValueType.BOOLEAN, CmpOp.EQ, "on"))
+        assertTrue("state_compare_invalid" in errorsFor(StateValueType.BOOLEAN, CmpOp.GT, "true"))
+        assertTrue("state_compare_invalid" in errorsFor(StateValueType.TEXT, CmpOp.GT, "x"))
+        assertTrue("state_compare_invalid" in errorsFor(StateValueType.TEXT, CmpOp.CONTAINS, ""))
+        assertTrue("state_compare_invalid" in errorsFor(StateValueType.TEXT, CmpOp.EQ, " padded "))
+        assertTrue(
+            "state_compare_invalid" in errorsFor(
+                StateValueType.TEXT,
+                CmpOp.EQ,
+                "x".repeat(5_000),
+            ),
+        )
+    }
     @Test fun `non finite or out of range locations and negative cooldown are rejected`() {
         val d = AutomationDraft(
             "x",

@@ -169,6 +169,7 @@ class DraftValidator(
             }
             is Condition.Not -> checkConditions(condition.cond, depth + 1, count, err)
             is Condition.StateEquals -> validateStateCondition(condition, err)
+            is Condition.StateCompare -> validateStateCompare(condition, err)
             is Condition.TimeWindow -> {
                 runCatching {
                     ZoneId.of(condition.tz)
@@ -201,6 +202,23 @@ class DraftValidator(
                 c.value in StateKeys.ALL.getValue(c.key).split('|')
         }
         if (!valid) err("state_value_invalid", "Valore/op '${c.op}:${c.value}' non valido per '${c.key}'")
+    }
+
+    private fun validateStateCompare(c: Condition.StateCompare, err: (String, String) -> Unit) {
+        if (!StateQueryPolicy.validQuery(c.query, stateKeys)) {
+            err("state_query_invalid", "Reader di stato o parametri non validi")
+            return
+        }
+        if (!StateQueryPolicy.validComparison(
+                c.query,
+                c.valueType,
+                c.op,
+                c.expected,
+                stateKeys,
+            )
+        ) {
+            err("state_compare_invalid", "Tipo, operatore o valore atteso non validi per il reader")
+        }
     }
 
     private fun validateAction(

@@ -34,6 +34,12 @@ class ConditionEvaluator(private val clock: Clock) {
             ?.let { Truth.of(it == c.pkg) }
             ?: Truth.UNKNOWN
         is Condition.StateEquals -> compare(state.values[c.key], c.op, c.value)
+        is Condition.StateCompare -> compareTyped(
+            state.queryValues[c.query.canonicalId],
+            c.valueType,
+            c.op,
+            c.expected,
+        )
         is Condition.LocationIn -> state.location?.let {
             Truth.of(haversineM(it.lat, it.lng, c.lat, c.lng) <= c.radiusM)
         } ?: Truth.UNKNOWN
@@ -64,6 +70,43 @@ class ConditionEvaluator(private val clock: Clock) {
         val dLat = Math.toRadians(lat2 - lat1); val dLon = Math.toRadians(lon2 - lon1)
         val a = sin(dLat / 2).pow(2) + cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) * sin(dLon / 2).pow(2)
         return r * 2 * atan2(sqrt(a), sqrt(1 - a))
+    }
+
+    private fun compareTyped(
+        actual: String?,
+        type: StateValueType,
+        op: CmpOp,
+        expected: String,
+    ): Truth {
+        if (actual == null) return Truth.UNKNOWN
+        return when (type) {
+            StateValueType.TEXT -> when (op) {
+                CmpOp.EQ -> Truth.of(actual == expected)
+                CmpOp.NEQ -> Truth.of(actual != expected)
+                CmpOp.CONTAINS -> Truth.of(actual.contains(expected))
+                CmpOp.GT, CmpOp.LT -> Truth.UNKNOWN
+            }
+            StateValueType.NUMBER -> {
+                val left = StateValueCoercion.number(actual) ?: return Truth.UNKNOWN
+                val right = StateValueCoercion.number(expected) ?: return Truth.UNKNOWN
+                when (op) {
+                    CmpOp.EQ -> Truth.of(left == right)
+                    CmpOp.NEQ -> Truth.of(left != right)
+                    CmpOp.GT -> Truth.of(left > right)
+                    CmpOp.LT -> Truth.of(left < right)
+                    CmpOp.CONTAINS -> Truth.UNKNOWN
+                }
+            }
+            StateValueType.BOOLEAN -> {
+                val left = StateValueCoercion.boolean(actual) ?: return Truth.UNKNOWN
+                val right = expected.toBooleanStrictOrNull() ?: return Truth.UNKNOWN
+                when (op) {
+                    CmpOp.EQ -> Truth.of(left == right)
+                    CmpOp.NEQ -> Truth.of(left != right)
+                    CmpOp.GT, CmpOp.LT, CmpOp.CONTAINS -> Truth.UNKNOWN
+                }
+            }
+        }
     }
 
     private enum class Truth {

@@ -125,7 +125,7 @@ class ArgusMinimalStateReadInstrumentedTest {
     }
 }
 
-private class SingleAutomationStore(private val automation: Automation) : AutomationStore {
+internal class SingleAutomationStore(private val automation: Automation) : AutomationStore {
     override suspend fun get(id: AutomationId): Automation? = automation.takeIf { it.id == id }
     override suspend fun all(): List<Automation> = listOf(automation)
     override fun observeAll(): Flow<List<Automation>> = flowOf(listOf(automation))

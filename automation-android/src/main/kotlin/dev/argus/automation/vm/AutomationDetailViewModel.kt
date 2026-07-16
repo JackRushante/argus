@@ -22,6 +22,8 @@ import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.ApprovalFingerprint
+import dev.argus.engine.model.StateQueryFamily
+import dev.argus.engine.model.StateValueType
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.safety.DraftDeleteResult
@@ -351,6 +353,9 @@ class AutomationDetailViewModel @Inject constructor(
                 geofencePreviewLabel = (snapshot.draft.trigger as? Trigger.Geofence)
                     ?.takeIf { it.resolveCurrentLocation }
                     ?.let { "Posizione: quella attuale al momento dell'attivazione" },
+                verifiedStateReaders = review?.verifiedStateQueries.orEmpty().map { evidence ->
+                    readerProbeLabel(evidence.family, evidence.valueType)
+                },
             ),
             automationId = snapshot.automationId.value,
             loading = false,
@@ -414,6 +419,22 @@ class AutomationDetailViewModel @Inject constructor(
         "Disponibile da P1 · cooldown minimo 60 s"
     } else {
         null
+    }
+
+    private fun readerProbeLabel(family: StateQueryFamily, type: StateValueType): String {
+        val reader = when (family) {
+            StateQueryFamily.BUILTIN -> "stato integrato"
+            StateQueryFamily.SETTING -> "impostazione Android"
+            StateQueryFamily.SYSTEM_PROPERTY -> "proprietà di sistema"
+            StateQueryFamily.SYSFS -> "sysfs"
+            StateQueryFamily.DUMPSYS_FIELD -> "dumpsys"
+        }
+        val valueType = when (type) {
+            StateValueType.TEXT -> "testo"
+            StateValueType.NUMBER -> "numero"
+            StateValueType.BOOLEAN -> "booleano"
+        }
+        return "$reader · $valueType · probe OK"
     }
 
     private suspend fun message(text: String) {

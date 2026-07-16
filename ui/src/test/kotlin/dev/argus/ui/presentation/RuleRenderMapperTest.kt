@@ -95,6 +95,28 @@ class RuleRenderMapperTest {
         assertEquals(expected, RuleRenderMapper.map(a).conditionLines)
     }
 
+    @Test fun `parametric reader review renders exact family parameters type and operator`() {
+        val automation = Automation(
+            AutomationId("query"),
+            "voltaggio",
+            CreatedBy.USER,
+            AutomationStatus.PENDING_APPROVAL,
+            Trigger.Time(cron = "0 8 * * *", tz = "Europe/Rome"),
+            listOf(Action.ShowNotification("Argus", "batteria")),
+            conditions = Condition.StateCompare(
+                StateQuery.DumpsysField("battery", "voltage"),
+                StateValueType.NUMBER,
+                CmpOp.GT,
+                "4000",
+            ),
+        )
+
+        assertEquals(
+            listOf("Solo se dumpsys battery · campo voltage [numero] > 4000"),
+            RuleRenderMapper.map(automation).conditionLines,
+        )
+    }
+
     @Test fun `non-humanizable cron falls back to the raw expression`() {
         val a = Automation(
             AutomationId("t1"), "cron strano", CreatedBy.LLM, AutomationStatus.ARMED,

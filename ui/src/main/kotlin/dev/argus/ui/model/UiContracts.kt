@@ -131,6 +131,8 @@ data class AutomationDetailState(
     /** P0-B non espone un percorso manuale sicuro: il controllo resta fail-closed finché non esiste. */
     val canRunNow: Boolean = false,
     val runNowBlockedReason: String? = "Esecuzione manuale non disponibile in questa fase",
+    /** Probe positivi redatti: solo famiglia/tipo, mai il valore campione. */
+    val verifiedStateReaders: List<String> = emptyList(),
 )
 
 interface AutomationDetailCallbacks {

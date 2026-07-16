@@ -12,6 +12,14 @@ sealed interface Condition {
     @Serializable @SerialName("state_equals")
     data class StateEquals(val key: String, val op: CmpOp, val value: String) : Condition
 
+    @Serializable @SerialName("state_compare")
+    data class StateCompare(
+        val query: StateQuery,
+        val valueType: StateValueType,
+        val op: CmpOp,
+        val expected: String,
+    ) : Condition
+
     @Serializable @SerialName("app_in_foreground")
     data class AppInForeground(val pkg: String) : Condition
 
@@ -26,4 +34,16 @@ sealed interface Condition {
 
     @Serializable @SerialName("not")
     data class Not(val cond: Condition) : Condition
+}
+
+fun Condition.stateComparisons(): List<Condition.StateCompare> = when (this) {
+    is Condition.StateCompare -> listOf(this)
+    is Condition.And -> all.flatMap(Condition::stateComparisons)
+    is Condition.Or -> any.flatMap(Condition::stateComparisons)
+    is Condition.Not -> cond.stateComparisons()
+    is Condition.TimeWindow,
+    is Condition.StateEquals,
+    is Condition.AppInForeground,
+    is Condition.LocationIn,
+    -> emptyList()
 }

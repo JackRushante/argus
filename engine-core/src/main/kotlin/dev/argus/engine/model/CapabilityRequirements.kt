@@ -17,6 +17,11 @@ object CapabilityIds {
 
     const val STATE_FOREGROUND_APP = "state.foreground_app"
     const val STATE_LOCATION = "state.location"
+    const val STATE_READER_BUILTIN = "state.reader.builtin"
+    const val STATE_READER_SETTING = "state.reader.setting"
+    const val STATE_READER_SYSTEM_PROPERTY = "state.reader.system_property"
+    const val STATE_READER_SYSFS = "state.reader.sysfs"
+    const val STATE_READER_DUMPSYS_FIELD = "state.reader.dumpsys_field"
 
     const val ACTION_SET_WIFI = "action.set_wifi"
     const val ACTION_SET_BLUETOOTH = "action.set_bluetooth"
@@ -73,6 +78,7 @@ object CapabilityRequirements {
     private fun forCondition(condition: Condition): Set<String> = when (condition) {
         is Condition.TimeWindow -> emptySet()
         is Condition.StateEquals -> setOf(CapabilityIds.state(condition.key))
+        is Condition.StateCompare -> setOf(condition.query.family.capabilityId)
         is Condition.AppInForeground -> setOf(CapabilityIds.STATE_FOREGROUND_APP)
         is Condition.LocationIn -> setOf(CapabilityIds.STATE_LOCATION)
         is Condition.And -> condition.all.flatMapTo(linkedSetOf(), ::forCondition)

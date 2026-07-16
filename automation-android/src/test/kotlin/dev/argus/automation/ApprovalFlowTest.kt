@@ -11,6 +11,11 @@ import dev.argus.engine.model.ApprovalFingerprints
 import dev.argus.engine.model.CapabilityIds
 import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.DndMode
+import dev.argus.engine.model.CmpOp
+import dev.argus.engine.model.Condition
+import dev.argus.engine.model.StateQuery
+import dev.argus.engine.model.StateQueryFamily
+import dev.argus.engine.model.StateValueType
 import dev.argus.engine.model.Transition
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.ActionCapabilities
@@ -310,12 +315,78 @@ class ApprovalFlowTest {
         assertEquals("Cambio concorrente", fixture.repository.get(first.id)?.draft?.name)
     }
 
+    @Test
+    fun `exact state query is probed before arm and unavailable or wrong type blocks`() = runTest {
+        val query = StateQuery.DumpsysField("battery", "voltage")
+        val draft = AutomationDraft(
+            "Voltaggio",
+            Trigger.Time(cron = "0 8 * * *", tz = "Europe/Rome"),
+            listOf(Action.ShowNotification("Argus", "voltaggio")),
+            conditions = Condition.StateCompare(
+                query,
+                StateValueType.NUMBER,
+                CmpOp.GT,
+                "4000",
+            ),
+        )
+        val capabilities = setOf(
+            CapabilityIds.TRIGGER_TIME,
+            ActionCapabilities.SHOW_NOTIFICATION,
+            CapabilityIds.STATE_READER_DUMPSYS_FIELD,
+        )
+
+        val unavailable = fixture(
+            available = capabilities,
+            stateQueryProbe = StateQueryProbe { StateQueryProbeResult.UNAVAILABLE },
+        )
+        val blocked = assertIs<DraftSubmissionResult.Ready>(
+            unavailable.flow.submit(CompileResult("ok", draft, null)),
+        ).review
+        assertFalse(blocked.canArm)
+        assertTrue(blocked.draft.issues.any { it.code == "state_query_unavailable" })
+        assertIs<FlowArmResult.ValidationFailed>(
+            unavailable.flow.arm(
+                blocked.draft.snapshot.id,
+                blocked.draft.snapshot.revision,
+                blocked.draft.snapshot.fingerprint,
+            ),
+        )
+
+        val wrongType = fixture(
+            available = capabilities,
+            stateQueryProbe = StateQueryProbe { StateQueryProbeResult.TYPE_MISMATCH },
+        )
+        val typeBlocked = assertIs<DraftSubmissionResult.Ready>(
+            wrongType.flow.submit(CompileResult("ok", draft, null)),
+        ).review
+        assertTrue(typeBlocked.draft.issues.any { it.code == "state_query_type_mismatch" })
+
+        var probed: Condition.StateCompare? = null
+        val available = fixture(
+            available = capabilities,
+            stateQueryProbe = StateQueryProbe { condition ->
+                probed = condition
+                StateQueryProbeResult.AVAILABLE
+            },
+        )
+        val ready = assertIs<DraftSubmissionResult.Ready>(
+            available.flow.submit(CompileResult("ok", draft, null)),
+        ).review
+        assertTrue(ready.canArm)
+        assertEquals(query, probed?.query)
+        assertEquals(1, ready.verifiedStateQueries.size)
+        assertEquals(query.canonicalId, ready.verifiedStateQueries.single().queryId)
+        assertEquals(StateQueryFamily.DUMPSYS_FIELD, ready.verifiedStateQueries.single().family)
+        assertEquals(StateValueType.NUMBER, ready.verifiedStateQueries.single().valueType)
+    }
+
     private fun fixture(
         available: Set<String>,
         transient: Set<String> = emptySet(),
         initial: List<Automation> = emptyList(),
         location: DeviceLocation? = null,
         registrar: ArmedAutomationRegistrar = ArmedAutomationRegistrar { true },
+        stateQueryProbe: StateQueryProbe = StateQueryProbe { StateQueryProbeResult.AVAILABLE },
     ): Fixture {
         val store = MemoryAutomationStore(initial)
         val repository = MemoryDraftRepository(store)
@@ -337,6 +408,7 @@ class ApprovalFlowTest {
             capabilities = FirePolicySnapshotProvider { snapshot },
             location = CurrentLocationProvider { location },
             registrar = registrar,
+            stateQueries = stateQueryProbe,
             nowMillis = { 1_000L },
             newDraftId = { DraftId("draft-${repository.count + 1}") },
             newAutomationId = { AutomationId("automation-${repository.count + 1}") },

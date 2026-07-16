@@ -11,6 +11,8 @@ import dev.argus.engine.model.ConnState
 import dev.argus.engine.model.Condition
 import dev.argus.engine.model.DndMode
 import dev.argus.engine.model.PhoneEvent
+import dev.argus.engine.model.StateQuery
+import dev.argus.engine.model.StateValueType
 import dev.argus.engine.model.Transition
 import dev.argus.engine.model.Trigger
 import dev.argus.ui.model.ActionRow
@@ -170,6 +172,11 @@ object RuleRenderMapper {
                 listOf("${pad}Solo tra le ${c.startLocal} e le ${c.endLocal} (${c.tz})")
             is Condition.StateEquals ->
                 listOf("${pad}Solo se ${c.key} ${opLabel(c.op)} ${c.value}")
+            is Condition.StateCompare ->
+                listOf(
+                    "${pad}Solo se ${queryLabel(c.query)} [${valueTypeLabel(c.valueType)}] " +
+                        "${opLabel(c.op)} ${c.expected}",
+                )
             is Condition.AppInForeground ->
                 listOf("${pad}Solo se ${appLabel(c.pkg)} è in primo piano")
             is Condition.LocationIn ->
@@ -346,5 +353,19 @@ object RuleRenderMapper {
     private fun fmtCoord(d: Double): String {
         val rounded = String.format(Locale.ROOT, "%.5f", d).trimEnd('0').trimEnd('.')
         return if (rounded == "-0") "0" else rounded
+    }
+
+    private fun queryLabel(query: StateQuery): String = when (query) {
+        is StateQuery.Builtin -> "stato ${query.key}"
+        is StateQuery.Setting -> "setting ${query.namespace.name}:${query.key}"
+        is StateQuery.SystemProperty -> "property ${query.name}"
+        is StateQuery.Sysfs -> "sysfs ${query.path}"
+        is StateQuery.DumpsysField -> "dumpsys ${query.service} · campo ${query.field}"
+    }
+
+    private fun valueTypeLabel(type: StateValueType): String = when (type) {
+        StateValueType.TEXT -> "testo"
+        StateValueType.NUMBER -> "numero"
+        StateValueType.BOOLEAN -> "booleano"
     }
 }

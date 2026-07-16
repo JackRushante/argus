@@ -13,6 +13,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import dev.argus.device.StateReader
+import dev.argus.device.ParametricStateReader
 import dev.argus.automation.connectivity.ConnectivityEventDispatcher
 import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
 import dev.argus.automation.connectivity.NoopConnectivityTriggerRuntime
@@ -53,22 +54,24 @@ class LazyDeviceStateProvider(
     private val reader: StateReader,
     private val shizukuStatus: () -> ShizukuGatewayStatus,
     private val location: CurrentLocationProvider,
+    private val parametricReader: ParametricStateReader? = null,
 ) : DeviceStateSnapshotProvider {
     constructor(
         reader: StateReader,
         shizuku: ShizukuGateway,
         location: CurrentLocationProvider,
-    ) : this(reader, shizuku::status, location)
+        parametricReader: ParametricStateReader,
+    ) : this(reader, shizuku::status, location, parametricReader)
 
     override suspend fun current(): DeviceState = current(StateReadRequest.LEGACY_GENERATIVE)
 
     override suspend fun current(request: StateReadRequest): DeviceState {
         if (request.isEmpty) return DeviceState()
-        val needsPrivilegedState = request.keys.isNotEmpty() || request.includeForegroundApp
-        val privileged = if (
-            needsPrivilegedState &&
+        val needsPrivilegedState = request.keys.isNotEmpty() || request.includeForegroundApp ||
+            request.queries.isNotEmpty()
+        val authorized = needsPrivilegedState &&
             runCatching { shizukuStatus() == ShizukuGatewayStatus.AUTHORIZED }.getOrDefault(false)
-        ) {
+        val privileged = if (authorized && (request.keys.isNotEmpty() || request.includeForegroundApp)) {
             try {
                 reader.read(request.keys, request.includeForegroundApp)
             } catch (error: CancellationException) {
@@ -78,6 +81,17 @@ class LazyDeviceStateProvider(
             }
         } else {
             DeviceState()
+        }
+        val queryValues = if (authorized && request.queries.isNotEmpty()) {
+            try {
+                parametricReader?.read(request.queries).orEmpty()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                emptyMap()
+            }
+        } else {
+            emptyMap()
         }
         val point = if (request.includeLocation) {
             try {
@@ -92,7 +106,7 @@ class LazyDeviceStateProvider(
         } else {
             null
         }
-        return request.project(privileged.copy(location = point))
+        return request.project(privileged.copy(location = point, queryValues = queryValues))
     }
 }
 

@@ -12,6 +12,7 @@ import dev.argus.automation.AndroidCapabilityProbe
 import dev.argus.automation.AndroidGenerativeLane
 import dev.argus.automation.AndroidArmedAutomationRegistrar
 import dev.argus.automation.AndroidGenerativeRuntimeReadiness
+import dev.argus.automation.AndroidStateQueryProbe
 import dev.argus.automation.GenerativeRuntimeReadiness
 import dev.argus.automation.AndroidTimeAlarmBackend
 import dev.argus.automation.AppPreferencesStore
@@ -42,6 +43,7 @@ import dev.argus.automation.NotificationEventDispatcher
 import dev.argus.automation.RoomTimeAlarmStateStore
 import dev.argus.automation.ShizukuActionExecutor
 import dev.argus.automation.ShizukuStaticShellRunner
+import dev.argus.automation.StateQueryProbe
 import dev.argus.automation.TimeAlarmBackend
 import dev.argus.automation.TimeAlarmCoordinator
 import dev.argus.automation.TimeAlarmRuntime
@@ -67,6 +69,7 @@ import dev.argus.data.RoomJournalMaintenance
 import dev.argus.data.RoomObservedConversationStore
 import dev.argus.device.DeviceController
 import dev.argus.device.DeviceTools
+import dev.argus.device.ParametricStateReader
 import dev.argus.device.StateReader
 import dev.argus.engine.brain.Brain
 import dev.argus.engine.brain.CapabilityProbe
@@ -255,11 +258,29 @@ object ArgusModule {
 
     @Provides
     @Singleton
+    fun parametricStateReader(shell: PrivilegedShell): ParametricStateReader =
+        ParametricStateReader(shell)
+
+    @Provides
+    @Singleton
+    fun stateQueryProbe(
+        gateway: ShizukuGateway,
+        reader: ParametricStateReader,
+    ): StateQueryProbe = AndroidStateQueryProbe(gateway, reader)
+
+    @Provides
+    @Singleton
     fun lazyDeviceState(
         reader: StateReader,
+        parametricReader: ParametricStateReader,
         gateway: ShizukuGateway,
         location: CurrentLocationProvider,
-    ): LazyDeviceStateProvider = LazyDeviceStateProvider(reader, gateway, location)
+    ): LazyDeviceStateProvider = LazyDeviceStateProvider(
+        reader,
+        gateway,
+        location,
+        parametricReader,
+    )
 
     @Provides
     fun deviceStateSnapshotProvider(
@@ -680,6 +701,7 @@ object ArgusModule {
         capabilities: FirePolicySnapshotProvider,
         location: CurrentLocationProvider,
         registrar: ArmedAutomationRegistrar,
+        stateQueries: StateQueryProbe,
     ): ApprovalFlow = ApprovalFlow(
         drafts,
         approvals,
@@ -687,6 +709,7 @@ object ArgusModule {
         capabilities,
         location,
         registrar,
+        stateQueries,
     )
 
     @Provides

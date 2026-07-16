@@ -308,5 +308,6 @@ class Engine(
         values = values + other.values,
         foregroundApp = other.foregroundApp ?: foregroundApp,
         location = other.location ?: location,
+        queryValues = queryValues + other.queryValues,
     )
 }

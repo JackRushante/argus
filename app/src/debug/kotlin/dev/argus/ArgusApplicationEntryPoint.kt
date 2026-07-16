@@ -14,6 +14,7 @@ import dev.argus.automation.geofence.GeofenceEventIngress
 import dev.argus.automation.geofence.GeofenceStateStore
 import dev.argus.automation.geofence.GeofenceTriggerRuntime
 import dev.argus.automation.ShizukuStaticShellRunner
+import dev.argus.automation.StateQueryProbe
 import dev.argus.automation.TimeAlarmBackend
 import dev.argus.automation.TimeAlarmRuntime
 import dev.argus.brain.BridgeConfigurationStore
@@ -34,6 +35,7 @@ interface ArgusApplicationEntryPoint {
     fun brain(): Brain
     fun capabilityProbe(): CapabilityProbe
     fun deviceStateSnapshotProvider(): DeviceStateSnapshotProvider
+    fun stateQueryProbe(): StateQueryProbe
     fun phoneEventIngress(): PhoneEventIngress
     fun connectivityEventIngress(): ConnectivityEventIngress
     fun connectivitySentinelStatus(): ConnectivitySentinelStatus

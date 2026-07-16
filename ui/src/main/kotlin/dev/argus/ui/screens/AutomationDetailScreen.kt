@@ -121,6 +121,11 @@ fun AutomationDetailScreen(
                 // §5.2: i warning stanno SOPRA la fold, prima della regola, mai collassati.
                 state.warnings.forEach { WarningBanner(it) }
 
+                // Probe positivo redatto: attesta il reader concreto senza mostrare il campione.
+                if (state.verifiedStateReaders.isNotEmpty()) {
+                    VerifiedReadersPanel(state.verifiedStateReaders)
+                }
+
                 // §5.1: la verità visiva è SEMPRE RuleRender (QUANDO/SOLO SE/ALLORA).
                 // showGenerativeHeader=false: la coppia generativa+cloud è già nella riga
                 // badge dell'header (TitleAndBadges); qui va soppressa per non duplicarla.
@@ -245,6 +250,41 @@ private fun TitleAndBadges(state: AutomationDetailState) {
 // -----------------------------------------------------------------------------
 // Righe meta: geofence preview, stima generativa, rationale
 // -----------------------------------------------------------------------------
+
+@Composable
+private fun VerifiedReadersPanel(readers: List<String>) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.primaryContainer)
+            .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+            .padding(horizontal = 13.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        Icon(
+            Icons.Rounded.CheckCircle,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(19.dp),
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(
+                "Reader verificati sul dispositivo",
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                style = MaterialTheme.typography.labelMedium,
+            )
+            readers.forEach { reader ->
+                Text(
+                    reader,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+    }
+}
 
 @Composable
 private fun GeofencePreviewRow(label: String) {

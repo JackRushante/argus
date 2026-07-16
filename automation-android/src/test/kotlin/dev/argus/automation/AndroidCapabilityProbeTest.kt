@@ -64,6 +64,8 @@ class AndroidCapabilityProbeTest {
         assertTrue(ActionCapabilities.RUN_SHELL in snapshot.availableCapabilities)
         assertTrue(ActionCapabilities.SHOW_NOTIFICATION in snapshot.availableCapabilities)
         assertTrue(CapabilityIds.state(StateKeys.RINGER) in snapshot.availableCapabilities)
+        assertTrue(CapabilityIds.STATE_READER_SYSFS in snapshot.availableCapabilities)
+        assertTrue(CapabilityIds.STATE_READER_DUMPSYS_FIELD in snapshot.availableCapabilities)
         assertEquals(setOf("jid:42"), snapshot.whitelistedConversationIds)
         assertEquals(emptySet(), snapshot.transientlyUnavailableCapabilities)
     }
@@ -78,6 +80,7 @@ class AndroidCapabilityProbeTest {
         ).current()
         assertFalse(ActionCapabilities.SET_DND in stopped.availableCapabilities)
         assertTrue(ActionCapabilities.SET_DND in stopped.transientlyUnavailableCapabilities)
+        assertTrue(CapabilityIds.STATE_READER_SYSFS in stopped.transientlyUnavailableCapabilities)
         assertFalse(ActionTypeIds.SET_DND in probe(
             state().copy(
                 shizukuStatus = ShizukuGatewayStatus.INSTALLED_NOT_RUNNING,

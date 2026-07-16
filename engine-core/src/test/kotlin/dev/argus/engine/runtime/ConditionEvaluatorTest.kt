@@ -69,4 +69,37 @@ class ConditionEvaluatorTest {
         assertTrue(ev.eval(Condition.Or(listOf(knownTrue, unavailable)), state))
         assertFalse(ev.eval(Condition.Not(unavailable), state))
     }
+
+    @Test fun `typed query comparison does not fall back to lexicographic ordering`() {
+        val ev = ConditionEvaluator(clockAt("2026-07-12T10:00:00Z"))
+        val query = StateQuery.DumpsysField("battery", "voltage")
+        val state = DeviceState(queryValues = mapOf(query.canonicalId to "4200"))
+
+        assertTrue(
+            ev.eval(
+                Condition.StateCompare(query, StateValueType.NUMBER, CmpOp.GT, "900"),
+                state,
+            ),
+        )
+        assertFalse(
+            ev.eval(
+                Condition.StateCompare(query, StateValueType.NUMBER, CmpOp.GT, "not-a-number"),
+                state,
+            ),
+        )
+    }
+
+    @Test fun `typed boolean values are normalized while missing remains unknown under not`() {
+        val ev = ConditionEvaluator(clockAt("2026-07-12T10:00:00Z"))
+        val query = StateQuery.Setting(SettingNamespace.GLOBAL, "airplane_mode_on")
+        val condition = Condition.StateCompare(
+            query,
+            StateValueType.BOOLEAN,
+            CmpOp.EQ,
+            "true",
+        )
+
+        assertTrue(ev.eval(condition, DeviceState(queryValues = mapOf(query.canonicalId to "1"))))
+        assertFalse(ev.eval(Condition.Not(condition), DeviceState()))
+    }
 }

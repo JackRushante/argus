@@ -284,7 +284,8 @@ Resta da chiudere nelle slice P3:
 - il contesto LLM `state` sovra-raccoglie lo snapshot invece di elencare query approvate;
 - azioni non privilegiate sono erroneamente nascoste quando Shizuku è offline;
 - manca audit lifecycle;
-- manca il modello/readers parametrici P3-1B.
+- il bridge compile v1 non conosce ancora `StateQuery`: serve P3-1C strict v2 prima di esporre i
+  reader al linguaggio naturale.
 
 ## 11. Gate di accettazione P3
 

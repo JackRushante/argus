@@ -46,19 +46,29 @@ runner output privo di valori, coordinate e payload.
 
 ## P3-1B — modello `StateQuery`
 
-1. Nuovi sealed subtype e serializzazione golden: Builtin, Setting, SystemProperty, Sysfs,
+**Stato 2026-07-16: COMPLETA.**
+
+1. [x] Nuovi sealed subtype e serializzazione golden: Builtin, Setting, SystemProperty, Sysfs,
    DumpsysField; nuovo `Condition.StateCompare` tipizzato.
-2. Validator per famiglia, caratteri, path, namespace, tipo/op e limiti.
-3. Canonical query id stabile e collision-safe; capability per famiglia.
-4. Reader Android argv-only, output/timeout bounded e parser in-process.
-5. Probe della query concreta prima di Arm; risultato redatto in review.
-6. Rendering deterministico completo di reader e parametri.
+2. [x] Validator per famiglia, caratteri, path, namespace, tipo/op e limiti.
+3. [x] Canonical query id stabile e collision-safe; capability per famiglia.
+4. [x] Reader Android argv-only, output/timeout bounded e parser in-process.
+5. [x] Probe della query concreta prima di Arm; risultato positivo/negativo redatto in review.
+6. [x] Rendering deterministico completo di reader e parametri.
 
-Test negativi: traversal/symlink fuori `/sys`, control char, service/key troppo lunghi, output
-troncato, tipo errato, timeout, cancellation, reader sparito dopo l'arm.
+Test negativi **PASS**: traversal/symlink fuori `/sys`, control char, service/key troppo lunghi,
+output troncato, campo ambiguo, setting assente, tipo errato, timeout, cancellation e reader
+sparito dopo l'arm. Le fixture golden confermano che i fingerprint v1 preesistenti sono invariati.
 
-Gate device iniziale: leggere e usare in condizione il **voltaggio batteria** attraverso il reader
-più stabile disponibile sul OnePlus; confrontare con un secondo metodo read-only.
+Gate device iniziale: **PASS** su OnePlus reale con
+`ArgusParametricStateReaderInstrumentedTest`. Il path sysfs del voltaggio è risultato non leggibile
+dal shell UID e quindi è stato correttamente escluso dal probe; il reader stabile scelto è
+`dumpsys battery`/campo `voltage`. Il valore è stato confrontato con il metodo indipendente Android
+`ACTION_BATTERY_CHANGED`/`EXTRA_VOLTAGE`, quindi usato da una condizione dell'Engine. Il runner non
+ha stampato il campione.
+
+Gate host completo: **PASS**, `test lintDebug assembleDebug assembleDebugAndroidTest` con cache
+disattivata, task rieseguiti e niente parallelismo: **758/758 task**, `BUILD SUCCESSFUL`.
 
 ## P3-1C — bridge compile v2
 

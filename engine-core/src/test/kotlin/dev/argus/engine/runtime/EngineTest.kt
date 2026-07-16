@@ -458,6 +458,37 @@ class EngineTest {
     }
 
     @Test
+    fun `typed condition requests only its exact parametric query`() = runTest {
+        val query = StateQuery.DumpsysField("battery", "voltage")
+        val automation = armed(
+            "query",
+            Trigger.Notification("com.whatsapp"),
+            listOf(Action.ShowNotification("Argus", "voltaggio")),
+            cond = Condition.StateCompare(
+                query,
+                StateValueType.NUMBER,
+                CmpOp.GT,
+                "4000",
+            ),
+        )
+        val requests = mutableListOf<StateReadRequest>()
+
+        val outcomes = engine(
+            FakeAutomationStore(listOf(automation)),
+            FakeActionExecutor(),
+            "2026-07-12T10:00:00Z",
+        ).onTrigger(
+            envelope("sbn:wa:query", TriggerEvent.NotificationPosted("com.whatsapp")),
+        ) { request ->
+            requests += request
+            DeviceState(queryValues = mapOf(query.canonicalId to "4200"))
+        }
+
+        assertEquals(1, outcomes.size)
+        assertEquals(listOf(StateReadRequest(queries = setOf(query))), requests)
+    }
+
+    @Test
     fun `batch cache reads only the missing delta and keeps prior values`() = runTest {
         val wifi = armed(
             "a-wifi",

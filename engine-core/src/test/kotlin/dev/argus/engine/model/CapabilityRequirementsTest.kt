@@ -2,6 +2,7 @@ package dev.argus.engine.model
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class CapabilityRequirementsTest {
     @Test
@@ -214,5 +215,55 @@ class CapabilityRequirementsTest {
                 actions = listOf(Action.ShowNotification("Argus", "test")),
             ),
         )
+    }
+
+    @Test
+    fun `parametric readers require their family capability while parameters stay fingerprinted`() {
+        val conditions = Condition.And(
+            listOf(
+                Condition.StateCompare(
+                    StateQuery.Builtin(StateKeys.BATTERY),
+                    StateValueType.NUMBER,
+                    CmpOp.GT,
+                    "20",
+                ),
+                Condition.StateCompare(
+                    StateQuery.Setting(SettingNamespace.GLOBAL, "airplane_mode_on"),
+                    StateValueType.BOOLEAN,
+                    CmpOp.EQ,
+                    "false",
+                ),
+                Condition.StateCompare(
+                    StateQuery.SystemProperty("ro.build.version.sdk"),
+                    StateValueType.NUMBER,
+                    CmpOp.GT,
+                    "30",
+                ),
+                Condition.StateCompare(
+                    StateQuery.Sysfs("/sys/class/power_supply/battery/voltage_now"),
+                    StateValueType.NUMBER,
+                    CmpOp.GT,
+                    "0",
+                ),
+                Condition.StateCompare(
+                    StateQuery.DumpsysField("battery", "voltage"),
+                    StateValueType.NUMBER,
+                    CmpOp.GT,
+                    "0",
+                ),
+            ),
+        )
+
+        val capabilities = CapabilityRequirements.derive(
+            Trigger.Time(cron = "0 8 * * *", tz = "Europe/Rome"),
+            listOf(Action.ShowNotification("Argus", "reader")),
+            conditions,
+        )
+
+        assertTrue(CapabilityIds.STATE_READER_BUILTIN in capabilities)
+        assertTrue(CapabilityIds.STATE_READER_SETTING in capabilities)
+        assertTrue(CapabilityIds.STATE_READER_SYSTEM_PROPERTY in capabilities)
+        assertTrue(CapabilityIds.STATE_READER_SYSFS in capabilities)
+        assertTrue(CapabilityIds.STATE_READER_DUMPSYS_FIELD in capabilities)
     }
 }

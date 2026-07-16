@@ -322,6 +322,11 @@ class AndroidCapabilityProbe internal constructor(
             add(ActionCapabilities.OPEN_URL)
             add(ActionCapabilities.RUN_SHELL)
             add(CapabilityIds.STATE_FOREGROUND_APP)
+            add(CapabilityIds.STATE_READER_BUILTIN)
+            add(CapabilityIds.STATE_READER_SETTING)
+            add(CapabilityIds.STATE_READER_SYSTEM_PROPERTY)
+            add(CapabilityIds.STATE_READER_SYSFS)
+            add(CapabilityIds.STATE_READER_DUMPSYS_FIELD)
             StateKeys.ALL.keys.forEach { add(CapabilityIds.state(it)) }
         }
     }
