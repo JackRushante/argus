@@ -29,10 +29,26 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
-data class DeviceLocation(val latitude: Double, val longitude: Double) {
+data class DeviceLocation(
+    val latitude: Double,
+    val longitude: Double,
+    /** Raggio d'incertezza orizzontale dichiarato dal provider; null = qualità ignota. */
+    val horizontalAccuracyMeters: Double? = null,
+    /** Età monotona del fix quando è stato consegnato; null = freschezza ignota. */
+    val ageMillis: Long? = null,
+) {
     val valid: Boolean = latitude.isFinite() && longitude.isFinite() &&
         latitude in -90.0..90.0 && longitude in -180.0..180.0 &&
         !(latitude == 0.0 && longitude == 0.0)
+
+    /** Solo un fix fresco con incertezza finita può smentire un bordo annunciato dall'OS. */
+    val usableAsContradictoryEvidence: Boolean = valid &&
+        horizontalAccuracyMeters?.let { it.isFinite() && it >= 0.0 } == true &&
+        ageMillis?.let { it in 0..MAX_CONTRADICTION_FIX_AGE_MILLIS } == true
+
+    companion object {
+        const val MAX_CONTRADICTION_FIX_AGE_MILLIS = 30_000L
+    }
 }
 
 fun interface CurrentLocationProvider {

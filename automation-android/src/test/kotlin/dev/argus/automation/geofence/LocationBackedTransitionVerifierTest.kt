@@ -25,24 +25,64 @@ class LocationBackedTransitionVerifierTest {
 
     @Test
     fun `an exit announced while sitting at the centre is refused`() = runTest {
-        assertFalse(verifier(DeviceLocation(45.0, 9.0)).accepts(id, Transition.EXIT))
+        assertFalse(verifier(preciseFix(45.0, 9.0)).accepts(id, Transition.EXIT))
     }
 
     @Test
     fun `an exit is believed when the position really is outside`() = runTest {
         // ~500 m a nord: fuori dai 200 m, ben oltre il margine di rumore.
-        assertTrue(verifier(DeviceLocation(45.0045, 9.0)).accepts(id, Transition.EXIT))
+        assertTrue(verifier(preciseFix(45.0045, 9.0)).accepts(id, Transition.EXIT))
     }
 
     @Test
     fun `near the boundary the framework keeps the last word`() = runTest {
         // ~189 m dal centro: dentro, ma entro i 25 m di isteresi. Lì non decidiamo noi.
-        assertTrue(verifier(DeviceLocation(45.0017, 9.0)).accepts(id, Transition.EXIT))
+        assertTrue(verifier(preciseFix(45.0017, 9.0)).accepts(id, Transition.EXIT))
     }
 
     @Test
     fun `an enter announced from far away is refused`() = runTest {
-        assertFalse(verifier(DeviceLocation(45.0045, 9.0)).accepts(id, Transition.ENTER))
+        assertFalse(verifier(preciseFix(45.0045, 9.0)).accepts(id, Transition.ENTER))
+    }
+
+    @Test
+    fun `a coarse fix cannot veto a framework transition`() = runTest {
+        // Il centro stimato è dentro, ma il disco d'incertezza attraversa ampiamente il bordo.
+        val coarseCentre = DeviceLocation(
+            latitude = 45.0,
+            longitude = 9.0,
+            horizontalAccuracyMeters = 250.0,
+            ageMillis = 1_000,
+        )
+        assertTrue(verifier(coarseCentre).accepts(id, Transition.EXIT))
+
+        // Simmetricamente, un centro stimato fuori non basta a smentire ENTER se è grossolano.
+        val coarseOutside = DeviceLocation(
+            latitude = 45.0045,
+            longitude = 9.0,
+            horizontalAccuracyMeters = 400.0,
+            ageMillis = 1_000,
+        )
+        assertTrue(verifier(coarseOutside).accepts(id, Transition.ENTER))
+    }
+
+    @Test
+    fun `a stale or quality-less fix is not evidence against the framework`() = runTest {
+        assertTrue(
+            verifier(preciseFix(45.0, 9.0, ageMillis = 30_001))
+                .accepts(id, Transition.EXIT),
+        )
+        assertTrue(verifier(DeviceLocation(45.0, 9.0)).accepts(id, Transition.EXIT))
+        assertTrue(
+            verifier(
+                DeviceLocation(
+                    45.0,
+                    9.0,
+                    horizontalAccuracyMeters = Double.NaN,
+                    ageMillis = 1_000,
+                ),
+            ).accepts(id, Transition.EXIT),
+        )
     }
 
     @Test
@@ -76,4 +116,15 @@ class LocationBackedTransitionVerifierTest {
 
     private fun verifier(fix: DeviceLocation?) =
         LocationBackedTransitionVerifier({ area }, CurrentLocationProvider { fix })
+
+    private fun preciseFix(
+        latitude: Double,
+        longitude: Double,
+        ageMillis: Long = 1_000,
+    ) = DeviceLocation(
+        latitude = latitude,
+        longitude = longitude,
+        horizontalAccuracyMeters = 3.0,
+        ageMillis = ageMillis,
+    )
 }

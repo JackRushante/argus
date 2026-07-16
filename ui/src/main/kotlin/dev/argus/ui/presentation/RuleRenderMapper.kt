@@ -343,6 +343,8 @@ object RuleRenderMapper {
      * su raggi da decine o centinaia di metri, il resto è rumore. `Locale.ROOT` tiene il punto
      * decimale, che è il separatore atteso per le coordinate.
      */
-    private fun fmtCoord(d: Double): String =
-        String.format(Locale.ROOT, "%.5f", d).trimEnd('0').trimEnd('.')
+    private fun fmtCoord(d: Double): String {
+        val rounded = String.format(Locale.ROOT, "%.5f", d).trimEnd('0').trimEnd('.')
+        return if (rounded == "-0") "0" else rounded
+    }
 }

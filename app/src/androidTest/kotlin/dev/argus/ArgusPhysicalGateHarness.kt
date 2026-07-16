@@ -7,6 +7,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import dagger.hilt.android.EntryPointAccessors
 import dev.argus.automation.DraftSubmissionResult
 import dev.argus.automation.FlowArmResult
+import dev.argus.automation.ReconcileReason
 import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.AutomationDraft
@@ -20,6 +21,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -131,7 +133,7 @@ class ArgusPhysicalGateHarness {
         )
     }
 
-    /** Geocodifica on-device. Stampa solo l'esito, mai le coordinate risolte. */
+    /** Geocodifica on-device. Non stampa né l'indirizzo né le coordinate risolte. */
     private fun geocode(address: String): Pair<Double, Double> {
         val geocoder = Geocoder(
             InstrumentationRegistry.getInstrumentation().targetContext,
@@ -147,10 +149,6 @@ class ArgusPhysicalGateHarness {
         assertTrue("Geocodifica in timeout", latch.await(30, TimeUnit.SECONDS))
         val hit = found.get()
         assertTrue("Indirizzo non risolto", hit != null && hit.hasLatitude() && hit.hasLongitude())
-        // Eco dell'indirizzo risolto: serve a scoprire subito una geocodifica sbagliata (es. il
-        // centro città invece della via), che altrimenti farebbe fallire il gate fisico per il
-        // motivo sbagliato. Le coordinate restano non stampate.
-        println("$TAG risolto in: ${requireNotNull(hit).getAddressLine(0)}")
         return requireNotNull(hit).latitude to requireNotNull(hit).longitude
     }
 
@@ -226,13 +224,48 @@ class ArgusPhysicalGateHarness {
     @Test
     fun cleanupGates(): Unit = runBlocking {
         val store = services.automationStore()
-        store.all().filter { it.name.startsWith(GATE_PREFIX) }.forEach {
+        val gates = store.all().filter { it.name.startsWith(GATE_PREFIX) }
+        gates.forEach {
             println("$TAG rimuovo ${it.name}")
             store.delete(it.id)
         }
+
+        // Room è la source of truth, ma delete() da solo non cancella PendingIntent, sentinella
+        // condivisa o geofence già registrati nell'OS. Ogni runtime va riconciliato anche se uno
+        // degli altri fallisce, altrimenti il cleanup diagnostico lascia trigger orfani.
+        val runtimeFailures = mutableListOf<String>()
+        try {
+            services.timeAlarmRuntime().reconcile(ReconcileReason.CAPABILITY_CHANGED)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            runtimeFailures += "time:${error::class.java.simpleName}"
+        }
+        try {
+            val report = services.connectivityTriggerRuntime().reconcile()
+            if (!report.cleanupSucceeded) runtimeFailures += "connectivity:cleanup_failed"
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            runtimeFailures += "connectivity:${error::class.java.simpleName}"
+        }
+        try {
+            val report = services.geofenceTriggerRuntime()
+                .reconcile(recreateOsRegistrations = false)
+            if (!report.cleanupSucceeded) runtimeFailures += "geofence:cleanup_failed"
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            runtimeFailures += "geofence:${error::class.java.simpleName}"
+        }
+
         assertTrue(
             "Cleanup gate diagnostici non completato",
             store.all().none { it.name.startsWith(GATE_PREFIX) },
+        )
+        assertTrue(
+            "Cleanup runtime incompleto: ${runtimeFailures.joinToString()}",
+            runtimeFailures.isEmpty(),
         )
         println("$TAG cleanup completato")
     }

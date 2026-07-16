@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.location.LocationManager
 import android.os.Build
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -218,7 +219,20 @@ class FrameworkCurrentLocationProvider(context: Context) : CurrentLocationProvid
                 manager.getCurrentLocation(provider, cancellation, directExecutor) { location ->
                     if (continuation.isActive) {
                         continuation.resume(
-                            location?.let { DeviceLocation(it.latitude, it.longitude) }
+                            location?.let {
+                                DeviceLocation(
+                                    latitude = it.latitude,
+                                    longitude = it.longitude,
+                                    horizontalAccuracyMeters = it.accuracy
+                                        .takeIf { accuracy ->
+                                            it.hasAccuracy() && accuracy.isFinite() && accuracy >= 0f
+                                        }
+                                        ?.toDouble(),
+                                    ageMillis = (
+                                        SystemClock.elapsedRealtimeNanos() - it.elapsedRealtimeNanos
+                                        ).coerceAtLeast(0L) / 1_000_000L,
+                                )
+                            }
                                 ?.takeIf(DeviceLocation::valid),
                         )
                     }

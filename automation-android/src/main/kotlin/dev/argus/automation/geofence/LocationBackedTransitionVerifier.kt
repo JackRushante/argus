@@ -40,13 +40,15 @@ class LocationBackedTransitionVerifier(
         } catch (_: Exception) {
             null
         }
-        if (fix?.valid != true) return true
+        if (fix?.usableAsContradictoryEvidence != true) return true
 
         val distance = distanceMeters(trigger.lat, trigger.lng, fix.latitude, fix.longitude)
+        val accuracy = requireNotNull(fix.horizontalAccuracyMeters)
         return when (transition) {
-            // Un EXIT è credibile solo se siamo davvero fuori, oltre il margine di rumore.
-            Transition.EXIT -> distance > trigger.radiusM - HYSTERESIS_METERS
-            Transition.ENTER -> distance < trigger.radiusM + HYSTERESIS_METERS
+            // Veto solo se l'intero disco d'incertezza è dentro/fuori oltre l'isteresi.
+            // Se il disco tocca la zona ambigua, il framework conserva l'ultima parola.
+            Transition.EXIT -> distance + accuracy > trigger.radiusM - HYSTERESIS_METERS
+            Transition.ENTER -> distance - accuracy < trigger.radiusM + HYSTERESIS_METERS
             // DWELL non è supportato dal runtime: non inventiamo un giudizio.
             Transition.DWELL -> true
         }

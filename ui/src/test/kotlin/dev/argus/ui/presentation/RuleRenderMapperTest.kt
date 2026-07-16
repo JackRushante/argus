@@ -205,4 +205,21 @@ class RuleRenderMapperTest {
             RuleRenderMapper.map(a).triggerLine,
         )
     }
+
+    @Test fun `rounded geofence coordinates never expose negative zero`() {
+        val a = Automation(
+            AutomationId("g3"), "equatore", CreatedBy.LLM, AutomationStatus.PENDING_APPROVAL,
+            Trigger.Geofence(
+                lat = -0.000001,
+                lng = -0.000001,
+                radiusM = 100.0,
+                transition = Transition.ENTER,
+            ),
+            listOf(Action.ShowNotification("Argus", "test")),
+        )
+        assertEquals(
+            "Quando entri in 0,0 (±100 m)",
+            RuleRenderMapper.map(a).triggerLine,
+        )
+    }
 }

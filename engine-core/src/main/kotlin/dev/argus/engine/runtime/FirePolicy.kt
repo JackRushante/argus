@@ -95,7 +95,13 @@ class RevalidatingFirePolicy(
         // Difesa sul dato live oltre al trigger approvato: l'identità va verificata sull'evento
         // realmente arrivato, non solo su quella dichiarata nella regola. Una regressione di
         // routing non deve mai far innescare la shell da un mittente non verificato.
-        if (hasStaticShell && !StaticShellSafety.allows(event, snapshot.whitelistedConversationIds))
+        if (hasStaticShell &&
+            !StaticShellSafety.allows(
+                automation.trigger,
+                event,
+                snapshot.whitelistedConversationIds,
+            )
+        )
             return FirePolicyDecision.Block("shell_external_trigger", needsReview = false)
 
         val derivedRequirements = CapabilityRequirements.derive(

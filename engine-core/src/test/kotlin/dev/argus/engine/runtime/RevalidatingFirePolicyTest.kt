@@ -257,6 +257,66 @@ class RevalidatingFirePolicyTest {
     }
 
     @Test
+    fun `approved static shell is allowed only for the matching live whitelisted whatsapp chat`() = runTest {
+        val automation = automation(
+            Trigger.Notification("com.whatsapp", conversationId = "jid:42", isGroup = false),
+            listOf(Action.RunShell("id")),
+        )
+        val capabilities = setOf(
+            CapabilityIds.TRIGGER_NOTIFICATION,
+            ActionCapabilities.RUN_SHELL,
+        )
+        val liveEvent = TriggerEvent.NotificationPosted(
+            pkg = "com.whatsapp",
+            conversationId = "jid:42",
+            isGroup = false,
+            notificationKey = "sbn:1",
+        )
+
+        assertEquals(
+            FirePolicyDecision.Allow,
+            policy(snapshot(availableCapabilities = capabilities, whitelist = setOf("jid:42")))
+                .evaluate(automation, liveEvent),
+        )
+
+        val revoked = assertIs<FirePolicyDecision.Block>(
+            policy(snapshot(availableCapabilities = capabilities, whitelist = emptySet()))
+                .evaluate(automation, liveEvent),
+        )
+        assertEquals("shell_external_trigger", revoked.code)
+        assertTrue(revoked.needsReview)
+    }
+
+    @Test
+    fun `static shell rejects a live whatsapp identity different from the approved chat`() = runTest {
+        val automation = automation(
+            Trigger.Notification("com.whatsapp", conversationId = "jid:42", isGroup = false),
+            listOf(Action.RunShell("id")),
+        )
+        val block = assertIs<FirePolicyDecision.Block>(
+            policy(
+                snapshot(
+                    availableCapabilities = setOf(
+                        CapabilityIds.TRIGGER_NOTIFICATION,
+                        ActionCapabilities.RUN_SHELL,
+                    ),
+                    whitelist = setOf("jid:42", "jid:other"),
+                ),
+            ).evaluate(
+                automation,
+                TriggerEvent.NotificationPosted(
+                    pkg = "com.whatsapp",
+                    conversationId = "jid:other",
+                    isGroup = false,
+                    notificationKey = "sbn:2",
+                ),
+            ),
+        )
+        assertEquals("shell_external_trigger", block.code)
+        assertTrue(!block.needsReview)
+    }
+
+    @Test
     fun `shell stays fail closed for message triggers and mismatched live events`() = runTest {
         val external = automation(
             Trigger.PhoneState(dev.argus.engine.model.PhoneEvent.SMS_RECEIVED),

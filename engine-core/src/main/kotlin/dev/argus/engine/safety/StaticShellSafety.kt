@@ -47,6 +47,35 @@ object StaticShellSafety {
         is TriggerEvent.PhoneStateChanged -> false
     }
 
+    /**
+     * Verifica anche il legame fra trigger approvato ed evento live. Non basta che entrambi siano
+     * separatamente fidati: una regressione di routing non deve permettere alla chat B di premere
+     * l'interruttore congelato per la chat A.
+     */
+    fun allows(
+        trigger: Trigger,
+        event: TriggerEvent,
+        whitelistedConversationIds: Set<String>,
+    ): Boolean {
+        if (!allows(trigger, whitelistedConversationIds) ||
+            !allows(event, whitelistedConversationIds)
+        ) return false
+        return when {
+            trigger is Trigger.Time && event is TriggerEvent.TimeFired -> true
+            trigger is Trigger.Geofence && event is TriggerEvent.GeofenceTransitioned ->
+                trigger.transition == event.transition
+            trigger is Trigger.Connectivity && event is TriggerEvent.ConnectivityChanged ->
+                trigger.medium == event.medium && trigger.state == event.state &&
+                    (trigger.match == null || trigger.match == event.name)
+            trigger is Trigger.Notification && event is TriggerEvent.NotificationPosted ->
+                trigger.pkg == event.pkg &&
+                    trigger.conversationId != null &&
+                    trigger.conversationId == event.conversationId &&
+                    trigger.isGroup == false && event.isGroup == false
+            else -> false
+        }
+    }
+
     /** `isGroup` null = metadata non determinabile ⇒ non autorizzato (fail-closed, §10.3). */
     private fun verifiedContact(
         pkg: String,
