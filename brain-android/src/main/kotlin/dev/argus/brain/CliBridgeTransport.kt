@@ -76,6 +76,24 @@ private data class ManifestEnvelope(
     @SerialName("state_keys") val stateKeys: Map<String, String>,
     /** Trigger armabili ora (P2-2): il server li vincola nel prompt di compilazione. */
     @SerialName("available_triggers") val availableTriggers: List<String>,
+    @SerialName("state_readers") val stateReaders: StateReadersEnvelope,
+)
+
+@Serializable
+private data class StateReadersEnvelope(
+    @SerialName("policy_version") val policyVersion: Int,
+    val families: List<String>,
+    val limits: StateReaderLimitsEnvelope,
+)
+
+@Serializable
+private data class StateReaderLimitsEnvelope(
+    @SerialName("max_query_name_length") val maxQueryNameLength: Int,
+    @SerialName("max_sysfs_path_length") val maxSysfsPathLength: Int,
+    @SerialName("max_expected_length") val maxExpectedLength: Int,
+    @SerialName("timeout_millis") val timeoutMillis: Long,
+    @SerialName("max_output_bytes") val maxOutputBytes: Int,
+    @SerialName("max_scalar_chars") val maxScalarChars: Int,
 )
 
 @Serializable
@@ -153,10 +171,14 @@ data class BridgeHealth(
     @SerialName("schema_version") val schemaVersion: Int,
     val status: String,
     val model: String,
+    @SerialName("compile_schema_versions") val compileSchemaVersions: List<Int>,
+    @SerialName("act_schema_versions") val actSchemaVersions: List<Int>,
+    @SerialName("source_sha256") val sourceSha256: String,
 )
 
 /**
- * Contratto unico Argus → Hermes: HTTPS, bearer auth, request id idempotente e risposta v1 strict.
+ * Contratto unico Argus → Hermes: HTTPS, bearer auth, request id idempotente e risposta strict
+ * per endpoint (`/compile` v2, `/act` v1, `/health/v2`).
  * Il vecchio fallback `/chat` è intenzionalmente escluso: non è versionato né adatto a un confine
  * che produce dati eseguibili.
  */
@@ -182,7 +204,10 @@ class CliBridgeTransport internal constructor(
     private val base = baseUrl.trimEnd('/').toHttpUrl()
     private val compileUrl = base.newBuilder().addPathSegment(COMPILE_PATH_SEGMENT).build()
     private val actUrl = base.newBuilder().addPathSegment(ACT_PATH_SEGMENT).build()
-    private val healthUrl = base.newBuilder().addPathSegment(HEALTH_PATH_SEGMENT).build()
+    private val healthUrl = base.newBuilder()
+        .addPathSegment(HEALTH_PATH_SEGMENT)
+        .addPathSegment(HEALTH_VERSION_SEGMENT)
+        .build()
 
     private val json = Json(ArgusJson) {
         isLenient = false
@@ -209,7 +234,7 @@ class CliBridgeTransport internal constructor(
         val cleanMessage = message.trim().takeIf { it.isNotEmpty() && it.length <= MAX_MESSAGE_CHARS }
             ?: throw BridgeException(BridgeErrorKind.CONFIGURATION, "messaggio vuoto o troppo lungo")
         val envelope = CompileRequestEnvelope(
-            schemaVersion = PROTOCOL_SCHEMA_VERSION,
+            schemaVersion = COMPILE_SCHEMA_VERSION,
             requestId = requestId,
             message = cleanMessage,
             manifest = manifest.toEnvelope(),
@@ -255,7 +280,7 @@ class CliBridgeTransport internal constructor(
             ?: throw BridgeException(BridgeErrorKind.CONFIGURATION, "testo notifica assente")
         val requestId = deterministicActRequestId(context)
         val envelope = ActRequestEnvelope(
-            schemaVersion = PROTOCOL_SCHEMA_VERSION,
+            schemaVersion = ACT_SCHEMA_VERSION,
             requestId = requestId,
             goal = cleanGoal,
             contextSources = contextSources,
@@ -300,8 +325,11 @@ class CliBridgeTransport internal constructor(
         } catch (error: IllegalArgumentException) {
             throw BridgeException(BridgeErrorKind.PROTOCOL, "health envelope non valido", cause = error)
         }
-        if (health.schemaVersion != PROTOCOL_SCHEMA_VERSION || health.status != "ok" ||
-            health.model.isBlank() || health.model.length > 128) {
+        if (health.schemaVersion != HEALTH_SCHEMA_VERSION || health.status != "ok" ||
+            health.model.isBlank() || health.model.length > 128 ||
+            health.compileSchemaVersions != SUPPORTED_COMPILE_SCHEMA_VERSIONS ||
+            health.actSchemaVersions != SUPPORTED_ACT_SCHEMA_VERSIONS ||
+            !SOURCE_SHA256.matches(health.sourceSha256)) {
             throw BridgeException(BridgeErrorKind.PROTOCOL, "health incompatibile")
         }
         return health
@@ -389,7 +417,7 @@ class CliBridgeTransport internal constructor(
         } catch (error: IllegalArgumentException) {
             throw BridgeException(BridgeErrorKind.PROTOCOL, "envelope /compile non valido", cause = error)
         }
-        if (envelope.schemaVersion != PROTOCOL_SCHEMA_VERSION) {
+        if (envelope.schemaVersion != COMPILE_SCHEMA_VERSION) {
             throw BridgeException(BridgeErrorKind.PROTOCOL, "schema_version incompatibile")
         }
         if (envelope.requestId != expectedRequestId) {
@@ -423,7 +451,7 @@ class CliBridgeTransport internal constructor(
         } catch (error: IllegalArgumentException) {
             throw BridgeException(BridgeErrorKind.PROTOCOL, "envelope /act non valido", cause = error)
         }
-        if (envelope.schemaVersion != PROTOCOL_SCHEMA_VERSION) {
+        if (envelope.schemaVersion != ACT_SCHEMA_VERSION) {
             throw BridgeException(BridgeErrorKind.PROTOCOL, "schema_version incompatibile")
         }
         if (envelope.requestId != expectedRequestId) {
@@ -454,6 +482,18 @@ class CliBridgeTransport internal constructor(
         whitelistedContacts = whitelistedContacts.map { ContactEnvelope(it.displayName, it.id) },
         stateKeys = stateKeys,
         availableTriggers = availableTriggers,
+        stateReaders = StateReadersEnvelope(
+            policyVersion = stateReaders.policyVersion,
+            families = stateReaders.families.map { it.wireName },
+            limits = StateReaderLimitsEnvelope(
+                maxQueryNameLength = stateReaders.limits.maxQueryNameLength,
+                maxSysfsPathLength = stateReaders.limits.maxSysfsPathLength,
+                maxExpectedLength = stateReaders.limits.maxExpectedLength,
+                timeoutMillis = stateReaders.limits.timeoutMillis,
+                maxOutputBytes = stateReaders.limits.maxOutputBytes,
+                maxScalarChars = stateReaders.limits.maxScalarChars,
+            ),
+        ),
     )
 
     private fun DeviceState.toEnvelope(manifest: CapabilityManifest): StateEnvelope {
@@ -496,7 +536,9 @@ class CliBridgeTransport internal constructor(
     }
 
     companion object {
-        const val PROTOCOL_SCHEMA_VERSION = 1
+        const val COMPILE_SCHEMA_VERSION = 2
+        const val ACT_SCHEMA_VERSION = 1
+        const val HEALTH_SCHEMA_VERSION = 2
         const val MAX_REQUEST_BYTES = 256 * 1024
         const val MAX_RESPONSE_BYTES = 512 * 1024
         private const val MAX_MESSAGE_CHARS = 8_192
@@ -511,6 +553,7 @@ class CliBridgeTransport internal constructor(
         private const val COMPILE_PATH_SEGMENT = "compile"
         private const val ACT_PATH_SEGMENT = "act"
         private const val HEALTH_PATH_SEGMENT = "health"
+        private const val HEALTH_VERSION_SEGMENT = "v2"
         private const val ACT_REPLY_TOOL = "whatsapp_reply"
         private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
         private val TEST_HTTP_HOSTS = setOf("localhost", "127.0.0.1", "::1")
@@ -518,6 +561,9 @@ class CliBridgeTransport internal constructor(
         private val ERROR_CODE = Regex("[a-z][a-z0-9_]{0,63}")
         private val SAFE_STATE_VALUE = Regex("[A-Za-z0-9._:+-]{1,64}")
         private val PACKAGE_NAME = Regex("[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z0-9_]+)+")
+        private val SOURCE_SHA256 = Regex("[0-9a-f]{64}")
+        private val SUPPORTED_COMPILE_SCHEMA_VERSIONS = listOf(1, COMPILE_SCHEMA_VERSION)
+        private val SUPPORTED_ACT_SCHEMA_VERSIONS = listOf(ACT_SCHEMA_VERSION)
         private val ACT_CONTEXT_SOURCES = setOf("notification", "state")
         private val WHATSAPP_PACKAGES = setOf("com.whatsapp", "com.whatsapp.w4b")
 

@@ -1,5 +1,6 @@
 package dev.argus
 
+import androidx.core.app.NotificationManagerCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import dagger.hilt.android.EntryPointAccessors
@@ -13,8 +14,13 @@ import dev.argus.data.dao.AuditLogRecord
 import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.AutomationStatus
+import dev.argus.engine.model.CmpOp
+import dev.argus.engine.model.Condition
 import dev.argus.engine.model.DndMode
 import dev.argus.engine.model.StateKeys
+import dev.argus.engine.model.StateQuery
+import dev.argus.engine.model.StateQueryPolicy
+import dev.argus.engine.model.StateValueType
 import dev.argus.engine.model.TimePrecision
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.ActionJournalOutcome
@@ -214,6 +220,159 @@ class ArgusProductionE2EInstrumentedTest {
         }
     }
 
+    @Test
+    fun voltageCompileReviewProbeArmAlarmNotificationAndJournal(): Unit = runBlocking {
+        val bearer = consumeBridgeToken()
+        val configuration = services.bridgeConfigurationStore()
+        val preferences = services.appPreferencesStore()
+        val store = services.automationStore()
+        val runtime = services.timeAlarmRuntime()
+        val database = services.database()
+        val originalConfigurationUrl = configuration.baseUrl()
+        val originalBearer = configuration.bearerToken()
+        val originalPreferences = preferences.observe().value
+        var automationId: dev.argus.engine.model.AutomationId? = null
+        var notificationId: Int? = null
+
+        try {
+            assertTrue(
+                configuration.saveConfiguration(
+                    AndroidBridgeConfigurationStore.DEFAULT_BASE_URL,
+                    bearer,
+                ),
+            )
+            assertTrue(preferences.setPrivacyAccepted(true))
+            assertTrue(preferences.setOnboardingCompleted(true))
+            val shizuku = services.shizukuGateway()
+            if (shizuku.status() != ShizukuGatewayStatus.AUTHORIZED) {
+                assertEquals(
+                    "Approva il dialog Shizuku sul dispositivo",
+                    ShizukuPermissionResult.GRANTED,
+                    withTimeout(SHIZUKU_PERMISSION_TIMEOUT_MILLIS) {
+                        shizuku.requestPermission()
+                    },
+                )
+            }
+            assertEquals(ShizukuGatewayStatus.AUTHORIZED, shizuku.status())
+            assertTrue(
+                "Il test deterministico richiede temporaneamente l'accesso exact-alarm",
+                services.timeAlarmBackend().canScheduleExact(),
+            )
+
+            val zone = ZoneId.systemDefault()
+            val state = services.deviceStateSnapshotProvider().current()
+            val manifest = services.capabilityProbe().probe(state)
+            val compiled = services.brain().compile(
+                "Ogni giorno alle 08:00 nel fuso ${zone.id}, se il voltaggio della batteria " +
+                    "scende sotto 100000 millivolt, mostrami una sola notifica locale con " +
+                    "titolo Argus e testo Voltaggio basso. Non aggiungere altre condizioni " +
+                    "o azioni.",
+                manifest,
+                state,
+            )
+            val draft = requireNotNull(compiled.draft) {
+                "Hermes non ha prodotto un draft: ${compiled.metaError ?: "nessun dettaglio"}"
+            }
+            assertTrue("Hermes deve compilare un trigger Time", draft.trigger is Trigger.Time)
+            val condition = draft.conditions as? Condition.StateCompare
+                ?: error("Hermes non ha prodotto state_compare")
+            assertEquals(StateQuery.DumpsysField("battery", "voltage"), condition.query)
+            assertEquals(StateValueType.NUMBER, condition.valueType)
+            assertEquals(CmpOp.LT, condition.op)
+            assertEquals(100_000.0, condition.expected.toDouble(), 0.0)
+            assertEquals(StateQueryPolicy.VERSION, condition.policyVersion)
+            assertTrue(draft.actions.single() is Action.ShowNotification)
+
+            val fireAt = LocalDateTime.now(zone).plusSeconds(FIRE_DELAY_SECONDS).withNano(0)
+            val deterministicCompile = CompileResult(
+                reply = compiled.reply,
+                draft = draft.copy(
+                    name = "$E2E_VOLTAGE_PREFIX ${System.currentTimeMillis()}",
+                    trigger = Trigger.Time(
+                        cron = null,
+                        at = fireAt.toString(),
+                        tz = zone.id,
+                        precision = TimePrecision.EXACT,
+                    ),
+                ),
+                metaError = null,
+            )
+            val submission = services.approvalFlow().submit(deterministicCompile)
+            assertTrue(
+                "Il draft con reader deve essere pronto alla review: $submission",
+                submission is DraftSubmissionResult.Ready,
+            )
+            val ready = submission as DraftSubmissionResult.Ready
+            assertTrue("Il probe locale deve consentire l'arm", ready.review.canArm)
+            assertEquals(1, ready.review.verifiedStateQueries.size)
+            assertEquals(
+                condition.query.canonicalId,
+                ready.review.verifiedStateQueries.single().queryId,
+            )
+            val snapshot = ready.review.draft.snapshot
+
+            val arm = services.approvalFlow().arm(
+                snapshot.id,
+                snapshot.revision,
+                snapshot.fingerprint,
+            )
+            assertTrue("Arm non riuscito: $arm", arm is FlowArmResult.Armed)
+            val armed = (arm as FlowArmResult.Armed).automation
+            automationId = armed.id
+            assertNotNull(armed.approvalFingerprint)
+            assertEquals(
+                ScheduledAlarmMode.EXACT.name,
+                database.scheduledTimeAlarmDao().get(armed.id.value)?.scheduledMode,
+            )
+
+            val fired = withTimeout(FIRE_TIMEOUT_MILLIS) {
+                database.auditDao().observeLogForAutomation(armed.id.value, 20)
+                    .first { records -> records.any { it.kind == AuditKind.FIRED } }
+                    .first { it.kind == AuditKind.FIRED }
+            }
+            notificationId = requireNotNull(fired.executionId).hashCode()
+            assertJournalSucceeded(fired, expectedActionType = "show_notification")
+            assertEquals(AutomationStatus.DISABLED, store.get(armed.id)?.status)
+        } finally {
+            withContext(NonCancellable) {
+                notificationId?.let {
+                    NotificationManagerCompat.from(instrumentation.targetContext).cancel(it)
+                }
+                val automationClean = automationId?.let { id ->
+                    runCatching {
+                        store.delete(id)
+                        runtime.reconcile(ReconcileReason.CAPABILITY_CHANGED)
+                        store.get(id) == null
+                    }.getOrDefault(false)
+                } ?: true
+                val configurationRestored = runCatching {
+                    if (originalBearer == null) {
+                        configuration.clearBearerToken() &&
+                            configuration.saveBaseUrl(originalConfigurationUrl)
+                    } else {
+                        configuration.saveConfiguration(originalConfigurationUrl, originalBearer)
+                    }
+                }.getOrDefault(false)
+                val preferencesRestored = runCatching {
+                    if (originalPreferences.privacyAccepted) {
+                        val privacySaved = preferences.setPrivacyAccepted(true)
+                        val onboardingSaved = preferences.setOnboardingCompleted(
+                            originalPreferences.onboardingCompleted,
+                        )
+                        privacySaved && onboardingSaved
+                    } else {
+                        val onboardingSaved = preferences.setOnboardingCompleted(false)
+                        val privacySaved = preferences.setPrivacyAccepted(false)
+                        onboardingSaved && privacySaved
+                    }
+                }.getOrDefault(false)
+                assertTrue("Cleanup automazione voltage E2E non completato", automationClean)
+                assertTrue("Configurazione bridge non ripristinata", configurationRestored)
+                assertTrue("Preferenze privacy/onboarding non ripristinate", preferencesRestored)
+            }
+        }
+    }
+
     /**
      * Cleanup host-driven da usare se ADB o l'instrumentation vengono interrotti prima che il
      * `finally` del test principale possa girare. È intenzionalmente limitato alle automazioni con
@@ -229,7 +388,10 @@ class ArgusProductionE2EInstrumentedTest {
         val failures = mutableListOf<String>()
 
         store.all()
-            .filter { it.name.startsWith(E2E_AUTOMATION_PREFIX) }
+            .filter { automation ->
+                automation.name.startsWith(E2E_AUTOMATION_PREFIX) ||
+                    automation.name.startsWith(E2E_VOLTAGE_PREFIX)
+            }
             .forEach { automation ->
                 runCatching { backend.cancel(automation.id) }
                     .onFailure { failures += "cancel:${automation.id.value}" }
@@ -258,7 +420,10 @@ class ArgusProductionE2EInstrumentedTest {
         )
         assertTrue(
             "Sono rimaste automazioni E2E",
-            store.all().none { it.name.startsWith(E2E_AUTOMATION_PREFIX) },
+            store.all().none { automation ->
+                automation.name.startsWith(E2E_AUTOMATION_PREFIX) ||
+                    automation.name.startsWith(E2E_VOLTAGE_PREFIX)
+            },
         )
     }
 
@@ -278,11 +443,14 @@ class ArgusProductionE2EInstrumentedTest {
         }
     }
 
-    private suspend fun assertJournalSucceeded(record: AuditLogRecord) {
+    private suspend fun assertJournalSucceeded(
+        record: AuditLogRecord,
+        expectedActionType: String = "set_dnd",
+    ) {
         val executionId = requireNotNull(record.executionId)
         val actions = services.database().executionJournalDao().actions(executionId)
         assertEquals(1, actions.size)
-        assertEquals("set_dnd", actions.single().actionType)
+        assertEquals(expectedActionType, actions.single().actionType)
         assertEquals(ActionJournalOutcome.SUCCEEDED, actions.single().outcome)
     }
 
@@ -308,6 +476,7 @@ class ArgusProductionE2EInstrumentedTest {
 
     private companion object {
         const val E2E_AUTOMATION_PREFIX = "Argus E2E DND"
+        const val E2E_VOLTAGE_PREFIX = "Argus E2E Voltage"
         const val BRIDGE_TOKEN_FILE = "argus-e2e-bridge-token"
         const val FIRE_DELAY_SECONDS = 45L
         const val FIRE_TIMEOUT_MILLIS = 120_000L

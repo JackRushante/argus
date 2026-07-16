@@ -59,6 +59,26 @@ class ApprovalFingerprintTest {
         )
     }
 
+    @Test
+    fun `state reader policy version is approval fingerprint material`() {
+        val condition = Condition.StateCompare(
+            query = StateQuery.DumpsysField("battery", "voltage"),
+            valueType = StateValueType.NUMBER,
+            op = CmpOp.LT,
+            expected = "3800",
+            policyVersion = StateQueryPolicy.VERSION,
+        )
+        val current = automation(base.copy(conditions = condition))
+        val changedPolicy = automation(
+            base.copy(conditions = condition.copy(policyVersion = StateQueryPolicy.VERSION + 1)),
+        )
+
+        assertNotEquals(
+            ApprovalFingerprints.of(current),
+            ApprovalFingerprints.of(changedPolicy),
+        )
+    }
+
     private fun automation(draft: AutomationDraft) = Automation(
         id = AutomationId("draft-a"),
         name = draft.name,

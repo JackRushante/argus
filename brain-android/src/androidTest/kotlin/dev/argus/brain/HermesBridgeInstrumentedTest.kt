@@ -52,7 +52,9 @@ class HermesBridgeInstrumentedTest {
         try {
             val health = transport().health()
             assertTrue("il bridge doveva risultare irraggiungibile", expectReachable)
-            assertEquals(CliBridgeTransport.PROTOCOL_SCHEMA_VERSION, health.schemaVersion)
+            assertEquals(CliBridgeTransport.HEALTH_SCHEMA_VERSION, health.schemaVersion)
+            assertTrue(CliBridgeTransport.COMPILE_SCHEMA_VERSION in health.compileSchemaVersions)
+            assertTrue(CliBridgeTransport.ACT_SCHEMA_VERSION in health.actSchemaVersions)
             assertEquals("ok", health.status)
         } catch (error: BridgeException) {
             if (expectReachable) throw error
@@ -127,6 +129,7 @@ class HermesBridgeInstrumentedTest {
             availableTools = listOf("set_dnd"),
             unavailableTools = emptyMap(),
             whitelistedContacts = emptyList(),
+            availableTriggers = listOf("time"),
         )
 
         val result = HermesBrain(transport()).compile(

@@ -14,6 +14,7 @@ import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.DndMode
 import dev.argus.engine.model.GenerativeContract
 import dev.argus.engine.model.StateKeys
+import dev.argus.engine.model.StateQueryFamily
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.ActionCapabilities
 import dev.argus.engine.runtime.AutomationStore
@@ -66,6 +67,7 @@ class AndroidCapabilityProbeTest {
         assertTrue(CapabilityIds.state(StateKeys.RINGER) in snapshot.availableCapabilities)
         assertTrue(CapabilityIds.STATE_READER_SYSFS in snapshot.availableCapabilities)
         assertTrue(CapabilityIds.STATE_READER_DUMPSYS_FIELD in snapshot.availableCapabilities)
+        assertEquals(StateQueryFamily.entries, manifest.stateReaders.families)
         assertEquals(setOf("jid:42"), snapshot.whitelistedConversationIds)
         assertEquals(emptySet(), snapshot.transientlyUnavailableCapabilities)
     }
@@ -81,6 +83,15 @@ class AndroidCapabilityProbeTest {
         assertFalse(ActionCapabilities.SET_DND in stopped.availableCapabilities)
         assertTrue(ActionCapabilities.SET_DND in stopped.transientlyUnavailableCapabilities)
         assertTrue(CapabilityIds.STATE_READER_SYSFS in stopped.transientlyUnavailableCapabilities)
+        assertEquals(
+            emptyList(),
+            probe(
+                state().copy(
+                    shizukuStatus = ShizukuGatewayStatus.INSTALLED_NOT_RUNNING,
+                    shizukuPermissionGranted = true,
+                ),
+            ).probe(DeviceState()).stateReaders.families,
+        )
         assertFalse(ActionTypeIds.SET_DND in probe(
             state().copy(
                 shizukuStatus = ShizukuGatewayStatus.INSTALLED_NOT_RUNNING,

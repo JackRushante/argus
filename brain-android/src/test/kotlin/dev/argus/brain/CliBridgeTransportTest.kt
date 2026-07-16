@@ -1,9 +1,16 @@
 package dev.argus.brain
 
 import dev.argus.engine.brain.CapabilityManifest
+import dev.argus.engine.brain.StateReaderManifest
 import dev.argus.engine.brain.WhitelistedContact
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.AutomationId
+import dev.argus.engine.model.CmpOp
+import dev.argus.engine.model.Condition
+import dev.argus.engine.model.StateQueryFamily
+import dev.argus.engine.model.StateQuery
+import dev.argus.engine.model.StateQueryPolicy
+import dev.argus.engine.model.StateValueType
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.ExecutionId
 import dev.argus.engine.runtime.FireContext
@@ -50,6 +57,13 @@ class CliBridgeTransportTest {
         unavailableTools = mapOf("vision.analyze" to "provider assente"),
         whitelistedContacts = listOf(WhitelistedContact("Moglie", "jid:42")),
         availableTriggers = listOf("time", "notification", "phone_state.sms"),
+        stateReaders = StateReaderManifest(
+            families = listOf(
+                StateQueryFamily.SETTING,
+                StateQueryFamily.SYSTEM_PROPERTY,
+                StateQueryFamily.DUMPSYS_FIELD,
+            ),
+        ),
     )
 
     @BeforeTest fun setUp() { server = MockWebServer().apply { start() } }
@@ -84,7 +98,7 @@ class CliBridgeTransportTest {
         assertEquals("application/json", request.getHeader("Accept"))
         val raw = request.body.readUtf8()
         val root = Json.parseToJsonElement(raw).jsonObject
-        assertEquals(1, root.getValue("schema_version").jsonPrimitive.content.toInt())
+        assertEquals(2, root.getValue("schema_version").jsonPrimitive.content.toInt())
         assertEquals(REQUEST_ID, root.getValue("request_id").jsonPrimitive.content)
         val sentManifest = root.getValue("manifest").jsonObject
         assertEquals(36, sentManifest.getValue("android_api").jsonPrimitive.content.toInt())
@@ -92,6 +106,17 @@ class CliBridgeTransportTest {
         assertEquals(
             listOf("time", "notification", "phone_state.sms"),
             sentManifest.getValue("available_triggers").jsonArray.map { it.jsonPrimitive.content },
+        )
+        val readers = sentManifest.getValue("state_readers").jsonObject
+        assertEquals(1, readers.getValue("policy_version").jsonPrimitive.content.toInt())
+        assertEquals(
+            listOf("setting", "system_property", "dumpsys_field"),
+            readers.getValue("families").jsonArray.map { it.jsonPrimitive.content },
+        )
+        assertEquals(
+            1_024,
+            readers.getValue("limits").jsonObject
+                .getValue("max_expected_length").jsonPrimitive.content.toInt(),
         )
         val sentState = root.getValue("state").jsonObject
         assertEquals("normal", sentState.getValue("values").jsonObject.getValue("ringer").jsonPrimitive.content)
@@ -104,15 +129,34 @@ class CliBridgeTransportTest {
     }
 
     @Test fun `health uses the same authenticated strict boundary`(): Unit = runBlocking {
-        server.enqueue(jsonResponse("""{"schema_version":1,"status":"ok","model":"gpt-5.5"}"""))
+        server.enqueue(jsonResponse(
+            """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1,2],"act_schema_versions":[1],"source_sha256":"${"a".repeat(64)}"}""",
+        ))
 
         val health = transport().health()
 
-        assertEquals(1, health.schemaVersion)
+        assertEquals(2, health.schemaVersion)
+        assertTrue(2 in health.compileSchemaVersions)
+        assertEquals(listOf(1), health.actSchemaVersions)
         assertEquals("gpt-5.5", health.model)
         val request = assertNotNull(server.takeRequest(2, TimeUnit.SECONDS))
-        assertEquals("/health", request.path)
+        assertEquals("/health/v2", request.path)
         assertEquals("Bearer $TOKEN", request.getHeader("Authorization"))
+    }
+
+    @Test fun `health rejects incomplete drifted or extended contracts`(): Unit = runBlocking {
+        val invalid = listOf(
+            """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1],"act_schema_versions":[1],"source_sha256":"${"a".repeat(64)}"}""",
+            """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1,2,3],"act_schema_versions":[1],"source_sha256":"${"a".repeat(64)}"}""",
+            """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1,2],"act_schema_versions":[1],"source_sha256":"not-a-sha"}""",
+            """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1,2],"act_schema_versions":[1],"source_sha256":"${"a".repeat(64)}","surprise":true}""",
+        )
+
+        invalid.forEach { body ->
+            server.enqueue(jsonResponse(body))
+            val error = assertFailsWith<BridgeException> { transport().health() }
+            assertEquals(BridgeErrorKind.PROTOCOL, error.kind)
+        }
     }
 
     @Test fun `act is deterministic minimal and never sends local reply handles or target ids`(): Unit = runBlocking {
@@ -200,7 +244,7 @@ class CliBridgeTransportTest {
 
     @Test fun `valid strict response decodes a draft`(): Unit = runBlocking {
         server.enqueue(jsonResponse(
-            """{"schema_version":1,"request_id":"$REQUEST_ID","reply":"ok","meta":{"draft":{"name":"wifi off","trigger":{"type":"time","at":"2026-07-15T23:00","tz":"Europe/Rome"},"actions":[{"type":"set_wifi","on":false}]},"error_code":null}}"""
+            """{"schema_version":2,"request_id":"$REQUEST_ID","reply":"ok","meta":{"draft":{"name":"wifi off","trigger":{"type":"time","at":"2026-07-15T23:00","tz":"Europe/Rome"},"actions":[{"type":"set_wifi","on":false}]},"error_code":null}}"""
         ))
 
         val result = transport().compile("x", manifest, DeviceState())
@@ -208,6 +252,37 @@ class CliBridgeTransportTest {
         assertEquals("ok", result.reply)
         assertNotNull(result.draft)
         assertNull(result.metaError)
+    }
+
+    @Test fun `compile v2 decodes a fingerprinted typed state query`(): Unit = runBlocking {
+        server.enqueue(jsonResponse(
+            """{"schema_version":2,"request_id":"$REQUEST_ID","reply":"ok","meta":{"draft":{"name":"voltaggio basso","trigger":{"type":"time","cron":"0 8 * * *","tz":"Europe/Rome"},"actions":[{"type":"show_notification","title":"Argus","text":"Batteria"}],"conditions":{"type":"state_compare","query":{"type":"dumpsys_field","service":"battery","field":"voltage"},"valueType":"NUMBER","op":"LT","expected":"3800","policyVersion":1}},"error_code":null}}""",
+        ))
+
+        val result = transport().compile("avvisami sotto 3800 mV", manifest, DeviceState())
+
+        assertEquals(
+            Condition.StateCompare(
+                query = StateQuery.DumpsysField("battery", "voltage"),
+                valueType = StateValueType.NUMBER,
+                op = CmpOp.LT,
+                expected = "3800",
+                policyVersion = StateQueryPolicy.VERSION,
+            ),
+            assertNotNull(result.draft).conditions,
+        )
+        assertNull(result.metaError)
+    }
+
+    @Test fun `compile v2 rejects state query without policy version as invalid draft`(): Unit = runBlocking {
+        server.enqueue(jsonResponse(
+            """{"schema_version":2,"request_id":"$REQUEST_ID","reply":"ok","meta":{"draft":{"name":"voltaggio basso","trigger":{"type":"time","cron":"0 8 * * *","tz":"Europe/Rome"},"actions":[{"type":"show_notification","title":"Argus","text":"Batteria"}],"conditions":{"type":"state_compare","query":{"type":"dumpsys_field","service":"battery","field":"voltage"},"valueType":"NUMBER","op":"LT","expected":"3800"}},"error_code":null}}""",
+        ))
+
+        val result = transport().compile("avvisami sotto 3800 mV", manifest, DeviceState())
+
+        assertNull(result.draft)
+        assertEquals("draft_invalid", result.metaError)
     }
 
     @Test fun `explicit no-draft response preserves reply and error code`(): Unit = runBlocking {
@@ -223,10 +298,10 @@ class CliBridgeTransportTest {
     @Test fun `missing incompatible or mismatched protocol fields fail closed`(): Unit = runBlocking {
         val invalid = listOf(
             """{"request_id":"$REQUEST_ID","reply":"x","meta":{"draft":null,"error_code":"x"}}""",
-            """{"schema_version":2,"request_id":"$REQUEST_ID","reply":"x","meta":{"draft":null,"error_code":"x"}}""",
-            """{"schema_version":1,"request_id":"other","reply":"x","meta":{"draft":null,"error_code":"x"}}""",
-            """{"schema_version":1,"request_id":"$REQUEST_ID","reply":{},"meta":{"draft":null,"error_code":"x"}}""",
-            """{"schema_version":1,"request_id":"$REQUEST_ID","reply":"x","meta":{"draft":null,"error_code":"x"},"surprise":true}""",
+            """{"schema_version":1,"request_id":"$REQUEST_ID","reply":"x","meta":{"draft":null,"error_code":"x"}}""",
+            """{"schema_version":2,"request_id":"other","reply":"x","meta":{"draft":null,"error_code":"x"}}""",
+            """{"schema_version":2,"request_id":"$REQUEST_ID","reply":{},"meta":{"draft":null,"error_code":"x"}}""",
+            """{"schema_version":2,"request_id":"$REQUEST_ID","reply":"x","meta":{"draft":null,"error_code":"x"},"surprise":true}""",
         )
 
         invalid.forEach { body ->
@@ -240,7 +315,7 @@ class CliBridgeTransportTest {
 
     @Test fun `malformed draft is fail-soft after a valid envelope`(): Unit = runBlocking {
         server.enqueue(jsonResponse(
-            """{"schema_version":1,"request_id":"$REQUEST_ID","reply":"x","meta":{"draft":{"name":"bad","trigger":{"type":"time","cron":"0 23 * * *"},"actions":[]},"error_code":null}}"""
+            """{"schema_version":2,"request_id":"$REQUEST_ID","reply":"x","meta":{"draft":{"name":"bad","trigger":{"type":"time","cron":"0 23 * * *"},"actions":[]},"error_code":null}}"""
         ))
 
         val result = transport().compile("x", manifest, DeviceState())
@@ -341,7 +416,7 @@ class CliBridgeTransportTest {
     }
 
     private fun validNoDraftResponse(reply: String = "ok") = jsonResponse(
-        """{"schema_version":1,"request_id":"$REQUEST_ID","reply":"$reply","meta":{"draft":null,"error_code":"clarification_required"}}"""
+        """{"schema_version":2,"request_id":"$REQUEST_ID","reply":"$reply","meta":{"draft":null,"error_code":"clarification_required"}}"""
     )
 
     private fun jsonResponse(body: String) = MockResponse()

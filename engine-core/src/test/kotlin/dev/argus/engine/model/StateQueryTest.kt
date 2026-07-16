@@ -36,6 +36,10 @@ class StateQueryTest {
                 ArgusJson.encodeToString(Condition.serializer(), condition),
             ),
         )
+        assertTrue(
+            "\"policyVersion\":${StateQueryPolicy.VERSION}" in
+                ArgusJson.encodeToString(Condition.serializer(), condition),
+        )
     }
 
     @Test
@@ -49,5 +53,28 @@ class StateQueryTest {
         assertNotEquals(a.canonicalId, differentNamespace.canonicalId)
         assertNotEquals(a.canonicalId, differentSplit.canonicalId)
         assertTrue(a.canonicalId.matches(Regex("^state\\.reader\\.setting\\.v1\\.[0-9a-f]{64}$")))
+    }
+
+    @Test
+    fun `closed builtin registry and utf16 limits cannot diverge from bridge policy`() {
+        assertFalse(
+            StateQueryPolicy.validQuery(
+                StateQuery.Builtin("future_key"),
+                stateKeys = setOf("future_key"),
+            ),
+        )
+        assertFalse(
+            StateQueryPolicy.validComparison(
+                query = StateQuery.SystemProperty("ro.product.model"),
+                valueType = StateValueType.TEXT,
+                op = CmpOp.EQ,
+                expected = "😀".repeat(513),
+            ),
+        )
+        assertFalse(
+            StateQueryPolicy.validQuery(
+                StateQuery.Sysfs("/sys/" + "😀".repeat(126)),
+            ),
+        )
     }
 }

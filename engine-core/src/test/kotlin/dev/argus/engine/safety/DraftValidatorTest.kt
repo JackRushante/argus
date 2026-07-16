@@ -381,6 +381,21 @@ class DraftValidatorTest {
                 "x".repeat(5_000),
             ),
         )
+        val incompatiblePolicy = AutomationDraft(
+            "reader",
+            Trigger.Time(cron = "0 8 * * *", tz = "Europe/Rome"),
+            listOf(Action.ShowNotification("Argus", "reader")),
+            conditions = Condition.StateCompare(
+                StateQuery.SystemProperty("ro.build.version.sdk"),
+                StateValueType.NUMBER,
+                CmpOp.GT,
+                "30",
+                policyVersion = StateQueryPolicy.VERSION + 1,
+            ),
+        )
+        assertTrue(
+            "state_query_policy_incompatible" in errors(v.validate(incompatiblePolicy, emptySet())),
+        )
     }
     @Test fun `non finite or out of range locations and negative cooldown are rejected`() {
         val d = AutomationDraft(

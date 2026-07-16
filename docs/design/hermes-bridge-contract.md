@@ -1,13 +1,13 @@
 # Contratto Argus ↔ Hermes bridge
 
-Stato: protocollo v1 `/compile` operativo dal 2026-07-13; `/act` aggiunto il 2026-07-14.
+Stato: `/compile` v2 corrente; `/compile` v1 mantenuto solo per rollout; `/act` resta v1.
 
 > **Confine di versione P3:** `schema_version` in questo documento versiona esclusivamente il
 > protocollo bridge. Non è la versione dello schema Room/automazioni e non è la versione del
 > materiale canonico usato per il fingerprint di approvazione. Le tre evolvono separatamente
-> secondo `argus-schema-versioning-adr.md`. `/compile` e `/act` v1 restano strict; i lettori
-> parametrici e i futuri turni agentici richiederanno un contratto esplicitamente nuovo, mai un
-> fallback implicito a `/chat`.
+> secondo `argus-schema-versioning-adr.md`. `/compile` v2 aggiunge i lettori parametrici senza
+> modificare `/act` v1. I futuri turni agentici richiederanno un altro contratto esplicitamente
+> versionato, mai un fallback implicito a `/chat`.
 
 ## Endpoint e confine di sicurezza
 
@@ -29,7 +29,9 @@ Sorgenti operative versionate:
 Il confronto repo/host va fatto sul contenuto normalizzato LF oppure sul file Python compilato e
 testato: un SHA-256 dei byte grezzi può segnalare falso drift quando il checkout Windows usa CRLF.
 
-## `GET /health`
+## Health e negoziazione
+
+`GET /health` è il contratto legacy, conservato durante il rollout server → Android.
 
 Risposta `200 application/json`:
 
@@ -37,8 +39,23 @@ Risposta `200 application/json`:
 {"schema_version":1,"status":"ok","model":"gpt-5.5"}
 ```
 
-Il client rifiuta campi sconosciuti, versione diversa, status diverso da `ok`, body non JSON o body
-oltre il limite.
+Il client Android corrente non usa più questo endpoint. Usa `GET /health/v2`:
+
+```json
+{
+  "schema_version": 2,
+  "status": "ok",
+  "model": "gpt-5.5",
+  "compile_schema_versions": [1, 2],
+  "act_schema_versions": [1],
+  "source_sha256": "<64 caratteri esadecimali lowercase>"
+}
+```
+
+Le liste sono esatte e ordinate: Android rifiuta versioni mancanti, duplicate, sconosciute o fuori
+ordine. `source_sha256` è l'hash di `bridge.py` dopo normalizzazione `CRLF|CR → LF`; permette di
+confrontare checkout Windows e deploy Linux senza falso drift. Il client rifiuta anche campi
+sconosciuti, status/modello non validi, body non JSON o oltre il limite.
 
 ## `POST /compile`
 
@@ -51,11 +68,11 @@ Accept: application/json
 Idempotency-Key: <request_id>
 ```
 
-Request v1:
+Request v2 corrente:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "request_id": "uuid-o-id-opaco",
   "message": "Dopo le 23 attiva non disturbare prioritario",
   "manifest": {
@@ -71,7 +88,19 @@ Request v1:
     ],
     "unavailable_tools": {},
     "whitelisted_contacts": [],
-    "state_keys": {"dnd": "off|priority|total"}
+    "state_keys": {"dnd": "off|priority|total"},
+    "state_readers": {
+      "policy_version": 1,
+      "families": ["builtin", "setting", "system_property", "sysfs", "dumpsys_field"],
+      "limits": {
+        "max_query_name_length": 96,
+        "max_sysfs_path_length": 256,
+        "max_expected_length": 1024,
+        "timeout_millis": 10000,
+        "max_output_bytes": 65536,
+        "max_scalar_chars": 4096
+      }
+    }
   },
   "state": {
     "values": {"dnd": "off"},
@@ -87,15 +116,30 @@ Request v1:
 derivare entrambi dallo stesso snapshot di capability: un'azione non disponibile va esclusa e
 riportata in `unavailable_tools` con il motivo.
 
-`available_triggers` è opzionale soltanto per retrocompatibilità con i client pre-P2. Quando è
-presente e non vuoto, il prompt e il validator del bridge rifiutano fail-closed ogni draft il cui
-trigger non è nella lista. PhoneState è distinto in `.sms`/`.call`; Connectivity in `.wifi`,
+In v2 `available_triggers` è obbligatorio, univoco e in ordine canonico. Nel solo v1 legacy può
+essere omesso per i client pre-P2. Quando è presente, il prompt e il validator del bridge rifiutano
+fail-closed ogni draft il cui trigger non è nella lista. PhoneState è distinto in `.sms`/`.call`; Connectivity in `.wifi`,
 `.bt`, `.power`. Un filtro SSID (`Connectivity.match`) richiede inoltre
 `connectivity.wifi.identity`, pubblicato solo con location foreground+background. Il controllo
 server non sostituisce la rivalidazione delle capability sul telefono.
 
+`state_readers` è obbligatorio soltanto in v2. Pubblica famiglie chiuse realmente disponibili e
+limiti esatti della policy, non un inventario di chiavi arbitrarie. Ordine, unicità, versione e
+limiti sono parte del wire contract: un mismatch viene rifiutato prima di chiamare il modello.
+Le famiglie sono:
+
+- `builtin(key)` per le chiavi legacy dichiarate anche in `state_keys`;
+- `setting(namespace,key)` con namespace `SYSTEM|SECURE|GLOBAL`;
+- `system_property(name)`;
+- `sysfs(path)`, con path validato e canonicalizzato sotto `/sys/` sul telefono;
+- `dumpsys_field(service,field)`, con parsing bounded in-process.
+
+Il bridge non riceve il valore letto. La query esatta viene provata localmente prima dell'arm; il
+sample resta fuori da wire, log e fingerprint. La condizione approvata include invece parametri,
+tipo, operatore, soglia e `policyVersion`, così un cambio semantico invalida il fingerprint.
+
 `geofence` viene pubblicato soltanto con posizione **precisa** e accesso in background. Nel
-contratto v1 accetta esclusivamente `transition=ENTER|EXIT` e `loiteringDelayMs=0`: il backend
+contratto corrente accetta esclusivamente `transition=ENTER|EXIT` e `loiteringDelayMs=0`: il backend
 framework Android non offre DWELL e il bridge non deve prometterlo.
 
 `phone_state.sms` indica soltanto SMS telephony, non RCS/MMS. `copy_to_clipboard.extractionRegex`
@@ -110,18 +154,26 @@ Redazione device state:
 - le coordinate non vengono mai inviate: passa solo `location_available`; il placeholder “qui” viene
   risolto sul telefono al momento dell'approvazione.
 
-Risposta v1:
+Risposta v2:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "request_id": "uuid-o-id-opaco",
   "reply": "Proposta pronta.",
   "meta": {
     "draft": {
-      "name": "DND sera",
-      "trigger": {"type":"time","cron":"0 23 * * *","at":null,"tz":"Europe/Rome","precision":"FLEXIBLE"},
-      "actions": [{"type":"set_dnd","mode":"PRIORITY"}]
+      "name": "Voltaggio basso",
+      "trigger": {"type":"time","cron":"0 8 * * *","at":null,"tz":"Europe/Rome","precision":"FLEXIBLE"},
+      "actions": [{"type":"show_notification","title":"Argus","text":"Batteria"}],
+      "conditions": {
+        "type": "state_compare",
+        "query": {"type":"dumpsys_field","service":"battery","field":"voltage"},
+        "valueType": "NUMBER",
+        "op": "LT",
+        "expected": "3800",
+        "policyVersion": 1
+      }
     },
     "error_code": null
   }
@@ -133,7 +185,7 @@ un `error_code` non nullo non possono coesistere.
 
 Il client accetta il draft soltanto se:
 
-1. `schema_version == 1`;
+1. `schema_version == 2`;
 2. `request_id` coincide con la richiesta;
 3. envelope e draft non hanno campi sconosciuti o tipi coercibili;
 4. `reply` è una stringa entro il limite;
@@ -141,6 +193,21 @@ Il client accetta il draft soltanto se:
 
 La decodifica non equivale all'approvazione: `DraftValidator`, fingerprint, conferma utente e
 revalidazione al fire-time restano obbligatori.
+
+### Compatibilità e rollout `/compile`
+
+- Il server accetta request v1 e v2, rispondendo con la stessa versione ricevuta.
+- Il v1 resta strict ma non può rappresentare `StateQuery`/`StateCompare`; non esiste conversione
+  implicita a `StateEquals` e non esiste fallback `/chat`.
+- Android corrente invia solo v2 e accetta solo response v2.
+- Ordine di deploy: prima server compatibile `[1,2]`, poi APK v2. Il rollback dell'APK resta
+  compatibile col server; il rollback del server con APK v2 fallisce visibilmente su `/health/v2`
+  e `/compile`, senza degradare silenziosamente.
+- Il deploy host comprende atomicamente `bridge.py`, `test_bridge.py` e
+  `state_query_contract_v2.json`, seguito da suite remota, restart, health e confronto hash LF.
+
+Request e output modello sono JSON strict: chiavi duplicate, `NaN`/`Infinity`, campi sconosciuti,
+tipi coercibili o enum non stringa vengono rifiutati fail-closed.
 
 ### Regole del prompt di compilazione (server)
 
@@ -153,6 +220,11 @@ le risposte generate usano il profilo `invoke_llm` P1 esatto, mentre `whatsapp_r
 riservata a testi dettati letteralmente dall'utente. Il draft resta comunque soggetto al
 `DraftValidator` locale: la regola serve a produrre draft armabili al primo colpo, non a
 sostituire i controlli.
+
+In `/compile` v2 la regola 13 consente `state_compare` soltanto per famiglie pubblicate in
+`manifest.state_readers`, impone `policyVersion=1` e chiede chiarimento se mancano soglia o unità.
+Per il voltaggio del device corrente il profilo noto è `dumpsys_field(battery, voltage)` in
+millivolt; il modello non può ripiegare su una `state_equals` lessicografica.
 
 ## `POST /act`
 
@@ -215,8 +287,9 @@ versione o request ID diversi sono errori di protocollo fail-closed.
 
 ## Idempotenza e limiti
 
-- Il server lega endpoint, `request_id`, `Idempotency-Key` e SHA-256 dei byte del request. Le cache
-  `/compile` e `/act` sono namespace separate, quindi lo stesso ID non collide tra operazioni.
+- Il server lega endpoint, versione schema, `request_id`, `Idempotency-Key` e SHA-256 dei byte del
+  request. Endpoint e versioni hanno namespace separati, quindi lo stesso ID non collide tra
+  operazioni o profili wire.
 - La stessa richiesta entro 15 minuti restituisce la risposta cached senza richiamare il modello;
   due duplicati concorrenti attendono lo stesso risultato e producono una sola chiamata Hermes.
 - Riutilizzare lo stesso ID con un body diverso restituisce `409 idempotency_conflict`.
@@ -233,7 +306,7 @@ versione o request ID diversi sono errori di protocollo fail-closed.
 | `401` | token assente/errato |
 | `409` | schema incompatibile o stesso request ID con contenuto diverso |
 | `413` / `415` | body troppo grande / content type errato |
-| `429` | compile già in corso |
+| `429` | slot modello già occupato da un'altra compile/act |
 | `503` | cache idempotenza temporaneamente piena oppure quota provider esaurita |
 | `502` / `504` | modello fallito / timeout |
 

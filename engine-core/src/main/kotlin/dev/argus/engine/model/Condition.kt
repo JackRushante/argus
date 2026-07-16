@@ -18,7 +18,17 @@ sealed interface Condition {
         val valueType: StateValueType,
         val op: CmpOp,
         val expected: String,
-    ) : Condition
+        /** Fingerprinta i limiti e la semantica del reader, non il sample letto al probe. */
+        val policyVersion: Int,
+    ) : Condition {
+        /** Ergonomia locale; sul wire policyVersion resta obbligatorio e strict. */
+        constructor(
+            query: StateQuery,
+            valueType: StateValueType,
+            op: CmpOp,
+            expected: String,
+        ) : this(query, valueType, op, expected, StateQueryPolicy.VERSION)
+    }
 
     @Serializable @SerialName("app_in_foreground")
     data class AppInForeground(val pkg: String) : Condition

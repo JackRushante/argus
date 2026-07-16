@@ -205,6 +205,10 @@ class DraftValidator(
     }
 
     private fun validateStateCompare(c: Condition.StateCompare, err: (String, String) -> Unit) {
+        if (c.policyVersion != StateQueryPolicy.VERSION) {
+            err("state_query_policy_incompatible", "Versione policy reader non compatibile")
+            return
+        }
         if (!StateQueryPolicy.validQuery(c.query, stateKeys)) {
             err("state_query_invalid", "Reader di stato o parametri non validi")
             return

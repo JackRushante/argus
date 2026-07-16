@@ -50,7 +50,7 @@ class HermesBrainTest {
 
     @Test fun `compile returns the strict bridge draft`(): Unit = runBlocking {
         server.enqueue(jsonResponse(
-            """{"schema_version":1,"request_id":"req-brain-1","reply":"ok","meta":{"draft":{"name":"dnd dopo le 23","trigger":{"type":"time","cron":"0 23 * * *","tz":"Europe/Rome"},"actions":[{"type":"set_dnd","mode":"PRIORITY"}]},"error_code":null}}"""
+            """{"schema_version":2,"request_id":"req-brain-1","reply":"ok","meta":{"draft":{"name":"dnd dopo le 23","trigger":{"type":"time","cron":"0 23 * * *","tz":"Europe/Rome"},"actions":[{"type":"set_dnd","mode":"PRIORITY"}]},"error_code":null}}"""
         ))
 
         val result = brain().compile("dopo le 23 metti DND", manifest, DeviceState())

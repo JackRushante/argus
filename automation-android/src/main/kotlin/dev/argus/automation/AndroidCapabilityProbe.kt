@@ -11,6 +11,7 @@ import androidx.core.content.ContextCompat
 import dev.argus.engine.brain.CapabilityManifest
 import dev.argus.engine.brain.CapabilityProbe
 import dev.argus.engine.brain.ContactWhitelistStore
+import dev.argus.engine.brain.StateReaderManifest
 import dev.argus.engine.brain.WhitelistedContact
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
@@ -20,6 +21,7 @@ import dev.argus.engine.model.CapabilityIds
 import dev.argus.engine.model.CapabilityRequirements
 import dev.argus.engine.model.GenerativeContract
 import dev.argus.engine.model.StateKeys
+import dev.argus.engine.model.StateQueryFamily
 import dev.argus.engine.runtime.ActionCapabilities
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.runtime.DeviceState
@@ -133,6 +135,11 @@ class AndroidCapabilityProbe internal constructor(
             whitelistedContacts = resolved.contacts,
             stateKeys = StateKeys.ALL,
             availableTriggers = availableTriggers(resolved.state),
+            stateReaders = StateReaderManifest(
+                families = StateQueryFamily.entries.filter { family ->
+                    family.capabilityId in resolved.available
+                },
+            ),
         )
     }
 

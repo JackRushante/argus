@@ -1,10 +1,12 @@
 import json
 import os
+import tempfile
 import threading
 import time
 import unittest
 import urllib.error
 import urllib.request
+from pathlib import Path
 from unittest import mock
 
 import bridge
@@ -34,11 +36,210 @@ class BridgeTest(unittest.TestCase):
         }
 
     def test_request_is_strict_and_versioned(self):
-        request = self.request()
-        self.assertIs(request, bridge.validate_request(request, "req-test-1"))
-        request["schema_version"] = 2
+        legacy = self.request()
+        self.assertIs(legacy, bridge.validate_request(legacy, "req-test-1"))
+        current = self.request_v2()
+        self.assertIs(current, bridge.validate_request(current, "req-test-1"))
+        current["schema_version"] = 3
         with self.assertRaises(bridge.RequestError):
-            bridge.validate_request(request, "req-test-1")
+            bridge.validate_request(current, "req-test-1")
+
+    def test_v2_manifest_requires_exact_reader_policy_families_and_limits(self):
+        missing = self.request_v2()
+        del missing["manifest"]["state_readers"]
+        with self.assertRaises(bridge.RequestError):
+            bridge.validate_request(missing, "req-test-1")
+
+        missing_triggers = self.request_v2()
+        del missing_triggers["manifest"]["available_triggers"]
+        with self.assertRaises(bridge.RequestError):
+            bridge.validate_request(missing_triggers, "req-test-1")
+
+        legacy_with_v2_field = self.request()
+        legacy_with_v2_field["manifest"]["state_readers"] = self.state_readers()
+        with self.assertRaises(bridge.RequestError):
+            bridge.validate_request(legacy_with_v2_field, "req-test-1")
+
+        for mutate in (
+            lambda readers: readers.update(policy_version=2),
+            lambda readers: readers.update(families=["dumpsys_field", "builtin"]),
+            lambda readers: readers["limits"].update(max_output_bytes=999_999),
+        ):
+            invalid = self.request_v2()
+            mutate(invalid["manifest"]["state_readers"])
+            with self.assertRaises(bridge.RequestError):
+                bridge.validate_request(invalid, "req-test-1")
+
+    def test_untrusted_reader_shapes_fail_closed_without_type_errors(self):
+        malformed_manifest = self.request_v2()
+        malformed_manifest["manifest"]["state_readers"]["families"] = [["builtin"]]
+        with self.assertRaises(bridge.RequestError):
+            bridge.validate_request(malformed_manifest, "req-test-1")
+
+        base = {
+            "type": "state_compare",
+            "query": {"type": "builtin", "key": "battery"},
+            "valueType": "NUMBER",
+            "op": "LT",
+            "expected": "20",
+            "policyVersion": bridge.STATE_QUERY_POLICY_VERSION,
+        }
+        malformed_conditions = []
+        for path, replacement in (
+            (("query", "key"), ["battery"]),
+            (("valueType",), ["NUMBER"]),
+            (("op",), ["LT"]),
+        ):
+            condition = json.loads(json.dumps(base))
+            target = condition
+            for key in path[:-1]:
+                target = target[key]
+            target[path[-1]] = replacement
+            malformed_conditions.append(condition)
+
+        setting = json.loads(json.dumps(base))
+        setting["query"] = {
+            "type": "setting",
+            "namespace": ["SYSTEM"],
+            "key": "screen_brightness",
+        }
+        malformed_conditions.append(setting)
+
+        for condition in malformed_conditions:
+            self.assertFalse(
+                bridge.validate_condition(
+                    condition,
+                    0,
+                    set(bridge.BUILTIN_STATE_VALUES),
+                    set(bridge.STATE_QUERY_FAMILIES),
+                )
+            )
+
+        self.assertFalse(bridge.validate_condition(
+            {
+                "type": "state_compare",
+                "query": {"type": "system_property", "name": "ro.product.model"},
+                "valueType": "TEXT",
+                "op": "EQ",
+                "expected": "😀" * 513,
+                "policyVersion": bridge.STATE_QUERY_POLICY_VERSION,
+            },
+            0,
+            set(bridge.BUILTIN_STATE_VALUES),
+            {"system_property"},
+        ))
+        self.assertFalse(bridge.validate_state_query(
+            {"type": "sysfs", "path": "/sys/" + "😀" * 126},
+            set(bridge.BUILTIN_STATE_VALUES),
+            {"sysfs"},
+        ))
+        self.assertFalse(bridge.validate_state_query(
+            {"type": "sysfs", "path": "/sys/   /value"},
+            set(bridge.BUILTIN_STATE_VALUES),
+            {"sysfs"},
+        ))
+
+    def test_all_untrusted_enum_memberships_fail_closed_without_type_errors(self):
+        act = {
+            "schema_version": 1,
+            "request_id": "act-test-1",
+            "goal": "rispondi",
+            "context_sources": [["notification"]],
+            "allowed_tools": ["whatsapp_reply"],
+            "context": {
+                "notification": {
+                    "package": "com.whatsapp",
+                    "sender": None,
+                    "title": None,
+                    "text": "ciao",
+                    "is_group": False,
+                },
+                "state": None,
+            },
+        }
+        with self.assertRaises(bridge.RequestError):
+            bridge.validate_act_request(act, "act-test-1")
+
+        bad_package = json.loads(json.dumps(act))
+        bad_package["context_sources"] = ["notification"]
+        bad_package["context"]["notification"]["package"] = ["com.whatsapp"]
+        with self.assertRaises(bridge.RequestError):
+            bridge.validate_act_request(bad_package, "act-test-1")
+
+        self.assertFalse(bridge.validate_trigger(
+            {"type": "time", "cron": "0 8 * * *", "tz": "Europe/Rome", "precision": ["EXACT"]},
+            set(),
+        ))
+        self.assertFalse(bridge.validate_trigger(
+            {"type": "geofence", "radiusM": 100, "transition": ["ENTER"], "lat": 1, "lng": 1},
+            set(),
+        ))
+        self.assertFalse(bridge.validate_condition(
+            {"type": "state_equals", "key": ["battery"], "op": "GT", "value": "20"},
+            0,
+            {"battery"},
+        ))
+        self.assertFalse(bridge.validate_action(
+            {"type": "set_dnd", "mode": ["TOTAL"]},
+            {"set_dnd"},
+        ))
+
+    def test_strict_json_rejects_duplicate_keys_and_non_finite_numbers(self):
+        for raw in ('{"a":1,"a":2}', '{"a":NaN}', '{"a":Infinity}'):
+            with self.assertRaises(bridge.StrictJsonError):
+                bridge.STRICT_JSON_DECODER.decode(raw)
+
+        output = '@@META@@ {"draft":null,"draft":{},"error_code":null}'
+        self.assertEqual(
+            ("", None, "meta_invalid"),
+            bridge.parse_model_output(output, set(), set(), set()),
+        )
+        with self.assertRaises(bridge.ModelProcessError):
+            bridge.parse_act_model_output(
+                '@@META@@ {"reply_text":"ciao","reply_text":"altro","error_code":null}'
+            )
+
+    def test_shared_state_query_v2_fixtures_match_python_validator(self):
+        fixture_path = os.path.join(os.path.dirname(__file__), "state_query_contract_v2.json")
+        with open(fixture_path, encoding="utf-8") as stream:
+            fixture = json.load(stream)
+        self.assertEqual(bridge.COMPILE_SCHEMA_VERSION, fixture["schema_version"])
+        self.assertEqual(bridge.STATE_QUERY_POLICY_VERSION, fixture["policy_version"])
+        self.assertEqual(bridge.STATE_READER_LIMITS, fixture["limits"])
+        self.assertEqual(list(bridge.STATE_QUERY_FAMILIES), fixture["all_families"])
+        allowed_keys = set(bridge.BUILTIN_STATE_VALUES)
+        for case in fixture["cases"]:
+            families = set(case.get("available_families", fixture["all_families"]))
+            actual = bridge.validate_condition(
+                case["condition"], 0, allowed_keys, families
+            )
+            self.assertEqual(case["accepted"], actual, case["name"])
+
+    def test_source_hash_normalizes_windows_and_linux_line_endings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            lf = Path(directory) / "lf.py"
+            crlf = Path(directory) / "crlf.py"
+            lf.write_bytes(b"first\nsecond\n")
+            crlf.write_bytes(b"first\r\nsecond\r\n")
+            self.assertEqual(
+                bridge.normalized_source_sha256(lf),
+                bridge.normalized_source_sha256(crlf),
+            )
+
+    @staticmethod
+    def state_readers():
+        return {
+            "policy_version": bridge.STATE_QUERY_POLICY_VERSION,
+            "families": list(bridge.STATE_QUERY_FAMILIES),
+            "limits": dict(bridge.STATE_READER_LIMITS),
+        }
+
+    def request_v2(self):
+        request = self.request()
+        request["schema_version"] = bridge.COMPILE_SCHEMA_VERSION
+        request["manifest"]["available_triggers"] = ["time"]
+        request["manifest"]["state_readers"] = self.state_readers()
+        return request
 
     def test_copy_to_clipboard_action_requires_a_compilable_regex(self):
         tools = {"copy_to_clipboard"}
@@ -181,7 +382,12 @@ class BridgeTest(unittest.TestCase):
         self.assertIn("phone_state.sms", prompt)
 
         # Malformata o fuori bounds: rifiutata.
-        for bad in (["x" * 65], "not-a-list", ["ok"] * 33):
+        for bad in (
+            ["x" * 65],
+            "not-a-list",
+            ["time"] * 2,
+            ["phone_state.sms", "time"],
+        ):
             broken = self.request()
             broken["manifest"]["available_triggers"] = bad
             with self.assertRaises(bridge.RequestError):
@@ -247,6 +453,42 @@ class BridgeTest(unittest.TestCase):
         self.assertIsNone(draft)
         self.assertEqual("draft_invalid", error)
 
+    def test_v2_model_output_accepts_only_advertised_typed_reader(self):
+        output = (
+            'Pronto.\n@@META@@ {"draft":{"name":"Voltaggio basso",'
+            '"trigger":{"type":"time","cron":"0 8 * * *","tz":"Europe/Rome"},'
+            '"actions":[{"type":"show_notification","title":"Argus","text":"Batteria"}],'
+            '"conditions":{"type":"state_compare","query":{"type":"dumpsys_field",'
+            '"service":"battery","field":"voltage"},"valueType":"NUMBER","op":"LT",'
+            '"expected":"3800","policyVersion":1}},"error_code":null}'
+        )
+        reply, draft, error = bridge.parse_model_output(
+            output,
+            {"show_notification"},
+            set(bridge.BUILTIN_STATE_VALUES),
+            set(),
+            {"time"},
+            {"dumpsys_field"},
+        )
+        self.assertEqual("Pronto.", reply)
+        self.assertEqual("state_compare", draft["conditions"]["type"])
+        self.assertIsNone(error)
+
+        _, draft, error = bridge.parse_model_output(
+            output,
+            {"show_notification"},
+            set(bridge.BUILTIN_STATE_VALUES),
+            set(),
+            {"time"},
+            set(),
+        )
+        self.assertIsNone(draft)
+        self.assertEqual("draft_invalid", error)
+        prompt = bridge.build_prompt(self.request_v2())
+        self.assertIn("state_compare", prompt)
+        self.assertIn("policyVersion", prompt)
+        self.assertIn('service "battery"', prompt)
+
     def test_model_output_enforces_granular_available_triggers(self):
         output = (
             'Pronto.\n@@META@@ {"draft":{"name":"Bluetooth auto",'
@@ -274,9 +516,16 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual("BT", draft["trigger"]["medium"])
         self.assertIsNone(error)
 
-        # Manifest legacy/empty: nessun vincolo aggiuntivo, per retrocompatibilita'.
-        _, legacy, error = bridge.parse_model_output(
+        # Lista v2 vuota significa nessun trigger armabile.
+        _, draft, error = bridge.parse_model_output(
             output, {"run_shell"}, set(), set(), set()
+        )
+        self.assertIsNone(draft)
+        self.assertEqual("draft_invalid", error)
+
+        # Solo il manifest v1 che omette il campo mantiene il comportamento legacy.
+        _, legacy, error = bridge.parse_model_output(
+            output, {"run_shell"}, set(), set()
         )
         self.assertIsNotNone(legacy)
         self.assertIsNone(error)
@@ -452,11 +701,27 @@ class BridgeHttpTest(unittest.TestCase):
         status, body = self.request("/health")
         self.assertEqual(200, status)
         self.assertEqual({"status", "model", "schema_version"}, set(body))
+        self.assertEqual(bridge.LEGACY_COMPILE_SCHEMA_VERSION, body["schema_version"])
+
+        status, current = self.request("/health/v2")
+        self.assertEqual(200, status)
+        self.assertEqual(
+            {
+                "status", "model", "schema_version", "compile_schema_versions",
+                "act_schema_versions", "source_sha256",
+            },
+            set(current),
+        )
+        self.assertEqual(bridge.HEALTH_SCHEMA_VERSION, current["schema_version"])
+        self.assertEqual(list(bridge.SUPPORTED_COMPILE_SCHEMA_VERSIONS), current["compile_schema_versions"])
+        self.assertEqual([bridge.ACT_SCHEMA_VERSION], current["act_schema_versions"])
+        self.assertEqual(64, len(current["source_sha256"]))
 
     def test_compile_is_strict_idempotent_and_conflict_safe(self):
         request = self.valid_request()
         status, first = self.request("/compile", request)
         self.assertEqual(200, status)
+        self.assertEqual(bridge.COMPILE_SCHEMA_VERSION, first["schema_version"])
         self.assertEqual("dnd sera", first["meta"]["draft"]["name"])
         self.assertEqual(first, self.request("/compile", request)[1])
         self.assertEqual(1, self.calls)
@@ -464,6 +729,19 @@ class BridgeHttpTest(unittest.TestCase):
         status, body = self.request("/compile", changed)
         self.assertEqual(409, status)
         self.assertEqual("idempotency_conflict", body["error"])
+
+    def test_legacy_compile_stays_strict_during_v2_rollout(self):
+        request = self.valid_request()
+        request["schema_version"] = bridge.LEGACY_COMPILE_SCHEMA_VERSION
+        del request["manifest"]["state_readers"]
+        request["request_id"] = "req-http-legacy"
+
+        status, body = self.request(
+            "/compile", request, request_id=request["request_id"]
+        )
+
+        self.assertEqual(200, status)
+        self.assertEqual(bridge.LEGACY_COMPILE_SCHEMA_VERSION, body["schema_version"])
 
     def test_act_is_strict_idempotent_and_never_returns_a_target(self):
         request = self.valid_act_request()
@@ -518,7 +796,7 @@ class BridgeHttpTest(unittest.TestCase):
     @staticmethod
     def valid_request(message="dopo le 23 metti dnd"):
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "request_id": "req-http-1",
             "message": message,
             "manifest": {
@@ -530,6 +808,12 @@ class BridgeHttpTest(unittest.TestCase):
                 "unavailable_tools": {},
                 "whitelisted_contacts": [],
                 "state_keys": {"dnd": "off|priority|total"},
+                "available_triggers": ["time"],
+                "state_readers": {
+                    "policy_version": bridge.STATE_QUERY_POLICY_VERSION,
+                    "families": list(bridge.STATE_QUERY_FAMILIES),
+                    "limits": dict(bridge.STATE_READER_LIMITS),
+                },
             },
             "state": {
                 "values": {"dnd": "off"},

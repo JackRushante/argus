@@ -13,4 +13,13 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
 }
 tasks.test { useJUnitPlatform() }
+sourceSets {
+    test {
+        // Stessa fixture consumata dal validator Python del bridge: nessuna copia divergente.
+        resources {
+            srcDir(rootProject.file("ops/hermes"))
+            include("state_query_contract_v2.json")
+        }
+    }
+}
 kotlin { jvmToolchain(17) }

@@ -1,0 +1,201 @@
+{
+  "schema_version": 2,
+  "policy_version": 1,
+  "limits": {
+    "max_query_name_length": 96,
+    "max_sysfs_path_length": 256,
+    "max_expected_length": 1024,
+    "timeout_millis": 10000,
+    "max_output_bytes": 65536,
+    "max_scalar_chars": 4096
+  },
+  "all_families": [
+    "builtin",
+    "setting",
+    "system_property",
+    "sysfs",
+    "dumpsys_field"
+  ],
+  "cases": [
+    {
+      "name": "builtin_battery_number",
+      "accepted": true,
+      "condition": {
+        "type": "state_compare",
+        "query": {"type": "builtin", "key": "battery"},
+        "valueType": "NUMBER",
+        "op": "GT",
+        "expected": "20",
+        "policyVersion": 1
+      }
+    },
+    {
+      "name": "setting_boolean",
+      "accepted": true,
+      "condition": {
+        "type": "state_compare",
+        "query": {"type": "setting", "namespace": "GLOBAL", "key": "airplane_mode_on"},
+        "valueType": "BOOLEAN",
+        "op": "EQ",
+        "expected": "true",
+        "policyVersion": 1
+      }
+    },
+    {
+      "name": "system_property_number",
+      "accepted": true,
+      "condition": {
+        "type": "state_compare",
+        "query": {"type": "system_property", "name": "ro.build.version.sdk"},
+        "valueType": "NUMBER",
+        "op": "GT",
+        "expected": "30",
+        "policyVersion": 1
+      }
+    },
+    {
+      "name": "sysfs_number",
+      "accepted": true,
+      "condition": {
+        "type": "state_compare",
+        "query": {"type": "sysfs", "path": "/sys/class/power_supply/battery/voltage_now"},
+        "valueType": "NUMBER",
+        "op": "LT",
+        "expected": "5000000",
+        "policyVersion": 1
+      }
+    },
+    {
+      "name": "dumpsys_number",
+      "accepted": true,
+      "condition": {
+        "type": "state_compare",
+        "query": {"type": "dumpsys_field", "service": "battery", "field": "voltage"},
+        "valueType": "NUMBER",
+        "op": "GT",
+        "expected": "0",
+        "policyVersion": 1
+      }
+    },
+    {
+      "name": "family_not_advertised",
+      "accepted": false,
+      "available_families": ["builtin"],
+      "condition": {
+        "type": "state_compare",
+        "query": {"type": "dumpsys_field", "service": "battery", "field": "voltage"},
+        "valueType": "NUMBER",
+        "op": "GT",
+        "expected": "0",
+        "policyVersion": 1
+      }
+    },
+    {
+      "name": "policy_version_missing",
+      "accepted": false,
+      "condition": {
+        "type": "state_compare",
+        "query": {"type": "dumpsys_field", "service": "battery", "field": "voltage"},
+        "valueType": "NUMBER",
+        "op": "GT",
+        "expected": "0"
+      }
+    },
+    {
+      "name": "policy_version_future",
+      "accepted": false,
+      "condition": {
+        "type": "state_compare",
+        "query": {"type": "dumpsys_field", "service": "battery", "field": "voltage"},
+        "valueType": "NUMBER",
+        "op": "GT",
+        "expected": "0",
+        "policyVersion": 2
+      }
+    },
+    {
+      "name": "sysfs_traversal",
+      "accepted": false,
+      "condition": {
+        "type": "state_compare",
+        "query": {"type": "sysfs", "path": "/sys/../data/local/tmp/value"},
+        "valueType": "NUMBER",
+        "op": "GT",
+        "expected": "0",
+        "policyVersion": 1
+      }
+    },
+    {
+      "name": "setting_control_character",
+      "accepted": false,
+      "condition": {
+        "type": "state_compare",
+        "query": {"type": "setting", "namespace": "SECURE", "key": "bad\nkey"},
+        "valueType": "TEXT",
+        "op": "EQ",
+        "expected": "x",
+        "policyVersion": 1
+      }
+    },
+    {
+      "name": "dumpsys_command_separator",
+      "accepted": false,
+      "condition": {
+        "type": "state_compare",
+        "query": {"type": "dumpsys_field", "service": "battery;id", "field": "voltage"},
+        "valueType": "NUMBER",
+        "op": "GT",
+        "expected": "0",
+        "policyVersion": 1
+      }
+    },
+    {
+      "name": "blank_text_contains",
+      "accepted": false,
+      "condition": {
+        "type": "state_compare",
+        "query": {"type": "system_property", "name": "ro.product.model"},
+        "valueType": "TEXT",
+        "op": "CONTAINS",
+        "expected": "",
+        "policyVersion": 1
+      }
+    },
+    {
+      "name": "boolean_alias_not_allowed",
+      "accepted": false,
+      "condition": {
+        "type": "state_compare",
+        "query": {"type": "setting", "namespace": "GLOBAL", "key": "airplane_mode_on"},
+        "valueType": "BOOLEAN",
+        "op": "EQ",
+        "expected": "on",
+        "policyVersion": 1
+      }
+    },
+    {
+      "name": "builtin_type_mismatch",
+      "accepted": false,
+      "condition": {
+        "type": "state_compare",
+        "query": {"type": "builtin", "key": "wifi"},
+        "valueType": "NUMBER",
+        "op": "GT",
+        "expected": "0",
+        "policyVersion": 1
+      }
+    },
+    {
+      "name": "unknown_query_field",
+      "accepted": false,
+      "condition": {
+        "type": "state_compare",
+        "query": {"type": "system_property", "name": "ro.build.version.sdk", "command": "id"},
+        "valueType": "NUMBER",
+        "op": "GT",
+        "expected": "30",
+        "policyVersion": 1
+      }
+    }
+  ]
+}

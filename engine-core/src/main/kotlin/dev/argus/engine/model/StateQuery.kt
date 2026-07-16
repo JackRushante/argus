@@ -18,9 +18,14 @@ enum class StateQueryFamily(val wireName: String, val capabilityId: String) {
 
 /** Policy pura condivisa da validator e reader runtime; il canonical path sysfs si verifica dopo. */
 object StateQueryPolicy {
+    /** Versione della policy read-only inclusa nel materiale approvato di StateCompare. */
+    const val VERSION = 1
     const val MAX_QUERY_NAME_LENGTH = 96
     const val MAX_SYSFS_PATH_LENGTH = 256
     const val MAX_EXPECTED_LENGTH = 1_024
+    const val QUERY_TIMEOUT_MILLIS = 10_000L
+    const val MAX_QUERY_OUTPUT_BYTES = 64 * 1_024
+    const val MAX_SCALAR_CHARS = 4_096
 
     private val QUERY_NAME = Regex("^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$")
     private val DUMPSYS_SERVICE = Regex("^[A-Za-z][A-Za-z0-9_.-]{0,63}$")
@@ -28,7 +33,7 @@ object StateQueryPolicy {
 
     fun validQuery(query: StateQuery, stateKeys: Set<String> = StateKeys.ALL.keys): Boolean =
         when (query) {
-            is StateQuery.Builtin -> query.key in stateKeys
+            is StateQuery.Builtin -> query.key in stateKeys && query.key in StateKeys.ALL
             is StateQuery.Setting -> validName(query.key)
             is StateQuery.SystemProperty -> validName(query.name)
             is StateQuery.Sysfs -> validSysfsPath(query.path)

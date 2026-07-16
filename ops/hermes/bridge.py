@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import ipaddress
 import json
+import math
 import os
 import re
 import subprocess
@@ -25,7 +26,14 @@ from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
 
-SCHEMA_VERSION = 1
+LEGACY_COMPILE_SCHEMA_VERSION = 1
+COMPILE_SCHEMA_VERSION = 2
+ACT_SCHEMA_VERSION = 1
+HEALTH_SCHEMA_VERSION = 2
+SUPPORTED_COMPILE_SCHEMA_VERSIONS = (
+    LEGACY_COMPILE_SCHEMA_VERSION,
+    COMPILE_SCHEMA_VERSION,
+)
 MODEL = os.environ.get("ARGUS_MODEL", "gpt-5.5")
 BIND = os.environ.get("ARGUS_BRIDGE_BIND", os.environ.get("ARGUS_BRIDGE_HOST", "127.0.0.1"))
 PORT = int(os.environ.get("ARGUS_BRIDGE_PORT", "8092"))
@@ -58,11 +66,55 @@ ERROR_CODE_RE = re.compile(r"[a-z][a-z0-9_]{0,63}\Z")
 PACKAGE_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)+\Z")
 STATE_VALUE_RE = re.compile(r"[A-Za-z0-9._:+-]{1,64}\Z")
 ACT_CONTEXT_SOURCES = frozenset({"notification", "state"})
+AVAILABLE_TRIGGER_IDS = (
+    "time",
+    "notification",
+    "geofence",
+    "phone_state.sms",
+    "phone_state.call",
+    "connectivity.wifi",
+    "connectivity.wifi.identity",
+    "connectivity.bt",
+    "connectivity.power",
+)
 ACT_STATE_KEYS = frozenset({
     "ringer", "wifi", "bluetooth", "dnd", "battery", "charging", "airplane",
 })
+BUILTIN_STATE_VALUES = {
+    "ringer": "normal|vibrate|silent",
+    "wifi": "on|off",
+    "bluetooth": "on|off",
+    "dnd": "off|priority|total",
+    "battery": "0..100",
+    "charging": "true|false",
+    "airplane": "on|off",
+}
 WHATSAPP_PACKAGES = frozenset({"com.whatsapp", "com.whatsapp.w4b"})
 ACT_REPLY_TOOL = "whatsapp_reply"
+STATE_QUERY_POLICY_VERSION = 1
+STATE_QUERY_FAMILIES = (
+    "builtin", "setting", "system_property", "sysfs", "dumpsys_field",
+)
+STATE_READER_LIMITS = {
+    "max_query_name_length": 96,
+    "max_sysfs_path_length": 256,
+    "max_expected_length": 1_024,
+    "timeout_millis": 10_000,
+    "max_output_bytes": 64 * 1_024,
+    "max_scalar_chars": 4_096,
+}
+QUERY_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,95}\Z")
+DUMPSYS_SERVICE_RE = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{0,63}\Z")
+DUMPSYS_FIELD_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_. -]{0,95}\Z")
+
+
+def normalized_source_sha256(path: Path = Path(__file__)) -> str:
+    """Hash stabile fra checkout Windows CRLF e deploy Linux LF."""
+    normalized = path.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    return hashlib.sha256(normalized).hexdigest()
+
+
+SOURCE_SHA256 = normalized_source_sha256()
 
 
 DRAFT_SCHEMA_TEXT = r"""
@@ -125,6 +177,28 @@ Action, discriminata da "type":
 """.strip()
 
 
+STATE_QUERY_SCHEMA_TEXT = r"""
+
+Solo per /compile schema v2, Condition supporta anche:
+- {"type":"state_compare","query":StateQuery,"valueType":"TEXT"|"NUMBER"|"BOOLEAN",
+   "op":"EQ"|"NEQ"|"GT"|"LT"|"CONTAINS","expected":string,"policyVersion":1}
+
+StateQuery, discriminata da "type" e ammessa SOLO se la famiglia compare in
+manifest.state_readers.families:
+- {"type":"builtin","key":string}  // key da manifest.state_keys
+- {"type":"setting","namespace":"SYSTEM"|"SECURE"|"GLOBAL","key":string}
+- {"type":"system_property","name":string}
+- {"type":"sysfs","path":string}  // path assoluto normalizzato sotto /sys/
+- {"type":"dumpsys_field","service":string,"field":string}
+
+I reader sono soltanto condizioni locali read-only: non interpolare mai il valore letto in
+comandi, routing, destinatari, URL o mutazioni di automazioni. Il sample non viene inviato al
+bridge. Per il voltaggio batteria sul device corrente usa dumpsys_field service "battery", campo
+"voltage", valueType NUMBER; la soglia deve essere espressa chiaramente in millivolt, altrimenti
+chiedi chiarimento.
+""".strip()
+
+
 def _is_int(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
@@ -133,13 +207,49 @@ def _is_number(value: Any) -> bool:
     return (isinstance(value, (int, float)) and not isinstance(value, bool))
 
 
+def _well_formed_text(value: str) -> bool:
+    return not any(0xD800 <= ord(char) <= 0xDFFF for char in value)
+
+
+def _utf16_units(value: str) -> int:
+    return len(value.encode("utf-16-le")) // 2
+
+
 def _string(value: Any, maximum: int, *, nonempty: bool = True) -> bool:
-    return isinstance(value, str) and len(value) <= maximum and (not nonempty or bool(value.strip()))
+    return (
+        isinstance(value, str)
+        and _well_formed_text(value)
+        and _utf16_units(value) <= maximum
+        and (not nonempty or bool(value.strip()))
+    )
 
 
 def _exact_keys(value: dict[str, Any], required: set[str], optional: set[str] = frozenset()) -> bool:
     keys = set(value)
     return required <= keys and keys <= required | optional
+
+
+class StrictJsonError(ValueError):
+    pass
+
+
+def _strict_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise StrictJsonError("duplicate_key")
+        result[key] = value
+    return result
+
+
+def _reject_json_constant(_value: str) -> Any:
+    raise StrictJsonError("non_finite_number")
+
+
+STRICT_JSON_DECODER = json.JSONDecoder(
+    object_pairs_hook=_strict_json_object,
+    parse_constant=_reject_json_constant,
+)
 
 
 class RequestError(ValueError):
@@ -163,7 +273,9 @@ def validate_request(data: Any, idempotency_key: str | None) -> dict[str, Any]:
         data, {"schema_version", "request_id", "message", "manifest", "state"}
     ):
         raise RequestError(400, "invalid_envelope")
-    if not _is_int(data["schema_version"]) or data["schema_version"] != SCHEMA_VERSION:
+    if not _is_int(data["schema_version"]) or (
+        data["schema_version"] not in SUPPORTED_COMPILE_SCHEMA_VERSIONS
+    ):
         raise RequestError(409, "schema_version_incompatible")
     request_id = data["request_id"]
     if not isinstance(request_id, str) or not REQUEST_ID_RE.fullmatch(request_id):
@@ -172,7 +284,7 @@ def validate_request(data: Any, idempotency_key: str | None) -> dict[str, Any]:
         raise RequestError(400, "idempotency_key_mismatch")
     if not _string(data["message"], 8_192):
         raise RequestError(400, "invalid_message")
-    validate_manifest(data["manifest"])
+    validate_manifest(data["manifest"], data["schema_version"])
     validate_state(data["state"], set(data["manifest"]["state_keys"]))
     return data
 
@@ -183,7 +295,7 @@ def validate_act_request(data: Any, idempotency_key: str | None) -> dict[str, An
     }
     if not isinstance(data, dict) or not _exact_keys(data, required):
         raise RequestError(400, "invalid_act_envelope")
-    if not _is_int(data["schema_version"]) or data["schema_version"] != SCHEMA_VERSION:
+    if not _is_int(data["schema_version"]) or data["schema_version"] != ACT_SCHEMA_VERSION:
         raise RequestError(409, "schema_version_incompatible")
     request_id = data["request_id"]
     if not isinstance(request_id, str) or not REQUEST_ID_RE.fullmatch(request_id):
@@ -194,9 +306,12 @@ def validate_act_request(data: Any, idempotency_key: str | None) -> dict[str, An
         raise RequestError(400, "invalid_goal")
 
     sources = data["context_sources"]
-    if not isinstance(sources, list) or not (1 <= len(sources) <= 2) or (
-        len(sources) != len(set(sources)) or "notification" not in sources
-        or not all(source in ACT_CONTEXT_SOURCES for source in sources)
+    if (
+        not isinstance(sources, list)
+        or not (1 <= len(sources) <= 2)
+        or not all(isinstance(source, str) and source in ACT_CONTEXT_SOURCES for source in sources)
+        or len(sources) != len(set(sources))
+        or "notification" not in sources
     ):
         raise RequestError(400, "invalid_context_sources")
     if data["allowed_tools"] != [ACT_REPLY_TOOL]:
@@ -217,7 +332,11 @@ def validate_notification_context(value: Any) -> None:
     required = {"package", "sender", "title", "text", "is_group"}
     if not isinstance(value, dict) or not _exact_keys(value, required):
         raise RequestError(400, "invalid_notification_context")
-    if value["package"] not in WHATSAPP_PACKAGES or value["is_group"] is not False:
+    if (
+        not isinstance(value["package"], str)
+        or value["package"] not in WHATSAPP_PACKAGES
+        or value["is_group"] is not False
+    ):
         raise RequestError(400, "notification_reply_not_authorized")
     if not _string(value["text"], 4_096):
         raise RequestError(400, "invalid_notification_context")
@@ -244,22 +363,28 @@ def validate_act_state(value: Any) -> None:
         raise RequestError(400, "invalid_act_state")
 
 
-def validate_manifest(value: Any) -> None:
+def validate_manifest(value: Any, schema_version: int) -> None:
     required = {
         "device_model", "android_api", "shizuku_available", "granted_permissions",
         "available_tools", "unavailable_tools", "whitelisted_contacts", "state_keys",
     }
-    # available_triggers e' opzionale: i client pre-P2 non lo inviano (default: nessun vincolo
-    # aggiuntivo oltre alle regole del prompt).
+    # Solo il v1 legacy può ometterlo. In v2 la lista è una parte obbligatoria del confine:
+    # senza di essa Hermes finirebbe per proporre trigger che il telefono non può armare.
     optional = {"available_triggers"}
+    if schema_version == COMPILE_SCHEMA_VERSION:
+        required.update({"available_triggers", "state_readers"})
+        optional.clear()
     if not isinstance(value, dict):
         raise RequestError(400, "invalid_manifest")
     keys = set(value.keys())
     if not (required <= keys <= (required | optional)):
         raise RequestError(400, "invalid_manifest")
     triggers = value.get("available_triggers", [])
-    if not isinstance(triggers, list) or len(triggers) > 32 or not all(
-        _string(x, 64) for x in triggers
+    if (
+        not isinstance(triggers, list)
+        or len(triggers) > len(AVAILABLE_TRIGGER_IDS)
+        or not all(isinstance(item, str) and item in AVAILABLE_TRIGGER_IDS for item in triggers)
+        or triggers != [item for item in AVAILABLE_TRIGGER_IDS if item in triggers]
     ):
         raise RequestError(400, "invalid_manifest")
     if not _string(value["device_model"], 256) or not _is_int(value["android_api"]):
@@ -284,6 +409,33 @@ def validate_manifest(value: Any) -> None:
             _string(contact["display_name"], 256) and _string(contact["id"], 512)
         ):
             raise RequestError(400, "invalid_manifest")
+    if schema_version == COMPILE_SCHEMA_VERSION:
+        validate_state_readers(value["state_readers"])
+
+
+def validate_state_readers(value: Any) -> None:
+    if not isinstance(value, dict) or not _exact_keys(
+        value, {"policy_version", "families", "limits"}
+    ):
+        raise RequestError(400, "invalid_state_readers")
+    if not _is_int(value["policy_version"]) or (
+        value["policy_version"] != STATE_QUERY_POLICY_VERSION
+    ):
+        raise RequestError(409, "state_reader_policy_incompatible")
+    families = value["families"]
+    if not isinstance(families, list) or not all(
+        isinstance(family, str) and family in STATE_QUERY_FAMILIES for family in families
+    ) or len(families) != len(set(families)):
+        raise RequestError(400, "invalid_state_readers")
+    expected_order = [family for family in STATE_QUERY_FAMILIES if family in families]
+    if families != expected_order:
+        raise RequestError(400, "invalid_state_readers")
+    limits = value["limits"]
+    if not isinstance(limits, dict) or set(limits) != set(STATE_READER_LIMITS) or not all(
+        _is_int(limits[key]) and limits[key] == expected
+        for key, expected in STATE_READER_LIMITS.items()
+    ):
+        raise RequestError(409, "state_reader_limits_incompatible")
 
 
 def validate_state(value: Any, allowed_keys: set[str]) -> None:
@@ -308,6 +460,13 @@ def validate_state(value: Any, allowed_keys: set[str]) -> None:
 
 def build_prompt(data: dict[str, Any]) -> str:
     now = datetime.now(ZoneInfo("Europe/Rome")).isoformat(timespec="minutes")
+    compile_v2 = data["schema_version"] == COMPILE_SCHEMA_VERSION
+    draft_schema = DRAFT_SCHEMA_TEXT + (f"\n\n{STATE_QUERY_SCHEMA_TEXT}" if compile_v2 else "")
+    state_query_rules = """\
+13. Le condition state_compare sono disponibili solo nello schema v2. Usa esclusivamente una
+    famiglia elencata in manifest.state_readers.families e rispetta policy_version/limits del
+    manifest. Se la famiglia o l'unita' della soglia manca, chiedi chiarimento: non retrofittare
+    state_compare in state_equals e non usare /chat.""" if compile_v2 else ""
     context = json.dumps(
         {"manifest": data["manifest"], "state": data["state"]},
         ensure_ascii=False,
@@ -335,7 +494,8 @@ REGOLE VINCOLANTI:
    GENERATA usa invoke_llm con contextSources ["notification"] (aggiungi "state" solo se serve
    lo stato del device), allowedTools esattamente ["whatsapp_reply"] e replyTargetSender=true;
    usa whatsapp_reply statica solo se l'utente detta il testo esatto della risposta.
-10. Se manifest.available_triggers e' presente e non vuoto, usa SOLO i trigger elencati:
+10. Se manifest.available_triggers e' presente, usa SOLO i trigger elencati (lista vuota =
+    nessun trigger armabile):
     "time", "notification", "geofence"; "phone_state.sms" = SMS_RECEIVED;
     "phone_state.call" = INCOMING_CALL/CALL_ENDED; "connectivity.wifi",
     "connectivity.bt" e "connectivity.power" corrispondono esattamente al rispettivo medium;
@@ -351,10 +511,11 @@ REGOLE VINCOLANTI:
     cmd e' sempre letterale, il messaggio e' solo un interruttore.
 12. I geofence supportano soltanto ENTER/EXIT e loiteringDelayMs deve essere 0: non proporre
     DWELL, che il runtime framework corrente non può implementare onestamente.
+{state_query_rules}
 
 Ora locale Europe/Rome: {now}
 
-{DRAFT_SCHEMA_TEXT}
+{draft_schema}
 
 ===== CONTESTO STRUTTURATO NON FIDATO =====
 {context}
@@ -437,6 +598,7 @@ def parse_model_output(
     allowed_state_keys: set[str],
     whitelisted_contact_ids: set[str],
     available_triggers: set[str] | None = None,
+    state_reader_families: set[str] | frozenset[str] = frozenset(),
 ) -> tuple[str, dict[str, Any] | None, str | None]:
     if SENTINEL not in output:
         return output.strip()[:MAX_REPLY_CHARS], None, "draft_missing"
@@ -445,8 +607,8 @@ def parse_model_output(
     if start < 0:
         return reply.strip()[:MAX_REPLY_CHARS], None, "meta_invalid"
     try:
-        meta, end = json.JSONDecoder().raw_decode(tail, start)
-    except json.JSONDecodeError:
+        meta, end = STRICT_JSON_DECODER.raw_decode(tail, start)
+    except (json.JSONDecodeError, StrictJsonError):
         return reply.strip()[:MAX_REPLY_CHARS], None, "meta_invalid"
     trailing = tail[end:].strip().replace("```", "").strip()
     if trailing or not isinstance(meta, dict) or not _exact_keys(meta, {"draft"}, {"error_code"}):
@@ -465,6 +627,7 @@ def parse_model_output(
         allowed_state_keys,
         whitelisted_contact_ids,
         available_triggers,
+        state_reader_families,
     ):
         return reply.strip()[:MAX_REPLY_CHARS], None, "draft_invalid"
     return reply.strip()[:MAX_REPLY_CHARS], draft, None
@@ -480,8 +643,8 @@ def parse_act_model_output(output: str) -> tuple[str | None, str | None]:
     if start < 0:
         raise ModelProcessError(502, "model_invalid_output")
     try:
-        meta, end = json.JSONDecoder().raw_decode(tail, start)
-    except json.JSONDecodeError as error:
+        meta, end = STRICT_JSON_DECODER.raw_decode(tail, start)
+    except (json.JSONDecodeError, StrictJsonError) as error:
         raise ModelProcessError(502, "model_invalid_output") from error
     trailing = tail[end:].strip().replace("```", "").strip()
     if trailing or not isinstance(meta, dict) or not _exact_keys(
@@ -532,6 +695,7 @@ def validate_draft(
     allowed_state_keys: set[str],
     whitelisted_contact_ids: set[str],
     available_triggers: set[str] | None = None,
+    state_reader_families: set[str] | frozenset[str] = frozenset(),
 ) -> bool:
     if not isinstance(value, dict) or not _exact_keys(
         value, {"name", "trigger", "actions"}, {"conditions", "rationale", "cooldownMs"}
@@ -541,7 +705,9 @@ def validate_draft(
         value["trigger"], whitelisted_contact_ids
     ):
         return False
-    if available_triggers and not trigger_allowed(value["trigger"], available_triggers):
+    if available_triggers is not None and not trigger_allowed(
+        value["trigger"], available_triggers
+    ):
         return False
     actions = value["actions"]
     if not isinstance(actions, list) or not (1 <= len(actions) <= 32) or not all(
@@ -553,7 +719,9 @@ def validate_draft(
     ):
         return False
     condition = value.get("conditions")
-    if condition is not None and not validate_condition(condition, 0, allowed_state_keys):
+    if condition is not None and not validate_condition(
+        condition, 0, allowed_state_keys, state_reader_families
+    ):
         return False
     if "rationale" in value and not _string(value["rationale"], 2_048, nonempty=False):
         return False
@@ -591,6 +759,7 @@ def validate_trigger(value: Any, whitelisted_contact_ids: set[str]) -> bool:
         return (
             (cron is None) != (at is None)
             and _string(cron or at, 256)
+            and isinstance(value.get("precision", "FLEXIBLE"), str)
             and value.get("precision", "FLEXIBLE") in {"FLEXIBLE", "EXACT"}
         )
     if kind == "geofence":
@@ -603,6 +772,7 @@ def validate_trigger(value: Any, whitelisted_contact_ids: set[str]) -> bool:
         has_coordinates = "lat" in value and "lng" in value
         return (
             _is_number(value["radiusM"]) and 0 < value["radiusM"] <= 100_000
+            and isinstance(value["transition"], str)
             and value["transition"] in {"ENTER", "EXIT"}
             and _is_number(value.get("lat", 0.0)) and _is_number(value.get("lng", 0.0))
             and -90 <= value.get("lat", 0.0) <= 90 and -180 <= value.get("lng", 0.0) <= 180
@@ -627,19 +797,30 @@ def validate_trigger(value: Any, whitelisted_contact_ids: set[str]) -> bool:
         )
     if kind == "phone_state":
         text_match = value.get("textMatch")
-        return value["event"] in {"INCOMING_CALL", "CALL_ENDED", "SMS_RECEIVED"} and (
+        return isinstance(value["event"], str) and value["event"] in {
+            "INCOMING_CALL", "CALL_ENDED", "SMS_RECEIVED"
+        } and (
             value.get("number") is None or _string(value["number"], 64)
         ) and (
             # Filtro sul testo: solo per gli SMS (le chiamate non hanno un corpo).
             text_match is None
             or (value["event"] == "SMS_RECEIVED" and _string(text_match, 512))
         )
-    return value["medium"] in {"WIFI", "BT", "POWER"} and value["state"] in {
-        "CONNECTED", "DISCONNECTED"
-    } and (value.get("match") is None or _string(value["match"], 256))
+    return (
+        isinstance(value["medium"], str)
+        and value["medium"] in {"WIFI", "BT", "POWER"}
+        and isinstance(value["state"], str)
+        and value["state"] in {"CONNECTED", "DISCONNECTED"}
+        and (value.get("match") is None or _string(value["match"], 256))
+    )
 
 
-def validate_condition(value: Any, depth: int, allowed_state_keys: set[str]) -> bool:
+def validate_condition(
+    value: Any,
+    depth: int,
+    allowed_state_keys: set[str],
+    state_reader_families: set[str] | frozenset[str] = frozenset(),
+) -> bool:
     if depth > 8 or not isinstance(value, dict) or not isinstance(value.get("type"), str):
         return False
     kind = value["type"]
@@ -648,11 +829,16 @@ def validate_condition(value: Any, depth: int, allowed_state_keys: set[str]) -> 
         items = value.get(field_name)
         return _exact_keys(value, {"type", field_name}) and isinstance(items, list) and (
             1 <= len(items) <= 16
-        ) and all(validate_condition(item, depth + 1, allowed_state_keys) for item in items)
+        ) and all(
+            validate_condition(item, depth + 1, allowed_state_keys, state_reader_families)
+            for item in items
+        )
     if kind == "not":
         return _exact_keys(value, {"type", "cond"}) and validate_condition(
-            value["cond"], depth + 1, allowed_state_keys
+            value["cond"], depth + 1, allowed_state_keys, state_reader_families
         )
+    if kind == "state_compare":
+        return validate_state_compare(value, allowed_state_keys, state_reader_families)
     specs = {
         "time_window": {"type", "startLocal", "endLocal", "tz"},
         "state_equals": {"type", "key", "op", "value"},
@@ -664,12 +850,136 @@ def validate_condition(value: Any, depth: int, allowed_state_keys: set[str]) -> 
     if kind == "time_window":
         return all(_string(value[key], 128) for key in ("startLocal", "endLocal", "tz"))
     if kind == "state_equals":
-        return value["key"] in allowed_state_keys and value["op"] in {
-            "EQ", "NEQ", "GT", "LT", "CONTAINS"
-        } and _string(value["value"], 512)
+        return (
+            isinstance(value["key"], str)
+            and value["key"] in allowed_state_keys
+            and isinstance(value["op"], str)
+            and value["op"] in {"EQ", "NEQ", "GT", "LT", "CONTAINS"}
+            and _string(value["value"], 512)
+        )
     if kind == "app_in_foreground":
         return _string(value["pkg"], 255)
     return all(_is_number(value[key]) for key in ("lat", "lng", "radiusM")) and value["radiusM"] > 0
+
+
+def _has_iso_control(value: str) -> bool:
+    return any(ord(char) <= 0x1F or 0x7F <= ord(char) <= 0x9F for char in value)
+
+
+def _valid_expected(value: Any) -> bool:
+    return (
+        _string(value, STATE_READER_LIMITS["max_expected_length"])
+        and value.strip() == value
+        and not _has_iso_control(value)
+    )
+
+
+def _finite_number(value: str) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) else None
+
+
+def validate_state_compare(
+    value: Any,
+    allowed_state_keys: set[str],
+    state_reader_families: set[str] | frozenset[str],
+) -> bool:
+    required = {"type", "query", "valueType", "op", "expected", "policyVersion"}
+    if not isinstance(value, dict) or not _exact_keys(value, required):
+        return False
+    if not _is_int(value["policyVersion"]) or (
+        value["policyVersion"] != STATE_QUERY_POLICY_VERSION
+    ):
+        return False
+    query = value["query"]
+    if not validate_state_query(query, allowed_state_keys, state_reader_families):
+        return False
+    value_type = value["valueType"]
+    operation = value["op"]
+    expected = value["expected"]
+    if not isinstance(value_type, str) or not isinstance(operation, str) or not _valid_expected(expected):
+        return False
+    if value_type == "TEXT":
+        generic_valid = operation in {"EQ", "NEQ", "CONTAINS"}
+    elif value_type == "NUMBER":
+        generic_valid = operation in {"EQ", "NEQ", "GT", "LT"} and (
+            _finite_number(expected) is not None
+        )
+    elif value_type == "BOOLEAN":
+        generic_valid = operation in {"EQ", "NEQ"} and expected in {"true", "false"}
+    else:
+        return False
+    if not generic_valid:
+        return False
+    if query["type"] != "builtin":
+        return True
+    key = query["key"]
+    if key == "battery":
+        number = _finite_number(expected)
+        return value_type == "NUMBER" and number is not None and 0 <= number <= 100
+    if key == "charging":
+        return value_type == "BOOLEAN"
+    return (
+        value_type == "TEXT"
+        and operation in {"EQ", "NEQ"}
+        and expected in BUILTIN_STATE_VALUES[key].split("|")
+    )
+
+
+def validate_state_query(
+    value: Any,
+    allowed_state_keys: set[str],
+    state_reader_families: set[str] | frozenset[str],
+) -> bool:
+    if not isinstance(value, dict) or not isinstance(value.get("type"), str):
+        return False
+    family = value["type"]
+    if family not in state_reader_families:
+        return False
+    if family == "builtin":
+        return _exact_keys(value, {"type", "key"}) and (
+            isinstance(value["key"], str)
+            and value["key"] in allowed_state_keys
+            and value["key"] in BUILTIN_STATE_VALUES
+        )
+    if family == "setting":
+        return _exact_keys(value, {"type", "namespace", "key"}) and (
+            isinstance(value["namespace"], str)
+            and value["namespace"] in {"SYSTEM", "SECURE", "GLOBAL"}
+            and isinstance(value["key"], str)
+            and QUERY_NAME_RE.fullmatch(value["key"]) is not None
+        )
+    if family == "system_property":
+        return _exact_keys(value, {"type", "name"}) and (
+            isinstance(value["name"], str)
+            and QUERY_NAME_RE.fullmatch(value["name"]) is not None
+        )
+    if family == "sysfs":
+        if not _exact_keys(value, {"type", "path"}) or not isinstance(value["path"], str):
+            return False
+        path = value["path"]
+        segments = path.split("/")[2:]
+        return (
+            _well_formed_text(path)
+            and 6 <= _utf16_units(path) <= STATE_READER_LIMITS["max_sysfs_path_length"]
+            and path.startswith("/sys/")
+            and "\\" not in path
+            and not _has_iso_control(path)
+            and bool(segments)
+            and all(segment.strip() and segment not in {".", ".."} for segment in segments)
+        )
+    if family == "dumpsys_field":
+        return _exact_keys(value, {"type", "service", "field"}) and (
+            isinstance(value["service"], str)
+            and DUMPSYS_SERVICE_RE.fullmatch(value["service"]) is not None
+            and isinstance(value["field"], str)
+            and value["field"].strip() == value["field"]
+            and DUMPSYS_FIELD_RE.fullmatch(value["field"]) is not None
+        )
+    return False
 
 
 def validate_action(value: Any, available_tools: set[str]) -> bool:
@@ -698,7 +1008,9 @@ def validate_action(value: Any, available_tools: set[str]) -> bool:
     if kind in {"set_wifi", "set_bluetooth"}:
         return isinstance(value["on"], bool)
     if kind == "set_dnd":
-        return value["mode"] in {"OFF", "PRIORITY", "TOTAL"}
+        return isinstance(value["mode"], str) and value["mode"] in {
+            "OFF", "PRIORITY", "TOTAL"
+        }
     if kind == "tap":
         return _is_int(value["x"]) and _is_int(value["y"])
     if kind == "show_notification":
@@ -807,12 +1119,17 @@ def compile_request(data: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         set(data["manifest"]["available_tools"]),
         set(data["manifest"]["state_keys"]),
         {contact["id"] for contact in data["manifest"]["whitelisted_contacts"]},
-        set(data["manifest"].get("available_triggers", [])),
+        (
+            set(data["manifest"]["available_triggers"])
+            if "available_triggers" in data["manifest"]
+            else None
+        ),
+        set(data["manifest"].get("state_readers", {}).get("families", [])),
     )
     if error_code in MODEL_PROTOCOL_ERRORS:
         raise ModelProcessError(502, "model_invalid_output")
     return 200, {
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": data["schema_version"],
         "request_id": data["request_id"],
         "reply": reply,
         "meta": {"draft": draft, "error_code": error_code},
@@ -828,7 +1145,7 @@ def act_request(data: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         MODEL_SLOTS.release()
     reply_text, error_code = parse_act_model_output(output)
     return 200, {
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": ACT_SCHEMA_VERSION,
         "request_id": data["request_id"],
         "result": None if reply_text is None else {"text": reply_text},
         "error_code": error_code,
@@ -836,7 +1153,7 @@ def act_request(data: dict[str, Any]) -> tuple[int, dict[str, Any]]:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "ArgusBridge/1"
+    server_version = "ArgusBridge/2"
 
     def _send(self, status: int, value: dict[str, Any], replayed: bool = False) -> None:
         body = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
@@ -851,12 +1168,26 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self) -> None:
-        if self.path == "/health":
+        if self.path in {"/health", "/health/v2"}:
             supplied = self.headers.get("Authorization", "")
             if not TOKEN or not hmac.compare_digest(supplied, f"Bearer {TOKEN}"):
                 self._send(401, {"error": "unauthorized"})
                 return
-            self._send(200, {"status": "ok", "model": MODEL, "schema_version": SCHEMA_VERSION})
+            if self.path == "/health":
+                # Contratto legacy invariato durante il rollout server -> Android.
+                self._send(200, {
+                    "status": "ok", "model": MODEL,
+                    "schema_version": LEGACY_COMPILE_SCHEMA_VERSION,
+                })
+            else:
+                self._send(200, {
+                    "status": "ok",
+                    "model": MODEL,
+                    "schema_version": HEALTH_SCHEMA_VERSION,
+                    "compile_schema_versions": list(SUPPORTED_COMPILE_SCHEMA_VERSIONS),
+                    "act_schema_versions": [ACT_SCHEMA_VERSION],
+                    "source_sha256": SOURCE_SHA256,
+                })
         else:
             self._send(404, {"error": "not_found"})
 
@@ -886,7 +1217,7 @@ class Handler(BaseHTTPRequestHandler):
         self.connection.settimeout(10)
         raw = self.rfile.read(length)
         try:
-            data = json.loads(raw.decode("utf-8"))
+            data = STRICT_JSON_DECODER.decode(raw.decode("utf-8"))
             if self.path == "/compile":
                 validate_request(data, self.headers.get("Idempotency-Key"))
                 producer = lambda: compile_request(data)
@@ -898,7 +1229,7 @@ class Handler(BaseHTTPRequestHandler):
             digest = hashlib.sha256(raw).hexdigest()
             started = time.monotonic()
             status, response, replayed = IDEMPOTENCY.execute(
-                f"{endpoint}:{data['request_id']}", digest, producer
+                f"{endpoint}:v{data['schema_version']}:{data['request_id']}", digest, producer
             )
             elapsed_ms = int((time.monotonic() - started) * 1000)
             print(
@@ -907,7 +1238,7 @@ class Handler(BaseHTTPRequestHandler):
                 flush=True,
             )
             self._send(status, response, replayed)
-        except (UnicodeDecodeError, json.JSONDecodeError):
+        except (UnicodeDecodeError, json.JSONDecodeError, StrictJsonError):
             self._send(400, {"error": "invalid_json"})
         except RequestError as error:
             self._send(error.status, {"error": error.code})
@@ -927,7 +1258,12 @@ def main() -> None:
         raise SystemExit("ARGUS_BRIDGE_BIND deve essere loopback; pubblicare con Tailscale Serve")
     if not HERMES_PYTHON.is_file():
         raise SystemExit("runtime Hermes non trovato")
-    print(f"argus-bridge loopback={BIND}:{PORT} model={MODEL} schema={SCHEMA_VERSION}", flush=True)
+    print(
+        f"argus-bridge loopback={BIND}:{PORT} model={MODEL} "
+        f"compile={SUPPORTED_COMPILE_SCHEMA_VERSIONS} act={ACT_SCHEMA_VERSION} "
+        f"source={SOURCE_SHA256[:12]}",
+        flush=True,
+    )
     ArgusBridgeServer((BIND, PORT), Handler).serve_forever()
 
 

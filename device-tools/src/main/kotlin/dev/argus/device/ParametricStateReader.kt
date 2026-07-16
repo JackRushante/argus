@@ -23,8 +23,8 @@ class ParametricStateReader(
         if (builtins.isNotEmpty()) {
             val state = builtinReader.readBounded(
                 keys = builtins.mapTo(linkedSetOf()) { it.key },
-                timeoutMillis = QUERY_TIMEOUT_MILLIS,
-                maxOutputBytes = MAX_QUERY_OUTPUT_BYTES,
+                timeoutMillis = StateQueryPolicy.QUERY_TIMEOUT_MILLIS,
+                maxOutputBytes = StateQueryPolicy.MAX_QUERY_OUTPUT_BYTES,
             )
             builtins.forEach { query ->
                 state.values[query.key]?.let { values[query.canonicalId] = it }
@@ -71,8 +71,8 @@ class ParametricStateReader(
     private suspend fun commandOutput(command: List<String>): String? = try {
         shell.run(
             command = command,
-            timeoutMillis = QUERY_TIMEOUT_MILLIS,
-            maxOutputBytes = MAX_QUERY_OUTPUT_BYTES,
+            timeoutMillis = StateQueryPolicy.QUERY_TIMEOUT_MILLIS,
+            maxOutputBytes = StateQueryPolicy.MAX_QUERY_OUTPUT_BYTES,
         ).takeIf { result ->
             result.successful && !result.truncated && !result.timedOut
         }?.stdoutText
@@ -87,13 +87,10 @@ class ParametricStateReader(
         const val GETPROP = "/system/bin/getprop"
         const val CAT = "/system/bin/cat"
         const val DUMPSYS = "/system/bin/dumpsys"
-        const val QUERY_TIMEOUT_MILLIS = 10_000L
-        const val MAX_QUERY_OUTPUT_BYTES = 64 * 1024
-        const val MAX_SCALAR_CHARS = 4_096
         const val SETTINGS_MISSING_VALUE = "null"
 
         fun normalizeScalar(raw: String): String? = raw.trim().takeIf { value ->
-            value.isNotEmpty() && value.length <= MAX_SCALAR_CHARS &&
+            value.isNotEmpty() && value.length <= StateQueryPolicy.MAX_SCALAR_CHARS &&
                 value.none { it.isISOControl() }
         }
 
