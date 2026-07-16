@@ -206,6 +206,21 @@ Per ogni famiglia si registrano reporting mode, wake-up flag, FIFO, sampling/lat
 tempo FGS. Il gate non è «compila»: comprende callback reale con app background, process restart,
 rearm dopo il primo evento e assenza di wake lock permanente.
 
+### 6.4 Confine P3-2A implementato
+
+Il dominio ammette soltanto `SIGNIFICANT_MOTION`, `STATIONARY_DETECT`, `MOTION_DETECT`,
+`STEP_DETECTOR` e `STEP_COUNTER`. Accelerometro/giroscopio raw non hanno un discriminatore e i
+campi sampling/latency vengono rifiutati finché non esiste una slice batched misurata. I tre kind
+motion richiedono un singolo evento; gli step ammettono un'aggregazione `1..100000`. Ogni regola
+sensore richiede cooldown fra 60 s e 7 giorni.
+
+`TriggerEvent.SensorChanged` contiene soltanto automation id, fingerprint e kind. L'id del relativo
+`TriggerEnvelope` è un digest di metadati e sequenza; nessuna API accetta il sample raw. Il probe
+Android registra reporting mode, wake-up, FIFO, min/max delay e stato del grant. Un kind viene
+pubblicato a Hermes solo nell'intersezione di: hardware compatibile, permesso concesso e backend
+collegato. Poiché P3-2A non installa listener, l'insieme backend della build resta vuoto; P3-2B
+abiliterà `SIGNIFICANT_MOTION` nello stesso commit che ne aggiunge registrazione e recovery.
+
 ## 7. D5 — distribuzione personale e pubblica
 
 ### 7.1 Profili, non un prodotto amputato

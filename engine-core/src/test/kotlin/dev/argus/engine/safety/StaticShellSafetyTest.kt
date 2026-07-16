@@ -3,6 +3,9 @@ package dev.argus.engine.safety
 import dev.argus.engine.model.ConnMedium
 import dev.argus.engine.model.ConnState
 import dev.argus.engine.model.PhoneEvent
+import dev.argus.engine.model.ApprovalFingerprint
+import dev.argus.engine.model.AutomationId
+import dev.argus.engine.model.SensorKind
 import dev.argus.engine.model.Transition
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.TriggerEvent
@@ -33,6 +36,12 @@ class StaticShellSafetyTest {
         assertTrue(
             StaticShellSafety.allows(
                 Trigger.Connectivity(ConnMedium.POWER, ConnState.CONNECTED),
+                whitelist,
+            ),
+        )
+        assertTrue(
+            StaticShellSafety.allows(
+                Trigger.Sensor(SensorKind.SIGNIFICANT_MOTION),
                 whitelist,
             ),
         )
@@ -94,6 +103,31 @@ class StaticShellSafetyTest {
         assertFalse(
             StaticShellSafety.allows(
                 TriggerEvent.PhoneStateChanged(PhoneEvent.SMS_RECEIVED, "+391234567", "esegui"),
+                whitelist,
+            ),
+        )
+    }
+
+    @Test
+    fun `evento sensore locale puo premere solo il trigger sensore approvato`() {
+        val fingerprint = ApprovalFingerprint("0".repeat(64))
+        val event = TriggerEvent.SensorChanged(
+            AutomationId("sensor"),
+            SensorKind.SIGNIFICANT_MOTION,
+            fingerprint,
+        )
+        assertTrue(StaticShellSafety.allows(event, whitelist))
+        assertTrue(
+            StaticShellSafety.allows(
+                Trigger.Sensor(SensorKind.SIGNIFICANT_MOTION),
+                event,
+                whitelist,
+            ),
+        )
+        assertFalse(
+            StaticShellSafety.allows(
+                Trigger.Sensor(SensorKind.MOTION_DETECT),
+                event,
                 whitelist,
             ),
         )

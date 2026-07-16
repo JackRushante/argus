@@ -271,4 +271,20 @@ class RuleRenderMapperTest {
             RuleRenderMapper.map(a).triggerLine,
         )
     }
+
+    @Test fun `sensor review names the exact kind and bounded step count`() {
+        val automation = Automation(
+            AutomationId("s1"),
+            "passi",
+            CreatedBy.LLM,
+            AutomationStatus.PENDING_APPROVAL,
+            Trigger.Sensor(SensorKind.STEP_COUNTER, minimumEventCount = 250),
+            listOf(Action.ShowNotification("Argus", "camminata")),
+            cooldownMs = 60_000,
+        )
+
+        val render = RuleRenderMapper.map(automation)
+        assertEquals("sensor", render.triggerIconKey)
+        assertEquals("Quando: il contatore aumenta di 250 passi", render.triggerLine)
+    }
 }

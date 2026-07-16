@@ -1,8 +1,13 @@
 # Argus — Agente LLM di automazione Android (design)
 
 > **Nome di lavoro:** *Argus* (il gigante dai molti occhi — agente always-on che "vede" lo schermo). Provvisorio, rinominabile.
-> **Data:** 2026-07-12 · **Rev:** 8 (P3-1D) · **Autore:** Lorenzo Marci + Claude Code (oneplus) + Codex
+> **Data:** 2026-07-12 · **Rev:** 9 (P3-2A) · **Autore:** Lorenzo Marci + Claude Code (oneplus) + Codex
 > **Stato 2026-07-16:** design approvato; P0/P1/P2 completati e P2 su `master`. Tutti i gate fisici P2, inclusi geofence lavoro/casa, sono passati sul campo. **P3 attiva**: fonte normativa per le nuove decisioni è `2026-07-16-argus-p3-decision-record.md`; il piano eseguibile è `2026-07-16-argus-p3-foundations-state-sensors.md`.
+>
+> **Changelog rev 9** (2026-07-16): P3-2A aggiunge il dominio sensori chiuso, l'identità evento
+> opaca, il probe Android di reporting mode/wake-up/FIFO/delay/permesso e il filtro a tre fattori
+> hardware + grant + backend. Nessun listener è ancora attivo e quindi la build non pubblica
+> falsamente trigger sensore; `significant_motion` verrà abilitato insieme al runtime P3-2B.
 >
 > **Changelog rev 8** (2026-07-16): P3-1D aggiunge `InvokeLlmV2` e `/act` v2: query di stato
 > esplicite, tipizzate, classificate `CLEAN|TAINTED` e `PUBLIC|PRIVATE|SECRET`, probe pre-arm e

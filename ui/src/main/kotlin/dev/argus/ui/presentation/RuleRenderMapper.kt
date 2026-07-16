@@ -11,6 +11,7 @@ import dev.argus.engine.model.ConnState
 import dev.argus.engine.model.Condition
 import dev.argus.engine.model.DndMode
 import dev.argus.engine.model.PhoneEvent
+import dev.argus.engine.model.SensorKind
 import dev.argus.engine.model.StateQuery
 import dev.argus.engine.model.StateValueType
 import dev.argus.engine.model.Transition
@@ -82,6 +83,7 @@ object RuleRenderMapper {
         is Trigger.Geofence -> "geofence"
         is Trigger.PhoneState -> "phone"
         is Trigger.Connectivity -> "connectivity"
+        is Trigger.Sensor -> "sensor"
     }
 
     private fun triggerLine(t: Trigger, conversationLabels: Map<String, String>): String = when (t) {
@@ -90,6 +92,7 @@ object RuleRenderMapper {
         is Trigger.Geofence -> geofenceLine(t)
         is Trigger.PhoneState -> phoneStateLine(t)
         is Trigger.Connectivity -> connectivityLine(t)
+        is Trigger.Sensor -> sensorLine(t)
     }
 
     private fun notificationLine(t: Trigger.Notification, conversationLabels: Map<String, String>): String {
@@ -166,6 +169,17 @@ object RuleRenderMapper {
         }
         val match = t.match?.let { " ($it)" } ?: ""
         return "Quando: $medium $state$match"
+    }
+
+    private fun sensorLine(t: Trigger.Sensor): String {
+        val kind = when (t.kind) {
+            SensorKind.SIGNIFICANT_MOTION -> "rilevato un movimento significativo"
+            SensorKind.STATIONARY_DETECT -> "il dispositivo diventa fermo"
+            SensorKind.MOTION_DETECT -> "il dispositivo torna in movimento"
+            SensorKind.STEP_DETECTOR -> "rilevati ${t.minimumEventCount} passi"
+            SensorKind.STEP_COUNTER -> "il contatore aumenta di ${t.minimumEventCount} passi"
+        }
+        return "Quando: $kind"
     }
 
     // ---------------------------------------------------------------------------------------------

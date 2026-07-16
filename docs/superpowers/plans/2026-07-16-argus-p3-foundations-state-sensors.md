@@ -119,11 +119,17 @@ Evidenza:
 
 ## P3-2A — dominio e capability sensori
 
-1. `Trigger.Sensor` con kind chiusi e parametri bounded; `TriggerEvent.SensorChanged` con event id
-   privo di raw value sensibili.
-2. Probe `SensorManager` runtime: disponibilità, reporting mode, wake-up, FIFO e permission.
-3. Manifest invia solo kind realmente armabili sul device.
-4. Validator richiede cooldown coerente e rifiuta raw/high-rate non supportati.
+**Stato 2026-07-16: COMPLETA.**
+
+1. [x] `Trigger.Sensor` con kind chiusi e parametri bounded; `TriggerEvent.SensorChanged` e
+   `SensorEventIds` non accettano raw value sensibili.
+2. [x] Probe `SensorManager` runtime: disponibilità, reporting mode, wake-up, FIFO, delay e permission.
+3. [x] Manifest invia solo l'intersezione hardware + grant + backend realmente collegato.
+4. [x] Validator richiede cooldown 60 s..7 giorni e rifiuta raw/high-rate non supportati.
+
+Il server conosce già i wire `sensor.<kind>`, ma la build P3-2A pubblica correttamente zero kind:
+non esiste ancora un listener. P3-2B abiliterà `significant_motion` insieme al backend, evitando una
+finestra in cui Hermes possa produrre una regola morta.
 
 Gate: JVM + Robolectric; niente listener ancora in questa slice.
 

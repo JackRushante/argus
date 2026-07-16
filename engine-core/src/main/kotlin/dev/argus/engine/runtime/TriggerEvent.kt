@@ -5,6 +5,7 @@ import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.ConnMedium
 import dev.argus.engine.model.ConnState
 import dev.argus.engine.model.PhoneEvent
+import dev.argus.engine.model.SensorKind
 import dev.argus.engine.model.Transition
 
 sealed interface TriggerEvent {
@@ -23,6 +24,13 @@ sealed interface TriggerEvent {
     data class GeofenceTransitioned(
         override val automationId: AutomationId,
         val transition: Transition,
+        override val approvalFingerprint: ApprovalFingerprint,
+    ) : Registered
+
+    /** Evento già ridotto a transizione approvata: nessun sample o counter raw attraversa il core. */
+    data class SensorChanged(
+        override val automationId: AutomationId,
+        val kind: SensorKind,
         override val approvalFingerprint: ApprovalFingerprint,
     ) : Registered
     /** Trigger broadcast: nessun id, richiedono match sullo spec. */

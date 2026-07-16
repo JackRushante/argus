@@ -491,4 +491,61 @@ class DraftValidatorTest {
         assertTrue("url_invalid" in e)
         assertTrue("text_invalid" in e)
     }
+
+    @Test fun `sensor triggers require bounded parameters and a real cooldown`() {
+        fun draft(trigger: Trigger.Sensor, cooldownMs: Long) = AutomationDraft(
+            "sensore",
+            trigger,
+            listOf(Action.ShowNotification("Argus", "evento")),
+            cooldownMs = cooldownMs,
+        )
+
+        assertEquals(
+            emptyList(),
+            errors(
+                v.validate(
+                    draft(Trigger.Sensor(SensorKind.SIGNIFICANT_MOTION), 60_000),
+                    emptySet(),
+                ),
+            ),
+        )
+        assertTrue(
+            "sensor_cooldown_invalid" in errors(
+                v.validate(draft(Trigger.Sensor(SensorKind.SIGNIFICANT_MOTION), 59_999), emptySet()),
+            ),
+        )
+        assertTrue(
+            "sensor_event_count_invalid" in errors(
+                v.validate(
+                    draft(Trigger.Sensor(SensorKind.SIGNIFICANT_MOTION, minimumEventCount = 2), 60_000),
+                    emptySet(),
+                ),
+            ),
+        )
+        assertTrue(
+            "sensor_event_count_invalid" in errors(
+                v.validate(
+                    draft(
+                        Trigger.Sensor(
+                            SensorKind.STEP_COUNTER,
+                            minimumEventCount = SensorTriggerPolicy.MAX_EVENT_COUNT + 1,
+                        ),
+                        60_000,
+                    ),
+                    emptySet(),
+                ),
+            ),
+        )
+        assertTrue(
+            "sensor_sampling_unsupported" in errors(
+                v.validate(
+                    draft(
+                        Trigger.Sensor(SensorKind.STEP_COUNTER, samplingPeriodUs = 1_000),
+                        60_000,
+                    ),
+                    emptySet(),
+                ),
+            ),
+        )
+    }
 }

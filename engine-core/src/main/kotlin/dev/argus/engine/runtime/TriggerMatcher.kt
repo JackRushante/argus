@@ -18,6 +18,7 @@ class TriggerMatcher {
         spec is Trigger.Connectivity && event is TriggerEvent.ConnectivityChanged ->
             spec.medium == event.medium && spec.state == event.state &&
                 (spec.match == null || spec.match == event.name)
+        spec is Trigger.Sensor && event is TriggerEvent.SensorChanged -> spec.kind == event.kind
         else -> false
     }
 

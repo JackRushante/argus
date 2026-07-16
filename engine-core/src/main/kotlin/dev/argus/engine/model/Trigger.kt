@@ -9,6 +9,32 @@ enum class ConnMedium { WIFI, BT, POWER }
 enum class ConnState { CONNECTED, DISCONNECTED }
 enum class TimePrecision { FLEXIBLE, EXACT }
 
+/** Famiglie sensore ammesse nel dominio. I sensori raw/high-rate non sono rappresentabili. */
+@Serializable
+enum class SensorKind(val wireName: String) {
+    @SerialName("significant_motion") SIGNIFICANT_MOTION("significant_motion"),
+    @SerialName("stationary_detect") STATIONARY_DETECT("stationary_detect"),
+    @SerialName("motion_detect") MOTION_DETECT("motion_detect"),
+    @SerialName("step_detector") STEP_DETECTOR("step_detector"),
+    @SerialName("step_counter") STEP_COUNTER("step_counter"),
+}
+
+object SensorTriggerPolicy {
+    const val MIN_COOLDOWN_MS = 60_000L
+    const val MAX_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1_000L
+    const val MAX_EVENT_COUNT = 100_000
+
+    fun validEventCount(kind: SensorKind, minimumEventCount: Int): Boolean = when (kind) {
+        SensorKind.SIGNIFICANT_MOTION,
+        SensorKind.STATIONARY_DETECT,
+        SensorKind.MOTION_DETECT,
+        -> minimumEventCount == 1
+        SensorKind.STEP_DETECTOR,
+        SensorKind.STEP_COUNTER,
+        -> minimumEventCount in 1..MAX_EVENT_COUNT
+    }
+}
+
 @Serializable
 sealed interface Trigger {
     @Serializable @SerialName("geofence")
@@ -52,4 +78,17 @@ sealed interface Trigger {
 
     @Serializable @SerialName("connectivity")
     data class Connectivity(val medium: ConnMedium, val state: ConnState, val match: String? = null) : Trigger
+
+    /**
+     * Il runtime emette soltanto l'evento aggregato: nessun valore raw del sensore entra nel
+     * TriggerEvent, nel journal o nell'event id. [minimumEventCount] vale solo per le famiglie step.
+     */
+    @Serializable @SerialName("sensor")
+    data class Sensor(
+        val kind: SensorKind,
+        val minimumEventCount: Int = 1,
+        /** Riservati a una futura slice batched; P3-2A li rifiuta invece di fingere supporto. */
+        val samplingPeriodUs: Int? = null,
+        val maxReportLatencyUs: Int? = null,
+    ) : Trigger
 }

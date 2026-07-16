@@ -73,4 +73,23 @@ class TriggerMatcherTest {
             ),
         )
     }
+
+    @Test fun `sensor event matches only the approved kind`() {
+        val id = AutomationId("sensor")
+        val fingerprint = ApprovalFingerprint("1".repeat(64))
+        val spec = Trigger.Sensor(SensorKind.SIGNIFICANT_MOTION)
+
+        assertTrue(
+            m.matches(
+                spec,
+                TriggerEvent.SensorChanged(id, SensorKind.SIGNIFICANT_MOTION, fingerprint),
+            ),
+        )
+        assertFalse(
+            m.matches(
+                spec,
+                TriggerEvent.SensorChanged(id, SensorKind.STATIONARY_DETECT, fingerprint),
+            ),
+        )
+    }
 }

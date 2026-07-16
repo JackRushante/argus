@@ -22,7 +22,7 @@ import dev.argus.engine.runtime.TriggerEvent
  */
 object StaticShellSafety {
     fun allows(trigger: Trigger, whitelistedConversationIds: Set<String>): Boolean = when (trigger) {
-        is Trigger.Time, is Trigger.Geofence, is Trigger.Connectivity -> true
+        is Trigger.Time, is Trigger.Geofence, is Trigger.Connectivity, is Trigger.Sensor -> true
         is Trigger.Notification -> verifiedContact(
             pkg = trigger.pkg,
             conversationId = trigger.conversationId,
@@ -37,6 +37,7 @@ object StaticShellSafety {
         is TriggerEvent.TimeFired,
         is TriggerEvent.GeofenceTransitioned,
         is TriggerEvent.ConnectivityChanged,
+        is TriggerEvent.SensorChanged,
         -> true
         is TriggerEvent.NotificationPosted -> verifiedContact(
             pkg = event.pkg,
@@ -67,6 +68,8 @@ object StaticShellSafety {
             trigger is Trigger.Connectivity && event is TriggerEvent.ConnectivityChanged ->
                 trigger.medium == event.medium && trigger.state == event.state &&
                     (trigger.match == null || trigger.match == event.name)
+            trigger is Trigger.Sensor && event is TriggerEvent.SensorChanged ->
+                trigger.kind == event.kind
             trigger is Trigger.Notification && event is TriggerEvent.NotificationPosted ->
                 trigger.pkg == event.pkg &&
                     trigger.conversationId != null &&

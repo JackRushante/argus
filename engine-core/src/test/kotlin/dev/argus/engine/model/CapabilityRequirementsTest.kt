@@ -6,6 +6,17 @@ import kotlin.test.assertTrue
 
 class CapabilityRequirementsTest {
     @Test
+    fun `sensor capability is kind-specific`() {
+        assertEquals(
+            setOf(CapabilityIds.triggerSensor(SensorKind.SIGNIFICANT_MOTION)),
+            CapabilityRequirements.derive(
+                trigger = Trigger.Sensor(SensorKind.SIGNIFICANT_MOTION),
+                actions = emptyList(),
+            ),
+        )
+    }
+
+    @Test
     fun `geofence trigger is OS managed and does not require Shizuku state location`() {
         assertEquals(
             setOf(CapabilityIds.TRIGGER_GEOFENCE, CapabilityIds.ACTION_SET_WIFI),

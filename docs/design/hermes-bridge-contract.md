@@ -85,7 +85,9 @@ Request v2 corrente:
     "available_triggers": [
       "time", "notification", "geofence", "phone_state.sms", "phone_state.call",
       "connectivity.wifi", "connectivity.wifi.identity",
-      "connectivity.bt", "connectivity.power"
+      "connectivity.bt", "connectivity.power",
+      "sensor.significant_motion", "sensor.stationary_detect", "sensor.motion_detect",
+      "sensor.step_detector", "sensor.step_counter"
     ],
     "unavailable_tools": {},
     "whitelisted_contacts": [],
@@ -123,6 +125,15 @@ fail-closed ogni draft il cui trigger non è nella lista. PhoneState è distinto
 `.bt`, `.power`. Un filtro SSID (`Connectivity.match`) richiede inoltre
 `connectivity.wifi.identity`, pubblicato solo con location foreground+background. Il controllo
 server non sostituisce la rivalidazione delle capability sul telefono.
+
+I sensori usano `sensor.<kind>`. Il dominio corrente rappresenta soltanto `significant_motion`,
+`stationary_detect`, `motion_detect`, `step_detector` e `step_counter`: accelerometro/giroscopio raw
+e sampling high-rate non sono compilabili. Un kind entra nel manifest soltanto se coincidono
+hardware con reporting mode corretto, grant runtime e backend realmente collegato. P3-2A lascia
+intenzionalmente quest'ultimo insieme vuoto: il server conosce il wire in anticipo, ma Android non
+pubblicherà `sensor.significant_motion` finché P3-2B non installerà il listener. I draft sensore
+richiedono cooldown `60000..604800000` ms; `minimumEventCount` è 1 per i motion e `1..100000` per
+gli step. I campi sampling/latency restano null finché una slice batched non li implementa.
 
 `state_readers` è obbligatorio soltanto in v2. Pubblica famiglie chiuse realmente disponibili e
 limiti esatti della policy, non un inventario di chiavi arbitrarie. Ordine, unicità, versione e

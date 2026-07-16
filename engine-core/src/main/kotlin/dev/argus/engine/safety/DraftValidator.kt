@@ -56,6 +56,15 @@ class DraftValidator(
         if (d.cooldownMs < 0) err("cooldown_invalid", "Cooldown non può essere negativo")
 
         validateTrigger(d.trigger, ::err, ::warn)
+        if (d.trigger is Trigger.Sensor &&
+            d.cooldownMs !in SensorTriggerPolicy.MIN_COOLDOWN_MS..SensorTriggerPolicy.MAX_COOLDOWN_MS
+        ) {
+            err(
+                "sensor_cooldown_invalid",
+                "I trigger sensore richiedono un cooldown tra " +
+                    "${SensorTriggerPolicy.MIN_COOLDOWN_MS} e ${SensorTriggerPolicy.MAX_COOLDOWN_MS} ms",
+            )
+        }
 
         var conditionCount = 0
         fun countCondition() = ++conditionCount
@@ -143,6 +152,23 @@ class DraftValidator(
                     err("sms_text_match_invalid", "Il filtro sul testo vale solo per gli SMS in arrivo")
             }
             is Trigger.Connectivity -> validateOptionalText(trigger.match, "match_invalid", err)
+            is Trigger.Sensor -> {
+                if (!SensorTriggerPolicy.validEventCount(trigger.kind, trigger.minimumEventCount)) {
+                    err(
+                        "sensor_event_count_invalid",
+                        "Conteggio eventi non valido per ${trigger.kind.wireName}; " +
+                            "i sensori motion sono one-shot e gli step ammettono 1.." +
+                            SensorTriggerPolicy.MAX_EVENT_COUNT,
+                    )
+                }
+                if (trigger.samplingPeriodUs != null || trigger.maxReportLatencyUs != null) {
+                    err(
+                        "sensor_sampling_unsupported",
+                        "Sampling continuo/high-rate non disponibile: usare soltanto i kind " +
+                            "event-driven approvati",
+                    )
+                }
+            }
         }
     }
 

@@ -78,6 +78,11 @@ AVAILABLE_TRIGGER_IDS = (
     "connectivity.wifi.identity",
     "connectivity.bt",
     "connectivity.power",
+    "sensor.significant_motion",
+    "sensor.stationary_detect",
+    "sensor.motion_detect",
+    "sensor.step_detector",
+    "sensor.step_counter",
 )
 ACT_STATE_KEYS = frozenset({
     "ringer", "wifi", "bluetooth", "dnd", "battery", "charging", "airplane",
@@ -147,6 +152,11 @@ Trigger, discriminato da "type":
    dell'SMS; SOLO con event SMS_RECEIVED)}
 - {"type":"connectivity", "medium":"WIFI"|"BT"|"POWER",
    "state":"CONNECTED"|"DISCONNECTED", "match":string|null}
+- {"type":"sensor", "kind":"significant_motion"|"stationary_detect"|"motion_detect"|
+   "step_detector"|"step_counter", "minimumEventCount":integer,
+   "samplingPeriodUs":null, "maxReportLatencyUs":null}
+  minimumEventCount deve essere 1 per i tre kind motion e 1..100000 per gli step. Il cooldown
+  del draft deve essere 60000..604800000 ms. Sensori raw e sampling high-rate non sono ammessi.
 
 Condition, discriminata da "type":
 - {"type":"time_window", "startLocal":"HH:mm", "endLocal":"HH:mm", "tz":string}
@@ -170,7 +180,8 @@ Action, discriminata da "type":
 - {"type":"input_text", "text":string}
 - {"type":"whatsapp_reply", "text":string}
 - {"type":"run_shell", "cmd":string}  // comando letterale, massimo 8192 caratteri; solo con
-  trigger time/geofence/connectivity o con una chat WhatsApp 1:1 whitelistata; mai phone_state
+  trigger time/geofence/connectivity/sensor o con una chat WhatsApp 1:1 whitelistata;
+  mai phone_state
 - {"type":"copy_to_clipboard", "extractionRegex":string|null (regex deterministica: copia il
    primo capture group — o il match intero — dal testo del trigger SMS/notifica; null = testo
    integrale; per gli OTP usa "(?:^|[^+0-9])([0-9]{4,8})(?:[^0-9]|$)")}
@@ -623,12 +634,13 @@ REGOLE VINCOLANTI:
     "time", "notification", "geofence"; "phone_state.sms" = SMS_RECEIVED;
     "phone_state.call" = INCOMING_CALL/CALL_ENDED; "connectivity.wifi",
     "connectivity.bt" e "connectivity.power" corrispondono esattamente al rispettivo medium;
-    un match SSID Wi-Fi richiede anche "connectivity.wifi.identity".
+    un match SSID Wi-Fi richiede anche "connectivity.wifi.identity". I trigger sensore sono
+    "sensor.<kind>" e vanno usati solo se quel kind esatto compare nella lista.
     Un trigger richiesto ma non in lista NON va compilato: indica brevemente il grant o il
     meccanismo mancante in Sistema e restituisci draft null con error_code
     "unsupported_capability".
 11. run_shell e' una shell autonoma con comando STATICO mostrato integralmente in review. Usala
-    con trigger time, geofence o connectivity, oppure con notification se e' una chat WhatsApp
+    con trigger time, geofence, connectivity o sensor, oppure con notification se e' una chat WhatsApp
     1:1 (isGroup=false) il cui conversationId e' in whitelist: un contatto verificato puo'
     innescare un comando gia' approvato. Mai con phone_state (mittente SMS e caller ID sono
     falsificabili) e mai incorporando contenuti di messaggi/notifiche dentro il comando: il
@@ -795,14 +807,14 @@ def _shell_trigger_allowed(trigger: Any, whitelisted_contact_ids: set[str]) -> b
     """Chi puo' innescare un comando gia' approvato letteralmente.
 
     Il cmd resta statico, quindi nessuna injection: il messaggio e' un interruttore, non
-    sceglie il comando. Time/geofence/connectivity non hanno un mittente; una chat WhatsApp
+    sceglie il comando. Time/geofence/connectivity/sensor non hanno un mittente; una chat WhatsApp
     1:1 con contatto in whitelist ha un'identita' verificata (conversationId, E15).
     SMS e chiamate restano esclusi: mittente e caller ID sono falsificabili, quindi nessuna
     whitelist puo' trasformarli in una prova d'identita'.
     Rispecchia StaticShellSafety lato Android, che resta la fonte autorevole.
     """
     kind = trigger.get("type")
-    if kind in {"time", "geofence", "connectivity"}:
+    if kind in {"time", "geofence", "connectivity", "sensor"}:
         return True
     if kind != "notification":
         return False
@@ -852,7 +864,11 @@ def validate_draft(
     if "rationale" in value and not _string(value["rationale"], 2_048, nonempty=False):
         return False
     cooldown = value.get("cooldownMs", 0)
-    return _is_int(cooldown) and 0 <= cooldown <= 31_536_000_000
+    if not _is_int(cooldown) or not 0 <= cooldown <= 31_536_000_000:
+        return False
+    if value["trigger"]["type"] == "sensor" and not 60_000 <= cooldown <= 604_800_000:
+        return False
+    return True
 
 
 def trigger_allowed(value: dict[str, Any], available_triggers: set[str]) -> bool:
@@ -869,6 +885,8 @@ def trigger_allowed(value: dict[str, Any], available_triggers: set[str]) -> bool
             return required in available_triggers and (
                 "connectivity.wifi.identity" in available_triggers
             )
+    elif kind == "sensor":
+        required = f"sensor.{value['kind']}"
     else:
         required = kind
     return required in available_triggers
@@ -906,6 +924,29 @@ def validate_trigger(value: Any, whitelisted_contact_ids: set[str]) -> bool:
             and isinstance(resolve_current, bool)
             and (resolve_current or has_coordinates)
         )
+    if kind == "sensor":
+        if not _exact_keys(
+            value,
+            {"type", "kind"},
+            {"minimumEventCount", "samplingPeriodUs", "maxReportLatencyUs"},
+        ):
+            return False
+        sensor_kind = value["kind"]
+        minimum = value.get("minimumEventCount", 1)
+        if (
+            not isinstance(sensor_kind, str)
+            or sensor_kind not in {
+                "significant_motion", "stationary_detect", "motion_detect",
+                "step_detector", "step_counter",
+            }
+            or not _is_int(minimum)
+            or value.get("samplingPeriodUs") is not None
+            or value.get("maxReportLatencyUs") is not None
+        ):
+            return False
+        if sensor_kind in {"significant_motion", "stationary_detect", "motion_detect"}:
+            return minimum == 1
+        return 1 <= minimum <= 100_000
     specs: dict[str, tuple[set[str], set[str]]] = {
         "notification": ({"type", "pkg"}, {"conversationId", "sender", "isGroup", "titleMatch", "textMatch"}),
         "phone_state": ({"type", "event"}, {"number", "textMatch"}),

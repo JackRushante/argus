@@ -20,6 +20,7 @@ import dev.argus.engine.model.ActionTypeIds
 import dev.argus.engine.model.CapabilityIds
 import dev.argus.engine.model.CapabilityRequirements
 import dev.argus.engine.model.GenerativeContract
+import dev.argus.engine.model.SensorKind
 import dev.argus.engine.model.StateKeys
 import dev.argus.engine.model.StateQueryFamily
 import dev.argus.engine.runtime.ActionCapabilities
@@ -48,6 +49,7 @@ internal data class AndroidCapabilityState(
     val readPhoneStateGranted: Boolean = false,
     val readCallLogGranted: Boolean = false,
     val bluetoothConnectGranted: Boolean = false,
+    val activityRecognitionGranted: Boolean = false,
 )
 
 internal fun interface AndroidCapabilityStateSource {
@@ -91,6 +93,7 @@ internal class SystemAndroidCapabilityStateSource(
         readCallLogGranted = granted(Manifest.permission.READ_CALL_LOG),
         bluetoothConnectGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
             granted(Manifest.permission.BLUETOOTH_CONNECT),
+        activityRecognitionGranted = granted(Manifest.permission.ACTIVITY_RECOGNITION),
     )
 
     private fun granted(permission: String): Boolean =
@@ -108,19 +111,28 @@ private data class ResolvedCapabilities(
     val transientlyUnavailable: Set<String>,
     val availableTools: List<String>,
     val unavailableTools: Map<String, String>,
+    val armableSensorKinds: List<SensorKind>,
 )
 
 class AndroidCapabilityProbe internal constructor(
     private val source: AndroidCapabilityStateSource,
     private val whitelist: ContactWhitelistStore,
     private val readiness: GenerativeRuntimeReadiness,
+    private val sensors: AndroidSensorCapabilitySource = EmptyAndroidSensorCapabilitySource,
+    private val implementedSensorKinds: Set<SensorKind> = emptySet(),
 ) : CapabilityProbe, FirePolicySnapshotProvider {
     constructor(
         context: Context,
         shizuku: ShizukuGateway,
         whitelist: ContactWhitelistStore,
         readiness: GenerativeRuntimeReadiness,
-    ) : this(SystemAndroidCapabilityStateSource(context, shizuku), whitelist, readiness)
+    ) : this(
+        SystemAndroidCapabilityStateSource(context, shizuku),
+        whitelist,
+        readiness,
+        SystemAndroidSensorCapabilitySource(context),
+        IMPLEMENTED_SENSOR_KINDS,
+    )
 
     override suspend fun probe(currentState: DeviceState): CapabilityManifest {
         val resolved = resolve()
@@ -134,7 +146,7 @@ class AndroidCapabilityProbe internal constructor(
             unavailableTools = resolved.unavailableTools,
             whitelistedContacts = resolved.contacts,
             stateKeys = StateKeys.ALL,
-            availableTriggers = availableTriggers(resolved.state),
+            availableTriggers = availableTriggers(resolved.state, resolved.armableSensorKinds),
             stateReaders = StateReaderManifest(
                 families = StateQueryFamily.entries.filter { family ->
                     family.capabilityId in resolved.available
@@ -144,7 +156,10 @@ class AndroidCapabilityProbe internal constructor(
     }
 
     /** Wire name dei trigger armabili ORA: Hermes non deve mai proporre un trigger morto. */
-    private fun availableTriggers(state: AndroidCapabilityState): List<String> = buildList {
+    private fun availableTriggers(
+        state: AndroidCapabilityState,
+        armableSensorKinds: List<SensorKind>,
+    ): List<String> = buildList {
         add("time")
         if (state.notificationListenerGranted) add("notification")
         if (state.foregroundLocationGranted && state.backgroundLocationGranted) add("geofence")
@@ -156,6 +171,7 @@ class AndroidCapabilityProbe internal constructor(
         }
         if (state.bluetoothConnectGranted) add("connectivity.bt")
         add("connectivity.power")
+        armableSensorKinds.forEach { add("sensor.${it.wireName}") }
     }
 
     override suspend fun current(): FirePolicySnapshot {
@@ -172,6 +188,10 @@ class AndroidCapabilityProbe internal constructor(
         val state = source.read()
         val contacts = whitelist.all()
         val generative = readiness.current()
+        val armableSensorKinds = SensorCapabilityPolicy.armableKinds(
+            sensors.read(state.activityRecognitionGranted),
+            implementedSensorKinds,
+        )
         val shizukuAvailable = state.shizukuStatus == ShizukuGatewayStatus.AUTHORIZED
         val shizukuTransient = state.shizukuStatus == ShizukuGatewayStatus.INSTALLED_NOT_RUNNING &&
             state.shizukuPermissionGranted
@@ -215,6 +235,7 @@ class AndroidCapabilityProbe internal constructor(
                 add(CapabilityIds.TRIGGER_PHONE_CALL)
             }
             if (generativeReady) add(CapabilityIds.ACTION_INVOKE_LLM)
+            armableSensorKinds.forEach { add(CapabilityIds.triggerSensor(it)) }
         }
         val transient = if (shizukuTransient) SHIZUKU_CAPABILITIES + SHIZUKU_TOOLS else emptySet()
 
@@ -262,6 +283,7 @@ class AndroidCapabilityProbe internal constructor(
             transientlyUnavailable = transient,
             availableTools = availableTools,
             unavailableTools = unavailableTools.toSortedMap(),
+            armableSensorKinds = armableSensorKinds,
         )
     }
 
@@ -276,6 +298,7 @@ class AndroidCapabilityProbe internal constructor(
         if (state.readPhoneStateGranted) add("read_phone_state")
         if (state.readCallLogGranted) add("read_call_log")
         if (state.bluetoothConnectGranted) add("bluetooth_connect")
+        if (state.activityRecognitionGranted) add("activity_recognition")
     }
 
     private fun shizukuReason(status: ShizukuGatewayStatus): String = when (status) {
@@ -287,6 +310,8 @@ class AndroidCapabilityProbe internal constructor(
     }
 
     internal companion object {
+        /** P3-2A non ha listener: P3-2B abiliterà SIGNIFICANT_MOTION insieme al backend reale. */
+        val IMPLEMENTED_SENSOR_KINDS: Set<SensorKind> = emptySet()
         const val REASON_NOTIFICATION_LISTENER = "accesso alle notifiche non concesso"
         const val REASON_GENERATIVE_RUNTIME =
             "runtime generativo non pronto (bearer, privacy o esenzione batteria mancanti)"

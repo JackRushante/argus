@@ -403,6 +403,46 @@ class BridgeTest(unittest.TestCase):
         self.assertFalse(bridge.validate_trigger({**base, "loiteringDelayMs": 60_000}, set()))
         self.assertIn("soltanto ENTER/EXIT", bridge.build_prompt(self.request()))
 
+    def test_sensor_trigger_is_closed_bounded_and_requires_cooldown(self):
+        significant = {
+            "type": "sensor",
+            "kind": "significant_motion",
+            "minimumEventCount": 1,
+            "samplingPeriodUs": None,
+            "maxReportLatencyUs": None,
+        }
+        self.assertTrue(bridge.validate_trigger(significant, set()))
+        self.assertFalse(bridge.validate_trigger({**significant, "minimumEventCount": 2}, set()))
+        self.assertFalse(bridge.validate_trigger({**significant, "kind": "accelerometer_raw"}, set()))
+        self.assertFalse(bridge.validate_trigger({**significant, "samplingPeriodUs": 1_000}, set()))
+
+        steps = {"type": "sensor", "kind": "step_counter", "minimumEventCount": 100_000}
+        self.assertTrue(bridge.validate_trigger(steps, set()))
+        self.assertFalse(bridge.validate_trigger({**steps, "minimumEventCount": 100_001}, set()))
+
+        draft = {
+            "name": "Movimento",
+            "trigger": significant,
+            "actions": [{"type": "run_shell", "cmd": "/system/bin/true"}],
+            "cooldownMs": 60_000,
+        }
+        self.assertTrue(
+            bridge.validate_draft(
+                draft, {"run_shell"}, set(), set(), {"sensor.significant_motion"}
+            )
+        )
+        self.assertFalse(
+            bridge.validate_draft(
+                {**draft, "cooldownMs": 59_999},
+                {"run_shell"}, set(), set(), {"sensor.significant_motion"},
+            )
+        )
+        self.assertFalse(
+            bridge.validate_draft(
+                draft, {"run_shell"}, set(), set(), {"sensor.stationary_detect"}
+            )
+        )
+
     def test_manifest_available_triggers_is_optional_and_bounded(self):
         # Client pre-P2: campo assente, accettato (retrocompatibilita').
         legacy = self.request()
@@ -410,11 +450,14 @@ class BridgeTest(unittest.TestCase):
 
         # Client P2: lista di wire name, accettata e usata dal prompt (REGOLA 10).
         current = self.request()
-        current["manifest"]["available_triggers"] = ["time", "notification", "phone_state.sms"]
+        current["manifest"]["available_triggers"] = [
+            "time", "notification", "phone_state.sms", "sensor.significant_motion",
+        ]
         self.assertIs(current, bridge.validate_request(current, "req-test-1"))
         prompt = bridge.build_prompt(current)
         self.assertIn("available_triggers", prompt)
         self.assertIn("phone_state.sms", prompt)
+        self.assertIn("sensor.significant_motion", prompt)
 
         # Malformata o fuori bounds: rifiutata.
         for bad in (

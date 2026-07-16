@@ -180,7 +180,9 @@ class AndroidArmedAutomationRegistrar(
         is Trigger.PhoneState -> registerBroadcastBacked(automation)
         is Trigger.Connectivity -> registerConnectivity(automation)
         is Trigger.Geofence -> registerGeofence(automation)
-        else -> false
+        // P3-2A definisce dominio e probe, ma non registra listener: il manifest non pubblica
+        // alcun kind finché P3-2B non collega un runtime concreto.
+        is Trigger.Sensor -> false
     }
 
     private suspend fun registerTime(automation: Automation): Boolean = try {

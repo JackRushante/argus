@@ -15,6 +15,8 @@ import dev.argus.engine.model.StateQueryFamily
 import dev.argus.engine.model.StateQuery
 import dev.argus.engine.model.StateQueryPolicy
 import dev.argus.engine.model.StateValueType
+import dev.argus.engine.model.SensorKind
+import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.ExecutionId
 import dev.argus.engine.runtime.FireContext
@@ -60,7 +62,9 @@ class CliBridgeTransportTest {
         availableTools = listOf("set_dnd", "set_wifi"),
         unavailableTools = mapOf("vision.analyze" to "provider assente"),
         whitelistedContacts = listOf(WhitelistedContact("Moglie", "jid:42")),
-        availableTriggers = listOf("time", "notification", "phone_state.sms"),
+        availableTriggers = listOf(
+            "time", "notification", "phone_state.sms", "sensor.significant_motion",
+        ),
         stateReaders = StateReaderManifest(
             families = listOf(
                 StateQueryFamily.SETTING,
@@ -108,7 +112,7 @@ class CliBridgeTransportTest {
         assertEquals(36, sentManifest.getValue("android_api").jsonPrimitive.content.toInt())
         // I trigger armabili viaggiano nel wire: Hermes non propone trigger morti (P2-2).
         assertEquals(
-            listOf("time", "notification", "phone_state.sms"),
+            listOf("time", "notification", "phone_state.sms", "sensor.significant_motion"),
             sentManifest.getValue("available_triggers").jsonArray.map { it.jsonPrimitive.content },
         )
         val readers = sentManifest.getValue("state_readers").jsonObject
@@ -311,6 +315,20 @@ class CliBridgeTransportTest {
         assertEquals("ok", result.reply)
         assertNotNull(result.draft)
         assertNull(result.metaError)
+    }
+
+    @Test fun `compile v2 decodes the closed sensor trigger contract`(): Unit = runBlocking {
+        server.enqueue(jsonResponse(
+            """{"schema_version":2,"request_id":"$REQUEST_ID","reply":"ok","meta":{"draft":{"name":"movimento","trigger":{"type":"sensor","kind":"significant_motion","minimumEventCount":1,"samplingPeriodUs":null,"maxReportLatencyUs":null},"actions":[{"type":"show_notification","title":"Argus","text":"Movimento"}],"cooldownMs":60000},"error_code":null}}""",
+        ))
+
+        val result = transport().compile("quando mi muovo", manifest, DeviceState())
+
+        val trigger = assertNotNull(result.draft).trigger as Trigger.Sensor
+        assertEquals(SensorKind.SIGNIFICANT_MOTION, trigger.kind)
+        assertEquals(1, trigger.minimumEventCount)
+        assertNull(trigger.samplingPeriodUs)
+        assertNull(trigger.maxReportLatencyUs)
     }
 
     @Test fun `compile v2 decodes a fingerprinted typed state query`(): Unit = runBlocking {

@@ -15,6 +15,8 @@ object CapabilityIds {
     const val TRIGGER_CONNECTIVITY_BT = "trigger.connectivity.bt"
     const val TRIGGER_CONNECTIVITY_POWER = "trigger.connectivity.power"
 
+    fun triggerSensor(kind: SensorKind): String = "trigger.sensor.${kind.wireName}"
+
     const val STATE_FOREGROUND_APP = "state.foreground_app"
     const val STATE_LOCATION = "state.location"
     const val STATE_READER_BUILTIN = "state.reader.builtin"
@@ -73,6 +75,7 @@ object CapabilityRequirements {
             ConnMedium.BT -> setOf(CapabilityIds.TRIGGER_CONNECTIVITY_BT)
             ConnMedium.POWER -> setOf(CapabilityIds.TRIGGER_CONNECTIVITY_POWER)
         }
+        is Trigger.Sensor -> setOf(CapabilityIds.triggerSensor(trigger.kind))
     }
 
     private fun forCondition(condition: Condition): Set<String> = when (condition) {

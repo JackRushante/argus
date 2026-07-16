@@ -13,6 +13,7 @@ import dev.argus.engine.model.CapabilityIds
 import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.DndMode
 import dev.argus.engine.model.GenerativeContract
+import dev.argus.engine.model.SensorKind
 import dev.argus.engine.model.StateKeys
 import dev.argus.engine.model.StateQueryFamily
 import dev.argus.engine.model.Trigger
@@ -359,6 +360,44 @@ class AndroidCapabilityProbeTest {
     }
 
     @Test
+    fun `sensor is advertised only when hardware grant and a real backend all agree`() = runTest {
+        val significant = AndroidSensorCapability(
+            kind = SensorKind.SIGNIFICANT_MOTION,
+            reportingMode = SensorReportingMode.ONE_SHOT,
+            wakeUp = true,
+            fifoMaxEventCount = 0,
+            minDelayUs = 0,
+            maxDelayUs = 0,
+            permissionGranted = true,
+        )
+        val hardware = AndroidSensorCapabilitySource { _ -> listOf(significant) }
+
+        val domainOnly = probe(state(), sensors = hardware).probe(DeviceState())
+        assertFalse("sensor.significant_motion" in domainOnly.availableTriggers)
+
+        val ready = probe(
+            state(),
+            sensors = hardware,
+            implementedSensorKinds = setOf(SensorKind.SIGNIFICANT_MOTION),
+        )
+        assertTrue("sensor.significant_motion" in ready.probe(DeviceState()).availableTriggers)
+        assertTrue(
+            CapabilityIds.triggerSensor(SensorKind.SIGNIFICANT_MOTION) in
+                ready.current().availableCapabilities,
+        )
+
+        val wrongMode = AndroidSensorCapabilitySource { _ ->
+            listOf(significant.copy(reportingMode = SensorReportingMode.CONTINUOUS))
+        }
+        val rejected = probe(
+            state(),
+            sensors = wrongMode,
+            implementedSensorKinds = setOf(SensorKind.SIGNIFICANT_MOTION),
+        )
+        assertFalse("sensor.significant_motion" in rejected.probe(DeviceState()).availableTriggers)
+    }
+
+    @Test
     fun `shizuku raw tools stay aligned between manifest and policy snapshot`() = runTest {
         val authorized = probe(state()).current()
         AndroidCapabilityProbe.SHIZUKU_TOOLS.forEach { tool ->
@@ -462,10 +501,14 @@ class AndroidCapabilityProbeTest {
             bridgeConfigured = true,
             privacyAccepted = true,
         ),
+        sensors: AndroidSensorCapabilitySource = EmptyAndroidSensorCapabilitySource,
+        implementedSensorKinds: Set<SensorKind> = emptySet(),
     ) = AndroidCapabilityProbe(
         AndroidCapabilityStateSource { state },
         FakeWhitelist(contacts),
         GenerativeRuntimeReadiness { readiness },
+        sensors,
+        implementedSensorKinds,
     )
 
     private fun state() = AndroidCapabilityState(
