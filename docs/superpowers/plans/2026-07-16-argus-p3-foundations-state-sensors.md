@@ -187,14 +187,35 @@ idempotenza coordinator; 14 per costruzione (il backend non usa Shizuku); 15-16-
 Codex in P3-2A (probe test, render test, bridge 32/32); 17 (golden fingerprint) invariato perché
 il modello serializzato `Trigger.Sensor` è di P3-2A e questo slice non lo tocca.
 
-### Gate device fisico — SERVE LORENZO (§7.8)
+### Gate device fisico (§7.8) — 2026-07-16, con Lorenzo
 
-- probe device: **fatto** senza Lorenzo (hardware SMD one-shot wake-up confermato);
-- arm con app cached/background → movimento reale ⇒ una sola esecuzione;
-- secondo movimento ⇒ prova che il one-shot è stato riarmato;
-- process kill/restart ⇒ ancora attivo;
-- disable/delete ⇒ nessun callback residuo;
-- misura consumo/tempo FGS (DoD: NOT MEASURED finché non fatto).
+**PASSATO nella parte sostanziale**, con un'evidenza in tre pezzi complementari:
+
+1. **Effetto + routing** — notifica reale **"movimento significativo"** (testo della nostra
+   regola) vista da Lorenzo **camminando**, non scuotendo il telefono in mano. È il comportamento
+   corretto del significant-motion, che ignora i movimenti da fermo.
+2. **Callback fisico + rearm** — log backend `ArgusSensor: sensor trigger: kind=significant_motion`
+   **due volte** (17:26:24 e 17:26:34) dallo **stesso pid** del processo app, e nel framework una
+   re-registrazione dallo stesso pid dopo ognuno: il one-shot scatta e il nostro backend lo
+   **ri-arma**.
+3. **Catena completa fino al journal** — `ArgusSensorIngressInstrumentedTest` (production-path
+   synthetic, stesso processo): arma + `onSensorTriggered` → **`FIRED` + `show_notification`
+   SUCCEEDED**.
+4. **FGS on-demand** — la sentinella condivisa (`ConnectivitySentinelService`, `specialUse`) è
+   partita all'arm del sensore e si è **spenta al cleanup**; sensore deregistrato dal framework.
+
+**Lezione di metodo (importante per chi riprende)**: leggere il journal con `am instrument`
+**uccide e ricrea il processo dell'app**, e la scrittura async del journal (il callback fa
+`scope.launch`) non fa in tempo a committare → il journal appariva vuoto pur essendo la catena
+corretta. Per il journal di un trigger fisico: NON leggere subito con `am instrument`; usare il
+test production-path synthetic (stesso processo) oppure dare tempo al commit e leggere il DB senza
+ricreare il processo.
+
+**Restano NON provati (residuo osservazionale, richiedono altri movimenti di Lorenzo)**:
+- disable → movimento non esegue;
+- ri-enable + delete → nessun callback residuo;
+- process kill/restart → movimento ancora consegnato (in modo pulito, senza l'artefatto sopra);
+- **misura consumo/tempo FGS** (DoD: NOT MEASURED).
 
 ## P3-2C — stationary/motion e step
 
