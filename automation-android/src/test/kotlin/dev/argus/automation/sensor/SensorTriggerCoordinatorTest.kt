@@ -127,6 +127,26 @@ class SensorTriggerCoordinatorTest {
     }
 
     @Test
+    fun `the shared fgs demand rises with the first registration and falls when it empties`() = runTest {
+        val fgs = RecordingForegroundDemand()
+        val store = MutableRulesStore(listOf(rule("a")))
+        val coordinator = SensorTriggerCoordinator(
+            store,
+            RecordingSensorBackend(),
+            implemented,
+            foregroundDemand = fgs,
+        )
+
+        coordinator.reconcile()
+        assertTrue(fgs.startCalls >= 1)
+        assertEquals(0, fgs.stopCalls)
+
+        store.rules = emptyList()
+        coordinator.reconcile()
+        assertEquals(1, fgs.stopCalls)
+    }
+
+    @Test
     fun `a fresh coordinator does not believe a previous physical registration`() = runTest {
         // Process recreation: nuovo coordinator, stessa regola armata. Deve ri-registrare
         // il sensore da zero, senza fidarsi di alcuno stato "registered" persistito.
@@ -168,6 +188,13 @@ private class RecordingSensorBackend(
         cancelCalls[kind] = (cancelCalls[kind] ?: 0) + 1
         return true
     }
+}
+
+private class RecordingForegroundDemand : dev.argus.automation.connectivity.ConnectivitySentinelBackend {
+    var startCalls = 0
+    var stopCalls = 0
+    override suspend fun start(): Boolean { startCalls += 1; return true }
+    override suspend fun stop(): Boolean { stopCalls += 1; return true }
 }
 
 private open class RulesStore(private val rules: List<Automation>) : AutomationStore {

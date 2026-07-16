@@ -1,11 +1,18 @@
 package dev.argus.automation.sensor
 
+import dev.argus.automation.connectivity.ConnectivitySentinelBackend
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.SensorKind
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.AutomationStore
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+
+/** Demand FGS assente: usato dai test del solo coordinator, dove il sentinel non serve. */
+object NoopForegroundDemand : ConnectivitySentinelBackend {
+    override suspend fun start(): Boolean = true
+    override suspend fun stop(): Boolean = true
+}
 
 /**
  * Esito tipizzato della registrazione fisica di un trigger sensore. Distingue i casi che il
@@ -74,6 +81,12 @@ class SensorTriggerCoordinator(
     private val store: AutomationStore,
     private val backend: SensorTriggerBackend,
     private val implementedKinds: Set<SensorKind>,
+    /**
+     * Demand sul FGS condiviso: tenere vivo il processo perché il `TriggerEventListener` riceva i
+     * callback in background. `start()` quando c'è ≥1 kind registrato, `stop()` quando nessuno.
+     * Default no-op così i test del solo coordinator non richiedono il sentinel.
+     */
+    private val foregroundDemand: ConnectivitySentinelBackend = NoopForegroundDemand,
 ) : SensorTriggerRuntime, SensorRearmer {
     private val mutex = Mutex()
     private val registeredKinds = mutableSetOf<SensorKind>()
@@ -119,6 +132,10 @@ class SensorTriggerCoordinator(
                     failed += eligible.filter { it.second == kind }.map { it.first }
             }
         }
+
+        // Il FGS deve vivere finché almeno un sensore è registrato. Idempotente lato sentinel:
+        // start/stop scattano solo sulla transizione vuoto↔non-vuoto del demand condiviso.
+        if (registeredKinds.isEmpty()) foregroundDemand.stop() else foregroundDemand.start()
 
         val requiredBy = eligible
             .filter { it.second in registeredKinds }
