@@ -15,6 +15,8 @@ import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
 import dev.argus.automation.connectivity.NoopConnectivityTriggerRuntime
 import dev.argus.automation.geofence.GeofenceTriggerRuntime
 import dev.argus.automation.geofence.NoopGeofenceTriggerRuntime
+import dev.argus.automation.sensor.NoopSensorTriggerRuntime
+import dev.argus.automation.sensor.SensorTriggerRuntime
 
 sealed interface EnablementResult {
     data object Updated : EnablementResult
@@ -30,6 +32,7 @@ class AutomationEnablementCoordinator @Inject constructor(
     private val scheduler: TimeAlarmRuntime,
     private val connectivity: ConnectivityTriggerRuntime = NoopConnectivityTriggerRuntime,
     private val geofence: GeofenceTriggerRuntime = NoopGeofenceTriggerRuntime,
+    private val sensor: SensorTriggerRuntime = NoopSensorTriggerRuntime,
 ) {
     private val mutex = Mutex()
 
@@ -65,8 +68,10 @@ class AutomationEnablementCoordinator @Inject constructor(
             val report = scheduler.reconcile(ReconcileReason.CAPABILITY_CHANGED)
             val connectivityReport = connectivity.reconcile()
             val geofenceReport = geofence.reconcile(recreateOsRegistrations = false)
+            val sensorReport = sensor.reconcile()
             if (id in report.failed || id in connectivityReport.failed ||
-                id in geofenceReport.failed
+                id in geofenceReport.failed ||
+                id in sensorReport.failed || id in sensorReport.needsReview
             ) {
                 rollbackEnable(id, fingerprint)
                 EnablementResult.SchedulingFailed
@@ -102,6 +107,11 @@ class AutomationEnablementCoordinator @Inject constructor(
         } catch (_: Exception) {
             // Stesso recovery: il receiver controlla comunque id e fingerprint approvati.
         }
+        try {
+            sensor.reconcile()
+        } catch (_: Exception) {
+            // Il sensore si ri-registra al prossimo bootstrap dallo stato armato desiderato.
+        }
     }
 
     /** In disable tenta entrambe le pulizie anche se la prima fallisce. */
@@ -123,6 +133,13 @@ class AutomationEnablementCoordinator @Inject constructor(
         }
         try {
             if (!geofence.reconcile(recreateOsRegistrations = false).cleanupSucceeded) clean = false
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            clean = false
+        }
+        try {
+            if (!sensor.reconcile().cleanupSucceeded) clean = false
         } catch (error: CancellationException) {
             throw error
         } catch (_: Exception) {

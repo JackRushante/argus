@@ -20,6 +20,9 @@ import dev.argus.automation.connectivity.NoopConnectivityTriggerRuntime
 import dev.argus.automation.geofence.GeofenceEventDispatcher
 import dev.argus.automation.geofence.GeofenceTriggerRuntime
 import dev.argus.automation.geofence.NoopGeofenceTriggerRuntime
+import dev.argus.automation.sensor.NoopSensorTriggerRuntime
+import dev.argus.automation.sensor.SensorEventDispatcher
+import dev.argus.automation.sensor.SensorTriggerRuntime
 import dev.argus.engine.model.ConnMedium
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationStatus
@@ -160,6 +163,15 @@ class EngineGeofenceEventDispatcher(
     }
 }
 
+class EngineSensorEventDispatcher(
+    private val engine: Engine,
+    private val state: DeviceStateSnapshotProvider,
+) : SensorEventDispatcher {
+    override suspend fun dispatch(envelope: TriggerEnvelope) {
+        engine.onTrigger(envelope) { request -> state.current(request) }
+    }
+}
+
 /**
  * Registrar per-trigger senza service persistente: Time registra presso AlarmManager tramite il
  * coordinator; Notification non ha una registrazione OS per-rule e richiede soltanto il grant
@@ -171,6 +183,7 @@ class AndroidArmedAutomationRegistrar(
     private val snapshots: FirePolicySnapshotProvider,
     private val connectivity: ConnectivityTriggerRuntime = NoopConnectivityTriggerRuntime,
     private val geofence: GeofenceTriggerRuntime = NoopGeofenceTriggerRuntime,
+    private val sensor: SensorTriggerRuntime = NoopSensorTriggerRuntime,
 ) : ArmedAutomationRegistrar {
     override suspend fun register(automation: Automation): Boolean = when (automation.trigger) {
         is Trigger.Time -> registerTime(automation)
@@ -180,9 +193,7 @@ class AndroidArmedAutomationRegistrar(
         is Trigger.PhoneState -> registerBroadcastBacked(automation)
         is Trigger.Connectivity -> registerConnectivity(automation)
         is Trigger.Geofence -> registerGeofence(automation)
-        // P3-2A definisce dominio e probe, ma non registra listener: il manifest non pubblica
-        // alcun kind finché P3-2B non collega un runtime concreto.
-        is Trigger.Sensor -> false
+        is Trigger.Sensor -> registerSensor(automation)
     }
 
     private suspend fun registerTime(automation: Automation): Boolean = try {
@@ -238,6 +249,22 @@ class AndroidArmedAutomationRegistrar(
         return try {
             val report = geofence.reconcile(recreateOsRegistrations = false)
             automation.id in report.requiredBy && automation.id !in report.failed
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private suspend fun registerSensor(automation: Automation): Boolean {
+        // Il pre-check verifica la capability granulare `trigger.sensor.<kind>`, pubblicata dal
+        // probe solo quando hardware, grant e backend collegato coincidono.
+        if (!registerBroadcastBacked(automation)) return false
+        return try {
+            val report = sensor.reconcile()
+            automation.id in report.requiredBy &&
+                automation.id !in report.needsReview &&
+                automation.id !in report.failed
         } catch (error: CancellationException) {
             throw error
         } catch (_: Exception) {

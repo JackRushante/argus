@@ -40,8 +40,21 @@ import dev.argus.automation.FrameworkCurrentLocationProvider
 import dev.argus.automation.GenerativeLane
 import dev.argus.automation.LazyDeviceStateProvider
 import dev.argus.automation.NotificationEventDispatcher
+import dev.argus.automation.EngineSensorEventDispatcher
 import dev.argus.automation.RoomTimeAlarmStateStore
 import dev.argus.automation.ShizukuActionExecutor
+import dev.argus.automation.foreground.SharedForegroundSentinel
+import dev.argus.automation.foreground.SentinelDemand
+import dev.argus.automation.sensor.AndroidSignificantMotionBackend
+import dev.argus.automation.sensor.EligibleSensorRule
+import dev.argus.automation.sensor.PrefsSensorDetectionStore
+import dev.argus.automation.sensor.SensorDetectionStore
+import dev.argus.automation.sensor.SensorEventDispatcher
+import dev.argus.automation.sensor.SensorEventIngress
+import dev.argus.automation.sensor.SensorTriggerBackend
+import dev.argus.automation.sensor.SensorTriggerCoordinator
+import dev.argus.automation.sensor.SensorTriggerRuntime
+import dev.argus.engine.model.Trigger
 import dev.argus.automation.ShizukuStaticShellRunner
 import dev.argus.automation.StateQueryProbe
 import dev.argus.automation.TimeAlarmBackend
@@ -120,6 +133,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import java.time.Clock
 import java.time.Instant
+import javax.inject.Provider
 import javax.inject.Qualifier
 import javax.inject.Singleton
 
@@ -563,17 +577,97 @@ object ArgusModule {
         backend: AndroidConnectivitySentinelBackend,
     ): ConnectivitySentinelBackend = backend
 
+    /** Unico FGS condiviso (decision record P3 §6.2): possiede il backend e unisce i demand. */
+    @Provides
+    @Singleton
+    fun sharedForegroundSentinel(
+        backend: ConnectivitySentinelBackend,
+    ): SharedForegroundSentinel = SharedForegroundSentinel(backend)
+
     @Provides
     @Singleton
     fun connectivitySentinelCoordinator(
         store: AutomationStore,
-        backend: ConnectivitySentinelBackend,
-    ): ConnectivitySentinelCoordinator = ConnectivitySentinelCoordinator(store, backend)
+        sentinel: SharedForegroundSentinel,
+    ): ConnectivitySentinelCoordinator =
+        ConnectivitySentinelCoordinator(store, sentinel.demandBackend(SentinelDemand.Connectivity))
 
     @Provides
     fun connectivityTriggerRuntime(
         coordinator: ConnectivitySentinelCoordinator,
     ): ConnectivityTriggerRuntime = coordinator
+
+    @Provides
+    @Singleton
+    fun sensorDetectionStore(
+        @ApplicationContext context: Context,
+    ): PrefsSensorDetectionStore = PrefsSensorDetectionStore(context)
+
+    @Provides
+    fun sensorDetectionStoreBoundary(store: PrefsSensorDetectionStore): SensorDetectionStore = store
+
+    @Provides
+    @Singleton
+    fun sensorTriggerBackend(
+        @ApplicationContext context: Context,
+        @ApplicationScope scope: CoroutineScope,
+        // Provider spezza il ciclo backend → ingress → coordinator → backend: l'ingress viene
+        // risolto solo al primo callback, non a build-time del grafo.
+        ingress: Provider<SensorEventIngress>,
+    ): AndroidSignificantMotionBackend =
+        AndroidSignificantMotionBackend(context, scope) { kind -> ingress.get().onSensorTriggered(kind) }
+
+    @Provides
+    fun sensorTriggerBackendBoundary(backend: AndroidSignificantMotionBackend): SensorTriggerBackend = backend
+
+    @Provides
+    @Singleton
+    fun sensorTriggerCoordinator(
+        store: AutomationStore,
+        backend: SensorTriggerBackend,
+        sentinel: SharedForegroundSentinel,
+    ): SensorTriggerCoordinator = SensorTriggerCoordinator(
+        store,
+        backend,
+        AndroidCapabilityProbe.IMPLEMENTED_SENSOR_KINDS,
+        sentinel.demandBackend(SentinelDemand.Sensor),
+    )
+
+    @Provides
+    fun sensorTriggerRuntime(coordinator: SensorTriggerCoordinator): SensorTriggerRuntime = coordinator
+
+    @Provides
+    @Singleton
+    fun sensorEventDispatcher(
+        engine: Engine,
+        state: DeviceStateSnapshotProvider,
+    ): EngineSensorEventDispatcher = EngineSensorEventDispatcher(engine, state)
+
+    @Provides
+    fun sensorEventDispatcherBoundary(
+        dispatcher: EngineSensorEventDispatcher,
+    ): SensorEventDispatcher = dispatcher
+
+    @Provides
+    @Singleton
+    fun sensorEventIngress(
+        detections: SensorDetectionStore,
+        dispatcher: SensorEventDispatcher,
+        coordinator: SensorTriggerCoordinator,
+        store: AutomationStore,
+    ): SensorEventIngress = SensorEventIngress(
+        store = detections,
+        dispatcher = dispatcher,
+        rearmer = coordinator,
+        eligibleRules = { kind ->
+            store.armed().mapNotNull { automation ->
+                val trigger = automation.trigger as? Trigger.Sensor ?: return@mapNotNull null
+                if (trigger.kind != kind) return@mapNotNull null
+                val fingerprint = automation.approvalFingerprint ?: return@mapNotNull null
+                EligibleSensorRule(automation.id, fingerprint, trigger.kind)
+            }
+        },
+    )
 
     @Provides
     @Singleton
@@ -668,12 +762,14 @@ object ArgusModule {
         snapshots: FirePolicySnapshotProvider,
         connectivity: ConnectivityTriggerRuntime,
         geofence: GeofenceTriggerRuntime,
+        sensor: SensorTriggerRuntime,
     ): ArmedAutomationRegistrar = AndroidArmedAutomationRegistrar(
         coordinator,
         store,
         snapshots,
         connectivity,
         geofence,
+        sensor,
     )
 
     @Provides
@@ -726,6 +822,8 @@ object ArgusModule {
         geofence: GeofenceTriggerRuntime,
         connectivityIngress: ConnectivityEventIngress,
         phoneIngress: PhoneEventIngress,
+        sensor: SensorTriggerRuntime,
+        sensorIngress: SensorEventIngress,
     ): ArgusRuntimeController = ArgusRuntimeController(
         scope,
         scheduler,
@@ -738,5 +836,7 @@ object ArgusModule {
         geofence,
         connectivityIngress,
         phoneIngress,
+        sensor,
+        sensorIngress,
     )
 }

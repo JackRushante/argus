@@ -310,8 +310,12 @@ class AndroidCapabilityProbe internal constructor(
     }
 
     internal companion object {
-        /** P3-2A non ha listener: P3-2B abiliterà SIGNIFICANT_MOTION insieme al backend reale. */
-        val IMPLEMENTED_SENSOR_KINDS: Set<SensorKind> = emptySet()
+        /**
+         * P3-2B collega il backend reale ([dev.argus.automation.sensor.AndroidSignificantMotionBackend]),
+         * quindi il probe può pubblicare SIGNIFICANT_MOTION quando hardware e mode combaciano. Gli
+         * altri kind restano fuori finché non hanno un backend proprio (P3-2C).
+         */
+        val IMPLEMENTED_SENSOR_KINDS: Set<SensorKind> = setOf(SensorKind.SIGNIFICANT_MOTION)
         const val REASON_NOTIFICATION_LISTENER = "accesso alle notifiche non concesso"
         const val REASON_GENERATIVE_RUNTIME =
             "runtime generativo non pronto (bearer, privacy o esenzione batteria mancanti)"

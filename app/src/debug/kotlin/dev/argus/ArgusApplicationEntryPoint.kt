@@ -13,6 +13,8 @@ import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
 import dev.argus.automation.geofence.GeofenceEventIngress
 import dev.argus.automation.geofence.GeofenceStateStore
 import dev.argus.automation.geofence.GeofenceTriggerRuntime
+import dev.argus.automation.sensor.SensorEventIngress
+import dev.argus.automation.sensor.SensorTriggerRuntime
 import dev.argus.automation.ShizukuStaticShellRunner
 import dev.argus.automation.StateQueryProbe
 import dev.argus.automation.TimeAlarmBackend
@@ -43,6 +45,8 @@ interface ArgusApplicationEntryPoint {
     fun geofenceEventIngress(): GeofenceEventIngress
     fun geofenceStateStore(): GeofenceStateStore
     fun geofenceTriggerRuntime(): GeofenceTriggerRuntime
+    fun sensorTriggerRuntime(): SensorTriggerRuntime
+    fun sensorEventIngress(): SensorEventIngress
     fun staticShellRunner(): ShizukuStaticShellRunner
     fun approvalFlow(): ApprovalFlow
     fun automationStore(): AutomationStore

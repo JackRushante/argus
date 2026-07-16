@@ -20,6 +20,9 @@ import dev.argus.automation.connectivity.ConnectivityEventIngress
 import dev.argus.automation.geofence.GeofenceTriggerRuntime
 import dev.argus.automation.geofence.NoopGeofenceTriggerRuntime
 import dev.argus.automation.phone.PhoneEventIngress
+import dev.argus.automation.sensor.NoopSensorTriggerRuntime
+import dev.argus.automation.sensor.SensorEventIngress
+import dev.argus.automation.sensor.SensorTriggerRuntime
 
 /** Bootstrap idempotente del runtime event-driven, condiviso da Application e lifecycle processo. */
 class ArgusRuntimeController(
@@ -34,6 +37,8 @@ class ArgusRuntimeController(
     private val geofence: GeofenceTriggerRuntime = NoopGeofenceTriggerRuntime,
     private val connectivityIngress: ConnectivityEventIngress? = null,
     private val phoneIngress: PhoneEventIngress? = null,
+    private val sensor: SensorTriggerRuntime = NoopSensorTriggerRuntime,
+    private val sensorIngress: SensorEventIngress? = null,
     private val nowMillis: () -> Long = System::currentTimeMillis,
 ) {
     private val started = AtomicBoolean(false)
@@ -99,6 +104,21 @@ class ArgusRuntimeController(
             )
         }.onFailure { error ->
             Log.w(TAG, "reconcile geofence fallito: ${error::class.java.simpleName}")
+        }
+        // I sensori one-shot non sopravvivono a process death, reboot o package replace: ogni
+        // reconcile li ri-registra dallo stato armato desiderato. requiredBy autorizza la
+        // redelivery dei soli pending di regole ancora armate, senza dare lo store al controller.
+        val sensorReport = runCatchingPreservingCancellation { sensor.reconcile() }
+            .onFailure { error ->
+                Log.w(TAG, "reconcile sensor fallito: ${error::class.java.simpleName}")
+            }
+            .getOrNull()
+        if (reason == ReconcileReason.APP_START && sensorReport != null) {
+            runCatchingPreservingCancellation {
+                sensorIngress?.recoverPending(sensorReport.requiredBy.toSet())
+            }.onFailure { error ->
+                Log.w(TAG, "recovery sensor fallito: ${error::class.java.simpleName}")
+            }
         }
         Unit
     }
