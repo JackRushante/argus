@@ -6,12 +6,20 @@ import java.time.ZoneId
 import kotlin.math.*
 
 class ConditionEvaluator(private val clock: Clock) {
+    enum class Result { MET, NOT_MET, STATE_UNAVAILABLE }
+
     /**
      * Condizione null = nessun vincolo = vero. Uno stato assente è UNKNOWN, non false: in
      * particolare `NOT UNKNOWN` resta UNKNOWN e al confine finale fallisce chiuso. Senza questa
      * semantica, revocare Shizuku/permessi trasformerebbe `not(wifi == on)` in un match.
      */
     fun eval(c: Condition?, state: DeviceState): Boolean = evaluate(c, state) == Truth.TRUE
+
+    fun result(c: Condition?, state: DeviceState): Result = when (evaluate(c, state)) {
+        Truth.TRUE -> Result.MET
+        Truth.FALSE -> Result.NOT_MET
+        Truth.UNKNOWN -> Result.STATE_UNAVAILABLE
+    }
 
     private fun evaluate(c: Condition?, state: DeviceState): Truth = when (c) {
         null -> Truth.TRUE

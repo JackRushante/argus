@@ -274,17 +274,17 @@ Corretto e testato:
 - cleanup harness cancellava Room ma non le registrazioni OS;
 - harness stampava l'indirizzo geocodificato nonostante il commento contrario;
 - coordinate molto vicine a zero mostravano `-0`;
-- `NOT` trasformava un reader indisponibile in condizione vera.
+- `NOT` trasformava un reader indisponibile in condizione vera;
+- ogni fire leggeva tutte le sette key + foreground anche senza necessità;
+- `Condition.LocationIn` non riceveva mai `DeviceState.location` e non aveva capability runtime;
+- spec principale, `CLAUDE.md`, contratto bridge e piano P2 avevano drift sulle decisioni correnti.
 
 Resta da chiudere nelle slice P3:
 
-- ogni fire legge oggi tutte le sette key + foreground app anche se non serve;
-- `Condition.LocationIn` è modellata ma il provider non popola `DeviceState.location` e la
-  capability non è pubblicata: è di fatto non armabile;
 - il contesto LLM `state` sovra-raccoglie lo snapshot invece di elencare query approvate;
 - azioni non privilegiate sono erroneamente nascoste quando Shizuku è offline;
 - manca audit lifecycle;
-- spec principale, `CLAUDE.md` e piano P2 contengono ancora righe storiche contraddittorie.
+- manca il modello/readers parametrici P3-1B.
 
 ## 11. Gate di accettazione P3
 

@@ -146,7 +146,10 @@ private fun auditSummary(record: AuditLogRecord): String = when (record.kind) {
     AuditKind.SUPPRESSED_DUPLICATE -> "evento duplicato ignorato"
     AuditKind.SUPPRESSED_COOLDOWN -> "soppressa dal cooldown"
     AuditKind.SUPPRESSED_NOT_ELIGIBLE -> "regola non più idonea"
-    AuditKind.CONDITIONS_NOT_MET -> "condizioni non soddisfatte"
+    AuditKind.CONDITIONS_NOT_MET -> when (record.detail) {
+        "condition_state_unavailable" -> "stato necessario non disponibile"
+        else -> "condizioni non soddisfatte"
+    }
     AuditKind.BLOCKED_POLICY -> when (record.detail) {
         "stale_trigger_registration" -> "registrazione non più approvata"
         else -> "bloccata dalla policy (${record.detail.safeDiagnostic()})"

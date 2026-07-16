@@ -21,24 +21,28 @@ Gate: nessuna contraddizione attiva su B8, sensori, shell WhatsApp, P2 chiusa o 
 
 ## P3-1A — lettura minima dello stato esistente
 
-1. Aggiungere `StateReadRequest(keys, foreground, location)` in `engine-core`.
-2. Derivare la richiesta dalle condizioni con visitor esaustivo.
-3. Per `InvokeLlm(context=state)` mantenere temporaneamente il profilo legacy esplicito, ma non
+**Stato 2026-07-16: COMPLETA.**
+
+1. [x] Aggiungere `StateReadRequest(keys, foreground, location)` in `engine-core`.
+2. [x] Derivare la richiesta dalle condizioni con visitor esaustivo.
+3. [x] Per `InvokeLlm(context=state)` mantenere temporaneamente il profilo legacy esplicito, ma non
    leggere stato per azioni deterministiche senza condizioni.
-4. Cambiare il provider dell'Engine in request-aware; cache/union solo nello stesso batch.
-5. Collegare `CurrentLocationProvider` a `DeviceState.location` senza Shizuku.
-6. Pubblicare `state.location` soltanto col grant adatto.
+4. [x] Cambiare il provider dell'Engine in request-aware; cache/union solo nello stesso batch.
+5. [x] Collegare `CurrentLocationProvider` a `DeviceState.location` senza Shizuku.
+6. [x] Pubblicare `state.location` soltanto col grant adatto.
 
 Test obbligatori:
 
-- zero chiamate reader per trigger → notifica/clipboard/toggle senza condizioni;
-- una sola key richiesta quando la condizione ne usa una;
-- foreground e location indipendenti;
-- union nel batch senza perdere valori;
-- missing/exception ⇒ UNKNOWN, `NOT UNKNOWN` non esegue;
-- revoca Shizuku non blocca una regola che usa solo location/API normali.
+- [x] zero chiamate reader per trigger → notifica/clipboard/toggle senza condizioni;
+- [x] una sola key richiesta quando la condizione ne usa una;
+- [x] foreground e location indipendenti;
+- [x] union nel batch senza perdere valori;
+- [x] missing/exception ⇒ UNKNOWN, `NOT UNKNOWN` non esegue;
+- [x] revoca Shizuku non blocca una regola che usa solo location/API normali.
 
-Gate device: una regola condizionata a batteria e una a location, con log che non contiene valori.
+Gate device: **PASS** su OnePlus reale con
+`ArgusMinimalStateReadInstrumentedTest`: una regola condizionata a batteria e una a location;
+runner output privo di valori, coordinate e payload.
 
 ## P3-1B — modello `StateQuery`
 

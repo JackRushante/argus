@@ -24,13 +24,14 @@ import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.CapabilityIds
 import dev.argus.engine.model.CapabilityRequirements
-import dev.argus.engine.model.StateKeys
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.Engine
 import dev.argus.engine.runtime.FireContext
 import dev.argus.engine.runtime.FirePolicySnapshotProvider
+import dev.argus.engine.runtime.GeoPoint
+import dev.argus.engine.runtime.StateReadRequest
 import dev.argus.engine.runtime.TriggerEnvelope
 import dev.argus.shizuku.ShizukuGateway
 import dev.argus.shizuku.ShizukuGatewayStatus
@@ -43,15 +44,55 @@ import kotlin.coroutines.resume
 /** Legge lo snapshot solo quando l'Engine trova una regola che ne ha davvero bisogno. */
 fun interface DeviceStateSnapshotProvider {
     suspend fun current(): DeviceState
+
+    /** Compatibilità per fake/client v1: la produzione override per evitare la lettura globale. */
+    suspend fun current(request: StateReadRequest): DeviceState = request.project(current())
 }
 
 class LazyDeviceStateProvider(
     private val reader: StateReader,
-    private val shizuku: ShizukuGateway,
+    private val shizukuStatus: () -> ShizukuGatewayStatus,
+    private val location: CurrentLocationProvider,
 ) : DeviceStateSnapshotProvider {
-    override suspend fun current(): DeviceState {
-        if (shizuku.status() != ShizukuGatewayStatus.AUTHORIZED) return DeviceState()
-        return reader.read(StateKeys.ALL.keys, includeForegroundApp = true)
+    constructor(
+        reader: StateReader,
+        shizuku: ShizukuGateway,
+        location: CurrentLocationProvider,
+    ) : this(reader, shizuku::status, location)
+
+    override suspend fun current(): DeviceState = current(StateReadRequest.LEGACY_GENERATIVE)
+
+    override suspend fun current(request: StateReadRequest): DeviceState {
+        if (request.isEmpty) return DeviceState()
+        val needsPrivilegedState = request.keys.isNotEmpty() || request.includeForegroundApp
+        val privileged = if (
+            needsPrivilegedState &&
+            runCatching { shizukuStatus() == ShizukuGatewayStatus.AUTHORIZED }.getOrDefault(false)
+        ) {
+            try {
+                reader.read(request.keys, request.includeForegroundApp)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                DeviceState()
+            }
+        } else {
+            DeviceState()
+        }
+        val point = if (request.includeLocation) {
+            try {
+                location.current()?.takeIf(DeviceLocation::valid)?.let {
+                    GeoPoint(it.latitude, it.longitude)
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                null
+            }
+        } else {
+            null
+        }
+        return request.project(privileged.copy(location = point))
     }
 }
 
@@ -60,7 +101,7 @@ class EngineTimeEventDispatcher(
     private val state: LazyDeviceStateProvider,
 ) : TimeEventDispatcher {
     override suspend fun dispatch(envelope: TriggerEnvelope) {
-        engine.onTrigger(envelope) { state.current() }
+        engine.onTrigger(envelope) { request -> state.current(request) }
     }
 }
 
@@ -73,7 +114,7 @@ class EngineNotificationEventDispatcher(
     private val state: DeviceStateSnapshotProvider,
 ) : NotificationEventDispatcher {
     override suspend fun dispatch(envelope: TriggerEnvelope) {
-        engine.onTrigger(envelope) { state.current() }
+        engine.onTrigger(envelope) { request -> state.current(request) }
     }
 }
 
@@ -83,7 +124,7 @@ class EnginePhoneEventDispatcher(
     private val state: DeviceStateSnapshotProvider,
 ) : dev.argus.automation.phone.PhoneEventDispatcher {
     override suspend fun dispatch(envelope: TriggerEnvelope) {
-        engine.onTrigger(envelope) { state.current() }
+        engine.onTrigger(envelope) { request -> state.current(request) }
     }
 }
 
@@ -92,7 +133,7 @@ class EngineConnectivityEventDispatcher(
     private val state: DeviceStateSnapshotProvider,
 ) : ConnectivityEventDispatcher {
     override suspend fun dispatch(envelope: TriggerEnvelope) {
-        engine.onTrigger(envelope) { state.current() }
+        engine.onTrigger(envelope) { request -> state.current(request) }
     }
 }
 
@@ -101,7 +142,7 @@ class EngineGeofenceEventDispatcher(
     private val state: DeviceStateSnapshotProvider,
 ) : GeofenceEventDispatcher {
     override suspend fun dispatch(envelope: TriggerEnvelope) {
-        engine.onTrigger(envelope) { state.current() }
+        engine.onTrigger(envelope) { request -> state.current(request) }
     }
 }
 

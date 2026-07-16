@@ -255,8 +255,11 @@ object ArgusModule {
 
     @Provides
     @Singleton
-    fun lazyDeviceState(reader: StateReader, gateway: ShizukuGateway): LazyDeviceStateProvider =
-        LazyDeviceStateProvider(reader, gateway)
+    fun lazyDeviceState(
+        reader: StateReader,
+        gateway: ShizukuGateway,
+        location: CurrentLocationProvider,
+    ): LazyDeviceStateProvider = LazyDeviceStateProvider(reader, gateway, location)
 
     @Provides
     fun deviceStateSnapshotProvider(

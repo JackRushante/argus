@@ -403,4 +403,218 @@ class EngineTest {
         assertEquals(AuditKind.BLOCKED_POLICY, audit.events.single().kind)
         assertEquals("stale_trigger_registration", audit.events.single().detail)
     }
+
+    @Test
+    fun `matching deterministic rule without state needs performs zero reads`() = runTest {
+        val automation = armed(
+            "no-state",
+            Trigger.Notification("com.whatsapp"),
+            listOf(Action.ShowNotification("titolo", "testo")),
+        )
+        var reads = 0
+        var actionState: DeviceState? = null
+        val executor = ActionExecutor { _, context ->
+            actionState = context.state
+            ActionResult.Success
+        }
+
+        engine(FakeAutomationStore(listOf(automation)), executor, "2026-07-12T10:00:00Z")
+            .onTrigger(
+                envelope("sbn:wa:no-state", TriggerEvent.NotificationPosted("com.whatsapp")),
+            ) { _ ->
+                reads++
+                DeviceState(values = mapOf(StateKeys.WIFI to "on"))
+            }
+
+        assertEquals(0, reads)
+        assertEquals(DeviceState(), actionState)
+    }
+
+    @Test
+    fun `condition requests only its single state key`() = runTest {
+        val automation = armed(
+            "one-key",
+            Trigger.Notification("com.whatsapp"),
+            listOf(Action.SetDnd(DndMode.PRIORITY)),
+            cond = Condition.StateEquals(StateKeys.RINGER, CmpOp.EQ, "normal"),
+        )
+        val requests = mutableListOf<StateReadRequest>()
+
+        engine(
+            FakeAutomationStore(listOf(automation)),
+            FakeActionExecutor(),
+            "2026-07-12T10:00:00Z",
+        ).onTrigger(
+            envelope("sbn:wa:one-key", TriggerEvent.NotificationPosted("com.whatsapp")),
+        ) { request ->
+            requests += request
+            DeviceState(values = mapOf(StateKeys.RINGER to "normal"))
+        }
+
+        assertEquals(
+            listOf(StateReadRequest(keys = setOf(StateKeys.RINGER))),
+            requests,
+        )
+    }
+
+    @Test
+    fun `batch cache reads only the missing delta and keeps prior values`() = runTest {
+        val wifi = armed(
+            "a-wifi",
+            Trigger.Notification("com.whatsapp"),
+            listOf(Action.SetWifi(false)),
+            cond = Condition.StateEquals(StateKeys.WIFI, CmpOp.EQ, "on"),
+        )
+        val wifiAndBattery = armed(
+            "b-battery",
+            Trigger.Notification("com.whatsapp"),
+            listOf(Action.SetBluetooth(true)),
+            cond = Condition.And(
+                listOf(
+                    Condition.StateEquals(StateKeys.WIFI, CmpOp.EQ, "on"),
+                    Condition.StateEquals(StateKeys.BATTERY, CmpOp.GT, "20"),
+                ),
+            ),
+        )
+        val requests = mutableListOf<StateReadRequest>()
+
+        val outcomes = engine(
+            FakeAutomationStore(listOf(wifiAndBattery, wifi)),
+            FakeActionExecutor(),
+            "2026-07-12T10:00:00Z",
+        ).onTrigger(
+            envelope("sbn:wa:cache", TriggerEvent.NotificationPosted("com.whatsapp")),
+        ) { request ->
+            requests += request
+            DeviceState(
+                values = buildMap {
+                    if (StateKeys.WIFI in request.keys) put(StateKeys.WIFI, "on")
+                    if (StateKeys.BATTERY in request.keys) put(StateKeys.BATTERY, "80")
+                },
+            )
+        }
+
+        assertEquals(listOf(wifi.id, wifiAndBattery.id), outcomes.map { it.automation.id })
+        assertEquals(
+            listOf(
+                StateReadRequest(keys = setOf(StateKeys.WIFI)),
+                StateReadRequest(keys = setOf(StateKeys.BATTERY)),
+            ),
+            requests,
+        )
+    }
+
+    @Test
+    fun `foreground and location are requested independently`() = runTest {
+        val foreground = armed(
+            "a-foreground",
+            Trigger.Notification("com.whatsapp"),
+            listOf(Action.SetWifi(false)),
+            cond = Condition.AppInForeground("dev.example"),
+        )
+        val location = armed(
+            "b-location",
+            Trigger.Notification("com.whatsapp"),
+            listOf(Action.SetBluetooth(true)),
+            cond = Condition.LocationIn(45.0, 9.0, 100.0),
+        )
+        val requests = mutableListOf<StateReadRequest>()
+
+        val outcomes = engine(
+            FakeAutomationStore(listOf(location, foreground)),
+            FakeActionExecutor(),
+            "2026-07-12T10:00:00Z",
+        ).onTrigger(
+            envelope("sbn:wa:independent", TriggerEvent.NotificationPosted("com.whatsapp")),
+        ) { request ->
+            requests += request
+            DeviceState(
+                foregroundApp = "dev.example".takeIf { request.includeForegroundApp },
+                location = GeoPoint(45.0, 9.0).takeIf { request.includeLocation },
+            )
+        }
+
+        assertEquals(listOf(foreground.id, location.id), outcomes.map { it.automation.id })
+        assertEquals(
+            listOf(
+                StateReadRequest(includeForegroundApp = true),
+                StateReadRequest(includeLocation = true),
+            ),
+            requests,
+        )
+    }
+
+    @Test
+    fun `state provider exception becomes unavailable condition and never fires`() = runTest {
+        val automation = armed(
+            "state-outage",
+            Trigger.Notification("com.whatsapp"),
+            listOf(Action.SetWifi(false)),
+            cond = Condition.Not(
+                Condition.StateEquals(StateKeys.WIFI, CmpOp.EQ, "on"),
+            ),
+        )
+        val audit = FakeAuditSink()
+        val executor = FakeActionExecutor()
+
+        engine(
+            FakeAutomationStore(listOf(automation)),
+            executor,
+            "2026-07-12T10:00:00Z",
+            audit = audit,
+        ).onTrigger(
+            envelope("sbn:wa:outage", TriggerEvent.NotificationPosted("com.whatsapp")),
+        ) { _ -> error("reader unavailable") }
+
+        assertEquals(emptyList(), executor.executed)
+        assertEquals(AuditKind.CONDITIONS_NOT_MET, audit.events.single().kind)
+        assertEquals("condition_state_unavailable", audit.events.single().detail)
+    }
+
+    @Test
+    fun `only invoke llm actions declaring state receive the legacy state profile`() = runTest {
+        val withoutState = Action.InvokeLlm(
+            "prima",
+            listOf(GenerativeContract.CONTEXT_NOTIFICATION),
+            listOf(GenerativeContract.TOOL_WHATSAPP_REPLY),
+            true,
+        )
+        val withState = Action.InvokeLlm(
+            "seconda",
+            listOf(
+                GenerativeContract.CONTEXT_NOTIFICATION,
+                GenerativeContract.CONTEXT_STATE,
+            ),
+            listOf(GenerativeContract.TOOL_WHATSAPP_REPLY),
+            true,
+        )
+        val automation = armed(
+            "generative-state",
+            Trigger.Notification("com.whatsapp"),
+            listOf(withoutState, withState),
+        )
+        val contexts = mutableListOf<DeviceState>()
+        val requests = mutableListOf<StateReadRequest>()
+        val executor = ActionExecutor { _, context ->
+            contexts += context.state
+            ActionResult.Submitted
+        }
+
+        engine(FakeAutomationStore(listOf(automation)), executor, "2026-07-12T10:00:00Z")
+            .onTrigger(
+                envelope("sbn:wa:generative", TriggerEvent.NotificationPosted("com.whatsapp")),
+            ) { request ->
+                requests += request
+                DeviceState(
+                    values = request.keys.associateWith { "known" },
+                    foregroundApp = "dev.example".takeIf { request.includeForegroundApp },
+                )
+            }
+
+        assertEquals(listOf(StateReadRequest.LEGACY_GENERATIVE), requests)
+        assertEquals(DeviceState(), contexts.first())
+        assertEquals(StateKeys.ALL.keys, contexts.last().values.keys)
+        assertEquals("dev.example", contexts.last().foregroundApp)
+        assertEquals(null, contexts.last().location)
+    }
 }

@@ -113,6 +113,39 @@ class UiStateMappersTest {
     }
 
     @Test
+    fun `unavailable condition state is distinct from a false condition`() {
+        val unavailable = AuditLogRecord(
+            id = 10L,
+            automationId = "state-rule",
+            automationName = "Regola stato",
+            kind = AuditKind.CONDITIONS_NOT_MET,
+            atMillis = 1_000L,
+            detail = "condition_state_unavailable",
+            executionId = null,
+            executionStatus = null,
+            succeededCount = null,
+            failedCount = null,
+            submittedCount = null,
+        ).toLogRow(emptyList())
+        val falseCondition = AuditLogRecord(
+            id = 11L,
+            automationId = "state-rule",
+            automationName = "Regola stato",
+            kind = AuditKind.CONDITIONS_NOT_MET,
+            atMillis = 1_001L,
+            detail = "",
+            executionId = null,
+            executionStatus = null,
+            succeededCount = null,
+            failedCount = null,
+            submittedCount = null,
+        ).toLogRow(emptyList())
+
+        assertEquals("stato necessario non disponibile", unavailable.summary)
+        assertEquals("condizioni non soddisfatte", falseCondition.summary)
+    }
+
+    @Test
     fun `list rows resolve the trusted whitelist name instead of the conversation hash`() {
         val hash = "shortcut:com.whatsapp:feedbeef00aabbcc"
         val labels = mapOf(hash to "Ottica Marci")

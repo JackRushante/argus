@@ -32,10 +32,10 @@ class Engine(
         val executionId: ExecutionId,
     )
 
-    /** [stateProvider] resta lazy e viene letto al più una volta per batch. */
+    /** [stateProvider] resta lazy; nello stesso batch riceve soltanto il delta non ancora letto. */
     suspend fun onTrigger(
         envelope: TriggerEnvelope,
-        stateProvider: suspend () -> DeviceState,
+        stateProvider: suspend (StateReadRequest) -> DeviceState,
     ): List<FireOutcome> {
         val event = envelope.event
         val candidates = when (event) {
@@ -45,8 +45,24 @@ class Engine(
             .sortedWith(compareBy({ it.priority }, { it.id.value }))
 
         val batchNow = now()
-        var cached: DeviceState? = null
-        suspend fun state(): DeviceState = cached ?: stateProvider().also { cached = it }
+        var cachedRequest = StateReadRequest.EMPTY
+        var cachedState = DeviceState()
+        suspend fun state(request: StateReadRequest): DeviceState {
+            if (request.isEmpty) return DeviceState()
+            val missing = request.missingFrom(cachedRequest)
+            if (!missing.isEmpty) {
+                val read = try {
+                    stateProvider(missing)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (_: Exception) {
+                    DeviceState()
+                }
+                cachedState = cachedState.merge(missing.project(read))
+                cachedRequest += missing
+            }
+            return request.project(cachedState)
+        }
 
         val outcomes = mutableListOf<FireOutcome>()
         for (automation in candidates) {
@@ -91,16 +107,32 @@ class Engine(
                     }
                 }
 
-                if (automation.conditions != null && !evaluator.eval(automation.conditions, state())) {
-                    recordAudit(
-                        AuditEvent(
-                            automation.id,
-                            AuditKind.CONDITIONS_NOT_MET,
-                            batchNow,
-                            eventId = envelope.id,
-                        ),
-                    )
-                    continue
+                if (automation.conditions != null) {
+                    val conditionState = state(StateReadPlanner.forCondition(automation.conditions))
+                    val conditionResult = evaluator.result(automation.conditions, conditionState)
+                    when (conditionResult) {
+                        ConditionEvaluator.Result.MET -> Unit
+                        ConditionEvaluator.Result.NOT_MET,
+                        ConditionEvaluator.Result.STATE_UNAVAILABLE,
+                        -> {
+                            recordAudit(
+                                AuditEvent(
+                                    automation.id,
+                                    AuditKind.CONDITIONS_NOT_MET,
+                                    batchNow,
+                                    detail = if (
+                                        conditionResult == ConditionEvaluator.Result.STATE_UNAVAILABLE
+                                    ) {
+                                        "condition_state_unavailable"
+                                    } else {
+                                        ""
+                                    },
+                                    eventId = envelope.id,
+                                ),
+                            )
+                            continue
+                        }
+                    }
                 }
 
                 executionId = executionIds.create(automation.id, envelope.id)
@@ -169,14 +201,13 @@ class Engine(
                     }
                 }
 
-                val fireState = state()
                 val approvalFingerprint = requireNotNull(automation.approvalFingerprint) {
                     "Automazione approvata priva di fingerprint"
                 }
                 automation.actions.forEachIndexed { index, action ->
                     val context = FireContext(
                         event = event,
-                        state = fireState,
+                        state = state(StateReadPlanner.forAction(action)),
                         automationId = automation.id,
                         approvalFingerprint = approvalFingerprint,
                         eventId = envelope.id,
@@ -272,4 +303,10 @@ class Engine(
         if (automation.actions.any { it.tier == ActionTier.GENERATIVE })
             maxOf(automation.cooldownMs, MIN_GENERATIVE_COOLDOWN_MS)
         else automation.cooldownMs
+
+    private fun DeviceState.merge(other: DeviceState): DeviceState = DeviceState(
+        values = values + other.values,
+        foregroundApp = other.foregroundApp ?: foregroundApp,
+        location = other.location ?: location,
+    )
 }

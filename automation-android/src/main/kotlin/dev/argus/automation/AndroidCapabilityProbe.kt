@@ -183,6 +183,8 @@ class AndroidCapabilityProbe internal constructor(
             if (state.bluetoothConnectGranted) add(CapabilityIds.TRIGGER_CONNECTIVITY_BT)
             if (state.foregroundLocationGranted && state.backgroundLocationGranted) {
                 add(CapabilityIds.TRIGGER_CONNECTIVITY_WIFI_IDENTITY)
+                // Fire-time location conditions use framework LocationManager, not Shizuku.
+                add(CapabilityIds.STATE_LOCATION)
             }
             // Clipboard locale: nessun permesso OS richiesto (scrittura verificata su device).
             add(ActionCapabilities.COPY_TO_CLIPBOARD)

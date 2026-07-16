@@ -102,6 +102,30 @@ class AndroidCapabilityProbeTest {
     }
 
     @Test
+    fun `location condition capability depends on location grants and not on Shizuku`() = runTest {
+        val withoutShizuku = probe(
+            state().copy(
+                shizukuStatus = ShizukuGatewayStatus.INSTALLED_NOT_RUNNING,
+                shizukuPermissionGranted = true,
+                foregroundLocationGranted = true,
+                backgroundLocationGranted = true,
+            ),
+        ).current()
+        assertTrue(CapabilityIds.STATE_LOCATION in withoutShizuku.availableCapabilities)
+        assertFalse(
+            CapabilityIds.STATE_LOCATION in withoutShizuku.transientlyUnavailableCapabilities,
+        )
+
+        val foregroundOnly = probe(
+            state().copy(
+                foregroundLocationGranted = true,
+                backgroundLocationGranted = false,
+            ),
+        ).current()
+        assertFalse(CapabilityIds.STATE_LOCATION in foregroundOnly.availableCapabilities)
+    }
+
+    @Test
     fun `missing listener grant keeps notification trigger and raw reply unavailable with exact reason`() = runTest {
         val probe = probe(
             state().copy(
