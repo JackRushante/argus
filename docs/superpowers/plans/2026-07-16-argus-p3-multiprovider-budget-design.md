@@ -185,3 +185,14 @@ Percorsi critici: S1→S4→S5/S6/S7→S8 (feature #48 core) e S11→S12→S13�
 5. Il tetto costo: per **giorno** o anche per **mese**? (Il modello dati supporta entrambi, la UI no di default.)
 6. Confermi **streaming fuori scope** per questa coppia di feature (resta chip roadmap)?
 7. Ordine di rilascio: #48 completa prima di #49, o accetti release intermedia con multi-provider + solo contatore chiamate (senza costi) mentre S15 aspetta Hermes?
+
+---
+
+## Decisioni Lorenzo (2026-07-16) — vincolanti per l'implementazione
+1. **compile client-side**: RIUSARE il template di Hermes (recuperato via `ssh hermes`), non riscriverlo.
+2. **Provider set**: Hermes, OpenAI, Anthropic, Google Gemini, **OpenRouter** (OpenAI-compat, 1 chiave -> molti modelli, copre anche self-hosted via OpenRouter), + **custom OpenAI-compat** (base URL libero: Ollama/LiteLLM). **z.ai RIMANDATO** (coperto di fatto da OpenRouter/custom).
+3. Niente smoke z.ai per ora.
+4. **Budget**: limiti **globali + per-provider**, valuta mostrata sia **USD che EUR**.
+5. **Tetto costo**: **mensile**.
+6. **Streaming**: fuori scope (resta chip roadmap).
+7. **Esecuzione**: orchestrata come la fase ricerca — **Fable 5 orchestratore (xhigh)** produce il build-book e le istruzioni; **Opus 4.8 multi-agente (high)** implementa le slice in TDD. Revisione + gate + commit tra le wave.
