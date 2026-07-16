@@ -133,6 +133,16 @@ finestra in cui Hermes possa produrre una regola morta.
 
 Gate: JVM + Robolectric; niente listener ancora in questa slice.
 
+Evidenza (`055499c`):
+
+- test dominio, policy capability, rendering e bridge Kotlin verdi; Robolectric legge realmente
+  metadata `SensorManager` sintetici per reporting mode, wake-up, FIFO e delay;
+- suite bridge locale, staging Hermes e directory finale **32/32**;
+- full gate forzato senza cache: **759/759 task**, `BUILD SUCCESSFUL`;
+- deploy server-first compatibile: health ancora `compile=[1,2]`, `act=[1,2]`, unit active, backup
+  `*.pre-p3a-055499c` e hash raw repo/host identici per bridge, test e fixture;
+- nessun gate callback fisico dichiarato: P3-2A non registra listener per definizione.
+
 ## P3-2B — significant-motion verticale
 
 1. Generalizzare la sentinella FGS con demand reasons condivisi (connectivity + sensor).
