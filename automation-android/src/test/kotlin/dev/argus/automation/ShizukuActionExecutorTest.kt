@@ -1,5 +1,7 @@
 package dev.argus.automation
 
+import dev.argus.automation.base.AndroidBaseActionExecutor
+import dev.argus.automation.base.BaseActionSurface
 import dev.argus.automation.notification.NotificationReplyDelivery
 import dev.argus.automation.notification.NotificationReplyGateway
 import dev.argus.automation.notification.NotificationReplyRequest
@@ -23,6 +25,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 class ShizukuActionExecutorTest {
     private val context = FireContext(
@@ -315,6 +318,7 @@ class ShizukuActionExecutorTest {
             ActionResult.Failure("shell_unavailable")
         },
         whitelistedIds: suspend () -> Set<String> = { emptySet() },
+        baseActions: AndroidBaseActionExecutor? = null,
     ) = ShizukuActionExecutor(
         tools = tools,
         notifier = AutomationNotifier { _, _, _ -> },
@@ -323,7 +327,61 @@ class ShizukuActionExecutorTest {
         clipboard = { _, _ -> ActionResult.Success },
         staticShell = staticShell,
         whitelistedIds = whitelistedIds,
+        baseActions = baseActions,
     )
+
+    @Test
+    fun `base actions route to the normal-api executor instead of shizuku`() = runTest {
+        val surface = RecordingBaseSurface()
+        val tools = RecordingDeviceController()
+        val exec = executor(tools = tools, baseActions = AndroidBaseActionExecutor(surface))
+
+        assertEquals(ActionResult.Success, exec.execute(Action.SetDnd(DndMode.PRIORITY), context))
+        assertEquals(ActionResult.Success, exec.execute(Action.SetRinger("normal"), context))
+        assertEquals(ActionResult.Success, exec.execute(Action.LaunchApp("com.example.app"), context))
+        assertEquals(ActionResult.Success, exec.execute(Action.OpenUrl("https://example.com"), context))
+
+        assertEquals(listOf(DndMode.PRIORITY), surface.dndModes)
+        assertEquals(listOf(RingerMode.NORMAL), surface.ringerModes)
+        assertEquals(listOf("com.example.app"), surface.launched)
+        assertEquals(listOf("https://example.com"), surface.opened)
+        // Nessuna azione base passa dallo shell privilegiato quando il base executor è presente.
+        assertEquals(emptyList(), tools.calls)
+    }
+
+    @Test
+    fun `privileged actions still go through shizuku when a base executor is present`() = runTest {
+        val surface = RecordingBaseSurface()
+        val tools = RecordingDeviceController()
+        val exec = executor(tools = tools, baseActions = AndroidBaseActionExecutor(surface))
+
+        assertEquals(ActionResult.Success, exec.execute(Action.SetWifi(true), context))
+        assertEquals(ActionResult.Success, exec.execute(Action.SetBluetooth(false), context))
+
+        assertEquals(listOf("wifi:true", "bluetooth:false"), tools.calls)
+        assertTrue(surface.dndModes.isEmpty() && surface.launched.isEmpty())
+    }
+
+    @Test
+    fun `invalid ringer mode fails before reaching the base executor`() = runTest {
+        val surface = RecordingBaseSurface()
+        val exec = executor(baseActions = AndroidBaseActionExecutor(surface))
+        assertEquals(
+            ActionResult.Failure("ringer_mode_invalid"),
+            exec.execute(Action.SetRinger("invented"), context),
+        )
+        assertTrue(surface.ringerModes.isEmpty())
+    }
+
+    @Test
+    fun `base executor grant failures surface as typed failures`() = runTest {
+        val surface = RecordingBaseSurface(dndGranted = false)
+        val exec = executor(baseActions = AndroidBaseActionExecutor(surface))
+        assertEquals(
+            ActionResult.Failure("dnd_policy_unavailable"),
+            exec.execute(Action.SetDnd(DndMode.TOTAL), context),
+        )
+    }
 
     private class RecordingReplyGateway(
         private val delivery: NotificationReplyDelivery,
@@ -380,4 +438,16 @@ private class ThrowingDeviceController(private val failure: RuntimeException) : 
     override suspend fun openUrl(url: String, executionId: ExecutionId, priority: Int) = fail()
     override suspend fun tap(x: Int, y: Int, executionId: ExecutionId, priority: Int) = fail()
     override suspend fun inputText(text: String, executionId: ExecutionId, priority: Int) = fail()
+}
+
+private class RecordingBaseSurface(private val dndGranted: Boolean = true) : BaseActionSurface {
+    val dndModes = mutableListOf<DndMode>()
+    val ringerModes = mutableListOf<RingerMode>()
+    val launched = mutableListOf<String>()
+    val opened = mutableListOf<String>()
+    override fun isDndPolicyGranted(): Boolean = dndGranted
+    override fun setInterruptionFilter(mode: DndMode) { dndModes += mode }
+    override fun setRingerMode(mode: RingerMode) { ringerModes += mode }
+    override fun launchPackage(pkg: String): Boolean { launched += pkg; return true }
+    override fun openHttpUrl(url: String) { opened += url }
 }

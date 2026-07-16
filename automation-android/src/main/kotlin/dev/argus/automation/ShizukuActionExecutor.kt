@@ -1,5 +1,6 @@
 package dev.argus.automation
 
+import dev.argus.automation.base.AndroidBaseActionExecutor
 import dev.argus.automation.notification.NotificationReplyDelivery
 import dev.argus.automation.notification.NotificationReplyGateway
 import dev.argus.automation.notification.NotificationReplyRequest
@@ -42,6 +43,12 @@ class ShizukuActionExecutor(
      * dimentica di cablare la whitelist ottiene il comportamento chiuso, mai quello aperto.
      */
     private val whitelistedIds: suspend () -> Set<String> = { emptySet() },
+    /**
+     * Executor delle azioni BASE con API Android normali (decision record §7.3). Quando presente,
+     * DND/Ringer/LaunchApp/OpenUrl NON passano più dallo shell Shizuku. Default **null**: finché il
+     * DI non lo cabla (tier base attivo), il comportamento resta quello legacy via [tools].
+     */
+    private val baseActions: AndroidBaseActionExecutor? = null,
 ) : ActionExecutor {
     override suspend fun execute(action: Action, ctx: FireContext): ActionResult = try {
         when (action) {
@@ -49,16 +56,18 @@ class ShizukuActionExecutor(
             is Action.SetBluetooth -> success {
                 tools.setBluetooth(action.on, ctx.executionId, ctx.priority)
             }
-            is Action.SetDnd -> success { tools.setDnd(action.mode, ctx.executionId, ctx.priority) }
+            is Action.SetDnd -> baseActions?.setDnd(action.mode)
+                ?: success { tools.setDnd(action.mode, ctx.executionId, ctx.priority) }
             is Action.SetRinger -> {
                 val mode = RingerMode.fromEngineValue(action.mode)
                     ?: return ActionResult.Failure("ringer_mode_invalid")
-                success { tools.setRinger(mode, ctx.executionId, ctx.priority) }
+                baseActions?.setRinger(mode)
+                    ?: success { tools.setRinger(mode, ctx.executionId, ctx.priority) }
             }
-            is Action.LaunchApp -> success {
-                tools.launchApp(action.pkg, ctx.executionId, ctx.priority)
-            }
-            is Action.OpenUrl -> success { tools.openUrl(action.url, ctx.executionId, ctx.priority) }
+            is Action.LaunchApp -> baseActions?.launchApp(action.pkg)
+                ?: success { tools.launchApp(action.pkg, ctx.executionId, ctx.priority) }
+            is Action.OpenUrl -> baseActions?.openUrl(action.url)
+                ?: success { tools.openUrl(action.url, ctx.executionId, ctx.priority) }
             is Action.ShowNotification -> success {
                 notifier.show(action.title, action.text, ctx)
             }
