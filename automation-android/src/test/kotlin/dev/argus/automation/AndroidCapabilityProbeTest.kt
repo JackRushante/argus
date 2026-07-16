@@ -216,6 +216,7 @@ class AndroidCapabilityProbeTest {
         val manifest = probe.probe(DeviceState())
         assertTrue(GenerativeContract.TOOL_WHATSAPP_REPLY in manifest.availableTools)
         assertTrue(ActionTypeIds.INVOKE_LLM in manifest.availableTools)
+        assertTrue(ActionTypeIds.INVOKE_LLM_V2 in manifest.availableTools)
         assertFalse(ActionTypeIds.INVOKE_LLM in manifest.unavailableTools)
     }
 
@@ -230,9 +231,14 @@ class AndroidCapabilityProbeTest {
         ).probe(DeviceState())
 
         assertFalse(ActionTypeIds.INVOKE_LLM in manifest.availableTools)
+        assertFalse(ActionTypeIds.INVOKE_LLM_V2 in manifest.availableTools)
         assertEquals(
             AndroidCapabilityProbe.REASON_GENERATIVE_RUNTIME,
             manifest.unavailableTools[ActionTypeIds.INVOKE_LLM],
+        )
+        assertEquals(
+            AndroidCapabilityProbe.REASON_GENERATIVE_RUNTIME,
+            manifest.unavailableTools[ActionTypeIds.INVOKE_LLM_V2],
         )
     }
 

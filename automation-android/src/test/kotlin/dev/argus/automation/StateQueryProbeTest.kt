@@ -1,7 +1,5 @@
 package dev.argus.automation
 
-import dev.argus.engine.model.CmpOp
-import dev.argus.engine.model.Condition
 import dev.argus.engine.model.StateQuery
 import dev.argus.engine.model.StateValueType
 import dev.argus.shizuku.ShizukuGatewayStatus
@@ -12,11 +10,9 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
 class StateQueryProbeTest {
-    private val condition = Condition.StateCompare(
+    private val request = StateQueryProbeRequest(
         StateQuery.DumpsysField("battery", "voltage"),
         StateValueType.NUMBER,
-        CmpOp.GT,
-        "4000",
     )
 
     @Test
@@ -34,9 +30,9 @@ class StateQueryProbeTest {
             { null },
         )
 
-        assertEquals(StateQueryProbeResult.AVAILABLE, available.probe(condition))
-        assertEquals(StateQueryProbeResult.TYPE_MISMATCH, wrongType.probe(condition))
-        assertEquals(StateQueryProbeResult.UNAVAILABLE, missing.probe(condition))
+        assertEquals(StateQueryProbeResult.AVAILABLE, available.probe(request))
+        assertEquals(StateQueryProbeResult.TYPE_MISMATCH, wrongType.probe(request))
+        assertEquals(StateQueryProbeResult.UNAVAILABLE, missing.probe(request))
     }
 
     @Test
@@ -46,13 +42,13 @@ class StateQueryProbeTest {
             { ShizukuGatewayStatus.INSTALLED_NOT_RUNNING },
             { reads++; "4200" },
         )
-        assertEquals(StateQueryProbeResult.UNAVAILABLE, stopped.probe(condition))
+        assertEquals(StateQueryProbeResult.UNAVAILABLE, stopped.probe(request))
         assertEquals(0, reads)
 
         val cancelled = AndroidStateQueryProbe(
             { ShizukuGatewayStatus.AUTHORIZED },
             { throw CancellationException("cancelled") },
         )
-        assertFailsWith<CancellationException> { cancelled.probe(condition) }
+        assertFailsWith<CancellationException> { cancelled.probe(request) }
     }
 }

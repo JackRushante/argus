@@ -294,6 +294,111 @@ class DraftValidator(
                 }
             }
             is Action.InvokeLlm -> validateInvokeLlm(action, trigger, whitelist, err, warn)
+            is Action.InvokeLlmV2 -> validateInvokeLlmV2(action, trigger, whitelist, err, warn)
+        }
+    }
+
+    private fun validateInvokeLlmV2(
+        action: Action.InvokeLlmV2,
+        trigger: Trigger,
+        whitelist: Set<String>,
+        err: (String, String) -> Unit,
+        warn: (String, String) -> Unit,
+    ) {
+        validateRequiredText(action.goal, MAX_TEXT_LENGTH, "goal_invalid", err)
+        if (action.stateContext.isEmpty()) {
+            err("state_context_empty", "InvokeLlm v2 richiede almeno un reader di stato esplicito")
+        }
+        if (action.stateContext.size > StateContextClassification.MAX_QUERIES) {
+            err(
+                "state_context_too_large",
+                "InvokeLlm v2 ammette al massimo ${StateContextClassification.MAX_QUERIES} reader",
+            )
+        }
+        if (action.stateContext.map { it.query.canonicalId }.distinct().size != action.stateContext.size) {
+            err("state_context_duplicated", "Reader di stato duplicati in InvokeLlm v2")
+        }
+        action.stateContext.forEach { context ->
+            if (context.policyVersion != StateQueryPolicy.VERSION) {
+                err("state_context_policy_incompatible", "Policy reader non compatibile")
+            }
+            if (!StateQueryPolicy.validQuery(context.query, stateKeys)) {
+                err("state_context_query_invalid", "Reader di stato o parametri non validi")
+            }
+            if (!StateContextClassification.validValueType(context.query, context.valueType)) {
+                err("state_context_type_invalid", "Tipo dichiarato non valido per il reader")
+            }
+            if (context.integrity != IntegrityLabel.CLEAN) {
+                err(
+                    "state_context_integrity_invalid",
+                    "Un reader locale approvato deve avere integrità CLEAN",
+                )
+            }
+            val minimum = StateContextClassification.minimumConfidentiality(context.query)
+            if (!StateContextClassification.covers(context.confidentiality, minimum)) {
+                err(
+                    "state_context_underclassified",
+                    "Reader ${context.query.family.wireName} classificato sotto il minimo ${minimum.name}",
+                )
+            }
+        }
+
+        validateGenerativeReplyContract(
+            allowedTools = action.allowedTools,
+            replyTargetSender = action.replyTargetSender,
+            timeoutMs = action.timeoutMs,
+            trigger = trigger,
+            whitelist = whitelist,
+            err = err,
+        )
+        warn(
+            "state_context_disclosure",
+            "I reader elencati saranno inviati al Brain configurato con classificazione esplicita",
+        )
+        if (action.stateContext.any { it.confidentiality == ConfidentialityLabel.SECRET }) {
+            warn(
+                "secret_state_context",
+                "Questa regola condivide stato classificato SECRET con Hermes/provider cloud",
+            )
+        }
+    }
+
+    private fun validateGenerativeReplyContract(
+        allowedTools: List<String>,
+        replyTargetSender: Boolean,
+        timeoutMs: Long,
+        trigger: Trigger,
+        whitelist: Set<String>,
+        err: (String, String) -> Unit,
+    ) {
+        if (allowedTools != GenerativeContract.ALLOWED_TOOLS) {
+            err(
+                "allowed_tools_unsupported",
+                "allowed_tools deve essere esattamente [${GenerativeContract.TOOL_WHATSAPP_REPLY}], senza alias",
+            )
+        }
+        if (allowedTools.isEmpty()) err("no_tools", "Azione generativa senza allowed_tools")
+        if (allowedTools.size > MAX_TOOL_COUNT) err("too_many_tools", "Troppi tool nell'azione generativa")
+        if (timeoutMs !in 1_000..MAX_LLM_TIMEOUT_MS) {
+            err("timeout_invalid", "Timeout InvokeLlm fuori intervallo")
+        }
+        for (tool in allowedTools) {
+            val norm = tool.lowercase()
+            val forbidden = norm in FORBIDDEN_IN_INVOKE_LLM ||
+                norm == FORBIDDEN_PREFIX_BARE || norm.startsWith(FORBIDDEN_PREFIX)
+            when {
+                tool.isBlank() || tool.length > 120 -> err("tool_invalid", "Nome tool non valido")
+                forbidden -> err("tool_forbidden", "Tool '$tool' vietato al fire-time generativo")
+                tool !in knownTools -> err("tool_unknown", "Tool '$tool' non nel catalogo")
+            }
+        }
+        val hasReplyTool = allowedTools.any { it.lowercase() in REPLY_TOOLS }
+        if (hasReplyTool && !replyTargetSender) {
+            err("reply_target_unbound", "Un tool di reply deve essere vincolato al mittente del trigger")
+        }
+        if (replyTargetSender) {
+            if (!hasReplyTool) err("reply_target_without_tool", "replyTargetSender senza tool di reply")
+            validateReplyTarget(trigger, whitelist, err)
         }
     }
 

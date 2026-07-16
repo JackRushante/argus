@@ -2,6 +2,7 @@ package dev.argus.automation
 
 import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.model.Action
+import dev.argus.engine.model.ApprovedStateContext
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.AutomationId
@@ -12,10 +13,13 @@ import dev.argus.engine.model.CapabilityIds
 import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.DndMode
 import dev.argus.engine.model.CmpOp
+import dev.argus.engine.model.ConfidentialityLabel
 import dev.argus.engine.model.Condition
 import dev.argus.engine.model.StateQuery
 import dev.argus.engine.model.StateQueryFamily
+import dev.argus.engine.model.StateQueryPolicy
 import dev.argus.engine.model.StateValueType
+import dev.argus.engine.model.IntegrityLabel
 import dev.argus.engine.model.Transition
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.ActionCapabilities
@@ -361,11 +365,11 @@ class ApprovalFlowTest {
         ).review
         assertTrue(typeBlocked.draft.issues.any { it.code == "state_query_type_mismatch" })
 
-        var probed: Condition.StateCompare? = null
+        var probed: StateQueryProbeRequest? = null
         val available = fixture(
             available = capabilities,
-            stateQueryProbe = StateQueryProbe { condition ->
-                probed = condition
+            stateQueryProbe = StateQueryProbe { request ->
+                probed = request
                 StateQueryProbeResult.AVAILABLE
             },
         )
@@ -380,6 +384,60 @@ class ApprovalFlowTest {
         assertEquals(StateValueType.NUMBER, ready.verifiedStateQueries.single().valueType)
     }
 
+    @Test
+    fun `v2 generative reader is probed exactly before it can arm`() = runTest {
+        val query = StateQuery.DumpsysField("battery", "voltage")
+        val draft = AutomationDraft(
+            name = "Reply con voltaggio",
+            trigger = Trigger.Notification(
+                pkg = "com.whatsapp",
+                conversationId = "jid:42",
+                isGroup = false,
+            ),
+            actions = listOf(
+                Action.InvokeLlmV2(
+                    goal = "rispondi considerando il voltaggio",
+                    stateContext = listOf(
+                        ApprovedStateContext(
+                            query = query,
+                            valueType = StateValueType.NUMBER,
+                            policyVersion = StateQueryPolicy.VERSION,
+                            integrity = IntegrityLabel.CLEAN,
+                            confidentiality = ConfidentialityLabel.SECRET,
+                        ),
+                    ),
+                    allowedTools = listOf("whatsapp_reply"),
+                    replyTargetSender = true,
+                    timeoutMs = 60_000,
+                ),
+            ),
+            cooldownMs = 60_000,
+        )
+        var probed: StateQueryProbeRequest? = null
+        val fixture = fixture(
+            available = setOf(
+                CapabilityIds.TRIGGER_NOTIFICATION,
+                CapabilityIds.ACTION_INVOKE_LLM,
+                CapabilityIds.STATE_READER_DUMPSYS_FIELD,
+                "whatsapp_reply",
+            ),
+            whitelisted = setOf("jid:42"),
+            stateQueryProbe = StateQueryProbe { request ->
+                probed = request
+                StateQueryProbeResult.AVAILABLE
+            },
+        )
+
+        val review = assertIs<DraftSubmissionResult.Ready>(
+            fixture.flow.submit(CompileResult("ok", draft, null)),
+        ).review
+
+        assertTrue(review.canArm)
+        assertEquals(query, probed?.query)
+        assertEquals(StateValueType.NUMBER, probed?.valueType)
+        assertEquals(query.canonicalId, review.verifiedStateQueries.single().queryId)
+    }
+
     private fun fixture(
         available: Set<String>,
         transient: Set<String> = emptySet(),
@@ -387,13 +445,14 @@ class ApprovalFlowTest {
         location: DeviceLocation? = null,
         registrar: ArmedAutomationRegistrar = ArmedAutomationRegistrar { true },
         stateQueryProbe: StateQueryProbe = StateQueryProbe { StateQueryProbeResult.AVAILABLE },
+        whitelisted: Set<String> = emptySet(),
     ): Fixture {
         val store = MemoryAutomationStore(initial)
         val repository = MemoryDraftRepository(store)
         val snapshot = FirePolicySnapshot(
             knownTools = AndroidCapabilityProbe.KNOWN_TOOLS,
             availableCapabilities = available,
-            whitelistedConversationIds = emptySet(),
+            whitelistedConversationIds = whitelisted,
             transientlyUnavailableCapabilities = transient,
         )
         val approval = ApprovalService(

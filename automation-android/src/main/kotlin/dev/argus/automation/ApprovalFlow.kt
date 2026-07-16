@@ -4,6 +4,7 @@ import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
+import dev.argus.engine.model.Action
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.CapabilityRequirements
 import dev.argus.engine.model.CreatedBy
@@ -346,33 +347,42 @@ class ApprovalFlow(
     private suspend fun stateQueryReport(snapshot: PendingDraft): StateQueryProbeReport {
         val issues = mutableListOf<ValidationIssue>()
         val verified = mutableListOf<StateQueryProbeEvidence>()
-        snapshot.draft.conditions?.stateComparisons().orEmpty()
-            .distinctBy { it.query.canonicalId to it.valueType }
-            .forEach { condition ->
-                when (probeStateQuery(condition)) {
+        val requests = buildList {
+            snapshot.draft.conditions?.stateComparisons().orEmpty().forEach { condition ->
+                add(StateQueryProbeRequest(condition.query, condition.valueType))
+            }
+            snapshot.draft.actions.filterIsInstance<Action.InvokeLlmV2>().forEach { action ->
+                action.stateContext.forEach { context ->
+                    add(StateQueryProbeRequest(context.query, context.valueType))
+                }
+            }
+        }
+        requests.distinctBy { it.query.canonicalId to it.valueType }
+            .forEach { request ->
+                when (probeStateQuery(request)) {
                     StateQueryProbeResult.AVAILABLE -> verified += StateQueryProbeEvidence(
-                        queryId = condition.query.canonicalId,
-                        family = condition.query.family,
-                        valueType = condition.valueType,
+                        queryId = request.query.canonicalId,
+                        family = request.query.family,
+                        valueType = request.valueType,
                     )
                     StateQueryProbeResult.UNAVAILABLE -> issues += ValidationIssue(
                             Severity.ERROR,
                             "state_query_unavailable",
-                            "Reader non disponibile sul dispositivo: ${condition.query.family.wireName}",
+                            "Reader non disponibile sul dispositivo: ${request.query.family.wireName}",
                         )
                     StateQueryProbeResult.TYPE_MISMATCH -> issues += ValidationIssue(
                             Severity.ERROR,
                             "state_query_type_mismatch",
-                            "Il reader non restituisce il tipo dichiarato: ${condition.valueType.name.lowercase()}",
+                            "Il reader non restituisce il tipo dichiarato: ${request.valueType.name.lowercase()}",
                         )
                 }
             }
         return StateQueryProbeReport(issues = issues, verified = verified)
     }
 
-    private suspend fun probeStateQuery(condition: dev.argus.engine.model.Condition.StateCompare) =
+    private suspend fun probeStateQuery(request: StateQueryProbeRequest) =
         try {
-            stateQueries.probe(condition)
+            stateQueries.probe(request)
         } catch (error: CancellationException) {
             throw error
         } catch (_: Exception) {

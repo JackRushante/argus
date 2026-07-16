@@ -142,6 +142,7 @@ class RevalidatingFirePolicy(
     private fun canReply(action: Action): Boolean = when (action) {
         is Action.WhatsAppReply -> true
         is Action.InvokeLlm -> action.allowedTools.any { it.equals("whatsapp_reply", ignoreCase = true) }
+        is Action.InvokeLlmV2 -> action.allowedTools.any { it.equals("whatsapp_reply", ignoreCase = true) }
         else -> false
     }
 }

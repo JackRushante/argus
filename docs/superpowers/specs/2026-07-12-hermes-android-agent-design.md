@@ -1,8 +1,12 @@
 # Argus — Agente LLM di automazione Android (design)
 
 > **Nome di lavoro:** *Argus* (il gigante dai molti occhi — agente always-on che "vede" lo schermo). Provvisorio, rinominabile.
-> **Data:** 2026-07-12 · **Rev:** 6 (P3 decision record) · **Autore:** Lorenzo Marci + Claude Code (oneplus) + Codex
+> **Data:** 2026-07-12 · **Rev:** 8 (P3-1D) · **Autore:** Lorenzo Marci + Claude Code (oneplus) + Codex
 > **Stato 2026-07-16:** design approvato; P0/P1/P2 completati e P2 su `master`. Tutti i gate fisici P2, inclusi geofence lavoro/casa, sono passati sul campo. **P3 attiva**: fonte normativa per le nuove decisioni è `2026-07-16-argus-p3-decision-record.md`; il piano eseguibile è `2026-07-16-argus-p3-foundations-state-sensors.md`.
+>
+> **Changelog rev 8** (2026-07-16): P3-1D aggiunge `InvokeLlmV2` e `/act` v2: query di stato
+> esplicite, tipizzate, classificate `CLEAN|TAINTED` e `PUBLIC|PRIVATE|SECRET`, probe pre-arm e
+> disclosure deterministica. Il profilo v1 resta invariato; nessuna migrazione senza nuova review.
 >
 > **Changelog rev 7** (2026-07-16): P3-1C chiusa — `/compile` v2 con reader parametrici,
 > policy fingerprintata, fixture condivisa Kotlin/Python, `/health/v2` e rollout server-first
@@ -294,9 +298,9 @@ Principio: **prima il valore nuovo e latency-tolerant** (automazioni da NL, che 
 
 - **`conversationId` WhatsApp (E15): CHIUSO.** Caratterizzato su device reale e usato da reply/shell con binding 1:1 e whitelist. Il display name non è autorità.
 - **Transport loop interattivo (P3):** il provider veloce resta una scelta aperta di costo/UX, non un blocker. Prima implementare il contratto provider-neutral e il tier lento via bridge.
-- **Argus bridge:** `/compile` v2 e `/act` v1 sono completati, isolati dal bridge Guida Bali,
-  deployati e consumati dai rispettivi path Android. Il server conserva `/compile` v1 solo per
-  rollout/rollback; nessun path riapre il fallback `/chat`.
+- **Argus bridge:** `/compile` v2 e `/act` v1+v2 sono implementati e isolati dal bridge Guida Bali.
+  Il server conserva i profili v1 per rollout e regole già approvate; nessun path riapre il
+  fallback `/chat`.
 - **B1:** UX e procedura esatta di ripristino Shizuku via Wireless ADB sul OnePlus 15 non-root;
   auto-start root/Magisk soltanto su un futuro device realmente rootato.
 - **B6:** provider multimodale per aux-vision (Gemini free candidato).

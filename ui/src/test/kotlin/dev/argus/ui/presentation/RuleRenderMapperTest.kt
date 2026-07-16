@@ -117,6 +117,33 @@ class RuleRenderMapperTest {
         )
     }
 
+    @Test fun `generative v2 review exposes exact reader classification and state disclosure`() {
+        val query = StateQuery.DumpsysField("battery", "voltage")
+        val render = RuleRenderMapper.map(
+            withAction(
+                Action.InvokeLlmV2(
+                    goal = "rispondi considerando il voltaggio",
+                    stateContext = listOf(
+                        ApprovedStateContext(
+                            query = query,
+                            valueType = StateValueType.NUMBER,
+                            policyVersion = StateQueryPolicy.VERSION,
+                            integrity = IntegrityLabel.CLEAN,
+                            confidentiality = ConfidentialityLabel.SECRET,
+                        ),
+                    ),
+                    allowedTools = listOf("whatsapp_reply"),
+                    replyTargetSender = true,
+                    timeoutMs = 60_000,
+                ),
+            ),
+        )
+
+        assertTrue(render.privacyNote.orEmpty().contains("reader di stato"))
+        assertTrue(render.actions.single().detail.orEmpty().contains("dumpsys battery · campo voltage"))
+        assertTrue(render.actions.single().detail.orEmpty().contains("CLEAN, SECRET"))
+    }
+
     @Test fun `non-humanizable cron falls back to the raw expression`() {
         val a = Automation(
             AutomationId("t1"), "cron strano", CreatedBy.LLM, AutomationStatus.ARMED,

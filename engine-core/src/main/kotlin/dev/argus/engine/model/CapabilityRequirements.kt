@@ -106,5 +106,10 @@ object CapabilityRequirements {
                 add(GenerativeContract.TOOL_STATE_READ)
             }
         }
+        is Action.InvokeLlmV2 -> buildSet {
+            add(CapabilityIds.ACTION_INVOKE_LLM)
+            addAll(action.allowedTools)
+            action.stateContext.forEach { add(it.query.family.capabilityId) }
+        }
     }
 }

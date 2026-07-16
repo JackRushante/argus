@@ -4,6 +4,7 @@ import dev.argus.engine.brain.Brain
 import dev.argus.engine.brain.ActResult
 import dev.argus.engine.brain.CapabilityManifest
 import dev.argus.engine.brain.CompileResult
+import dev.argus.engine.model.Action
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireContext
 
@@ -36,6 +37,15 @@ class HermesBrain(
         allowedTools: List<String>,
     ): ActResult = try {
         transport.act(context, goal, contextSources, allowedTools)
+    } catch (e: BridgeException) {
+        ActResult(
+            text = null,
+            metaError = "bridge_${e.kind.name.lowercase()}",
+        )
+    }
+
+    override suspend fun actV2(context: FireContext, action: Action.InvokeLlmV2): ActResult = try {
+        transport.actV2(context, action)
     } catch (e: BridgeException) {
         ActResult(
             text = null,

@@ -91,6 +91,9 @@ object StateReadPlanner {
         } else {
             StateReadRequest.EMPTY
         }
+        is Action.InvokeLlmV2 -> StateReadRequest(
+            queries = action.stateContext.mapTo(linkedSetOf()) { it.query },
+        )
         is Action.SetWifi,
         is Action.SetBluetooth,
         is Action.SetDnd,

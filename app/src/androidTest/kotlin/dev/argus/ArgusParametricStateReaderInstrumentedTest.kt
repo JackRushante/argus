@@ -29,6 +29,7 @@ import dev.argus.engine.runtime.TriggerEvent
 import dev.argus.engine.runtime.TriggerEventId
 import dev.argus.engine.runtime.TriggerMatcher
 import dev.argus.automation.StateQueryProbeResult
+import dev.argus.automation.StateQueryProbeRequest
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -59,7 +60,9 @@ class ArgusParametricStateReaderInstrumentedTest {
         )
         assertEquals(
             StateQueryProbeResult.AVAILABLE,
-            services.stateQueryProbe().probe(condition),
+            services.stateQueryProbe().probe(
+                StateQueryProbeRequest(condition.query, condition.valueType),
+            ),
         )
 
         val provider = services.deviceStateSnapshotProvider()

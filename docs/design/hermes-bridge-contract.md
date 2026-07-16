@@ -1,13 +1,14 @@
 # Contratto Argus ↔ Hermes bridge
 
-Stato: `/compile` v2 corrente; `/compile` v1 mantenuto solo per rollout; `/act` resta v1.
+Stato: `/compile` v2 corrente; `/compile` v1 mantenuto solo per rollout; `/act` v2 corrente con
+v1 mantenuto per le regole già approvate.
 
 > **Confine di versione P3:** `schema_version` in questo documento versiona esclusivamente il
 > protocollo bridge. Non è la versione dello schema Room/automazioni e non è la versione del
 > materiale canonico usato per il fingerprint di approvazione. Le tre evolvono separatamente
-> secondo `argus-schema-versioning-adr.md`. `/compile` v2 aggiunge i lettori parametrici senza
-> modificare `/act` v1. I futuri turni agentici richiederanno un altro contratto esplicitamente
-> versionato, mai un fallback implicito a `/chat`.
+> secondo `argus-schema-versioning-adr.md`. `/act` v2 è additivo e non modifica né migra
+> `Action.InvokeLlm`/`/act` v1. I futuri turni agentici richiederanno un altro contratto
+> esplicitamente versionato, mai un fallback implicito a `/chat`.
 
 ## Endpoint e confine di sicurezza
 
@@ -47,7 +48,7 @@ Il client Android corrente non usa più questo endpoint. Usa `GET /health/v2`:
   "status": "ok",
   "model": "gpt-5.5",
   "compile_schema_versions": [1, 2],
-  "act_schema_versions": [1],
+  "act_schema_versions": [1, 2],
   "source_sha256": "<64 caratteri esadecimali lowercase>"
 }
 ```
@@ -213,11 +214,12 @@ tipi coercibili o enum non stringa vengono rifiutati fail-closed.
 
 Il prompt di sistema in `bridge.py` vincola il modello, tra l'altro, a: usare SOLO i tool di
 `available_tools` (regola 1 — un tool assente equivale a non esistente, quindi il probe Android
-deve pubblicare `invoke_llm` quando il runtime generativo è pronto); e — **REGOLA 9, aggiunta
+deve pubblicare `invoke_llm` e `invoke_llm_v2` quando il runtime generativo è pronto); e — **REGOLA 9, aggiunta
 il 2026-07-14 dopo la caratterizzazione reale** — per le reply WhatsApp il trigger deve avere
 `conversationId` scelto tra i `whitelisted_contacts` e `isGroup=false` ESPLICITO (mai null);
-le risposte generate usano il profilo `invoke_llm` P1 esatto, mentre `whatsapp_reply` statica è
-riservata a testi dettati letteralmente dall'utente. Il draft resta comunque soggetto al
+le risposte generate senza stato usano il profilo `invoke_llm` P1 esatto; quelle che richiedono
+stato usano `invoke_llm_v2` con query, tipo, policy e classificazioni esplicite. `whatsapp_reply`
+statica è riservata a testi dettati letteralmente dall'utente. Il draft resta comunque soggetto al
 `DraftValidator` locale: la regola serve a produrre draft armabili al primo colpo, non a
 sostituire i controlli.
 
@@ -228,8 +230,8 @@ millivolt; il modello non può ripiegare su una `state_equals` lessicografica.
 
 ## `POST /act`
 
-`/act` è il confine one-shot P1 per generare il solo testo di una reply. Usa gli stessi header,
-schema v1, bearer, limiti e regole di idempotenza di `/compile`. Il `request_id` Android è
+`/act` è il confine one-shot per generare il solo testo di una reply. Usa gli stessi header,
+bearer, limiti e regole di idempotenza di `/compile`. Il `request_id` Android è
 deterministico: `act-` seguito dal digest SHA-256 di `executionId + NUL + actionIndex`.
 
 Request v1:
@@ -257,7 +259,52 @@ Request v1:
 }
 ```
 
-Invarianti del request:
+Il v1 resta operativo byte-for-byte per le regole `Action.InvokeLlm` già approvate. Il suo profilo
+`state` legacy può inviare le sette chiavi builtin e foreground app; non viene esteso con default.
+
+Request v2 (`Action.InvokeLlmV2`):
+
+```json
+{
+  "schema_version": 2,
+  "request_id": "act-<sha256>",
+  "goal": "Rispondi tenendo conto del voltaggio",
+  "allowed_tools": ["whatsapp_reply"],
+  "context": {
+    "notification": {
+      "package": "com.whatsapp",
+      "sender": "Moglie",
+      "title": "Moglie",
+      "text": "Arrivo tra dieci minuti",
+      "is_group": false
+    },
+    "state": [{
+      "query_id": "state.reader.dumpsys_field.v1.<sha256>",
+      "query": {"type": "dumpsys_field", "service": "battery", "field": "voltage"},
+      "value_type": "NUMBER",
+      "policy_version": 1,
+      "integrity": "CLEAN",
+      "confidentiality": "SECRET",
+      "value": "4200"
+    }]
+  }
+}
+```
+
+Invarianti aggiuntivi v2:
+
+- da 1 a 16 query, senza duplicati; ID canonico, query, tipo e policy devono coincidere;
+- il telefono legge al fire-time esclusivamente quelle query e rifiuta valore mancante, troncato,
+  con control char o non convertibile: non invia stringhe vuote e non ripiega sullo snapshot v1;
+- i reader locali hanno integrità `CLEAN`; la riservatezza minima è `PRIVATE` per builtin e
+  `SECRET` per setting, system property, sysfs e dumpsys; il compilatore può alzarla, mai abbassarla;
+- query, classificazioni, obiettivo, tool e timeout sono nel fingerprint. Il valore runtime non
+  entra nel fingerprint né nei log;
+- la review mostra parametri e classificazioni e il probe pre-arm verifica query e tipo senza
+  mostrare il sample;
+- una regola v1 passa a v2 soltanto con edit, nuova review e nuova approvazione.
+
+Invarianti comuni e v1:
 
 - `context_sources` accetta soltanto `notification` e `state`; `notification` è obbligatorio;
 - `state` deve essere `null` se la regola non lo ha richiesto;
@@ -268,11 +315,11 @@ Invarianti del request:
 - il server tratta goal e contesto come dati delimitati; il contenuto della notifica non può
   cambiare formato, tool o destinatario.
 
-Risposta v1:
+Risposta (stessa versione della request; esempio v2):
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "request_id": "act-<sha256>",
   "result": {"text": "Perfetto, a dopo!"},
   "error_code": null

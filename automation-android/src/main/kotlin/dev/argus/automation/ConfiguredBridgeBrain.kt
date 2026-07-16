@@ -11,6 +11,7 @@ import dev.argus.engine.brain.Brain
 import dev.argus.engine.brain.ActResult
 import dev.argus.engine.brain.CapabilityManifest
 import dev.argus.engine.brain.CompileResult
+import dev.argus.engine.model.Action
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireContext
 import kotlinx.coroutines.CancellationException
@@ -54,6 +55,11 @@ class ConfiguredBridgeBrain(
     ): ActResult {
         requirePrivacyConsent()
         return HermesBrain(currentTransport()).act(context, goal, contextSources, allowedTools)
+    }
+
+    override suspend fun actV2(context: FireContext, action: Action.InvokeLlmV2): ActResult {
+        requirePrivacyConsent()
+        return HermesBrain(currentTransport()).actV2(context, action)
     }
 
     suspend fun health(): BridgeHealthResult {

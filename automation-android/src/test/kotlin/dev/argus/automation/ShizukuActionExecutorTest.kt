@@ -7,6 +7,7 @@ import dev.argus.device.DeviceController
 import dev.argus.device.DeviceToolException
 import dev.argus.device.RingerMode
 import dev.argus.engine.model.Action
+import dev.argus.engine.model.GenerativeAction
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.DndMode
@@ -84,7 +85,7 @@ class ShizukuActionExecutorTest {
 
     @Test
     fun `generative work is only marked submitted when the lane accepts it`() = runTest {
-        val submissions = mutableListOf<Pair<ExecutionId, Action.InvokeLlm>>()
+        val submissions = mutableListOf<Pair<ExecutionId, GenerativeAction>>()
         val action = Action.InvokeLlm(
             goal = "riassumi",
             contextSources = listOf("notification"),
@@ -104,7 +105,10 @@ class ShizukuActionExecutorTest {
             ActionResult.Failure("generative_lane_unavailable"),
             rejecting.execute(action, context),
         )
-        assertEquals(listOf(ExecutionId("execution-1") to action), submissions)
+        assertEquals(
+            listOf<Pair<ExecutionId, GenerativeAction>>(ExecutionId("execution-1") to action),
+            submissions,
+        )
     }
 
     @Test

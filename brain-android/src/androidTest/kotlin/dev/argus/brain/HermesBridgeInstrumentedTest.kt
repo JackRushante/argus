@@ -7,10 +7,19 @@ import android.net.NetworkRequest
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.argus.engine.brain.CapabilityManifest
+import dev.argus.engine.brain.StateReaderManifest
+import dev.argus.engine.brain.WhitelistedContact
 import dev.argus.engine.model.Action
+import dev.argus.engine.model.ApprovedStateContext
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.DndMode
+import dev.argus.engine.model.ConfidentialityLabel
+import dev.argus.engine.model.IntegrityLabel
+import dev.argus.engine.model.StateQuery
+import dev.argus.engine.model.StateQueryFamily
+import dev.argus.engine.model.StateQueryPolicy
+import dev.argus.engine.model.StateValueType
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.ExecutionId
@@ -55,6 +64,7 @@ class HermesBridgeInstrumentedTest {
             assertEquals(CliBridgeTransport.HEALTH_SCHEMA_VERSION, health.schemaVersion)
             assertTrue(CliBridgeTransport.COMPILE_SCHEMA_VERSION in health.compileSchemaVersions)
             assertTrue(CliBridgeTransport.ACT_SCHEMA_VERSION in health.actSchemaVersions)
+            assertTrue(CliBridgeTransport.ACT_V2_SCHEMA_VERSION in health.actSchemaVersions)
             assertEquals("ok", health.status)
         } catch (error: BridgeException) {
             if (expectReachable) throw error
@@ -145,6 +155,41 @@ class HermesBridgeInstrumentedTest {
         assertEquals(Action.SetDnd(DndMode.PRIORITY), draft.actions.single())
     }
 
+    @Test fun liveCompileV2ReturnsExplicitClassifiedStateAction(): Unit = runBlocking {
+        assumeTrue("compile v2 live non richiesto", arguments.getString("runLiveCompileV2") == "true")
+        val manifest = CapabilityManifest(
+            deviceModel = "OnePlus CPH2747",
+            androidVersion = 16,
+            androidApi = 36,
+            shizukuAvailable = true,
+            grantedPermissions = listOf("notification_listener"),
+            availableTools = listOf("invoke_llm_v2", "whatsapp_reply"),
+            unavailableTools = emptyMap(),
+            whitelistedContacts = listOf(WhitelistedContact("Contatto test", "jid:test")),
+            availableTriggers = listOf("notification"),
+            stateReaders = StateReaderManifest(
+                families = listOf(StateQueryFamily.DUMPSYS_FIELD),
+            ),
+        )
+
+        val result = HermesBrain(transport()).compile(
+            "Quando ricevo un messaggio WhatsApp 1:1 da Contatto test, rispondi in modo " +
+                "cordiale tenendo conto del voltaggio batteria in millivolt. Usa il reader " +
+                "dumpsys battery, campo voltage; non aggiungere altre azioni o condizioni.",
+            manifest,
+            DeviceState(),
+        )
+
+        assertNull(result.metaError)
+        val draft = requireNotNull(result.draft)
+        assertTrue(draft.trigger is Trigger.Notification)
+        val action = draft.actions.single() as Action.InvokeLlmV2
+        assertEquals(StateQuery.DumpsysField("battery", "voltage"), action.stateContext.single().query)
+        assertEquals(StateValueType.NUMBER, action.stateContext.single().valueType)
+        assertEquals(IntegrityLabel.CLEAN, action.stateContext.single().integrity)
+        assertEquals(ConfidentialityLabel.SECRET, action.stateContext.single().confidentiality)
+    }
+
     @Test fun liveActReturnsTextWithoutRemoteTarget(): Unit = runBlocking {
         assumeTrue("act live non richiesto", arguments.getString("runLiveAct") == "true")
         val context = FireContext(
@@ -169,6 +214,46 @@ class HermesBridgeInstrumentedTest {
             contextSources = listOf("notification"),
             allowedTools = listOf("whatsapp_reply"),
         )
+
+        assertNull(result.metaError)
+        assertTrue(requireNotNull(result.text).length in 1..4_096)
+    }
+
+    @Test fun liveActV2ReturnsTextFromOnlyTheClassifiedQuery(): Unit = runBlocking {
+        assumeTrue("act v2 live non richiesto", arguments.getString("runLiveActV2") == "true")
+        val query = StateQuery.DumpsysField("battery", "voltage")
+        val context = FireContext(
+            event = TriggerEvent.NotificationPosted(
+                pkg = "com.whatsapp",
+                sender = "Contatto test",
+                title = "Contatto test",
+                text = "Arrivo tra dieci minuti",
+                isGroup = false,
+            ),
+            state = DeviceState(queryValues = mapOf(query.canonicalId to "4200")),
+            automationId = AutomationId("live-act-v2-automation"),
+            approvalFingerprint = ApprovalFingerprint("0".repeat(64)),
+            eventId = TriggerEventId("live-act-v2-event"),
+            executionId = ExecutionId("live-act-v2-20260716-1"),
+            actionIndex = 0,
+        )
+        val action = Action.InvokeLlmV2(
+            goal = "Rispondi in italiano in modo cordiale e molto conciso tenendo conto del voltaggio",
+            stateContext = listOf(
+                ApprovedStateContext(
+                    query = query,
+                    valueType = StateValueType.NUMBER,
+                    policyVersion = StateQueryPolicy.VERSION,
+                    integrity = IntegrityLabel.CLEAN,
+                    confidentiality = ConfidentialityLabel.SECRET,
+                ),
+            ),
+            allowedTools = listOf("whatsapp_reply"),
+            replyTargetSender = true,
+            timeoutMs = 60_000,
+        )
+
+        val result = HermesBrain(transport()).actV2(context, action)
 
         assertNull(result.metaError)
         assertTrue(requireNotNull(result.text).length in 1..4_096)

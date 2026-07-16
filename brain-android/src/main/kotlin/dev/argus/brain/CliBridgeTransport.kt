@@ -4,8 +4,17 @@ import dev.argus.engine.brain.CapabilityManifest
 import dev.argus.engine.brain.ActResult
 import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.model.ArgusJson
+import dev.argus.engine.model.Action
 import dev.argus.engine.model.AutomationDraft
+import dev.argus.engine.model.ApprovedStateContext
+import dev.argus.engine.model.ConfidentialityLabel
+import dev.argus.engine.model.IntegrityLabel
+import dev.argus.engine.model.StateContextClassification
 import dev.argus.engine.model.StateKeys
+import dev.argus.engine.model.StateQuery
+import dev.argus.engine.model.StateQueryPolicy
+import dev.argus.engine.model.StateValueCoercion
+import dev.argus.engine.model.StateValueType
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireContext
 import dev.argus.engine.runtime.TriggerEvent
@@ -176,9 +185,35 @@ data class BridgeHealth(
     @SerialName("source_sha256") val sourceSha256: String,
 )
 
+@Serializable
+private data class ActV2RequestEnvelope(
+    @SerialName("schema_version") val schemaVersion: Int,
+    @SerialName("request_id") val requestId: String,
+    val goal: String,
+    @SerialName("allowed_tools") val allowedTools: List<String>,
+    val context: ActV2ContextEnvelope,
+)
+
+@Serializable
+private data class ActV2ContextEnvelope(
+    val notification: NotificationContextEnvelope,
+    val state: List<ActV2StateValueEnvelope>,
+)
+
+@Serializable
+private data class ActV2StateValueEnvelope(
+    @SerialName("query_id") val queryId: String,
+    val query: StateQuery,
+    @SerialName("value_type") val valueType: StateValueType,
+    @SerialName("policy_version") val policyVersion: Int,
+    val integrity: IntegrityLabel,
+    val confidentiality: ConfidentialityLabel,
+    val value: String,
+)
+
 /**
  * Contratto unico Argus → Hermes: HTTPS, bearer auth, request id idempotente e risposta strict
- * per endpoint (`/compile` v2, `/act` v1, `/health/v2`).
+ * per endpoint (`/compile` v2, `/act` v1+v2, `/health/v2`).
  * Il vecchio fallback `/chat` è intenzionalmente escluso: non è versionato né adatto a un confine
  * che produce dati eseguibili.
  */
@@ -307,7 +342,74 @@ class CliBridgeTransport internal constructor(
             .header("Idempotency-Key", requestId)
             .post(payload.toRequestBody(JSON_MEDIA))
             .build()
-        return parseActResponse(execute(request), expectedRequestId = requestId)
+        return parseActResponse(
+            execute(request),
+            expectedRequestId = requestId,
+            expectedSchemaVersion = ACT_SCHEMA_VERSION,
+        )
+    }
+
+    suspend fun actV2(context: FireContext, action: Action.InvokeLlmV2): ActResult {
+        val token = requireToken()
+        val cleanGoal = action.goal.trim().takeIf {
+            it.isNotEmpty() && it.length <= MAX_GOAL_CHARS
+        } ?: throw BridgeException(
+            BridgeErrorKind.CONFIGURATION,
+            "goal act v2 vuoto o troppo lungo",
+        )
+        if (action.allowedTools != listOf(ACT_REPLY_TOOL) || !action.replyTargetSender) {
+            throw BridgeException(BridgeErrorKind.CONFIGURATION, "contratto act v2 non supportato")
+        }
+        if (action.timeoutMs !in MIN_ACT_TIMEOUT_MILLIS..MAX_ACT_TIMEOUT_MILLIS) {
+            throw BridgeException(BridgeErrorKind.CONFIGURATION, "timeout act v2 non valido")
+        }
+        if (action.stateContext.isEmpty() ||
+            action.stateContext.size > StateContextClassification.MAX_QUERIES ||
+            action.stateContext.map { it.query.canonicalId }.distinct().size != action.stateContext.size
+        ) {
+            throw BridgeException(BridgeErrorKind.CONFIGURATION, "state context act v2 non valido")
+        }
+        val notification = context.event as? TriggerEvent.NotificationPosted
+            ?: throw BridgeException(BridgeErrorKind.CONFIGURATION, "act v2 richiede un evento Notification")
+        if (notification.pkg !in WHATSAPP_PACKAGES || notification.isGroup != false) {
+            throw BridgeException(BridgeErrorKind.CONFIGURATION, "reply act v2 non autorizzata")
+        }
+        val cleanText = notification.text.cleanUntrusted(MAX_NOTIFICATION_TEXT_CHARS)
+            ?: throw BridgeException(BridgeErrorKind.CONFIGURATION, "testo notifica assente")
+        val state = action.stateContext.map { approved -> approved.toActV2Envelope(context.state) }
+        val requestId = deterministicActRequestId(context)
+        val envelope = ActV2RequestEnvelope(
+            schemaVersion = ACT_V2_SCHEMA_VERSION,
+            requestId = requestId,
+            goal = cleanGoal,
+            allowedTools = action.allowedTools,
+            context = ActV2ContextEnvelope(
+                notification = NotificationContextEnvelope(
+                    packageName = notification.pkg,
+                    sender = notification.sender.cleanUntrusted(MAX_NOTIFICATION_SENDER_CHARS),
+                    title = notification.title.cleanUntrusted(MAX_NOTIFICATION_TITLE_CHARS),
+                    text = cleanText,
+                    isGroup = false,
+                ),
+                state = state,
+            ),
+        )
+        val payload = json.encodeToString(envelope)
+        if (payload.toByteArray(Charsets.UTF_8).size > MAX_REQUEST_BYTES) {
+            throw BridgeException(BridgeErrorKind.CONFIGURATION, "richiesta act v2 troppo grande")
+        }
+        val request = Request.Builder()
+            .url(actUrl)
+            .header("Accept", "application/json")
+            .header("Authorization", "Bearer $token")
+            .header("Idempotency-Key", requestId)
+            .post(payload.toRequestBody(JSON_MEDIA))
+            .build()
+        return parseActResponse(
+            execute(request),
+            expectedRequestId = requestId,
+            expectedSchemaVersion = ACT_V2_SCHEMA_VERSION,
+        )
     }
 
     suspend fun health(): BridgeHealth {
@@ -443,7 +545,11 @@ class CliBridgeTransport internal constructor(
         return CompileResult(envelope.reply, draft, null)
     }
 
-    private fun parseActResponse(body: String, expectedRequestId: String): ActResult {
+    private fun parseActResponse(
+        body: String,
+        expectedRequestId: String,
+        expectedSchemaVersion: Int,
+    ): ActResult {
         val envelope = try {
             json.decodeFromString(ActResponseEnvelope.serializer(), body)
         } catch (error: SerializationException) {
@@ -451,7 +557,7 @@ class CliBridgeTransport internal constructor(
         } catch (error: IllegalArgumentException) {
             throw BridgeException(BridgeErrorKind.PROTOCOL, "envelope /act non valido", cause = error)
         }
-        if (envelope.schemaVersion != ACT_SCHEMA_VERSION) {
+        if (envelope.schemaVersion != expectedSchemaVersion) {
             throw BridgeException(BridgeErrorKind.PROTOCOL, "schema_version incompatibile")
         }
         if (envelope.requestId != expectedRequestId) {
@@ -520,6 +626,36 @@ class CliBridgeTransport internal constructor(
         return ActStateEnvelope(safeValues, safeForeground)
     }
 
+    private fun ApprovedStateContext.toActV2Envelope(state: DeviceState): ActV2StateValueEnvelope {
+        if (policyVersion != StateQueryPolicy.VERSION ||
+            !StateQueryPolicy.validQuery(query) ||
+            !StateContextClassification.validValueType(query, valueType) ||
+            integrity != IntegrityLabel.CLEAN ||
+            !StateContextClassification.covers(
+                confidentiality,
+                StateContextClassification.minimumConfidentiality(query),
+            )
+        ) {
+            throw BridgeException(BridgeErrorKind.CONFIGURATION, "classificazione act v2 non valida")
+        }
+        val raw = state.queryValues[query.canonicalId]
+            ?: throw BridgeException(BridgeErrorKind.CONFIGURATION, "valore act v2 non disponibile")
+        if (raw.isEmpty() || raw.length > StateQueryPolicy.MAX_SCALAR_CHARS ||
+            raw.any(Char::isISOControl) || !StateValueCoercion.compatible(raw, valueType)
+        ) {
+            throw BridgeException(BridgeErrorKind.CONFIGURATION, "valore act v2 non valido")
+        }
+        return ActV2StateValueEnvelope(
+            queryId = query.canonicalId,
+            query = query,
+            valueType = valueType,
+            policyVersion = policyVersion,
+            integrity = integrity,
+            confidentiality = confidentiality,
+            value = raw,
+        )
+    }
+
     private fun String?.cleanUntrusted(maximum: Int): String? {
         val clean = this
             ?.filter { !it.isISOControl() || it == '\n' || it == '\t' }
@@ -538,6 +674,7 @@ class CliBridgeTransport internal constructor(
     companion object {
         const val COMPILE_SCHEMA_VERSION = 2
         const val ACT_SCHEMA_VERSION = 1
+        const val ACT_V2_SCHEMA_VERSION = 2
         const val HEALTH_SCHEMA_VERSION = 2
         const val MAX_REQUEST_BYTES = 256 * 1024
         const val MAX_RESPONSE_BYTES = 512 * 1024
@@ -548,6 +685,8 @@ class CliBridgeTransport internal constructor(
         private const val MAX_NOTIFICATION_TEXT_CHARS = 4_096
         private const val MAX_NOTIFICATION_TITLE_CHARS = 512
         private const val MAX_NOTIFICATION_SENDER_CHARS = 256
+        private const val MIN_ACT_TIMEOUT_MILLIS = 1_000L
+        private const val MAX_ACT_TIMEOUT_MILLIS = 120_000L
         private const val MAX_TOKEN_CHARS = 2_048
         private const val MAX_PACKAGE_CHARS = 255
         private const val COMPILE_PATH_SEGMENT = "compile"
@@ -563,7 +702,7 @@ class CliBridgeTransport internal constructor(
         private val PACKAGE_NAME = Regex("[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z0-9_]+)+")
         private val SOURCE_SHA256 = Regex("[0-9a-f]{64}")
         private val SUPPORTED_COMPILE_SCHEMA_VERSIONS = listOf(1, COMPILE_SCHEMA_VERSION)
-        private val SUPPORTED_ACT_SCHEMA_VERSIONS = listOf(ACT_SCHEMA_VERSION)
+        private val SUPPORTED_ACT_SCHEMA_VERSIONS = listOf(ACT_SCHEMA_VERSION, ACT_V2_SCHEMA_VERSION)
         private val ACT_CONTEXT_SOURCES = setOf("notification", "state")
         private val WHATSAPP_PACKAGES = setOf("com.whatsapp", "com.whatsapp.w4b")
 

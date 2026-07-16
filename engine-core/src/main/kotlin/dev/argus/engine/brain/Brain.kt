@@ -1,5 +1,6 @@
 package dev.argus.engine.brain
 import dev.argus.engine.model.AutomationDraft
+import dev.argus.engine.model.Action
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireContext
 
@@ -30,4 +31,8 @@ interface Brain {
         contextSources: List<String>,
         allowedTools: List<String>,
     ): ActResult
+
+    /** Profilo additivo: le implementazioni legacy falliscono chiuse senza rompere i fake v1. */
+    suspend fun actV2(context: FireContext, action: Action.InvokeLlmV2): ActResult =
+        ActResult(text = null, metaError = "act_v2_unsupported")
 }

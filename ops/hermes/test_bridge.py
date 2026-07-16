@@ -207,6 +207,8 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(bridge.STATE_QUERY_POLICY_VERSION, fixture["policy_version"])
         self.assertEqual(bridge.STATE_READER_LIMITS, fixture["limits"])
         self.assertEqual(list(bridge.STATE_QUERY_FAMILIES), fixture["all_families"])
+        for case in fixture["canonical_ids"]:
+            self.assertEqual(case["id"], bridge.state_query_canonical_id(case["query"]))
         allowed_keys = set(bridge.BUILTIN_STATE_VALUES)
         for case in fixture["cases"]:
             families = set(case.get("available_families", fixture["all_families"]))
@@ -267,6 +269,39 @@ class BridgeTest(unittest.TestCase):
         self.assertFalse(
             bridge.validate_action({"type": "copy_to_clipboard", "extractionRegex": "x" * 600}, tools)
         )
+
+    def test_invoke_llm_v2_requires_explicit_typed_and_classified_state(self):
+        query = {"type": "dumpsys_field", "service": "battery", "field": "voltage"}
+        action = {
+            "type": "invoke_llm_v2",
+            "goal": "rispondi considerando il voltaggio",
+            "stateContext": [{
+                "query": query,
+                "valueType": "NUMBER",
+                "policyVersion": bridge.STATE_QUERY_POLICY_VERSION,
+                "integrity": "CLEAN",
+                "confidentiality": "SECRET",
+            }],
+            "allowedTools": ["whatsapp_reply"],
+            "replyTargetSender": True,
+            "timeoutMs": 60_000,
+        }
+        arguments = (
+            {"invoke_llm_v2"}, set(bridge.BUILTIN_STATE_VALUES),
+            {"dumpsys_field"},
+        )
+        self.assertTrue(bridge.validate_action(action, *arguments))
+
+        underclassified = json.loads(json.dumps(action))
+        underclassified["stateContext"][0]["confidentiality"] = "PRIVATE"
+        self.assertFalse(bridge.validate_action(underclassified, *arguments))
+        missing_timeout = dict(action)
+        del missing_timeout["timeoutMs"]
+        self.assertFalse(bridge.validate_action(missing_timeout, *arguments))
+        malformed_enum = json.loads(json.dumps(action))
+        malformed_enum["stateContext"][0]["confidentiality"] = ["SECRET"]
+        self.assertFalse(bridge.validate_action(malformed_enum, *arguments))
+        self.assertIn("invoke_llm_v2", bridge.build_prompt(self.request_v2()))
 
     def test_static_shell_is_bounded_and_rejected_on_message_triggers(self):
         tools = {"run_shell"}
@@ -714,7 +749,9 @@ class BridgeHttpTest(unittest.TestCase):
         )
         self.assertEqual(bridge.HEALTH_SCHEMA_VERSION, current["schema_version"])
         self.assertEqual(list(bridge.SUPPORTED_COMPILE_SCHEMA_VERSIONS), current["compile_schema_versions"])
-        self.assertEqual([bridge.ACT_SCHEMA_VERSION], current["act_schema_versions"])
+        self.assertEqual(
+            list(bridge.SUPPORTED_ACT_SCHEMA_VERSIONS), current["act_schema_versions"]
+        )
         self.assertEqual(64, len(current["source_sha256"]))
 
     def test_compile_is_strict_idempotent_and_conflict_safe(self):
@@ -765,6 +802,43 @@ class BridgeHttpTest(unittest.TestCase):
         )
         self.assertEqual(409, status)
         self.assertEqual("idempotency_conflict", body["error"])
+
+    def test_act_v2_accepts_only_exact_classified_reader_values(self):
+        request = self.valid_act_v2_request()
+        status, body = self.request(
+            "/act", request, request_id=request["request_id"]
+        )
+        self.assertEqual(200, status)
+        self.assertEqual(bridge.ACT_V2_SCHEMA_VERSION, body["schema_version"])
+        self.assertEqual(1, self.calls)
+
+        mutations = []
+        underclassified = self.valid_act_v2_request("act-v2-underclassified")
+        underclassified["context"]["state"][0]["confidentiality"] = "PRIVATE"
+        mutations.append(underclassified)
+        tainted = self.valid_act_v2_request("act-v2-tainted")
+        tainted["context"]["state"][0]["integrity"] = "TAINTED"
+        mutations.append(tainted)
+        mismatched = self.valid_act_v2_request("act-v2-query-id")
+        mismatched["context"]["state"][0]["query_id"] = "state.reader.fake"
+        mutations.append(mismatched)
+        unknown = self.valid_act_v2_request("act-v2-extra")
+        unknown["context"]["state"][0]["extra"] = "no"
+        mutations.append(unknown)
+        malformed_unicode = self.valid_act_v2_request("act-v2-unicode")
+        malformed_unicode["context"]["state"][0]["value"] = "\ud800"
+        mutations.append(malformed_unicode)
+        malformed_enum = self.valid_act_v2_request("act-v2-enum")
+        malformed_enum["context"]["state"][0]["confidentiality"] = ["SECRET"]
+        malformed_enum["context"]["state"][0]["value_type"] = ["NUMBER"]
+        mutations.append(malformed_enum)
+
+        for invalid in mutations:
+            status, _ = self.request(
+                "/act", invalid, request_id=invalid["request_id"]
+            )
+            self.assertEqual(400, status)
+        self.assertEqual(1, self.calls)
 
     def test_invalid_contract_never_calls_model(self):
         request = self.valid_request()
@@ -839,6 +913,34 @@ class BridgeHttpTest(unittest.TestCase):
                     "is_group": False,
                 },
                 "state": None,
+            },
+        }
+
+    @staticmethod
+    def valid_act_v2_request(request_id="act-v2-http-1"):
+        query = {"type": "dumpsys_field", "service": "battery", "field": "voltage"}
+        return {
+            "schema_version": bridge.ACT_V2_SCHEMA_VERSION,
+            "request_id": request_id,
+            "goal": "rispondi tenendo conto del voltaggio",
+            "allowed_tools": ["whatsapp_reply"],
+            "context": {
+                "notification": {
+                    "package": "com.whatsapp",
+                    "sender": "Moglie",
+                    "title": "Moglie",
+                    "text": "ciao",
+                    "is_group": False,
+                },
+                "state": [{
+                    "query_id": bridge.state_query_canonical_id(query),
+                    "query": query,
+                    "value_type": "NUMBER",
+                    "policy_version": bridge.STATE_QUERY_POLICY_VERSION,
+                    "integrity": "CLEAN",
+                    "confidentiality": "SECRET",
+                    "value": "4200",
+                }],
             },
         }
 

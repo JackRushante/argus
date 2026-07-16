@@ -4,9 +4,13 @@ import dev.argus.engine.brain.CapabilityManifest
 import dev.argus.engine.brain.StateReaderManifest
 import dev.argus.engine.brain.WhitelistedContact
 import dev.argus.engine.model.ApprovalFingerprint
+import dev.argus.engine.model.Action
+import dev.argus.engine.model.ApprovedStateContext
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.CmpOp
 import dev.argus.engine.model.Condition
+import dev.argus.engine.model.ConfidentialityLabel
+import dev.argus.engine.model.IntegrityLabel
 import dev.argus.engine.model.StateQueryFamily
 import dev.argus.engine.model.StateQuery
 import dev.argus.engine.model.StateQueryPolicy
@@ -130,14 +134,14 @@ class CliBridgeTransportTest {
 
     @Test fun `health uses the same authenticated strict boundary`(): Unit = runBlocking {
         server.enqueue(jsonResponse(
-            """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1,2],"act_schema_versions":[1],"source_sha256":"${"a".repeat(64)}"}""",
+            """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1,2],"act_schema_versions":[1,2],"source_sha256":"${"a".repeat(64)}"}""",
         ))
 
         val health = transport().health()
 
         assertEquals(2, health.schemaVersion)
         assertTrue(2 in health.compileSchemaVersions)
-        assertEquals(listOf(1), health.actSchemaVersions)
+        assertEquals(listOf(1, 2), health.actSchemaVersions)
         assertEquals("gpt-5.5", health.model)
         val request = assertNotNull(server.takeRequest(2, TimeUnit.SECONDS))
         assertEquals("/health/v2", request.path)
@@ -146,10 +150,11 @@ class CliBridgeTransportTest {
 
     @Test fun `health rejects incomplete drifted or extended contracts`(): Unit = runBlocking {
         val invalid = listOf(
-            """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1],"act_schema_versions":[1],"source_sha256":"${"a".repeat(64)}"}""",
-            """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1,2,3],"act_schema_versions":[1],"source_sha256":"${"a".repeat(64)}"}""",
-            """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1,2],"act_schema_versions":[1],"source_sha256":"not-a-sha"}""",
-            """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1,2],"act_schema_versions":[1],"source_sha256":"${"a".repeat(64)}","surprise":true}""",
+            """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1],"act_schema_versions":[1,2],"source_sha256":"${"a".repeat(64)}"}""",
+            """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1,2,3],"act_schema_versions":[1,2],"source_sha256":"${"a".repeat(64)}"}""",
+            """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1,2],"act_schema_versions":[1],"source_sha256":"${"a".repeat(64)}"}""",
+            """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1,2],"act_schema_versions":[1,2],"source_sha256":"not-a-sha"}""",
+            """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1,2],"act_schema_versions":[1,2],"source_sha256":"${"a".repeat(64)}","surprise":true}""",
         )
 
         invalid.forEach { body ->
@@ -224,6 +229,60 @@ class CliBridgeTransportTest {
         assertNull(server.takeRequest(200, TimeUnit.MILLISECONDS))
     }
 
+    @Test fun `act v2 sends only exact classified query values and fails closed when missing`(): Unit = runBlocking {
+        val query = StateQuery.DumpsysField("battery", "voltage")
+        val action = Action.InvokeLlmV2(
+            goal = "rispondi tenendo conto del voltaggio",
+            stateContext = listOf(
+                ApprovedStateContext(
+                    query = query,
+                    valueType = StateValueType.NUMBER,
+                    policyVersion = StateQueryPolicy.VERSION,
+                    integrity = IntegrityLabel.CLEAN,
+                    confidentiality = ConfidentialityLabel.SECRET,
+                ),
+            ),
+            allowedTools = listOf("whatsapp_reply"),
+            replyTargetSender = true,
+            timeoutMs = 60_000,
+        )
+        val expectedRequestId = actRequestId("execution-1", 0)
+        server.enqueue(jsonResponse(
+            """{"schema_version":2,"request_id":"$expectedRequestId","result":{"text":"Va bene"},"error_code":null}""",
+        ))
+
+        val result = transport().actV2(
+            fireContext().copy(
+                state = fireContext().state.copy(
+                    queryValues = mapOf(query.canonicalId to "4200"),
+                ),
+            ),
+            action,
+        )
+
+        assertEquals("Va bene", result.text)
+        val raw = assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8()
+        val root = Json.parseToJsonElement(raw).jsonObject
+        assertEquals(2, root.getValue("schema_version").jsonPrimitive.content.toInt())
+        assertFalse("context_sources" in root)
+        val state = root.getValue("context").jsonObject.getValue("state").jsonArray
+        assertEquals(1, state.size)
+        val sent = state.single().jsonObject
+        assertEquals(query.canonicalId, sent.getValue("query_id").jsonPrimitive.content)
+        assertEquals("NUMBER", sent.getValue("value_type").jsonPrimitive.content)
+        assertEquals("CLEAN", sent.getValue("integrity").jsonPrimitive.content)
+        assertEquals("SECRET", sent.getValue("confidentiality").jsonPrimitive.content)
+        assertEquals("4200", sent.getValue("value").jsonPrimitive.content)
+        assertFalse(raw.contains("private_state"))
+        assertFalse(raw.contains("com.whatsapp\"" + ":\"normal"))
+
+        val error = assertFailsWith<BridgeException> {
+            transport().actV2(fireContext(), action)
+        }
+        assertEquals(BridgeErrorKind.CONFIGURATION, error.kind)
+        assertNull(server.takeRequest(200, TimeUnit.MILLISECONDS))
+    }
+
     @Test fun `act response cannot choose a target or smuggle unknown fields`(): Unit = runBlocking {
         val requestId = actRequestId("execution-1", 0)
         server.enqueue(jsonResponse(
@@ -283,6 +342,21 @@ class CliBridgeTransportTest {
 
         assertNull(result.draft)
         assertEquals("draft_invalid", result.metaError)
+    }
+
+    @Test fun `compile v2 decodes explicit classified generative state without v1 defaults`(): Unit = runBlocking {
+        server.enqueue(jsonResponse(
+            """{"schema_version":2,"request_id":"$REQUEST_ID","reply":"ok","meta":{"draft":{"name":"reply con stato","trigger":{"type":"notification","pkg":"com.whatsapp","conversationId":"jid:42","isGroup":false},"actions":[{"type":"invoke_llm_v2","goal":"rispondi considerando il voltaggio","stateContext":[{"query":{"type":"dumpsys_field","service":"battery","field":"voltage"},"valueType":"NUMBER","policyVersion":1,"integrity":"CLEAN","confidentiality":"SECRET"}],"allowedTools":["whatsapp_reply"],"replyTargetSender":true,"timeoutMs":60000}],"cooldownMs":60000},"error_code":null}}""",
+        ))
+
+        val result = transport().compile("rispondi usando il voltaggio", manifest, DeviceState())
+
+        val action = assertNotNull(result.draft).actions.single()
+        assertTrue(action is Action.InvokeLlmV2)
+        assertEquals(StateQuery.DumpsysField("battery", "voltage"), action.stateContext.single().query)
+        assertEquals(ConfidentialityLabel.SECRET, action.stateContext.single().confidentiality)
+        assertEquals(60_000, action.timeoutMs)
+        assertNull(result.metaError)
     }
 
     @Test fun `explicit no-draft response preserves reply and error code`(): Unit = runBlocking {

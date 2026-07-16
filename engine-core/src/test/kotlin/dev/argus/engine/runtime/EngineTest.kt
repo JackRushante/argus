@@ -648,4 +648,29 @@ class EngineTest {
         assertEquals("dev.example", contexts.last().foregroundApp)
         assertEquals(null, contexts.last().location)
     }
+
+    @Test
+    fun `invoke llm v2 requests only fingerprinted parametric readers`() {
+        val query = StateQuery.DumpsysField("battery", "voltage")
+        val action = Action.InvokeLlmV2(
+            goal = "rispondi",
+            stateContext = listOf(
+                ApprovedStateContext(
+                    query = query,
+                    valueType = StateValueType.NUMBER,
+                    policyVersion = StateQueryPolicy.VERSION,
+                    integrity = IntegrityLabel.CLEAN,
+                    confidentiality = ConfidentialityLabel.SECRET,
+                ),
+            ),
+            allowedTools = listOf("whatsapp_reply"),
+            replyTargetSender = true,
+            timeoutMs = 60_000,
+        )
+
+        assertEquals(
+            StateReadRequest(queries = setOf(query)),
+            StateReadPlanner.forAction(action),
+        )
+    }
 }

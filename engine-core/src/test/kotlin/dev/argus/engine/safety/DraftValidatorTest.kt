@@ -160,6 +160,77 @@ class DraftValidatorTest {
         ))
         assertEquals(emptyList(), errors(v.validate(withState, whitelistedIds = setOf("jid:42"))))
     }
+    @Test fun `v2 generative state is exact typed classified and never underclassified`() {
+        val query = StateQuery.DumpsysField("battery", "voltage")
+        val context = ApprovedStateContext(
+            query = query,
+            valueType = StateValueType.NUMBER,
+            policyVersion = StateQueryPolicy.VERSION,
+            integrity = IntegrityLabel.CLEAN,
+            confidentiality = ConfidentialityLabel.SECRET,
+        )
+        fun draft(state: List<ApprovedStateContext>) = validGenerative.copy(
+            actions = listOf(
+                Action.InvokeLlmV2(
+                    goal = "rispondi considerando il voltaggio",
+                    stateContext = state,
+                    allowedTools = listOf("whatsapp_reply"),
+                    replyTargetSender = true,
+                    timeoutMs = 60_000,
+                ),
+            ),
+        )
+
+        val valid = v.validate(draft(listOf(context)), setOf("jid:42"))
+        assertEquals(emptyList(), errors(valid))
+        assertTrue(valid.any { it.code == "state_context_disclosure" })
+        assertTrue(valid.any { it.code == "secret_state_context" })
+
+        assertTrue(
+            "state_context_underclassified" in errors(
+                v.validate(
+                    draft(listOf(context.copy(confidentiality = ConfidentialityLabel.PRIVATE))),
+                    setOf("jid:42"),
+                ),
+            ),
+        )
+        assertTrue(
+            "state_context_integrity_invalid" in errors(
+                v.validate(
+                    draft(listOf(context.copy(integrity = IntegrityLabel.TAINTED))),
+                    setOf("jid:42"),
+                ),
+            ),
+        )
+        assertTrue(
+            "state_context_duplicated" in errors(
+                v.validate(draft(listOf(context, context)), setOf("jid:42")),
+            ),
+        )
+        assertTrue(
+            "state_context_type_invalid" in errors(
+                v.validate(
+                    draft(
+                        listOf(
+                            context.copy(
+                                query = StateQuery.Builtin(StateKeys.BATTERY),
+                                valueType = StateValueType.BOOLEAN,
+                            ),
+                        ),
+                    ),
+                    setOf("jid:42"),
+                ),
+            ),
+        )
+        assertTrue(
+            "state_context_policy_incompatible" in errors(
+                v.validate(
+                    draft(listOf(context.copy(policyVersion = StateQueryPolicy.VERSION + 1))),
+                    setOf("jid:42"),
+                ),
+            ),
+        )
+    }
     @Test fun `generative context sources must be present and include notification`() {
         val empty = validGenerative.copy(actions = listOf(
             Action.InvokeLlm("g", listOf(), listOf("whatsapp_reply"), true)

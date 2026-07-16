@@ -120,6 +120,7 @@ internal fun Action.journalType(): String = when (this) {
     is Action.RunShell -> ActionTypeIds.RUN_SHELL
     is Action.CopyToClipboard -> ActionTypeIds.COPY_TO_CLIPBOARD
     is Action.InvokeLlm -> ActionTypeIds.INVOKE_LLM
+    is Action.InvokeLlmV2 -> ActionTypeIds.INVOKE_LLM_V2
 }
 
 internal fun ActionResult.journalOutcome(): ActionJournalOutcome = when (this) {

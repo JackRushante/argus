@@ -7,6 +7,12 @@ import dev.argus.engine.brain.Brain
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.ApprovalFingerprints
 import dev.argus.engine.model.AutomationStatus
+import dev.argus.engine.model.GenerativeContract
+import dev.argus.engine.model.GenerativeAction
+import dev.argus.engine.model.IntegrityLabel
+import dev.argus.engine.model.StateContextClassification
+import dev.argus.engine.model.StateQueryPolicy
+import dev.argus.engine.model.StateValueCoercion
 import dev.argus.engine.runtime.ActionJournalOutcome
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.runtime.ExecutionStatus
@@ -63,14 +69,23 @@ class AndroidGenerativeLane(
         }
     }
 
-    override fun trySubmit(context: FireContext, action: Action.InvokeLlm): Boolean {
+    override fun trySubmit(context: FireContext, action: GenerativeAction): Boolean {
         val frozenContext = context.copy(
-            state = context.state.copy(values = context.state.values.toMap()),
+            state = context.state.copy(
+                values = context.state.values.toMap(),
+                queryValues = context.state.queryValues.toMap(),
+            ),
         )
-        val frozenAction = action.copy(
-            contextSources = action.contextSources.toList(),
-            allowedTools = action.allowedTools.toList(),
-        )
+        val frozenAction: GenerativeAction = when (action) {
+            is Action.InvokeLlm -> action.copy(
+                contextSources = action.contextSources.toList(),
+                allowedTools = action.allowedTools.toList(),
+            )
+            is Action.InvokeLlmV2 -> action.copy(
+                stateContext = action.stateContext.toList(),
+                allowedTools = action.allowedTools.toList(),
+            )
+        }
         return queue.trySend(QueuedAction(frozenContext, frozenAction)).isSuccess
     }
 
@@ -92,13 +107,16 @@ class AndroidGenerativeLane(
         }
 
         val act = try {
-            withTimeout(queued.action.timeoutMs) {
-                brain.act(
-                    context = queued.context,
-                    goal = queued.action.goal,
-                    contextSources = queued.action.contextSources,
-                    allowedTools = queued.action.allowedTools,
-                )
+            withTimeout(timeoutMs(queued.action)) {
+                when (val action = queued.action) {
+                    is Action.InvokeLlm -> brain.act(
+                        context = queued.context,
+                        goal = action.goal,
+                        contextSources = action.contextSources,
+                        allowedTools = action.allowedTools,
+                    )
+                    is Action.InvokeLlmV2 -> brain.actV2(queued.context, action)
+                }
             }
         } catch (_: TimeoutCancellationException) {
             complete(queued, ActionJournalOutcome.FAILED, "act_timeout")
@@ -162,7 +180,7 @@ class AndroidGenerativeLane(
         } ?: false
 
     private suspend fun validate(queued: QueuedAction): String? {
-        if (!validContract(queued.action)) return "action_contract_invalid"
+        if (!validContract(queued)) return "action_contract_invalid"
         val current = automations.get(queued.context.automationId) ?: return "rule_missing"
         if (current.status != AutomationStatus.ARMED || !current.enabled) return "rule_inactive"
         if (
@@ -178,14 +196,46 @@ class AndroidGenerativeLane(
         }
     }
 
-    private fun validContract(action: Action.InvokeLlm): Boolean =
-        action.replyTargetSender &&
+    private fun validContract(queued: QueuedAction): Boolean = when (val action = queued.action) {
+        is Action.InvokeLlm -> action.replyTargetSender &&
             action.contextSources.isNotEmpty() &&
             action.contextSources == action.contextSources.distinct() &&
             "notification" in action.contextSources &&
             action.contextSources.all { it in P1_CONTEXT_SOURCES } &&
             action.allowedTools == listOf(REPLY_TOOL) &&
-            action.timeoutMs > 0
+            action.timeoutMs in MIN_TIMEOUT_MILLIS..MAX_TIMEOUT_MILLIS
+        is Action.InvokeLlmV2 -> action.replyTargetSender &&
+            action.allowedTools == GenerativeContract.ALLOWED_TOOLS &&
+            action.timeoutMs in MIN_TIMEOUT_MILLIS..MAX_TIMEOUT_MILLIS &&
+            action.stateContext.isNotEmpty() &&
+            action.stateContext.size <= StateContextClassification.MAX_QUERIES &&
+            action.stateContext.map { it.query.canonicalId }.distinct().size == action.stateContext.size &&
+            action.stateContext.all { context ->
+                context.policyVersion == StateQueryPolicy.VERSION &&
+                    StateQueryPolicy.validQuery(context.query) &&
+                    StateContextClassification.validValueType(context.query, context.valueType) &&
+                    context.integrity == IntegrityLabel.CLEAN &&
+                    StateContextClassification.covers(
+                        context.confidentiality,
+                        StateContextClassification.minimumConfidentiality(context.query),
+                    ) &&
+                    queuedValueIsValid(queued.context, context.query.canonicalId, context.valueType)
+            }
+    }
+
+    private fun queuedValueIsValid(
+        context: FireContext,
+        queryId: String,
+        valueType: dev.argus.engine.model.StateValueType,
+    ): Boolean = context.state.queryValues[queryId]?.let { raw ->
+        raw.isNotEmpty() && raw.length <= StateQueryPolicy.MAX_SCALAR_CHARS &&
+            raw.none(Char::isISOControl) && StateValueCoercion.compatible(raw, valueType)
+    } == true
+
+    private fun timeoutMs(action: GenerativeAction): Long = when (action) {
+        is Action.InvokeLlm -> action.timeoutMs
+        is Action.InvokeLlmV2 -> action.timeoutMs
+    }
 
     private suspend fun deferSafely(context: FireContext, text: String): Boolean = try {
         deferredReplies.defer(context, text)
@@ -222,12 +272,14 @@ class AndroidGenerativeLane(
 
     private class QueuedAction(
         val context: FireContext,
-        val action: Action.InvokeLlm,
+        val action: GenerativeAction,
     )
 
     private companion object {
         const val DEFAULT_CAPACITY = 8
         const val DEFAULT_HANDSHAKE_TIMEOUT_MILLIS = 5_000L
+        const val MIN_TIMEOUT_MILLIS = 1_000L
+        const val MAX_TIMEOUT_MILLIS = 120_000L
         const val REPLY_TOOL = "whatsapp_reply"
         val P1_CONTEXT_SOURCES = setOf("notification", "state")
         val PENDING_EXECUTION_STATES = setOf(ExecutionStatus.RUNNING, ExecutionStatus.SUBMITTED)

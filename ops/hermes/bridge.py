@@ -29,6 +29,8 @@ from zoneinfo import ZoneInfo
 LEGACY_COMPILE_SCHEMA_VERSION = 1
 COMPILE_SCHEMA_VERSION = 2
 ACT_SCHEMA_VERSION = 1
+ACT_V2_SCHEMA_VERSION = 2
+SUPPORTED_ACT_SCHEMA_VERSIONS = (ACT_SCHEMA_VERSION, ACT_V2_SCHEMA_VERSION)
 HEALTH_SCHEMA_VERSION = 2
 SUPPORTED_COMPILE_SCHEMA_VERSIONS = (
     LEGACY_COMPILE_SCHEMA_VERSION,
@@ -174,6 +176,8 @@ Action, discriminata da "type":
    integrale; per gli OTP usa "(?:^|[^+0-9])([0-9]{4,8})(?:[^0-9]|$)")}
 - {"type":"invoke_llm", "goal":string, "contextSources":[string,...],
    "allowedTools":[string,...], "replyTargetSender":boolean, "timeoutMs":integer}
+- {"type":"invoke_llm_v2", "goal":string, "stateContext":[ApprovedStateContext,...],
+   "allowedTools":["whatsapp_reply"], "replyTargetSender":true, "timeoutMs":integer}
 """.strip()
 
 
@@ -191,9 +195,17 @@ manifest.state_readers.families:
 - {"type":"sysfs","path":string}  // path assoluto normalizzato sotto /sys/
 - {"type":"dumpsys_field","service":string,"field":string}
 
-I reader sono soltanto condizioni locali read-only: non interpolare mai il valore letto in
-comandi, routing, destinatari, URL o mutazioni di automazioni. Il sample non viene inviato al
-bridge. Per il voltaggio batteria sul device corrente usa dumpsys_field service "battery", campo
+ApprovedStateContext (solo invoke_llm_v2; tutti i campi sono obbligatori):
+{"query":StateQuery,"valueType":"TEXT"|"NUMBER"|"BOOLEAN","policyVersion":1,
+ "integrity":"CLEAN","confidentiality":"PUBLIC"|"PRIVATE"|"SECRET"}
+La classificazione minima e' PRIVATE per builtin e SECRET per setting, system_property, sysfs e
+dumpsys_field. Non classificare mai un reader locale come TAINTED e non abbassare il minimo.
+
+I reader sono sempre read-only: state_compare resta una condizione locale; soltanto
+invoke_llm_v2 può condividere al fire-time le query elencate e classificate nel suo fingerprint.
+Non interpolare mai il valore letto in comandi, routing, destinatari, URL o mutazioni di
+automazioni. Il sample di probe/compile non viene inviato al bridge. Per il voltaggio batteria sul
+device corrente usa dumpsys_field service "battery", campo
 "voltage", valueType NUMBER; la soglia deve essere espressa chiaramente in millivolt, altrimenti
 chiedi chiarimento.
 """.strip()
@@ -290,13 +302,18 @@ def validate_request(data: Any, idempotency_key: str | None) -> dict[str, Any]:
 
 
 def validate_act_request(data: Any, idempotency_key: str | None) -> dict[str, Any]:
+    if not isinstance(data, dict) or not _is_int(data.get("schema_version")):
+        raise RequestError(400, "invalid_act_envelope")
+    if data["schema_version"] not in SUPPORTED_ACT_SCHEMA_VERSIONS:
+        raise RequestError(409, "schema_version_incompatible")
+    if data["schema_version"] == ACT_V2_SCHEMA_VERSION:
+        return validate_act_v2_request(data, idempotency_key)
+
     required = {
         "schema_version", "request_id", "goal", "context_sources", "allowed_tools", "context",
     }
     if not isinstance(data, dict) or not _exact_keys(data, required):
         raise RequestError(400, "invalid_act_envelope")
-    if not _is_int(data["schema_version"]) or data["schema_version"] != ACT_SCHEMA_VERSION:
-        raise RequestError(409, "schema_version_incompatible")
     request_id = data["request_id"]
     if not isinstance(request_id, str) or not REQUEST_ID_RE.fullmatch(request_id):
         raise RequestError(400, "invalid_request_id")
@@ -326,6 +343,111 @@ def validate_act_request(data: Any, idempotency_key: str | None) -> dict[str, An
     elif context["state"] is not None:
         raise RequestError(400, "unapproved_state_context")
     return data
+
+
+def validate_act_v2_request(data: Any, idempotency_key: str | None) -> dict[str, Any]:
+    required = {"schema_version", "request_id", "goal", "allowed_tools", "context"}
+    if not isinstance(data, dict) or not _exact_keys(data, required):
+        raise RequestError(400, "invalid_act_envelope")
+    request_id = data["request_id"]
+    if not isinstance(request_id, str) or not REQUEST_ID_RE.fullmatch(request_id):
+        raise RequestError(400, "invalid_request_id")
+    if idempotency_key != request_id:
+        raise RequestError(400, "idempotency_key_mismatch")
+    if not _string(data["goal"], 4_000):
+        raise RequestError(400, "invalid_goal")
+    if data["allowed_tools"] != [ACT_REPLY_TOOL]:
+        raise RequestError(400, "invalid_allowed_tools")
+    context = data["context"]
+    if not isinstance(context, dict) or not _exact_keys(context, {"notification", "state"}):
+        raise RequestError(400, "invalid_act_context")
+    validate_notification_context(context["notification"])
+    state = context["state"]
+    if not isinstance(state, list) or not (1 <= len(state) <= 16):
+        raise RequestError(400, "invalid_act_state")
+    query_ids: list[str] = []
+    for item in state:
+        validate_act_v2_state_value(item)
+        query_ids.append(item["query_id"])
+    if len(query_ids) != len(set(query_ids)):
+        raise RequestError(400, "invalid_act_state")
+    return data
+
+
+def validate_act_v2_state_value(value: Any) -> None:
+    required = {
+        "query_id", "query", "value_type", "policy_version", "integrity",
+        "confidentiality", "value",
+    }
+    if not isinstance(value, dict) or not _exact_keys(value, required):
+        raise RequestError(400, "invalid_act_state")
+    query = value["query"]
+    if not validate_state_query(
+        query, set(BUILTIN_STATE_VALUES), set(STATE_QUERY_FAMILIES)
+    ):
+        raise RequestError(400, "invalid_act_state")
+    if value["query_id"] != state_query_canonical_id(query):
+        raise RequestError(400, "invalid_act_state")
+    if value["policy_version"] != STATE_QUERY_POLICY_VERSION or (
+        not _is_int(value["policy_version"])
+    ):
+        raise RequestError(400, "invalid_act_state")
+    if value["integrity"] != "CLEAN":
+        raise RequestError(400, "invalid_act_state")
+    minimum = "PRIVATE" if query["type"] == "builtin" else "SECRET"
+    confidentiality_rank = {"PUBLIC": 0, "PRIVATE": 1, "SECRET": 2}
+    confidentiality = value["confidentiality"]
+    if not isinstance(confidentiality, str) or (
+        confidentiality_rank.get(confidentiality, -1) < confidentiality_rank[minimum]
+    ):
+        raise RequestError(400, "invalid_act_state")
+    value_type = value["value_type"]
+    raw = value["value"]
+    if not valid_state_context_type(query, value_type) or not valid_state_context_value(
+        raw, value_type
+    ):
+        raise RequestError(400, "invalid_act_state")
+
+
+def state_query_canonical_id(query: dict[str, Any]) -> str:
+    family = query["type"]
+    if family == "builtin":
+        parts = (family, query["key"])
+    elif family == "setting":
+        parts = (family, query["namespace"], query["key"])
+    elif family == "system_property":
+        parts = (family, query["name"])
+    elif family == "sysfs":
+        parts = (family, query["path"])
+    else:
+        parts = (family, query["service"], query["field"])
+    material = "".join(f"{len(part.encode('utf-8'))}:{part}" for part in parts)
+    digest = hashlib.sha256(f"argus-state-query-v1\0{material}".encode("utf-8")).hexdigest()
+    return f"state.reader.{family}.v1.{digest}"
+
+
+def valid_state_context_type(query: dict[str, Any], value_type: Any) -> bool:
+    if not isinstance(value_type, str) or value_type not in {"TEXT", "NUMBER", "BOOLEAN"}:
+        return False
+    if query["type"] != "builtin":
+        return True
+    if query["key"] == "battery":
+        return value_type == "NUMBER"
+    if query["key"] == "charging":
+        return value_type == "BOOLEAN"
+    return value_type == "TEXT"
+
+
+def valid_state_context_value(value: Any, value_type: str) -> bool:
+    if not isinstance(value, str) or not _well_formed_text(value):
+        return False
+    if not (1 <= _utf16_units(value) <= 4_096) or _has_iso_control(value):
+        return False
+    if value_type == "NUMBER":
+        return _finite_number(value) is not None
+    if value_type == "BOOLEAN":
+        return value.strip().lower() in {"true", "1", "on", "false", "0", "off"}
+    return True
 
 
 def validate_notification_context(value: Any) -> None:
@@ -488,11 +610,13 @@ REGOLE VINCOLANTI:
    {SENTINEL} {{"draft":<oggetto-o-null>,"error_code":<string-o-null>}}
 8. Se draft non e' null, error_code deve essere null. Se draft e' null usa
    "clarification_required" oppure un codice snake_case breve.
-9. Reply WhatsApp (whatsapp_reply oppure invoke_llm con replyTargetSender): il trigger deve
+9. Reply WhatsApp (whatsapp_reply, invoke_llm o invoke_llm_v2 con replyTargetSender): il trigger deve
    essere notification con pkg WhatsApp, conversationId preso dalla whitelist e isGroup=false
    ESPLICITO (mai null: le reply valgono solo su chat 1:1 verificate). Per una risposta
-   GENERATA usa invoke_llm con contextSources ["notification"] (aggiungi "state" solo se serve
-   lo stato del device), allowedTools esattamente ["whatsapp_reply"] e replyTargetSender=true;
+   GENERATA senza stato usa invoke_llm con contextSources ["notification"]. Se serve stato usa
+   SOLO invoke_llm_v2 e inserisci in stateContext ogni query esatta con tipo, policy e
+   classificazione minima; allowedTools deve essere esattamente ["whatsapp_reply"],
+   replyTargetSender=true e timeoutMs esplicito;
    usa whatsapp_reply statica solo se l'utente detta il testo esatto della risposta.
 10. Se manifest.available_triggers e' presente, usa SOLO i trigger elencati (lista vuota =
     nessun trigger armabile):
@@ -711,7 +835,9 @@ def validate_draft(
         return False
     actions = value["actions"]
     if not isinstance(actions, list) or not (1 <= len(actions) <= 32) or not all(
-        validate_action(action, available_tools) for action in actions
+        validate_action(
+            action, available_tools, allowed_state_keys, state_reader_families
+        ) for action in actions
     ):
         return False
     if any(action["type"] == "run_shell" for action in actions) and not _shell_trigger_allowed(
@@ -982,7 +1108,12 @@ def validate_state_query(
     return False
 
 
-def validate_action(value: Any, available_tools: set[str]) -> bool:
+def validate_action(
+    value: Any,
+    available_tools: set[str],
+    allowed_state_keys: set[str] = frozenset(),
+    state_reader_families: set[str] | frozenset[str] = frozenset(),
+) -> bool:
     if not isinstance(value, dict) or not isinstance(value.get("type"), str):
         return False
     kind = value["type"]
@@ -1002,6 +1133,10 @@ def validate_action(value: Any, available_tools: set[str]) -> bool:
         "run_shell": ({"type", "cmd"}, set()),
         "copy_to_clipboard": ({"type"}, {"extractionRegex"}),
         "invoke_llm": ({"type", "goal", "contextSources", "allowedTools", "replyTargetSender"}, {"timeoutMs"}),
+        "invoke_llm_v2": (
+            {"type", "goal", "stateContext", "allowedTools", "replyTargetSender", "timeoutMs"},
+            set(),
+        ),
     }
     if kind not in fields or not _exact_keys(value, *fields[kind]):
         return False
@@ -1017,11 +1152,49 @@ def validate_action(value: Any, available_tools: set[str]) -> bool:
         return _string(value["title"], 512) and _string(value["text"], 4_096, nonempty=False)
     if kind == "invoke_llm":
         return (
-            _string(value["goal"], 2_048)
+            _string(value["goal"], 4_000)
             and all(isinstance(value[key], list) and len(value[key]) <= 32 and all(_string(x, 256) for x in value[key]) for key in ("contextSources", "allowedTools"))
             and isinstance(value["replyTargetSender"], bool)
             and _is_int(value.get("timeoutMs", 60_000))
         )
+    if kind == "invoke_llm_v2":
+        contexts = value["stateContext"]
+        if not (
+            _string(value["goal"], 4_000)
+            and isinstance(contexts, list) and 1 <= len(contexts) <= 16
+            and value["allowedTools"] == [ACT_REPLY_TOOL]
+            and value["replyTargetSender"] is True
+            and _is_int(value["timeoutMs"])
+            and 1_000 <= value["timeoutMs"] <= 120_000
+        ):
+            return False
+        query_ids: list[str] = []
+        for context in contexts:
+            required = {
+                "query", "valueType", "policyVersion", "integrity", "confidentiality",
+            }
+            if not isinstance(context, dict) or not _exact_keys(context, required):
+                return False
+            query = context["query"]
+            if not validate_state_query(query, allowed_state_keys, state_reader_families):
+                return False
+            if context["policyVersion"] != STATE_QUERY_POLICY_VERSION or (
+                not _is_int(context["policyVersion"])
+            ):
+                return False
+            if context["integrity"] != "CLEAN" or not valid_state_context_type(
+                query, context["valueType"]
+            ):
+                return False
+            minimum = "PRIVATE" if query["type"] == "builtin" else "SECRET"
+            rank = {"PUBLIC": 0, "PRIVATE": 1, "SECRET": 2}
+            confidentiality = context["confidentiality"]
+            if not isinstance(confidentiality, str) or (
+                rank.get(confidentiality, -1) < rank[minimum]
+            ):
+                return False
+            query_ids.append(state_query_canonical_id(query))
+        return len(query_ids) == len(set(query_ids))
     if kind == "copy_to_clipboard":
         pattern = value.get("extractionRegex")
         if pattern is None:
@@ -1145,7 +1318,7 @@ def act_request(data: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         MODEL_SLOTS.release()
     reply_text, error_code = parse_act_model_output(output)
     return 200, {
-        "schema_version": ACT_SCHEMA_VERSION,
+        "schema_version": data["schema_version"],
         "request_id": data["request_id"],
         "result": None if reply_text is None else {"text": reply_text},
         "error_code": error_code,
@@ -1185,7 +1358,7 @@ class Handler(BaseHTTPRequestHandler):
                     "model": MODEL,
                     "schema_version": HEALTH_SCHEMA_VERSION,
                     "compile_schema_versions": list(SUPPORTED_COMPILE_SCHEMA_VERSIONS),
-                    "act_schema_versions": [ACT_SCHEMA_VERSION],
+                    "act_schema_versions": list(SUPPORTED_ACT_SCHEMA_VERSIONS),
                     "source_sha256": SOURCE_SHA256,
                 })
         else:
@@ -1260,7 +1433,7 @@ def main() -> None:
         raise SystemExit("runtime Hermes non trovato")
     print(
         f"argus-bridge loopback={BIND}:{PORT} model={MODEL} "
-        f"compile={SUPPORTED_COMPILE_SCHEMA_VERSIONS} act={ACT_SCHEMA_VERSION} "
+        f"compile={SUPPORTED_COMPILE_SCHEMA_VERSIONS} act={SUPPORTED_ACT_SCHEMA_VERSIONS} "
         f"source={SOURCE_SHA256[:12]}",
         flush=True,
     )

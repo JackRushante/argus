@@ -7,6 +7,7 @@ import dev.argus.device.DeviceController
 import dev.argus.device.DeviceToolException
 import dev.argus.device.RingerMode
 import dev.argus.engine.model.Action
+import dev.argus.engine.model.GenerativeAction
 import dev.argus.engine.runtime.ActionExecutor
 import dev.argus.engine.runtime.ActionResult
 import dev.argus.engine.runtime.FireContext
@@ -24,7 +25,7 @@ fun interface AutomationNotifier {
  * all'executor deterministico di attendere la chiamata LLM.
  */
 fun interface GenerativeLane {
-    fun trySubmit(context: FireContext, action: Action.InvokeLlm): Boolean
+    fun trySubmit(context: FireContext, action: GenerativeAction): Boolean
 }
 
 class ShizukuActionExecutor(
@@ -81,6 +82,11 @@ class ShizukuActionExecutor(
             is Action.CopyToClipboard -> clipboard.copy(ctx.event, action.extractionRegex)
 
             is Action.InvokeLlm -> if (generativeLane.trySubmit(ctx, action)) {
+                ActionResult.Submitted
+            } else {
+                ActionResult.Failure("generative_lane_unavailable")
+            }
+            is Action.InvokeLlmV2 -> if (generativeLane.trySubmit(ctx, action)) {
                 ActionResult.Submitted
             } else {
                 ActionResult.Failure("generative_lane_unavailable")

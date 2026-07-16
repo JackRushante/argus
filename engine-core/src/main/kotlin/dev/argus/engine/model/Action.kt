@@ -5,6 +5,9 @@ import kotlinx.serialization.Serializable
 enum class DndMode { OFF, PRIORITY, TOTAL }
 enum class ActionTier { DETERMINISTIC, GENERATIVE }
 
+/** Marker chiuso per impedire che la lane accetti azioni deterministiche per errore. */
+sealed interface GenerativeAction
+
 /** Discriminatori wire stabili condivisi da JSON, manifest capability e journal. */
 object ActionTypeIds {
     const val SET_WIFI = "set_wifi"
@@ -20,6 +23,7 @@ object ActionTypeIds {
     const val RUN_SHELL = "run_shell"
     const val COPY_TO_CLIPBOARD = "copy_to_clipboard"
     const val INVOKE_LLM = "invoke_llm"
+    const val INVOKE_LLM_V2 = "invoke_llm_v2"
 }
 
 /**
@@ -39,7 +43,25 @@ object GenerativeContract {
 
 @Serializable
 sealed interface Action {
-    val tier: ActionTier get() = if (this is InvokeLlm) ActionTier.GENERATIVE else ActionTier.DETERMINISTIC
+    val tier: ActionTier
+        get() = when (this) {
+            is InvokeLlm,
+            is InvokeLlmV2,
+            -> ActionTier.GENERATIVE
+            is SetWifi,
+            is SetBluetooth,
+            is SetDnd,
+            is SetRinger,
+            is LaunchApp,
+            is OpenUrl,
+            is ShowNotification,
+            is Tap,
+            is InputText,
+            is WhatsAppReply,
+            is RunShell,
+            is CopyToClipboard,
+            -> ActionTier.DETERMINISTIC
+        }
 
     @Serializable @SerialName(ActionTypeIds.SET_WIFI) data class SetWifi(val on: Boolean) : Action
     @Serializable @SerialName(ActionTypeIds.SET_BLUETOOTH) data class SetBluetooth(val on: Boolean) : Action
@@ -66,5 +88,60 @@ sealed interface Action {
         val allowedTools: List<String>,   // MAI shell.run / automation.* (DraftValidator, spec §7)
         val replyTargetSender: Boolean,   // spec §10.4: destinatario vincolato al trigger.sender
         val timeoutMs: Long = 60_000,
-    ) : Action
+    ) : Action, GenerativeAction
+
+    /**
+     * Profilo P3 con stato minimo: a differenza di [InvokeLlm] non autorizza uno snapshot
+     * generico. Ogni reader, tipo e classificazione entra nel fingerprint approvato.
+     *
+     * Tutti i campi wire sono obbligatori: una regola v1 non viene mai migrata aggiungendo
+     * default o riscrivendone il fingerprint in silenzio.
+     */
+    @Serializable @SerialName(ActionTypeIds.INVOKE_LLM_V2)
+    data class InvokeLlmV2(
+        val goal: String,
+        val stateContext: List<ApprovedStateContext>,
+        val allowedTools: List<String>,
+        val replyTargetSender: Boolean,
+        val timeoutMs: Long,
+    ) : Action, GenerativeAction
+}
+
+enum class IntegrityLabel { CLEAN, TAINTED }
+enum class ConfidentialityLabel { PUBLIC, PRIVATE, SECRET }
+
+/** Metadati approvati per un singolo valore locale inviato al Brain configurato. */
+@Serializable
+data class ApprovedStateContext(
+    val query: StateQuery,
+    val valueType: StateValueType,
+    val policyVersion: Int,
+    val integrity: IntegrityLabel,
+    val confidentiality: ConfidentialityLabel,
+)
+
+/** Classificazione minima fail-closed: il compilatore può alzarla, mai abbassarla. */
+object StateContextClassification {
+    const val MAX_QUERIES = 16
+
+    fun minimumConfidentiality(query: StateQuery): ConfidentialityLabel = when (query) {
+        is StateQuery.Builtin -> ConfidentialityLabel.PRIVATE
+        is StateQuery.Setting,
+        is StateQuery.SystemProperty,
+        is StateQuery.Sysfs,
+        is StateQuery.DumpsysField,
+        -> ConfidentialityLabel.SECRET
+    }
+
+    fun covers(actual: ConfidentialityLabel, minimum: ConfidentialityLabel): Boolean =
+        actual.ordinal >= minimum.ordinal
+
+    fun validValueType(query: StateQuery, valueType: StateValueType): Boolean =
+        (query as? StateQuery.Builtin)?.let { builtin ->
+            when (builtin.key) {
+                StateKeys.BATTERY -> valueType == StateValueType.NUMBER
+                StateKeys.CHARGING -> valueType == StateValueType.BOOLEAN
+                else -> valueType == StateValueType.TEXT
+            }
+        } ?: true
 }

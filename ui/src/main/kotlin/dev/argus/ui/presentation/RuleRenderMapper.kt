@@ -35,6 +35,9 @@ object RuleRenderMapper {
     /** Verbatim da design §7.3 — mai parafrasare (invariante di sicurezza handoff §5). */
     private const val PRIVACY_NOTE =
         "Il testo delle notifiche verrà inviato a Hermes e ai provider cloud per generare la risposta."
+    private const val STATE_PRIVACY_NOTE =
+        "Il testo delle notifiche e i reader di stato elencati verranno inviati a Hermes e ai " +
+            "provider cloud per generare la risposta."
 
     /**
      * [conversationLabels] mappa conversationId → display name proveniente dallo store whitelist
@@ -61,7 +64,11 @@ object RuleRenderMapper {
             conditionLines = conditions?.let { flattenConditions(it, 0) } ?: emptyList(),
             actions = actions.map { actionRow(it) },
             isGenerative = isGenerative,
-            privacyNote = if (isGenerative) PRIVACY_NOTE else null,
+            privacyNote = when {
+                actions.any { it is Action.InvokeLlmV2 } -> STATE_PRIVACY_NOTE
+                isGenerative -> PRIVACY_NOTE
+                else -> null
+            },
         )
     }
 
@@ -272,6 +279,21 @@ object RuleRenderMapper {
             iconKey = "generative",
             label = "Rispondi con l'AI",
             detail = "Obiettivo: ${a.goal} · tool: ${a.allowedTools.joinToString(", ")}",
+            isGenerative = true,
+        )
+        is Action.InvokeLlmV2 -> row(
+            iconKey = "generative",
+            label = "Rispondi con l'AI",
+            detail = buildString {
+                append("Obiettivo: ${a.goal} · stato condiviso: ")
+                append(
+                    a.stateContext.joinToString("; ") { context ->
+                        "${queryLabel(context.query)} [${valueTypeLabel(context.valueType)}, " +
+                            "${context.integrity.name}, ${context.confidentiality.name}]"
+                    },
+                )
+                append(" · tool: ${a.allowedTools.joinToString(", ")}")
+            },
             isGenerative = true,
         )
     }

@@ -16,6 +16,28 @@
     "sysfs",
     "dumpsys_field"
   ],
+  "canonical_ids": [
+    {
+      "query": {"type": "builtin", "key": "battery"},
+      "id": "state.reader.builtin.v1.13778f8b49514fac102fa00a04dccc24350bf734d4fe4e4c5f5d78e0f1117634"
+    },
+    {
+      "query": {"type": "setting", "namespace": "GLOBAL", "key": "airplane_mode_on"},
+      "id": "state.reader.setting.v1.bb443e561b0145a7c04ecd5e6bac9f0fc12a29ea92b6e8910c9d3b10fac4c5aa"
+    },
+    {
+      "query": {"type": "system_property", "name": "ro.build.version.sdk"},
+      "id": "state.reader.system_property.v1.f20cbbfb77e479977f0b4238a6dfa20caf1f2633ab41877058c354bd7cc6b6b0"
+    },
+    {
+      "query": {"type": "sysfs", "path": "/sys/class/power_supply/battery/voltage_now"},
+      "id": "state.reader.sysfs.v1.79b3db69ebdfebb2eda0cbfa33743d59895cb5612811a670cd58553504b49f0c"
+    },
+    {
+      "query": {"type": "dumpsys_field", "service": "battery", "field": "voltage"},
+      "id": "state.reader.dumpsys_field.v1.56c21cf86117198783085f56cb24512d32dfc124c2c173c65e89fdbada40a0d6"
+    }
+  ],
   "cases": [
     {
       "name": "builtin_battery_number",

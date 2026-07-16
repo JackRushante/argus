@@ -2,6 +2,8 @@ package dev.argus.engine.model
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlin.test.assertFailsWith
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 class AutomationSerializationTest {
@@ -46,6 +48,44 @@ class AutomationSerializationTest {
         assertTrue(Action.SetWifi(true).tier == ActionTier.DETERMINISTIC)
         assertTrue(Action.ShowNotification("t", "x").tier == ActionTier.DETERMINISTIC)
         assertTrue(Action.InvokeLlm("g", listOf(), listOf(), true).tier == ActionTier.GENERATIVE)
+    }
+    @Test fun `invoke llm v2 round trips with required wire fields and exact reader capability`() {
+        val query = StateQuery.DumpsysField("battery", "voltage")
+        val action = Action.InvokeLlmV2(
+            goal = "rispondi",
+            stateContext = listOf(
+                ApprovedStateContext(
+                    query,
+                    StateValueType.NUMBER,
+                    StateQueryPolicy.VERSION,
+                    IntegrityLabel.CLEAN,
+                    ConfidentialityLabel.SECRET,
+                ),
+            ),
+            allowedTools = listOf("whatsapp_reply"),
+            replyTargetSender = true,
+            timeoutMs = 60_000,
+        )
+        val automation = Automation(
+            AutomationId("v2"),
+            "reply v2",
+            CreatedBy.USER,
+            AutomationStatus.PENDING_APPROVAL,
+            Trigger.Notification("com.whatsapp", "id:42", isGroup = false),
+            listOf(action),
+        )
+        val encoded = ArgusJson.encodeToString(Automation.serializer(), automation)
+
+        assertEquals(automation, ArgusJson.decodeFromString(Automation.serializer(), encoded))
+        assertTrue(action.tier == ActionTier.GENERATIVE)
+        assertTrue(CapabilityIds.STATE_READER_DUMPSYS_FIELD in automation.requiredCapabilities)
+        assertTrue("state.read" !in automation.requiredCapabilities)
+        assertFailsWith<SerializationException> {
+            ArgusJson.decodeFromString(
+                Automation.serializer(),
+                encoded.replace(",\"timeoutMs\":60000", ""),
+            )
+        }
     }
     @Test fun `state keys registry is closed and documented`() {
         assertTrue(StateKeys.RINGER in StateKeys.ALL)

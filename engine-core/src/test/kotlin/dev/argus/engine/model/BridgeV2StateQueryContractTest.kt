@@ -41,6 +41,14 @@ class BridgeV2StateQueryContractTest {
         )
         val allFamilies = root.getValue("all_families").jsonArray.strings()
         assertEquals(StateQueryFamily.entries.map(StateQueryFamily::wireName), allFamilies)
+        root.getValue("canonical_ids").jsonArray.forEach { element ->
+            val fixture = element.jsonObject
+            val query = strictJson.decodeFromJsonElement(
+                StateQuery.serializer(),
+                fixture.getValue("query"),
+            )
+            assertEquals(fixture.getValue("id").jsonPrimitive.content, query.canonicalId)
+        }
 
         root.getValue("cases").jsonArray.forEach { element ->
             val case = element.jsonObject

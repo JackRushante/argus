@@ -7,11 +7,17 @@ import dev.argus.engine.brain.Brain
 import dev.argus.engine.brain.CapabilityManifest
 import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.model.Action
+import dev.argus.engine.model.ApprovedStateContext
 import dev.argus.engine.model.ApprovalFingerprints
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.CreatedBy
+import dev.argus.engine.model.ConfidentialityLabel
+import dev.argus.engine.model.IntegrityLabel
+import dev.argus.engine.model.StateQuery
+import dev.argus.engine.model.StateQueryPolicy
+import dev.argus.engine.model.StateValueType
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.ActionJournalOutcome
 import dev.argus.engine.runtime.AutomationStore
@@ -240,6 +246,54 @@ class GenerativeActionLaneTest {
         assertEquals("act_timeout", fixture.journal.completions.single().errorCode)
     }
 
+    @Test
+    fun `v2 lane freezes and submits only an available explicitly approved query`() = runTest {
+        val query = StateQuery.DumpsysField("battery", "voltage")
+        val action = Action.InvokeLlmV2(
+            goal = "rispondi considerando il voltaggio",
+            stateContext = listOf(
+                ApprovedStateContext(
+                    query = query,
+                    valueType = StateValueType.NUMBER,
+                    policyVersion = StateQueryPolicy.VERSION,
+                    integrity = IntegrityLabel.CLEAN,
+                    confidentiality = ConfidentialityLabel.SECRET,
+                ),
+            ),
+            allowedTools = listOf("whatsapp_reply"),
+            replyTargetSender = true,
+            timeoutMs = 60_000,
+        )
+        val automation = approvedAutomation(action)
+        val store = MutableAutomationStore(automation)
+        val journal = FakeSubmittedJournal()
+        val brain = FakeBrain { ActResult("risposta v2", null) }
+        val gateway = FakeReplyGateway(NotificationReplyDelivery.Sent)
+        val context = context(
+            automation,
+            action,
+            DeviceState(queryValues = mapOf(query.canonicalId to "4200")),
+        )
+        val lane = AndroidGenerativeLane(
+            scope = backgroundScope,
+            journal = journal,
+            automations = store,
+            firePolicy = MutableFirePolicy(),
+            brain = brain,
+            replies = gateway,
+            deferredReplies = DeferredReplySink { _, _ -> false },
+        )
+
+        assertTrue(lane.trySubmit(context, action))
+        journal.ready()
+        runCurrent()
+
+        assertEquals(1, brain.calls)
+        assertEquals(action, brain.lastV2)
+        assertEquals(1, gateway.calls)
+        assertEquals(ActionJournalOutcome.SUCCEEDED, journal.completions.single().outcome)
+    }
+
     private fun kotlinx.coroutines.test.TestScope.fixture(
         action: Action.InvokeLlm = action(),
         automation: Automation = approvedAutomation(action),
@@ -316,6 +370,7 @@ class GenerativeActionLaneTest {
         private val actResult: suspend () -> ActResult,
     ) : Brain {
         var calls = 0
+        var lastV2: Action.InvokeLlmV2? = null
 
         override suspend fun compile(
             nl: String,
@@ -330,6 +385,15 @@ class GenerativeActionLaneTest {
             allowedTools: List<String>,
         ): ActResult {
             calls++
+            return actResult()
+        }
+
+        override suspend fun actV2(
+            context: FireContext,
+            action: Action.InvokeLlmV2,
+        ): ActResult {
+            calls++
+            lastV2 = action
             return actResult()
         }
     }
@@ -399,7 +463,7 @@ class GenerativeActionLaneTest {
             timeoutMs = 60_000,
         )
 
-        fun approvedAutomation(action: Action.InvokeLlm): Automation {
+        fun approvedAutomation(action: Action): Automation {
             val unsigned = Automation(
                 id = AutomationId("automation-1"),
                 name = "Reply",
@@ -417,7 +481,11 @@ class GenerativeActionLaneTest {
             return unsigned.copy(approvalFingerprint = ApprovalFingerprints.of(unsigned))
         }
 
-        fun context(automation: Automation, action: Action.InvokeLlm): FireContext = FireContext(
+        fun context(
+            automation: Automation,
+            action: Action,
+            state: DeviceState = DeviceState(),
+        ): FireContext = FireContext(
             event = TriggerEvent.NotificationPosted(
                 pkg = "com.whatsapp",
                 conversationId = CONVERSATION_ID,
@@ -426,7 +494,7 @@ class GenerativeActionLaneTest {
                 isGroup = false,
                 notificationKey = "sbn:1",
             ),
-            state = DeviceState(),
+            state = state,
             automationId = automation.id,
             approvalFingerprint = requireNotNull(automation.approvalFingerprint),
             eventId = TriggerEventId("notification:event-1"),

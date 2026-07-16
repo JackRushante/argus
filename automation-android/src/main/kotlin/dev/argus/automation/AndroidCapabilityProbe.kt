@@ -231,7 +231,10 @@ class AndroidCapabilityProbe internal constructor(
             if (listenerGranted) add(GenerativeContract.TOOL_WHATSAPP_REPLY)
             // Il compilatore usa SOLO manifest.available_tools: invoke_llm deve comparire qui,
             // altrimenti Hermes ripiega su una reply statica anche quando il runtime è pronto.
-            if (generativeReady) add(ActionTypeIds.INVOKE_LLM)
+            if (generativeReady) {
+                add(ActionTypeIds.INVOKE_LLM)
+                add(ActionTypeIds.INVOKE_LLM_V2)
+            }
         }.sorted()
         val unavailableTools = linkedMapOf<String, String>()
         if (!shizukuAvailable) {
@@ -248,6 +251,7 @@ class AndroidCapabilityProbe internal constructor(
         }
         if (!generativeReady) {
             unavailableTools[ActionTypeIds.INVOKE_LLM] = REASON_GENERATIVE_RUNTIME
+            unavailableTools[ActionTypeIds.INVOKE_LLM_V2] = REASON_GENERATIVE_RUNTIME
         }
         PHASE_UNAVAILABLE_TOOLS.forEach { (tool, reason) -> unavailableTools[tool] = reason }
 
