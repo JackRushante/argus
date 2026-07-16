@@ -1,12 +1,14 @@
 # Argus — App Android di automazione LLM-driven
 
-Motore di automazione Tasker-class always-on: l'LLM (via Hermes) **compila** richieste in linguaggio naturale in regole `{trigger, condizioni, azioni}`; un motore deterministico le esegue senza LLM a ogni scatto. Privilegi elevati via Shizuku (shell UID 2000). App personale, sideloaded, single-user (OnePlus 15, OxygenOS, min SDK 30). Lingua UI: **italiano**.
+Motore di automazione Tasker-class always-on: l'LLM (via Hermes o altro Brain configurabile) **compila** richieste in linguaggio naturale in regole `{trigger, condizioni, azioni}`; un motore deterministico le esegue senza LLM a ogni scatto. Il deploy corrente è personale/sideload su OnePlus 15; P3 separa un profilo pubblico base dalle capability opzionali Shizuku. Lingua UI: **italiano**.
 
 ## Documenti fonte di verità (leggere PRIMA di implementare)
 
 | Documento | Contenuto |
 |---|---|
-| `docs/superpowers/specs/2026-07-12-hermes-android-agent-design.md` | Spec di sistema **rev 4** — architettura, schema automazioni, Brain a 2 transport, sicurezza (§10), edge case E1-E15, phasing P0-P3 |
+| `docs/superpowers/specs/2026-07-12-hermes-android-agent-design.md` | Spec di sistema **rev 6** — architettura e stato P0-P3 |
+| `docs/superpowers/specs/2026-07-16-argus-p3-decision-record.md` | Fonte normativa P3: D0, taint per sink, state reader, sensori, transport e release profiles |
+| `docs/superpowers/plans/2026-07-16-argus-p3-foundations-state-sensors.md` | Piano operativo P3 corrente e gate per slice |
 | `docs/superpowers/plans/2026-07-13-argus-commander-replan.md` | Piano operativo corretto e stato corrente dell'implementazione |
 | `docs/design/argus-p0b-final-audit.md` | Matrice requisiti/evidenze, rischi residui e gate di chiusura P0-B |
 | `docs/design/hermes-bridge-contract.md` | Contratto v1 e confine di sicurezza del bridge Argus dedicato |
@@ -44,10 +46,14 @@ Motore di automazione Tasker-class always-on: l'LLM (via Hermes) **compila** ric
 4. La regola in approvazione si renderizza **dai tipi** (`RuleRender`), mai dalla parafrasi dell'LLM.
 5. Reply generative: solo chat 1:1 (`isGroup=false`), solo `conversationId` whitelistato, destinatario vincolato a `trigger.sender`.
 6. Comandi shell sempre in monospace, integrali, mai troncati.
+7. Il contenuto esterno può alimentare sink locali/vincolati ma non creare autorità: mai TAINTED → command, routing, target, path/package o mutazione automazioni (decision record §4).
+8. Missing state = UNKNOWN e fallisce chiuso anche sotto `Not`; mai sostituire un valore assente con stringa vuota.
 
 ## Fasi
 
 - **M1 / P0-A**: engine core JVM completato e coperto da test.
 - **M2 / UI**: 6 schermi Compose e app demo su fixture completati.
 - **M3 / P0-B** (gate finali): persistenza, approvazione, audit, bridge Hermes v1, scheduler, Shizuku executor e wiring Android sono implementati. TUTTI i gate esterni sono chiusi (2026-07-14 sera): E2E Hermes/DND, process-death, outage Shizuku, smoke sei schermi, full gate, reboot/LNP Android 16 e rerun compile live post-clean-install. Il bridge Argus è solo `https://hermes.tail04462d.ts.net`; la porta 8090 appartiene alla Guida Bali e non è un fallback. Il telefono target è `oneplus` (100.74.117.9, Tailscale).
-- **P1 / notifiche generative**: COMPLETA salvo chiusura P1-8 (2026-07-14 sera). Lane generativa `invoke_llm` con reply WhatsApp reali: Esempio 3 passato live (8,5 s e2e), E13 deferred cifrato, whitelist con picker, caratterizzazione WhatsApp vera (4 bug reali fixati, incl. anti-eco strutturale). Stato canonico: handoff `docs/superpowers/specs/2026-07-14-argus-codex-to-claude-handoff.md` §21.
+- **P1 / notifiche generative**: COMPLETA. Lane `invoke_llm`, reply WhatsApp reale, E13 cifrato, whitelist/binding 1:1 e anti-eco verificati.
+- **P2 / background triggers**: COMPLETA e mergiata. SMS/OTP, chiamate, connectivity/power/Bluetooth e geofence fisici verificati; handoff chiusura `2026-07-16-argus-claude-to-codex-p2-closed.md`.
+- **P3**: ATTIVA. Ordine vincolante: decision/dataflow → lettori parametrici → sensori → base senza Shizuku → audit/TTS → computer-use lento e poi veloce opzionale.

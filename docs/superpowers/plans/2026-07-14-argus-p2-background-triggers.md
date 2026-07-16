@@ -1,5 +1,12 @@
 # Argus P2 — Trigger in background, PhoneState/SMS, OTP autocopy, Geofence
 
+> **CHIUSA il 2026-07-15. Documento storico, non normativo per P3.** La DoD P2 e i gate
+> fisici SMS/OTP, chiamata, connettività e geofence sono passati. Le direttive qui sotto vanno
+> lette nel loro contesto temporale: in particolare i sensori sono stati riaperti da Lorenzo e
+> il modello injection è ora una policy per sink. Le fonti correnti sono
+> `2026-07-16-argus-p3-decision-record.md` e
+> `2026-07-16-argus-p3-foundations-state-sensors.md`.
+
 Data: 2026-07-14 (sera, subito dopo il merge P0-B+P1 su master `8f283ca`).
 Mandato: Lorenzo, live ("progedi col prossimo chunk di features, p2"), con tre direttive
 esplicite raccolte sul campo:

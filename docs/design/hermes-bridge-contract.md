@@ -2,6 +2,13 @@
 
 Stato: protocollo v1 `/compile` operativo dal 2026-07-13; `/act` aggiunto il 2026-07-14.
 
+> **Confine di versione P3:** `schema_version` in questo documento versiona esclusivamente il
+> protocollo bridge. Non è la versione dello schema Room/automazioni e non è la versione del
+> materiale canonico usato per il fingerprint di approvazione. Le tre evolvono separatamente
+> secondo `argus-schema-versioning-adr.md`. `/compile` e `/act` v1 restano strict; i lettori
+> parametrici e i futuri turni agentici richiederanno un contratto esplicitamente nuovo, mai un
+> fallback implicito a `/chat`.
+
 ## Endpoint e confine di sicurezza
 
 - Base URL: `https://hermes.tail04462d.ts.net` (raggiungibile solo dal tailnet).
@@ -18,6 +25,9 @@ Sorgenti operative versionate:
 - server: `ops/hermes/bridge.py`;
 - unit systemd: `ops/hermes/argus-bridge.service`;
 - client: `brain-android/.../CliBridgeTransport.kt`.
+
+Il confronto repo/host va fatto sul contenuto normalizzato LF oppure sul file Python compilato e
+testato: un SHA-256 dei byte grezzi può segnalare falso drift quando il checkout Windows usa CRLF.
 
 ## `GET /health`
 
