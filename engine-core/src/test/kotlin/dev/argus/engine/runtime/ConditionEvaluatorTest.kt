@@ -35,4 +35,38 @@ class ConditionEvaluatorTest {
         val ev = ConditionEvaluator(clockAt("2026-07-12T10:00:00Z"))
         assertTrue(ev.eval(null, DeviceState()))
     }
+
+    @Test fun `not cannot turn an unavailable state reader into a match`() {
+        val ev = ConditionEvaluator(clockAt("2026-07-12T10:00:00Z"))
+        val missing = DeviceState()
+
+        assertFalse(
+            ev.eval(
+                Condition.Not(Condition.StateEquals(StateKeys.WIFI, CmpOp.EQ, "on")),
+                missing,
+            ),
+        )
+        assertFalse(
+            ev.eval(Condition.Not(Condition.AppInForeground("com.whatsapp")), missing),
+        )
+        assertFalse(
+            ev.eval(
+                Condition.Not(Condition.LocationIn(45.0, 9.0, 100.0)),
+                missing,
+            ),
+        )
+    }
+
+    @Test fun `and or and not preserve unknown until the final fail closed boundary`() {
+        val ev = ConditionEvaluator(clockAt("2026-07-12T10:00:00Z"))
+        val state = DeviceState(values = mapOf(StateKeys.WIFI to "on"))
+        val knownTrue = Condition.StateEquals(StateKeys.WIFI, CmpOp.EQ, "on")
+        val knownFalse = Condition.StateEquals(StateKeys.WIFI, CmpOp.EQ, "off")
+        val unavailable = Condition.AppInForeground("com.whatsapp")
+
+        assertFalse(ev.eval(Condition.And(listOf(knownTrue, unavailable)), state))
+        assertFalse(ev.eval(Condition.Or(listOf(knownFalse, unavailable)), state))
+        assertTrue(ev.eval(Condition.Or(listOf(knownTrue, unavailable)), state))
+        assertFalse(ev.eval(Condition.Not(unavailable), state))
+    }
 }
