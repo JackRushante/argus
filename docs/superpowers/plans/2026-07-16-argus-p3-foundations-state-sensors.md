@@ -211,11 +211,21 @@ corretta. Per il journal di un trigger fisico: NON leggere subito con `am instru
 test production-path synthetic (stesso processo) oppure dare tempo al commit e leggere il DB senza
 ricreare il processo.
 
-**Restano NON provati (residuo osservazionale, richiedono altri movimenti di Lorenzo)**:
-- disable → movimento non esegue;
-- ri-enable + delete → nessun callback residuo;
-- process kill/restart → movimento ancora consegnato (in modo pulito, senza l'artefatto sopra);
-- **misura consumo/tempo FGS** (DoD: NOT MEASURED).
+**Gate negativo (§7.8) — 2026-07-16, senza Lorenzo, `ArgusSensorNegativeInstrumentedTest`**
+(stesso processo, catena di produzione; `OK (3 tests)` su OnePlus):
+- **disable → non esegue**: regola armata poi `disable`, `onSensorTriggered` → **0 FIRED**;
+- **delete → non esegue**: regola armata poi `delete`, `onSensorTriggered` → **0 FIRED**;
+- **delete → deregistrazione fisica (no-leak)**: `reconcile` registra davvero SIGNIFICANT_MOTION,
+  dopo il `delete` un secondo `reconcile` lo cancella (`cleanupSucceeded`, `requiredBy` vuoto,
+  kind fuori da `registeredKinds`). Confermato dal registro del framework: `dumpsys sensorservice`
+  mostra per ogni pid `+` (register all'arm) poi `-` (unregister al reconcile), e **0 connessioni
+  `dev.argus` vive** a fine gate (21 menzioni, tutte storiche). L'unico FGS residuo è il
+  `NotificationListenerService` (categoria `android`), non la sentinella sensore.
+
+**Restano NON provati (residuo osservazionale, richiedono Lorenzo o tempo reale)**:
+- process kill/restart → movimento ancora consegnato (in modo pulito, senza l'artefatto `am
+  instrument` sopra) — richiede un movimento fisico dopo il kill;
+- **misura consumo/tempo FGS** (DoD: NOT MEASURED) — richiede una finestra di batteria reale.
 
 ## P3-2C — stationary/motion e step
 
