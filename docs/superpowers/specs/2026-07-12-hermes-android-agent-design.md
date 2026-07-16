@@ -4,6 +4,11 @@
 > **Data:** 2026-07-12 · **Rev:** 6 (P3 decision record) · **Autore:** Lorenzo Marci + Claude Code (oneplus) + Codex
 > **Stato 2026-07-16:** design approvato; P0/P1/P2 completati e P2 su `master`. Tutti i gate fisici P2, inclusi geofence lavoro/casa, sono passati sul campo. **P3 attiva**: fonte normativa per le nuove decisioni è `2026-07-16-argus-p3-decision-record.md`; il piano eseguibile è `2026-07-16-argus-p3-foundations-state-sensors.md`.
 >
+> **Changelog rev 7** (2026-07-16): P3-1C chiusa — `/compile` v2 con reader parametrici,
+> policy fingerprintata, fixture condivisa Kotlin/Python, `/health/v2` e rollout server-first
+> compatibile; compile/review/probe/fire verificati sul OnePlus reale. `/compile` v1 resta solo
+> per rollback del vecchio client, `/act` resta v1.
+>
 > **Changelog rev 6** (2026-07-16): taint corretto da divieto globale a policy per sink; state reader parametrici; sensori event-driven; transport computer-use lento/veloce; profili personal-full/play-core; schema, fingerprint e protocollo separati. Corretta anche la nota Play: Device automation è un'eccezione dichiarabile per SMS/Call Log, non un divieto assoluto.
 >
 > **Changelog rev 5** (2026-07-15): **D0** registra la direttiva fondativa di Lorenzo (limiti solo etici) con la tassonomia delle quattro classi; **B8 declassata** da barriera invalicabile a trade-off di latenza (loop interattivo a due tier, quello a pagamento è opzionale); **§10.2** — la shell è innescabile anche da una chat WhatsApp 1:1 whitelistata, mentre PhoneState resta escluso perché mittente e caller ID sono falsificabili; **C2/E14** — l'isteresi geofence copre ora anche il percorso framework, dopo un flapping osservato sul campo a device fermo; **sensori** riaperti da Lorenzo (erano una classe 4, non una legge).
@@ -33,7 +38,7 @@ Esempi target (devono funzionare a fine **P2** — vedi §15 per cosa funziona q
 
 - **Hermes** (VM `hermes` 100.80.142.65, sul tailnet) ha già `computer_use` con **vision-routing**: se il cervello (`gpt-5.5` via `openai-codex`, OAuth) non è multimodale, lo screenshot viene **pre-analizzato dalla pipeline `auxiliary.vision`** (provider `auto` → OpenRouter/Gemini/Claude) e passato come **testo** al cervello, fuso con l'albero accessibilità/SOM. Web search già attiva via **Brave free**. → Vision e web **non richiedono API dirette**; sono capability ausiliarie disaccoppiate dal canale principale.
 - **Transport verso Hermes — VERIFICATI (risolve il vecchio rischio B5):**
-  - **`argus-bridge`** espone `POST /compile` v1 tramite Tailscale Serve HTTPS; riceve manifest strutturato + `DeviceState` redatto, chiama Hermes/gpt-5.5 e ritorna un envelope strict con `AutomationDraft`. Bearer runtime, request ID idempotente, limiti body e parser fail-closed. **Latenza ~10-30 s/chiamata.** Contratto: `docs/design/hermes-bridge-contract.md`.
+  - **`argus-bridge`** espone `POST /compile` v2 tramite Tailscale Serve HTTPS (v1 solo rollout); riceve manifest strutturato, famiglie reader bounded + `DeviceState` redatto, chiama Hermes/gpt-5.5 e ritorna un envelope strict con `AutomationDraft`. Bearer runtime, request ID idempotente, limiti body e parser fail-closed. **Latenza ~10-30 s/chiamata.** Contratto: `docs/design/hermes-bridge-contract.md`.
   - **`guida-agent/bridge.py`** (porta 8090) resta il bridge separato della Guida Bali e non è un fallback Argus.
   - **`hermes proxy`** (OpenAI-compatible, `/v1/chat/completions`, porta 8645) inoltra a upstream **`nous` o `xai`** con le credenziali OAuth di Hermes. **NON** instrada il codex/ChatGPT gpt-5.5 gratuito.
 - **Conseguenza sul transport** (vedi §7): il **gpt-5.5 codex gratis** è raggiungibile **solo** via CLI/bridge (lento, one-shot, testo+JSON). Il **path veloce con tool-call nativi** esiste solo via proxy (Nous/xAI) o LLM diretto (OpenAI/OpenRouter/Gemini), che costa/consuma quota.
@@ -231,7 +236,7 @@ Punto chiave da non perdere: **l'MVP non ha streaming** — il transport primari
 | B2 | **FGS non avviabile da background** (Android 12+). | P0-B non ha FGS persistente: alarm e receiver fanno lavoro breve event-driven. Un eventuale worker/FGS short-lived P2 parte solo attraverso un percorso consentito e con failure visibile. |
 | B3 | **Exact alarm revocabile** (Android 13+). | `SCHEDULE_EXACT_ALARM` + guida a "Sveglie e promemoria"; exact solo se richiesto e concesso, fallback inexact per non perdere la regola. |
 | B4 | **OxygenOS può uccidere il processo**. | Alarm OS-managed + stato Room + reconcile su app-start/boot/package replace. Battery exemption e hardening OEM arrivano quando P1/P2 introducono lavoro più lungo; stato degradato resta visibile. |
-| B5 | ~~Gateway Hermes senza endpoint programmatico~~ | **RISOLTO:** `argus-bridge` `/compile` v1 è live su Tailscale HTTPS, autenticato e testato da Android; `hermes proxy` resta l'opzione P3 OpenAI-compatible. Vedi §2/§7. |
+| B5 | ~~Gateway Hermes senza endpoint programmatico~~ | **RISOLTO:** `argus-bridge` `/compile` v2 è live su Tailscale HTTPS, autenticato e testato end-to-end da Android; v1 resta per rollout e `hermes proxy` resta l'opzione P3 OpenAI-compatible. Vedi §2/§7. |
 | B6 | **Aux-vision senza provider multimodale raggiungibile**. | Configurare almeno **una key multimodale** (Gemini free); il probe avvisa e **disabilita** le regole che dipendono dalla visione schermo. |
 | B7 | **Finestre `FLAG_SECURE`** (banking): `screencap` torna nero. | Rilevare e riportare al Brain ("schermo illeggibile: finestra sicura"); provare `uiautomator dump` come fallback (l'albero a11y resta leggibile); non crashare. |
 | ~~B8~~ | ~~**Latenza del brain gratuito** (CliBridge ~10-30 s/call): inusabile per un loop computer_use multi-turn (200 s+/task).~~ **DECLASSATA il 2026-07-15: non era una barriera.** | **"Inusabile" era un assunto sulla tolleranza alla latenza, non un fatto.** Decisione di Lorenzo: per automazione **non presidiata** 200 s vanno benissimo — nessuno sta aspettando. Il loop interattivo diventa quindi a **due tier**: (a) **lento e gratuito** via CliBridge, default consigliato in onboarding per chi usa Hermes o API proprie; (b) **veloce e a pagamento** via `OpenAICompatTransport`, **opzionale**, solo per uso presidiato in cui guardi lo schermo e aspetti. Il tier (b) non è più un prerequisito di P3. Nota tecnica: dove l'albero a11y è leggibile (es. WhatsApp) usare `uiautomator dump` — deterministico e gratis — e tenere la vision come **fallback** per UI opache (canvas/giochi). |
@@ -289,7 +294,9 @@ Principio: **prima il valore nuovo e latency-tolerant** (automazioni da NL, che 
 
 - **`conversationId` WhatsApp (E15): CHIUSO.** Caratterizzato su device reale e usato da reply/shell con binding 1:1 e whitelist. Il display name non è autorità.
 - **Transport loop interattivo (P3):** il provider veloce resta una scelta aperta di costo/UX, non un blocker. Prima implementare il contratto provider-neutral e il tier lento via bridge.
-- **Argus bridge:** `/compile` v1 e `/act` v1 sono completati, isolati dal bridge Guida Bali, deployati e consumati dai rispettivi path Android. Le evoluzioni P3 devono versionare il contratto senza riaprire il fallback `/chat`.
+- **Argus bridge:** `/compile` v2 e `/act` v1 sono completati, isolati dal bridge Guida Bali,
+  deployati e consumati dai rispettivi path Android. Il server conserva `/compile` v1 solo per
+  rollout/rollback; nessun path riapre il fallback `/chat`.
 - **B1:** UX e procedura esatta di ripristino Shizuku via Wireless ADB sul OnePlus 15 non-root;
   auto-start root/Magisk soltanto su un futuro device realmente rootato.
 - **B6:** provider multimodale per aux-vision (Gemini free candidato).

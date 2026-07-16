@@ -72,13 +72,28 @@ disattivata, task rieseguiti e niente parallelismo: **758/758 task**, `BUILD SUC
 
 ## P3-1C — bridge compile v2
 
-1. Manifest espone famiglie reader e limiti, non un inventario infinito di chiavi.
-2. `/compile` v2 accetta i nuovi subtype; v1 resta esplicitamente incompatibile, non fallback `/chat`.
-3. Validator Python e Kotlin devono avere fixture condivise positive/negative.
-4. Deploy atomico host + Android; health/version/hash normalizzati; rollback documentato.
-5. Prompt NL reale: «se il voltaggio scende sotto X…» produce draft armabile o chiarimento onesto.
+**Stato 2026-07-16: COMPLETA** (`462bc83` + fix race del solo harness nel commit successivo).
+
+1. [x] Manifest espone famiglie reader e limiti, non un inventario infinito di chiavi.
+2. [x] `/compile` v2 accetta i nuovi subtype; v1 resta esplicitamente incompatibile, non fallback `/chat`.
+3. [x] Validator Python e Kotlin usano la stessa fixture positiva/negativa, inclusi policy e limiti.
+4. [x] Deploy server-first compatibile `[1,2]`, Android v2, `/health/v2`, hash LF e rollback documentati.
+5. [x] Prompt NL reale sul voltaggio produce un draft armabile e verificato fino al fire reale.
 
 Gate: test bridge, compile live, review locale e fire reale; nessun valore state sensibile nei log.
+
+Evidenza:
+
+- bridge locale e host: 29/29; staging e directory finale entrambe verdi;
+- gate completo senza cache: 759/759 task eseguiti, `BUILD SUCCESSFUL`;
+- file host `bridge.py`, `test_bridge.py`, fixture: hash raw identici al repo; health autenticato
+  dichiara compile `[1,2]`, act `[1]` e lo SHA normalizzato atteso;
+- OnePlus reale: richiesta naturale «se il voltaggio ... sotto 100000 millivolt» →
+  `StateCompare(DumpsysField("battery","voltage"), NUMBER, LT)` → probe locale → review/arm →
+  AlarmManager exact → `show_notification` riuscita nel journal → one-shot `DISABLED` → cleanup;
+- il primo run ha osservato `FIRED` pochi millisecondi prima del successivo `disableIfApproved`:
+  era una race dell'asserzione del test, provata dall'ordine del coordinator. Il rerun con attesa
+  esplicita della barriera è `OK (1 test)`; nessun fix di produzione è stato necessario.
 
 ## P3-1D — stato generativo minimo
 

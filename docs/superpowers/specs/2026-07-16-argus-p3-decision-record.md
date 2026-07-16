@@ -284,8 +284,10 @@ Resta da chiudere nelle slice P3:
 - il contesto LLM `state` sovra-raccoglie lo snapshot invece di elencare query approvate;
 - azioni non privilegiate sono erroneamente nascoste quando Shizuku è offline;
 - manca audit lifecycle;
-- il bridge compile v1 non conosce ancora `StateQuery`: serve P3-1C strict v2 prima di esporre i
-  reader al linguaggio naturale.
+
+Chiuso in P3-1C (`462bc83`): `/compile` v2 espone `StateQuery` con manifest/policy bounded,
+fixture condivisa Kotlin/Python e gate fisico completo; il server conserva v1 soltanto come
+compatibilità di rollout e Android non usa fallback `/chat`.
 
 ## 11. Gate di accettazione P3
 

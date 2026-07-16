@@ -164,6 +164,7 @@ class ArgusProductionE2EInstrumentedTest {
             }
             awaitDnd(DndMode.TOTAL)
             assertJournalSucceeded(fired)
+            awaitAutomationStatus(armed.id, AutomationStatus.DISABLED)
             assertEquals(AutomationStatus.DISABLED, store.get(armed.id)?.status)
 
             val duplicate = runtime.onAlarm(
@@ -332,6 +333,7 @@ class ArgusProductionE2EInstrumentedTest {
             }
             notificationId = requireNotNull(fired.executionId).hashCode()
             assertJournalSucceeded(fired, expectedActionType = "show_notification")
+            awaitAutomationStatus(armed.id, AutomationStatus.DISABLED)
             assertEquals(AutomationStatus.DISABLED, store.get(armed.id)?.status)
         } finally {
             withContext(NonCancellable) {
@@ -443,6 +445,15 @@ class ArgusProductionE2EInstrumentedTest {
         }
     }
 
+    private suspend fun awaitAutomationStatus(
+        id: dev.argus.engine.model.AutomationId,
+        expected: AutomationStatus,
+    ) {
+        withTimeout(AUTOMATION_STATUS_TIMEOUT_MILLIS) {
+            while (services.automationStore().get(id)?.status != expected) delay(50)
+        }
+    }
+
     private suspend fun assertJournalSucceeded(
         record: AuditLogRecord,
         expectedActionType: String = "set_dnd",
@@ -481,6 +492,7 @@ class ArgusProductionE2EInstrumentedTest {
         const val FIRE_DELAY_SECONDS = 45L
         const val FIRE_TIMEOUT_MILLIS = 120_000L
         const val DND_TIMEOUT_MILLIS = 20_000L
+        const val AUTOMATION_STATUS_TIMEOUT_MILLIS = 10_000L
         const val SHIZUKU_PERMISSION_TIMEOUT_MILLIS = 60_000L
     }
 }
