@@ -97,9 +97,25 @@ Evidenza:
 
 ## P3-1D — stato generativo minimo
 
-Non aggiungere campi default a `Action.InvokeLlm` v1. Creare un subtype/profilo v2 che elenca query
-esplicite. Il bridge `/act` riceve soltanto quelle; ogni valore ha classificazione privacy/taint.
-Migrare una regola solo con nuova approvazione, mai riscrivendo il fingerprint in silenzio.
+**Stato 2026-07-16: COMPLETA** (`0e6006f`).
+
+1. [x] Lasciare `Action.InvokeLlm` v1 e i relativi fingerprint byte-compatibili.
+2. [x] Aggiungere `InvokeLlmV2` con query esatte, tipo, policy, integrità e riservatezza obbligatori.
+3. [x] Leggere e congelare soltanto i valori approvati; nessuno snapshot state legacy nel path v2.
+4. [x] Validare fingerprint/policy/valori prima e dopo il Brain e usare una lane generativa tipizzata.
+5. [x] Aggiungere `/act` v2 strict mantenendo `/act` v1 operativo e separando l'idempotenza per wire.
+6. [x] Mostrare in review ogni reader e la disclosure esplicita verso Hermes/provider cloud.
+
+Evidenza:
+
+- suite bridge locale e host **31/31**; gate host completo forzato **759/759 task**;
+- deploy server-first: health autenticato `compile=[1,2]`, `act=[1,2]`, servizio attivo e hash raw
+  repo/host identici per bridge, test e fixture;
+- OnePlus reale: health, compile v2 con `DumpsysField(battery, voltage)` classificato
+  `NUMBER/CLEAN/SECRET` e act v2 autenticato sono tutti PASS nello stesso runner;
+- il test act usa intenzionalmente un valore fixture (`4200`) per isolare il contratto wire. La
+  lettura fisica del voltaggio era già stata provata in P3-1B/P3-1C; non viene falsamente contata
+  come nuova prova end-to-end reader → LLM.
 
 ## P3-2A — dominio e capability sensori
 

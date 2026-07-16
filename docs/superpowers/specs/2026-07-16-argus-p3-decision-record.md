@@ -114,6 +114,19 @@ Per la distribuzione pubblica servirà un asse distinto `PUBLIC|PRIVATE|SECRET`.
 essere clean ma privato (posizione, stato app, contatti). Questo asse genera redazione/disclosure e
 blocca esfiltrazioni non approvate; non cambia la capacità del valore di comandare un sink.
 
+### 4.4 Profilo generativo minimo implementato
+
+`InvokeLlm` v1 resta immutato. Il profilo additivo `InvokeLlmV2` richiede senza default goal,
+query esatte, tipo, versione policy, integrità, riservatezza, tool bounded, binding della reply e
+timeout. Ogni migrazione richiede una nuova approvazione: nessun fingerprint v1 viene riscritto.
+
+I lettori locali approvati producono oggi solo valori `CLEAN`. Il floor di riservatezza è
+`PRIVATE` per i builtin e `SECRET` per setting, system property, sysfs e dumpsys; il compilatore può
+alzarlo ma mai abbassarlo. `/act` v2 riceve soltanto gli id canonici e i valori delle query elencate,
+mai lo snapshot state legacy. Il telefono congela valori e capability di reply e rivalida
+fingerprint/policy sia prima sia dopo il Brain. La review nomina ogni reader e dichiara che testo
+della notifica e stato autorizzato transitano verso Hermes/provider cloud.
+
 ## 5. D3 — state reader parametrici
 
 ### 5.1 Modello
