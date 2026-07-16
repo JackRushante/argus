@@ -48,12 +48,12 @@ class AndroidBridgeConfigurationStore(context: Context) : BridgeConfigurationSto
                 val existing = preferences.getString(KEY_BEARER, null)
                 val encoded = if (bearerToken == null) {
                     existing?.takeIf { stored ->
-                        runCatching { AesGcmTokenCodec.decrypt(stored, encryptionKey()) }
+                        runCatching { AesGcmTokenCodec.decrypt(stored, BridgeKeystore.encryptionKey()) }
                             .getOrNull()
                             ?.let(::validBearer) == true
                     } ?: return@synchronized false
                 } else {
-                    AesGcmTokenCodec.encrypt(bearerToken, encryptionKey())
+                    AesGcmTokenCodec.encrypt(bearerToken, BridgeKeystore.encryptionKey())
                 }
                 preferences.edit()
                     .putString(KEY_BASE_URL, normalized)
@@ -72,7 +72,7 @@ class AndroidBridgeConfigurationStore(context: Context) : BridgeConfigurationSto
         if (!validBearer(value)) return@withContext false
         synchronized(lock) {
             runCatching {
-                val encoded = AesGcmTokenCodec.encrypt(value, encryptionKey())
+                val encoded = AesGcmTokenCodec.encrypt(value, BridgeKeystore.encryptionKey())
                 preferences.edit().putString(KEY_BEARER, encoded).commit()
             }.getOrDefault(false)
         }
@@ -85,13 +85,30 @@ class AndroidBridgeConfigurationStore(context: Context) : BridgeConfigurationSto
     override suspend fun bearerToken(): String? = withContext(Dispatchers.IO) {
         synchronized(lock) {
             val encoded = preferences.getString(KEY_BEARER, null) ?: return@synchronized null
-            runCatching { AesGcmTokenCodec.decrypt(encoded, encryptionKey()) }
+            runCatching { AesGcmTokenCodec.decrypt(encoded, BridgeKeystore.encryptionKey()) }
                 .getOrNull()
                 ?.takeIf(::validBearer)
         }
     }
 
-    private fun encryptionKey(): SecretKey {
+    companion object {
+        const val DEFAULT_BASE_URL = "https://hermes.tail04462d.ts.net"
+        private const val PREFERENCES_NAME = "argus_bridge_private"
+        private const val KEY_BASE_URL = "base_url"
+        private const val KEY_BEARER = "bearer_v1"
+    }
+}
+
+/**
+ * Chiave AES-GCM non esportabile in Android Keystore, condivisa da [AndroidBridgeConfigurationStore]
+ * e [AndroidProviderConfigStore] (stesso alias): il ciphertext legacy resta decifrabile dopo la
+ * migrazione multi-provider senza round-trip di re-encrypt.
+ */
+internal object BridgeKeystore {
+    private const val KEY_ALIAS = "argus_bridge_bearer_aes_v1"
+    private const val ANDROID_KEYSTORE = "AndroidKeyStore"
+
+    fun encryptionKey(): SecretKey {
         val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
         (keyStore.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }
         return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE).run {
@@ -107,15 +124,6 @@ class AndroidBridgeConfigurationStore(context: Context) : BridgeConfigurationSto
             )
             generateKey()
         }
-    }
-
-    companion object {
-        const val DEFAULT_BASE_URL = "https://hermes.tail04462d.ts.net"
-        private const val PREFERENCES_NAME = "argus_bridge_private"
-        private const val KEY_BASE_URL = "base_url"
-        private const val KEY_BEARER = "bearer_v1"
-        private const val KEY_ALIAS = "argus_bridge_bearer_aes_v1"
-        private const val ANDROID_KEYSTORE = "AndroidKeyStore"
     }
 }
 

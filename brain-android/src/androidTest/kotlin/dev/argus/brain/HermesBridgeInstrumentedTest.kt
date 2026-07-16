@@ -142,7 +142,7 @@ class HermesBridgeInstrumentedTest {
             availableTriggers = listOf("time"),
         )
 
-        val result = HermesBrain(transport()).compile(
+        val result = TransportBackedBrain(transport()).compile(
             "Dopo le 23 attiva non disturbare prioritario",
             manifest,
             DeviceState(values = mapOf("dnd" to "off")),
@@ -172,7 +172,7 @@ class HermesBridgeInstrumentedTest {
             ),
         )
 
-        val result = HermesBrain(transport()).compile(
+        val result = TransportBackedBrain(transport()).compile(
             "Quando ricevo un messaggio WhatsApp 1:1 da Contatto test, rispondi in modo " +
                 "cordiale tenendo conto del voltaggio batteria in millivolt. Usa il reader " +
                 "dumpsys battery, campo voltage; non aggiungere altre azioni o condizioni.",
@@ -208,7 +208,7 @@ class HermesBridgeInstrumentedTest {
             actionIndex = 0,
         )
 
-        val result = HermesBrain(transport()).act(
+        val result = TransportBackedBrain(transport()).act(
             context = context,
             goal = "Rispondi in italiano in modo cordiale e molto conciso",
             contextSources = listOf("notification"),
@@ -253,7 +253,7 @@ class HermesBridgeInstrumentedTest {
             timeoutMs = 60_000,
         )
 
-        val result = HermesBrain(transport()).actV2(context, action)
+        val result = TransportBackedBrain(transport()).actV2(context, action)
 
         assertNull(result.metaError)
         assertTrue(requireNotNull(result.text).length in 1..4_096)

@@ -6,7 +6,9 @@ import dev.argus.automation.ArmedAutomationRegistrar
 import dev.argus.automation.ConfiguredBridgeBrain
 import dev.argus.automation.CurrentLocationProvider
 import dev.argus.automation.DeviceStateSnapshotProvider
-import dev.argus.brain.BridgeConfigurationStore
+import dev.argus.brain.ProviderConfig
+import dev.argus.brain.ProviderConfigStore
+import dev.argus.brain.ProviderId
 import dev.argus.engine.brain.Brain
 import dev.argus.engine.brain.CapabilityManifest
 import dev.argus.engine.brain.CapabilityProbe
@@ -324,13 +326,20 @@ private class ViewModelWhitelistStore(vararg contacts: WhitelistedContact) : Con
     }
 }
 
-private class ViewModelBridgeConfiguration : BridgeConfigurationStore {
-    override fun baseUrl(): String = "https://bridge.invalid"
-    override suspend fun bearerToken(): String? = null
-    override suspend fun saveConfiguration(baseUrl: String, bearerToken: String?): Boolean = false
-    override suspend fun saveBaseUrl(value: String): Boolean = false
-    override suspend fun saveBearerToken(value: String): Boolean = false
-    override suspend fun clearBearerToken(): Boolean = true
+private class ViewModelBridgeConfiguration : ProviderConfigStore {
+    override fun selectedProviderId(): ProviderId = ProviderId.HERMES
+    override suspend fun selectProvider(id: ProviderId): Boolean = false
+    override fun providerConfig(id: ProviderId): ProviderConfig =
+        ProviderConfig(providerId = id, baseUrl = "https://bridge.invalid", model = null)
+    override suspend fun saveProviderConfig(
+        id: ProviderId,
+        baseUrl: String?,
+        model: String?,
+        apiKey: String?,
+    ): Boolean = false
+    override suspend fun apiKey(id: ProviderId): String? = null
+    override suspend fun hasApiKey(id: ProviderId): Boolean = false
+    override suspend fun clearApiKey(id: ProviderId): Boolean = true
 }
 
 private class ViewModelDraftRepository : DraftRepository {

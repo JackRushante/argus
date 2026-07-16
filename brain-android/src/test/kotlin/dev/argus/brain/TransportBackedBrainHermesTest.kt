@@ -21,7 +21,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 
-class HermesBrainTest {
+class TransportBackedBrainHermesTest {
     private lateinit var server: MockWebServer
 
     private val manifest = CapabilityManifest(
@@ -38,7 +38,7 @@ class HermesBrainTest {
     @BeforeTest fun setUp() { server = MockWebServer().apply { start() } }
     @AfterTest fun tearDown() { runCatching { server.shutdown() } }
 
-    private fun brain() = HermesBrain(
+    private fun brain() = TransportBackedBrain(
         CliBridgeTransport(
             baseUrl = server.url("/").toString(),
             authProvider = BridgeAuthProvider { "test-token" },

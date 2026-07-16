@@ -363,6 +363,10 @@ class ChatViewModel @Inject constructor(
                     BridgeErrorKind.CONFIGURATION, BridgeErrorKind.AUTH ->
                         ChatError.MalformedReply("Configura Hermes e accetta l'informativa privacy.")
                     BridgeErrorKind.PROTOCOL -> ChatError.MalformedReply("Protocollo bridge non valido.")
+                    BridgeErrorKind.RATE_LIMIT -> ChatError.Timeout
+                    BridgeErrorKind.BUDGET -> ChatError.MalformedReply(
+                        "Budget AI esaurito. Riprova più tardi o alza il limite in Impostazioni.",
+                    )
                 },
             )
         }

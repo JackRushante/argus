@@ -71,8 +71,11 @@ import dev.argus.automation.notification.AndroidNotificationSnapshotFactory
 import dev.argus.automation.notification.NotificationIngress
 import dev.argus.automation.notification.NotificationReplyGateway
 import dev.argus.automation.notification.NotificationReplyHandleFactory
-import dev.argus.brain.AndroidBridgeConfigurationStore
+import dev.argus.brain.AndroidProviderConfigStore
 import dev.argus.brain.BridgeConfigurationStore
+import dev.argus.brain.DefaultTransportFactory
+import dev.argus.brain.ProviderConfigStore
+import dev.argus.brain.TransportFactory
 import dev.argus.data.ArgusDatabase
 import dev.argus.data.DeferredReplyStore
 import dev.argus.data.RoomDeferredReplyStore
@@ -352,17 +355,27 @@ object ArgusModule {
 
     @Provides
     @Singleton
-    fun bridgeConfiguration(@ApplicationContext context: Context): BridgeConfigurationStore =
-        AndroidBridgeConfigurationStore(context)
+    fun providerConfigStore(@ApplicationContext context: Context): ProviderConfigStore =
+        AndroidProviderConfigStore(context)
+
+    /** Ponte legacy: Readiness/probe/entry point restano invariati sul contratto storico. */
+    @Provides
+    fun bridgeConfiguration(store: ProviderConfigStore): BridgeConfigurationStore = store
+
+    @Provides
+    @Singleton
+    fun transportFactory(store: ProviderConfigStore): TransportFactory = DefaultTransportFactory(store)
 
     @Provides
     @Singleton
     fun configuredBrain(
-        configuration: BridgeConfigurationStore,
+        configuration: ProviderConfigStore,
+        factory: TransportFactory,
         preferences: AppPreferencesStore,
     ): ConfiguredBridgeBrain = ConfiguredBridgeBrain(
         configuration = configuration,
         privacyAccepted = { preferences.observe().value.privacyAccepted },
+        factory = factory,
     )
 
     @Provides

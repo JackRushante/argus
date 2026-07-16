@@ -47,22 +47,8 @@ fun interface BridgeAuthProvider {
     suspend fun bearerToken(): String?
 }
 
-enum class BridgeErrorKind {
-    CONFIGURATION,
-    TIMEOUT,
-    NETWORK,
-    AUTH,
-    HTTP,
-    PROTOCOL,
-}
-
-/** Errore di confine con soli metadati sicuri: il body remoto non entra mai nel messaggio. */
-class BridgeException(
-    val kind: BridgeErrorKind,
-    message: String,
-    val statusCode: Int? = null,
-    cause: Throwable? = null,
-) : IOException(message, cause)
+// BridgeErrorKind / BridgeException sono ora typealias su TransportErrorKind / TransportException
+// (vedi TransportException.kt): il codice qui sotto resta valido carattere per carattere.
 
 @Serializable
 private data class CompileRequestEnvelope(
@@ -179,11 +165,11 @@ private data class ActReplyEnvelope(val text: String)
 data class BridgeHealth(
     @SerialName("schema_version") val schemaVersion: Int,
     val status: String,
-    val model: String,
+    override val model: String,
     @SerialName("compile_schema_versions") val compileSchemaVersions: List<Int>,
     @SerialName("act_schema_versions") val actSchemaVersions: List<Int>,
     @SerialName("source_sha256") val sourceSha256: String,
-)
+) : TransportHealth
 
 @Serializable
 private data class ActV2RequestEnvelope(
@@ -223,7 +209,9 @@ class CliBridgeTransport internal constructor(
     private val client: OkHttpClient,
     private val allowCleartextForTests: Boolean,
     private val requestIdFactory: () -> String,
-) {
+) : AgentTransport {
+    override val providerId: ProviderId get() = ProviderId.HERMES
+
     constructor(
         baseUrl: String,
         authProvider: BridgeAuthProvider,
@@ -258,7 +246,7 @@ class CliBridgeTransport internal constructor(
         }
     }
 
-    suspend fun compile(
+    override suspend fun compile(
         message: String,
         manifest: CapabilityManifest,
         state: DeviceState,
@@ -289,7 +277,7 @@ class CliBridgeTransport internal constructor(
         return parseCompileResponse(execute(request), expectedRequestId = requestId)
     }
 
-    suspend fun act(
+    override suspend fun act(
         context: FireContext,
         goal: String,
         contextSources: List<String>,
@@ -349,7 +337,7 @@ class CliBridgeTransport internal constructor(
         )
     }
 
-    suspend fun actV2(context: FireContext, action: Action.InvokeLlmV2): ActResult {
+    override suspend fun actV2(context: FireContext, action: Action.InvokeLlmV2): ActResult {
         val token = requireToken()
         val cleanGoal = action.goal.trim().takeIf {
             it.isNotEmpty() && it.length <= MAX_GOAL_CHARS
@@ -412,7 +400,7 @@ class CliBridgeTransport internal constructor(
         )
     }
 
-    suspend fun health(): BridgeHealth {
+    override suspend fun health(): BridgeHealth {
         val token = requireToken()
         val request = Request.Builder()
             .url(healthUrl)
