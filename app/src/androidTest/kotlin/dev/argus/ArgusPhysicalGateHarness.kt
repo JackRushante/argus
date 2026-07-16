@@ -37,7 +37,8 @@ import org.junit.runner.RunWith
  *
  *   1. `arm*Gate`     — arma e lascia armato (nessun cleanup: il processo deve poter morire);
  *   2. azione fisica  — la fa Lorenzo;
- *   3. `reportGates`  — legge il journal; `cleanupGates` — rimuove ogni regola del prefisso.
+ *   3. `reportGates`  — legge il journal; `cleanupGates` — rimuove le regole del gate (mirato con
+ *      `-e gate <sottostringa>`, es. `movimento`; senza arg rimuove TUTTE le "Argus GATE").
  *
  * Il report stampa SOLO nomi di regola (scelti qui), kind, esito e tipo azione: mai `detail`,
  * numeri, SSID o nomi/address Bluetooth. `cleanupGates` è idempotente e va eseguito comunque,
@@ -235,7 +236,17 @@ class ArgusPhysicalGateHarness {
     @Test
     fun cleanupGates(): Unit = runBlocking {
         val store = services.automationStore()
-        val gates = store.all().filter { it.name.startsWith(GATE_PREFIX) }
+        // Cleanup MIRATO: con `-e gate <sottostringa>` rimuove solo le regole di quel gate (es.
+        // `gate movimento`), NON tutte le "Argus GATE". Senza l'arg pulisce tutto, ma lo dichiara:
+        // così pulire un gate non ricancella regole di un altro ancora armate (feedback Lorenzo).
+        val gateArg = InstrumentationRegistry.getArguments().getString("gate")?.trim().orEmpty()
+        val targetPrefix = if (gateArg.isEmpty()) GATE_PREFIX else "$GATE_PREFIX $gateArg"
+        if (gateArg.isEmpty()) {
+            println("$TAG ATTENZIONE: nessun arg 'gate' — rimuovo TUTTE le regole '$GATE_PREFIX'")
+        } else {
+            println("$TAG cleanup mirato al gate '$targetPrefix'")
+        }
+        val gates = store.all().filter { it.name.startsWith(targetPrefix) }
         gates.forEach {
             println("$TAG rimuovo ${it.name}")
             store.delete(it.id)
@@ -272,7 +283,7 @@ class ArgusPhysicalGateHarness {
 
         assertTrue(
             "Cleanup gate diagnostici non completato",
-            store.all().none { it.name.startsWith(GATE_PREFIX) },
+            store.all().none { it.name.startsWith(targetPrefix) },
         )
         assertTrue(
             "Cleanup runtime incompleto: ${runtimeFailures.joinToString()}",
