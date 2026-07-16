@@ -12,6 +12,7 @@ import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.ConnMedium
+import dev.argus.engine.model.SensorKind
 import dev.argus.engine.model.ConnState
 import dev.argus.engine.model.PhoneEvent
 import dev.argus.engine.model.Transition
@@ -66,6 +67,16 @@ class ArgusPhysicalGateHarness {
     fun armBluetoothGate(): Unit = runBlocking {
         arm("$GATE_PREFIX bt connesso", Trigger.Connectivity(ConnMedium.BT, ConnState.CONNECTED))
         arm("$GATE_PREFIX bt disconnesso", Trigger.Connectivity(ConnMedium.BT, ConnState.DISCONNECTED))
+    }
+
+    /**
+     * Gate fisico significant-motion (P3-2B §7.8). Arma una regola innocua e la lascia viva: il
+     * FGS sentinella parte, Lorenzo muove il telefono e la regola scatta una sola volta, poi si
+     * ri-arma. NON lanciare finché Lorenzo non è pronto: l'FGS resta acceso fino a `cleanupGates`.
+     */
+    @Test
+    fun armSensorGate(): Unit = runBlocking {
+        arm("$GATE_PREFIX movimento significativo", Trigger.Sensor(SensorKind.SIGNIFICANT_MOTION))
     }
 
     /**
