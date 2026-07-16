@@ -6,6 +6,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -35,6 +37,7 @@ import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -57,14 +60,17 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import dev.argus.ui.model.AuthState
 import dev.argus.ui.model.BgLocationState
 import dev.argus.ui.model.BudgetUi
 import dev.argus.ui.model.ContactRow
+import dev.argus.ui.model.ProviderChoiceUi
 import dev.argus.ui.model.SettingsCallbacks
 import dev.argus.ui.model.SettingsState
 import dev.argus.ui.model.ShizukuStatus
 import dev.argus.ui.model.TransportUi
 import dev.argus.ui.components.BridgeConfigurationDialog
+import dev.argus.ui.components.ProviderConfigurationDialog
 import dev.argus.ui.R
 import dev.argus.ui.theme.ArgusTheme
 import dev.argus.ui.theme.LocalArgusSemantic
@@ -108,7 +114,7 @@ fun SettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(18.dp),
             ) {
                 HealthSection(state, callbacks)
-                TransportSection(state.transport, callbacks) { showBridgeEditor = true }
+                TransportSection(state.transport, state.providerChoices, callbacks) { showBridgeEditor = true }
                 PrivacySection(state.privacyAccepted) { confirmPrivacyRevoke = true }
                 WhitelistSection(state.whitelist, callbacks)
                 BudgetSection(state.budget)
@@ -118,14 +124,22 @@ fun SettingsScreen(
             }
         }
     }
-    val bridge = state.transport as? TransportUi.CliBridge
-    if (showBridgeEditor && bridge != null) {
-        BridgeConfigurationDialog(
-            initialUrl = bridge.url,
-            tokenConfigured = bridge.tokenConfigured,
-            onDismiss = { showBridgeEditor = false },
-            onSave = callbacks::onSaveBridge,
-        )
+    if (showBridgeEditor) {
+        when (val transport = state.transport) {
+            is TransportUi.CliBridge -> BridgeConfigurationDialog(
+                initialUrl = transport.url,
+                tokenConfigured = transport.tokenConfigured,
+                onDismiss = { showBridgeEditor = false },
+                onSave = callbacks::onSaveBridge,
+            )
+            is TransportUi.DirectProvider -> ProviderConfigurationDialog(
+                provider = transport,
+                onDismiss = { showBridgeEditor = false },
+                onSave = { baseUrl, model, apiKey ->
+                    callbacks.onSaveProviderConfig(transport.providerId, baseUrl, model, apiKey)
+                },
+            )
+        }
     }
     if (confirmPrivacyRevoke) {
         AlertDialog(
@@ -341,12 +355,17 @@ private fun HealthRow(
 @Composable
 private fun TransportSection(
     transport: TransportUi,
+    providerChoices: List<ProviderChoiceUi>,
     callbacks: SettingsCallbacks,
-    onEditBridge: () -> Unit,
+    onEditTransport: () -> Unit,
 ) {
+    val onEditBridge = onEditTransport
     val semantic = LocalArgusSemantic.current
     SettingsSection("BRAIN · TRANSPORT") {
         SectionCard {
+            if (providerChoices.isNotEmpty()) {
+                ProviderSelector(providerChoices, callbacks::onSelectProvider)
+            }
             when (transport) {
                 is TransportUi.CliBridge -> {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -401,12 +420,59 @@ private fun TransportSection(
                         }
                     }
                 }
-                is TransportUi.OpenAICompat -> {
-                    // P3: transport OpenAI-compat (streaming) mostrato come "in arrivo".
+                is TransportUi.DirectProvider -> {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Icon(Icons.Rounded.Hub, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
-                        Text("OpenAI-compat · ${transport.model}", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
-                        InArrivoChip()
+                        Icon(Icons.Rounded.Hub, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                        Text(
+                            "${transport.providerLabel} · ${transport.model ?: "modello non impostato"}",
+                            color = MaterialTheme.colorScheme.onSurface,
+                            style = MaterialTheme.typography.labelLarge,
+                            modifier = Modifier.weight(1f),
+                        )
+                        val (reachColor, reachText) = when (transport.reachable) {
+                            true -> semantic.armed.fg to "raggiungibile"
+                            false -> semantic.error.fg to "irraggiungibile"
+                            null -> MaterialTheme.colorScheme.onSurfaceVariant to "non verificato"
+                        }
+                        Text(reachText, color = reachColor, style = MaterialTheme.typography.bodyMedium)
+                    }
+                    // Endpoint monospace, tappabile → editor (host).
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(MaterialTheme.colorScheme.background)
+                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
+                            .clickable(onClick = onEditBridge)
+                            .heightIn(min = 48.dp)
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Text(
+                            transport.baseUrl,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Icon(Icons.Rounded.Edit, contentDescription = "Modifica ${transport.providerLabel}", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                    }
+                    Text(
+                        if (transport.authState == AuthState.OK) "Chiave configurata" else "Chiave mancante",
+                        color = if (transport.authState == AuthState.OK) semantic.armed.fg else semantic.error.fg,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            transport.lastLatencyLabel?.let { "Ultima latenza: $it" } ?: "Latenza non ancora misurata",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        OutlinedButton(onClick = callbacks::onTestConnection, modifier = Modifier.heightIn(min = 48.dp)) {
+                            Text("Test connessione")
+                        }
                     }
                 }
             }
@@ -422,6 +488,20 @@ private fun TransportSection(
                     InArrivoChip()
                 }
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ProviderSelector(choices: List<ProviderChoiceUi>, onSelect: (String) -> Unit) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        choices.forEach { choice ->
+            FilterChip(
+                selected = choice.selected,
+                onClick = { onSelect(choice.id) },
+                label = { Text(choice.label) },
+            )
         }
     }
 }
@@ -654,6 +734,15 @@ private object NoopSettingsCallbacks : SettingsCallbacks {
     override fun onRerunOnboarding() {}
 }
 
+private val previewProviderChoices = listOf(
+    ProviderChoiceUi("hermes", "Hermes (self-hosted)", selected = true),
+    ProviderChoiceUi("openai", "OpenAI", selected = false),
+    ProviderChoiceUi("anthropic", "Anthropic", selected = false),
+    ProviderChoiceUi("gemini", "Google Gemini", selected = false),
+    ProviderChoiceUi("openrouter", "OpenRouter", selected = false),
+    ProviderChoiceUi("custom_openai_compat", "Custom (OpenAI-compat)", selected = false),
+)
+
 private val previewAllGreen = SettingsState(
     transport = TransportUi.CliBridge(url = "https://hermes.tail04462d.ts.net", reachable = true, lastLatencyLabel = "14 s · normale per Hermes"),
     shizuku = ShizukuStatus.AUTHORIZED,
@@ -665,6 +754,21 @@ private val previewAllGreen = SettingsState(
     budget = BudgetUi(maxCallsPerHour = 20, usedThisHourLabel = "3 / 20 quest'ora"),
     privacyAccepted = true,
     appVersionLabel = "Argus v0.1.0 · MVP (sideload)",
+    providerChoices = previewProviderChoices,
+)
+
+private val previewDirectProvider = previewAllGreen.copy(
+    transport = TransportUi.DirectProvider(
+        providerId = "openai",
+        providerLabel = "OpenAI",
+        baseUrl = "https://api.openai.com/v1",
+        model = "gpt-5.5",
+        authState = AuthState.OK,
+        reachable = true,
+        lastLatencyLabel = "2.1 s",
+        defaultModels = listOf("gpt-5.5", "gpt-5-mini"),
+    ),
+    providerChoices = previewProviderChoices.map { it.copy(selected = it.id == "openai") },
 )
 
 private val previewDegraded = SettingsState(
@@ -690,4 +794,10 @@ private fun SettingsAllGreenPreview() {
 @Composable
 private fun SettingsDegradedPreview() {
     ArgusTheme { SettingsScreen(previewDegraded, NoopSettingsCallbacks) }
+}
+
+@Preview(name = "Sistema · provider diretto (OpenAI)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 1100)
+@Composable
+private fun SettingsDirectProviderPreview() {
+    ArgusTheme { SettingsScreen(previewDirectProvider, NoopSettingsCallbacks) }
 }

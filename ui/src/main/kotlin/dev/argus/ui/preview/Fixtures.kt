@@ -16,8 +16,10 @@ import dev.argus.ui.model.EngineBanner
 import dev.argus.ui.model.ExecutionLogState
 import dev.argus.ui.model.LogOutcome
 import dev.argus.ui.model.LogRow
+import dev.argus.ui.model.AuthState
 import dev.argus.ui.model.OnboardingState
 import dev.argus.ui.model.OnboardingStepState
+import dev.argus.ui.model.ProviderChoiceUi
 import dev.argus.ui.model.RuleRender
 import dev.argus.ui.model.SettingsState
 import dev.argus.ui.model.ShizukuStatus
@@ -485,6 +487,16 @@ object Fixtures {
     // Sistema · settings (§6.5)
     // -------------------------------------------------------------------------
 
+    /** 6 provider dal catalog; Hermes selezionato (default). */
+    val providerChoices: List<ProviderChoiceUi> = listOf(
+        ProviderChoiceUi("hermes", "Hermes (self-hosted)", selected = true),
+        ProviderChoiceUi("openai", "OpenAI", selected = false),
+        ProviderChoiceUi("anthropic", "Anthropic", selected = false),
+        ProviderChoiceUi("gemini", "Google Gemini", selected = false),
+        ProviderChoiceUi("openrouter", "OpenRouter", selected = false),
+        ProviderChoiceUi("custom_openai_compat", "Custom (OpenAI-compat)", selected = false),
+    )
+
     val settingsAllGreen = SettingsState(
         transport = TransportUi.CliBridge(
             url = "https://hermes.tail04462d.ts.net",
@@ -500,6 +512,7 @@ object Fixtures {
         budget = BudgetUi(maxCallsPerHour = 20, usedThisHourLabel = "3 / 20 quest'ora"),
         privacyAccepted = true,
         appVersionLabel = "Argus v0.1.0 · MVP (sideload)",
+        providerChoices = providerChoices,
     )
 
     val settingsDegraded = SettingsState(
@@ -513,6 +526,22 @@ object Fixtures {
         budget = BudgetUi(maxCallsPerHour = 20, usedThisHourLabel = "17 / 20 quest'ora"),
         privacyAccepted = true,
         appVersionLabel = "Argus v0.1.0 · MVP (sideload)",
+        providerChoices = providerChoices,
+    )
+
+    /** Provider diretto selezionato (OpenAI) con chiave configurata. */
+    val settingsDirectProvider = settingsAllGreen.copy(
+        transport = TransportUi.DirectProvider(
+            providerId = "openai",
+            providerLabel = "OpenAI",
+            baseUrl = "https://api.openai.com/v1",
+            model = "gpt-5.5",
+            authState = AuthState.OK,
+            reachable = true,
+            lastLatencyLabel = "2.1 s",
+            defaultModels = listOf("gpt-5.5", "gpt-5-mini"),
+        ),
+        providerChoices = providerChoices.map { it.copy(selected = it.id == "openai") },
     )
 
     // -------------------------------------------------------------------------
@@ -537,9 +566,9 @@ object Fixtures {
                 ctaLabel = "Ho capito, acconsento", blockedReason = null,
             ),
             OnboardingStepState(
-                StepKind.BRAIN_CONFIG, statusFor(StepKind.BRAIN_CONFIG), "Collega Hermes",
-                "Indirizzo del bridge Hermes sul tuo tailnet. Precompilato: puoi testarlo subito.",
-                ctaLabel = "Test connessione", blockedReason = null,
+                StepKind.BRAIN_CONFIG, statusFor(StepKind.BRAIN_CONFIG), "Scegli il cervello",
+                "Hermes self-hosted (bridge sul tuo tailnet) oppure un provider diretto con la tua chiave API (BYOK). La chiave viene cifrata con Android Keystore e non sarà più mostrata.",
+                ctaLabel = "Configura il cervello", blockedReason = null,
             ),
             OnboardingStepState(
                 StepKind.SHIZUKU, statusFor(StepKind.SHIZUKU),
@@ -569,5 +598,12 @@ object Fixtures {
         steps = onboardingSteps(current = StepKind.WELCOME_PRIVACY),
         currentIndex = 0,
         canFinish = false,
+        providerChoices = providerChoices,
+        transport = TransportUi.CliBridge(
+            url = "https://hermes.tail04462d.ts.net",
+            reachable = null,
+            lastLatencyLabel = null,
+            tokenConfigured = false,
+        ),
     )
 }

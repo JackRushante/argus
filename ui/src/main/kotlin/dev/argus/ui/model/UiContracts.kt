@@ -200,6 +200,7 @@ data class SettingsState(
     val budget: BudgetUi,
     val privacyAccepted: Boolean,
     val appVersionLabel: String,
+    val providerChoices: List<ProviderChoiceUi> = emptyList(),
 )
 
 sealed interface TransportUi {
@@ -210,9 +211,25 @@ sealed interface TransportUi {
         /** Indica solo la presenza nel Keystore; il bearer non entra mai nello stato UI. */
         val tokenConfigured: Boolean = false,
     ) : TransportUi
-    data class OpenAICompat(val baseUrl: String, val model: String, val authState: AuthState) : TransportUi  // P3, mostrare come "in arrivo"
+
+    /** Provider diretto BYOK. NESSUN campo chiave: solo [AuthState] (§3 design). */
+    data class DirectProvider(
+        val providerId: String,          // ProviderId.wireName, es. "openai"
+        val providerLabel: String,       // ProviderCatalog.spec(id).displayName
+        val baseUrl: String,
+        val model: String?,
+        val authState: AuthState,        // OK | NOT_CONFIGURED (EXPIRED non emesso in S9)
+        val reachable: Boolean?,
+        val lastLatencyLabel: String?,
+        val defaultModels: List<String> = emptyList(),   // suggerimenti dal catalog
+        val baseUrlEditable: Boolean = false,            // true solo per CUSTOM_OPENAI_COMPAT
+        val apiKeyPrefixHint: String? = null,            // hint soft, MAI bloccante
+    ) : TransportUi
 }
 enum class AuthState { OK, EXPIRED, NOT_CONFIGURED }
+
+/** Voce del selettore provider (il VM la costruisce dal ProviderCatalog). */
+data class ProviderChoiceUi(val id: String, val label: String, val selected: Boolean)
 enum class BgLocationState { GRANTED, WHILE_IN_USE, DENIED, NOT_NEEDED }
 
 data class ContactRow(val displayName: String, val conversationId: String)   // id in monospace, azione rimuovi
@@ -236,6 +253,10 @@ interface SettingsCallbacks {
     fun onBudgetChange(maxPerHour: Int)
     fun onRevokePrivacy()
     fun onRerunOnboarding()
+    /** Selettore provider: id = ProviderId.wireName. Id sconosciuti = no-op lato VM. */
+    fun onSelectProvider(providerId: String) {}
+    /** apiKey null = conserva la chiave esistente (pattern onSaveBridge). La chiave NON torna mai nello stato. */
+    fun onSaveProviderConfig(providerId: String, baseUrl: String?, model: String?, apiKey: String?) {}
 }
 
 // --- 6.6 Onboarding / permessi ---
@@ -244,8 +265,11 @@ data class OnboardingState(
     val steps: List<OnboardingStepState>,
     val currentIndex: Int,
     val canFinish: Boolean,     // WELCOME_PRIVACY e BRAIN_CONFIG obbligatori; il resto skippabile (degradato)
-    val bridgeUrl: String? = null,
-    val bridgeTokenConfigured: Boolean = false,
+    val bridgeUrl: String? = null,               // legacy, resta per il ramo Hermes
+    val bridgeTokenConfigured: Boolean = false,  // legacy, resta
+    val providerChoices: List<ProviderChoiceUi> = emptyList(),
+    /** Ramo transport del provider selezionato: guida quale dialog apre la CTA BRAIN_CONFIG. */
+    val transport: TransportUi? = null,
 )
 
 data class OnboardingStepState(
@@ -263,4 +287,8 @@ enum class StepStatus { TODO, IN_PROGRESS, DONE, SKIPPED, BLOCKED }
 interface OnboardingCallbacks {
     fun onStepCta(kind: StepKind); fun onSkip(kind: StepKind); fun onNext(); fun onBack(); fun onFinish()
     fun onSaveBridge(url: String, bearerToken: String?) {}
+    /** Selettore provider: id = ProviderId.wireName. Id sconosciuti = no-op lato VM. */
+    fun onSelectProvider(providerId: String) {}
+    /** apiKey null = conserva la chiave esistente (pattern onSaveBridge). La chiave NON torna mai nello stato. */
+    fun onSaveProviderConfig(providerId: String, baseUrl: String?, model: String?, apiKey: String?) {}
 }

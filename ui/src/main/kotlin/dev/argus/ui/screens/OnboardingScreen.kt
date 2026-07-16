@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -31,6 +33,7 @@ import androidx.compose.material.icons.rounded.RadioButtonUnchecked
 import androidx.compose.material.icons.rounded.RemoveCircleOutline
 import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -52,12 +55,15 @@ import androidx.compose.ui.unit.dp
 import dev.argus.engine.safety.Severity
 import dev.argus.ui.components.WarningBanner
 import dev.argus.ui.components.BridgeConfigurationDialog
+import dev.argus.ui.components.ProviderConfigurationDialog
 import dev.argus.ui.model.OnboardingCallbacks
 import dev.argus.ui.model.OnboardingState
 import dev.argus.ui.model.OnboardingStepState
+import dev.argus.ui.model.ProviderChoiceUi
 import dev.argus.ui.model.ShizukuStatus
 import dev.argus.ui.model.StepKind
 import dev.argus.ui.model.StepStatus
+import dev.argus.ui.model.TransportUi
 import dev.argus.ui.model.UiWarning
 import dev.argus.ui.theme.ArgusTheme
 import dev.argus.ui.theme.LocalArgusSemantic
@@ -110,7 +116,7 @@ private fun stepIcon(kind: StepKind): ImageVector = when (kind) {
 
 private fun shortName(kind: StepKind): String = when (kind) {
     StepKind.WELCOME_PRIVACY -> "Privacy"
-    StepKind.BRAIN_CONFIG -> "Hermes"
+    StepKind.BRAIN_CONFIG -> "Cervello"
     StepKind.SHIZUKU -> "Shizuku"
     StepKind.NOTIFICATION_ACCESS -> "Notifiche"
     StepKind.BATTERY_OEM -> "Batteria"
@@ -140,6 +146,11 @@ fun OnboardingScreen(
             ) {
                 Spacer(Modifier.height(4.dp))
                 StepHeadline(step)
+
+                // BRAIN_CONFIG: selettore provider ("Scegli il cervello") sopra la checklist.
+                if (step.kind == StepKind.BRAIN_CONFIG && state.providerChoices.isNotEmpty()) {
+                    ProviderSelector(state.providerChoices, callbacks::onSelectProvider)
+                }
 
                 // BATTERY_OEM: conseguenza reale del rifiuto, sopra la checklist (§6.6).
                 if (step.kind == StepKind.BATTERY_OEM) {
@@ -173,13 +184,45 @@ fun OnboardingScreen(
             )
         }
     }
-    if (showBridgeEditor && state.bridgeUrl != null) {
-        BridgeConfigurationDialog(
-            initialUrl = state.bridgeUrl,
-            tokenConfigured = state.bridgeTokenConfigured,
-            onDismiss = { showBridgeEditor = false },
-            onSave = callbacks::onSaveBridge,
-        )
+    if (showBridgeEditor) {
+        when (val transport = state.transport) {
+            is TransportUi.CliBridge -> BridgeConfigurationDialog(
+                initialUrl = transport.url,
+                tokenConfigured = transport.tokenConfigured,
+                onDismiss = { showBridgeEditor = false },
+                onSave = callbacks::onSaveBridge,
+            )
+            is TransportUi.DirectProvider -> ProviderConfigurationDialog(
+                provider = transport,
+                onDismiss = { showBridgeEditor = false },
+                onSave = { baseUrl, model, apiKey ->
+                    callbacks.onSaveProviderConfig(transport.providerId, baseUrl, model, apiKey)
+                },
+            )
+            // Fallback legacy: stato senza transport (fixture vecchie). Il VM reale emette sempre un ramo.
+            null -> if (state.bridgeUrl != null) {
+                BridgeConfigurationDialog(
+                    initialUrl = state.bridgeUrl,
+                    tokenConfigured = state.bridgeTokenConfigured,
+                    onDismiss = { showBridgeEditor = false },
+                    onSave = callbacks::onSaveBridge,
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ProviderSelector(choices: List<ProviderChoiceUi>, onSelect: (String) -> Unit) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        choices.forEach { choice ->
+            FilterChip(
+                selected = choice.selected,
+                onClick = { onSelect(choice.id) },
+                label = { Text(choice.label) },
+            )
+        }
     }
 }
 
@@ -472,6 +515,51 @@ private fun OnboardingPrivacyPreview() {
 @Composable
 private fun OnboardingShizukuPreview() {
     PreviewFor(StepKind.SHIZUKU, ShizukuStatus.RUNNING_NOT_AUTHORIZED)
+}
+
+@Preview(name = "Onboarding · Scegli il cervello (selettore provider)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)
+@Composable
+private fun OnboardingBrainConfigPreview() {
+    val choices = listOf(
+        ProviderChoiceUi("hermes", "Hermes (self-hosted)", selected = false),
+        ProviderChoiceUi("openai", "OpenAI", selected = true),
+        ProviderChoiceUi("anthropic", "Anthropic", selected = false),
+        ProviderChoiceUi("gemini", "Google Gemini", selected = false),
+        ProviderChoiceUi("openrouter", "OpenRouter", selected = false),
+        ProviderChoiceUi("custom_openai_compat", "Custom (OpenAI-compat)", selected = false),
+    )
+    ArgusTheme {
+        OnboardingScreen(
+            OnboardingState(
+                steps = stepsFixture(StepKind.BRAIN_CONFIG).mapIndexed { i, s ->
+                    if (i == 1) {
+                        s.copy(
+                            status = StepStatus.IN_PROGRESS,
+                            title = "Scegli il cervello",
+                            body = "Provider diretto: serve una tua chiave API (BYOK), nessun account Argus. La chiave viene cifrata con Android Keystore e non sarà più mostrata.",
+                            ctaLabel = "Configura il cervello",
+                        )
+                    } else {
+                        s.copy(status = if (i == 0) StepStatus.DONE else StepStatus.TODO)
+                    }
+                },
+                currentIndex = 1,
+                canFinish = false,
+                providerChoices = choices,
+                transport = TransportUi.DirectProvider(
+                    providerId = "openai",
+                    providerLabel = "OpenAI",
+                    baseUrl = "https://api.openai.com/v1",
+                    model = "gpt-5.5",
+                    authState = dev.argus.ui.model.AuthState.NOT_CONFIGURED,
+                    reachable = null,
+                    lastLatencyLabel = null,
+                    defaultModels = listOf("gpt-5.5", "gpt-5-mini"),
+                ),
+            ),
+            NoopOnboardingCallbacks,
+        )
+    }
 }
 
 @Preview(name = "Onboarding · Batteria (conseguenza)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)

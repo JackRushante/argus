@@ -13,7 +13,9 @@ import dev.argus.automation.ConfiguredBridgeBrain
 import dev.argus.automation.connectivity.ConnectivitySentinelStatus
 import dev.argus.automation.PrivacyRevocationCoordinator
 import dev.argus.automation.PrivacyRevocationResult
-import dev.argus.brain.BridgeConfigurationStore
+import dev.argus.brain.ProviderCatalog
+import dev.argus.brain.ProviderConfigStore
+import dev.argus.brain.ProviderId
 import dev.argus.engine.brain.ContactWhitelistStore
 import dev.argus.engine.brain.WhitelistedContact
 import dev.argus.engine.model.Automation
@@ -28,8 +30,10 @@ import dev.argus.engine.safety.PendingDraft
 import dev.argus.shizuku.ShizukuGateway
 import dev.argus.shizuku.ShizukuGatewayStatus
 import dev.argus.shizuku.ShizukuPermissionResult
+import dev.argus.ui.model.AuthState
 import dev.argus.ui.model.BudgetUi
 import dev.argus.ui.model.ContactRow
+import dev.argus.ui.model.ProviderChoiceUi
 import dev.argus.ui.model.SettingsState
 import dev.argus.ui.model.TransportUi
 import kotlinx.coroutines.CancellationException
@@ -80,7 +84,7 @@ internal fun observedWhitelistCandidates(
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val configuration: BridgeConfigurationStore,
+    private val configuration: ProviderConfigStore,
     private val brain: ConfiguredBridgeBrain,
     private val whitelist: ContactWhitelistStore,
     private val preferences: AppPreferencesStore,
@@ -150,12 +154,8 @@ class SettingsViewModel @Inject constructor(
     ) { values, bridge, hasToken, _, sentinelActive ->
         val health = readAndroidUiHealth(context)
         SettingsState(
-            transport = TransportUi.CliBridge(
-                url = configuration.baseUrl(),
-                reachable = bridge.reachable,
-                lastLatencyLabel = bridge.latencyLabel,
-                tokenConfigured = hasToken,
-            ),
+            transport = transportUi(bridge, hasToken),
+            providerChoices = providerChoices(),
             shizuku = values.shizukuStatus.toUiStatus(
                 degradedAfterReboot = values.shizukuNeeded &&
                     values.shizukuStatus == ShizukuGatewayStatus.INSTALLED_NOT_RUNNING,
@@ -228,6 +228,44 @@ class SettingsViewModel @Inject constructor(
             } catch (_: Exception) {
                 bridgeHealth.value = BridgeUiHealth(reachable = false)
                 message("Impossibile verificare Hermes.")
+            }
+        }
+    }
+
+    fun selectProvider(wireName: String) {
+        val id = ProviderId.fromWireName(wireName) ?: run {
+            mutableMessages.tryEmit("Provider sconosciuto.")
+            return
+        }
+        viewModelScope.launch {
+            if (configuration.selectProvider(id)) {
+                // La reachability misurata su un provider non vale per il nuovo selezionato.
+                bridgeHealth.value = BridgeUiHealth()
+                refresh()
+            } else {
+                message("Impossibile selezionare il provider.")
+            }
+        }
+    }
+
+    fun saveProviderConfig(wireName: String, baseUrl: String?, model: String?, apiKey: String?) {
+        val id = ProviderId.fromWireName(wireName) ?: run {
+            mutableMessages.tryEmit("Provider sconosciuto.")
+            return
+        }
+        viewModelScope.launch {
+            try {
+                if (!configuration.saveProviderConfig(id, baseUrl = baseUrl, model = model, apiKey = apiKey)) {
+                    message("Configurazione non valida.")
+                    return@launch
+                }
+                bridgeHealth.value = BridgeUiHealth()
+                refresh()
+                if (id == configuration.selectedProviderId()) testConnectionInternal(savedMessage = true)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                message("Impossibile salvare la configurazione del provider.")
             }
         }
     }
@@ -313,6 +351,7 @@ class SettingsViewModel @Inject constructor(
 
     private suspend fun testConnectionInternal(savedMessage: Boolean) {
         bridgeHealth.value = BridgeUiHealth()
+        val label = ProviderCatalog.spec(configuration.selectedProviderId()).displayName
         when (val result = brain.health()) {
             is BridgeHealthResult.Reachable -> {
                 bridgeHealth.value = BridgeUiHealth(
@@ -320,30 +359,60 @@ class SettingsViewModel @Inject constructor(
                     latencyLabel = latencyLabel(result.latencyMillis),
                 )
                 message(
-                    if (savedMessage) "Configurazione protetta salvata; Hermes è raggiungibile."
-                    else "Hermes raggiungibile.",
+                    if (savedMessage) "Configurazione protetta salvata; $label è raggiungibile."
+                    else "$label raggiungibile.",
                 )
             }
             is BridgeHealthResult.Unreachable -> {
                 bridgeHealth.value = BridgeUiHealth(reachable = false)
                 val suffix = result.kind.name.lowercase(Locale.ROOT)
                 message(
-                    if (savedMessage) "Configurazione salvata; Hermes non raggiungibile ($suffix)."
-                    else "Hermes non raggiungibile ($suffix).",
+                    if (savedMessage) "Configurazione salvata; $label non raggiungibile ($suffix)."
+                    else "$label non raggiungibile ($suffix).",
                 )
             }
+        }
+    }
+
+    private fun transportUi(bridge: BridgeUiHealth, hasToken: Boolean): TransportUi {
+        val id = configuration.selectedProviderId()
+        val config = configuration.providerConfig(id)
+        return if (id == ProviderId.HERMES) {
+            TransportUi.CliBridge(
+                url = config.baseUrl,
+                reachable = bridge.reachable,
+                lastLatencyLabel = bridge.latencyLabel,
+                tokenConfigured = hasToken,
+            )
+        } else {
+            val spec = ProviderCatalog.spec(id)
+            TransportUi.DirectProvider(
+                providerId = id.wireName,
+                providerLabel = spec.displayName,
+                baseUrl = config.baseUrl,
+                model = config.model,
+                authState = if (hasToken) AuthState.OK else AuthState.NOT_CONFIGURED,
+                reachable = bridge.reachable,
+                lastLatencyLabel = bridge.latencyLabel,
+                defaultModels = spec.defaultModels,
+                baseUrlEditable = id == ProviderId.CUSTOM_OPENAI_COMPAT,
+                apiKeyPrefixHint = spec.apiKeyPrefixHint,
+            )
+        }
+    }
+
+    private fun providerChoices(): List<ProviderChoiceUi> {
+        val selected = configuration.selectedProviderId()
+        return ProviderCatalog.specs.values.map {
+            ProviderChoiceUi(it.id.wireName, it.displayName, it.id == selected)
         }
     }
 
     private fun initialState(): SettingsState {
         val health = readAndroidUiHealth(context)
         return SettingsState(
-            transport = TransportUi.CliBridge(
-                url = configuration.baseUrl(),
-                reachable = null,
-                lastLatencyLabel = null,
-                tokenConfigured = false,
-            ),
+            transport = transportUi(BridgeUiHealth(), hasToken = false),
+            providerChoices = providerChoices(),
             shizuku = shizuku.status().toUiStatus(false),
             batteryExempt = health.batteryExempt,
             notificationsGranted = health.notificationsGranted,

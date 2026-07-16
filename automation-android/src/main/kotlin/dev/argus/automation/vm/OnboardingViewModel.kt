@@ -10,18 +10,23 @@ import dev.argus.automation.AppPreferences
 import dev.argus.automation.AppPreferencesStore
 import dev.argus.automation.BridgeHealthResult
 import dev.argus.automation.ConfiguredBridgeBrain
-import dev.argus.brain.BridgeConfigurationStore
+import dev.argus.brain.ProviderCatalog
+import dev.argus.brain.ProviderConfigStore
+import dev.argus.brain.ProviderId
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.safety.DraftRepository
 import dev.argus.shizuku.ShizukuGateway
 import dev.argus.shizuku.ShizukuGatewayStatus
 import dev.argus.shizuku.ShizukuPermissionResult
+import dev.argus.ui.model.AuthState
 import dev.argus.ui.model.OnboardingState
 import dev.argus.ui.model.OnboardingStepState
+import dev.argus.ui.model.ProviderChoiceUi
 import dev.argus.ui.model.ShizukuStatus
 import dev.argus.ui.model.StepKind
 import dev.argus.ui.model.StepStatus
+import dev.argus.ui.model.TransportUi
 import dev.argus.ui.screens.shizukuOnboardingCopy
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -51,7 +56,7 @@ class OnboardingViewModel @Inject constructor(
     private val savedStateHandle: SavedStateHandle,
     @ApplicationContext private val context: Context,
     private val preferences: AppPreferencesStore,
-    private val configuration: BridgeConfigurationStore,
+    private val configuration: ProviderConfigStore,
     private val brain: ConfiguredBridgeBrain,
     private val shizuku: ShizukuGateway,
     automations: AutomationStore,
@@ -142,6 +147,49 @@ class OnboardingViewModel @Inject constructor(
                 throw error
             } catch (_: Exception) {
                 message("Impossibile salvare la configurazione Hermes.")
+            }
+        }
+    }
+
+    fun selectProvider(wireName: String) {
+        val id = ProviderId.fromWireName(wireName) ?: run {
+            mutableEvents.tryEmit(OnboardingEvent.Message("Provider sconosciuto."))
+            return
+        }
+        viewModelScope.launch {
+            if (configuration.selectProvider(id)) {
+                refresh()
+            } else {
+                message("Impossibile selezionare il provider.")
+            }
+        }
+    }
+
+    fun saveProviderConfig(wireName: String, baseUrl: String?, model: String?, apiKey: String?) {
+        val id = ProviderId.fromWireName(wireName) ?: run {
+            mutableEvents.tryEmit(OnboardingEvent.Message("Provider sconosciuto."))
+            return
+        }
+        viewModelScope.launch {
+            try {
+                if (!configuration.saveProviderConfig(id, baseUrl = baseUrl, model = model, apiKey = apiKey)) {
+                    message("Configurazione non valida.")
+                    return@launch
+                }
+                // La chiave salvata potrebbe essere di un provider NON selezionato: rileggi invece di assumere true.
+                tokenConfigured.value = configuration.bearerToken() != null
+                message("Configurazione salvata in storage protetto.")
+                when (brain.health()) {
+                    is BridgeHealthResult.Reachable -> message("Provider raggiungibile.")
+                    is BridgeHealthResult.Unreachable -> message(
+                        "Configurazione salvata; il provider non è raggiungibile ora.",
+                    )
+                }
+                advance()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                message("Impossibile salvare la configurazione del provider.")
             }
         }
     }
@@ -264,7 +312,47 @@ class OnboardingViewModel @Inject constructor(
             canFinish = sources.preferences.privacyAccepted && configured,
             bridgeUrl = configuration.baseUrl(),
             bridgeTokenConfigured = configured,
+            providerChoices = providerChoices(),
+            transport = transportUi(configured),
         )
+    }
+
+    /**
+     * Ramo transport del provider selezionato, versione onboarding: nessuna reachability misurata
+     * (health si prova solo al salvataggio). [configured] = chiave del selezionato presente.
+     */
+    private fun transportUi(configured: Boolean): TransportUi {
+        val id = configuration.selectedProviderId()
+        val config = configuration.providerConfig(id)
+        return if (id == ProviderId.HERMES) {
+            TransportUi.CliBridge(
+                url = config.baseUrl,
+                reachable = null,
+                lastLatencyLabel = null,
+                tokenConfigured = configured,
+            )
+        } else {
+            val spec = ProviderCatalog.spec(id)
+            TransportUi.DirectProvider(
+                providerId = id.wireName,
+                providerLabel = spec.displayName,
+                baseUrl = config.baseUrl,
+                model = config.model,
+                authState = if (configured) AuthState.OK else AuthState.NOT_CONFIGURED,
+                reachable = null,
+                lastLatencyLabel = null,
+                defaultModels = spec.defaultModels,
+                baseUrlEditable = id == ProviderId.CUSTOM_OPENAI_COMPAT,
+                apiKeyPrefixHint = spec.apiKeyPrefixHint,
+            )
+        }
+    }
+
+    private fun providerChoices(): List<ProviderChoiceUi> {
+        val selected = configuration.selectedProviderId()
+        return ProviderCatalog.specs.values.map {
+            ProviderChoiceUi(it.id.wireName, it.displayName, it.id == selected)
+        }
     }
 
     private fun step(
@@ -283,14 +371,21 @@ class OnboardingViewModel @Inject constructor(
                 "Ho capito, acconsento",
                 null,
             )
-            StepKind.BRAIN_CONFIG -> OnboardingStepState(
-                kind,
-                StepStatus.TODO,
-                "Collega Hermes",
-                "Configura l'indirizzo HTTPS del bridge e il bearer. Il bearer viene cifrato con Android Keystore e non sarà più mostrato.",
-                "Configura Hermes",
-                null,
-            )
+            StepKind.BRAIN_CONFIG -> {
+                val hermesSelected = configuration.selectedProviderId() == ProviderId.HERMES
+                OnboardingStepState(
+                    kind,
+                    StepStatus.TODO,
+                    "Scegli il cervello",
+                    if (hermesSelected) {
+                        "Configura l'indirizzo HTTPS del bridge e il bearer. Il bearer viene cifrato con Android Keystore e non sarà più mostrato."
+                    } else {
+                        "Provider diretto: serve una tua chiave API (BYOK), nessun account Argus. La chiave viene cifrata con Android Keystore e non sarà più mostrata."
+                    },
+                    "Configura il cervello",
+                    null,
+                )
+            }
             StepKind.SHIZUKU -> OnboardingStepState(
                 kind,
                 StepStatus.TODO,

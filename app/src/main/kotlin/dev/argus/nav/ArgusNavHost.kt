@@ -453,6 +453,14 @@ fun ArgusNavHost() {
                         override fun onRerunOnboarding() {
                             navController.navigate(Routes.ONBOARDING)
                         }
+                        override fun onSelectProvider(providerId: String) =
+                            settingsViewModel.selectProvider(providerId)
+                        override fun onSaveProviderConfig(
+                            providerId: String,
+                            baseUrl: String?,
+                            model: String?,
+                            apiKey: String?,
+                        ) = settingsViewModel.saveProviderConfig(providerId, baseUrl, model, apiKey)
                     },
                     modifier = Modifier.testTag("screen_settings"),
                 )
@@ -576,6 +584,14 @@ fun ArgusNavHost() {
                         override fun onSaveBridge(url: String, bearerToken: String?) {
                             viewModel.saveBridge(url, bearerToken)
                         }
+                        override fun onSelectProvider(providerId: String) =
+                            viewModel.selectProvider(providerId)
+                        override fun onSaveProviderConfig(
+                            providerId: String,
+                            baseUrl: String?,
+                            model: String?,
+                            apiKey: String?,
+                        ) = viewModel.saveProviderConfig(providerId, baseUrl, model, apiKey)
                         override fun onSkip(kind: StepKind) = viewModel.onSkip(kind)
                         override fun onNext() = viewModel.onNext()
                         override fun onBack() = viewModel.onBack()
