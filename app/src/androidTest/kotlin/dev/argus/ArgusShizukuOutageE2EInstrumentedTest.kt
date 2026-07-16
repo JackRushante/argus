@@ -15,6 +15,7 @@ import dev.argus.engine.model.DndMode
 import dev.argus.engine.model.StateKeys
 import dev.argus.engine.model.TimePrecision
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.runtime.ActionJournalOutcome
 import dev.argus.engine.runtime.AuditKind
 import dev.argus.engine.runtime.ExecutionId
 import dev.argus.shizuku.ShizukuGatewayStatus
@@ -34,10 +35,13 @@ import java.time.LocalDateTime
 import java.time.ZoneId
 
 /**
- * Negative E2E host-driven. `prepare` arma una one-shot DND con Shizuku attivo; l'host ferma il
- * daemon e attende AlarmManager; `verify` controlla che lo scatto sia stato bloccato/auditato,
- * senza azione e senza replay implicito. L'host riavvia poi Shizuku e invoca `cleanup`, che
- * verifica/ripristina il DND prima di eliminare il marker. Senza fase esplicita il test è saltato.
+ * E2E host-driven del tier base (P3-3). `prepare` arma una one-shot DND con Shizuku attivo; l'host
+ * ferma il daemon e attende AlarmManager; `verify` controlla che — essendo SetDnd una azione BASE
+ * (NotificationManager, accesso «Non disturbare» implicito dal listener) — lo scatto AVVENGA lo
+ * stesso con Shizuku fermo: nessun blocco policy, regola ancora ARMED, DND davvero a TOTAL. È il
+ * complemento del vecchio contratto (che bloccava la regola): il tier base rende le azioni normali
+ * indipendenti da Shizuku. L'host riavvia poi Shizuku e invoca `cleanup`, che ripristina il DND
+ * prima di eliminare il marker. Senza fase esplicita il test è saltato.
  */
 @RunWith(AndroidJUnit4::class)
 class ArgusShizukuOutageE2EInstrumentedTest {
@@ -128,22 +132,30 @@ class ArgusShizukuOutageE2EInstrumentedTest {
             services.shizukuGateway().status(),
         )
         try {
-            val records = withTimeout(AUDIT_TIMEOUT_MILLIS) {
+            // Tier base: SetDnd esegue via NotificationManager, quindi con Shizuku fermo lo scatto
+            // avviene lo stesso. Attendo il FIRED (non un blocco).
+            val fired = withTimeout(AUDIT_TIMEOUT_MILLIS) {
                 services.database().auditDao().observeLogForAutomation(id.value, 20)
-                    .first { rows -> rows.any { it.kind == AuditKind.BLOCKED_POLICY } }
+                    .first { rows -> rows.any { it.kind == AuditKind.FIRED } }
+                    .first { it.kind == AuditKind.FIRED }
             }
-            val blocked = records.filter { it.kind == AuditKind.BLOCKED_POLICY }
-            assertEquals(1, blocked.size)
-            assertEquals("capability_unavailable", blocked.single().detail)
-            assertFalse(records.any { it.kind == AuditKind.FIRED })
-            val terminal = withTimeout(AUDIT_TIMEOUT_MILLIS) {
-                services.automationStore().observeAll().first { automations ->
-                    automations.firstOrNull { it.id == id }?.status == AutomationStatus.DISABLED
-                }
-            }
+            val records = services.database().auditDao().forAutomation(id.value)
+            assertFalse(
+                "Una base come SetDnd non deve essere bloccata in outage Shizuku",
+                records.any { it.kind == AuditKind.BLOCKED_POLICY },
+            )
+            val actions = services.database().executionJournalDao()
+                .actions(requireNotNull(fired.executionId))
+            assertEquals("set_dnd", actions.single().actionType)
+            assertEquals(ActionJournalOutcome.SUCCEEDED, actions.single().outcome)
+            assertTrue(
+                "Il DND non è passato a TOTAL via il tier base",
+                awaitDnd(DndMode.TOTAL),
+            )
+            // La regola resta ARMED: nessuna quarantena, la capability base è disponibile.
             assertEquals(
-                AutomationStatus.DISABLED,
-                terminal.first { it.id == id }.status,
+                AutomationStatus.ARMED,
+                services.automationStore().get(id)?.status,
             )
         } finally {
             // Il daemon è volutamente spento: elimina la regola ma conserva il marker affinché
