@@ -26,8 +26,23 @@ class DefaultTransportFactory(
             authProvider = BridgeAuthProvider { secrets.apiKey(ProviderId.HERMES) },
             client = client,
         )
-        // Wave 2: OPENAI/GEMINI/OPENROUTER/CUSTOM_OPENAI_COMPAT -> OpenAICompatTransport (S5-S6);
-        //         ANTHROPIC -> AnthropicMessagesTransport (S7).
-        else -> throw TransportNotImplementedException(config.providerId)
+        // S5: i provider Chat Completions condividono un solo adapter, parametrizzato dal catalog.
+        ProviderId.OPENAI,
+        ProviderId.GEMINI,
+        ProviderId.OPENROUTER,
+        ProviderId.CUSTOM_OPENAI_COMPAT -> OpenAICompatTransport(
+            providerId = config.providerId,
+            spec = ProviderCatalog.spec(config.providerId),
+            config = config,
+            apiKey = { secrets.apiKey(config.providerId) },
+            client = client,
+        )
+        // S7: ANTHROPIC -> AnthropicMessagesTransport (x-api-key, Messages API dedicata).
+        ProviderId.ANTHROPIC -> AnthropicMessagesTransport(
+            spec = ProviderCatalog.spec(ProviderId.ANTHROPIC),
+            config = config,
+            apiKey = { secrets.apiKey(ProviderId.ANTHROPIC) },
+            client = client,
+        )
     }
 }

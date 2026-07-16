@@ -24,24 +24,61 @@ class TransportFactoryTest {
     }
 
     @Test
-    fun `every other provider fails with the typed not_yet_implemented error`() {
+    fun `the four openai-compat providers produce an OpenAICompatTransport`() {
         val factory = DefaultTransportFactory(fixedSecret)
+        val compat = listOf(
+            ProviderId.OPENAI,
+            ProviderId.GEMINI,
+            ProviderId.OPENROUTER,
+            ProviderId.CUSTOM_OPENAI_COMPAT,
+        )
 
-        ProviderId.entries.filter { it != ProviderId.HERMES }.forEach { id ->
-            val spec = ProviderCatalog.spec(id)
-            val baseUrl = spec.defaultBaseUrl ?: "https://custom.example"
-            val error = assertFailsWith<TransportNotImplementedException> {
-                factory.create(ProviderConfig(id, baseUrl, model = null))
-            }
-            assertEquals(TransportErrorKind.CONFIGURATION, error.kind)
-            assertEquals(id, error.providerId)
-            val message = error.message.orEmpty()
-            assertTrue(message.contains("not_yet_implemented"), "message: $message")
-            assertTrue(message.contains(id.wireName), "message: $message")
-            // Nessun segreto e nessuna baseUrl nel messaggio d'errore.
-            assertFalse(message.contains(baseUrl), "message leaks baseUrl: $message")
-            assertFalse(message.contains("test-token"), "message leaks secret: $message")
+        compat.forEach { id ->
+            val baseUrl = ProviderCatalog.spec(id).defaultBaseUrl ?: "https://custom.example"
+            val transport = factory.create(ProviderConfig(id, baseUrl, model = null))
+            assertTrue(transport is OpenAICompatTransport, "provider $id")
+            assertEquals(id, transport.providerId)
         }
+    }
+
+    @Test
+    fun `anthropic config produces an AnthropicMessagesTransport`() {
+        val factory = DefaultTransportFactory(fixedSecret)
+        val id = ProviderId.ANTHROPIC
+        val baseUrl = ProviderCatalog.spec(id).defaultBaseUrl ?: "https://custom.example"
+
+        val transport = factory.create(ProviderConfig(id, baseUrl, model = null))
+
+        assertTrue(transport is AnthropicMessagesTransport)
+        assertEquals(id, transport.providerId)
+    }
+
+    @Test
+    fun `anthropic factory never reads the api key at creation time`() = runBlocking {
+        var reads = 0
+        val countingSecrets = ProviderSecrets {
+            reads += 1
+            "test-token-0123456789abcdef"
+        }
+        val factory = DefaultTransportFactory(countingSecrets)
+
+        factory.create(ProviderConfig(ProviderId.ANTHROPIC, "https://api.anthropic.com", model = null))
+
+        assertEquals(0, reads)
+    }
+
+    @Test
+    fun `openai-compat factory never reads the api key at creation time`() = runBlocking {
+        var reads = 0
+        val countingSecrets = ProviderSecrets {
+            reads += 1
+            "test-token-0123456789abcdef"
+        }
+        val factory = DefaultTransportFactory(countingSecrets)
+
+        factory.create(ProviderConfig(ProviderId.OPENAI, "https://api.openai.com/v1", model = null))
+
+        assertEquals(0, reads)
     }
 
     @Test

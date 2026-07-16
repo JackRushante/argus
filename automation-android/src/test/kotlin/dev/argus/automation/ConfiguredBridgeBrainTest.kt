@@ -123,16 +123,18 @@ class ConfiguredBridgeBrainTest {
     }
 
     @Test
-    fun `selecting a provider without transport surfaces a configuration error`() = runTest {
-        val configuration = FakeBridgeConfiguration().apply {
-            token = "a-valid-bridge-token"
-            selected = ProviderId.OPENAI
+    fun `a factory configuration error propagates out of compile`() = runTest {
+        // Proprieta' documentata (ConfiguredBridgeBrain §currentTransport): il throw della factory
+        // per un provider che non puo' essere costruito si propaga FUORI dal try di
+        // TransportBackedBrain, quindi compile() rilancia la TransportException invece di mapparla a
+        // metaError. In Wave 1 lo scatenava un provider non implementato; ora tutti i provider hanno
+        // un transport, quindi si verifica il canale con una factory che lancia, a prescindere dal
+        // provider concreto.
+        val configuration = FakeBridgeConfiguration().apply { token = "a-valid-bridge-token" }
+        val factory = TransportFactory {
+            throw TransportException(TransportErrorKind.CONFIGURATION, "provider non configurato")
         }
-        val brain = ConfiguredBridgeBrain(
-            configuration,
-            privacyAccepted = { true },
-            factory = DefaultTransportFactory(configuration),
-        )
+        val brain = ConfiguredBridgeBrain(configuration, privacyAccepted = { true }, factory = factory)
 
         val error = assertFailsWith<TransportException> {
             brain.compile("una regola", TEST_MANIFEST, DeviceState())
