@@ -52,6 +52,8 @@ data class OpenAiCompatHealth(override val model: String) : TransportHealth
  *
  * Redazione: la chiave viaggia solo nell'header `Authorization`/`x-api-key`; non entra mai in
  * eccezioni, messaggi, `toString` o `TurnUsage`. I body remoti non vengono ripubblicati negli errori.
+ *
+ * Il consumo token di ogni turno viaggia dentro [ActResult.usage] (S12), non più in un campo laterale.
  */
 class OpenAICompatTransport internal constructor(
     override val providerId: ProviderId,
@@ -69,15 +71,6 @@ class OpenAICompatTransport internal constructor(
         apiKey: suspend () -> String?,
         client: OkHttpClient = CliBridgeTransport.defaultClient(),
     ) : this(providerId, spec, config, apiKey, client, allowCleartextForTests = false)
-
-    /**
-     * Ultimo consumo token osservato (S12 lo instraderà in [ActResult.usage]; il contratto
-     * [AgentTransport] non lo trasporta ancora). Popolato dopo ogni `act`/`actV2` riuscito, `null`
-     * se il provider non ha restituito `usage`. Mai un segreto: solo conteggi e nome modello.
-     */
-    @Volatile
-    var lastUsage: TurnUsage? = null
-        private set
 
     private val base = config.baseUrl.trimEnd('/').toHttpUrl()
     private val chatUrl = base.newBuilder()
@@ -127,7 +120,6 @@ class OpenAICompatTransport internal constructor(
         )
         val payload = json.encodeToString(request)
         val response = parseChatResponse(execute(buildRequest(token, payload)))
-        lastUsage = response.toTurnUsage(fallbackModel = model)
         val text = response.choices.firstOrNull()?.message?.content?.trim()
         if (text.isNullOrEmpty()) return CompileResult("", null, "empty_response")
         val parsed = compileParser.parseCompile(text)
@@ -218,10 +210,10 @@ class OpenAICompatTransport internal constructor(
         )
         val payload = json.encodeToString(request)
         val response = parseChatResponse(execute(buildRequest(token, payload)))
-        lastUsage = response.toTurnUsage(fallbackModel = model)
+        val usage = response.toTurnUsage(fallbackModel = model)
         val text = response.replyText()
-            ?: return ActResult(text = null, metaError = "empty_response")
-        return ActResult(text = text, metaError = null)
+            ?: return ActResult(text = null, metaError = "empty_response", usage = usage)
+        return ActResult(text = text, metaError = null, usage = usage)
     }
 
     private fun buildRequest(token: String, payload: String): Request {

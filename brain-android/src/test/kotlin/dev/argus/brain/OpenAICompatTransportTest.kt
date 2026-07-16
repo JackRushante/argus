@@ -79,7 +79,7 @@ class OpenAICompatTransportTest {
 
         assertEquals("Va bene, a dopo.", result.text)
         assertNull(result.metaError)
-        val usage = assertNotNull(t.lastUsage)
+        val usage = assertNotNull(result.usage)
         assertEquals(120L, usage.inputTokens)
         assertEquals(8L, usage.outputTokens)
         assertEquals(64L, usage.cachedInputTokens)
@@ -115,7 +115,7 @@ class OpenAICompatTransportTest {
         val result = t.act(fireContext(), "rispondi", listOf("notification"), listOf("whatsapp_reply"))
 
         assertEquals("Ciao, arrivo!", result.text)
-        val usage = assertNotNull(t.lastUsage)
+        val usage = assertNotNull(result.usage)
         assertEquals(30L, usage.inputTokens)
         assertEquals(4L, usage.outputTokens)
         assertNull(usage.cachedInputTokens)
@@ -124,6 +124,27 @@ class OpenAICompatTransportTest {
         ).jsonObject
         assertTrue("max_tokens" in root)
         assertFalse("max_completion_tokens" in root)
+    }
+
+    @Test fun `usage is attached even when the reply is empty`(): Unit = runBlocking {
+        // choices senza testo né tool_call, ma con usage: i token sono stati consumati e devono
+        // viaggiare con l'ActResult anche sul ramo empty_response (S13 li deve poter contare).
+        server.enqueue(jsonResponse(
+            """
+            {"id":"1","model":"gpt-5.5",
+             "choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":null}}],
+             "usage":{"prompt_tokens":77,"completion_tokens":0}}
+            """.trimIndent(),
+        ))
+        val t = transport(ProviderId.OPENAI, model = "gpt-5.5")
+
+        val result = t.act(fireContext(), "rispondi", listOf("notification"), listOf("whatsapp_reply"))
+
+        assertNull(result.text)
+        assertEquals("empty_response", result.metaError)
+        val usage = assertNotNull(result.usage)
+        assertEquals(77L, usage.inputTokens)
+        assertEquals(0L, usage.outputTokens)
     }
 
     @Test fun `openrouter default model is resolved from catalog`(): Unit = runBlocking {

@@ -9,6 +9,7 @@ data class CompileResult(val reply: String, val draft: AutomationDraft?, val met
 data class ActResult(
     val text: String?,
     val metaError: String?,
+    val usage: TurnUsage? = null,
 ) {
     init {
         require((text != null) xor (metaError != null)) {

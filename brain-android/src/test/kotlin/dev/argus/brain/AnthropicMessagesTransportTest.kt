@@ -72,7 +72,7 @@ class AnthropicMessagesTransportTest {
 
         assertEquals("Va bene, a dopo.", result.text)
         assertNull(result.metaError)
-        val usage = assertNotNull(t.lastUsage)
+        val usage = assertNotNull(result.usage)
         assertEquals(120L, usage.inputTokens)
         assertEquals(8L, usage.outputTokens)
         assertEquals(64L, usage.cachedInputTokens)
@@ -114,7 +114,7 @@ class AnthropicMessagesTransportTest {
         val result = t.act(fireContext(), "rispondi", listOf("notification"), listOf("whatsapp_reply"))
 
         assertEquals("Ciao, arrivo!", result.text)
-        val usage = assertNotNull(t.lastUsage)
+        val usage = assertNotNull(result.usage)
         assertEquals(30L, usage.inputTokens)
         assertEquals(4L, usage.outputTokens)
         assertNull(usage.cachedInputTokens)

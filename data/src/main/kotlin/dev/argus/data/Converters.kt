@@ -3,6 +3,8 @@ package dev.argus.data
 import androidx.room.TypeConverter
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.CreatedBy
+import dev.argus.data.entities.UsageEventKind
+import dev.argus.data.entities.UsageEventOutcome
 import dev.argus.engine.runtime.AuditKind
 import dev.argus.engine.runtime.ActionJournalOutcome
 import dev.argus.engine.runtime.ExecutionStatus
@@ -27,4 +29,11 @@ class Converters {
     @TypeConverter fun actionOutcomeToString(value: ActionJournalOutcome): String = value.name
     @TypeConverter fun stringToActionOutcome(value: String): ActionJournalOutcome =
         ActionJournalOutcome.valueOf(value)
+
+    @TypeConverter fun usageKindToString(value: UsageEventKind): String = value.name
+    @TypeConverter fun stringToUsageKind(value: String): UsageEventKind = UsageEventKind.valueOf(value)
+
+    @TypeConverter fun usageOutcomeToString(value: UsageEventOutcome): String = value.name
+    @TypeConverter fun stringToUsageOutcome(value: String): UsageEventOutcome =
+        UsageEventOutcome.valueOf(value)
 }

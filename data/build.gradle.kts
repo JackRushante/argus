@@ -25,6 +25,9 @@ android {
     // MigrationTestHelper possa validarlo su device (T3 Step 4, scaffolding migrazioni future).
     sourceSets {
         getByName("androidTest").assets.srcDir("$projectDir/schemas")
+        // Anche il source set `test` (host/Robolectric) espone gli schemi come asset così che
+        // MigrationTestHelper possa validare la migrazione 9→10 senza device (S11).
+        getByName("test").assets.srcDir("$projectDir/schemas")
     }
 }
 
@@ -49,6 +52,7 @@ dependencies {
     testImplementation(libs.junit4)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
+    testImplementation(libs.androidx.room.testing) // MigrationTestHelper su host (Robolectric) per la migrazione 9→10
     testImplementation(libs.kotlinx.coroutines.test)
 
     androidTestImplementation(libs.androidx.test.core)

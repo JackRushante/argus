@@ -51,6 +51,8 @@ data class AnthropicMessagesHealth(override val model: String) : TransportHealth
  *
  * Redazione: la chiave viaggia solo nell'header `x-api-key`; non entra mai in eccezioni, messaggi,
  * `toString` o [TurnUsage], e i body remoti non vengono ripubblicati negli errori.
+ *
+ * Il consumo token di ogni turno viaggia dentro [ActResult.usage] (S12), non più in un campo laterale.
  */
 class AnthropicMessagesTransport internal constructor(
     private val spec: ProviderSpec,
@@ -68,15 +70,6 @@ class AnthropicMessagesTransport internal constructor(
     ) : this(spec, config, apiKey, client, allowCleartextForTests = false)
 
     override val providerId: ProviderId = ProviderId.ANTHROPIC
-
-    /**
-     * Ultimo consumo token osservato (S12 lo instraderà in [ActResult.usage]). Popolato dopo ogni
-     * `act`/`actV2` riuscito, `null` se la risposta non ha restituito `usage`. Mai un segreto: solo
-     * conteggi e nome modello.
-     */
-    @Volatile
-    var lastUsage: TurnUsage? = null
-        private set
 
     private val base = config.baseUrl.trimEnd('/').toHttpUrl()
     private val messagesUrl = base.newBuilder()
@@ -117,7 +110,6 @@ class AnthropicMessagesTransport internal constructor(
             messages = listOf(InputMessage("user", AgentMessageSupport.compileUserText(cleanMessage, manifest, state))),
         )
         val response = parseResponse(execute(buildRequest(token, json.encodeToString(request))))
-        lastUsage = response.toTurnUsage(fallbackModel = model)
         val text = response.textContent().trim()
         if (text.isEmpty()) return CompileResult("", null, "empty_response")
         val parsed = compileParser.parseCompile(text)
@@ -189,10 +181,10 @@ class AnthropicMessagesTransport internal constructor(
             toolChoice = if (spec.quirks.forceToolChoiceAuto) AUTO_TOOL_CHOICE else FORCED_REPLY_CHOICE,
         )
         val response = parseResponse(execute(buildRequest(token, json.encodeToString(request))))
-        lastUsage = response.toTurnUsage(fallbackModel = model)
+        val usage = response.toTurnUsage(fallbackModel = model)
         val text = response.replyText()
-            ?: return ActResult(text = null, metaError = "empty_response")
-        return ActResult(text = text, metaError = null)
+            ?: return ActResult(text = null, metaError = "empty_response", usage = usage)
+        return ActResult(text = text, metaError = null, usage = usage)
     }
 
     private fun buildRequest(token: String, payload: String): Request {

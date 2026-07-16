@@ -109,6 +109,39 @@ class TransportBackedBrainTest {
         assertEquals("bridge_budget", actV2Fail.metaError)
     }
 
+    @Test fun `usage from the transport flows through act and actV2 untouched`(): Unit = runBlocking {
+        val ok = TransportBackedBrain(
+            FakeTransport(
+                onAct = { ActResult("Ciao", null, TurnUsage(7, 3, model = "m")) },
+                onActV2 = { ActResult("Ciao2", null, TurnUsage(11, 5, cachedInputTokens = 2, model = "m2")) },
+            ),
+        )
+        val actUsage = assertNotNull(
+            ok.act(fireContext(), "g", listOf("notification"), listOf("whatsapp_reply")).usage,
+        )
+        assertEquals(7L, actUsage.inputTokens)
+        assertEquals(3L, actUsage.outputTokens)
+        assertEquals("m", actUsage.model)
+
+        val actV2Action = Action.InvokeLlmV2(
+            goal = "g",
+            allowedTools = listOf("whatsapp_reply"),
+            replyTargetSender = true,
+            timeoutMs = 30_000L,
+            stateContext = emptyList(),
+        )
+        val actV2Usage = assertNotNull(ok.actV2(fireContext(), actV2Action).usage)
+        assertEquals(11L, actV2Usage.inputTokens)
+        assertEquals(2L, actV2Usage.cachedInputTokens)
+
+        // Ramo failure: nessuna risposta ⇒ nessun conteggio.
+        val failing = TransportBackedBrain(
+            FakeTransport(onAct = { throw TransportException(TransportErrorKind.AUTH, "nope") }),
+        )
+        val failed = failing.act(fireContext(), "g", listOf("notification"), listOf("whatsapp_reply"))
+        assertNull(failed.usage)
+    }
+
     @Test fun `cancellation propagates untouched`(): Unit = runBlocking {
         val brain = TransportBackedBrain(
             FakeTransport(onCompile = { throw CancellationException("cancelled") }),
