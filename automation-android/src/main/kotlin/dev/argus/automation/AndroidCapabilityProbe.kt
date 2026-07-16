@@ -2,6 +2,7 @@ package dev.argus.automation
 
 import android.Manifest
 import android.app.AlarmManager
+import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
@@ -50,6 +51,8 @@ internal data class AndroidCapabilityState(
     val readCallLogGranted: Boolean = false,
     val bluetoothConnectGranted: Boolean = false,
     val activityRecognitionGranted: Boolean = false,
+    /** Accesso «Non disturbare» (`ACCESS_NOTIFICATION_POLICY`): abilita DND/Ringer senza Shizuku. */
+    val dndPolicyGranted: Boolean = false,
 )
 
 internal fun interface AndroidCapabilityStateSource {
@@ -94,6 +97,10 @@ internal class SystemAndroidCapabilityStateSource(
         bluetoothConnectGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
             granted(Manifest.permission.BLUETOOTH_CONNECT),
         activityRecognitionGranted = granted(Manifest.permission.ACTIVITY_RECOGNITION),
+        dndPolicyGranted = runCatching {
+            appContext.getSystemService(NotificationManager::class.java)
+                .isNotificationPolicyAccessGranted
+        }.getOrDefault(false),
     )
 
     private fun granted(permission: String): Boolean =
@@ -120,6 +127,13 @@ class AndroidCapabilityProbe internal constructor(
     private val readiness: GenerativeRuntimeReadiness,
     private val sensors: AndroidSensorCapabilitySource = EmptyAndroidSensorCapabilitySource,
     private val implementedSensorKinds: Set<SensorKind> = emptySet(),
+    /**
+     * Tier base attivo (decision record §7.3, piano P3-3): quando `true`, le azioni BASE
+     * (LaunchApp/OpenUrl sempre; DND/Ringer col grant `ACCESS_NOTIFICATION_POLICY`) si pubblicano
+     * anche senza Shizuku. Default `false` = ogni azione resta gated su Shizuku (legacy), così il
+     * flip è deliberato e allineato all'executor che esegue davvero le base senza privilegi (B4).
+     */
+    private val baseTierActive: Boolean = false,
 ) : CapabilityProbe, FirePolicySnapshotProvider {
     constructor(
         context: Context,
@@ -195,6 +209,9 @@ class AndroidCapabilityProbe internal constructor(
         val shizukuAvailable = state.shizukuStatus == ShizukuGatewayStatus.AUTHORIZED
         val shizukuTransient = state.shizukuStatus == ShizukuGatewayStatus.INSTALLED_NOT_RUNNING &&
             state.shizukuPermissionGranted
+        // Tier base: LaunchApp/OpenUrl senza grant; DND/Ringer col policy `ACCESS_NOTIFICATION_POLICY`.
+        val launchBase = baseTierActive
+        val dndBase = baseTierActive && state.dndPolicyGranted
         val listenerGranted = state.notificationListenerGranted
         // Requisiti runtime della lane generativa oltre al canale notification/reply.
         val generativeReady = generative.bridgeConfigured && generative.privacyAccepted &&
@@ -219,9 +236,11 @@ class AndroidCapabilityProbe internal constructor(
             // CapabilityRequirements persiste anche i raw tool approvati: il set del fire-time
             // deve contenere gli stessi nomi wire, senza alias con le capability typed.
             if (shizukuAvailable) {
-                addAll(SHIZUKU_CAPABILITIES)
+                addAll(PRIVILEGED_CAPABILITIES)
                 addAll(SHIZUKU_TOOLS)
             }
+            if (shizukuAvailable || dndBase) addAll(BASE_DND_CAPABILITIES)
+            if (shizukuAvailable || launchBase) addAll(BASE_LAUNCH_CAPABILITIES)
             if (listenerGranted) {
                 add(CapabilityIds.TRIGGER_NOTIFICATION)
                 add(GenerativeContract.TOOL_WHATSAPP_REPLY)
@@ -242,9 +261,11 @@ class AndroidCapabilityProbe internal constructor(
         val availableTools = buildList {
             add(ActionTypeIds.COPY_TO_CLIPBOARD)
             if (shizukuAvailable) {
-                addAll(SHIZUKU_ACTION_TYPES)
+                addAll(PRIVILEGED_ACTION_TYPES)
                 addAll(SHIZUKU_TOOLS)
             }
+            if (shizukuAvailable || dndBase) addAll(BASE_DND_ACTION_TYPES)
+            if (shizukuAvailable || launchBase) addAll(BASE_LAUNCH_ACTION_TYPES)
             if (state.notificationsGranted) {
                 add(ActionTypeIds.SHOW_NOTIFICATION)
                 add(TOOL_NOTIFY_SHOW)
@@ -260,8 +281,12 @@ class AndroidCapabilityProbe internal constructor(
         val unavailableTools = linkedMapOf<String, String>()
         if (!shizukuAvailable) {
             val reason = shizukuReason(state.shizukuStatus)
-            SHIZUKU_ACTION_TYPES.forEach { unavailableTools[it] = reason }
+            PRIVILEGED_ACTION_TYPES.forEach { unavailableTools[it] = reason }
             SHIZUKU_TOOLS.forEach { unavailableTools[it] = reason }
+            if (!launchBase) BASE_LAUNCH_ACTION_TYPES.forEach { unavailableTools[it] = reason }
+            if (!dndBase) BASE_DND_ACTION_TYPES.forEach {
+                unavailableTools[it] = if (baseTierActive) REASON_DND_POLICY else reason
+            }
         }
         if (!state.notificationsGranted) {
             unavailableTools[ActionTypeIds.SHOW_NOTIFICATION] = "permesso notifiche mancante"
@@ -333,15 +358,21 @@ class AndroidCapabilityProbe internal constructor(
             TOOL_TOGGLE_SET,
             TOOL_APP_LAUNCH,
         )
-        val SHIZUKU_ACTION_TYPES = setOf(
+        const val REASON_DND_POLICY = "accesso «Non disturbare» non concesso"
+
+        /** Azioni che richiedono davvero lo shell Shizuku: toggle radio e shell. */
+        val PRIVILEGED_ACTION_TYPES = setOf(
             ActionTypeIds.SET_WIFI,
             ActionTypeIds.SET_BLUETOOTH,
-            ActionTypeIds.SET_DND,
-            ActionTypeIds.SET_RINGER,
-            ActionTypeIds.LAUNCH_APP,
-            ActionTypeIds.OPEN_URL,
             ActionTypeIds.RUN_SHELL,
         )
+        /** Base con grant `ACCESS_NOTIFICATION_POLICY` (NotificationManager/AudioManager). */
+        val BASE_DND_ACTION_TYPES = setOf(ActionTypeIds.SET_DND, ActionTypeIds.SET_RINGER)
+        /** Base senza alcun grant: Intent verso launcher/URL. */
+        val BASE_LAUNCH_ACTION_TYPES = setOf(ActionTypeIds.LAUNCH_APP, ActionTypeIds.OPEN_URL)
+        // Unione legacy: usata per la ragione di indisponibilità quando il tier base è inattivo.
+        val SHIZUKU_ACTION_TYPES =
+            PRIVILEGED_ACTION_TYPES + BASE_DND_ACTION_TYPES + BASE_LAUNCH_ACTION_TYPES
         val PHASE_UNAVAILABLE_TOOLS = linkedMapOf(
             "screen.tap" to "azione UI non disponibile in questa fase",
             "screen.swipe" to "azione UI non disponibile in questa fase",
@@ -353,13 +384,13 @@ class AndroidCapabilityProbe internal constructor(
         )
         val KNOWN_TOOLS: Set<String> = SHIZUKU_TOOLS + TOOL_NOTIFY_SHOW +
             GenerativeContract.TOOL_WHATSAPP_REPLY + PHASE_UNAVAILABLE_TOOLS.keys
-        val SHIZUKU_CAPABILITIES: Set<String> = buildSet {
+        val BASE_DND_CAPABILITIES = setOf(ActionCapabilities.SET_DND, ActionCapabilities.SET_RINGER)
+        val BASE_LAUNCH_CAPABILITIES =
+            setOf(ActionCapabilities.LAUNCH_APP, ActionCapabilities.OPEN_URL)
+        /** Capability che richiedono lo shell Shizuku: toggle, shell e lettori privilegiati. */
+        val PRIVILEGED_CAPABILITIES: Set<String> = buildSet {
             add(ActionCapabilities.SET_WIFI)
             add(ActionCapabilities.SET_BLUETOOTH)
-            add(ActionCapabilities.SET_DND)
-            add(ActionCapabilities.SET_RINGER)
-            add(ActionCapabilities.LAUNCH_APP)
-            add(ActionCapabilities.OPEN_URL)
             add(ActionCapabilities.RUN_SHELL)
             add(CapabilityIds.STATE_FOREGROUND_APP)
             add(CapabilityIds.STATE_READER_BUILTIN)
@@ -369,6 +400,9 @@ class AndroidCapabilityProbe internal constructor(
             add(CapabilityIds.STATE_READER_DUMPSYS_FIELD)
             StateKeys.ALL.keys.forEach { add(CapabilityIds.state(it)) }
         }
+        // Unione legacy: usata per il set transiente (Shizuku fermo ma autorizzato).
+        val SHIZUKU_CAPABILITIES: Set<String> =
+            PRIVILEGED_CAPABILITIES + BASE_DND_CAPABILITIES + BASE_LAUNCH_CAPABILITIES
     }
 }
 

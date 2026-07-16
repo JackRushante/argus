@@ -503,13 +503,78 @@ class AndroidCapabilityProbeTest {
         ),
         sensors: AndroidSensorCapabilitySource = EmptyAndroidSensorCapabilitySource,
         implementedSensorKinds: Set<SensorKind> = emptySet(),
+        baseTierActive: Boolean = false,
     ) = AndroidCapabilityProbe(
         AndroidCapabilityStateSource { state },
         FakeWhitelist(contacts),
         GenerativeRuntimeReadiness { readiness },
         sensors,
         implementedSensorKinds,
+        baseTierActive,
     )
+
+    @Test
+    fun `base tier active publishes DND and launch without Shizuku when policy granted`() = runTest {
+        val probe = probe(
+            state().copy(
+                shizukuStatus = ShizukuGatewayStatus.NOT_INSTALLED,
+                shizukuPermissionGranted = false,
+                dndPolicyGranted = true,
+                notificationsGranted = true,
+            ),
+            baseTierActive = true,
+        )
+        val snapshot = probe.current()
+        val manifest = probe.probe(DeviceState())
+
+        // Base disponibili senza Shizuku.
+        assertTrue(ActionCapabilities.SET_DND in snapshot.availableCapabilities)
+        assertTrue(ActionCapabilities.SET_RINGER in snapshot.availableCapabilities)
+        assertTrue(ActionCapabilities.LAUNCH_APP in snapshot.availableCapabilities)
+        assertTrue(ActionCapabilities.OPEN_URL in snapshot.availableCapabilities)
+        assertTrue(ActionTypeIds.SET_DND in manifest.availableTools)
+        assertTrue(ActionTypeIds.LAUNCH_APP in manifest.availableTools)
+        // Privilegiate ancora bloccate senza Shizuku.
+        assertFalse(ActionCapabilities.RUN_SHELL in snapshot.availableCapabilities)
+        assertFalse(ActionCapabilities.SET_WIFI in snapshot.availableCapabilities)
+        assertFalse(ActionTypeIds.RUN_SHELL in manifest.availableTools)
+    }
+
+    @Test
+    fun `base tier active still gates DND on the policy grant but launch stays free`() = runTest {
+        val probe = probe(
+            state().copy(
+                shizukuStatus = ShizukuGatewayStatus.NOT_INSTALLED,
+                shizukuPermissionGranted = false,
+                dndPolicyGranted = false,
+            ),
+            baseTierActive = true,
+        )
+        val snapshot = probe.current()
+        val manifest = probe.probe(DeviceState())
+
+        assertFalse(ActionCapabilities.SET_DND in snapshot.availableCapabilities)
+        assertFalse(ActionTypeIds.SET_DND in manifest.availableTools)
+        assertTrue(ActionTypeIds.SET_DND in manifest.unavailableTools)
+        // LaunchApp/OpenUrl non richiedono alcun grant: restano disponibili.
+        assertTrue(ActionCapabilities.LAUNCH_APP in snapshot.availableCapabilities)
+        assertTrue(ActionTypeIds.OPEN_URL in manifest.availableTools)
+    }
+
+    @Test
+    fun `base tier inactive keeps every base action gated on Shizuku`() = runTest {
+        // Default (tier base non attivo): nessun cambiamento rispetto al legacy.
+        val probe = probe(
+            state().copy(
+                shizukuStatus = ShizukuGatewayStatus.NOT_INSTALLED,
+                shizukuPermissionGranted = false,
+                dndPolicyGranted = true,
+            ),
+        )
+        val snapshot = probe.current()
+        assertFalse(ActionCapabilities.SET_DND in snapshot.availableCapabilities)
+        assertFalse(ActionCapabilities.LAUNCH_APP in snapshot.availableCapabilities)
+    }
 
     private fun state() = AndroidCapabilityState(
         deviceModel = "CPH2747",
