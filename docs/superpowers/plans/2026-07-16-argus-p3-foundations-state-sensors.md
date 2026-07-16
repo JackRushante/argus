@@ -151,13 +151,50 @@ Evidenza (`055499c`):
 4. Cleanup su disable/delete e recovery APP_START/BOOT/PACKAGE_REPLACED.
 5. Notifica FGS esplicita e stop action; nessun wake lock permanente.
 
-Gate device fisico:
+### Stato 2026-07-16 (Claude): **HOST COMPLETO — READY FOR PHYSICAL GATE**
 
-- arm con app cached/background;
-- movimento reale ⇒ una sola esecuzione;
+Implementazione host chiusa, in TDD, su `master` (commit `b2e9919` → `204de74`). **Non è
+`COMPLETE`**: i movimenti fisici, il process restart e i negativi disable/delete richiedono Lorenzo
+(gate §7.8 dell'handoff), quindi lo stato resta `READY FOR PHYSICAL GATE` come prescrive la DoD.
+
+Cosa è stato costruito:
+- `SensorTriggerCoordinator` — registrazione fisica **condivisa per kind** (più regole = un solo
+  `requestTriggerSensor`, fan-out a valle); stato `registered` **solo in memoria** (dopo process
+  recreation è vuoto → reconcile ri-registra: nessun falso "registrato ma morto");
+  Unavailable→NEEDS_REVIEW, Failure→retry bounded.
+- `SensorEventIngress` — one-shot: al callback marca consumed, fan-out per regola, rearm **sempre**
+  in `NonCancellable` senza inghiottire `CancellationException`; event-id stabile su redelivery,
+  fingerprint di una revisione superata non corrisponde.
+- `SharedForegroundSentinel` — **un solo FGS** (decision record §6.2): connectivity e sensori ne
+  prendono la vista demand; il servizio si ferma solo quando l'unione dei demand è vuota. Il
+  coordinator connectivity resta invariato.
+- `AndroidSignificantMotionBackend` — `requestTriggerSensor` reale, non Shizuku, non logga
+  `TriggerEvent.values`; rifiuta mode≠ONE_SHOT o wakeUp=false.
+- `PrefsSensorDetectionStore` — unico stato persistito, corruption-safe.
+- Wiring: registrar (`Trigger.Sensor`→reconcile), enablement, controller (recovery
+  APP_START/boot/package), DI con `Provider` per spezzare il ciclo backend→ingress→coordinator.
+- **`IMPLEMENTED_SENSOR_KINDS = {SIGNIFICANT_MOTION}`**: capability pubblicata nello stesso slice
+  del backend (decision record §6.4).
+
+Evidenza host: **full gate no-cache 759/759, EXIT=0**; suite sensori dedicata (coordinator,
+ingress, FGS sentinel, backend Robolectric negativi, store persistito+corruption); bridge 32/32
+active (già deployato da Codex con i wire `sensor.*`). Hardware confermato sul OnePlus via
+`dumpsys sensorservice`: `significant_motion(17)` flags `0x05` = wake-up + ONE_SHOT.
+
+**Mappatura ai 20 test host dell'handoff §7.7**: 1-8, 10-12, 19-20 nella suite sensori nuova;
+9 coperto per composizione (rearm=reconcile rilegge `armed()`); 13 dal recovery del controller +
+idempotenza coordinator; 14 per costruzione (il backend non usa Shizuku); 15-16-18 già coperti da
+Codex in P3-2A (probe test, render test, bridge 32/32); 17 (golden fingerprint) invariato perché
+il modello serializzato `Trigger.Sensor` è di P3-2A e questo slice non lo tocca.
+
+### Gate device fisico — SERVE LORENZO (§7.8)
+
+- probe device: **fatto** senza Lorenzo (hardware SMD one-shot wake-up confermato);
+- arm con app cached/background → movimento reale ⇒ una sola esecuzione;
 - secondo movimento ⇒ prova che il one-shot è stato riarmato;
 - process kill/restart ⇒ ancora attivo;
-- disable/delete ⇒ nessun callback residuo.
+- disable/delete ⇒ nessun callback residuo;
+- misura consumo/tempo FGS (DoD: NOT MEASURED finché non fatto).
 
 ## P3-2C — stationary/motion e step
 
