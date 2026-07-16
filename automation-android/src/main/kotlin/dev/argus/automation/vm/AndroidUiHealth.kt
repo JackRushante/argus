@@ -65,8 +65,10 @@ internal fun ShizukuGatewayStatus.toUiStatus(degradedAfterReboot: Boolean): Shiz
 }
 
 internal fun AndroidUiHealth.backgroundLocationState(needed: Boolean): BgLocationState = when {
-    !needed -> BgLocationState.NOT_NEEDED
+    // Un grant completo concesso in anticipo deve leggersi GRANTED anche senza regole geofence:
+    // altrimenti «sempre/precisa» appariva grigio/NOT_NEEDED e sembrava non essere stato applicato.
     backgroundLocationGranted && foregroundLocationGranted -> BgLocationState.GRANTED
+    !needed -> BgLocationState.NOT_NEEDED
     foregroundLocationGranted -> BgLocationState.WHILE_IN_USE
     else -> BgLocationState.DENIED
 }
