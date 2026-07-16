@@ -58,6 +58,20 @@ class PrefsSensorDetectionStoreTest {
     }
 
     @Test
+    fun `a corrupt kind fails the pending closed instead of crashing`() {
+        val prefs = context.getSharedPreferences("argus_sensor_detection_v1", Context.MODE_PRIVATE)
+        store().beginDetection(id, fingerprint, kind)
+        // Sovrascrive il kind con un wire name inesistente: la redelivery deve fallire chiusa.
+        val keyBase = "record." + android.util.Base64.encodeToString(
+            id.value.toByteArray(),
+            android.util.Base64.NO_WRAP,
+        )
+        prefs.edit().putString("$keyBase.kind", "not_a_real_kind").commit()
+
+        assertNull(store().pending(id, fingerprint))
+    }
+
+    @Test
     fun `forget removes the record and its index entry`() {
         val store = store()
         store.beginDetection(id, fingerprint, kind)
