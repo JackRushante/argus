@@ -17,6 +17,9 @@
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
     <!-- Connectivity BT (API 31+): grant runtime opt-in, separato da Wi-Fi/alimentazione. -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <!-- Tier base senza Shizuku (P3-3): DND/Ringer via NotificationManager/AudioManager.
+         Grant «Accesso Non disturbare» concesso dall'utente, non runtime. -->
+    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
 
     <application>
         <service

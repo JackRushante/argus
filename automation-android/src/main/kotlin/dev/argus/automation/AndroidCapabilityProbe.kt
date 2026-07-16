@@ -140,12 +140,14 @@ class AndroidCapabilityProbe internal constructor(
         shizuku: ShizukuGateway,
         whitelist: ContactWhitelistStore,
         readiness: GenerativeRuntimeReadiness,
+        baseTierActive: Boolean = false,
     ) : this(
         SystemAndroidCapabilityStateSource(context, shizuku),
         whitelist,
         readiness,
         SystemAndroidSensorCapabilitySource(context),
         IMPLEMENTED_SENSOR_KINDS,
+        baseTierActive,
     )
 
     override suspend fun probe(currentState: DeviceState): CapabilityManifest {

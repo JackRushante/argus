@@ -43,6 +43,9 @@ import dev.argus.automation.NotificationEventDispatcher
 import dev.argus.automation.EngineSensorEventDispatcher
 import dev.argus.automation.RoomTimeAlarmStateStore
 import dev.argus.automation.ShizukuActionExecutor
+import dev.argus.automation.base.AndroidBaseActionExecutor
+import dev.argus.automation.base.AndroidBaseActionSurface
+import dev.argus.automation.base.BaseActionSurface
 import dev.argus.automation.foreground.SharedForegroundSentinel
 import dev.argus.automation.foreground.SentinelDemand
 import dev.argus.automation.sensor.AndroidSignificantMotionBackend
@@ -315,7 +318,15 @@ object ArgusModule {
         gateway: ShizukuGateway,
         whitelist: ContactWhitelistStore,
         readiness: GenerativeRuntimeReadiness,
-    ): AndroidCapabilityProbe = AndroidCapabilityProbe(context, gateway, whitelist, readiness)
+    ): AndroidCapabilityProbe = AndroidCapabilityProbe(
+        context,
+        gateway,
+        whitelist,
+        readiness,
+        // Tier base attivo (P3-3): DND/Ringer via NotificationManager, LaunchApp/OpenUrl via Intent,
+        // senza Shizuku. In futuro pilotato dal flavor (personal-full/play-core).
+        baseTierActive = true,
+    )
 
     @Provides
     fun capabilityProbeBoundary(probe: AndroidCapabilityProbe): CapabilityProbe = probe
@@ -442,6 +453,16 @@ object ArgusModule {
 
     @Provides
     @Singleton
+    fun baseActionSurface(@ApplicationContext context: Context): BaseActionSurface =
+        AndroidBaseActionSurface(context)
+
+    @Provides
+    @Singleton
+    fun baseActionExecutor(surface: BaseActionSurface): AndroidBaseActionExecutor =
+        AndroidBaseActionExecutor(surface)
+
+    @Provides
+    @Singleton
     fun actionExecutor(
         tools: DeviceController,
         staticShell: ShizukuStaticShellRunner,
@@ -450,6 +471,7 @@ object ArgusModule {
         replies: NotificationReplyGateway,
         clipboard: ClipboardCopier,
         whitelist: ContactWhitelistStore,
+        baseActions: AndroidBaseActionExecutor,
     ): ShizukuActionExecutor =
         ShizukuActionExecutor(
             tools,
@@ -461,6 +483,8 @@ object ArgusModule {
             // Riletta a ogni scatto, non memoizzata: togliere un contatto dalla whitelist deve
             // revocargli la shell subito, senza attendere un riavvio del processo.
             whitelistedIds = { whitelist.all().mapTo(mutableSetOf()) { it.id } },
+            // Tier base (P3-3): DND/Ringer/LaunchApp/OpenUrl via API normali, non Shizuku.
+            baseActions = baseActions,
         )
 
     @Provides
