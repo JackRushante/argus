@@ -45,6 +45,10 @@ class SchemaRoundTripTest {
             Action.InputText("ciao"),
             Action.WhatsAppReply("ok"),
             Action.RunShell("svc wifi disable"),
+            Action.SetAlarm(hour = 7, minute = 30),
+            Action.SetAlarm(hour = 22, minute = 5, label = "Medicine", skipUi = false),
+            Action.SetTimer(seconds = 300),
+            Action.SetTimer(seconds = 1_800, label = "Pasta", skipUi = false),
         )
         actions.forEach { roundTrip(Action.serializer(), it) }
     }

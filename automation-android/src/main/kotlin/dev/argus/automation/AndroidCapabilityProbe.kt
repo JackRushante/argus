@@ -234,6 +234,9 @@ class AndroidCapabilityProbe internal constructor(
             }
             // Clipboard locale: nessun permesso OS richiesto (scrittura verificata su device).
             add(ActionCapabilities.COPY_TO_CLIPBOARD)
+            // Sveglia/timer: Intent AlarmClock col permesso normal SET_ALARM (auto-concesso), quindi
+            // sempre armabili senza Shizuku né grant runtime, come la clipboard.
+            addAll(BASE_ALARM_CAPABILITIES)
             if (state.notificationsGranted) add(ActionCapabilities.SHOW_NOTIFICATION)
             // CapabilityRequirements persiste anche i raw tool approvati: il set del fire-time
             // deve contenere gli stessi nomi wire, senza alias con le capability typed.
@@ -262,6 +265,7 @@ class AndroidCapabilityProbe internal constructor(
 
         val availableTools = buildList {
             add(ActionTypeIds.COPY_TO_CLIPBOARD)
+            addAll(BASE_ALARM_ACTION_TYPES)
             if (shizukuAvailable) {
                 addAll(PRIVILEGED_ACTION_TYPES)
                 addAll(SHIZUKU_TOOLS)
@@ -372,6 +376,8 @@ class AndroidCapabilityProbe internal constructor(
         val BASE_DND_ACTION_TYPES = setOf(ActionTypeIds.SET_DND, ActionTypeIds.SET_RINGER)
         /** Base senza alcun grant: Intent verso launcher/URL. */
         val BASE_LAUNCH_ACTION_TYPES = setOf(ActionTypeIds.LAUNCH_APP, ActionTypeIds.OPEN_URL)
+        /** Base sempre disponibili (permesso normal SET_ALARM): sveglia/timer via Intent AlarmClock. */
+        val BASE_ALARM_ACTION_TYPES = setOf(ActionTypeIds.SET_ALARM, ActionTypeIds.SET_TIMER)
         // Unione legacy: usata per la ragione di indisponibilità quando il tier base è inattivo.
         val SHIZUKU_ACTION_TYPES =
             PRIVILEGED_ACTION_TYPES + BASE_DND_ACTION_TYPES + BASE_LAUNCH_ACTION_TYPES
@@ -389,6 +395,9 @@ class AndroidCapabilityProbe internal constructor(
         val BASE_DND_CAPABILITIES = setOf(ActionCapabilities.SET_DND, ActionCapabilities.SET_RINGER)
         val BASE_LAUNCH_CAPABILITIES =
             setOf(ActionCapabilities.LAUNCH_APP, ActionCapabilities.OPEN_URL)
+        /** Capability sempre disponibili delle azioni sveglia/timer (permesso normal SET_ALARM). */
+        val BASE_ALARM_CAPABILITIES =
+            setOf(ActionCapabilities.SET_ALARM, ActionCapabilities.SET_TIMER)
         /** Capability che richiedono lo shell Shizuku: toggle, shell e lettori privilegiati. */
         val PRIVILEGED_CAPABILITIES: Set<String> = buildSet {
             add(ActionCapabilities.SET_WIFI)

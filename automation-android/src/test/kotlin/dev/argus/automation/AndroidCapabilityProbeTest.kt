@@ -562,6 +562,30 @@ class AndroidCapabilityProbeTest {
     }
 
     @Test
+    fun `set alarm and set timer are always published as base actions without Shizuku or grants`() = runTest {
+        // Nessuno Shizuku, nessun grant runtime: SET_ALARM è un permesso normal auto-concesso,
+        // quindi sveglia/timer restano armabili come copy_to_clipboard.
+        val probe = probe(
+            state().copy(
+                shizukuStatus = ShizukuGatewayStatus.NOT_INSTALLED,
+                shizukuPermissionGranted = false,
+                dndPolicyGranted = false,
+                notificationsGranted = false,
+            ),
+            baseTierActive = false,
+        )
+        val manifest = probe.probe(DeviceState())
+        val snapshot = probe.current()
+
+        assertTrue(ActionTypeIds.SET_ALARM in manifest.availableTools)
+        assertTrue(ActionTypeIds.SET_TIMER in manifest.availableTools)
+        assertFalse(ActionTypeIds.SET_ALARM in manifest.unavailableTools)
+        assertFalse(ActionTypeIds.SET_TIMER in manifest.unavailableTools)
+        assertTrue(CapabilityIds.ACTION_SET_ALARM in snapshot.availableCapabilities)
+        assertTrue(CapabilityIds.ACTION_SET_TIMER in snapshot.availableCapabilities)
+    }
+
+    @Test
     fun `base tier inactive keeps every base action gated on Shizuku`() = runTest {
         // Default (tier base non attivo): nessun cambiamento rispetto al legacy.
         val probe = probe(

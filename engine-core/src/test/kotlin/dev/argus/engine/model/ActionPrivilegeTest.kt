@@ -36,6 +36,8 @@ class ActionPrivilegeTest {
             Action.LaunchApp("com.example"),
             Action.OpenUrl("https://example.org"),
             Action.ShowNotification("Argus", "ciao"),
+            Action.SetAlarm(hour = 7, minute = 30),
+            Action.SetTimer(seconds = 300),
             Action.WhatsAppReply("ok"),
             Action.CopyToClipboard(),
             Action.InvokeLlm(
@@ -67,5 +69,7 @@ class ActionPrivilegeTest {
         assertEquals(true, ActionPrivileges.requiresShizuku(Action.SetWifi(false)))
         assertEquals(false, ActionPrivileges.requiresShizuku(Action.LaunchApp("com.example")))
         assertEquals(false, ActionPrivileges.requiresShizuku(Action.SetDnd(DndMode.OFF)))
+        assertEquals(false, ActionPrivileges.requiresShizuku(Action.SetAlarm(hour = 8, minute = 0)))
+        assertEquals(false, ActionPrivileges.requiresShizuku(Action.SetTimer(seconds = 60)))
     }
 }

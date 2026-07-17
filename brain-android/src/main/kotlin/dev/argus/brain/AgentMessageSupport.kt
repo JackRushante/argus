@@ -316,6 +316,11 @@ Action, discriminata da "type":
 - {"type":"copy_to_clipboard", "extractionRegex":string|null (regex deterministica: copia il
    primo capture group — o il match intero — dal testo del trigger SMS/notifica; null = testo
    integrale; per gli OTP usa "(?:^|[^+0-9])([0-9]{4,8})(?:[^0-9]|${'$'})")}
+- {"type":"set_alarm", "hour":integer 0-23, "minute":integer 0-59, "label":string|null,
+   "skipUi":boolean}  // imposta la SVEGLIA reale dell'orologio (non una notifica); skipUi=true
+   di norma per non aprire l'app orologio
+- {"type":"set_timer", "seconds":integer 1-86400, "label":string|null, "skipUi":boolean}
+   // avvia un TIMER reale
 - {"type":"invoke_llm", "goal":string, "contextSources":[string,...],
    "allowedTools":[string,...], "replyTargetSender":boolean, "timeoutMs":integer}
 - {"type":"invoke_llm_v2", "goal":string, "stateContext":[ApprovedStateContext,...],

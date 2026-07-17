@@ -383,6 +383,50 @@ class ShizukuActionExecutorTest {
         )
     }
 
+    @Test
+    fun `set alarm and set timer route to the base executor`() = runTest {
+        val surface = RecordingBaseSurface()
+        val tools = RecordingDeviceController()
+        val exec = executor(tools = tools, baseActions = AndroidBaseActionExecutor(surface))
+
+        assertEquals(
+            ActionResult.Success,
+            exec.execute(Action.SetAlarm(hour = 7, minute = 30, label = "Palestra"), context),
+        )
+        assertEquals(
+            ActionResult.Success,
+            exec.execute(Action.SetTimer(seconds = 300), context),
+        )
+        assertEquals(listOf("7:30:Palestra:true"), surface.alarms)
+        assertEquals(listOf("300:null:true"), surface.timers)
+        // Le sveglie/timer sono BASE: non toccano mai lo shell privilegiato.
+        assertEquals(emptyList(), tools.calls)
+    }
+
+    @Test
+    fun `set alarm is base-only and fails clean without a base executor`() = runTest {
+        val exec = executor(baseActions = null)
+        assertEquals(
+            ActionResult.Failure("base_executor_unavailable"),
+            exec.execute(Action.SetAlarm(hour = 7, minute = 0), context),
+        )
+        assertEquals(
+            ActionResult.Failure("base_executor_unavailable"),
+            exec.execute(Action.SetTimer(seconds = 60), context),
+        )
+    }
+
+    @Test
+    fun `set alarm rejects an invalid range through the base executor`() = runTest {
+        val surface = RecordingBaseSurface()
+        val exec = executor(baseActions = AndroidBaseActionExecutor(surface))
+        assertEquals(
+            ActionResult.Failure("action_invalid"),
+            exec.execute(Action.SetAlarm(hour = 24, minute = 0), context),
+        )
+        assertTrue(surface.alarms.isEmpty())
+    }
+
     private class RecordingReplyGateway(
         private val delivery: NotificationReplyDelivery,
     ) : NotificationReplyGateway {
@@ -445,9 +489,17 @@ private class RecordingBaseSurface(private val dndGranted: Boolean = true) : Bas
     val ringerModes = mutableListOf<RingerMode>()
     val launched = mutableListOf<String>()
     val opened = mutableListOf<String>()
+    val alarms = mutableListOf<String>()
+    val timers = mutableListOf<String>()
     override fun isDndPolicyGranted(): Boolean = dndGranted
     override fun setInterruptionFilter(mode: DndMode) { dndModes += mode }
     override fun setRingerMode(mode: RingerMode) { ringerModes += mode }
     override fun launchPackage(pkg: String): Boolean { launched += pkg; return true }
     override fun openHttpUrl(url: String) { opened += url }
+    override fun setAlarm(hour: Int, minute: Int, label: String?, skipUi: Boolean): Boolean {
+        alarms += "$hour:$minute:$label:$skipUi"; return true
+    }
+    override fun setTimer(seconds: Int, label: String?, skipUi: Boolean): Boolean {
+        timers += "$seconds:$label:$skipUi"; return true
+    }
 }

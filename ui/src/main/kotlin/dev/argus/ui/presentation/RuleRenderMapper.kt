@@ -289,6 +289,18 @@ object RuleRenderMapper {
             // §5: la regex è il criterio reale di estrazione, resta visibile integrale.
             detail = a.extractionRegex?.let { "estrazione: $it" } ?: "il testo integrale del messaggio",
         )
+        is Action.SetAlarm -> row(
+            iconKey = "alarm",
+            label = "Imposta sveglia",
+            detail = "%02d:%02d".format(a.hour, a.minute) +
+                (a.label?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""),
+        )
+        is Action.SetTimer -> row(
+            iconKey = "timer",
+            label = "Avvia timer",
+            detail = "${a.seconds}s" +
+                (a.label?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""),
+        )
         is Action.InvokeLlm -> row(
             iconKey = "generative",
             label = "Rispondi con l'AI",

@@ -90,6 +90,14 @@ class ShizukuActionExecutor(
             // Clipboard: locale, senza privilegi; il payload arriva dall'evento del trigger.
             is Action.CopyToClipboard -> clipboard.copy(ctx.event, action.extractionRegex)
 
+            // Sveglia/timer: BASE via Intent AlarmClock (permesso normal SET_ALARM). Base-only per
+            // S1: senza base executor falliscono pulito. Il fallback Shizuku `am start` per il
+            // caveat BAL è un TODO futuro, non ora.
+            is Action.SetAlarm -> baseActions?.setAlarm(action.hour, action.minute, action.label, action.skipUi)
+                ?: ActionResult.Failure("base_executor_unavailable")
+            is Action.SetTimer -> baseActions?.setTimer(action.seconds, action.label, action.skipUi)
+                ?: ActionResult.Failure("base_executor_unavailable")
+
             is Action.InvokeLlm -> if (generativeLane.trySubmit(ctx, action)) {
                 ActionResult.Submitted
             } else {

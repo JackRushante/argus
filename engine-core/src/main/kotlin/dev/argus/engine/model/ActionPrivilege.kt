@@ -37,6 +37,9 @@ object ActionPrivileges {
         is Action.ShowNotification,
         is Action.WhatsAppReply,
         is Action.CopyToClipboard,
+        // Sveglia/timer: Intent AlarmClock col permesso normal SET_ALARM, nessuno Shizuku.
+        is Action.SetAlarm,
+        is Action.SetTimer,
         is Action.InvokeLlm,
         is Action.InvokeLlmV2,
         -> ActionPrivilege.BASE

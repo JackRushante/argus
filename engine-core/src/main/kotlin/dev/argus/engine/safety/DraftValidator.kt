@@ -40,6 +40,7 @@ class DraftValidator(
         private const val MAX_GEOFENCE_RADIUS_M = 100_000.0
         private const val MAX_LOITERING_MS = 86_400_000L
         private const val MAX_LLM_TIMEOUT_MS = 120_000L
+        private const val MAX_TIMER_SECONDS = 86_400
 
         private val PACKAGE_NAME = Regex("^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+$")
     }
@@ -318,6 +319,16 @@ class DraftValidator(
                                 "${SafeExtractionRegex.MAX_PATTERN_CHARS} caratteri",
                         )
                 }
+            }
+            is Action.SetAlarm -> {
+                if (action.hour !in 0..23 || action.minute !in 0..59)
+                    err("alarm_time_invalid", "Ora sveglia fuori intervallo: hour 0..23, minute 0..59")
+                validateOptionalText(action.label, "alarm_label_invalid", err)
+            }
+            is Action.SetTimer -> {
+                if (action.seconds !in 1..MAX_TIMER_SECONDS)
+                    err("timer_seconds_invalid", "Durata timer fuori intervallo: 1..$MAX_TIMER_SECONDS secondi")
+                validateOptionalText(action.label, "timer_label_invalid", err)
             }
             is Action.InvokeLlm -> validateInvokeLlm(action, trigger, whitelist, err, warn)
             is Action.InvokeLlmV2 -> validateInvokeLlmV2(action, trigger, whitelist, err, warn)

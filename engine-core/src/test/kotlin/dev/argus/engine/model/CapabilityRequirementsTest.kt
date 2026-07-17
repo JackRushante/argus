@@ -164,6 +164,24 @@ class CapabilityRequirementsTest {
     }
 
     @Test
+    fun `set alarm and set timer derive their own base action capabilities`() {
+        assertEquals(
+            setOf(CapabilityIds.TRIGGER_TIME, CapabilityIds.ACTION_SET_ALARM),
+            CapabilityRequirements.derive(
+                trigger = Trigger.Time(at = "2026-07-17T07:00", tz = "Europe/Rome"),
+                actions = listOf(Action.SetAlarm(hour = 7, minute = 0, label = "Palestra")),
+            ),
+        )
+        assertEquals(
+            setOf(CapabilityIds.TRIGGER_TIME, CapabilityIds.ACTION_SET_TIMER),
+            CapabilityRequirements.derive(
+                trigger = Trigger.Time(at = "2026-07-17T07:00", tz = "Europe/Rome"),
+                actions = listOf(Action.SetTimer(seconds = 600)),
+            ),
+        )
+    }
+
+    @Test
     fun `connectivity requirements are granular and wifi identity needs location`() {
         assertEquals(
             setOf(CapabilityIds.TRIGGER_CONNECTIVITY_POWER),

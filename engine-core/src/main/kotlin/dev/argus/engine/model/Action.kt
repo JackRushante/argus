@@ -22,6 +22,8 @@ object ActionTypeIds {
     const val WHATSAPP_REPLY = "whatsapp_reply"
     const val RUN_SHELL = "run_shell"
     const val COPY_TO_CLIPBOARD = "copy_to_clipboard"
+    const val SET_ALARM = "set_alarm"
+    const val SET_TIMER = "set_timer"
     const val INVOKE_LLM = "invoke_llm"
     const val INVOKE_LLM_V2 = "invoke_llm_v2"
 }
@@ -60,6 +62,8 @@ sealed interface Action {
             is WhatsAppReply,
             is RunShell,
             is CopyToClipboard,
+            is SetAlarm,
+            is SetTimer,
             -> ActionTier.DETERMINISTIC
         }
 
@@ -80,6 +84,26 @@ sealed interface Action {
      *  DETERMINISTICA: il testo non lascia mai il telefono. */
     @Serializable @SerialName(ActionTypeIds.COPY_TO_CLIPBOARD)
     data class CopyToClipboard(val extractionRegex: String? = null) : Action
+
+    /** Imposta la SVEGLIA reale dell'app orologio via Intent `AlarmClock.ACTION_SET_ALARM`
+     *  (NON una notifica). BASE: solo il permesso manifest normal `SET_ALARM`, nessuno Shizuku.
+     *  Range validato: hour 0..23, minute 0..59. `skipUi` è un hint per non aprire l'app orologio. */
+    @Serializable @SerialName(ActionTypeIds.SET_ALARM)
+    data class SetAlarm(
+        val hour: Int,
+        val minute: Int,
+        val label: String? = null,
+        val skipUi: Boolean = true,
+    ) : Action
+
+    /** Avvia un TIMER reale via Intent `AlarmClock.ACTION_SET_TIMER`. BASE come [SetAlarm].
+     *  Range validato: seconds 1..86400. */
+    @Serializable @SerialName(ActionTypeIds.SET_TIMER)
+    data class SetTimer(
+        val seconds: Int,
+        val label: String? = null,
+        val skipUi: Boolean = true,
+    ) : Action
 
     @Serializable @SerialName(ActionTypeIds.INVOKE_LLM)
     data class InvokeLlm(

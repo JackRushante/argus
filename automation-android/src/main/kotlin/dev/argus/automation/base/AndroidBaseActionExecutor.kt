@@ -19,6 +19,12 @@ interface BaseActionSurface {
     /** Avvia il launcher del package; false se non esiste una entry avviabile. */
     fun launchPackage(pkg: String): Boolean
     fun openHttpUrl(url: String)
+    /** Imposta la sveglia reale via Intent `AlarmClock.ACTION_SET_ALARM`; false se nessuna app
+     *  orologio risolve l'Intent. Il range è già validato dall'executor. */
+    fun setAlarm(hour: Int, minute: Int, label: String?, skipUi: Boolean): Boolean
+    /** Avvia il timer reale via Intent `AlarmClock.ACTION_SET_TIMER`; false se nessuna app orologio
+     *  risolve l'Intent. Il range è già validato dall'executor. */
+    fun setTimer(seconds: Int, label: String?, skipUi: Boolean): Boolean
 }
 
 /**
@@ -55,6 +61,18 @@ class AndroidBaseActionExecutor(private val surface: BaseActionSurface) {
         ActionResult.Success
     }
 
+    suspend fun setAlarm(hour: Int, minute: Int, label: String?, skipUi: Boolean): ActionResult = guarded {
+        if (hour !in 0..23 || minute !in 0..59) return ActionResult.Failure("action_invalid")
+        if (surface.setAlarm(hour, minute, label, skipUi)) ActionResult.Success
+        else ActionResult.Failure("alarm_app_unresolved")
+    }
+
+    suspend fun setTimer(seconds: Int, label: String?, skipUi: Boolean): ActionResult = guarded {
+        if (seconds !in 1..MAX_TIMER_SECONDS) return ActionResult.Failure("action_invalid")
+        if (surface.setTimer(seconds, label, skipUi)) ActionResult.Success
+        else ActionResult.Failure("alarm_app_unresolved")
+    }
+
     private inline fun guarded(block: () -> ActionResult): ActionResult = try {
         block()
     } catch (error: CancellationException) {
@@ -71,6 +89,7 @@ class AndroidBaseActionExecutor(private val surface: BaseActionSurface) {
 
     private companion object {
         const val MAX_URL_CHARS = 8_192
+        const val MAX_TIMER_SECONDS = 86_400
         val HTTP_SCHEMES = setOf("http", "https")
         val PACKAGE_NAME = Regex("^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+$")
     }

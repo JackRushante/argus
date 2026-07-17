@@ -20,6 +20,8 @@
     <!-- Tier base senza Shizuku (P3-3): DND/Ringer via NotificationManager/AudioManager.
          Grant «Accesso Non disturbare» concesso dall'utente, non runtime. -->
     <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
+    <!-- Sveglia/timer reali via Intent AlarmClock (S1): permesso normal, auto-concesso. -->
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
 
     <application>
         <service

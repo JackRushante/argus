@@ -492,6 +492,33 @@ class DraftValidatorTest {
         assertTrue("text_invalid" in e)
     }
 
+    @Test fun `set alarm accepts valid ranges and rejects out of range hour or minute`() {
+        fun draft(action: Action) = AutomationDraft(
+            name = "sveglia",
+            trigger = Trigger.Time(at = "2026-07-17T07:00", tz = "Europe/Rome"),
+            actions = listOf(action),
+        )
+        assertEquals(emptyList(), errors(v.validate(draft(Action.SetAlarm(0, 0)), emptySet())))
+        assertEquals(emptyList(), errors(v.validate(draft(Action.SetAlarm(23, 59, "Palestra")), emptySet())))
+        assertTrue("alarm_time_invalid" in errors(v.validate(draft(Action.SetAlarm(24, 0)), emptySet())))
+        assertTrue("alarm_time_invalid" in errors(v.validate(draft(Action.SetAlarm(-1, 0)), emptySet())))
+        assertTrue("alarm_time_invalid" in errors(v.validate(draft(Action.SetAlarm(7, 60)), emptySet())))
+        assertTrue("alarm_label_invalid" in errors(v.validate(draft(Action.SetAlarm(7, 0, "x".repeat(5_000))), emptySet())))
+    }
+
+    @Test fun `set timer accepts valid seconds and rejects out of range`() {
+        fun draft(action: Action) = AutomationDraft(
+            name = "timer",
+            trigger = Trigger.Time(at = "2026-07-17T07:00", tz = "Europe/Rome"),
+            actions = listOf(action),
+        )
+        assertEquals(emptyList(), errors(v.validate(draft(Action.SetTimer(1)), emptySet())))
+        assertEquals(emptyList(), errors(v.validate(draft(Action.SetTimer(86_400, "Pasta")), emptySet())))
+        assertTrue("timer_seconds_invalid" in errors(v.validate(draft(Action.SetTimer(0)), emptySet())))
+        assertTrue("timer_seconds_invalid" in errors(v.validate(draft(Action.SetTimer(86_401)), emptySet())))
+        assertTrue("timer_label_invalid" in errors(v.validate(draft(Action.SetTimer(60, "x".repeat(5_000))), emptySet())))
+    }
+
     @Test fun `sensor triggers require bounded parameters and a real cooldown`() {
         fun draft(trigger: Trigger.Sensor, cooldownMs: Long) = AutomationDraft(
             "sensore",

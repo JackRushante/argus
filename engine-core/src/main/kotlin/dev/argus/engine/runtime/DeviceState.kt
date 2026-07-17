@@ -106,6 +106,8 @@ object StateReadPlanner {
         is Action.WhatsAppReply,
         is Action.RunShell,
         is Action.CopyToClipboard,
+        is Action.SetAlarm,
+        is Action.SetTimer,
         -> StateReadRequest.EMPTY
     }
 }

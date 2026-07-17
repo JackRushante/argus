@@ -37,6 +37,8 @@ object CapabilityIds {
     const val ACTION_WHATSAPP_REPLY = "action.whatsapp_reply"
     const val ACTION_RUN_SHELL = "action.run_shell"
     const val ACTION_COPY_TO_CLIPBOARD = "action.copy_to_clipboard"
+    const val ACTION_SET_ALARM = "action.set_alarm"
+    const val ACTION_SET_TIMER = "action.set_timer"
     const val ACTION_INVOKE_LLM = "action.invoke_llm"
 
     fun state(key: String): String = "state.$key"
@@ -102,6 +104,8 @@ object CapabilityRequirements {
         is Action.WhatsAppReply -> setOf(CapabilityIds.ACTION_WHATSAPP_REPLY)
         is Action.RunShell -> setOf(CapabilityIds.ACTION_RUN_SHELL)
         is Action.CopyToClipboard -> setOf(CapabilityIds.ACTION_COPY_TO_CLIPBOARD)
+        is Action.SetAlarm -> setOf(CapabilityIds.ACTION_SET_ALARM)
+        is Action.SetTimer -> setOf(CapabilityIds.ACTION_SET_TIMER)
         is Action.InvokeLlm -> buildSet {
             add(CapabilityIds.ACTION_INVOKE_LLM)
             addAll(action.allowedTools)

@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.media.AudioManager
 import android.net.Uri
+import android.provider.AlarmClock
 import dev.argus.device.RingerMode
 import dev.argus.engine.model.DndMode
 
@@ -51,5 +52,32 @@ class AndroidBaseActionSurface(context: Context) : BaseActionSurface {
         appContext.startActivity(
             Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         )
+    }
+
+    override fun setAlarm(hour: Int, minute: Int, label: String?, skipUi: Boolean): Boolean {
+        val intent = Intent(AlarmClock.ACTION_SET_ALARM)
+            .putExtra(AlarmClock.EXTRA_HOUR, hour)
+            .putExtra(AlarmClock.EXTRA_MINUTES, minute)
+            .putExtra(AlarmClock.EXTRA_SKIP_UI, skipUi)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (!label.isNullOrBlank()) intent.putExtra(AlarmClock.EXTRA_MESSAGE, label)
+        return startIfResolvable(intent)
+    }
+
+    override fun setTimer(seconds: Int, label: String?, skipUi: Boolean): Boolean {
+        val intent = Intent(AlarmClock.ACTION_SET_TIMER)
+            .putExtra(AlarmClock.EXTRA_LENGTH, seconds)
+            .putExtra(AlarmClock.EXTRA_SKIP_UI, skipUi)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (!label.isNullOrBlank()) intent.putExtra(AlarmClock.EXTRA_MESSAGE, label)
+        return startIfResolvable(intent)
+    }
+
+    /** Nessuna app orologio gestisce l'Intent → false, così l'executor emette `alarm_app_unresolved`
+     *  invece di crashare con ActivityNotFoundException. */
+    private fun startIfResolvable(intent: Intent): Boolean {
+        if (intent.resolveActivity(appContext.packageManager) == null) return false
+        appContext.startActivity(intent)
+        return true
     }
 }
