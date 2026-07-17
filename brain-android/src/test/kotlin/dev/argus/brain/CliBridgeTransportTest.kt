@@ -2,6 +2,7 @@ package dev.argus.brain
 
 import dev.argus.engine.brain.CapabilityManifest
 import dev.argus.engine.brain.StateReaderManifest
+import dev.argus.engine.brain.TurnUsage
 import dev.argus.engine.brain.WhitelistedContact
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.Action
@@ -696,6 +697,41 @@ class CliBridgeTransportTest {
                 authProvider = BridgeAuthProvider { TOKEN },
             )
         }
+    }
+
+    @Test fun `compile and act map the optional bridge usage into TurnUsage`(): Unit = runBlocking {
+        // S15: subset chiuso sanitizzato dal bridge (forma reale di hermes --usage-file).
+        val usageJson = """"usage":{"input_tokens":2785,"output_tokens":5,"total_tokens":2790,""" +
+            """"api_calls":1,"model":"gpt-5.5","provider":"openai-codex","cost_status":"included",""" +
+            """"estimated_cost_usd":0.0}"""
+        server.enqueue(jsonResponse(
+            """{"schema_version":2,"request_id":"$REQUEST_ID","reply":"ok",""" +
+                """"meta":{"draft":null,"error_code":"clarification_required"},$usageJson}""",
+        ))
+        val compile = transport().compile("dopo le 23 dnd", manifest, DeviceState())
+        assertEquals(
+            TurnUsage(inputTokens = 2785, outputTokens = 5, model = "gpt-5.5"),
+            compile.usage,
+        )
+
+        val expectedRequestId = actRequestId("execution-1", 0)
+        server.enqueue(jsonResponse(
+            """{"schema_version":1,"request_id":"$expectedRequestId",""" +
+                """"result":{"text":"Va bene."},"error_code":null,$usageJson}""",
+        ))
+        val act = transport().act(
+            fireContext(), "rispondi", listOf("notification"), listOf("whatsapp_reply"),
+        )
+        assertEquals(
+            TurnUsage(inputTokens = 2785, outputTokens = 5, model = "gpt-5.5"),
+            act.usage,
+        )
+    }
+
+    @Test fun `responses without usage keep a null TurnUsage`(): Unit = runBlocking {
+        // Retro-compat: il campo è opzionale, un bridge vecchio (o run senza report) non lo manda.
+        server.enqueue(validNoDraftResponse())
+        assertNull(transport().compile("dopo le 23 dnd", manifest, DeviceState()).usage)
     }
 
     private fun validNoDraftResponse(reply: String = "ok") = jsonResponse(

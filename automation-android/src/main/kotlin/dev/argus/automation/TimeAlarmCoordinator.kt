@@ -102,6 +102,15 @@ sealed interface AlarmDeliveryResult {
 }
 
 object TimeAlarmPlanner {
+    /**
+     * Un ritardo relativo esplicito ("tra N") è puntuale per natura: il batching inexact OEM può
+     * posticipare oltre il ritardo stesso (campo 2026-07-17: +2m33s su un timer di 3 minuti).
+     * Il runtime lo tratta quindi come EXACT, con fallback inexact se manca il permesso. È una
+     * politica di SCHEDULING, non parte del trigger: il fingerprint resta invariato.
+     */
+    fun effectivePrecision(trigger: Trigger.Time): TimePrecision =
+        if (trigger.afterMs != null) TimePrecision.EXACT else trigger.precision
+
     fun next(
         automation: Automation,
         after: Instant,
@@ -124,7 +133,7 @@ object TimeAlarmPlanner {
             automationId = automation.id,
             approvalFingerprint = approvalFingerprint,
             eventAtMillis = eventAt.toEpochMilli(),
-            requestedPrecision = trigger.precision,
+            requestedPrecision = effectivePrecision(trigger),
         )
     }
 }
@@ -249,14 +258,17 @@ class TimeAlarmCoordinator(
             }
         }
 
+        // Stessa politica del planner (afterMs -> EXACT): il record di recovery deve rispecchiare
+        // la precisione EFFETTIVA di scheduling, non quella dichiarata nel trigger.
+        val recoveryPrecision = TimeAlarmPlanner.effectivePrecision(trigger)
         val recoveryRecord = persisted ?: ScheduledTimeAlarm(
             automationId = automationId,
             approvalFingerprint = eventFingerprint,
             eventAtMillis = eventAtMillis,
             wakeAtMillis = eventAtMillis,
-            requestedPrecision = trigger.precision,
+            requestedPrecision = recoveryPrecision,
             scheduledMode = if (
-                trigger.precision == TimePrecision.EXACT && backend.canScheduleExact()
+                recoveryPrecision == TimePrecision.EXACT && backend.canScheduleExact()
             ) ScheduledAlarmMode.EXACT else ScheduledAlarmMode.INEXACT,
             updatedAtMillis = currentNow.toEpochMilli(),
         )

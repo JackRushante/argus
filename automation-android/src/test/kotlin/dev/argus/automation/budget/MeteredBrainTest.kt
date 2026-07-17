@@ -72,6 +72,25 @@ class MeteredBrainTest {
     }
 
     @Test
+    fun `compile registra i token reali quando il transport li riporta`() = runTest {
+        // S15: il bridge Hermes ora allega l'usage anche in compile — niente più N/D cieco.
+        val hermes = ProviderConfig(ProviderId.HERMES, "https://hermes", null)
+        val usage = TurnUsage(inputTokens = 2_785, outputTokens = 5, model = "gpt-5.5")
+        val delegate = FakeBrain(compileResult = { CompileResult("ok", null, null, usage) })
+        val dao = RecordingUsageDao()
+        val brain = metered(delegate, FakePolicy(), dao, config = hermes)
+
+        brain.compile("crea", TEST_MANIFEST, DeviceState())
+
+        val event = dao.events.single()
+        assertEquals(UsageEventKind.COMPILE, event.kind)
+        assertEquals(UsageEventOutcome.OK, event.outcome)
+        assertEquals(2_785L, event.tokensIn)
+        assertEquals(5L, event.tokensOut)
+        assertEquals("gpt-5.5", event.model)
+    }
+
+    @Test
     fun `meta error del delegate registra evento ERROR senza costo`() = runTest {
         val delegate = FakeBrain(actResult = { ActResult(null, "brain_failed") })
         val dao = RecordingUsageDao()

@@ -622,6 +622,37 @@ class TimeAlarmCoordinatorTest {
     }
 
     @Test
+    fun `relative afterMs schedules exact by default when permitted`() = runTest {
+        // Campo (2026-07-17): un "tra 3 minuti" INEXACT è scattato con +2m33s di batching OEM.
+        // Un ritardo relativo esplicito è puntuale per natura: il runtime lo tratta come EXACT
+        // anche con precision FLEXIBLE nel trigger (politica di scheduling, fingerprint invariato).
+        val automation = automation(Trigger.Time(afterMs = 180_000, tz = "UTC"))
+        val state = FakeTimeAlarmStateStore()
+        val backend = FakeTimeAlarmBackend(exactAllowed = true)
+
+        val report = coordinator(FakeAutomationStore(automation), state, backend)
+            .reconcile(ReconcileReason.APP_START)
+
+        assertEquals(listOf(automation.id), report.scheduled)
+        assertEquals(TimePrecision.EXACT, state.get(automation.id)?.requestedPrecision)
+        assertEquals(ScheduledAlarmMode.EXACT, state.get(automation.id)?.scheduledMode)
+        assertEquals(now.plusMillis(180_000).toEpochMilli(), state.get(automation.id)?.eventAtMillis)
+    }
+
+    @Test
+    fun `relative afterMs falls back to inexact without exact permission`() = runTest {
+        val automation = automation(Trigger.Time(afterMs = 180_000, tz = "UTC"))
+        val state = FakeTimeAlarmStateStore()
+        val backend = FakeTimeAlarmBackend(exactAllowed = false)
+
+        val report = coordinator(FakeAutomationStore(automation), state, backend)
+            .reconcile(ReconcileReason.APP_START)
+
+        assertEquals(listOf(automation.id), report.scheduled)
+        assertEquals(ScheduledAlarmMode.INEXACT, state.get(automation.id)?.scheduledMode)
+    }
+
+    @Test
     fun `relative afterMs due record is recovered and delivered on reconcile`() = runTest {
         val automation = automation(Trigger.Time(afterMs = 120_000, tz = "UTC"))
         val dueAt = now.minusSeconds(60).toEpochMilli() // ancora già scaduta

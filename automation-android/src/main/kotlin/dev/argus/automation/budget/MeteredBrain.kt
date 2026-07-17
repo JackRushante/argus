@@ -74,7 +74,8 @@ class MeteredBrain(
             BudgetVerdict.Ok -> {}
         }
         val result = delegate.compile(nl, manifest, state)
-        recordUsage(config, UsageEventKind.COMPILE, now, result.metaError, usage = null)
+        // S15: il transport (bridge Hermes incluso) ora riporta l'usage reale anche in compile.
+        recordUsage(config, UsageEventKind.COMPILE, now, result.metaError, result.usage)
         return result
     }
 

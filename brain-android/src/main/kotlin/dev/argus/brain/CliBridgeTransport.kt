@@ -3,6 +3,7 @@ package dev.argus.brain
 import dev.argus.engine.brain.CapabilityManifest
 import dev.argus.engine.brain.ActResult
 import dev.argus.engine.brain.CompileResult
+import dev.argus.engine.brain.TurnUsage
 import dev.argus.engine.model.ArgusJson
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.AutomationDraft
@@ -113,7 +114,27 @@ private data class CompileResponseEnvelope(
     @SerialName("request_id") val requestId: String,
     val reply: String,
     val meta: CompileMetaEnvelope,
+    // S15: opzionale — un bridge vecchio (o un run senza report) non lo manda.
+    val usage: BridgeUsageEnvelope? = null,
 )
+
+/** S15: subset chiuso sanitizzato dal bridge (forma di `hermes --usage-file`). Il parser resta
+ *  strict: il bridge garantisce ESATTAMENTE queste chiavi, ognuna opzionale tranne i token. */
+@Serializable
+private data class BridgeUsageEnvelope(
+    @SerialName("input_tokens") val inputTokens: Long,
+    @SerialName("output_tokens") val outputTokens: Long,
+    @SerialName("total_tokens") val totalTokens: Long? = null,
+    @SerialName("api_calls") val apiCalls: Int? = null,
+    val model: String? = null,
+    val provider: String? = null,
+    @SerialName("cost_status") val costStatus: String? = null,
+    @SerialName("estimated_cost_usd") val estimatedCostUsd: Double? = null,
+) {
+    /** Conteggi negativi o incoerenti -> report scartato (fail-closed), mai un crash del turno. */
+    fun toTurnUsageOrNull(): TurnUsage? =
+        runCatching { TurnUsage(inputTokens, outputTokens, model = model) }.getOrNull()
+}
 
 @Serializable
 private data class CompileMetaEnvelope(
@@ -162,6 +183,8 @@ private data class ActResponseEnvelope(
     @SerialName("request_id") val requestId: String,
     val result: ActReplyEnvelope?,
     @SerialName("error_code") val errorCode: String?,
+    // S15: opzionale, come per /compile.
+    val usage: BridgeUsageEnvelope? = null,
 )
 
 @Serializable
@@ -558,17 +581,19 @@ class CliBridgeTransport internal constructor(
         if (errorCode != null && !ERROR_CODE.matches(errorCode)) {
             throw BridgeException(BridgeErrorKind.PROTOCOL, "error_code non valido")
         }
+        // S15: l'usage è informativo e viaggia anche sugli esiti senza draft (il turno è costato).
+        val usage = envelope.usage?.toTurnUsageOrNull()
         val draftElement = envelope.meta.draft
-            ?: return CompileResult(envelope.reply, null, errorCode ?: "draft_missing")
+            ?: return CompileResult(envelope.reply, null, errorCode ?: "draft_missing", usage)
         if (errorCode != null) {
             throw BridgeException(BridgeErrorKind.PROTOCOL, "draft e error_code non possono coesistere")
         }
         val draft = try {
             json.decodeFromJsonElement(AutomationDraft.serializer(), draftElement)
         } catch (_: Exception) {
-            return CompileResult(envelope.reply, null, "draft_invalid")
+            return CompileResult(envelope.reply, null, "draft_invalid", usage)
         }
-        return CompileResult(envelope.reply, draft, null)
+        return CompileResult(envelope.reply, draft, null, usage)
     }
 
     private fun parseActResponse(
@@ -601,7 +626,7 @@ class CliBridgeTransport internal constructor(
                 text.any { it.isISOControl() && it != '\n' && it != '\t' })) {
             throw BridgeException(BridgeErrorKind.PROTOCOL, "testo act non valido")
         }
-        return ActResult(text = text, metaError = errorCode)
+        return ActResult(text = text, metaError = errorCode, usage = envelope.usage?.toTurnUsageOrNull())
     }
 
     private fun CapabilityManifest.toEnvelope() = ManifestEnvelope(

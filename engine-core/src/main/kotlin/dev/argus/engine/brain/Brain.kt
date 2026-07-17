@@ -4,7 +4,13 @@ import dev.argus.engine.model.Action
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireContext
 
-data class CompileResult(val reply: String, val draft: AutomationDraft?, val metaError: String?)
+data class CompileResult(
+    val reply: String,
+    val draft: AutomationDraft?,
+    val metaError: String?,
+    /** S15: usage reale del turno quando il transport lo riporta (bridge Hermes o provider diretto). */
+    val usage: TurnUsage? = null,
+)
 
 data class ActResult(
     val text: String?,
