@@ -340,19 +340,27 @@ REGOLE VINCOLANTI:
     aggiungerlo se il dato non e' online/live. "web.search" deve comparire in
     manifest.available_tools. Per invoke_llm con "web.search" in allowedTools, imposta
     timeoutMs=120000 (la ricerca web e' lenta).
-15. Per comandi one-shot da eseguire subito (impostare una sveglia/timer, o quando l'utente dice
-    "subito"/"adesso"/"ora"), usa il trigger "immediate" (esegui-una-volta-all'attivazione).
-    L'orario della sveglia/timer va nell'AZIONE (set_alarm/set_timer), NON nel trigger. Non usare
-    un trigger "time" a un istante gia' presente/passato.
+15. Scelta del TRIGGER temporale (fondamentale, non confondere immediate con un ritardo):
+    - "immediate" SOLO per "esegui ADESSO / appena la attivo" (subito/adesso/ora), ZERO ritardo:
+      esegue una volta all'attivazione. NON usarlo mai per un ritardo o una ripetizione.
+    - "time" con "at" per UN momento specifico UNA VOLTA: "tra N minuti/ore" -> at = ora locale attuale
+      + N; "alle HH:MM"/"domani alle …" -> quel datetime. Formato "at" = ISO locale SENZA offset timezone
+      e SENZA "Z" (es. "2026-07-17T14:30" o "2026-07-17T14:30:00"), MAI con "+02:00"/"+00:00"/"Z".
+    - "time" con "cron" per RICORRENTI: "ogni N ore/giorni", "ogni ora", "ogni giorno/settimana/lunedi'
+      alle HH:MM" -> cron corrispondente. La regola ri-scatta e (se generativa) ri-genera ogni volta.
+    Per sveglia/timer reali l'orario va nell'AZIONE set_alarm/set_timer, non nel trigger. Mai un "time"
+    con "at" gia' passato. Esempi: "notificami tra 2 minuti il cambio" -> time at=+2min (NON immediate);
+    "ogni 24 ore mandami il prezzo BTC" -> time cron ogni 24h; "avvisami subito" -> immediate.
 16. La consegna generativa di invoke_llm ha DUE modi (campo "deliver"):
     - "WHATSAPP_REPLY" (default): risponde a una notifica in arrivo (trigger notification, chat 1:1 in
       whitelist), contextSources ["notification"], allowedTools ["whatsapp_reply"] (+ "web.search"
       opzionale), replyTargetSender=true. E' il modo per RISPONDERE a un messaggio ricevuto.
     - "LOCAL_NOTIFICATION": posta una NOTIFICA locale col testo generato, da QUALSIASI trigger
-      (time/immediate/…). Usa questo quando l'utente dice "mandami/inviami/notificami <X>" (es. "tra 2
-      min una notifica col cambio euro-usd"): allowedTools=[] oppure ["web.search"] (MAI whatsapp_reply),
+      temporale (time.at, time.cron, immediate). Usa questo quando l'utente dice "mandami/inviami/
+      notificami <X>", incluse le richieste RICORRENTI ("ogni 24 ore il prezzo BTC", "ogni settimana il
+      risultato del Milan" -> time.cron): allowedTools=[] oppure ["web.search"] (MAI whatsapp_reply),
       replyTargetSender=false, contextSources=[] (o ["state"] se serve stato), e "notificationTitle"=un
-      titolo breve sintetico. Il trigger e' quello richiesto (time per "tra N min", immediate per "subito").
+      titolo breve sintetico. Il trigger si sceglie con la regola 15 (tra N -> time.at, ogni N -> time.cron).
     "show_notification" NON e' mai un tool generativo (mai in allowedTools); invoke_llm_v2 resta solo reply."""
 
     const val DRAFT_SCHEMA_TEXT = """AutomationDraft JSON (nomi e maiuscole sono esatti):
