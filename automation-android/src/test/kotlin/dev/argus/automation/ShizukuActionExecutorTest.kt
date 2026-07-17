@@ -14,6 +14,8 @@ import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.DndMode
 import dev.argus.engine.model.PhoneEvent
+import dev.argus.engine.model.SettingsScreen
+import dev.argus.engine.model.VolumeStream
 import dev.argus.engine.runtime.ActionResult
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.ExecutionId
@@ -433,6 +435,46 @@ class ShizukuActionExecutorTest {
     }
 
     @Test
+    fun `manager pack actions route to the base executor and never touch shizuku`() = runTest {
+        val surface = RecordingBaseSurface()
+        val tools = RecordingDeviceController()
+        val exec = executor(tools = tools, baseActions = AndroidBaseActionExecutor(surface))
+
+        assertEquals(
+            ActionResult.Success,
+            exec.execute(Action.SetVolume(VolumeStream.MEDIA, level = 5), context),
+        )
+        assertEquals(ActionResult.Success, exec.execute(Action.SetFlashlight(on = true), context))
+        assertEquals(
+            ActionResult.Success,
+            exec.execute(Action.OpenSettingsScreen(SettingsScreen.WIFI), context),
+        )
+        assertEquals(ActionResult.Success, exec.execute(Action.Vibrate(durationMs = 200), context))
+
+        assertEquals(listOf("MEDIA:5"), surface.volumes)
+        assertEquals(listOf(true), surface.torch)
+        assertEquals(listOf("WIFI:null"), surface.settingsScreens)
+        assertEquals(listOf(200), surface.vibrations)
+        assertEquals(emptyList(), tools.calls)
+    }
+
+    @Test
+    fun `manager pack actions are base-only and fail clean without a base executor`() = runTest {
+        val exec = executor(baseActions = null)
+        listOf(
+            Action.SetVolume(VolumeStream.RING, level = 3),
+            Action.SetFlashlight(on = false),
+            Action.OpenSettingsScreen(SettingsScreen.SETTINGS),
+            Action.Vibrate(durationMs = 100),
+        ).forEach { action ->
+            assertEquals(
+                ActionResult.Failure("base_executor_unavailable"),
+                exec.execute(action, context),
+            )
+        }
+    }
+
+    @Test
     fun `set alarm is base-only and fails clean without a base executor`() = runTest {
         val exec = executor(baseActions = null)
         assertEquals(
@@ -534,6 +576,10 @@ private class RecordingBaseSurface(private val dndGranted: Boolean = true) : Bas
     val opened = mutableListOf<String>()
     val alarms = mutableListOf<String>()
     val timers = mutableListOf<String>()
+    val volumes = mutableListOf<String>()
+    val torch = mutableListOf<Boolean>()
+    val settingsScreens = mutableListOf<String>()
+    val vibrations = mutableListOf<Int>()
     override fun isDndPolicyGranted(): Boolean = dndGranted
     override fun setInterruptionFilter(mode: DndMode) { dndModes += mode }
     override fun setRingerMode(mode: RingerMode) { ringerModes += mode }
@@ -545,4 +591,11 @@ private class RecordingBaseSurface(private val dndGranted: Boolean = true) : Bas
     override fun setTimer(seconds: Int, label: String?, skipUi: Boolean): Boolean {
         timers += "$seconds:$label:$skipUi"; return true
     }
+    override fun maxStreamVolume(stream: VolumeStream): Int = 15
+    override fun setStreamVolume(stream: VolumeStream, level: Int) { volumes += "$stream:$level" }
+    override fun setTorchMode(on: Boolean): Boolean { torch += on; return true }
+    override fun openSettingsScreen(screen: SettingsScreen, pkg: String?): Boolean {
+        settingsScreens += "$screen:$pkg"; return true
+    }
+    override fun vibrateOneShot(durationMs: Int): Boolean { vibrations += durationMs; return true }
 }

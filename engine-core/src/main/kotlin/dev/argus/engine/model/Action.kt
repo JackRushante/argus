@@ -5,6 +5,16 @@ import kotlinx.serialization.Serializable
 enum class DndMode { OFF, PRIORITY, TOTAL }
 enum class ActionTier { DETERMINISTIC, GENERATIVE }
 
+/** Stream audio target di [Action.SetVolume]. Enum chiuso: mappato 1:1 su AudioManager.STREAM_*. */
+enum class VolumeStream { MEDIA, RING, ALARM, NOTIFICATION }
+
+/**
+ * Schermata Impostazioni target di [Action.OpenSettingsScreen]. Enum CHIUSO (mai una action-string
+ * arbitraria): evita il routing-sink di `startActivity` verso Intent Settings.ACTION_* liberi.
+ * `APP_DETAILS` è l'unico che consuma un `pkg`.
+ */
+enum class SettingsScreen { WIFI, BLUETOOTH, DISPLAY, SOUND, LOCATION, BATTERY, DATE, APP_DETAILS, SETTINGS }
+
 /** Marker chiuso per impedire che la lane accetti azioni deterministiche per errore. */
 sealed interface GenerativeAction
 
@@ -24,6 +34,10 @@ object ActionTypeIds {
     const val COPY_TO_CLIPBOARD = "copy_to_clipboard"
     const val SET_ALARM = "set_alarm"
     const val SET_TIMER = "set_timer"
+    const val SET_VOLUME = "set_volume"
+    const val SET_FLASHLIGHT = "set_flashlight"
+    const val OPEN_SETTINGS_SCREEN = "open_settings_screen"
+    const val VIBRATE = "vibrate"
     const val WRITE_SETTING = "write_setting"
     const val INVOKE_LLM = "invoke_llm"
     const val INVOKE_LLM_V2 = "invoke_llm_v2"
@@ -65,6 +79,10 @@ sealed interface Action {
             is CopyToClipboard,
             is SetAlarm,
             is SetTimer,
+            is SetVolume,
+            is SetFlashlight,
+            is OpenSettingsScreen,
+            is Vibrate,
             is WriteSetting,
             -> ActionTier.DETERMINISTIC
         }
@@ -106,6 +124,34 @@ sealed interface Action {
         val label: String? = null,
         val skipUi: Boolean = true,
     ) : Action
+
+    /** Volume assoluto per stream via `AudioManager.setStreamVolume`. BASE, nessun permesso: la
+     *  gate DND ([BaseActionSurface.isDndPolicyGranted]) scatta solo se porta RING/NOTIFICATION a 0
+     *  (silenziamento). `level` è validato >= 0 e clampato a `getStreamMaxVolume(stream)`. */
+    @Serializable @SerialName(ActionTypeIds.SET_VOLUME)
+    data class SetVolume(
+        val stream: VolumeStream,
+        val level: Int,
+    ) : Action
+
+    /** Torcia on/off via `CameraManager.setTorchMode` sulla camera con flash. BASE, nessun permesso
+     *  (API 23+). Fallisce `torch_unavailable` se nessuna camera con flash o CameraAccessException. */
+    @Serializable @SerialName(ActionTypeIds.SET_FLASHLIGHT)
+    data class SetFlashlight(val on: Boolean) : Action
+
+    /** Apre una schermata Impostazioni via Intent `Settings.ACTION_*` mappato da un enum CHIUSO
+     *  ([SettingsScreen]): nessuna action-string arbitraria (evita il routing-sink). BASE,
+     *  `startActivity` NEW_TASK. `pkg` serve solo per [SettingsScreen.APP_DETAILS]. */
+    @Serializable @SerialName(ActionTypeIds.OPEN_SETTINGS_SCREEN)
+    data class OpenSettingsScreen(
+        val screen: SettingsScreen,
+        val pkg: String? = null,
+    ) : Action
+
+    /** Vibrazione one-shot via `Vibrator.vibrate(VibrationEffect.createOneShot)`. BASE, permesso
+     *  normal `VIBRATE`. `durationMs` validato in 1..10000. */
+    @Serializable @SerialName(ActionTypeIds.VIBRATE)
+    data class Vibrate(val durationMs: Int) : Action
 
     /**
      * Scrittura PARAMETRICA di un'impostazione Android (`system|secure|global`) per chiave —

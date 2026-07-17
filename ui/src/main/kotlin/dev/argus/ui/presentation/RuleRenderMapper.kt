@@ -301,6 +301,27 @@ object RuleRenderMapper {
             detail = "${a.seconds}s" +
                 (a.label?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""),
         )
+        is Action.SetVolume -> row(
+            iconKey = "volume",
+            label = "Imposta volume",
+            detail = "${a.stream.name.lowercase()} · livello ${a.level}",
+        )
+        is Action.SetFlashlight -> row(
+            iconKey = "flashlight",
+            label = if (a.on) "Accendi torcia" else "Spegni torcia",
+            detail = if (a.on) "on" else "off",
+        )
+        is Action.OpenSettingsScreen -> row(
+            iconKey = "settings",
+            label = "Apri Impostazioni",
+            detail = a.screen.name.lowercase() +
+                (a.pkg?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""),
+        )
+        is Action.Vibrate -> row(
+            iconKey = "vibrate",
+            label = "Vibra",
+            detail = "${a.durationMs} ms",
+        )
         is Action.WriteSetting -> row(
             iconKey = "settings",
             // D2: la review mostra namespace/key/value LETTERALI e integrali (l'utente approva

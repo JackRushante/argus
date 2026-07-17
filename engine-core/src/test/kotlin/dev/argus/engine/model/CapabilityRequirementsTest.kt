@@ -197,6 +197,30 @@ class CapabilityRequirementsTest {
     }
 
     @Test
+    fun `manager pack actions derive their own base action capabilities`() {
+        fun caps(action: Action) = CapabilityRequirements.derive(
+            trigger = Trigger.Time(at = "2026-07-17T07:00", tz = "Europe/Rome"),
+            actions = listOf(action),
+        )
+        assertEquals(
+            setOf(CapabilityIds.TRIGGER_TIME, CapabilityIds.ACTION_SET_VOLUME),
+            caps(Action.SetVolume(VolumeStream.MEDIA, level = 5)),
+        )
+        assertEquals(
+            setOf(CapabilityIds.TRIGGER_TIME, CapabilityIds.ACTION_SET_FLASHLIGHT),
+            caps(Action.SetFlashlight(on = true)),
+        )
+        assertEquals(
+            setOf(CapabilityIds.TRIGGER_TIME, CapabilityIds.ACTION_OPEN_SETTINGS_SCREEN),
+            caps(Action.OpenSettingsScreen(SettingsScreen.WIFI)),
+        )
+        assertEquals(
+            setOf(CapabilityIds.TRIGGER_TIME, CapabilityIds.ACTION_VIBRATE),
+            caps(Action.Vibrate(durationMs = 200)),
+        )
+    }
+
+    @Test
     fun `connectivity requirements are granular and wifi identity needs location`() {
         assertEquals(
             setOf(CapabilityIds.TRIGGER_CONNECTIVITY_POWER),

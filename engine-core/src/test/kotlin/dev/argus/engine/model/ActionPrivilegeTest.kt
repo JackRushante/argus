@@ -39,6 +39,10 @@ class ActionPrivilegeTest {
             Action.ShowNotification("Argus", "ciao"),
             Action.SetAlarm(hour = 7, minute = 30),
             Action.SetTimer(seconds = 300),
+            Action.SetVolume(VolumeStream.MEDIA, level = 5),
+            Action.SetFlashlight(on = true),
+            Action.OpenSettingsScreen(SettingsScreen.WIFI),
+            Action.Vibrate(durationMs = 200),
             Action.WhatsAppReply("ok"),
             Action.CopyToClipboard(),
             Action.InvokeLlm(
@@ -72,6 +76,10 @@ class ActionPrivilegeTest {
         assertEquals(false, ActionPrivileges.requiresShizuku(Action.SetDnd(DndMode.OFF)))
         assertEquals(false, ActionPrivileges.requiresShizuku(Action.SetAlarm(hour = 8, minute = 0)))
         assertEquals(false, ActionPrivileges.requiresShizuku(Action.SetTimer(seconds = 60)))
+        assertEquals(false, ActionPrivileges.requiresShizuku(Action.SetVolume(VolumeStream.RING, 3)))
+        assertEquals(false, ActionPrivileges.requiresShizuku(Action.SetFlashlight(on = false)))
+        assertEquals(false, ActionPrivileges.requiresShizuku(Action.OpenSettingsScreen(SettingsScreen.SETTINGS)))
+        assertEquals(false, ActionPrivileges.requiresShizuku(Action.Vibrate(durationMs = 100)))
         assertEquals(
             true,
             ActionPrivileges.requiresShizuku(

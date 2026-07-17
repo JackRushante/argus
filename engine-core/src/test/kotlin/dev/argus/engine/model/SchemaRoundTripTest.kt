@@ -49,6 +49,13 @@ class SchemaRoundTripTest {
             Action.SetAlarm(hour = 22, minute = 5, label = "Medicine", skipUi = false),
             Action.SetTimer(seconds = 300),
             Action.SetTimer(seconds = 1_800, label = "Pasta", skipUi = false),
+            Action.SetVolume(VolumeStream.MEDIA, level = 8),
+            Action.SetVolume(VolumeStream.NOTIFICATION, level = 0),
+            Action.SetFlashlight(on = true),
+            Action.SetFlashlight(on = false),
+            Action.OpenSettingsScreen(SettingsScreen.WIFI),
+            Action.OpenSettingsScreen(SettingsScreen.APP_DETAILS, pkg = "com.example.app"),
+            Action.Vibrate(durationMs = 300),
         )
         actions.forEach { roundTrip(Action.serializer(), it) }
     }

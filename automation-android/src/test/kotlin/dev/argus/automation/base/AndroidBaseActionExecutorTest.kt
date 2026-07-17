@@ -2,6 +2,8 @@ package dev.argus.automation.base
 
 import dev.argus.device.RingerMode
 import dev.argus.engine.model.DndMode
+import dev.argus.engine.model.SettingsScreen
+import dev.argus.engine.model.VolumeStream
 import dev.argus.engine.runtime.ActionResult
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -16,11 +18,17 @@ class AndroidBaseActionExecutorTest {
 
     private data class AlarmCall(val hour: Int, val minute: Int, val label: String?, val skipUi: Boolean)
     private data class TimerCall(val seconds: Int, val label: String?, val skipUi: Boolean)
+    private data class VolumeCall(val stream: VolumeStream, val level: Int)
+    private data class SettingsCall(val screen: SettingsScreen, val pkg: String?)
 
     private class FakeSurface(
         var dndGranted: Boolean = true,
         var launchable: Boolean = true,
         var alarmResolvable: Boolean = true,
+        var settingsResolvable: Boolean = true,
+        var torchAvailable: Boolean = true,
+        var vibratorAvailable: Boolean = true,
+        var streamMax: Int = 15,
         var throwOn: String? = null,
     ) : BaseActionSurface {
         val dndModes = mutableListOf<DndMode>()
@@ -29,6 +37,10 @@ class AndroidBaseActionExecutorTest {
         val opened = mutableListOf<String>()
         val alarms = mutableListOf<AlarmCall>()
         val timers = mutableListOf<TimerCall>()
+        val volumes = mutableListOf<VolumeCall>()
+        val torch = mutableListOf<Boolean>()
+        val settingsScreens = mutableListOf<SettingsCall>()
+        val vibrations = mutableListOf<Int>()
 
         override fun isDndPolicyGranted(): Boolean = dndGranted
         override fun setInterruptionFilter(mode: DndMode) {
@@ -59,6 +71,29 @@ class AndroidBaseActionExecutorTest {
             if (throwOn == "timer") error("boom")
             if (!alarmResolvable) return false
             timers += TimerCall(seconds, label, skipUi)
+            return true
+        }
+        override fun maxStreamVolume(stream: VolumeStream): Int = streamMax
+        override fun setStreamVolume(stream: VolumeStream, level: Int) {
+            if (throwOn == "volume") error("boom")
+            volumes += VolumeCall(stream, level)
+        }
+        override fun setTorchMode(on: Boolean): Boolean {
+            if (throwOn == "torch") error("boom")
+            if (!torchAvailable) return false
+            torch += on
+            return true
+        }
+        override fun openSettingsScreen(screen: SettingsScreen, pkg: String?): Boolean {
+            if (throwOn == "settings") error("boom")
+            if (!settingsResolvable) return false
+            settingsScreens += SettingsCall(screen, pkg)
+            return true
+        }
+        override fun vibrateOneShot(durationMs: Int): Boolean {
+            if (throwOn == "vibrate") error("boom")
+            if (!vibratorAvailable) return false
+            vibrations += durationMs
             return true
         }
     }
@@ -200,6 +235,102 @@ class AndroidBaseActionExecutorTest {
         val surface = FakeSurface(throwOn = "alarm")
         val result = AndroidBaseActionExecutor(surface).setAlarm(7, 0, null, skipUi = true)
         assertEquals(ActionResult.Failure("action_failed"), result)
+    }
+
+    @Test
+    fun `set volume forwards the level to the stream`() = runTest {
+        val surface = FakeSurface()
+        val result = AndroidBaseActionExecutor(surface).setVolume(VolumeStream.MEDIA, 7)
+        assertEquals(ActionResult.Success, result)
+        assertEquals(listOf(VolumeCall(VolumeStream.MEDIA, 7)), surface.volumes)
+    }
+
+    @Test
+    fun `set volume clamps the level to the stream maximum`() = runTest {
+        val surface = FakeSurface(streamMax = 10)
+        assertEquals(ActionResult.Success, AndroidBaseActionExecutor(surface).setVolume(VolumeStream.ALARM, 999))
+        assertEquals(listOf(VolumeCall(VolumeStream.ALARM, 10)), surface.volumes)
+    }
+
+    @Test
+    fun `set volume rejects a negative level before touching Android`() = runTest {
+        val surface = FakeSurface()
+        assertEquals(ActionResult.Failure("action_invalid"), AndroidBaseActionExecutor(surface).setVolume(VolumeStream.MEDIA, -1))
+        assertTrue(surface.volumes.isEmpty())
+    }
+
+    @Test
+    fun `silencing ring or notification requires the dnd policy grant`() = runTest {
+        val surface = FakeSurface(dndGranted = false)
+        val executor = AndroidBaseActionExecutor(surface)
+        assertEquals(ActionResult.Failure("volume_policy_unavailable"), executor.setVolume(VolumeStream.RING, 0))
+        assertEquals(ActionResult.Failure("volume_policy_unavailable"), executor.setVolume(VolumeStream.NOTIFICATION, 0))
+        assertTrue(surface.volumes.isEmpty())
+        // Media a 0 non silenzia la suoneria: nessun grant richiesto.
+        assertEquals(ActionResult.Success, executor.setVolume(VolumeStream.MEDIA, 0))
+        assertEquals(listOf(VolumeCall(VolumeStream.MEDIA, 0)), surface.volumes)
+    }
+
+    @Test
+    fun `set flashlight toggles the torch and reports torch_unavailable when no flash`() = runTest {
+        val on = FakeSurface()
+        assertEquals(ActionResult.Success, AndroidBaseActionExecutor(on).setFlashlight(true))
+        assertEquals(listOf(true), on.torch)
+
+        val none = FakeSurface(torchAvailable = false)
+        assertEquals(ActionResult.Failure("torch_unavailable"), AndroidBaseActionExecutor(none).setFlashlight(true))
+    }
+
+    @Test
+    fun `open settings screen forwards a resolvable screen`() = runTest {
+        val surface = FakeSurface()
+        assertEquals(ActionResult.Success, AndroidBaseActionExecutor(surface).openSettingsScreen(SettingsScreen.WIFI, null))
+        assertEquals(listOf(SettingsCall(SettingsScreen.WIFI, null)), surface.settingsScreens)
+    }
+
+    @Test
+    fun `open settings screen requires a valid package only for app details`() = runTest {
+        val surface = FakeSurface()
+        val executor = AndroidBaseActionExecutor(surface)
+        assertEquals(ActionResult.Failure("action_invalid"), executor.openSettingsScreen(SettingsScreen.APP_DETAILS, null))
+        assertEquals(ActionResult.Failure("action_invalid"), executor.openSettingsScreen(SettingsScreen.APP_DETAILS, "not a pkg"))
+        assertTrue(surface.settingsScreens.isEmpty())
+        assertEquals(ActionResult.Success, executor.openSettingsScreen(SettingsScreen.APP_DETAILS, "com.example.app"))
+        assertEquals(listOf(SettingsCall(SettingsScreen.APP_DETAILS, "com.example.app")), surface.settingsScreens)
+    }
+
+    @Test
+    fun `open settings screen fails clean when the intent does not resolve`() = runTest {
+        val surface = FakeSurface(settingsResolvable = false)
+        assertEquals(
+            ActionResult.Failure("settings_screen_unresolved"),
+            AndroidBaseActionExecutor(surface).openSettingsScreen(SettingsScreen.BLUETOOTH, null),
+        )
+    }
+
+    @Test
+    fun `vibrate forwards a valid duration and rejects an out of range one`() = runTest {
+        val surface = FakeSurface()
+        val executor = AndroidBaseActionExecutor(surface)
+        assertEquals(ActionResult.Success, executor.vibrate(250))
+        assertEquals(ActionResult.Success, executor.vibrate(10_000))
+        assertEquals(listOf(250, 10_000), surface.vibrations)
+        assertEquals(ActionResult.Failure("action_invalid"), executor.vibrate(0))
+        assertEquals(ActionResult.Failure("action_invalid"), executor.vibrate(10_001))
+    }
+
+    @Test
+    fun `vibrate reports vibrator_unavailable when the device has no vibrator`() = runTest {
+        val surface = FakeSurface(vibratorAvailable = false)
+        assertEquals(ActionResult.Failure("vibrator_unavailable"), AndroidBaseActionExecutor(surface).vibrate(100))
+    }
+
+    @Test
+    fun `manager pack surface exceptions become typed failures`() = runTest {
+        assertEquals(ActionResult.Failure("action_failed"), AndroidBaseActionExecutor(FakeSurface(throwOn = "volume")).setVolume(VolumeStream.MEDIA, 5))
+        assertEquals(ActionResult.Failure("action_failed"), AndroidBaseActionExecutor(FakeSurface(throwOn = "torch")).setFlashlight(true))
+        assertEquals(ActionResult.Failure("action_failed"), AndroidBaseActionExecutor(FakeSurface(throwOn = "settings")).openSettingsScreen(SettingsScreen.WIFI, null))
+        assertEquals(ActionResult.Failure("action_failed"), AndroidBaseActionExecutor(FakeSurface(throwOn = "vibrate")).vibrate(100))
     }
 
     @Test

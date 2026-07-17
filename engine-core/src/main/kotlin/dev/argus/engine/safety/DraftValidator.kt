@@ -41,6 +41,8 @@ class DraftValidator(
         private const val MAX_LOITERING_MS = 86_400_000L
         private const val MAX_LLM_TIMEOUT_MS = 120_000L
         private const val MAX_TIMER_SECONDS = 86_400
+        private const val MAX_VOLUME_LEVEL = 100
+        private const val MAX_VIBRATE_MS = 10_000
 
         private val PACKAGE_NAME = Regex("^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+$")
     }
@@ -329,6 +331,27 @@ class DraftValidator(
                 if (action.seconds !in 1..MAX_TIMER_SECONDS)
                     err("timer_seconds_invalid", "Durata timer fuori intervallo: 1..$MAX_TIMER_SECONDS secondi")
                 validateOptionalText(action.label, "timer_label_invalid", err)
+            }
+            is Action.SetVolume -> {
+                // Stream è un enum chiuso (compile-enforced). Il livello reale è clampato a
+                // getStreamMaxVolume dall'executor; qui basta rifiutare i valori assurdi.
+                if (action.level !in 0..MAX_VOLUME_LEVEL)
+                    err("volume_level_invalid", "Livello volume fuori intervallo: 0..$MAX_VOLUME_LEVEL")
+            }
+            is Action.SetFlashlight -> Unit // solo booleano, nulla da validare
+            is Action.OpenSettingsScreen -> {
+                // Enum chiuso: nessuna action-string arbitraria. `pkg` è obbligatorio e valido solo
+                // per APP_DETAILS; per le altre schermate va lasciato assente.
+                if (action.screen == SettingsScreen.APP_DETAILS) {
+                    if (action.pkg == null) err("settings_pkg_missing", "APP_DETAILS richiede un package")
+                    else validatePackage(action.pkg, "settings_pkg_invalid", err)
+                } else if (action.pkg != null) {
+                    err("settings_pkg_unexpected", "Il package è ammesso solo per la schermata APP_DETAILS")
+                }
+            }
+            is Action.Vibrate -> {
+                if (action.durationMs !in 1..MAX_VIBRATE_MS)
+                    err("vibrate_duration_invalid", "Durata vibrazione fuori intervallo: 1..$MAX_VIBRATE_MS ms")
             }
             is Action.WriteSetting -> {
                 // PARAMETRICA (D0: nessuna allowlist di chiavi). Solo validazione di forma via

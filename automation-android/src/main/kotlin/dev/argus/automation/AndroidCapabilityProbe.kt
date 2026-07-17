@@ -237,6 +237,11 @@ class AndroidCapabilityProbe internal constructor(
             // Sveglia/timer: Intent AlarmClock col permesso normal SET_ALARM (auto-concesso), quindi
             // sempre armabili senza Shizuku né grant runtime, come la clipboard.
             addAll(BASE_ALARM_CAPABILITIES)
+            // Manager pack S4 (volume/torcia/schermata impostazioni/vibrazione): AudioManager/
+            // CameraManager/Vibrator/Intent Settings, solo permesso normal VIBRATE, nessun grant
+            // runtime pubblicabile. Sempre disponibili come la clipboard (la gate DND del volume a 0
+            // è un fallimento tipizzato a runtime, non un gate di pubblicazione).
+            addAll(BASE_MANAGER_CAPABILITIES)
             if (state.notificationsGranted) add(ActionCapabilities.SHOW_NOTIFICATION)
             // CapabilityRequirements persiste anche i raw tool approvati: il set del fire-time
             // deve contenere gli stessi nomi wire, senza alias con le capability typed.
@@ -266,6 +271,7 @@ class AndroidCapabilityProbe internal constructor(
         val availableTools = buildList {
             add(ActionTypeIds.COPY_TO_CLIPBOARD)
             addAll(BASE_ALARM_ACTION_TYPES)
+            addAll(BASE_MANAGER_ACTION_TYPES)
             if (shizukuAvailable) {
                 addAll(PRIVILEGED_ACTION_TYPES)
                 addAll(SHIZUKU_TOOLS)
@@ -380,6 +386,13 @@ class AndroidCapabilityProbe internal constructor(
         val BASE_LAUNCH_ACTION_TYPES = setOf(ActionTypeIds.LAUNCH_APP, ActionTypeIds.OPEN_URL)
         /** Base sempre disponibili (permesso normal SET_ALARM): sveglia/timer via Intent AlarmClock. */
         val BASE_ALARM_ACTION_TYPES = setOf(ActionTypeIds.SET_ALARM, ActionTypeIds.SET_TIMER)
+        /** Base sempre disponibili (S4): Manager/Intent, solo permesso normal VIBRATE, ungated. */
+        val BASE_MANAGER_ACTION_TYPES = setOf(
+            ActionTypeIds.SET_VOLUME,
+            ActionTypeIds.SET_FLASHLIGHT,
+            ActionTypeIds.OPEN_SETTINGS_SCREEN,
+            ActionTypeIds.VIBRATE,
+        )
         // Unione legacy: usata per la ragione di indisponibilità quando il tier base è inattivo.
         val SHIZUKU_ACTION_TYPES =
             PRIVILEGED_ACTION_TYPES + BASE_DND_ACTION_TYPES + BASE_LAUNCH_ACTION_TYPES
@@ -400,6 +413,13 @@ class AndroidCapabilityProbe internal constructor(
         /** Capability sempre disponibili delle azioni sveglia/timer (permesso normal SET_ALARM). */
         val BASE_ALARM_CAPABILITIES =
             setOf(ActionCapabilities.SET_ALARM, ActionCapabilities.SET_TIMER)
+        /** Capability sempre disponibili del Manager pack S4 (ungated, solo permesso normal VIBRATE). */
+        val BASE_MANAGER_CAPABILITIES = setOf(
+            ActionCapabilities.SET_VOLUME,
+            ActionCapabilities.SET_FLASHLIGHT,
+            ActionCapabilities.OPEN_SETTINGS_SCREEN,
+            ActionCapabilities.VIBRATE,
+        )
         /** Capability che richiedono lo shell Shizuku: toggle, shell e lettori privilegiati. */
         val PRIVILEGED_CAPABILITIES: Set<String> = buildSet {
             add(ActionCapabilities.SET_WIFI)

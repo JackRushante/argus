@@ -620,6 +620,37 @@ class AndroidCapabilityProbeTest {
     }
 
     @Test
+    fun `manager pack base actions are always published without Shizuku or grants`() = runTest {
+        // Volume/torcia/schermata impostazioni/vibrazione: solo permesso normal VIBRATE, nessun
+        // grant runtime pubblicabile, quindi sempre armabili come sveglia/clipboard.
+        val probe = probe(
+            state().copy(
+                shizukuStatus = ShizukuGatewayStatus.NOT_INSTALLED,
+                shizukuPermissionGranted = false,
+                dndPolicyGranted = false,
+                notificationsGranted = false,
+            ),
+            baseTierActive = false,
+        )
+        val manifest = probe.probe(DeviceState())
+        val snapshot = probe.current()
+
+        listOf(
+            ActionTypeIds.SET_VOLUME,
+            ActionTypeIds.SET_FLASHLIGHT,
+            ActionTypeIds.OPEN_SETTINGS_SCREEN,
+            ActionTypeIds.VIBRATE,
+        ).forEach { type ->
+            assertTrue(type in manifest.availableTools, "atteso $type pubblicato")
+            assertFalse(type in manifest.unavailableTools, "$type non deve essere indisponibile")
+        }
+        assertTrue(CapabilityIds.ACTION_SET_VOLUME in snapshot.availableCapabilities)
+        assertTrue(CapabilityIds.ACTION_SET_FLASHLIGHT in snapshot.availableCapabilities)
+        assertTrue(CapabilityIds.ACTION_OPEN_SETTINGS_SCREEN in snapshot.availableCapabilities)
+        assertTrue(CapabilityIds.ACTION_VIBRATE in snapshot.availableCapabilities)
+    }
+
+    @Test
     fun `base tier inactive keeps every base action gated on Shizuku`() = runTest {
         // Default (tier base non attivo): nessun cambiamento rispetto al legacy.
         val probe = probe(

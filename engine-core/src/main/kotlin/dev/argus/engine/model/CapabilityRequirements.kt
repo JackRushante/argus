@@ -39,6 +39,10 @@ object CapabilityIds {
     const val ACTION_COPY_TO_CLIPBOARD = "action.copy_to_clipboard"
     const val ACTION_SET_ALARM = "action.set_alarm"
     const val ACTION_SET_TIMER = "action.set_timer"
+    const val ACTION_SET_VOLUME = "action.set_volume"
+    const val ACTION_SET_FLASHLIGHT = "action.set_flashlight"
+    const val ACTION_OPEN_SETTINGS_SCREEN = "action.open_settings_screen"
+    const val ACTION_VIBRATE = "action.vibrate"
     const val ACTION_WRITE_SETTING = "action.write_setting"
     const val ACTION_INVOKE_LLM = "action.invoke_llm"
 
@@ -107,6 +111,10 @@ object CapabilityRequirements {
         is Action.CopyToClipboard -> setOf(CapabilityIds.ACTION_COPY_TO_CLIPBOARD)
         is Action.SetAlarm -> setOf(CapabilityIds.ACTION_SET_ALARM)
         is Action.SetTimer -> setOf(CapabilityIds.ACTION_SET_TIMER)
+        is Action.SetVolume -> setOf(CapabilityIds.ACTION_SET_VOLUME)
+        is Action.SetFlashlight -> setOf(CapabilityIds.ACTION_SET_FLASHLIGHT)
+        is Action.OpenSettingsScreen -> setOf(CapabilityIds.ACTION_OPEN_SETTINGS_SCREEN)
+        is Action.Vibrate -> setOf(CapabilityIds.ACTION_VIBRATE)
         // Come i reader parametrici (che gatano sulla famiglia, non sul singolo canonicalId):
         // il gate runtime è la famiglia ACTION_WRITE_SETTING (pubblicata dal probe solo con
         // Shizuku), mentre il binding per-chiave namespace|key|value è nel fingerprint approvato

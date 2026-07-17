@@ -42,6 +42,11 @@ object ActionPrivileges {
         // Sveglia/timer: Intent AlarmClock col permesso normal SET_ALARM, nessuno Shizuku.
         is Action.SetAlarm,
         is Action.SetTimer,
+        // Manager/Intent BASE: AudioManager/CameraManager/Vibrator/Intent Settings, nessuno Shizuku.
+        is Action.SetVolume,
+        is Action.SetFlashlight,
+        is Action.OpenSettingsScreen,
+        is Action.Vibrate,
         is Action.InvokeLlm,
         is Action.InvokeLlmV2,
         -> ActionPrivilege.BASE

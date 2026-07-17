@@ -2,6 +2,8 @@ package dev.argus.automation.base
 
 import dev.argus.device.RingerMode
 import dev.argus.engine.model.DndMode
+import dev.argus.engine.model.SettingsScreen
+import dev.argus.engine.model.VolumeStream
 import dev.argus.engine.runtime.ActionResult
 import kotlinx.coroutines.CancellationException
 import java.net.URI
@@ -25,6 +27,21 @@ interface BaseActionSurface {
     /** Avvia il timer reale via Intent `AlarmClock.ACTION_SET_TIMER`; false se nessuna app orologio
      *  risolve l'Intent. Il range è già validato dall'executor. */
     fun setTimer(seconds: Int, label: String?, skipUi: Boolean): Boolean
+    /** Volume massimo dello stream (`AudioManager.getStreamMaxVolume`): usato dall'executor per il
+     *  clamp host-testabile prima di [setStreamVolume]. */
+    fun maxStreamVolume(stream: VolumeStream): Int
+    /** Imposta il volume assoluto dello stream (`AudioManager.setStreamVolume`, flag 0). Il livello
+     *  è già validato/clampato dall'executor. */
+    fun setStreamVolume(stream: VolumeStream, level: Int)
+    /** Torcia on/off via `CameraManager.setTorchMode`; false se nessuna camera con flash o
+     *  CameraAccessException. */
+    fun setTorchMode(on: Boolean): Boolean
+    /** Apre la schermata Impostazioni (enum chiuso) via Intent `Settings.ACTION_*`; false se
+     *  l'Intent non risolve. */
+    fun openSettingsScreen(screen: SettingsScreen, pkg: String?): Boolean
+    /** Vibrazione one-shot via `Vibrator`; false se il device non ha vibratore. Durata già
+     *  validata dall'executor. */
+    fun vibrateOneShot(durationMs: Int): Boolean
 }
 
 /**
@@ -73,6 +90,42 @@ class AndroidBaseActionExecutor(private val surface: BaseActionSurface) {
         else ActionResult.Failure("alarm_app_unresolved")
     }
 
+    suspend fun setVolume(stream: VolumeStream, level: Int): ActionResult = guarded {
+        if (level < 0) return ActionResult.Failure("action_invalid")
+        // Portare RING/NOTIFICATION a 0 = silenziare: su Android moderni commuta il DND e richiede
+        // il policy grant, esattamente come il ringer (setRinger sopra).
+        if (level == 0 &&
+            (stream == VolumeStream.RING || stream == VolumeStream.NOTIFICATION) &&
+            !surface.isDndPolicyGranted()
+        ) {
+            return ActionResult.Failure("volume_policy_unavailable")
+        }
+        val clamped = level.coerceAtMost(surface.maxStreamVolume(stream))
+        surface.setStreamVolume(stream, clamped)
+        ActionResult.Success
+    }
+
+    suspend fun setFlashlight(on: Boolean): ActionResult = guarded {
+        if (surface.setTorchMode(on)) ActionResult.Success
+        else ActionResult.Failure("torch_unavailable")
+    }
+
+    suspend fun openSettingsScreen(screen: SettingsScreen, pkg: String?): ActionResult = guarded {
+        // APP_DETAILS è l'unico che consuma un pkg; per gli altri il pkg è ignorato. Enum chiuso:
+        // niente action-string arbitraria, quindi nessun routing-sink.
+        if (screen == SettingsScreen.APP_DETAILS && !PACKAGE_NAME.matches(pkg ?: "")) {
+            return ActionResult.Failure("action_invalid")
+        }
+        if (surface.openSettingsScreen(screen, pkg)) ActionResult.Success
+        else ActionResult.Failure("settings_screen_unresolved")
+    }
+
+    suspend fun vibrate(durationMs: Int): ActionResult = guarded {
+        if (durationMs !in 1..MAX_VIBRATE_MS) return ActionResult.Failure("action_invalid")
+        if (surface.vibrateOneShot(durationMs)) ActionResult.Success
+        else ActionResult.Failure("vibrator_unavailable")
+    }
+
     private inline fun guarded(block: () -> ActionResult): ActionResult = try {
         block()
     } catch (error: CancellationException) {
@@ -90,6 +143,7 @@ class AndroidBaseActionExecutor(private val surface: BaseActionSurface) {
     private companion object {
         const val MAX_URL_CHARS = 8_192
         const val MAX_TIMER_SECONDS = 86_400
+        const val MAX_VIBRATE_MS = 10_000
         val HTTP_SCHEMES = setOf("http", "https")
         val PACKAGE_NAME = Regex("^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+$")
     }

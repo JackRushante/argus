@@ -519,6 +519,46 @@ class DraftValidatorTest {
         assertTrue("timer_label_invalid" in errors(v.validate(draft(Action.SetTimer(60, "x".repeat(5_000))), emptySet())))
     }
 
+    @Test fun `set volume accepts a bounded level and rejects out of range`() {
+        fun draft(action: Action) = AutomationDraft(
+            name = "volume",
+            trigger = Trigger.Time(at = "2026-07-17T07:00", tz = "Europe/Rome"),
+            actions = listOf(action),
+        )
+        assertEquals(emptyList(), errors(v.validate(draft(Action.SetVolume(VolumeStream.MEDIA, 0)), emptySet())))
+        assertEquals(emptyList(), errors(v.validate(draft(Action.SetVolume(VolumeStream.RING, 100)), emptySet())))
+        assertTrue("volume_level_invalid" in errors(v.validate(draft(Action.SetVolume(VolumeStream.MEDIA, -1)), emptySet())))
+        assertTrue("volume_level_invalid" in errors(v.validate(draft(Action.SetVolume(VolumeStream.MEDIA, 101)), emptySet())))
+    }
+
+    @Test fun `set flashlight and vibrate validate their bounds`() {
+        fun draft(action: Action) = AutomationDraft(
+            name = "base",
+            trigger = Trigger.Time(at = "2026-07-17T07:00", tz = "Europe/Rome"),
+            actions = listOf(action),
+        )
+        assertEquals(emptyList(), errors(v.validate(draft(Action.SetFlashlight(on = true)), emptySet())))
+        assertEquals(emptyList(), errors(v.validate(draft(Action.Vibrate(1)), emptySet())))
+        assertEquals(emptyList(), errors(v.validate(draft(Action.Vibrate(10_000)), emptySet())))
+        assertTrue("vibrate_duration_invalid" in errors(v.validate(draft(Action.Vibrate(0)), emptySet())))
+        assertTrue("vibrate_duration_invalid" in errors(v.validate(draft(Action.Vibrate(10_001)), emptySet())))
+    }
+
+    @Test fun `open settings screen requires a package only for app details`() {
+        fun draft(action: Action) = AutomationDraft(
+            name = "settings",
+            trigger = Trigger.Time(at = "2026-07-17T07:00", tz = "Europe/Rome"),
+            actions = listOf(action),
+        )
+        assertEquals(emptyList(), errors(v.validate(draft(Action.OpenSettingsScreen(SettingsScreen.WIFI)), emptySet())))
+        assertEquals(
+            emptyList(),
+            errors(v.validate(draft(Action.OpenSettingsScreen(SettingsScreen.APP_DETAILS, pkg = "com.example.app")), emptySet())),
+        )
+        assertTrue("settings_pkg_missing" in errors(v.validate(draft(Action.OpenSettingsScreen(SettingsScreen.APP_DETAILS)), emptySet())))
+        assertTrue("settings_pkg_unexpected" in errors(v.validate(draft(Action.OpenSettingsScreen(SettingsScreen.WIFI, pkg = "com.example.app")), emptySet())))
+    }
+
     @Test fun `write setting is parametric accepting any well-formed key and rejecting malformed key or value`() {
         fun draft(action: Action) = AutomationDraft(
             name = "impostazione",

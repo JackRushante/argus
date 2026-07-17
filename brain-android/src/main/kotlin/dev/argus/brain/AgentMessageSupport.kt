@@ -321,6 +321,14 @@ Action, discriminata da "type":
    di norma per non aprire l'app orologio
 - {"type":"set_timer", "seconds":integer 1-86400, "label":string|null, "skipUi":boolean}
    // avvia un TIMER reale
+- {"type":"set_volume", "stream":"MEDIA"|"RING"|"ALARM"|"NOTIFICATION", "level":integer 0-100}
+   // volume assoluto per stream (clampato al massimo del device); portare RING/NOTIFICATION a 0
+   // silenzia e può richiedere l'accesso «Non disturbare»
+- {"type":"set_flashlight", "on":boolean}  // torcia on/off
+- {"type":"open_settings_screen", "screen":"WIFI"|"BLUETOOTH"|"DISPLAY"|"SOUND"|"LOCATION"|
+   "BATTERY"|"DATE"|"APP_DETAILS"|"SETTINGS", "pkg":string|null}  // apre una schermata Impostazioni
+   // (enum chiuso); pkg SOLO con APP_DETAILS, altrimenti null
+- {"type":"vibrate", "durationMs":integer 1-10000}  // vibrazione one-shot
 - {"type":"write_setting", "namespace":"system"|"secure"|"global", "key":string, "value":string}
    // scrive QUALSIASI impostazione Android per chiave (contraltare in scrittura di state.setting).
    // Richiede Shizuku (compare in available_tools solo se disponibile). key/value sono LETTERALI

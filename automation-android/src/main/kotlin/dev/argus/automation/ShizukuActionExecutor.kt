@@ -109,6 +109,17 @@ class ShizukuActionExecutor(
             is Action.SetTimer -> baseActions?.setTimer(action.seconds, action.label, action.skipUi)
                 ?: ActionResult.Failure("base_executor_unavailable")
 
+            // Manager/Intent BASE (S4): volume/torcia/schermata impostazioni/vibrazione. Base-only:
+            // senza base executor falliscono pulito, non toccano mai lo shell privilegiato.
+            is Action.SetVolume -> baseActions?.setVolume(action.stream, action.level)
+                ?: ActionResult.Failure("base_executor_unavailable")
+            is Action.SetFlashlight -> baseActions?.setFlashlight(action.on)
+                ?: ActionResult.Failure("base_executor_unavailable")
+            is Action.OpenSettingsScreen -> baseActions?.openSettingsScreen(action.screen, action.pkg)
+                ?: ActionResult.Failure("base_executor_unavailable")
+            is Action.Vibrate -> baseActions?.vibrate(action.durationMs)
+                ?: ActionResult.Failure("base_executor_unavailable")
+
             is Action.InvokeLlm -> if (generativeLane.trySubmit(ctx, action)) {
                 ActionResult.Submitted
             } else {
