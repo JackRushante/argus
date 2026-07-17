@@ -7,6 +7,9 @@ import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.runtime.AuditEvent
+import dev.argus.engine.runtime.AuditKind
+import dev.argus.engine.runtime.AuditSink
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.runtime.FireClaimRequest
 import dev.argus.engine.runtime.FireClaimResult
@@ -83,6 +86,35 @@ class AutomationEnablementCoordinatorTest {
     }
 
     @Test
+    fun `enable review rejection records ENABLE_FAILED review_required`() = runTest {
+        val store = ToggleStore(enableResult = false)
+        val runtime = RecordingRuntime { report() }
+        val audit = EnableAuditRecorder()
+
+        AutomationEnablementCoordinator(store, runtime, audit = audit).setEnabled(id, true)
+
+        val event = audit.events.single { it.kind == AuditKind.ENABLE_FAILED }
+        assertEquals("review_required", event.detail)
+        assertEquals(id, event.automationId)
+    }
+
+    @Test
+    fun `enable scheduling failure records ENABLE_FAILED scheduling_failed`() = runTest {
+        val store = ToggleStore(enableResult = true)
+        val runtime = RecordingRuntime { call ->
+            if (call == 1) report(failed = listOf(id)) else report()
+        }
+        val audit = EnableAuditRecorder()
+
+        val result = AutomationEnablementCoordinator(store, runtime, audit = audit).setEnabled(id, true)
+
+        assertEquals(EnablementResult.SchedulingFailed, result)
+        val event = audit.events.single { it.kind == AuditKind.ENABLE_FAILED }
+        assertEquals("scheduling_failed", event.detail)
+        assertEquals(id, event.automationId)
+    }
+
+    @Test
     fun `disable remains durable when scheduler cleanup is deferred`() = runTest {
         val store = ToggleStore(enableResult = true, initiallyEnabled = true)
         val runtime = RecordingRuntime { error("cleanup unavailable") }
@@ -144,6 +176,11 @@ class AutomationEnablementCoordinatorTest {
         recovered = emptyList(),
         failed = failed,
     )
+}
+
+private class EnableAuditRecorder : AuditSink {
+    val events = mutableListOf<AuditEvent>()
+    override suspend fun record(e: AuditEvent) { events += e }
 }
 
 private class RecordingGeofenceRuntime(

@@ -6,7 +6,11 @@ import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.TimePrecision
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.runtime.AuditEvent
+import dev.argus.engine.runtime.AuditKind
+import dev.argus.engine.runtime.AuditSink
 import dev.argus.engine.runtime.AutomationStore
+import dev.argus.engine.runtime.NoopAuditSink
 import dev.argus.engine.runtime.TimeSpecs
 import dev.argus.engine.runtime.TriggerEnvelope
 import dev.argus.engine.runtime.TriggerEvent
@@ -123,6 +127,7 @@ class TimeAlarmCoordinator(
     private val backend: TimeAlarmBackend,
     private val dispatcher: TimeEventDispatcher,
     private val now: () -> Instant,
+    private val audit: AuditSink = NoopAuditSink,
 ) {
     private val mutex = Mutex()
 
@@ -168,7 +173,10 @@ class TimeAlarmCoordinator(
                 )
             ) {
                 ScheduleResult.SCHEDULED -> scheduled += automation.id
-                ScheduleResult.FAILED -> failed += automation.id
+                ScheduleResult.FAILED -> {
+                    failed += automation.id
+                    recordSchedulingFailed(automation.id, "scheduling_failed")
+                }
                 ScheduleResult.EXPIRED -> {
                     if (persisted != null) cancelled += automation.id
                     if ((automation.trigger as Trigger.Time).at != null) {
@@ -177,6 +185,7 @@ class TimeAlarmCoordinator(
                             requireNotNull(automation.approvalFingerprint),
                         )
                     }
+                    recordSchedulingFailed(automation.id, "expired")
                 }
                 ScheduleResult.UNCHANGED -> Unit
             }
@@ -219,7 +228,7 @@ class TimeAlarmCoordinator(
         }
         if (automation.approvalFingerprint != eventFingerprint) {
             return when (scheduleLocked(automation, currentNow, existing = persisted)) {
-                ScheduleResult.FAILED -> AlarmDeliveryResult.Failed("reschedule_failed")
+                ScheduleResult.FAILED -> deliveryFailed(automationId, "reschedule_failed")
                 else -> AlarmDeliveryResult.Ignored
             }
         }
@@ -255,7 +264,7 @@ class TimeAlarmCoordinator(
             throw error
         } catch (_: Exception) {
             // Il record resta intenzionalmente due: APP_START/BOOT riprova lo stesso event ID.
-            return AlarmDeliveryResult.Failed("dispatch_failed")
+            return deliveryFailed(automationId, "dispatch_failed")
         }
 
         val latest = store.get(automationId)
@@ -268,7 +277,7 @@ class TimeAlarmCoordinator(
         }
         if (latest.approvalFingerprint != eventFingerprint) {
             return when (scheduleLocked(latest, currentNow, existing = recoveryRecord)) {
-                ScheduleResult.FAILED -> AlarmDeliveryResult.Failed("reschedule_failed")
+                ScheduleResult.FAILED -> deliveryFailed(automationId, "reschedule_failed")
                 else -> AlarmDeliveryResult.Delivered
             }
         }
@@ -286,7 +295,7 @@ class TimeAlarmCoordinator(
                 return AlarmDeliveryResult.Delivered
             }
             return when (scheduleLocked(revised, currentNow, existing = recoveryRecord)) {
-                ScheduleResult.FAILED -> AlarmDeliveryResult.Failed("reschedule_failed")
+                ScheduleResult.FAILED -> deliveryFailed(automationId, "reschedule_failed")
                 else -> AlarmDeliveryResult.Delivered
             }
         }
@@ -294,8 +303,8 @@ class TimeAlarmCoordinator(
         val after = Instant.ofEpochMilli(maxOf(currentNow.toEpochMilli(), eventAtMillis))
         return when (scheduleLocked(latest, after, existing = recoveryRecord)) {
             ScheduleResult.SCHEDULED, ScheduleResult.UNCHANGED -> AlarmDeliveryResult.Delivered
-            ScheduleResult.EXPIRED -> AlarmDeliveryResult.Failed("reschedule_expired")
-            ScheduleResult.FAILED -> AlarmDeliveryResult.Failed("reschedule_failed")
+            ScheduleResult.EXPIRED -> deliveryFailed(automationId, "reschedule_expired")
+            ScheduleResult.FAILED -> deliveryFailed(automationId, "reschedule_failed")
         }
     }
 
@@ -377,6 +386,32 @@ class TimeAlarmCoordinator(
             backend.cancel(automationId)
         } finally {
             state.delete(automationId)
+        }
+    }
+
+    /** Registra SCHEDULING_FAILED col reason chiuso e restituisce l'esito di consegna fallito. */
+    private suspend fun deliveryFailed(
+        automationId: AutomationId,
+        reason: String,
+    ): AlarmDeliveryResult {
+        recordSchedulingFailed(automationId, reason)
+        return AlarmDeliveryResult.Failed(reason)
+    }
+
+    private suspend fun recordSchedulingFailed(automationId: AutomationId, reason: String) {
+        try {
+            audit.record(
+                AuditEvent(
+                    automationId,
+                    AuditKind.SCHEDULING_FAILED,
+                    now().toEpochMilli(),
+                    detail = reason,
+                ),
+            )
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            // Il logging non deve cambiare l'esito dello scheduling.
         }
     }
 

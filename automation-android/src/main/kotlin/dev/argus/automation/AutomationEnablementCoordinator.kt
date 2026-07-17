@@ -3,7 +3,11 @@ package dev.argus.automation
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.ApprovalFingerprint
+import dev.argus.engine.runtime.AuditEvent
+import dev.argus.engine.runtime.AuditKind
+import dev.argus.engine.runtime.AuditSink
 import dev.argus.engine.runtime.AutomationStore
+import dev.argus.engine.runtime.NoopAuditSink
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
@@ -33,6 +37,7 @@ class AutomationEnablementCoordinator @Inject constructor(
     private val connectivity: ConnectivityTriggerRuntime = NoopConnectivityTriggerRuntime,
     private val geofence: GeofenceTriggerRuntime = NoopGeofenceTriggerRuntime,
     private val sensor: SensorTriggerRuntime = NoopSensorTriggerRuntime,
+    private val audit: AuditSink = NoopAuditSink,
 ) {
     private val mutex = Mutex()
 
@@ -62,6 +67,7 @@ class AutomationEnablementCoordinator @Inject constructor(
             return@withLock EnablementResult.Updated
         }
         if (!store.enableIfApproved(id, fingerprint)) {
+            recordEnableFailed(id, "review_required")
             return@withLock EnablementResult.ReviewRequired
         }
         return@withLock try {
@@ -74,6 +80,7 @@ class AutomationEnablementCoordinator @Inject constructor(
                 id in sensorReport.failed || id in sensorReport.needsReview
             ) {
                 rollbackEnable(id, fingerprint)
+                recordEnableFailed(id, "scheduling_failed")
                 EnablementResult.SchedulingFailed
             } else {
                 EnablementResult.Updated
@@ -83,7 +90,25 @@ class AutomationEnablementCoordinator @Inject constructor(
             throw error
         } catch (_: Exception) {
             rollbackEnable(id, fingerprint)
+            recordEnableFailed(id, "scheduling_failed")
             EnablementResult.SchedulingFailed
+        }
+    }
+
+    private suspend fun recordEnableFailed(id: AutomationId, reason: String) {
+        try {
+            audit.record(
+                AuditEvent(
+                    id,
+                    AuditKind.ENABLE_FAILED,
+                    System.currentTimeMillis(),
+                    detail = reason,
+                ),
+            )
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            // Il logging non deve cambiare l'esito dell'abilitazione.
         }
     }
 

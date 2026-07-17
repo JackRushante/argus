@@ -447,6 +447,47 @@ class RoomStoreTest {
         assertEquals("month_cost:openai", rows[1].detail) // atMillis 100: whitelisted sopravvive
     }
 
+    @Test
+    fun `audit VALIDATION_REJECTED tiene solo i code snake_case bounded`() = runTest {
+        val id = AutomationId("validation-redaction")
+        // Lista di code validi (costanti ValidationIssue) -> sopravvive integra.
+        sink.record(
+            AuditEvent(id, AuditKind.VALIDATION_REJECTED, 100, detail = "allowed_tools_unsupported,no_tools"),
+        )
+        // Testo libero (mai un code) -> azzerato dal filtro di forma.
+        sink.record(
+            AuditEvent(id, AuditKind.VALIDATION_REJECTED, 200, detail = "john@example.org ha rotto tutto"),
+        )
+        // Token misti: solo quelli a vocabolario chiuso passano.
+        sink.record(
+            AuditEvent(id, AuditKind.VALIDATION_REJECTED, 300, detail = "tz_invalid,DROP TABLE,cron_invalid"),
+        )
+
+        val rows = db.auditDao().forAutomation(id.value)
+        assertEquals("tz_invalid,cron_invalid", rows[0].detail) // 300
+        assertEquals("", rows[1].detail)                        // 200
+        assertEquals("allowed_tools_unsupported,no_tools", rows[2].detail) // 100
+    }
+
+    @Test
+    fun `audit ARM SCHEDULING ENABLE redigono reason fuori vocabolario`() = runTest {
+        val id = AutomationId("reason-redaction")
+        sink.record(AuditEvent(id, AuditKind.ARM_FAILED, 100, detail = "registrar_failed"))
+        sink.record(AuditEvent(id, AuditKind.ARM_FAILED, 200, detail = "segreto: token=abc"))
+        sink.record(AuditEvent(id, AuditKind.SCHEDULING_FAILED, 300, detail = "expired"))
+        sink.record(AuditEvent(id, AuditKind.SCHEDULING_FAILED, 400, detail = "http://leak/x"))
+        sink.record(AuditEvent(id, AuditKind.ENABLE_FAILED, 500, detail = "review_required"))
+        sink.record(AuditEvent(id, AuditKind.ENABLE_FAILED, 600, detail = "expired"))
+
+        val rows = db.auditDao().forAutomation(id.value)
+        assertEquals("enable_failed", rows[0].detail)      // 600: "expired" non è un reason di enable
+        assertEquals("review_required", rows[1].detail)    // 500
+        assertEquals("scheduling_failed", rows[2].detail)  // 400: testo libero -> generico
+        assertEquals("expired", rows[3].detail)            // 300
+        assertEquals("arm_failed", rows[4].detail)         // 200: testo libero -> generico
+        assertEquals("registrar_failed", rows[5].detail)   // 100
+    }
+
     // --- helpers -------------------------------------------------------------
 
     /** Seed di fixture confinato ai test; il codice applicativo scrive solo via DraftRepository. */

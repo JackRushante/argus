@@ -9,6 +9,9 @@ import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.TimePrecision
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.runtime.AuditEvent
+import dev.argus.engine.runtime.AuditKind
+import dev.argus.engine.runtime.AuditSink
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.runtime.FireClaimRequest
 import dev.argus.engine.runtime.FireClaimResult
@@ -435,6 +438,51 @@ class TimeAlarmCoordinatorTest {
         assertEquals(AutomationStatus.DISABLED, store.get(current.id)?.status)
     }
 
+    @Test
+    fun `expired one-shot reconcile records SCHEDULING_FAILED expired`() = runTest {
+        val automation = automation(Trigger.Time(at = "2026-07-13T19:00", tz = "UTC"))
+        val store = FakeAutomationStore(automation)
+        val state = FakeTimeAlarmStateStore()
+        val audit = ScheduleAuditRecorder()
+        val coordinator = TimeAlarmCoordinator(
+            store = store,
+            state = state,
+            backend = FakeTimeAlarmBackend(),
+            dispatcher = TimeEventDispatcher { },
+            now = { now },
+            audit = audit,
+        )
+
+        coordinator.reconcile(ReconcileReason.APP_START)
+
+        assertEquals(AutomationStatus.DISABLED, store.get(automation.id)?.status)
+        val event = audit.events.single { it.kind == AuditKind.SCHEDULING_FAILED }
+        assertEquals("expired", event.detail)
+        assertEquals(automation.id, event.automationId)
+    }
+
+    @Test
+    fun `backend schedule failure records SCHEDULING_FAILED scheduling_failed`() = runTest {
+        val automation = automation(Trigger.Time(at = "2026-07-13T22:00", tz = "UTC"))
+        val store = FakeAutomationStore(automation)
+        val state = FakeTimeAlarmStateStore()
+        val audit = ScheduleAuditRecorder()
+        val coordinator = TimeAlarmCoordinator(
+            store = store,
+            state = state,
+            backend = FakeTimeAlarmBackend(failSchedules = true),
+            dispatcher = TimeEventDispatcher { },
+            now = { now },
+            audit = audit,
+        )
+
+        val report = coordinator.reconcile(ReconcileReason.APP_START)
+
+        assertEquals(listOf(automation.id), report.failed)
+        val event = audit.events.single { it.kind == AuditKind.SCHEDULING_FAILED }
+        assertEquals("scheduling_failed", event.detail)
+    }
+
     private fun coordinator(
         store: FakeAutomationStore,
         state: FakeTimeAlarmStateStore,
@@ -469,6 +517,11 @@ class TimeAlarmCoordinatorTest {
         scheduledMode = ScheduledAlarmMode.INEXACT,
         updatedAtMillis = at,
     )
+}
+
+private class ScheduleAuditRecorder : AuditSink {
+    val events = mutableListOf<AuditEvent>()
+    override suspend fun record(e: AuditEvent) { events += e }
 }
 
 private class FakeTimeAlarmBackend(

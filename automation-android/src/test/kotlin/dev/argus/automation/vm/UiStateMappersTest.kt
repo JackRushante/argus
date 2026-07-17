@@ -179,6 +179,44 @@ class UiStateMappersTest {
     }
 
     @Test
+    fun `arm-time failures render an italian label and a FAILED outcome`() {
+        fun record(kind: AuditKind, detail: String) = AuditLogRecord(
+            id = 1L,
+            automationId = "automation-x",
+            automationName = "Sveglia",
+            kind = kind,
+            atMillis = 1_000L,
+            detail = detail,
+            executionId = null,
+            executionStatus = null,
+            succeededCount = null,
+            failedCount = null,
+            submittedCount = null,
+        ).toLogRow(emptyList())
+
+        val validation = record(AuditKind.VALIDATION_REJECTED, "tz_invalid,cron_invalid")
+        assertEquals(dev.argus.ui.model.LogOutcome.FAILED, validation.outcome)
+        assertTrue(validation.summary.contains("Validazione rifiutata"))
+        assertTrue(validation.summary.contains("tz invalid"))
+        assertTrue(validation.summary.contains("cron invalid"))
+
+        val arm = record(AuditKind.ARM_FAILED, "registrar_failed")
+        assertEquals(dev.argus.ui.model.LogOutcome.FAILED, arm.outcome)
+        assertTrue(arm.summary.contains("Attivazione fallita"))
+        assertTrue(arm.summary.contains("registrar failed"))
+
+        val scheduling = record(AuditKind.SCHEDULING_FAILED, "expired")
+        assertEquals(dev.argus.ui.model.LogOutcome.FAILED, scheduling.outcome)
+        assertTrue(scheduling.summary.contains("Pianificazione non riuscita"))
+        assertTrue(scheduling.summary.contains("expired"))
+
+        val enable = record(AuditKind.ENABLE_FAILED, "review_required")
+        assertEquals(dev.argus.ui.model.LogOutcome.FAILED, enable.outcome)
+        assertTrue(enable.summary.contains("Abilitazione non riuscita"))
+        assertTrue(enable.summary.contains("review required"))
+    }
+
+    @Test
     fun `generative draft review always copies the privacy warning`() {
         val draft = AutomationDraft(
             name = "Risposta AI",

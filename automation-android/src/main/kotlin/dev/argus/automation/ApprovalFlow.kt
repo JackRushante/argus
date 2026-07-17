@@ -12,8 +12,12 @@ import dev.argus.engine.model.StateQueryFamily
 import dev.argus.engine.model.StateValueType
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.model.stateComparisons
+import dev.argus.engine.runtime.AuditEvent
+import dev.argus.engine.runtime.AuditKind
+import dev.argus.engine.runtime.AuditSink
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.runtime.FirePolicySnapshotProvider
+import dev.argus.engine.runtime.NoopAuditSink
 import dev.argus.engine.safety.ApprovalResult
 import dev.argus.engine.safety.ApprovalService
 import dev.argus.engine.safety.ConflictDetector
@@ -106,6 +110,7 @@ class ApprovalFlow(
     private val location: CurrentLocationProvider,
     private val registrar: ArmedAutomationRegistrar,
     private val stateQueries: StateQueryProbe = FailClosedStateQueryProbe,
+    private val audit: AuditSink = NoopAuditSink,
     private val conflicts: ConflictDetector = ConflictDetector(),
     private val nowMillis: () -> Long = System::currentTimeMillis,
     private val newDraftId: () -> DraftId = { DraftId(UUID.randomUUID().toString()) },
@@ -256,7 +261,12 @@ class ApprovalFlow(
         if (currentReview.draft.snapshot.fingerprint != expectedFingerprint) {
             return FlowArmResult.IntegrityFailure
         }
-        currentReview.validationFailure()?.let { return it }
+        currentReview.validationFailure()?.let {
+            return rejectValidation(
+                currentReview.draft.snapshot.automationId,
+                it.issues,
+            )
+        }
 
         var snapshot = currentReview.draft.snapshot
         val geofence = snapshot.draft.trigger as? Trigger.Geofence
@@ -287,7 +297,12 @@ class ApprovalFlow(
             if (currentReview.draft.snapshot.revision != snapshot.revision ||
                 currentReview.draft.snapshot.fingerprint != snapshot.fingerprint
             ) return FlowArmResult.IntegrityFailure
-            currentReview.validationFailure()?.let { return it }
+            currentReview.validationFailure()?.let {
+                return rejectValidation(
+                    currentReview.draft.snapshot.automationId,
+                    it.issues,
+                )
+            }
         }
 
         return when (
@@ -300,7 +315,8 @@ class ApprovalFlow(
             is ApprovalResult.Armed -> finalizeRegistration(result.automation)
             ApprovalResult.Missing -> FlowArmResult.Missing
             is ApprovalResult.Stale -> FlowArmResult.Stale(result.currentRevision)
-            is ApprovalResult.ValidationFailed -> FlowArmResult.ValidationFailed(result.issues)
+            is ApprovalResult.ValidationFailed ->
+                rejectValidation(snapshot.automationId, result.issues)
             ApprovalResult.PolicyUnavailable -> FlowArmResult.PolicyUnavailable
             ApprovalResult.IntegrityFailure -> FlowArmResult.IntegrityFailure
             ApprovalResult.AutomationConflict -> FlowArmResult.AutomationConflict
@@ -406,6 +422,16 @@ class ApprovalFlow(
                 automation.approvalFingerprint?.let { fingerprint ->
                     automations.disableIfApproved(automation.id, fingerprint)
                 }
+                // Il registrar restituisce solo un Boolean: il motivo granulare (scheduling, capability)
+                // viene loggato dal coordinator; qui registriamo il fallimento d'arm a monte.
+                recordAudit(
+                    AuditEvent(
+                        automation.id,
+                        AuditKind.ARM_FAILED,
+                        nowMillis(),
+                        detail = "registrar_failed",
+                    ),
+                )
             }
             currentCoroutineContext().ensureActive()
             return FlowArmResult.RegistrationFailed(automation)
@@ -417,6 +443,32 @@ class ApprovalFlow(
     private fun ApprovalFlowReview.validationFailure(): FlowArmResult.ValidationFailed? {
         val errors = draft.issues.filter { it.severity == Severity.ERROR }
         return errors.takeIf(List<ValidationIssue>::isNotEmpty)?.let(FlowArmResult::ValidationFailed)
+    }
+
+    /** Registra VALIDATION_REJECTED coi soli `code` (vocabolario chiuso) e restituisce l'esito. */
+    private suspend fun rejectValidation(
+        automationId: AutomationId,
+        issues: List<ValidationIssue>,
+    ): FlowArmResult.ValidationFailed {
+        recordAudit(
+            AuditEvent(
+                automationId,
+                AuditKind.VALIDATION_REJECTED,
+                nowMillis(),
+                detail = issues.joinToString(",") { it.code },
+            ),
+        )
+        return FlowArmResult.ValidationFailed(issues)
+    }
+
+    private suspend fun recordAudit(event: AuditEvent) {
+        try {
+            audit.record(event)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // Il logging non deve cambiare l'esito dell'arm.
+        }
     }
 }
 

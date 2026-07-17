@@ -838,7 +838,9 @@ object ArgusModule {
         state: TimeAlarmStateStore,
         backend: TimeAlarmBackend,
         dispatcher: TimeEventDispatcher,
-    ): TimeAlarmCoordinator = TimeAlarmCoordinator(store, state, backend, dispatcher, Instant::now)
+        audit: AuditSink,
+    ): TimeAlarmCoordinator =
+        TimeAlarmCoordinator(store, state, backend, dispatcher, Instant::now, audit)
 
     @Provides
     @Singleton
@@ -892,6 +894,7 @@ object ArgusModule {
         location: CurrentLocationProvider,
         registrar: ArmedAutomationRegistrar,
         stateQueries: StateQueryProbe,
+        audit: AuditSink,
     ): ApprovalFlow = ApprovalFlow(
         drafts,
         approvals,
@@ -900,6 +903,7 @@ object ArgusModule {
         location,
         registrar,
         stateQueries,
+        audit,
     )
 
     @Provides

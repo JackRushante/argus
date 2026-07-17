@@ -332,6 +332,10 @@ private fun outcomeVisual(row: LogRow): Pair<ImageVector, Color> {
     return when (row.kind) {
         AuditKind.ERROR -> Icons.Rounded.Error to s.error.fg
         AuditKind.BLOCKED_POLICY -> Icons.Rounded.Error to s.error.fg
+        AuditKind.VALIDATION_REJECTED,
+        AuditKind.ARM_FAILED,
+        AuditKind.SCHEDULING_FAILED,
+        AuditKind.ENABLE_FAILED -> Icons.Rounded.Error to s.error.fg
         AuditKind.SUPPRESSED_DUPLICATE,
         AuditKind.SUPPRESSED_COOLDOWN -> Icons.Rounded.Block to faint
         AuditKind.SUPPRESSED_BUDGET -> Icons.Rounded.Block to s.pending.fg

@@ -23,6 +23,9 @@ import dev.argus.engine.model.IntegrityLabel
 import dev.argus.engine.model.Transition
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.ActionCapabilities
+import dev.argus.engine.runtime.AuditEvent
+import dev.argus.engine.runtime.AuditKind
+import dev.argus.engine.runtime.AuditSink
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.runtime.FireClaimRequest
 import dev.argus.engine.runtime.FireClaimResult
@@ -186,6 +189,48 @@ class ApprovalFlowTest {
             AutomationStatus.DISABLED,
             fixture.store.get(failed.automation.id)?.status,
         )
+        val armAudit = fixture.audit.events.single { it.kind == AuditKind.ARM_FAILED }
+        assertEquals("registrar_failed", armAudit.detail)
+        assertEquals(failed.automation.id, armAudit.automationId)
+    }
+
+    @Test
+    fun `validation failure at arm records VALIDATION_REJECTED with the issue codes`() = runTest {
+        val draft = AutomationDraft(
+            name = "Regola stato",
+            trigger = Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
+            actions = listOf(Action.ShowNotification("Argus", "ciao")),
+            conditions = Condition.StateCompare(
+                StateQuery.DumpsysField("battery", "voltage"),
+                StateValueType.NUMBER,
+                CmpOp.GT,
+                "4000",
+            ),
+        )
+        val capabilities = setOf(
+            CapabilityIds.TRIGGER_TIME,
+            ActionCapabilities.SHOW_NOTIFICATION,
+            CapabilityIds.STATE_READER_DUMPSYS_FIELD,
+        )
+        val fixture = fixture(
+            available = capabilities,
+            stateQueryProbe = StateQueryProbe { StateQueryProbeResult.UNAVAILABLE },
+        )
+        val review = assertIs<DraftSubmissionResult.Ready>(
+            fixture.flow.submit(CompileResult("ok", draft, null)),
+        ).review
+
+        assertIs<FlowArmResult.ValidationFailed>(
+            fixture.flow.arm(
+                review.draft.snapshot.id,
+                review.draft.snapshot.revision,
+                review.draft.snapshot.fingerprint,
+            ),
+        )
+
+        val rejected = fixture.audit.events.single { it.kind == AuditKind.VALIDATION_REJECTED }
+        assertEquals(review.draft.snapshot.automationId, rejected.automationId)
+        assertTrue(rejected.detail.split(',').contains("state_query_unavailable"))
     }
 
     @Test
@@ -446,6 +491,7 @@ class ApprovalFlowTest {
         registrar: ArmedAutomationRegistrar = ArmedAutomationRegistrar { true },
         stateQueryProbe: StateQueryProbe = StateQueryProbe { StateQueryProbeResult.AVAILABLE },
         whitelisted: Set<String> = emptySet(),
+        audit: ArmAuditRecorder = ArmAuditRecorder(),
     ): Fixture {
         val store = MemoryAutomationStore(initial)
         val repository = MemoryDraftRepository(store)
@@ -468,11 +514,12 @@ class ApprovalFlowTest {
             location = CurrentLocationProvider { location },
             registrar = registrar,
             stateQueries = stateQueryProbe,
+            audit = audit,
             nowMillis = { 1_000L },
             newDraftId = { DraftId("draft-${repository.count + 1}") },
             newAutomationId = { AutomationId("automation-${repository.count + 1}") },
         )
-        return Fixture(flow, store, repository)
+        return Fixture(flow, store, repository, audit)
     }
 
     private fun signed(value: Automation): Automation =
@@ -482,7 +529,13 @@ class ApprovalFlowTest {
         val flow: ApprovalFlow,
         val store: MemoryAutomationStore,
         val repository: MemoryDraftRepository,
+        val audit: ArmAuditRecorder,
     )
+}
+
+private class ArmAuditRecorder : AuditSink {
+    val events = mutableListOf<AuditEvent>()
+    override suspend fun record(e: AuditEvent) { events += e }
 }
 
 private class MemoryDraftRepository(

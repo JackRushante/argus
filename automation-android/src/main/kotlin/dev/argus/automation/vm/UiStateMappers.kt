@@ -110,7 +110,9 @@ internal fun AuditLogRecord.toLogRow(actions: List<ActionResultEntity>): LogRow 
 private fun Int?.orZero(): Int = this ?: 0
 
 private fun ExecutionStatus?.toLogOutcome(kind: AuditKind): LogOutcome = when {
-    kind == AuditKind.ERROR || kind == AuditKind.BLOCKED_POLICY -> LogOutcome.FAILED
+    kind == AuditKind.ERROR || kind == AuditKind.BLOCKED_POLICY ||
+        kind == AuditKind.VALIDATION_REJECTED || kind == AuditKind.ARM_FAILED ||
+        kind == AuditKind.SCHEDULING_FAILED || kind == AuditKind.ENABLE_FAILED -> LogOutcome.FAILED
     this == ExecutionStatus.PARTIAL -> LogOutcome.PARTIAL
     this == ExecutionStatus.DEFERRED -> LogOutcome.DEFERRED
     this in setOf(
@@ -157,6 +159,10 @@ private fun auditSummary(record: AuditLogRecord): String = when (record.kind) {
         else -> "bloccata dalla policy (${record.detail.safeDiagnostic()})"
     }
     AuditKind.ERROR -> "errore di esecuzione (${record.detail.safeDiagnostic()})"
+    AuditKind.VALIDATION_REJECTED -> "Validazione rifiutata: ${record.detail.safeCodeList()}"
+    AuditKind.ARM_FAILED -> "Attivazione fallita: ${record.detail.safeDiagnostic()}"
+    AuditKind.SCHEDULING_FAILED -> "Pianificazione non riuscita: ${record.detail.safeDiagnostic()}"
+    AuditKind.ENABLE_FAILED -> "Abilitazione non riuscita: ${record.detail.safeDiagnostic()}"
 }
 
 private fun actionDetail(action: ActionResultEntity): String {
@@ -217,6 +223,12 @@ private fun String.safeCode(): String = lowercase(Locale.ROOT)
     .ifBlank { "unknown" }
 
 private fun String.safeDiagnostic(): String = safeCode().replace('_', ' ')
+
+/** Lista di code (VALIDATION_REJECTED è join di più code); ognuno resta a vocabolario chiuso. */
+private fun String.safeCodeList(): String = split(',')
+    .filter { it.isNotBlank() }
+    .joinToString(", ") { it.safeDiagnostic() }
+    .ifBlank { "motivo sconosciuto" }
 
 private val TIME_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.ITALIAN)
 private val DAY_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM", Locale.ITALIAN)

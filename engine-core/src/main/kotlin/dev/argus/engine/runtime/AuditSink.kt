@@ -11,6 +11,11 @@ enum class AuditKind {
     CONDITIONS_NOT_MET,
     BLOCKED_POLICY,
     ERROR,
+    // Fallimenti fuori dal fire-time (audit più ricco, task #31): perché una regola non si arma.
+    VALIDATION_REJECTED,
+    ARM_FAILED,
+    SCHEDULING_FAILED,
+    ENABLE_FAILED,
 }
 data class AuditEvent(
     val automationId: AutomationId,
