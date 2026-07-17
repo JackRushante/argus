@@ -233,7 +233,30 @@ data class ProviderChoiceUi(val id: String, val label: String, val selected: Boo
 enum class BgLocationState { GRANTED, WHILE_IN_USE, DENIED, NOT_NEEDED }
 
 data class ContactRow(val displayName: String, val conversationId: String)   // id in monospace, azione rimuovi
-data class BudgetUi(val maxCallsPerHour: Int, val usedThisHourLabel: String) // "3/20 quest'ora"
+
+/** Riga per-provider del breakdown budget. Costo nullable = "n/d" (Hermes pre-S15), distinto da 0. */
+data class ProviderUsageUi(
+    val providerId: String,        // ProviderId.wireName
+    val providerLabel: String,     // dal ProviderCatalog, mappato nel VM
+    val callsHour: Long,
+    val callsDay: Long,
+    val costMonthMicros: Long?,    // null = n/d (es. Hermes pre-S15)
+)
+
+/**
+ * Budget LLM aggregato cross-regola (§5.5). Limiti null = illimitato (la convenzione 0 = illimitato
+ * vive solo al confine UI→VM). Costo in micro-USD; null = nessun dato costo (distinto da 0).
+ */
+data class BudgetUi(
+    val usedHour: Long = 0,
+    val limitHour: Int? = null,          // null = illimitato
+    val usedDay: Long = 0,
+    val limitDay: Int? = null,
+    val costMonthMicros: Long? = null,   // null = nessun dato costo nel mese
+    val costLimitMicros: Long? = null,
+    val perProvider: List<ProviderUsageUi> = emptyList(),
+    val softWarningActive: Boolean = false,
+)
 
 interface SettingsCallbacks {
     fun onEditBridgeUrl(url: String); fun onTestConnection()
@@ -251,6 +274,10 @@ interface SettingsCallbacks {
     /** Selezione dal picker delle conversazioni 1:1 osservate. */
     fun onAddObservedContact(contact: ContactRow) {}
     fun onBudgetChange(maxPerHour: Int)
+    /** Tetto chiamate/giorno globale. 0 = illimitato. Default no-op per implementatori esistenti. */
+    fun onBudgetDayChange(maxPerDay: Int) {}
+    /** Tetto costo mensile globale in micro-USD. 0 = illimitato. Default no-op. */
+    fun onBudgetMonthlyCostChange(maxCostMonthMicros: Long) {}
     fun onRevokePrivacy()
     fun onRerunOnboarding()
     /** Selettore provider: id = ProviderId.wireName. Id sconosciuti = no-op lato VM. */

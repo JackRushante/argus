@@ -105,6 +105,7 @@ interface ExecutionJournalDao {
         val deferred = resolved.count { it.outcome == ActionJournalOutcome.DEFERRED }
         val status = when {
             submitted > 0 -> ExecutionStatus.SUBMITTED
+            completion.suppressedStatus != null && failed == resolved.size -> completion.suppressedStatus!!
             deferred > 0 -> ExecutionStatus.DEFERRED
             failed == resolved.size && resolved.isNotEmpty() -> ExecutionStatus.FAILED
             failed > 0 -> ExecutionStatus.PARTIAL

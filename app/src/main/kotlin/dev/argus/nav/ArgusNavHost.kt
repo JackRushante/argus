@@ -449,6 +449,12 @@ fun ArgusNavHost() {
                         override fun onBudgetChange(maxPerHour: Int) {
                             settingsViewModel.onBudgetChange(maxPerHour)
                         }
+                        override fun onBudgetDayChange(maxPerDay: Int) {
+                            settingsViewModel.onBudgetDayChange(maxPerDay)
+                        }
+                        override fun onBudgetMonthlyCostChange(maxCostMonthMicros: Long) {
+                            settingsViewModel.onBudgetMonthlyCostChange(maxCostMonthMicros)
+                        }
                         override fun onRevokePrivacy() = settingsViewModel.revokePrivacy()
                         override fun onRerunOnboarding() {
                             navController.navigate(Routes.ONBOARDING)

@@ -334,6 +334,7 @@ private fun outcomeVisual(row: LogRow): Pair<ImageVector, Color> {
         AuditKind.BLOCKED_POLICY -> Icons.Rounded.Error to s.error.fg
         AuditKind.SUPPRESSED_DUPLICATE,
         AuditKind.SUPPRESSED_COOLDOWN -> Icons.Rounded.Block to faint
+        AuditKind.SUPPRESSED_BUDGET -> Icons.Rounded.Block to s.pending.fg
         AuditKind.SUPPRESSED_NOT_ELIGIBLE -> Icons.Rounded.Block to faint
         AuditKind.CONDITIONS_NOT_MET -> Icons.Rounded.FilterAltOff to faint
         AuditKind.FIRED -> when (row.outcome) {

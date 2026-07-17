@@ -1,5 +1,6 @@
 package dev.argus.automation
 
+import dev.argus.automation.budget.BudgetMeta
 import dev.argus.automation.notification.NotificationReplyDelivery
 import dev.argus.automation.notification.NotificationReplyGateway
 import dev.argus.automation.notification.NotificationReplyRequest
@@ -129,7 +130,13 @@ class AndroidGenerativeLane(
         }
         val text = act.text
         if (text == null) {
-            complete(queued, ActionJournalOutcome.FAILED, safeCode(act.metaError, "brain_failed"))
+            val suppressed = act.metaError == BudgetMeta.BUDGET_EXCEEDED
+            complete(
+                queued,
+                ActionJournalOutcome.FAILED,
+                safeCode(act.metaError, "brain_failed"),
+                suppressedStatus = if (suppressed) ExecutionStatus.SUPPRESSED_BUDGET else null,
+            )
             return
         }
 
@@ -249,6 +256,7 @@ class AndroidGenerativeLane(
         queued: QueuedAction,
         outcome: ActionJournalOutcome,
         errorCode: String?,
+        suppressedStatus: ExecutionStatus? = null,
     ): Boolean = try {
         journal.resolveSubmitted(
             SubmittedActionCompletion(
@@ -257,6 +265,7 @@ class AndroidGenerativeLane(
                 outcome = outcome,
                 atMillis = nowMillis().coerceAtLeast(0),
                 errorCode = errorCode,
+                suppressedStatus = suppressedStatus,
             ),
         )
     } catch (error: CancellationException) {

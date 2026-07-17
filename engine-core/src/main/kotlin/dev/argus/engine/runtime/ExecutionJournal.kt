@@ -13,6 +13,7 @@ enum class ExecutionStatus {
     DEFERRED,
     CANCELLED,
     SUPPRESSED_COOLDOWN,
+    SUPPRESSED_BUDGET,
     SUPPRESSED_NOT_ELIGIBLE,
     INTERRUPTED,
 }
@@ -73,6 +74,7 @@ data class SubmittedActionCompletion(
     val outcome: ActionJournalOutcome,
     val atMillis: Long,
     val errorCode: String? = null,
+    val suppressedStatus: ExecutionStatus? = null,
 ) {
     init {
         require(actionIndex >= 0) { "actionIndex non può essere negativo" }
@@ -82,6 +84,12 @@ data class SubmittedActionCompletion(
         require(atMillis >= 0) { "atMillis non può essere negativo" }
         require(errorCode == null || errorCode.matches(Regex("^[a-z][a-z0-9_]{0,63}$"))) {
             "errorCode non valido"
+        }
+        require(suppressedStatus == null || suppressedStatus == ExecutionStatus.SUPPRESSED_BUDGET) {
+            "suppressedStatus ammette solo SUPPRESSED_BUDGET"
+        }
+        require(suppressedStatus == null || outcome == ActionJournalOutcome.FAILED) {
+            "una soppressione budget viaggia solo su outcome FAILED"
         }
     }
 }

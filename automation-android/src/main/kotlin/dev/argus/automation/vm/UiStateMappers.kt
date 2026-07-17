@@ -139,12 +139,14 @@ private fun auditSummary(record: AuditLogRecord): String = when (record.kind) {
             ExecutionStatus.CANCELLED -> "esecuzione annullata"
             ExecutionStatus.INTERRUPTED -> "esecuzione interrotta dal sistema"
             ExecutionStatus.SUPPRESSED_COOLDOWN -> "soppressa dal cooldown"
+            ExecutionStatus.SUPPRESSED_BUDGET -> "bloccata dal budget LLM"
             ExecutionStatus.SUPPRESSED_NOT_ELIGIBLE -> "regola non più idonea"
             null -> "esecuzione registrata"
         }
     }
     AuditKind.SUPPRESSED_DUPLICATE -> "evento duplicato ignorato"
     AuditKind.SUPPRESSED_COOLDOWN -> "soppressa dal cooldown"
+    AuditKind.SUPPRESSED_BUDGET -> "bloccata dal budget LLM"
     AuditKind.SUPPRESSED_NOT_ELIGIBLE -> "regola non più idonea"
     AuditKind.CONDITIONS_NOT_MET -> when (record.detail) {
         "condition_state_unavailable" -> "stato necessario non disponibile"

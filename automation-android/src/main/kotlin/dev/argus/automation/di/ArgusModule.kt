@@ -71,12 +71,19 @@ import dev.argus.automation.notification.AndroidNotificationSnapshotFactory
 import dev.argus.automation.notification.NotificationIngress
 import dev.argus.automation.notification.NotificationReplyGateway
 import dev.argus.automation.notification.NotificationReplyHandleFactory
+import dev.argus.automation.budget.AndroidBudgetAlerts
+import dev.argus.automation.budget.AndroidBudgetSettingsStore
+import dev.argus.automation.budget.BudgetAlerts
+import dev.argus.automation.budget.BudgetPolicy
+import dev.argus.automation.budget.BudgetSettingsStore
+import dev.argus.automation.budget.MeteredBrain
 import dev.argus.brain.AndroidProviderConfigStore
 import dev.argus.brain.BridgeConfigurationStore
 import dev.argus.brain.DefaultTransportFactory
 import dev.argus.brain.ProviderConfigStore
 import dev.argus.brain.TransportFactory
 import dev.argus.data.ArgusDatabase
+import dev.argus.data.dao.UsageDao
 import dev.argus.data.DeferredReplyStore
 import dev.argus.data.RoomDeferredReplyStore
 import dev.argus.data.RoomAuditSink
@@ -379,7 +386,33 @@ object ArgusModule {
     )
 
     @Provides
-    fun brain(brain: ConfiguredBridgeBrain): Brain = brain
+    fun usageDao(database: ArgusDatabase): UsageDao = database.usageDao()
+
+    @Provides
+    @Singleton
+    fun budgetSettings(@ApplicationContext context: Context): BudgetSettingsStore =
+        AndroidBudgetSettingsStore(context)
+
+    @Provides
+    @Singleton
+    fun budgetPolicy(usage: UsageDao, settings: BudgetSettingsStore): BudgetPolicy =
+        BudgetPolicy(usage, settings)
+
+    @Provides
+    @Singleton
+    fun budgetAlerts(@ApplicationContext context: Context): BudgetAlerts = AndroidBudgetAlerts(context)
+
+    // @Singleton perché il dedupe soft-warning è in-memory nel decorator.
+    @Provides
+    @Singleton
+    fun brain(
+        brain: ConfiguredBridgeBrain,
+        policy: BudgetPolicy,
+        usage: UsageDao,
+        store: ProviderConfigStore,
+        audit: AuditSink,
+        alerts: BudgetAlerts,
+    ): Brain = MeteredBrain(brain, policy, usage, store::selectedProviderConfig, audit, alerts)
 
     @Provides
     @Singleton

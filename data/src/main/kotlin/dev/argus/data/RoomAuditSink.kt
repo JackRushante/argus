@@ -23,6 +23,8 @@ class RoomAuditSink(private val dao: AuditDao) : AuditSink {
     private fun redactedDetail(event: AuditEvent): String = when (event.kind) {
         dev.argus.engine.runtime.AuditKind.SUPPRESSED_COOLDOWN ->
             event.detail.takeIf { RETRY_AT.matches(it) } ?: ""
+        dev.argus.engine.runtime.AuditKind.SUPPRESSED_BUDGET ->
+            event.detail.takeIf { BUDGET_DETAIL.matches(it) } ?: ""
         dev.argus.engine.runtime.AuditKind.BLOCKED_POLICY ->
             event.detail.takeIf { it in SAFE_POLICY_CODES } ?: "policy_blocked"
         dev.argus.engine.runtime.AuditKind.ERROR -> "execution_error"
@@ -34,6 +36,7 @@ class RoomAuditSink(private val dao: AuditDao) : AuditSink {
 
     private companion object {
         val RETRY_AT = Regex("^retry_at=[0-9]{1,19}$")
+        val BUDGET_DETAIL = Regex("^(hour|day|month_cost):(global|[a-z][a-z0-9_]{0,32})$")
         val SAFE_POLICY_CODES = setOf(
             "approval_fingerprint_mismatch",
             "capability_snapshot_unavailable",

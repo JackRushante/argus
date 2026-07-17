@@ -1,0 +1,231 @@
+package dev.argus.automation.budget
+
+import dev.argus.brain.ProviderCatalog
+import dev.argus.brain.ProviderConfig
+import dev.argus.data.UsageWindows
+import dev.argus.data.dao.UsageDao
+import dev.argus.data.entities.UsageEventEntity
+import dev.argus.data.entities.UsageEventKind
+import dev.argus.data.entities.UsageEventOutcome
+import dev.argus.engine.brain.ActResult
+import dev.argus.engine.brain.Brain
+import dev.argus.engine.brain.CapabilityManifest
+import dev.argus.engine.brain.CompileResult
+import dev.argus.engine.model.Action
+import dev.argus.engine.runtime.AuditEvent
+import dev.argus.engine.runtime.AuditKind
+import dev.argus.engine.runtime.AuditSink
+import dev.argus.engine.runtime.DeviceState
+import dev.argus.engine.runtime.FireContext
+import kotlinx.coroutines.CancellationException
+import java.time.Instant
+import java.time.YearMonth
+import java.time.ZoneId
+import java.util.concurrent.ConcurrentHashMap
+
+object BudgetMeta {
+    const val BUDGET_EXCEEDED = "budget_exceeded" // rispetta ^[a-z][a-z0-9_]{0,63}$ (invariante ActResult)
+    const val BLOCKED_REPLY =
+        "Budget LLM esaurito: ho bloccato la chiamata. Alza o azzera i limiti in Sistema → Budget."
+    const val UNKNOWN_MODEL = "unknown" // convenzione T9 di UsageEventEntity
+}
+
+/** Canale notifiche budget, separato da AutomationNotifier (che richiede FireContext). */
+fun interface BudgetAlerts {
+    suspend fun notify(title: String, text: String)
+}
+
+/**
+ * Decorator [Brain] che fa da unico choke-point per il budget LLM (aggregato cross-regola).
+ * Pre-call: [BudgetPolicy.check] → HARD blocca il transport; SOFT avvisa una sola volta per finestra.
+ * Post-call: scrive un evento usage con token e costo stimato. Il cooldown per-regola dell'Engine
+ * resta invariato: qui si misura solo l'aggregato.
+ */
+class MeteredBrain(
+    private val delegate: Brain,
+    private val policy: BudgetPolicy,
+    private val usage: UsageDao,
+    private val selectedConfig: () -> ProviderConfig,
+    private val audit: AuditSink,
+    private val alerts: BudgetAlerts,
+    private val nowMillis: () -> Long = System::currentTimeMillis,
+    private val zone: () -> ZoneId = ZoneId::systemDefault,
+) : Brain {
+    private val notified = ConcurrentHashMap<String, Boolean>()
+
+    override suspend fun compile(
+        nl: String,
+        manifest: CapabilityManifest,
+        state: DeviceState,
+    ): CompileResult {
+        val config = selectedConfig()
+        val now = nowMillis()
+        when (val verdict = verdictFor(config, now)) {
+            is BudgetVerdict.HardExceeded -> {
+                recordBlocked(config, UsageEventKind.COMPILE, now)
+                notifyOnce(verdict.tripped, now)
+                return CompileResult(
+                    reply = BudgetMeta.BLOCKED_REPLY,
+                    draft = null,
+                    metaError = BudgetMeta.BUDGET_EXCEEDED,
+                )
+            }
+            is BudgetVerdict.SoftExceeded -> notifyOnce(verdict.tripped, now)
+            BudgetVerdict.Ok -> {}
+        }
+        val result = delegate.compile(nl, manifest, state)
+        recordUsage(config, UsageEventKind.COMPILE, now, result.metaError, usage = null)
+        return result
+    }
+
+    override suspend fun act(
+        context: FireContext,
+        goal: String,
+        contextSources: List<String>,
+        allowedTools: List<String>,
+    ): ActResult {
+        val config = selectedConfig()
+        val now = nowMillis()
+        when (val verdict = verdictFor(config, now)) {
+            is BudgetVerdict.HardExceeded -> return hardBlock(config, UsageEventKind.ACT, now, context, verdict.tripped)
+            is BudgetVerdict.SoftExceeded -> notifyOnce(verdict.tripped, now)
+            BudgetVerdict.Ok -> {}
+        }
+        val result = delegate.act(context, goal, contextSources, allowedTools)
+        recordUsage(config, UsageEventKind.ACT, now, result.metaError, result.usage)
+        return result
+    }
+
+    override suspend fun actV2(context: FireContext, action: Action.InvokeLlmV2): ActResult {
+        val config = selectedConfig()
+        val now = nowMillis()
+        when (val verdict = verdictFor(config, now)) {
+            is BudgetVerdict.HardExceeded -> return hardBlock(config, UsageEventKind.ACT_V2, now, context, verdict.tripped)
+            is BudgetVerdict.SoftExceeded -> notifyOnce(verdict.tripped, now)
+            BudgetVerdict.Ok -> {}
+        }
+        val result = delegate.actV2(context, action)
+        recordUsage(config, UsageEventKind.ACT_V2, now, result.metaError, result.usage)
+        return result
+    }
+
+    /** Un errore DB del budget non deve spegnere il cervello: fail-open (ma la cancellazione risale). */
+    private suspend fun verdictFor(config: ProviderConfig, now: Long): BudgetVerdict = try {
+        policy.check(config.providerId, now)
+    } catch (error: CancellationException) {
+        throw error
+    } catch (_: Throwable) {
+        BudgetVerdict.Ok
+    }
+
+    private suspend fun hardBlock(
+        config: ProviderConfig,
+        kind: UsageEventKind,
+        now: Long,
+        context: FireContext,
+        tripped: TrippedLimit,
+    ): ActResult {
+        recordBlocked(config, kind, now)
+        tryAudit(
+            AuditEvent(
+                automationId = context.automationId,
+                kind = AuditKind.SUPPRESSED_BUDGET,
+                atMillis = now,
+                detail = tripped.auditDetail(),
+                eventId = context.eventId,
+                executionId = context.executionId,
+            ),
+        )
+        notifyOnce(tripped, now)
+        return ActResult(text = null, metaError = BudgetMeta.BUDGET_EXCEEDED)
+    }
+
+    private suspend fun recordUsage(
+        config: ProviderConfig,
+        kind: UsageEventKind,
+        now: Long,
+        metaError: String?,
+        usage: dev.argus.engine.brain.TurnUsage?,
+    ) {
+        val model = usage?.model ?: config.model ?: BudgetMeta.UNKNOWN_MODEL
+        val cost = CostEstimator.estimate(config.providerId, model, usage)
+        tryInsert(
+            UsageEventEntity(
+                timestampMs = now,
+                providerId = config.providerId.wireName,
+                model = model,
+                kind = kind,
+                outcome = if (metaError == null) UsageEventOutcome.OK else UsageEventOutcome.ERROR,
+                tokensIn = usage?.inputTokens,
+                tokensOut = usage?.outputTokens,
+                costMicros = cost,
+                pricingVersion = if (cost != null) ProviderCatalog.PRICING_VERSION else null,
+            ),
+        )
+    }
+
+    private suspend fun recordBlocked(config: ProviderConfig, kind: UsageEventKind, now: Long) {
+        tryInsert(
+            UsageEventEntity(
+                timestampMs = now,
+                providerId = config.providerId.wireName,
+                model = config.model ?: BudgetMeta.UNKNOWN_MODEL,
+                kind = kind,
+                outcome = UsageEventOutcome.BLOCKED_BUDGET,
+                tokensIn = null,
+                tokensOut = null,
+                costMicros = null,
+                pricingVersion = null,
+            ),
+        )
+    }
+
+    /** L'insert è best-effort: mai trasformare una risposta buona in crash. */
+    private suspend fun tryInsert(event: UsageEventEntity) {
+        try {
+            usage.insert(event)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Throwable) {
+            // ignorato: la contabilità budget non deve rompere il turno.
+        }
+    }
+
+    private suspend fun tryAudit(event: AuditEvent) {
+        try {
+            audit.record(event)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Throwable) {
+            // ignorato: l'audit budget è best-effort.
+        }
+    }
+
+    /** One-shot per finestra: chiave = auditDetail + bucket (ora/giorno/mese locale). */
+    private suspend fun notifyOnce(tripped: TrippedLimit, now: Long) {
+        val key = bucketKey(tripped, now)
+        if (notified.putIfAbsent(key, true) == null) {
+            try {
+                alerts.notify(BUDGET_ALERT_TITLE, BUDGET_ALERT_TEXT)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Throwable) {
+                // best-effort
+            }
+        }
+    }
+
+    private fun bucketKey(tripped: TrippedLimit, now: Long): String {
+        val bucket = when (tripped.window) {
+            LimitWindow.HOUR -> (now / UsageWindows.HOUR_MILLIS).toString()
+            LimitWindow.DAY -> Instant.ofEpochMilli(now).atZone(zone()).toLocalDate().toString()
+            LimitWindow.MONTH_COST -> YearMonth.from(Instant.ofEpochMilli(now).atZone(zone())).toString()
+        }
+        return "${tripped.auditDetail()}:$bucket"
+    }
+
+    private companion object {
+        const val BUDGET_ALERT_TITLE = "Budget LLM"
+        const val BUDGET_ALERT_TEXT = "Budget LLM quasi o del tutto esaurito. Controlla i limiti in Sistema → Budget."
+    }
+}

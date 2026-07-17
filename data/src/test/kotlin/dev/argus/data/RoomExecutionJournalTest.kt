@@ -260,6 +260,88 @@ class RoomExecutionJournalTest {
     }
 
     @Test
+    fun `resolveSubmitted con suppressedStatus marca la fire claim SUPPRESSED_BUDGET`() = runTest {
+        val automationId = arm("budget-block", listOf(Action.InvokeLlm(
+            goal = "rispondi",
+            contextSources = listOf("notification"),
+            allowedTools = listOf("whatsapp_reply"),
+            replyTargetSender = true,
+        )))
+        val executionId = ExecutionId("exec-budget-block")
+        store.claimFire(claim(automationId, "event-budget-block", executionId, 1_000))
+        journal.recordAction(
+            ActionJournalEntry(executionId, 0, "invoke_llm", ActionJournalOutcome.SUBMITTED, 1_001),
+        )
+        journal.finish(
+            ExecutionCompletion(executionId, ExecutionStatus.SUBMITTED, 1_002, 0, 0, 1),
+        )
+
+        assertTrue(
+            journal.resolveSubmitted(
+                SubmittedActionCompletion(
+                    executionId = executionId,
+                    actionIndex = 0,
+                    outcome = ActionJournalOutcome.FAILED,
+                    atMillis = 1_100,
+                    errorCode = "budget_exceeded",
+                    suppressedStatus = ExecutionStatus.SUPPRESSED_BUDGET,
+                ),
+            ),
+        )
+
+        assertEquals(
+            ExecutionStatus.SUPPRESSED_BUDGET,
+            db.executionJournalDao().status(executionId.value),
+        )
+    }
+
+    @Test
+    fun `resolveSubmitted con azioni miste ignora suppressedStatus`() = runTest {
+        val generative = Action.InvokeLlm(
+            goal = "rispondi",
+            contextSources = listOf("notification"),
+            allowedTools = listOf("whatsapp_reply"),
+            replyTargetSender = true,
+        )
+        val automationId = arm("budget-mixed", listOf(generative, generative))
+        val executionId = ExecutionId("exec-budget-mixed")
+        store.claimFire(claim(automationId, "event-budget-mixed", executionId, 1_000))
+        repeat(2) { index ->
+            journal.recordAction(
+                ActionJournalEntry(executionId, index, "invoke_llm", ActionJournalOutcome.SUBMITTED, 1_001),
+            )
+        }
+        journal.finish(
+            ExecutionCompletion(executionId, ExecutionStatus.SUBMITTED, 1_002, 0, 0, 2),
+        )
+
+        assertTrue(
+            journal.resolveSubmitted(
+                SubmittedActionCompletion(
+                    executionId, 0, ActionJournalOutcome.SUCCEEDED, 1_050,
+                ),
+            ),
+        )
+        assertTrue(
+            journal.resolveSubmitted(
+                SubmittedActionCompletion(
+                    executionId = executionId,
+                    actionIndex = 1,
+                    outcome = ActionJournalOutcome.FAILED,
+                    atMillis = 1_100,
+                    errorCode = "budget_exceeded",
+                    suppressedStatus = ExecutionStatus.SUPPRESSED_BUDGET,
+                ),
+            ),
+        )
+
+        assertEquals(
+            ExecutionStatus.PARTIAL,
+            db.executionJournalDao().status(executionId.value),
+        )
+    }
+
+    @Test
     fun `maintenance interrupts stale submitted work and never leaves it pending forever`() = runTest {
         val automationId = arm("stale-submitted", listOf(Action.InvokeLlm(
             "rispondi",

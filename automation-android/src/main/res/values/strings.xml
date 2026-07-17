@@ -6,4 +6,6 @@
     <string name="argus_connectivity_channel_description">Monitora Wi-Fi e alimentazione per le automazioni armate</string>
     <string name="argus_connectivity_notification_title">Argus è in ascolto</string>
     <string name="argus_connectivity_notification_text">Monitoraggio Wi-Fi e alimentazione per automazioni armate</string>
+    <string name="argus_budget_channel_name">Budget LLM</string>
+    <string name="argus_budget_channel_description">Avvisi quando il budget delle chiamate LLM è quasi o del tutto esaurito</string>
 </resources>

@@ -70,7 +70,10 @@ import dev.argus.ui.model.SettingsState
 import dev.argus.ui.model.ShizukuStatus
 import dev.argus.ui.model.TransportUi
 import dev.argus.ui.components.BridgeConfigurationDialog
+import dev.argus.ui.components.BudgetLimitsDialog
 import dev.argus.ui.components.ProviderConfigurationDialog
+import dev.argus.ui.model.ProviderUsageUi
+import dev.argus.ui.presentation.BudgetFormat
 import dev.argus.ui.R
 import dev.argus.ui.theme.ArgusTheme
 import dev.argus.ui.theme.LocalArgusSemantic
@@ -117,7 +120,7 @@ fun SettingsScreen(
                 TransportSection(state.transport, state.providerChoices, callbacks) { showBridgeEditor = true }
                 PrivacySection(state.privacyAccepted) { confirmPrivacyRevoke = true }
                 WhitelistSection(state.whitelist, callbacks)
-                BudgetSection(state.budget)
+                BudgetSection(state.budget, callbacks)
                 RerunRow(callbacks::onRerunOnboarding)
                 VersionFooter(state.appVersionLabel)
                 Spacer(Modifier.size(8.dp))
@@ -642,37 +645,122 @@ private fun maskConversationId(id: String): String {
 // -----------------------------------------------------------------------------
 
 @Composable
-private fun BudgetSection(budget: BudgetUi) {
+private fun BudgetSection(budget: BudgetUi, callbacks: SettingsCallbacks) {
+    val semantic = LocalArgusSemantic.current
+    var showLimitsEditor by remember { mutableStateOf(false) }
     SettingsSection("BUDGET LLM") {
         SectionCard {
-            // Con maxCallsPerHour <= 0 nessun contatore orario è attivo: la label è una FRASE
-            // descrittiva e va resa come testo normale a piena larghezza (il layout contatore
-            // la sillabava in una colonna illeggibile — feedback Lorenzo 2026-07-14).
-            if (budget.maxCallsPerHour <= 0) {
-                Text("Chiamate al cervello", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge)
-                Text(
-                    budget.usedThisHourLabel,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            } else {
-                val used = budget.usedThisHourLabel.trim().substringBefore(' ').toIntOrNull()
-                val fraction = if (used != null) {
-                    (used.toFloat() / budget.maxCallsPerHour).coerceIn(0f, 1f)
-                } else {
-                    0f
+            if (budget.softWarningActive) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(semantic.pending.fg.copy(alpha = 0.06f))
+                        .border(1.dp, semantic.pending.fg.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text(
+                        "Budget quasi esaurito",
+                        color = semantic.pending.fg,
+                        style = MaterialTheme.typography.labelLarge,
+                    )
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Chiamate al cervello", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
-                    Text(budget.usedThisHourLabel, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace)
-                }
-                LinearProgressIndicator(
-                    progress = { fraction },
-                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)),
-                    color = MaterialTheme.colorScheme.primary,
-                    trackColor = MaterialTheme.colorScheme.background,
-                )
             }
+            BudgetCallsRow("Chiamate · ultima ora", budget.usedHour, budget.limitHour)
+            BudgetCallsRow("Chiamate · oggi", budget.usedDay, budget.limitDay)
+            BudgetCostRow(budget.costMonthMicros, budget.costLimitMicros)
+            if (budget.perProvider.isNotEmpty()) {
+                budget.perProvider.forEach { provider ->
+                    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                        Text(
+                            provider.providerLabel,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                        Text(
+                            "ora ${provider.callsHour} · oggi ${provider.callsDay} · " +
+                                "mese ${BudgetFormat.costLabel(provider.costMonthMicros)}",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+            }
+            Text(
+                "Costi stimati dal listino pubblico (stima indicativa, non fattura) · EUR a tasso fisso ≈",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.labelSmall,
+            )
+            OutlinedButton(
+                onClick = { showLimitsEditor = true },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+            ) { Text("Modifica limiti") }
+        }
+    }
+    if (showLimitsEditor) {
+        BudgetLimitsDialog(
+            initialMaxPerHour = budget.limitHour,
+            initialMaxPerDay = budget.limitDay,
+            initialMaxCostMonthMicros = budget.costLimitMicros,
+            onDismiss = { showLimitsEditor = false },
+            onSave = { maxPerHour, maxPerDay, maxCostMonthMicros ->
+                callbacks.onBudgetChange(maxPerHour)
+                callbacks.onBudgetDayChange(maxPerDay)
+                callbacks.onBudgetMonthlyCostChange(maxCostMonthMicros)
+            },
+        )
+    }
+}
+
+@Composable
+private fun BudgetCallsRow(label: String, used: Long, limit: Int?) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(label, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+            Text(
+                BudgetFormat.callsLabel(used, limit),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = FontFamily.Monospace,
+            )
+        }
+        if (limit != null && limit > 0) {
+            LinearProgressIndicator(
+                progress = { BudgetFormat.ratio(used, limit) },
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.background,
+            )
+        }
+    }
+}
+
+@Composable
+private fun BudgetCostRow(costMonthMicros: Long?, costLimitMicros: Long?) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Costo · mese corrente", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+            Text(
+                BudgetFormat.costLabel(costMonthMicros),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = FontFamily.Monospace,
+            )
+        }
+        if (costLimitMicros != null && costLimitMicros > 0L) {
+            LinearProgressIndicator(
+                progress = { BudgetFormat.costRatio(costMonthMicros, costLimitMicros) },
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.background,
+            )
+            Text(
+                "Limite: ${BudgetFormat.costLabel(costLimitMicros)}",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+            )
         }
     }
 }
@@ -751,7 +839,19 @@ private val previewAllGreen = SettingsState(
     notificationListenerGranted = true,
     backgroundLocation = BgLocationState.GRANTED,
     whitelist = previewContacts,
-    budget = BudgetUi(maxCallsPerHour = 20, usedThisHourLabel = "3 / 20 quest'ora"),
+    budget = BudgetUi(
+        usedHour = 3,
+        limitHour = 20,
+        usedDay = 11,
+        limitDay = 100,
+        costMonthMicros = 1_870_000,
+        costLimitMicros = 5_000_000,
+        perProvider = listOf(
+            ProviderUsageUi("openai", "OpenAI", callsHour = 3, callsDay = 11, costMonthMicros = 1_870_000),
+            ProviderUsageUi("hermes", "Hermes (self-hosted)", callsHour = 0, callsDay = 0, costMonthMicros = null),
+        ),
+        softWarningActive = false,
+    ),
     privacyAccepted = true,
     appVersionLabel = "Argus v0.1.0 · MVP (sideload)",
     providerChoices = previewProviderChoices,
@@ -779,7 +879,18 @@ private val previewDegraded = SettingsState(
     notificationListenerGranted = true,
     backgroundLocation = BgLocationState.DENIED,
     whitelist = emptyList(),
-    budget = BudgetUi(maxCallsPerHour = 20, usedThisHourLabel = "17 / 20 quest'ora"),
+    budget = BudgetUi(
+        usedHour = 17,
+        limitHour = 20,
+        usedDay = 92,
+        limitDay = 100,
+        costMonthMicros = 4_500_000,
+        costLimitMicros = 5_000_000,
+        perProvider = listOf(
+            ProviderUsageUi("openai", "OpenAI", callsHour = 17, callsDay = 92, costMonthMicros = 4_500_000),
+        ),
+        softWarningActive = true,
+    ),
     privacyAccepted = true,
     appVersionLabel = "Argus v0.1.0 · MVP (sideload)",
 )

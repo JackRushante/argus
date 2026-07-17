@@ -294,6 +294,21 @@ class GenerativeActionLaneTest {
         assertEquals(ActionJournalOutcome.SUCCEEDED, journal.completions.single().outcome)
     }
 
+    @Test
+    fun `budget hard block risolve la completion come soppressione budget`() = runTest {
+        val fixture = fixture(act = { ActResult(null, "budget_exceeded") })
+        fixture.lane.trySubmit(fixture.context, fixture.action)
+        fixture.journal.ready()
+        runCurrent()
+
+        assertEquals(0, fixture.gateway.calls)
+        fixture.journal.completions.single().also { completion ->
+            assertEquals(ActionJournalOutcome.FAILED, completion.outcome)
+            assertEquals("budget_exceeded", completion.errorCode)
+            assertEquals(ExecutionStatus.SUPPRESSED_BUDGET, completion.suppressedStatus)
+        }
+    }
+
     private fun kotlinx.coroutines.test.TestScope.fixture(
         action: Action.InvokeLlm = action(),
         automation: Automation = approvedAutomation(action),

@@ -6,6 +6,9 @@ import dev.argus.automation.AppPreferences
 import dev.argus.automation.AppPreferencesStore
 import dev.argus.automation.ConfiguredBridgeBrain
 import dev.argus.automation.PrivacyRevocationCoordinator
+import dev.argus.automation.budget.BudgetLimits
+import dev.argus.automation.budget.BudgetSettings
+import dev.argus.automation.budget.BudgetSettingsStore
 import dev.argus.automation.connectivity.ConnectivitySentinelStatus
 import dev.argus.automation.notification.ActiveNotificationReplyRegistry
 import dev.argus.brain.AgentTransport
@@ -16,6 +19,9 @@ import dev.argus.brain.ProviderId
 import dev.argus.brain.TransportFactory
 import dev.argus.brain.TransportHealth
 import dev.argus.data.DeferredReplyStore
+import dev.argus.data.UsageWindows
+import dev.argus.data.dao.ProviderUsageAggregate
+import dev.argus.data.dao.UsageDao
 import dev.argus.data.entities.DeferredReplyEntity
 import dev.argus.engine.brain.ActResult
 import dev.argus.engine.brain.CapabilityManifest
@@ -47,7 +53,9 @@ import dev.argus.ui.model.TransportUi
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.time.ZoneId
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -260,7 +268,11 @@ class SettingsViewModelTest {
         return out
     }
 
-    private fun settingsViewModel(store: FakeProviderStore): SettingsViewModel {
+    private fun settingsViewModel(
+        store: FakeProviderStore,
+        usage: UsageDao = FakeUsageDao(),
+        budgetSettings: BudgetSettingsStore = FakeBudgetSettingsStore(),
+    ): SettingsViewModel {
         val brain = ConfiguredBridgeBrain(store, privacyAccepted = { true }, factory = FakeTransportFactory())
         val preferences = FakePreferences(privacyAccepted = true)
         val observed = FakeObservedConversationStore()
@@ -282,8 +294,188 @@ class SettingsViewModelTest {
             drafts = FakeDraftRepository(),
             shizuku = ShizukuGateway(context),
             connectivitySentinelStatus = ConnectivitySentinelStatus(),
+            usage = usage,
+            budgetSettings = budgetSettings,
         )
     }
+
+    // ------------------------------------------------------------------ budget (S14)
+
+    @Test
+    fun `budget emette aggregati tipizzati escludendo i blocked`() = runTest(dispatcher) {
+        val usage = FakeUsageDao(
+            all = listOf(
+                aggregate("openai", calls = 5, blocked = 2, cost = 1_870_000),
+                aggregate("hermes", calls = 3, blocked = 0, cost = null),
+            ),
+        )
+        val vm = settingsViewModel(FakeProviderStore(), usage = usage)
+        observe(vm)
+        vm.refresh()
+        advanceUntilIdle()
+
+        val budget = vm.state.value.budget
+        assertEquals(6L, budget.usedHour)
+        val labels = budget.perProvider.associate { it.providerId to it.providerLabel }
+        assertEquals("OpenAI", labels["openai"])
+        assertEquals("Hermes (self-hosted)", labels["hermes"])
+        val hermes = budget.perProvider.first { it.providerId == "hermes" }
+        assertNull(hermes.costMonthMicros)
+    }
+
+    @Test
+    fun `budget espone i limiti dallo store`() = runTest(dispatcher) {
+        val settings = FakeBudgetSettingsStore(
+            BudgetSettings(
+                global = BudgetLimits(maxCallsPerHour = 20, maxCallsPerDay = null, maxCostPerMonthMicros = 5_000_000),
+            ),
+        )
+        val vm = settingsViewModel(FakeProviderStore(), budgetSettings = settings)
+        observe(vm)
+        vm.refresh()
+        advanceUntilIdle()
+
+        val budget = vm.state.value.budget
+        assertEquals(20, budget.limitHour)
+        assertNull(budget.limitDay)
+        assertEquals(5_000_000L, budget.costLimitMicros)
+    }
+
+    @Test
+    fun `soft warning attivo oltre la soglia`() = runTest(dispatcher) {
+        val over = settingsViewModel(
+            FakeProviderStore(),
+            usage = FakeUsageDao(all = listOf(aggregate("openai", calls = 17, blocked = 0, cost = null))),
+            budgetSettings = FakeBudgetSettingsStore(
+                BudgetSettings(global = BudgetLimits(maxCallsPerHour = 20), softThresholdPct = 80),
+            ),
+        )
+        observe(over)
+        over.refresh()
+        advanceUntilIdle()
+        assertTrue(over.state.value.budget.softWarningActive)
+
+        val under = settingsViewModel(
+            FakeProviderStore(),
+            usage = FakeUsageDao(all = listOf(aggregate("openai", calls = 10, blocked = 0, cost = null))),
+            budgetSettings = FakeBudgetSettingsStore(
+                BudgetSettings(global = BudgetLimits(maxCallsPerHour = 20), softThresholdPct = 80),
+            ),
+        )
+        observe(under)
+        under.refresh()
+        advanceUntilIdle()
+        assertFalse(under.state.value.budget.softWarningActive)
+    }
+
+    @Test
+    fun `onBudgetChange persiste il limite orario globale`() = runTest(dispatcher) {
+        val settings = FakeBudgetSettingsStore()
+        val vm = settingsViewModel(FakeProviderStore(), budgetSettings = settings)
+        observe(vm)
+        advanceUntilIdle()
+
+        vm.onBudgetChange(25)
+        advanceUntilIdle()
+        assertEquals(25, settings.observe().value.global.maxCallsPerHour)
+
+        vm.onBudgetChange(0)
+        advanceUntilIdle()
+        assertNull(settings.observe().value.global.maxCallsPerHour)
+    }
+
+    @Test
+    fun `onBudgetMonthlyCostChange persiste il tetto mensile`() = runTest(dispatcher) {
+        val settings = FakeBudgetSettingsStore()
+        val vm = settingsViewModel(FakeProviderStore(), budgetSettings = settings)
+        observe(vm)
+        advanceUntilIdle()
+
+        vm.onBudgetMonthlyCostChange(5_000_000)
+        advanceUntilIdle()
+        assertEquals(5_000_000L, settings.observe().value.global.maxCostPerMonthMicros)
+
+        vm.onBudgetMonthlyCostChange(0)
+        advanceUntilIdle()
+        assertNull(settings.observe().value.global.maxCostPerMonthMicros)
+    }
+}
+
+private fun aggregate(providerId: String, calls: Long, blocked: Long, cost: Long?): ProviderUsageAggregate =
+    ProviderUsageAggregate(
+        providerId = providerId,
+        calls = calls,
+        okCalls = (calls - blocked).coerceAtLeast(0),
+        errorCalls = 0,
+        blockedCalls = blocked,
+        tokensIn = null,
+        tokensOut = null,
+        costMicros = cost,
+    )
+
+/**
+ * Ritorna aggregati canned instradati per finestra: ricostruisce `now = end - 1` e confronta lo start
+ * con i confini calcolati da [UsageWindows], così ogni finestra riceve la sua lista (default: la stessa).
+ */
+private class FakeUsageDao(
+    private val all: List<ProviderUsageAggregate> = emptyList(),
+    private val hour: List<ProviderUsageAggregate> = all,
+    private val day: List<ProviderUsageAggregate> = all,
+    private val month: List<ProviderUsageAggregate> = all,
+) : UsageDao {
+    override suspend fun insert(event: dev.argus.data.entities.UsageEventEntity): Long = 1L
+
+    override suspend fun aggregateBetween(
+        startMillis: Long,
+        endMillisExclusive: Long,
+    ): List<ProviderUsageAggregate> {
+        val now = endMillisExclusive - 1
+        val zone = ZoneId.systemDefault()
+        return when (startMillis) {
+            UsageWindows.lastHour(now).startMillis -> hour
+            UsageWindows.currentDay(now, zone).startMillis -> day
+            UsageWindows.currentMonth(now, zone).startMillis -> month
+            else -> emptyList()
+        }
+    }
+
+    override suspend fun purgeBefore(cutoffMillis: Long): Int = 0
+}
+
+private class FakeBudgetSettingsStore(
+    initial: BudgetSettings = BudgetSettings(),
+) : BudgetSettingsStore {
+    private val flow = MutableStateFlow(initial)
+    override fun observe(): StateFlow<BudgetSettings> = flow.asStateFlow()
+
+    override suspend fun setGlobalLimits(limits: BudgetLimits): Boolean {
+        if (negative(limits)) return false
+        flow.value = flow.value.copy(global = normalize(limits))
+        return true
+    }
+
+    override suspend fun setProviderLimits(id: ProviderId, limits: BudgetLimits): Boolean {
+        if (negative(limits)) return false
+        flow.value = flow.value.copy(
+            perProvider = flow.value.perProvider + (id.wireName to normalize(limits)),
+        )
+        return true
+    }
+
+    override suspend fun setSoftThresholdPct(pct: Int): Boolean {
+        if (pct !in 1..100) return false
+        flow.value = flow.value.copy(softThresholdPct = pct)
+        return true
+    }
+
+    private fun negative(l: BudgetLimits): Boolean =
+        (l.maxCallsPerHour ?: 0) < 0 || (l.maxCallsPerDay ?: 0) < 0 || (l.maxCostPerMonthMicros ?: 0L) < 0L
+
+    private fun normalize(l: BudgetLimits): BudgetLimits = BudgetLimits(
+        maxCallsPerHour = l.maxCallsPerHour?.takeIf { it > 0 },
+        maxCallsPerDay = l.maxCallsPerDay?.takeIf { it > 0 },
+        maxCostPerMonthMicros = l.maxCostPerMonthMicros?.takeIf { it > 0L },
+    )
 }
 
 // ----------------------------------------------------------------------- fakes

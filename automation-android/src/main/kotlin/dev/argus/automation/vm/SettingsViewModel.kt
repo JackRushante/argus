@@ -13,9 +13,15 @@ import dev.argus.automation.ConfiguredBridgeBrain
 import dev.argus.automation.connectivity.ConnectivitySentinelStatus
 import dev.argus.automation.PrivacyRevocationCoordinator
 import dev.argus.automation.PrivacyRevocationResult
+import dev.argus.automation.budget.BudgetLimits
+import dev.argus.automation.budget.BudgetSettings
+import dev.argus.automation.budget.BudgetSettingsStore
 import dev.argus.brain.ProviderCatalog
 import dev.argus.brain.ProviderConfigStore
 import dev.argus.brain.ProviderId
+import dev.argus.data.UsageWindows
+import dev.argus.data.dao.ProviderUsageAggregate
+import dev.argus.data.dao.UsageDao
 import dev.argus.engine.brain.ContactWhitelistStore
 import dev.argus.engine.brain.WhitelistedContact
 import dev.argus.engine.model.Automation
@@ -34,6 +40,7 @@ import dev.argus.ui.model.AuthState
 import dev.argus.ui.model.BudgetUi
 import dev.argus.ui.model.ContactRow
 import dev.argus.ui.model.ProviderChoiceUi
+import dev.argus.ui.model.ProviderUsageUi
 import dev.argus.ui.model.SettingsState
 import dev.argus.ui.model.TransportUi
 import kotlinx.coroutines.CancellationException
@@ -45,8 +52,10 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.time.ZoneId
 import java.util.Locale
 import javax.inject.Inject
+import kotlin.math.ceil
 
 private data class BridgeUiHealth(
     val reachable: Boolean? = null,
@@ -81,6 +90,98 @@ internal fun observedWhitelistCandidates(
         .toList()
 }
 
+/** Aggregati usage per le tre finestre (ora/giorno/mese), caricati da [UsageDao] in [SettingsViewModel.refresh]. */
+internal data class BudgetUsageSnapshot(
+    val hour: List<ProviderUsageAggregate> = emptyList(),
+    val day: List<ProviderUsageAggregate> = emptyList(),
+    val month: List<ProviderUsageAggregate> = emptyList(),
+)
+
+/** Chiamate effettive di un aggregato: i tentativi bloccati dal budget NON contano (T: no lock-out visivo). */
+private fun ProviderUsageAggregate.netCalls(): Long = (calls - blockedCalls).coerceAtLeast(0L)
+
+private fun List<ProviderUsageAggregate>.totalNetCalls(): Long = sumOf { it.netCalls() }
+
+/** Somma dei costi: se TUTTI gli aggregati hanno costo null (es. solo Hermes) il totale è null, non 0. */
+private fun List<ProviderUsageAggregate>.totalCostMicros(): Long? {
+    val present = mapNotNull { it.costMicros }
+    return if (present.isEmpty()) null else present.sum()
+}
+
+private fun overSoftCalls(used: Long, limit: Int?, softPct: Int): Boolean {
+    if (limit == null || limit <= 0) return false
+    val threshold = ceil(limit.toDouble() * softPct / 100.0).toLong()
+    return used >= threshold
+}
+
+private fun overSoftCost(usedMicros: Long?, limitMicros: Long?, softPct: Int): Boolean {
+    if (limitMicros == null || limitMicros <= 0L) return false
+    val threshold = ceil(limitMicros.toDouble() * softPct / 100.0).toLong()
+    return (usedMicros ?: 0L) >= threshold
+}
+
+/**
+ * Mappa gli aggregati usage + i limiti configurati nel contratto UI tipizzato [BudgetUi]. Puro e
+ * testabile su host. Chiamate = calls - blockedCalls; costo mese = somma costMicros (tutti null → null,
+ * non 0). Il breakdown per-provider è ordinato per wireName con label dal [ProviderCatalog].
+ */
+internal fun budgetUi(usage: BudgetUsageSnapshot, settings: BudgetSettings): BudgetUi {
+    val global = settings.global
+    val softPct = settings.softThresholdPct
+    val usedHour = usage.hour.totalNetCalls()
+    val usedDay = usage.day.totalNetCalls()
+    val costMonth = usage.month.totalCostMicros()
+
+    val wireNames = (
+        usage.hour.map { it.providerId } +
+            usage.day.map { it.providerId } +
+            usage.month.map { it.providerId }
+        ).toSortedSet()
+    val perProvider = wireNames.map { wire ->
+        val hourAgg = usage.hour.firstOrNull { it.providerId == wire }
+        val dayAgg = usage.day.firstOrNull { it.providerId == wire }
+        val monthAgg = usage.month.firstOrNull { it.providerId == wire }
+        val label = ProviderId.fromWireName(wire)
+            ?.let { ProviderCatalog.spec(it).displayName } ?: wire
+        ProviderUsageUi(
+            providerId = wire,
+            providerLabel = label,
+            callsHour = hourAgg?.netCalls() ?: 0L,
+            callsDay = dayAgg?.netCalls() ?: 0L,
+            costMonthMicros = monthAgg?.costMicros,
+        )
+    }
+
+    var softActive = overSoftCalls(usedHour, global.maxCallsPerHour, softPct) ||
+        overSoftCalls(usedDay, global.maxCallsPerDay, softPct) ||
+        overSoftCost(costMonth, global.maxCostPerMonthMicros, softPct)
+    if (!softActive) {
+        for ((wire, limits) in settings.perProvider) {
+            val hourAgg = usage.hour.firstOrNull { it.providerId == wire }
+            val dayAgg = usage.day.firstOrNull { it.providerId == wire }
+            val monthAgg = usage.month.firstOrNull { it.providerId == wire }
+            if (overSoftCalls(hourAgg?.netCalls() ?: 0L, limits.maxCallsPerHour, softPct) ||
+                overSoftCalls(dayAgg?.netCalls() ?: 0L, limits.maxCallsPerDay, softPct) ||
+                overSoftCost(monthAgg?.costMicros, limits.maxCostPerMonthMicros, softPct)
+            ) {
+                softActive = true
+                break
+            }
+        }
+    }
+
+    return BudgetUi(
+        usedHour = usedHour,
+        limitHour = global.maxCallsPerHour,
+        usedDay = usedDay,
+        limitDay = global.maxCallsPerDay,
+        costMonthMicros = costMonth,
+        costLimitMicros = global.maxCostPerMonthMicros,
+        perProvider = perProvider,
+        softWarningActive = softActive,
+    )
+}
+
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -94,8 +195,11 @@ class SettingsViewModel @Inject constructor(
     drafts: DraftRepository,
     private val shizuku: ShizukuGateway,
     private val connectivitySentinelStatus: ConnectivitySentinelStatus,
+    private val usage: UsageDao,
+    private val budgetSettings: BudgetSettingsStore,
 ) : ViewModel() {
     private val refreshSignal = MutableStateFlow(0L)
+    private val budgetUsage = MutableStateFlow(BudgetUsageSnapshot())
     private val bridgeHealth = MutableStateFlow(BridgeUiHealth())
     private val mutableTokenConfigured = MutableStateFlow(false)
     val tokenConfigured: StateFlow<Boolean> = mutableTokenConfigured
@@ -151,32 +255,36 @@ class SettingsViewModel @Inject constructor(
         tokenConfigured,
         refreshSignal,
         connectivitySentinelStatus.active,
-    ) { values, bridge, hasToken, _, sentinelActive ->
+        budgetUsage,
+        budgetSettings.observe(),
+    ) { values: Array<Any?> ->
+        val settingsSources = values[0] as SettingsSources
+        val bridge = values[1] as BridgeUiHealth
+        val hasToken = values[2] as Boolean
+        // values[3] = refreshSignal, usato solo come trigger di ricarica.
+        val sentinelActive = values[4] as Boolean
+        val usageSnapshot = values[5] as BudgetUsageSnapshot
+        val budgetConfig = values[6] as BudgetSettings
         val health = readAndroidUiHealth(context)
         SettingsState(
             transport = transportUi(bridge, hasToken),
             providerChoices = providerChoices(),
-            shizuku = values.shizukuStatus.toUiStatus(
-                degradedAfterReboot = values.shizukuNeeded &&
-                    values.shizukuStatus == ShizukuGatewayStatus.INSTALLED_NOT_RUNNING,
+            shizuku = settingsSources.shizukuStatus.toUiStatus(
+                degradedAfterReboot = settingsSources.shizukuNeeded &&
+                    settingsSources.shizukuStatus == ShizukuGatewayStatus.INSTALLED_NOT_RUNNING,
             ),
             batteryExempt = health.batteryExempt,
             notificationsGranted = health.notificationsGranted,
             notificationListenerGranted = health.notificationListenerGranted,
-            backgroundLocation = health.backgroundLocationState(values.geofenceNeeded),
+            backgroundLocation = health.backgroundLocationState(settingsSources.geofenceNeeded),
             smsTriggerGranted = health.receiveSmsGranted,
             callTriggerGranted = health.readPhoneStateGranted && health.readCallLogGranted,
             bluetoothTriggerGranted = health.bluetoothConnectGranted,
             connectivitySentinelActive = sentinelActive,
-            whitelist = values.contacts.map { ContactRow(it.displayName, it.id) },
-            observedCandidates = values.observedCandidates,
-            budget = BudgetUi(
-                maxCallsPerHour = 0,
-                usedThisHourLabel = "Ogni regola con risposta AI può scattare al massimo " +
-                    "una volta ogni 60 secondi. Un limite orario complessivo di chiamate " +
-                    "arriverà in una versione futura.",
-            ),
-            privacyAccepted = values.privacyAccepted,
+            whitelist = settingsSources.contacts.map { ContactRow(it.displayName, it.id) },
+            observedCandidates = settingsSources.observedCandidates,
+            budget = budgetUi(usageSnapshot, budgetConfig),
+            privacyAccepted = settingsSources.privacyAccepted,
             appVersionLabel = appVersionLabel(),
         )
     }.stateIn(
@@ -196,6 +304,23 @@ class SettingsViewModel @Inject constructor(
                 configuration.bearerToken() != null
             } ?: false
         }
+        viewModelScope.launch {
+            budgetUsage.value = cancellationSafeOrNull {
+                loadBudgetUsage(System.currentTimeMillis())
+            } ?: BudgetUsageSnapshot()
+        }
+    }
+
+    private suspend fun loadBudgetUsage(nowMillis: Long): BudgetUsageSnapshot {
+        val zone = ZoneId.systemDefault()
+        val hourWin = UsageWindows.lastHour(nowMillis)
+        val dayWin = UsageWindows.currentDay(nowMillis, zone)
+        val monthWin = UsageWindows.currentMonth(nowMillis, zone)
+        return BudgetUsageSnapshot(
+            hour = usage.aggregateBetween(hourWin.startMillis, hourWin.endMillisExclusive),
+            day = usage.aggregateBetween(dayWin.startMillis, dayWin.endMillisExclusive),
+            month = usage.aggregateBetween(monthWin.startMillis, monthWin.endMillisExclusive),
+        )
     }
 
     fun saveBridge(url: String, bearer: String?) {
@@ -317,11 +442,31 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun onBudgetChange(maxPerHour: Int) {
-        mutableMessages.tryEmit(
-            "Il budget globale arriverà in una fase successiva (P3); " +
-                "in P1 ogni regola generativa ha un cooldown minimo di 60 secondi.",
-        )
+    fun onBudgetChange(maxPerHour: Int) =
+        updateGlobalLimits { it.copy(maxCallsPerHour = maxPerHour.takeIf { v -> v > 0 }) }
+
+    fun onBudgetDayChange(maxPerDay: Int) =
+        updateGlobalLimits { it.copy(maxCallsPerDay = maxPerDay.takeIf { v -> v > 0 }) }
+
+    fun onBudgetMonthlyCostChange(maxCostMonthMicros: Long) =
+        updateGlobalLimits { it.copy(maxCostPerMonthMicros = maxCostMonthMicros.takeIf { v -> v > 0 }) }
+
+    private fun updateGlobalLimits(mutate: (BudgetLimits) -> BudgetLimits) {
+        viewModelScope.launch {
+            try {
+                val current = budgetSettings.observe().value.global
+                if (budgetSettings.setGlobalLimits(mutate(current))) {
+                    message("Limiti budget salvati.")
+                    refresh()
+                } else {
+                    message("Limite non valido.")
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                message("Impossibile salvare i limiti budget.")
+            }
+        }
     }
 
     fun revokePrivacy() {
@@ -423,12 +568,7 @@ class SettingsViewModel @Inject constructor(
             bluetoothTriggerGranted = health.bluetoothConnectGranted,
             connectivitySentinelActive = connectivitySentinelStatus.active.value,
             whitelist = emptyList(),
-            budget = BudgetUi(
-                0,
-                "Ogni regola con risposta AI può scattare al massimo una volta ogni " +
-                    "60 secondi. Un limite orario complessivo di chiamate arriverà in " +
-                    "una versione futura.",
-            ),
+            budget = BudgetUi(),
             privacyAccepted = false,
             appVersionLabel = appVersionLabel(),
         )

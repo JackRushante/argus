@@ -20,6 +20,7 @@ import dev.argus.ui.model.AuthState
 import dev.argus.ui.model.OnboardingState
 import dev.argus.ui.model.OnboardingStepState
 import dev.argus.ui.model.ProviderChoiceUi
+import dev.argus.ui.model.ProviderUsageUi
 import dev.argus.ui.model.RuleRender
 import dev.argus.ui.model.SettingsState
 import dev.argus.ui.model.ShizukuStatus
@@ -509,7 +510,19 @@ object Fixtures {
         notificationListenerGranted = true,
         backgroundLocation = BgLocationState.GRANTED,
         whitelist = listOf(ContactRow(displayName = "Moglie", conversationId = "wa::393200000000::c1a9")),
-        budget = BudgetUi(maxCallsPerHour = 20, usedThisHourLabel = "3 / 20 quest'ora"),
+        budget = BudgetUi(
+            usedHour = 3,
+            limitHour = 20,
+            usedDay = 11,
+            limitDay = 100,
+            costMonthMicros = 1_870_000,
+            costLimitMicros = 5_000_000,
+            perProvider = listOf(
+                ProviderUsageUi("openai", "OpenAI", callsHour = 3, callsDay = 11, costMonthMicros = 1_870_000),
+                ProviderUsageUi("hermes", "Hermes (self-hosted)", callsHour = 0, callsDay = 0, costMonthMicros = null),
+            ),
+            softWarningActive = false,
+        ),
         privacyAccepted = true,
         appVersionLabel = "Argus v0.1.0 · MVP (sideload)",
         providerChoices = providerChoices,
@@ -523,7 +536,18 @@ object Fixtures {
         notificationListenerGranted = true,
         backgroundLocation = BgLocationState.DENIED,
         whitelist = emptyList(),
-        budget = BudgetUi(maxCallsPerHour = 20, usedThisHourLabel = "17 / 20 quest'ora"),
+        budget = BudgetUi(
+            usedHour = 17,
+            limitHour = 20,
+            usedDay = 92,
+            limitDay = 100,
+            costMonthMicros = 4_500_000,
+            costLimitMicros = 5_000_000,
+            perProvider = listOf(
+                ProviderUsageUi("openai", "OpenAI", callsHour = 17, callsDay = 92, costMonthMicros = 4_500_000),
+            ),
+            softWarningActive = true,
+        ),
         privacyAccepted = true,
         appVersionLabel = "Argus v0.1.0 · MVP (sideload)",
         providerChoices = providerChoices,
