@@ -54,8 +54,20 @@ object GenerativeContract {
     const val TOOL_WHATSAPP_REPLY = ActionTypeIds.WHATSAPP_REPLY
     /** Tool raw richiesto a runtime quando il contesto include lo stato device. */
     const val TOOL_STATE_READ = "state.read"
+    /** Tool web di sola lettura, server-side (wire-name col punto). */
+    const val TOOL_WEB_SEARCH = "web.search"
     val CONTEXT_SOURCES: Set<String> = setOf(CONTEXT_NOTIFICATION, CONTEXT_STATE)
     val ALLOWED_TOOLS: List<String> = listOf(TOOL_WHATSAPP_REPLY)
+    /** Tool di contesto opzionali di sola lettura ammessi accanto al reply obbligatorio. */
+    val OPTIONAL_TOOLS: Set<String> = setOf(TOOL_WEB_SEARCH)
+
+    /** allowedTools valido per un'azione generativa: contiene il reply (sink obbligatorio), nessun
+     *  duplicato, e per il resto SOLO tool di contesto opzionali di sola lettura (web). shell/automation.*
+     *  restano vietati da DraftValidator. */
+    fun isAllowedToolset(tools: List<String>): Boolean =
+        TOOL_WHATSAPP_REPLY in tools &&
+            tools.size == tools.toSet().size &&
+            tools.all { it == TOOL_WHATSAPP_REPLY || it in OPTIONAL_TOOLS }
 }
 
 @Serializable

@@ -229,6 +229,21 @@ class GenerativeActionLaneTest {
     }
 
     @Test
+    fun `optional web search tool is an accepted generative contract`() = runTest {
+        // Fase 1 web tool: allowedTools = [reply, web.search] deve passare validContract e arrivare
+        // al brain, esattamente come il profilo reply-only.
+        val webAction = action().copy(allowedTools = listOf("whatsapp_reply", "web.search"))
+        val fixture = fixture(action = webAction, automation = approvedAutomation(webAction))
+        fixture.lane.trySubmit(fixture.context, fixture.action)
+        fixture.journal.ready()
+        runCurrent()
+
+        assertEquals(1, fixture.brain.calls)
+        assertEquals(1, fixture.gateway.calls)
+        assertEquals(ActionJournalOutcome.SUCCEEDED, fixture.journal.completions.single().outcome)
+    }
+
+    @Test
     fun `brain timeout fails without touching reply channel`() = runTest {
         val timed = action().copy(timeoutMs = 1_000)
         val fixture = fixture(

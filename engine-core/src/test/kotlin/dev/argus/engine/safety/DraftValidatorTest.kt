@@ -5,6 +5,11 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 class DraftValidatorTest {
     private val v = DraftValidator(knownTools = setOf("whatsapp_reply", "notify.show", "state.read"))
+    // Come in produzione (AndroidCapabilityProbe.KNOWN_TOOLS) web.search è nel catalogo: serve
+    // perché il check per-tool tool_unknown non lo respinga mentre verifichiamo il contratto.
+    private val vWeb = DraftValidator(
+        knownTools = setOf("whatsapp_reply", "notify.show", "state.read", "web.search"),
+    )
     private fun errors(issues: List<ValidationIssue>) = issues.filter { it.severity == Severity.ERROR }.map { it.code }
 
     private val validGenerative = AutomationDraft(
@@ -253,8 +258,9 @@ class DraftValidatorTest {
         ))
         assertTrue("context_source_unsupported" in errors(v.validate(unknown, setOf("jid:42"))))
     }
-    @Test fun `generative tools must be exactly whatsapp_reply without aliases`() {
-        // Tool extra oltre il profilo P1: la lane lo rifiuterebbe al fire con action_contract_invalid.
+    @Test fun `generative tools require the reply and reject non-web read tools or aliases`() {
+        // Il reply resta obbligatorio; oltre ad esso è ammesso SOLO il tool di contesto web
+        // opzionale (web.search). state.read/screen.* e gli alias di case restano fuori dal contratto.
         val extra = validGenerative.copy(actions = listOf(
             Action.InvokeLlm("g", listOf("notification"), listOf("whatsapp_reply", "state.read"), true)
         ))
@@ -270,6 +276,70 @@ class DraftValidatorTest {
             Action.InvokeLlm("g", listOf("notification"), listOf("state.read"), true)
         ))
         assertTrue("allowed_tools_unsupported" in errors(v.validate(withoutReply, setOf("jid:42"))))
+    }
+
+    @Test fun `invoke_llm allows the optional web search tool beside the mandatory reply`() {
+        fun draft(tools: List<String>) = validGenerative.copy(
+            actions = listOf(Action.InvokeLlm("g", listOf("notification"), tools, true)),
+        )
+        // reply-only resta valido (regressione).
+        assertEquals(emptyList(), errors(vWeb.validate(draft(listOf("whatsapp_reply")), setOf("jid:42"))))
+        // reply + web.search: nuovo contratto valido.
+        assertEquals(
+            emptyList(),
+            errors(vWeb.validate(draft(listOf("whatsapp_reply", "web.search")), setOf("jid:42"))),
+        )
+        // web.search senza reply (manca il sink obbligatorio) → non valido.
+        assertTrue(
+            "allowed_tools_unsupported" in errors(vWeb.validate(draft(listOf("web.search")), setOf("jid:42"))),
+        )
+        // reply duplicato → non valido.
+        assertTrue(
+            "allowed_tools_unsupported" in errors(
+                vWeb.validate(draft(listOf("whatsapp_reply", "whatsapp_reply")), setOf("jid:42")),
+            ),
+        )
+        // reply + shell.run: il toolset è illegale (allowed_tools_unsupported) e in più la difesa
+        // in profondità per-tool marca shell.run come tool_forbidden.
+        val shell = errors(vWeb.validate(draft(listOf("whatsapp_reply", "shell.run")), setOf("jid:42")))
+        assertTrue("allowed_tools_unsupported" in shell)
+        assertTrue("tool_forbidden" in shell)
+    }
+
+    @Test fun `invoke_llm_v2 reply contract allows the optional web search tool`() {
+        val context = ApprovedStateContext(
+            query = StateQuery.DumpsysField("battery", "voltage"),
+            valueType = StateValueType.NUMBER,
+            policyVersion = StateQueryPolicy.VERSION,
+            integrity = IntegrityLabel.CLEAN,
+            confidentiality = ConfidentialityLabel.SECRET,
+        )
+        fun draft(tools: List<String>) = validGenerative.copy(
+            actions = listOf(
+                Action.InvokeLlmV2(
+                    goal = "rispondi considerando il voltaggio",
+                    stateContext = listOf(context),
+                    allowedTools = tools,
+                    replyTargetSender = true,
+                    timeoutMs = 60_000,
+                ),
+            ),
+        )
+        // reply + web.search valido anche sul contratto v2.
+        assertEquals(
+            emptyList(),
+            errors(vWeb.validate(draft(listOf("whatsapp_reply", "web.search")), setOf("jid:42"))),
+        )
+        // web.search da solo → non valido (manca il reply).
+        assertTrue(
+            "allowed_tools_unsupported" in errors(vWeb.validate(draft(listOf("web.search")), setOf("jid:42"))),
+        )
+        // reply duplicato → non valido.
+        assertTrue(
+            "allowed_tools_unsupported" in errors(
+                vWeb.validate(draft(listOf("whatsapp_reply", "whatsapp_reply")), setOf("jid:42")),
+            ),
+        )
     }
     @Test fun `reply tool cannot disable sender binding`() {
         val unbound = validGenerative.copy(actions = listOf(

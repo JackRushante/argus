@@ -209,10 +209,10 @@ class AndroidGenerativeLane(
             action.contextSources == action.contextSources.distinct() &&
             "notification" in action.contextSources &&
             action.contextSources.all { it in P1_CONTEXT_SOURCES } &&
-            action.allowedTools == listOf(REPLY_TOOL) &&
+            GenerativeContract.isAllowedToolset(action.allowedTools) &&
             action.timeoutMs in MIN_TIMEOUT_MILLIS..MAX_TIMEOUT_MILLIS
         is Action.InvokeLlmV2 -> action.replyTargetSender &&
-            action.allowedTools == GenerativeContract.ALLOWED_TOOLS &&
+            GenerativeContract.isAllowedToolset(action.allowedTools) &&
             action.timeoutMs in MIN_TIMEOUT_MILLIS..MAX_TIMEOUT_MILLIS &&
             action.stateContext.isNotEmpty() &&
             action.stateContext.size <= StateContextClassification.MAX_QUERIES &&

@@ -448,10 +448,10 @@ class DraftValidator(
         whitelist: Set<String>,
         err: (String, String) -> Unit,
     ) {
-        if (allowedTools != GenerativeContract.ALLOWED_TOOLS) {
+        if (!GenerativeContract.isAllowedToolset(allowedTools)) {
             err(
                 "allowed_tools_unsupported",
-                "allowed_tools deve essere esattamente [${GenerativeContract.TOOL_WHATSAPP_REPLY}], senza alias",
+                "allowed_tools deve contenere whatsapp_reply e al più web.search",
             )
         }
         if (allowedTools.isEmpty()) err("no_tools", "Azione generativa senza allowed_tools")
@@ -503,10 +503,10 @@ class DraftValidator(
                 err("context_source_unsupported", "Context source '$source' non supportata in P1")
             }
         }
-        if (action.allowedTools != GenerativeContract.ALLOWED_TOOLS)
+        if (!GenerativeContract.isAllowedToolset(action.allowedTools))
             err(
                 "allowed_tools_unsupported",
-                "In P1 allowed_tools deve essere esattamente [${GenerativeContract.TOOL_WHATSAPP_REPLY}], senza alias",
+                "allowed_tools deve contenere whatsapp_reply e al più web.search",
             )
 
         if (action.allowedTools.isEmpty()) err("no_tools", "InvokeLlm senza allowed_tools")
