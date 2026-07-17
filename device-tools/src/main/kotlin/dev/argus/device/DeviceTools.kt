@@ -2,6 +2,8 @@ package dev.argus.device
 
 import android.content.Context
 import dev.argus.engine.model.DndMode
+import dev.argus.engine.model.SettingNamespace
+import dev.argus.engine.model.WriteSettingPolicy
 import dev.argus.engine.runtime.ExecutionId
 import dev.argus.shizuku.PrivilegedShell
 import dev.argus.shizuku.ShellResult
@@ -40,6 +42,13 @@ interface DeviceController {
     suspend fun openUrl(url: String, executionId: ExecutionId, priority: Int = 0)
     suspend fun tap(x: Int, y: Int, executionId: ExecutionId, priority: Int = 0)
     suspend fun inputText(text: String, executionId: ExecutionId, priority: Int = 0)
+    suspend fun writeSetting(
+        namespace: SettingNamespace,
+        key: String,
+        value: String,
+        executionId: ExecutionId,
+        priority: Int = 0,
+    )
 }
 
 class DeviceTools(
@@ -156,6 +165,25 @@ class DeviceTools(
         )
     }
 
+    override suspend fun writeSetting(
+        namespace: SettingNamespace,
+        key: String,
+        value: String,
+        executionId: ExecutionId,
+        priority: Int,
+    ) {
+        // Seconda barriera dopo DraftValidator/WriteSettingPolicy: argv separati, mai `sh -c`, e la
+        // key/value non raggiungono mai il transport privilegiato se non passano la policy di forma.
+        require(WriteSettingPolicy.validKey(key)) { "Chiave impostazione non valida" }
+        require(WriteSettingPolicy.validValue(value)) { "Valore impostazione non valido" }
+        runChecked(
+            operation = "write_setting",
+            command = listOf(SETTINGS, "put", namespace.name.lowercase(), key, value),
+            executionId = executionId,
+            priority = priority,
+        )
+    }
+
     suspend fun capture(): ByteArray {
         val bytes = runToBytes(
             operation = "screen_capture",
@@ -256,6 +284,7 @@ class DeviceTools(
     private companion object {
         const val SVC = "/system/bin/svc"
         const val CMD = "/system/bin/cmd"
+        const val SETTINGS = "/system/bin/settings"
         const val AM = "/system/bin/am"
         const val INPUT = "/system/bin/input"
         const val SCREENCAP = "/system/bin/screencap"

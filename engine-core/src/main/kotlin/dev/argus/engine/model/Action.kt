@@ -24,6 +24,7 @@ object ActionTypeIds {
     const val COPY_TO_CLIPBOARD = "copy_to_clipboard"
     const val SET_ALARM = "set_alarm"
     const val SET_TIMER = "set_timer"
+    const val WRITE_SETTING = "write_setting"
     const val INVOKE_LLM = "invoke_llm"
     const val INVOKE_LLM_V2 = "invoke_llm_v2"
 }
@@ -64,6 +65,7 @@ sealed interface Action {
             is CopyToClipboard,
             is SetAlarm,
             is SetTimer,
+            is WriteSetting,
             -> ActionTier.DETERMINISTIC
         }
 
@@ -103,6 +105,27 @@ sealed interface Action {
         val seconds: Int,
         val label: String? = null,
         val skipUi: Boolean = true,
+    ) : Action
+
+    /**
+     * Scrittura PARAMETRICA di un'impostazione Android (`system|secure|global`) per chiave —
+     * contraltare WRITE di [StateQuery.Setting]. È il pezzo di "libertà di automazione assoluta"
+     * (direttiva D0 "limiti solo etici"): scrive QUALSIASI chiave, non un'allowlist curata.
+     *
+     * Sempre PRIVILEGED (Shizuku): `settings put` su secure/global non ha percorso app-normale.
+     *
+     * L'unico invariante NON negoziabile è D2 (decision-record §4.2, "un dato non fidato non può
+     * creare autorità"): `namespace`/`key`/`value` sono LETTERALI CLEAN nel fingerprint approvato,
+     * MAI interpolati dal contenuto del trigger (SMS/notifiche) — identico regime di [RunShell].
+     * Guardrail = validazione ([WriteSettingPolicy]: regex key, value bounded, control char/NUL/
+     * newline rifiutati; argv separati quindi niente shell injection) + review umana pre-arm
+     * (l'utente vede namespace/key/value letterali). Nessun altro limite.
+     */
+    @Serializable @SerialName(ActionTypeIds.WRITE_SETTING)
+    data class WriteSetting(
+        val namespace: SettingNamespace,
+        val key: String,
+        val value: String,
     ) : Action
 
     @Serializable @SerialName(ActionTypeIds.INVOKE_LLM)

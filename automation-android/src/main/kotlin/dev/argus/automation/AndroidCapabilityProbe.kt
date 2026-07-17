@@ -366,11 +366,13 @@ class AndroidCapabilityProbe internal constructor(
         )
         const val REASON_DND_POLICY = "accesso «Non disturbare» non concesso"
 
-        /** Azioni che richiedono davvero lo shell Shizuku: toggle radio e shell. */
+        /** Azioni che richiedono davvero lo shell Shizuku: toggle radio, shell e write_setting. */
         val PRIVILEGED_ACTION_TYPES = setOf(
             ActionTypeIds.SET_WIFI,
             ActionTypeIds.SET_BLUETOOTH,
             ActionTypeIds.RUN_SHELL,
+            // Scrittura impostazioni parametrica: `settings put` non ha percorso app-normale.
+            ActionTypeIds.WRITE_SETTING,
         )
         /** Base con grant `ACCESS_NOTIFICATION_POLICY` (NotificationManager/AudioManager). */
         val BASE_DND_ACTION_TYPES = setOf(ActionTypeIds.SET_DND, ActionTypeIds.SET_RINGER)
@@ -403,6 +405,9 @@ class AndroidCapabilityProbe internal constructor(
             add(ActionCapabilities.SET_WIFI)
             add(ActionCapabilities.SET_BLUETOOTH)
             add(ActionCapabilities.RUN_SHELL)
+            // Gate famiglia della scrittura parametrica: forAction(WriteSetting) richiede questa,
+            // pubblicata solo con Shizuku (e transiente se Shizuku è fermo ma autorizzato).
+            add(ActionCapabilities.WRITE_SETTING)
             add(CapabilityIds.STATE_FOREGROUND_APP)
             add(CapabilityIds.STATE_READER_BUILTIN)
             add(CapabilityIds.STATE_READER_SETTING)

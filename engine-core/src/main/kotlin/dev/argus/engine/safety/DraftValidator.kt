@@ -330,6 +330,23 @@ class DraftValidator(
                     err("timer_seconds_invalid", "Durata timer fuori intervallo: 1..$MAX_TIMER_SECONDS secondi")
                 validateOptionalText(action.label, "timer_label_invalid", err)
             }
+            is Action.WriteSetting -> {
+                // PARAMETRICA (D0: nessuna allowlist di chiavi). Solo validazione di forma via
+                // WriteSettingPolicy: key stile QUERY_NAME, value bounded, control char rifiutati.
+                if (!WriteSettingPolicy.validKey(action.key))
+                    err("write_setting_key_invalid", "Chiave impostazione non valida (forma/limite)")
+                if (!WriteSettingPolicy.validValue(action.value))
+                    err(
+                        "write_setting_value_invalid",
+                        "Valore impostazione vuoto, troppo lungo o con caratteri di controllo",
+                    )
+                // D2: la scrittura crea autorità e il valore è letterale/approvato, mai dal trigger.
+                warn(
+                    "write_setting_review",
+                    "Scrittura impostazione approvata letteralmente: " +
+                        "${action.namespace.name.lowercase()} ${action.key} = ${action.value}",
+                )
+            }
             is Action.InvokeLlm -> validateInvokeLlm(action, trigger, whitelist, err, warn)
             is Action.InvokeLlmV2 -> validateInvokeLlmV2(action, trigger, whitelist, err, warn)
         }

@@ -129,6 +129,7 @@ internal fun Action.journalType(): String = when (this) {
     is Action.CopyToClipboard -> ActionTypeIds.COPY_TO_CLIPBOARD
     is Action.SetAlarm -> ActionTypeIds.SET_ALARM
     is Action.SetTimer -> ActionTypeIds.SET_TIMER
+    is Action.WriteSetting -> ActionTypeIds.WRITE_SETTING
     is Action.InvokeLlm -> ActionTypeIds.INVOKE_LLM
     is Action.InvokeLlmV2 -> ActionTypeIds.INVOKE_LLM_V2
 }

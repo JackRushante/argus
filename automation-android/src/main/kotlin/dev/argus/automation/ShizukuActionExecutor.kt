@@ -56,6 +56,17 @@ class ShizukuActionExecutor(
             is Action.SetBluetooth -> success {
                 tools.setBluetooth(action.on, ctx.executionId, ctx.priority)
             }
+            // Scrittura impostazioni PARAMETRICA: PRIVILEGED puro (nessun fallback base). key/value
+            // sono letterali dell'azione approvata; DeviceTools li ri-valida e costruisce argv.
+            is Action.WriteSetting -> success {
+                tools.writeSetting(
+                    action.namespace,
+                    action.key,
+                    action.value,
+                    ctx.executionId,
+                    ctx.priority,
+                )
+            }
             is Action.SetDnd -> baseActions?.setDnd(action.mode)
                 ?: success { tools.setDnd(action.mode, ctx.executionId, ctx.priority) }
             is Action.SetRinger -> {

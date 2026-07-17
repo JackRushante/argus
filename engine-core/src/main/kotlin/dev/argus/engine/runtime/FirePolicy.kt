@@ -50,6 +50,7 @@ object ActionCapabilities {
     const val COPY_TO_CLIPBOARD = CapabilityIds.ACTION_COPY_TO_CLIPBOARD
     const val SET_ALARM = CapabilityIds.ACTION_SET_ALARM
     const val SET_TIMER = CapabilityIds.ACTION_SET_TIMER
+    const val WRITE_SETTING = CapabilityIds.ACTION_WRITE_SETTING
     const val INVOKE_LLM = CapabilityIds.ACTION_INVOKE_LLM
 }
 

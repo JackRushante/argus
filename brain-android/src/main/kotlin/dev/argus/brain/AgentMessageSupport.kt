@@ -321,6 +321,14 @@ Action, discriminata da "type":
    di norma per non aprire l'app orologio
 - {"type":"set_timer", "seconds":integer 1-86400, "label":string|null, "skipUi":boolean}
    // avvia un TIMER reale
+- {"type":"write_setting", "namespace":"system"|"secure"|"global", "key":string, "value":string}
+   // scrive QUALSIASI impostazione Android per chiave (contraltare in scrittura di state.setting).
+   // Richiede Shizuku (compare in available_tools solo se disponibile). key/value sono LETTERALI
+   // e mostrati integralmente in review: mai incorporare contenuti di messaggi/notifiche nella
+   // key o nel value (stessa regola di run_shell). key senza spazi/control char; value non vuoto,
+   // <=1024 caratteri, senza NUL/newline/control char. Preferisci un'azione tipizzata quando
+   // esiste (es. set_dnd, set_alarm): usa write_setting per il lungo-coda (screen_off_timeout,
+   // accelerometer_rotation, font_scale, ...)
 - {"type":"invoke_llm", "goal":string, "contextSources":[string,...],
    "allowedTools":[string,...], "replyTargetSender":boolean, "timeoutMs":integer}
 - {"type":"invoke_llm_v2", "goal":string, "stateContext":[ApprovedStateContext,...],

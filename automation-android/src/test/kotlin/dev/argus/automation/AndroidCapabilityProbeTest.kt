@@ -117,6 +117,40 @@ class AndroidCapabilityProbeTest {
     }
 
     @Test
+    fun `write setting is a privileged action gated on shizuku`() = runTest {
+        val authorized = probe(state())
+        val manifest = authorized.probe(DeviceState())
+        val snapshot = authorized.current()
+        assertTrue(ActionTypeIds.WRITE_SETTING in manifest.availableTools)
+        assertFalse(ActionTypeIds.WRITE_SETTING in manifest.unavailableTools)
+        assertTrue(CapabilityIds.ACTION_WRITE_SETTING in snapshot.availableCapabilities)
+
+        val revokedProbe = probe(
+            state().copy(
+                shizukuStatus = ShizukuGatewayStatus.RUNNING_NOT_AUTHORIZED,
+                shizukuPermissionGranted = false,
+            ),
+        )
+        val revokedManifest = revokedProbe.probe(DeviceState())
+        assertFalse(ActionTypeIds.WRITE_SETTING in revokedManifest.availableTools)
+        assertTrue(ActionTypeIds.WRITE_SETTING in revokedManifest.unavailableTools)
+        assertFalse(
+            CapabilityIds.ACTION_WRITE_SETTING in revokedProbe.current().availableCapabilities,
+        )
+
+        // Shizuku fermo ma ancora autorizzato: indisponibilità transiente, non strutturale.
+        val stopped = probe(
+            state().copy(
+                shizukuStatus = ShizukuGatewayStatus.INSTALLED_NOT_RUNNING,
+                shizukuPermissionGranted = true,
+            ),
+        ).current()
+        assertTrue(
+            CapabilityIds.ACTION_WRITE_SETTING in stopped.transientlyUnavailableCapabilities,
+        )
+    }
+
+    @Test
     fun `location condition capability depends on location grants and not on Shizuku`() = runTest {
         val withoutShizuku = probe(
             state().copy(

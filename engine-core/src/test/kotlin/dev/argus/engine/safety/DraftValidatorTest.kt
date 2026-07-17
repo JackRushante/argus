@@ -519,6 +519,36 @@ class DraftValidatorTest {
         assertTrue("timer_label_invalid" in errors(v.validate(draft(Action.SetTimer(60, "x".repeat(5_000))), emptySet())))
     }
 
+    @Test fun `write setting is parametric accepting any well-formed key and rejecting malformed key or value`() {
+        fun draft(action: Action) = AutomationDraft(
+            name = "impostazione",
+            trigger = Trigger.Time(at = "2026-07-17T22:00", tz = "Europe/Rome"),
+            actions = listOf(action),
+        )
+        // Parametrica (D0): qualsiasi chiave ben formata passa, incluse quelle "di autorità".
+        assertEquals(
+            emptyList(),
+            errors(v.validate(draft(Action.WriteSetting(SettingNamespace.SYSTEM, "screen_off_timeout", "30000")), emptySet())),
+        )
+        assertEquals(
+            emptyList(),
+            errors(v.validate(draft(Action.WriteSetting(SettingNamespace.SECURE, "adb_enabled", "1")), emptySet())),
+        )
+        // Key malformata / value con control char sono errori tipizzati.
+        assertTrue(
+            "write_setting_key_invalid" in
+                errors(v.validate(draft(Action.WriteSetting(SettingNamespace.SYSTEM, "bad key", "1")), emptySet())),
+        )
+        assertTrue(
+            "write_setting_value_invalid" in
+                errors(v.validate(draft(Action.WriteSetting(SettingNamespace.SYSTEM, "font_scale", "1.0\n")), emptySet())),
+        )
+        assertTrue(
+            "write_setting_value_invalid" in
+                errors(v.validate(draft(Action.WriteSetting(SettingNamespace.SYSTEM, "font_scale", "")), emptySet())),
+        )
+    }
+
     @Test fun `sensor triggers require bounded parameters and a real cooldown`() {
         fun draft(trigger: Trigger.Sensor, cooldownMs: Long) = AutomationDraft(
             "sensore",

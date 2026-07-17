@@ -182,6 +182,21 @@ class CapabilityRequirementsTest {
     }
 
     @Test
+    fun `write setting derives only the family action capability not a per-key id`() {
+        // Gate famiglia (come i reader): il binding per-chiave sta nel fingerprint, non qui.
+        // Un canonicalId per-chiave brickierebbe la regola nel CapabilityReconciler.
+        val caps = CapabilityRequirements.derive(
+            trigger = Trigger.Time(cron = "0 22 * * *", tz = "Europe/Rome"),
+            actions = listOf(Action.WriteSetting(SettingNamespace.SYSTEM, "screen_off_timeout", "30000")),
+        )
+        assertEquals(
+            setOf(CapabilityIds.TRIGGER_TIME, CapabilityIds.ACTION_WRITE_SETTING),
+            caps,
+        )
+        assertTrue(caps.none { it.startsWith("action.write_setting.v1.") })
+    }
+
+    @Test
     fun `connectivity requirements are granular and wifi identity needs location`() {
         assertEquals(
             setOf(CapabilityIds.TRIGGER_CONNECTIVITY_POWER),

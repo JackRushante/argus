@@ -301,6 +301,13 @@ object RuleRenderMapper {
             detail = "${a.seconds}s" +
                 (a.label?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""),
         )
+        is Action.WriteSetting -> row(
+            iconKey = "settings",
+            // D2: la review mostra namespace/key/value LETTERALI e integrali (l'utente approva
+            // esattamente questa terna, mai interpolata dal trigger).
+            label = "Scrivi impostazione",
+            detail = "${a.namespace.name.lowercase()} · ${a.key} = ${a.value}",
+        )
         is Action.InvokeLlm -> row(
             iconKey = "generative",
             label = "Rispondi con l'AI",

@@ -26,6 +26,8 @@ object ActionPrivileges {
         is Action.RunShell,
         is Action.Tap,
         is Action.InputText,
+        // Scrittura impostazioni: `settings put` su secure/global passa dallo shell Shizuku.
+        is Action.WriteSetting,
         -> ActionPrivilege.PRIVILEGED
 
         // Base: Intent, policy/audio manager, notifiche, clipboard, RemoteInput reply e lane LLM

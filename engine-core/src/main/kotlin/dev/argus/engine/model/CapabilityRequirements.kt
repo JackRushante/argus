@@ -39,6 +39,7 @@ object CapabilityIds {
     const val ACTION_COPY_TO_CLIPBOARD = "action.copy_to_clipboard"
     const val ACTION_SET_ALARM = "action.set_alarm"
     const val ACTION_SET_TIMER = "action.set_timer"
+    const val ACTION_WRITE_SETTING = "action.write_setting"
     const val ACTION_INVOKE_LLM = "action.invoke_llm"
 
     fun state(key: String): String = "state.$key"
@@ -106,6 +107,15 @@ object CapabilityRequirements {
         is Action.CopyToClipboard -> setOf(CapabilityIds.ACTION_COPY_TO_CLIPBOARD)
         is Action.SetAlarm -> setOf(CapabilityIds.ACTION_SET_ALARM)
         is Action.SetTimer -> setOf(CapabilityIds.ACTION_SET_TIMER)
+        // Come i reader parametrici (che gatano sulla famiglia, non sul singolo canonicalId):
+        // il gate runtime è la famiglia ACTION_WRITE_SETTING (pubblicata dal probe solo con
+        // Shizuku), mentre il binding per-chiave namespace|key|value è nel fingerprint approvato
+        // (ApprovalFingerprints serializza l'azione letterale) e in WriteSettingPolicy.canonicalId.
+        // Un canonicalId per-chiave NON entra qui: il CapabilityReconciler lo troverebbe sempre
+        // "structurally missing" (il probe non può enumerare ogni chiave) e metterebbe la regola in
+        // needsReview permanente. Ogni cambio di chiave/valore cambia comunque il fingerprint →
+        // FirePolicy blocca con approval_fingerprint_mismatch finché non c'è nuova approvazione.
+        is Action.WriteSetting -> setOf(CapabilityIds.ACTION_WRITE_SETTING)
         is Action.InvokeLlm -> buildSet {
             add(CapabilityIds.ACTION_INVOKE_LLM)
             addAll(action.allowedTools)

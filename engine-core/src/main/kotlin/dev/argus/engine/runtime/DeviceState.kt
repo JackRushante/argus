@@ -108,6 +108,8 @@ object StateReadPlanner {
         is Action.CopyToClipboard,
         is Action.SetAlarm,
         is Action.SetTimer,
+        // write_setting non legge stato: namespace/key/value sono letterali approvati.
+        is Action.WriteSetting,
         -> StateReadRequest.EMPTY
     }
 }

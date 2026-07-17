@@ -425,6 +425,13 @@ class GenerativeEndToEndTest {
         override suspend fun openUrl(url: String, executionId: ExecutionId, priority: Int) = Unit
         override suspend fun tap(x: Int, y: Int, executionId: ExecutionId, priority: Int) = Unit
         override suspend fun inputText(text: String, executionId: ExecutionId, priority: Int) = Unit
+        override suspend fun writeSetting(
+            namespace: dev.argus.engine.model.SettingNamespace,
+            key: String,
+            value: String,
+            executionId: ExecutionId,
+            priority: Int,
+        ) = Unit
     }
 
     private companion object {

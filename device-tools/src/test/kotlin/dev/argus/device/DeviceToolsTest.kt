@@ -1,6 +1,7 @@
 package dev.argus.device
 
 import dev.argus.engine.model.DndMode
+import dev.argus.engine.model.SettingNamespace
 import dev.argus.engine.runtime.ExecutionId
 import dev.argus.shizuku.PrivilegedShell
 import dev.argus.shizuku.ShellResult
@@ -36,6 +37,7 @@ class DeviceToolsTest {
         tools.openUrl("https://example.com/a?q=uno%20due", EXECUTION_ID, PRIORITY)
         tools.tap(123, 456, EXECUTION_ID, PRIORITY)
         tools.inputText("ciao mondo", EXECUTION_ID, PRIORITY)
+        tools.writeSetting(SettingNamespace.SECURE, "adb_enabled", "1", EXECUTION_ID, PRIORITY)
 
         assertEquals(
             listOf(
@@ -70,6 +72,7 @@ class DeviceToolsTest {
                 ),
                 listOf("/system/bin/input", "tap", "123", "456"),
                 listOf("/system/bin/input", "text", "ciao mondo"),
+                listOf("/system/bin/settings", "put", "secure", "adb_enabled", "1"),
             ),
             shell.calls.map { it.command },
         )
@@ -90,6 +93,12 @@ class DeviceToolsTest {
         assertFailsWith<IllegalArgumentException> { tools.tap(-1, 2, EXECUTION_ID) }
         assertFailsWith<IllegalArgumentException> { tools.inputText("riga\nnuova", EXECUTION_ID) }
         assertFailsWith<IllegalArgumentException> { tools.inputText("letterale %s", EXECUTION_ID) }
+        assertFailsWith<IllegalArgumentException> {
+            tools.writeSetting(SettingNamespace.SECURE, "bad key", "1", EXECUTION_ID)
+        }
+        assertFailsWith<IllegalArgumentException> {
+            tools.writeSetting(SettingNamespace.SECURE, "adb_enabled", "x\nnewline", EXECUTION_ID)
+        }
         assertEquals(emptyList(), shell.calls)
     }
 

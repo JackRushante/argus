@@ -18,6 +18,7 @@ class ActionPrivilegeTest {
             Action.RunShell("id"),
             Action.Tap(1, 2),
             Action.InputText("x"),
+            Action.WriteSetting(SettingNamespace.SECURE, "adb_enabled", "1"),
         )
         privileged.forEach { action ->
             assertEquals(
@@ -71,5 +72,11 @@ class ActionPrivilegeTest {
         assertEquals(false, ActionPrivileges.requiresShizuku(Action.SetDnd(DndMode.OFF)))
         assertEquals(false, ActionPrivileges.requiresShizuku(Action.SetAlarm(hour = 8, minute = 0)))
         assertEquals(false, ActionPrivileges.requiresShizuku(Action.SetTimer(seconds = 60)))
+        assertEquals(
+            true,
+            ActionPrivileges.requiresShizuku(
+                Action.WriteSetting(SettingNamespace.GLOBAL, "airplane_mode_on", "1"),
+            ),
+        )
     }
 }

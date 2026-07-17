@@ -384,6 +384,35 @@ class ShizukuActionExecutorTest {
     }
 
     @Test
+    fun `write setting dispatches through the privileged shell with literal namespace key and value`() = runTest {
+        val tools = RecordingDeviceController()
+        val exec = executor(tools = tools)
+
+        assertEquals(
+            ActionResult.Success,
+            exec.execute(
+                Action.WriteSetting(dev.argus.engine.model.SettingNamespace.SECURE, "adb_enabled", "1"),
+                context,
+            ),
+        )
+        assertEquals(listOf("setting:secure:adb_enabled=1"), tools.calls)
+        assertEquals(listOf(context.executionId), tools.executionIds)
+        assertEquals(listOf(context.priority), tools.priorities)
+    }
+
+    @Test
+    fun `write setting surfaces the typed device failure code`() = runTest {
+        val exec = executor(ThrowingDeviceController(DeviceToolException("write_setting_failed")))
+        assertEquals(
+            ActionResult.Failure("write_setting_failed"),
+            exec.execute(
+                Action.WriteSetting(dev.argus.engine.model.SettingNamespace.GLOBAL, "airplane_mode_on", "1"),
+                context,
+            ),
+        )
+    }
+
+    @Test
     fun `set alarm and set timer route to the base executor`() = runTest {
         val surface = RecordingBaseSurface()
         val tools = RecordingDeviceController()
@@ -470,6 +499,13 @@ private class RecordingDeviceController : DeviceController {
         record(executionId, priority, "tap:$x,$y")
     override suspend fun inputText(text: String, executionId: ExecutionId, priority: Int) =
         record(executionId, priority, "text:$text")
+    override suspend fun writeSetting(
+        namespace: dev.argus.engine.model.SettingNamespace,
+        key: String,
+        value: String,
+        executionId: ExecutionId,
+        priority: Int,
+    ) = record(executionId, priority, "setting:${namespace.name.lowercase()}:$key=$value")
 }
 
 private class ThrowingDeviceController(private val failure: RuntimeException) : DeviceController {
@@ -482,6 +518,13 @@ private class ThrowingDeviceController(private val failure: RuntimeException) : 
     override suspend fun openUrl(url: String, executionId: ExecutionId, priority: Int) = fail()
     override suspend fun tap(x: Int, y: Int, executionId: ExecutionId, priority: Int) = fail()
     override suspend fun inputText(text: String, executionId: ExecutionId, priority: Int) = fail()
+    override suspend fun writeSetting(
+        namespace: dev.argus.engine.model.SettingNamespace,
+        key: String,
+        value: String,
+        executionId: ExecutionId,
+        priority: Int,
+    ) = fail()
 }
 
 private class RecordingBaseSurface(private val dndGranted: Boolean = true) : BaseActionSurface {
