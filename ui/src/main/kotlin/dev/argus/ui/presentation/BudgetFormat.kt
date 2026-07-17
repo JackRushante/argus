@@ -45,4 +45,33 @@ object BudgetFormat {
         if (dollars < 0.0) return null
         return Math.round(dollars * 1_000_000.0)
     }
+
+    // --- TOKEN (metrica primaria dei provider token-only: Hermes/OpenRouter/Custom) ---
+
+    /** (1500,300)->"in 1500 · out 300"; un lato null->"n/d"; entrambi null->"n/d". */
+    fun tokensLabel(tokensIn: Long?, tokensOut: Long?): String {
+        if (tokensIn == null && tokensOut == null) return "n/d"
+        return "in ${tokensIn?.toString() ?: "n/d"} · out ${tokensOut?.toString() ?: "n/d"}"
+    }
+
+    /** (300,1000)->"300 / 1000"; limite null/<=0->"300 · illimitato"; usato null->"n/d". */
+    fun tokensCapLabel(used: Long?, limit: Long?): String {
+        val usedLabel = used?.toString() ?: "n/d"
+        return if (limit != null && limit > 0) "$usedLabel / $limit" else "$usedLabel · illimitato"
+    }
+
+    /** 0f se usato n/d o limite null/<=0; altrimenti used/limit clampato in [0,1]. */
+    fun tokenRatio(used: Long?, limit: Long?): Float {
+        if (used == null || limit == null || limit <= 0L) return 0f
+        return (used.toFloat() / limit).coerceIn(0f, 1f)
+    }
+
+    /** "1500"->1500; ""/"0"->0 (illimitato); non intero o negativo->null. */
+    fun parseTokens(text: String): Long? {
+        val cleaned = text.trim()
+        if (cleaned.isEmpty()) return 0L
+        val tokens = cleaned.toLongOrNull() ?: return null
+        if (tokens < 0L) return null
+        return tokens
+    }
 }

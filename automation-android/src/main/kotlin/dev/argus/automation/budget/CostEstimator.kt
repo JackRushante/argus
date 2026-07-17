@@ -10,16 +10,19 @@ import dev.argus.engine.brain.TurnUsage
  */
 object CostEstimator {
     /**
-     * Costo in micro-USD, oppure `null` (mai throw) se: [usage] è null, [model] è null o sconosciuto
-     * al listino, o il provider non ha prezzi (HERMES, CUSTOM_OPENAI_COMPAT).
+     * Costo in micro-USD, oppure `null` (mai throw) se: il provider non è `costTracked` (i TOKEN-ONLY
+     * — HERMES, OPENROUTER, CUSTOM_OPENAI_COMPAT — non hanno mai un costo in dollari), [usage] è null,
+     * [model] è null o sconosciuto al listino, o il prezzo è assente.
      *
      * I token cached, se il listino espone `cachedInputMicrosPerMTok`, vengono scorporati dall'input
      * e prezzati alla tariffa cached; altrimenti restano prezzati come input pieno.
      * Arrotondamento half-up: `(somma + 500_000) / 1_000_000`.
      */
     fun estimate(providerId: ProviderId, model: String?, usage: TurnUsage?): Long? {
+        val spec = ProviderCatalog.spec(providerId)
+        if (!spec.costTracked) return null
         if (usage == null || model == null) return null
-        val price = ProviderCatalog.spec(providerId).prices[model] ?: return null
+        val price = spec.prices[model] ?: return null
 
         val cached = usage.cachedInputTokens ?: 0L
         val cachedRate = price.cachedInputMicrosPerMTok

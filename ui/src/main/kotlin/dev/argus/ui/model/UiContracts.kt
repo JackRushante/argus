@@ -234,26 +234,42 @@ enum class BgLocationState { GRANTED, WHILE_IN_USE, DENIED, NOT_NEEDED }
 
 data class ContactRow(val displayName: String, val conversationId: String)   // id in monospace, azione rimuovi
 
-/** Riga per-provider del breakdown budget. Costo nullable = "n/d" (Hermes pre-S15), distinto da 0. */
+/**
+ * Riga per-provider del breakdown budget. Metrica primaria: TOKEN in/out per finestra (null = "n/d",
+ * distinto da 0). Il costo in dollari esiste SOLO per i provider [costTracked] (OpenAI/Anthropic/
+ * Gemini): per i TOKEN-ONLY (Hermes/OpenRouter/Custom) resta null e la UI non mostra dollari.
+ */
 data class ProviderUsageUi(
     val providerId: String,        // ProviderId.wireName
     val providerLabel: String,     // dal ProviderCatalog, mappato nel VM
     val callsHour: Long,
     val callsDay: Long,
-    val costMonthMicros: Long?,    // null = n/d (es. Hermes pre-S15)
+    val costMonthMicros: Long?,    // null = n/d; sempre null per i provider non costTracked
+    val costTracked: Boolean = false,
+    val tokensInHour: Long? = null,
+    val tokensOutHour: Long? = null,
+    val tokensInDay: Long? = null,
+    val tokensOutDay: Long? = null,
+    val tokensInMonth: Long? = null,
+    val tokensOutMonth: Long? = null,
 )
 
 /**
  * Budget LLM aggregato cross-regola (§5.5). Limiti null = illimitato (la convenzione 0 = illimitato
  * vive solo al confine UI→VM). Costo in micro-USD; null = nessun dato costo (distinto da 0).
+ * [tokensInMonth]/[tokensOutMonth] sommano i soli provider TOKEN-ONLY, la stessa base su cui il
+ * [tokenLimitMonth] (tetto TOKEN mensile globale) viene applicato dalla policy.
  */
 data class BudgetUi(
     val usedHour: Long = 0,
     val limitHour: Int? = null,          // null = illimitato
     val usedDay: Long = 0,
     val limitDay: Int? = null,
-    val costMonthMicros: Long? = null,   // null = nessun dato costo nel mese
+    val costMonthMicros: Long? = null,   // null = nessun dato costo nel mese (solo provider priced)
     val costLimitMicros: Long? = null,
+    val tokensInMonth: Long? = null,     // null = n/d; solo provider token-only
+    val tokensOutMonth: Long? = null,
+    val tokenLimitMonth: Long? = null,   // tetto TOKEN mensile globale (token-only); null = illimitato
     val perProvider: List<ProviderUsageUi> = emptyList(),
     val softWarningActive: Boolean = false,
 )
@@ -278,6 +294,8 @@ interface SettingsCallbacks {
     fun onBudgetDayChange(maxPerDay: Int) {}
     /** Tetto costo mensile globale in micro-USD. 0 = illimitato. Default no-op. */
     fun onBudgetMonthlyCostChange(maxCostMonthMicros: Long) {}
+    /** Tetto TOKEN mensile globale (provider token-only). 0 = illimitato. Default no-op. */
+    fun onBudgetMonthlyTokensChange(maxTokensPerMonth: Long) {}
     fun onRevokePrivacy()
     fun onRerunOnboarding()
     /** Selettore provider: id = ProviderId.wireName. Id sconosciuti = no-op lato VM. */

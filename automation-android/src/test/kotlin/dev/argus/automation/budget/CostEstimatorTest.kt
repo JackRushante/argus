@@ -53,6 +53,15 @@ class CostEstimatorTest {
     }
 
     @Test
+    fun `provider token-only ritorna null anche per modelli prima prezzati`() {
+        // OpenRouter era stimato da listino statico (2 modelli su centinaia): ora è TOKEN-ONLY,
+        // il costo in dollari è sempre n/d a prescindere dal modello.
+        val usage = TurnUsage(inputTokens = 1_000_000, outputTokens = 100_000)
+        assertNull(CostEstimator.estimate(ProviderId.OPENROUTER, "openai/gpt-5.5", usage))
+        assertNull(CostEstimator.estimate(ProviderId.OPENROUTER, "anthropic/claude-sonnet-4-5", usage))
+    }
+
+    @Test
     fun `usage o model null ritorna null`() {
         assertNull(CostEstimator.estimate(ProviderId.OPENAI, "gpt-5.5", null))
         assertNull(

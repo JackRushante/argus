@@ -219,7 +219,8 @@ class MeteredBrain(
         val bucket = when (tripped.window) {
             LimitWindow.HOUR -> (now / UsageWindows.HOUR_MILLIS).toString()
             LimitWindow.DAY -> Instant.ofEpochMilli(now).atZone(zone()).toLocalDate().toString()
-            LimitWindow.MONTH_COST -> YearMonth.from(Instant.ofEpochMilli(now).atZone(zone())).toString()
+            LimitWindow.MONTH_COST, LimitWindow.MONTH_TOKENS ->
+                YearMonth.from(Instant.ofEpochMilli(now).atZone(zone())).toString()
         }
         return "${tripped.auditDetail()}:$bucket"
     }

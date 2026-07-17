@@ -670,6 +670,7 @@ private fun BudgetSection(budget: BudgetUi, callbacks: SettingsCallbacks) {
             }
             BudgetCallsRow("Chiamate · ultima ora", budget.usedHour, budget.limitHour)
             BudgetCallsRow("Chiamate · oggi", budget.usedDay, budget.limitDay)
+            BudgetTokensRow(budget.tokensInMonth, budget.tokensOutMonth, budget.tokenLimitMonth)
             BudgetCostRow(budget.costMonthMicros, budget.costLimitMicros)
             if (budget.perProvider.isNotEmpty()) {
                 budget.perProvider.forEach { provider ->
@@ -679,17 +680,34 @@ private fun BudgetSection(budget: BudgetUi, callbacks: SettingsCallbacks) {
                             color = MaterialTheme.colorScheme.onSurface,
                             style = MaterialTheme.typography.labelMedium,
                         )
+                        // Metrica primaria: TOKEN input/output per finestra.
                         Text(
-                            "ora ${provider.callsHour} · oggi ${provider.callsDay} · " +
-                                "mese ${BudgetFormat.costLabel(provider.costMonthMicros)}",
+                            "token · ora ${BudgetFormat.tokensLabel(provider.tokensInHour, provider.tokensOutHour)} · " +
+                                "oggi ${BudgetFormat.tokensLabel(provider.tokensInDay, provider.tokensOutDay)} · " +
+                                "mese ${BudgetFormat.tokensLabel(provider.tokensInMonth, provider.tokensOutMonth)}",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodyMedium,
                         )
+                        Text(
+                            "chiamate · ora ${provider.callsHour} · oggi ${provider.callsDay}",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        // Dollari SOLO per i provider a listino noto: mai per Hermes/OpenRouter/Custom.
+                        if (provider.costTracked) {
+                            Text(
+                                "costo mese ${BudgetFormat.costLabel(provider.costMonthMicros)}",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
                     }
                 }
             }
             Text(
-                "Costi stimati dal listino pubblico (stima indicativa, non fattura) · EUR a tasso fisso ≈",
+                "Costi in dollari stimati dal listino pubblico solo per i provider a prezzo noto " +
+                    "(stima indicativa, non fattura) · EUR a tasso fisso ≈ · " +
+                    "Hermes/OpenRouter/Custom: solo token",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.labelSmall,
             )
@@ -704,11 +722,13 @@ private fun BudgetSection(budget: BudgetUi, callbacks: SettingsCallbacks) {
             initialMaxPerHour = budget.limitHour,
             initialMaxPerDay = budget.limitDay,
             initialMaxCostMonthMicros = budget.costLimitMicros,
+            initialMaxTokensMonth = budget.tokenLimitMonth,
             onDismiss = { showLimitsEditor = false },
-            onSave = { maxPerHour, maxPerDay, maxCostMonthMicros ->
+            onSave = { maxPerHour, maxPerDay, maxCostMonthMicros, maxTokensMonth ->
                 callbacks.onBudgetChange(maxPerHour)
                 callbacks.onBudgetDayChange(maxPerDay)
                 callbacks.onBudgetMonthlyCostChange(maxCostMonthMicros)
+                callbacks.onBudgetMonthlyTokensChange(maxTokensMonth)
             },
         )
     }
@@ -732,6 +752,41 @@ private fun BudgetCallsRow(label: String, used: Long, limit: Int?) {
                 modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)),
                 color = MaterialTheme.colorScheme.primary,
                 trackColor = MaterialTheme.colorScheme.background,
+            )
+        }
+    }
+}
+
+/** Token mese dei provider token-only (Hermes/OpenRouter/Custom): la loro metrica primaria. */
+@Composable
+private fun BudgetTokensRow(tokensIn: Long?, tokensOut: Long?, tokenLimitMonth: Long?) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Token · mese (token-only)",
+                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                BudgetFormat.tokensLabel(tokensIn, tokensOut),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = FontFamily.Monospace,
+            )
+        }
+        if (tokenLimitMonth != null && tokenLimitMonth > 0L) {
+            val used = (tokensIn ?: 0L) + (tokensOut ?: 0L)
+            LinearProgressIndicator(
+                progress = { BudgetFormat.tokenRatio(used, tokenLimitMonth) },
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.background,
+            )
+            Text(
+                "Limite: ${BudgetFormat.tokensCapLabel(used, tokenLimitMonth)}",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
             )
         }
     }
@@ -846,9 +901,22 @@ private val previewAllGreen = SettingsState(
         limitDay = 100,
         costMonthMicros = 1_870_000,
         costLimitMicros = 5_000_000,
+        tokensInMonth = 42_000,
+        tokensOutMonth = 6_500,
+        tokenLimitMonth = 1_000_000,
         perProvider = listOf(
-            ProviderUsageUi("openai", "OpenAI", callsHour = 3, callsDay = 11, costMonthMicros = 1_870_000),
-            ProviderUsageUi("hermes", "Hermes (self-hosted)", callsHour = 0, callsDay = 0, costMonthMicros = null),
+            ProviderUsageUi(
+                "openai", "OpenAI", callsHour = 3, callsDay = 11, costMonthMicros = 1_870_000,
+                costTracked = true,
+                tokensInHour = 4_200, tokensOutHour = 600,
+                tokensInDay = 18_000, tokensOutDay = 2_400,
+                tokensInMonth = 310_000, tokensOutMonth = 41_000,
+            ),
+            ProviderUsageUi(
+                "hermes", "Hermes (self-hosted)", callsHour = 0, callsDay = 0, costMonthMicros = null,
+                costTracked = false,
+                tokensInMonth = 42_000, tokensOutMonth = 6_500,
+            ),
         ),
         softWarningActive = false,
     ),
@@ -887,7 +955,13 @@ private val previewDegraded = SettingsState(
         costMonthMicros = 4_500_000,
         costLimitMicros = 5_000_000,
         perProvider = listOf(
-            ProviderUsageUi("openai", "OpenAI", callsHour = 17, callsDay = 92, costMonthMicros = 4_500_000),
+            ProviderUsageUi(
+                "openai", "OpenAI", callsHour = 17, callsDay = 92, costMonthMicros = 4_500_000,
+                costTracked = true,
+                tokensInHour = 21_000, tokensOutHour = 3_100,
+                tokensInDay = 96_000, tokensOutDay = 14_000,
+                tokensInMonth = 1_450_000, tokensOutMonth = 210_000,
+            ),
         ),
         softWarningActive = true,
     ),

@@ -33,6 +33,12 @@ data class ProviderSpec(
     val prices: Map<String, ModelPrice> = emptyMap(),
     /** Hint morbido per la UI (es. "sk-"): MAI usato come validazione bloccante. */
     val apiKeyPrefixHint: String? = null,
+    /**
+     * true SOLO per i provider a listino pubblico noto (OpenAI/Anthropic/Gemini): per loro la stima
+     * costo in dollari ha senso. I provider TOKEN-ONLY (Hermes/OpenRouter/Custom) mostrano e limitano
+     * solo token: nessuna stima in dollari da listino statico.
+     */
+    val costTracked: Boolean = false,
 )
 
 /**
@@ -53,7 +59,7 @@ object ProviderCatalog {
             defaultBaseUrl = AndroidBridgeConfigurationStore.DEFAULT_BASE_URL,
             authStyle = AuthStyle.BEARER,
             defaultModels = emptyList(),
-            // Costo "n/d" fino a S15 (il wire Hermes non trasporta ancora usage).
+            // TOKEN-ONLY: self-hosted, nessun dollaro da mostrare (il wire non trasporta usage fino a S15).
             prices = emptyMap(),
         ),
         ProviderSpec(
@@ -63,6 +69,7 @@ object ProviderCatalog {
             authStyle = AuthStyle.BEARER,
             defaultModels = listOf("gpt-5.5", "gpt-5-mini"),
             quirks = ProviderQuirks(outputCapParam = OutputCapParam.MAX_COMPLETION_TOKENS),
+            costTracked = true,
             prices = mapOf(
                 // gpt-5.5: $1.25 in / $10 out per 1M token.
                 "gpt-5.5" to ModelPrice(1_250_000, 10_000_000, cachedInputMicrosPerMTok = 125_000),
@@ -78,6 +85,7 @@ object ProviderCatalog {
             authStyle = AuthStyle.X_API_KEY,
             defaultModels = listOf("claude-opus-4-8", "claude-sonnet-4-5"),
             quirks = ProviderQuirks(extraHeaders = mapOf("anthropic-version" to "2023-06-01")),
+            costTracked = true,
             prices = mapOf(
                 // claude-opus: $15 in / $75 out per 1M token.
                 "claude-opus-4-8" to ModelPrice(15_000_000, 75_000_000, cachedInputMicrosPerMTok = 1_500_000),
@@ -94,6 +102,7 @@ object ProviderCatalog {
             authStyle = AuthStyle.BEARER,
             defaultModels = listOf("gemini-2.5-pro", "gemini-2.5-flash"),
             quirks = ProviderQuirks(extraBodyPassthrough = true),
+            costTracked = true,
             prices = mapOf(
                 // gemini-2.5-pro: $1.25 in / $10 out per 1M token (fascia <=200k).
                 "gemini-2.5-pro" to ModelPrice(1_250_000, 10_000_000),
@@ -108,11 +117,9 @@ object ProviderCatalog {
             defaultBaseUrl = "https://openrouter.ai/api/v1",
             authStyle = AuthStyle.BEARER,
             defaultModels = listOf("openai/gpt-5.5", "anthropic/claude-sonnet-4-5"),
-            prices = mapOf(
-                // OpenRouter fa passthrough del listino provider; timbrato con PRICING_VERSION.
-                "openai/gpt-5.5" to ModelPrice(1_250_000, 10_000_000),
-                "anthropic/claude-sonnet-4-5" to ModelPrice(3_000_000, 15_000_000),
-            ),
+            // TOKEN-ONLY: il listino statico copriva 2 modelli su centinaia e non leggiamo il
+            // costo reale dal wire — niente stime in dollari, si contano solo i token.
+            prices = emptyMap(),
             apiKeyPrefixHint = "sk-or-",
         ),
         ProviderSpec(

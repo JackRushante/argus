@@ -102,11 +102,28 @@ private fun ProviderUsageAggregate.netCalls(): Long = (calls - blockedCalls).coe
 
 private fun List<ProviderUsageAggregate>.totalNetCalls(): Long = sumOf { it.netCalls() }
 
-/** Somma dei costi: se TUTTI gli aggregati hanno costo null (es. solo Hermes) il totale è null, non 0. */
+/** true se il wireName appartiene a un provider a costo tracciato (listino noto nel catalog). */
+private fun costTrackedWire(wire: String): Boolean =
+    ProviderId.fromWireName(wire)?.let { ProviderCatalog.spec(it).costTracked } ?: false
+
+/**
+ * Somma dei costi dei SOLI provider costTracked: i token-only (Hermes/OpenRouter/Custom) non hanno
+ * dollari, nemmeno per eventuali costMicros legacy in tabella. Tutti null → null, non 0.
+ */
 private fun List<ProviderUsageAggregate>.totalCostMicros(): Long? {
-    val present = mapNotNull { it.costMicros }
+    val present = filter { costTrackedWire(it.providerId) }.mapNotNull { it.costMicros }
     return if (present.isEmpty()) null else present.sum()
 }
+
+/** Somma nullable: se TUTTI i valori sono null (n/d) il totale resta null, non 0. */
+private fun List<Long?>.sumOrNull(): Long? {
+    val present = filterNotNull()
+    return if (present.isEmpty()) null else present.sum()
+}
+
+/** Token totali in+out di un provider; null solo se entrambe le colonne sono n/d. */
+private fun totalTokens(tokensIn: Long?, tokensOut: Long?): Long? =
+    if (tokensIn == null && tokensOut == null) null else (tokensIn ?: 0L) + (tokensOut ?: 0L)
 
 private fun overSoftCalls(used: Long, limit: Int?, softPct: Int): Boolean {
     if (limit == null || limit <= 0) return false
@@ -114,16 +131,18 @@ private fun overSoftCalls(used: Long, limit: Int?, softPct: Int): Boolean {
     return used >= threshold
 }
 
-private fun overSoftCost(usedMicros: Long?, limitMicros: Long?, softPct: Int): Boolean {
-    if (limitMicros == null || limitMicros <= 0L) return false
-    val threshold = ceil(limitMicros.toDouble() * softPct / 100.0).toLong()
-    return (usedMicros ?: 0L) >= threshold
+/** Soglia soft generica su quantità Long (micro-USD o token): null usato pesa 0. */
+private fun overSoftAmount(used: Long?, limit: Long?, softPct: Int): Boolean {
+    if (limit == null || limit <= 0L) return false
+    val threshold = ceil(limit.toDouble() * softPct / 100.0).toLong()
+    return (used ?: 0L) >= threshold
 }
 
 /**
  * Mappa gli aggregati usage + i limiti configurati nel contratto UI tipizzato [BudgetUi]. Puro e
- * testabile su host. Chiamate = calls - blockedCalls; costo mese = somma costMicros (tutti null → null,
- * non 0). Il breakdown per-provider è ordinato per wireName con label dal [ProviderCatalog].
+ * testabile su host. Chiamate = calls - blockedCalls; costo mese = somma costMicros dei soli provider
+ * costTracked (tutti null → null, non 0); token mese = somma in/out dei soli provider token-only.
+ * Il breakdown per-provider è ordinato per wireName con label dal [ProviderCatalog].
  */
 internal fun budgetUi(usage: BudgetUsageSnapshot, settings: BudgetSettings): BudgetUi {
     val global = settings.global
@@ -131,6 +150,9 @@ internal fun budgetUi(usage: BudgetUsageSnapshot, settings: BudgetSettings): Bud
     val usedHour = usage.hour.totalNetCalls()
     val usedDay = usage.day.totalNetCalls()
     val costMonth = usage.month.totalCostMicros()
+    val tokenOnlyMonth = usage.month.filterNot { costTrackedWire(it.providerId) }
+    val tokensInMonth = tokenOnlyMonth.map { it.tokensIn }.sumOrNull()
+    val tokensOutMonth = tokenOnlyMonth.map { it.tokensOut }.sumOrNull()
 
     val wireNames = (
         usage.hour.map { it.providerId } +
@@ -143,26 +165,46 @@ internal fun budgetUi(usage: BudgetUsageSnapshot, settings: BudgetSettings): Bud
         val monthAgg = usage.month.firstOrNull { it.providerId == wire }
         val label = ProviderId.fromWireName(wire)
             ?.let { ProviderCatalog.spec(it).displayName } ?: wire
+        val tracked = costTrackedWire(wire)
         ProviderUsageUi(
             providerId = wire,
             providerLabel = label,
             callsHour = hourAgg?.netCalls() ?: 0L,
             callsDay = dayAgg?.netCalls() ?: 0L,
-            costMonthMicros = monthAgg?.costMicros,
+            // Dollari SOLO per i priced: un token-only non mostra mai costi, neanche legacy.
+            costMonthMicros = if (tracked) monthAgg?.costMicros else null,
+            costTracked = tracked,
+            tokensInHour = hourAgg?.tokensIn,
+            tokensOutHour = hourAgg?.tokensOut,
+            tokensInDay = dayAgg?.tokensIn,
+            tokensOutDay = dayAgg?.tokensOut,
+            tokensInMonth = monthAgg?.tokensIn,
+            tokensOutMonth = monthAgg?.tokensOut,
         )
     }
 
     var softActive = overSoftCalls(usedHour, global.maxCallsPerHour, softPct) ||
         overSoftCalls(usedDay, global.maxCallsPerDay, softPct) ||
-        overSoftCost(costMonth, global.maxCostPerMonthMicros, softPct)
+        overSoftAmount(costMonth, global.maxCostPerMonthMicros, softPct) ||
+        overSoftAmount(totalTokens(tokensInMonth, tokensOutMonth), global.maxTokensPerMonth, softPct)
     if (!softActive) {
         for ((wire, limits) in settings.perProvider) {
             val hourAgg = usage.hour.firstOrNull { it.providerId == wire }
             val dayAgg = usage.day.firstOrNull { it.providerId == wire }
             val monthAgg = usage.month.firstOrNull { it.providerId == wire }
+            // Tetto mensile per natura del provider: costo per i priced, token per i token-only.
+            val monthlySoft = if (costTrackedWire(wire)) {
+                overSoftAmount(monthAgg?.costMicros, limits.maxCostPerMonthMicros, softPct)
+            } else {
+                overSoftAmount(
+                    totalTokens(monthAgg?.tokensIn, monthAgg?.tokensOut),
+                    limits.maxTokensPerMonth,
+                    softPct,
+                )
+            }
             if (overSoftCalls(hourAgg?.netCalls() ?: 0L, limits.maxCallsPerHour, softPct) ||
                 overSoftCalls(dayAgg?.netCalls() ?: 0L, limits.maxCallsPerDay, softPct) ||
-                overSoftCost(monthAgg?.costMicros, limits.maxCostPerMonthMicros, softPct)
+                monthlySoft
             ) {
                 softActive = true
                 break
@@ -177,6 +219,9 @@ internal fun budgetUi(usage: BudgetUsageSnapshot, settings: BudgetSettings): Bud
         limitDay = global.maxCallsPerDay,
         costMonthMicros = costMonth,
         costLimitMicros = global.maxCostPerMonthMicros,
+        tokensInMonth = tokensInMonth,
+        tokensOutMonth = tokensOutMonth,
+        tokenLimitMonth = global.maxTokensPerMonth,
         perProvider = perProvider,
         softWarningActive = softActive,
     )
@@ -450,6 +495,9 @@ class SettingsViewModel @Inject constructor(
 
     fun onBudgetMonthlyCostChange(maxCostMonthMicros: Long) =
         updateGlobalLimits { it.copy(maxCostPerMonthMicros = maxCostMonthMicros.takeIf { v -> v > 0 }) }
+
+    fun onBudgetMonthlyTokensChange(maxTokensPerMonth: Long) =
+        updateGlobalLimits { it.copy(maxTokensPerMonth = maxTokensPerMonth.takeIf { v -> v > 0 }) }
 
     private fun updateGlobalLimits(mutate: (BudgetLimits) -> BudgetLimits) {
         viewModelScope.launch {

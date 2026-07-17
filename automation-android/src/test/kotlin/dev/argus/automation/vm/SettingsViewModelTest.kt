@@ -20,6 +20,7 @@ import dev.argus.brain.TransportFactory
 import dev.argus.brain.TransportHealth
 import dev.argus.data.DeferredReplyStore
 import dev.argus.data.UsageWindows
+import dev.argus.data.dao.ProviderTokensAggregate
 import dev.argus.data.dao.ProviderUsageAggregate
 import dev.argus.data.dao.UsageDao
 import dev.argus.data.entities.DeferredReplyEntity
@@ -399,17 +400,69 @@ class SettingsViewModelTest {
         advanceUntilIdle()
         assertNull(settings.observe().value.global.maxCostPerMonthMicros)
     }
+
+    @Test
+    fun `onBudgetMonthlyTokensChange persiste il tetto token mensile`() = runTest(dispatcher) {
+        val settings = FakeBudgetSettingsStore()
+        val vm = settingsViewModel(FakeProviderStore(), budgetSettings = settings)
+        observe(vm)
+        advanceUntilIdle()
+
+        vm.onBudgetMonthlyTokensChange(1_000_000)
+        advanceUntilIdle()
+        assertEquals(1_000_000L, settings.observe().value.global.maxTokensPerMonth)
+
+        vm.onBudgetMonthlyTokensChange(0)
+        advanceUntilIdle()
+        assertNull(settings.observe().value.global.maxTokensPerMonth)
+    }
+
+    @Test
+    fun `budget espone token per provider e nessun dollaro per i token-only`() = runTest(dispatcher) {
+        val usage = FakeUsageDao(
+            all = listOf(
+                aggregate("hermes", calls = 3, blocked = 0, cost = null, tokensIn = 150, tokensOut = 15),
+                aggregate("openai", calls = 5, blocked = 0, cost = 1_870_000, tokensIn = 900, tokensOut = 90),
+            ),
+        )
+        val vm = settingsViewModel(FakeProviderStore(), usage = usage)
+        observe(vm)
+        vm.refresh()
+        advanceUntilIdle()
+
+        val budget = vm.state.value.budget
+        val hermes = budget.perProvider.first { it.providerId == "hermes" }
+        assertFalse(hermes.costTracked)
+        assertNull(hermes.costMonthMicros)
+        assertEquals(150L, hermes.tokensInMonth)
+        assertEquals(15L, hermes.tokensOutMonth)
+
+        val openai = budget.perProvider.first { it.providerId == "openai" }
+        assertTrue(openai.costTracked)
+        assertEquals(1_870_000L, openai.costMonthMicros)
+
+        // Il totale token mese (token-only) esclude i 990 token di openai.
+        assertEquals(150L, budget.tokensInMonth)
+        assertEquals(15L, budget.tokensOutMonth)
+    }
 }
 
-private fun aggregate(providerId: String, calls: Long, blocked: Long, cost: Long?): ProviderUsageAggregate =
+private fun aggregate(
+    providerId: String,
+    calls: Long,
+    blocked: Long,
+    cost: Long?,
+    tokensIn: Long? = null,
+    tokensOut: Long? = null,
+): ProviderUsageAggregate =
     ProviderUsageAggregate(
         providerId = providerId,
         calls = calls,
         okCalls = (calls - blocked).coerceAtLeast(0),
         errorCalls = 0,
         blockedCalls = blocked,
-        tokensIn = null,
-        tokensOut = null,
+        tokensIn = tokensIn,
+        tokensOut = tokensOut,
         costMicros = cost,
     )
 
@@ -438,6 +491,13 @@ private class FakeUsageDao(
             else -> emptyList()
         }
     }
+
+    override suspend fun tokensBetween(
+        startMillis: Long,
+        endMillisExclusive: Long,
+    ): List<ProviderTokensAggregate> =
+        aggregateBetween(startMillis, endMillisExclusive)
+            .map { ProviderTokensAggregate(it.providerId, it.tokensIn, it.tokensOut) }
 
     override suspend fun purgeBefore(cutoffMillis: Long): Int = 0
 }
@@ -469,12 +529,14 @@ private class FakeBudgetSettingsStore(
     }
 
     private fun negative(l: BudgetLimits): Boolean =
-        (l.maxCallsPerHour ?: 0) < 0 || (l.maxCallsPerDay ?: 0) < 0 || (l.maxCostPerMonthMicros ?: 0L) < 0L
+        (l.maxCallsPerHour ?: 0) < 0 || (l.maxCallsPerDay ?: 0) < 0 ||
+            (l.maxCostPerMonthMicros ?: 0L) < 0L || (l.maxTokensPerMonth ?: 0L) < 0L
 
     private fun normalize(l: BudgetLimits): BudgetLimits = BudgetLimits(
         maxCallsPerHour = l.maxCallsPerHour?.takeIf { it > 0 },
         maxCallsPerDay = l.maxCallsPerDay?.takeIf { it > 0 },
         maxCostPerMonthMicros = l.maxCostPerMonthMicros?.takeIf { it > 0L },
+        maxTokensPerMonth = l.maxTokensPerMonth?.takeIf { it > 0L },
     )
 }
 

@@ -1,12 +1,14 @@
 package dev.argus.automation.budget
 
+import dev.argus.brain.ProviderCatalog
 import dev.argus.brain.ProviderId
 import dev.argus.data.UsageWindows
+import dev.argus.data.dao.ProviderTokensAggregate
 import dev.argus.data.dao.ProviderUsageAggregate
 import dev.argus.data.dao.UsageDao
 import java.time.ZoneId
 
-enum class LimitWindow { HOUR, DAY, MONTH_COST }
+enum class LimitWindow { HOUR, DAY, MONTH_COST, MONTH_TOKENS }
 
 sealed interface BudgetScope {
     data object Global : BudgetScope
@@ -20,6 +22,7 @@ data class TrippedLimit(val window: LimitWindow, val scope: BudgetScope) {
             LimitWindow.HOUR -> "hour"
             LimitWindow.DAY -> "day"
             LimitWindow.MONTH_COST -> "month_cost"
+            LimitWindow.MONTH_TOKENS -> "month_tokens"
         }
         val scopeToken = when (scope) {
             BudgetScope.Global -> "global"
@@ -37,7 +40,9 @@ sealed interface BudgetVerdict {
 
 /**
  * Aggregato cross-regola: valuta i tetti scelti dall'utente (globali + per-provider) sulle finestre
- * ora/giorno e sul tetto costo mensile. Separato dal cooldown per-regola dell'Engine.
+ * ora/giorno e sul tetto mensile. I limiti chiamate ora/giorno sono universali; il tetto mensile
+ * dipende dal provider: COSTO per i costTracked (OpenAI/Anthropic/Gemini), TOKEN (in+out) per i
+ * TOKEN-ONLY (Hermes/OpenRouter/Custom). Separato dal cooldown per-regola dell'Engine.
  */
 open class BudgetPolicy(
     private val usage: UsageDao,
@@ -62,14 +67,26 @@ open class BudgetPolicy(
         val globalLimits = current.global
         val softPct = current.softThresholdPct
 
-        // Ordine deterministico: prima provider (HOUR->DAY->MONTH_COST), poi global (stesso ordine).
+        val costTracked = ProviderCatalog.spec(providerId).costTracked
+        // Il tetto mensile cambia natura col provider: costo per i priced, token per i token-only.
+        // Il tetto token globale copre SOLO i provider token-only: i priced sono governati dal costo.
+        val (providerMonth, globalMonth) = if (costTracked) {
+            Check(LimitWindow.MONTH_COST, provider, providerLimits.maxCostPerMonthMicros, costFor(monthAgg, wire)) to
+                Check(LimitWindow.MONTH_COST, BudgetScope.Global, globalLimits.maxCostPerMonthMicros, costAll(monthAgg))
+        } else {
+            val monthTokens = usage.tokensBetween(monthWindow.startMillis, monthWindow.endMillisExclusive)
+            Check(LimitWindow.MONTH_TOKENS, provider, providerLimits.maxTokensPerMonth, tokensFor(monthTokens, wire)) to
+                Check(LimitWindow.MONTH_TOKENS, BudgetScope.Global, globalLimits.maxTokensPerMonth, tokensTokenOnly(monthTokens))
+        }
+
+        // Ordine deterministico: prima provider (HOUR->DAY->MONTH_*), poi global (stesso ordine).
         val checks = listOf(
             Check(LimitWindow.HOUR, provider, providerLimits.maxCallsPerHour?.toLong(), callsFor(hourAgg, wire)),
             Check(LimitWindow.DAY, provider, providerLimits.maxCallsPerDay?.toLong(), callsFor(dayAgg, wire)),
-            Check(LimitWindow.MONTH_COST, provider, providerLimits.maxCostPerMonthMicros, costFor(monthAgg, wire)),
+            providerMonth,
             Check(LimitWindow.HOUR, BudgetScope.Global, globalLimits.maxCallsPerHour?.toLong(), callsAll(hourAgg)),
             Check(LimitWindow.DAY, BudgetScope.Global, globalLimits.maxCallsPerDay?.toLong(), callsAll(dayAgg)),
-            Check(LimitWindow.MONTH_COST, BudgetScope.Global, globalLimits.maxCostPerMonthMicros, costAll(monthAgg)),
+            globalMonth,
         )
 
         checks.firstOrNull { it.limit != null && it.used >= it.limit }?.let {
@@ -105,6 +122,20 @@ open class BudgetPolicy(
 
     private fun costAll(aggregates: List<ProviderUsageAggregate>): Long =
         aggregates.sumOf { it.costMicros ?: 0L }
+
+    /** Token consumati = in + out; NULL (n/d) pesa 0, come per il costo. */
+    private fun tokens(row: ProviderTokensAggregate): Long =
+        (row.tokensIn ?: 0L) + (row.tokensOut ?: 0L)
+
+    private fun tokensFor(rows: List<ProviderTokensAggregate>, wire: String): Long =
+        rows.firstOrNull { it.providerId == wire }?.let(::tokens) ?: 0L
+
+    /** Somma dei soli provider token-only: i token dei priced non consumano il tetto token globale. */
+    private fun tokensTokenOnly(rows: List<ProviderTokensAggregate>): Long =
+        rows.filterNot { costTrackedWire(it.providerId) }.sumOf(::tokens)
+
+    private fun costTrackedWire(wire: String): Boolean =
+        ProviderId.fromWireName(wire)?.let { ProviderCatalog.spec(it).costTracked } ?: false
 
     private fun softFloor(limit: Long, softPct: Int): Long = (limit * softPct + 99) / 100
 }

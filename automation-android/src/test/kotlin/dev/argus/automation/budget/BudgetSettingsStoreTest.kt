@@ -77,6 +77,28 @@ class BudgetSettingsStoreTest {
     }
 
     @Test
+    fun `limite token mensile persiste globale e per provider`() = runTest {
+        val store = AndroidBudgetSettingsStore(context)
+        assertTrue(store.setGlobalLimits(BudgetLimits(maxTokensPerMonth = 1_000_000)))
+        assertTrue(store.setProviderLimits(ProviderId.HERMES, BudgetLimits(maxTokensPerMonth = 250_000)))
+
+        val restored = AndroidBudgetSettingsStore(context)
+        assertEquals(1_000_000L, restored.observe().value.global.maxTokensPerMonth)
+        assertEquals(250_000L, restored.observe().value.perProvider["hermes"]?.maxTokensPerMonth)
+    }
+
+    @Test
+    fun `token zero normalizzato a illimitato e negativo rifiutato`() = runTest {
+        val store = AndroidBudgetSettingsStore(context)
+        assertTrue(store.setGlobalLimits(BudgetLimits(maxTokensPerMonth = 0)))
+        assertNull(store.observe().value.global.maxTokensPerMonth)
+
+        assertTrue(store.setGlobalLimits(BudgetLimits(maxTokensPerMonth = 500)))
+        assertFalse(store.setGlobalLimits(BudgetLimits(maxTokensPerMonth = -1)))
+        assertEquals(500L, store.observe().value.global.maxTokensPerMonth)
+    }
+
+    @Test
     fun `softThresholdPct fuori intervallo valido rifiutato`() = runTest {
         val store = AndroidBudgetSettingsStore(context)
         assertFalse(store.setSoftThresholdPct(0))

@@ -2,6 +2,7 @@ package dev.argus.automation.budget
 
 import dev.argus.brain.ProviderId
 import dev.argus.data.UsageWindows
+import dev.argus.data.dao.ProviderTokensAggregate
 import dev.argus.data.dao.ProviderUsageAggregate
 import dev.argus.data.dao.UsageDao
 import dev.argus.data.entities.UsageEventEntity
@@ -110,6 +111,113 @@ class BudgetPolicyTest {
         assertEquals(BudgetVerdict.Ok, policy.check(ProviderId.HERMES, now))
     }
 
+    // --- tetto TOKEN mensile (provider token-only) ---------------------------
+
+    @Test
+    fun `tetto token mensile per provider token-only raggiunto ritorna HardExceeded`() = runTest {
+        val policy = policy(
+            settings = BudgetSettings(
+                perProvider = mapOf("hermes" to BudgetLimits(maxTokensPerMonth = 1_000)),
+            ),
+            aggregates = listOf(agg("hermes", calls = 3, tokensIn = 600, tokensOut = 400)),
+        )
+        val verdict = policy.check(ProviderId.HERMES, now)
+        assertIs<BudgetVerdict.HardExceeded>(verdict)
+        assertEquals("month_tokens:hermes", verdict.tripped.auditDetail())
+    }
+
+    @Test
+    fun `tetto token mensile soft a 80 prima del limite`() = runTest {
+        val policy = policy(
+            settings = BudgetSettings(
+                perProvider = mapOf("hermes" to BudgetLimits(maxTokensPerMonth = 1_000)),
+                softThresholdPct = 80,
+            ),
+            aggregates = listOf(agg("hermes", calls = 3, tokensIn = 700, tokensOut = 100)),
+        )
+        val verdict = policy.check(ProviderId.HERMES, now)
+        assertIs<BudgetVerdict.SoftExceeded>(verdict)
+        assertEquals("month_tokens:hermes", verdict.tripped.auditDetail())
+    }
+
+    @Test
+    fun `provider costTracked ignora il tetto token e usa il tetto costo`() = runTest {
+        // openai ha superato di molto il tetto token, ma è priced: conta solo il costo.
+        val policy = policy(
+            settings = BudgetSettings(
+                perProvider = mapOf(
+                    "openai" to BudgetLimits(maxTokensPerMonth = 100, maxCostPerMonthMicros = 10_000_000),
+                ),
+            ),
+            aggregates = listOf(agg("openai", calls = 3, tokensIn = 5_000, tokensOut = 5_000, costMicros = 1_000)),
+        )
+        assertEquals(BudgetVerdict.Ok, policy.check(ProviderId.OPENAI, now))
+    }
+
+    @Test
+    fun `provider token-only ignora il tetto costo e usa il tetto token`() = runTest {
+        // Anche con un costMicros legacy in tabella, per hermes conta SOLO il tetto token.
+        val policy = policy(
+            settings = BudgetSettings(
+                perProvider = mapOf(
+                    "hermes" to BudgetLimits(maxCostPerMonthMicros = 1, maxTokensPerMonth = 1_000),
+                ),
+            ),
+            aggregates = listOf(agg("hermes", calls = 3, tokensIn = 100, tokensOut = 100, costMicros = 999)),
+        )
+        assertEquals(BudgetVerdict.Ok, policy.check(ProviderId.HERMES, now))
+    }
+
+    @Test
+    fun `tetto token globale somma solo i provider token-only`() = runTest {
+        val settings = BudgetSettings(global = BudgetLimits(maxTokensPerMonth = 1_000))
+        // I 10_000 token di openai (priced) NON consumano il tetto token globale.
+        val under = policy(
+            settings,
+            listOf(
+                agg("hermes", calls = 2, tokensIn = 300, tokensOut = 100),
+                agg("openai", calls = 2, tokensIn = 9_000, tokensOut = 1_000),
+            ),
+        )
+        assertEquals(BudgetVerdict.Ok, under.check(ProviderId.HERMES, now))
+
+        val over = policy(
+            settings,
+            listOf(
+                agg("hermes", calls = 2, tokensIn = 600, tokensOut = 200),
+                agg("openrouter", calls = 1, tokensIn = 200, tokensOut = 0),
+            ),
+        )
+        val verdict = over.check(ProviderId.HERMES, now)
+        assertIs<BudgetVerdict.HardExceeded>(verdict)
+        assertEquals("month_tokens:global", verdict.tripped.auditDetail())
+    }
+
+    @Test
+    fun `tetto token globale non blocca i provider costTracked`() = runTest {
+        val policy = policy(
+            settings = BudgetSettings(global = BudgetLimits(maxTokensPerMonth = 100)),
+            aggregates = listOf(agg("hermes", calls = 2, tokensIn = 500, tokensOut = 500)),
+        )
+        // Chiamando openai (priced) il tetto token globale non si applica.
+        assertEquals(BudgetVerdict.Ok, policy.check(ProviderId.OPENAI, now))
+    }
+
+    @Test
+    fun `tetto token per provider isolato dagli altri token-only`() = runTest {
+        val policy = policy(
+            settings = BudgetSettings(
+                perProvider = mapOf("hermes" to BudgetLimits(maxTokensPerMonth = 100)),
+            ),
+            aggregates = listOf(
+                agg("hermes", calls = 2, tokensIn = 90, tokensOut = 20),
+                agg("openrouter", calls = 1, tokensIn = 10, tokensOut = 0),
+            ),
+        )
+        assertIs<BudgetVerdict.HardExceeded>(policy.check(ProviderId.HERMES, now))
+        assertEquals(BudgetVerdict.Ok, policy.check(ProviderId.OPENROUTER, now))
+    }
+
     // --- helpers -------------------------------------------------------------
 
     private fun policy(settings: BudgetSettings, aggregates: List<ProviderUsageAggregate>): BudgetPolicy =
@@ -120,14 +228,16 @@ class BudgetPolicyTest {
         calls: Long,
         blockedCalls: Long = 0,
         costMicros: Long? = null,
+        tokensIn: Long? = null,
+        tokensOut: Long? = null,
     ) = ProviderUsageAggregate(
         providerId = providerId,
         calls = calls,
         okCalls = calls - blockedCalls,
         errorCalls = 0,
         blockedCalls = blockedCalls,
-        tokensIn = null,
-        tokensOut = null,
+        tokensIn = tokensIn,
+        tokensOut = tokensOut,
         costMicros = costMicros,
     )
 
@@ -143,6 +253,11 @@ class BudgetPolicyTest {
             windows += startMillis to endMillisExclusive
             return aggregates
         }
+        override suspend fun tokensBetween(
+            startMillis: Long,
+            endMillisExclusive: Long,
+        ): List<ProviderTokensAggregate> =
+            aggregates.map { ProviderTokensAggregate(it.providerId, it.tokensIn, it.tokensOut) }
         override suspend fun purgeBefore(cutoffMillis: Long): Int = 0
     }
 

@@ -37,6 +37,29 @@ class ProviderCatalogTest {
         assertTrue(ProviderCatalog.spec(ProviderId.CUSTOM_OPENAI_COMPAT).prices.isEmpty())
     }
 
+    @Test fun `costTracked solo per i provider a prezzo noto`() {
+        val tracked = setOf(ProviderId.OPENAI, ProviderId.ANTHROPIC, ProviderId.GEMINI)
+        for (id in ProviderId.entries) {
+            assertEquals(
+                id in tracked,
+                ProviderCatalog.spec(id).costTracked,
+                "costTracked incoerente per $id",
+            )
+        }
+    }
+
+    @Test fun `solo i provider costTracked hanno un listino prezzi`() {
+        for (id in ProviderId.entries) {
+            val spec = ProviderCatalog.spec(id)
+            if (spec.costTracked) {
+                assertTrue(spec.prices.isNotEmpty(), "$id costTracked ma senza modelli prezzati")
+            } else {
+                // TOKEN-ONLY (Hermes/OpenRouter/Custom): nessuna stima dollari da listino statico.
+                assertTrue(spec.prices.isEmpty(), "$id token-only con prezzi: ${spec.prices.keys}")
+            }
+        }
+    }
+
     @Test fun `quirks follow the finding table`() {
         val openai = ProviderCatalog.spec(ProviderId.OPENAI)
         assertEquals(OutputCapParam.MAX_COMPLETION_TOKENS, openai.quirks.outputCapParam)
@@ -78,7 +101,7 @@ class ProviderCatalogTest {
                 }
             }
         }
-        for (id in listOf(ProviderId.OPENAI, ProviderId.ANTHROPIC, ProviderId.GEMINI, ProviderId.OPENROUTER)) {
+        for (id in listOf(ProviderId.OPENAI, ProviderId.ANTHROPIC, ProviderId.GEMINI)) {
             assertTrue(ProviderCatalog.spec(id).prices.isNotEmpty(), "$id senza modelli prezzati")
         }
     }

@@ -21,6 +21,17 @@ data class ProviderUsageAggregate(
     val costMicros: Long?,
 )
 
+/**
+ * Aggregato dei soli TOKEN per provider su una finestra temporale (metrica primaria dei provider
+ * token-only: Hermes/OpenRouter/Custom). Stessa semantica NULL di [ProviderUsageAggregate]:
+ * `SUM` su righe tutte NULL ritorna NULL = "n/d", distinto da 0.
+ */
+data class ProviderTokensAggregate(
+    val providerId: String,
+    val tokensIn: Long?,
+    val tokensOut: Long?,
+)
+
 @Dao
 interface UsageDao {
     @Insert
@@ -43,6 +54,19 @@ interface UsageDao {
             "GROUP BY providerId ORDER BY providerId ASC",
     )
     suspend fun aggregateBetween(startMillis: Long, endMillisExclusive: Long): List<ProviderUsageAggregate>
+
+    /**
+     * Totali token per provider nella semi-finestra `[startMillis, endMillisExclusive)`: stesso
+     * pattern di [aggregateBetween], confini da [dev.argus.data.UsageWindows]. Usato dal budget
+     * TOKEN mensile dei provider token-only e dal breakdown UI.
+     */
+    @Query(
+        "SELECT providerId, SUM(tokensIn) AS tokensIn, SUM(tokensOut) AS tokensOut " +
+            "FROM usage_events " +
+            "WHERE timestampMs >= :startMillis AND timestampMs < :endMillisExclusive " +
+            "GROUP BY providerId ORDER BY providerId ASC",
+    )
+    suspend fun tokensBetween(startMillis: Long, endMillisExclusive: Long): List<ProviderTokensAggregate>
 
     @Query("DELETE FROM usage_events WHERE timestampMs < :cutoffMillis")
     suspend fun purgeBefore(cutoffMillis: Long): Int

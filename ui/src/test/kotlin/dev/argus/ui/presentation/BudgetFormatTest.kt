@@ -47,4 +47,36 @@ class BudgetFormatTest {
         assertEquals(0L, BudgetFormat.parseUsdToMicros("0"))
         assertNull(BudgetFormat.parseUsdToMicros("-1"))
     }
+
+    @Test fun `tokens label separa in e out e nd solo se entrambi mancano`() {
+        assertEquals("in 1500 · out 300", BudgetFormat.tokensLabel(1_500, 300))
+        assertEquals("in 0 · out 0", BudgetFormat.tokensLabel(0, 0))
+        assertEquals("in 1500 · out n/d", BudgetFormat.tokensLabel(1_500, null))
+        assertEquals("in n/d · out 300", BudgetFormat.tokensLabel(null, 300))
+        assertEquals("n/d", BudgetFormat.tokensLabel(null, null))
+    }
+
+    @Test fun `token cap label con e senza limite`() {
+        assertEquals("300 / 1000", BudgetFormat.tokensCapLabel(300, 1_000))
+        assertEquals("300 · illimitato", BudgetFormat.tokensCapLabel(300, null))
+        assertEquals("300 · illimitato", BudgetFormat.tokensCapLabel(300, 0))
+        assertEquals("n/d · illimitato", BudgetFormat.tokensCapLabel(null, null))
+        assertEquals("n/d / 1000", BudgetFormat.tokensCapLabel(null, 1_000))
+    }
+
+    @Test fun `token ratio clampata e zero se illimitato o nd`() {
+        assertEquals(0f, BudgetFormat.tokenRatio(500, null))
+        assertEquals(0f, BudgetFormat.tokenRatio(null, 1_000))
+        assertEquals(0.5f, BudgetFormat.tokenRatio(500, 1_000))
+        assertEquals(1f, BudgetFormat.tokenRatio(2_000, 1_000))
+    }
+
+    @Test fun `parse tokens interi non negativi`() {
+        assertEquals(1_500L, BudgetFormat.parseTokens("1500"))
+        assertEquals(0L, BudgetFormat.parseTokens(""))
+        assertEquals(0L, BudgetFormat.parseTokens("0"))
+        assertNull(BudgetFormat.parseTokens("abc"))
+        assertNull(BudgetFormat.parseTokens("-1"))
+        assertNull(BudgetFormat.parseTokens("1.5"))
+    }
 }

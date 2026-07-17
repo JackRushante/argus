@@ -3,6 +3,7 @@ package dev.argus.automation.budget
 import dev.argus.brain.ProviderConfig
 import dev.argus.brain.ProviderId
 import dev.argus.data.UsageWindows
+import dev.argus.data.dao.ProviderTokensAggregate
 import dev.argus.data.dao.ProviderUsageAggregate
 import dev.argus.data.dao.UsageDao
 import dev.argus.data.entities.UsageEventEntity
@@ -304,6 +305,11 @@ class MeteredBrainTest {
             endMillisExclusive: Long,
         ): List<ProviderUsageAggregate> = emptyList()
 
+        override suspend fun tokensBetween(
+            startMillis: Long,
+            endMillisExclusive: Long,
+        ): List<ProviderTokensAggregate> = emptyList()
+
         override suspend fun purgeBefore(cutoffMillis: Long): Int = 0
     }
 
@@ -329,6 +335,10 @@ private val NoopUsageDaoForTest = object : UsageDao {
         startMillis: Long,
         endMillisExclusive: Long,
     ): List<ProviderUsageAggregate> = emptyList()
+    override suspend fun tokensBetween(
+        startMillis: Long,
+        endMillisExclusive: Long,
+    ): List<ProviderTokensAggregate> = emptyList()
     override suspend fun purgeBefore(cutoffMillis: Long): Int = 0
 }
 

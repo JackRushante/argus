@@ -132,6 +132,38 @@ class UsageDaoTest {
     }
 
     @Test
+    fun `tokensBetween aggrega i token per provider dentro la finestra`() = runTest {
+        db.usageDao().insert(event(providerId = "hermes", timestampMs = 1_000, tokensIn = 100, tokensOut = 10))
+        db.usageDao().insert(event(providerId = "hermes", timestampMs = 1_100, tokensIn = 50, tokensOut = 5))
+        db.usageDao().insert(event(providerId = "openai", timestampMs = 1_050, tokensIn = 7, tokensOut = 3))
+        // Fuori finestra.
+        db.usageDao().insert(event(providerId = "hermes", timestampMs = 9_000, tokensIn = 999, tokensOut = 99))
+
+        val rows = db.usageDao().tokensBetween(500, 2_000)
+        assertEquals(listOf("hermes", "openai"), rows.map { it.providerId })
+
+        val hermes = rows.first { it.providerId == "hermes" }
+        assertEquals(150L, hermes.tokensIn)
+        assertEquals(15L, hermes.tokensOut)
+
+        val openai = rows.first { it.providerId == "openai" }
+        assertEquals(7L, openai.tokensIn)
+        assertEquals(3L, openai.tokensOut)
+    }
+
+    @Test
+    fun `tokensBetween distingue nd da zero`() = runTest {
+        db.usageDao().insert(event(providerId = "hermes", timestampMs = 1_000, tokensIn = null, tokensOut = null))
+        db.usageDao().insert(event(providerId = "openai", timestampMs = 1_000, tokensIn = 0, tokensOut = 0))
+
+        val rows = db.usageDao().tokensBetween(0, 10_000)
+        assertNull(rows.first { it.providerId == "hermes" }.tokensIn, "SUM su soli NULL deve restare n/d")
+        assertNull(rows.first { it.providerId == "hermes" }.tokensOut)
+        assertEquals(0L, rows.first { it.providerId == "openai" }.tokensIn)
+        assertEquals(0L, rows.first { it.providerId == "openai" }.tokensOut)
+    }
+
+    @Test
     fun `purgeBefore deletes only strictly older events`() = runTest {
         db.usageDao().insert(event(timestampMs = 1_000))
         db.usageDao().insert(event(timestampMs = 2_000))

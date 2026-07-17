@@ -10,11 +10,16 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-/** null = illimitato. La UI usa 0 come "illimitato": lo store normalizza 0 -> null in scrittura. */
+/**
+ * null = illimitato. La UI usa 0 come "illimitato": lo store normalizza 0 -> null in scrittura.
+ * [maxCostPerMonthMicros] vale per i provider costTracked (dollari a listino noto);
+ * [maxTokensPerMonth] (tokensIn+tokensOut) per i provider TOKEN-ONLY (Hermes/OpenRouter/Custom).
+ */
 data class BudgetLimits(
     val maxCallsPerHour: Int? = null,
     val maxCallsPerDay: Int? = null,
     val maxCostPerMonthMicros: Long? = null,
+    val maxTokensPerMonth: Long? = null,
 )
 
 data class BudgetSettings(
@@ -67,7 +72,10 @@ class AndroidBudgetSettingsStore(context: Context) : BudgetSettingsStore {
         val hour = limits.maxCallsPerHour
         val day = limits.maxCallsPerDay
         val cost = limits.maxCostPerMonthMicros
-        if ((hour != null && hour < 0) || (day != null && day < 0) || (cost != null && cost < 0)) {
+        val tokens = limits.maxTokensPerMonth
+        if ((hour != null && hour < 0) || (day != null && day < 0) ||
+            (cost != null && cost < 0) || (tokens != null && tokens < 0)
+        ) {
             return@withLock false
         }
         withContext(Dispatchers.IO) {
@@ -75,6 +83,7 @@ class AndroidBudgetSettingsStore(context: Context) : BudgetSettingsStore {
             putOrRemoveInt(editor, "$prefix$SUFFIX_HOUR", hour)
             putOrRemoveInt(editor, "$prefix$SUFFIX_DAY", day)
             putOrRemoveLong(editor, "$prefix$SUFFIX_COST", cost)
+            putOrRemoveLong(editor, "$prefix$SUFFIX_TOKENS", tokens)
             editor.commit().also { saved -> if (saved) state.value = read() }
         }
     }
@@ -108,6 +117,7 @@ class AndroidBudgetSettingsStore(context: Context) : BudgetSettingsStore {
         maxCallsPerHour = preferences.getInt("$prefix$SUFFIX_HOUR", 0).takeIf { it > 0 },
         maxCallsPerDay = preferences.getInt("$prefix$SUFFIX_DAY", 0).takeIf { it > 0 },
         maxCostPerMonthMicros = preferences.getLong("$prefix$SUFFIX_COST", 0L).takeIf { it > 0 },
+        maxTokensPerMonth = preferences.getLong("$prefix$SUFFIX_TOKENS", 0L).takeIf { it > 0 },
     )
 
     private fun providerPrefix(wireName: String): String = "provider.$wireName."
@@ -118,6 +128,7 @@ class AndroidBudgetSettingsStore(context: Context) : BudgetSettingsStore {
         const val SUFFIX_HOUR = "maxCallsPerHour"
         const val SUFFIX_DAY = "maxCallsPerDay"
         const val SUFFIX_COST = "maxCostPerMonthMicros"
+        const val SUFFIX_TOKENS = "maxTokensPerMonth"
         const val KEY_SOFT_THRESHOLD = "softThresholdPct"
     }
 }

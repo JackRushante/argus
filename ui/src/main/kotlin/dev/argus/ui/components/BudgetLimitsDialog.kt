@@ -22,15 +22,18 @@ import dev.argus.ui.presentation.BudgetFormat
 /**
  * Editor dei tetti budget globali. La dialog fa solo parse input → callback tipizzata (nessuna
  * matematica sui soldi qui). Convenzione al confine UI: 0 o campo vuoto = illimitato. Il costo si
- * inserisce in USD e viene convertito in micro-USD via [BudgetFormat.parseUsdToMicros].
+ * inserisce in USD (vale per i provider a listino noto) e viene convertito in micro-USD via
+ * [BudgetFormat.parseUsdToMicros]; il tetto TOKEN mensile vale per i provider token-only
+ * (Hermes/OpenRouter/Custom) e si inserisce come intero via [BudgetFormat.parseTokens].
  */
 @Composable
 fun BudgetLimitsDialog(
     initialMaxPerHour: Int?,
     initialMaxPerDay: Int?,
     initialMaxCostMonthMicros: Long?,
+    initialMaxTokensMonth: Long?,
     onDismiss: () -> Unit,
-    onSave: (maxPerHour: Int, maxPerDay: Int, maxCostMonthMicros: Long) -> Unit,
+    onSave: (maxPerHour: Int, maxPerDay: Int, maxCostMonthMicros: Long, maxTokensMonth: Long) -> Unit,
 ) {
     var hourText by rememberSaveable { mutableStateOf(initialMaxPerHour?.takeIf { it > 0 }?.toString() ?: "") }
     var dayText by rememberSaveable { mutableStateOf(initialMaxPerDay?.takeIf { it > 0 }?.toString() ?: "") }
@@ -39,12 +42,17 @@ fun BudgetLimitsDialog(
             initialMaxCostMonthMicros?.takeIf { it > 0 }?.let { BudgetFormat.usdLabel(it).removePrefix("$") } ?: "",
         )
     }
+    var tokensText by rememberSaveable {
+        mutableStateOf(initialMaxTokensMonth?.takeIf { it > 0 }?.toString() ?: "")
+    }
 
     // Vuoto = illimitato (0). Un intero non parsabile invalida solo quel campo.
     val hour = hourText.trim().ifEmpty { "0" }.toIntOrNull()
     val day = dayText.trim().ifEmpty { "0" }.toIntOrNull()
     val costMicros = BudgetFormat.parseUsdToMicros(costText)
-    val canSave = hour != null && hour >= 0 && day != null && day >= 0 && costMicros != null
+    val tokensMonth = BudgetFormat.parseTokens(tokensText)
+    val canSave = hour != null && hour >= 0 && day != null && day >= 0 &&
+        costMicros != null && tokensMonth != null
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -77,7 +85,17 @@ fun BudgetLimitsDialog(
                     isError = costMicros == null,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     label = { Text("Costo / mese (USD)") },
-                    supportingText = { Text("0 o vuoto = illimitato") },
+                    supportingText = { Text("Provider a listino (OpenAI/Anthropic/Gemini) · 0 o vuoto = illimitato") },
+                )
+                OutlinedTextField(
+                    value = tokensText,
+                    onValueChange = { tokensText = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    isError = tokensMonth == null,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    label = { Text("Token / mese") },
+                    supportingText = { Text("Provider token-only (Hermes/OpenRouter/Custom) · 0 o vuoto = illimitato") },
                 )
             }
         },
@@ -88,7 +106,7 @@ fun BudgetLimitsDialog(
             Button(
                 enabled = canSave,
                 onClick = {
-                    onSave(hour ?: 0, day ?: 0, costMicros ?: 0L)
+                    onSave(hour ?: 0, day ?: 0, costMicros ?: 0L, tokensMonth ?: 0L)
                     onDismiss()
                 },
             ) { Text("Salva") }
