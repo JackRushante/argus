@@ -60,6 +60,9 @@ import dev.argus.ui.model.OnboardingCallbacks
 import dev.argus.ui.model.OnboardingState
 import dev.argus.ui.model.OnboardingStepState
 import dev.argus.ui.model.ProviderChoiceUi
+import dev.argus.ui.model.ShizukuCapabilityCatalog
+import dev.argus.ui.model.ShizukuCapabilityRow
+import dev.argus.ui.model.ShizukuRequirement
 import dev.argus.ui.model.ShizukuStatus
 import dev.argus.ui.model.StepKind
 import dev.argus.ui.model.StepStatus
@@ -152,6 +155,11 @@ fun OnboardingScreen(
                     ProviderSelector(state.providerChoices, callbacks::onSelectProvider)
                 }
 
+                // SHIZUKU: lista onesta di cosa richiede/degrada senza Shizuku (task #54).
+                if (step.kind == StepKind.SHIZUKU && state.shizukuCapabilities.isNotEmpty()) {
+                    ShizukuCapabilityList(state.shizukuCapabilities)
+                }
+
                 // BATTERY_OEM: conseguenza reale del rifiuto, sopra la checklist (§6.6).
                 if (step.kind == StepKind.BATTERY_OEM) {
                     WarningBanner(
@@ -222,6 +230,100 @@ private fun ProviderSelector(choices: List<ProviderChoiceUi>, onSelect: (String)
                 onClick = { onSelect(choice.id) },
                 label = { Text(choice.label) },
             )
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// SHIZUKU: "Cosa richiede Shizuku" (task #54) — lista onesta raggruppata per grado
+// di dipendenza. Il grado e il testo arrivano dallo stato (ShizukuCapabilityCatalog),
+// il composable non li fabbrica.
+// -----------------------------------------------------------------------------
+
+private fun requirementHeading(requirement: ShizukuRequirement): String = when (requirement) {
+    ShizukuRequirement.REQUIRED -> "Richiede Shizuku"
+    ShizukuRequirement.RECOMMENDED -> "Meglio con Shizuku"
+    ShizukuRequirement.NOT_REQUIRED -> "Non richiede Shizuku"
+}
+
+private fun requirementSubhead(requirement: ShizukuRequirement): String = when (requirement) {
+    ShizukuRequirement.REQUIRED -> "Senza autorizzazione, queste azioni non sono disponibili."
+    ShizukuRequirement.RECOMMENDED -> "Funzionano anche senza, ma solo con Argus aperto in primo piano."
+    ShizukuRequirement.NOT_REQUIRED -> "Sempre disponibili, con o senza Shizuku."
+}
+
+@Composable
+private fun ShizukuCapabilityList(rows: List<ShizukuCapabilityRow>) {
+    val semantic = LocalArgusSemantic.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(14.dp))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        // Ordine fisso: prima cosa NON puoi fare senza (REQUIRED), poi cosa degrada, poi cosa resta.
+        listOf(
+            ShizukuRequirement.REQUIRED,
+            ShizukuRequirement.RECOMMENDED,
+            ShizukuRequirement.NOT_REQUIRED,
+        ).forEach { requirement ->
+            val group = rows.filter { it.requirement == requirement }
+            if (group.isNotEmpty()) {
+                ShizukuCapabilityGroup(requirement, group, semantic)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ShizukuCapabilityGroup(
+    requirement: ShizukuRequirement,
+    rows: List<ShizukuCapabilityRow>,
+    semantic: dev.argus.ui.theme.ArgusSemantic,
+) {
+    val accent = when (requirement) {
+        ShizukuRequirement.REQUIRED -> semantic.error.fg
+        ShizukuRequirement.RECOMMENDED -> semantic.pending.fg
+        ShizukuRequirement.NOT_REQUIRED -> semantic.armed.fg
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            requirementHeading(requirement),
+            color = accent,
+            style = MaterialTheme.typography.labelLarge,
+        )
+        Text(
+            requirementSubhead(requirement),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        rows.forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(
+                    modifier = Modifier
+                        .padding(top = 7.dp)
+                        .size(6.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(accent),
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                    Text(
+                        row.title,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    if (row.note != null) {
+                        Text(
+                            row.note,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -491,6 +593,7 @@ private fun PreviewFor(kind: StepKind, shizuku: ShizukuStatus = ShizukuStatus.RU
                 steps = stepsFixture(kind, shizuku),
                 currentIndex = indexOfKind(kind),
                 canFinish = true,
+                shizukuCapabilities = ShizukuCapabilityCatalog.rows(),
             ),
             NoopOnboardingCallbacks,
         )

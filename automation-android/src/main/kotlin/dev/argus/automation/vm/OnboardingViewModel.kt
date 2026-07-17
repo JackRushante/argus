@@ -23,6 +23,7 @@ import dev.argus.ui.model.AuthState
 import dev.argus.ui.model.OnboardingState
 import dev.argus.ui.model.OnboardingStepState
 import dev.argus.ui.model.ProviderChoiceUi
+import dev.argus.ui.model.ShizukuCapabilityCatalog
 import dev.argus.ui.model.ShizukuStatus
 import dev.argus.ui.model.StepKind
 import dev.argus.ui.model.StepStatus
@@ -314,6 +315,7 @@ class OnboardingViewModel @Inject constructor(
             bridgeTokenConfigured = configured,
             providerChoices = providerChoices(),
             transport = transportUi(configured),
+            shizukuCapabilities = ShizukuCapabilityCatalog.rows(),
         )
     }
 

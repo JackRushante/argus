@@ -17,6 +17,7 @@ import dev.argus.engine.brain.ActResult
 import dev.argus.engine.brain.CapabilityManifest
 import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.model.Action
+import dev.argus.engine.model.ActionTypeIds
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationDraft
@@ -35,6 +36,7 @@ import dev.argus.engine.safety.NewDraft
 import dev.argus.engine.safety.PendingDraft
 import dev.argus.shizuku.ShizukuGateway
 import dev.argus.ui.model.AuthState
+import dev.argus.ui.model.ShizukuRequirement
 import dev.argus.ui.model.StepKind
 import dev.argus.ui.model.StepStatus
 import dev.argus.ui.model.TransportUi
@@ -217,6 +219,26 @@ class OnboardingViewModelTest {
             StepStatus.SKIPPED,
             vm.state.value.steps.first { it.kind == StepKind.BRAIN_CONFIG }.status,
         )
+    }
+
+    @Test
+    fun `lo stato espone la lista onesta di cosa richiede Shizuku`() = runTest(dispatcher) {
+        val store = OnbFakeProviderStore()
+        val vm = onboardingViewModel(store, index = 2)
+        observe(vm)
+        advanceUntilIdle()
+
+        val caps = vm.state.value.shizukuCapabilities
+        assertTrue(caps.isNotEmpty(), "la lista Shizuku non deve essere vuota")
+
+        fun requirementOf(id: String): ShizukuRequirement? =
+            caps.firstOrNull { id in it.actionTypeIds }?.requirement
+
+        assertEquals(ShizukuRequirement.REQUIRED, requirementOf(ActionTypeIds.SET_WIFI))
+        assertEquals(ShizukuRequirement.NOT_REQUIRED, requirementOf(ActionTypeIds.SET_VOLUME))
+        assertEquals(ShizukuRequirement.RECOMMENDED, requirementOf(ActionTypeIds.SET_ALARM))
+        // Tutte e tre le categorie presenti: l'onboarding dice cosa NON puoi fare, cosa degrada, cosa resta.
+        assertEquals(ShizukuRequirement.entries.toSet(), caps.map { it.requirement }.toSet())
     }
 
     // ------------------------------------------------------------------ helper

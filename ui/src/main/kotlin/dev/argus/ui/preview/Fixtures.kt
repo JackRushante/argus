@@ -22,6 +22,7 @@ import dev.argus.ui.model.OnboardingStepState
 import dev.argus.ui.model.ProviderChoiceUi
 import dev.argus.ui.model.ProviderUsageUi
 import dev.argus.ui.model.RuleRender
+import dev.argus.ui.model.ShizukuCapabilityCatalog
 import dev.argus.ui.model.SettingsState
 import dev.argus.ui.model.ShizukuStatus
 import dev.argus.ui.model.StatusBadge
@@ -648,5 +649,6 @@ object Fixtures {
             lastLatencyLabel = null,
             tokenConfigured = false,
         ),
+        shizukuCapabilities = ShizukuCapabilityCatalog.rows(),
     )
 }

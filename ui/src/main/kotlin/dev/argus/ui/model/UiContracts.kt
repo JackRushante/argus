@@ -1,5 +1,6 @@
 package dev.argus.ui.model
 
+import dev.argus.engine.model.ActionTypeIds
 import dev.argus.engine.safety.Severity
 import dev.argus.engine.runtime.AuditKind
 
@@ -315,7 +316,112 @@ data class OnboardingState(
     val providerChoices: List<ProviderChoiceUi> = emptyList(),
     /** Ramo transport del provider selezionato: guida quale dialog apre la CTA BRAIN_CONFIG. */
     val transport: TransportUi? = null,
+    /**
+     * Lista onesta di cosa dipende da Shizuku, mostrata nello step SHIZUKU: l'utente sa in anticipo
+     * cosa NON potrà fare senza concederlo (task #54). Statica, derivata da ActionPrivileges.
+     */
+    val shizukuCapabilities: List<ShizukuCapabilityRow> = emptyList(),
 )
+
+/**
+ * Grado di dipendenza da Shizuku di una capacità (task #54). Derivato da
+ * [dev.argus.engine.model.ActionPrivileges] (BASE vs PRIVILEGED) e dal comportamento reale delle
+ * azioni activity-launch da automazione in background (fix #53).
+ */
+enum class ShizukuRequirement {
+    /** Impossibile senza Shizuku: azioni PRIVILEGED (toggle radio, shell, write_setting) e lettori privilegiati. */
+    REQUIRED,
+    /** Degradato senza Shizuku: BASE activity-launch affidabili da background solo con `am start`. */
+    RECOMMENDED,
+    /** Sempre disponibile: BASE via API Android normali, nessuno Shizuku. */
+    NOT_REQUIRED,
+}
+
+/**
+ * Riga della lista "Cosa richiede Shizuku". [actionTypeIds] traccia i tipi azione coperti (wire name
+ * da [dev.argus.engine.model.ActionTypeIds]): è la fonte di verità per i test, così la categoria
+ * resta agganciata alla classificazione reale e non a stringhe libere nella UI.
+ */
+data class ShizukuCapabilityRow(
+    val title: String,
+    val requirement: ShizukuRequirement,
+    val note: String? = null,
+    val actionTypeIds: List<String> = emptyList(),
+)
+
+/**
+ * Lista statica e onesta di cosa dipende da Shizuku, coerente con `ActionPrivileges` e
+ * `AndroidCapabilityProbe`. Invariante: ogni [ActionTypeIds] compare in UNA sola riga, così la
+ * categoria di un'azione è univoca (verificato a host).
+ */
+object ShizukuCapabilityCatalog {
+    fun rows(): List<ShizukuCapabilityRow> = listOf(
+        // --- Richiede Shizuku (PRIVILEGED): senza, impossibile ---
+        ShizukuCapabilityRow(
+            title = "Attivare o disattivare Wi-Fi e Bluetooth",
+            requirement = ShizukuRequirement.REQUIRED,
+            note = "Gli interruttori radio passano dallo shell privilegiato di Shizuku.",
+            actionTypeIds = listOf(ActionTypeIds.SET_WIFI, ActionTypeIds.SET_BLUETOOTH),
+        ),
+        ShizukuCapabilityRow(
+            title = "Scrivere impostazioni di sistema",
+            requirement = ShizukuRequirement.REQUIRED,
+            note = "Modifiche a impostazioni secure/global (settings put): nessuna via da app normale.",
+            actionTypeIds = listOf(ActionTypeIds.WRITE_SETTING),
+        ),
+        ShizukuCapabilityRow(
+            title = "Eseguire comandi shell",
+            requirement = ShizukuRequirement.REQUIRED,
+            note = "Comandi in stile adb: disponibili solo tramite Shizuku.",
+            actionTypeIds = listOf(ActionTypeIds.RUN_SHELL),
+        ),
+        ShizukuCapabilityRow(
+            title = "Leggere stato di sistema privilegiato",
+            requirement = ShizukuRequirement.REQUIRED,
+            note = "App in primo piano, valori delle impostazioni e altri lettori che servono a certe regole.",
+        ),
+        // --- Meglio con Shizuku (BASE, degrada senza) ---
+        ShizukuCapabilityRow(
+            title = "Sveglia, timer, apri app o URL e schermate impostazioni da una regola",
+            requirement = ShizukuRequirement.RECOMMENDED,
+            note = "Da un'automazione in background sono affidabili solo con Shizuku. Senza, partono " +
+                "solo mentre Argus è aperto in primo piano.",
+            actionTypeIds = listOf(
+                ActionTypeIds.SET_ALARM,
+                ActionTypeIds.SET_TIMER,
+                ActionTypeIds.LAUNCH_APP,
+                ActionTypeIds.OPEN_URL,
+                ActionTypeIds.OPEN_SETTINGS_SCREEN,
+            ),
+        ),
+        // --- Non richiede Shizuku (BASE, sempre disponibile) ---
+        ShizukuCapabilityRow(
+            title = "Volume, suoneria e Non disturbare",
+            requirement = ShizukuRequirement.NOT_REQUIRED,
+            note = "Per suoneria e Non disturbare basta concedere una volta l'accesso «Non disturbare», non Shizuku.",
+            actionTypeIds = listOf(
+                ActionTypeIds.SET_VOLUME,
+                ActionTypeIds.SET_RINGER,
+                ActionTypeIds.SET_DND,
+            ),
+        ),
+        ShizukuCapabilityRow(
+            title = "Torcia e vibrazione",
+            requirement = ShizukuRequirement.NOT_REQUIRED,
+            actionTypeIds = listOf(ActionTypeIds.SET_FLASHLIGHT, ActionTypeIds.VIBRATE),
+        ),
+        ShizukuCapabilityRow(
+            title = "Notifiche di Argus e copia negli appunti",
+            requirement = ShizukuRequirement.NOT_REQUIRED,
+            actionTypeIds = listOf(ActionTypeIds.SHOW_NOTIFICATION, ActionTypeIds.COPY_TO_CLIPBOARD),
+        ),
+        ShizukuCapabilityRow(
+            title = "Sveglia e timer avviati a mano dalla chat",
+            requirement = ShizukuRequirement.NOT_REQUIRED,
+            note = "Quando li chiedi in chat (app in primo piano) partono sempre, senza Shizuku.",
+        ),
+    )
+}
 
 data class OnboardingStepState(
     val kind: StepKind,
