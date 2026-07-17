@@ -167,6 +167,114 @@ class OpenAICompatTransportTest {
         assertEquals("openai/gpt-5.5", root.getValue("model").jsonPrimitive.content)
     }
 
+    // --- #52 F3: web search server-side sui provider diretti ---
+
+    @Test fun `openrouter web search appends online suffix and forces tool_choice auto`(): Unit = runBlocking {
+        // Con web richiesto, OpenRouter attiva il loop server-side via slug `<model>:online`; il reply
+        // NON va forzato (impedirebbe la ricerca) e il testo finale post-web arriva come content.
+        server.enqueue(jsonResponse(
+            """
+            {"model":"openai/gpt-5.5",
+             "choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"Il cambio EUR/USD e' 1.08."}}],
+             "usage":{"prompt_tokens":50,"completion_tokens":10}}
+            """.trimIndent(),
+        ))
+        val t = transport(ProviderId.OPENROUTER, model = "openai/gpt-5.5")
+
+        val result = t.act(
+            fireContext(), "dimmi il cambio euro dollaro", listOf("notification"),
+            listOf("whatsapp_reply", "web.search"),
+        )
+
+        assertEquals("Il cambio EUR/USD e' 1.08.", result.text)
+        val root = Json.parseToJsonElement(
+            assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
+        ).jsonObject
+        assertEquals("openai/gpt-5.5:online", root.getValue("model").jsonPrimitive.content)
+        assertEquals("auto", root.getValue("tool_choice").jsonPrimitive.content)
+        // il reply tool resta dichiarato accanto al web server-side.
+        val tool = root.getValue("tools").jsonArray.single().jsonObject.getValue("function").jsonObject
+        assertEquals("whatsapp_reply", tool.getValue("name").jsonPrimitive.content)
+        assertFalse("extra_body" in root)
+    }
+
+    @Test fun `openrouter without web keeps forced reply and plain model`(): Unit = runBlocking {
+        server.enqueue(jsonResponse(
+            """
+            {"model":"openai/gpt-5.5",
+             "choices":[{"index":0,"message":{"role":"assistant",
+               "tool_calls":[{"id":"c1","type":"function","function":{"name":"whatsapp_reply","arguments":"{\"text\":\"Ok!\"}"}}]}}],
+             "usage":{"prompt_tokens":10,"completion_tokens":2}}
+            """.trimIndent(),
+        ))
+        val t = transport(ProviderId.OPENROUTER, model = "openai/gpt-5.5")
+
+        t.act(fireContext(), "rispondi", listOf("notification"), listOf("whatsapp_reply"))
+
+        val root = Json.parseToJsonElement(
+            assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
+        ).jsonObject
+        assertEquals("openai/gpt-5.5", root.getValue("model").jsonPrimitive.content)
+        val toolChoice = root.getValue("tool_choice").jsonObject
+        assertEquals("whatsapp_reply", toolChoice.getValue("function").jsonObject.getValue("name").jsonPrimitive.content)
+    }
+
+    @Test fun `gemini web search adds grounding extra_body and forces tool_choice auto`(): Unit = runBlocking {
+        server.enqueue(jsonResponse(
+            """
+            {"model":"gemini-2.5-flash",
+             "choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"Oggi a Roma 28 gradi."}}],
+             "usage":{"prompt_tokens":40,"completion_tokens":8}}
+            """.trimIndent(),
+        ))
+        val t = transport(ProviderId.GEMINI, model = "gemini-2.5-flash")
+
+        val result = t.act(
+            fireContext(), "che tempo fa a Roma", listOf("notification"),
+            listOf("whatsapp_reply", "web.search"),
+        )
+
+        assertEquals("Oggi a Roma 28 gradi.", result.text)
+        val root = Json.parseToJsonElement(
+            assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
+        ).jsonObject
+        // Gemini NON usa `:online`: il modello resta invariato.
+        assertEquals("gemini-2.5-flash", root.getValue("model").jsonPrimitive.content)
+        assertEquals("auto", root.getValue("tool_choice").jsonPrimitive.content)
+        // grounding passthrough: extra_body.google.tools = [{"google_search":{}}]
+        val google = root.getValue("extra_body").jsonObject.getValue("google").jsonObject
+        val grounding = google.getValue("tools").jsonArray.single().jsonObject
+        assertTrue("google_search" in grounding)
+    }
+
+    @Test fun `openai ignores web when mechanism is NONE and keeps forced reply`(): Unit = runBlocking {
+        // Degradazione graziosa: web richiesto ma non supportato via /chat/completions con gpt-5.x →
+        // si genera normalmente col reply forzato, nessun extra_body, nessun cambio di modello.
+        server.enqueue(jsonResponse(
+            """
+            {"model":"gpt-5.5",
+             "choices":[{"index":0,"message":{"role":"assistant",
+               "tool_calls":[{"id":"c1","type":"function","function":{"name":"whatsapp_reply","arguments":"{\"text\":\"Ok!\"}"}}]}}],
+             "usage":{"prompt_tokens":10,"completion_tokens":2}}
+            """.trimIndent(),
+        ))
+        val t = transport(ProviderId.OPENAI, model = "gpt-5.5")
+
+        val result = t.act(
+            fireContext(), "rispondi", listOf("notification"),
+            listOf("whatsapp_reply", "web.search"),
+        )
+
+        assertEquals("Ok!", result.text)
+        val root = Json.parseToJsonElement(
+            assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
+        ).jsonObject
+        assertEquals("gpt-5.5", root.getValue("model").jsonPrimitive.content)
+        assertFalse("extra_body" in root)
+        val toolChoice = root.getValue("tool_choice").jsonObject
+        assertEquals("whatsapp_reply", toolChoice.getValue("function").jsonObject.getValue("name").jsonPrimitive.content)
+    }
+
     @Test fun `actV2 sends the classified state value in the prompt`(): Unit = runBlocking {
         val query = StateQuery.DumpsysField("battery", "voltage")
         val action = Action.InvokeLlmV2(

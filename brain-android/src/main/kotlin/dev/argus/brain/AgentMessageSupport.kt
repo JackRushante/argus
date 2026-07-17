@@ -2,6 +2,7 @@ package dev.argus.brain
 
 import dev.argus.engine.brain.CapabilityManifest
 import dev.argus.engine.model.ApprovedStateContext
+import dev.argus.engine.model.GenerativeContract
 import dev.argus.engine.model.IntegrityLabel
 import dev.argus.engine.model.StateContextClassification
 import dev.argus.engine.model.StateQueryPolicy
@@ -57,8 +58,12 @@ internal object AgentMessageSupport {
         goal.trim().takeIf { it.isNotEmpty() && it.length <= MAX_GOAL_CHARS }
             ?: throw config("goal vuoto o troppo lungo")
 
+    /**
+     * Toolset generativo valido: reply obbligatorio + al più il tool web opzionale di sola lettura
+     * (nessun shell/automation.*). Coerente con [CliBridgeTransport]/[GenerativeContract].
+     */
     fun requireReplyTool(allowedTools: List<String>) {
-        if (allowedTools != listOf(REPLY_TOOL)) throw config("allowed_tools non supportati")
+        if (!GenerativeContract.isAllowedToolset(allowedTools)) throw config("allowed_tools non supportati")
     }
 
     /** Valida le context_sources del profilo act v1: non vuote, distinte, notification obbligatoria. */

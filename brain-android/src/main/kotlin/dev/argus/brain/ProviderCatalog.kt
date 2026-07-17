@@ -6,6 +6,21 @@ enum class AuthStyle { BEARER, X_API_KEY }
 /** Come il transport nomina il tetto output: OpenAI gpt-5.x rigetta max_tokens. */
 enum class OutputCapParam { MAX_TOKENS, MAX_COMPLETION_TOKENS }
 
+/**
+ * Meccanismo di attivazione del web search SERVER-SIDE per provider (#52 F3). Il web dei provider è
+ * server-side: si aggiunge un tool/flag alla richiesta, il provider fa il loop interno e ritorna il
+ * testo finale in UNA chiamata — l'architettura single-turn dei transport resta invariata.
+ * - [NONE]: web non attivabile da questo path (default; degradazione graziosa se richiesto).
+ * - [ANTHROPIC_TOOL]: server tool `{"type":"web_search_20250305","name":"web_search"}` nei `tools`.
+ * - [OPENROUTER_ONLINE]: slug modello con suffisso `:online`.
+ * - [OPENAI_SEARCH]: `web_search_options` + modello `-search-preview` in Chat Completions (o Responses
+ *   API). NON usato: i modelli configurati sono gpt-5.x e la Responses API è un endpoint diverso da
+ *   quello OpenAI-compat di questo transport — vedi ProviderCatalog OPENAI (resta NONE, onesto).
+ * - [GEMINI_GROUNDING]: grounding `google_search` via passthrough `extra_body.google.tools` sullo shim
+ *   OpenAI-compat di Gemini (il `tools` OpenAI top-level verrebbe rifiutato con "Unknown name").
+ */
+enum class WebSearchMechanism { NONE, ANTHROPIC_TOOL, OPENROUTER_ONLINE, OPENAI_SEARCH, GEMINI_GROUNDING }
+
 /** Flag di comportamento per-provider: MAI `if (provider == ...)` dentro un transport. */
 data class ProviderQuirks(
     val forceToolChoiceAuto: Boolean = false,
@@ -13,6 +28,8 @@ data class ProviderQuirks(
     val extraBodyPassthrough: Boolean = false,
     /** Header addizionali NON di autenticazione (es. anthropic-version). */
     val extraHeaders: Map<String, String> = emptyMap(),
+    /** Come il transport attiva il web search server-side (o [WebSearchMechanism.NONE]). */
+    val webSearch: WebSearchMechanism = WebSearchMechanism.NONE,
 )
 
 /** Prezzi in micro-USD per 1M token (es. $2.50/MTok = 2_500_000). Interi: niente float sui soldi. */
@@ -68,7 +85,13 @@ object ProviderCatalog {
             defaultBaseUrl = "https://api.openai.com/v1",
             authStyle = AuthStyle.BEARER,
             defaultModels = listOf("gpt-5.5", "gpt-5-mini"),
-            quirks = ProviderQuirks(outputCapParam = OutputCapParam.MAX_COMPLETION_TOKENS),
+            // Web NONE: `web_search_options` in Chat Completions richiede un modello `-search-preview`
+            // (non i gpt-5.x qui) e il web dei gpt-5 passa dalla Responses API, endpoint diverso da
+            // /chat/completions usato da OpenAICompatTransport. Onesto: web non disponibile su questo path.
+            quirks = ProviderQuirks(
+                outputCapParam = OutputCapParam.MAX_COMPLETION_TOKENS,
+                webSearch = WebSearchMechanism.NONE,
+            ),
             costTracked = true,
             prices = mapOf(
                 // gpt-5.5: $1.25 in / $10 out per 1M token.
@@ -84,7 +107,11 @@ object ProviderCatalog {
             defaultBaseUrl = "https://api.anthropic.com",
             authStyle = AuthStyle.X_API_KEY,
             defaultModels = listOf("claude-opus-4-8", "claude-sonnet-4-5"),
-            quirks = ProviderQuirks(extraHeaders = mapOf("anthropic-version" to "2023-06-01")),
+            quirks = ProviderQuirks(
+                extraHeaders = mapOf("anthropic-version" to "2023-06-01"),
+                // Server tool web_search_20250305: loop di ricerca interno lato Anthropic, single-turn.
+                webSearch = WebSearchMechanism.ANTHROPIC_TOOL,
+            ),
             costTracked = true,
             prices = mapOf(
                 // claude-opus: $15 in / $75 out per 1M token.
@@ -101,7 +128,12 @@ object ProviderCatalog {
             defaultBaseUrl = "https://generativelanguage.googleapis.com/v1beta/openai",
             authStyle = AuthStyle.BEARER,
             defaultModels = listOf("gemini-2.5-pro", "gemini-2.5-flash"),
-            quirks = ProviderQuirks(extraBodyPassthrough = true),
+            // Grounding via passthrough `extra_body.google.tools=[{google_search:{}}]` sullo shim
+            // OpenAI-compat (il `tools` OpenAI top-level verrebbe rifiutato dal compat layer di Gemini).
+            quirks = ProviderQuirks(
+                extraBodyPassthrough = true,
+                webSearch = WebSearchMechanism.GEMINI_GROUNDING,
+            ),
             costTracked = true,
             prices = mapOf(
                 // gemini-2.5-pro: $1.25 in / $10 out per 1M token (fascia <=200k).
@@ -117,6 +149,8 @@ object ProviderCatalog {
             defaultBaseUrl = "https://openrouter.ai/api/v1",
             authStyle = AuthStyle.BEARER,
             defaultModels = listOf("openai/gpt-5.5", "anthropic/claude-sonnet-4-5"),
+            // Web attivato dallo slug modello `<model>:online` (loop di ricerca interno lato OpenRouter).
+            quirks = ProviderQuirks(webSearch = WebSearchMechanism.OPENROUTER_ONLINE),
             // TOKEN-ONLY: il listino statico copriva 2 modelli su centinaia e non leggiamo il
             // costo reale dal wire — niente stime in dollari, si contano solo i token.
             prices = emptyMap(),

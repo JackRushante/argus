@@ -5,6 +5,7 @@ import dev.argus.engine.brain.CapabilityManifest
 import dev.argus.engine.brain.CliBridgeParser
 import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.model.Action
+import dev.argus.engine.model.GenerativeContract
 import dev.argus.engine.model.StateContextClassification
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireContext
@@ -131,12 +132,13 @@ class AnthropicMessagesTransport internal constructor(
         AgentMessageSupport.requireReplyTool(allowedTools)
         val notification = AgentMessageSupport.requireWhatsAppNotification(context)
         val stateLines = if ("state" in contextSources) AgentMessageSupport.safeStateLines(context.state) else emptyList()
-        return generate(goal = cleanGoal, notification = notification, stateLines = stateLines)
+        val webRequested = GenerativeContract.TOOL_WEB_SEARCH in allowedTools
+        return generate(goal = cleanGoal, notification = notification, stateLines = stateLines, webRequested = webRequested)
     }
 
     override suspend fun actV2(context: FireContext, action: Action.InvokeLlmV2): ActResult {
         val cleanGoal = AgentMessageSupport.requireGoal(action.goal)
-        if (action.allowedTools != listOf(AgentMessageSupport.REPLY_TOOL) || !action.replyTargetSender) {
+        if (!GenerativeContract.isAllowedToolset(action.allowedTools) || !action.replyTargetSender) {
             throw config("contratto act v2 non supportato")
         }
         if (action.timeoutMs !in AgentMessageSupport.MIN_ACT_TIMEOUT_MILLIS..AgentMessageSupport.MAX_ACT_TIMEOUT_MILLIS) {
@@ -150,7 +152,8 @@ class AnthropicMessagesTransport internal constructor(
         }
         val notification = AgentMessageSupport.requireWhatsAppNotification(context)
         val stateLines = action.stateContext.map { approved -> AgentMessageSupport.toStateLine(approved, context.state) }
-        return generate(goal = cleanGoal, notification = notification, stateLines = stateLines)
+        val webRequested = GenerativeContract.TOOL_WEB_SEARCH in action.allowedTools
+        return generate(goal = cleanGoal, notification = notification, stateLines = stateLines, webRequested = webRequested)
     }
 
     override suspend fun health(): TransportHealth {
@@ -169,16 +172,24 @@ class AnthropicMessagesTransport internal constructor(
         goal: String,
         notification: TriggerEvent.NotificationPosted,
         stateLines: List<String>,
+        webRequested: Boolean,
     ): ActResult {
         val token = requireKey()
         val model = resolveModel()
+        // Web search server-side, single-turn: se richiesto e supportato, il server tool web_search
+        // affianca il reply tool e Anthropic esegue il loop di ricerca internamente. Con NONE il web
+        // richiesto viene ignorato (degradazione graziosa).
+        val applyWeb = webRequested && spec.quirks.webSearch == WebSearchMechanism.ANTHROPIC_TOOL
+        val tools = if (applyWeb) listOf(replyToolDef(), webSearchToolDef()) else listOf(replyToolDef())
         val request = MessagesRequest(
             model = model,
             maxTokens = MAX_OUTPUT_TOKENS,
             system = AgentMessageSupport.actSystemText(goal),
             messages = listOf(InputMessage("user", AgentMessageSupport.actUserText(notification, stateLines))),
-            tools = listOf(replyToolDef()),
-            toolChoice = if (spec.quirks.forceToolChoiceAuto) AUTO_TOOL_CHOICE else FORCED_REPLY_CHOICE,
+            tools = tools,
+            // Con il web attivo il reply NON va forzato: il testo finale (blocco text dopo i risultati
+            // web) arriva via textContent(); forzare il reply tool impedirebbe la ricerca.
+            toolChoice = if (applyWeb || spec.quirks.forceToolChoiceAuto) AUTO_TOOL_CHOICE else FORCED_REPLY_CHOICE,
         )
         val response = parseResponse(execute(buildRequest(token, json.encodeToString(request))))
         val usage = response.toTurnUsage(fallbackModel = model)
@@ -221,6 +232,15 @@ class AnthropicMessagesTransport internal constructor(
             putJsonArray("required") { add(JsonPrimitive("text")) }
             put("additionalProperties", false)
         }
+    }
+
+    /**
+     * Server tool web search di Anthropic (Messages API): `{"type":"web_search_20250305","name":
+     * "web_search"}`. Il loop di ricerca è interno lato Anthropic — nessun turno client-side.
+     */
+    private fun webSearchToolDef(): JsonObject = buildJsonObject {
+        put("type", "web_search_20250305")
+        put("name", "web_search")
     }
 
     private fun MessagesResponse.replyText(): String? {

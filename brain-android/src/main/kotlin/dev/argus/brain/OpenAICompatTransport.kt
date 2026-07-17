@@ -5,6 +5,7 @@ import dev.argus.engine.brain.CapabilityManifest
 import dev.argus.engine.brain.CliBridgeParser
 import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.model.Action
+import dev.argus.engine.model.GenerativeContract
 import dev.argus.engine.model.StateContextClassification
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireContext
@@ -153,12 +154,13 @@ class OpenAICompatTransport internal constructor(
         AgentMessageSupport.requireReplyTool(allowedTools)
         val notification = AgentMessageSupport.requireWhatsAppNotification(context)
         val stateLines = if ("state" in contextSources) AgentMessageSupport.safeStateLines(context.state) else emptyList()
-        return generate(goal = cleanGoal, notification = notification, stateLines = stateLines)
+        val webRequested = GenerativeContract.TOOL_WEB_SEARCH in allowedTools
+        return generate(goal = cleanGoal, notification = notification, stateLines = stateLines, webRequested = webRequested)
     }
 
     override suspend fun actV2(context: FireContext, action: Action.InvokeLlmV2): ActResult {
         val cleanGoal = AgentMessageSupport.requireGoal(action.goal)
-        if (action.allowedTools != listOf(AgentMessageSupport.REPLY_TOOL) || !action.replyTargetSender) {
+        if (!GenerativeContract.isAllowedToolset(action.allowedTools) || !action.replyTargetSender) {
             throw config("contratto act v2 non supportato")
         }
         if (action.timeoutMs !in AgentMessageSupport.MIN_ACT_TIMEOUT_MILLIS..AgentMessageSupport.MAX_ACT_TIMEOUT_MILLIS) {
@@ -172,7 +174,8 @@ class OpenAICompatTransport internal constructor(
         }
         val notification = AgentMessageSupport.requireWhatsAppNotification(context)
         val stateLines = action.stateContext.map { approved -> AgentMessageSupport.toStateLine(approved, context.state) }
-        return generate(goal = cleanGoal, notification = notification, stateLines = stateLines)
+        val webRequested = GenerativeContract.TOOL_WEB_SEARCH in action.allowedTools
+        return generate(goal = cleanGoal, notification = notification, stateLines = stateLines, webRequested = webRequested)
     }
 
     override suspend fun health(): TransportHealth {
@@ -194,9 +197,25 @@ class OpenAICompatTransport internal constructor(
         goal: String,
         notification: TriggerEvent.NotificationPosted,
         stateLines: List<String>,
+        webRequested: Boolean,
     ): ActResult {
         val token = requireKey()
-        val model = resolveModel()
+        val baseModel = resolveModel()
+        // Web search server-side, single-turn: applica il meccanismo del provider SOLO se il web è
+        // richiesto E supportato. Se richiesto ma NONE → degradazione graziosa (genera normalmente).
+        val applyWeb = webRequested && spec.quirks.webSearch != WebSearchMechanism.NONE
+        // OpenRouter attiva il loop web con lo slug `<model>:online`; gli altri lasciano il modello com'è.
+        val model = if (applyWeb && spec.quirks.webSearch == WebSearchMechanism.OPENROUTER_ONLINE) {
+            "$baseModel:online"
+        } else {
+            baseModel
+        }
+        // Gemini attiva il grounding via passthrough `extra_body.google.tools=[{google_search:{}}]`.
+        val extraBody = if (applyWeb && spec.quirks.webSearch == WebSearchMechanism.GEMINI_GROUNDING) {
+            GEMINI_GROUNDING_EXTRA_BODY
+        } else {
+            null
+        }
         val request = ChatRequest(
             model = model,
             messages = listOf(
@@ -204,13 +223,16 @@ class OpenAICompatTransport internal constructor(
                 ChatMessage("user", AgentMessageSupport.actUserText(notification, stateLines)),
             ),
             tools = listOf(replyToolDef()),
-            toolChoice = if (spec.quirks.forceToolChoiceAuto) JsonPrimitive("auto") else FORCED_REPLY_CHOICE,
+            // Con il web attivo il reply NON va forzato: forzarlo impedirebbe la ricerca. `replyText()`
+            // fa `fromTool ?: content`, quindi il testo finale post-web (content) arriva comunque.
+            toolChoice = if (applyWeb || spec.quirks.forceToolChoiceAuto) JsonPrimitive("auto") else FORCED_REPLY_CHOICE,
+            extraBody = extraBody,
             maxTokens = if (spec.quirks.outputCapParam == OutputCapParam.MAX_TOKENS) MAX_OUTPUT_TOKENS else null,
             maxCompletionTokens = if (spec.quirks.outputCapParam == OutputCapParam.MAX_COMPLETION_TOKENS) MAX_OUTPUT_TOKENS else null,
         )
         val payload = json.encodeToString(request)
         val response = parseChatResponse(execute(buildRequest(token, payload)))
-        val usage = response.toTurnUsage(fallbackModel = model)
+        val usage = response.toTurnUsage(fallbackModel = baseModel)
         val text = response.replyText()
             ?: return ActResult(text = null, metaError = "empty_response", usage = usage)
         return ActResult(text = text, metaError = null, usage = usage)
@@ -369,6 +391,8 @@ class OpenAICompatTransport internal constructor(
         @SerialName("tool_choice") val toolChoice: JsonElement? = null,
         @SerialName("max_tokens") val maxTokens: Int? = null,
         @SerialName("max_completion_tokens") val maxCompletionTokens: Int? = null,
+        /** Passthrough per feature Gemini-specifiche (es. grounding); assente per gli altri provider. */
+        @SerialName("extra_body") val extraBody: JsonObject? = null,
     )
 
     @Serializable
@@ -428,6 +452,18 @@ class OpenAICompatTransport internal constructor(
         val FORCED_REPLY_CHOICE: JsonElement = buildJsonObject {
             put("type", "function")
             putJsonObject("function") { put("name", AgentMessageSupport.REPLY_TOOL) }
+        }
+
+        /**
+         * Grounding Gemini sullo shim OpenAI-compat: `{"google":{"tools":[{"google_search":{}}]}}` sotto
+         * il campo top-level `extra_body`. Il `tools` OpenAI standard verrebbe rifiutato dal compat layer.
+         */
+        val GEMINI_GROUNDING_EXTRA_BODY: JsonObject = buildJsonObject {
+            putJsonObject("google") {
+                putJsonArray("tools") {
+                    add(buildJsonObject { putJsonObject("google_search") {} })
+                }
+            }
         }
     }
 }

@@ -74,6 +74,21 @@ class ProviderCatalogTest {
         assertEquals(AuthStyle.BEARER, ProviderCatalog.spec(ProviderId.OPENROUTER).authStyle)
     }
 
+    @Test fun `web search mechanism follows the verified per-provider table`() {
+        // Anthropic: server tool web_search_20250305 nell'array tools (loop interno lato Anthropic).
+        assertEquals(WebSearchMechanism.ANTHROPIC_TOOL, ProviderCatalog.spec(ProviderId.ANTHROPIC).quirks.webSearch)
+        // OpenRouter: slug modello con suffisso `:online`.
+        assertEquals(WebSearchMechanism.OPENROUTER_ONLINE, ProviderCatalog.spec(ProviderId.OPENROUTER).quirks.webSearch)
+        // Gemini: grounding google_search via passthrough extra_body.google.tools (shim OpenAI-compat).
+        assertEquals(WebSearchMechanism.GEMINI_GROUNDING, ProviderCatalog.spec(ProviderId.GEMINI).quirks.webSearch)
+        // OpenAI: web_search_options richiede un modello `-search-preview` (non i gpt-5.x configurati) o
+        // la Responses API (endpoint diverso da /chat/completions): non supportato pulito qui → NONE.
+        assertEquals(WebSearchMechanism.NONE, ProviderCatalog.spec(ProviderId.OPENAI).quirks.webSearch)
+        // Custom e Hermes non attivano il web da questo path (Hermes lo fa nel bridge) → NONE.
+        assertEquals(WebSearchMechanism.NONE, ProviderCatalog.spec(ProviderId.CUSTOM_OPENAI_COMPAT).quirks.webSearch)
+        assertEquals(WebSearchMechanism.NONE, ProviderCatalog.spec(ProviderId.HERMES).quirks.webSearch)
+    }
+
     @Test fun `auth headers never live in extraHeaders`() {
         val forbidden = setOf("authorization", "x-api-key")
         for (id in ProviderId.entries) {

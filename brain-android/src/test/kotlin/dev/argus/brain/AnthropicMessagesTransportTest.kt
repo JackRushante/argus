@@ -100,6 +100,65 @@ class AnthropicMessagesTransportTest {
         assertEquals("whatsapp_reply", toolChoice.getValue("name").jsonPrimitive.content)
     }
 
+    // --- #52 F3: web search server-side (Anthropic Messages) ---
+
+    @Test fun `web search adds the server tool and sets tool_choice auto`(): Unit = runBlocking {
+        // Con web richiesto: il server tool web_search_20250305 affianca il reply tool e il reply NON
+        // e' forzato (auto), cosi' Anthropic puo' cercare e poi rispondere. Il testo finale (blocco
+        // text dopo i risultati web) passa via textContent().
+        server.enqueue(jsonResponse(
+            """
+            {"id":"msg_w","type":"message","role":"assistant","model":"claude-opus-4-8",
+             "content":[{"type":"text","text":"A Roma oggi sereno, 28 gradi."}],
+             "stop_reason":"end_turn",
+             "usage":{"input_tokens":100,"output_tokens":20}}
+            """.trimIndent(),
+        ))
+        val t = transport(model = "claude-opus-4-8")
+
+        val result = t.act(
+            fireContext(), "che tempo fa a Roma", listOf("notification"),
+            listOf("whatsapp_reply", "web.search"),
+        )
+
+        assertEquals("A Roma oggi sereno, 28 gradi.", result.text)
+        val root = Json.parseToJsonElement(
+            assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
+        ).jsonObject
+        val tools = root.getValue("tools").jsonArray
+        assertEquals(2, tools.size)
+        val names = tools.map { it.jsonObject.getValue("name").jsonPrimitive.content }.toSet()
+        assertTrue("whatsapp_reply" in names)
+        assertTrue("web_search" in names)
+        val webTool = tools.first { it.jsonObject.getValue("name").jsonPrimitive.content == "web_search" }.jsonObject
+        assertEquals("web_search_20250305", webTool.getValue("type").jsonPrimitive.content)
+        val toolChoice = root.getValue("tool_choice").jsonObject
+        assertEquals("auto", toolChoice.getValue("type").jsonPrimitive.content)
+    }
+
+    @Test fun `without web the reply tool is forced and no web tool is present`(): Unit = runBlocking {
+        server.enqueue(jsonResponse(
+            """
+            {"id":"msg_nw","type":"message","role":"assistant","model":"claude-opus-4-8",
+             "content":[{"type":"tool_use","id":"toolu_1","name":"whatsapp_reply","input":{"text":"Ok!"}}],
+             "stop_reason":"tool_use","usage":{"input_tokens":10,"output_tokens":2}}
+            """.trimIndent(),
+        ))
+        val t = transport(model = "claude-opus-4-8")
+
+        t.act(fireContext(), "rispondi", listOf("notification"), listOf("whatsapp_reply"))
+
+        val root = Json.parseToJsonElement(
+            assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
+        ).jsonObject
+        val tools = root.getValue("tools").jsonArray
+        assertEquals(1, tools.size)
+        assertEquals("whatsapp_reply", tools.single().jsonObject.getValue("name").jsonPrimitive.content)
+        val toolChoice = root.getValue("tool_choice").jsonObject
+        assertEquals("tool", toolChoice.getValue("type").jsonPrimitive.content)
+        assertEquals("whatsapp_reply", toolChoice.getValue("name").jsonPrimitive.content)
+    }
+
     @Test fun `plain text content reply is accepted`(): Unit = runBlocking {
         server.enqueue(jsonResponse(
             """
