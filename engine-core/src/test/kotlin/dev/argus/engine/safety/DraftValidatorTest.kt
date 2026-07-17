@@ -372,6 +372,17 @@ class DraftValidatorTest {
         val e = errors(v.validate(d, emptySet()))
         assertTrue("cron_invalid" in e); assertTrue("state_key_unknown" in e)
     }
+    @Test fun `immediate trigger with valid actions has no trigger errors`() {
+        val d = AutomationDraft(
+            name = "sveglia adesso",
+            trigger = Trigger.Immediate,
+            actions = listOf(
+                Action.SetVolume(VolumeStream.ALARM, level = 80),
+                Action.SetAlarm(hour = 7, minute = 30, label = "Palestra"),
+            ),
+        )
+        assertEquals(emptyList(), errors(v.validate(d, emptySet())))
+    }
     @Test fun `time requires exactly one of cron and at`() {
         assertTrue("time_spec" in errors(v.validate(AutomationDraft("x",
             Trigger.Time(cron = "0 8 * * *", at = "2026-07-15T08:00", tz = "Europe/Rome"), listOf(Action.SetWifi(true))), emptySet())))

@@ -6,6 +6,9 @@ import dev.argus.engine.model.*
 class TriggerMatcher {
     fun matches(spec: Trigger, event: TriggerEvent): Boolean = when {
         spec is Trigger.Time && event is TriggerEvent.TimeFired -> true
+        // ImmediateFired accettato SOLO su una regola immediate (id/fingerprint verificati a monte
+        // dall'Engine, come per TimeFired): un ImmediateFired su qualsiasi altro trigger non matcha.
+        spec is Trigger.Immediate && event is TriggerEvent.ImmediateFired -> true
         spec is Trigger.Geofence && event is TriggerEvent.GeofenceTransitioned -> spec.transition == event.transition
         spec is Trigger.Notification && event is TriggerEvent.NotificationPosted -> matchesNotification(spec, event)
         spec is Trigger.PhoneState && event is TriggerEvent.PhoneStateChanged ->

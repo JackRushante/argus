@@ -17,6 +17,19 @@ class CapabilityRequirementsTest {
     }
 
     @Test
+    fun `immediate trigger requires its own capability and nothing time-related`() {
+        val caps = CapabilityRequirements.derive(
+            trigger = Trigger.Immediate,
+            actions = listOf(Action.SetAlarm(hour = 7, minute = 30)),
+        )
+        assertEquals(
+            setOf(CapabilityIds.TRIGGER_IMMEDIATE, CapabilityIds.ACTION_SET_ALARM),
+            caps,
+        )
+        assertTrue(CapabilityIds.TRIGGER_TIME !in caps)
+    }
+
+    @Test
     fun `geofence trigger is OS managed and does not require Shizuku state location`() {
         assertEquals(
             setOf(CapabilityIds.TRIGGER_GEOFENCE, CapabilityIds.ACTION_SET_WIFI),

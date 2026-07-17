@@ -30,6 +30,14 @@ class TriggerSerializationTest {
             (ArgusJson.decodeFromString(Trigger.serializer(), legacy) as Trigger.Time).precision,
         )
     }
+    @Test fun `immediate trigger round-trips and keeps its discriminator`() {
+        val t: Trigger = Trigger.Immediate
+        val json = ArgusJson.encodeToString(Trigger.serializer(), t)
+        assert(json.contains("\"type\":\"immediate\"")) { json }
+        val decoded = ArgusJson.decodeFromString(Trigger.serializer(), json)
+        assertEquals(Trigger.Immediate, decoded)
+        assert(decoded === Trigger.Immediate) { "data object deve deserializzare al singleton" }
+    }
     @Test fun `notification trigger keeps discriminator and identity fields`() {
         val t: Trigger = Trigger.Notification(pkg = "com.whatsapp", conversationId = "id:42", isGroup = false)
         val json = ArgusJson.encodeToString(Trigger.serializer(), t)

@@ -89,6 +89,8 @@ class DraftValidator(
         warn: (String, String) -> Unit,
     ) {
         when (trigger) {
+            // Immediate non ha campi propri (nessun cron/at/tz): è valido di per sé, fira all'arm.
+            is Trigger.Immediate -> Unit
             is Trigger.Time -> {
                 if ((trigger.cron == null) == (trigger.at == null))
                     err("time_spec", "Time richiede esattamente uno tra cron e at")

@@ -50,6 +50,49 @@ class RevalidatingFirePolicyTest {
         requireNotNull(automation.approvalFingerprint),
     )
 
+    private fun immediateEvent(automation: Automation) = TriggerEvent.ImmediateFired(
+        automation.id,
+        requireNotNull(automation.approvalFingerprint),
+    )
+
+    @Test
+    fun `immediate automation is allowed when its capability is live`() = runTest {
+        val automation = automation(
+            Trigger.Immediate,
+            listOf(Action.SetDnd(DndMode.PRIORITY)),
+        )
+        val result = policy(
+            snapshot(
+                availableCapabilities = setOf(
+                    CapabilityIds.TRIGGER_IMMEDIATE,
+                    ActionCapabilities.SET_DND,
+                ),
+            ),
+        ).evaluate(automation, immediateEvent(automation))
+        assertEquals(FirePolicyDecision.Allow, result)
+    }
+
+    @Test
+    fun `immediate automation edited after approval fails the fingerprint check`() = runTest {
+        val approved = automation(
+            Trigger.Immediate,
+            listOf(Action.SetDnd(DndMode.PRIORITY)),
+        )
+        val editedWithoutApproval = approved.copy(actions = listOf(Action.SetDnd(DndMode.TOTAL)))
+        val block = assertIs<FirePolicyDecision.Block>(
+            policy(
+                snapshot(
+                    availableCapabilities = setOf(
+                        CapabilityIds.TRIGGER_IMMEDIATE,
+                        ActionCapabilities.SET_DND,
+                    ),
+                ),
+            ).evaluate(editedWithoutApproval, immediateEvent(approved)),
+        )
+        assertEquals("approval_fingerprint_mismatch", block.code)
+        assertTrue(block.needsReview)
+    }
+
     @Test
     fun `valid deterministic automation is allowed when capability is live`() = runTest {
         val automation = automation(

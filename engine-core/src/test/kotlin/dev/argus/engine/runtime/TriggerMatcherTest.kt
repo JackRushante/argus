@@ -32,6 +32,18 @@ class TriggerMatcherTest {
             ),
         )
     }
+    @Test fun `immediate event matches only an immediate trigger`() {
+        val fingerprint = ApprovalFingerprint("0".repeat(64))
+        val immediateEvent = TriggerEvent.ImmediateFired(AutomationId("a1"), fingerprint)
+        // ImmediateFired su regola immediate -> match
+        assertTrue(m.matches(Trigger.Immediate, immediateEvent))
+        // ImmediateFired su una regola non-immediate -> NO match (bloccato)
+        assertFalse(m.matches(Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"), immediateEvent))
+        // e simmetricamente un TimeFired non fa scattare una regola immediate
+        assertFalse(
+            m.matches(Trigger.Immediate, TriggerEvent.TimeFired(AutomationId("a1"), fingerprint)),
+        )
+    }
     @Test fun `connectivity matches medium state and name`() {
         val spec = Trigger.Connectivity(ConnMedium.WIFI, ConnState.DISCONNECTED, match = "Casa")
         assertTrue(m.matches(spec, TriggerEvent.ConnectivityChanged(ConnMedium.WIFI, ConnState.DISCONNECTED, "Casa")))

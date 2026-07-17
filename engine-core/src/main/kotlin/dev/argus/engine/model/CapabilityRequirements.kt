@@ -3,6 +3,8 @@ package dev.argus.engine.model
 /** Identificatori stabili persistiti insieme allo snapshot approvato. */
 object CapabilityIds {
     const val TRIGGER_TIME = "trigger.time"
+    // Trigger immediato "fire una-volta all'arm": nessun scheduling OS, nessun grant particolare.
+    const val TRIGGER_IMMEDIATE = "trigger.immediate"
     const val TRIGGER_GEOFENCE = "trigger.geofence"
     const val TRIGGER_NOTIFICATION = "trigger.notification"
     // Granulari per evento: i grant OS differiscono (RECEIVE_SMS vs READ_PHONE_STATE).
@@ -66,6 +68,7 @@ object CapabilityRequirements {
 
     private fun forTrigger(trigger: Trigger): Set<String> = when (trigger) {
         is Trigger.Time -> setOf(CapabilityIds.TRIGGER_TIME)
+        is Trigger.Immediate -> setOf(CapabilityIds.TRIGGER_IMMEDIATE)
         // La registrazione è OS-managed e non legge DeviceState/Shizuku. STATE_LOCATION serve
         // solo a una Condition.LocationIn, derivata separatamente qui sotto.
         is Trigger.Geofence -> setOf(CapabilityIds.TRIGGER_GEOFENCE)

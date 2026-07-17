@@ -21,6 +21,13 @@ sealed interface TriggerEvent {
         override val approvalFingerprint: ApprovalFingerprint,
     ) : Registered
 
+    /** Fire una-tantum all'arm della regola immediate: mirror esatto di [TimeFired], porta l'id
+     *  e il fingerprint approvato così il match e la revalidazione seguono lo stesso percorso. */
+    data class ImmediateFired(
+        override val automationId: AutomationId,
+        override val approvalFingerprint: ApprovalFingerprint,
+    ) : Registered
+
     data class GeofenceTransitioned(
         override val automationId: AutomationId,
         val transition: Transition,

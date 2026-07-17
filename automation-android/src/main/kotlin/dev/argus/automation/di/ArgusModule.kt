@@ -35,7 +35,9 @@ import dev.argus.automation.EngineNotificationEventDispatcher
 import dev.argus.automation.EnginePhoneEventDispatcher
 import dev.argus.automation.EngineConnectivityEventDispatcher
 import dev.argus.automation.EngineGeofenceEventDispatcher
+import dev.argus.automation.EngineImmediateEventDispatcher
 import dev.argus.automation.EngineTimeEventDispatcher
+import dev.argus.automation.ImmediateEventDispatcher
 import dev.argus.automation.FrameworkCurrentLocationProvider
 import dev.argus.automation.GenerativeLane
 import dev.argus.automation.LazyDeviceStateProvider
@@ -571,6 +573,18 @@ object ArgusModule {
 
     @Provides
     @Singleton
+    fun immediateEventDispatcher(
+        engine: Engine,
+        state: LazyDeviceStateProvider,
+    ): EngineImmediateEventDispatcher = EngineImmediateEventDispatcher(engine, state)
+
+    @Provides
+    fun immediateEventDispatcherBoundary(
+        dispatcher: EngineImmediateEventDispatcher,
+    ): ImmediateEventDispatcher = dispatcher
+
+    @Provides
+    @Singleton
     fun notificationEventDispatcher(
         engine: Engine,
         state: DeviceStateSnapshotProvider,
@@ -838,6 +852,7 @@ object ArgusModule {
         connectivity: ConnectivityTriggerRuntime,
         geofence: GeofenceTriggerRuntime,
         sensor: SensorTriggerRuntime,
+        immediateDispatcher: ImmediateEventDispatcher,
     ): ArmedAutomationRegistrar = AndroidArmedAutomationRegistrar(
         coordinator,
         store,
@@ -845,6 +860,8 @@ object ArgusModule {
         connectivity,
         geofence,
         sensor,
+        immediateDispatcher,
+        Instant::now,
     )
 
     @Provides

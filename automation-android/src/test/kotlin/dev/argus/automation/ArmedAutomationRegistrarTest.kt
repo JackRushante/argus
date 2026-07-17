@@ -23,6 +23,8 @@ import dev.argus.engine.runtime.FireClaimRequest
 import dev.argus.engine.runtime.FireClaimResult
 import dev.argus.engine.runtime.FirePolicySnapshot
 import dev.argus.engine.runtime.FirePolicySnapshotProvider
+import dev.argus.engine.runtime.TriggerEnvelope
+import dev.argus.engine.runtime.TriggerEvent
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
@@ -190,6 +192,79 @@ class ArmedAutomationRegistrarTest {
     }
 
     @Test
+    fun `immediate rule fires once on arm and consumes the rule`() = runTest {
+        val immediate = signed(
+            rule("imm").copy(
+                trigger = Trigger.Immediate,
+                actions = listOf(Action.ShowNotification("Argus", "sveglia")),
+            ),
+        )
+        val store = RecordingStore(immediate)
+        val dispatched = mutableListOf<TriggerEnvelope>()
+        val registrar = AndroidArmedAutomationRegistrar(
+            coordinator = coordinator(store),
+            store = store,
+            snapshots = FirePolicySnapshotProvider {
+                FirePolicySnapshot(
+                    knownTools = AndroidCapabilityProbe.KNOWN_TOOLS,
+                    availableCapabilities = setOf(CapabilityIds.TRIGGER_IMMEDIATE),
+                    whitelistedConversationIds = setOf(CONVERSATION_ID),
+                )
+            },
+            immediateDispatcher = { dispatched += it },
+            now = { Instant.parse("2026-07-14T08:00:00Z") },
+        )
+
+        assertTrue(registrar.register(immediate), "il dispatch riuscito arma la regola one-shot")
+        assertEquals(1, dispatched.size, "un solo envelope immediate per arm")
+        val envelope = dispatched.single()
+        assertTrue(
+            envelope.id.value.startsWith("immediate:"),
+            "id con prefisso immediate: ${envelope.id.value}",
+        )
+        val event = envelope.event
+        assertTrue(event is TriggerEvent.ImmediateFired)
+        assertEquals(immediate.id, event.automationId)
+        assertEquals(immediate.approvalFingerprint, event.approvalFingerprint)
+        assertEquals(
+            listOf(immediate.id),
+            store.disabled,
+            "dopo il fire la regola one-shot si consuma con disableIfApproved",
+        )
+    }
+
+    @Test
+    fun `immediate rule that is not armed does not dispatch and fails closed`() = runTest {
+        val immediate = signed(
+            rule("imm").copy(
+                status = AutomationStatus.DISABLED,
+                enabled = false,
+                trigger = Trigger.Immediate,
+                actions = listOf(Action.ShowNotification("Argus", "sveglia")),
+            ),
+        )
+        val store = RecordingStore(immediate)
+        val dispatched = mutableListOf<TriggerEnvelope>()
+        val registrar = AndroidArmedAutomationRegistrar(
+            coordinator = coordinator(store),
+            store = store,
+            snapshots = FirePolicySnapshotProvider {
+                FirePolicySnapshot(
+                    knownTools = AndroidCapabilityProbe.KNOWN_TOOLS,
+                    availableCapabilities = setOf(CapabilityIds.TRIGGER_IMMEDIATE),
+                    whitelistedConversationIds = setOf(CONVERSATION_ID),
+                )
+            },
+            immediateDispatcher = { dispatched += it },
+            now = { Instant.parse("2026-07-14T08:00:00Z") },
+        )
+
+        assertFalse(registrar.register(immediate))
+        assertTrue(dispatched.isEmpty(), "una regola non ARMED non deve firare")
+        assertTrue(store.disabled.isEmpty())
+    }
+
+    @Test
     fun `geofence requires location capability and a tracked OS registration`() = runTest {
         val geofenceRule = signed(
             rule("geo").copy(
@@ -300,6 +375,42 @@ class ArmedAutomationRegistrarTest {
         override suspend fun disable(id: AutomationId) = Unit
         override suspend fun disableIfApproved(id: AutomationId, fingerprint: ApprovalFingerprint) =
             false
+
+        override suspend fun enableIfApproved(id: AutomationId, fingerprint: ApprovalFingerprint) =
+            false
+
+        override suspend fun markNeedsReview(id: AutomationId) = Unit
+        override suspend fun markNeedsReviewIfApproved(
+            id: AutomationId,
+            fingerprint: ApprovalFingerprint,
+        ): Boolean = false
+
+        override suspend fun claimFire(request: FireClaimRequest): FireClaimResult =
+            FireClaimResult.NotEligible
+
+        override suspend fun recordFired(id: AutomationId, atMillis: Long) = Unit
+        override suspend fun lastFiredAt(id: AutomationId): Long? = null
+    }
+
+    /** Store che registra le consumazioni one-shot e conferma disableIfApproved come lo store reale. */
+    private class RecordingStore(private val rule: Automation) : AutomationStore {
+        val disabled = mutableListOf<AutomationId>()
+        override suspend fun get(id: AutomationId): Automation? = rule.takeIf { it.id == id }
+        override suspend fun all(): List<Automation> = listOf(rule)
+        override fun observeAll(): Flow<List<Automation>> = flowOf(listOf(rule))
+        override suspend fun armed(): List<Automation> = listOf(rule).filter {
+            it.status == AutomationStatus.ARMED && it.enabled
+        }
+
+        override suspend fun delete(id: AutomationId) = Unit
+        override suspend fun disable(id: AutomationId) = Unit
+        override suspend fun disableIfApproved(
+            id: AutomationId,
+            fingerprint: ApprovalFingerprint,
+        ): Boolean {
+            disabled += id
+            return true
+        }
 
         override suspend fun enableIfApproved(id: AutomationId, fingerprint: ApprovalFingerprint) =
             false

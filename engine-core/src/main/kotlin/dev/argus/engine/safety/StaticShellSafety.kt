@@ -22,7 +22,11 @@ import dev.argus.engine.runtime.TriggerEvent
  */
 object StaticShellSafety {
     fun allows(trigger: Trigger, whitelistedConversationIds: Set<String>): Boolean = when (trigger) {
-        is Trigger.Time, is Trigger.Geofence, is Trigger.Connectivity, is Trigger.Sensor -> true
+        // Immediate fira on-arm senza attore esterno: nessuno "preme l'interruttore" al posto
+        // dell'utente che ha armato la regola, quindi è fidato come Time/Geofence/Connectivity/Sensor.
+        is Trigger.Time, is Trigger.Immediate,
+        is Trigger.Geofence, is Trigger.Connectivity, is Trigger.Sensor,
+        -> true
         is Trigger.Notification -> verifiedContact(
             pkg = trigger.pkg,
             conversationId = trigger.conversationId,
@@ -35,6 +39,7 @@ object StaticShellSafety {
 
     fun allows(event: TriggerEvent, whitelistedConversationIds: Set<String>): Boolean = when (event) {
         is TriggerEvent.TimeFired,
+        is TriggerEvent.ImmediateFired,
         is TriggerEvent.GeofenceTransitioned,
         is TriggerEvent.ConnectivityChanged,
         is TriggerEvent.SensorChanged,
@@ -63,6 +68,7 @@ object StaticShellSafety {
         ) return false
         return when {
             trigger is Trigger.Time && event is TriggerEvent.TimeFired -> true
+            trigger is Trigger.Immediate && event is TriggerEvent.ImmediateFired -> true
             trigger is Trigger.Geofence && event is TriggerEvent.GeofenceTransitioned ->
                 trigger.transition == event.transition
             trigger is Trigger.Connectivity && event is TriggerEvent.ConnectivityChanged ->

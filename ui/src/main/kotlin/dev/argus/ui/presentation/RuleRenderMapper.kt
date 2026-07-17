@@ -80,6 +80,7 @@ object RuleRenderMapper {
     private fun triggerIconKey(t: Trigger): String = when (t) {
         is Trigger.Notification -> "notification"
         is Trigger.Time -> "time"
+        is Trigger.Immediate -> "immediate"
         is Trigger.Geofence -> "geofence"
         is Trigger.PhoneState -> "phone"
         is Trigger.Connectivity -> "connectivity"
@@ -89,6 +90,7 @@ object RuleRenderMapper {
     private fun triggerLine(t: Trigger, conversationLabels: Map<String, String>): String = when (t) {
         is Trigger.Notification -> notificationLine(t, conversationLabels)
         is Trigger.Time -> timeLine(t)
+        is Trigger.Immediate -> "Una volta, all'attivazione"
         is Trigger.Geofence -> geofenceLine(t)
         is Trigger.PhoneState -> phoneStateLine(t)
         is Trigger.Connectivity -> connectivityLine(t)

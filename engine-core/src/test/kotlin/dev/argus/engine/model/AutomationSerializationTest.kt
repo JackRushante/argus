@@ -44,6 +44,28 @@ class AutomationSerializationTest {
             decoded.requiredCapabilities,
         )
     }
+    @Test fun `immediate automation with alarm and volume actions round-trips`() {
+        val a = Automation(
+            id = AutomationId("imm1"), name = "sveglia tra poco",
+            createdBy = CreatedBy.USER, status = AutomationStatus.PENDING_APPROVAL,
+            trigger = Trigger.Immediate,
+            actions = listOf(
+                Action.SetVolume(VolumeStream.ALARM, level = 80),
+                Action.SetAlarm(hour = 7, minute = 30, label = "Palestra"),
+            ),
+        )
+        val json = ArgusJson.encodeToString(Automation.serializer(), a)
+        assertTrue(json.contains("\"type\":\"immediate\""), json)
+        assertEquals(a, ArgusJson.decodeFromString(Automation.serializer(), json))
+        assertEquals(
+            setOf(
+                CapabilityIds.TRIGGER_IMMEDIATE,
+                CapabilityIds.ACTION_SET_VOLUME,
+                CapabilityIds.ACTION_SET_ALARM,
+            ),
+            a.requiredCapabilities,
+        )
+    }
     @Test fun `tier classification`() {
         assertTrue(Action.SetWifi(true).tier == ActionTier.DETERMINISTIC)
         assertTrue(Action.ShowNotification("t", "x").tier == ActionTier.DETERMINISTIC)

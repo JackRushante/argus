@@ -208,7 +208,7 @@ internal object AgentMessageSupport {
         return context.toString()
     }
 
-    // Prompt di compile riusato dal reference Hermes (schema v2): 14 regole vincolanti +
+    // Prompt di compile riusato dal reference Hermes (schema v2): 15 regole vincolanti +
     // schema draft + schema state-query. Nessun segreto: solo template statico.
     const val COMPILE_RULES = """Sei il compilatore read-only di Argus. Trasforma la richiesta dell'utente in una
 AutomationDraft, ma non eseguire azioni e non inventare capability.
@@ -235,7 +235,8 @@ REGOLE VINCOLANTI:
    usa whatsapp_reply statica solo se l'utente detta il testo esatto della risposta.
 10. Se manifest.available_triggers e' presente, usa SOLO i trigger elencati (lista vuota =
     nessun trigger armabile):
-    "time", "notification", "geofence"; "phone_state.sms" = SMS_RECEIVED;
+    "time", "immediate" (esegui-una-volta-all'attivazione), "notification", "geofence";
+    "phone_state.sms" = SMS_RECEIVED;
     "phone_state.call" = INCOMING_CALL/CALL_ENDED; "connectivity.wifi",
     "connectivity.bt" e "connectivity.power" corrispondono esattamente al rispettivo medium;
     un match SSID Wi-Fi richiede anche "connectivity.wifi.identity". I trigger sensore sono
@@ -258,7 +259,11 @@ REGOLE VINCOLANTI:
 14. invoke_llm.allowedTools puo' includere "web.search" oltre a "whatsapp_reply" SOLO quando il
     goal richiede dati aggiornati dal web (cambio valuta, meteo, prezzi, notizie, orari): non
     aggiungerlo se il dato non e' online/live. "web.search" deve comparire in
-    manifest.available_tools."""
+    manifest.available_tools.
+15. Per comandi one-shot da eseguire subito (impostare una sveglia/timer, o quando l'utente dice
+    "subito"/"adesso"/"ora"), usa il trigger "immediate" (esegui-una-volta-all'attivazione).
+    L'orario della sveglia/timer va nell'AZIONE (set_alarm/set_timer), NON nel trigger. Non usare
+    un trigger "time" a un istante gia' presente/passato."""
 
     const val DRAFT_SCHEMA_TEXT = """AutomationDraft JSON (nomi e maiuscole sono esatti):
 {
@@ -276,6 +281,9 @@ Trigger, discriminato da "type":
   Esattamente uno tra cron e at. at e' ISO locale, es. 2026-07-15T23:00.
   Ometti precision o usa FLEXIBLE normalmente; EXACT solo se l'utente chiede
   esplicitamente puntualita' esatta.
+- {"type":"immediate"}  // esegue le azioni UNA VOLTA all'attivazione della regola, senza orario.
+  Per "imposta subito una sveglia/un timer" usa questo trigger e metti l'ora nell'azione
+  set_alarm/set_timer, mai un trigger time a un istante gia' passato.
 - {"type":"geofence", "lat":number, "lng":number, "radiusM":number,
    "transition":"ENTER"|"EXIT", "loiteringDelayMs":0,
    "resolveCurrentLocation":boolean}

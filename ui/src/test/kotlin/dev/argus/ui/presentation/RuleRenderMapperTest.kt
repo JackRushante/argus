@@ -32,6 +32,16 @@ class RuleRenderMapperTest {
         assertTrue(!r.isGenerative && r.privacyNote == null)
         assertEquals(1, r.actions.size)
     }
+    @Test fun `immediate trigger renders the on-arm one-shot line`() {
+        val a = Automation(
+            AutomationId("i1"), "Sveglia adesso", CreatedBy.USER, AutomationStatus.PENDING_APPROVAL,
+            Trigger.Immediate,
+            listOf(Action.SetAlarm(hour = 7, minute = 30, label = "Palestra")),
+        )
+        val r = RuleRenderMapper.map(a)
+        assertEquals("immediate", r.triggerIconKey)
+        assertEquals("Una volta, all'attivazione", r.triggerLine)
+    }
     @Test fun `shell action is flagged and command preserved`() {
         val a = Automation(
             AutomationId("s1"), "Backup", CreatedBy.LLM, AutomationStatus.PENDING_APPROVAL,

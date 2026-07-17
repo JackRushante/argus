@@ -45,6 +45,23 @@ class StaticShellSafetyTest {
                 whitelist,
             ),
         )
+        assertTrue(StaticShellSafety.allows(Trigger.Immediate, whitelist))
+    }
+
+    @Test
+    fun `evento immediate locale puo premere solo il trigger immediate approvato`() {
+        val fingerprint = ApprovalFingerprint("0".repeat(64))
+        val event = TriggerEvent.ImmediateFired(AutomationId("imm"), fingerprint)
+        assertTrue(StaticShellSafety.allows(event, whitelist))
+        assertTrue(StaticShellSafety.allows(Trigger.Immediate, event, whitelist))
+        // Un ImmediateFired non deve poter premere l'interruttore di una regola non-immediate.
+        assertFalse(
+            StaticShellSafety.allows(
+                Trigger.Time(cron = "0 8 * * *", tz = "Europe/Rome"),
+                event,
+                whitelist,
+            ),
+        )
     }
 
     @Test

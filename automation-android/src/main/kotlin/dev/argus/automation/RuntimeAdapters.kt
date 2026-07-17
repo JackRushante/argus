@@ -37,6 +37,8 @@ import dev.argus.engine.runtime.FirePolicySnapshotProvider
 import dev.argus.engine.runtime.GeoPoint
 import dev.argus.engine.runtime.StateReadRequest
 import dev.argus.engine.runtime.TriggerEnvelope
+import dev.argus.engine.runtime.TriggerEvent
+import dev.argus.engine.runtime.TriggerEventId
 import dev.argus.shizuku.ShizukuGateway
 import dev.argus.shizuku.ShizukuGatewayStatus
 import kotlinx.coroutines.CancellationException
@@ -122,6 +124,20 @@ class EngineTimeEventDispatcher(
     }
 }
 
+/** Dispatcher del trigger immediato: fira on-arm, senza scheduling OS. Mirror di [TimeEventDispatcher]. */
+fun interface ImmediateEventDispatcher {
+    suspend fun dispatch(envelope: TriggerEnvelope)
+}
+
+class EngineImmediateEventDispatcher(
+    private val engine: Engine,
+    private val state: LazyDeviceStateProvider,
+) : ImmediateEventDispatcher {
+    override suspend fun dispatch(envelope: TriggerEnvelope) {
+        engine.onTrigger(envelope) { request -> state.current(request) }
+    }
+}
+
 fun interface NotificationEventDispatcher {
     suspend fun dispatch(envelope: TriggerEnvelope)
 }
@@ -184,9 +200,14 @@ class AndroidArmedAutomationRegistrar(
     private val connectivity: ConnectivityTriggerRuntime = NoopConnectivityTriggerRuntime,
     private val geofence: GeofenceTriggerRuntime = NoopGeofenceTriggerRuntime,
     private val sensor: SensorTriggerRuntime = NoopSensorTriggerRuntime,
+    // Il trigger immediato non registra nulla presso l'OS: fira on-arm dispatchando subito al motore.
+    private val immediateDispatcher: ImmediateEventDispatcher = ImmediateEventDispatcher { },
+    // Clock iniettabile per un id univoco per-arm (un RE-ARM ri-fira, niente dedup permanente).
+    private val now: () -> java.time.Instant = java.time.Instant::now,
 ) : ArmedAutomationRegistrar {
     override suspend fun register(automation: Automation): Boolean = when (automation.trigger) {
         is Trigger.Time -> registerTime(automation)
+        is Trigger.Immediate -> registerImmediate(automation)
         is Trigger.Notification -> registerNotification(automation)
         // I receiver manifest sono sempre attivi: la registrazione OS è il grant runtime
         // stesso, verificato qui con la capability granulare dell'evento (sms vs call).
@@ -205,6 +226,31 @@ class AndroidArmedAutomationRegistrar(
         throw error
     } catch (_: Exception) {
         false
+    }
+
+    /**
+     * Trigger immediato: nessuna registrazione OS. All'arm dispatcha subito un [TriggerEvent.ImmediateFired]
+     * al motore (che esegue le azioni), poi consuma la regola one-shot disabilitandola come un time
+     * one-shot dopo il fire. L'id include il timestamp corrente così un RE-ARM ri-fira senza dedup.
+     */
+    private suspend fun registerImmediate(automation: Automation): Boolean {
+        return try {
+            val fingerprint = automation.approvalFingerprint ?: return false
+            val persisted = store.get(automation.id)
+            if (persisted?.status != AutomationStatus.ARMED || !persisted.enabled) return false
+            val envelope = TriggerEnvelope(
+                id = TriggerEventId("immediate:${fingerprint.value}:${now().toEpochMilli()}"),
+                event = TriggerEvent.ImmediateFired(automation.id, fingerprint),
+            )
+            immediateDispatcher.dispatch(envelope)
+            // Consuma la regola one-shot dopo il fire, come TimeAlarmCoordinator per un time one-shot.
+            store.disableIfApproved(automation.id, fingerprint)
+            true
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private suspend fun registerNotification(automation: Automation): Boolean = try {

@@ -389,6 +389,7 @@ class AndroidCapabilityProbeTest {
         assertEquals(
             listOf(
                 "time",
+                "immediate",
                 "notification",
                 "phone_state.sms",
                 "connectivity.wifi",
@@ -400,6 +401,14 @@ class AndroidCapabilityProbeTest {
 
         // Retrocompatibilità: senza lista la riga non compare (manifest legacy nei test brain).
         assertFalse("TRIGGER DISPONIBILI" in manifest.copy(availableTriggers = emptyList()).render())
+    }
+
+    @Test
+    fun `immediate trigger is always available with no OS dependency`() = runTest {
+        // Nessun grant: fira on-arm, quindi deve comparire sia come capability sia nella lista wire.
+        val bare = probe(state())
+        assertTrue(CapabilityIds.TRIGGER_IMMEDIATE in bare.current().availableCapabilities)
+        assertTrue("immediate" in bare.probe(DeviceState()).availableTriggers)
     }
 
     @Test

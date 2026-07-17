@@ -56,6 +56,16 @@ sealed interface Trigger {
         val precision: TimePrecision = TimePrecision.FLEXIBLE,
     ) : Trigger
 
+    /**
+     * Fire UNA VOLTA all'arm della regola: nessun orario, nessun cron/at, nessuna corsa contro
+     * l'orologio. Serve quando un one-shot "adesso" non è schedulabile (l'istante scappa nel
+     * passato tra bozza→approva→schedula, generando "pianificazione non riuscita"). L'immediato
+     * fira on-arm, deterministico. L'orario dell'eventuale sveglia/timer sta nell'AZIONE
+     * (SetAlarm/SetTimer), NON nel trigger.
+     */
+    @Serializable @SerialName("immediate")
+    data object Immediate : Trigger
+
     @Serializable @SerialName("notification")
     data class Notification(
         val pkg: String,

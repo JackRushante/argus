@@ -177,6 +177,8 @@ class AndroidCapabilityProbe internal constructor(
         armableSensorKinds: List<SensorKind>,
     ): List<String> = buildList {
         add("time")
+        // Sempre armabile: fira on-arm, nessuna dipendenza OS o grant.
+        add("immediate")
         if (state.notificationListenerGranted) add("notification")
         if (state.foregroundLocationGranted && state.backgroundLocationGranted) add("geofence")
         if (state.receiveSmsGranted) add("phone_state.sms")
@@ -221,6 +223,8 @@ class AndroidCapabilityProbe internal constructor(
 
         val available = buildSet {
             add(CapabilityIds.TRIGGER_TIME)
+            // Trigger immediato: nessuna dipendenza OS, fira on-arm ⇒ sempre disponibile.
+            add(CapabilityIds.TRIGGER_IMMEDIATE)
             if (state.foregroundLocationGranted && state.backgroundLocationGranted) {
                 add(CapabilityIds.TRIGGER_GEOFENCE)
             }
