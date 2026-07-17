@@ -159,6 +159,59 @@ class AnthropicMessagesTransportTest {
         assertEquals("whatsapp_reply", toolChoice.getValue("name").jsonPrimitive.content)
     }
 
+    // --- #59 Ondata 3: sink NOTIFICA → testo plain, nessun reply tool ---
+
+    @Test fun `notification sink without web omits the reply tool and reads plain text`(): Unit = runBlocking {
+        // allowedTools senza whatsapp_reply (sink notifica): nessun tool dichiarato, nessun
+        // tool_choice, testo dal blocco text.
+        server.enqueue(jsonResponse(
+            """
+            {"id":"msg_n","type":"message","role":"assistant","model":"claude-opus-4-8",
+             "content":[{"type":"text","text":"Promemoria: chiama il dentista."}],
+             "stop_reason":"end_turn","usage":{"input_tokens":30,"output_tokens":6}}
+            """.trimIndent(),
+        ))
+        val t = transport(model = "claude-opus-4-8")
+
+        val result = t.act(fireContext(), "genera un promemoria", listOf("notification"), emptyList())
+
+        assertEquals("Promemoria: chiama il dentista.", result.text)
+        assertNull(result.metaError)
+        val root = Json.parseToJsonElement(
+            assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
+        ).jsonObject
+        assertFalse("tools" in root, "il sink notifica non dichiara il reply tool")
+        assertFalse("tool_choice" in root, "il sink notifica non forza alcun tool")
+    }
+
+    @Test fun `notification sink with web adds only the web tool and no reply`(): Unit = runBlocking {
+        // Sink notifica + web: solo il server tool web_search, nessun reply tool, nessun tool_choice
+        // forzato; il testo finale post-web arriva via textContent().
+        server.enqueue(jsonResponse(
+            """
+            {"id":"msg_nw2","type":"message","role":"assistant","model":"claude-opus-4-8",
+             "content":[{"type":"text","text":"Oggi sereno a Roma."}],
+             "stop_reason":"end_turn","usage":{"input_tokens":40,"output_tokens":8}}
+            """.trimIndent(),
+        ))
+        val t = transport(model = "claude-opus-4-8")
+
+        val result = t.act(fireContext(), "che tempo fa a Roma", listOf("notification"), listOf("web.search"))
+
+        assertEquals("Oggi sereno a Roma.", result.text)
+        val root = Json.parseToJsonElement(
+            assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
+        ).jsonObject
+        val tools = root.getValue("tools").jsonArray
+        assertEquals(1, tools.size)
+        assertEquals("web_search", tools.single().jsonObject.getValue("name").jsonPrimitive.content)
+        assertEquals(
+            "web_search_20250305",
+            tools.single().jsonObject.getValue("type").jsonPrimitive.content,
+        )
+        assertFalse("tool_choice" in root)
+    }
+
     @Test fun `plain text content reply is accepted`(): Unit = runBlocking {
         server.enqueue(jsonResponse(
             """

@@ -158,11 +158,17 @@ class OpenAICompatTransport internal constructor(
     ): ActResult {
         val cleanGoal = AgentMessageSupport.requireGoal(goal)
         AgentMessageSupport.requireActContextSources(contextSources)
-        AgentMessageSupport.requireReplyTool(allowedTools)
+        val useReplyTool = AgentMessageSupport.requireGenerativeToolset(allowedTools)
         val notification = AgentMessageSupport.requireWhatsAppNotification(context)
         val stateLines = if ("state" in contextSources) AgentMessageSupport.safeStateLines(context.state) else emptyList()
         val webRequested = GenerativeContract.TOOL_WEB_SEARCH in allowedTools
-        return generate(goal = cleanGoal, notification = notification, stateLines = stateLines, webRequested = webRequested)
+        return generate(
+            goal = cleanGoal,
+            notification = notification,
+            stateLines = stateLines,
+            webRequested = webRequested,
+            useReplyTool = useReplyTool,
+        )
     }
 
     override suspend fun actV2(context: FireContext, action: Action.InvokeLlmV2): ActResult {
@@ -182,7 +188,14 @@ class OpenAICompatTransport internal constructor(
         val notification = AgentMessageSupport.requireWhatsAppNotification(context)
         val stateLines = action.stateContext.map { approved -> AgentMessageSupport.toStateLine(approved, context.state) }
         val webRequested = GenerativeContract.TOOL_WEB_SEARCH in action.allowedTools
-        return generate(goal = cleanGoal, notification = notification, stateLines = stateLines, webRequested = webRequested)
+        // act v2 è sempre un reply (allowedTools include whatsapp_reply): reply tool sempre attivo.
+        return generate(
+            goal = cleanGoal,
+            notification = notification,
+            stateLines = stateLines,
+            webRequested = webRequested,
+            useReplyTool = true,
+        )
     }
 
     override suspend fun health(): TransportHealth {
@@ -205,6 +218,7 @@ class OpenAICompatTransport internal constructor(
         notification: TriggerEvent.NotificationPosted,
         stateLines: List<String>,
         webRequested: Boolean,
+        useReplyTool: Boolean,
     ): ActResult {
         val token = requireKey()
         val baseModel = resolveModel()
@@ -212,8 +226,8 @@ class OpenAICompatTransport internal constructor(
         // richiesto E supportato. Se richiesto ma NONE → degradazione graziosa (genera normalmente).
         val applyWeb = webRequested && spec.quirks.webSearch != WebSearchMechanism.NONE
         // OpenAI e Gemini fanno web con endpoint/codec DIVERSI da Chat Completions: il provider esegue il
-        // loop web internamente e genera il testo direttamente (nessun reply tool). Deviamo prima di
-        // costruire la ChatRequest.
+        // loop web internamente e genera il testo direttamente (nessun reply tool, system PLAIN). Deviamo
+        // prima di costruire la ChatRequest, a prescindere da useReplyTool (vale anche per il sink notifica).
         if (applyWeb) {
             when (spec.quirks.webSearch) {
                 WebSearchMechanism.OPENAI_RESPONSES ->
@@ -229,16 +243,26 @@ class OpenAICompatTransport internal constructor(
         } else {
             baseModel
         }
+        // Sink NOTIFICA #59 (useReplyTool=false): NIENTE reply tool, NESSUN tool_choice, system PLAIN.
+        // Il modello (con o senza web OpenRouter `:online`) produce testo semplice preso dal `content`.
+        // Sink REPLY (useReplyTool=true): comportamento invariato (reply tool forzato/auto).
         val request = ChatRequest(
             model = model,
             messages = listOf(
-                ChatMessage("system", AgentMessageSupport.actSystemText(goal)),
+                ChatMessage(
+                    "system",
+                    if (useReplyTool) AgentMessageSupport.actSystemText(goal) else AgentMessageSupport.actSystemTextPlain(goal),
+                ),
                 ChatMessage("user", AgentMessageSupport.actUserText(notification, stateLines)),
             ),
-            tools = listOf(replyToolDef()),
+            tools = if (useReplyTool) listOf(replyToolDef()) else null,
             // Con il web attivo il reply NON va forzato: forzarlo impedirebbe la ricerca. `replyText()`
             // fa `fromTool ?: content`, quindi il testo finale post-web (content) arriva comunque.
-            toolChoice = if (applyWeb || spec.quirks.forceToolChoiceAuto) JsonPrimitive("auto") else FORCED_REPLY_CHOICE,
+            toolChoice = when {
+                !useReplyTool -> null
+                applyWeb || spec.quirks.forceToolChoiceAuto -> JsonPrimitive("auto")
+                else -> FORCED_REPLY_CHOICE
+            },
             maxTokens = if (spec.quirks.outputCapParam == OutputCapParam.MAX_TOKENS) MAX_OUTPUT_TOKENS else null,
             maxCompletionTokens = if (spec.quirks.outputCapParam == OutputCapParam.MAX_COMPLETION_TOKENS) MAX_OUTPUT_TOKENS else null,
         )

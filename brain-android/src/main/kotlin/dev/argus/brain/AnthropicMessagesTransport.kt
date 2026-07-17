@@ -129,11 +129,17 @@ class AnthropicMessagesTransport internal constructor(
     ): ActResult {
         val cleanGoal = AgentMessageSupport.requireGoal(goal)
         AgentMessageSupport.requireActContextSources(contextSources)
-        AgentMessageSupport.requireReplyTool(allowedTools)
+        val useReplyTool = AgentMessageSupport.requireGenerativeToolset(allowedTools)
         val notification = AgentMessageSupport.requireWhatsAppNotification(context)
         val stateLines = if ("state" in contextSources) AgentMessageSupport.safeStateLines(context.state) else emptyList()
         val webRequested = GenerativeContract.TOOL_WEB_SEARCH in allowedTools
-        return generate(goal = cleanGoal, notification = notification, stateLines = stateLines, webRequested = webRequested)
+        return generate(
+            goal = cleanGoal,
+            notification = notification,
+            stateLines = stateLines,
+            webRequested = webRequested,
+            useReplyTool = useReplyTool,
+        )
     }
 
     override suspend fun actV2(context: FireContext, action: Action.InvokeLlmV2): ActResult {
@@ -153,7 +159,14 @@ class AnthropicMessagesTransport internal constructor(
         val notification = AgentMessageSupport.requireWhatsAppNotification(context)
         val stateLines = action.stateContext.map { approved -> AgentMessageSupport.toStateLine(approved, context.state) }
         val webRequested = GenerativeContract.TOOL_WEB_SEARCH in action.allowedTools
-        return generate(goal = cleanGoal, notification = notification, stateLines = stateLines, webRequested = webRequested)
+        // act v2 è sempre un reply (allowedTools include whatsapp_reply): reply tool sempre attivo.
+        return generate(
+            goal = cleanGoal,
+            notification = notification,
+            stateLines = stateLines,
+            webRequested = webRequested,
+            useReplyTool = true,
+        )
     }
 
     override suspend fun health(): TransportHealth {
@@ -173,23 +186,37 @@ class AnthropicMessagesTransport internal constructor(
         notification: TriggerEvent.NotificationPosted,
         stateLines: List<String>,
         webRequested: Boolean,
+        useReplyTool: Boolean,
     ): ActResult {
         val token = requireKey()
         val model = resolveModel()
         // Web search server-side, single-turn: se richiesto e supportato, il server tool web_search
-        // affianca il reply tool e Anthropic esegue il loop di ricerca internamente. Con NONE il web
+        // affianca gli altri tool e Anthropic esegue il loop di ricerca internamente. Con NONE il web
         // richiesto viene ignorato (degradazione graziosa).
         val applyWeb = webRequested && spec.quirks.webSearch == WebSearchMechanism.ANTHROPIC_TOOL
-        val tools = if (applyWeb) listOf(replyToolDef(), webSearchToolDef()) else listOf(replyToolDef())
+        // Sink NOTIFICA #59 (useReplyTool=false): NIENTE reply tool (solo eventuale web_search), NESSUN
+        // tool_choice forzato, system PLAIN, testo dal blocco `text` via replyText(). Sink REPLY
+        // (useReplyTool=true): comportamento invariato (reply tool + eventuale web_search).
+        val tools = when {
+            useReplyTool && applyWeb -> listOf(replyToolDef(), webSearchToolDef())
+            useReplyTool -> listOf(replyToolDef())
+            applyWeb -> listOf(webSearchToolDef())
+            else -> null
+        }
         val request = MessagesRequest(
             model = model,
             maxTokens = MAX_OUTPUT_TOKENS,
-            system = AgentMessageSupport.actSystemText(goal),
+            system = if (useReplyTool) AgentMessageSupport.actSystemText(goal) else AgentMessageSupport.actSystemTextPlain(goal),
             messages = listOf(InputMessage("user", AgentMessageSupport.actUserText(notification, stateLines))),
             tools = tools,
-            // Con il web attivo il reply NON va forzato: il testo finale (blocco text dopo i risultati
-            // web) arriva via textContent(); forzare il reply tool impedirebbe la ricerca.
-            toolChoice = if (applyWeb || spec.quirks.forceToolChoiceAuto) AUTO_TOOL_CHOICE else FORCED_REPLY_CHOICE,
+            // Con il web attivo (o senza reply tool) il reply NON va forzato: il testo finale (blocco
+            // text dopo i risultati web) arriva via textContent(); forzare il reply tool impedirebbe la
+            // ricerca e, nel sink notifica, non esiste alcun reply tool da forzare.
+            toolChoice = when {
+                !useReplyTool -> null
+                applyWeb || spec.quirks.forceToolChoiceAuto -> AUTO_TOOL_CHOICE
+                else -> FORCED_REPLY_CHOICE
+            },
         )
         val response = parseResponse(execute(buildRequest(token, json.encodeToString(request))))
         val usage = response.toTurnUsage(fallbackModel = model)

@@ -59,11 +59,21 @@ internal object AgentMessageSupport {
             ?: throw config("goal vuoto o troppo lungo")
 
     /**
-     * Toolset generativo valido: reply obbligatorio + al più il tool web opzionale di sola lettura
-     * (nessun shell/automation.*). Coerente con [CliBridgeTransport]/[GenerativeContract].
+     * Valida il toolset generativo e ritorna se il transport deve usare il reply tool.
+     * Accetta due profili (coerenti con [GenerativeContract]): il profilo P1 REPLY (whatsapp_reply
+     * obbligatorio + al più il web opzionale) e il sink NOTIFICA #59 (nessun reply, solo web
+     * opzionale, lista vuota valida). Nessun shell/automation.* in entrambi.
+     *
+     * `useReplyTool = whatsapp_reply in allowedTools`: true → il transport forza/dichiara il reply
+     * tool; false → genera testo PLAIN che la lane posta come notifica locale.
      */
-    fun requireReplyTool(allowedTools: List<String>) {
-        if (!GenerativeContract.isAllowedToolset(allowedTools)) throw config("allowed_tools non supportati")
+    fun requireGenerativeToolset(allowedTools: List<String>): Boolean {
+        if (!GenerativeContract.isAllowedToolset(allowedTools) &&
+            !GenerativeContract.isNotificationToolset(allowedTools)
+        ) {
+            throw config("allowed_tools non supportati")
+        }
+        return GenerativeContract.TOOL_WHATSAPP_REPLY in allowedTools
     }
 
     /** Valida le context_sources del profilo act v1: non vuote, distinte, notification obbligatoria. */

@@ -292,7 +292,12 @@ class CliBridgeTransport internal constructor(
         ) {
             throw BridgeException(BridgeErrorKind.CONFIGURATION, "context_sources act non supportate")
         }
-        if (!GenerativeContract.isAllowedToolset(allowedTools)) {
+        // Accetta sia il profilo REPLY (whatsapp_reply obbligatorio) sia il sink NOTIFICA #59
+        // (nessun reply, solo web opzionale). L'envelope inoltra allowedTools tale e quale: il bridge
+        // produce testo plain quando manca whatsapp_reply.
+        if (!GenerativeContract.isAllowedToolset(allowedTools) &&
+            !GenerativeContract.isNotificationToolset(allowedTools)
+        ) {
             throw BridgeException(BridgeErrorKind.CONFIGURATION, "allowed_tools act non supportati")
         }
         val notification = context.event as? TriggerEvent.NotificationPosted
@@ -346,7 +351,10 @@ class CliBridgeTransport internal constructor(
             BridgeErrorKind.CONFIGURATION,
             "goal act v2 vuoto o troppo lungo",
         )
-        if (!GenerativeContract.isAllowedToolset(action.allowedTools) || !action.replyTargetSender) {
+        if ((!GenerativeContract.isAllowedToolset(action.allowedTools) &&
+                !GenerativeContract.isNotificationToolset(action.allowedTools)) ||
+            !action.replyTargetSender
+        ) {
             throw BridgeException(BridgeErrorKind.CONFIGURATION, "contratto act v2 non supportato")
         }
         if (action.timeoutMs !in MIN_ACT_TIMEOUT_MILLIS..MAX_ACT_TIMEOUT_MILLIS) {

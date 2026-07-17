@@ -310,6 +310,78 @@ class OpenAICompatTransportTest {
         assertFalse("tool_choice" in root)
     }
 
+    // --- #59 Ondata 3: sink NOTIFICA (deliver=LOCAL_NOTIFICATION) → testo plain, nessun reply tool ---
+
+    @Test fun `notification sink without web omits the reply tool and reads plain content`(): Unit = runBlocking {
+        // allowedTools senza whatsapp_reply (sink notifica): il modello produce testo semplice nel
+        // content; la richiesta NON dichiara il reply tool né forza il tool_choice.
+        server.enqueue(jsonResponse(
+            """
+            {"model":"openai/gpt-5.5",
+             "choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"Promemoria: bevi acqua."}}],
+             "usage":{"prompt_tokens":20,"completion_tokens":5}}
+            """.trimIndent(),
+        ))
+        val t = transport(ProviderId.OPENROUTER, model = "openai/gpt-5.5")
+
+        val result = t.act(fireContext(), "genera un promemoria", listOf("notification"), emptyList())
+
+        assertEquals("Promemoria: bevi acqua.", result.text)
+        assertNull(result.metaError)
+        val root = Json.parseToJsonElement(
+            assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
+        ).jsonObject
+        assertFalse("tools" in root, "il sink notifica non dichiara il reply tool")
+        assertFalse("tool_choice" in root, "il sink notifica non forza alcun tool")
+        // niente web richiesto: modello plain, nessuno slug :online.
+        assertEquals("openai/gpt-5.5", root.getValue("model").jsonPrimitive.content)
+    }
+
+    @Test fun `notification sink with web on openrouter keeps online model and no reply tool`(): Unit = runBlocking {
+        // Sink notifica + web su OpenRouter: resta su Chat Completions con slug `:online`, ma senza
+        // reply tool né tool_choice; il testo finale post-web arriva dal content.
+        server.enqueue(jsonResponse(
+            """
+            {"model":"openai/gpt-5.5",
+             "choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"Il cambio oggi e' 1.09."}}],
+             "usage":{"prompt_tokens":50,"completion_tokens":10}}
+            """.trimIndent(),
+        ))
+        val t = transport(ProviderId.OPENROUTER, model = "openai/gpt-5.5")
+
+        val result = t.act(fireContext(), "dimmi il cambio", listOf("notification"), listOf("web.search"))
+
+        assertEquals("Il cambio oggi e' 1.09.", result.text)
+        val root = Json.parseToJsonElement(
+            assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
+        ).jsonObject
+        assertEquals("openai/gpt-5.5:online", root.getValue("model").jsonPrimitive.content)
+        assertFalse("tools" in root)
+        assertFalse("tool_choice" in root)
+    }
+
+    @Test fun `notification sink with web on openai still routes to the responses endpoint`(): Unit = runBlocking {
+        // Sink notifica + web su OpenAI: il path web dedicato (Responses API, gia' plain) viene scelto
+        // a prescindere da useReplyTool.
+        server.enqueue(jsonResponse(
+            """
+            {"model":"gpt-5.5",
+             "output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Cambio 1.09."}]}],
+             "usage":{"input_tokens":100,"output_tokens":10}}
+            """.trimIndent(),
+        ))
+        val t = transport(ProviderId.OPENAI, model = "gpt-5.5")
+
+        val result = t.act(fireContext(), "dimmi il cambio", listOf("notification"), listOf("web.search"))
+
+        assertEquals("Cambio 1.09.", result.text)
+        val request = assertNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("/responses", request.path)
+        val root = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
+        assertFalse("tool_choice" in root)
+        assertFalse("messages" in root)
+    }
+
     @Test fun `actV2 sends the classified state value in the prompt`(): Unit = runBlocking {
         val query = StateQuery.DumpsysField("battery", "voltage")
         val action = Action.InvokeLlmV2(

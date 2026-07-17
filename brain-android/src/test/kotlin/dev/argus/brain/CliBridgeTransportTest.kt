@@ -287,7 +287,7 @@ class CliBridgeTransportTest {
         assertNull(server.takeRequest(200, TimeUnit.MILLISECONDS))
     }
 
-    @Test fun `act forwards web search alongside reply and rejects web search without reply`(): Unit = runBlocking {
+    @Test fun `act forwards web search alongside reply and rejects unsupported tools`(): Unit = runBlocking {
         val expectedRequestId = actRequestId("execution-1", 0)
         server.enqueue(jsonResponse(
             """{"schema_version":1,"request_id":"$expectedRequestId","result":{"text":"Il cambio e' 1.08."},"error_code":null}""",
@@ -324,15 +324,48 @@ class CliBridgeTransportTest {
             ).jsonObject.getValue("allowed_tools").jsonArray.map { it.jsonPrimitive.content },
         )
 
-        // web.search da solo, senza il sink reply, resta un errore di config prima della rete.
+        // Un tool arbitrario (né reply né web) resta un errore di config prima della rete.
         val error = assertFailsWith<BridgeException> {
-            transport().act(fireContext(), "rispondi", listOf("notification"), listOf("web.search"))
+            transport().act(fireContext(), "rispondi", listOf("notification"), listOf("shell.run"))
         }
         assertEquals(BridgeErrorKind.CONFIGURATION, error.kind)
         assertNull(server.takeRequest(200, TimeUnit.MILLISECONDS))
     }
 
-    @Test fun `act v2 forwards web search alongside reply and rejects web search without reply`(): Unit = runBlocking {
+    @Test fun `act accepts the notification sink toolset without reply and forwards it verbatim`(): Unit = runBlocking {
+        // Sink NOTIFICA #59: allowedTools senza whatsapp_reply è accettato e inoltrato tale e quale;
+        // il bridge (O4) produce testo plain quando manca il reply tool.
+        val expectedRequestId = actRequestId("execution-1", 0)
+
+        // [web.search] senza reply.
+        server.enqueue(jsonResponse(
+            """{"schema_version":1,"request_id":"$expectedRequestId","result":{"text":"Promemoria."},"error_code":null}""",
+        ))
+        val withWeb = transport().act(
+            fireContext(), "genera un promemoria", listOf("notification"), listOf("web.search"),
+        )
+        assertEquals("Promemoria.", withWeb.text)
+        assertEquals(
+            listOf("web.search"),
+            Json.parseToJsonElement(assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8())
+                .jsonObject.getValue("allowed_tools").jsonArray.map { it.jsonPrimitive.content },
+        )
+
+        // [] senza reply.
+        server.enqueue(jsonResponse(
+            """{"schema_version":1,"request_id":"$expectedRequestId","result":{"text":"Ok."},"error_code":null}""",
+        ))
+        val empty = transport().act(
+            fireContext(), "genera", listOf("notification"), emptyList(),
+        )
+        assertEquals("Ok.", empty.text)
+        assertTrue(
+            Json.parseToJsonElement(assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8())
+                .jsonObject.getValue("allowed_tools").jsonArray.isEmpty(),
+        )
+    }
+
+    @Test fun `act v2 forwards web search alongside reply and rejects unsupported tools`(): Unit = runBlocking {
         val query = StateQuery.DumpsysField("battery", "voltage")
         fun action(tools: List<String>) = Action.InvokeLlmV2(
             goal = "rispondi col meteo aggiornato",
@@ -368,9 +401,9 @@ class CliBridgeTransportTest {
             root.getValue("allowed_tools").jsonArray.map { it.jsonPrimitive.content },
         )
 
-        // web.search da solo (senza reply) fallisce come config error prima della rete.
+        // Un tool arbitrario (né reply né web) fallisce come config error prima della rete.
         val error = assertFailsWith<BridgeException> {
-            transport().actV2(context, action(listOf("web.search")))
+            transport().actV2(context, action(listOf("shell.run")))
         }
         assertEquals(BridgeErrorKind.CONFIGURATION, error.kind)
         assertNull(server.takeRequest(200, TimeUnit.MILLISECONDS))
