@@ -665,6 +665,17 @@ class CliBridgeTransportTest {
         }
     }
 
+    @Test fun `default client timeouts outlast the maximum action timeout`() {
+        // #60: l'HTTP non deve tagliare prima del withTimeout massimo dell'azione (120s). Il default
+        // è 125s > MAX_ACT_TIMEOUT_MILLIS, così una /act web lenta rispetta il budget dell'azione.
+        val client = CliBridgeTransport.defaultClient()
+        val expected = 125 * 1_000
+        assertEquals(expected, client.callTimeoutMillis)
+        assertEquals(expected, client.connectTimeoutMillis)
+        assertEquals(expected, client.readTimeoutMillis)
+        assertEquals(expected, client.writeTimeoutMillis)
+    }
+
     @Test fun `cleartext base URLs are unavailable outside explicit tests`() {
         assertFailsWith<IllegalArgumentException> {
             CliBridgeTransport(

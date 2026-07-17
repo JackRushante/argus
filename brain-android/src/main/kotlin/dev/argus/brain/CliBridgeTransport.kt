@@ -730,7 +730,11 @@ class CliBridgeTransport internal constructor(
         private val SINK_CONTEXT_SOURCES = setOf("state")
         private val WHATSAPP_PACKAGES = setOf("com.whatsapp", "com.whatsapp.w4b")
 
-        fun defaultClient(timeoutSeconds: Long = 60): OkHttpClient = OkHttpClient.Builder()
+        // 125s > timeout azione massimo (120s, MAX_ACT_TIMEOUT_MILLIS): l'HTTP non deve tagliare
+        // prima che scada il withTimeout della lane generativa, altrimenti una /act web lenta
+        // (ricerca web variabile) fallirebbe con un errore di rete invece di rispettare il budget
+        // dell'azione. Il main loop del bridge alza già il MODEL_TIMEOUT lato server.
+        fun defaultClient(timeoutSeconds: Long = 125): OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(timeoutSeconds, TimeUnit.SECONDS)
             .readTimeout(timeoutSeconds, TimeUnit.SECONDS)
             .writeTimeout(timeoutSeconds, TimeUnit.SECONDS)

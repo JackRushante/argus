@@ -15,6 +15,7 @@ import dev.argus.engine.model.IntegrityLabel
 import dev.argus.engine.model.StateContextClassification
 import dev.argus.engine.model.StateQueryPolicy
 import dev.argus.engine.model.StateValueCoercion
+import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.ActionJournalOutcome
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.runtime.ExecutionStatus
@@ -221,7 +222,9 @@ class AndroidGenerativeLane(
     private suspend fun validate(queued: QueuedAction): String? {
         if (!validContract(queued)) return "action_contract_invalid"
         val current = automations.get(queued.context.automationId) ?: return "rule_missing"
-        if (current.status != AutomationStatus.ARMED || !current.enabled) return "rule_inactive"
+        // Fingerprint e azione PRIMA dello stato: la sicurezza (nessuna approvazione stale) è tutta
+        // nel fingerprint, che NON include status/enabled (vedi ApprovalFingerprints.of). Un edit non
+        // ri-approvato resta "approval_changed" anche su un one-shot; un'azione cambiata "action_changed".
         if (
             current.approvalFingerprint != queued.context.approvalFingerprint ||
             current.approvalFingerprint != ApprovalFingerprints.of(current)
@@ -229,11 +232,25 @@ class AndroidGenerativeLane(
         if (current.actions.getOrNull(queued.context.actionIndex) != queued.action) {
             return "action_changed"
         }
+        // RACE one-shot (#60): un trigger one-shot (immediate, o time con `at`) si DISABILITA appena
+        // dispatchato (TimeAlarmCoordinator.deliverLocked / ArmedAutomationRegistrar.registerImmediate
+        // consumano la regola), mentre la lane generativa gira async. L'azione era già accodata quando
+        // la regola era ARMATA e fingerprint+azione combaciano ancora: DEVE poter completare. Le regole
+        // ricorrenti disabilitate dall'utente (time con cron, ecc.) restano invece "rule_inactive".
+        if (current.status != AutomationStatus.ARMED || !current.enabled) {
+            if (!isOneShot(current.trigger)) return "rule_inactive"
+        }
         return when (val decision = firePolicy.evaluate(current, queued.context.event)) {
             FirePolicyDecision.Allow -> null
             is FirePolicyDecision.Block -> safeCode(decision.code, "policy_blocked")
         }
     }
+
+    /** One-shot = fira una sola volta e si auto-consuma: `immediate` oppure `time` con istante `at`
+     *  (mai un `time` ricorrente con `cron`). Solo questi tollerano lo stato disabilitato in
+     *  ri-validazione, perché il dispatch li disabilita per costruzione. */
+    private fun isOneShot(trigger: Trigger): Boolean =
+        trigger is Trigger.Immediate || (trigger as? Trigger.Time)?.at != null
 
     private fun validContract(queued: QueuedAction): Boolean = when (val action = queued.action) {
         is Action.InvokeLlm -> when (action.deliver) {

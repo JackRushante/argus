@@ -136,6 +136,120 @@ class GenerativeActionLaneTest {
     }
 
     @Test
+    fun `consumed one-shot immediate rule still completes despite being disabled`() = runTest {
+        // Race #60: il trigger immediate si DISABILITA appena dispatchato (ArmedAutomationRegistrar
+        // consuma il one-shot). L'azione generativa era già accodata quando la regola era armata:
+        // fingerprint+azione invariati → deve COMPLETARE, non "rule_inactive".
+        val action = notificationAction(allowedTools = listOf("web.search"))
+        val armed = approvedAutomation(action, Trigger.Immediate)
+        val consumed = armed.copy(status = AutomationStatus.DISABLED, enabled = false)
+        val event = TriggerEvent.ImmediateFired(armed.id, requireNotNull(armed.approvalFingerprint))
+        val fixture = fixture(
+            action = action,
+            automation = consumed,
+            context = context(armed, action, event = event),
+        )
+        fixture.lane.trySubmit(fixture.context, fixture.action)
+        fixture.journal.ready()
+        runCurrent()
+
+        assertEquals(1, fixture.brain.calls)
+        assertEquals(1, fixture.notifier.calls.size)
+        assertEquals(ActionJournalOutcome.SUCCEEDED, fixture.journal.completions.single().outcome)
+    }
+
+    @Test
+    fun `consumed one-shot time-at rule still completes despite being disabled`() = runTest {
+        val action = notificationAction(allowedTools = listOf("web.search"))
+        val armed = approvedAutomation(action, Trigger.Time(at = "2026-07-15T08:00", tz = "Europe/Rome"))
+        val consumed = armed.copy(status = AutomationStatus.DISABLED, enabled = false)
+        val event = TriggerEvent.TimeFired(armed.id, requireNotNull(armed.approvalFingerprint))
+        val fixture = fixture(
+            action = action,
+            automation = consumed,
+            context = context(armed, action, event = event),
+        )
+        fixture.lane.trySubmit(fixture.context, fixture.action)
+        fixture.journal.ready()
+        runCurrent()
+
+        assertEquals(1, fixture.brain.calls)
+        assertEquals(1, fixture.notifier.calls.size)
+        assertEquals(ActionJournalOutcome.SUCCEEDED, fixture.journal.completions.single().outcome)
+    }
+
+    @Test
+    fun `disabled recurring cron rule stays inactive`() = runTest {
+        // Una ricorrente (time con cron, senza at) DISABILITATA dall'utente resta "rule_inactive":
+        // la tolleranza vale solo per i one-shot consumati, mai per le regole spente a mano.
+        val action = notificationAction(allowedTools = listOf("web.search"))
+        val armed = approvedAutomation(action, Trigger.Time(cron = "0 8 * * *", tz = "Europe/Rome"))
+        val disabled = armed.copy(status = AutomationStatus.DISABLED, enabled = false)
+        val event = TriggerEvent.TimeFired(armed.id, requireNotNull(armed.approvalFingerprint))
+        val fixture = fixture(
+            action = action,
+            automation = disabled,
+            context = context(armed, action, event = event),
+        )
+        fixture.lane.trySubmit(fixture.context, fixture.action)
+        fixture.journal.ready()
+        runCurrent()
+
+        assertEquals(0, fixture.brain.calls)
+        assertTrue(fixture.notifier.calls.isEmpty())
+        fixture.journal.completions.single().also { completion ->
+            assertEquals(ActionJournalOutcome.FAILED, completion.outcome)
+            assertEquals("rule_inactive", completion.errorCode)
+        }
+    }
+
+    @Test
+    fun `consumed one-shot with changed fingerprint still fails as approval changed`() = runTest {
+        // La tolleranza one-shot NON bypassa il fingerprint: un edit non ri-approvato (qui il nome)
+        // rende current.approvalFingerprint != of(current) → "approval_changed", mai consegna.
+        val action = notificationAction(allowedTools = listOf("web.search"))
+        val armed = approvedAutomation(action, Trigger.Immediate)
+        val edited = armed.copy(
+            name = "Rinominata",
+            status = AutomationStatus.DISABLED,
+            enabled = false,
+        )
+        val event = TriggerEvent.ImmediateFired(armed.id, requireNotNull(armed.approvalFingerprint))
+        val fixture = fixture(
+            action = action,
+            automation = edited,
+            context = context(armed, action, event = event),
+        )
+        fixture.lane.trySubmit(fixture.context, fixture.action)
+        fixture.journal.ready()
+        runCurrent()
+
+        assertEquals(0, fixture.brain.calls)
+        assertTrue(fixture.notifier.calls.isEmpty())
+        assertEquals("approval_changed", fixture.journal.completions.single().errorCode)
+    }
+
+    @Test
+    fun `deleted one-shot rule fails as rule missing`() = runTest {
+        val action = notificationAction(allowedTools = listOf("web.search"))
+        val armed = approvedAutomation(action, Trigger.Immediate)
+        val event = TriggerEvent.ImmediateFired(armed.id, requireNotNull(armed.approvalFingerprint))
+        val fixture = fixture(
+            action = action,
+            automation = armed,
+            context = context(armed, action, event = event),
+        )
+        fixture.store.current = null
+        fixture.lane.trySubmit(fixture.context, fixture.action)
+        fixture.journal.ready()
+        runCurrent()
+
+        assertEquals(0, fixture.brain.calls)
+        assertTrue(fixture.notifier.calls.isEmpty())
+        assertEquals("rule_missing", fixture.journal.completions.single().errorCode)
+    }
+
+    @Test
     fun `queue is bounded while the single consumer waits for journal`() = runTest {
         val fixture = fixture(capacity = 1)
 
@@ -607,17 +721,20 @@ class GenerativeActionLaneTest {
             notificationTitle = notificationTitle,
         )
 
-        fun approvedAutomation(action: Action): Automation {
+        fun approvedAutomation(
+            action: Action,
+            trigger: Trigger = Trigger.Notification(
+                pkg = "com.whatsapp",
+                conversationId = CONVERSATION_ID,
+                isGroup = false,
+            ),
+        ): Automation {
             val unsigned = Automation(
                 id = AutomationId("automation-1"),
                 name = "Reply",
                 createdBy = CreatedBy.USER,
                 status = AutomationStatus.ARMED,
-                trigger = Trigger.Notification(
-                    pkg = "com.whatsapp",
-                    conversationId = CONVERSATION_ID,
-                    isGroup = false,
-                ),
+                trigger = trigger,
                 actions = listOf(action),
                 enabled = true,
                 cooldownMs = 60_000,

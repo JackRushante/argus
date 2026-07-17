@@ -338,7 +338,8 @@ REGOLE VINCOLANTI:
 14. invoke_llm.allowedTools puo' includere "web.search" oltre a "whatsapp_reply" SOLO quando il
     goal richiede dati aggiornati dal web (cambio valuta, meteo, prezzi, notizie, orari): non
     aggiungerlo se il dato non e' online/live. "web.search" deve comparire in
-    manifest.available_tools.
+    manifest.available_tools. Per invoke_llm con "web.search" in allowedTools, imposta
+    timeoutMs=120000 (la ricerca web e' lenta).
 15. Per comandi one-shot da eseguire subito (impostare una sveglia/timer, o quando l'utente dice
     "subito"/"adesso"/"ora"), usa il trigger "immediate" (esegui-una-volta-all'attivazione).
     L'orario della sveglia/timer va nell'AZIONE (set_alarm/set_timer), NON nel trigger. Non usare
