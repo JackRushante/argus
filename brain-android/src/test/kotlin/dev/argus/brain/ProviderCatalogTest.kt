@@ -79,12 +79,12 @@ class ProviderCatalogTest {
         assertEquals(WebSearchMechanism.ANTHROPIC_TOOL, ProviderCatalog.spec(ProviderId.ANTHROPIC).quirks.webSearch)
         // OpenRouter: slug modello con suffisso `:online`.
         assertEquals(WebSearchMechanism.OPENROUTER_ONLINE, ProviderCatalog.spec(ProviderId.OPENROUTER).quirks.webSearch)
-        // Gemini: NONE — grounding via shim OpenAI-compat non raggiungibile (smoke live 2026-07-17:
-        // extra_body.google.tools da' 400 anche su gemini-3). Il web nativo non passa da /chat/completions.
-        assertEquals(WebSearchMechanism.NONE, ProviderCatalog.spec(ProviderId.GEMINI).quirks.webSearch)
-        // OpenAI: web_search_options richiede un modello `-search-preview` (non i gpt-5.x configurati) o
-        // la Responses API (endpoint diverso da /chat/completions): non supportato pulito qui → NONE.
-        assertEquals(WebSearchMechanism.NONE, ProviderCatalog.spec(ProviderId.OPENAI).quirks.webSearch)
+        // Gemini: GEMINI_NATIVE — grounding `google_search` via API nativa generateContent (validato
+        // live 2026-07-17). Non passa dallo shim OpenAI-compat /chat/completions.
+        assertEquals(WebSearchMechanism.GEMINI_NATIVE, ProviderCatalog.spec(ProviderId.GEMINI).quirks.webSearch)
+        // OpenAI: OPENAI_RESPONSES — tool `web_search` via Responses API /responses (validato live
+        // 2026-07-17). Non passa da /chat/completions (che richiederebbe un modello `-search-preview`).
+        assertEquals(WebSearchMechanism.OPENAI_RESPONSES, ProviderCatalog.spec(ProviderId.OPENAI).quirks.webSearch)
         // Custom e Hermes non attivano il web da questo path (Hermes lo fa nel bridge) → NONE.
         assertEquals(WebSearchMechanism.NONE, ProviderCatalog.spec(ProviderId.CUSTOM_OPENAI_COMPAT).quirks.webSearch)
         assertEquals(WebSearchMechanism.NONE, ProviderCatalog.spec(ProviderId.HERMES).quirks.webSearch)

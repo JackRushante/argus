@@ -219,15 +219,17 @@ class OpenAICompatTransportTest {
         assertEquals("whatsapp_reply", toolChoice.getValue("function").jsonObject.getValue("name").jsonPrimitive.content)
     }
 
-    @Test fun `gemini ignores web when mechanism is NONE and keeps forced reply`(): Unit = runBlocking {
-        // Web = NONE per Gemini: il grounding via shim OpenAI-compat non e' raggiungibile (smoke live
-        // 2026-07-17: extra_body.google.tools da 400 anche su gemini-3). Degradazione graziosa: nessun
-        // extra_body, modello invariato, reply forzato — nessuna richiesta che darebbe 400.
+    @Test fun `gemini web search uses native generateContent with google_search`(): Unit = runBlocking {
+        // Web richiesto su Gemini: NON passa dallo shim OpenAI-compat /chat/completions, ma dall'API
+        // nativa generateContent con tool google_search (grounding, loop interno lato Google, single-turn).
+        // Header auth diverso (`x-goog-api-key`), body diverso (contents/systemInstruction/tools),
+        // testo = concatenazione di candidates[0].content.parts[].text, usage da usageMetadata.
         server.enqueue(jsonResponse(
             """
-            {"model":"gemini-2.5-flash",
-             "choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"Oggi a Roma 28 gradi."}}],
-             "usage":{"prompt_tokens":40,"completion_tokens":8}}
+            {"candidates":[{"content":{"role":"model","parts":[
+               {"text":"Oggi a Roma "},{"text":"29 gradi."}]}}],
+             "usageMetadata":{"promptTokenCount":45,"candidatesTokenCount":9},
+             "modelVersion":"gemini-2.5-flash"}
             """.trimIndent(),
         ))
         val t = transport(ProviderId.GEMINI, model = "gemini-2.5-flash")
@@ -237,40 +239,75 @@ class OpenAICompatTransportTest {
             listOf("whatsapp_reply", "web.search"),
         )
 
-        assertEquals("Oggi a Roma 28 gradi.", result.text)
-        val root = Json.parseToJsonElement(
-            assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
-        ).jsonObject
-        assertEquals("gemini-2.5-flash", root.getValue("model").jsonPrimitive.content)
-        assertFalse("extra_body" in root)
+        assertEquals("Oggi a Roma 29 gradi.", result.text)
+        assertNull(result.metaError)
+        val usage = assertNotNull(result.usage)
+        assertEquals(45L, usage.inputTokens)
+        assertEquals(9L, usage.outputTokens)
+
+        val request = assertNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        // API nativa: path `.../models/{model}:generateContent`.
+        assertTrue(request.path.orEmpty().contains(":generateContent"), "path nativo: ${request.path}")
+        assertTrue(request.path.orEmpty().contains("gemini-2.5-flash"))
+        // Auth nativa: x-goog-api-key, MAI Bearer.
+        assertEquals(API_KEY, request.getHeader("x-goog-api-key"))
+        assertNull(request.getHeader("Authorization"))
+        val root = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
+        // tool grounding google_search
+        assertTrue("google_search" in root.getValue("tools").jsonArray.single().jsonObject)
+        // system separato (systemInstruction) e user in contents
+        assertTrue("systemInstruction" in root)
+        val userParts = root.getValue("contents").jsonArray.single().jsonObject
+            .getValue("parts").jsonArray
+        assertTrue(userParts.first().jsonObject.getValue("text").jsonPrimitive.content.isNotEmpty())
+        // niente Chat Completions
+        assertFalse("messages" in root)
     }
 
-    @Test fun `openai ignores web when mechanism is NONE and keeps forced reply`(): Unit = runBlocking {
-        // Degradazione graziosa: web richiesto ma non supportato via /chat/completions con gpt-5.x →
-        // si genera normalmente col reply forzato, nessun extra_body, nessun cambio di modello.
+    @Test fun `openai web search uses the responses endpoint and web_search tool`(): Unit = runBlocking {
+        // Web richiesto su OpenAI: NON passa da /chat/completions (che vorrebbe un modello
+        // `-search-preview`), ma dalla Responses API /responses con tool web_search (loop interno lato
+        // OpenAI, single-turn). Testo = item output type=message → content type=output_text; il
+        // web_search_call si ignora. Usage da input_tokens/output_tokens.
         server.enqueue(jsonResponse(
             """
             {"model":"gpt-5.5",
-             "choices":[{"index":0,"message":{"role":"assistant",
-               "tool_calls":[{"id":"c1","type":"function","function":{"name":"whatsapp_reply","arguments":"{\"text\":\"Ok!\"}"}}]}}],
-             "usage":{"prompt_tokens":10,"completion_tokens":2}}
+             "output":[
+               {"type":"web_search_call","status":"completed"},
+               {"type":"message","role":"assistant","content":[
+                 {"type":"output_text","text":"Il cambio EUR/USD e' 1.09."}]}],
+             "usage":{"input_tokens":220,"output_tokens":18}}
             """.trimIndent(),
         ))
         val t = transport(ProviderId.OPENAI, model = "gpt-5.5")
 
         val result = t.act(
-            fireContext(), "rispondi", listOf("notification"),
+            fireContext(), "dimmi il cambio euro dollaro", listOf("notification"),
             listOf("whatsapp_reply", "web.search"),
         )
 
-        assertEquals("Ok!", result.text)
-        val root = Json.parseToJsonElement(
-            assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
-        ).jsonObject
+        assertEquals("Il cambio EUR/USD e' 1.09.", result.text)
+        assertNull(result.metaError)
+        val usage = assertNotNull(result.usage)
+        assertEquals(220L, usage.inputTokens)
+        assertEquals(18L, usage.outputTokens)
+
+        val request = assertNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("/responses", request.path)
+        assertEquals("Bearer $API_KEY", request.getHeader("Authorization"))
+        val root = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
         assertEquals("gpt-5.5", root.getValue("model").jsonPrimitive.content)
-        assertFalse("extra_body" in root)
-        val toolChoice = root.getValue("tool_choice").jsonObject
-        assertEquals("whatsapp_reply", toolChoice.getValue("function").jsonObject.getValue("name").jsonPrimitive.content)
+        // tool web_search (Responses API)
+        assertEquals(
+            "web_search",
+            root.getValue("tools").jsonArray.single().jsonObject.getValue("type").jsonPrimitive.content,
+        )
+        // input = system + user (niente formato Chat Completions/messages)
+        val input = root.getValue("input").jsonArray
+        assertEquals("system", input.first().jsonObject.getValue("role").jsonPrimitive.content)
+        assertEquals("user", input.last().jsonObject.getValue("role").jsonPrimitive.content)
+        assertFalse("messages" in root)
+        assertFalse("tool_choice" in root)
     }
 
     @Test fun `actV2 sends the classified state value in the prompt`(): Unit = runBlocking {

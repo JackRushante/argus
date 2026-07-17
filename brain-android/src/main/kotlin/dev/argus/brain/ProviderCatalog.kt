@@ -13,13 +13,15 @@ enum class OutputCapParam { MAX_TOKENS, MAX_COMPLETION_TOKENS }
  * - [NONE]: web non attivabile da questo path (default; degradazione graziosa se richiesto).
  * - [ANTHROPIC_TOOL]: server tool `{"type":"web_search_20250305","name":"web_search"}` nei `tools`.
  * - [OPENROUTER_ONLINE]: slug modello con suffisso `:online`.
- * - [OPENAI_SEARCH]: `web_search_options` + modello `-search-preview` in Chat Completions (o Responses
- *   API). NON usato: i modelli configurati sono gpt-5.x e la Responses API è un endpoint diverso da
- *   quello OpenAI-compat di questo transport — vedi ProviderCatalog OPENAI (resta NONE, onesto).
- * - [GEMINI_GROUNDING]: grounding `google_search` via passthrough `extra_body.google.tools` sullo shim
- *   OpenAI-compat di Gemini (il `tools` OpenAI top-level verrebbe rifiutato con "Unknown name").
+ * - [OPENAI_RESPONSES]: tool `{"type":"web_search"}` sulla Responses API (`POST {base}/responses`,
+ *   endpoint diverso da /chat/completions). Il modello gpt-5.x fa il loop web internamente e ritorna il
+ *   testo negli item `output→message→output_text`. Validato live 2026-07-17.
+ * - [GEMINI_NATIVE]: tool `{"google_search":{}}` sull'API nativa `generateContent`
+ *   (`POST {geminiHost}/v1beta/models/{model}:generateContent`, header `x-goog-api-key`), NON sullo shim
+ *   OpenAI-compat (che rifiuta il grounding con 400). Testo = `candidates[0].content.parts[].text`.
+ *   Validato live 2026-07-17.
  */
-enum class WebSearchMechanism { NONE, ANTHROPIC_TOOL, OPENROUTER_ONLINE, OPENAI_SEARCH, GEMINI_GROUNDING }
+enum class WebSearchMechanism { NONE, ANTHROPIC_TOOL, OPENROUTER_ONLINE, OPENAI_RESPONSES, GEMINI_NATIVE }
 
 /** Flag di comportamento per-provider: MAI `if (provider == ...)` dentro un transport. */
 data class ProviderQuirks(
@@ -85,12 +87,12 @@ object ProviderCatalog {
             defaultBaseUrl = "https://api.openai.com/v1",
             authStyle = AuthStyle.BEARER,
             defaultModels = listOf("gpt-5.5", "gpt-5-mini"),
-            // Web NONE: `web_search_options` in Chat Completions richiede un modello `-search-preview`
-            // (non i gpt-5.x qui) e il web dei gpt-5 passa dalla Responses API, endpoint diverso da
-            // /chat/completions usato da OpenAICompatTransport. Onesto: web non disponibile su questo path.
+            // Web via Responses API: tool `web_search` su `POST {base}/responses` (NON /chat/completions,
+            // che vorrebbe un modello `-search-preview`). gpt-5.x fa il loop web internamente e ritorna il
+            // testo in `output→message→output_text`. Validato live 2026-07-17.
             quirks = ProviderQuirks(
                 outputCapParam = OutputCapParam.MAX_COMPLETION_TOKENS,
-                webSearch = WebSearchMechanism.NONE,
+                webSearch = WebSearchMechanism.OPENAI_RESPONSES,
             ),
             costTracked = true,
             prices = mapOf(
@@ -128,14 +130,13 @@ object ProviderCatalog {
             defaultBaseUrl = "https://generativelanguage.googleapis.com/v1beta/openai",
             authStyle = AuthStyle.BEARER,
             defaultModels = listOf("gemini-2.5-pro", "gemini-2.5-flash"),
-            // Web = NONE (onesto): il grounding via shim OpenAI-compat non e' raggiungibile. Smoke live
-            // 2026-07-17: sia `extra_body.google.tools=[{google_search:{}}]` (formato documentato) sia il
-            // `tools` OpenAI top-level danno 400 ("Unknown name 'tools' at 'extra_body.google'"), anche su
-            // gemini-3-flash-preview. Mismatch doc<->API lato Google. Il web di Gemini passa dall'API nativa
-            // (non da /chat/completions usata qui). Riattivare quando il compat layer accettera' il grounding.
+            // Web via API nativa: tool `{"google_search":{}}` su `POST {geminiHost}/v1beta/models/
+            // {model}:generateContent` (header `x-goog-api-key`), NON sullo shim OpenAI-compat
+            // /chat/completions (che rifiuta il grounding con 400 — smoke 2026-07-17). Il transport deriva
+            // l'host nativo dal baseUrl compat togliendo `/openai`. Validato live 2026-07-17.
             quirks = ProviderQuirks(
                 extraBodyPassthrough = true,
-                webSearch = WebSearchMechanism.NONE,
+                webSearch = WebSearchMechanism.GEMINI_NATIVE,
             ),
             costTracked = true,
             prices = mapOf(

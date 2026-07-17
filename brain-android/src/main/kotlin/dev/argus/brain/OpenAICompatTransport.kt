@@ -11,6 +11,7 @@ import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireContext
 import dev.argus.engine.runtime.TriggerEvent
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
@@ -28,6 +29,7 @@ import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import okhttp3.Call
 import okhttp3.Callback
+import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -77,6 +79,11 @@ class OpenAICompatTransport internal constructor(
     private val chatUrl = base.newBuilder()
         .addPathSegment(CHAT_SEGMENT)
         .addPathSegment(COMPLETIONS_SEGMENT)
+        .build()
+
+    /** Endpoint OpenAI Responses API (`{base}/responses`): usato solo dal path web [WebSearchMechanism.OPENAI_RESPONSES]. */
+    private val responsesUrl = base.newBuilder()
+        .addPathSegment(RESPONSES_SEGMENT)
         .build()
 
     private val json = Json {
@@ -204,17 +211,23 @@ class OpenAICompatTransport internal constructor(
         // Web search server-side, single-turn: applica il meccanismo del provider SOLO se il web è
         // richiesto E supportato. Se richiesto ma NONE → degradazione graziosa (genera normalmente).
         val applyWeb = webRequested && spec.quirks.webSearch != WebSearchMechanism.NONE
+        // OpenAI e Gemini fanno web con endpoint/codec DIVERSI da Chat Completions: il provider esegue il
+        // loop web internamente e genera il testo direttamente (nessun reply tool). Deviamo prima di
+        // costruire la ChatRequest.
+        if (applyWeb) {
+            when (spec.quirks.webSearch) {
+                WebSearchMechanism.OPENAI_RESPONSES ->
+                    return generateViaResponses(goal, notification, stateLines, token, baseModel)
+                WebSearchMechanism.GEMINI_NATIVE ->
+                    return generateViaGeminiNative(goal, notification, stateLines, token, baseModel)
+                else -> Unit // OPENROUTER_ONLINE resta su Chat Completions (slug `:online`).
+            }
+        }
         // OpenRouter attiva il loop web con lo slug `<model>:online`; gli altri lasciano il modello com'è.
         val model = if (applyWeb && spec.quirks.webSearch == WebSearchMechanism.OPENROUTER_ONLINE) {
             "$baseModel:online"
         } else {
             baseModel
-        }
-        // Gemini attiva il grounding via passthrough `extra_body.google.tools=[{google_search:{}}]`.
-        val extraBody = if (applyWeb && spec.quirks.webSearch == WebSearchMechanism.GEMINI_GROUNDING) {
-            GEMINI_GROUNDING_EXTRA_BODY
-        } else {
-            null
         }
         val request = ChatRequest(
             model = model,
@@ -226,7 +239,6 @@ class OpenAICompatTransport internal constructor(
             // Con il web attivo il reply NON va forzato: forzarlo impedirebbe la ricerca. `replyText()`
             // fa `fromTool ?: content`, quindi il testo finale post-web (content) arriva comunque.
             toolChoice = if (applyWeb || spec.quirks.forceToolChoiceAuto) JsonPrimitive("auto") else FORCED_REPLY_CHOICE,
-            extraBody = extraBody,
             maxTokens = if (spec.quirks.outputCapParam == OutputCapParam.MAX_TOKENS) MAX_OUTPUT_TOKENS else null,
             maxCompletionTokens = if (spec.quirks.outputCapParam == OutputCapParam.MAX_COMPLETION_TOKENS) MAX_OUTPUT_TOKENS else null,
         )
@@ -236,6 +248,91 @@ class OpenAICompatTransport internal constructor(
         val text = response.replyText()
             ?: return ActResult(text = null, metaError = "empty_response", usage = usage)
         return ActResult(text = text, metaError = null, usage = usage)
+    }
+
+    /**
+     * Web OpenAI via Responses API (`POST {base}/responses`, es. `https://api.openai.com/v1/responses`),
+     * auth Bearer come Chat Completions. Body: `{"model","input":[{role,content}...],"tools":[{"type":
+     * "web_search"}]}` — nessun reply tool, il modello genera il testo direttamente. La risposta ha
+     * `output` come array di item eterogenei: prendiamo l'item `type=message` e concateniamo i suoi
+     * `content[].text` con `type=output_text` (gli altri, es. `web_search_call`, si ignorano). Usage da
+     * `usage.input_tokens`/`usage.output_tokens`. Single-turn: il loop web è interno lato OpenAI.
+     */
+    private suspend fun generateViaResponses(
+        goal: String,
+        notification: TriggerEvent.NotificationPosted,
+        stateLines: List<String>,
+        token: String,
+        baseModel: String,
+    ): ActResult {
+        val request = ResponsesRequest(
+            model = baseModel,
+            input = listOf(
+                ResponsesInputMessage("system", AgentMessageSupport.actSystemTextPlain(goal)),
+                ResponsesInputMessage("user", AgentMessageSupport.actUserText(notification, stateLines)),
+            ),
+            tools = listOf(WEB_SEARCH_TOOL),
+        )
+        val payload = json.encodeToString(request)
+        val httpRequest = buildBearerRequest(responsesUrl, token, payload)
+        val response = parseJson(execute(httpRequest), ResponsesResponse.serializer())
+        val usage = response.toTurnUsage(fallbackModel = baseModel)
+        val text = response.replyText()
+            ?: return ActResult(text = null, metaError = "empty_response", usage = usage)
+        return ActResult(text = text, metaError = null, usage = usage)
+    }
+
+    /**
+     * Web Gemini via API nativa `generateContent` (`POST {geminiHost}/v1beta/models/{model}:
+     * generateContent`, header `x-goog-api-key`), derivata dal baseUrl compat togliendo `/openai`. Body:
+     * `{"contents":[{"role":"user","parts":[{text}]}],"systemInstruction":{"parts":[{text}]},"tools":
+     * [{"google_search":{}}]}` — nessun reply tool, il modello genera il testo direttamente. La risposta
+     * ha il testo in `candidates[0].content.parts[].text` (concatenati); usage da
+     * `usageMetadata.promptTokenCount`/`candidatesTokenCount`. Single-turn: il grounding è interno lato Google.
+     */
+    private suspend fun generateViaGeminiNative(
+        goal: String,
+        notification: TriggerEvent.NotificationPosted,
+        stateLines: List<String>,
+        token: String,
+        baseModel: String,
+    ): ActResult {
+        val request = GeminiNativeRequest(
+            contents = listOf(
+                GeminiContent(
+                    role = "user",
+                    parts = listOf(GeminiPart(AgentMessageSupport.actUserText(notification, stateLines))),
+                ),
+            ),
+            systemInstruction = GeminiSystemInstruction(
+                parts = listOf(GeminiPart(AgentMessageSupport.actSystemTextPlain(goal))),
+            ),
+            tools = listOf(GOOGLE_SEARCH_TOOL),
+        )
+        val payload = json.encodeToString(request)
+        val httpRequest = buildGoogleApiKeyRequest(geminiNativeUrl(baseModel), token, payload)
+        val response = parseJson(execute(httpRequest), GeminiNativeResponse.serializer())
+        val usage = response.toTurnUsage(fallbackModel = baseModel)
+        val text = response.replyText()
+            ?: return ActResult(text = null, metaError = "empty_response", usage = usage)
+        return ActResult(text = text, metaError = null, usage = usage)
+    }
+
+    /**
+     * URL nativo Gemini: parte dal baseUrl compat (`.../v1beta/openai`), toglie l'ultimo segmento
+     * `openai` per arrivare a `.../v1beta`, poi aggiunge `models/{model}:generateContent`. Il `:` resta
+     * letterale nel segmento di path (pchar valido, okhttp non lo percent-encoda).
+     */
+    private fun geminiNativeUrl(model: String): HttpUrl {
+        val builder = base.newBuilder()
+        val segments = base.pathSegments
+        if (segments.isNotEmpty() && segments.last() == OPENAI_COMPAT_SEGMENT) {
+            builder.removePathSegment(segments.size - 1)
+        }
+        return builder
+            .addPathSegment(MODELS_SEGMENT)
+            .addPathSegment("$model:$GENERATE_CONTENT_ACTION")
+            .build()
     }
 
     private fun buildRequest(token: String, payload: String): Request {
@@ -250,6 +347,24 @@ class OpenAICompatTransport internal constructor(
         spec.quirks.extraHeaders.forEach { (name, value) -> builder.header(name, value) }
         return builder.build()
     }
+
+    /** POST con auth Bearer verso [url] (Responses API): la chiave viaggia solo nell'header, mai altrove. */
+    private fun buildBearerRequest(url: HttpUrl, token: String, payload: String): Request =
+        Request.Builder()
+            .url(url)
+            .header("Accept", "application/json")
+            .header("Authorization", "Bearer $token")
+            .post(payload.toRequestBody(JSON_MEDIA))
+            .build()
+
+    /** POST con auth `x-goog-api-key` verso [url] (Gemini nativo): NON Bearer, la chiave solo nell'header. */
+    private fun buildGoogleApiKeyRequest(url: HttpUrl, token: String, payload: String): Request =
+        Request.Builder()
+            .url(url)
+            .header("Accept", "application/json")
+            .header(GOOG_API_KEY_HEADER, token)
+            .post(payload.toRequestBody(JSON_MEDIA))
+            .build()
 
     private suspend fun requireKey(): String = AgentMessageSupport.requireKey(apiKey())
 
@@ -303,14 +418,63 @@ class OpenAICompatTransport internal constructor(
         )
     }
 
-    private fun parseChatResponse(body: String): ChatResponse =
+    private fun parseChatResponse(body: String): ChatResponse = parseJson(body, ChatResponse.serializer())
+
+    /** Deserializza in [T] mappando ogni fallita in un errore PROTOCOL tipizzato, senza ripubblicare il body. */
+    private fun <T> parseJson(body: String, deserializer: DeserializationStrategy<T>): T =
         try {
-            json.decodeFromString(ChatResponse.serializer(), body)
+            json.decodeFromString(deserializer, body)
         } catch (error: SerializationException) {
             throw TransportException(TransportErrorKind.PROTOCOL, "risposta provider non valida", cause = error)
         } catch (error: IllegalArgumentException) {
             throw TransportException(TransportErrorKind.PROTOCOL, "risposta provider non valida", cause = error)
         }
+
+    /** Testo Responses: item `type=message` → `content[]` `type=output_text` concatenati (il resto si ignora). */
+    private fun ResponsesResponse.replyText(): String? {
+        val raw = output.asSequence()
+            .filter { it.type == "message" }
+            .flatMap { (it.content ?: emptyList()).asSequence() }
+            .filter { it.type == "output_text" }
+            .mapNotNull { it.text }
+            .joinToString(separator = "")
+            .takeIf { it.isNotEmpty() }
+        return AgentMessageSupport.cleanReply(raw)
+    }
+
+    private fun ResponsesResponse.toTurnUsage(fallbackModel: String): TurnUsage? {
+        val u = usage ?: return null
+        val input = u.inputTokens ?: return null
+        val output = u.outputTokens ?: return null
+        if (input < 0 || output < 0) return null
+        return TurnUsage(
+            inputTokens = input,
+            outputTokens = output,
+            model = model?.takeIf { it.isNotBlank() } ?: fallbackModel,
+        )
+    }
+
+    /** Testo Gemini nativo: `candidates[0].content.parts[].text` concatenati. */
+    private fun GeminiNativeResponse.replyText(): String? {
+        val raw = candidates.firstOrNull()?.content?.parts.orEmpty()
+            .asSequence()
+            .mapNotNull { it.text }
+            .joinToString(separator = "")
+            .takeIf { it.isNotEmpty() }
+        return AgentMessageSupport.cleanReply(raw)
+    }
+
+    private fun GeminiNativeResponse.toTurnUsage(fallbackModel: String): TurnUsage? {
+        val u = usageMetadata ?: return null
+        val input = u.promptTokenCount ?: return null
+        val output = u.candidatesTokenCount ?: return null
+        if (input < 0 || output < 0) return null
+        return TurnUsage(
+            inputTokens = input,
+            outputTokens = output,
+            model = modelVersion?.takeIf { it.isNotBlank() } ?: fallbackModel,
+        )
+    }
 
     private suspend fun execute(request: Request): String {
         val call = client.newCall(request)
@@ -391,12 +555,87 @@ class OpenAICompatTransport internal constructor(
         @SerialName("tool_choice") val toolChoice: JsonElement? = null,
         @SerialName("max_tokens") val maxTokens: Int? = null,
         @SerialName("max_completion_tokens") val maxCompletionTokens: Int? = null,
-        /** Passthrough per feature Gemini-specifiche (es. grounding); assente per gli altri provider. */
-        @SerialName("extra_body") val extraBody: JsonObject? = null,
     )
 
     @Serializable
     private data class ChatMessage(val role: String, val content: String)
+
+    // --- Responses API (OpenAI web, #57) ---
+
+    @Serializable
+    private data class ResponsesRequest(
+        val model: String,
+        val input: List<ResponsesInputMessage>,
+        val tools: List<JsonObject>,
+    )
+
+    @Serializable
+    private data class ResponsesInputMessage(val role: String, val content: String)
+
+    @Serializable
+    private data class ResponsesResponse(
+        val output: List<ResponsesOutputItem> = emptyList(),
+        val usage: ResponsesUsage? = null,
+        val model: String? = null,
+    )
+
+    @Serializable
+    private data class ResponsesOutputItem(
+        val type: String? = null,
+        val content: List<ResponsesContentPart>? = null,
+    )
+
+    @Serializable
+    private data class ResponsesContentPart(
+        val type: String? = null,
+        val text: String? = null,
+    )
+
+    @Serializable
+    private data class ResponsesUsage(
+        @SerialName("input_tokens") val inputTokens: Long? = null,
+        @SerialName("output_tokens") val outputTokens: Long? = null,
+    )
+
+    // --- API nativa Gemini generateContent (Gemini web, #57) ---
+
+    @Serializable
+    private data class GeminiNativeRequest(
+        val contents: List<GeminiContent>,
+        val systemInstruction: GeminiSystemInstruction? = null,
+        val tools: List<JsonObject>,
+    )
+
+    @Serializable
+    private data class GeminiContent(val role: String, val parts: List<GeminiPart>)
+
+    @Serializable
+    private data class GeminiPart(val text: String)
+
+    @Serializable
+    private data class GeminiSystemInstruction(val parts: List<GeminiPart>)
+
+    @Serializable
+    private data class GeminiNativeResponse(
+        val candidates: List<GeminiCandidate> = emptyList(),
+        val usageMetadata: GeminiUsageMetadata? = null,
+        val modelVersion: String? = null,
+    )
+
+    @Serializable
+    private data class GeminiCandidate(val content: GeminiResponseContent? = null)
+
+    @Serializable
+    private data class GeminiResponseContent(val parts: List<GeminiResponsePart> = emptyList())
+
+    @Serializable
+    private data class GeminiResponsePart(val text: String? = null)
+
+    @Serializable
+    private data class GeminiUsageMetadata(
+        val promptTokenCount: Long? = null,
+        val candidatesTokenCount: Long? = null,
+    )
 
     @Serializable
     private data class ChatResponse(
@@ -442,6 +681,11 @@ class OpenAICompatTransport internal constructor(
     private companion object {
         const val CHAT_SEGMENT = "chat"
         const val COMPLETIONS_SEGMENT = "completions"
+        const val RESPONSES_SEGMENT = "responses"
+        const val MODELS_SEGMENT = "models"
+        const val OPENAI_COMPAT_SEGMENT = "openai"
+        const val GENERATE_CONTENT_ACTION = "generateContent"
+        const val GOOG_API_KEY_HEADER = "x-goog-api-key"
         const val HEALTH_PING = "ping"
         const val HEALTH_MAX_TOKENS = 1
         const val MAX_OUTPUT_TOKENS = 1_024
@@ -454,16 +698,10 @@ class OpenAICompatTransport internal constructor(
             putJsonObject("function") { put("name", AgentMessageSupport.REPLY_TOOL) }
         }
 
-        /**
-         * Grounding Gemini sullo shim OpenAI-compat: `{"google":{"tools":[{"google_search":{}}]}}` sotto
-         * il campo top-level `extra_body`. Il `tools` OpenAI standard verrebbe rifiutato dal compat layer.
-         */
-        val GEMINI_GROUNDING_EXTRA_BODY: JsonObject = buildJsonObject {
-            putJsonObject("google") {
-                putJsonArray("tools") {
-                    add(buildJsonObject { putJsonObject("google_search") {} })
-                }
-            }
-        }
+        /** Tool web della Responses API OpenAI: `{"type":"web_search"}`. Loop di ricerca interno lato OpenAI. */
+        val WEB_SEARCH_TOOL: JsonObject = buildJsonObject { put("type", "web_search") }
+
+        /** Tool grounding dell'API nativa Gemini: `{"google_search":{}}`. Loop di ricerca interno lato Google. */
+        val GOOGLE_SEARCH_TOOL: JsonObject = buildJsonObject { putJsonObject("google_search") {} }
     }
 }

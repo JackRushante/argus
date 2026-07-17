@@ -138,6 +138,18 @@ internal object AgentMessageSupport {
         append("Restituisci la risposta chiamando lo strumento ").append(REPLY_TOOL).append(".")
     }
 
+    /**
+     * System prompt PLAIN (senza reply tool) per i path web single-turn in cui il provider genera il
+     * testo direttamente (OpenAI Responses, Gemini nativo): niente formato `{"reply_text":...}`, il
+     * modello risponde col SOLO testo. Il goal approvato è incluso.
+     */
+    fun actSystemTextPlain(goal: String): String = buildString {
+        append("Sei il generatore one-shot di risposte Argus. Rispondi al messaggio WhatsApp al posto dell'utente. ")
+        append("Obiettivo: ").append(goal).append(". ")
+        append("Usa la ricerca web per dati aggiornati. ")
+        append("Scrivi nella stessa lingua del messaggio ricevuto e rispondi con il SOLO testo della risposta, senza spiegazioni.")
+    }
+
     fun actUserText(
         notification: TriggerEvent.NotificationPosted,
         stateLines: List<String>,
