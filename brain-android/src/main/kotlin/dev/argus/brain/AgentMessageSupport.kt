@@ -225,7 +225,7 @@ internal object AgentMessageSupport {
         return context.toString()
     }
 
-    // Prompt di compile riusato dal reference Hermes (schema v2): 15 regole vincolanti +
+    // Prompt di compile riusato dal reference Hermes (schema v2): 16 regole vincolanti +
     // schema draft + schema state-query. Nessun segreto: solo template statico.
     const val COMPILE_RULES = """Sei il compilatore read-only di Argus. Trasforma la richiesta dell'utente in una
 AutomationDraft, ma non eseguire azioni e non inventare capability.
@@ -280,7 +280,14 @@ REGOLE VINCOLANTI:
 15. Per comandi one-shot da eseguire subito (impostare una sveglia/timer, o quando l'utente dice
     "subito"/"adesso"/"ora"), usa il trigger "immediate" (esegui-una-volta-all'attivazione).
     L'orario della sveglia/timer va nell'AZIONE (set_alarm/set_timer), NON nel trigger. Non usare
-    un trigger "time" a un istante gia' presente/passato."""
+    un trigger "time" a un istante gia' presente/passato.
+16. La consegna generativa (invoke_llm/invoke_llm_v2) avviene SEMPRE come reply WhatsApp a una
+    notifica in arrivo (trigger notification, chat 1:1 in whitelist): NON puo' postare una notifica
+    di sistema e "show_notification" NON e' un tool generativo (mai in allowedTools). Se l'utente
+    chiede una NOTIFICA con contenuto GENERATO o dal web a partire da un timer/orario/immediate (non
+    una reply a un messaggio in arrivo), NON e' ancora supportato: restituisci draft null con
+    error_code "unsupported_capability" e spiega in una frase che la notifica generata arrivera' piu'
+    avanti."""
 
     const val DRAFT_SCHEMA_TEXT = """AutomationDraft JSON (nomi e maiuscole sono esatti):
 {

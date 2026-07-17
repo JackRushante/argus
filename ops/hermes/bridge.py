@@ -685,6 +685,12 @@ REGOLE VINCOLANTI:
     "subito"/"adesso"/"ora") usa il trigger "immediate" (esegui-una-volta-all'attivazione): la regola
     scatta appena l'utente la arma. L'orario della sveglia/timer va nell'azione set_alarm/set_timer,
     MAI in un trigger "time" a un istante gia' presente o passato (non sarebbe schedulabile).
+14. La consegna generativa (invoke_llm/invoke_llm_v2) avviene SEMPRE come reply WhatsApp a una
+    notifica in arrivo (trigger notification, chat 1:1 in whitelist): NON puo' postare una notifica
+    di sistema e "show_notification" NON e' un tool generativo (mai in allowedTools). Se l'utente
+    chiede una NOTIFICA con contenuto GENERATO o dal web a partire da un timer/orario/immediate (non
+    una reply a un messaggio in arrivo), NON e' ancora supportato: restituisci draft null con
+    error_code "unsupported_capability" e spiega in una frase che la notifica generata arrivera' piu' avanti.
 {state_query_rules}
 
 Ora locale Europe/Rome: {now}

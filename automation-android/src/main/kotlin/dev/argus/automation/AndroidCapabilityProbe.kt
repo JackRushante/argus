@@ -267,7 +267,13 @@ class AndroidCapabilityProbe internal constructor(
             if (state.readPhoneStateGranted && state.readCallLogGranted) {
                 add(CapabilityIds.TRIGGER_PHONE_CALL)
             }
-            if (generativeReady) add(CapabilityIds.ACTION_INVOKE_LLM)
+            if (generativeReady) {
+                add(CapabilityIds.ACTION_INVOKE_LLM)
+                // web.search e' una capability RICHIESTA all'arm (CapabilityRequirements.InvokeLlm fa
+                // addAll(allowedTools)): deve stare nel set `available`, non solo in availableTools, o
+                // una regola reply+web compila ma non si arma ("capacita non disponibile: web.search").
+                add(GenerativeContract.TOOL_WEB_SEARCH)
+            }
             armableSensorKinds.forEach { add(CapabilityIds.triggerSensor(it)) }
         }
         val transient = if (shizukuTransient) SHIZUKU_CAPABILITIES + SHIZUKU_TOOLS else emptySet()

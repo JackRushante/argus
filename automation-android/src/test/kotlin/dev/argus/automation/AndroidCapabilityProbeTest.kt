@@ -242,6 +242,9 @@ class AndroidCapabilityProbeTest {
         val snapshot = probe.current()
         assertTrue(CapabilityIds.TRIGGER_NOTIFICATION in snapshot.availableCapabilities)
         assertTrue(CapabilityIds.ACTION_INVOKE_LLM in snapshot.availableCapabilities)
+        // web.search e' una capability richiesta all'arm (CapabilityRequirements.InvokeLlm): deve
+        // stare nel set available, non solo in availableTools, o una regola reply+web non si arma.
+        assertTrue(GenerativeContract.TOOL_WEB_SEARCH in snapshot.availableCapabilities)
         assertTrue(GenerativeContract.TOOL_WHATSAPP_REPLY in snapshot.availableCapabilities)
         // La reply statica ha un executor reale via NotificationReplyGateway: segue il listener.
         assertTrue(ActionCapabilities.WHATSAPP_REPLY in snapshot.availableCapabilities)
