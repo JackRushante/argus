@@ -8,6 +8,7 @@ import dev.argus.engine.model.Action
 import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.ApprovedStateContext
 import dev.argus.engine.model.ConfidentialityLabel
+import dev.argus.engine.model.GenerativeContract
 import dev.argus.engine.model.IntegrityLabel
 import dev.argus.engine.model.StateContextClassification
 import dev.argus.engine.model.StateKeys
@@ -291,7 +292,7 @@ class CliBridgeTransport internal constructor(
         ) {
             throw BridgeException(BridgeErrorKind.CONFIGURATION, "context_sources act non supportate")
         }
-        if (allowedTools != listOf(ACT_REPLY_TOOL)) {
+        if (!GenerativeContract.isAllowedToolset(allowedTools)) {
             throw BridgeException(BridgeErrorKind.CONFIGURATION, "allowed_tools act non supportati")
         }
         val notification = context.event as? TriggerEvent.NotificationPosted
@@ -345,7 +346,7 @@ class CliBridgeTransport internal constructor(
             BridgeErrorKind.CONFIGURATION,
             "goal act v2 vuoto o troppo lungo",
         )
-        if (action.allowedTools != listOf(ACT_REPLY_TOOL) || !action.replyTargetSender) {
+        if (!GenerativeContract.isAllowedToolset(action.allowedTools) || !action.replyTargetSender) {
             throw BridgeException(BridgeErrorKind.CONFIGURATION, "contratto act v2 non supportato")
         }
         if (action.timeoutMs !in MIN_ACT_TIMEOUT_MILLIS..MAX_ACT_TIMEOUT_MILLIS) {
@@ -681,7 +682,6 @@ class CliBridgeTransport internal constructor(
         private const val ACT_PATH_SEGMENT = "act"
         private const val HEALTH_PATH_SEGMENT = "health"
         private const val HEALTH_VERSION_SEGMENT = "v2"
-        private const val ACT_REPLY_TOOL = "whatsapp_reply"
         private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
         private val TEST_HTTP_HOSTS = setOf("localhost", "127.0.0.1", "::1")
         private val REQUEST_ID = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,127}")

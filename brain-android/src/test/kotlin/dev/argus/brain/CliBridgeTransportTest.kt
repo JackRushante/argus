@@ -287,6 +287,95 @@ class CliBridgeTransportTest {
         assertNull(server.takeRequest(200, TimeUnit.MILLISECONDS))
     }
 
+    @Test fun `act forwards web search alongside reply and rejects web search without reply`(): Unit = runBlocking {
+        val expectedRequestId = actRequestId("execution-1", 0)
+        server.enqueue(jsonResponse(
+            """{"schema_version":1,"request_id":"$expectedRequestId","result":{"text":"Il cambio e' 1.08."},"error_code":null}""",
+        ))
+
+        // web.search accanto al reply obbligatorio: toolset generativo valido, inoltrato tale e quale.
+        val result = transport().act(
+            context = fireContext(),
+            goal = "rispondi col cambio aggiornato",
+            contextSources = listOf("notification"),
+            allowedTools = listOf("whatsapp_reply", "web.search"),
+        )
+
+        assertEquals("Il cambio e' 1.08.", result.text)
+        val raw = assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8()
+        val root = Json.parseToJsonElement(raw).jsonObject
+        assertEquals(
+            listOf("whatsapp_reply", "web.search"),
+            root.getValue("allowed_tools").jsonArray.map { it.jsonPrimitive.content },
+        )
+
+        // whatsapp_reply da solo resta accettato (contratto base invariato).
+        server.enqueue(jsonResponse(
+            """{"schema_version":1,"request_id":"$expectedRequestId","result":{"text":"Ok"},"error_code":null}""",
+        ))
+        val replyOnly = transport().act(
+            fireContext(), "rispondi", listOf("notification"), listOf("whatsapp_reply"),
+        )
+        assertEquals("Ok", replyOnly.text)
+        assertEquals(
+            listOf("whatsapp_reply"),
+            Json.parseToJsonElement(
+                assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
+            ).jsonObject.getValue("allowed_tools").jsonArray.map { it.jsonPrimitive.content },
+        )
+
+        // web.search da solo, senza il sink reply, resta un errore di config prima della rete.
+        val error = assertFailsWith<BridgeException> {
+            transport().act(fireContext(), "rispondi", listOf("notification"), listOf("web.search"))
+        }
+        assertEquals(BridgeErrorKind.CONFIGURATION, error.kind)
+        assertNull(server.takeRequest(200, TimeUnit.MILLISECONDS))
+    }
+
+    @Test fun `act v2 forwards web search alongside reply and rejects web search without reply`(): Unit = runBlocking {
+        val query = StateQuery.DumpsysField("battery", "voltage")
+        fun action(tools: List<String>) = Action.InvokeLlmV2(
+            goal = "rispondi col meteo aggiornato",
+            stateContext = listOf(
+                ApprovedStateContext(
+                    query = query,
+                    valueType = StateValueType.NUMBER,
+                    policyVersion = StateQueryPolicy.VERSION,
+                    integrity = IntegrityLabel.CLEAN,
+                    confidentiality = ConfidentialityLabel.SECRET,
+                ),
+            ),
+            allowedTools = tools,
+            replyTargetSender = true,
+            timeoutMs = 60_000,
+        )
+        val expectedRequestId = actRequestId("execution-1", 0)
+        val context = fireContext().copy(
+            state = fireContext().state.copy(queryValues = mapOf(query.canonicalId to "4200")),
+        )
+        server.enqueue(jsonResponse(
+            """{"schema_version":2,"request_id":"$expectedRequestId","result":{"text":"Oggi sole."},"error_code":null}""",
+        ))
+
+        val result = transport().actV2(context, action(listOf("whatsapp_reply", "web.search")))
+
+        assertEquals("Oggi sole.", result.text)
+        val root = Json.parseToJsonElement(
+            assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
+        ).jsonObject
+        assertEquals(
+            listOf("whatsapp_reply", "web.search"),
+            root.getValue("allowed_tools").jsonArray.map { it.jsonPrimitive.content },
+        )
+
+        // web.search da solo (senza reply) fallisce come config error prima della rete.
+        val error = assertFailsWith<BridgeException> {
+            transport().actV2(context, action(listOf("web.search")))
+        }
+        assertEquals(BridgeErrorKind.CONFIGURATION, error.kind)
+        assertNull(server.takeRequest(200, TimeUnit.MILLISECONDS))
+    }
+
     @Test fun `act response cannot choose a target or smuggle unknown fields`(): Unit = runBlocking {
         val requestId = actRequestId("execution-1", 0)
         server.enqueue(jsonResponse(

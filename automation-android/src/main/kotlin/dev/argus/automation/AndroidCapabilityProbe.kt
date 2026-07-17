@@ -288,6 +288,9 @@ class AndroidCapabilityProbe internal constructor(
             if (generativeReady) {
                 add(ActionTypeIds.INVOKE_LLM)
                 add(ActionTypeIds.INVOKE_LLM_V2)
+                // web.search è disponibile ⇔ invoke_llm lo è: il provider di default (Hermes) fa il
+                // web server-side; F3 aggiunge i provider diretti.
+                add(GenerativeContract.TOOL_WEB_SEARCH)
             }
         }.sorted()
         val unavailableTools = linkedMapOf<String, String>()
@@ -310,6 +313,7 @@ class AndroidCapabilityProbe internal constructor(
         if (!generativeReady) {
             unavailableTools[ActionTypeIds.INVOKE_LLM] = REASON_GENERATIVE_RUNTIME
             unavailableTools[ActionTypeIds.INVOKE_LLM_V2] = REASON_GENERATIVE_RUNTIME
+            unavailableTools[GenerativeContract.TOOL_WEB_SEARCH] = REASON_GENERATIVE_RUNTIME
         }
         PHASE_UNAVAILABLE_TOOLS.forEach { (tool, reason) -> unavailableTools[tool] = reason }
 
@@ -402,11 +406,11 @@ class AndroidCapabilityProbe internal constructor(
             "screen.type" to "azione UI non disponibile in questa fase",
             "app.install" to "installazione app non implementata",
             "shell.run" to "conferma live non implementata",
-            "web.search" to "provider non configurato",
             "vision.analyze" to "provider multimodale non configurato",
         )
         val KNOWN_TOOLS: Set<String> = SHIZUKU_TOOLS + TOOL_NOTIFY_SHOW +
-            GenerativeContract.TOOL_WHATSAPP_REPLY + PHASE_UNAVAILABLE_TOOLS.keys
+            GenerativeContract.TOOL_WHATSAPP_REPLY + GenerativeContract.TOOL_WEB_SEARCH +
+            PHASE_UNAVAILABLE_TOOLS.keys
         val BASE_DND_CAPABILITIES = setOf(ActionCapabilities.SET_DND, ActionCapabilities.SET_RINGER)
         val BASE_LAUNCH_CAPABILITIES =
             setOf(ActionCapabilities.LAUNCH_APP, ActionCapabilities.OPEN_URL)

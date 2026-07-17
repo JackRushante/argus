@@ -253,6 +253,9 @@ class AndroidCapabilityProbeTest {
         assertTrue(ActionTypeIds.INVOKE_LLM in manifest.availableTools)
         assertTrue(ActionTypeIds.INVOKE_LLM_V2 in manifest.availableTools)
         assertFalse(ActionTypeIds.INVOKE_LLM in manifest.unavailableTools)
+        // web.search segue invoke_llm: disponibile ⇔ runtime generativo pronto (F2 web tool).
+        assertTrue(GenerativeContract.TOOL_WEB_SEARCH in manifest.availableTools)
+        assertFalse(GenerativeContract.TOOL_WEB_SEARCH in manifest.unavailableTools)
     }
 
     @Test
@@ -274,6 +277,12 @@ class AndroidCapabilityProbeTest {
         assertEquals(
             AndroidCapabilityProbe.REASON_GENERATIVE_RUNTIME,
             manifest.unavailableTools[ActionTypeIds.INVOKE_LLM_V2],
+        )
+        // web.search cade con invoke_llm e riporta la stessa ragione di runtime non pronto.
+        assertFalse(GenerativeContract.TOOL_WEB_SEARCH in manifest.availableTools)
+        assertEquals(
+            AndroidCapabilityProbe.REASON_GENERATIVE_RUNTIME,
+            manifest.unavailableTools[GenerativeContract.TOOL_WEB_SEARCH],
         )
     }
 

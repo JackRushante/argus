@@ -208,7 +208,7 @@ internal object AgentMessageSupport {
         return context.toString()
     }
 
-    // Prompt di compile riusato dal reference Hermes (schema v2): 13 regole vincolanti +
+    // Prompt di compile riusato dal reference Hermes (schema v2): 14 regole vincolanti +
     // schema draft + schema state-query. Nessun segreto: solo template statico.
     const val COMPILE_RULES = """Sei il compilatore read-only di Argus. Trasforma la richiesta dell'utente in una
 AutomationDraft, ma non eseguire azioni e non inventare capability.
@@ -254,7 +254,11 @@ REGOLE VINCOLANTI:
 13. Le condition state_compare sono disponibili solo nello schema v2. Usa esclusivamente una
     famiglia elencata in manifest.state_readers.families e rispetta policy_version/limits del
     manifest. Se la famiglia o l'unita' della soglia manca, chiedi chiarimento: non retrofittare
-    state_compare in state_equals e non usare /chat."""
+    state_compare in state_equals e non usare /chat.
+14. invoke_llm.allowedTools puo' includere "web.search" oltre a "whatsapp_reply" SOLO quando il
+    goal richiede dati aggiornati dal web (cambio valuta, meteo, prezzi, notizie, orari): non
+    aggiungerlo se il dato non e' online/live. "web.search" deve comparire in
+    manifest.available_tools."""
 
     const val DRAFT_SCHEMA_TEXT = """AutomationDraft JSON (nomi e maiuscole sono esatti):
 {
