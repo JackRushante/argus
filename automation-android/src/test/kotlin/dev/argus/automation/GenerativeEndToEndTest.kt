@@ -319,6 +319,7 @@ class GenerativeEndToEndTest {
                 cipher,
                 ttlMillis = 60_000,
             ) { 1_500 },
+            notifier = { _, _, _ -> },
         )
         val engine = Engine(
             store = automations,

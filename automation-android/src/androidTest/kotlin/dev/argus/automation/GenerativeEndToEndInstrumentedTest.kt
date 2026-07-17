@@ -144,6 +144,7 @@ class GenerativeEndToEndInstrumentedTest {
                 cipher,
                 ttlMillis = 60_000,
             ),
+            notifier = { _, _, _ -> },
         )
         val engine = Engine(
             store = automations,

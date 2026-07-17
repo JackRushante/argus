@@ -476,6 +476,7 @@ object ArgusModule {
         brain: Brain,
         replies: NotificationReplyGateway,
         deferredReplies: DeferredReplySink,
+        notifier: AutomationNotifier,
     ): AndroidGenerativeLane = AndroidGenerativeLane(
         scope,
         journal,
@@ -484,6 +485,7 @@ object ArgusModule {
         brain,
         replies,
         deferredReplies,
+        notifier,
     )
 
     @Provides

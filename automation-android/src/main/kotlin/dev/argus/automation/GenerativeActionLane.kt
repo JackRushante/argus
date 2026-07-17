@@ -10,6 +10,7 @@ import dev.argus.engine.model.ApprovalFingerprints
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.GenerativeContract
 import dev.argus.engine.model.GenerativeAction
+import dev.argus.engine.model.GenerativeDeliverMode
 import dev.argus.engine.model.IntegrityLabel
 import dev.argus.engine.model.StateContextClassification
 import dev.argus.engine.model.StateQueryPolicy
@@ -51,6 +52,7 @@ class AndroidGenerativeLane(
     private val brain: Brain,
     private val replies: NotificationReplyGateway,
     private val deferredReplies: DeferredReplySink,
+    private val notifier: AutomationNotifier,
     capacity: Int = DEFAULT_CAPACITY,
     private val submissionHandshakeTimeoutMillis: Long = DEFAULT_HANDSHAKE_TIMEOUT_MILLIS,
     private val nowMillis: () -> Long = System::currentTimeMillis,
@@ -144,6 +146,11 @@ class AndroidGenerativeLane(
             complete(queued, ActionJournalOutcome.FAILED, code)
             return
         }
+        val action = queued.action
+        if (action is Action.InvokeLlm && action.deliver == GenerativeDeliverMode.LOCAL_NOTIFICATION) {
+            deliverNotification(queued, action, text)
+            return
+        }
         val notification = queued.context.event as? TriggerEvent.NotificationPosted
         if (notification == null) {
             complete(queued, ActionJournalOutcome.FAILED, "reply_event_unverified")
@@ -176,6 +183,31 @@ class AndroidGenerativeLane(
         }
     }
 
+    /**
+     * Sink NOTIFICA (#59): il testo generato diventa una notifica locale, senza alcun requisito
+     * sull'evento trigger (a differenza del reply, che esige una NotificationPosted). Il titolo è
+     * LETTERALE dal fingerprint approvato (validContract ne garantisce la presenza, D2).
+     */
+    private suspend fun deliverNotification(
+        queued: QueuedAction,
+        action: Action.InvokeLlm,
+        text: String,
+    ) {
+        try {
+            notifier.show(
+                title = action.notificationTitle!!,
+                text = text,
+                context = queued.context,
+            )
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            complete(queued, ActionJournalOutcome.FAILED, "notify_failed")
+            return
+        }
+        complete(queued, ActionJournalOutcome.SUCCEEDED, null)
+    }
+
     private suspend fun awaitSubmitted(queued: QueuedAction): Boolean =
         withTimeoutOrNull(submissionHandshakeTimeoutMillis) {
             journal.observeSubmission(
@@ -204,13 +236,23 @@ class AndroidGenerativeLane(
     }
 
     private fun validContract(queued: QueuedAction): Boolean = when (val action = queued.action) {
-        is Action.InvokeLlm -> action.replyTargetSender &&
-            action.contextSources.isNotEmpty() &&
-            action.contextSources == action.contextSources.distinct() &&
-            "notification" in action.contextSources &&
-            action.contextSources.all { it in P1_CONTEXT_SOURCES } &&
-            GenerativeContract.isAllowedToolset(action.allowedTools) &&
-            action.timeoutMs in MIN_TIMEOUT_MILLIS..MAX_TIMEOUT_MILLIS
+        is Action.InvokeLlm -> when (action.deliver) {
+            // Sink REPLY (profilo P1, invariato).
+            GenerativeDeliverMode.WHATSAPP_REPLY -> action.replyTargetSender &&
+                action.contextSources.isNotEmpty() &&
+                action.contextSources == action.contextSources.distinct() &&
+                "notification" in action.contextSources &&
+                action.contextSources.all { it in P1_CONTEXT_SOURCES } &&
+                GenerativeContract.isAllowedToolset(action.allowedTools) &&
+                action.timeoutMs in MIN_TIMEOUT_MILLIS..MAX_TIMEOUT_MILLIS
+            // Sink NOTIFICA (#59): specchia DraftValidator.validateInvokeLlmNotificationDeliver.
+            GenerativeDeliverMode.LOCAL_NOTIFICATION -> !action.replyTargetSender &&
+                GenerativeContract.isNotificationToolset(action.allowedTools) &&
+                validNotificationTitle(action.notificationTitle) &&
+                action.contextSources == action.contextSources.distinct() &&
+                action.contextSources.all { it == GenerativeContract.CONTEXT_STATE } &&
+                action.timeoutMs in MIN_TIMEOUT_MILLIS..MAX_TIMEOUT_MILLIS
+        }
         is Action.InvokeLlmV2 -> action.replyTargetSender &&
             GenerativeContract.isAllowedToolset(action.allowedTools) &&
             action.timeoutMs in MIN_TIMEOUT_MILLIS..MAX_TIMEOUT_MILLIS &&
@@ -229,6 +271,13 @@ class AndroidGenerativeLane(
                     queuedValueIsValid(queued.context, context.query.canonicalId, context.valueType)
             }
     }
+
+    /** Titolo notifica LETTERALE (D2): non-null, non-blank, bounded e senza caratteri di controllo.
+     *  Specchia DraftValidator.validateInvokeLlmNotificationDeliver (MAX_NAME_LENGTH = 120). */
+    private fun validNotificationTitle(title: String?): Boolean =
+        !title.isNullOrBlank() &&
+            title.length <= MAX_NOTIFICATION_TITLE_CHARS &&
+            title.none(Char::isISOControl)
 
     private fun queuedValueIsValid(
         context: FireContext,
@@ -289,6 +338,8 @@ class AndroidGenerativeLane(
         const val DEFAULT_HANDSHAKE_TIMEOUT_MILLIS = 5_000L
         const val MIN_TIMEOUT_MILLIS = 1_000L
         const val MAX_TIMEOUT_MILLIS = 120_000L
+        // Allineato a DraftValidator.MAX_NAME_LENGTH: il titolo del sink notifica è letterale.
+        const val MAX_NOTIFICATION_TITLE_CHARS = 120
         const val REPLY_TOOL = "whatsapp_reply"
         val P1_CONTEXT_SOURCES = setOf("notification", "state")
         val PENDING_EXECUTION_STATES = setOf(ExecutionStatus.RUNNING, ExecutionStatus.SUBMITTED)

@@ -14,6 +14,7 @@ import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.ConfidentialityLabel
+import dev.argus.engine.model.GenerativeDeliverMode
 import dev.argus.engine.model.IntegrityLabel
 import dev.argus.engine.model.StateQuery
 import dev.argus.engine.model.StateQueryPolicy
@@ -297,6 +298,7 @@ class GenerativeActionLaneTest {
             brain = brain,
             replies = gateway,
             deferredReplies = DeferredReplySink { _, _ -> false },
+            notifier = RecordingNotifier(),
         )
 
         assertTrue(lane.trySubmit(context, action))
@@ -324,12 +326,94 @@ class GenerativeActionLaneTest {
         }
     }
 
+    @Test
+    fun `local notification deliver posts the generated text and never touches the reply channel`() = runTest {
+        val action = notificationAction()
+        val fixture = fixture(action = action, automation = approvedAutomation(action))
+        fixture.lane.trySubmit(fixture.context, fixture.action)
+        fixture.journal.ready()
+        runCurrent()
+
+        assertEquals(1, fixture.brain.calls)
+        assertEquals(0, fixture.gateway.calls, "il sink notifica non usa il canale reply")
+        fixture.notifier.calls.single().also { shown ->
+            assertEquals("Cambio EUR/USD", shown.title)
+            assertEquals("risposta", shown.text)
+            assertEquals(fixture.context.executionId, shown.context.executionId)
+        }
+        assertEquals(ActionJournalOutcome.SUCCEEDED, fixture.journal.completions.single().outcome)
+    }
+
+    @Test
+    fun `local notification deliver fires from a non notification trigger`() = runTest {
+        // A differenza del reply (che esige TriggerEvent.NotificationPosted) il sink notifica posta
+        // il testo da un trigger qualsiasi: è il caso reale "tra 2 min mandami il cambio euro/usd".
+        val action = notificationAction(allowedTools = listOf("web.search"))
+        val automation = approvedAutomation(action)
+        val timeContext = context(
+            automation,
+            action,
+            event = TriggerEvent.TimeFired(
+                automation.id,
+                requireNotNull(automation.approvalFingerprint),
+            ),
+        )
+        val fixture = fixture(action = action, automation = automation, context = timeContext)
+        fixture.lane.trySubmit(fixture.context, fixture.action)
+        fixture.journal.ready()
+        runCurrent()
+
+        assertEquals(1, fixture.brain.calls)
+        assertEquals(0, fixture.gateway.calls)
+        assertEquals(1, fixture.notifier.calls.size)
+        assertEquals("risposta", fixture.notifier.calls.single().text)
+        assertEquals(ActionJournalOutcome.SUCCEEDED, fixture.journal.completions.single().outcome)
+    }
+
+    @Test
+    fun `local notification deliver fails when the notifier throws`() = runTest {
+        val action = notificationAction()
+        val fixture = fixture(
+            action = action,
+            automation = approvedAutomation(action),
+            notifier = RecordingNotifier(onShow = { error("notification_permission_unavailable") }),
+        )
+        fixture.lane.trySubmit(fixture.context, fixture.action)
+        fixture.journal.ready()
+        runCurrent()
+
+        assertEquals(0, fixture.gateway.calls)
+        assertTrue(fixture.notifier.calls.isEmpty())
+        fixture.journal.completions.single().also { completion ->
+            assertEquals(ActionJournalOutcome.FAILED, completion.outcome)
+            assertEquals("notify_failed", completion.errorCode)
+        }
+    }
+
+    @Test
+    fun `local notification deliver rejects a whatsapp reply tool before contacting brain`() = runTest {
+        // isNotificationToolset vieta whatsapp_reply: il contratto è invalido e la lane non chiama il
+        // brain né posta nulla (specchia validateInvokeLlmNotificationDeliver).
+        val action = notificationAction(allowedTools = listOf("whatsapp_reply"))
+        val fixture = fixture(action = action, automation = approvedAutomation(action))
+        fixture.lane.trySubmit(fixture.context, fixture.action)
+        fixture.journal.ready()
+        runCurrent()
+
+        assertEquals(0, fixture.brain.calls)
+        assertEquals(0, fixture.gateway.calls)
+        assertTrue(fixture.notifier.calls.isEmpty())
+        assertEquals("action_contract_invalid", fixture.journal.completions.single().errorCode)
+    }
+
     private fun kotlinx.coroutines.test.TestScope.fixture(
         action: Action.InvokeLlm = action(),
         automation: Automation = approvedAutomation(action),
         capacity: Int = 8,
         delivery: NotificationReplyDelivery = NotificationReplyDelivery.Sent,
         deferred: DeferredReplySink = DeferredReplySink { _, _ -> false },
+        notifier: RecordingNotifier = RecordingNotifier(),
+        context: FireContext = context(automation, action),
         act: suspend () -> ActResult = { ActResult("risposta", null) },
     ): Fixture {
         val store = MutableAutomationStore(automation)
@@ -337,7 +421,6 @@ class GenerativeActionLaneTest {
         val brain = FakeBrain(act)
         val gateway = FakeReplyGateway(delivery)
         val policy = MutableFirePolicy()
-        val context = context(automation, action)
         val lane = AndroidGenerativeLane(
             scope = backgroundScope,
             journal = journal,
@@ -346,11 +429,12 @@ class GenerativeActionLaneTest {
             brain = brain,
             replies = gateway,
             deferredReplies = deferred,
+            notifier = notifier,
             capacity = capacity,
             submissionHandshakeTimeoutMillis = 5_000,
             nowMillis = { 2_000L },
         )
-        return Fixture(lane, action, context, store, journal, brain, gateway, policy)
+        return Fixture(lane, action, context, store, journal, brain, gateway, policy, notifier)
     }
 
     private data class Fixture(
@@ -362,6 +446,7 @@ class GenerativeActionLaneTest {
         val brain: FakeBrain,
         val gateway: FakeReplyGateway,
         val policy: MutableFirePolicy,
+        val notifier: RecordingNotifier,
     )
 
     private class FakeSubmittedJournal : SubmittedActionJournal {
@@ -446,6 +531,21 @@ class GenerativeActionLaneTest {
         override suspend fun evaluate(automation: Automation, event: TriggerEvent) = decision
     }
 
+    /** Notifier fake che registra ogni show; se `onShow` è impostato, lo lancia PRIMA di registrare
+     *  (simula un permesso notifiche revocato → IllegalStateException del notifier reale). */
+    private class RecordingNotifier(
+        private val onShow: (() -> Unit)? = null,
+    ) : AutomationNotifier {
+        data class Shown(val title: String, val text: String, val context: FireContext)
+
+        val calls = mutableListOf<Shown>()
+
+        override suspend fun show(title: String, text: String, context: FireContext) {
+            onShow?.invoke()
+            calls += Shown(title, text, context)
+        }
+    }
+
     private class MutableAutomationStore(var current: Automation?) : AutomationStore {
         override suspend fun get(id: AutomationId): Automation? = current?.takeIf { it.id == id }
         override suspend fun all(): List<Automation> = listOfNotNull(current)
@@ -493,6 +593,20 @@ class GenerativeActionLaneTest {
             timeoutMs = 60_000,
         )
 
+        fun notificationAction(
+            allowedTools: List<String> = emptyList(),
+            contextSources: List<String> = emptyList(),
+            notificationTitle: String? = "Cambio EUR/USD",
+        ) = Action.InvokeLlm(
+            goal = "genera il cambio euro verso usd",
+            contextSources = contextSources,
+            allowedTools = allowedTools,
+            replyTargetSender = false,
+            timeoutMs = 60_000,
+            deliver = GenerativeDeliverMode.LOCAL_NOTIFICATION,
+            notificationTitle = notificationTitle,
+        )
+
         fun approvedAutomation(action: Action): Automation {
             val unsigned = Automation(
                 id = AutomationId("automation-1"),
@@ -515,8 +629,7 @@ class GenerativeActionLaneTest {
             automation: Automation,
             action: Action,
             state: DeviceState = DeviceState(),
-        ): FireContext = FireContext(
-            event = TriggerEvent.NotificationPosted(
+            event: TriggerEvent = TriggerEvent.NotificationPosted(
                 pkg = "com.whatsapp",
                 conversationId = CONVERSATION_ID,
                 sender = "Contatto",
@@ -524,6 +637,8 @@ class GenerativeActionLaneTest {
                 isGroup = false,
                 notificationKey = "sbn:1",
             ),
+        ): FireContext = FireContext(
+            event = event,
             state = state,
             automationId = automation.id,
             approvalFingerprint = requireNotNull(automation.approvalFingerprint),
