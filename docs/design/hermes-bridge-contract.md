@@ -53,8 +53,11 @@ Il client Android corrente non usa più questo endpoint. Usa `GET /health/v2`:
 }
 ```
 
-Le liste sono esatte e ordinate: Android rifiuta versioni mancanti, duplicate, sconosciute o fuori
-ordine. `source_sha256` è l'hash di `bridge.py` dopo normalizzazione `CRLF|CR → LF`; permette di
+Compatibilità per CONTENIMENTO (#41): Android accetta il bridge se le liste `compile_schema_versions`
+/`act_schema_versions` CONTENGONO le versioni che l'app usa (compile v2, act v1+v2). Un redeploy che
+AGGIUNGE una versione (es. annuncia `[1,2,3]`) resta compatibile con le app vecchie; un bridge che
+TOGLIE una versione usata dall'app è incompatibile. `health.schema_version` è accettato se >= a quello
+atteso dall'app. `source_sha256` è l'hash di `bridge.py` dopo normalizzazione `CRLF|CR → LF`; permette di
 confrontare checkout Windows e deploy Linux senza falso drift. Il client rifiuta anche campi
 sconosciuti, status/modello non validi, body non JSON o oltre il limite.
 

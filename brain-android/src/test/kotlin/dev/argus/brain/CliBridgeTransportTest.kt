@@ -152,12 +152,15 @@ class CliBridgeTransportTest {
         assertEquals("Bearer $TOKEN", request.getHeader("Authorization"))
     }
 
-    @Test fun `health rejects incomplete drifted or extended contracts`(): Unit = runBlocking {
+    @Test fun `health rejects a bridge missing a version the app uses or a malformed envelope`(): Unit = runBlocking {
         val invalid = listOf(
+            // compile senza la v2 usata dall'app -> incompatibile.
             """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1],"act_schema_versions":[1,2],"source_sha256":"${"a".repeat(64)}"}""",
-            """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1,2,3],"act_schema_versions":[1,2],"source_sha256":"${"a".repeat(64)}"}""",
+            // act senza la v2 (act_v2) usata dall'app -> incompatibile.
             """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1,2],"act_schema_versions":[1],"source_sha256":"${"a".repeat(64)}"}""",
+            // sha in formato invalido.
             """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1,2],"act_schema_versions":[1,2],"source_sha256":"not-a-sha"}""",
+            // campo sconosciuto -> envelope non valido (decoder strict).
             """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1,2],"act_schema_versions":[1,2],"source_sha256":"${"a".repeat(64)}","surprise":true}""",
         )
 
@@ -166,6 +169,16 @@ class CliBridgeTransportTest {
             val error = assertFailsWith<BridgeException> { transport().health() }
             assertEquals(BridgeErrorKind.PROTOCOL, error.kind)
         }
+    }
+
+    @Test fun `health accepts a bridge that announces extra schema versions (forward compat #41)`(): Unit = runBlocking {
+        // Un redeploy che AGGIUNGE una versione (compile [1,2,3]) resta compatibile: l'app usa la v2,
+        // contenuta nel set annunciato. Non deve piu' cadere offline (#41).
+        server.enqueue(jsonResponse(
+            """{"schema_version":3,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1,2,3],"act_schema_versions":[1,2,3],"source_sha256":"${"a".repeat(64)}"}""",
+        ))
+        val health = transport().health()
+        assertTrue(2 in health.compileSchemaVersions && 3 in health.compileSchemaVersions)
     }
 
     @Test fun `act is deterministic minimal and never sends local reply handles or target ids`(): Unit = runBlocking {

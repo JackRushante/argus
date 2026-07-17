@@ -448,10 +448,15 @@ class CliBridgeTransport internal constructor(
         } catch (error: IllegalArgumentException) {
             throw BridgeException(BridgeErrorKind.PROTOCOL, "health envelope non valido", cause = error)
         }
-        if (health.schemaVersion != HEALTH_SCHEMA_VERSION || health.status != "ok" ||
+        // Compatibilita' per CONTENIMENTO, non uguaglianza esatta (#41): il bridge e' compatibile se
+        // ANNUNCIA le versioni che l'app usa. Cosi' un redeploy che AGGIUNGE una schema version (es.
+        // annuncia [1,2,3]) non butta piu' offline le app vecchie; un bridge che TOGLIE una versione
+        // che serve all'app resta correttamente incompatibile. Lo SHA e' solo format-checked (regex).
+        if (health.schemaVersion < HEALTH_SCHEMA_VERSION || health.status != "ok" ||
             health.model.isBlank() || health.model.length > 128 ||
-            health.compileSchemaVersions != SUPPORTED_COMPILE_SCHEMA_VERSIONS ||
-            health.actSchemaVersions != SUPPORTED_ACT_SCHEMA_VERSIONS ||
+            COMPILE_SCHEMA_VERSION !in health.compileSchemaVersions ||
+            ACT_SCHEMA_VERSION !in health.actSchemaVersions ||
+            ACT_V2_SCHEMA_VERSION !in health.actSchemaVersions ||
             !SOURCE_SHA256.matches(health.sourceSha256)) {
             throw BridgeException(BridgeErrorKind.PROTOCOL, "health incompatibile")
         }
