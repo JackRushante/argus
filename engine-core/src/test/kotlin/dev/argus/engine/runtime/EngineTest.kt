@@ -346,7 +346,13 @@ class EngineTest {
         assertEquals(0, stateReads)
         assertEquals(emptyList(), ex.executed)
         assertEquals(AutomationStatus.NEEDS_REVIEW, store.get(a.id)?.status)
-        assertEquals(AuditKind.BLOCKED_POLICY, audit.events.single().kind)
+        // La quarantena è un evento lifecycle esplicito, poi il blocco fire-time col code esatto.
+        assertEquals(
+            listOf(AuditKind.RULE_NEEDS_REVIEW, AuditKind.BLOCKED_POLICY),
+            audit.events.map { it.kind },
+        )
+        assertEquals("fire_policy", audit.events.first().detail)
+        assertEquals(a.id, audit.events.first().automationId)
     }
 
     @Test

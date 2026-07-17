@@ -30,6 +30,7 @@ import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.FilterAltOff
 import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.SyncProblem
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -341,6 +342,12 @@ private fun outcomeVisual(row: LogRow): Pair<ImageVector, Color> {
         AuditKind.SUPPRESSED_BUDGET -> Icons.Rounded.Block to s.pending.fg
         AuditKind.SUPPRESSED_NOT_ELIGIBLE -> Icons.Rounded.Block to faint
         AuditKind.CONDITIONS_NOT_MET -> Icons.Rounded.FilterAltOff to faint
+        // Lifecycle (task #31-B): eventi informativi, non esiti di esecuzione.
+        AuditKind.RULE_ARMED,
+        AuditKind.RULE_ENABLED -> Icons.Rounded.CheckCircle to s.armed.fg
+        AuditKind.RULE_DISABLED,
+        AuditKind.RULE_DELETED -> Icons.Rounded.Block to faint
+        AuditKind.RULE_NEEDS_REVIEW -> Icons.Rounded.SyncProblem to s.needsReview.fg
         AuditKind.FIRED -> when (row.outcome) {
             LogOutcome.SUCCESS -> Icons.Rounded.CheckCircle to s.armed.fg
             LogOutcome.PARTIAL -> Icons.Rounded.CheckCircle to s.pending.fg

@@ -414,6 +414,17 @@ class ApprovalFlow(
     }
 
     private suspend fun finalizeRegistration(automation: Automation): FlowArmResult {
+        // Lifecycle (task #31-B): la transizione in ARMED è già persistita dall'approvazione.
+        // Registrata PRIMA del registrar così un eventuale disable immediato (one-shot) o un
+        // ARM_FAILED successivo restano in ordine cronologico nel log.
+        recordAudit(
+            AuditEvent(
+                automation.id,
+                AuditKind.RULE_ARMED,
+                nowMillis(),
+                detail = "approval",
+            ),
+        )
         val registered = withContext(NonCancellable) {
             runCatching { registrar.register(automation) }.getOrDefault(false)
         }

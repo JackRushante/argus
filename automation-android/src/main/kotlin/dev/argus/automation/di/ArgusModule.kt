@@ -360,7 +360,8 @@ object ArgusModule {
     fun capabilityReconciler(
         store: AutomationStore,
         snapshots: FirePolicySnapshotProvider,
-    ) = dev.argus.automation.CapabilityReconciler(store, snapshots)
+        audit: AuditSink,
+    ) = dev.argus.automation.CapabilityReconciler(store, snapshots, audit)
 
     @Provides
     @Singleton
@@ -857,6 +858,7 @@ object ArgusModule {
         geofence: GeofenceTriggerRuntime,
         sensor: SensorTriggerRuntime,
         immediateDispatcher: ImmediateEventDispatcher,
+        audit: AuditSink,
     ): ArmedAutomationRegistrar = AndroidArmedAutomationRegistrar(
         coordinator,
         store,
@@ -866,6 +868,7 @@ object ArgusModule {
         sensor,
         immediateDispatcher,
         Instant::now,
+        audit,
     )
 
     @Provides

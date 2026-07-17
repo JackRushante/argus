@@ -18,6 +18,9 @@ import dev.argus.engine.model.StateKeys
 import dev.argus.engine.model.StateQueryFamily
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.ActionCapabilities
+import dev.argus.engine.runtime.AuditEvent
+import dev.argus.engine.runtime.AuditKind
+import dev.argus.engine.runtime.AuditSink
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireClaimRequest
@@ -515,9 +518,14 @@ class AndroidCapabilityProbeTest {
                 shizukuPermissionGranted = false,
             ),
         )
-        val revoked = CapabilityReconciler(revokedStore, revokedProbe).reconcile()
+        val revokedAudit = ReconcilerAuditRecorder()
+        val revoked = CapabilityReconciler(revokedStore, revokedProbe, revokedAudit).reconcile()
         assertEquals(listOf(rule.id), revoked.needsReview)
         assertEquals(AutomationStatus.NEEDS_REVIEW, revokedStore.get(rule.id)?.status)
+        // Lifecycle: la quarantena per capability revocata resta tracciata col reason chiuso.
+        val quarantined = revokedAudit.events.single { it.kind == AuditKind.RULE_NEEDS_REVIEW }
+        assertEquals("capability_lost", quarantined.detail)
+        assertEquals(rule.id, quarantined.automationId)
 
         val temporaryStore = ReconcileAutomationStore(rule)
         val temporaryProbe = probe(
@@ -526,9 +534,11 @@ class AndroidCapabilityProbeTest {
                 shizukuPermissionGranted = true,
             ),
         )
-        val temporary = CapabilityReconciler(temporaryStore, temporaryProbe).reconcile()
+        val temporaryAudit = ReconcilerAuditRecorder()
+        val temporary = CapabilityReconciler(temporaryStore, temporaryProbe, temporaryAudit).reconcile()
         assertEquals(listOf(rule.id), temporary.temporarilyBlocked)
         assertEquals(AutomationStatus.ARMED, temporaryStore.get(rule.id)?.status)
+        assertTrue(temporaryAudit.events.isEmpty(), "un outage transiente non è un evento lifecycle")
     }
 
     @Test
@@ -752,6 +762,11 @@ private class FakeWhitelist(initial: List<WhitelistedContact>) : ContactWhitelis
     override suspend fun remove(conversationId: String) {
         values.value = values.value.filterNot { it.id == conversationId }
     }
+}
+
+private class ReconcilerAuditRecorder : AuditSink {
+    val events = mutableListOf<AuditEvent>()
+    override suspend fun record(e: AuditEvent) { events += e }
 }
 
 private class ReconcileAutomationStore(initial: Automation) : AutomationStore {

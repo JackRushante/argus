@@ -25,10 +25,15 @@ import dev.argus.engine.model.SensorKind
 import dev.argus.engine.model.StateKeys
 import dev.argus.engine.model.StateQueryFamily
 import dev.argus.engine.runtime.ActionCapabilities
+import dev.argus.engine.runtime.AuditEvent
+import dev.argus.engine.runtime.AuditKind
+import dev.argus.engine.runtime.AuditSink
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FirePolicySnapshot
 import dev.argus.engine.runtime.FirePolicySnapshotProvider
+import dev.argus.engine.runtime.NoopAuditSink
+import kotlinx.coroutines.CancellationException
 import dev.argus.engine.safety.DraftValidator
 import dev.argus.engine.safety.Severity
 import dev.argus.shizuku.ShizukuGateway
@@ -465,6 +470,7 @@ data class CapabilityReconcileReport(
 class CapabilityReconciler(
     private val store: AutomationStore,
     private val snapshots: FirePolicySnapshotProvider,
+    private val audit: AuditSink = NoopAuditSink,
 ) {
     suspend fun reconcile(): CapabilityReconcileReport {
         val snapshot = snapshots.current()
@@ -483,12 +489,38 @@ class CapabilityReconciler(
                 val fingerprint = automation.approvalFingerprint ?: return@forEach
                 if (store.markNeedsReviewIfApproved(automation.id, fingerprint)) {
                     needsReview += automation.id
+                    // Lifecycle (task #31-B): il PERCHÉ è noto solo qui, reason chiuso per causa.
+                    recordNeedsReview(
+                        automation.id,
+                        reason = when {
+                            structuralMissing.isNotEmpty() -> "capability_lost"
+                            validationFailed -> "validation_failed"
+                            else -> "requirements_changed"
+                        },
+                    )
                 }
             } else if (missing.isNotEmpty()) {
                 temporarilyBlocked += automation.id
             }
         }
         return CapabilityReconcileReport(needsReview, temporarilyBlocked)
+    }
+
+    private suspend fun recordNeedsReview(id: AutomationId, reason: String) {
+        try {
+            audit.record(
+                AuditEvent(
+                    id,
+                    AuditKind.RULE_NEEDS_REVIEW,
+                    System.currentTimeMillis(),
+                    detail = reason,
+                ),
+            )
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            // Il logging non deve cambiare l'esito del reconcile.
+        }
     }
 
     private fun validationFailed(

@@ -460,6 +460,60 @@ class TimeAlarmCoordinatorTest {
         val event = audit.events.single { it.kind == AuditKind.SCHEDULING_FAILED }
         assertEquals("expired", event.detail)
         assertEquals(automation.id, event.automationId)
+        // Lifecycle: la sparizione dalla lista armate resta tracciata come disable esplicito.
+        val disabled = audit.events.single { it.kind == AuditKind.RULE_DISABLED }
+        assertEquals("expired", disabled.detail)
+        assertEquals(automation.id, disabled.automationId)
+    }
+
+    @Test
+    fun `one-shot delivery records RULE_DISABLED one_shot_consumed`() = runTest {
+        val automation = automation(Trigger.Time(at = "2026-07-13T20:00", tz = "UTC"))
+        val dueAt = Instant.parse("2026-07-13T20:00:00Z").toEpochMilli()
+        val store = FakeAutomationStore(automation)
+        val state = FakeTimeAlarmStateStore(record(automation, dueAt))
+        val audit = ScheduleAuditRecorder()
+        val coordinator = TimeAlarmCoordinator(
+            store = store,
+            state = state,
+            backend = FakeTimeAlarmBackend(),
+            dispatcher = TimeEventDispatcher { },
+            now = { now },
+            audit = audit,
+        )
+
+        assertIs<AlarmDeliveryResult.Delivered>(
+            coordinator.onAlarm(automation.id, requireNotNull(automation.approvalFingerprint), dueAt),
+        )
+
+        assertEquals(AutomationStatus.DISABLED, store.get(automation.id)?.status)
+        val event = audit.events.single { it.kind == AuditKind.RULE_DISABLED }
+        assertEquals("one_shot_consumed", event.detail)
+        assertEquals(automation.id, event.automationId)
+    }
+
+    @Test
+    fun `planner failure quarantines the rule and records RULE_NEEDS_REVIEW planner_failed`() = runTest {
+        // Timezone invalida: TimeSpecs.nextFire lancia e il coordinator quarantena la revisione.
+        val automation = automation(Trigger.Time(at = "2026-07-13T22:00", tz = "Mars/Olympus"))
+        val store = FakeAutomationStore(automation)
+        val audit = ScheduleAuditRecorder()
+        val coordinator = TimeAlarmCoordinator(
+            store = store,
+            state = FakeTimeAlarmStateStore(),
+            backend = FakeTimeAlarmBackend(),
+            dispatcher = TimeEventDispatcher { },
+            now = { now },
+            audit = audit,
+        )
+
+        val report = coordinator.reconcile(ReconcileReason.APP_START)
+
+        assertEquals(listOf(automation.id), report.failed)
+        assertEquals(AutomationStatus.NEEDS_REVIEW, store.get(automation.id)?.status)
+        val event = audit.events.single { it.kind == AuditKind.RULE_NEEDS_REVIEW }
+        assertEquals("planner_failed", event.detail)
+        assertEquals(automation.id, event.automationId)
     }
 
     @Test

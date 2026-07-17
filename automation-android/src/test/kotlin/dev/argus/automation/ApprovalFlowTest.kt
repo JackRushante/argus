@@ -192,6 +192,43 @@ class ApprovalFlowTest {
         val armAudit = fixture.audit.events.single { it.kind == AuditKind.ARM_FAILED }
         assertEquals("registrar_failed", armAudit.detail)
         assertEquals(failed.automation.id, armAudit.automationId)
+        // Timeline coerente: la regola risulta armata (approvazione riuscita) PRIMA del fallimento.
+        assertEquals(
+            listOf(AuditKind.RULE_ARMED, AuditKind.ARM_FAILED),
+            fixture.audit.events.map { it.kind },
+        )
+    }
+
+    @Test
+    fun `successful arm records RULE_ARMED with the approval reason`() = runTest {
+        val fixture = fixture(
+            available = setOf(CapabilityIds.TRIGGER_TIME, ActionCapabilities.SET_DND),
+        )
+        val ready = assertIs<DraftSubmissionResult.Ready>(
+            fixture.flow.submit(
+                CompileResult(
+                    "ok",
+                    AutomationDraft(
+                        "DND",
+                        Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
+                        listOf(Action.SetDnd(DndMode.PRIORITY)),
+                    ),
+                    null,
+                ),
+            ),
+        ).review
+
+        val armed = assertIs<FlowArmResult.Armed>(
+            fixture.flow.arm(
+                ready.draft.snapshot.id,
+                ready.draft.snapshot.revision,
+                ready.draft.snapshot.fingerprint,
+            ),
+        ).automation
+
+        val event = fixture.audit.events.single { it.kind == AuditKind.RULE_ARMED }
+        assertEquals("approval", event.detail)
+        assertEquals(armed.id, event.automationId)
     }
 
     @Test

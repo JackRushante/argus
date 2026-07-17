@@ -25,13 +25,18 @@ import dev.argus.automation.sensor.SensorEventDispatcher
 import dev.argus.automation.sensor.SensorTriggerRuntime
 import dev.argus.engine.model.ConnMedium
 import dev.argus.engine.model.Automation
+import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.CapabilityIds
 import dev.argus.engine.model.CapabilityRequirements
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.runtime.AuditEvent
+import dev.argus.engine.runtime.AuditKind
+import dev.argus.engine.runtime.AuditSink
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.Engine
+import dev.argus.engine.runtime.NoopAuditSink
 import dev.argus.engine.runtime.FireContext
 import dev.argus.engine.runtime.FirePolicySnapshotProvider
 import dev.argus.engine.runtime.GeoPoint
@@ -204,6 +209,7 @@ class AndroidArmedAutomationRegistrar(
     private val immediateDispatcher: ImmediateEventDispatcher = ImmediateEventDispatcher { },
     // Clock iniettabile per un id univoco per-arm (un RE-ARM ri-fira, niente dedup permanente).
     private val now: () -> java.time.Instant = java.time.Instant::now,
+    private val audit: AuditSink = NoopAuditSink,
 ) : ArmedAutomationRegistrar {
     override suspend fun register(automation: Automation): Boolean = when (automation.trigger) {
         is Trigger.Time -> registerTime(automation)
@@ -244,7 +250,10 @@ class AndroidArmedAutomationRegistrar(
             )
             immediateDispatcher.dispatch(envelope)
             // Consuma la regola one-shot dopo il fire, come TimeAlarmCoordinator per un time one-shot.
-            store.disableIfApproved(automation.id, fingerprint)
+            if (store.disableIfApproved(automation.id, fingerprint)) {
+                // Lifecycle (task #31-B): il disable post-fire va tracciato, mai silenzioso.
+                recordLifecycle(automation.id, AuditKind.RULE_DISABLED, "one_shot_consumed")
+            }
             true
         } catch (error: CancellationException) {
             throw error
@@ -315,6 +324,27 @@ class AndroidArmedAutomationRegistrar(
             throw error
         } catch (_: Exception) {
             false
+        }
+    }
+
+    private suspend fun recordLifecycle(
+        automationId: AutomationId,
+        kind: AuditKind,
+        reason: String,
+    ) {
+        try {
+            audit.record(
+                AuditEvent(
+                    automationId,
+                    kind,
+                    now().toEpochMilli(),
+                    detail = reason,
+                ),
+            )
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            // Il logging non deve cambiare l'esito della registrazione.
         }
     }
 }

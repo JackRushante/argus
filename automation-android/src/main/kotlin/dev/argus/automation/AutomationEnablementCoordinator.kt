@@ -52,6 +52,9 @@ class AutomationEnablementCoordinator @Inject constructor(
             if (!store.disableIfApproved(id, fingerprint)) {
                 return@withLock EnablementResult.ReviewRequired
             }
+            // Il disable è già durevole in Room: l'evento va emesso anche se la pulizia
+            // runtime sotto viene rinviata (DisableCleanupDeferred).
+            recordLifecycle(id, AuditKind.RULE_DISABLED, "user")
             return@withLock try {
                 val schedulerClean = runCleanupReconcile()
                 if (schedulerClean) EnablementResult.Updated
@@ -83,6 +86,9 @@ class AutomationEnablementCoordinator @Inject constructor(
                 recordEnableFailed(id, "scheduling_failed")
                 EnablementResult.SchedulingFailed
             } else {
+                // Solo l'esito finale riuscito è un RULE_ENABLED: il rollback resta
+                // tracciato dal solo ENABLE_FAILED, senza doppi eventi ambigui.
+                recordLifecycle(id, AuditKind.RULE_ENABLED, "user")
                 EnablementResult.Updated
             }
         } catch (error: CancellationException) {
@@ -95,12 +101,15 @@ class AutomationEnablementCoordinator @Inject constructor(
         }
     }
 
-    private suspend fun recordEnableFailed(id: AutomationId, reason: String) {
+    private suspend fun recordEnableFailed(id: AutomationId, reason: String) =
+        recordLifecycle(id, AuditKind.ENABLE_FAILED, reason)
+
+    private suspend fun recordLifecycle(id: AutomationId, kind: AuditKind, reason: String) {
         try {
             audit.record(
                 AuditEvent(
                     id,
-                    AuditKind.ENABLE_FAILED,
+                    kind,
                     System.currentTimeMillis(),
                     detail = reason,
                 ),
@@ -108,7 +117,7 @@ class AutomationEnablementCoordinator @Inject constructor(
         } catch (error: CancellationException) {
             throw error
         } catch (_: Exception) {
-            // Il logging non deve cambiare l'esito dell'abilitazione.
+            // Il logging non deve cambiare l'esito dell'operazione.
         }
     }
 

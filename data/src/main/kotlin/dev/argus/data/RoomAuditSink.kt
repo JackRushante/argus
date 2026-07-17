@@ -41,6 +41,17 @@ class RoomAuditSink(private val dao: AuditDao) : AuditSink {
             event.detail.takeIf { it in SCHEDULING_REASONS } ?: "scheduling_failed"
         dev.argus.engine.runtime.AuditKind.ENABLE_FAILED ->
             event.detail.takeIf { it in ENABLE_REASONS } ?: "enable_failed"
+        // Lifecycle riuscito (task #31-B): solo reason-code a vocabolario chiuso, mai testo libero.
+        dev.argus.engine.runtime.AuditKind.RULE_ARMED ->
+            event.detail.takeIf { it in RULE_ARMED_REASONS } ?: "rule_armed"
+        dev.argus.engine.runtime.AuditKind.RULE_DISABLED ->
+            event.detail.takeIf { it in RULE_DISABLED_REASONS } ?: "rule_disabled"
+        dev.argus.engine.runtime.AuditKind.RULE_ENABLED ->
+            event.detail.takeIf { it in RULE_ENABLED_REASONS } ?: "rule_enabled"
+        dev.argus.engine.runtime.AuditKind.RULE_DELETED ->
+            event.detail.takeIf { it in RULE_DELETED_REASONS } ?: "rule_deleted"
+        dev.argus.engine.runtime.AuditKind.RULE_NEEDS_REVIEW ->
+            event.detail.takeIf { it in RULE_NEEDS_REVIEW_REASONS } ?: "rule_needs_review"
         dev.argus.engine.runtime.AuditKind.FIRED,
         dev.argus.engine.runtime.AuditKind.SUPPRESSED_DUPLICATE,
         dev.argus.engine.runtime.AuditKind.SUPPRESSED_NOT_ELIGIBLE,
@@ -77,6 +88,22 @@ class RoomAuditSink(private val dao: AuditDao) : AuditSink {
         val ENABLE_REASONS = setOf(
             "scheduling_failed",
             "review_required",
+        )
+        // --- Lifecycle riuscito (task #31-B): un set chiuso per kind, fallback generico. ---
+        /** Unico ingresso in ARMED: l'approvazione utente (submit o edit passano di lì). */
+        val RULE_ARMED_REASONS = setOf("approval")
+        /** user = azione manuale; one_shot_consumed = auto-disable post fire; expired = time.at passato. */
+        val RULE_DISABLED_REASONS = setOf("user", "one_shot_consumed", "expired")
+        val RULE_ENABLED_REASONS = setOf("user")
+        val RULE_DELETED_REASONS = setOf("user")
+        /** fire_policy = blocco fire-time; capability/validation/requirements = CapabilityReconciler;
+         *  planner_failed = TimeAlarmPlanner lancia su una revisione non più pianificabile. */
+        val RULE_NEEDS_REVIEW_REASONS = setOf(
+            "fire_policy",
+            "capability_lost",
+            "validation_failed",
+            "requirements_changed",
+            "planner_failed",
         )
     }
 }

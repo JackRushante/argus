@@ -25,6 +25,9 @@ import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.StateQueryFamily
 import dev.argus.engine.model.StateValueType
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.runtime.AuditEvent
+import dev.argus.engine.runtime.AuditKind
+import dev.argus.engine.runtime.AuditSink
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.safety.DraftDeleteResult
 import dev.argus.engine.safety.DraftId
@@ -98,6 +101,7 @@ class AutomationDetailViewModel @Inject constructor(
     private val whitelist: ContactWhitelistStore,
     private val connectivity: ConnectivityTriggerRuntime,
     private val geofence: GeofenceTriggerRuntime,
+    private val audit: AuditSink,
 ) : ViewModel() {
     private val routeId = requireNotNull(savedStateHandle.get<String>("id")) {
         "Dettaglio senza id"
@@ -254,6 +258,22 @@ class AutomationDetailViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 store.delete(automation.id)
+                // Lifecycle (task #31-B): la cancellazione è sempre un'azione manuale dell'utente;
+                // il logging non deve mai cambiare l'esito del delete (pattern non-fatale standard).
+                try {
+                    audit.record(
+                        AuditEvent(
+                            automation.id,
+                            AuditKind.RULE_DELETED,
+                            System.currentTimeMillis(),
+                            detail = "user",
+                        ),
+                    )
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (_: Exception) {
+                    // Regola già rimossa: il fallimento del log non riapre l'operazione.
+                }
                 // Tenta tutte le pulizie: un AlarmManager guasto non deve impedire lo stop
                 // della sentinella né l'unregister del PendingIntent geofence.
                 var reconciled = true

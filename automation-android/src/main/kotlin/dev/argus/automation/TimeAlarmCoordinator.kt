@@ -192,10 +192,14 @@ class TimeAlarmCoordinator(
                 ScheduleResult.EXPIRED -> {
                     if (persisted != null) cancelled += automation.id
                     if ((automation.trigger as Trigger.Time).isOneShot()) {
-                        store.disableIfApproved(
+                        val disabled = store.disableIfApproved(
                             automation.id,
                             requireNotNull(automation.approvalFingerprint),
                         )
+                        // Lifecycle (task #31-B): la regola sparisce dalle armate, va tracciato.
+                        if (disabled) {
+                            recordAuditEvent(automation.id, AuditKind.RULE_DISABLED, "expired")
+                        }
                     }
                     recordSchedulingFailed(automation.id, "expired")
                 }
@@ -295,6 +299,8 @@ class TimeAlarmCoordinator(
         }
         if (latestTrigger.isOneShot()) {
             if (store.disableIfApproved(automationId, eventFingerprint)) {
+                // Lifecycle (task #31-B): auto-disable post fire della one-shot (immediate/at/afterMs).
+                recordAuditEvent(automationId, AuditKind.RULE_DISABLED, "one_shot_consumed")
                 cancelAndForget(automationId)
                 return AlarmDeliveryResult.Delivered
             }
@@ -333,7 +339,11 @@ class TimeAlarmCoordinator(
         } catch (_: Exception) {
             existing?.let { cancelAndForget(automation.id) }
             automation.approvalFingerprint?.let { fingerprint ->
-                store.markNeedsReviewIfApproved(automation.id, fingerprint)
+                // Lifecycle (task #31-B): quarantena strutturale (planner non pianifica più
+                // questa revisione), tracciata solo se la transizione è avvenuta davvero.
+                if (store.markNeedsReviewIfApproved(automation.id, fingerprint)) {
+                    recordAuditEvent(automation.id, AuditKind.RULE_NEEDS_REVIEW, "planner_failed")
+                }
             }
             return ScheduleResult.FAILED
         } ?: run {
@@ -410,12 +420,19 @@ class TimeAlarmCoordinator(
         return AlarmDeliveryResult.Failed(reason)
     }
 
-    private suspend fun recordSchedulingFailed(automationId: AutomationId, reason: String) {
+    private suspend fun recordSchedulingFailed(automationId: AutomationId, reason: String) =
+        recordAuditEvent(automationId, AuditKind.SCHEDULING_FAILED, reason)
+
+    private suspend fun recordAuditEvent(
+        automationId: AutomationId,
+        kind: AuditKind,
+        reason: String,
+    ) {
         try {
             audit.record(
                 AuditEvent(
                     automationId,
-                    AuditKind.SCHEDULING_FAILED,
+                    kind,
                     now().toEpochMilli(),
                     detail = reason,
                 ),
@@ -423,7 +440,7 @@ class TimeAlarmCoordinator(
         } catch (error: CancellationException) {
             throw error
         } catch (_: Exception) {
-            // Il logging non deve cambiare l'esito dello scheduling.
+            // Il logging non deve cambiare l'esito dell'operazione.
         }
     }
 

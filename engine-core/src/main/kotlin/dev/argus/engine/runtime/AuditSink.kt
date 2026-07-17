@@ -16,6 +16,12 @@ enum class AuditKind {
     ARM_FAILED,
     SCHEDULING_FAILED,
     ENABLE_FAILED,
+    // Lifecycle riuscito (task #31-B): traccia di chi/quando mette e toglie una regola.
+    RULE_ARMED,
+    RULE_DISABLED,
+    RULE_ENABLED,
+    RULE_DELETED,
+    RULE_NEEDS_REVIEW,
 }
 data class AuditEvent(
     val automationId: AutomationId,

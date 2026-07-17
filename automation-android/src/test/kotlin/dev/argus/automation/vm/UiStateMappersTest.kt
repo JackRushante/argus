@@ -217,6 +217,53 @@ class UiStateMappersTest {
     }
 
     @Test
+    fun `lifecycle events render italian labels and coherent outcomes`() {
+        fun record(kind: AuditKind, detail: String) = AuditLogRecord(
+            id = 1L,
+            automationId = "automation-x",
+            automationName = "Sveglia",
+            kind = kind,
+            atMillis = 1_000L,
+            detail = detail,
+            executionId = null,
+            executionStatus = null,
+            succeededCount = null,
+            failedCount = null,
+            submittedCount = null,
+        ).toLogRow(emptyList())
+
+        val armed = record(AuditKind.RULE_ARMED, "approval")
+        assertEquals(dev.argus.ui.model.LogOutcome.SUCCESS, armed.outcome)
+        assertEquals("Regola armata", armed.summary)
+
+        val disabledByUser = record(AuditKind.RULE_DISABLED, "user")
+        assertEquals(dev.argus.ui.model.LogOutcome.SUCCESS, disabledByUser.outcome)
+        assertEquals("Regola disabilitata dall'utente", disabledByUser.summary)
+
+        val oneShot = record(AuditKind.RULE_DISABLED, "one_shot_consumed")
+        assertEquals("Regola disabilitata: one-shot consumata", oneShot.summary)
+
+        val expired = record(AuditKind.RULE_DISABLED, "expired")
+        assertEquals("Regola disabilitata: scadenza passata", expired.summary)
+
+        val unknownDisable = record(AuditKind.RULE_DISABLED, "rule_disabled")
+        assertEquals("Regola disabilitata", unknownDisable.summary)
+
+        val enabled = record(AuditKind.RULE_ENABLED, "user")
+        assertEquals(dev.argus.ui.model.LogOutcome.SUCCESS, enabled.outcome)
+        assertEquals("Regola riabilitata", enabled.summary)
+
+        val deleted = record(AuditKind.RULE_DELETED, "user")
+        assertEquals(dev.argus.ui.model.LogOutcome.SUCCESS, deleted.outcome)
+        assertEquals("Regola eliminata", deleted.summary)
+
+        val review = record(AuditKind.RULE_NEEDS_REVIEW, "capability_lost")
+        assertEquals(dev.argus.ui.model.LogOutcome.FAILED, review.outcome)
+        assertTrue(review.summary.contains("Regola da rivedere"))
+        assertTrue(review.summary.contains("capability lost"))
+    }
+
+    @Test
     fun `generative draft review always copies the privacy warning`() {
         val draft = AutomationDraft(
             name = "Risposta AI",

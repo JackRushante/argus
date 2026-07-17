@@ -488,6 +488,33 @@ class RoomStoreTest {
         assertEquals("registrar_failed", rows[5].detail)   // 100
     }
 
+    @Test
+    fun `audit lifecycle redige reason fuori vocabolario`() = runTest {
+        val id = AutomationId("lifecycle-redaction")
+        sink.record(AuditEvent(id, AuditKind.RULE_ARMED, 100, detail = "approval"))
+        sink.record(AuditEvent(id, AuditKind.RULE_ARMED, 200, detail = "Sveglia 07:00 di Lorenzo"))
+        sink.record(AuditEvent(id, AuditKind.RULE_DISABLED, 300, detail = "one_shot_consumed"))
+        sink.record(AuditEvent(id, AuditKind.RULE_DISABLED, 400, detail = "ssid=CasaMarci"))
+        sink.record(AuditEvent(id, AuditKind.RULE_ENABLED, 500, detail = "user"))
+        sink.record(AuditEvent(id, AuditKind.RULE_ENABLED, 600, detail = "approval"))
+        sink.record(AuditEvent(id, AuditKind.RULE_DELETED, 700, detail = "user"))
+        sink.record(AuditEvent(id, AuditKind.RULE_DELETED, 800, detail = "+39 393 2077480"))
+        sink.record(AuditEvent(id, AuditKind.RULE_NEEDS_REVIEW, 900, detail = "capability_lost"))
+        sink.record(AuditEvent(id, AuditKind.RULE_NEEDS_REVIEW, 1000, detail = "expired"))
+
+        val rows = db.auditDao().forAutomation(id.value)
+        assertEquals("rule_needs_review", rows[0].detail)  // 1000: "expired" non è un reason di review
+        assertEquals("capability_lost", rows[1].detail)    // 900
+        assertEquals("rule_deleted", rows[2].detail)       // 800: numero di telefono -> generico
+        assertEquals("user", rows[3].detail)               // 700
+        assertEquals("rule_enabled", rows[4].detail)       // 600: "approval" non è un reason di enable
+        assertEquals("user", rows[5].detail)               // 500
+        assertEquals("rule_disabled", rows[6].detail)      // 400: SSID -> generico
+        assertEquals("one_shot_consumed", rows[7].detail)  // 300
+        assertEquals("rule_armed", rows[8].detail)         // 200: nome regola -> generico
+        assertEquals("approval", rows[9].detail)           // 100
+    }
+
     // --- helpers -------------------------------------------------------------
 
     /** Seed di fixture confinato ai test; il codice applicativo scrive solo via DraftRepository. */

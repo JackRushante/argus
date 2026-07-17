@@ -91,7 +91,20 @@ class Engine(
                     is FirePolicyDecision.Block -> {
                         if (decision.needsReview) {
                             automation.approvalFingerprint?.let { fingerprint ->
-                                store.markNeedsReviewIfApproved(automation.id, fingerprint)
+                                // Lifecycle (task #31-B): la quarantena toglie la regola dalle
+                                // armate; evento emesso solo se la transizione è avvenuta davvero.
+                                // Il code esatto del blocco resta nel BLOCKED_POLICY successivo.
+                                if (store.markNeedsReviewIfApproved(automation.id, fingerprint)) {
+                                    recordAudit(
+                                        AuditEvent(
+                                            automationId = automation.id,
+                                            kind = AuditKind.RULE_NEEDS_REVIEW,
+                                            atMillis = batchNow,
+                                            detail = "fire_policy",
+                                            eventId = envelope.id,
+                                        ),
+                                    )
+                                }
                             }
                         }
                         recordAudit(

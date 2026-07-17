@@ -24,6 +24,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 class AutomationEnablementCoordinatorTest {
     private val id = AutomationId("automation-1")
@@ -112,6 +113,67 @@ class AutomationEnablementCoordinatorTest {
         val event = audit.events.single { it.kind == AuditKind.ENABLE_FAILED }
         assertEquals("scheduling_failed", event.detail)
         assertEquals(id, event.automationId)
+    }
+
+    @Test
+    fun `user disable records RULE_DISABLED with the user reason`() = runTest {
+        val store = ToggleStore(enableResult = true, initiallyEnabled = true)
+        val runtime = RecordingRuntime { report() }
+        val audit = EnableAuditRecorder()
+
+        val result = AutomationEnablementCoordinator(store, runtime, audit = audit)
+            .setEnabled(id, false)
+
+        assertEquals(EnablementResult.Updated, result)
+        val event = audit.events.single { it.kind == AuditKind.RULE_DISABLED }
+        assertEquals("user", event.detail)
+        assertEquals(id, event.automationId)
+    }
+
+    @Test
+    fun `deferred disable cleanup still records RULE_DISABLED because the store is disabled`() = runTest {
+        val store = ToggleStore(enableResult = true, initiallyEnabled = true)
+        val runtime = RecordingRuntime { error("cleanup unavailable") }
+        val audit = EnableAuditRecorder()
+
+        val result = AutomationEnablementCoordinator(store, runtime, audit = audit)
+            .setEnabled(id, false)
+
+        assertEquals(EnablementResult.DisableCleanupDeferred, result)
+        val event = audit.events.single { it.kind == AuditKind.RULE_DISABLED }
+        assertEquals("user", event.detail)
+    }
+
+    @Test
+    fun `user enable records RULE_ENABLED with the user reason`() = runTest {
+        val store = ToggleStore(enableResult = true)
+        val runtime = RecordingRuntime { report() }
+        val audit = EnableAuditRecorder()
+
+        val result = AutomationEnablementCoordinator(store, runtime, audit = audit)
+            .setEnabled(id, true)
+
+        assertEquals(EnablementResult.Updated, result)
+        val event = audit.events.single { it.kind == AuditKind.RULE_ENABLED }
+        assertEquals("user", event.detail)
+        assertEquals(id, event.automationId)
+    }
+
+    @Test
+    fun `rolled back enable never records RULE_ENABLED`() = runTest {
+        val store = ToggleStore(enableResult = true)
+        val runtime = RecordingRuntime { call ->
+            if (call == 1) report(failed = listOf(id)) else report()
+        }
+        val audit = EnableAuditRecorder()
+
+        val result = AutomationEnablementCoordinator(store, runtime, audit = audit)
+            .setEnabled(id, true)
+
+        assertEquals(EnablementResult.SchedulingFailed, result)
+        assertTrue(audit.events.none { it.kind == AuditKind.RULE_ENABLED })
+        // Il rollback resta tracciato dal solo ENABLE_FAILED: nessun doppio evento ambiguo.
+        assertTrue(audit.events.none { it.kind == AuditKind.RULE_DISABLED })
     }
 
     @Test

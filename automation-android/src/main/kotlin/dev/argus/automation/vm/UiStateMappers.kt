@@ -113,6 +113,11 @@ private fun ExecutionStatus?.toLogOutcome(kind: AuditKind): LogOutcome = when {
     kind == AuditKind.ERROR || kind == AuditKind.BLOCKED_POLICY ||
         kind == AuditKind.VALIDATION_REJECTED || kind == AuditKind.ARM_FAILED ||
         kind == AuditKind.SCHEDULING_FAILED || kind == AuditKind.ENABLE_FAILED -> LogOutcome.FAILED
+    // Quarantena di sistema: la regola sparisce dalle armate, va resa visibile come problema.
+    kind == AuditKind.RULE_NEEDS_REVIEW -> LogOutcome.FAILED
+    // Gli altri eventi lifecycle sono transizioni riuscite, non esiti di esecuzione.
+    kind == AuditKind.RULE_ARMED || kind == AuditKind.RULE_DISABLED ||
+        kind == AuditKind.RULE_ENABLED || kind == AuditKind.RULE_DELETED -> LogOutcome.SUCCESS
     this == ExecutionStatus.PARTIAL -> LogOutcome.PARTIAL
     this == ExecutionStatus.DEFERRED -> LogOutcome.DEFERRED
     this in setOf(
@@ -163,6 +168,17 @@ private fun auditSummary(record: AuditLogRecord): String = when (record.kind) {
     AuditKind.ARM_FAILED -> "Attivazione fallita: ${record.detail.safeDiagnostic()}"
     AuditKind.SCHEDULING_FAILED -> "Pianificazione non riuscita: ${record.detail.safeDiagnostic()}"
     AuditKind.ENABLE_FAILED -> "Abilitazione non riuscita: ${record.detail.safeDiagnostic()}"
+    // Lifecycle riuscito (task #31-B): chi/quando mette e toglie una regola.
+    AuditKind.RULE_ARMED -> "Regola armata"
+    AuditKind.RULE_DISABLED -> when (record.detail) {
+        "user" -> "Regola disabilitata dall'utente"
+        "one_shot_consumed" -> "Regola disabilitata: one-shot consumata"
+        "expired" -> "Regola disabilitata: scadenza passata"
+        else -> "Regola disabilitata"
+    }
+    AuditKind.RULE_ENABLED -> "Regola riabilitata"
+    AuditKind.RULE_DELETED -> "Regola eliminata"
+    AuditKind.RULE_NEEDS_REVIEW -> "Regola da rivedere (${record.detail.safeDiagnostic()})"
 }
 
 private fun actionDetail(action: ActionResultEntity): String {

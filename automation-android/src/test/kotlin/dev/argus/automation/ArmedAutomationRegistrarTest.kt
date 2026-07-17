@@ -18,6 +18,9 @@ import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
 import dev.argus.automation.geofence.GeofenceReconcileReport
 import dev.argus.automation.geofence.GeofenceTriggerRuntime
 import dev.argus.automation.geofence.NoopGeofenceTriggerRuntime
+import dev.argus.engine.runtime.AuditEvent
+import dev.argus.engine.runtime.AuditKind
+import dev.argus.engine.runtime.AuditSink
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.runtime.FireClaimRequest
 import dev.argus.engine.runtime.FireClaimResult
@@ -201,6 +204,7 @@ class ArmedAutomationRegistrarTest {
         )
         val store = RecordingStore(immediate)
         val dispatched = mutableListOf<TriggerEnvelope>()
+        val audit = RegistrarAuditRecorder()
         val registrar = AndroidArmedAutomationRegistrar(
             coordinator = coordinator(store),
             store = store,
@@ -213,6 +217,7 @@ class ArmedAutomationRegistrarTest {
             },
             immediateDispatcher = { dispatched += it },
             now = { Instant.parse("2026-07-14T08:00:00Z") },
+            audit = audit,
         )
 
         assertTrue(registrar.register(immediate), "il dispatch riuscito arma la regola one-shot")
@@ -231,6 +236,9 @@ class ArmedAutomationRegistrarTest {
             store.disabled,
             "dopo il fire la regola one-shot si consuma con disableIfApproved",
         )
+        val consumed = audit.events.single { it.kind == AuditKind.RULE_DISABLED }
+        assertEquals("one_shot_consumed", consumed.detail)
+        assertEquals(immediate.id, consumed.automationId)
     }
 
     @Test
@@ -449,6 +457,11 @@ class ArmedAutomationRegistrarTest {
             ScheduledAlarmMode.INEXACT
 
         override fun cancel(automationId: AutomationId) = Unit
+    }
+
+    private class RegistrarAuditRecorder : AuditSink {
+        val events = mutableListOf<AuditEvent>()
+        override suspend fun record(e: AuditEvent) { events += e }
     }
 
     private companion object {
