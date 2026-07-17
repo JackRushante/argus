@@ -16,6 +16,7 @@ import math
 import os
 import re
 import subprocess
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
@@ -388,8 +389,10 @@ def validate_act_request(data: Any, idempotency_key: str | None) -> dict[str, An
         raise RequestError(400, "invalid_allowed_tools")
     if (
         not isinstance(sources, list)
-        or len(sources) != len(set(sources))
+        # Type-check PRIMA del dedup: set() su elementi non hashable (es. liste annidate)
+        # esploderebbe in TypeError invece di rifiutare pulito (fail-closed).
         or not all(isinstance(source, str) and source in ACT_CONTEXT_SOURCES for source in sources)
+        or len(sources) != len(set(sources))
     ):
         raise RequestError(400, "invalid_context_sources")
 
@@ -785,10 +788,60 @@ REGOLE VINCOLANTI:
 """
 
 
-def run_gpt(prompt: str, tools: str = "clarify") -> str:
+# S15 — subset chiuso del report `hermes --usage-file` esposto nelle risposte /compile e /act.
+USAGE_INT_KEYS = ("input_tokens", "output_tokens", "total_tokens", "api_calls")
+USAGE_STR_KEYS = ("model", "provider", "cost_status")
+
+
+def _sanitize_usage(value: Any) -> dict[str, Any] | None:
+    """Riduce il report usage al subset chiuso; qualsiasi forma sospetta -> None (fail-closed)."""
+    if not isinstance(value, dict):
+        return None
+    out: dict[str, Any] = {}
+    for key in USAGE_INT_KEYS:
+        raw = value.get(key)
+        if raw is None:
+            continue
+        if not _is_int(raw) or raw < 0:
+            return None
+        out[key] = raw
+    for key in USAGE_STR_KEYS:
+        raw = value.get(key)
+        if raw is None:
+            continue
+        if not isinstance(raw, str) or not raw or len(raw) > 64:
+            return None
+        out[key] = raw
+    cost = value.get("estimated_cost_usd")
+    if cost is not None:
+        if isinstance(cost, bool) or not isinstance(cost, (int, float)) \
+                or not math.isfinite(cost) or cost < 0:
+            return None
+        out["estimated_cost_usd"] = float(cost)
+    # Senza i token minimi il report non serve alla contabilità budget dell'app.
+    if "input_tokens" not in out or "output_tokens" not in out:
+        return None
+    return out
+
+
+def _read_usage(path: str) -> dict[str, Any] | None:
+    """Best-effort: l'usage non deve mai far fallire una risposta buona del modello."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            report = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    return report if isinstance(report, dict) else None
+
+
+def run_gpt(prompt: str, tools: str = "clarify") -> tuple[str, dict[str, Any] | None]:
+    """Esegue hermes one-shot; ritorna (output, usage-report-raw-o-None)."""
+    fd, usage_path = tempfile.mkstemp(prefix="argus-usage-", suffix=".json")
+    os.close(fd)
     command = [
         str(HERMES_PYTHON), "-m", "hermes_cli.main", "-z", prompt,
         "--cli", "--ignore-rules", "-t", tools,
+        "--usage-file", usage_path,
     ]
     environment = dict(os.environ)
     environment["PATH"] = HERMES_PATH + ":" + environment.get("PATH", "")
@@ -799,27 +852,33 @@ def run_gpt(prompt: str, tools: str = "clarify") -> str:
     environment.pop("ARGUS_BRIDGE_BIND", None)
     environment.pop("ARGUS_BRIDGE_HOST", None)
     environment.pop("ARGUS_BRIDGE_PORT", None)
-    completed = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-        timeout=MODEL_TIMEOUT_SECONDS,
-        cwd=HERMES_HOME,
-        env=environment,
-    )
-    output = completed.stdout or ""
-    if len(output) > MAX_MODEL_OUTPUT_CHARS:
-        raise ModelProcessError(502, "model_output_too_large")
-    structured_success = completed.returncode == 0 and SENTINEL in output
-    if not structured_success:
-        diagnostic = f"{output}\n{completed.stderr or ''}".lower()
-        if any(marker in diagnostic for marker in PROVIDER_QUOTA_MARKERS):
-            raise ModelProcessError(503, "provider_quota_exhausted")
-    if completed.returncode != 0:
-        raise ModelProcessError(502, "model_failure")
-    if not output.strip():
-        raise ModelProcessError(502, "model_empty_output")
-    return output.strip()
+    try:
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=MODEL_TIMEOUT_SECONDS,
+            cwd=HERMES_HOME,
+            env=environment,
+        )
+        output = completed.stdout or ""
+        if len(output) > MAX_MODEL_OUTPUT_CHARS:
+            raise ModelProcessError(502, "model_output_too_large")
+        structured_success = completed.returncode == 0 and SENTINEL in output
+        if not structured_success:
+            diagnostic = f"{output}\n{completed.stderr or ''}".lower()
+            if any(marker in diagnostic for marker in PROVIDER_QUOTA_MARKERS):
+                raise ModelProcessError(503, "provider_quota_exhausted")
+        if completed.returncode != 0:
+            raise ModelProcessError(502, "model_failure")
+        if not output.strip():
+            raise ModelProcessError(502, "model_empty_output")
+        return output.strip(), _read_usage(usage_path)
+    finally:
+        try:
+            os.unlink(usage_path)
+        except OSError:
+            pass
 
 
 def parse_model_output(
@@ -1493,7 +1552,7 @@ def compile_request(data: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     if not MODEL_SLOTS.acquire(timeout=1):
         return 429, {"error": "model_busy"}
     try:
-        output = run_gpt(build_prompt(data))
+        output, model_usage = run_gpt(build_prompt(data))
     finally:
         MODEL_SLOTS.release()
     reply, draft, error_code = parse_model_output(
@@ -1510,12 +1569,17 @@ def compile_request(data: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     )
     if error_code in MODEL_PROTOCOL_ERRORS:
         raise ModelProcessError(502, "model_invalid_output")
-    return 200, {
+    response: dict[str, Any] = {
         "schema_version": data["schema_version"],
         "request_id": data["request_id"],
         "reply": reply,
         "meta": {"draft": draft, "error_code": error_code},
     }
+    # S15: campo OPZIONALE (mai null esplicito) — le app strict lo dichiarano nullable.
+    usage = _sanitize_usage(model_usage)
+    if usage is not None:
+        response["usage"] = usage
+    return 200, response
 
 
 def act_request(data: dict[str, Any]) -> tuple[int, dict[str, Any]]:
@@ -1525,16 +1589,21 @@ def act_request(data: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     try:
         # Web concesso -> toolset Hermes `web,clarify` (ricerca server-side, brave-free+ddgs);
         # altrimenti solo `clarify`. Il web fa il loop internamente, resta una singola chiamata.
-        output = run_gpt(build_act_prompt(data, web=web), tools="clarify,web" if web else "clarify")
+        output, model_usage = run_gpt(build_act_prompt(data, web=web), tools="clarify,web" if web else "clarify")
     finally:
         MODEL_SLOTS.release()
     reply_text, error_code = parse_act_model_output(output)
-    return 200, {
+    response: dict[str, Any] = {
         "schema_version": data["schema_version"],
         "request_id": data["request_id"],
         "result": None if reply_text is None else {"text": reply_text},
         "error_code": error_code,
     }
+    # S15: come per /compile, usage opzionale sanitizzato.
+    usage = _sanitize_usage(model_usage)
+    if usage is not None:
+        response["usage"] = usage
+    return 200, response
 
 
 class Handler(BaseHTTPRequestHandler):

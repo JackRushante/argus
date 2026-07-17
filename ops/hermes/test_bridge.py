@@ -716,14 +716,45 @@ class BridgeTest(unittest.TestCase):
             '@@META@@ {"draft":null,"error_code":"clarification_required"}'
         )
         run.return_value = mock.Mock(returncode=0, stdout=output, stderr="")
-        self.assertEqual(output, bridge.run_gpt("prompt"))
+        # subprocess mockato -> nessun usage-file scritto -> usage None (best-effort).
+        self.assertEqual((output, None), bridge.run_gpt("prompt"))
 
-    @mock.patch("bridge.run_gpt", return_value="risposta senza metadati")
+    @mock.patch("bridge.run_gpt", return_value=("risposta senza metadati", None))
     def test_compile_rejects_missing_meta_as_upstream_failure(self, _run):
         with self.assertRaises(bridge.ModelProcessError) as raised:
             bridge.compile_request(self.request())
         self.assertEqual(502, raised.exception.status)
         self.assertEqual("model_invalid_output", raised.exception.code)
+
+    def test_sanitize_usage_is_fail_closed(self):
+        # Report reale della CLI hermes --usage-file (S15): il bridge tiene solo il subset chiuso.
+        full = {
+            "estimated_cost_usd": 0.0, "cost_status": "included", "cost_source": "none",
+            "input_tokens": 2785, "output_tokens": 5, "cache_read_tokens": 0,
+            "cache_write_tokens": 0, "reasoning_tokens": 0, "total_tokens": 2790,
+            "api_calls": 1, "model": "gpt-5.5", "provider": "openai-codex",
+            "session_id": "20260717_163952_e79991", "completed": True, "failed": False,
+            "service_tier": None,
+        }
+        self.assertEqual(
+            {
+                "input_tokens": 2785, "output_tokens": 5, "total_tokens": 2790,
+                "api_calls": 1, "model": "gpt-5.5", "provider": "openai-codex",
+                "cost_status": "included", "estimated_cost_usd": 0.0,
+            },
+            bridge._sanitize_usage(full),
+        )
+        # Fail-closed: forme non valide -> None, mai TypeError.
+        self.assertIsNone(bridge._sanitize_usage(None))
+        self.assertIsNone(bridge._sanitize_usage([full]))
+        self.assertIsNone(bridge._sanitize_usage({**full, "input_tokens": -1}))
+        self.assertIsNone(bridge._sanitize_usage({**full, "output_tokens": "5"}))
+        self.assertIsNone(bridge._sanitize_usage({**full, "api_calls": True}))
+        self.assertIsNone(bridge._sanitize_usage({**full, "model": "x" * 65}))
+        self.assertIsNone(bridge._sanitize_usage({**full, "estimated_cost_usd": float("inf")}))
+        self.assertIsNone(bridge._sanitize_usage({**full, "estimated_cost_usd": -0.1}))
+        # Senza i token minimi (input+output) il report non serve al budget: None.
+        self.assertIsNone(bridge._sanitize_usage({"model": "gpt-5.5"}))
 
     @staticmethod
     def act_request():
@@ -750,17 +781,37 @@ class BridgeTest(unittest.TestCase):
 
 
 class BridgeHttpTest(unittest.TestCase):
+    # Forma reale del report hermes --usage-file (S15).
+    USAGE_REPORT = {
+        "estimated_cost_usd": 0.0, "cost_status": "included", "cost_source": "none",
+        "input_tokens": 2785, "output_tokens": 5, "cache_read_tokens": 0,
+        "cache_write_tokens": 0, "reasoning_tokens": 0, "total_tokens": 2790,
+        "api_calls": 1, "model": "gpt-5.5", "provider": "openai-codex",
+        "session_id": "20260717_163952_e79991", "completed": True, "failed": False,
+        "service_tier": None,
+    }
+    SANITIZED_USAGE = {
+        "input_tokens": 2785, "output_tokens": 5, "total_tokens": 2790,
+        "api_calls": 1, "model": "gpt-5.5", "provider": "openai-codex",
+        "cost_status": "included", "estimated_cost_usd": 0.0,
+    }
+
     def setUp(self):
         self.calls = 0
 
-        def runner(_prompt):
+        # Stessa firma di run_gpt (il kwarg tools= è usato dal path /act): ritorna (output, usage).
+        def runner(_prompt, tools="clarify"):
             self.calls += 1
             if "GENERATORE ONE-SHOT" in _prompt:
-                return '@@META@@ {"reply_text":"Ciao, a dopo.","error_code":null}'
+                return (
+                    '@@META@@ {"reply_text":"Ciao, a dopo.","error_code":null}',
+                    dict(self.USAGE_REPORT),
+                )
             return (
                 'Regola pronta.\n@@META@@ {"draft":{"name":"dnd sera",'
                 '"trigger":{"type":"time","cron":"0 23 * * *","tz":"Europe/Rome"},'
-                '"actions":[{"type":"set_dnd","mode":"PRIORITY"}]},"error_code":null}'
+                '"actions":[{"type":"set_dnd","mode":"PRIORITY"}]},"error_code":null}',
+                dict(self.USAGE_REPORT),
             )
 
         self.patchers = [
@@ -853,7 +904,7 @@ class BridgeHttpTest(unittest.TestCase):
         )
         self.assertEqual(200, status)
         self.assertEqual(
-            {"schema_version", "request_id", "result", "error_code"}, set(first)
+            {"schema_version", "request_id", "result", "error_code", "usage"}, set(first)
         )
         self.assertEqual({"text"}, set(first["result"]))
         self.assertEqual(
@@ -905,6 +956,37 @@ class BridgeHttpTest(unittest.TestCase):
             )
             self.assertEqual(400, status)
         self.assertEqual(1, self.calls)
+
+    def test_responses_carry_sanitized_model_usage(self):
+        # S15: /compile e /act allegano l'usage reale (subset chiuso) quando disponibile.
+        status, body = self.request("/compile", self.valid_request())
+        self.assertEqual(200, status)
+        self.assertEqual(self.SANITIZED_USAGE, body["usage"])
+
+        act = self.valid_act_request()
+        status, act_body = self.request("/act", act, request_id=act["request_id"])
+        self.assertEqual(200, status)
+        self.assertEqual(self.SANITIZED_USAGE, act_body["usage"])
+
+    def test_missing_usage_report_omits_the_field(self):
+        # Senza report (o malformato) la risposta NON contiene "usage": il campo è opzionale
+        # e le app con parser strict lo dichiarano nullable — mai un null esplicito.
+        def runner_without_usage(_prompt, tools="clarify"):
+            return (
+                'Regola pronta.\n@@META@@ {"draft":{"name":"dnd sera",'
+                '"trigger":{"type":"time","cron":"0 23 * * *","tz":"Europe/Rome"},'
+                '"actions":[{"type":"set_dnd","mode":"PRIORITY"}]},"error_code":null}',
+                None,
+            )
+
+        with mock.patch.object(bridge, "run_gpt", runner_without_usage):
+            request = self.valid_request(message="senza usage")
+            request["request_id"] = "req-http-nousage"
+            status, body = self.request(
+                "/compile", request, request_id=request["request_id"]
+            )
+        self.assertEqual(200, status)
+        self.assertNotIn("usage", body)
 
     def test_invalid_contract_never_calls_model(self):
         request = self.valid_request()
