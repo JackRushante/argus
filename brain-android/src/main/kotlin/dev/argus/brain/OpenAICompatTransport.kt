@@ -157,9 +157,12 @@ class OpenAICompatTransport internal constructor(
         allowedTools: List<String>,
     ): ActResult {
         val cleanGoal = AgentMessageSupport.requireGoal(goal)
-        AgentMessageSupport.requireActContextSources(contextSources)
         val useReplyTool = AgentMessageSupport.requireGenerativeToolset(allowedTools)
-        val notification = AgentMessageSupport.requireWhatsAppNotification(context)
+        AgentMessageSupport.requireGenerativeContextSources(contextSources, useReplyTool)
+        // Reply: esige una notifica WhatsApp 1:1 in arrivo. Sink NOTIFICA #59 (da timer/immediate):
+        // nessuna notifica, il testo nasce dal solo goal (+ web/state).
+        val notification =
+            if (useReplyTool) AgentMessageSupport.requireWhatsAppNotification(context) else null
         val stateLines = if ("state" in contextSources) AgentMessageSupport.safeStateLines(context.state) else emptyList()
         val webRequested = GenerativeContract.TOOL_WEB_SEARCH in allowedTools
         return generate(
@@ -213,9 +216,20 @@ class OpenAICompatTransport internal constructor(
         return OpenAiCompatHealth(model = response.model?.takeIf { it.isNotBlank() } ?: model)
     }
 
+    /**
+     * User message del turno: framing "Messaggio ricevuto…" quando c'è una notifica (reply); testo
+     * neutro del sink NOTIFICA #59 (nessuna notifica) quando [notification] è null.
+     */
+    private fun userMessageFor(
+        notification: TriggerEvent.NotificationPosted?,
+        stateLines: List<String>,
+    ): String =
+        if (notification != null) AgentMessageSupport.actUserText(notification, stateLines)
+        else AgentMessageSupport.actUserTextNotification(stateLines)
+
     private suspend fun generate(
         goal: String,
-        notification: TriggerEvent.NotificationPosted,
+        notification: TriggerEvent.NotificationPosted?,
         stateLines: List<String>,
         webRequested: Boolean,
         useReplyTool: Boolean,
@@ -243,17 +257,17 @@ class OpenAICompatTransport internal constructor(
         } else {
             baseModel
         }
-        // Sink NOTIFICA #59 (useReplyTool=false): NIENTE reply tool, NESSUN tool_choice, system PLAIN.
-        // Il modello (con o senza web OpenRouter `:online`) produce testo semplice preso dal `content`.
-        // Sink REPLY (useReplyTool=true): comportamento invariato (reply tool forzato/auto).
+        // Sink NOTIFICA #59 (useReplyTool=false): NIENTE reply tool, NESSUN tool_choice, system della
+        // NOTIFICA (nessun framing WhatsApp). Il modello (con o senza web OpenRouter `:online`) produce
+        // testo semplice preso dal `content`. Reply (useReplyTool=true): invariato (reply tool + actSystemText).
         val request = ChatRequest(
             model = model,
             messages = listOf(
                 ChatMessage(
                     "system",
-                    if (useReplyTool) AgentMessageSupport.actSystemText(goal) else AgentMessageSupport.actSystemTextPlain(goal),
+                    if (useReplyTool) AgentMessageSupport.actSystemText(goal) else AgentMessageSupport.actSystemTextNotification(goal),
                 ),
-                ChatMessage("user", AgentMessageSupport.actUserText(notification, stateLines)),
+                ChatMessage("user", userMessageFor(notification, stateLines)),
             ),
             tools = if (useReplyTool) listOf(replyToolDef()) else null,
             // Con il web attivo il reply NON va forzato: forzarlo impedirebbe la ricerca. `replyText()`
@@ -284,16 +298,22 @@ class OpenAICompatTransport internal constructor(
      */
     private suspend fun generateViaResponses(
         goal: String,
-        notification: TriggerEvent.NotificationPosted,
+        notification: TriggerEvent.NotificationPosted?,
         stateLines: List<String>,
         token: String,
         baseModel: String,
     ): ActResult {
+        // Reply (notification presente) → system PLAIN con framing WhatsApp. Sink NOTIFICA #59
+        // (notification null) → system della NOTIFICA, senza alcun riferimento a un messaggio ricevuto.
         val request = ResponsesRequest(
             model = baseModel,
             input = listOf(
-                ResponsesInputMessage("system", AgentMessageSupport.actSystemTextPlain(goal)),
-                ResponsesInputMessage("user", AgentMessageSupport.actUserText(notification, stateLines)),
+                ResponsesInputMessage(
+                    "system",
+                    if (notification != null) AgentMessageSupport.actSystemTextPlain(goal)
+                    else AgentMessageSupport.actSystemTextNotification(goal),
+                ),
+                ResponsesInputMessage("user", userMessageFor(notification, stateLines)),
             ),
             tools = listOf(WEB_SEARCH_TOOL),
         )
@@ -316,20 +336,27 @@ class OpenAICompatTransport internal constructor(
      */
     private suspend fun generateViaGeminiNative(
         goal: String,
-        notification: TriggerEvent.NotificationPosted,
+        notification: TriggerEvent.NotificationPosted?,
         stateLines: List<String>,
         token: String,
         baseModel: String,
     ): ActResult {
+        // Reply (notification presente) → system PLAIN con framing WhatsApp. Sink NOTIFICA #59
+        // (notification null) → system della NOTIFICA, senza riferimenti a un messaggio ricevuto.
         val request = GeminiNativeRequest(
             contents = listOf(
                 GeminiContent(
                     role = "user",
-                    parts = listOf(GeminiPart(AgentMessageSupport.actUserText(notification, stateLines))),
+                    parts = listOf(GeminiPart(userMessageFor(notification, stateLines))),
                 ),
             ),
             systemInstruction = GeminiSystemInstruction(
-                parts = listOf(GeminiPart(AgentMessageSupport.actSystemTextPlain(goal))),
+                parts = listOf(
+                    GeminiPart(
+                        if (notification != null) AgentMessageSupport.actSystemTextPlain(goal)
+                        else AgentMessageSupport.actSystemTextNotification(goal),
+                    ),
+                ),
             ),
             tools = listOf(GOOGLE_SEARCH_TOOL),
         )

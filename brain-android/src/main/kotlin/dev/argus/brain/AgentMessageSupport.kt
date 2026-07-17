@@ -37,6 +37,10 @@ internal object AgentMessageSupport {
 
     val WHATSAPP_PACKAGES = setOf("com.whatsapp", "com.whatsapp.w4b")
     val ACT_CONTEXT_SOURCES = setOf("notification", "state")
+
+    /** Sorgenti di contesto ammesse per il sink NOTIFICA #59: solo "state" (opzionale), MAI
+     *  "notification" (non c'è alcun messaggio in arrivo). Lista vuota valida. */
+    val SINK_CONTEXT_SOURCES = setOf("state")
     val SAFE_STATE_VALUE = Regex("[A-Za-z0-9._:+-]{1,64}")
 
     fun config(message: String) = TransportException(TransportErrorKind.CONFIGURATION, message)
@@ -82,6 +86,28 @@ internal object AgentMessageSupport {
             "notification" !in contextSources || contextSources.any { it !in ACT_CONTEXT_SOURCES }
         ) {
             throw config("context_sources act non supportate")
+        }
+    }
+
+    /**
+     * Valida le context_sources del profilo generativo distinguendo reply e sink NOTIFICA #59.
+     *
+     * - `useReplyTool` (reply P1/act v1): comportamento invariato ([requireActContextSources]),
+     *   "notification" obbligatoria.
+     * - NON `useReplyTool` (sink notifica da timer/immediate): NESSUNA notifica in arrivo. Le
+     *   contextSources devono essere `[]` oppure il solo `["state"]` (subset distinto di {"state"});
+     *   "notification" o qualsiasi altra sorgente è un config error. Il testo nasce dal solo goal
+     *   (+ web/state), mai da un messaggio ricevuto.
+     */
+    fun requireGenerativeContextSources(contextSources: List<String>, useReplyTool: Boolean) {
+        if (useReplyTool) {
+            requireActContextSources(contextSources)
+            return
+        }
+        if (contextSources != contextSources.distinct() ||
+            contextSources.any { it !in SINK_CONTEXT_SOURCES }
+        ) {
+            throw config("context_sources sink non supportate")
         }
     }
 
@@ -160,6 +186,18 @@ internal object AgentMessageSupport {
         append("Scrivi nella stessa lingua del messaggio ricevuto e rispondi con il SOLO testo della risposta, senza spiegazioni.")
     }
 
+    /**
+     * System prompt del sink NOTIFICA #59 (deliver LOCAL_NOTIFICATION da timer/immediate): NESSUN
+     * framing WhatsApp — non esiste alcun messaggio in arrivo, il testo nasce dal solo goal
+     * (+ web/state). Reply-less: il modello risponde col SOLO testo della notifica.
+     */
+    fun actSystemTextNotification(goal: String): String = buildString {
+        append("Sei il generatore Argus. Genera il testo di una NOTIFICA per l'utente. ")
+        append("Obiettivo: ").append(goal).append(". ")
+        append("Usa la ricerca web per dati aggiornati. ")
+        append("Rispondi con il SOLO testo della notifica, senza spiegazioni.")
+    }
+
     fun actUserText(
         notification: TriggerEvent.NotificationPosted,
         stateLines: List<String>,
@@ -171,6 +209,20 @@ internal object AgentMessageSupport {
         append(": ").append(text)
         if (stateLines.isNotEmpty()) {
             append("\nStato del dispositivo:")
+            stateLines.forEach { append("\n- ").append(it) }
+        }
+    }
+
+    /**
+     * User message del sink NOTIFICA #59: NON referenzia alcuna notifica in arrivo (non esiste).
+     * Porta solo le state lines quando "state" è tra le sorgenti; altrimenti una riga neutra di
+     * innesco.
+     */
+    fun actUserTextNotification(stateLines: List<String>): String = buildString {
+        if (stateLines.isEmpty()) {
+            append("Genera ora il contenuto richiesto.")
+        } else {
+            append("Stato del dispositivo:")
             stateLines.forEach { append("\n- ").append(it) }
         }
     }

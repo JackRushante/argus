@@ -310,11 +310,13 @@ class OpenAICompatTransportTest {
         assertFalse("tool_choice" in root)
     }
 
-    // --- #59 Ondata 3: sink NOTIFICA (deliver=LOCAL_NOTIFICATION) → testo plain, nessun reply tool ---
+    // --- #59 Ondata 4a: sink NOTIFICA (deliver=LOCAL_NOTIFICATION, da timer) → testo plain,
+    //     nessun reply tool, NESSUNA notifica, system della NOTIFICA (no framing WhatsApp) ---
 
-    @Test fun `notification sink without web omits the reply tool and reads plain content`(): Unit = runBlocking {
-        // allowedTools senza whatsapp_reply (sink notifica): il modello produce testo semplice nel
-        // content; la richiesta NON dichiara il reply tool né forza il tool_choice.
+    @Test fun `notification sink without web omits the reply tool and uses the notification prompt`(): Unit = runBlocking {
+        // Sink da evento TimeFired, contextSources=[], allowedTools=[]: il modello produce testo
+        // semplice nel content; nessun reply tool, nessun tool_choice; il system è quello della
+        // NOTIFICA (nessun riferimento a un messaggio WhatsApp ricevuto).
         server.enqueue(jsonResponse(
             """
             {"model":"openai/gpt-5.5",
@@ -324,7 +326,7 @@ class OpenAICompatTransportTest {
         ))
         val t = transport(ProviderId.OPENROUTER, model = "openai/gpt-5.5")
 
-        val result = t.act(fireContext(), "genera un promemoria", listOf("notification"), emptyList())
+        val result = t.act(timerContext(), "genera un promemoria", emptyList(), emptyList())
 
         assertEquals("Promemoria: bevi acqua.", result.text)
         assertNull(result.metaError)
@@ -335,6 +337,46 @@ class OpenAICompatTransportTest {
         assertFalse("tool_choice" in root, "il sink notifica non forza alcun tool")
         // niente web richiesto: modello plain, nessuno slug :online.
         assertEquals("openai/gpt-5.5", root.getValue("model").jsonPrimitive.content)
+        val messages = root.getValue("messages").jsonArray
+        val system = messages.first().jsonObject.getValue("content").jsonPrimitive.content
+        val user = messages.last().jsonObject.getValue("content").jsonPrimitive.content
+        assertTrue("NOTIFICA" in system, "il system del sink deve parlare di NOTIFICA")
+        assertFalse("WhatsApp" in system, "il system del sink NON deve parlare di WhatsApp")
+        assertFalse("Messaggio ricevuto" in user, "il sink non referenzia alcuna notifica in arrivo")
+        assertTrue("Genera ora" in user, "user neutro quando non c'è stato")
+    }
+
+    @Test fun `notification sink with state carries the state lines and no notification framing`(): Unit = runBlocking {
+        // contextSources=[state] su TimeFired: le state lines entrano nel user message, senza alcun
+        // "Messaggio ricevuto".
+        server.enqueue(jsonResponse(
+            """
+            {"model":"openai/gpt-5.5",
+             "choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"Batteria ok."}}],
+             "usage":{"prompt_tokens":20,"completion_tokens":5}}
+            """.trimIndent(),
+        ))
+        val t = transport(ProviderId.OPENROUTER, model = "openai/gpt-5.5")
+
+        val result = t.act(timerContext(), "riassumi lo stato", listOf("state"), emptyList())
+
+        assertEquals("Batteria ok.", result.text)
+        val user = Json.parseToJsonElement(
+            assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
+        ).jsonObject.getValue("messages").jsonArray.last().jsonObject
+            .getValue("content").jsonPrimitive.content
+        assertTrue("ringer=normal" in user, "le state lines devono entrare nel prompt del sink")
+        assertFalse("Messaggio ricevuto" in user)
+    }
+
+    @Test fun `notification sink rejects notification among the context sources`(): Unit = runBlocking {
+        val t = transport(ProviderId.OPENAI, model = "gpt-5.5")
+
+        // Senza reply tool, "notification" fra le sorgenti è un config error prima della rete.
+        assertFailsWith<TransportException> {
+            t.act(timerContext(), "genera", listOf("notification"), emptyList())
+        }.also { assertEquals(TransportErrorKind.CONFIGURATION, it.kind) }
+        assertNull(server.takeRequest(200, TimeUnit.MILLISECONDS))
     }
 
     @Test fun `notification sink with web on openrouter keeps online model and no reply tool`(): Unit = runBlocking {
@@ -349,7 +391,7 @@ class OpenAICompatTransportTest {
         ))
         val t = transport(ProviderId.OPENROUTER, model = "openai/gpt-5.5")
 
-        val result = t.act(fireContext(), "dimmi il cambio", listOf("notification"), listOf("web.search"))
+        val result = t.act(timerContext(), "dimmi il cambio", emptyList(), listOf("web.search"))
 
         assertEquals("Il cambio oggi e' 1.09.", result.text)
         val root = Json.parseToJsonElement(
@@ -360,9 +402,9 @@ class OpenAICompatTransportTest {
         assertFalse("tool_choice" in root)
     }
 
-    @Test fun `notification sink with web on openai still routes to the responses endpoint`(): Unit = runBlocking {
+    @Test fun `notification sink with web on openai routes to responses with the notification prompt`(): Unit = runBlocking {
         // Sink notifica + web su OpenAI: il path web dedicato (Responses API, gia' plain) viene scelto
-        // a prescindere da useReplyTool.
+        // a prescindere da useReplyTool, e usa il system della NOTIFICA (no framing WhatsApp).
         server.enqueue(jsonResponse(
             """
             {"model":"gpt-5.5",
@@ -372,7 +414,7 @@ class OpenAICompatTransportTest {
         ))
         val t = transport(ProviderId.OPENAI, model = "gpt-5.5")
 
-        val result = t.act(fireContext(), "dimmi il cambio", listOf("notification"), listOf("web.search"))
+        val result = t.act(timerContext(), "dimmi il cambio", emptyList(), listOf("web.search"))
 
         assertEquals("Cambio 1.09.", result.text)
         val request = assertNotNull(server.takeRequest(2, TimeUnit.SECONDS))
@@ -380,6 +422,10 @@ class OpenAICompatTransportTest {
         val root = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
         assertFalse("tool_choice" in root)
         assertFalse("messages" in root)
+        val system = root.getValue("input").jsonArray.first().jsonObject
+            .getValue("content").jsonPrimitive.content
+        assertTrue("NOTIFICA" in system)
+        assertFalse("WhatsApp" in system)
     }
 
     @Test fun `actV2 sends the classified state value in the prompt`(): Unit = runBlocking {
@@ -628,6 +674,22 @@ class OpenAICompatTransportTest {
             text = "ciao",
             isGroup = isGroup,
             notificationKey = "sbn:private",
+        ),
+        state = DeviceState(
+            values = mapOf("ringer" to "normal", "private_state" to "secret"),
+            foregroundApp = "com.whatsapp",
+        ),
+        automationId = AutomationId("automation-1"),
+        approvalFingerprint = ApprovalFingerprint("0".repeat(64)),
+        eventId = TriggerEventId("event-1"),
+        executionId = ExecutionId("execution-1"),
+        actionIndex = 0,
+    )
+
+    private fun timerContext() = FireContext(
+        event = TriggerEvent.TimeFired(
+            automationId = AutomationId("automation-1"),
+            approvalFingerprint = ApprovalFingerprint("0".repeat(64)),
         ),
         state = DeviceState(
             values = mapOf("ringer" to "normal", "private_state" to "secret"),

@@ -1,6 +1,9 @@
 package dev.argus.brain
 
 import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class AgentMessageSupportTest {
@@ -17,5 +20,49 @@ class AgentMessageSupportTest {
             "{\"type\":\"immediate\"}" in prompt,
             "lo schema draft deve descrivere il trigger immediate",
         )
+    }
+
+    // --- #59 Ondata 4a: sink NOTIFICA (nessuna notifica, testo dal solo goal) ---
+
+    @Test
+    fun `generative context sources accept the sink subset and reject notification`() {
+        // Reply (useReplyTool=true): comportamento invariato, "notification" obbligatoria.
+        AgentMessageSupport.requireGenerativeContextSources(listOf("notification"), useReplyTool = true)
+        AgentMessageSupport.requireGenerativeContextSources(listOf("notification", "state"), useReplyTool = true)
+
+        // Sink (useReplyTool=false): [] e [state] validi.
+        AgentMessageSupport.requireGenerativeContextSources(emptyList(), useReplyTool = false)
+        AgentMessageSupport.requireGenerativeContextSources(listOf("state"), useReplyTool = false)
+
+        // Sink rifiuta "notification", sorgenti sconosciute e duplicati.
+        listOf(
+            listOf("notification"),
+            listOf("notification", "state"),
+            listOf("screen"),
+            listOf("state", "state"),
+        ).forEach { sources ->
+            assertFailsWith<TransportException> {
+                AgentMessageSupport.requireGenerativeContextSources(sources, useReplyTool = false)
+            }
+        }
+    }
+
+    @Test
+    fun `notification prompts carry the goal without any whatsapp framing`() {
+        val system = AgentMessageSupport.actSystemTextNotification("promemoria acqua")
+        assertTrue("promemoria acqua" in system, "il goal deve entrare nel system del sink")
+        assertTrue("NOTIFICA" in system)
+        assertFalse("WhatsApp" in system, "il sink non parla di messaggi WhatsApp")
+        assertFalse("messaggio" in system.lowercase(), "il sink non parla di un messaggio ricevuto")
+
+        // User message: neutro senza stato, con le sole state lines quando presenti.
+        assertEquals(
+            "Genera ora il contenuto richiesto.",
+            AgentMessageSupport.actUserTextNotification(emptyList()),
+        )
+        val withState = AgentMessageSupport.actUserTextNotification(listOf("ringer=normal", "battery=80"))
+        assertTrue("ringer=normal" in withState)
+        assertTrue("battery=80" in withState)
+        assertFalse("Messaggio ricevuto" in withState)
     }
 }

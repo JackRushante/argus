@@ -159,11 +159,12 @@ class AnthropicMessagesTransportTest {
         assertEquals("whatsapp_reply", toolChoice.getValue("name").jsonPrimitive.content)
     }
 
-    // --- #59 Ondata 3: sink NOTIFICA → testo plain, nessun reply tool ---
+    // --- #59 Ondata 4a: sink NOTIFICA (da timer) → testo plain, nessun reply tool, NESSUNA notifica,
+    //     system della NOTIFICA (no framing WhatsApp) ---
 
-    @Test fun `notification sink without web omits the reply tool and reads plain text`(): Unit = runBlocking {
-        // allowedTools senza whatsapp_reply (sink notifica): nessun tool dichiarato, nessun
-        // tool_choice, testo dal blocco text.
+    @Test fun `notification sink without web omits the reply tool and uses the notification prompt`(): Unit = runBlocking {
+        // Sink da evento TimeFired, contextSources=[], allowedTools=[]: nessun tool dichiarato, nessun
+        // tool_choice, testo dal blocco text, system della NOTIFICA (nessun messaggio WhatsApp).
         server.enqueue(jsonResponse(
             """
             {"id":"msg_n","type":"message","role":"assistant","model":"claude-opus-4-8",
@@ -173,7 +174,7 @@ class AnthropicMessagesTransportTest {
         ))
         val t = transport(model = "claude-opus-4-8")
 
-        val result = t.act(fireContext(), "genera un promemoria", listOf("notification"), emptyList())
+        val result = t.act(timerContext(), "genera un promemoria", emptyList(), emptyList())
 
         assertEquals("Promemoria: chiama il dentista.", result.text)
         assertNull(result.metaError)
@@ -182,11 +183,17 @@ class AnthropicMessagesTransportTest {
         ).jsonObject
         assertFalse("tools" in root, "il sink notifica non dichiara il reply tool")
         assertFalse("tool_choice" in root, "il sink notifica non forza alcun tool")
+        val system = root.getValue("system").jsonPrimitive.content
+        assertTrue("NOTIFICA" in system)
+        assertFalse("WhatsApp" in system, "il system del sink NON deve parlare di WhatsApp")
+        val user = root.getValue("messages").jsonArray.single().jsonObject
+            .getValue("content").jsonPrimitive.content
+        assertFalse("Messaggio ricevuto" in user, "il sink non referenzia alcuna notifica in arrivo")
     }
 
     @Test fun `notification sink with web adds only the web tool and no reply`(): Unit = runBlocking {
-        // Sink notifica + web: solo il server tool web_search, nessun reply tool, nessun tool_choice
-        // forzato; il testo finale post-web arriva via textContent().
+        // Sink notifica + web (da timer): solo il server tool web_search, nessun reply tool, nessun
+        // tool_choice forzato; il testo finale post-web arriva via textContent().
         server.enqueue(jsonResponse(
             """
             {"id":"msg_nw2","type":"message","role":"assistant","model":"claude-opus-4-8",
@@ -196,7 +203,7 @@ class AnthropicMessagesTransportTest {
         ))
         val t = transport(model = "claude-opus-4-8")
 
-        val result = t.act(fireContext(), "che tempo fa a Roma", listOf("notification"), listOf("web.search"))
+        val result = t.act(timerContext(), "che tempo fa a Roma", emptyList(), listOf("web.search"))
 
         assertEquals("Oggi sereno a Roma.", result.text)
         val root = Json.parseToJsonElement(
@@ -210,6 +217,15 @@ class AnthropicMessagesTransportTest {
             tools.single().jsonObject.getValue("type").jsonPrimitive.content,
         )
         assertFalse("tool_choice" in root)
+    }
+
+    @Test fun `notification sink rejects notification among the context sources`(): Unit = runBlocking {
+        val t = transport(model = "claude-opus-4-8")
+
+        assertFailsWith<TransportException> {
+            t.act(timerContext(), "genera", listOf("notification"), emptyList())
+        }.also { assertEquals(TransportErrorKind.CONFIGURATION, it.kind) }
+        assertNull(server.takeRequest(200, TimeUnit.MILLISECONDS))
     }
 
     @Test fun `plain text content reply is accepted`(): Unit = runBlocking {
@@ -439,6 +455,22 @@ class AnthropicMessagesTransportTest {
             text = "ciao",
             isGroup = isGroup,
             notificationKey = "sbn:private",
+        ),
+        state = DeviceState(
+            values = mapOf("ringer" to "normal", "private_state" to "secret"),
+            foregroundApp = "com.whatsapp",
+        ),
+        automationId = AutomationId("automation-1"),
+        approvalFingerprint = ApprovalFingerprint("0".repeat(64)),
+        eventId = TriggerEventId("event-1"),
+        executionId = ExecutionId("execution-1"),
+        actionIndex = 0,
+    )
+
+    private fun timerContext() = FireContext(
+        event = TriggerEvent.TimeFired(
+            automationId = AutomationId("automation-1"),
+            approvalFingerprint = ApprovalFingerprint("0".repeat(64)),
         ),
         state = DeviceState(
             values = mapOf("ringer" to "normal", "private_state" to "secret"),

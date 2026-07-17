@@ -332,37 +332,82 @@ class CliBridgeTransportTest {
         assertNull(server.takeRequest(200, TimeUnit.MILLISECONDS))
     }
 
-    @Test fun `act accepts the notification sink toolset without reply and forwards it verbatim`(): Unit = runBlocking {
-        // Sink NOTIFICA #59: allowedTools senza whatsapp_reply è accettato e inoltrato tale e quale;
-        // il bridge (O4) produce testo plain quando manca il reply tool.
+    @Test fun `act notification sink omits notification and forwards empty or state sources`(): Unit = runBlocking {
+        // Sink NOTIFICA #59 (Ondata 4a): allowedTools senza whatsapp_reply + evento TimeFired (NON
+        // NotificationPosted) + contextSources [] o [state] (MAI "notification"). L'envelope NON
+        // contiene context.notification; il bridge (O4) produce testo plain dal solo goal (+ web/state).
         val expectedRequestId = actRequestId("execution-1", 0)
 
-        // [web.search] senza reply.
+        // [web.search] senza reply, contextSources [] su evento TimeFired.
         server.enqueue(jsonResponse(
             """{"schema_version":1,"request_id":"$expectedRequestId","result":{"text":"Promemoria."},"error_code":null}""",
         ))
         val withWeb = transport().act(
-            fireContext(), "genera un promemoria", listOf("notification"), listOf("web.search"),
+            timerContext(), "genera un promemoria", emptyList(), listOf("web.search"),
         )
         assertEquals("Promemoria.", withWeb.text)
+        val webRoot = Json.parseToJsonElement(
+            assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
+        ).jsonObject
+        assertTrue(webRoot.getValue("context_sources").jsonArray.isEmpty())
         assertEquals(
             listOf("web.search"),
-            Json.parseToJsonElement(assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8())
-                .jsonObject.getValue("allowed_tools").jsonArray.map { it.jsonPrimitive.content },
+            webRoot.getValue("allowed_tools").jsonArray.map { it.jsonPrimitive.content },
         )
+        // context.notification ASSENTE (omessa via @EncodeDefault(NEVER)).
+        assertFalse("notification" in webRoot.getValue("context").jsonObject)
 
-        // [] senza reply.
+        // [] senza reply → allowed_tools vuoto, notifica assente.
         server.enqueue(jsonResponse(
             """{"schema_version":1,"request_id":"$expectedRequestId","result":{"text":"Ok."},"error_code":null}""",
         ))
-        val empty = transport().act(
-            fireContext(), "genera", listOf("notification"), emptyList(),
-        )
+        val empty = transport().act(timerContext(), "genera", emptyList(), emptyList())
         assertEquals("Ok.", empty.text)
-        assertTrue(
-            Json.parseToJsonElement(assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8())
-                .jsonObject.getValue("allowed_tools").jsonArray.isEmpty(),
+        val emptyRoot = Json.parseToJsonElement(
+            assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
+        ).jsonObject
+        assertTrue(emptyRoot.getValue("allowed_tools").jsonArray.isEmpty())
+        assertFalse("notification" in emptyRoot.getValue("context").jsonObject)
+
+        // [state] senza reply: lo stato viaggia, la notifica resta assente.
+        server.enqueue(jsonResponse(
+            """{"schema_version":1,"request_id":"$expectedRequestId","result":{"text":"Stato ok."},"error_code":null}""",
+        ))
+        transport().act(timerContext(), "genera con stato", listOf("state"), listOf("web.search"))
+        val stateCtx = Json.parseToJsonElement(
+            assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
+        ).jsonObject.getValue("context").jsonObject
+        assertFalse("notification" in stateCtx)
+        assertEquals(
+            "normal",
+            stateCtx.getValue("state").jsonObject.getValue("values").jsonObject
+                .getValue("ringer").jsonPrimitive.content,
         )
+
+        // Il sink RIFIUTA "notification" fra le sorgenti (mai un messaggio in arrivo) prima della rete.
+        val error = assertFailsWith<BridgeException> {
+            transport().act(timerContext(), "genera", listOf("notification"), listOf("web.search"))
+        }
+        assertEquals(BridgeErrorKind.CONFIGURATION, error.kind)
+        assertNull(server.takeRequest(200, TimeUnit.MILLISECONDS))
+    }
+
+    @Test fun `reply act envelope stays byte-identical with the notification present`(): Unit = runBlocking {
+        // La notifica resta OBBLIGATORIA e presente nel reply; con "state" fuori dalle sorgenti il
+        // wire emette ancora "state":null. Byte-invarianza del reply-envelope (idempotency/hash bridge).
+        val expectedRequestId = actRequestId("execution-1", 0)
+        server.enqueue(jsonResponse(
+            """{"schema_version":1,"request_id":"$expectedRequestId","result":{"text":"Ok"},"error_code":null}""",
+        ))
+        transport().act(fireContext(), "rispondi", listOf("notification"), listOf("whatsapp_reply"))
+        val context = Json.parseToJsonElement(
+            assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
+        ).jsonObject.getValue("context").jsonObject
+        assertEquals(
+            "com.whatsapp",
+            context.getValue("notification").jsonObject.getValue("package").jsonPrimitive.content,
+        )
+        assertEquals("null", context.getValue("state").jsonPrimitive.content)
     }
 
     @Test fun `act v2 forwards web search alongside reply and rejects unsupported tools`(): Unit = runBlocking {
@@ -646,6 +691,23 @@ class CliBridgeTransportTest {
             text = "ciao",
             isGroup = isGroup,
             notificationKey = "sbn:private",
+        ),
+        state = DeviceState(
+            values = mapOf("ringer" to "normal", "private_state" to "secret"),
+            foregroundApp = "com.whatsapp",
+            location = GeoPoint(45.123, 11.456),
+        ),
+        automationId = AutomationId("automation-1"),
+        approvalFingerprint = ApprovalFingerprint("0".repeat(64)),
+        eventId = TriggerEventId("event-1"),
+        executionId = ExecutionId("execution-1"),
+        actionIndex = 0,
+    )
+
+    private fun timerContext() = FireContext(
+        event = TriggerEvent.TimeFired(
+            automationId = AutomationId("automation-1"),
+            approvalFingerprint = ApprovalFingerprint("0".repeat(64)),
         ),
         state = DeviceState(
             values = mapOf("ringer" to "normal", "private_state" to "secret"),

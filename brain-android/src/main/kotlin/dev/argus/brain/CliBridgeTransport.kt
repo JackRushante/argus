@@ -20,6 +20,7 @@ import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireContext
 import dev.argus.engine.runtime.TriggerEvent
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
@@ -132,8 +133,12 @@ private data class ActRequestEnvelope(
 
 @Serializable
 private data class ActContextEnvelope(
-    val notification: NotificationContextEnvelope,
-    val state: ActStateEnvelope?,
+    // Sink NOTIFICA #59: la notifica è OPZIONALE. Per il reply è sempre presente (wire byte-invariato);
+    // per il sink è null e @EncodeDefault(NEVER) la OMETTE dal JSON (ArgusJson ha explicitNulls=true,
+    // quindi un null verrebbe altrimenti emesso come "notification":null).
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val notification: NotificationContextEnvelope? = null,
+    val state: ActStateEnvelope? = null,
 )
 
 @Serializable
@@ -287,11 +292,6 @@ class CliBridgeTransport internal constructor(
         val token = requireToken()
         val cleanGoal = goal.trim().takeIf { it.isNotEmpty() && it.length <= MAX_GOAL_CHARS }
             ?: throw BridgeException(BridgeErrorKind.CONFIGURATION, "goal act vuoto o troppo lungo")
-        if (contextSources.isEmpty() || contextSources != contextSources.distinct() ||
-            "notification" !in contextSources || contextSources.any { it !in ACT_CONTEXT_SOURCES }
-        ) {
-            throw BridgeException(BridgeErrorKind.CONFIGURATION, "context_sources act non supportate")
-        }
         // Accetta sia il profilo REPLY (whatsapp_reply obbligatorio) sia il sink NOTIFICA #59
         // (nessun reply, solo web opzionale). L'envelope inoltra allowedTools tale e quale: il bridge
         // produce testo plain quando manca whatsapp_reply.
@@ -300,21 +300,23 @@ class CliBridgeTransport internal constructor(
         ) {
             throw BridgeException(BridgeErrorKind.CONFIGURATION, "allowed_tools act non supportati")
         }
-        val notification = context.event as? TriggerEvent.NotificationPosted
-            ?: throw BridgeException(BridgeErrorKind.CONFIGURATION, "act richiede un evento Notification")
-        if (notification.pkg !in WHATSAPP_PACKAGES || notification.isGroup != false) {
-            throw BridgeException(BridgeErrorKind.CONFIGURATION, "reply act non autorizzata")
-        }
-        val cleanText = notification.text.cleanUntrusted(MAX_NOTIFICATION_TEXT_CHARS)
-            ?: throw BridgeException(BridgeErrorKind.CONFIGURATION, "testo notifica assente")
-        val requestId = deterministicActRequestId(context)
-        val envelope = ActRequestEnvelope(
-            schemaVersion = ACT_SCHEMA_VERSION,
-            requestId = requestId,
-            goal = cleanGoal,
-            contextSources = contextSources,
-            allowedTools = allowedTools,
-            context = ActContextEnvelope(
+        val useReplyTool = GenerativeContract.TOOL_WHATSAPP_REPLY in allowedTools
+        val actContext = if (useReplyTool) {
+            // Reply: "notification" obbligatoria fra le sorgenti + evento WhatsApp 1:1 verificato;
+            // envelope CON la notifica (wire byte-invariato).
+            if (contextSources.isEmpty() || contextSources != contextSources.distinct() ||
+                "notification" !in contextSources || contextSources.any { it !in ACT_CONTEXT_SOURCES }
+            ) {
+                throw BridgeException(BridgeErrorKind.CONFIGURATION, "context_sources act non supportate")
+            }
+            val notification = context.event as? TriggerEvent.NotificationPosted
+                ?: throw BridgeException(BridgeErrorKind.CONFIGURATION, "act richiede un evento Notification")
+            if (notification.pkg !in WHATSAPP_PACKAGES || notification.isGroup != false) {
+                throw BridgeException(BridgeErrorKind.CONFIGURATION, "reply act non autorizzata")
+            }
+            val cleanText = notification.text.cleanUntrusted(MAX_NOTIFICATION_TEXT_CHARS)
+                ?: throw BridgeException(BridgeErrorKind.CONFIGURATION, "testo notifica assente")
+            ActContextEnvelope(
                 notification = NotificationContextEnvelope(
                     packageName = notification.pkg,
                     sender = notification.sender.cleanUntrusted(MAX_NOTIFICATION_SENDER_CHARS),
@@ -323,7 +325,29 @@ class CliBridgeTransport internal constructor(
                     isGroup = false,
                 ),
                 state = context.state.toActEnvelope().takeIf { "state" in contextSources },
-            ),
+            )
+        } else {
+            // Sink NOTIFICA #59 (da timer/immediate): NESSUNA notifica (né in sorgenti né come evento,
+            // niente requireWhatsAppNotification). contextSources = [] oppure il solo [state]. La
+            // notifica è OMESSA dall'envelope; lo stato viaggia solo se "state" è fra le sorgenti.
+            if (contextSources != contextSources.distinct() ||
+                contextSources.any { it !in SINK_CONTEXT_SOURCES }
+            ) {
+                throw BridgeException(BridgeErrorKind.CONFIGURATION, "context_sources sink non supportate")
+            }
+            ActContextEnvelope(
+                notification = null,
+                state = context.state.toActEnvelope().takeIf { "state" in contextSources },
+            )
+        }
+        val requestId = deterministicActRequestId(context)
+        val envelope = ActRequestEnvelope(
+            schemaVersion = ACT_SCHEMA_VERSION,
+            requestId = requestId,
+            goal = cleanGoal,
+            contextSources = contextSources,
+            allowedTools = allowedTools,
+            context = actContext,
         )
         val payload = json.encodeToString(envelope)
         if (payload.toByteArray(Charsets.UTF_8).size > MAX_REQUEST_BYTES) {
@@ -700,6 +724,10 @@ class CliBridgeTransport internal constructor(
         private val SUPPORTED_COMPILE_SCHEMA_VERSIONS = listOf(1, COMPILE_SCHEMA_VERSION)
         private val SUPPORTED_ACT_SCHEMA_VERSIONS = listOf(ACT_SCHEMA_VERSION, ACT_V2_SCHEMA_VERSION)
         private val ACT_CONTEXT_SOURCES = setOf("notification", "state")
+
+        /** Sink NOTIFICA #59: sorgenti ammesse senza reply — solo "state" (opzionale), MAI
+         *  "notification". Lista vuota valida (testo dal solo goal). */
+        private val SINK_CONTEXT_SOURCES = setOf("state")
         private val WHATSAPP_PACKAGES = setOf("com.whatsapp", "com.whatsapp.w4b")
 
         fun defaultClient(timeoutSeconds: Long = 60): OkHttpClient = OkHttpClient.Builder()

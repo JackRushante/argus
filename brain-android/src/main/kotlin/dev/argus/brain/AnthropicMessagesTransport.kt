@@ -128,9 +128,12 @@ class AnthropicMessagesTransport internal constructor(
         allowedTools: List<String>,
     ): ActResult {
         val cleanGoal = AgentMessageSupport.requireGoal(goal)
-        AgentMessageSupport.requireActContextSources(contextSources)
         val useReplyTool = AgentMessageSupport.requireGenerativeToolset(allowedTools)
-        val notification = AgentMessageSupport.requireWhatsAppNotification(context)
+        AgentMessageSupport.requireGenerativeContextSources(contextSources, useReplyTool)
+        // Reply: esige una notifica WhatsApp 1:1 in arrivo. Sink NOTIFICA #59 (da timer/immediate):
+        // nessuna notifica, il testo nasce dal solo goal (+ web/state).
+        val notification =
+            if (useReplyTool) AgentMessageSupport.requireWhatsAppNotification(context) else null
         val stateLines = if ("state" in contextSources) AgentMessageSupport.safeStateLines(context.state) else emptyList()
         val webRequested = GenerativeContract.TOOL_WEB_SEARCH in allowedTools
         return generate(
@@ -183,7 +186,7 @@ class AnthropicMessagesTransport internal constructor(
 
     private suspend fun generate(
         goal: String,
-        notification: TriggerEvent.NotificationPosted,
+        notification: TriggerEvent.NotificationPosted?,
         stateLines: List<String>,
         webRequested: Boolean,
         useReplyTool: Boolean,
@@ -195,8 +198,8 @@ class AnthropicMessagesTransport internal constructor(
         // richiesto viene ignorato (degradazione graziosa).
         val applyWeb = webRequested && spec.quirks.webSearch == WebSearchMechanism.ANTHROPIC_TOOL
         // Sink NOTIFICA #59 (useReplyTool=false): NIENTE reply tool (solo eventuale web_search), NESSUN
-        // tool_choice forzato, system PLAIN, testo dal blocco `text` via replyText(). Sink REPLY
-        // (useReplyTool=true): comportamento invariato (reply tool + eventuale web_search).
+        // tool_choice forzato, system della NOTIFICA (nessun framing WhatsApp), testo dal blocco `text`
+        // via replyText(). Reply (useReplyTool=true): invariato (reply tool + eventuale web_search).
         val tools = when {
             useReplyTool && applyWeb -> listOf(replyToolDef(), webSearchToolDef())
             useReplyTool -> listOf(replyToolDef())
@@ -206,8 +209,14 @@ class AnthropicMessagesTransport internal constructor(
         val request = MessagesRequest(
             model = model,
             maxTokens = MAX_OUTPUT_TOKENS,
-            system = if (useReplyTool) AgentMessageSupport.actSystemText(goal) else AgentMessageSupport.actSystemTextPlain(goal),
-            messages = listOf(InputMessage("user", AgentMessageSupport.actUserText(notification, stateLines))),
+            system = if (useReplyTool) AgentMessageSupport.actSystemText(goal) else AgentMessageSupport.actSystemTextNotification(goal),
+            messages = listOf(
+                InputMessage(
+                    "user",
+                    if (notification != null) AgentMessageSupport.actUserText(notification, stateLines)
+                    else AgentMessageSupport.actUserTextNotification(stateLines),
+                ),
+            ),
             tools = tools,
             // Con il web attivo (o senza reply tool) il reply NON va forzato: il testo finale (blocco
             // text dopo i risultati web) arriva via textContent(); forzare il reply tool impedirebbe la
