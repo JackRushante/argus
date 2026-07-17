@@ -22,6 +22,23 @@ class AgentMessageSupportTest {
         )
     }
 
+    @Test
+    fun `compile prompt teaches the relative afterMs delay for tra N`() {
+        val prompt = AgentMessageSupport.compileSystemText()
+
+        // Regola 15: "tra N" ora è un ritardo relativo afterMs (millisecondi), non più "at".
+        assertTrue("afterMs" in prompt, "la regola temporale deve insegnare afterMs")
+        assertTrue(
+            "afterMs=120000" in prompt,
+            "l'esempio 'tra 2 minuti' deve mappare su afterMs in millisecondi",
+        )
+        // Lo schema draft del trigger time deve dichiarare il campo afterMs.
+        assertTrue(
+            "\"afterMs\":integer|null" in prompt,
+            "lo schema draft time deve descrivere afterMs",
+        )
+    }
+
     // --- #59 Ondata 4a: sink NOTIFICA (nessuna notifica, testo dal solo goal) ---
 
     @Test

@@ -1,4 +1,5 @@
 package dev.argus.engine.model
+import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -45,12 +46,16 @@ sealed interface Trigger {
         val resolveCurrentLocation: Boolean = false,
     ) : Trigger
 
-    /** Esattamente uno tra [cron] e [at] (enforced dal DraftValidator).
-     *  [at] = datetime ISO locale ("2026-07-15T08:00") interpretato in [tz], one-shot. */
+    /** Esattamente uno tra [cron], [at] e [afterMs] (enforced dal DraftValidator).
+     *  [at] = datetime ISO locale ("2026-07-15T08:00") interpretato in [tz], one-shot.
+     *  [afterMs] = ritardo relativo in ms, one-shot, ancorato all'arm (ri-armabile). */
     @Serializable @SerialName("time")
     data class Time(
         val cron: String? = null,
         val at: String? = null,
+        // @EncodeDefault(NEVER): quando null è OMESSO dal wire, così i Time cron/at esistenti
+        // restano byte-for-byte identici e i fingerprint v1 pinnati non si rompono.
+        @EncodeDefault(EncodeDefault.Mode.NEVER) val afterMs: Long? = null,
         val tz: String,
         /** EXACT solo se l'utente richiede esplicitamente puntualità; altrimenti allarme inexact. */
         val precision: TimePrecision = TimePrecision.FLEXIBLE,
@@ -102,3 +107,6 @@ sealed interface Trigger {
         val maxReportLatencyUs: Int? = null,
     ) : Trigger
 }
+
+/** One-shot = fira una volta e si auto-consuma: `at` assoluto o `afterMs` relativo (mai cron ricorrente). */
+fun Trigger.Time.isOneShot(): Boolean = at != null || afterMs != null

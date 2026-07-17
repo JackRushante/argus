@@ -123,11 +123,41 @@ object RuleRenderMapper {
     private fun timeLine(t: Trigger.Time): String {
         val cron = t.cron
         val at = t.at
+        val afterMs = t.afterMs
         return when {
             cron != null -> humanizeCron(cron, t.tz)
             at != null -> "Una volta il ${at.replace("T", " alle ")} (${t.tz})"
+            // Ritardo relativo one-shot (ri-armabile): nessun orario assoluto da mostrare, solo la
+            // durata umanizzata (l'ancora reale è congelata a runtime nel ScheduledTimeAlarm).
+            afterMs != null -> "Una volta, tra ${humanizeDelay(afterMs)}"
             else -> "Orario non specificato (${t.tz})"
         }
+    }
+
+    /**
+     * Umanizza un ritardo relativo in italiano: unità più significativa più, se presente, quella
+     * immediatamente inferiore (es. 5_400_000 → "1 ora e 30 minuti"), con singolare/plurale corretto.
+     * Le unità sotto la seconda scelta vengono troncate per una resa pulita e leggibile in review.
+     */
+    private fun humanizeDelay(ms: Long): String {
+        val totalSeconds = ms / 1_000
+        val units = listOf(
+            Triple(totalSeconds / 86_400, "giorno", "giorni"),
+            Triple((totalSeconds % 86_400) / 3_600, "ora", "ore"),
+            Triple((totalSeconds % 3_600) / 60, "minuto", "minuti"),
+            Triple(totalSeconds % 60, "secondo", "secondi"),
+        )
+        fun render(value: Long, singular: String, plural: String) =
+            "$value ${if (value == 1L) singular else plural}"
+
+        val primaryIndex = units.indexOfFirst { it.first != 0L }
+        if (primaryIndex == -1) return render(0, "secondo", "secondi") // difensivo: afterMs >= 1s
+        val (pv, ps, pp) = units[primaryIndex]
+        val primary = render(pv, ps, pp)
+        val secondary = units.getOrNull(primaryIndex + 1)
+            ?.takeIf { it.first != 0L }
+            ?.let { (sv, ss, sp) -> render(sv, ss, sp) }
+        return if (secondary != null) "$primary e $secondary" else primary
     }
 
     private fun geofenceLine(t: Trigger.Geofence): String {

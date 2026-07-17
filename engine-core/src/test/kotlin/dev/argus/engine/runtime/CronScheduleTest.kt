@@ -57,4 +57,9 @@ class CronScheduleTest {
         assertEquals(Instant.parse("2026-07-15T06:00:00Z"), TimeSpecs.nextFire(t, Instant.parse("2026-07-12T00:00:00Z")))
         assertNull(TimeSpecs.nextFire(t, Instant.parse("2026-07-15T06:00:00Z")))   // passato -> mai più
     }
+    @Test fun `timespecs relative afterMs fires exactly after plus delay`() {
+        val t = Trigger.Time(afterMs = 120_000, tz = "Europe/Rome")
+        val after = Instant.parse("2026-07-15T06:00:00Z")
+        assertEquals(after.plusMillis(120_000), TimeSpecs.nextFire(t, after))
+    }
 }

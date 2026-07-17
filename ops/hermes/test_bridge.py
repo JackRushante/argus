@@ -403,6 +403,29 @@ class BridgeTest(unittest.TestCase):
         self.assertFalse(bridge.validate_trigger({**base, "loiteringDelayMs": 60_000}, set()))
         self.assertIn("soltanto ENTER/EXIT", bridge.build_prompt(self.request()))
 
+    def test_time_trigger_accepts_relative_after_ms_one_shot(self):
+        tz = "Europe/Rome"
+        seven_days = 7 * 24 * 60 * 60 * 1_000
+        # afterMs valido: esattamente uno tra cron/at/afterMs, bound 1s..7g.
+        self.assertTrue(bridge.validate_trigger({"type": "time", "afterMs": 120_000, "tz": tz}, set()))
+        self.assertTrue(bridge.validate_trigger({"type": "time", "afterMs": 1_000, "tz": tz}, set()))
+        self.assertTrue(bridge.validate_trigger({"type": "time", "afterMs": seven_days, "tz": tz}, set()))
+        # bound violati.
+        self.assertFalse(bridge.validate_trigger({"type": "time", "afterMs": 999, "tz": tz}, set()))
+        self.assertFalse(bridge.validate_trigger({"type": "time", "afterMs": 0, "tz": tz}, set()))
+        self.assertFalse(bridge.validate_trigger({"type": "time", "afterMs": seven_days + 1, "tz": tz}, set()))
+        # non-int rifiutato senza TypeError (short-circuit su _is_int).
+        self.assertFalse(bridge.validate_trigger({"type": "time", "afterMs": "120000", "tz": tz}, set()))
+        # esattamente uno: combinazioni multiple rifiutate.
+        self.assertFalse(bridge.validate_trigger(
+            {"type": "time", "afterMs": 120_000, "at": "2026-07-17T14:30", "tz": tz}, set()))
+        self.assertFalse(bridge.validate_trigger(
+            {"type": "time", "afterMs": 120_000, "cron": "0 8 * * *", "tz": tz}, set()))
+        # nessuno dei tre rifiutato.
+        self.assertFalse(bridge.validate_trigger({"type": "time", "tz": tz}, set()))
+        # il prompt insegna afterMs per "tra N".
+        self.assertIn("afterMs", bridge.build_prompt(self.request()))
+
     def test_sensor_trigger_is_closed_bounded_and_requires_cooldown(self):
         significant = {
             "type": "sensor",

@@ -438,6 +438,37 @@ class DraftValidatorTest {
         assertTrue("time_spec" in errors(v.validate(AutomationDraft("x",
             Trigger.Time(tz = "Europe/Rome"), listOf(Action.SetWifi(true))), emptySet())))
     }
+    @Test fun `time accepts a relative afterMs and enforces exactly one spec and its bounds`() {
+        fun draft(trigger: Trigger.Time) =
+            AutomationDraft("x", trigger, listOf(Action.SetWifi(true)))
+
+        // afterMs valido = esattamente uno tra cron/at/afterMs.
+        assertEquals(
+            emptyList(),
+            errors(v.validate(draft(Trigger.Time(afterMs = 120_000, tz = "Europe/Rome")), emptySet())),
+        )
+        // afterMs+at oppure afterMs+cron = due spec = time_spec.
+        assertTrue("time_spec" in errors(v.validate(
+            draft(Trigger.Time(at = "2026-07-15T08:00", afterMs = 120_000, tz = "Europe/Rome")), emptySet())))
+        assertTrue("time_spec" in errors(v.validate(
+            draft(Trigger.Time(cron = "0 8 * * *", afterMs = 120_000, tz = "Europe/Rome")), emptySet())))
+        // Bound: 0, negativo e oltre il massimo (7g) = after_ms_invalid.
+        assertTrue("after_ms_invalid" in errors(v.validate(
+            draft(Trigger.Time(afterMs = 0, tz = "Europe/Rome")), emptySet())))
+        assertTrue("after_ms_invalid" in errors(v.validate(
+            draft(Trigger.Time(afterMs = -1, tz = "Europe/Rome")), emptySet())))
+        assertTrue("after_ms_invalid" in errors(v.validate(
+            draft(Trigger.Time(afterMs = 7L * 24 * 60 * 60 * 1_000 + 1, tz = "Europe/Rome")), emptySet())))
+        // Estremi ammessi: 1s e 7g esatti.
+        assertEquals(
+            emptyList(),
+            errors(v.validate(draft(Trigger.Time(afterMs = 1_000, tz = "Europe/Rome")), emptySet())),
+        )
+        assertEquals(
+            emptyList(),
+            errors(v.validate(draft(Trigger.Time(afterMs = 7L * 24 * 60 * 60 * 1_000, tz = "Europe/Rome")), emptySet())),
+        )
+    }
     @Test fun `small geofence radius is a warning, empty actions an error`() {
         val d = AutomationDraft("x", Trigger.Geofence(radiusM = 50.0, transition = Transition.EXIT, resolveCurrentLocation = true), emptyList())
         val issues = v.validate(d, emptySet())

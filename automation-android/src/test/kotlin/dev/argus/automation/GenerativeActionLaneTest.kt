@@ -179,6 +179,28 @@ class GenerativeActionLaneTest {
     }
 
     @Test
+    fun `consumed one-shot relative afterMs rule still completes despite being disabled`() = runTest {
+        // afterMs è one-shot come at: il dispatch lo disabilita, ma l'azione generativa già accodata
+        // (fingerprint+azione invariati) DEVE completare, non "rule_inactive".
+        val action = notificationAction(allowedTools = listOf("web.search"))
+        val armed = approvedAutomation(action, Trigger.Time(afterMs = 120_000, tz = "Europe/Rome"))
+        val consumed = armed.copy(status = AutomationStatus.DISABLED, enabled = false)
+        val event = TriggerEvent.TimeFired(armed.id, requireNotNull(armed.approvalFingerprint))
+        val fixture = fixture(
+            action = action,
+            automation = consumed,
+            context = context(armed, action, event = event),
+        )
+        fixture.lane.trySubmit(fixture.context, fixture.action)
+        fixture.journal.ready()
+        runCurrent()
+
+        assertEquals(1, fixture.brain.calls)
+        assertEquals(1, fixture.notifier.calls.size)
+        assertEquals(ActionJournalOutcome.SUCCEEDED, fixture.journal.completions.single().outcome)
+    }
+
+    @Test
     fun `disabled recurring cron rule stays inactive`() = runTest {
         // Una ricorrente (time con cron, senza at) DISABILITATA dall'utente resta "rule_inactive":
         // la tolleranza vale solo per i one-shot consumati, mai per le regole spente a mano.

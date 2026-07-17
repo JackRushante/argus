@@ -124,6 +124,8 @@ object TimeSpecs {
         return when {
             t.cron != null -> CronSchedule.parse(t.cron).nextFireAfter(after, zone)
             t.at != null -> resolveScheduledLocal(LocalDateTime.parse(t.at), zone).takeIf { it > after }
+            // afterMs relativo: l'ancora è sempre > after (afterMs>0 garantito dal validator).
+            t.afterMs != null -> after.plusMillis(t.afterMs)
             else -> null
         }
     }

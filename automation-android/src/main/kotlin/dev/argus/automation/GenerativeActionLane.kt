@@ -16,6 +16,7 @@ import dev.argus.engine.model.StateContextClassification
 import dev.argus.engine.model.StateQueryPolicy
 import dev.argus.engine.model.StateValueCoercion
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.isOneShot
 import dev.argus.engine.runtime.ActionJournalOutcome
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.runtime.ExecutionStatus
@@ -246,11 +247,12 @@ class AndroidGenerativeLane(
         }
     }
 
-    /** One-shot = fira una sola volta e si auto-consuma: `immediate` oppure `time` con istante `at`
-     *  (mai un `time` ricorrente con `cron`). Solo questi tollerano lo stato disabilitato in
-     *  ri-validazione, perché il dispatch li disabilita per costruzione. */
+    /** One-shot = fira una sola volta e si auto-consuma: `immediate` oppure `time` one-shot
+     *  (`at` assoluto o `afterMs` relativo, mai un `time` ricorrente con `cron`). Solo questi
+     *  tollerano lo stato disabilitato in ri-validazione, perché il dispatch li disabilita per
+     *  costruzione. */
     private fun isOneShot(trigger: Trigger): Boolean =
-        trigger is Trigger.Immediate || (trigger as? Trigger.Time)?.at != null
+        trigger is Trigger.Immediate || (trigger as? Trigger.Time)?.isOneShot() == true
 
     private fun validContract(queued: QueuedAction): Boolean = when (val action = queued.action) {
         is Action.InvokeLlm -> when (action.deliver) {

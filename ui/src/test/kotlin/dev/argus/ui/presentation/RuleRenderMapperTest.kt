@@ -32,6 +32,22 @@ class RuleRenderMapperTest {
         assertTrue(!r.isGenerative && r.privacyNote == null)
         assertEquals(1, r.actions.size)
     }
+    @Test fun `relative afterMs time renders a one-shot delay line in italian`() {
+        fun line(afterMs: Long) = RuleRenderMapper.map(
+            Automation(
+                AutomationId("r1"), "tra due minuti", CreatedBy.LLM, AutomationStatus.PENDING_APPROVAL,
+                Trigger.Time(afterMs = afterMs, tz = "Europe/Rome"),
+                listOf(Action.ShowNotification("Argus", "promemoria")),
+            ),
+        ).triggerLine
+        assertEquals("Una volta, tra 2 minuti", line(120_000))
+        assertEquals("Una volta, tra 1 minuto", line(60_000))
+        assertEquals("Una volta, tra 1 ora", line(3_600_000))
+        assertEquals("Una volta, tra 30 secondi", line(30_000))
+        assertEquals("Una volta, tra 2 giorni", line(2L * 24 * 60 * 60 * 1_000))
+        assertEquals("Una volta, tra 1 ora e 30 minuti", line(5_400_000))
+    }
+
     @Test fun `immediate trigger renders the on-arm one-shot line`() {
         val a = Automation(
             AutomationId("i1"), "Sveglia adesso", CreatedBy.USER, AutomationStatus.PENDING_APPROVAL,

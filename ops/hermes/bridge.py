@@ -161,9 +161,11 @@ AutomationDraft JSON (nomi e maiuscole sono esatti):
 }
 
 Trigger, discriminato da "type":
-- {"type":"time", "cron":string|null, "at":string|null, "tz":string,
-   "precision":"FLEXIBLE"|"EXACT"}
-  Esattamente uno tra cron e at. at e' ISO locale, es. 2026-07-15T23:00.
+- {"type":"time", "cron":string|null, "at":string|null, "afterMs":integer|null,
+   "tz":string, "precision":"FLEXIBLE"|"EXACT"}
+  Esattamente uno tra cron, at e afterMs. at e' ISO locale, es. 2026-07-15T23:00.
+  afterMs e' un ritardo RELATIVO in millisecondi (one-shot): fira una volta afterMs
+  dopo l'attivazione della regola e RIPARTE ad ogni ri-attivazione (per "tra N").
   Ometti precision o usa FLEXIBLE normalmente; EXACT solo se l'utente chiede
   esplicitamente puntualita' esatta.
 - {"type":"immediate"}  // esegue le azioni UNA VOLTA all'attivazione della regola,
@@ -709,20 +711,25 @@ REGOLE VINCOLANTI:
 13. Scelta del TRIGGER temporale (fondamentale, non confondere immediate con un ritardo):
     - "immediate" SOLO per "esegui ADESSO / appena la attivo" (subito/adesso/ora), ZERO ritardo:
       esegue una volta all'attivazione. NON usarlo mai per un ritardo o una ripetizione.
-    - "time" con "at" per UN momento specifico UNA VOLTA: "tra N minuti/ore" -> at = ora locale attuale
-      + N (usa l'ora sotto); "alle HH:MM"/"domani alle …" -> quel datetime. Formato "at" = ISO locale
-      SENZA offset timezone e SENZA "Z" (es. "2026-07-17T14:30"), MAI con "+02:00"/"Z".
+    - "time" con "afterMs" per un RITARDO RELATIVO one-shot: "tra N minuti/ore/secondi" -> afterMs =
+      N convertito in millisecondi (es. "tra 2 minuti" -> afterMs=120000; "tra 1 ora" -> 3600000).
+      E' RELATIVO all'attivazione, quindi riparte se la regola viene disarmata e ri-armata. Usa
+      QUESTO per ogni "tra N", NON "at".
+    - "time" con "at" per UN momento ASSOLUTO specifico UNA VOLTA: "alle HH:MM"/"domani alle …"/una
+      data -> quel datetime. Formato "at" = ISO locale SENZA offset timezone e SENZA "Z"
+      (es. "2026-07-17T14:30"), MAI con "+02:00"/"Z". NON usare "at" per "tra N" (usa afterMs).
     - "time" con "cron" per RICORRENTI: "ogni N ore/giorni", "ogni ora", "ogni giorno/settimana/lunedi'
       alle HH:MM" -> cron corrispondente. La regola ri-scatta e (se generativa) ri-genera ogni volta.
     L'orario della sveglia/timer reali va nell'azione set_alarm/set_timer, non nel trigger. Mai un "time"
-    con "at" gia' passato. Esempi: "notificami tra 2 minuti il cambio" -> time at=+2min (NON immediate);
-    "ogni 24 ore il prezzo BTC" -> time cron ogni 24h; "avvisami subito" -> immediate.
+    con "at" gia' passato. Esempi: "notificami tra 2 minuti il cambio" -> time afterMs=120000 (NON
+    immediate, NON at); "domani alle 8 sveglia" -> time at=domani 08:00; "ogni 24 ore il prezzo BTC"
+    -> time cron ogni 24h; "avvisami subito" -> immediate.
 14. La consegna generativa di invoke_llm ha DUE modi (campo "deliver"):
     - "WHATSAPP_REPLY" (default): risponde a una notifica in arrivo (trigger notification, chat 1:1 in
       whitelist), contextSources ["notification"], allowedTools ["whatsapp_reply"] (+ "web.search" opz),
       replyTargetSender=true. Per RISPONDERE a un messaggio ricevuto.
     - "LOCAL_NOTIFICATION": posta una NOTIFICA locale col testo generato, da QUALSIASI trigger temporale
-      (time.at, time.cron, immediate). Usalo quando l'utente dice "mandami/inviami/notificami <X>",
+      (time.afterMs, time.at, time.cron, immediate). Usalo quando l'utente dice "mandami/inviami/notificami <X>",
       incluse le richieste RICORRENTI ("ogni 24 ore il prezzo BTC", "ogni settimana il risultato del
       Milan" -> time.cron): allowedTools=[] o ["web.search"] (MAI whatsapp_reply), replyTargetSender=false,
       contextSources=[] (o ["state"]), "notificationTitle"=titolo breve. Trigger scelto con la regola 13.
@@ -984,13 +991,21 @@ def validate_trigger(value: Any, whitelisted_contact_ids: set[str]) -> bool:
         return False
     kind = value["type"]
     if kind == "time":
-        if not _exact_keys(value, {"type", "tz"}, {"cron", "at", "precision"}) or not _string(value["tz"], 128):
+        if not _exact_keys(value, {"type", "tz"}, {"cron", "at", "afterMs", "precision"}) or not _string(value["tz"], 128):
             return False
-        cron, at = value.get("cron"), value.get("at")
+        cron, at, after_ms = value.get("cron"), value.get("at"), value.get("afterMs")
+        # Esattamente uno tra cron, at, afterMs.
+        specified = [s for s in (cron, at, after_ms) if s is not None]
+        if len(specified) != 1:
+            return False
+        if after_ms is not None:
+            # Ritardo relativo one-shot in ms: 1s..7g (allineato a DraftValidator MIN/MAX_DELAY_MS).
+            if not _is_int(after_ms) or not 1_000 <= after_ms <= 7 * 24 * 60 * 60 * 1_000:
+                return False
+        elif not _string(cron or at, 256):
+            return False
         return (
-            (cron is None) != (at is None)
-            and _string(cron or at, 256)
-            and isinstance(value.get("precision", "FLEXIBLE"), str)
+            isinstance(value.get("precision", "FLEXIBLE"), str)
             and value.get("precision", "FLEXIBLE") in {"FLEXIBLE", "EXACT"}
         )
     if kind == "geofence":

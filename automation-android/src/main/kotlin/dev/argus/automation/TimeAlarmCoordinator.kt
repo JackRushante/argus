@@ -6,6 +6,7 @@ import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.TimePrecision
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.isOneShot
 import dev.argus.engine.runtime.AuditEvent
 import dev.argus.engine.runtime.AuditKind
 import dev.argus.engine.runtime.AuditSink
@@ -101,13 +102,24 @@ sealed interface AlarmDeliveryResult {
 }
 
 object TimeAlarmPlanner {
-    fun next(automation: Automation, after: Instant): TimeAlarmRegistration? {
+    fun next(
+        automation: Automation,
+        after: Instant,
+        existing: ScheduledTimeAlarm? = null,
+    ): TimeAlarmRegistration? {
         if (automation.status != AutomationStatus.ARMED || !automation.enabled) return null
         val trigger = automation.trigger as? Trigger.Time ?: return null
         val approvalFingerprint = requireNotNull(automation.approvalFingerprint) {
             "Automazione ARMED priva di fingerprint"
         }
-        val eventAt = TimeSpecs.nextFire(trigger, after) ?: return null
+        val afterMs = trigger.afterMs
+        val eventAt = if (afterMs != null) {
+            // Ritardo relativo: l'ancora si calcola UNA volta all'arm e poi si congela sul record
+            // persistito. Senza questo freeze ogni reconcile ricalcolerebbe now+afterMs, slittando.
+            existing?.let { Instant.ofEpochMilli(it.eventAtMillis) } ?: after.plusMillis(afterMs)
+        } else {
+            TimeSpecs.nextFire(trigger, after) ?: return null
+        }
         return TimeAlarmRegistration(
             automationId = automation.id,
             approvalFingerprint = approvalFingerprint,
@@ -179,7 +191,7 @@ class TimeAlarmCoordinator(
                 }
                 ScheduleResult.EXPIRED -> {
                     if (persisted != null) cancelled += automation.id
-                    if ((automation.trigger as Trigger.Time).at != null) {
+                    if ((automation.trigger as Trigger.Time).isOneShot()) {
                         store.disableIfApproved(
                             automation.id,
                             requireNotNull(automation.approvalFingerprint),
@@ -281,7 +293,7 @@ class TimeAlarmCoordinator(
                 else -> AlarmDeliveryResult.Delivered
             }
         }
-        if (latestTrigger.at != null) {
+        if (latestTrigger.isOneShot()) {
             if (store.disableIfApproved(automationId, eventFingerprint)) {
                 cancelAndForget(automationId)
                 return AlarmDeliveryResult.Delivered
@@ -315,7 +327,7 @@ class TimeAlarmCoordinator(
         force: Boolean = false,
     ): ScheduleResult {
         val registration = try {
-            TimeAlarmPlanner.next(automation, after)
+            TimeAlarmPlanner.next(automation, after, existing)
         } catch (error: CancellationException) {
             throw error
         } catch (_: Exception) {

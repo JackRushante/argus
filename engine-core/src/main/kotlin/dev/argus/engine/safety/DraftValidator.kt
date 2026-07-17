@@ -40,6 +40,10 @@ class DraftValidator(
         private const val MAX_GEOFENCE_RADIUS_M = 100_000.0
         private const val MAX_LOITERING_MS = 86_400_000L
         private const val MAX_LLM_TIMEOUT_MS = 120_000L
+
+        /** Ritardo relativo one-shot (Trigger.Time.afterMs): da 1 secondo a 7 giorni. */
+        const val MIN_DELAY_MS = 1_000L
+        const val MAX_DELAY_MS = 7L * 24 * 60 * 60 * 1_000
         private const val MAX_TIMER_SECONDS = 86_400
         private const val MAX_VOLUME_LEVEL = 100
         private const val MAX_VIBRATE_MS = 10_000
@@ -92,8 +96,10 @@ class DraftValidator(
             // Immediate non ha campi propri (nessun cron/at/tz): è valido di per sé, fira all'arm.
             is Trigger.Immediate -> Unit
             is Trigger.Time -> {
-                if ((trigger.cron == null) == (trigger.at == null))
-                    err("time_spec", "Time richiede esattamente uno tra cron e at")
+                // Esattamente uno tra {cron, at, afterMs}: conta i non-null.
+                val specCount = listOfNotNull(trigger.cron, trigger.at, trigger.afterMs).size
+                if (specCount != 1)
+                    err("time_spec", "Time richiede esattamente uno tra cron, at e afterMs")
                 runCatching { ZoneId.of(trigger.tz) }
                     .onFailure { err("tz_invalid", "Timezone '${trigger.tz}' non valida") }
                 trigger.cron?.let { cron ->
@@ -103,6 +109,10 @@ class DraftValidator(
                 trigger.at?.let { at ->
                     runCatching { LocalDateTime.parse(at) }
                         .onFailure { err("at_invalid", "Datetime '$at' non valido (ISO locale atteso)") }
+                }
+                trigger.afterMs?.let { afterMs ->
+                    if (afterMs !in MIN_DELAY_MS..MAX_DELAY_MS)
+                        err("after_ms_invalid", "Ritardo relativo fuori intervallo (1s..7g)")
                 }
             }
 

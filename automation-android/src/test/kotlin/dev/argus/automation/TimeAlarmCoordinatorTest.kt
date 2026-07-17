@@ -24,6 +24,7 @@ import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -481,6 +482,111 @@ class TimeAlarmCoordinatorTest {
         assertEquals(listOf(automation.id), report.failed)
         val event = audit.events.single { it.kind == AuditKind.SCHEDULING_FAILED }
         assertEquals("scheduling_failed", event.detail)
+    }
+
+    // --- Trigger.Time.afterMs: ritardo relativo one-shot, ancora congelata e ri-armabile ---
+
+    @Test
+    fun `relative afterMs anchors on first reconcile and stays frozen across later reconciles`() = runTest {
+        val start = Instant.parse("2026-07-13T20:00:00Z")
+        var clock = start
+        val automation = automation(Trigger.Time(afterMs = 120_000, tz = "UTC"))
+        val state = FakeTimeAlarmStateStore()
+        val backend = FakeTimeAlarmBackend()
+        val coordinator = TimeAlarmCoordinator(
+            store = FakeAutomationStore(automation),
+            state = state,
+            backend = backend,
+            dispatcher = TimeEventDispatcher { },
+            now = { clock },
+        )
+
+        // 1° reconcile: ancora = now + afterMs, persistita e schedulata una sola volta.
+        val anchor = start.plusMillis(120_000).toEpochMilli()
+        val first = coordinator.reconcile(ReconcileReason.APP_START)
+        assertEquals(listOf(automation.id), first.scheduled)
+        assertEquals(anchor, state.get(automation.id)?.eventAtMillis)
+        assertEquals(1, backend.scheduled.size)
+
+        // now avanza: senza il freeze l'ancora slitterebbe a now+afterMs. Deve restare congelata.
+        clock = start.plusSeconds(30)
+        val second = coordinator.reconcile(ReconcileReason.APP_START)
+        assertEquals(emptyList(), second.scheduled) // UNCHANGED, nessuna nuova schedule
+        assertEquals(anchor, state.get(automation.id)?.eventAtMillis)
+        assertEquals(1, backend.scheduled.size) // il backend NON è stato richiamato
+    }
+
+    @Test
+    fun `relative afterMs one shot is disabled after delivery like at`() = runTest {
+        val automation = automation(Trigger.Time(afterMs = 120_000, tz = "UTC"))
+        val dueAt = now.plusSeconds(30).toEpochMilli()
+        val store = FakeAutomationStore(automation)
+        val state = FakeTimeAlarmStateStore(record(automation, dueAt))
+        val coordinator = coordinator(store, state, FakeTimeAlarmBackend())
+
+        assertIs<AlarmDeliveryResult.Delivered>(
+            coordinator.onAlarm(automation.id, requireNotNull(automation.approvalFingerprint), dueAt),
+        )
+
+        assertEquals(AutomationStatus.DISABLED, store.get(automation.id)?.status)
+        assertNull(state.get(automation.id))
+    }
+
+    @Test
+    fun `re-armed relative rule gets a fresh anchor after the previous one fired`() = runTest {
+        var clock = Instant.parse("2026-07-13T20:00:00Z")
+        val armed = automation(Trigger.Time(afterMs = 120_000, tz = "UTC"))
+        val store = FakeAutomationStore(armed)
+        val state = FakeTimeAlarmStateStore()
+        val coordinator = TimeAlarmCoordinator(
+            store = store,
+            state = state,
+            backend = FakeTimeAlarmBackend(),
+            dispatcher = TimeEventDispatcher { },
+            now = { clock },
+        )
+
+        coordinator.reconcile(ReconcileReason.APP_START)
+        val firstAnchor = clock.plusMillis(120_000).toEpochMilli()
+        assertEquals(firstAnchor, state.get(armed.id)?.eventAtMillis)
+
+        // Lo scatto one-shot disabilita la regola e cancella il record persistito.
+        clock = clock.plusMillis(120_000)
+        assertIs<AlarmDeliveryResult.Delivered>(
+            coordinator.onAlarm(armed.id, requireNotNull(armed.approvalFingerprint), firstAnchor),
+        )
+        assertNull(state.get(armed.id))
+        assertEquals(AutomationStatus.DISABLED, store.get(armed.id)?.status)
+
+        // Ri-arm: stessa regola tornata ARMED (fingerprint invariato), clock avanzato.
+        store.replace(armed.copy(status = AutomationStatus.ARMED, enabled = true))
+        clock = clock.plusSeconds(300)
+        coordinator.reconcile(ReconcileReason.APP_START)
+        val secondAnchor = clock.plusMillis(120_000).toEpochMilli()
+        assertEquals(secondAnchor, state.get(armed.id)?.eventAtMillis)
+        assertNotEquals(firstAnchor, secondAnchor)
+    }
+
+    @Test
+    fun `relative afterMs due record is recovered and delivered on reconcile`() = runTest {
+        val automation = automation(Trigger.Time(afterMs = 120_000, tz = "UTC"))
+        val dueAt = now.minusSeconds(60).toEpochMilli() // ancora già scaduta
+        val store = FakeAutomationStore(automation)
+        val state = FakeTimeAlarmStateStore(record(automation, dueAt))
+        val dispatched = mutableListOf<TriggerEnvelope>()
+        val coordinator = TimeAlarmCoordinator(
+            store = store,
+            state = state,
+            backend = FakeTimeAlarmBackend(),
+            dispatcher = TimeEventDispatcher { dispatched += it },
+            now = { now },
+        )
+
+        val report = coordinator.reconcile(ReconcileReason.APP_START)
+
+        assertEquals(listOf(automation.id), report.recovered)
+        assertEquals(1, dispatched.size)
+        assertEquals(AutomationStatus.DISABLED, store.get(automation.id)?.status)
     }
 
     private fun coordinator(
