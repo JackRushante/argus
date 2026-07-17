@@ -301,6 +301,27 @@ class GenerativeEndToEndInstrumentedTest {
             Unit
 
         override suspend fun openUrl(url: String, executionId: ExecutionId, priority: Int) = Unit
+        override suspend fun setAlarm(
+            hour: Int,
+            minute: Int,
+            label: String?,
+            skipUi: Boolean,
+            executionId: ExecutionId,
+            priority: Int,
+        ) = Unit
+        override suspend fun setTimer(
+            seconds: Int,
+            label: String?,
+            skipUi: Boolean,
+            executionId: ExecutionId,
+            priority: Int,
+        ) = Unit
+        override suspend fun openSettingsScreen(
+            screen: dev.argus.engine.model.SettingsScreen,
+            pkg: String?,
+            executionId: ExecutionId,
+            priority: Int,
+        ) = Unit
         override suspend fun tap(x: Int, y: Int, executionId: ExecutionId, priority: Int) = Unit
         override suspend fun inputText(text: String, executionId: ExecutionId, priority: Int) = Unit
         override suspend fun writeSetting(

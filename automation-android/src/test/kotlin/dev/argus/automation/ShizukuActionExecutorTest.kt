@@ -321,6 +321,7 @@ class ShizukuActionExecutorTest {
         },
         whitelistedIds: suspend () -> Set<String> = { emptySet() },
         baseActions: AndroidBaseActionExecutor? = null,
+        shizukuReady: () -> Boolean = { false },
     ) = ShizukuActionExecutor(
         tools = tools,
         notifier = AutomationNotifier { _, _, _ -> },
@@ -330,7 +331,62 @@ class ShizukuActionExecutorTest {
         staticShell = staticShell,
         whitelistedIds = whitelistedIds,
         baseActions = baseActions,
+        shizukuReady = shizukuReady,
     )
+
+    @Test
+    fun `activity-launch actions prefer privileged am start when shizuku is ready`() = runTest {
+        val surface = RecordingBaseSurface()
+        val tools = RecordingDeviceController()
+        val exec = executor(
+            tools = tools,
+            baseActions = AndroidBaseActionExecutor(surface),
+            shizukuReady = { true },
+        )
+
+        assertEquals(ActionResult.Success, exec.execute(Action.SetAlarm(7, 30, "Palestra"), context))
+        assertEquals(ActionResult.Success, exec.execute(Action.SetTimer(300), context))
+        assertEquals(ActionResult.Success, exec.execute(Action.OpenSettingsScreen(SettingsScreen.WIFI), context))
+        assertEquals(ActionResult.Success, exec.execute(Action.LaunchApp("com.example.app"), context))
+        assertEquals(ActionResult.Success, exec.execute(Action.OpenUrl("https://example.com"), context))
+
+        // Con Shizuku pronto le activity-launch passano dal privilegiato `am start`, mai dall'Intent BASE.
+        assertEquals(
+            listOf(
+                "alarm:7:30:Palestra:true",
+                "timer:300:null:true",
+                "settings:WIFI:null",
+                "launch:com.example.app",
+                "url:https://example.com",
+            ),
+            tools.calls,
+        )
+        assertTrue(surface.alarms.isEmpty() && surface.timers.isEmpty())
+        assertTrue(surface.settingsScreens.isEmpty() && surface.launched.isEmpty() && surface.opened.isEmpty())
+    }
+
+    @Test
+    fun `manager actions stay on the base executor even when shizuku is ready`() = runTest {
+        val surface = RecordingBaseSurface()
+        val tools = RecordingDeviceController()
+        val exec = executor(
+            tools = tools,
+            baseActions = AndroidBaseActionExecutor(surface),
+            shizukuReady = { true },
+        )
+
+        assertEquals(ActionResult.Success, exec.execute(Action.SetDnd(DndMode.PRIORITY), context))
+        assertEquals(ActionResult.Success, exec.execute(Action.SetVolume(VolumeStream.MEDIA, 5), context))
+        assertEquals(ActionResult.Success, exec.execute(Action.SetFlashlight(on = true), context))
+        assertEquals(ActionResult.Success, exec.execute(Action.Vibrate(durationMs = 200), context))
+
+        // Le azioni Manager funzionano già da background: nessun motivo per lo shell privilegiato.
+        assertEquals(listOf(DndMode.PRIORITY), surface.dndModes)
+        assertEquals(listOf("MEDIA:5"), surface.volumes)
+        assertEquals(listOf(true), surface.torch)
+        assertEquals(listOf(200), surface.vibrations)
+        assertEquals(emptyList(), tools.calls)
+    }
 
     @Test
     fun `base actions route to the normal-api executor instead of shizuku`() = runTest {
@@ -537,6 +593,27 @@ private class RecordingDeviceController : DeviceController {
         record(executionId, priority, "launch:$packageName")
     override suspend fun openUrl(url: String, executionId: ExecutionId, priority: Int) =
         record(executionId, priority, "url:$url")
+    override suspend fun setAlarm(
+        hour: Int,
+        minute: Int,
+        label: String?,
+        skipUi: Boolean,
+        executionId: ExecutionId,
+        priority: Int,
+    ) = record(executionId, priority, "alarm:$hour:$minute:$label:$skipUi")
+    override suspend fun setTimer(
+        seconds: Int,
+        label: String?,
+        skipUi: Boolean,
+        executionId: ExecutionId,
+        priority: Int,
+    ) = record(executionId, priority, "timer:$seconds:$label:$skipUi")
+    override suspend fun openSettingsScreen(
+        screen: SettingsScreen,
+        pkg: String?,
+        executionId: ExecutionId,
+        priority: Int,
+    ) = record(executionId, priority, "settings:$screen:$pkg")
     override suspend fun tap(x: Int, y: Int, executionId: ExecutionId, priority: Int) =
         record(executionId, priority, "tap:$x,$y")
     override suspend fun inputText(text: String, executionId: ExecutionId, priority: Int) =
@@ -558,6 +635,27 @@ private class ThrowingDeviceController(private val failure: RuntimeException) : 
     override suspend fun setRinger(mode: RingerMode, executionId: ExecutionId, priority: Int) = fail()
     override suspend fun launchApp(packageName: String, executionId: ExecutionId, priority: Int) = fail()
     override suspend fun openUrl(url: String, executionId: ExecutionId, priority: Int) = fail()
+    override suspend fun setAlarm(
+        hour: Int,
+        minute: Int,
+        label: String?,
+        skipUi: Boolean,
+        executionId: ExecutionId,
+        priority: Int,
+    ) = fail()
+    override suspend fun setTimer(
+        seconds: Int,
+        label: String?,
+        skipUi: Boolean,
+        executionId: ExecutionId,
+        priority: Int,
+    ) = fail()
+    override suspend fun openSettingsScreen(
+        screen: SettingsScreen,
+        pkg: String?,
+        executionId: ExecutionId,
+        priority: Int,
+    ) = fail()
     override suspend fun tap(x: Int, y: Int, executionId: ExecutionId, priority: Int) = fail()
     override suspend fun inputText(text: String, executionId: ExecutionId, priority: Int) = fail()
     override suspend fun writeSetting(

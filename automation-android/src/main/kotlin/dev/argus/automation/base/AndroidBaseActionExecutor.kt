@@ -9,6 +9,14 @@ import kotlinx.coroutines.CancellationException
 import java.net.URI
 
 /**
+ * `startActivity` da un contesto **background** (automazione: receiver/AlarmManager) viene bloccato
+ * da Android 14+/OEM (caveat Background Activity Launch). La superficie reale la solleva così che
+ * l'executor emetta il codice **onesto** `activity_start_blocked` (finisce nel journal) invece del
+ * generico `action_failed`. Il percorso affidabile da background è quello privilegiato `am start`.
+ */
+class ActivityStartBlockedException(cause: Throwable? = null) : Exception(cause)
+
+/**
  * Superficie Android normale per le azioni BASE (decision record §7.3): nessuno Shizuku, solo
  * NotificationManager/AudioManager/PackageManager/Intent. Astratta per il test — la logica di
  * mapping, grant e validazione vive in [AndroidBaseActionExecutor], l'adapter reale è sottile.
@@ -130,6 +138,9 @@ class AndroidBaseActionExecutor(private val surface: BaseActionSurface) {
         block()
     } catch (error: CancellationException) {
         throw error
+    } catch (_: ActivityStartBlockedException) {
+        // Distinto da action_failed: da background l'Intent non parte, serve Shizuku (`am start`).
+        ActionResult.Failure("activity_start_blocked")
     } catch (_: Exception) {
         ActionResult.Failure("action_failed")
     }

@@ -518,6 +518,7 @@ object ArgusModule {
         clipboard: ClipboardCopier,
         whitelist: ContactWhitelistStore,
         baseActions: AndroidBaseActionExecutor,
+        gateway: ShizukuGateway,
     ): ShizukuActionExecutor =
         ShizukuActionExecutor(
             tools,
@@ -529,8 +530,12 @@ object ArgusModule {
             // Riletta a ogni scatto, non memoizzata: togliere un contatto dalla whitelist deve
             // revocargli la shell subito, senza attendere un riavvio del processo.
             whitelistedIds = { whitelist.all().mapTo(mutableSetOf()) { it.id } },
-            // Tier base (P3-3): DND/Ringer/LaunchApp/OpenUrl via API normali, non Shizuku.
+            // Tier base (P3-3): DND/Ringer via API normali, non Shizuku.
             baseActions = baseActions,
+            // Caveat BAL: le activity-launch (sveglia/timer/settings/app/URL) da automazione (background)
+            // sono affidabili solo via `am start` privilegiato. Riletto a ogni scatto: se l'utente revoca
+            // Shizuku si ricade sul percorso BASE senza riavvio.
+            shizukuReady = { gateway.status() == dev.argus.shizuku.ShizukuGatewayStatus.AUTHORIZED },
         )
 
     @Provides

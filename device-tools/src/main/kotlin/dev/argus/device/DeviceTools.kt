@@ -3,6 +3,7 @@ package dev.argus.device
 import android.content.Context
 import dev.argus.engine.model.DndMode
 import dev.argus.engine.model.SettingNamespace
+import dev.argus.engine.model.SettingsScreen
 import dev.argus.engine.model.WriteSettingPolicy
 import dev.argus.engine.runtime.ExecutionId
 import dev.argus.shizuku.PrivilegedShell
@@ -40,6 +41,37 @@ interface DeviceController {
     suspend fun setRinger(mode: RingerMode, executionId: ExecutionId, priority: Int = 0)
     suspend fun launchApp(packageName: String, executionId: ExecutionId, priority: Int = 0)
     suspend fun openUrl(url: String, executionId: ExecutionId, priority: Int = 0)
+
+    /**
+     * Sveglia/timer/schermate impostazioni reali via `am start` privilegiato. A differenza del
+     * percorso BASE ([dev.argus.automation.base.BaseActionSurface]) queste girano con identità
+     * shell (uid 2000) ed **esistono da background** (esenti dal blocco Background Activity Launch
+     * di Android 14+/OEM). Sono il fix del caveat BAL: da automazione la sola via affidabile.
+     */
+    suspend fun setAlarm(
+        hour: Int,
+        minute: Int,
+        label: String?,
+        skipUi: Boolean,
+        executionId: ExecutionId,
+        priority: Int = 0,
+    )
+
+    suspend fun setTimer(
+        seconds: Int,
+        label: String?,
+        skipUi: Boolean,
+        executionId: ExecutionId,
+        priority: Int = 0,
+    )
+
+    suspend fun openSettingsScreen(
+        screen: SettingsScreen,
+        pkg: String?,
+        executionId: ExecutionId,
+        priority: Int = 0,
+    )
+
     suspend fun tap(x: Int, y: Int, executionId: ExecutionId, priority: Int = 0)
     suspend fun inputText(text: String, executionId: ExecutionId, priority: Int = 0)
     suspend fun writeSetting(
@@ -139,6 +171,81 @@ class DeviceTools(
             executionId = executionId,
             priority = priority,
         )
+    }
+
+    override suspend fun setAlarm(
+        hour: Int,
+        minute: Int,
+        label: String?,
+        skipUi: Boolean,
+        executionId: ExecutionId,
+        priority: Int,
+    ) {
+        require(hour in 0..23 && minute in 0..59) { "Orario sveglia fuori intervallo" }
+        val command = buildList {
+            addAll(listOf(AM, "start", "--user", "current", "-a", "android.intent.action.SET_ALARM"))
+            addAll(listOf("--ei", ALARM_EXTRA_HOUR, hour.toString()))
+            addAll(listOf("--ei", ALARM_EXTRA_MINUTES, minute.toString()))
+            addAll(listOf("--ez", ALARM_EXTRA_SKIP_UI, skipUi.toString()))
+            appendLabel(label)
+        }
+        runChecked("set_alarm", command, executionId, priority)
+    }
+
+    override suspend fun setTimer(
+        seconds: Int,
+        label: String?,
+        skipUi: Boolean,
+        executionId: ExecutionId,
+        priority: Int,
+    ) {
+        require(seconds in 1..MAX_TIMER_SECONDS) { "Durata timer fuori intervallo" }
+        val command = buildList {
+            addAll(listOf(AM, "start", "--user", "current", "-a", "android.intent.action.SET_TIMER"))
+            addAll(listOf("--ei", ALARM_EXTRA_LENGTH, seconds.toString()))
+            addAll(listOf("--ez", ALARM_EXTRA_SKIP_UI, skipUi.toString()))
+            appendLabel(label)
+        }
+        runChecked("set_timer", command, executionId, priority)
+    }
+
+    override suspend fun openSettingsScreen(
+        screen: SettingsScreen,
+        pkg: String?,
+        executionId: ExecutionId,
+        priority: Int,
+    ) {
+        val command = buildList {
+            addAll(listOf(AM, "start", "--user", "current", "-a", settingsAction(screen)))
+            if (screen == SettingsScreen.APP_DETAILS) {
+                require(PACKAGE_NAME.matches(pkg.orEmpty())) { "Package non valido" }
+                addAll(listOf("-d", "package:$pkg"))
+            }
+        }
+        runChecked("open_settings", command, executionId, priority)
+    }
+
+    /** L'etichetta è un token argv separato (nessuna shell injection), ma resta un dato: bounded e
+     *  senza caratteri di controllo, come [inputText]. */
+    private fun MutableList<String>.appendLabel(label: String?) {
+        if (label.isNullOrBlank()) return
+        require(label.length <= MAX_LABEL_CHARS) { "Etichetta troppo lunga" }
+        require(label.none(Char::isISOControl)) { "L'etichetta contiene caratteri di controllo" }
+        addAll(listOf("--es", ALARM_EXTRA_MESSAGE, label))
+    }
+
+    /** Enum CHIUSO → action-string Settings.ACTION_* letterale (niente action arbitraria: no routing
+     *  sink privilegiato). Speculare a `settingsIntent` del BaseActionSurface. */
+    private fun settingsAction(screen: SettingsScreen): String = when (screen) {
+        SettingsScreen.WIFI -> "android.settings.WIFI_SETTINGS"
+        SettingsScreen.BLUETOOTH -> "android.settings.BLUETOOTH_SETTINGS"
+        SettingsScreen.DISPLAY -> "android.settings.DISPLAY_SETTINGS"
+        SettingsScreen.SOUND -> "android.settings.SOUND_SETTINGS"
+        SettingsScreen.LOCATION -> "android.settings.LOCATION_SOURCE_SETTINGS"
+        SettingsScreen.BATTERY -> "android.intent.action.POWER_USAGE_SUMMARY"
+        SettingsScreen.DATE -> "android.settings.DATE_SETTINGS"
+        SettingsScreen.APP_DETAILS -> "android.settings.APPLICATION_DETAILS_SETTINGS"
+        SettingsScreen.SETTINGS -> "android.settings.SETTINGS"
     }
 
     override suspend fun tap(x: Int, y: Int, executionId: ExecutionId, priority: Int) {
@@ -294,6 +401,13 @@ class DeviceTools(
         const val REMOTE_TEMP_PREFIX = "/data/local/tmp/argus-ui-"
         const val MAX_TEXT_CHARS = 4_000
         const val MAX_URL_CHARS = 8_192
+        const val MAX_TIMER_SECONDS = 86_400
+        const val MAX_LABEL_CHARS = 200
+        const val ALARM_EXTRA_HOUR = "android.intent.extra.alarm.HOUR"
+        const val ALARM_EXTRA_MINUTES = "android.intent.extra.alarm.MINUTES"
+        const val ALARM_EXTRA_LENGTH = "android.intent.extra.alarm.LENGTH"
+        const val ALARM_EXTRA_SKIP_UI = "android.intent.extra.alarm.SKIP_UI"
+        const val ALARM_EXTRA_MESSAGE = "android.intent.extra.alarm.MESSAGE"
         const val MAX_UI_DUMP_BYTES = 4 * 1024 * 1024
         const val CLEANUP_TIMEOUT_MILLIS = 5_000L
         const val CLEANUP_OUTPUT_BYTES = 4 * 1024

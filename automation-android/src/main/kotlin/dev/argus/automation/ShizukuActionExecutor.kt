@@ -49,6 +49,14 @@ class ShizukuActionExecutor(
      * DI non lo cabla (tier base attivo), il comportamento resta quello legacy via [tools].
      */
     private val baseActions: AndroidBaseActionExecutor? = null,
+    /**
+     * Vero quando Shizuku è vivo e concesso. Le azioni **activity-launch** (sveglia/timer/schermate
+     * impostazioni/app/URL) partono da un Intent `startActivity`, che Android 14+/OEM **bloccano da
+     * background** (caveat BAL): da un'automazione l'Intent BASE fallisce. Quando Shizuku è pronto le
+     * instradiamo su `am start` privilegiato (identità shell, esente dal blocco) così funzionano anche
+     * da background. Default **false**: senza segnale si resta sul percorso BASE (foreground-only).
+     */
+    private val shizukuReady: () -> Boolean = { false },
 ) : ActionExecutor {
     override suspend fun execute(action: Action, ctx: FireContext): ActionResult = try {
         when (action) {
@@ -75,10 +83,20 @@ class ShizukuActionExecutor(
                 baseActions?.setRinger(mode)
                     ?: success { tools.setRinger(mode, ctx.executionId, ctx.priority) }
             }
-            is Action.LaunchApp -> baseActions?.launchApp(action.pkg)
-                ?: success { tools.launchApp(action.pkg, ctx.executionId, ctx.priority) }
-            is Action.OpenUrl -> baseActions?.openUrl(action.url)
-                ?: success { tools.openUrl(action.url, ctx.executionId, ctx.priority) }
+            // Activity-launch: privilegiato `am start` quando Shizuku è pronto (sopravvive al
+            // background), altrimenti Intent BASE (foreground) o, senza base, il vecchio percorso tools.
+            is Action.LaunchApp -> if (shizukuReady()) {
+                success { tools.launchApp(action.pkg, ctx.executionId, ctx.priority) }
+            } else {
+                baseActions?.launchApp(action.pkg)
+                    ?: success { tools.launchApp(action.pkg, ctx.executionId, ctx.priority) }
+            }
+            is Action.OpenUrl -> if (shizukuReady()) {
+                success { tools.openUrl(action.url, ctx.executionId, ctx.priority) }
+            } else {
+                baseActions?.openUrl(action.url)
+                    ?: success { tools.openUrl(action.url, ctx.executionId, ctx.priority) }
+            }
             is Action.ShowNotification -> success {
                 notifier.show(action.title, action.text, ctx)
             }
@@ -101,13 +119,21 @@ class ShizukuActionExecutor(
             // Clipboard: locale, senza privilegi; il payload arriva dall'evento del trigger.
             is Action.CopyToClipboard -> clipboard.copy(ctx.event, action.extractionRegex)
 
-            // Sveglia/timer: BASE via Intent AlarmClock (permesso normal SET_ALARM). Base-only per
-            // S1: senza base executor falliscono pulito. Il fallback Shizuku `am start` per il
-            // caveat BAL è un TODO futuro, non ora.
-            is Action.SetAlarm -> baseActions?.setAlarm(action.hour, action.minute, action.label, action.skipUi)
-                ?: ActionResult.Failure("base_executor_unavailable")
-            is Action.SetTimer -> baseActions?.setTimer(action.seconds, action.label, action.skipUi)
-                ?: ActionResult.Failure("base_executor_unavailable")
+            // Sveglia/timer: privilegiato `am start` quando Shizuku è pronto (unica via affidabile da
+            // background, caveat BAL), altrimenti Intent AlarmClock BASE (permesso normal SET_ALARM,
+            // solo foreground). Senza né Shizuku né base executor: fallimento pulito.
+            is Action.SetAlarm -> if (shizukuReady()) {
+                success { tools.setAlarm(action.hour, action.minute, action.label, action.skipUi, ctx.executionId, ctx.priority) }
+            } else {
+                baseActions?.setAlarm(action.hour, action.minute, action.label, action.skipUi)
+                    ?: ActionResult.Failure("base_executor_unavailable")
+            }
+            is Action.SetTimer -> if (shizukuReady()) {
+                success { tools.setTimer(action.seconds, action.label, action.skipUi, ctx.executionId, ctx.priority) }
+            } else {
+                baseActions?.setTimer(action.seconds, action.label, action.skipUi)
+                    ?: ActionResult.Failure("base_executor_unavailable")
+            }
 
             // Manager/Intent BASE (S4): volume/torcia/schermata impostazioni/vibrazione. Base-only:
             // senza base executor falliscono pulito, non toccano mai lo shell privilegiato.
@@ -115,8 +141,13 @@ class ShizukuActionExecutor(
                 ?: ActionResult.Failure("base_executor_unavailable")
             is Action.SetFlashlight -> baseActions?.setFlashlight(action.on)
                 ?: ActionResult.Failure("base_executor_unavailable")
-            is Action.OpenSettingsScreen -> baseActions?.openSettingsScreen(action.screen, action.pkg)
-                ?: ActionResult.Failure("base_executor_unavailable")
+            // Activity-launch come sveglia: privilegiato quando Shizuku è pronto, Intent BASE altrimenti.
+            is Action.OpenSettingsScreen -> if (shizukuReady()) {
+                success { tools.openSettingsScreen(action.screen, action.pkg, ctx.executionId, ctx.priority) }
+            } else {
+                baseActions?.openSettingsScreen(action.screen, action.pkg)
+                    ?: ActionResult.Failure("base_executor_unavailable")
+            }
             is Action.Vibrate -> baseActions?.vibrate(action.durationMs)
                 ?: ActionResult.Failure("base_executor_unavailable")
 

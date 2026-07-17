@@ -2,6 +2,7 @@ package dev.argus.device
 
 import dev.argus.engine.model.DndMode
 import dev.argus.engine.model.SettingNamespace
+import dev.argus.engine.model.SettingsScreen
 import dev.argus.engine.runtime.ExecutionId
 import dev.argus.shizuku.PrivilegedShell
 import dev.argus.shizuku.ShellResult
@@ -79,6 +80,79 @@ class DeviceToolsTest {
         assertEquals(setOf(EXECUTION_ID.value), shell.calls.mapNotNull { it.executionId }.toSet())
         assertEquals(setOf(PRIORITY), shell.calls.map { it.priority }.toSet())
         assertFalse(shell.calls.any { it.command.firstOrNull() in setOf("sh", "/system/bin/sh") })
+    }
+
+    @Test
+    fun `activity-launch actions map to am start argv so they survive background execution`() = runTest {
+        val shell = RecordingShell()
+        val tools = DeviceTools(shell, temporaryDirectory.toFile())
+
+        tools.setAlarm(10, 53, label = null, skipUi = true, EXECUTION_ID, PRIORITY)
+        tools.setAlarm(7, 5, label = "Sveglia", skipUi = false, EXECUTION_ID, PRIORITY)
+        tools.setTimer(600, label = null, skipUi = true, EXECUTION_ID, PRIORITY)
+        tools.setTimer(90, label = "Pasta", skipUi = true, EXECUTION_ID, PRIORITY)
+        tools.openSettingsScreen(SettingsScreen.WIFI, pkg = null, EXECUTION_ID, PRIORITY)
+        tools.openSettingsScreen(SettingsScreen.APP_DETAILS, pkg = "com.example.app", EXECUTION_ID, PRIORITY)
+
+        assertEquals(
+            listOf(
+                listOf(
+                    "/system/bin/am", "start", "--user", "current",
+                    "-a", "android.intent.action.SET_ALARM",
+                    "--ei", "android.intent.extra.alarm.HOUR", "10",
+                    "--ei", "android.intent.extra.alarm.MINUTES", "53",
+                    "--ez", "android.intent.extra.alarm.SKIP_UI", "true",
+                ),
+                listOf(
+                    "/system/bin/am", "start", "--user", "current",
+                    "-a", "android.intent.action.SET_ALARM",
+                    "--ei", "android.intent.extra.alarm.HOUR", "7",
+                    "--ei", "android.intent.extra.alarm.MINUTES", "5",
+                    "--ez", "android.intent.extra.alarm.SKIP_UI", "false",
+                    "--es", "android.intent.extra.alarm.MESSAGE", "Sveglia",
+                ),
+                listOf(
+                    "/system/bin/am", "start", "--user", "current",
+                    "-a", "android.intent.action.SET_TIMER",
+                    "--ei", "android.intent.extra.alarm.LENGTH", "600",
+                    "--ez", "android.intent.extra.alarm.SKIP_UI", "true",
+                ),
+                listOf(
+                    "/system/bin/am", "start", "--user", "current",
+                    "-a", "android.intent.action.SET_TIMER",
+                    "--ei", "android.intent.extra.alarm.LENGTH", "90",
+                    "--ez", "android.intent.extra.alarm.SKIP_UI", "true",
+                    "--es", "android.intent.extra.alarm.MESSAGE", "Pasta",
+                ),
+                listOf(
+                    "/system/bin/am", "start", "--user", "current",
+                    "-a", "android.settings.WIFI_SETTINGS",
+                ),
+                listOf(
+                    "/system/bin/am", "start", "--user", "current",
+                    "-a", "android.settings.APPLICATION_DETAILS_SETTINGS",
+                    "-d", "package:com.example.app",
+                ),
+            ),
+            shell.calls.map { it.command },
+        )
+        assertFalse(shell.calls.any { it.command.firstOrNull() in setOf("sh", "/system/bin/sh") })
+    }
+
+    @Test
+    fun `invalid activity-launch values never reach privileged transport`() = runTest {
+        val shell = RecordingShell()
+        val tools = DeviceTools(shell, temporaryDirectory.toFile())
+
+        assertFailsWith<IllegalArgumentException> { tools.setAlarm(24, 0, null, true, EXECUTION_ID) }
+        assertFailsWith<IllegalArgumentException> { tools.setAlarm(0, 60, null, true, EXECUTION_ID) }
+        assertFailsWith<IllegalArgumentException> { tools.setAlarm(6, 0, "riga\nnuova", true, EXECUTION_ID) }
+        assertFailsWith<IllegalArgumentException> { tools.setTimer(0, null, true, EXECUTION_ID) }
+        assertFailsWith<IllegalArgumentException> { tools.setTimer(90_000, null, true, EXECUTION_ID) }
+        assertFailsWith<IllegalArgumentException> {
+            tools.openSettingsScreen(SettingsScreen.APP_DETAILS, "bad package", EXECUTION_ID)
+        }
+        assertEquals(emptyList(), shell.calls)
     }
 
     @Test

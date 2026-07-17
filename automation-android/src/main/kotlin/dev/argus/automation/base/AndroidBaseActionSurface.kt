@@ -54,12 +54,12 @@ class AndroidBaseActionSurface(context: Context) : BaseActionSurface {
 
     override fun launchPackage(pkg: String): Boolean {
         val intent = appContext.packageManager.getLaunchIntentForPackage(pkg) ?: return false
-        appContext.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        startActivityGuarded(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         return true
     }
 
     override fun openHttpUrl(url: String) {
-        appContext.startActivity(
+        startActivityGuarded(
             Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         )
     }
@@ -151,7 +151,18 @@ class AndroidBaseActionSurface(context: Context) : BaseActionSurface {
      *  invece di crashare con ActivityNotFoundException. */
     private fun startIfResolvable(intent: Intent): Boolean {
         if (intent.resolveActivity(appContext.packageManager) == null) return false
-        appContext.startActivity(intent)
+        startActivityGuarded(intent)
         return true
+    }
+
+    /** `startActivity` da background è bloccato da Android 14+/OEM (caveat BAL): traduciamo il fallimento
+     *  in [ActivityStartBlockedException] così l'executor emette `activity_start_blocked` (onesto), non
+     *  il generico `action_failed`. Il percorso affidabile da automazione è il privilegiato `am start`. */
+    private fun startActivityGuarded(intent: Intent) {
+        try {
+            appContext.startActivity(intent)
+        } catch (error: Exception) {
+            throw ActivityStartBlockedException(error)
+        }
     }
 }

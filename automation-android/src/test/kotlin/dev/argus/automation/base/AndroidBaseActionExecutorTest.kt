@@ -30,6 +30,7 @@ class AndroidBaseActionExecutorTest {
         var vibratorAvailable: Boolean = true,
         var streamMax: Int = 15,
         var throwOn: String? = null,
+        var blockedOn: String? = null,
     ) : BaseActionSurface {
         val dndModes = mutableListOf<DndMode>()
         val ringerModes = mutableListOf<RingerMode>()
@@ -53,6 +54,7 @@ class AndroidBaseActionExecutorTest {
         }
         override fun launchPackage(pkg: String): Boolean {
             if (throwOn == "launch") error("boom")
+            if (blockedOn == "launch") throw ActivityStartBlockedException()
             if (!launchable) return false
             launched += pkg
             return true
@@ -63,6 +65,7 @@ class AndroidBaseActionExecutorTest {
         }
         override fun setAlarm(hour: Int, minute: Int, label: String?, skipUi: Boolean): Boolean {
             if (throwOn == "alarm") error("boom")
+            if (blockedOn == "alarm") throw ActivityStartBlockedException()
             if (!alarmResolvable) return false
             alarms += AlarmCall(hour, minute, label, skipUi)
             return true
@@ -235,6 +238,19 @@ class AndroidBaseActionExecutorTest {
         val surface = FakeSurface(throwOn = "alarm")
         val result = AndroidBaseActionExecutor(surface).setAlarm(7, 0, null, skipUi = true)
         assertEquals(ActionResult.Failure("action_failed"), result)
+    }
+
+    @Test
+    fun `a blocked background activity start is a distinct honest failure`() = runTest {
+        // Caveat BAL: da background startActivity viene bloccato → codice onesto, non action_failed.
+        assertEquals(
+            ActionResult.Failure("activity_start_blocked"),
+            AndroidBaseActionExecutor(FakeSurface(blockedOn = "alarm")).setAlarm(7, 0, null, skipUi = true),
+        )
+        assertEquals(
+            ActionResult.Failure("activity_start_blocked"),
+            AndroidBaseActionExecutor(FakeSurface(blockedOn = "launch")).launchApp("com.example.app"),
+        )
     }
 
     @Test
