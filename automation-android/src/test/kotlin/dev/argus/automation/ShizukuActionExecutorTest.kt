@@ -376,13 +376,14 @@ class ShizukuActionExecutorTest {
         )
 
         assertEquals(ActionResult.Success, exec.execute(Action.SetDnd(DndMode.PRIORITY), context))
-        assertEquals(ActionResult.Success, exec.execute(Action.SetVolume(VolumeStream.MEDIA, 5), context))
+        // level è una PERCENTUALE: 100% mappa sul max reale dello stream (RecordingBaseSurface: 15).
+        assertEquals(ActionResult.Success, exec.execute(Action.SetVolume(VolumeStream.MEDIA, 100), context))
         assertEquals(ActionResult.Success, exec.execute(Action.SetFlashlight(on = true), context))
         assertEquals(ActionResult.Success, exec.execute(Action.Vibrate(durationMs = 200), context))
 
         // Le azioni Manager funzionano già da background: nessun motivo per lo shell privilegiato.
         assertEquals(listOf(DndMode.PRIORITY), surface.dndModes)
-        assertEquals(listOf("MEDIA:5"), surface.volumes)
+        assertEquals(listOf("MEDIA:15"), surface.volumes)
         assertEquals(listOf(true), surface.torch)
         assertEquals(listOf(200), surface.vibrations)
         assertEquals(emptyList(), tools.calls)
@@ -496,9 +497,10 @@ class ShizukuActionExecutorTest {
         val tools = RecordingDeviceController()
         val exec = executor(tools = tools, baseActions = AndroidBaseActionExecutor(surface))
 
+        // level è una PERCENTUALE: 100% mappa sul max reale dello stream (RecordingBaseSurface: 15).
         assertEquals(
             ActionResult.Success,
-            exec.execute(Action.SetVolume(VolumeStream.MEDIA, level = 5), context),
+            exec.execute(Action.SetVolume(VolumeStream.MEDIA, level = 100), context),
         )
         assertEquals(ActionResult.Success, exec.execute(Action.SetFlashlight(on = true), context))
         assertEquals(
@@ -507,7 +509,7 @@ class ShizukuActionExecutorTest {
         )
         assertEquals(ActionResult.Success, exec.execute(Action.Vibrate(durationMs = 200), context))
 
-        assertEquals(listOf("MEDIA:5"), surface.volumes)
+        assertEquals(listOf("MEDIA:15"), surface.volumes)
         assertEquals(listOf(true), surface.torch)
         assertEquals(listOf("WIFI:null"), surface.settingsScreens)
         assertEquals(listOf(200), surface.vibrations)

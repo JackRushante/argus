@@ -254,24 +254,42 @@ class AndroidBaseActionExecutorTest {
     }
 
     @Test
-    fun `set volume forwards the level to the stream`() = runTest {
-        val surface = FakeSurface()
-        val result = AndroidBaseActionExecutor(surface).setVolume(VolumeStream.MEDIA, 7)
+    fun `set volume maps a percentage onto the stream maximum`() = runTest {
+        // level è una PERCENTUALE: 50% di un max reale 16 = 8 (non l'indice assoluto 50/50).
+        val surface = FakeSurface(streamMax = 16)
+        val result = AndroidBaseActionExecutor(surface).setVolume(VolumeStream.MEDIA, 50)
         assertEquals(ActionResult.Success, result)
-        assertEquals(listOf(VolumeCall(VolumeStream.MEDIA, 7)), surface.volumes)
+        assertEquals(listOf(VolumeCall(VolumeStream.MEDIA, 8)), surface.volumes)
     }
 
     @Test
-    fun `set volume clamps the level to the stream maximum`() = runTest {
-        val surface = FakeSurface(streamMax = 10)
-        assertEquals(ActionResult.Success, AndroidBaseActionExecutor(surface).setVolume(VolumeStream.ALARM, 999))
-        assertEquals(listOf(VolumeCall(VolumeStream.ALARM, 10)), surface.volumes)
+    fun `set volume at 100 percent reaches the stream maximum`() = runTest {
+        val surface = FakeSurface(streamMax = 16)
+        assertEquals(ActionResult.Success, AndroidBaseActionExecutor(surface).setVolume(VolumeStream.ALARM, 100))
+        assertEquals(listOf(VolumeCall(VolumeStream.ALARM, 16)), surface.volumes)
     }
 
     @Test
-    fun `set volume rejects a negative level before touching Android`() = runTest {
+    fun `set volume never silences a positive percentage`() = runTest {
+        // 1% di 16 arrotonda a 0, ma una percentuale > 0 non deve mai silenziare: minimo 1.
+        val surface = FakeSurface(streamMax = 16)
+        assertEquals(ActionResult.Success, AndroidBaseActionExecutor(surface).setVolume(VolumeStream.ALARM, 1))
+        assertEquals(listOf(VolumeCall(VolumeStream.ALARM, 1)), surface.volumes)
+    }
+
+    @Test
+    fun `set volume at 0 percent is a real zero`() = runTest {
+        val surface = FakeSurface(streamMax = 16)
+        assertEquals(ActionResult.Success, AndroidBaseActionExecutor(surface).setVolume(VolumeStream.MEDIA, 0))
+        assertEquals(listOf(VolumeCall(VolumeStream.MEDIA, 0)), surface.volumes)
+    }
+
+    @Test
+    fun `set volume rejects a percentage outside 0 to 100 before touching Android`() = runTest {
         val surface = FakeSurface()
-        assertEquals(ActionResult.Failure("action_invalid"), AndroidBaseActionExecutor(surface).setVolume(VolumeStream.MEDIA, -1))
+        val executor = AndroidBaseActionExecutor(surface)
+        assertEquals(ActionResult.Failure("action_invalid"), executor.setVolume(VolumeStream.MEDIA, -1))
+        assertEquals(ActionResult.Failure("action_invalid"), executor.setVolume(VolumeStream.MEDIA, 101))
         assertTrue(surface.volumes.isEmpty())
     }
 

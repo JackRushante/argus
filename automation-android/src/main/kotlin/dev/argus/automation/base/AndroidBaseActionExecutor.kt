@@ -99,7 +99,8 @@ class AndroidBaseActionExecutor(private val surface: BaseActionSurface) {
     }
 
     suspend fun setVolume(stream: VolumeStream, level: Int): ActionResult = guarded {
-        if (level < 0) return ActionResult.Failure("action_invalid")
+        // `level` è una PERCENTUALE 0..100, non un indice assoluto dello stream.
+        if (level !in 0..100) return ActionResult.Failure("action_invalid")
         // Portare RING/NOTIFICATION a 0 = silenziare: su Android moderni commuta il DND e richiede
         // il policy grant, esattamente come il ringer (setRinger sopra).
         if (level == 0 &&
@@ -108,8 +109,11 @@ class AndroidBaseActionExecutor(private val surface: BaseActionSurface) {
         ) {
             return ActionResult.Failure("volume_policy_unavailable")
         }
-        val clamped = level.coerceAtMost(surface.maxStreamVolume(stream))
-        surface.setStreamVolume(stream, clamped)
+        // Mappa la percentuale sul massimo reale dello stream: 100% = max, 0% = 0. Ogni percentuale
+        // > 0 non deve mai silenziare (minimo 1), altrimenti "volume al 5%" diventerebbe muto.
+        val max = surface.maxStreamVolume(stream)
+        val actual = if (level == 0) 0 else maxOf(1, Math.round(level / 100.0 * max).toInt())
+        surface.setStreamVolume(stream, actual)
         ActionResult.Success
     }
 

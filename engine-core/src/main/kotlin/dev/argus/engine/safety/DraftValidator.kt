@@ -335,8 +335,8 @@ class DraftValidator(
                 validateOptionalText(action.label, "timer_label_invalid", err)
             }
             is Action.SetVolume -> {
-                // Stream è un enum chiuso (compile-enforced). Il livello reale è clampato a
-                // getStreamMaxVolume dall'executor; qui basta rifiutare i valori assurdi.
+                // Stream è un enum chiuso (compile-enforced). `level` è una PERCENTUALE 0..100 che
+                // l'executor mappa sul massimo reale dello stream a runtime; qui basta il range.
                 if (action.level !in 0..MAX_VOLUME_LEVEL)
                     err("volume_level_invalid", "Livello volume fuori intervallo: 0..$MAX_VOLUME_LEVEL")
             }

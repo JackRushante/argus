@@ -137,9 +137,12 @@ sealed interface Action {
         val skipUi: Boolean = true,
     ) : Action
 
-    /** Volume assoluto per stream via `AudioManager.setStreamVolume`. BASE, nessun permesso: la
-     *  gate DND ([BaseActionSurface.isDndPolicyGranted]) scatta solo se porta RING/NOTIFICATION a 0
-     *  (silenziamento). `level` è validato >= 0 e clampato a `getStreamMaxVolume(stream)`. */
+    /** Volume per stream via `AudioManager.setStreamVolume`. BASE, nessun permesso: la gate DND
+     *  ([BaseActionSurface.isDndPolicyGranted]) scatta solo se porta RING/NOTIFICATION a 0
+     *  (silenziamento). `level` è ora una **percentuale 0..100** (non più un indice assoluto dello
+     *  stream): l'executor la mappa sul massimo reale dello stream a runtime
+     *  (`getStreamMaxVolume(stream)`), con 100 = massimo e ogni percentuale > 0 che non silenzia mai
+     *  (minimo 1). Validato in 0..100. */
     @Serializable @SerialName(ActionTypeIds.SET_VOLUME)
     data class SetVolume(
         val stream: VolumeStream,
