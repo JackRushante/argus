@@ -79,8 +79,9 @@ class ProviderCatalogTest {
         assertEquals(WebSearchMechanism.ANTHROPIC_TOOL, ProviderCatalog.spec(ProviderId.ANTHROPIC).quirks.webSearch)
         // OpenRouter: slug modello con suffisso `:online`.
         assertEquals(WebSearchMechanism.OPENROUTER_ONLINE, ProviderCatalog.spec(ProviderId.OPENROUTER).quirks.webSearch)
-        // Gemini: grounding google_search via passthrough extra_body.google.tools (shim OpenAI-compat).
-        assertEquals(WebSearchMechanism.GEMINI_GROUNDING, ProviderCatalog.spec(ProviderId.GEMINI).quirks.webSearch)
+        // Gemini: NONE — grounding via shim OpenAI-compat non raggiungibile (smoke live 2026-07-17:
+        // extra_body.google.tools da' 400 anche su gemini-3). Il web nativo non passa da /chat/completions.
+        assertEquals(WebSearchMechanism.NONE, ProviderCatalog.spec(ProviderId.GEMINI).quirks.webSearch)
         // OpenAI: web_search_options richiede un modello `-search-preview` (non i gpt-5.x configurati) o
         // la Responses API (endpoint diverso da /chat/completions): non supportato pulito qui → NONE.
         assertEquals(WebSearchMechanism.NONE, ProviderCatalog.spec(ProviderId.OPENAI).quirks.webSearch)

@@ -128,11 +128,14 @@ object ProviderCatalog {
             defaultBaseUrl = "https://generativelanguage.googleapis.com/v1beta/openai",
             authStyle = AuthStyle.BEARER,
             defaultModels = listOf("gemini-2.5-pro", "gemini-2.5-flash"),
-            // Grounding via passthrough `extra_body.google.tools=[{google_search:{}}]` sullo shim
-            // OpenAI-compat (il `tools` OpenAI top-level verrebbe rifiutato dal compat layer di Gemini).
+            // Web = NONE (onesto): il grounding via shim OpenAI-compat non e' raggiungibile. Smoke live
+            // 2026-07-17: sia `extra_body.google.tools=[{google_search:{}}]` (formato documentato) sia il
+            // `tools` OpenAI top-level danno 400 ("Unknown name 'tools' at 'extra_body.google'"), anche su
+            // gemini-3-flash-preview. Mismatch doc<->API lato Google. Il web di Gemini passa dall'API nativa
+            // (non da /chat/completions usata qui). Riattivare quando il compat layer accettera' il grounding.
             quirks = ProviderQuirks(
                 extraBodyPassthrough = true,
-                webSearch = WebSearchMechanism.GEMINI_GROUNDING,
+                webSearch = WebSearchMechanism.NONE,
             ),
             costTracked = true,
             prices = mapOf(

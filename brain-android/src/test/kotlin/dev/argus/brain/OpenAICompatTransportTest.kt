@@ -219,7 +219,10 @@ class OpenAICompatTransportTest {
         assertEquals("whatsapp_reply", toolChoice.getValue("function").jsonObject.getValue("name").jsonPrimitive.content)
     }
 
-    @Test fun `gemini web search adds grounding extra_body and forces tool_choice auto`(): Unit = runBlocking {
+    @Test fun `gemini ignores web when mechanism is NONE and keeps forced reply`(): Unit = runBlocking {
+        // Web = NONE per Gemini: il grounding via shim OpenAI-compat non e' raggiungibile (smoke live
+        // 2026-07-17: extra_body.google.tools da 400 anche su gemini-3). Degradazione graziosa: nessun
+        // extra_body, modello invariato, reply forzato — nessuna richiesta che darebbe 400.
         server.enqueue(jsonResponse(
             """
             {"model":"gemini-2.5-flash",
@@ -238,13 +241,8 @@ class OpenAICompatTransportTest {
         val root = Json.parseToJsonElement(
             assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
         ).jsonObject
-        // Gemini NON usa `:online`: il modello resta invariato.
         assertEquals("gemini-2.5-flash", root.getValue("model").jsonPrimitive.content)
-        assertEquals("auto", root.getValue("tool_choice").jsonPrimitive.content)
-        // grounding passthrough: extra_body.google.tools = [{"google_search":{}}]
-        val google = root.getValue("extra_body").jsonObject.getValue("google").jsonObject
-        val grounding = google.getValue("tools").jsonArray.single().jsonObject
-        assertTrue("google_search" in grounding)
+        assertFalse("extra_body" in root)
     }
 
     @Test fun `openai ignores web when mechanism is NONE and keeps forced reply`(): Unit = runBlocking {
