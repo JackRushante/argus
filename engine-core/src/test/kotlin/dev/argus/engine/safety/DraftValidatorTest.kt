@@ -341,6 +341,55 @@ class DraftValidatorTest {
             ),
         )
     }
+    @Test fun `local notification sink is valid with title, empty or web tools, no reply target`() {
+        fun draft(action: Action) = AutomationDraft(
+            name = "notifica cambio",
+            trigger = Trigger.Time(at = "2026-07-17T12:00", tz = "Europe/Rome"),
+            actions = listOf(action),
+        )
+        val bare = Action.InvokeLlm(
+            goal = "genera il cambio euro dollaro",
+            contextSources = emptyList(),
+            allowedTools = emptyList(),
+            replyTargetSender = false,
+            deliver = GenerativeDeliverMode.LOCAL_NOTIFICATION,
+            notificationTitle = "Cambio EUR/USD",
+        )
+        // Nessun trigger notification richiesto: qualsiasi trigger va bene.
+        assertEquals(emptyList(), errors(v.validate(draft(bare), emptySet())))
+        // web.search opzionale + contextSources subset di {state}: valido (catalogo con web).
+        val withWeb = bare.copy(allowedTools = listOf("web.search"), contextSources = listOf("state"))
+        assertEquals(emptyList(), errors(vWeb.validate(draft(withWeb), emptySet())))
+    }
+
+    @Test fun `local notification sink rejects bad title, reply tool, reply target and notification context`() {
+        fun draft(action: Action) = AutomationDraft(
+            name = "notifica cambio",
+            trigger = Trigger.Time(at = "2026-07-17T12:00", tz = "Europe/Rome"),
+            actions = listOf(action),
+        )
+        val base = Action.InvokeLlm(
+            goal = "genera",
+            contextSources = emptyList(),
+            allowedTools = emptyList(),
+            replyTargetSender = false,
+            deliver = GenerativeDeliverMode.LOCAL_NOTIFICATION,
+            notificationTitle = "Titolo",
+        )
+        // Titolo mancante / blank.
+        assertTrue("notification_title_invalid" in errors(v.validate(draft(base.copy(notificationTitle = null)), emptySet())))
+        assertTrue("notification_title_invalid" in errors(v.validate(draft(base.copy(notificationTitle = "   ")), emptySet())))
+        // Titolo con control char o oltre i 120 caratteri.
+        assertTrue("notification_title_invalid" in errors(v.validate(draft(base.copy(notificationTitle = "ab")), emptySet())))
+        assertTrue("notification_title_invalid" in errors(v.validate(draft(base.copy(notificationTitle = "x".repeat(121))), emptySet())))
+        // whatsapp_reply nel sink notifica → toolset non supportato (la notifica È il sink).
+        assertTrue("allowed_tools_unsupported" in errors(v.validate(draft(base.copy(allowedTools = listOf("whatsapp_reply"))), emptySet())))
+        // replyTargetSender DEVE essere false.
+        assertTrue("reply_target_forbidden" in errors(v.validate(draft(base.copy(replyTargetSender = true)), emptySet())))
+        // contextSources con 'notification' non è supportato dal sink notifica.
+        assertTrue("context_source_unsupported" in errors(v.validate(draft(base.copy(contextSources = listOf("notification"))), emptySet())))
+    }
+
     @Test fun `reply tool cannot disable sender binding`() {
         val unbound = validGenerative.copy(actions = listOf(
             Action.InvokeLlm("g", listOf("notification"), listOf("whatsapp_reply"), replyTargetSender = false)

@@ -488,12 +488,47 @@ class DraftValidator(
         err: (String, String) -> Unit,
         warn: (String, String) -> Unit,
     ) {
+        // Controlli comuni ai due sink (goal + forma delle context sources).
         validateRequiredText(action.goal, MAX_TEXT_LENGTH, "goal_invalid", err)
         if (action.contextSources.size > MAX_TOOL_COUNT || action.contextSources.any { it.isBlank() || it.length > 120 })
             err("context_sources_invalid", "Context sources non valide o troppe")
 
-        // Contratto P1: l'unico profilo che la lane generativa esegue davvero al fire-time.
-        // Un draft più permissivo passerebbe la review e fallirebbe poi con action_contract_invalid.
+        when (action.deliver) {
+            GenerativeDeliverMode.WHATSAPP_REPLY ->
+                validateInvokeLlmReplyDeliver(action, trigger, whitelist, err, warn)
+            GenerativeDeliverMode.LOCAL_NOTIFICATION ->
+                validateInvokeLlmNotificationDeliver(action, err)
+        }
+
+        // Difesa in profondità per-tool + timeout: valgono per ENTRAMBI i sink (web.search è in
+        // knownTools; shell.run/automation.* restano vietati e i tool ignoti respinti).
+        if (action.allowedTools.size > MAX_TOOL_COUNT) err("too_many_tools", "Troppi tool in InvokeLlm")
+        if (action.timeoutMs !in 1_000..MAX_LLM_TIMEOUT_MS)
+            err("timeout_invalid", "Timeout InvokeLlm fuori intervallo")
+        for (tool in action.allowedTools) {
+            val norm = tool.lowercase()
+            val forbidden = norm in FORBIDDEN_IN_INVOKE_LLM ||
+                norm == FORBIDDEN_PREFIX_BARE || norm.startsWith(FORBIDDEN_PREFIX)
+            when {
+                tool.isBlank() || tool.length > 120 -> err("tool_invalid", "Nome tool non valido")
+                forbidden -> err("tool_forbidden", "Tool '$tool' vietato al fire-time generativo")
+                tool !in knownTools -> err("tool_unknown", "Tool '$tool' non nel catalogo")
+            }
+        }
+    }
+
+    /**
+     * Sink REPLY (profilo P1, invariato): l'unico profilo che la lane generativa esegue davvero
+     * al fire-time. Un draft più permissivo passerebbe la review e fallirebbe con
+     * action_contract_invalid.
+     */
+    private fun validateInvokeLlmReplyDeliver(
+        action: Action.InvokeLlm,
+        trigger: Trigger,
+        whitelist: Set<String>,
+        err: (String, String) -> Unit,
+        warn: (String, String) -> Unit,
+    ) {
         if (action.contextSources.isEmpty()) {
             err("context_sources_empty", "InvokeLlm richiede almeno la context source 'notification'")
         } else {
@@ -510,22 +545,7 @@ class DraftValidator(
                 "allowed_tools_unsupported",
                 "allowed_tools deve contenere whatsapp_reply e al più web.search",
             )
-
         if (action.allowedTools.isEmpty()) err("no_tools", "InvokeLlm senza allowed_tools")
-        if (action.allowedTools.size > MAX_TOOL_COUNT) err("too_many_tools", "Troppi tool in InvokeLlm")
-        if (action.timeoutMs !in 1_000..MAX_LLM_TIMEOUT_MS)
-            err("timeout_invalid", "Timeout InvokeLlm fuori intervallo")
-
-        for (tool in action.allowedTools) {
-            val norm = tool.lowercase()
-            val forbidden = norm in FORBIDDEN_IN_INVOKE_LLM ||
-                norm == FORBIDDEN_PREFIX_BARE || norm.startsWith(FORBIDDEN_PREFIX)
-            when {
-                tool.isBlank() || tool.length > 120 -> err("tool_invalid", "Nome tool non valido")
-                forbidden -> err("tool_forbidden", "Tool '$tool' vietato al fire-time generativo")
-                tool !in knownTools -> err("tool_unknown", "Tool '$tool' non nel catalogo")
-            }
-        }
 
         val hasReplyTool = action.allowedTools.any { it.lowercase() in REPLY_TOOLS }
         if (hasReplyTool && !action.replyTargetSender)
@@ -537,6 +557,36 @@ class DraftValidator(
 
         if (action.allowedTools.any { it.startsWith("screen.") || it == "state.read" } && hasReplyTool)
             warn("read_plus_reply", "Tool di lettura + canale in uscita: possibile esfiltrazione")
+    }
+
+    /**
+     * Sink NOTIFICA (#59): il testo generato diventa una notifica locale, da un trigger qualsiasi.
+     * Il titolo è LETTERALE (dal fingerprint approvato, mai dal contenuto del trigger — D2). Nessun
+     * vincolo di reply-target: la notifica È il sink, non un canale verso un contatto.
+     */
+    private fun validateInvokeLlmNotificationDeliver(
+        action: Action.InvokeLlm,
+        err: (String, String) -> Unit,
+    ) {
+        val title = action.notificationTitle
+        if (title.isNullOrBlank()) {
+            err("notification_title_invalid", "Il sink notifica richiede un titolo non vuoto")
+        } else if (title.length > MAX_NAME_LENGTH || title.any(Char::isISOControl)) {
+            err("notification_title_invalid", "Titolo notifica oltre $MAX_NAME_LENGTH caratteri o con caratteri di controllo")
+        }
+        if (!GenerativeContract.isNotificationToolset(action.allowedTools))
+            err(
+                "allowed_tools_unsupported",
+                "Il sink notifica ammette al più web.search, mai whatsapp_reply",
+            )
+        if (action.replyTargetSender)
+            err("reply_target_forbidden", "Il sink notifica non può vincolare un destinatario di reply")
+        // contextSources: vuota OPPURE subset di {state} — mai 'notification' (il testo nasce dal goal).
+        action.contextSources.filterNot { it == GenerativeContract.CONTEXT_STATE }.forEach { source ->
+            err("context_source_unsupported", "Context source '$source' non supportata dal sink notifica")
+        }
+        if (action.contextSources.size != action.contextSources.distinct().size)
+            err("context_sources_duplicated", "Context sources duplicate in InvokeLlm")
     }
 
     private fun validateReplyTarget(

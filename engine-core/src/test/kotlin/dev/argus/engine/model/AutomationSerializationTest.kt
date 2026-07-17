@@ -71,6 +71,37 @@ class AutomationSerializationTest {
         assertTrue(Action.ShowNotification("t", "x").tier == ActionTier.DETERMINISTIC)
         assertTrue(Action.InvokeLlm("g", listOf(), listOf(), true).tier == ActionTier.GENERATIVE)
     }
+    @Test fun `invoke llm local notification sink round-trips and serializes deliver uppercase`() {
+        val action = Action.InvokeLlm(
+            goal = "genera il cambio euro dollaro",
+            contextSources = emptyList(),
+            allowedTools = listOf("web.search"),
+            replyTargetSender = false,
+            deliver = GenerativeDeliverMode.LOCAL_NOTIFICATION,
+            notificationTitle = "Cambio EUR/USD",
+        )
+        val json = ArgusJson.encodeToString(Action.serializer(), action)
+        // Enum senza @SerialName → UPPERCASE; ArgusJson è case-sensitive.
+        assertTrue(json.contains("\"deliver\":\"LOCAL_NOTIFICATION\""), json)
+        assertTrue(json.contains("\"notificationTitle\":\"Cambio EUR/USD\""), json)
+        assertEquals(action, ArgusJson.decodeFromString(Action.serializer(), json))
+    }
+    @Test fun `invoke llm reply is the default and stays wire-compatible without deliver field`() {
+        val reply = Action.InvokeLlm("rispondi", listOf("notification"), listOf("whatsapp_reply"), true)
+        assertEquals(GenerativeDeliverMode.WHATSAPP_REPLY, reply.deliver)
+        val json = ArgusJson.encodeToString(Action.serializer(), reply)
+        // @EncodeDefault(NEVER): il ramo reply NON emette i campi nuovi → bytes v1 stabili.
+        assertTrue(!json.contains("deliver"), json)
+        assertTrue(!json.contains("notificationTitle"), json)
+        assertEquals(reply, ArgusJson.decodeFromString(Action.serializer(), json))
+        // Un vecchio JSON senza `deliver` deserializza al default WHATSAPP_REPLY (retro-compat).
+        val legacy = "{\"type\":\"invoke_llm\",\"goal\":\"rispondi\"," +
+            "\"contextSources\":[\"notification\"],\"allowedTools\":[\"whatsapp_reply\"]," +
+            "\"replyTargetSender\":true,\"timeoutMs\":60000}"
+        val decoded = ArgusJson.decodeFromString(Action.serializer(), legacy) as Action.InvokeLlm
+        assertEquals(reply, decoded)
+        assertEquals(GenerativeDeliverMode.WHATSAPP_REPLY, decoded.deliver)
+    }
     @Test fun `invoke llm v2 round trips with required wire fields and exact reader capability`() {
         val query = StateQuery.DumpsysField("battery", "voltage")
         val action = Action.InvokeLlmV2(

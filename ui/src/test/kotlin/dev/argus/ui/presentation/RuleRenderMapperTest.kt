@@ -77,6 +77,34 @@ class RuleRenderMapperTest {
         }
     }
 
+    @Test fun `local notification invoke_llm renders the notification title distinct from reply`() {
+        val notif = Automation(
+            AutomationId("n1"), "Cambio EUR/USD", CreatedBy.LLM, AutomationStatus.PENDING_APPROVAL,
+            Trigger.Time(at = "2026-07-17T12:00", tz = "Europe/Rome"),
+            listOf(
+                Action.InvokeLlm(
+                    goal = "genera il cambio euro dollaro",
+                    contextSources = emptyList(),
+                    allowedTools = listOf("web.search"),
+                    replyTargetSender = false,
+                    deliver = GenerativeDeliverMode.LOCAL_NOTIFICATION,
+                    notificationTitle = "Cambio EUR/USD",
+                ),
+            ),
+        )
+        val row = RuleRenderMapper.map(notif).actions.single()
+        assertTrue(row.isGenerative)
+        assertTrue(row.label.contains("notifica"), row.label)
+        assertTrue(row.detail.orEmpty().contains("Cambio EUR/USD"), row.detail.orEmpty())
+
+        // Il ramo reply resta distinto (verbo "rispondi", nessun titolo di notifica).
+        val reply = withAction(
+            Action.InvokeLlm("rispondi", listOf("notification"), listOf("whatsapp_reply"), true),
+        )
+        val replyRow = RuleRenderMapper.map(reply).actions.single()
+        assertTrue(replyRow.label.contains("rispondi"), replyRow.label)
+    }
+
     @Test fun `and-or-not condition tree flattens into indented lines`() {
         val a = Automation(
             AutomationId("c1"), "condizioni", CreatedBy.LLM, AutomationStatus.PENDING_APPROVAL,

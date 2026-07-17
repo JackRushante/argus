@@ -129,9 +129,19 @@ object CapabilityRequirements {
         is Action.WriteSetting -> setOf(CapabilityIds.ACTION_WRITE_SETTING)
         is Action.InvokeLlm -> buildSet {
             add(CapabilityIds.ACTION_INVOKE_LLM)
-            addAll(action.allowedTools)
-            if (GenerativeContract.CONTEXT_STATE in action.contextSources) {
-                add(GenerativeContract.TOOL_STATE_READ)
+            when (action.deliver) {
+                GenerativeDeliverMode.WHATSAPP_REPLY -> {
+                    addAll(action.allowedTools)
+                    if (GenerativeContract.CONTEXT_STATE in action.contextSources) {
+                        add(GenerativeContract.TOOL_STATE_READ)
+                    }
+                }
+                // Sink notifica (#59): serve il permesso notifiche (ACTION_SHOW_NOTIFICATION),
+                // più gli eventuali tool di contesto (web.search). Mai whatsapp_reply.
+                GenerativeDeliverMode.LOCAL_NOTIFICATION -> {
+                    add(CapabilityIds.ACTION_SHOW_NOTIFICATION)
+                    addAll(action.allowedTools)
+                }
             }
         }
         is Action.InvokeLlmV2 -> buildSet {

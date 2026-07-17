@@ -1,9 +1,19 @@
 package dev.argus.engine.model
+import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 enum class DndMode { OFF, PRIORITY, TOTAL }
 enum class ActionTier { DETERMINISTIC, GENERATIVE }
+
+/**
+ * Sink di consegna del testo generato da [Action.InvokeLlm] (#59). Enum CHIUSO e SENZA @SerialName:
+ * serializza col nome UPPERCASE, coerente con [ArgusJson] case-sensitive.
+ * - [WHATSAPP_REPLY]: il testo è inviato come reply WhatsApp al mittente del trigger (profilo P1).
+ * - [LOCAL_NOTIFICATION]: il testo diventa una notifica locale, da un trigger qualsiasi.
+ */
+@Serializable
+enum class GenerativeDeliverMode { WHATSAPP_REPLY, LOCAL_NOTIFICATION }
 
 /** Stream audio target di [Action.SetVolume]. Enum chiuso: mappato 1:1 su AudioManager.STREAM_*. */
 enum class VolumeStream { MEDIA, RING, ALARM, NOTIFICATION }
@@ -68,6 +78,12 @@ object GenerativeContract {
         TOOL_WHATSAPP_REPLY in tools &&
             tools.size == tools.toSet().size &&
             tools.all { it == TOOL_WHATSAPP_REPLY || it in OPTIONAL_TOOLS }
+
+    /** allowedTools valido per il sink NOTIFICA (#59): nessun duplicato, SOLO [TOOL_WEB_SEARCH]
+     *  opzionale, MAI whatsapp_reply (la notifica È il sink, non un tool di uscita). Lista vuota
+     *  valida (il testo si genera dal solo goal). */
+    fun isNotificationToolset(tools: List<String>): Boolean =
+        tools.size == tools.toSet().size && tools.all { it == TOOL_WEB_SEARCH }
 }
 
 @Serializable
@@ -196,6 +212,13 @@ sealed interface Action {
         val allowedTools: List<String>,   // MAI shell.run / automation.* (DraftValidator, spec §7)
         val replyTargetSender: Boolean,   // spec §10.4: destinatario vincolato al trigger.sender
         val timeoutMs: Long = 60_000,
+        // Sink di consegna (#59). @EncodeDefault(NEVER): il ramo reply (default) NON serializza
+        // questi campi, così i fingerprint v1 già approvati restano byte-for-byte stabili e le
+        // regole reply esistenti non richiedono ri-approvazione. Solo LOCAL_NOTIFICATION li emette.
+        @EncodeDefault(EncodeDefault.Mode.NEVER)
+        val deliver: GenerativeDeliverMode = GenerativeDeliverMode.WHATSAPP_REPLY,
+        @EncodeDefault(EncodeDefault.Mode.NEVER)
+        val notificationTitle: String? = null,
     ) : Action, GenerativeAction
 
     /**

@@ -88,6 +88,34 @@ class CapabilityRequirementsTest {
     }
 
     @Test
+    fun `local notification sink requires the show notification capability plus optional web`() {
+        val caps = CapabilityRequirements.derive(
+            trigger = Trigger.Time(at = "2026-07-17T12:00", tz = "Europe/Rome"),
+            actions = listOf(
+                Action.InvokeLlm(
+                    goal = "genera il cambio euro dollaro",
+                    contextSources = emptyList(),
+                    allowedTools = listOf("web.search"),
+                    replyTargetSender = false,
+                    deliver = GenerativeDeliverMode.LOCAL_NOTIFICATION,
+                    notificationTitle = "Cambio EUR/USD",
+                ),
+            ),
+        )
+        assertEquals(
+            setOf(
+                CapabilityIds.TRIGGER_TIME,
+                CapabilityIds.ACTION_INVOKE_LLM,
+                CapabilityIds.ACTION_SHOW_NOTIFICATION,
+                GenerativeContract.TOOL_WEB_SEARCH,
+            ),
+            caps,
+        )
+        // Il sink notifica non passa mai per whatsapp_reply.
+        assertTrue(GenerativeContract.TOOL_WHATSAPP_REPLY !in caps)
+    }
+
+    @Test
     fun `state context source adds the state read requirement exactly once`() {
         assertEquals(
             setOf(

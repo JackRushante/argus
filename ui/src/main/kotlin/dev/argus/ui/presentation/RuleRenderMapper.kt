@@ -10,6 +10,7 @@ import dev.argus.engine.model.ConnMedium
 import dev.argus.engine.model.ConnState
 import dev.argus.engine.model.Condition
 import dev.argus.engine.model.DndMode
+import dev.argus.engine.model.GenerativeDeliverMode
 import dev.argus.engine.model.PhoneEvent
 import dev.argus.engine.model.SensorKind
 import dev.argus.engine.model.StateQuery
@@ -333,8 +334,19 @@ object RuleRenderMapper {
         )
         is Action.InvokeLlm -> row(
             iconKey = "generative",
-            label = "Rispondi con l'AI",
-            detail = "Obiettivo: ${a.goal} · tool: ${a.allowedTools.joinToString(", ")}",
+            // §5: i due sink (reply vs notifica locale) restano distinti e non "softati" in review.
+            label = when (a.deliver) {
+                GenerativeDeliverMode.WHATSAPP_REPLY -> "Genera e rispondi con l'AI"
+                GenerativeDeliverMode.LOCAL_NOTIFICATION -> "Genera e notifica"
+            },
+            detail = when (a.deliver) {
+                GenerativeDeliverMode.WHATSAPP_REPLY ->
+                    "Obiettivo: ${a.goal} · tool: ${a.allowedTools.joinToString(", ")}"
+                // Titolo LETTERALE (D2): l'utente approva esattamente questo testo, mai dal trigger.
+                GenerativeDeliverMode.LOCAL_NOTIFICATION ->
+                    "Titolo notifica: ${a.notificationTitle.orEmpty()} · Obiettivo: ${a.goal} · " +
+                        "tool: ${a.allowedTools.joinToString(", ")}"
+            },
             isGenerative = true,
         )
         is Action.InvokeLlmV2 -> row(
