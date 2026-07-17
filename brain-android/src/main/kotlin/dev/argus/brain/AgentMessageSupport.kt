@@ -343,13 +343,16 @@ REGOLE VINCOLANTI:
     "subito"/"adesso"/"ora"), usa il trigger "immediate" (esegui-una-volta-all'attivazione).
     L'orario della sveglia/timer va nell'AZIONE (set_alarm/set_timer), NON nel trigger. Non usare
     un trigger "time" a un istante gia' presente/passato.
-16. La consegna generativa (invoke_llm/invoke_llm_v2) avviene SEMPRE come reply WhatsApp a una
-    notifica in arrivo (trigger notification, chat 1:1 in whitelist): NON puo' postare una notifica
-    di sistema e "show_notification" NON e' un tool generativo (mai in allowedTools). Se l'utente
-    chiede una NOTIFICA con contenuto GENERATO o dal web a partire da un timer/orario/immediate (non
-    una reply a un messaggio in arrivo), NON e' ancora supportato: restituisci draft null con
-    error_code "unsupported_capability" e spiega in una frase che la notifica generata arrivera' piu'
-    avanti."""
+16. La consegna generativa di invoke_llm ha DUE modi (campo "deliver"):
+    - "WHATSAPP_REPLY" (default): risponde a una notifica in arrivo (trigger notification, chat 1:1 in
+      whitelist), contextSources ["notification"], allowedTools ["whatsapp_reply"] (+ "web.search"
+      opzionale), replyTargetSender=true. E' il modo per RISPONDERE a un messaggio ricevuto.
+    - "LOCAL_NOTIFICATION": posta una NOTIFICA locale col testo generato, da QUALSIASI trigger
+      (time/immediate/…). Usa questo quando l'utente dice "mandami/inviami/notificami <X>" (es. "tra 2
+      min una notifica col cambio euro-usd"): allowedTools=[] oppure ["web.search"] (MAI whatsapp_reply),
+      replyTargetSender=false, contextSources=[] (o ["state"] se serve stato), e "notificationTitle"=un
+      titolo breve sintetico. Il trigger e' quello richiesto (time per "tra N min", immediate per "subito").
+    "show_notification" NON e' mai un tool generativo (mai in allowedTools); invoke_llm_v2 resta solo reply."""
 
     const val DRAFT_SCHEMA_TEXT = """AutomationDraft JSON (nomi e maiuscole sono esatti):
 {
@@ -437,7 +440,11 @@ Action, discriminata da "type":
    // esiste (es. set_dnd, set_alarm): usa write_setting per il lungo-coda (screen_off_timeout,
    // accelerometer_rotation, font_scale, ...)
 - {"type":"invoke_llm", "goal":string, "contextSources":[string,...],
-   "allowedTools":[string,...], "replyTargetSender":boolean, "timeoutMs":integer}
+   "allowedTools":[string,...], "replyTargetSender":boolean, "timeoutMs":integer,
+   "deliver":"WHATSAPP_REPLY"|"LOCAL_NOTIFICATION", "notificationTitle":string|null}
+   // deliver default WHATSAPP_REPLY (reply a notifica in arrivo). LOCAL_NOTIFICATION = posta una
+   // notifica locale col testo generato (da trigger qualsiasi): allowedTools senza whatsapp_reply,
+   // replyTargetSender=false, contextSources []/["state"], notificationTitle obbligatorio (titolo breve).
 - {"type":"invoke_llm_v2", "goal":string, "stateContext":[ApprovedStateContext,...],
    "allowedTools":["whatsapp_reply"], "replyTargetSender":true, "timeoutMs":integer}"""
 

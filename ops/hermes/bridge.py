@@ -112,6 +112,17 @@ def _valid_generative_toolset(tools: Any) -> bool:
         and len(tools) == len(set(tools))
         and all(t in (ACT_REPLY_TOOL, WEB_SEARCH_TOOL) for t in tools)
     )
+
+
+def _valid_notification_toolset(tools: Any) -> bool:
+    """allowed_tools del sink NOTIFICA #59: nessun duplicato, SOLO web.search opzionale, MAI
+    whatsapp_reply (il sink e' la notifica, non un tool). Lista vuota valida. Speculare a
+    GenerativeContract.isNotificationToolset lato app."""
+    return (
+        isinstance(tools, list)
+        and len(tools) == len(set(tools))
+        and all(t == WEB_SEARCH_TOOL for t in tools)
+    )
 STATE_QUERY_POLICY_VERSION = 1
 STATE_QUERY_FAMILIES = (
     "builtin", "setting", "system_property", "sysfs", "dumpsys_field",
@@ -217,7 +228,11 @@ Action, discriminata da "type":
    // contenuti di messaggi/notifiche nella key o nel value (stessa regola di run_shell). key senza
    // spazi/control char; value non vuoto, <=1024 char, senza NUL/newline/control char.
 - {"type":"invoke_llm", "goal":string, "contextSources":[string,...],
-   "allowedTools":[string,...], "replyTargetSender":boolean, "timeoutMs":integer}
+   "allowedTools":[string,...], "replyTargetSender":boolean, "timeoutMs":integer,
+   "deliver":"WHATSAPP_REPLY"|"LOCAL_NOTIFICATION", "notificationTitle":string|null}
+   // deliver default WHATSAPP_REPLY. LOCAL_NOTIFICATION = posta una notifica locale col testo generato
+   // (trigger qualsiasi): allowedTools senza whatsapp_reply, replyTargetSender=false, contextSources
+   // []/["state"], notificationTitle obbligatorio (titolo breve).
 - {"type":"invoke_llm_v2", "goal":string, "stateContext":[ApprovedStateContext,...],
    "allowedTools":["whatsapp_reply"] o ["whatsapp_reply","web.search"], "replyTargetSender":true, "timeoutMs":integer}
 """.strip()
@@ -365,21 +380,31 @@ def validate_act_request(data: Any, idempotency_key: str | None) -> dict[str, An
         raise RequestError(400, "invalid_goal")
 
     sources = data["context_sources"]
+    tools = data["allowed_tools"]
+    reply_mode = _valid_generative_toolset(tools)
+    if not reply_mode and not _valid_notification_toolset(tools):
+        raise RequestError(400, "invalid_allowed_tools")
     if (
         not isinstance(sources, list)
-        or not (1 <= len(sources) <= 2)
-        or not all(isinstance(source, str) and source in ACT_CONTEXT_SOURCES for source in sources)
         or len(sources) != len(set(sources))
-        or "notification" not in sources
+        or not all(isinstance(source, str) and source in ACT_CONTEXT_SOURCES for source in sources)
     ):
         raise RequestError(400, "invalid_context_sources")
-    if not _valid_generative_toolset(data["allowed_tools"]):
-        raise RequestError(400, "invalid_allowed_tools")
 
     context = data["context"]
-    if not isinstance(context, dict) or not _exact_keys(context, {"notification", "state"}):
-        raise RequestError(400, "invalid_act_context")
-    validate_notification_context(context["notification"])
+    if reply_mode:
+        # Reply: notifica WhatsApp in arrivo OBBLIGATORIA.
+        if not (1 <= len(sources) <= 2) or "notification" not in sources:
+            raise RequestError(400, "invalid_context_sources")
+        if not isinstance(context, dict) or not _exact_keys(context, {"notification", "state"}):
+            raise RequestError(400, "invalid_act_context")
+        validate_notification_context(context["notification"])
+    else:
+        # Sink NOTIFICA #59: nessuna notifica in arrivo (trigger time/immediate). sources = [] o ["state"].
+        if "notification" in sources:
+            raise RequestError(400, "invalid_context_sources")
+        if not isinstance(context, dict) or not _exact_keys(context, {"state"}):
+            raise RequestError(400, "invalid_act_context")
     if "state" in sources:
         validate_act_state(context["state"])
     elif context["state"] is not None:
@@ -685,12 +710,16 @@ REGOLE VINCOLANTI:
     "subito"/"adesso"/"ora") usa il trigger "immediate" (esegui-una-volta-all'attivazione): la regola
     scatta appena l'utente la arma. L'orario della sveglia/timer va nell'azione set_alarm/set_timer,
     MAI in un trigger "time" a un istante gia' presente o passato (non sarebbe schedulabile).
-14. La consegna generativa (invoke_llm/invoke_llm_v2) avviene SEMPRE come reply WhatsApp a una
-    notifica in arrivo (trigger notification, chat 1:1 in whitelist): NON puo' postare una notifica
-    di sistema e "show_notification" NON e' un tool generativo (mai in allowedTools). Se l'utente
-    chiede una NOTIFICA con contenuto GENERATO o dal web a partire da un timer/orario/immediate (non
-    una reply a un messaggio in arrivo), NON e' ancora supportato: restituisci draft null con
-    error_code "unsupported_capability" e spiega in una frase che la notifica generata arrivera' piu' avanti.
+14. La consegna generativa di invoke_llm ha DUE modi (campo "deliver"):
+    - "WHATSAPP_REPLY" (default): risponde a una notifica in arrivo (trigger notification, chat 1:1 in
+      whitelist), contextSources ["notification"], allowedTools ["whatsapp_reply"] (+ "web.search" opz),
+      replyTargetSender=true. Per RISPONDERE a un messaggio ricevuto.
+    - "LOCAL_NOTIFICATION": posta una NOTIFICA locale col testo generato, da QUALSIASI trigger
+      (time/immediate/…). Usalo quando l'utente dice "mandami/inviami/notificami <X>" (es. "tra 2 min una
+      notifica col cambio euro-usd"): allowedTools=[] o ["web.search"] (MAI whatsapp_reply),
+      replyTargetSender=false, contextSources=[] (o ["state"]), "notificationTitle"=titolo breve. Il
+      trigger e' quello richiesto (time per "tra N min", immediate per "subito").
+    "show_notification" NON e' mai un tool generativo (mai in allowedTools); invoke_llm_v2 resta solo reply.
 {state_query_rules}
 
 Ora locale Europe/Rome: {now}
@@ -1234,7 +1263,7 @@ def validate_action(
         "open_settings_screen": ({"type", "screen"}, {"pkg"}),
         "vibrate": ({"type", "durationMs"}, set()),
         "write_setting": ({"type", "namespace", "key", "value"}, set()),
-        "invoke_llm": ({"type", "goal", "contextSources", "allowedTools", "replyTargetSender"}, {"timeoutMs"}),
+        "invoke_llm": ({"type", "goal", "contextSources", "allowedTools", "replyTargetSender"}, {"timeoutMs", "deliver", "notificationTitle"}),
         "invoke_llm_v2": (
             {"type", "goal", "stateContext", "allowedTools", "replyTargetSender", "timeoutMs"},
             set(),
@@ -1253,12 +1282,25 @@ def validate_action(
     if kind == "show_notification":
         return _string(value["title"], 512) and _string(value["text"], 4_096, nonempty=False)
     if kind == "invoke_llm":
-        return (
+        if not (
             _string(value["goal"], 4_000)
             and all(isinstance(value[key], list) and len(value[key]) <= 32 and all(_string(x, 256) for x in value[key]) for key in ("contextSources", "allowedTools"))
             and isinstance(value["replyTargetSender"], bool)
             and _is_int(value.get("timeoutMs", 60_000))
-        )
+        ):
+            return False
+        deliver = value.get("deliver", "WHATSAPP_REPLY")
+        if deliver not in {"WHATSAPP_REPLY", "LOCAL_NOTIFICATION"}:
+            return False
+        if deliver == "LOCAL_NOTIFICATION":
+            # sink notifica #59: nessun whatsapp_reply, titolo obbligatorio, no reply target, no notification.
+            return (
+                _valid_notification_toolset(value["allowedTools"])
+                and value["replyTargetSender"] is False
+                and _string(value.get("notificationTitle"), 120)
+                and "notification" not in value["contextSources"]
+            )
+        return value.get("notificationTitle") is None
     if kind == "invoke_llm_v2":
         contexts = value["stateContext"]
         if not (
