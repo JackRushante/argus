@@ -115,6 +115,18 @@ class AndroidTimeAlarmBackendTest {
     }
 
     @Test
+    fun `alarm intent is flagged foreground so a frozen process cannot defer delivery`() {
+        // Campo #63 (2026-07-17): con setExactAndAllowWhileIdle + permesso + battery whitelist,
+        // gli scatti arrivavano comunque +37s/+56s tardi. Android 14+ accoda i broadcast verso
+        // processi cached/frozen: FLAG_RECEIVER_FOREGROUND li consegna subito.
+        val intent = AndroidTimeAlarmBackend.identityIntent(context, AutomationId("fg"))
+        assertTrue(
+            intent.flags and Intent.FLAG_RECEIVER_FOREGROUND != 0,
+            "l'intent dell'alarm deve portare FLAG_RECEIVER_FOREGROUND",
+        )
+    }
+
+    @Test
     fun `reconcile actions map only known system broadcasts`() {
         assertEquals(ReconcileReason.BOOT, reconcileReason(Intent.ACTION_BOOT_COMPLETED))
         assertEquals(ReconcileReason.TIME_CHANGED, reconcileReason(Intent.ACTION_TIME_CHANGED))

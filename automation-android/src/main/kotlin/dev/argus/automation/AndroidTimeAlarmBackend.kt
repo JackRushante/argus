@@ -86,6 +86,11 @@ class AndroidTimeAlarmBackend(context: Context) : TimeAlarmBackend {
                     .authority("time")
                     .appendPath(automationId.value)
                     .build()
+                // Campo #63: Android 14+ accoda i broadcast verso processi cached/frozen — un
+                // alarm EXACT arrivava comunque con decine di secondi di ritardo. Il flag forza
+                // la consegna immediata. (I flag non entrano in filterEquals: i PendingIntent già
+                // registrati restano matchabili e vengono aggiornati da FLAG_UPDATE_CURRENT.)
+                addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
             }
 
         fun parseSignal(intent: Intent?): TimeAlarmSignal? = runCatching {
