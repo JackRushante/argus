@@ -1,9 +1,18 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
+}
+
+// S16: firma release da keystore.properties LOCALE (mai committato; vedi .gitignore).
+// Senza il file la build release resta possibile ma non firmata (CI/altre macchine).
+val keystoreProperties = Properties().apply {
+    val file = rootProject.file("keystore.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
 }
 
 android {
@@ -17,7 +26,27 @@ android {
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
-    buildTypes { getByName("debug") { isDebuggable = true } }
+    signingConfigs {
+        if (keystoreProperties.isNotEmpty()) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
+    }
+    buildTypes {
+        getByName("debug") { isDebuggable = true }
+        getByName("release") {
+            // R8 spento al primo giro (S16): meno variabili per l'E2E dei tester; si accende
+            // in un secondo momento con le keep-rules per serialization/Hilt/Room.
+            isMinifyEnabled = false
+            if (keystoreProperties.isNotEmpty()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+        }
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -47,11 +76,13 @@ dependencies {
     ksp(libs.hilt.compiler)
     debugImplementation(libs.compose.ui.tooling)
     debugImplementation(libs.compose.ui.test.manifest)
-    // Il solo APK debug espone l'entry point Hilt usato dagli E2E di produzione.
-    debugImplementation(project(":brain-android"))
-    debugImplementation(project(":core-shizuku"))
-    debugImplementation(project(":data"))
-    debugImplementation(project(":device-tools"))
+    // S16: i moduli runtime servono in TUTTI i buildType (prima erano debugImplementation e la
+    // release nasceva senza brain/data/shizuku/device-tools). L'entry point Hilt degli E2E resta
+    // esposto solo dal source set debug.
+    implementation(project(":brain-android"))
+    implementation(project(":core-shizuku"))
+    implementation(project(":data"))
+    implementation(project(":device-tools"))
     androidTestImplementation(platform(libs.compose.bom))
     androidTestImplementation(project(":brain-android"))
     androidTestImplementation(project(":core-shizuku"))

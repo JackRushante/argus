@@ -30,3 +30,8 @@ __pycache__/
 
 # Superpowers SDD scratch (ledger + briefs + reports)
 .superpowers/
+
+# S16 — firma release: MAI committare keystore e credenziali
+keystore.properties
+*.keystore
+*.jks
