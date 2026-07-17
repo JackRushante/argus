@@ -329,7 +329,7 @@ Action, discriminata da "type":
    "BATTERY"|"DATE"|"APP_DETAILS"|"SETTINGS", "pkg":string|null}  // apre una schermata Impostazioni
    // (enum chiuso); pkg SOLO con APP_DETAILS, altrimenti null
 - {"type":"vibrate", "durationMs":integer 1-10000}  // vibrazione one-shot
-- {"type":"write_setting", "namespace":"system"|"secure"|"global", "key":string, "value":string}
+- {"type":"write_setting", "namespace":"SYSTEM"|"SECURE"|"GLOBAL", "key":string, "value":string}
    // scrive QUALSIASI impostazione Android per chiave (contraltare in scrittura di state.setting).
    // Richiede Shizuku (compare in available_tools solo se disponibile). key/value sono LETTERALI
    // e mostrati integralmente in review: mai incorporare contenuti di messaggi/notifiche nella
