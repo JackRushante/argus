@@ -896,6 +896,7 @@ object ArgusModule {
         immediateDispatcher: ImmediateEventDispatcher,
         audit: AuditSink,
         oneShotConsumptions: OneShotConsumptionRegistry,
+        foregroundLauncher: ReceiverWorkLauncher,
     ): ArmedAutomationRegistrar = AndroidArmedAutomationRegistrar(
         coordinator,
         store,
@@ -907,6 +908,7 @@ object ArgusModule {
         Instant::now,
         audit,
         oneShotConsumptions,
+        foregroundLauncher,
     )
 
     @Provides

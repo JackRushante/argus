@@ -20,6 +20,7 @@ import dev.argus.automation.connectivity.NoopConnectivityTriggerRuntime
 import dev.argus.automation.geofence.GeofenceEventDispatcher
 import dev.argus.automation.geofence.GeofenceTriggerRuntime
 import dev.argus.automation.geofence.NoopGeofenceTriggerRuntime
+import dev.argus.automation.foreground.ReceiverWorkLauncher
 import dev.argus.automation.sensor.NoopSensorTriggerRuntime
 import dev.argus.automation.sensor.SensorEventDispatcher
 import dev.argus.automation.sensor.SensorTriggerRuntime
@@ -27,6 +28,7 @@ import dev.argus.engine.model.ConnMedium
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
+import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.CapabilityIds
 import dev.argus.engine.model.CapabilityRequirements
 import dev.argus.engine.model.Trigger
@@ -211,6 +213,8 @@ class AndroidArmedAutomationRegistrar(
     private val now: () -> java.time.Instant = java.time.Instant::now,
     private val audit: AuditSink = NoopAuditSink,
     private val oneShotConsumptions: OneShotConsumptionRegistry = NoopOneShotConsumptionRegistry,
+    /** Production: sgancia il fire immediato dalla coroutine UI e ne possiede la durata via FGS. */
+    private val foregroundLauncher: ReceiverWorkLauncher? = null,
 ) : ArmedAutomationRegistrar {
     override suspend fun register(automation: Automation): Boolean = when (automation.trigger) {
         is Trigger.Time -> registerTime(automation)
@@ -249,24 +253,47 @@ class AndroidArmedAutomationRegistrar(
                 id = TriggerEventId("immediate:${fingerprint.value}:${now().toEpochMilli()}"),
                 event = TriggerEvent.ImmediateFired(automation.id, fingerprint),
             )
-            immediateDispatcher.dispatch(envelope)
-            // Consuma la regola one-shot dopo il fire, come TimeAlarmCoordinator per un time one-shot.
-            val attempt = oneShotConsumptions.begin(envelope.id)
-            var consumed = false
-            try {
-                consumed = store.disableIfApproved(automation.id, fingerprint)
-            } finally {
-                attempt.complete(consumed)
-            }
-            if (consumed) {
-                // Lifecycle (task #31-B): il disable post-fire va tracciato, mai silenzioso.
-                recordLifecycle(automation.id, AuditKind.RULE_DISABLED, "one_shot_consumed")
+            val launcher = foregroundLauncher
+            if (launcher == null) {
+                // Percorso sincrono conservato per test/fake e caller non Android.
+                dispatchAndConsumeImmediate(automation, fingerprint, envelope)
+            } else {
+                launcher.launch("immediate") {
+                    try {
+                        dispatchAndConsumeImmediate(automation, fingerprint, envelope)
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: Exception) {
+                        // Il register è già tornato: rendere visibile il guasto senza rieseguire
+                        // automaticamente un one-shot di cui non conosciamo l'esito.
+                        recordLifecycle(automation.id, AuditKind.ERROR, "immediate_dispatch_failed")
+                    }
+                }
             }
             true
         } catch (error: CancellationException) {
             throw error
         } catch (_: Exception) {
             false
+        }
+    }
+
+    private suspend fun dispatchAndConsumeImmediate(
+        automation: Automation,
+        fingerprint: ApprovalFingerprint,
+        envelope: TriggerEnvelope,
+    ) {
+        immediateDispatcher.dispatch(envelope)
+        // Consuma la regola one-shot solo dopo il completamento reale del programma.
+        val attempt = oneShotConsumptions.begin(envelope.id)
+        var consumed = false
+        try {
+            consumed = store.disableIfApproved(automation.id, fingerprint)
+        } finally {
+            attempt.complete(consumed)
+        }
+        if (consumed) {
+            recordLifecycle(automation.id, AuditKind.RULE_DISABLED, "one_shot_consumed")
         }
     }
 
