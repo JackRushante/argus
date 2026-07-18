@@ -13,6 +13,15 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
 }
 tasks.test { useJUnitPlatform() }
+// jvmTarget 17 esplicito invece di jvmToolchain(17): quest'ultimo tira il
+// foojay-resolver (download JDK remoto) che lo scanner F-Droid rifiuta.
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    compilerOptions.jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+}
 sourceSets {
     test {
         // Stessa fixture consumata dal validator Python del bridge: nessuna copia divergente.
@@ -22,4 +31,3 @@ sourceSets {
         }
     }
 }
-kotlin { jvmToolchain(17) }
