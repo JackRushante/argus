@@ -40,9 +40,6 @@ public release: compile/bridge support (P4-D), recursive UI rendering (P4-E), an
 - The app shell, runtime logs, generated notifications, onboarding/settings copy, capability labels,
   and diagnostics now honor English-default/Italian-system-locale rendering, including historical
   structured log rows.
-- Public builds no longer embed the maintainer's private Hermes/Tailscale endpoint. Self-hosted
-  Hermes starts unconfigured on a fresh install; existing users retain their locally stored URL.
-
 ### Verification
 
 - Full clean Gradle gate: all JVM/Robolectric suites across eight modules plus `:app:assembleDebug`
