@@ -461,12 +461,14 @@ class OpenAICompatTransport internal constructor(
         val input = u.promptTokens ?: return null
         val output = u.completionTokens ?: return null
         if (input < 0 || output < 0) return null
-        return TurnUsage(
-            inputTokens = input,
-            outputTokens = output,
-            cachedInputTokens = u.promptTokensDetails?.cachedTokens?.takeIf { it >= 0 },
-            model = model?.takeIf { it.isNotBlank() } ?: fallbackModel,
-        )
+        return runCatching {
+            TurnUsage(
+                inputTokens = input,
+                outputTokens = output,
+                cachedInputTokens = u.promptTokensDetails?.cachedTokens?.takeIf { it >= 0 },
+                model = model?.takeIf { it.isNotBlank() } ?: fallbackModel,
+            )
+        }.getOrNull()
     }
 
     private fun parseChatResponse(body: String): ChatResponse = parseJson(body, ChatResponse.serializer())
@@ -498,11 +500,13 @@ class OpenAICompatTransport internal constructor(
         val input = u.inputTokens ?: return null
         val output = u.outputTokens ?: return null
         if (input < 0 || output < 0) return null
-        return TurnUsage(
-            inputTokens = input,
-            outputTokens = output,
-            model = model?.takeIf { it.isNotBlank() } ?: fallbackModel,
-        )
+        return runCatching {
+            TurnUsage(
+                inputTokens = input,
+                outputTokens = output,
+                model = model?.takeIf { it.isNotBlank() } ?: fallbackModel,
+            )
+        }.getOrNull()
     }
 
     /** Testo Gemini nativo: `candidates[0].content.parts[].text` concatenati. */
@@ -520,11 +524,13 @@ class OpenAICompatTransport internal constructor(
         val input = u.promptTokenCount ?: return null
         val output = u.candidatesTokenCount ?: return null
         if (input < 0 || output < 0) return null
-        return TurnUsage(
-            inputTokens = input,
-            outputTokens = output,
-            model = modelVersion?.takeIf { it.isNotBlank() } ?: fallbackModel,
-        )
+        return runCatching {
+            TurnUsage(
+                inputTokens = input,
+                outputTokens = output,
+                model = modelVersion?.takeIf { it.isNotBlank() } ?: fallbackModel,
+            )
+        }.getOrNull()
     }
 
     private suspend fun execute(request: Request): String {

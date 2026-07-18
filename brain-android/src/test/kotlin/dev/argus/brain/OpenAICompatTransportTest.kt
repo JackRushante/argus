@@ -147,6 +147,24 @@ class OpenAICompatTransportTest {
         assertEquals(0L, usage.outputTokens)
     }
 
+    @Test fun `implausible remote usage is discarded without losing a valid reply`(): Unit = runBlocking {
+        server.enqueue(jsonResponse(
+            """
+            {"id":"1","model":"gpt-5.5",
+             "choices":[{"index":0,"message":{"role":"assistant","content":"Risposta valida"}}],
+             "usage":{"prompt_tokens":${dev.argus.engine.brain.TurnUsage.MAX_TOKENS_PER_TURN + 1},
+                      "completion_tokens":1}}
+            """.trimIndent(),
+        ))
+        val t = transport(ProviderId.OPENAI, model = "gpt-5.5")
+
+        val result = t.act(fireContext(), "rispondi", listOf("notification"), listOf("whatsapp_reply"))
+
+        assertEquals("Risposta valida", result.text)
+        assertNull(result.metaError)
+        assertNull(result.usage)
+    }
+
     @Test fun `openrouter default model is resolved from catalog`(): Unit = runBlocking {
         server.enqueue(jsonResponse(
             """

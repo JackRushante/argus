@@ -13,8 +13,23 @@ data class TurnUsage(
     val model: String? = null,
 ) {
     init {
-        require(inputTokens >= 0 && outputTokens >= 0 && (cachedInputTokens ?: 0L) >= 0L) {
-            "conteggi token negativi"
+        require(inputTokens in 0..MAX_TOKENS_PER_TURN && outputTokens in 0..MAX_TOKENS_PER_TURN) {
+            "conteggi token fuori intervallo"
         }
+        require(cachedInputTokens == null || cachedInputTokens in 0..inputTokens) {
+            "conteggio token cached incoerente"
+        }
+        require(
+            model == null ||
+                model.isNotBlank() && model.length <= MAX_MODEL_CHARS && model.none(Char::isISOControl),
+        ) {
+            "identificatore modello non valido"
+        }
+    }
+
+    companion object {
+        /** Bound difensivo molto sopra i context window correnti, ma sicuro per DB e costo intero. */
+        const val MAX_TOKENS_PER_TURN: Long = 100_000_000L
+        const val MAX_MODEL_CHARS: Int = 256
     }
 }

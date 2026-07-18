@@ -299,12 +299,14 @@ class AnthropicMessagesTransport internal constructor(
         val input = u.inputTokens ?: return null
         val output = u.outputTokens ?: return null
         if (input < 0 || output < 0) return null
-        return TurnUsage(
-            inputTokens = input,
-            outputTokens = output,
-            cachedInputTokens = u.cacheReadInputTokens?.takeIf { it >= 0 },
-            model = model?.takeIf { it.isNotBlank() } ?: fallbackModel,
-        )
+        return runCatching {
+            TurnUsage(
+                inputTokens = input,
+                outputTokens = output,
+                cachedInputTokens = u.cacheReadInputTokens?.takeIf { it >= 0 },
+                model = model?.takeIf { it.isNotBlank() } ?: fallbackModel,
+            )
+        }.getOrNull()
     }
 
     private fun parseResponse(body: String): MessagesResponse =

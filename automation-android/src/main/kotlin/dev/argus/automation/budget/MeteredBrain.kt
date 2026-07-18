@@ -168,7 +168,14 @@ class MeteredBrain(
         usage: dev.argus.engine.brain.TurnUsage?,
     ) {
         val model = usage?.model ?: config.model ?: BudgetMeta.UNKNOWN_MODEL
-        val cost = CostEstimator.estimate(config.providerId, model, usage)
+        // Alcuni provider restituiscono un alias/versione datata del modello configurato. Se
+        // quell'alias non è nel listino ma il modello scelto dall'utente sì, usa quest'ultimo per
+        // il prezzo senza falsificare il model registrato nell'evento.
+        val prices = ProviderCatalog.spec(config.providerId).prices
+        val pricingModel = sequenceOf(usage?.model, config.model)
+            .filterNotNull()
+            .firstOrNull(prices::containsKey)
+        val cost = CostEstimator.estimate(config.providerId, pricingModel, usage)
         tryInsert(
             UsageEventEntity(
                 timestampMs = now,

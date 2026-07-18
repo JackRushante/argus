@@ -47,6 +47,8 @@ MAX_REPLY_CHARS = 32_768
 MAX_ACT_REPLY_CHARS = 4_096
 MAX_MODEL_OUTPUT_CHARS = 256 * 1024
 MAX_CONCURRENT_MODEL_CALLS = 1
+MAX_USAGE_TOKENS = 100_000_000
+MAX_USAGE_API_CALLS = 1_000
 SENTINEL = "@@META@@"
 PROVIDER_QUOTA_MARKERS = ("quota exhausted", "usage_limit_reached")
 MODEL_PROTOCOL_ERRORS = frozenset({"draft_missing", "meta_invalid"})
@@ -806,7 +808,8 @@ def _sanitize_usage(value: Any) -> dict[str, Any] | None:
         raw = value.get(key)
         if raw is None:
             continue
-        if not _is_int(raw) or raw < 0:
+        maximum = MAX_USAGE_API_CALLS if key == "api_calls" else MAX_USAGE_TOKENS
+        if not _is_int(raw) or raw < 0 or raw > maximum:
             return None
         out[key] = raw
     for key in USAGE_STR_KEYS:

@@ -75,6 +75,29 @@ class MeteredBrainTest {
     }
 
     @Test
+    fun `a provider model alias falls back to the approved configured price`() = runTest {
+        val usage = TurnUsage(
+            inputTokens = 1_000_000,
+            outputTokens = 100_000,
+            model = "gpt-5.5-2026-07-01",
+        )
+        val dao = RecordingUsageDao()
+        val brain = metered(
+            FakeBrain(actResult = { ActResult("risposta", null, usage) }),
+            FakePolicy(),
+            dao,
+            config = openai,
+        )
+
+        brain.actV2(context(), invokeV2())
+
+        val event = dao.events.single()
+        assertEquals("gpt-5.5-2026-07-01", event.model)
+        assertEquals(2_250_000L, event.costMicros)
+        assertEquals(ProviderCatalog.PRICING_VERSION, event.pricingVersion)
+    }
+
+    @Test
     fun `compile registra i token reali quando il transport li riporta`() = runTest {
         // S15: il bridge Hermes ora allega l'usage anche in compile — niente più N/D cieco.
         val hermes = ProviderConfig(ProviderId.HERMES, "https://hermes", null)

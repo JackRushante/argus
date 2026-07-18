@@ -51,6 +51,21 @@ class ActResultUsageTest {
         assertFailsWith<IllegalArgumentException> { TurnUsage(0, 0, cachedInputTokens = -1) }
     }
 
+    @Test fun `turn usage rejects impossible remote accounting values`() {
+        assertFailsWith<IllegalArgumentException> {
+            TurnUsage(TurnUsage.MAX_TOKENS_PER_TURN + 1, 0)
+        }
+        assertFailsWith<IllegalArgumentException> {
+            TurnUsage(10, 0, cachedInputTokens = 11)
+        }
+        assertFailsWith<IllegalArgumentException> {
+            TurnUsage(1, 1, model = "m\nsecret")
+        }
+        assertFailsWith<IllegalArgumentException> {
+            TurnUsage(1, 1, model = "m".repeat(TurnUsage.MAX_MODEL_CHARS + 1))
+        }
+    }
+
     @Test fun `act v2 default still fails closed with no usage`() = runBlocking {
         val brain = object : Brain {
             override suspend fun compile(nl: String, manifest: CapabilityManifest, state: DeviceState) =
