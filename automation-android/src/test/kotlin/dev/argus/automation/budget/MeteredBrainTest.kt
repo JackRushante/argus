@@ -27,6 +27,9 @@ import dev.argus.engine.runtime.FireContext
 import dev.argus.engine.runtime.TriggerEvent
 import dev.argus.engine.runtime.TriggerEventId
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.test.runTest
@@ -232,6 +235,40 @@ class MeteredBrainTest {
 
         assertFailsWith<CancellationException> { brain.actV2(context(), invokeV2()) }
         assertTrue(dao.events.isEmpty())
+    }
+
+    @Test
+    fun `concurrent calls cannot both cross a one-call hard limit`() = runTest {
+        val dao = RecordingUsageDao()
+        val delegate = FakeBrain(
+            actResult = {
+                // Lascia alla seconda coroutine il tempo di arrivare al pre-check. Senza il gate
+                // atomico entrambe vedono zero eventi e contattano il provider.
+                delay(1)
+                ActResult("risposta", null)
+            },
+        )
+        val policy = object : BudgetPolicy(NoopUsageDaoForTest, NoopSettingsForTest) {
+            override suspend fun check(providerId: ProviderId, nowMillis: Long): BudgetVerdict =
+                if (dao.events.any { it.outcome != UsageEventOutcome.BLOCKED_BUDGET }) {
+                    BudgetVerdict.HardExceeded(TrippedLimit(LimitWindow.HOUR, BudgetScope.Global))
+                } else {
+                    BudgetVerdict.Ok
+                }
+        }
+        val brain = metered(delegate, policy, dao, config = openai)
+
+        val first = async { brain.actV2(context(), invokeV2()) }
+        val second = async { brain.actV2(context(), invokeV2()) }
+        val results = awaitAll(first, second)
+
+        assertEquals(1, delegate.calls)
+        assertEquals(1, results.count { it.text == "risposta" })
+        assertEquals(1, results.count { it.metaError == BudgetMeta.BUDGET_EXCEEDED })
+        assertEquals(
+            listOf(UsageEventOutcome.OK, UsageEventOutcome.BLOCKED_BUDGET),
+            dao.events.map { it.outcome },
+        )
     }
 
     // --- helpers -------------------------------------------------------------

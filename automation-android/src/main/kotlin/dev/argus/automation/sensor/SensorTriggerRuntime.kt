@@ -135,7 +135,21 @@ class SensorTriggerCoordinator(
 
         // Il FGS deve vivere finché almeno un sensore è registrato. Idempotente lato sentinel:
         // start/stop scattano solo sulla transizione vuoto↔non-vuoto del demand condiviso.
-        if (registeredKinds.isEmpty()) foregroundDemand.stop() else foregroundDemand.start()
+        val foregroundReady = if (registeredKinds.isEmpty()) {
+            foregroundDemand.stop().also { stopped ->
+                if (!stopped) cleanupSucceeded = false
+            }
+        } else {
+            foregroundDemand.start()
+        }
+
+        // Una registrazione sensore senza il sentinel richiesto non è affidabile in background.
+        // Il caller deve vedere il fallimento (e l'enablement rollbackarlo), non un falso verde.
+        if (!foregroundReady && registeredKinds.isNotEmpty()) {
+            failed += eligible
+                .filter { it.second in registeredKinds }
+                .map { it.first }
+        }
 
         val requiredBy = eligible
             .filter { it.second in registeredKinds }
@@ -146,7 +160,7 @@ class SensorTriggerCoordinator(
             requiredBy = requiredBy,
             registeredKinds = registeredKinds.toSet(),
             needsReview = needsReview.sortedBy { it.value },
-            failed = failed.sortedBy { it.value },
+            failed = failed.distinct().sortedBy { it.value },
             cleanupSucceeded = cleanupSucceeded,
         )
     }

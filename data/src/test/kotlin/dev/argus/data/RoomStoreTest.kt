@@ -440,11 +440,13 @@ class RoomStoreTest {
     fun `audit SUPPRESSED_BUDGET conserva solo detail whitelisted`() = runTest {
         val id = AutomationId("budget-redaction")
         sink.record(AuditEvent(id, AuditKind.SUPPRESSED_BUDGET, 100, detail = "month_cost:openai"))
-        sink.record(AuditEvent(id, AuditKind.SUPPRESSED_BUDGET, 200, detail = "http://leak.example/token?x=segreto"))
+        sink.record(AuditEvent(id, AuditKind.SUPPRESSED_BUDGET, 200, detail = "month_tokens:hermes"))
+        sink.record(AuditEvent(id, AuditKind.SUPPRESSED_BUDGET, 300, detail = "http://leak.example/token?x=segreto"))
 
         val rows = db.auditDao().forAutomation(id.value)
-        assertEquals("", rows[0].detail)                 // atMillis 200: detail libero -> redatto
-        assertEquals("month_cost:openai", rows[1].detail) // atMillis 100: whitelisted sopravvive
+        assertEquals("", rows[0].detail)                    // atMillis 300: detail libero -> redatto
+        assertEquals("month_tokens:hermes", rows[1].detail) // atMillis 200: token-only sopravvive
+        assertEquals("month_cost:openai", rows[2].detail)   // atMillis 100: cost tracked sopravvive
     }
 
     @Test

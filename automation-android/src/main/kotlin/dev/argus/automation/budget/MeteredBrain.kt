@@ -19,6 +19,8 @@ import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireContext
 import dev.argus.ui.presentation.RenderLanguage
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.time.Instant
 import java.time.YearMonth
 import java.time.ZoneId
@@ -61,12 +63,18 @@ class MeteredBrain(
     private val zone: () -> ZoneId = ZoneId::systemDefault,
 ) : Brain {
     private val notified = ConcurrentHashMap<String, Boolean>()
+    /**
+     * Il check e la registrazione del consumo formano un'unica sezione critica. Senza questo gate
+     * due trigger concorrenti possono leggere entrambi N-1 chiamate, oltrepassare un limite HARD e
+     * contattare entrambi il provider prima che uno dei due eventi usage sia persistito.
+     */
+    private val callGate = Mutex()
 
     override suspend fun compile(
         nl: String,
         manifest: CapabilityManifest,
         state: DeviceState,
-    ): CompileResult {
+    ): CompileResult = callGate.withLock {
         val config = selectedConfig()
         val now = nowMillis()
         when (val verdict = verdictFor(config, now)) {
@@ -93,7 +101,7 @@ class MeteredBrain(
         goal: String,
         contextSources: List<String>,
         allowedTools: List<String>,
-    ): ActResult {
+    ): ActResult = callGate.withLock {
         val config = selectedConfig()
         val now = nowMillis()
         when (val verdict = verdictFor(config, now)) {
@@ -106,18 +114,20 @@ class MeteredBrain(
         return result
     }
 
-    override suspend fun actV2(context: FireContext, action: Action.InvokeLlmV2): ActResult {
-        val config = selectedConfig()
-        val now = nowMillis()
-        when (val verdict = verdictFor(config, now)) {
-            is BudgetVerdict.HardExceeded -> return hardBlock(config, UsageEventKind.ACT_V2, now, context, verdict.tripped)
-            is BudgetVerdict.SoftExceeded -> notifyOnce(verdict.tripped, now)
-            BudgetVerdict.Ok -> {}
+    override suspend fun actV2(context: FireContext, action: Action.InvokeLlmV2): ActResult =
+        callGate.withLock {
+            val config = selectedConfig()
+            val now = nowMillis()
+            when (val verdict = verdictFor(config, now)) {
+                is BudgetVerdict.HardExceeded ->
+                    return hardBlock(config, UsageEventKind.ACT_V2, now, context, verdict.tripped)
+                is BudgetVerdict.SoftExceeded -> notifyOnce(verdict.tripped, now)
+                BudgetVerdict.Ok -> {}
+            }
+            val result = delegate.actV2(context, action)
+            recordUsage(config, UsageEventKind.ACT_V2, now, result.metaError, result.usage)
+            return result
         }
-        val result = delegate.actV2(context, action)
-        recordUsage(config, UsageEventKind.ACT_V2, now, result.metaError, result.usage)
-        return result
-    }
 
     /** Un errore DB del budget non deve spegnere il cervello: fail-open (ma la cancellazione risale). */
     private suspend fun verdictFor(config: ProviderConfig, now: Long): BudgetVerdict = try {
