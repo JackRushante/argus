@@ -1,4 +1,18 @@
-# Argus
+<div align="center">
+
+<img src="docs/assets/argus-banner.svg" alt="ARGUS" width="640">
+
+### The all-seeing Android automation engine
+
+[![Release](https://img.shields.io/github/v/release/JackRushante/argus?style=for-the-badge&labelColor=444&color=f5a623)](https://github.com/JackRushante/argus/releases/latest)
+[![License](https://img.shields.io/badge/LICENSE-GPL--3.0-4c9141?style=for-the-badge&labelColor=444)](LICENSE)
+[![Platform](https://img.shields.io/badge/ANDROID-14%2B-3ddc84?style=for-the-badge&labelColor=444&logo=android&logoColor=white)](#build--installation)
+
+[![Kotlin](https://img.shields.io/badge/KOTLIN-100%25-7f52ff?style=for-the-badge&labelColor=444&logo=kotlin&logoColor=white)](#architecture)
+[![Engine](https://img.shields.io/badge/RULES-LLM%20compiled%20·%20deterministic%20run-00b8d4?style=for-the-badge&labelColor=444)](#what-is-argus)
+[![Bilingual](https://img.shields.io/badge/LANG-EN%20%7C%20IT-e05d44?style=for-the-badge&labelColor=444)](#project-status-and-roadmap)
+
+</div>
 
 **Natural-language automation for Android, compiled by an LLM, executed by a deterministic engine.**
 
