@@ -134,6 +134,7 @@ import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.runtime.ConditionEvaluator
 import dev.argus.engine.runtime.Engine
 import dev.argus.engine.runtime.ExecutionJournal
+import dev.argus.engine.runtime.ResolvedActionExecutor
 import dev.argus.engine.runtime.FirePolicy
 import dev.argus.engine.runtime.FirePolicySnapshotProvider
 import dev.argus.engine.runtime.RevalidatingFirePolicy
@@ -561,6 +562,9 @@ object ArgusModule {
     fun actionExecutorBoundary(executor: ShizukuActionExecutor): ActionExecutor = executor
 
     @Provides
+    fun resolvedActionExecutorBoundary(executor: ShizukuActionExecutor): ResolvedActionExecutor = executor
+
+    @Provides
     @Singleton
     fun engine(
         store: AutomationStore,
@@ -568,6 +572,7 @@ object ArgusModule {
         firePolicy: FirePolicy,
         audit: AuditSink,
         journal: ExecutionJournal,
+        resolvedExecutor: ResolvedActionExecutor,
     ): Engine = Engine(
         store = store,
         executor = executor,
@@ -576,6 +581,7 @@ object ArgusModule {
         firePolicy = firePolicy,
         audit = audit,
         journal = journal,
+        resolvedExecutor = resolvedExecutor,
         now = System::currentTimeMillis,
     )
 

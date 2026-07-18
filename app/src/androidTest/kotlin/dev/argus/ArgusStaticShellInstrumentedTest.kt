@@ -55,5 +55,12 @@ class ArgusStaticShellInstrumentedTest {
             ActionResult.Failure("shell_failed"),
             services.staticShellRunner().run("/system/bin/false", context),
         )
+
+        val captured = services.staticShellRunner().runCaptured(
+            "/system/bin/printf argus-p4-capture",
+            context,
+        )
+        assertEquals(ActionResult.Success, captured.result)
+        assertEquals("argus-p4-capture", captured.capturedText)
     }
 }

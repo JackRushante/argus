@@ -14,6 +14,7 @@ import kotlinx.coroutines.test.runTest
 import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 
 class StaticShellRunnerTest {
     private val context = FireContext(
@@ -54,6 +55,30 @@ class StaticShellRunnerTest {
             RecordingShell(ShellResult(exitCode = 9, stderr = "secret".encodeToByteArray())),
         )
         assertEquals(ActionResult.Failure("shell_failed"), failed.run("false", context))
+    }
+
+    @Test
+    fun `capture returns bounded stdout and rejects truncated output`() = runTest {
+        val successfulShell = RecordingShell(
+            ShellResult(exitCode = 0, stdout = "captured\n".encodeToByteArray()),
+        )
+        val successful = ShizukuStaticShellRunner(successfulShell)
+        val captured = successful.runCaptured("printf captured", context)
+        assertEquals(ActionResult.Success, captured.result)
+        assertEquals("captured\n", captured.capturedText)
+        assertEquals(64 * 1_024, successfulShell.maxOutputBytes)
+
+        val truncated = ShizukuStaticShellRunner(
+            RecordingShell(
+                ShellResult(
+                    exitCode = 0,
+                    stdout = "partial-secret".encodeToByteArray(),
+                    truncated = true,
+                ),
+            ),
+        ).runCaptured("large-output", context)
+        assertEquals(ActionResult.Failure("shell_output_too_large"), truncated.result)
+        assertNull(truncated.capturedText)
     }
 }
 

@@ -12,6 +12,9 @@ import dev.argus.engine.model.GenerativeAction
 import dev.argus.engine.runtime.ActionExecutor
 import dev.argus.engine.runtime.ActionResult
 import dev.argus.engine.runtime.FireContext
+import dev.argus.engine.runtime.ProgramActionResult
+import dev.argus.engine.runtime.ResolvedActionExecutor
+import dev.argus.engine.runtime.ResolvedProgramAction
 import dev.argus.engine.runtime.TriggerEvent
 import dev.argus.engine.safety.StaticShellSafety
 import kotlinx.coroutines.CancellationException
@@ -57,7 +60,42 @@ class ShizukuActionExecutor(
      * da background. Default **false**: senza segnale si resta sul percorso BASE (foreground-only).
      */
     private val shizukuReady: () -> Boolean = { false },
-) : ActionExecutor {
+) : ActionExecutor, ResolvedActionExecutor {
+    override suspend fun execute(
+        action: ResolvedProgramAction,
+        context: FireContext,
+    ): ProgramActionResult = try {
+        // Il framing LLM dei RuntimeDataBinding arriva in P4-D: fino ad allora nessun valore
+        // separato può essere degradato concatenandolo al goal approvato.
+        if (action.runtimeData.isNotEmpty()) {
+            ProgramActionResult(ActionResult.Failure("p4_runtime_data_unavailable"))
+        } else {
+            when (val leaf = action.action) {
+                is Action.RunShell -> if (leaf.captureAs != null) {
+                    if (!StaticShellSafety.allows(context.event, whitelistedIds())) {
+                        ProgramActionResult(ActionResult.Failure("shell_external_trigger"))
+                    } else {
+                        staticShell.runCaptured(leaf.cmd, context)
+                    }
+                } else {
+                    ProgramActionResult(execute(leaf, context))
+                }
+                is Action.InvokeLlm,
+                is Action.InvokeLlmV2,
+                -> ProgramActionResult(ActionResult.Failure("p4_generative_unavailable"))
+                else -> ProgramActionResult(execute(leaf, context))
+            }
+        }
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: DeviceToolException) {
+        ProgramActionResult(ActionResult.Failure(error.code))
+    } catch (_: IllegalArgumentException) {
+        ProgramActionResult(ActionResult.Failure("action_invalid"))
+    } catch (_: Exception) {
+        ProgramActionResult(ActionResult.Failure("action_failed"))
+    }
+
     override suspend fun execute(action: Action, ctx: FireContext): ActionResult = try {
         when (action) {
             is Action.SetWifi -> success { tools.setWifi(action.on, ctx.executionId, ctx.priority) }

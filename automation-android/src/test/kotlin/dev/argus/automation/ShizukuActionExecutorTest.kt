@@ -17,11 +17,15 @@ import dev.argus.engine.model.PhoneEvent
 import dev.argus.engine.model.SettingsScreen
 import dev.argus.engine.model.VolumeStream
 import dev.argus.engine.runtime.ActionResult
+import dev.argus.engine.runtime.ActionResolution
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.ExecutionId
 import dev.argus.engine.runtime.FireContext
+import dev.argus.engine.runtime.ProgramActionResult
+import dev.argus.engine.runtime.TaintAwareInterpolator
 import dev.argus.engine.runtime.TriggerEvent
 import dev.argus.engine.runtime.TriggerEventId
+import dev.argus.engine.runtime.VarScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -159,6 +163,71 @@ class ShizukuActionExecutorTest {
             ),
         )
         assertEquals(listOf("/system/bin/id >/dev/null" to trustedContext), calls)
+    }
+
+    @Test
+    fun `resolved shell capture preserves policy check and returns concrete stdout`() = runTest {
+        val calls = mutableListOf<String>()
+        val runner = object : StaticShellRunner {
+            override suspend fun run(command: String, context: FireContext): ActionResult =
+                error("flat run non atteso")
+
+            override suspend fun runCaptured(
+                command: String,
+                context: FireContext,
+            ): ProgramActionResult {
+                calls += command
+                return ProgramActionResult(ActionResult.Success, capturedText = "uid=2000")
+            }
+        }
+        val action = Action.RunShell("id", captureAs = "identity")
+        val resolved = (TaintAwareInterpolator().resolve(action, VarScope()) as ActionResolution.Resolved).value
+        val trusted = context.copy(
+            event = TriggerEvent.TimeFired(context.automationId, context.approvalFingerprint),
+        )
+
+        val captured = executor(staticShell = runner).execute(resolved, trusted)
+        assertEquals(ActionResult.Success, captured.result)
+        assertEquals("uid=2000", captured.capturedText)
+        assertEquals(listOf("id"), calls)
+
+        val blocked = executor(staticShell = runner).execute(resolved, context)
+        assertEquals(ActionResult.Failure("shell_external_trigger"), blocked.result)
+        assertEquals(listOf("id"), calls)
+    }
+
+    @Test
+    fun `resolved shell capture contains transport failures but propagates cancellation`() = runTest {
+        val resolved = (
+            TaintAwareInterpolator().resolve(
+                Action.RunShell("id", captureAs = "identity"),
+                VarScope(),
+            ) as ActionResolution.Resolved
+            ).value
+        val trusted = context.copy(
+            event = TriggerEvent.TimeFired(context.automationId, context.approvalFingerprint),
+        )
+
+        fun throwingRunner(error: Exception) = object : StaticShellRunner {
+            override suspend fun run(command: String, context: FireContext): ActionResult =
+                error("flat run non atteso")
+
+            override suspend fun runCaptured(
+                command: String,
+                context: FireContext,
+            ): ProgramActionResult = throw error
+        }
+
+        assertEquals(
+            ActionResult.Failure("action_failed"),
+            executor(staticShell = throwingRunner(IllegalStateException("sensitive")))
+                .execute(resolved, trusted)
+                .result,
+        )
+        assertFailsWith<CancellationException> {
+            executor(staticShell = throwingRunner(CancellationException("stop")))
+                .execute(resolved, trusted)
+        }
     }
 
     @Test
