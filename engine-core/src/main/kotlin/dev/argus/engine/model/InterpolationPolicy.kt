@@ -24,7 +24,9 @@ object InterpolationPolicy {
     data class TemplateField(val label: String, val value: String, val cls: FieldClass)
 
     /** Riferimento `${nome}` valido: il nome rispetta [VarBinding.NAME_REGEX]. */
-    private val VALID_REF = Regex("""\$\{([a-z][a-z0-9_]{0,31})}""")
+    // Escape both braces: Android's ICU regex engine rejects a bare closing brace even though
+    // the host JDK accepts it, which would otherwise crash the process on first validation.
+    private val VALID_REF = Regex("""\$\{([a-z][a-z0-9_]{0,31})\}""")
 
     /** Marcatore di apertura interpolazione: rileva ANCHE i `${...}` malformati. */
     private val OPEN_MARKER = Regex("""\$\{""")
