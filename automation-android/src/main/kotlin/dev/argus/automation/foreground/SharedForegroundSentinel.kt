@@ -11,6 +11,8 @@ import kotlinx.coroutines.sync.withLock
 sealed interface SentinelDemand {
     data object Connectivity : SentinelDemand
     data object Sensor : SentinelDemand
+    /** Lease univoca per un dispatch nato da BroadcastReceiver: più eventi possono sovrapporsi. */
+    data class Execution(val token: Long) : SentinelDemand
 }
 
 /**

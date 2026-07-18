@@ -16,13 +16,11 @@ import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
-import dev.argus.automation.di.ApplicationScope
+import dev.argus.automation.foreground.launchReceiverWork
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.Transition
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.launch
 
 data class GeofenceSignal(
     val automationId: AutomationId,
@@ -138,9 +136,6 @@ class AndroidGeofenceBackend(context: Context) : GeofenceBackend {
 @InstallIn(SingletonComponent::class)
 interface GeofenceIngressEntryPoint {
     fun geofenceEventIngress(): GeofenceEventIngress
-
-    @ApplicationScope
-    fun applicationScope(): CoroutineScope
 }
 
 /** Receiver non esportato: viene attivato soltanto dal PendingIntent posseduto dal framework. */
@@ -151,8 +146,7 @@ class GeofenceTransitionReceiver : BroadcastReceiver() {
             context.applicationContext,
             GeofenceIngressEntryPoint::class.java,
         )
-        val pending = goAsync()
-        entry.applicationScope().launch {
+        launchReceiverWork(context, "geofence") {
             try {
                 entry.geofenceEventIngress().onTransition(
                     signal.automationId,
@@ -163,8 +157,6 @@ class GeofenceTransitionReceiver : BroadcastReceiver() {
                 throw error
             } catch (error: Exception) {
                 Log.w(TAG, "dispatch geofence fallito: ${error::class.java.simpleName}")
-            } finally {
-                pending.finish()
             }
         }
     }

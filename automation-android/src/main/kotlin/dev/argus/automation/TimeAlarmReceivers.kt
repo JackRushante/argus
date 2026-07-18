@@ -5,12 +5,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import dev.argus.automation.foreground.launchReceiverWork
 import dev.argus.engine.model.AutomationId
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
 
 interface TimeAlarmRuntime {
     suspend fun onAlarm(
@@ -53,7 +49,7 @@ class TimeAlarmReceiver : BroadcastReceiver() {
             Log.w(TAG, "runtime scheduler non inizializzato; alarm recuperabile da Room")
             return
         }
-        launchAsync {
+        launchReceiverWork(context, "time_alarm") {
             runtime.onAlarm(signal.automationId, signal.approvalFingerprint, signal.eventAtMillis)
         }
     }
@@ -66,7 +62,7 @@ class TimeReconciliationReceiver : BroadcastReceiver() {
             Log.w(TAG, "runtime scheduler non inizializzato; reconcile rinviata")
             return
         }
-        launchAsync { runtime.reconcile(reason) }
+        launchReceiverWork(context, "time_reconcile") { runtime.reconcile(reason) }
     }
 }
 
@@ -78,21 +74,6 @@ internal fun reconcileReason(action: String?): ReconcileReason? = when (action) 
     AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED ->
         ReconcileReason.EXACT_ALARM_PERMISSION_CHANGED
     else -> null
-}
-
-private fun BroadcastReceiver.launchAsync(block: suspend () -> Unit) {
-    val pending = goAsync()
-    CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
-        try {
-            block()
-        } catch (_: CancellationException) {
-            Log.w(TAG, "receiver scheduler cancellato; recovery rinviata")
-        } catch (error: Exception) {
-            Log.e(TAG, "receiver scheduler fallito: ${error::class.java.simpleName}")
-        } finally {
-            pending.finish()
-        }
-    }
 }
 
 private const val TAG = "ArgusTimeAlarm"

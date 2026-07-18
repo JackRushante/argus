@@ -68,6 +68,23 @@ class SharedForegroundSentinelTest {
         assertEquals(1, backend.startCalls)
         assertEquals(2, backend.stopCalls)
     }
+
+    @Test
+    fun `concurrent executions hold independent demands`() = runTest {
+        val backend = RecordingBackend()
+        val sentinel = SharedForegroundSentinel(backend)
+        val first = SentinelDemand.Execution(1)
+        val second = SentinelDemand.Execution(2)
+
+        assertTrue(sentinel.setDemand(first, required = true))
+        assertTrue(sentinel.setDemand(second, required = true))
+        assertEquals(1, backend.startCalls)
+
+        assertTrue(sentinel.setDemand(first, required = false))
+        assertEquals(0, backend.stopCalls)
+        assertTrue(sentinel.setDemand(second, required = false))
+        assertEquals(1, backend.stopCalls)
+    }
 }
 
 private class RecordingBackend(

@@ -51,6 +51,7 @@ import dev.argus.automation.base.AndroidBaseActionExecutor
 import dev.argus.automation.base.AndroidBaseActionSurface
 import dev.argus.automation.base.BaseActionSurface
 import dev.argus.automation.foreground.SharedForegroundSentinel
+import dev.argus.automation.foreground.ReceiverWorkLauncher
 import dev.argus.automation.foreground.SentinelDemand
 import dev.argus.automation.sensor.AndroidSignificantMotionBackend
 import dev.argus.automation.sensor.EligibleSensorRule
@@ -688,6 +689,13 @@ object ArgusModule {
     fun sharedForegroundSentinel(
         backend: ConnectivitySentinelBackend,
     ): SharedForegroundSentinel = SharedForegroundSentinel(backend)
+
+    @Provides
+    @Singleton
+    fun receiverWorkLauncher(
+        @ApplicationScope scope: CoroutineScope,
+        sentinel: SharedForegroundSentinel,
+    ): ReceiverWorkLauncher = ReceiverWorkLauncher(scope, sentinel)
 
     @Provides
     @Singleton
