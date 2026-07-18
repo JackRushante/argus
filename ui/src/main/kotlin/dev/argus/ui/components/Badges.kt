@@ -24,8 +24,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import dev.argus.ui.R
 import dev.argus.ui.model.StatusBadge
 import dev.argus.ui.theme.ArgusTheme
 import dev.argus.ui.theme.LocalArgusSemantic
@@ -64,10 +66,10 @@ private data class BadgeStyle(val role: RolePair, val icon: ImageVector, val lab
 private fun statusStyle(status: StatusBadge): BadgeStyle {
     val s = LocalArgusSemantic.current
     return when (status) {
-        StatusBadge.ARMED -> BadgeStyle(s.armed, Icons.Rounded.Shield, "armata")
-        StatusBadge.PENDING_APPROVAL -> BadgeStyle(s.pending, Icons.Rounded.Pending, "in approvazione")
-        StatusBadge.DISABLED -> BadgeStyle(s.disabled, Icons.Rounded.PauseCircle, "disattivata")
-        StatusBadge.NEEDS_REVIEW -> BadgeStyle(s.needsReview, Icons.Rounded.SyncProblem, "da rivedere")
+        StatusBadge.ARMED -> BadgeStyle(s.armed, Icons.Rounded.Shield, stringResource(R.string.badge_status_armed))
+        StatusBadge.PENDING_APPROVAL -> BadgeStyle(s.pending, Icons.Rounded.Pending, stringResource(R.string.badge_status_pending))
+        StatusBadge.DISABLED -> BadgeStyle(s.disabled, Icons.Rounded.PauseCircle, stringResource(R.string.badge_status_disabled))
+        StatusBadge.NEEDS_REVIEW -> BadgeStyle(s.needsReview, Icons.Rounded.SyncProblem, stringResource(R.string.badge_status_needs_review))
     }
 }
 
@@ -81,13 +83,13 @@ fun StatusBadgeChip(status: StatusBadge, modifier: Modifier = Modifier) {
 /** Badge "generativa" (viola) — accompagna SEMPRE una regola generativa (invariante §5.4). */
 @Composable
 fun GenerativeTag(modifier: Modifier = Modifier) {
-    SemanticChip(LocalArgusSemantic.current.generative, Icons.Rounded.SmartToy, "generativa", modifier)
+    SemanticChip(LocalArgusSemantic.current.generative, Icons.Rounded.SmartToy, stringResource(R.string.badge_generative), modifier)
 }
 
 /** Badge privacy "esce verso il cloud" (ambra) — coppia obbligatoria di GenerativeTag (§5.4). */
 @Composable
 fun CloudTag(modifier: Modifier = Modifier) {
-    SemanticChip(LocalArgusSemantic.current.cloud, Icons.Rounded.CloudUpload, "esce verso il cloud", modifier)
+    SemanticChip(LocalArgusSemantic.current.cloud, Icons.Rounded.CloudUpload, stringResource(R.string.badge_cloud), modifier)
 }
 
 @OptIn(ExperimentalLayoutApi::class)

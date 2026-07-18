@@ -106,7 +106,7 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState()),
         ) {
             Text(
-                "Sistema",
+                stringResource(R.string.settings_title),
                 color = MaterialTheme.colorScheme.onSurface,
                 style = MaterialTheme.typography.titleLarge,
                 modifier = Modifier.padding(start = 18.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
@@ -201,96 +201,96 @@ private enum class HealthLevel { OK, WARN, NEUTRAL }
 @Composable
 private fun HealthSection(state: SettingsState, callbacks: SettingsCallbacks) {
     val shizukuSub = when (state.shizuku) {
-        ShizukuStatus.AUTHORIZED -> "attivo — privilegi shell disponibili"
-        ShizukuStatus.NOT_INSTALLED -> "non installato"
-        ShizukuStatus.INSTALLED_NOT_RUNNING -> "installato, non in esecuzione"
-        ShizukuStatus.RUNNING_NOT_AUTHORIZED -> "attivo, Argus non autorizzato"
-        ShizukuStatus.DEGRADED_AFTER_REBOOT -> "spento dopo il riavvio — azioni shell in coda"
+        ShizukuStatus.AUTHORIZED -> stringResource(R.string.settings_shizuku_ok)
+        ShizukuStatus.NOT_INSTALLED -> stringResource(R.string.settings_shizuku_not_installed)
+        ShizukuStatus.INSTALLED_NOT_RUNNING -> stringResource(R.string.settings_shizuku_not_running)
+        ShizukuStatus.RUNNING_NOT_AUTHORIZED -> stringResource(R.string.settings_shizuku_not_authorized)
+        ShizukuStatus.DEGRADED_AFTER_REBOOT -> stringResource(R.string.settings_shizuku_degraded)
     }
     val (locLevel, locSub) = when (state.backgroundLocation) {
-        BgLocationState.GRANTED -> HealthLevel.OK to "sempre — i geofence sono affidabili"
-        BgLocationState.WHILE_IN_USE -> HealthLevel.WARN to "solo mentre in uso — serve «Consenti sempre» per i geofence"
-        BgLocationState.DENIED -> HealthLevel.WARN to "negata o non precisa — i geofence non funzionano"
-        BgLocationState.NOT_NEEDED -> HealthLevel.NEUTRAL to "non necessaria — nessuna regola geofence; tocca per concederla in anticipo"
+        BgLocationState.GRANTED -> HealthLevel.OK to stringResource(R.string.settings_location_granted)
+        BgLocationState.WHILE_IN_USE -> HealthLevel.WARN to stringResource(R.string.settings_location_while_in_use)
+        BgLocationState.DENIED -> HealthLevel.WARN to stringResource(R.string.settings_location_denied)
+        BgLocationState.NOT_NEEDED -> HealthLevel.NEUTRAL to stringResource(R.string.settings_location_not_needed)
     }
 
-    SettingsSection("SALUTE") {
+    SettingsSection(stringResource(R.string.settings_section_health)) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             HealthRow(
-                Icons.Rounded.Terminal, "Shizuku", shizukuSub,
+                Icons.Rounded.Terminal, stringResource(R.string.settings_shizuku_title), shizukuSub,
                 if (state.shizuku == ShizukuStatus.AUTHORIZED) HealthLevel.OK else HealthLevel.WARN,
                 onFix = callbacks::onOpenShizukuFix,
             )
             HealthRow(
-                Icons.Rounded.BatterySaver, "Ottimizzazione batteria",
+                Icons.Rounded.BatterySaver, stringResource(R.string.settings_battery_title),
                 if (state.batteryExempt) {
-                    "esclusione Android concessa — i controlli attività in background/avvio automatico OxygenOS restano manuali"
+                    stringResource(R.string.settings_battery_ok)
                 } else {
-                    "attiva — concedi l'esclusione e verifica anche attività in background/avvio automatico in OxygenOS"
+                    stringResource(R.string.settings_battery_warn)
                 },
                 if (state.batteryExempt) HealthLevel.OK else HealthLevel.WARN,
                 onFix = callbacks::onOpenBatteryFix,
             )
             HealthRow(
-                Icons.Rounded.Notifications, "Notifiche Argus",
-                if (state.notificationsGranted) "consentite" else "non consentite — esiti e avvisi non saranno visibili",
+                Icons.Rounded.Notifications, stringResource(R.string.settings_notifications_title),
+                if (state.notificationsGranted) stringResource(R.string.settings_notifications_ok) else stringResource(R.string.settings_notifications_warn),
                 if (state.notificationsGranted) HealthLevel.OK else HealthLevel.WARN,
                 onFix = callbacks::onOpenNotificationAccessFix,
             )
             HealthRow(
-                Icons.Rounded.Notifications, "Lettura notifiche",
+                Icons.Rounded.Notifications, stringResource(R.string.settings_listener_title),
                 if (state.notificationListenerGranted) {
-                    "attiva — trigger WhatsApp e risposte disponibili"
+                    stringResource(R.string.settings_listener_ok)
                 } else {
-                    "non attiva — trigger WhatsApp e risposte non armabili"
+                    stringResource(R.string.settings_listener_warn)
                 },
                 if (state.notificationListenerGranted) HealthLevel.OK else HealthLevel.WARN,
                 onFix = callbacks::onOpenNotificationListenerFix,
             )
             HealthRow(
-                Icons.Rounded.MyLocation, "Posizione in background", locSub, locLevel,
+                Icons.Rounded.MyLocation, stringResource(R.string.settings_location_title), locSub, locLevel,
                 onFix = callbacks::onOpenLocationFix,
             )
             // Telefonia (P2-2): opt-in, non un problema di salute — NEUTRAL finché non
             // concesso, il tap lancia direttamente la richiesta runtime.
             HealthRow(
-                Icons.Rounded.Sms, "Trigger SMS",
+                Icons.Rounded.Sms, stringResource(R.string.settings_sms_title),
                 if (state.smsTriggerGranted) {
-                    "attivi per SMS telefonici — chat RCS e MMS non emettono questo trigger"
+                    stringResource(R.string.settings_sms_on)
                 } else {
-                    "non attivi — solo SMS telefonici, non chat RCS o MMS"
+                    stringResource(R.string.settings_sms_off)
                 },
                 if (state.smsTriggerGranted) HealthLevel.OK else HealthLevel.NEUTRAL,
                 onFix = callbacks::onRequestSmsPermission,
-                actionLabel = if (state.smsTriggerGranted) null else "Attiva",
+                actionLabel = if (state.smsTriggerGranted) null else stringResource(R.string.settings_enable_action),
             )
             HealthRow(
-                Icons.Rounded.Call, "Trigger chiamate",
+                Icons.Rounded.Call, stringResource(R.string.settings_call_title),
                 if (state.callTriggerGranted) {
-                    "attivi — squillo e fine chiamata armabili"
+                    stringResource(R.string.settings_call_on)
                 } else {
-                    "non attivi — consenti per armare regole sulle chiamate"
+                    stringResource(R.string.settings_call_off)
                 },
                 if (state.callTriggerGranted) HealthLevel.OK else HealthLevel.NEUTRAL,
                 onFix = callbacks::onRequestCallPermissions,
-                actionLabel = if (state.callTriggerGranted) null else "Attiva",
+                actionLabel = if (state.callTriggerGranted) null else stringResource(R.string.settings_enable_action),
             )
             HealthRow(
-                Icons.Rounded.Bluetooth, "Trigger Bluetooth",
+                Icons.Rounded.Bluetooth, stringResource(R.string.settings_bt_title),
                 if (state.bluetoothTriggerGranted) {
-                    "attivi — connessione e disconnessione dei dispositivi sono armabili"
+                    stringResource(R.string.settings_bt_on)
                 } else {
-                    "non attivi — consenti Dispositivi nelle vicinanze per armare le regole"
+                    stringResource(R.string.settings_bt_off)
                 },
                 if (state.bluetoothTriggerGranted) HealthLevel.OK else HealthLevel.NEUTRAL,
                 onFix = callbacks::onRequestBluetoothPermission,
-                actionLabel = if (state.bluetoothTriggerGranted) null else "Attiva",
+                actionLabel = if (state.bluetoothTriggerGranted) null else stringResource(R.string.settings_enable_action),
             )
             if (state.connectivitySentinelActive) {
                 HealthRow(
                     Icons.Rounded.Hub,
-                    "Sentinella connettività",
-                    "attiva — monitora Wi-Fi e alimentazione per le regole armate",
+                    stringResource(R.string.settings_sentinel_title),
+                    stringResource(R.string.settings_sentinel_active),
                     HealthLevel.OK,
                     onFix = {},
                 )
@@ -340,7 +340,7 @@ private fun HealthRow(
         }
         when {
             level == HealthLevel.WARN ->
-                OutlinedButton(onClick = onFix, modifier = Modifier.heightIn(min = 48.dp)) { Text("Correggi") }
+                OutlinedButton(onClick = onFix, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.settings_fix)) }
             actionLabel != null ->
                 OutlinedButton(onClick = onFix, modifier = Modifier.heightIn(min = 48.dp)) { Text(actionLabel) }
             level == HealthLevel.OK ->
@@ -364,7 +364,7 @@ private fun TransportSection(
 ) {
     val onEditBridge = onEditTransport
     val semantic = LocalArgusSemantic.current
-    SettingsSection("BRAIN · TRANSPORT") {
+    SettingsSection(stringResource(R.string.settings_section_transport)) {
         SectionCard {
             if (providerChoices.isNotEmpty()) {
                 ProviderSelector(providerChoices, callbacks::onSelectProvider)
@@ -373,11 +373,11 @@ private fun TransportSection(
                 is TransportUi.CliBridge -> {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Icon(Icons.Rounded.Hub, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                        Text("CliBridge · Hermes", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+                        Text(stringResource(R.string.settings_clibridge_title), color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
                         val (reachColor, reachText) = when (transport.reachable) {
-                            true -> semantic.armed.fg to "raggiungibile"
-                            false -> semantic.error.fg to "irraggiungibile"
-                            null -> MaterialTheme.colorScheme.onSurfaceVariant to "non verificato"
+                            true -> semantic.armed.fg to stringResource(R.string.settings_reachable)
+                            false -> semantic.error.fg to stringResource(R.string.settings_unreachable)
+                            null -> MaterialTheme.colorScheme.onSurfaceVariant to stringResource(R.string.settings_unverified)
                         }
                         Text(reachText, color = reachColor, style = MaterialTheme.typography.bodyMedium)
                     }
@@ -401,7 +401,7 @@ private fun TransportSection(
                             fontFamily = FontFamily.Monospace,
                             modifier = Modifier.weight(1f),
                         )
-                        Icon(Icons.Rounded.Edit, contentDescription = "Modifica bridge Hermes", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Rounded.Edit, contentDescription = stringResource(R.string.settings_edit_bridge_cd), tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                     }
                     Text(
                         stringResource(
@@ -413,13 +413,14 @@ private fun TransportSection(
                     )
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(
-                            transport.lastLatencyLabel?.let { "Ultima latenza: $it" } ?: "Latenza non ancora misurata",
+                            transport.lastLatencyLabel?.let { stringResource(R.string.settings_latency_last, it) }
+                                ?: stringResource(R.string.settings_latency_none),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodyMedium,
                             modifier = Modifier.weight(1f),
                         )
                         OutlinedButton(onClick = callbacks::onTestConnection, modifier = Modifier.heightIn(min = 48.dp)) {
-                            Text("Test connessione")
+                            Text(stringResource(R.string.settings_test_connection))
                         }
                     }
                 }
@@ -427,15 +428,15 @@ private fun TransportSection(
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Icon(Icons.Rounded.Hub, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                         Text(
-                            "${transport.providerLabel} · ${transport.model ?: "modello non impostato"}",
+                            "${transport.providerLabel} · ${transport.model ?: stringResource(R.string.settings_model_not_set)}",
                             color = MaterialTheme.colorScheme.onSurface,
                             style = MaterialTheme.typography.labelLarge,
                             modifier = Modifier.weight(1f),
                         )
                         val (reachColor, reachText) = when (transport.reachable) {
-                            true -> semantic.armed.fg to "raggiungibile"
-                            false -> semantic.error.fg to "irraggiungibile"
-                            null -> MaterialTheme.colorScheme.onSurfaceVariant to "non verificato"
+                            true -> semantic.armed.fg to stringResource(R.string.settings_reachable)
+                            false -> semantic.error.fg to stringResource(R.string.settings_unreachable)
+                            null -> MaterialTheme.colorScheme.onSurfaceVariant to stringResource(R.string.settings_unverified)
                         }
                         Text(reachText, color = reachColor, style = MaterialTheme.typography.bodyMedium)
                     }
@@ -459,22 +460,23 @@ private fun TransportSection(
                             fontFamily = FontFamily.Monospace,
                             modifier = Modifier.weight(1f),
                         )
-                        Icon(Icons.Rounded.Edit, contentDescription = "Modifica ${transport.providerLabel}", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Rounded.Edit, contentDescription = stringResource(R.string.settings_edit_provider_cd, transport.providerLabel), tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                     }
                     Text(
-                        if (transport.authState == AuthState.OK) "Chiave configurata" else "Chiave mancante",
+                        if (transport.authState == AuthState.OK) stringResource(R.string.settings_key_configured) else stringResource(R.string.settings_key_missing),
                         color = if (transport.authState == AuthState.OK) semantic.armed.fg else semantic.error.fg,
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(
-                            transport.lastLatencyLabel?.let { "Ultima latenza: $it" } ?: "Latenza non ancora misurata",
+                            transport.lastLatencyLabel?.let { stringResource(R.string.settings_latency_last, it) }
+                                ?: stringResource(R.string.settings_latency_none),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodyMedium,
                             modifier = Modifier.weight(1f),
                         )
                         OutlinedButton(onClick = callbacks::onTestConnection, modifier = Modifier.heightIn(min = 48.dp)) {
-                            Text("Test connessione")
+                            Text(stringResource(R.string.settings_test_connection))
                         }
                     }
                 }
@@ -483,7 +485,7 @@ private fun TransportSection(
             if (transport is TransportUi.CliBridge) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        "Streaming (OpenAI-compat)",
+                        stringResource(R.string.settings_streaming_label),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.weight(1f),
@@ -512,7 +514,7 @@ private fun ProviderSelector(choices: List<ProviderChoiceUi>, onSelect: (String)
 @Composable
 private fun InArrivoChip() {
     Text(
-        "in arrivo",
+        stringResource(R.string.settings_coming_soon),
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         style = MaterialTheme.typography.labelSmall,
         modifier = Modifier
@@ -524,7 +526,7 @@ private fun InArrivoChip() {
 
 @Composable
 private fun PrivacySection(accepted: Boolean, onRevoke: () -> Unit) {
-    SettingsSection("PRIVACY") {
+    SettingsSection(stringResource(R.string.settings_section_privacy)) {
         SectionCard {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -537,7 +539,7 @@ private fun PrivacySection(accepted: Boolean, onRevoke: () -> Unit) {
                     modifier = Modifier.size(22.dp),
                 )
                 Text(
-                    if (accepted) "Consenso Hermes attivo" else "Consenso non accettato",
+                    if (accepted) stringResource(R.string.settings_privacy_active) else stringResource(R.string.settings_privacy_missing),
                     color = MaterialTheme.colorScheme.onSurface,
                     style = MaterialTheme.typography.labelLarge,
                 )
@@ -565,11 +567,11 @@ private fun PrivacySection(accepted: Boolean, onRevoke: () -> Unit) {
 
 @Composable
 private fun WhitelistSection(contacts: List<ContactRow>, callbacks: SettingsCallbacks) {
-    SettingsSection("WHITELIST CONTATTI") {
+    SettingsSection(stringResource(R.string.settings_section_whitelist)) {
         SectionCard {
             // Nota VERBATIM (§6.5): il match è per conversationId, spoofabile.
             Text(
-                "Solo questi contatti possono ricevere risposte automatiche. Memorizzati per conversationId, non per nome — spoofabile.",
+                stringResource(R.string.settings_whitelist_note),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -585,7 +587,7 @@ private fun WhitelistSection(contacts: List<ContactRow>, callbacks: SettingsCall
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Icon(Icons.Rounded.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                Text("Aggiungi contatto", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
+                Text(stringResource(R.string.settings_add_contact), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
             }
         }
     }
@@ -629,7 +631,7 @@ private fun ContactRowItem(contact: ContactRow, onRemove: () -> Unit) {
                 .clickable { onRemove() },
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Rounded.Close, contentDescription = "Rimuovi ${contact.displayName}", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+            Icon(Icons.Rounded.Close, contentDescription = stringResource(R.string.settings_remove_contact_cd, contact.displayName), tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
         }
     }
 }
@@ -648,7 +650,7 @@ private fun maskConversationId(id: String): String {
 private fun BudgetSection(budget: BudgetUi, callbacks: SettingsCallbacks) {
     val semantic = LocalArgusSemantic.current
     var showLimitsEditor by remember { mutableStateOf(false) }
-    SettingsSection("BUDGET LLM") {
+    SettingsSection(stringResource(R.string.settings_section_budget)) {
         SectionCard {
             if (budget.softWarningActive) {
                 Row(
@@ -662,14 +664,14 @@ private fun BudgetSection(budget: BudgetUi, callbacks: SettingsCallbacks) {
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Text(
-                        "Budget quasi esaurito",
+                        stringResource(R.string.settings_budget_soft),
                         color = semantic.pending.fg,
                         style = MaterialTheme.typography.labelLarge,
                     )
                 }
             }
-            BudgetCallsRow("Chiamate · ultima ora", budget.usedHour, budget.limitHour)
-            BudgetCallsRow("Chiamate · oggi", budget.usedDay, budget.limitDay)
+            BudgetCallsRow(stringResource(R.string.settings_budget_calls_hour), budget.usedHour, budget.limitHour)
+            BudgetCallsRow(stringResource(R.string.settings_budget_calls_day), budget.usedDay, budget.limitDay)
             BudgetTokensRow(budget.tokensInMonth, budget.tokensOutMonth, budget.tokenLimitMonth)
             BudgetCostRow(budget.costMonthMicros, budget.costLimitMicros)
             if (budget.perProvider.isNotEmpty()) {
@@ -682,21 +684,24 @@ private fun BudgetSection(budget: BudgetUi, callbacks: SettingsCallbacks) {
                         )
                         // Metrica primaria: TOKEN input/output per finestra.
                         Text(
-                            "token · ora ${BudgetFormat.tokensLabel(provider.tokensInHour, provider.tokensOutHour)} · " +
-                                "oggi ${BudgetFormat.tokensLabel(provider.tokensInDay, provider.tokensOutDay)} · " +
-                                "mese ${BudgetFormat.tokensLabel(provider.tokensInMonth, provider.tokensOutMonth)}",
+                            stringResource(
+                                R.string.settings_budget_provider_tokens,
+                                BudgetFormat.tokensLabel(provider.tokensInHour, provider.tokensOutHour),
+                                BudgetFormat.tokensLabel(provider.tokensInDay, provider.tokensOutDay),
+                                BudgetFormat.tokensLabel(provider.tokensInMonth, provider.tokensOutMonth),
+                            ),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodyMedium,
                         )
                         Text(
-                            "chiamate · ora ${provider.callsHour} · oggi ${provider.callsDay}",
+                            stringResource(R.string.settings_budget_provider_calls, provider.callsHour, provider.callsDay),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodyMedium,
                         )
                         // Dollari SOLO per i provider a listino noto: mai per Hermes/OpenRouter/Custom.
                         if (provider.costTracked) {
                             Text(
-                                "costo mese ${BudgetFormat.costLabel(provider.costMonthMicros)}",
+                                stringResource(R.string.settings_budget_provider_cost, BudgetFormat.costLabel(provider.costMonthMicros)),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 style = MaterialTheme.typography.bodyMedium,
                             )
@@ -705,16 +710,14 @@ private fun BudgetSection(budget: BudgetUi, callbacks: SettingsCallbacks) {
                 }
             }
             Text(
-                "Costi in dollari stimati dal listino pubblico solo per i provider a prezzo noto " +
-                    "(stima indicativa, non fattura) · EUR a tasso fisso ≈ · " +
-                    "Hermes/OpenRouter/Custom: solo token",
+                stringResource(R.string.settings_budget_footnote),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.labelSmall,
             )
             OutlinedButton(
                 onClick = { showLimitsEditor = true },
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-            ) { Text("Modifica limiti") }
+            ) { Text(stringResource(R.string.settings_budget_edit_limits)) }
         }
     }
     if (showLimitsEditor) {
@@ -763,7 +766,7 @@ private fun BudgetTokensRow(tokensIn: Long?, tokensOut: Long?, tokenLimitMonth: 
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                "Token · mese (token-only)",
+                stringResource(R.string.settings_budget_tokens_month),
                 color = MaterialTheme.colorScheme.onSurface,
                 style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier.weight(1f),
@@ -784,7 +787,7 @@ private fun BudgetTokensRow(tokensIn: Long?, tokensOut: Long?, tokenLimitMonth: 
                 trackColor = MaterialTheme.colorScheme.background,
             )
             Text(
-                "Limite: ${BudgetFormat.tokensCapLabel(used, tokenLimitMonth)}",
+                stringResource(R.string.settings_budget_limit, BudgetFormat.tokensCapLabel(used, tokenLimitMonth)),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -796,7 +799,7 @@ private fun BudgetTokensRow(tokensIn: Long?, tokensOut: Long?, tokenLimitMonth: 
 private fun BudgetCostRow(costMonthMicros: Long?, costLimitMicros: Long?) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Costo · mese corrente", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+            Text(stringResource(R.string.settings_budget_cost_month), color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
             Text(
                 BudgetFormat.costLabel(costMonthMicros),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -812,7 +815,7 @@ private fun BudgetCostRow(costMonthMicros: Long?, costLimitMicros: Long?) {
                 trackColor = MaterialTheme.colorScheme.background,
             )
             Text(
-                "Limite: ${BudgetFormat.costLabel(costLimitMicros)}",
+                stringResource(R.string.settings_budget_limit, BudgetFormat.costLabel(costLimitMicros)),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -839,7 +842,7 @@ private fun RerunRow(onRerun: () -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Icon(Icons.Rounded.RestartAlt, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
-        Text("Ripeti configurazione", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+        Text(stringResource(R.string.settings_rerun), color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
         Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp))
     }
 }

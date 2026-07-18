@@ -29,9 +29,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import dev.argus.ui.R
 import dev.argus.ui.model.ActionRow
 import dev.argus.ui.model.RuleRender
 import dev.argus.ui.model.iconFor
@@ -67,7 +69,7 @@ fun ShellCommandBlock(cmd: String, modifier: Modifier = Modifier) {
         ) {
             Icon(Icons.Rounded.Terminal, contentDescription = null, tint = semantic.cloud.fg, modifier = Modifier.size(16.dp))
             Text(
-                "esegue comandi con privilegi shell (UID 2000)",
+                stringResource(R.string.rule_shell_privileges_label),
                 color = semantic.cloud.fg,
                 style = MaterialTheme.typography.labelSmall,
             )
@@ -96,7 +98,7 @@ private fun LiveConfirmChip(modifier: Modifier = Modifier) {
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Icon(Icons.Rounded.TouchApp, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(13.dp))
-        Text("conferma live", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+        Text(stringResource(R.string.rule_live_confirm), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
     }
 }
 
@@ -220,9 +222,9 @@ private fun CompactRuleCard(rule: RuleRender, modifier: Modifier, showGenerative
 private fun ExtendedRuleCard(rule: RuleRender, modifier: Modifier, showGenerativeHeader: Boolean) {
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         if (showGenerativeHeader) GenerativeHeader(rule)
-        RuleSection("QUANDO") { TriggerLine(rule) }
+        RuleSection(stringResource(R.string.rule_section_when)) { TriggerLine(rule) }
         if (rule.conditionLines.isNotEmpty()) {
-            RuleSection("SOLO SE") {
+            RuleSection(stringResource(R.string.rule_section_only_if)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Icon(
                         Icons.Rounded.FilterAlt,
@@ -238,7 +240,7 @@ private fun ExtendedRuleCard(rule: RuleRender, modifier: Modifier, showGenerativ
                 }
             }
         }
-        RuleSection("ALLORA") {
+        RuleSection(stringResource(R.string.rule_section_then)) {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 rule.actions.forEach { ActionRowItem(it) }
             }

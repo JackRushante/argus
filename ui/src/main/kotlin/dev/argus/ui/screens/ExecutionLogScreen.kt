@@ -50,10 +50,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import dev.argus.engine.runtime.AuditKind
+import dev.argus.ui.R
 import dev.argus.ui.components.EmptyState
 import dev.argus.ui.components.CloudTag
 import dev.argus.ui.components.GenerativeTag
@@ -92,7 +94,7 @@ fun ExecutionLogScreen(
     Surface(color = MaterialTheme.colorScheme.background, modifier = modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             Text(
-                "Log esecuzioni",
+                stringResource(R.string.log_title),
                 color = MaterialTheme.colorScheme.onSurface,
                 style = MaterialTheme.typography.titleLarge,
                 modifier = Modifier.padding(start = 18.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
@@ -112,8 +114,8 @@ fun ExecutionLogScreen(
             } else if (state.entries.isEmpty()) {
                 EmptyState(
                     icon = Icons.Rounded.History,
-                    title = "Nessuna esecuzione",
-                    body = "Qui compaiono gli scatti delle regole armate: successi, condizioni non soddisfatte ed errori.",
+                    title = stringResource(R.string.log_empty_title),
+                    body = stringResource(R.string.log_empty_body),
                 )
             } else {
                 // groupBy preserva l'ordine di prima comparsa delle chiavi (host: più recenti in cima).
@@ -166,7 +168,7 @@ private fun FilterHeader(name: String, onClear: () -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
-            "Solo: $name",
+            stringResource(R.string.log_filter_only, name),
             color = MaterialTheme.colorScheme.onSurface,
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.weight(1f),
@@ -180,7 +182,7 @@ private fun FilterHeader(name: String, onClear: () -> Unit) {
         ) {
             Icon(
                 Icons.Rounded.Close,
-                contentDescription = "Rimuovi filtro",
+                contentDescription = stringResource(R.string.log_filter_remove),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(20.dp),
             )
@@ -260,7 +262,7 @@ private fun LogRowItem(
             if (expandable) {
                 Icon(
                     Icons.Rounded.ExpandMore,
-                    contentDescription = if (expanded) "Comprimi" else "Espandi",
+                    contentDescription = if (expanded) stringResource(R.string.log_collapse) else stringResource(R.string.log_expand),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(20.dp).rotate(chevronRotation),
                 )
@@ -311,7 +313,7 @@ private fun ExpandedDetail(
             ) {
                 Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("Invia ora")
+                Text(stringResource(R.string.log_send_now))
             }
         }
         if (row.automationId != null) {
@@ -319,7 +321,7 @@ private fun ExpandedDetail(
                 onClick = onOpenAutomation,
                 modifier = Modifier.heightIn(min = 48.dp),
             ) {
-                Text("Apri automazione")
+                Text(stringResource(R.string.log_open_automation))
             }
         }
     }

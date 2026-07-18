@@ -30,10 +30,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import dev.argus.engine.safety.Severity
+import dev.argus.ui.R
 import dev.argus.ui.model.EngineBanner
 import dev.argus.ui.model.UiWarning
 import dev.argus.ui.theme.ArgusTheme
@@ -89,13 +91,13 @@ fun EngineBannerBar(banner: EngineBanner, modifier: Modifier = Modifier, onClick
     val semantic = LocalArgusSemantic.current
     val (role, text) = when (banner) {
         EngineBanner.SHIZUKU_DOWN ->
-            semantic.pending to "Shizuku non attivo — azioni shell in pausa"
+            semantic.pending to stringResource(R.string.banner_shizuku_down)
         EngineBanner.SHIZUKU_DEGRADED_AFTER_REBOOT ->
-            semantic.pending to "Dopo il riavvio Shizuku è spento — le azioni shell sono in coda"
+            semantic.pending to stringResource(R.string.banner_shizuku_degraded)
         EngineBanner.BATTERY_NOT_EXEMPT ->
-            semantic.pending to "Ottimizzazione batteria attiva — le azioni in background possono fallire"
+            semantic.pending to stringResource(R.string.banner_battery_not_exempt)
         EngineBanner.BRAIN_UNREACHABLE ->
-            semantic.error to "Hermes irraggiungibile — la chat non può proporre regole"
+            semantic.error to stringResource(R.string.banner_brain_unreachable)
         EngineBanner.NONE -> return
     }
     val icon = if (banner == EngineBanner.BRAIN_UNREACHABLE) Icons.Rounded.CloudOff else Icons.Rounded.WarningAmber
@@ -143,7 +145,7 @@ fun LatencyIndicator(
         )
         Column(modifier = Modifier.weight(1f).padding(end = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
-                "Argus sta pensando… ($elapsedSec s)",
+                stringResource(R.string.latency_thinking, elapsedSec),
                 color = MaterialTheme.colorScheme.onSurface,
                 style = MaterialTheme.typography.bodyLarge,
             )
@@ -154,7 +156,7 @@ fun LatencyIndicator(
             )
         }
         TextButton(onClick = onCancel, modifier = Modifier.heightIn(min = 48.dp)) {
-            Text("Annulla")
+            Text(stringResource(R.string.action_cancel))
         }
     }
 }

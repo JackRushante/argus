@@ -1,0 +1,241 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Traduzione italiana: attiva quando il locale di sistema è "it". -->
+<resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="Typos">
+    <!-- Azioni condivise -->
+    <string name="action_cancel">Annulla</string>
+    <string name="action_save">Salva</string>
+    <string name="action_save_and_test">Salva e verifica</string>
+    <string name="action_delete">Elimina</string>
+    <string name="action_run_now">Esegui ora</string>
+    <string name="action_back">Indietro</string>
+
+    <!-- Dialog bridge Hermes -->
+    <string name="bridge_dialog_title">Configura Hermes</string>
+    <string name="bridge_url_label">Indirizzo HTTPS del bridge</string>
+    <string name="bridge_token_label">Bearer token</string>
+    <string name="bridge_token_keep_hint">Lascia vuoto per conservare il token protetto</string>
+    <string name="bridge_token_required_hint">Inserisci il bearer token</string>
+    <string name="bridge_token_configured">Token protetto configurato</string>
+    <string name="bridge_token_missing">Token non configurato</string>
+
+    <!-- Dialog provider BYOK -->
+    <string name="provider_dialog_title">Configura %1$s</string>
+    <string name="provider_endpoint_label">Endpoint</string>
+    <string name="provider_model_label">Modello</string>
+    <string name="provider_key_label">Chiave API</string>
+    <string name="provider_key_keep_hint">Lascia vuoto per conservare la chiave attuale.</string>
+    <string name="provider_key_required_hint">Obbligatoria.</string>
+
+    <!-- Dialog conferme (dettaglio) -->
+    <string name="delete_dialog_title">Eliminare l\'automazione?</string>
+    <string name="delete_dialog_body">La regola e il suo stato verranno rimossi. Questa azione non si può annullare.</string>
+    <string name="run_now_dialog_title">Eseguire ora?</string>
+    <string name="run_now_dialog_body">Le azioni verranno eseguite subito, senza attendere il trigger o valutare le condizioni.</string>
+
+    <!-- Privacy (Sistema) -->
+    <string name="cloud_processing">Elaborazione cloud</string>
+    <string name="privacy_section_body">Il testo inviato in chat può raggiungere Hermes e il provider cloud configurato. Puoi revocare il consenso in qualsiasi momento.</string>
+    <string name="privacy_revoke_action">Revoca consenso</string>
+    <string name="privacy_revoke_title">Revocare il consenso?</string>
+    <string name="privacy_revoke_body">Hermes verrà bloccato subito e l\'onboarding sarà richiesto di nuovo. Le automazioni deterministiche già approvate restano locali.</string>
+    <string name="privacy_revoke_confirm">Revoca e blocca Hermes</string>
+
+    <!-- Badge -->
+    <string name="badge_status_armed">armata</string>
+    <string name="badge_status_pending">in approvazione</string>
+    <string name="badge_status_disabled">disattivata</string>
+    <string name="badge_status_needs_review">da rivedere</string>
+    <string name="badge_generative">generativa</string>
+    <string name="badge_cloud">esce verso il cloud</string>
+
+    <!-- Banner salute -->
+    <string name="banner_shizuku_down">Shizuku non attivo — azioni shell in pausa</string>
+    <string name="banner_shizuku_degraded">Dopo il riavvio Shizuku è spento — le azioni shell sono in coda</string>
+    <string name="banner_battery_not_exempt">Ottimizzazione batteria attiva — le azioni in background possono fallire</string>
+    <string name="banner_brain_unreachable">Hermes irraggiungibile — la chat non può proporre regole</string>
+    <string name="latency_thinking">Argus sta pensando… (%1$d s)</string>
+
+    <!-- RuleCard -->
+    <string name="rule_shell_privileges_label">esegue comandi con privilegi shell (UID 2000)</string>
+    <string name="rule_live_confirm">conferma live</string>
+    <string name="rule_section_when">QUANDO</string>
+    <string name="rule_section_only_if">SOLO SE</string>
+    <string name="rule_section_then">ALLORA</string>
+
+    <!-- Chat -->
+    <string name="chat_subtitle">chat · compilatore di regole</string>
+    <string name="chat_more">Altro</string>
+    <string name="chat_menu_clear">Svuota conversazione</string>
+    <string name="chat_menu_check_connection">Verifica connessione Hermes</string>
+    <string name="chat_expected_range">di solito 10-30 s</string>
+    <string name="chat_not_armable">Non armabile: %1$s</string>
+    <string name="chat_draft_pending">Bozza · in attesa di approvazione</string>
+    <string name="chat_draft_approved">Approvata e armata</string>
+    <string name="chat_draft_rejected">Bozza rifiutata</string>
+    <string name="chat_draft_superseded">Sostituita da una proposta più recente</string>
+    <string name="chat_review_cta">Rivedi e approva</string>
+    <string name="chat_brain_down">Hermes irraggiungibile</string>
+    <string name="chat_retry">Riprova</string>
+    <string name="chat_error_timeout">Hermes non risponde (timeout 60 s). Il server potrebbe essere occupato — riprova.</string>
+    <string name="chat_error_unreachable">Hermes irraggiungibile. Controlla la connessione al tailnet e riprova.</string>
+    <string name="chat_error_malformed">La risposta non conteneva una regola valida. Riprova o riformula.</string>
+    <string name="chat_error_detail_show">Dettaglio tecnico</string>
+    <string name="chat_error_detail_hide">Nascondi dettaglio tecnico</string>
+    <string name="chat_empty_title">Chiedi la tua prima regola</string>
+    <string name="chat_empty_body">Descrivi cosa vuoi che Argus faccia: proporrà una regola da rivedere e armare.</string>
+    <string name="chat_empty_try">Prova a chiedere</string>
+    <string name="chat_suggestion_morning">Ogni giorno alle 8 togli il Non disturbare e alza la suoneria.</string>
+    <string name="chat_suggestion_night">Dopo le 23 controlla la suoneria e metti Non disturbare.</string>
+    <string name="chat_suggestion_whatsapp">Se un contatto in whitelist scrive su WhatsApp tra le 9 e le 18, rispondi tu che sono occupato.</string>
+    <string name="chat_input_sending">In attesa della risposta…</string>
+    <string name="chat_input_placeholder">Chiedi una regola…</string>
+    <string name="chat_send">Invia</string>
+
+    <!-- Lista automazioni -->
+    <string name="list_title">Automazioni</string>
+    <string name="list_filter_all">Tutte</string>
+    <string name="list_filter_pending">In approvazione</string>
+    <string name="list_filter_armed">Armate</string>
+    <string name="list_filter_disabled">Disattivate</string>
+    <string name="list_filter_needs_review">Da rivedere</string>
+    <string name="list_empty_title">Nessuna automazione</string>
+    <string name="list_empty_body">Chiedila in chat: descrivi cosa vuoi che Argus faccia e proporrà una regola da rivedere e armare.</string>
+    <string name="list_empty_cta">Vai in chat</string>
+    <string name="list_toggle_off">Disattiva %1$s</string>
+    <string name="list_toggle_on">Riattiva %1$s</string>
+
+    <!-- Dettaglio / approvazione -->
+    <string name="detail_header_approval">Approvazione</string>
+    <string name="detail_header_detail">Dettaglio</string>
+    <string name="detail_verified_readers">Reader verificati sul dispositivo</string>
+    <string name="detail_rationale_label">descrizione del modello</string>
+    <string name="detail_recent_runs">Ultime esecuzioni</string>
+    <string name="detail_see_all">Vedi tutte</string>
+    <string name="detail_arm_blocked">Arma bloccato: %1$s</string>
+    <string name="detail_not_armable">Regola non armabile</string>
+    <string name="detail_reject">Rifiuta</string>
+    <string name="detail_edit">Modifica</string>
+    <string name="detail_arm">Arma</string>
+    <string name="detail_disable">Disattiva automazione</string>
+    <string name="detail_enable">Riattiva automazione</string>
+    <string name="detail_edit_in_chat">Modifica in chat</string>
+    <string name="detail_recreate_in_chat">Ricrea in chat</string>
+
+    <!-- Log esecuzioni -->
+    <string name="log_title">Log esecuzioni</string>
+    <string name="log_empty_title">Nessuna esecuzione</string>
+    <string name="log_empty_body">Qui compaiono gli scatti delle regole armate: successi, condizioni non soddisfatte ed errori.</string>
+    <string name="log_filter_only">Solo: %1$s</string>
+    <string name="log_filter_remove">Rimuovi filtro</string>
+    <string name="log_expand">Espandi</string>
+    <string name="log_collapse">Comprimi</string>
+    <string name="log_send_now">Invia ora</string>
+    <string name="log_open_automation">Apri automazione</string>
+
+    <!-- Sistema (settings) -->
+    <string name="settings_title">Sistema</string>
+    <string name="settings_section_health">SALUTE</string>
+    <string name="settings_section_transport">BRAIN · TRANSPORT</string>
+    <string name="settings_section_privacy">PRIVACY</string>
+    <string name="settings_section_whitelist">WHITELIST CONTATTI</string>
+    <string name="settings_section_budget">BUDGET LLM</string>
+    <string name="settings_fix">Correggi</string>
+    <string name="settings_enable_action">Attiva</string>
+    <string name="settings_shizuku_title">Shizuku</string>
+    <string name="settings_shizuku_ok">attivo — privilegi shell disponibili</string>
+    <string name="settings_shizuku_not_installed">non installato</string>
+    <string name="settings_shizuku_not_running">installato, non in esecuzione</string>
+    <string name="settings_shizuku_not_authorized">attivo, Argus non autorizzato</string>
+    <string name="settings_shizuku_degraded">spento dopo il riavvio — azioni shell in coda</string>
+    <string name="settings_battery_title">Ottimizzazione batteria</string>
+    <string name="settings_battery_ok">esclusione Android concessa — i controlli attività in background/avvio automatico OxygenOS restano manuali</string>
+    <string name="settings_battery_warn">attiva — concedi l\'esclusione e verifica anche attività in background/avvio automatico in OxygenOS</string>
+    <string name="settings_notifications_title">Notifiche Argus</string>
+    <string name="settings_notifications_ok">consentite</string>
+    <string name="settings_notifications_warn">non consentite — esiti e avvisi non saranno visibili</string>
+    <string name="settings_listener_title">Lettura notifiche</string>
+    <string name="settings_listener_ok">attiva — trigger WhatsApp e risposte disponibili</string>
+    <string name="settings_listener_warn">non attiva — trigger WhatsApp e risposte non armabili</string>
+    <string name="settings_location_title">Posizione in background</string>
+    <string name="settings_location_granted">sempre — i geofence sono affidabili</string>
+    <string name="settings_location_while_in_use">solo mentre in uso — serve «Consenti sempre» per i geofence</string>
+    <string name="settings_location_denied">negata o non precisa — i geofence non funzionano</string>
+    <string name="settings_location_not_needed">non necessaria — nessuna regola geofence; tocca per concederla in anticipo</string>
+    <string name="settings_sms_title">Trigger SMS</string>
+    <string name="settings_sms_on">attivi per SMS telefonici — chat RCS e MMS non emettono questo trigger</string>
+    <string name="settings_sms_off">non attivi — solo SMS telefonici, non chat RCS o MMS</string>
+    <string name="settings_call_title">Trigger chiamate</string>
+    <string name="settings_call_on">attivi — squillo e fine chiamata armabili</string>
+    <string name="settings_call_off">non attivi — consenti per armare regole sulle chiamate</string>
+    <string name="settings_bt_title">Trigger Bluetooth</string>
+    <string name="settings_bt_on">attivi — connessione e disconnessione dei dispositivi sono armabili</string>
+    <string name="settings_bt_off">non attivi — consenti Dispositivi nelle vicinanze per armare le regole</string>
+    <string name="settings_sentinel_title">Sentinella connettività</string>
+    <string name="settings_sentinel_active">attiva — monitora Wi-Fi e alimentazione per le regole armate</string>
+    <string name="settings_clibridge_title">CliBridge · Hermes</string>
+    <string name="settings_reachable">raggiungibile</string>
+    <string name="settings_unreachable">irraggiungibile</string>
+    <string name="settings_unverified">non verificato</string>
+    <string name="settings_edit_bridge_cd">Modifica bridge Hermes</string>
+    <string name="settings_edit_provider_cd">Modifica %1$s</string>
+    <string name="settings_latency_last">Ultima latenza: %1$s</string>
+    <string name="settings_latency_none">Latenza non ancora misurata</string>
+    <string name="settings_test_connection">Test connessione</string>
+    <string name="settings_model_not_set">modello non impostato</string>
+    <string name="settings_key_configured">Chiave configurata</string>
+    <string name="settings_key_missing">Chiave mancante</string>
+    <string name="settings_streaming_label">Streaming (OpenAI-compat)</string>
+    <string name="settings_coming_soon">in arrivo</string>
+    <string name="settings_privacy_active">Consenso Hermes attivo</string>
+    <string name="settings_privacy_missing">Consenso non accettato</string>
+    <string name="settings_whitelist_note">Solo questi contatti possono ricevere risposte automatiche. Memorizzati per conversationId, non per nome — spoofabile.</string>
+    <string name="settings_add_contact">Aggiungi contatto</string>
+    <string name="settings_remove_contact_cd">Rimuovi %1$s</string>
+    <string name="settings_budget_soft">Budget quasi esaurito</string>
+    <string name="settings_budget_calls_hour">Chiamate · ultima ora</string>
+    <string name="settings_budget_calls_day">Chiamate · oggi</string>
+    <string name="settings_budget_tokens_month">Token · mese (token-only)</string>
+    <string name="settings_budget_cost_month">Costo · mese corrente</string>
+    <string name="settings_budget_limit">Limite: %1$s</string>
+    <string name="settings_budget_provider_tokens">token · ora %1$s · oggi %2$s · mese %3$s</string>
+    <string name="settings_budget_provider_calls">chiamate · ora %1$d · oggi %2$d</string>
+    <string name="settings_budget_provider_cost">costo mese %1$s</string>
+    <string name="settings_budget_footnote">Costi in dollari stimati dal listino pubblico solo per i provider a prezzo noto (stima indicativa, non fattura) · EUR a tasso fisso ≈ · Hermes/OpenRouter/Custom: solo token</string>
+    <string name="settings_budget_edit_limits">Modifica limiti</string>
+    <string name="settings_rerun">Ripeti configurazione</string>
+
+    <!-- Dialog limiti budget -->
+    <string name="budget_dialog_title">Limiti budget LLM</string>
+    <string name="budget_calls_hour_label">Chiamate / ora</string>
+    <string name="budget_calls_day_label">Chiamate / giorno</string>
+    <string name="budget_cost_label">Costo / mese (USD)</string>
+    <string name="budget_tokens_label">Token / mese</string>
+    <string name="budget_unlimited_hint">0 o vuoto = illimitato</string>
+    <string name="budget_cost_hint">Provider a listino (OpenAI/Anthropic/Gemini) · 0 o vuoto = illimitato</string>
+    <string name="budget_tokens_hint">Provider token-only (Hermes/OpenRouter/Custom) · 0 o vuoto = illimitato</string>
+
+    <!-- Onboarding -->
+    <string name="onboarding_header">Configurazione · %1$d di %2$d</string>
+    <string name="onboarding_mandatory">Passo obbligatorio</string>
+    <string name="onboarding_optional">Opzionale</string>
+    <string name="onboarding_skip">Salta</string>
+    <string name="onboarding_next">Avanti</string>
+    <string name="onboarding_finish">Concludi</string>
+    <string name="onboarding_status_done">Fatto</string>
+    <string name="onboarding_status_in_progress">In corso</string>
+    <string name="onboarding_status_skipped">Saltato</string>
+    <string name="onboarding_status_blocked">Bloccato</string>
+    <string name="onboarding_step_privacy">Privacy</string>
+    <string name="onboarding_step_brain">Cervello</string>
+    <string name="onboarding_step_shizuku">Shizuku</string>
+    <string name="onboarding_step_notifications">Notifiche</string>
+    <string name="onboarding_step_battery">Batteria</string>
+    <string name="onboarding_step_location">Posizione</string>
+    <string name="onboarding_shizuku_required">Richiede Shizuku</string>
+    <string name="onboarding_shizuku_recommended">Meglio con Shizuku</string>
+    <string name="onboarding_shizuku_not_required">Non richiede Shizuku</string>
+    <string name="onboarding_shizuku_required_sub">Senza autorizzazione, queste azioni non sono disponibili.</string>
+    <string name="onboarding_shizuku_recommended_sub">Funzionano anche senza, ma solo con Argus aperto in primo piano.</string>
+    <string name="onboarding_shizuku_not_required_sub">Sempre disponibili, con o senza Shizuku.</string>
+    <string name="onboarding_battery_consequence">Senza l\'esclusione, OxygenOS può ritardare il lavoro in background. Gli allarmi restano event-driven e non usano un servizio persistente.</string>
+</resources>

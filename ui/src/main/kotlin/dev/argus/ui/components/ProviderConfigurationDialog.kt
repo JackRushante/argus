@@ -18,8 +18,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import dev.argus.ui.R
 import dev.argus.ui.model.AuthState
 import dev.argus.ui.model.TransportUi
 
@@ -49,7 +51,7 @@ fun ProviderConfigurationDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Configura ${provider.providerLabel}") },
+        title = { Text(stringResource(R.string.provider_dialog_title, provider.providerLabel)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
@@ -58,14 +60,14 @@ fun ProviderConfigurationDialog(
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     enabled = provider.baseUrlEditable,
-                    label = { Text("Endpoint") },
+                    label = { Text(stringResource(R.string.provider_endpoint_label)) },
                 )
                 OutlinedTextField(
                     value = model,
                     onValueChange = { model = it },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
-                    label = { Text("Modello") },
+                    label = { Text(stringResource(R.string.provider_model_label)) },
                 )
                 if (provider.defaultModels.isNotEmpty()) {
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -83,19 +85,19 @@ fun ProviderConfigurationDialog(
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
-                    label = { Text("Chiave API") },
+                    label = { Text(stringResource(R.string.provider_key_label)) },
                     placeholder = provider.apiKeyPrefixHint?.let { { Text(it) } },
                     supportingText = {
                         Text(
-                            if (keyConfigured) "Lascia vuoto per conservare la chiave attuale."
-                            else "Obbligatoria.",
+                            if (keyConfigured) stringResource(R.string.provider_key_keep_hint)
+                            else stringResource(R.string.provider_key_required_hint),
                         )
                     },
                 )
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Annulla") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
         },
         confirmButton = {
             Button(
@@ -109,7 +111,7 @@ fun ProviderConfigurationDialog(
                     key = ""
                     onDismiss()
                 },
-            ) { Text("Salva e verifica") }
+            ) { Text(stringResource(R.string.action_save_and_test)) }
         },
     )
 }

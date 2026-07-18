@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Traduzione italiana: attiva quando il locale di sistema è "it". -->
+<resources>
+    <string name="argus_automation_channel_name">Automazioni Argus</string>
+    <string name="argus_automation_channel_description">Avvisi generati dalle regole approvate</string>
+    <string name="argus_connectivity_channel_name">Trigger connettività</string>
+    <string name="argus_connectivity_channel_description">Monitora Wi-Fi e alimentazione per le automazioni armate</string>
+    <string name="argus_connectivity_notification_title">Argus è in ascolto</string>
+    <string name="argus_connectivity_notification_text">Monitoraggio Wi-Fi e alimentazione per automazioni armate</string>
+    <string name="argus_budget_channel_name">Budget LLM</string>
+    <string name="argus_budget_channel_description">Avvisi quando il budget delle chiamate LLM è quasi o del tutto esaurito</string>
+</resources>

@@ -17,6 +17,7 @@ import dev.argus.engine.runtime.AuditKind
 import dev.argus.engine.runtime.AuditSink
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireContext
+import dev.argus.ui.presentation.RenderLanguage
 import kotlinx.coroutines.CancellationException
 import java.time.Instant
 import java.time.YearMonth
@@ -25,9 +26,17 @@ import java.util.concurrent.ConcurrentHashMap
 
 object BudgetMeta {
     const val BUDGET_EXCEEDED = "budget_exceeded" // rispetta ^[a-z][a-z0-9_]{0,63}$ (invariante ActResult)
-    const val BLOCKED_REPLY =
-        "Budget LLM esaurito: ho bloccato la chiamata. Alza o azzera i limiti in Sistema → Budget."
     const val UNKNOWN_MODEL = "unknown" // convenzione T9 di UsageEventEntity
+
+    /**
+     * Reply mostrata in chat quando il budget HARD blocca la compile. EN di default, IT quando il
+     * locale di sistema è italiano (bilingue via [RenderLanguage], come il RuleRenderMapper): questo
+     * è testo utente prodotto FUORI da Compose, quindi niente risorse Android qui.
+     */
+    fun blockedReply(l: RenderLanguage = RenderLanguage.system()): String = l.pick(
+        "LLM budget exhausted: I blocked the call. Raise or reset the limits in System → Budget.",
+        "Budget LLM esaurito: ho bloccato la chiamata. Alza o azzera i limiti in Sistema → Budget.",
+    )
 }
 
 /** Canale notifiche budget, separato da AutomationNotifier (che richiede FireContext). */
@@ -65,7 +74,7 @@ class MeteredBrain(
                 recordBlocked(config, UsageEventKind.COMPILE, now)
                 notifyOnce(verdict.tripped, now)
                 return CompileResult(
-                    reply = BudgetMeta.BLOCKED_REPLY,
+                    reply = BudgetMeta.blockedReply(),
                     draft = null,
                     metaError = BudgetMeta.BUDGET_EXCEEDED,
                 )
@@ -207,7 +216,17 @@ class MeteredBrain(
         val key = bucketKey(tripped, now)
         if (notified.putIfAbsent(key, true) == null) {
             try {
-                alerts.notify(BUDGET_ALERT_TITLE, BUDGET_ALERT_TEXT)
+                // Titolo/testo dell'alert bilingui via RenderLanguage (EN default, IT se locale it).
+                val l = RenderLanguage.system()
+                alerts.notify(
+                    l.pick("LLM budget", "Budget LLM"),
+                    l.pick(
+                        "The LLM budget is almost or fully exhausted. Check the limits in " +
+                            "System → Budget.",
+                        "Budget LLM quasi o del tutto esaurito. Controlla i limiti in " +
+                            "Sistema → Budget.",
+                    ),
+                )
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Throwable) {
@@ -224,10 +243,5 @@ class MeteredBrain(
                 YearMonth.from(Instant.ofEpochMilli(now).atZone(zone())).toString()
         }
         return "${tripped.auditDetail()}:$bucket"
-    }
-
-    private companion object {
-        const val BUDGET_ALERT_TITLE = "Budget LLM"
-        const val BUDGET_ALERT_TEXT = "Budget LLM quasi o del tutto esaurito. Controlla i limiti in Sistema → Budget."
     }
 }

@@ -14,9 +14,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
+import dev.argus.ui.R
 import dev.argus.ui.presentation.BudgetFormat
 
 /**
@@ -56,7 +58,7 @@ fun BudgetLimitsDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Limiti budget LLM") },
+        title = { Text(stringResource(R.string.budget_dialog_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
@@ -65,8 +67,8 @@ fun BudgetLimitsDialog(
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    label = { Text("Chiamate / ora") },
-                    supportingText = { Text("0 o vuoto = illimitato") },
+                    label = { Text(stringResource(R.string.budget_calls_hour_label)) },
+                    supportingText = { Text(stringResource(R.string.budget_unlimited_hint)) },
                 )
                 OutlinedTextField(
                     value = dayText,
@@ -74,8 +76,8 @@ fun BudgetLimitsDialog(
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    label = { Text("Chiamate / giorno") },
-                    supportingText = { Text("0 o vuoto = illimitato") },
+                    label = { Text(stringResource(R.string.budget_calls_day_label)) },
+                    supportingText = { Text(stringResource(R.string.budget_unlimited_hint)) },
                 )
                 OutlinedTextField(
                     value = costText,
@@ -84,8 +86,8 @@ fun BudgetLimitsDialog(
                     singleLine = true,
                     isError = costMicros == null,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    label = { Text("Costo / mese (USD)") },
-                    supportingText = { Text("Provider a listino (OpenAI/Anthropic/Gemini) · 0 o vuoto = illimitato") },
+                    label = { Text(stringResource(R.string.budget_cost_label)) },
+                    supportingText = { Text(stringResource(R.string.budget_cost_hint)) },
                 )
                 OutlinedTextField(
                     value = tokensText,
@@ -94,13 +96,13 @@ fun BudgetLimitsDialog(
                     singleLine = true,
                     isError = tokensMonth == null,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    label = { Text("Token / mese") },
-                    supportingText = { Text("Provider token-only (Hermes/OpenRouter/Custom) · 0 o vuoto = illimitato") },
+                    label = { Text(stringResource(R.string.budget_tokens_label)) },
+                    supportingText = { Text(stringResource(R.string.budget_tokens_hint)) },
                 )
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Annulla") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
         },
         confirmButton = {
             Button(
@@ -109,7 +111,7 @@ fun BudgetLimitsDialog(
                     onSave(hour ?: 0, day ?: 0, costMicros ?: 0L, tokensMonth ?: 0L)
                     onDismiss()
                 },
-            ) { Text("Salva") }
+            ) { Text(stringResource(R.string.action_save)) }
         },
     )
 }

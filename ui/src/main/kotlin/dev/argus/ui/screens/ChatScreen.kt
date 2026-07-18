@@ -56,6 +56,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
@@ -72,6 +73,7 @@ import dev.argus.ui.model.DraftCardStatus
 import dev.argus.ui.model.NoticeKind
 import dev.argus.ui.model.RuleRender
 import dev.argus.ui.model.UiWarning
+import dev.argus.ui.R
 import dev.argus.ui.theme.ArgusTheme
 import dev.argus.ui.theme.LocalArgusSemantic
 import dev.argus.ui.theme.RolePair
@@ -87,17 +89,6 @@ import dev.argus.ui.theme.RolePair
 //    (via RuleCard); ERROR nelle issues ⇒ fascia "Non armabile: <motivo>".
 // Stateless: solo (state, callbacks). L'overflow in header è nav host-owned.
 // =============================================================================
-
-/**
- * Esempi cliccabili dell'empty state. Rivisti su feedback di Lorenzo (2026-07-14): niente
- * riferimenti personali e SOLO regole armabili con le capability correnti (trigger time o
- * notification; il geofence del prototipo §1a è disponibile quando i permessi posizione sono verdi).
- */
-private val ChatSuggestions = listOf(
-    "Ogni giorno alle 8 togli il Non disturbare e alza la suoneria.",
-    "Dopo le 23 controlla la suoneria e metti Non disturbare.",
-    "Se un contatto in whitelist scrive su WhatsApp tra le 9 e le 18, rispondi tu che sono occupato.",
-)
 
 @Composable
 fun ChatScreen(
@@ -143,7 +134,7 @@ fun ChatScreen(
                 if (state.sending) {
                     LatencyIndicator(
                         elapsedSec = state.sendingElapsedSec ?: 0,
-                        expectedRangeLabel = "di solito 10-30 s",
+                        expectedRangeLabel = stringResource(R.string.chat_expected_range),
                         onCancel = callbacks::onCancelPending,
                     )
                 }
@@ -179,25 +170,25 @@ private fun ChatHeader(
         Column(Modifier.weight(1f)) {
             Text("Argus", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleLarge)
             Text(
-                "chat · compilatore di regole",
+                stringResource(R.string.chat_subtitle),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
         Box {
             IconButton(onClick = { menuOpen = true }, modifier = Modifier.testTag("chat_overflow")) {
-                Icon(Icons.Rounded.MoreVert, contentDescription = "Altro", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(24.dp))
+                Icon(Icons.Rounded.MoreVert, contentDescription = stringResource(R.string.chat_more), tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(24.dp))
             }
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                 DropdownMenuItem(
-                    text = { Text("Svuota conversazione") },
+                    text = { Text(stringResource(R.string.chat_menu_clear)) },
                     onClick = {
                         menuOpen = false
                         onClearConversation()
                     },
                 )
                 DropdownMenuItem(
-                    text = { Text("Verifica connessione Hermes") },
+                    text = { Text(stringResource(R.string.chat_menu_check_connection)) },
                     onClick = {
                         menuOpen = false
                         onCheckConnection()
@@ -313,7 +304,7 @@ private fun DraftCardItem(draft: ChatItem.DraftCard, onOpenDraft: (String) -> Un
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Icon(Icons.Rounded.Error, contentDescription = null, tint = semantic.error.fg, modifier = Modifier.size(16.dp))
-                Text("Non armabile: ${errorIssue.text}", color = semantic.error.fg, style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.chat_not_armable, errorIssue.text), color = semantic.error.fg, style = MaterialTheme.typography.bodyMedium)
             }
         }
 
@@ -327,13 +318,13 @@ private fun DraftFooter(draft: ChatItem.DraftCard, onOpenDraft: (String) -> Unit
     // Stato bozza -> copy + colore semantico; la CTA compare solo quando è azionabile (PROPOSED).
     val (role, icon, label, showCta) = when (draft.status) {
         DraftCardStatus.PROPOSED ->
-            StatusLine(semantic.pending, Icons.Rounded.Pending, "Bozza · in attesa di approvazione", true)
+            StatusLine(semantic.pending, Icons.Rounded.Pending, stringResource(R.string.chat_draft_pending), true)
         DraftCardStatus.APPROVED ->
-            StatusLine(semantic.armed, Icons.Rounded.Shield, "Approvata e armata", false)
+            StatusLine(semantic.armed, Icons.Rounded.Shield, stringResource(R.string.chat_draft_approved), false)
         DraftCardStatus.REJECTED ->
-            StatusLine(semantic.disabled, Icons.Rounded.Block, "Bozza rifiutata", false)
+            StatusLine(semantic.disabled, Icons.Rounded.Block, stringResource(R.string.chat_draft_rejected), false)
         DraftCardStatus.SUPERSEDED ->
-            StatusLine(semantic.disabled, Icons.Rounded.History, "Sostituita da una proposta più recente", false)
+            StatusLine(semantic.disabled, Icons.Rounded.History, stringResource(R.string.chat_draft_superseded), false)
     }
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -350,7 +341,7 @@ private fun DraftFooter(draft: ChatItem.DraftCard, onOpenDraft: (String) -> Unit
                 modifier = Modifier.heightIn(min = 48.dp),
                 contentPadding = PaddingValues(start = 16.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
             ) {
-                Text("Rivedi e approva")
+                Text(stringResource(R.string.chat_review_cta))
                 Icon(Icons.Rounded.ChevronRight, contentDescription = null, modifier = Modifier.size(18.dp))
             }
         }
@@ -377,8 +368,8 @@ private fun BrainDownBanner(onRetry: () -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Icon(Icons.Rounded.CloudOff, contentDescription = null, tint = semantic.error.fg, modifier = Modifier.size(20.dp))
-        Text("Hermes irraggiungibile", color = semantic.error.fg, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-        TextButton(onClick = onRetry, modifier = Modifier.heightIn(min = 48.dp)) { Text("Riprova") }
+        Text(stringResource(R.string.chat_brain_down), color = semantic.error.fg, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        TextButton(onClick = onRetry, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.chat_retry)) }
     }
 }
 
@@ -388,9 +379,9 @@ private fun ChatErrorBanner(error: ChatError, onRetry: () -> Unit) {
     val semantic = LocalArgusSemantic.current
     var expanded by remember { mutableStateOf(false) }
     val text = when (error) {
-        ChatError.Timeout -> "Hermes non risponde (timeout 60 s). Il server potrebbe essere occupato — riprova."
-        ChatError.BridgeUnreachable -> "Hermes irraggiungibile. Controlla la connessione al tailnet e riprova."
-        is ChatError.MalformedReply -> "La risposta non conteneva una regola valida. Riprova o riformula."
+        ChatError.Timeout -> stringResource(R.string.chat_error_timeout)
+        ChatError.BridgeUnreachable -> stringResource(R.string.chat_error_unreachable)
+        is ChatError.MalformedReply -> stringResource(R.string.chat_error_malformed)
     }
     Column(
         modifier = Modifier
@@ -408,7 +399,7 @@ private fun ChatErrorBanner(error: ChatError, onRetry: () -> Unit) {
         if (error is ChatError.MalformedReply) {
             // Dettaglio tecnico espandibile: atteso (l'LLM sbaglia il JSON), tono calmo.
             TextButton(onClick = { expanded = !expanded }, modifier = Modifier.heightIn(min = 48.dp)) {
-                Text(if (expanded) "Nascondi dettaglio tecnico" else "Dettaglio tecnico")
+                Text(if (expanded) stringResource(R.string.chat_error_detail_hide) else stringResource(R.string.chat_error_detail_show))
             }
             if (expanded) {
                 Text(
@@ -420,7 +411,7 @@ private fun ChatErrorBanner(error: ChatError, onRetry: () -> Unit) {
             }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            TextButton(onClick = onRetry, modifier = Modifier.heightIn(min = 48.dp)) { Text("Riprova") }
+            TextButton(onClick = onRetry, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.chat_retry)) }
         }
     }
 }
@@ -441,23 +432,30 @@ private fun ChatEmptyState(callbacks: ChatCallbacks) {
     ) {
         Icon(Icons.Rounded.ChatBubbleOutline, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(44.dp))
         Spacer(Modifier.size(12.dp))
-        Text("Chiedi la tua prima regola", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+        Text(stringResource(R.string.chat_empty_title), color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
         Spacer(Modifier.size(6.dp))
         Text(
-            "Descrivi cosa vuoi che Argus faccia: proporrà una regola da rivedere e armare.",
+            stringResource(R.string.chat_empty_body),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodyMedium,
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.size(20.dp))
         Text(
-            "Prova a chiedere",
+            stringResource(R.string.chat_empty_try),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.labelSmall,
             modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
         )
+        // Esempi cliccabili dell'empty state (feedback Lorenzo 2026-07-14): niente riferimenti
+        // personali e SOLO regole armabili con le capability correnti (time/notification/geofence).
+        val suggestions = listOf(
+            stringResource(R.string.chat_suggestion_morning),
+            stringResource(R.string.chat_suggestion_night),
+            stringResource(R.string.chat_suggestion_whatsapp),
+        )
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            ChatSuggestions.forEach { s ->
+            suggestions.forEach { s ->
                 SuggestionChip(s) {
                     // Empty-state: imposta l'input e invia (brief Task 7).
                     callbacks.onInputChange(s)
@@ -508,7 +506,7 @@ private fun ChatInputBar(
             enabled = enabled,
             modifier = Modifier.weight(1f),
             placeholder = {
-                Text(if (sending) "In attesa della risposta…" else "Chiedi una regola…")
+                Text(if (sending) stringResource(R.string.chat_input_sending) else stringResource(R.string.chat_input_placeholder))
             },
             shape = RoundedCornerShape(24.dp),
             maxLines = 4,
@@ -530,7 +528,7 @@ private fun ChatInputBar(
                 contentColor = MaterialTheme.colorScheme.onPrimary,
             ),
         ) {
-            Icon(Icons.Rounded.ArrowUpward, contentDescription = "Invia", modifier = Modifier.size(22.dp))
+            Icon(Icons.Rounded.ArrowUpward, contentDescription = stringResource(R.string.chat_send), modifier = Modifier.size(22.dp))
         }
     }
 }
