@@ -35,3 +35,12 @@ __pycache__/
 keystore.properties
 *.keystore
 *.jks
+
+# Internal planning/design docs — kept locally, not published
+docs/superpowers/
+docs/design/CLAUDE-CODE-TIPS.md
+docs/design/support.js
+docs/design/Argus-preview-standalone.html
+docs/design/Argus.dc.html
+docs/design/argus-p0b-final-audit.md
+docs/design/README.md

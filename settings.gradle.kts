@@ -10,10 +10,9 @@ dependencyResolutionManagement {
     repositories { google(); mavenCentral() }
 }
 
-plugins {
-    // Provisioning automatico dei JDK toolchain (jvmToolchain(17) in engine-core)
-    id("org.gradle.toolchains.foojay-resolver-convention") version "0.9.0"
-}
+// Niente foojay-resolver: lo scanner F-Droid lo blocca (scarica JDK da un servizio
+// remoto a build-time). I moduli fissano il jvmTarget 17 esplicito e usano il JDK
+// già presente (F-Droid builda con JDK 17).
 
 rootProject.name = "argus"
 include("engine-core", "ui", "app", "data")

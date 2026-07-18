@@ -22,8 +22,8 @@ android {
         applicationId = "dev.argus"
         minSdk = 30
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 4
+        versionName = "0.2.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
@@ -42,10 +42,22 @@ android {
             // R8 spento al primo giro (S16): meno variabili per l'E2E dei tester; si accende
             // in un secondo momento con le keep-rules per serialization/Hilt/Room.
             isMinifyEnabled = false
+            // Reproducible build per F-Droid: il resource shrinking rinominava risorse in modo
+            // non deterministico (mismatch byte-per-byte col buildserver F-Droid).
+            isShrinkResources = false
+            // Niente git SHA in META-INF/version-control-info.textproto: F-Droid ricompila da un
+            // clone pulito al tag e il file conterrebbe un hash diverso -> repro fallisce.
+            vcsInfo { include = false }
             if (keystoreProperties.isNotEmpty()) {
                 signingConfig = signingConfigs.getByName("release")
             }
         }
+    }
+    // AGP inietta un blocco "Dependency metadata" (0x504b4453) nell'APK Signing Block: F-Droid
+    // lo rifiuta al job `check apk`. Disabilitarlo alla sorgente evita lo strip manuale.
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

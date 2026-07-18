@@ -50,9 +50,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import dev.argus.engine.safety.Severity
+import dev.argus.ui.R
 import dev.argus.ui.components.WarningBanner
 import dev.argus.ui.components.BridgeConfigurationDialog
 import dev.argus.ui.components.ProviderConfigurationDialog
@@ -68,6 +70,7 @@ import dev.argus.ui.model.StepKind
 import dev.argus.ui.model.StepStatus
 import dev.argus.ui.model.TransportUi
 import dev.argus.ui.model.UiWarning
+import dev.argus.ui.presentation.RenderLanguage
 import dev.argus.ui.theme.ArgusTheme
 import dev.argus.ui.theme.LocalArgusSemantic
 
@@ -86,23 +89,39 @@ import dev.argus.ui.theme.LocalArgusSemantic
 // è §9, resa verbatim in `shizukuOnboardingCopy` e nelle preview.
 // =============================================================================
 
-private const val MANDATORY_NOTE = "Passo obbligatorio"
-
 /**
  * Copy VERBATIM degli stati Shizuku (handoff §9, tabella microcopy). Sorgente unica
  * per costruire body + ctaLabel dello step SHIZUKU (host/fixture). Nessuna parafrasi.
  */
-fun shizukuOnboardingCopy(status: ShizukuStatus): Pair<String, String?> = when (status) {
+fun shizukuOnboardingCopy(
+    status: ShizukuStatus,
+    language: RenderLanguage = RenderLanguage.system(),
+): Pair<String, String?> = when (status) {
     ShizukuStatus.NOT_INSTALLED ->
-        "Shizuku non è installato. Serve per dare ad Argus i privilegi shell (come adb)." to "Scarica Shizuku"
+        language.pick(
+            "Shizuku is not installed. It gives Argus shell privileges (like adb).",
+            "Shizuku non è installato. Serve per dare ad Argus i privilegi shell (come adb).",
+        ) to language.pick("Download Shizuku", "Scarica Shizuku")
     ShizukuStatus.INSTALLED_NOT_RUNNING ->
-        "Shizuku è installato ma non in esecuzione. Avvialo (via root parte da solo al boot)." to "Apri Shizuku"
+        language.pick(
+            "Shizuku is installed but not running. Start it (with root it starts on boot).",
+            "Shizuku è installato ma non in esecuzione. Avvialo (via root parte da solo al boot).",
+        ) to language.pick("Open Shizuku", "Apri Shizuku")
     ShizukuStatus.RUNNING_NOT_AUTHORIZED ->
-        "Shizuku è attivo ma Argus non è autorizzato." to "Richiedi autorizzazione"
+        language.pick(
+            "Shizuku is running but Argus is not authorized.",
+            "Shizuku è attivo ma Argus non è autorizzato.",
+        ) to language.pick("Request authorization", "Richiedi autorizzazione")
     ShizukuStatus.AUTHORIZED ->
-        "Shizuku attivo — privilegi shell disponibili." to null
+        language.pick(
+            "Shizuku active — shell privileges available.",
+            "Shizuku attivo — privilegi shell disponibili.",
+        ) to null
     ShizukuStatus.DEGRADED_AFTER_REBOOT ->
-        "Dopo il riavvio Shizuku è spento. Le azioni shell sono in coda; il resto funziona." to "Riattiva"
+        language.pick(
+            "After the reboot Shizuku is off. Shell actions are queued; everything else works.",
+            "Dopo il riavvio Shizuku è spento. Le azioni shell sono in coda; il resto funziona.",
+        ) to language.pick("Re-enable", "Riattiva")
 }
 
 private fun isMandatory(kind: StepKind): Boolean =
@@ -117,13 +136,14 @@ private fun stepIcon(kind: StepKind): ImageVector = when (kind) {
     StepKind.BACKGROUND_LOCATION -> Icons.Rounded.MyLocation
 }
 
+@Composable
 private fun shortName(kind: StepKind): String = when (kind) {
-    StepKind.WELCOME_PRIVACY -> "Privacy"
-    StepKind.BRAIN_CONFIG -> "Cervello"
-    StepKind.SHIZUKU -> "Shizuku"
-    StepKind.NOTIFICATION_ACCESS -> "Notifiche"
-    StepKind.BATTERY_OEM -> "Batteria"
-    StepKind.BACKGROUND_LOCATION -> "Posizione"
+    StepKind.WELCOME_PRIVACY -> stringResource(R.string.onboarding_step_privacy)
+    StepKind.BRAIN_CONFIG -> stringResource(R.string.onboarding_step_brain)
+    StepKind.SHIZUKU -> stringResource(R.string.onboarding_step_shizuku)
+    StepKind.NOTIFICATION_ACCESS -> stringResource(R.string.onboarding_step_notifications)
+    StepKind.BATTERY_OEM -> stringResource(R.string.onboarding_step_battery)
+    StepKind.BACKGROUND_LOCATION -> stringResource(R.string.onboarding_step_location)
 }
 
 @Composable
@@ -166,7 +186,7 @@ fun OnboardingScreen(
                         UiWarning(
                             Severity.WARNING,
                             "battery_consequence",
-                            "Senza l'esclusione, OxygenOS può ritardare il lavoro in background. Gli allarmi restano event-driven e non usano un servizio persistente.",
+                            stringResource(R.string.onboarding_battery_consequence),
                         ),
                     )
                 }
@@ -240,16 +260,18 @@ private fun ProviderSelector(choices: List<ProviderChoiceUi>, onSelect: (String)
 // il composable non li fabbrica.
 // -----------------------------------------------------------------------------
 
+@Composable
 private fun requirementHeading(requirement: ShizukuRequirement): String = when (requirement) {
-    ShizukuRequirement.REQUIRED -> "Richiede Shizuku"
-    ShizukuRequirement.RECOMMENDED -> "Meglio con Shizuku"
-    ShizukuRequirement.NOT_REQUIRED -> "Non richiede Shizuku"
+    ShizukuRequirement.REQUIRED -> stringResource(R.string.onboarding_shizuku_required)
+    ShizukuRequirement.RECOMMENDED -> stringResource(R.string.onboarding_shizuku_recommended)
+    ShizukuRequirement.NOT_REQUIRED -> stringResource(R.string.onboarding_shizuku_not_required)
 }
 
+@Composable
 private fun requirementSubhead(requirement: ShizukuRequirement): String = when (requirement) {
-    ShizukuRequirement.REQUIRED -> "Senza autorizzazione, queste azioni non sono disponibili."
-    ShizukuRequirement.RECOMMENDED -> "Funzionano anche senza, ma solo con Argus aperto in primo piano."
-    ShizukuRequirement.NOT_REQUIRED -> "Sempre disponibili, con o senza Shizuku."
+    ShizukuRequirement.REQUIRED -> stringResource(R.string.onboarding_shizuku_required_sub)
+    ShizukuRequirement.RECOMMENDED -> stringResource(R.string.onboarding_shizuku_recommended_sub)
+    ShizukuRequirement.NOT_REQUIRED -> stringResource(R.string.onboarding_shizuku_not_required_sub)
 }
 
 @Composable
@@ -345,10 +367,10 @@ private fun OnboardingHeader(currentIndex: Int, total: Int, onBack: () -> Unit) 
             modifier = Modifier.size(48.dp).clip(RoundedCornerShape(24.dp)).clickable { onBack() },
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Indietro", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(24.dp))
+            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.action_back), tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(24.dp))
         }
         Text(
-            "Configurazione · ${currentIndex + 1} di $total",
+            stringResource(R.string.onboarding_header, currentIndex + 1, total),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.titleMedium,
         )
@@ -409,7 +431,7 @@ private fun StepHeadline(step: OnboardingStepState) {
 @Composable
 private fun OptionalChip() {
     Text(
-        "Opzionale",
+        stringResource(R.string.onboarding_optional),
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         style = MaterialTheme.typography.labelSmall,
         modifier = Modifier
@@ -450,11 +472,11 @@ private fun ChecklistRow(step: OnboardingStepState, isCurrent: Boolean) {
         StepStatus.TODO -> Icons.Rounded.RadioButtonUnchecked to MaterialTheme.colorScheme.onSurfaceVariant
     }
     val (rightText, rightColor) = when (step.status) {
-        StepStatus.DONE -> "Fatto" to semantic.armed.fg
-        StepStatus.IN_PROGRESS -> "In corso" to MaterialTheme.colorScheme.primary
-        StepStatus.SKIPPED -> "Saltato" to MaterialTheme.colorScheme.onSurfaceVariant
-        StepStatus.BLOCKED -> (step.blockedReason ?: "Bloccato") to semantic.error.fg
-        StepStatus.TODO -> if (step.kind == StepKind.BACKGROUND_LOCATION) "Opzionale" to MaterialTheme.colorScheme.onSurfaceVariant else null to Color.Unspecified
+        StepStatus.DONE -> stringResource(R.string.onboarding_status_done) to semantic.armed.fg
+        StepStatus.IN_PROGRESS -> stringResource(R.string.onboarding_status_in_progress) to MaterialTheme.colorScheme.primary
+        StepStatus.SKIPPED -> stringResource(R.string.onboarding_status_skipped) to MaterialTheme.colorScheme.onSurfaceVariant
+        StepStatus.BLOCKED -> (step.blockedReason ?: stringResource(R.string.onboarding_status_blocked)) to semantic.error.fg
+        StepStatus.TODO -> if (step.kind == StepKind.BACKGROUND_LOCATION) stringResource(R.string.onboarding_optional) to MaterialTheme.colorScheme.onSurfaceVariant else null to Color.Unspecified
     }
     Row(
         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 13.dp, vertical = 4.dp),
@@ -491,13 +513,13 @@ private fun OnboardingFooter(
         Surface(color = MaterialTheme.colorScheme.background) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (isMandatory(step.kind)) {
-                    Text(MANDATORY_NOTE, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                    Text(stringResource(R.string.onboarding_mandatory), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     // Salta solo per gli step non obbligatori (§6.6: il resto è skippabile).
                     if (!isMandatory(step.kind)) {
                         OutlinedButton(onClick = { callbacks.onSkip(step.kind) }, modifier = Modifier.heightIn(min = 48.dp)) {
-                            Text("Salta")
+                            Text(stringResource(R.string.onboarding_skip))
                         }
                     }
                     // Primario: azione dello step (ctaLabel) se presente; altrimenti nav
@@ -511,11 +533,11 @@ private fun OnboardingFooter(
                             onClick = callbacks::onFinish,
                             enabled = state.canFinish,
                             modifier = Modifier.weight(1f).heightIn(min = 48.dp),
-                        ) { Text("Concludi") }
+                        ) { Text(stringResource(R.string.onboarding_finish)) }
                         else -> Button(
                             onClick = callbacks::onNext,
                             modifier = Modifier.weight(1f).heightIn(min = 48.dp),
-                        ) { Text("Avanti") }
+                        ) { Text(stringResource(R.string.onboarding_next)) }
                     }
                 }
             }

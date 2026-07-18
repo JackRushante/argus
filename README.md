@@ -1,4 +1,18 @@
-# Argus
+<div align="center">
+
+<img src="docs/assets/argus-banner.svg" alt="ARGUS" width="640">
+
+### The all-seeing Android automation engine
+
+[![Release](https://img.shields.io/github/v/release/JackRushante/argus?style=for-the-badge&labelColor=444&color=f5a623)](https://github.com/JackRushante/argus/releases/latest)
+[![License](https://img.shields.io/badge/LICENSE-GPL--3.0-4c9141?style=for-the-badge&labelColor=444)](LICENSE)
+[![Platform](https://img.shields.io/badge/ANDROID-14%2B-3ddc84?style=for-the-badge&labelColor=444&logo=android&logoColor=white)](#build--installation)
+
+[![Kotlin](https://img.shields.io/badge/KOTLIN-100%25-7f52ff?style=for-the-badge&labelColor=444&logo=kotlin&logoColor=white)](#architecture)
+[![Engine](https://img.shields.io/badge/RULES-LLM%20compiled%20·%20deterministic%20run-00b8d4?style=for-the-badge&labelColor=444)](#what-is-argus)
+[![Bilingual](https://img.shields.io/badge/LANG-EN%20%7C%20IT-e05d44?style=for-the-badge&labelColor=444)](#project-status-and-roadmap)
+
+</div>
 
 **Natural-language automation for Android, compiled by an LLM, executed by a deterministic engine.**
 
@@ -292,11 +306,13 @@ Open an [Issue](https://github.com/JackRushante/argus/issues) with: what you ask
 
 ## Project status and roadmap
 
-**Active development.** Phases completed and verified on a real device: P0 (engine core + Android glue), P1 (notifications/WhatsApp generative replies), P2 (background triggers: SMS/OTP, calls, connectivity/power/BT, geofence). **P3 in progress**: parametric state readers, sensor triggers, base tier without Shizuku, multi-provider with budget.
+**Active development.** Phases completed and verified on a real device: P0 (engine core + Android glue), P1 (notifications/WhatsApp generative replies), P2 (background triggers: SMS/OTP, calls, connectivity/power/BT, geofence), P3 (parametric state readers, sensor triggers, base tier without Shizuku, multi-provider with per-provider budgets and usage tracking). Since **v0.2.0** the app is fully bilingual (English/Italian, follows the system language).
 
 Short roadmap:
 
-- **P4** — variables and control flow (parity with Tasker's combinatorics: if/then, dynamic values) with taint propagation on every value; first piece already shipped (generative notification sink for `invoke_llm`, recurring too).
+- **P4 — variables and control flow** *(in progress)*: Tasker-class combinatorics — `if`/`while`, values captured from triggers, device state and action outputs — with per-value taint tracking so untrusted external content can fill data fields but never gain execution authority. Design is finalized; the domain model is being implemented. First piece already shipped (generative notification sink for `invoke_llm`, recurring too).
+- **In-app Privacy & Licenses section** — GPL-3.0 notice plus a plain-language privacy summary (keys encrypted on device, no backend, audit log without PII).
+- **Android settings commands** — brightness, dark/light theme, real system settings writes.
 - **Computer-use** — interactive screen→action loop in two tiers (a valid slow/self-hosted path, an optional fast path).
 
 **Disclaimer**: this is a personal project, developed and tested mainly on a single device (OnePlus 15, Android 16, non-root). Expect rough edges on other OEMs — that is exactly the feedback we are looking for. No warranty: rules execute real actions on your phone, read what you approve.

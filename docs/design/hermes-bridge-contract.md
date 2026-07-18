@@ -12,7 +12,7 @@ v1 mantenuto per le regole già approvate.
 
 ## Endpoint e confine di sicurezza
 
-- Base URL: `https://hermes.tail04462d.ts.net` (raggiungibile solo dal tailnet).
+- Base URL: `https://your-hermes-host.ts.net` (raggiungibile solo dal tailnet).
 - `argus-bridge` ascolta esclusivamente su `127.0.0.1:8092`; Tailscale Serve termina TLS su `443`.
 - Ogni endpoint, incluso `/health`, richiede `Authorization: Bearer <token>`.
 - Il token viene fornito a `CliBridgeTransport` a runtime tramite `BridgeAuthProvider`: non va in Git,

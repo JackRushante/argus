@@ -38,10 +38,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import dev.argus.ui.R
 import dev.argus.ui.components.EmptyState
 import dev.argus.ui.components.EngineBannerBar
 import dev.argus.ui.components.GenerativeTag
@@ -79,13 +81,13 @@ private val StatusRank: Map<StatusBadge, Int> = mapOf(
     StatusBadge.DISABLED to 3,
 )
 
-/** Chip filtro in ordine di design (§7.2), con copy italiana. */
-private val FilterChips: List<Pair<StatusFilter, String>> = listOf(
-    StatusFilter.ALL to "Tutte",
-    StatusFilter.PENDING to "In approvazione",
-    StatusFilter.ARMED to "Armate",
-    StatusFilter.DISABLED to "Disattivate",
-    StatusFilter.NEEDS_REVIEW to "Da rivedere",
+/** Chip filtro in ordine di design (§7.2); la label localizzata si risolve nel Composable. */
+private val FilterOrder: List<StatusFilter> = listOf(
+    StatusFilter.ALL,
+    StatusFilter.PENDING,
+    StatusFilter.ARMED,
+    StatusFilter.DISABLED,
+    StatusFilter.NEEDS_REVIEW,
 )
 
 @Composable
@@ -97,7 +99,7 @@ fun AutomationListScreen(
     Surface(color = MaterialTheme.colorScheme.background, modifier = modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             Text(
-                "Automazioni",
+                stringResource(R.string.list_title),
                 color = MaterialTheme.colorScheme.onSurface,
                 style = MaterialTheme.typography.titleLarge,
                 modifier = Modifier.padding(start = 18.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
@@ -125,9 +127,9 @@ fun AutomationListScreen(
                 // (NavHost, Task 12) via onEmptyCta, come le altre affordance di nav.
                 EmptyState(
                     icon = Icons.Rounded.Bolt,
-                    title = "Nessuna automazione",
-                    body = "Chiedila in chat: descrivi cosa vuoi che Argus faccia e proporrà una regola da rivedere e armare.",
-                    ctaLabel = "Vai in chat",
+                    title = stringResource(R.string.list_empty_title),
+                    body = stringResource(R.string.list_empty_body),
+                    ctaLabel = stringResource(R.string.list_empty_cta),
                     onCta = callbacks::onEmptyCta,
                 )
             } else {
@@ -162,7 +164,14 @@ private fun FilterChipsRow(active: StatusFilter, onFilter: (StatusFilter) -> Uni
             .padding(horizontal = 16.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        FilterChips.forEach { (filter, label) ->
+        FilterOrder.forEach { filter ->
+            val label = when (filter) {
+                StatusFilter.ALL -> stringResource(R.string.list_filter_all)
+                StatusFilter.PENDING -> stringResource(R.string.list_filter_pending)
+                StatusFilter.ARMED -> stringResource(R.string.list_filter_armed)
+                StatusFilter.DISABLED -> stringResource(R.string.list_filter_disabled)
+                StatusFilter.NEEDS_REVIEW -> stringResource(R.string.list_filter_needs_review)
+            }
             val selected = active == filter
             FilterChip(
                 selected = selected,
@@ -256,15 +265,18 @@ private fun AutomationCard(
                 )
             }
             if (showToggle) {
+                // La contentDescription si risolve nel Composable: semantics{} non è un contesto @Composable.
+                val toggleOff = stringResource(R.string.list_toggle_off, row.name)
+                val toggleOn = stringResource(R.string.list_toggle_on, row.name)
                 // Toggle inline ARMED⇄DISABLED: onCheckedChange NON propaga al tap card.
                 Switch(
                     checked = row.enabled,
                     onCheckedChange = onToggleEnabled,
                     modifier = Modifier.semantics {
                         contentDescription = if (row.enabled) {
-                            "Disattiva ${row.name}"
+                            toggleOff
                         } else {
-                            "Riattiva ${row.name}"
+                            toggleOn
                         }
                     },
                     colors = SwitchDefaults.colors(

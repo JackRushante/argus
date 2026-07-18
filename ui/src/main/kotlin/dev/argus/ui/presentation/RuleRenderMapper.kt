@@ -29,17 +29,24 @@ import dev.argus.ui.model.RuleRender
  * `when` (no `else`), nothing is dropped or softened — in particular shell commands are shown
  * integrally and any generative/cloud flag is surfaced.
  *
- * Pure JVM presentation logic: no `android.*`, no `Context`, no string resources. Italian copy
- * is inline; the privacy note is verbatim from design §7.3.
+ * Pure JVM presentation logic: no `android.*`, no `Context`, no string resources. Il testo è
+ * bilingue via [RenderLanguage] (tabelle EN/IT affiancate al call-site): produzione = locale di
+ * sistema, test = lingua esplicita. La nota privacy IT resta verbatim da design §7.3.
  */
 object RuleRenderMapper {
 
-    /** Verbatim da design §7.3 — mai parafrasare (invariante di sicurezza handoff §5). */
-    private const val PRIVACY_NOTE =
-        "Il testo delle notifiche verrà inviato a Hermes e ai provider cloud per generare la risposta."
-    private const val STATE_PRIVACY_NOTE =
+    /** IT verbatim da design §7.3 — mai parafrasare (invariante di sicurezza handoff §5). */
+    private fun privacyNote(l: RenderLanguage): String = l.pick(
+        "The notification text will be sent to Hermes and to the cloud providers to generate the reply.",
+        "Il testo delle notifiche verrà inviato a Hermes e ai provider cloud per generare la risposta.",
+    )
+
+    private fun statePrivacyNote(l: RenderLanguage): String = l.pick(
+        "The notification text and the listed state readers will be sent to Hermes and to the " +
+            "cloud providers to generate the reply.",
         "Il testo delle notifiche e i reader di stato elencati verranno inviati a Hermes e ai " +
-            "provider cloud per generare la risposta."
+            "provider cloud per generare la risposta.",
+    )
 
     /**
      * [conversationLabels] mappa conversationId → display name proveniente dallo store whitelist
@@ -47,28 +54,35 @@ object RuleRenderMapper {
      * il nome leggibile al posto dell'hash. Lookup deterministico, opzionale per i caller che non
      * hanno accesso allo store (fallback: hash integrale, onesto).
      */
-    fun map(a: Automation, conversationLabels: Map<String, String> = emptyMap()): RuleRender =
-        render(a.trigger, a.actions, a.conditions, conversationLabels)
+    fun map(
+        a: Automation,
+        conversationLabels: Map<String, String> = emptyMap(),
+        language: RenderLanguage = RenderLanguage.system(),
+    ): RuleRender = render(a.trigger, a.actions, a.conditions, conversationLabels, language)
 
-    fun mapDraft(d: AutomationDraft, conversationLabels: Map<String, String> = emptyMap()): RuleRender =
-        render(d.trigger, d.actions, d.conditions, conversationLabels)
+    fun mapDraft(
+        d: AutomationDraft,
+        conversationLabels: Map<String, String> = emptyMap(),
+        language: RenderLanguage = RenderLanguage.system(),
+    ): RuleRender = render(d.trigger, d.actions, d.conditions, conversationLabels, language)
 
     private fun render(
         trigger: Trigger,
         actions: List<Action>,
         conditions: Condition?,
         conversationLabels: Map<String, String>,
+        l: RenderLanguage,
     ): RuleRender {
         val isGenerative = actions.any { it.tier == ActionTier.GENERATIVE }
         return RuleRender(
-            triggerLine = triggerLine(trigger, conversationLabels),
+            triggerLine = triggerLine(trigger, conversationLabels, l),
             triggerIconKey = triggerIconKey(trigger),
-            conditionLines = conditions?.let { flattenConditions(it, 0) } ?: emptyList(),
-            actions = actions.map { actionRow(it) },
+            conditionLines = conditions?.let { flattenConditions(it, 0, l) } ?: emptyList(),
+            actions = actions.map { actionRow(it, l) },
             isGenerative = isGenerative,
             privacyNote = when {
-                actions.any { it is Action.InvokeLlmV2 } -> STATE_PRIVACY_NOTE
-                isGenerative -> PRIVACY_NOTE
+                actions.any { it is Action.InvokeLlmV2 } -> statePrivacyNote(l)
+                isGenerative -> privacyNote(l)
                 else -> null
             },
         )
@@ -88,317 +102,425 @@ object RuleRenderMapper {
         is Trigger.Sensor -> "sensor"
     }
 
-    private fun triggerLine(t: Trigger, conversationLabels: Map<String, String>): String = when (t) {
-        is Trigger.Notification -> notificationLine(t, conversationLabels)
-        is Trigger.Time -> timeLine(t)
-        is Trigger.Immediate -> "Una volta, all'attivazione"
-        is Trigger.Geofence -> geofenceLine(t)
-        is Trigger.PhoneState -> phoneStateLine(t)
-        is Trigger.Connectivity -> connectivityLine(t)
-        is Trigger.Sensor -> sensorLine(t)
+    private fun triggerLine(t: Trigger, conversationLabels: Map<String, String>, l: RenderLanguage): String = when (t) {
+        is Trigger.Notification -> notificationLine(t, conversationLabels, l)
+        is Trigger.Time -> timeLine(t, l)
+        is Trigger.Immediate -> l.pick("Once, on activation", "Una volta, all'attivazione")
+        is Trigger.Geofence -> geofenceLine(t, l)
+        is Trigger.PhoneState -> phoneStateLine(t, l)
+        is Trigger.Connectivity -> connectivityLine(t, l)
+        is Trigger.Sensor -> sensorLine(t, l)
     }
 
-    private fun notificationLine(t: Trigger.Notification, conversationLabels: Map<String, String>): String {
+    /** Prefisso "Quando: "/"When: " condiviso con chi deriva il sommario lista (UiStateMappers). */
+    fun whenPrefix(language: RenderLanguage = RenderLanguage.system()): String =
+        language.pick("When: ", "Quando: ")
+
+    private fun notificationLine(
+        t: Trigger.Notification,
+        conversationLabels: Map<String, String>,
+        l: RenderLanguage,
+    ): String {
         val chat = when (t.isGroup) {
-            true -> "gruppo"
-            false -> "chat 1:1"
-            null -> "chat 1:1 o gruppo"
+            true -> l.pick("group", "gruppo")
+            false -> l.pick("1:1 chat", "chat 1:1")
+            null -> l.pick("1:1 chat or group", "chat 1:1 o gruppo")
         }
         // Il TriggerMatcher dà al conversationId precedenza ESCLUSIVA sul sender: quando l'id è
         // whitelistato il nome fidato descrive il criterio di match reale meglio del sender LLM
         // o dell'hash. Senza label si mostra l'hash INTEGRALE: onesto, mai abbreviato (§5).
         val trusted = t.conversationId?.let(conversationLabels::get)
+        val prefix = whenPrefix(l)
+        val app = appLabel(t.pkg)
         val base = if (trusted != null) {
-            "Quando: notifica ${appLabel(t.pkg)} da $trusted (identità verificata, $chat)"
+            l.pick(
+                "$prefix$app notification from $trusted (verified identity, $chat)",
+                "${prefix}notifica $app da $trusted (identità verificata, $chat)",
+            )
         } else {
-            val who = t.sender ?: t.conversationId ?: "chiunque"
-            "Quando: notifica ${appLabel(t.pkg)} da $who ($chat)"
+            val who = t.sender ?: t.conversationId ?: l.pick("anyone", "chiunque")
+            l.pick(
+                "$prefix$app notification from $who ($chat)",
+                "${prefix}notifica $app da $who ($chat)",
+            )
         }
         // Non nascondere i filtri che restringono quando la regola scatta (§5: non "softare" nulla).
-        val title = t.titleMatch?.let { " · titolo \"$it\"" } ?: ""
-        val text = t.textMatch?.let { " · testo \"$it\"" } ?: ""
+        val title = t.titleMatch?.let { l.pick(" · title \"$it\"", " · titolo \"$it\"") } ?: ""
+        val text = t.textMatch?.let { l.pick(" · text \"$it\"", " · testo \"$it\"") } ?: ""
         return base + title + text
     }
 
-    private fun timeLine(t: Trigger.Time): String {
+    private fun timeLine(t: Trigger.Time, l: RenderLanguage): String {
         val cron = t.cron
         val at = t.at
         val afterMs = t.afterMs
         return when {
-            cron != null -> humanizeCron(cron, t.tz)
-            at != null -> "Una volta il ${at.replace("T", " alle ")} (${t.tz})"
+            cron != null -> humanizeCron(cron, t.tz, l)
+            at != null -> l.pick(
+                "Once on ${at.replace("T", " at ")} (${t.tz})",
+                "Una volta il ${at.replace("T", " alle ")} (${t.tz})",
+            )
             // Ritardo relativo one-shot (ri-armabile): nessun orario assoluto da mostrare, solo la
             // durata umanizzata (l'ancora reale è congelata a runtime nel ScheduledTimeAlarm).
-            afterMs != null -> "Una volta, tra ${humanizeDelay(afterMs)}"
-            else -> "Orario non specificato (${t.tz})"
+            afterMs != null -> l.pick(
+                "Once, in ${humanizeDelay(afterMs, l)}",
+                "Una volta, tra ${humanizeDelay(afterMs, l)}",
+            )
+            else -> l.pick("Time not specified (${t.tz})", "Orario non specificato (${t.tz})")
         }
     }
 
     /**
-     * Umanizza un ritardo relativo in italiano: unità più significativa più, se presente, quella
-     * immediatamente inferiore (es. 5_400_000 → "1 ora e 30 minuti"), con singolare/plurale corretto.
-     * Le unità sotto la seconda scelta vengono troncate per una resa pulita e leggibile in review.
+     * Umanizza un ritardo relativo: unità più significativa più, se presente, quella immediatamente
+     * inferiore (es. 5_400_000 → "1 ora e 30 minuti" / "1 hour and 30 minutes"), con singolare e
+     * plurale corretti per lingua. Le unità sotto la seconda scelta vengono troncate.
      */
-    private fun humanizeDelay(ms: Long): String {
+    private fun humanizeDelay(ms: Long, l: RenderLanguage): String {
         val totalSeconds = ms / 1_000
         val units = listOf(
-            Triple(totalSeconds / 86_400, "giorno", "giorni"),
-            Triple((totalSeconds % 86_400) / 3_600, "ora", "ore"),
-            Triple((totalSeconds % 3_600) / 60, "minuto", "minuti"),
-            Triple(totalSeconds % 60, "secondo", "secondi"),
+            Triple(totalSeconds / 86_400, l.pick("day", "giorno") to l.pick("days", "giorni"), Unit),
+            Triple((totalSeconds % 86_400) / 3_600, l.pick("hour", "ora") to l.pick("hours", "ore"), Unit),
+            Triple((totalSeconds % 3_600) / 60, l.pick("minute", "minuto") to l.pick("minutes", "minuti"), Unit),
+            Triple(totalSeconds % 60, l.pick("second", "secondo") to l.pick("seconds", "secondi"), Unit),
         )
-        fun render(value: Long, singular: String, plural: String) =
-            "$value ${if (value == 1L) singular else plural}"
+        fun render(value: Long, names: Pair<String, String>) =
+            "$value ${if (value == 1L) names.first else names.second}"
 
         val primaryIndex = units.indexOfFirst { it.first != 0L }
-        if (primaryIndex == -1) return render(0, "secondo", "secondi") // difensivo: afterMs >= 1s
-        val (pv, ps, pp) = units[primaryIndex]
-        val primary = render(pv, ps, pp)
+        // Difensivo: afterMs >= 1s.
+        if (primaryIndex == -1) return render(0, l.pick("second", "secondo") to l.pick("seconds", "secondi"))
+        val (pv, pn, _) = units[primaryIndex]
+        val primary = render(pv, pn)
         val secondary = units.getOrNull(primaryIndex + 1)
             ?.takeIf { it.first != 0L }
-            ?.let { (sv, ss, sp) -> render(sv, ss, sp) }
-        return if (secondary != null) "$primary e $secondary" else primary
+            ?.let { (sv, sn, _) -> render(sv, sn) }
+        val joiner = l.pick(" and ", " e ")
+        return if (secondary != null) "$primary$joiner$secondary" else primary
     }
 
-    private fun geofenceLine(t: Trigger.Geofence): String {
+    private fun geofenceLine(t: Trigger.Geofence, l: RenderLanguage): String {
         val r = fmtNum(t.radiusM)
         return if (t.resolveCurrentLocation) {
             when (t.transition) {
-                Transition.ENTER -> "Quando entri nella posizione attuale (±$r m)"
-                Transition.EXIT -> "Quando esci dalla posizione attuale (±$r m)"
-                Transition.DWELL -> "Quando ti trattieni nella posizione attuale (±$r m)"
+                Transition.ENTER -> l.pick(
+                    "When you enter the current location (±$r m)",
+                    "Quando entri nella posizione attuale (±$r m)",
+                )
+                Transition.EXIT -> l.pick(
+                    "When you leave the current location (±$r m)",
+                    "Quando esci dalla posizione attuale (±$r m)",
+                )
+                Transition.DWELL -> l.pick(
+                    "When you dwell at the current location (±$r m)",
+                    "Quando ti trattieni nella posizione attuale (±$r m)",
+                )
             }
         } else {
             val loc = "${fmtCoord(t.lat)},${fmtCoord(t.lng)}"
             when (t.transition) {
-                Transition.ENTER -> "Quando entri in $loc (±$r m)"
-                Transition.EXIT -> "Quando esci da $loc (±$r m)"
-                Transition.DWELL -> "Quando ti trattieni presso $loc (±$r m)"
+                Transition.ENTER -> l.pick(
+                    "When you enter $loc (±$r m)",
+                    "Quando entri in $loc (±$r m)",
+                )
+                Transition.EXIT -> l.pick(
+                    "When you leave $loc (±$r m)",
+                    "Quando esci da $loc (±$r m)",
+                )
+                Transition.DWELL -> l.pick(
+                    "When you dwell at $loc (±$r m)",
+                    "Quando ti trattieni presso $loc (±$r m)",
+                )
             }
         }
     }
 
-    private fun phoneStateLine(t: Trigger.PhoneState): String {
+    private fun phoneStateLine(t: Trigger.PhoneState, l: RenderLanguage): String {
         val event = when (t.event) {
-            PhoneEvent.INCOMING_CALL -> "chiamata in arrivo"
-            PhoneEvent.CALL_ENDED -> "chiamata terminata"
-            PhoneEvent.SMS_RECEIVED -> "SMS ricevuto"
+            PhoneEvent.INCOMING_CALL -> l.pick("incoming call", "chiamata in arrivo")
+            PhoneEvent.CALL_ENDED -> l.pick("call ended", "chiamata terminata")
+            PhoneEvent.SMS_RECEIVED -> l.pick("SMS received", "SMS ricevuto")
         }
-        val from = t.number?.let { "da $it" } ?: "da chiunque"
+        val from = t.number?.let { l.pick("from $it", "da $it") } ?: l.pick("from anyone", "da chiunque")
         // §5: i filtri che restringono il match restano visibili integrali in review.
-        val text = t.textMatch?.let { " · testo \"$it\"" } ?: ""
-        return "Quando: $event $from$text"
+        val text = t.textMatch?.let { l.pick(" · text \"$it\"", " · testo \"$it\"") } ?: ""
+        return "${whenPrefix(l)}$event $from$text"
     }
 
-    private fun connectivityLine(t: Trigger.Connectivity): String {
+    private fun connectivityLine(t: Trigger.Connectivity, l: RenderLanguage): String {
         val medium = when (t.medium) {
             ConnMedium.WIFI -> "Wi-Fi"
             ConnMedium.BT -> "Bluetooth"
-            ConnMedium.POWER -> "alimentazione"
+            ConnMedium.POWER -> l.pick("power", "alimentazione")
         }
         val state = when (t.medium) {
-            ConnMedium.POWER -> if (t.state == ConnState.CONNECTED) "collegata" else "scollegata"
-            else -> if (t.state == ConnState.CONNECTED) "connesso" else "disconnesso"
+            ConnMedium.POWER ->
+                if (t.state == ConnState.CONNECTED) l.pick("connected", "collegata")
+                else l.pick("disconnected", "scollegata")
+            else ->
+                if (t.state == ConnState.CONNECTED) l.pick("connected", "connesso")
+                else l.pick("disconnected", "disconnesso")
         }
         val match = t.match?.let { " ($it)" } ?: ""
-        return "Quando: $medium $state$match"
+        return "${whenPrefix(l)}$medium $state$match"
     }
 
-    private fun sensorLine(t: Trigger.Sensor): String {
+    private fun sensorLine(t: Trigger.Sensor, l: RenderLanguage): String {
         val kind = when (t.kind) {
-            SensorKind.SIGNIFICANT_MOTION -> "rilevato un movimento significativo"
-            SensorKind.STATIONARY_DETECT -> "il dispositivo diventa fermo"
-            SensorKind.MOTION_DETECT -> "il dispositivo torna in movimento"
-            SensorKind.STEP_DETECTOR -> "rilevati ${t.minimumEventCount} passi"
-            SensorKind.STEP_COUNTER -> "il contatore aumenta di ${t.minimumEventCount} passi"
+            SensorKind.SIGNIFICANT_MOTION -> l.pick(
+                "significant motion detected",
+                "rilevato un movimento significativo",
+            )
+            SensorKind.STATIONARY_DETECT -> l.pick(
+                "the device becomes stationary",
+                "il dispositivo diventa fermo",
+            )
+            SensorKind.MOTION_DETECT -> l.pick(
+                "the device starts moving again",
+                "il dispositivo torna in movimento",
+            )
+            SensorKind.STEP_DETECTOR -> l.pick(
+                "${t.minimumEventCount} steps detected",
+                "rilevati ${t.minimumEventCount} passi",
+            )
+            SensorKind.STEP_COUNTER -> l.pick(
+                "the step counter increases by ${t.minimumEventCount} steps",
+                "il contatore aumenta di ${t.minimumEventCount} passi",
+            )
         }
-        return "Quando: $kind"
+        return "${whenPrefix(l)}$kind"
     }
 
     // ---------------------------------------------------------------------------------------------
     // Condition tree — appiattito in righe indentate (§6)
     // ---------------------------------------------------------------------------------------------
 
-    private fun flattenConditions(c: Condition, depth: Int): List<String> {
+    private fun flattenConditions(c: Condition, depth: Int, l: RenderLanguage): List<String> {
         val pad = "  ".repeat(depth)
         return when (c) {
-            is Condition.TimeWindow ->
-                listOf("${pad}Solo tra le ${c.startLocal} e le ${c.endLocal} (${c.tz})")
-            is Condition.StateEquals ->
-                listOf("${pad}Solo se ${c.key} ${opLabel(c.op)} ${c.value}")
-            is Condition.StateCompare ->
-                listOf(
-                    "${pad}Solo se ${queryLabel(c.query)} [${valueTypeLabel(c.valueType)}] " +
-                        "${opLabel(c.op)} ${c.expected}",
-                )
-            is Condition.AppInForeground ->
-                listOf("${pad}Solo se ${appLabel(c.pkg)} è in primo piano")
-            is Condition.LocationIn ->
-                listOf("${pad}Solo se ti trovi entro ${fmtNum(c.radiusM)} m da ${c.lat},${c.lng}")
+            is Condition.TimeWindow -> listOf(
+                l.pick(
+                    "${pad}Only between ${c.startLocal} and ${c.endLocal} (${c.tz})",
+                    "${pad}Solo tra le ${c.startLocal} e le ${c.endLocal} (${c.tz})",
+                ),
+            )
+            is Condition.StateEquals -> listOf(
+                l.pick(
+                    "${pad}Only if ${c.key} ${opLabel(c.op, l)} ${c.value}",
+                    "${pad}Solo se ${c.key} ${opLabel(c.op, l)} ${c.value}",
+                ),
+            )
+            is Condition.StateCompare -> listOf(
+                l.pick(
+                    "${pad}Only if ${queryLabel(c.query, l)} [${valueTypeLabel(c.valueType, l)}] " +
+                        "${opLabel(c.op, l)} ${c.expected}",
+                    "${pad}Solo se ${queryLabel(c.query, l)} [${valueTypeLabel(c.valueType, l)}] " +
+                        "${opLabel(c.op, l)} ${c.expected}",
+                ),
+            )
+            is Condition.AppInForeground -> listOf(
+                l.pick(
+                    "${pad}Only if ${appLabel(c.pkg)} is in the foreground",
+                    "${pad}Solo se ${appLabel(c.pkg)} è in primo piano",
+                ),
+            )
+            is Condition.LocationIn -> listOf(
+                l.pick(
+                    "${pad}Only if you are within ${fmtNum(c.radiusM)} m of ${c.lat},${c.lng}",
+                    "${pad}Solo se ti trovi entro ${fmtNum(c.radiusM)} m da ${c.lat},${c.lng}",
+                ),
+            )
             is Condition.And ->
-                listOf("${pad}Tutte le seguenti:") + c.all.flatMap { flattenConditions(it, depth + 1) }
+                listOf(l.pick("${pad}All of the following:", "${pad}Tutte le seguenti:")) +
+                    c.all.flatMap { flattenConditions(it, depth + 1, l) }
             is Condition.Or ->
-                listOf("${pad}Almeno una delle seguenti:") + c.any.flatMap { flattenConditions(it, depth + 1) }
+                listOf(l.pick("${pad}At least one of the following:", "${pad}Almeno una delle seguenti:")) +
+                    c.any.flatMap { flattenConditions(it, depth + 1, l) }
             is Condition.Not ->
-                listOf("${pad}Non deve valere:") + flattenConditions(c.cond, depth + 1)
+                listOf(l.pick("${pad}Must not hold:", "${pad}Non deve valere:")) +
+                    flattenConditions(c.cond, depth + 1, l)
             is Condition.BooleanLiteral ->
-                listOf("${pad}${if (c.value) "Sempre" else "Mai"}")
+                listOf("$pad${if (c.value) l.pick("Always", "Sempre") else l.pick("Never", "Mai")}")
             // P4: confronto su variabile di programma. La destra è un'altra variabile (${nome}) o un
             // letterale. Rendering minimale a una riga (l'espansione ricca dei badge provenienza è P4-E).
             is Condition.VarCompare -> {
                 val right = c.expectedVar?.let { "\${$it}" } ?: c.expected ?: "<?>"
-                listOf("${pad}Solo se \${${c.varName}} ${opLabel(c.op)} $right")
+                listOf(
+                    l.pick(
+                        "${pad}Only if \${${c.varName}} ${opLabel(c.op, l)} $right",
+                        "${pad}Solo se \${${c.varName}} ${opLabel(c.op, l)} $right",
+                    ),
+                )
             }
         }
     }
 
-    private fun opLabel(op: CmpOp): String = when (op) {
+    private fun opLabel(op: CmpOp, l: RenderLanguage): String = when (op) {
         CmpOp.EQ -> "="
         CmpOp.NEQ -> "≠"
         CmpOp.GT -> ">"
         CmpOp.LT -> "<"
-        CmpOp.CONTAINS -> "contiene"
+        CmpOp.CONTAINS -> l.pick("contains", "contiene")
     }
 
     // ---------------------------------------------------------------------------------------------
     // Action -> ActionRow
     // ---------------------------------------------------------------------------------------------
 
-    private fun actionRow(a: Action): ActionRow = when (a) {
+    private fun actionRow(a: Action, l: RenderLanguage): ActionRow = when (a) {
         is Action.SetWifi -> row(
             iconKey = "wifi_off",
-            label = if (a.on) "Attiva Wi-Fi" else "Disattiva Wi-Fi",
+            label = if (a.on) l.pick("Turn on Wi-Fi", "Attiva Wi-Fi")
+            else l.pick("Turn off Wi-Fi", "Disattiva Wi-Fi"),
         )
         is Action.SetBluetooth -> row(
             iconKey = "bluetooth",
-            label = if (a.on) "Attiva Bluetooth" else "Disattiva Bluetooth",
+            label = if (a.on) l.pick("Turn on Bluetooth", "Attiva Bluetooth")
+            else l.pick("Turn off Bluetooth", "Disattiva Bluetooth"),
         )
         is Action.SetDnd -> row(
             iconKey = "dnd",
             label = when (a.mode) {
-                DndMode.OFF -> "Disattiva Non disturbare"
-                DndMode.PRIORITY -> "Attiva Non disturbare (priorità)"
-                DndMode.TOTAL -> "Attiva Non disturbare (totale)"
+                DndMode.OFF -> l.pick("Turn off Do Not Disturb", "Disattiva Non disturbare")
+                DndMode.PRIORITY -> l.pick(
+                    "Turn on Do Not Disturb (priority)",
+                    "Attiva Non disturbare (priorità)",
+                )
+                DndMode.TOTAL -> l.pick(
+                    "Turn on Do Not Disturb (total)",
+                    "Attiva Non disturbare (totale)",
+                )
             },
         )
         is Action.SetRinger -> row(
             iconKey = "ringer",
-            label = "Imposta suoneria (${a.mode})",
+            label = l.pick("Set ringer (${a.mode})", "Imposta suoneria (${a.mode})"),
         )
         is Action.LaunchApp -> row(
             iconKey = "launch_app",
-            label = "Apri app",
+            label = l.pick("Open app", "Apri app"),
             detail = appLabel(a.pkg),
         )
         is Action.OpenUrl -> row(
             iconKey = "open_url",
-            label = "Apri URL",
+            label = l.pick("Open URL", "Apri URL"),
             detail = a.url,
         )
         is Action.ShowNotification -> row(
             iconKey = "notify",
-            label = "Mostra notifica",
+            label = l.pick("Show notification", "Mostra notifica"),
             detail = a.text,
         )
         is Action.Tap -> row(
             iconKey = "tap",
-            label = "Tocca schermo",
+            label = l.pick("Tap the screen", "Tocca schermo"),
             detail = "(${a.x}, ${a.y})",
             requiresLiveConfirm = true,
         )
         is Action.InputText -> row(
             iconKey = "input_text",
-            label = "Digita testo",
+            label = l.pick("Type text", "Digita testo"),
             detail = a.text,
             requiresLiveConfirm = true,
         )
         is Action.WhatsAppReply -> row(
             iconKey = "whatsapp_reply",
-            label = "Rispondi su WhatsApp",
+            label = l.pick("Reply on WhatsApp", "Rispondi su WhatsApp"),
             detail = a.text,
             requiresLiveConfirm = true,
         )
         is Action.RunShell -> row(
             iconKey = "shell",
-            label = "Esegui comando shell",
+            label = l.pick("Run shell command", "Esegui comando shell"),
             isShell = true,
             shellCommand = a.cmd, // integrale, mai troncato (invariante §5.4)
         )
         is Action.CopyToClipboard -> row(
             iconKey = "clipboard",
-            label = "Copia negli appunti",
+            label = l.pick("Copy to clipboard", "Copia negli appunti"),
             // §5: la regex è il criterio reale di estrazione, resta visibile integrale.
-            detail = a.extractionRegex?.let { "estrazione: $it" } ?: "il testo integrale del messaggio",
+            detail = a.extractionRegex?.let { l.pick("extraction: $it", "estrazione: $it") }
+                ?: l.pick("the full text of the message", "il testo integrale del messaggio"),
         )
         is Action.SetAlarm -> row(
             iconKey = "alarm",
-            label = "Imposta sveglia",
+            label = l.pick("Set alarm", "Imposta sveglia"),
             detail = "%02d:%02d".format(a.hour, a.minute) +
                 (a.label?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""),
         )
         is Action.SetTimer -> row(
             iconKey = "timer",
-            label = "Avvia timer",
+            label = l.pick("Start timer", "Avvia timer"),
             detail = "${a.seconds}s" +
                 (a.label?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""),
         )
         is Action.SetVolume -> row(
             iconKey = "volume",
-            label = "Imposta volume",
-            detail = "${a.stream.name.lowercase()} · livello ${a.level}",
+            label = l.pick("Set volume", "Imposta volume"),
+            detail = "${a.stream.name.lowercase()} · ${l.pick("level", "livello")} ${a.level}",
         )
         is Action.SetFlashlight -> row(
             iconKey = "flashlight",
-            label = if (a.on) "Accendi torcia" else "Spegni torcia",
+            label = if (a.on) l.pick("Turn on flashlight", "Accendi torcia")
+            else l.pick("Turn off flashlight", "Spegni torcia"),
             detail = if (a.on) "on" else "off",
         )
         is Action.OpenSettingsScreen -> row(
             iconKey = "settings",
-            label = "Apri Impostazioni",
+            label = l.pick("Open Settings", "Apri Impostazioni"),
             detail = a.screen.name.lowercase() +
                 (a.pkg?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""),
         )
         is Action.Vibrate -> row(
             iconKey = "vibrate",
-            label = "Vibra",
+            label = l.pick("Vibrate", "Vibra"),
             detail = "${a.durationMs} ms",
         )
         is Action.WriteSetting -> row(
             iconKey = "settings",
             // D2: la review mostra namespace/key/value LETTERALI e integrali (l'utente approva
             // esattamente questa terna, mai interpolata dal trigger).
-            label = "Scrivi impostazione",
+            label = l.pick("Write setting", "Scrivi impostazione"),
             detail = "${a.namespace.name.lowercase()} · ${a.key} = ${a.value}",
         )
         is Action.InvokeLlm -> row(
             iconKey = "generative",
             // §5: i due sink (reply vs notifica locale) restano distinti e non "softati" in review.
             label = when (a.deliver) {
-                GenerativeDeliverMode.WHATSAPP_REPLY -> "Genera e rispondi con l'AI"
-                GenerativeDeliverMode.LOCAL_NOTIFICATION -> "Genera e notifica"
+                GenerativeDeliverMode.WHATSAPP_REPLY ->
+                    l.pick("Generate and reply with AI", "Genera e rispondi con l'AI")
+                GenerativeDeliverMode.LOCAL_NOTIFICATION ->
+                    l.pick("Generate and notify", "Genera e notifica")
             },
             detail = when (a.deliver) {
-                GenerativeDeliverMode.WHATSAPP_REPLY ->
-                    "Obiettivo: ${a.goal} · tool: ${a.allowedTools.joinToString(", ")}"
+                GenerativeDeliverMode.WHATSAPP_REPLY -> l.pick(
+                    "Goal: ${a.goal} · tools: ${a.allowedTools.joinToString(", ")}",
+                    "Obiettivo: ${a.goal} · tool: ${a.allowedTools.joinToString(", ")}",
+                )
                 // Titolo LETTERALE (D2): l'utente approva esattamente questo testo, mai dal trigger.
-                GenerativeDeliverMode.LOCAL_NOTIFICATION ->
+                GenerativeDeliverMode.LOCAL_NOTIFICATION -> l.pick(
+                    "Notification title: ${a.notificationTitle.orEmpty()} · Goal: ${a.goal} · " +
+                        "tools: ${a.allowedTools.joinToString(", ")}",
                     "Titolo notifica: ${a.notificationTitle.orEmpty()} · Obiettivo: ${a.goal} · " +
-                        "tool: ${a.allowedTools.joinToString(", ")}"
+                        "tool: ${a.allowedTools.joinToString(", ")}",
+                )
             },
             isGenerative = true,
         )
         is Action.InvokeLlmV2 -> row(
             iconKey = "generative",
-            label = "Rispondi con l'AI",
+            label = l.pick("Reply with AI", "Rispondi con l'AI"),
             detail = buildString {
-                append("Obiettivo: ${a.goal} · stato condiviso: ")
+                append(
+                    l.pick("Goal: ${a.goal} · shared state: ", "Obiettivo: ${a.goal} · stato condiviso: "),
+                )
                 append(
                     a.stateContext.joinToString("; ") { context ->
-                        "${queryLabel(context.query)} [${valueTypeLabel(context.valueType)}, " +
+                        "${queryLabel(context.query, l)} [${valueTypeLabel(context.valueType, l)}, " +
                             "${context.integrity.name}, ${context.confidentiality.name}]"
                     },
                 )
-                append(" · tool: ${a.allowedTools.joinToString(", ")}")
+                append(l.pick(" · tools: ", " · tool: "))
+                append(a.allowedTools.joinToString(", "))
             },
             isGenerative = true,
         )
@@ -407,18 +529,31 @@ object RuleRenderMapper {
         // aggregato) così la review resta onesta anche prima del render completo.
         is Action.If -> row(
             iconKey = "control_flow",
-            label = "Se (condizione), esegui un blocco",
-            detail = "${a.then.size} azioni se vera" +
-                (if (a.orElse.isNotEmpty()) ", ${a.orElse.size} altrimenti" else "") +
-                " · dettaglio completo nell'approvazione avanzata",
+            label = l.pick("If (condition), run a block", "Se (condizione), esegui un blocco"),
+            detail = l.pick(
+                "${a.then.size} actions if true" +
+                    (if (a.orElse.isNotEmpty()) ", ${a.orElse.size} otherwise" else "") +
+                    " · full detail in advanced approval",
+                "${a.then.size} azioni se vera" +
+                    (if (a.orElse.isNotEmpty()) ", ${a.orElse.size} altrimenti" else "") +
+                    " · dettaglio completo nell'approvazione avanzata",
+            ),
             isGenerative = a.tier == ActionTier.GENERATIVE,
         )
         is Action.While -> row(
             iconKey = "control_flow",
-            label = "Ripeti (max ${a.maxIterations} volte)",
-            detail = "${a.body.size} azioni per iterazione" +
-                (if (a.delayBetweenMs > 0) " · ogni ${a.delayBetweenMs} ms" else "") +
-                " · dettaglio completo nell'approvazione avanzata",
+            label = l.pick(
+                "Repeat (up to ${a.maxIterations} times)",
+                "Ripeti (max ${a.maxIterations} volte)",
+            ),
+            detail = l.pick(
+                "${a.body.size} actions per iteration" +
+                    (if (a.delayBetweenMs > 0) " · every ${a.delayBetweenMs} ms" else "") +
+                    " · full detail in advanced approval",
+                "${a.body.size} azioni per iterazione" +
+                    (if (a.delayBetweenMs > 0) " · ogni ${a.delayBetweenMs} ms" else "") +
+                    " · dettaglio completo nell'approvazione avanzata",
+            ),
             isGenerative = a.tier == ActionTier.GENERATIVE,
         )
     }
@@ -452,7 +587,7 @@ object RuleRenderMapper {
     }
 
     /** Umanizza i cron comuni; fallback esplicito che mostra l'espressione integrale. */
-    private fun humanizeCron(expr: String, tz: String): String {
+    private fun humanizeCron(expr: String, tz: String, l: RenderLanguage): String {
         val parts = expr.trim().split(Regex("\\s+"))
         if (parts.size == 5) {
             val (min, hour, dom, mon, dow) = parts
@@ -461,29 +596,32 @@ object RuleRenderMapper {
             if (m != null && h != null && m in 0..59 && h in 0..23) {
                 val time = "%02d:%02d".format(h, m)
                 if (dom == "*" && mon == "*" && dow == "*") {
-                    return "Ogni giorno alle $time ($tz)"
+                    return l.pick("Every day at $time ($tz)", "Ogni giorno alle $time ($tz)")
                 }
-                val dowName = weekdayName(dow)
+                val dowName = weekdayName(dow, l)
                 if (dom == "*" && mon == "*" && dowName != null) {
-                    return "Ogni $dowName alle $time ($tz)"
+                    return l.pick("Every $dowName at $time ($tz)", "Ogni $dowName alle $time ($tz)")
                 }
                 val domDay = dom.toIntOrNull()
                 if (domDay != null && domDay in 1..31 && mon == "*" && dow == "*") {
-                    return "Ogni mese il giorno $domDay alle $time ($tz)"
+                    return l.pick(
+                        "Every month on day $domDay at $time ($tz)",
+                        "Ogni mese il giorno $domDay alle $time ($tz)",
+                    )
                 }
             }
         }
         return "Cron '$expr' ($tz)"
     }
 
-    private fun weekdayName(dow: String): String? = when (dow.toIntOrNull()) {
-        0, 7 -> "domenica"
-        1 -> "lunedì"
-        2 -> "martedì"
-        3 -> "mercoledì"
-        4 -> "giovedì"
-        5 -> "venerdì"
-        6 -> "sabato"
+    private fun weekdayName(dow: String, l: RenderLanguage): String? = when (dow.toIntOrNull()) {
+        0, 7 -> l.pick("Sunday", "domenica")
+        1 -> l.pick("Monday", "lunedì")
+        2 -> l.pick("Tuesday", "martedì")
+        3 -> l.pick("Wednesday", "mercoledì")
+        4 -> l.pick("Thursday", "giovedì")
+        5 -> l.pick("Friday", "venerdì")
+        6 -> l.pick("Saturday", "sabato")
         else -> null
     }
 
@@ -502,17 +640,20 @@ object RuleRenderMapper {
         return if (rounded == "-0") "0" else rounded
     }
 
-    private fun queryLabel(query: StateQuery): String = when (query) {
-        is StateQuery.Builtin -> "stato ${query.key}"
+    private fun queryLabel(query: StateQuery, l: RenderLanguage): String = when (query) {
+        is StateQuery.Builtin -> l.pick("state ${query.key}", "stato ${query.key}")
         is StateQuery.Setting -> "setting ${query.namespace.name}:${query.key}"
         is StateQuery.SystemProperty -> "property ${query.name}"
         is StateQuery.Sysfs -> "sysfs ${query.path}"
-        is StateQuery.DumpsysField -> "dumpsys ${query.service} · campo ${query.field}"
+        is StateQuery.DumpsysField -> l.pick(
+            "dumpsys ${query.service} · field ${query.field}",
+            "dumpsys ${query.service} · campo ${query.field}",
+        )
     }
 
-    private fun valueTypeLabel(type: StateValueType): String = when (type) {
-        StateValueType.TEXT -> "testo"
-        StateValueType.NUMBER -> "numero"
-        StateValueType.BOOLEAN -> "booleano"
+    private fun valueTypeLabel(type: StateValueType, l: RenderLanguage): String = when (type) {
+        StateValueType.TEXT -> l.pick("text", "testo")
+        StateValueType.NUMBER -> l.pick("number", "numero")
+        StateValueType.BOOLEAN -> l.pick("boolean", "booleano")
     }
 }

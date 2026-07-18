@@ -14,17 +14,22 @@ object BudgetFormat {
     fun usdLabel(micros: Long): String =
         "$" + String.format(Locale.US, "%.2f", micros / 1_000_000.0)
 
-    /** 2_250_000 -> "≈ $2.25 · ≈ €2.07"; null -> "n/d". */
-    fun costLabel(micros: Long?, eurPerUsd: Double = DEFAULT_EUR_PER_USD): String {
-        if (micros == null) return "n/d"
+    /** 2_250_000 -> "≈ $2.25 · ≈ €2.07"; null -> "n/a" (EN) / "n/d" (IT). */
+    fun costLabel(
+        micros: Long?,
+        eurPerUsd: Double = DEFAULT_EUR_PER_USD,
+        language: RenderLanguage = RenderLanguage.system(),
+    ): String {
+        if (micros == null) return language.pick("n/a", "n/d")
         val eur = micros / 1_000_000.0 * eurPerUsd
         val eurLabel = "€" + String.format(Locale.US, "%.2f", eur)
         return "≈ ${usdLabel(micros)} · ≈ $eurLabel"
     }
 
-    /** (3,20)->"3 / 20"; (3,null)->"3 · illimitato". */
-    fun callsLabel(used: Long, limit: Int?): String =
-        if (limit != null && limit > 0) "$used / $limit" else "$used · illimitato"
+    /** (3,20)->"3 / 20"; (3,null)->"3 · unlimited" (EN) / "3 · illimitato" (IT). */
+    fun callsLabel(used: Long, limit: Int?, language: RenderLanguage = RenderLanguage.system()): String =
+        if (limit != null && limit > 0) "$used / $limit"
+        else "$used · " + language.pick("unlimited", "illimitato")
 
     /** 0f se limite null/<=0; altrimenti used/limit clampato in [0,1]. */
     fun ratio(used: Long, limit: Int?): Float {
@@ -48,16 +53,26 @@ object BudgetFormat {
 
     // --- TOKEN (metrica primaria dei provider token-only: Hermes/OpenRouter/Custom) ---
 
-    /** (1500,300)->"in 1500 · out 300"; un lato null->"n/d"; entrambi null->"n/d". */
-    fun tokensLabel(tokensIn: Long?, tokensOut: Long?): String {
-        if (tokensIn == null && tokensOut == null) return "n/d"
-        return "in ${tokensIn?.toString() ?: "n/d"} · out ${tokensOut?.toString() ?: "n/d"}"
+    /** (1500,300)->"in 1500 · out 300"; un lato null->"n/a"/"n/d"; entrambi null->"n/a"/"n/d". */
+    fun tokensLabel(
+        tokensIn: Long?,
+        tokensOut: Long?,
+        language: RenderLanguage = RenderLanguage.system(),
+    ): String {
+        val na = language.pick("n/a", "n/d")
+        if (tokensIn == null && tokensOut == null) return na
+        return "in ${tokensIn?.toString() ?: na} · out ${tokensOut?.toString() ?: na}"
     }
 
-    /** (300,1000)->"300 / 1000"; limite null/<=0->"300 · illimitato"; usato null->"n/d". */
-    fun tokensCapLabel(used: Long?, limit: Long?): String {
-        val usedLabel = used?.toString() ?: "n/d"
-        return if (limit != null && limit > 0) "$usedLabel / $limit" else "$usedLabel · illimitato"
+    /** (300,1000)->"300 / 1000"; limite null/<=0->"300 · unlimited"/"illimitato"; usato null->"n/a"/"n/d". */
+    fun tokensCapLabel(
+        used: Long?,
+        limit: Long?,
+        language: RenderLanguage = RenderLanguage.system(),
+    ): String {
+        val usedLabel = used?.toString() ?: language.pick("n/a", "n/d")
+        return if (limit != null && limit > 0) "$usedLabel / $limit"
+        else "$usedLabel · " + language.pick("unlimited", "illimitato")
     }
 
     /** 0f se usato n/d o limite null/<=0; altrimenti used/limit clampato in [0,1]. */

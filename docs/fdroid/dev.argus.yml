@@ -1,0 +1,34 @@
+AntiFeatures:
+  NonFreeNet:
+    en-US: >-
+      Optional. Argus can connect to proprietary LLM provider APIs
+      (OpenAI, Anthropic, Google) if the user configures one. It also
+      works fully with a self-hosted bridge and an on-device base tier,
+      with no proprietary network service.
+Categories:
+  - System
+License: GPL-3.0-only
+AuthorName: JackRushante
+SourceCode: https://github.com/JackRushante/argus
+IssueTracker: https://github.com/JackRushante/argus/issues
+
+AutoName: Argus
+
+RepoType: git
+Repo: https://github.com/JackRushante/argus
+Binaries: https://github.com/JackRushante/argus/releases/download/v%v/argus-v%v.apk
+
+Builds:
+  - versionName: 0.2.2
+    versionCode: 4
+    commit: bdeb21304042cc91ce28d7865b6ba1fbd9632ea0
+    subdir: app
+    gradle:
+      - yes
+
+AllowedAPKSigningKeys: 4c09633e64cf9876b0da682f5f259383af8d22742aadd93ef273b9f2c73cca6b
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags
+CurrentVersion: 0.2.2
+CurrentVersionCode: 4

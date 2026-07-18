@@ -1,0 +1,1 @@
+v0.2.1 - Build riproducibile per F-Droid. Nessun cambiamento funzionale rispetto alla 0.2.0: stessa app bilingue (inglese/italiano, segue la lingua di sistema).

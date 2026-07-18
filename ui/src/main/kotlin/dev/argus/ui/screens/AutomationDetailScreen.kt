@@ -205,7 +205,8 @@ fun AutomationDetailScreen(
 @Composable
 private fun DetailHeader(status: StatusBadge, onBack: () -> Unit) {
     // "Approvazione" in review (PENDING), "Dettaglio" in ispezione (design §7.3).
-    val kind = if (status == StatusBadge.PENDING_APPROVAL) "Approvazione" else "Dettaglio"
+    val kind = if (status == StatusBadge.PENDING_APPROVAL) stringResource(R.string.detail_header_approval)
+    else stringResource(R.string.detail_header_detail)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -220,7 +221,7 @@ private fun DetailHeader(status: StatusBadge, onBack: () -> Unit) {
         ) {
             Icon(
                 Icons.AutoMirrored.Rounded.ArrowBack,
-                contentDescription = "Indietro",
+                contentDescription = stringResource(R.string.action_back),
                 tint = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.size(24.dp),
             )
@@ -272,7 +273,7 @@ private fun VerifiedReadersPanel(readers: List<String>) {
         )
         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(
-                "Reader verificati sul dispositivo",
+                stringResource(R.string.detail_verified_readers),
                 color = MaterialTheme.colorScheme.onPrimaryContainer,
                 style = MaterialTheme.typography.labelMedium,
             )
@@ -330,7 +331,7 @@ private fun RationaleQuote(text: String) {
         )
         Column(modifier = Modifier.padding(start = 13.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
-                "descrizione del modello",
+                stringResource(R.string.detail_rationale_label),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.labelSmall,
             )
@@ -356,8 +357,8 @@ private fun RecentRunsSection(runs: List<LogRow>, onOpenFullLog: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Text("Ultime esecuzioni", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-            TextButton(onClick = onOpenFullLog, modifier = Modifier.heightIn(min = 48.dp)) { Text("Vedi tutte") }
+            Text(stringResource(R.string.detail_recent_runs), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+            TextButton(onClick = onOpenFullLog, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.detail_see_all)) }
         }
         Column(
             modifier = Modifier
@@ -466,19 +467,19 @@ private fun PendingFooter(state: AutomationDetailState, callbacks: AutomationDet
         // §5.2: quando l'arm è bloccato il motivo è SEMPRE visibile accanto al bottone
         // disabilitato — con fallback generico se l'host non ha valorizzato il motivo.
         if (!state.canArm) {
-            val reason = state.armBlockedReason ?: "Regola non armabile"
+            val reason = state.armBlockedReason ?: stringResource(R.string.detail_not_armable)
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Top) {
                 Icon(Icons.Rounded.Block, contentDescription = null, tint = semantic.error.fg, modifier = Modifier.size(16.dp))
                 Text(
-                    "Arma bloccato: $reason",
+                    stringResource(R.string.detail_arm_blocked, reason),
                     color = semantic.error.fg,
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedButton(onClick = callbacks::onReject, modifier = Modifier.heightIn(min = 48.dp)) { Text("Rifiuta") }
-            OutlinedButton(onClick = callbacks::onAskEdit, modifier = Modifier.heightIn(min = 48.dp)) { Text("Modifica") }
+            OutlinedButton(onClick = callbacks::onReject, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.detail_reject)) }
+            OutlinedButton(onClick = callbacks::onAskEdit, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.detail_edit)) }
             // Arma = unica azione filled/accent; abilitata SOLO se canArm (invariante §5.2).
             Button(
                 onClick = callbacks::onArm,
@@ -487,7 +488,7 @@ private fun PendingFooter(state: AutomationDetailState, callbacks: AutomationDet
             ) {
                 Icon(Icons.Rounded.Shield, contentDescription = null, modifier = Modifier.size(19.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("Arma")
+                Text(stringResource(R.string.detail_arm))
             }
         }
     }
@@ -512,8 +513,8 @@ private fun ReviewableFooter(
             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
         ) {
             Text(
-                if (state.status == StatusBadge.ARMED) "Disattiva automazione"
-                else "Riattiva automazione",
+                if (state.status == StatusBadge.ARMED) stringResource(R.string.detail_disable)
+                else stringResource(R.string.detail_enable),
             )
         }
         if (!state.canRunNow && state.runNowBlockedReason != null) {
@@ -531,9 +532,9 @@ private fun ReviewableFooter(
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = semantic.error.fg),
                 border = androidx.compose.foundation.BorderStroke(1.dp, semantic.error.fg.copy(alpha = 0.55f)),
             ) {
-                Icon(Icons.Rounded.Delete, contentDescription = "Elimina", modifier = Modifier.size(21.dp))
+                Icon(Icons.Rounded.Delete, contentDescription = stringResource(R.string.action_delete), modifier = Modifier.size(21.dp))
             }
-            OutlinedButton(onClick = callbacks::onAskEdit, modifier = Modifier.heightIn(min = 48.dp)) { Text("Modifica in chat") }
+            OutlinedButton(onClick = callbacks::onAskEdit, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.detail_edit_in_chat)) }
             OutlinedButton(
                 onClick = onRunNow,
                 enabled = state.canRunNow,
@@ -542,7 +543,7 @@ private fun ReviewableFooter(
             ) {
                 Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(19.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("Esegui ora")
+                Text(stringResource(R.string.action_run_now))
             }
         }
     }
@@ -575,7 +576,7 @@ private fun NeedsReviewFooter(
             onClick = callbacks::onAskEdit,
             modifier = Modifier.weight(1f).heightIn(min = 48.dp),
         ) {
-            Text("Ricrea in chat")
+            Text(stringResource(R.string.detail_recreate_in_chat))
         }
     }
 }

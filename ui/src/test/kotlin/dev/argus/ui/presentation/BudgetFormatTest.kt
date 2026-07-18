@@ -6,6 +6,8 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class BudgetFormatTest {
+    // Le label con parole ("illimitato"/"n/d") passano SEMPRE `RenderLanguage.IT` esplicito: senza,
+    // dipenderebbero dal locale della macchina. I casi EN in fondo pinnano il default inglese.
     @Test fun `usd label due decimali`() {
         assertEquals("$2.25", BudgetFormat.usdLabel(2_250_000))
         assertEquals("$0.00", BudgetFormat.usdLabel(0))
@@ -18,12 +20,15 @@ class BudgetFormatTest {
     }
 
     @Test fun `cost label null e' nd`() {
-        assertEquals("n/d", BudgetFormat.costLabel(null))
+        assertEquals("n/d", BudgetFormat.costLabel(null, language = RenderLanguage.IT))
+        assertEquals("n/a", BudgetFormat.costLabel(null, language = RenderLanguage.EN))
     }
 
     @Test fun `calls label con e senza limite`() {
-        assertEquals("3 / 20", BudgetFormat.callsLabel(3, 20))
-        assertEquals("3 · illimitato", BudgetFormat.callsLabel(3, null))
+        assertEquals("3 / 20", BudgetFormat.callsLabel(3, 20, RenderLanguage.IT))
+        assertEquals("3 · illimitato", BudgetFormat.callsLabel(3, null, RenderLanguage.IT))
+        // Default EN dell'app.
+        assertEquals("3 · unlimited", BudgetFormat.callsLabel(3, null, RenderLanguage.EN))
     }
 
     @Test fun `ratio clampata e zero se illimitato`() {
@@ -49,19 +54,25 @@ class BudgetFormatTest {
     }
 
     @Test fun `tokens label separa in e out e nd solo se entrambi mancano`() {
-        assertEquals("in 1500 · out 300", BudgetFormat.tokensLabel(1_500, 300))
-        assertEquals("in 0 · out 0", BudgetFormat.tokensLabel(0, 0))
-        assertEquals("in 1500 · out n/d", BudgetFormat.tokensLabel(1_500, null))
-        assertEquals("in n/d · out 300", BudgetFormat.tokensLabel(null, 300))
-        assertEquals("n/d", BudgetFormat.tokensLabel(null, null))
+        assertEquals("in 1500 · out 300", BudgetFormat.tokensLabel(1_500, 300, RenderLanguage.IT))
+        assertEquals("in 0 · out 0", BudgetFormat.tokensLabel(0, 0, RenderLanguage.IT))
+        assertEquals("in 1500 · out n/d", BudgetFormat.tokensLabel(1_500, null, RenderLanguage.IT))
+        assertEquals("in n/d · out 300", BudgetFormat.tokensLabel(null, 300, RenderLanguage.IT))
+        assertEquals("n/d", BudgetFormat.tokensLabel(null, null, RenderLanguage.IT))
+        // Default EN dell'app: "n/d" diventa "n/a".
+        assertEquals("in 1500 · out n/a", BudgetFormat.tokensLabel(1_500, null, RenderLanguage.EN))
+        assertEquals("n/a", BudgetFormat.tokensLabel(null, null, RenderLanguage.EN))
     }
 
     @Test fun `token cap label con e senza limite`() {
-        assertEquals("300 / 1000", BudgetFormat.tokensCapLabel(300, 1_000))
-        assertEquals("300 · illimitato", BudgetFormat.tokensCapLabel(300, null))
-        assertEquals("300 · illimitato", BudgetFormat.tokensCapLabel(300, 0))
-        assertEquals("n/d · illimitato", BudgetFormat.tokensCapLabel(null, null))
-        assertEquals("n/d / 1000", BudgetFormat.tokensCapLabel(null, 1_000))
+        assertEquals("300 / 1000", BudgetFormat.tokensCapLabel(300, 1_000, RenderLanguage.IT))
+        assertEquals("300 · illimitato", BudgetFormat.tokensCapLabel(300, null, RenderLanguage.IT))
+        assertEquals("300 · illimitato", BudgetFormat.tokensCapLabel(300, 0, RenderLanguage.IT))
+        assertEquals("n/d · illimitato", BudgetFormat.tokensCapLabel(null, null, RenderLanguage.IT))
+        assertEquals("n/d / 1000", BudgetFormat.tokensCapLabel(null, 1_000, RenderLanguage.IT))
+        // Default EN dell'app.
+        assertEquals("300 · unlimited", BudgetFormat.tokensCapLabel(300, null, RenderLanguage.EN))
+        assertEquals("n/a · unlimited", BudgetFormat.tokensCapLabel(null, null, RenderLanguage.EN))
     }
 
     @Test fun `token ratio clampata e zero se illimitato o nd`() {
