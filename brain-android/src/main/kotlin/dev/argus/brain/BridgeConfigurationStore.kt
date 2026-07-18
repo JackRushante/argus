@@ -92,7 +92,8 @@ class AndroidBridgeConfigurationStore(context: Context) : BridgeConfigurationSto
     }
 
     companion object {
-        const val DEFAULT_BASE_URL = "https://hermes.tail04462d.ts.net"
+        /** Self-hosted endpoint: a public build must never embed one developer's private host. */
+        const val DEFAULT_BASE_URL = ""
         private const val PREFERENCES_NAME = "argus_bridge_private"
         private const val KEY_BASE_URL = "base_url"
         private const val KEY_BEARER = "bearer_v1"

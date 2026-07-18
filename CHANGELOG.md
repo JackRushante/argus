@@ -2,6 +2,13 @@
 
 Patch notes for every commit, newest first. Generated from the project's git history.
 
+## Unreleased — privacy hardening (2026-07-18)
+
+- Public builds no longer embed the maintainer's private Hermes/Tailscale endpoint in production
+  defaults, previews, tests, or contributor notes.
+- Hermes is unconfigured on a fresh install and must be set by the user. Existing installations
+  retain their locally stored URL.
+
 ## `87c1e9502` — 2026-07-17
 
 **feat(#50 S15 + field fix): end-to-end Hermes usage + afterMs schedules EXACT by default**

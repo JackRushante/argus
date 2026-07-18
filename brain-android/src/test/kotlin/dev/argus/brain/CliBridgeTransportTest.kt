@@ -693,7 +693,7 @@ class CliBridgeTransportTest {
     @Test fun `cleartext base URLs are unavailable outside explicit tests`() {
         assertFailsWith<IllegalArgumentException> {
             CliBridgeTransport(
-                baseUrl = "http://100.80.142.65:8090",
+                baseUrl = "http://192.0.2.1:8090",
                 authProvider = BridgeAuthProvider { TOKEN },
             )
         }

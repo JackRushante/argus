@@ -26,11 +26,11 @@ class BridgeConfigurationStoreTest {
     @Test
     fun `bridge URL accepts only credential-free HTTPS endpoints`() {
         assertEquals(
-            "https://hermes.tail04462d.ts.net",
-            normalizeBridgeBaseUrl(" https://hermes.tail04462d.ts.net/ "),
+            "https://hermes.example",
+            normalizeBridgeBaseUrl(" https://hermes.example/ "),
         )
-        assertNull(normalizeBridgeBaseUrl("http://hermes.tail04462d.ts.net"))
-        assertNull(normalizeBridgeBaseUrl("https://token@hermes.tail04462d.ts.net"))
-        assertNull(normalizeBridgeBaseUrl("https://hermes.tail04462d.ts.net?token=secret"))
+        assertNull(normalizeBridgeBaseUrl("http://hermes.example"))
+        assertNull(normalizeBridgeBaseUrl("https://token@hermes.example"))
+        assertNull(normalizeBridgeBaseUrl("https://hermes.example?token=secret"))
     }
 }
