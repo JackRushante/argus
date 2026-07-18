@@ -184,11 +184,11 @@ class AnthropicMessagesTransportTest {
         assertFalse("tools" in root, "il sink notifica non dichiara il reply tool")
         assertFalse("tool_choice" in root, "il sink notifica non forza alcun tool")
         val system = root.getValue("system").jsonPrimitive.content
-        assertTrue("NOTIFICA" in system)
+        assertTrue("NOTIFICATION" in system)
         assertFalse("WhatsApp" in system, "il system del sink NON deve parlare di WhatsApp")
         val user = root.getValue("messages").jsonArray.single().jsonObject
             .getValue("content").jsonPrimitive.content
-        assertFalse("Messaggio ricevuto" in user, "il sink non referenzia alcuna notifica in arrivo")
+        assertFalse("Message received" in user, "il sink non referenzia alcuna notifica in arrivo")
     }
 
     @Test fun `notification sink with web adds only the web tool and no reply`(): Unit = runBlocking {
@@ -391,7 +391,7 @@ class AnthropicMessagesTransportTest {
         assertTrue("max_tokens" in root)
         assertFalse("tools" in root, "la strada primaria del compile è la riga sentinel nel testo")
         val system = root.getValue("system").jsonPrimitive.content
-        assertTrue(system.contains("REGOLE VINCOLANTI"))
+        assertTrue(system.contains("BINDING RULES"))
         assertTrue(system.contains("@@META@@"))
         assertTrue(system.contains("AutomationDraft"))
         val user = root.getValue("messages").jsonArray.single().jsonObject.getValue("content").jsonPrimitive.content

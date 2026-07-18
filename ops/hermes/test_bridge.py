@@ -344,7 +344,7 @@ class BridgeTest(unittest.TestCase):
 
         prompt = bridge.build_prompt(self.request())
         self.assertIn("run_shell", prompt)
-        self.assertIn("Mai con phone_state", prompt)
+        self.assertIn("Never with phone_state", prompt)
 
     def test_whitelisted_whatsapp_contact_can_trigger_static_shell(self):
         """Decisione Lorenzo 2026-07-15: un contatto verificato puo' innescare un comando gia'
@@ -401,7 +401,7 @@ class BridgeTest(unittest.TestCase):
         self.assertTrue(bridge.validate_trigger(base, set()))
         self.assertFalse(bridge.validate_trigger({**base, "transition": "DWELL"}, set()))
         self.assertFalse(bridge.validate_trigger({**base, "loiteringDelayMs": 60_000}, set()))
-        self.assertIn("soltanto ENTER/EXIT", bridge.build_prompt(self.request()))
+        self.assertIn("only ENTER/EXIT", bridge.build_prompt(self.request()))
 
     def test_time_trigger_accepts_relative_after_ms_one_shot(self):
         tz = "Europe/Rome"
@@ -654,6 +654,13 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual("Casa", draft["trigger"]["match"])
         self.assertIsNone(error)
 
+    def test_prompts_mirror_the_users_language(self):
+        # Pinning della regola di MIRROR: entrambi i prompt (compile e act) devono istruire
+        # esplicitamente il modello a scrivere il testo utente nella LINGUA DELL'UTENTE.
+        self.assertIn("USER'S language", bridge.build_prompt(self.request()))
+        self.assertIn("USER'S language", bridge.build_prompt(self.request_v2()))
+        self.assertIn("USER'S language", bridge.build_act_prompt(self.act_request()))
+
     def test_missing_or_malformed_meta_fails_soft(self):
         self.assertEqual(
             ("testo", None, "draft_missing"),
@@ -802,7 +809,7 @@ class BridgeHttpTest(unittest.TestCase):
         # Stessa firma di run_gpt (il kwarg tools= è usato dal path /act): ritorna (output, usage).
         def runner(_prompt, tools="clarify"):
             self.calls += 1
-            if "GENERATORE ONE-SHOT" in _prompt:
+            if "ONE-SHOT GENERATOR" in _prompt:
                 return (
                     '@@META@@ {"reply_text":"Ciao, a dopo.","error_code":null}',
                     dict(self.USAGE_REPORT),

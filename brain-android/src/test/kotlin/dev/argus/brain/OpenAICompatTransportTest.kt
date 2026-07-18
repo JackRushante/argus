@@ -340,15 +340,15 @@ class OpenAICompatTransportTest {
         val messages = root.getValue("messages").jsonArray
         val system = messages.first().jsonObject.getValue("content").jsonPrimitive.content
         val user = messages.last().jsonObject.getValue("content").jsonPrimitive.content
-        assertTrue("NOTIFICA" in system, "il system del sink deve parlare di NOTIFICA")
+        assertTrue("NOTIFICATION" in system, "il system del sink deve parlare della NOTIFICATION")
         assertFalse("WhatsApp" in system, "il system del sink NON deve parlare di WhatsApp")
-        assertFalse("Messaggio ricevuto" in user, "il sink non referenzia alcuna notifica in arrivo")
-        assertTrue("Genera ora" in user, "user neutro quando non c'è stato")
+        assertFalse("Message received" in user, "il sink non referenzia alcuna notifica in arrivo")
+        assertTrue("Generate the requested content" in user, "user neutro quando non c'è stato")
     }
 
     @Test fun `notification sink with state carries the state lines and no notification framing`(): Unit = runBlocking {
         // contextSources=[state] su TimeFired: le state lines entrano nel user message, senza alcun
-        // "Messaggio ricevuto".
+        // "Message received".
         server.enqueue(jsonResponse(
             """
             {"model":"openai/gpt-5.5",
@@ -366,7 +366,7 @@ class OpenAICompatTransportTest {
         ).jsonObject.getValue("messages").jsonArray.last().jsonObject
             .getValue("content").jsonPrimitive.content
         assertTrue("ringer=normal" in user, "le state lines devono entrare nel prompt del sink")
-        assertFalse("Messaggio ricevuto" in user)
+        assertFalse("Message received" in user)
     }
 
     @Test fun `notification sink rejects notification among the context sources`(): Unit = runBlocking {
@@ -424,7 +424,7 @@ class OpenAICompatTransportTest {
         assertFalse("messages" in root)
         val system = root.getValue("input").jsonArray.first().jsonObject
             .getValue("content").jsonPrimitive.content
-        assertTrue("NOTIFICA" in system)
+        assertTrue("NOTIFICATION" in system)
         assertFalse("WhatsApp" in system)
     }
 
@@ -565,7 +565,7 @@ class OpenAICompatTransportTest {
         val prompt = root.getValue("messages").jsonArray.joinToString("\n") {
             it.jsonObject.getValue("content").jsonPrimitive.content
         }
-        assertTrue(prompt.contains("REGOLE VINCOLANTI"), "il prompt deve includere le regole Hermes")
+        assertTrue(prompt.contains("BINDING RULES"), "il prompt deve includere le regole Hermes")
         assertTrue(prompt.contains("@@META@@"), "il prompt deve richiedere la riga sentinel")
         assertTrue(prompt.contains("AutomationDraft"), "il prompt deve includere lo schema draft")
         assertTrue(prompt.contains("metti in silenzioso alle 23"), "il messaggio utente deve entrare nel prompt")
