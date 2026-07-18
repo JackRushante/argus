@@ -19,16 +19,16 @@ Repo: https://github.com/JackRushante/argus
 Binaries: https://github.com/JackRushante/argus/releases/download/v%v/argus-v%v.apk
 
 Builds:
-  - versionName: 0.2.1
-    versionCode: 3
-    commit: b84dd0c6a06c837e3a140e947c333c29601c5206
+  - versionName: 0.2.2
+    versionCode: 4
+    commit: bdeb21304042cc91ce28d7865b6ba1fbd9632ea0
     subdir: app
     gradle:
       - yes
 
 AllowedAPKSigningKeys: 4c09633e64cf9876b0da682f5f259383af8d22742aadd93ef273b9f2c73cca6b
 
-AutoUpdateMode: Version v%v
+AutoUpdateMode: Version
 UpdateCheckMode: Tags
-CurrentVersion: 0.2.1
-CurrentVersionCode: 3
+CurrentVersion: 0.2.2
+CurrentVersionCode: 4

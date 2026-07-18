@@ -17,11 +17,11 @@ signing key must be pinned.
 |---|---|
 | applicationId | `dev.argus` |
 | metadata file | `metadata/dev.argus.yml` |
-| version | `0.2.1` / versionCode `3` |
-| tag (v-prefixed) | `v0.2.1` |
-| build commit (full hash) | `b84dd0c6a06c837e3a140e947c333c29601c5206` |
+| version | `0.2.2` / versionCode `4` |
+| tag (v-prefixed) | `v0.2.2` |
+| build commit (full hash) | `bdeb21304042cc91ce28d7865b6ba1fbd9632ea0` |
 | signing cert SHA-256 | `4c09633e64cf9876b0da682f5f259383af8d22742aadd93ef273b9f2c73cca6b` |
-| release asset name | `argus-v0.2.1.apk` (pattern `argus-v%v.apk`) |
+| release asset name | `argus-v0.2.2.apk` (pattern `argus-v%v.apk`) |
 | License (SPDX) | `GPL-3.0-only` |
 
 ## 1. Reproducible release build (already in `app/build.gradle.kts`)
@@ -120,6 +120,20 @@ F-Droid — it does not go in the recipe.
    `CurrentVersion`/`CurrentVersionCode`. Add `fastlane/.../changelogs/<code>.txt`
    in both locales (**≤ 500 chars each** — the client truncates longer).
 5. `fdroid rewritemeta` + `fdroid lint`; rebase on upstream; push; watch the pipeline.
+
+## 5b. Gotchas found on the first MR (!43234)
+
+The first pipeline failed two jobs — both fixed in v0.2.2. Watch for these:
+
+- **`schema validation`**: `AutoUpdateMode: Version v%v` is rejected by the current
+  schema. Use just `AutoUpdateMode: Version` (F-Droid derives the tag from the
+  Binaries `v%v` pattern). Keep `UpdateCheckMode: Tags`.
+- **`fdroid build` scanner**: `org.gradle.toolchains.foojay-resolver-convention` is a
+  "usual suspect" (it provisions JDKs from a remote service at build time) and blocks
+  the build. It was removed from `settings.gradle.kts`; `engine-core` sets the JVM 17
+  target explicitly instead of `jvmToolchain(17)`. **Never reintroduce foojay or a
+  `jvmToolchain{}` that triggers a remote download** — F-Droid builds with a local
+  JDK 17.
 
 ## 6. Privacy / distribution invariants
 

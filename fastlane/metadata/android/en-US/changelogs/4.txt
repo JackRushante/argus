@@ -1,0 +1,1 @@
+v0.2.2 - F-Droid build fix: drops the Gradle foojay-resolver (rejected by the scanner) for an explicit JVM 17 target. No functional change; still fully bilingual (English/Italian).
