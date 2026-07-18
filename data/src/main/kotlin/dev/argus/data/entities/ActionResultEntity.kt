@@ -3,6 +3,7 @@ package dev.argus.data.entities
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
+import androidx.room.ColumnInfo
 import dev.argus.engine.runtime.ActionJournalOutcome
 
 @Entity(
@@ -16,7 +17,11 @@ import dev.argus.engine.runtime.ActionJournalOutcome
             onDelete = ForeignKey.CASCADE,
         ),
     ],
-    indices = [Index("executionId"), Index("atMillis")],
+    indices = [
+        Index("executionId"),
+        Index("atMillis"),
+        Index(value = ["executionId", "actionPath"], unique = true),
+    ],
 )
 data class ActionResultEntity(
     val executionId: String,
@@ -25,4 +30,7 @@ data class ActionResultEntity(
     val outcome: ActionJournalOutcome,
     val atMillis: Long,
     val errorCode: String? = null,
+    /** Path strutturale P4; le righe migrate da v10 usano l'indice one-based. */
+    @ColumnInfo(defaultValue = "''")
+    val actionPath: String = (actionIndex + 1).toString(),
 )

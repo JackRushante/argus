@@ -28,6 +28,8 @@ data class ActionJournalEntry(
     val atMillis: Long,
     /** Codice diagnostico non sensibile; mai messaggi/command/contact/text raw. */
     val errorCode: String? = null,
+    /** Path P4 stabile; per le esecuzioni legacy è l'indice one-based. */
+    val actionPath: String = (actionIndex + 1).toString(),
 ) {
     init {
         require(actionIndex >= 0) { "actionIndex non può essere negativo" }
@@ -36,6 +38,7 @@ data class ActionJournalEntry(
             "errorCode non valido"
         }
         require(atMillis >= 0) { "atMillis non può essere negativo" }
+        ActionPath(actionPath)
     }
 }
 

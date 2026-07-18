@@ -40,7 +40,7 @@ import dev.argus.data.entities.WhitelistedContactEntity
         DeferredReplyEntity::class,
         UsageEventEntity::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -288,6 +288,23 @@ abstract class ArgusDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE `action_results` ADD COLUMN `actionPath` " +
+                        "TEXT NOT NULL DEFAULT ''",
+                )
+                db.execSQL(
+                    "UPDATE `action_results` SET `actionPath` = CAST(`actionIndex` + 1 AS TEXT)",
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS " +
+                        "`index_action_results_executionId_actionPath` " +
+                        "ON `action_results` (`executionId`, `actionPath`)",
+                )
+            }
+        }
+
         fun build(context: Context, name: String = "argus.db"): ArgusDatabase =
             Room.databaseBuilder(context, ArgusDatabase::class.java, name)
                 .addMigrations(
@@ -300,6 +317,7 @@ abstract class ArgusDatabase : RoomDatabase() {
                     MIGRATION_7_8,
                     MIGRATION_8_9,
                     MIGRATION_9_10,
+                    MIGRATION_10_11,
                 )
                 .build()
 

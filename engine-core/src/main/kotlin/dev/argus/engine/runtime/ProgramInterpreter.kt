@@ -33,8 +33,28 @@ value class ActionPath(val value: String) {
     internal fun iteration(iteration: Int, index: Int): ActionPath =
         ActionPath("$value.while[$iteration].${index + 1}")
 
+    /** Risolve il path nell'albero approvato; il numero d'iterazione non modifica la struttura. */
+    fun resolve(actions: List<Action>): Action? {
+        val rootText = value.substringBefore('.')
+        var current = actions.getOrNull((rootText.toIntOrNull() ?: return null) - 1) ?: return null
+        var cursor = rootText.length
+        while (cursor < value.length) {
+            val match = SEGMENT.matchAt(value, cursor) ?: return null
+            val childIndex = (match.groupValues[2].ifEmpty { match.groupValues[3] }.toIntOrNull()
+                ?: return null) - 1
+            current = when (match.groupValues[1]) {
+                "then" -> (current as? Action.If)?.then?.getOrNull(childIndex)
+                "else" -> (current as? Action.If)?.orElse?.getOrNull(childIndex)
+                else -> (current as? Action.While)?.body?.getOrNull(childIndex)
+            } ?: return null
+            cursor = match.range.last + 1
+        }
+        return current
+    }
+
     companion object {
         private val PATH = Regex("^[1-9][0-9]*(?:\\.(?:then|else)\\.[1-9][0-9]*|\\.while\\[[1-9][0-9]*\\]\\.[1-9][0-9]*)*$")
+        private val SEGMENT = Regex("\\.(then|else)\\.([1-9][0-9]*)|\\.while\\[[1-9][0-9]*\\]\\.([1-9][0-9]*)")
         internal fun root(index: Int): ActionPath = ActionPath((index + 1).toString())
     }
 }

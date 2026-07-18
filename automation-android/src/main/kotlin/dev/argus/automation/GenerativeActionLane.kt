@@ -18,6 +18,7 @@ import dev.argus.engine.model.StateValueCoercion
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.model.isOneShot
 import dev.argus.engine.runtime.ActionJournalOutcome
+import dev.argus.engine.runtime.ActionPath
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.runtime.ExecutionStatus
 import dev.argus.engine.runtime.FireContext
@@ -231,7 +232,7 @@ class AndroidGenerativeLane(
             current.approvalFingerprint != queued.context.approvalFingerprint ||
             current.approvalFingerprint != ApprovalFingerprints.of(current)
         ) return "approval_changed"
-        if (current.actions.getOrNull(queued.context.actionIndex) != queued.action) {
+        if (ActionPath(queued.context.actionPath).resolve(current.actions) != queued.action) {
             return "action_changed"
         }
         // RACE one-shot (#60): un trigger one-shot (immediate, o time con `at`) si DISABILITA appena

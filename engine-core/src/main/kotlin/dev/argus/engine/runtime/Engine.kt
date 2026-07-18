@@ -3,6 +3,7 @@ package dev.argus.engine.runtime
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.ActionTier
 import dev.argus.engine.model.Automation
+import dev.argus.engine.model.AutomationSchema
 import dev.argus.engine.model.AutomationStatus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
@@ -18,10 +19,24 @@ class Engine(
     private val audit: AuditSink = NoopAuditSink,
     private val journal: ExecutionJournal = NoopExecutionJournal,
     private val executionIds: ExecutionIdFactory = StableExecutionIdFactory,
+    private val resolvedExecutor: ResolvedActionExecutor? = null,
     private val now: () -> Long,
 ) {
     companion object {
         const val MIN_GENERATIVE_COOLDOWN_MS = 60_000L
+        private val PROGRAM_POLICY_STOPS = setOf(
+            "invalid_program",
+            "trigger_mismatch",
+            "binding_unavailable",
+            "binding_state_unavailable",
+            "condition_state_unavailable",
+            "variable_unavailable",
+            "interpolation_policy_missing",
+            "interpolation_malformed",
+            "interpolation_too_long",
+            "resolved_action_invalid",
+            "taint_blocked",
+        )
     }
 
     data class FireOutcome(
@@ -217,37 +232,120 @@ class Engine(
                 val approvalFingerprint = requireNotNull(automation.approvalFingerprint) {
                     "Automazione approvata priva di fingerprint"
                 }
-                automation.actions.forEachIndexed { index, action ->
-                    val context = FireContext(
-                        event = event,
-                        state = state(StateReadPlanner.forAction(action)),
-                        automationId = automation.id,
-                        approvalFingerprint = approvalFingerprint,
-                        eventId = envelope.id,
-                        executionId = executionId,
-                        actionIndex = index,
-                        priority = automation.priority,
+                if (AutomationSchema.requiresP4(automation)) {
+                    val indexes = linkedMapOf<ActionPath, Int>()
+                    fun indexFor(path: ActionPath): Int = indexes.getOrPut(path) { indexes.size }
+                    val program = ProgramInterpreter(
+                        runner = ProgramActionRunner { resolved, path ->
+                            val index = indexFor(path)
+                            val request = StateReadPlanner.forAction(resolved.action)
+                            val actionState = if (request.isEmpty) DeviceState() else stateProvider(request)
+                            val context = FireContext(
+                                event = event,
+                                state = actionState,
+                                automationId = automation.id,
+                                approvalFingerprint = approvalFingerprint,
+                                eventId = envelope.id,
+                                executionId = executionId,
+                                actionIndex = index,
+                                priority = automation.priority,
+                                actionPath = path.value,
+                            )
+                            val p4Executor = resolvedExecutor
+                            when {
+                                p4Executor != null -> p4Executor.execute(resolved, context)
+                                resolved.runtimeData.isNotEmpty() -> ProgramActionResult(
+                                    ActionResult.Failure("p4_runtime_data_unavailable"),
+                                )
+                                resolved.action.captureNameOrNull() != null -> ProgramActionResult(
+                                    ActionResult.Failure("p4_capture_unavailable"),
+                                )
+                                resolved.action.tier == ActionTier.GENERATIVE -> ProgramActionResult(
+                                    ActionResult.Failure("p4_generative_unavailable"),
+                                )
+                                else -> ProgramActionResult(executor.execute(resolved.action, context))
+                            }
+                        },
+                        stateProvider = stateProvider,
+                        conditionEvaluator = evaluator,
+                        journal = ProgramExecutionJournal { entry ->
+                            recordJournalAction(
+                                ActionJournalEntry(
+                                    executionId = executionId,
+                                    actionIndex = indexFor(entry.path),
+                                    actionType = entry.actionType,
+                                    outcome = entry.outcome,
+                                    atMillis = now().coerceAtLeast(0),
+                                    errorCode = entry.errorCode,
+                                    actionPath = entry.path.value,
+                                ),
+                            )
+                        },
                     )
-                    val result = try {
-                        executor.execute(action, context)
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (_: Exception) {
-                        ActionResult.Failure("executor_exception")
+                    val result = program.execute(
+                        trigger = automation.trigger,
+                        event = event,
+                        bindings = automation.vars,
+                        actions = automation.actions,
+                    )
+                    actionResults += result.steps.map { it.result }
+                    if (!result.completed) {
+                        val code = requireNotNull(result.stopCode)
+                        recordAudit(
+                            AuditEvent(
+                                automation.id,
+                                if (code in PROGRAM_POLICY_STOPS) {
+                                    AuditKind.BLOCKED_POLICY
+                                } else {
+                                    AuditKind.ERROR
+                                },
+                                now().coerceAtLeast(0),
+                                detail = code,
+                                eventId = envelope.id,
+                                executionId = executionId,
+                            ),
+                        )
                     }
-                    actionResults += result
-                    recordJournalAction(
-                        ActionJournalEntry(
-                            executionId = executionId,
-                            actionIndex = index,
-                            actionType = action.journalType(),
-                            outcome = result.journalOutcome(),
-                            atMillis = batchNow,
-                            errorCode = if (result is ActionResult.Failure) "action_failed" else null,
+                    finishJournal(
+                        actionResults.completion(
+                            executionId,
+                            now().coerceAtLeast(0),
+                            forcedStatus = if (result.completed) null else ExecutionStatus.FAILED,
                         ),
                     )
+                } else {
+                    automation.actions.forEachIndexed { index, action ->
+                        val context = FireContext(
+                            event = event,
+                            state = state(StateReadPlanner.forAction(action)),
+                            automationId = automation.id,
+                            approvalFingerprint = approvalFingerprint,
+                            eventId = envelope.id,
+                            executionId = executionId,
+                            actionIndex = index,
+                            priority = automation.priority,
+                        )
+                        val result = try {
+                            executor.execute(action, context)
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (_: Exception) {
+                            ActionResult.Failure("executor_exception")
+                        }
+                        actionResults += result
+                        recordJournalAction(
+                            ActionJournalEntry(
+                                executionId = executionId,
+                                actionIndex = index,
+                                actionType = action.journalType(),
+                                outcome = result.journalOutcome(),
+                                atMillis = batchNow,
+                                errorCode = if (result is ActionResult.Failure) "action_failed" else null,
+                            ),
+                        )
+                    }
+                    finishJournal(actionResults.completion(executionId, batchNow))
                 }
-                finishJournal(actionResults.completion(executionId, batchNow))
                 claimed = false
                 recordAudit(
                     AuditEvent(
@@ -317,10 +415,18 @@ class Engine(
             maxOf(automation.cooldownMs, MIN_GENERATIVE_COOLDOWN_MS)
         else automation.cooldownMs
 
+    private fun Action.captureNameOrNull(): String? = when (this) {
+        is Action.RunShell -> captureAs
+        is Action.InvokeLlm -> captureAs
+        is Action.InvokeLlmV2 -> captureAs
+        else -> null
+    }
+
     private fun DeviceState.merge(other: DeviceState): DeviceState = DeviceState(
         values = values + other.values,
         foregroundApp = other.foregroundApp ?: foregroundApp,
         location = other.location ?: location,
         queryValues = queryValues + other.queryValues,
     )
+
 }

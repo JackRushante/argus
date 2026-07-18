@@ -283,7 +283,8 @@ private fun actionDetail(action: ActionResultEntity, l: RenderLanguage): String 
         ActionJournalOutcome.FAILED -> l.pick("failed", "fallita")
     }
     val error = action.errorCode?.let { " · ${it.safeDiagnostic()}" }.orEmpty()
-    return "${action.actionIndex + 1}. ${actionTypeLabel(action.actionType, l)} → $outcome$error"
+    val path = action.actionPath.ifBlank { (action.actionIndex + 1).toString() }
+    return "$path. ${actionTypeLabel(action.actionType, l)} → $outcome$error"
 }
 
 private fun actionTypeLabel(type: String, l: RenderLanguage): String = when (type) {

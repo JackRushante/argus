@@ -349,6 +349,26 @@ class ProgramInterpreterTest {
     }
 
     @Test
+    fun `approved action path resolves nested branches and ignores loop iteration identity`() {
+        val leaf = Action.SetFlashlight(true)
+        val tree = listOf(
+            Action.If(
+                Condition.BooleanLiteral(true),
+                then = listOf(
+                    Action.While(
+                        Condition.BooleanLiteral(true),
+                        body = listOf(leaf),
+                        maxIterations = 3,
+                    ),
+                ),
+            ),
+        )
+
+        assertEquals(leaf, ActionPath("1.then.1.while[999].1").resolve(tree))
+        assertEquals(null, ActionPath("1.else.1").resolve(tree))
+    }
+
+    @Test
     fun `hard deadline bounds even a statically invalid oversized loop`() = runTest {
         val interpreter = ProgramInterpreter(
             runner = ProgramActionRunner { _, _ -> ProgramActionResult(ActionResult.Success) },
