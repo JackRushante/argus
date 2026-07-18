@@ -55,6 +55,7 @@ class AndroidGenerativeLane(
     private val replies: NotificationReplyGateway,
     private val deferredReplies: DeferredReplySink,
     private val notifier: AutomationNotifier,
+    private val oneShotConsumptions: OneShotConsumptionRegistry = NoopOneShotConsumptionRegistry,
     capacity: Int = DEFAULT_CAPACITY,
     private val submissionHandshakeTimeoutMillis: Long = DEFAULT_HANDSHAKE_TIMEOUT_MILLIS,
     private val nowMillis: () -> Long = System::currentTimeMillis,
@@ -239,7 +240,10 @@ class AndroidGenerativeLane(
         // la regola era ARMATA e fingerprint+azione combaciano ancora: DEVE poter completare. Le regole
         // ricorrenti disabilitate dall'utente (time con cron, ecc.) restano invece "rule_inactive".
         if (current.status != AutomationStatus.ARMED || !current.enabled) {
-            if (!isOneShot(current.trigger)) return "rule_inactive"
+            if (
+                !isOneShot(current.trigger) ||
+                !oneShotConsumptions.wasAutoConsumed(queued.context.eventId)
+            ) return "rule_inactive"
         }
         return when (val decision = firePolicy.evaluate(current, queued.context.event)) {
             FirePolicyDecision.Allow -> null

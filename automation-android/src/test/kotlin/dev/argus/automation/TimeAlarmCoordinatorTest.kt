@@ -17,6 +17,7 @@ import dev.argus.engine.runtime.FireClaimRequest
 import dev.argus.engine.runtime.FireClaimResult
 import dev.argus.engine.runtime.TriggerEnvelope
 import dev.argus.engine.runtime.TriggerEvent
+import dev.argus.engine.runtime.TriggerEventId
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
@@ -202,7 +203,15 @@ class TimeAlarmCoordinatorTest {
         val dueAt = Instant.parse("2026-07-13T20:00:00Z").toEpochMilli()
         val store = FakeAutomationStore(automation)
         val state = FakeTimeAlarmStateStore(record(automation, dueAt))
-        val coordinator = coordinator(store, state, FakeTimeAlarmBackend())
+        val oneShotConsumptions = ProcessOneShotConsumptionRegistry()
+        val coordinator = TimeAlarmCoordinator(
+            store = store,
+            state = state,
+            backend = FakeTimeAlarmBackend(),
+            dispatcher = TimeEventDispatcher { },
+            now = { now },
+            oneShotConsumptions = oneShotConsumptions,
+        )
 
         assertIs<AlarmDeliveryResult.Delivered>(
             coordinator.onAlarm(automation.id, requireNotNull(automation.approvalFingerprint), dueAt),
@@ -210,6 +219,11 @@ class TimeAlarmCoordinatorTest {
 
         assertEquals(AutomationStatus.DISABLED, store.get(automation.id)?.status)
         assertNull(state.get(automation.id))
+        assertTrue(
+            oneShotConsumptions.wasAutoConsumed(
+                TriggerEventId("time:${automation.approvalFingerprint!!.value}:$dueAt"),
+            ),
+        )
     }
 
     @Test

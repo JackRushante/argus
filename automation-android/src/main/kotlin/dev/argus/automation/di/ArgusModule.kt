@@ -42,6 +42,8 @@ import dev.argus.automation.FrameworkCurrentLocationProvider
 import dev.argus.automation.GenerativeLane
 import dev.argus.automation.LazyDeviceStateProvider
 import dev.argus.automation.NotificationEventDispatcher
+import dev.argus.automation.OneShotConsumptionRegistry
+import dev.argus.automation.ProcessOneShotConsumptionRegistry
 import dev.argus.automation.EngineSensorEventDispatcher
 import dev.argus.automation.RoomTimeAlarmStateStore
 import dev.argus.automation.ShizukuActionExecutor
@@ -469,6 +471,11 @@ object ArgusModule {
 
     @Provides
     @Singleton
+    fun oneShotConsumptionRegistry(): OneShotConsumptionRegistry =
+        ProcessOneShotConsumptionRegistry()
+
+    @Provides
+    @Singleton
     fun androidGenerativeLane(
         @ApplicationScope scope: CoroutineScope,
         journal: SubmittedActionJournal,
@@ -478,6 +485,7 @@ object ArgusModule {
         replies: NotificationReplyGateway,
         deferredReplies: DeferredReplySink,
         notifier: AutomationNotifier,
+        oneShotConsumptions: OneShotConsumptionRegistry,
     ): AndroidGenerativeLane = AndroidGenerativeLane(
         scope,
         journal,
@@ -487,6 +495,7 @@ object ArgusModule {
         replies,
         deferredReplies,
         notifier,
+        oneShotConsumptions,
     )
 
     @Provides
@@ -840,8 +849,17 @@ object ArgusModule {
         backend: TimeAlarmBackend,
         dispatcher: TimeEventDispatcher,
         audit: AuditSink,
+        oneShotConsumptions: OneShotConsumptionRegistry,
     ): TimeAlarmCoordinator =
-        TimeAlarmCoordinator(store, state, backend, dispatcher, Instant::now, audit)
+        TimeAlarmCoordinator(
+            store,
+            state,
+            backend,
+            dispatcher,
+            Instant::now,
+            audit,
+            oneShotConsumptions,
+        )
 
     @Provides
     @Singleton
@@ -859,6 +877,7 @@ object ArgusModule {
         sensor: SensorTriggerRuntime,
         immediateDispatcher: ImmediateEventDispatcher,
         audit: AuditSink,
+        oneShotConsumptions: OneShotConsumptionRegistry,
     ): ArmedAutomationRegistrar = AndroidArmedAutomationRegistrar(
         coordinator,
         store,
@@ -869,6 +888,7 @@ object ArgusModule {
         immediateDispatcher,
         Instant::now,
         audit,
+        oneShotConsumptions,
     )
 
     @Provides

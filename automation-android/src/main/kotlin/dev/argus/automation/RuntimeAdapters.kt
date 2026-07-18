@@ -210,6 +210,7 @@ class AndroidArmedAutomationRegistrar(
     // Clock iniettabile per un id univoco per-arm (un RE-ARM ri-fira, niente dedup permanente).
     private val now: () -> java.time.Instant = java.time.Instant::now,
     private val audit: AuditSink = NoopAuditSink,
+    private val oneShotConsumptions: OneShotConsumptionRegistry = NoopOneShotConsumptionRegistry,
 ) : ArmedAutomationRegistrar {
     override suspend fun register(automation: Automation): Boolean = when (automation.trigger) {
         is Trigger.Time -> registerTime(automation)
@@ -250,7 +251,14 @@ class AndroidArmedAutomationRegistrar(
             )
             immediateDispatcher.dispatch(envelope)
             // Consuma la regola one-shot dopo il fire, come TimeAlarmCoordinator per un time one-shot.
-            if (store.disableIfApproved(automation.id, fingerprint)) {
+            val attempt = oneShotConsumptions.begin(envelope.id)
+            var consumed = false
+            try {
+                consumed = store.disableIfApproved(automation.id, fingerprint)
+            } finally {
+                attempt.complete(consumed)
+            }
+            if (consumed) {
                 // Lifecycle (task #31-B): il disable post-fire va tracciato, mai silenzioso.
                 recordLifecycle(automation.id, AuditKind.RULE_DISABLED, "one_shot_consumed")
             }

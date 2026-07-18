@@ -205,6 +205,7 @@ class ArmedAutomationRegistrarTest {
         val store = RecordingStore(immediate)
         val dispatched = mutableListOf<TriggerEnvelope>()
         val audit = RegistrarAuditRecorder()
+        val oneShotConsumptions = ProcessOneShotConsumptionRegistry()
         val registrar = AndroidArmedAutomationRegistrar(
             coordinator = coordinator(store),
             store = store,
@@ -218,6 +219,7 @@ class ArmedAutomationRegistrarTest {
             immediateDispatcher = { dispatched += it },
             now = { Instant.parse("2026-07-14T08:00:00Z") },
             audit = audit,
+            oneShotConsumptions = oneShotConsumptions,
         )
 
         assertTrue(registrar.register(immediate), "il dispatch riuscito arma la regola one-shot")
@@ -231,6 +233,7 @@ class ArmedAutomationRegistrarTest {
         assertTrue(event is TriggerEvent.ImmediateFired)
         assertEquals(immediate.id, event.automationId)
         assertEquals(immediate.approvalFingerprint, event.approvalFingerprint)
+        assertTrue(oneShotConsumptions.wasAutoConsumed(envelope.id))
         assertEquals(
             listOf(immediate.id),
             store.disabled,

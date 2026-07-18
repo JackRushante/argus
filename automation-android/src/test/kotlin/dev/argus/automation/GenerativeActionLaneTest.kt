@@ -144,10 +144,12 @@ class GenerativeActionLaneTest {
         val armed = approvedAutomation(action, Trigger.Immediate)
         val consumed = armed.copy(status = AutomationStatus.DISABLED, enabled = false)
         val event = TriggerEvent.ImmediateFired(armed.id, requireNotNull(armed.approvalFingerprint))
+        val fireContext = context(armed, action, event = event)
         val fixture = fixture(
             action = action,
             automation = consumed,
-            context = context(armed, action, event = event),
+            context = fireContext,
+            oneShotConsumptions = autoConsumedRegistry(fireContext.eventId),
         )
         fixture.lane.trySubmit(fixture.context, fixture.action)
         fixture.journal.ready()
@@ -164,10 +166,12 @@ class GenerativeActionLaneTest {
         val armed = approvedAutomation(action, Trigger.Time(at = "2026-07-15T08:00", tz = "Europe/Rome"))
         val consumed = armed.copy(status = AutomationStatus.DISABLED, enabled = false)
         val event = TriggerEvent.TimeFired(armed.id, requireNotNull(armed.approvalFingerprint))
+        val fireContext = context(armed, action, event = event)
         val fixture = fixture(
             action = action,
             automation = consumed,
-            context = context(armed, action, event = event),
+            context = fireContext,
+            oneShotConsumptions = autoConsumedRegistry(fireContext.eventId),
         )
         fixture.lane.trySubmit(fixture.context, fixture.action)
         fixture.journal.ready()
@@ -186,10 +190,12 @@ class GenerativeActionLaneTest {
         val armed = approvedAutomation(action, Trigger.Time(afterMs = 120_000, tz = "Europe/Rome"))
         val consumed = armed.copy(status = AutomationStatus.DISABLED, enabled = false)
         val event = TriggerEvent.TimeFired(armed.id, requireNotNull(armed.approvalFingerprint))
+        val fireContext = context(armed, action, event = event)
         val fixture = fixture(
             action = action,
             automation = consumed,
-            context = context(armed, action, event = event),
+            context = fireContext,
+            oneShotConsumptions = autoConsumedRegistry(fireContext.eventId),
         )
         fixture.lane.trySubmit(fixture.context, fixture.action)
         fixture.journal.ready()
@@ -198,6 +204,27 @@ class GenerativeActionLaneTest {
         assertEquals(1, fixture.brain.calls)
         assertEquals(1, fixture.notifier.calls.size)
         assertEquals(ActionJournalOutcome.SUCCEEDED, fixture.journal.completions.single().outcome)
+    }
+
+    @Test
+    fun `manually disabled one-shot is inactive even when fingerprint and action are unchanged`() = runTest {
+        val action = notificationAction(allowedTools = listOf("web.search"))
+        val armed = approvedAutomation(action, Trigger.Immediate)
+        val disabledByUser = armed.copy(status = AutomationStatus.DISABLED, enabled = false)
+        val event = TriggerEvent.ImmediateFired(armed.id, requireNotNull(armed.approvalFingerprint))
+        val fixture = fixture(
+            action = action,
+            automation = disabledByUser,
+            context = context(armed, action, event = event),
+        )
+
+        fixture.lane.trySubmit(fixture.context, fixture.action)
+        fixture.journal.ready()
+        runCurrent()
+
+        assertEquals(0, fixture.brain.calls)
+        assertTrue(fixture.notifier.calls.isEmpty())
+        assertEquals("rule_inactive", fixture.journal.completions.single().errorCode)
     }
 
     @Test
@@ -551,6 +578,7 @@ class GenerativeActionLaneTest {
         notifier: RecordingNotifier = RecordingNotifier(),
         context: FireContext = context(automation, action),
         act: suspend () -> ActResult = { ActResult("risposta", null) },
+        oneShotConsumptions: OneShotConsumptionRegistry = NoopOneShotConsumptionRegistry,
     ): Fixture {
         val store = MutableAutomationStore(automation)
         val journal = FakeSubmittedJournal()
@@ -566,12 +594,18 @@ class GenerativeActionLaneTest {
             replies = gateway,
             deferredReplies = deferred,
             notifier = notifier,
+            oneShotConsumptions = oneShotConsumptions,
             capacity = capacity,
             submissionHandshakeTimeoutMillis = 5_000,
             nowMillis = { 2_000L },
         )
         return Fixture(lane, action, context, store, journal, brain, gateway, policy, notifier)
     }
+
+    private fun autoConsumedRegistry(eventId: TriggerEventId): OneShotConsumptionRegistry =
+        ProcessOneShotConsumptionRegistry().also { registry ->
+            registry.begin(eventId).complete(consumed = true)
+        }
 
     private data class Fixture(
         val lane: AndroidGenerativeLane,
