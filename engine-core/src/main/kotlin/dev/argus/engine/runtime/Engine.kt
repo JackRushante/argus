@@ -5,9 +5,17 @@ import dev.argus.engine.model.ActionTier
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationSchema
 import dev.argus.engine.model.AutomationStatus
+import dev.argus.engine.model.ApprovalFingerprint
+import dev.argus.engine.model.ApprovalFingerprints
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.selects.select
 
 /** @param now fornitore di epoch-millis (Android: System::currentTimeMillis). */
 class Engine(
@@ -282,12 +290,14 @@ class Engine(
                             )
                         },
                     )
-                    val result = program.execute(
-                        trigger = automation.trigger,
-                        event = event,
-                        bindings = automation.vars,
-                        actions = automation.actions,
-                    )
+                    val result = runWhileApproved(automation, approvalFingerprint) {
+                        program.execute(
+                            trigger = automation.trigger,
+                            event = event,
+                            bindings = automation.vars,
+                            actions = automation.actions,
+                        )
+                    }
                     actionResults += result.steps.map { it.result }
                     if (!result.completed) {
                         val code = requireNotNull(result.stopCode)
@@ -310,9 +320,17 @@ class Engine(
                         actionResults.completion(
                             executionId,
                             now().coerceAtLeast(0),
-                            forcedStatus = if (result.completed) null else ExecutionStatus.FAILED,
+                            forcedStatus = when {
+                                result.completed -> null
+                                result.stopCode == "cancelled" -> ExecutionStatus.CANCELLED
+                                else -> ExecutionStatus.FAILED
+                            },
                         ),
                     )
+                    if (result.stopCode == "cancelled") {
+                        claimed = false
+                        continue
+                    }
                 } else {
                     automation.actions.forEachIndexed { index, action ->
                         val context = FireContext(
@@ -407,6 +425,49 @@ class Engine(
             throw e
         } catch (_: Exception) {
             // Il claim RUNNING verrà marcato INTERRUPTED dalla maintenance.
+        }
+    }
+
+    /**
+     * Isola ogni programma P4 in un child supervisionato: disable, delete o cambio fingerprint
+     * cancellano solo quella regola (anche durante un `wait`), senza abortire le altre candidate
+     * dello stesso evento. Se il flusso di stato non è più verificabile l'esecuzione viene
+     * invalidata: una regola lunga non continua con un'approvazione che non possiamo confermare.
+     */
+    private suspend fun runWhileApproved(
+        automation: Automation,
+        fingerprint: ApprovalFingerprint,
+        block: suspend () -> ProgramExecutionResult,
+    ): ProgramExecutionResult = supervisorScope {
+        val execution = async(start = CoroutineStart.UNDISPATCHED) { block() }
+        val invalidated = async(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                store.observeAll().first { automations ->
+                    val current = automations.firstOrNull { it.id == automation.id }
+                    current == null ||
+                        current.status != AutomationStatus.ARMED ||
+                        !current.enabled ||
+                        current.approvalFingerprint != fingerprint ||
+                        ApprovalFingerprints.of(current) != fingerprint
+                }
+                Unit
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                Unit
+            }
+        }
+        try {
+            select {
+                execution.onAwait { it }
+                invalidated.onAwait {
+                    execution.cancelAndJoin()
+                    ProgramExecutionResult(emptyList(), stopCode = "cancelled")
+                }
+            }
+        } finally {
+            invalidated.cancelAndJoin()
+            if (execution.isActive) execution.cancelAndJoin()
         }
     }
 

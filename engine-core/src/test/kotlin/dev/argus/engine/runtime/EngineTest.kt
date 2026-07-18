@@ -2,9 +2,11 @@ package dev.argus.engine.runtime
 
 import dev.argus.engine.model.*
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import java.time.Clock
 import java.time.Instant
@@ -198,6 +200,61 @@ class EngineTest {
         )
         assertEquals("p4_generative_unavailable", journal.actions.single().errorCode)
         assertEquals(ExecutionStatus.FAILED, journal.completions.single().status)
+    }
+
+    @Test
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun `disabling a waiting P4 program cancels only that rule and continues the batch`() = runTest {
+        val waiting = armed(
+            id = "p4-waiting",
+            t = Trigger.Notification("com.example"),
+            acts = listOf(
+                Action.Wait(60_000),
+                Action.ShowNotification("Argus", "must not run"),
+            ),
+            prio = 0,
+        )
+        val next = armed(
+            id = "next-rule",
+            t = Trigger.Notification("com.example"),
+            acts = listOf(Action.ShowNotification("Argus", "next runs")),
+            prio = 1,
+        )
+        val store = FakeAutomationStore(listOf(waiting, next))
+        val audit = FakeAuditSink()
+        val journal = FakeExecutionJournal()
+        val executed = mutableListOf<Action>()
+        val eventId = TriggerEventId("notification:p4-cancel")
+        val pending = async {
+            engine(
+                store,
+                ActionExecutor { action, _ ->
+                    executed += action
+                    ActionResult.Success
+                },
+                "2026-07-18T10:00:00Z",
+                audit = audit,
+                journal = journal,
+            ).onTrigger(
+                TriggerEnvelope(eventId, TriggerEvent.NotificationPosted("com.example")),
+            ) { DeviceState() }
+        }
+
+        runCurrent()
+        assertTrue(!pending.isCompleted)
+        store.disable(waiting.id)
+        runCurrent()
+
+        assertEquals(listOf(next.id), pending.await().map { it.automation.id })
+        assertEquals(listOf<Action>(Action.ShowNotification("Argus", "next runs")), executed)
+        assertEquals(
+            ExecutionStatus.CANCELLED,
+            journal.completions.first {
+                it.executionId == StableExecutionIdFactory.create(waiting.id, eventId)
+            }.status,
+        )
+        assertTrue(audit.events.any { it.automationId == waiting.id && it.detail == "cancelled" })
+        assertTrue(audit.events.none { it.automationId == waiting.id && it.kind == AuditKind.FIRED })
     }
 
     @Test
