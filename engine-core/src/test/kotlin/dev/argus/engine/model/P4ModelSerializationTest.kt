@@ -138,6 +138,22 @@ class P4ModelSerializationTest {
         }
     }
 
+    @Test fun `wait action is explicit and round-trips`() {
+        val action: Action = Action.Wait(durationMs = 500)
+        val json = ArgusJson.encodeToString(Action.serializer(), action)
+
+        assertEquals("{\"type\":\"wait\",\"durationMs\":500}", json)
+        assertEquals(action, ArgusJson.decodeFromString(Action.serializer(), json))
+        assertEquals(ActionPrivilege.BASE, ActionPrivileges.of(action))
+        assertEquals(
+            setOf(CapabilityIds.TRIGGER_TIME),
+            CapabilityRequirements.derive(
+                Trigger.Time(cron = "0 8 * * *", tz = "Europe/Rome"),
+                listOf(action),
+            ),
+        )
+    }
+
     @Test fun `var compare serializes exactly one rhs and boolean literal round-trips`() {
         val literal: Condition = Condition.VarCompare("a", CmpOp.GT, expected = "0")
         val literalJson = ArgusJson.encodeToString(Condition.serializer(), literal)

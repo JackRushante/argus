@@ -53,6 +53,7 @@ object ActionTypeIds {
     const val WRITE_SETTING = "write_setting"
     const val INVOKE_LLM = "invoke_llm"
     const val INVOKE_LLM_V2 = "invoke_llm_v2"
+    const val WAIT = "wait"
     // Control-flow strutturato P4 §2.3: contenitori, non azioni foglia.
     const val IF = "if"
     const val WHILE = "while"
@@ -130,6 +131,7 @@ sealed interface Action {
             is OpenSettingsScreen,
             is Vibrate,
             is WriteSetting,
+            is Wait,
             -> ActionTier.DETERMINISTIC
         }
 
@@ -208,6 +210,14 @@ sealed interface Action {
      *  normal `VIBRATE`. `durationMs` validato in 1..10000. */
     @Serializable @SerialName(ActionTypeIds.VIBRATE)
     data class Vibrate(val durationMs: Int) : Action
+
+    /**
+     * Pausa cooperativa dentro un programma P4. È interpretata dal [ProgramInterpreter], non da
+     * Android/Shizuku: serve a rendere esprimibili sequenze temporali reali (per esempio torcia
+     * on → wait 500 ms → off) senza attribuire una semantica sorprendente al delay fra i loop.
+     */
+    @Serializable @SerialName(ActionTypeIds.WAIT)
+    data class Wait(val durationMs: Long) : Action
 
     /**
      * Scrittura PARAMETRICA di un'impostazione Android (`system|secure|global`) per chiave —

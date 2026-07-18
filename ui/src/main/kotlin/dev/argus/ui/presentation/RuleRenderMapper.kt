@@ -475,6 +475,11 @@ object RuleRenderMapper {
             label = l.pick("Vibrate", "Vibra"),
             detail = "${a.durationMs} ms",
         )
+        is Action.Wait -> row(
+            iconKey = "control_flow",
+            label = l.pick("Wait", "Attendi"),
+            detail = "${a.durationMs} ms",
+        )
         is Action.WriteSetting -> row(
             iconKey = "settings",
             // D2: la review mostra namespace/key/value LETTERALI e integrali (l'utente approva

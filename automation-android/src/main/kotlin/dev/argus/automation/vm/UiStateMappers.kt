@@ -305,6 +305,7 @@ private fun actionTypeLabel(type: String, l: RenderLanguage): String = when (typ
     ActionTypeIds.SET_FLASHLIGHT -> l.pick("Set flashlight", "Imposta torcia")
     ActionTypeIds.OPEN_SETTINGS_SCREEN -> l.pick("Open Settings", "Apri Impostazioni")
     ActionTypeIds.VIBRATE -> l.pick("Vibrate", "Vibrazione")
+    ActionTypeIds.WAIT -> l.pick("Wait", "Attesa")
     ActionTypeIds.WRITE_SETTING -> l.pick("Write setting", "Scrivi impostazione")
     ActionTypeIds.INVOKE_LLM,
     ActionTypeIds.INVOKE_LLM_V2,

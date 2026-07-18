@@ -47,6 +47,7 @@ object ActionPrivileges {
         is Action.SetFlashlight,
         is Action.OpenSettingsScreen,
         is Action.Vibrate,
+        is Action.Wait,
         is Action.InvokeLlm,
         is Action.InvokeLlmV2,
         -> ActionPrivilege.BASE

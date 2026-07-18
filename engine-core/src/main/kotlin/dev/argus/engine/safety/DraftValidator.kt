@@ -54,6 +54,7 @@ class DraftValidator(
         private const val MIN_WHILE_ITERATIONS = 1
         private const val MAX_WHILE_ITERATIONS = 1_000
         private const val MAX_WHILE_DELAY_MS = 3_600_000L
+        private const val MAX_WAIT_MS = 3_600_000L
         private const val MAX_TIME_BUDGET_MS = 6L * 60 * 60 * 1_000 // 6 ore
 
         // Stime worst-case per il budget tempo statico (§2.5): dominato dai delay dei while, ma
@@ -525,6 +526,7 @@ class DraftValidator(
         is Action.InvokeLlm -> action.timeoutMs.coerceAtLeast(0)
         is Action.InvokeLlmV2 -> action.timeoutMs.coerceAtLeast(0)
         is Action.RunShell -> SHELL_ACTION_BUDGET_MS
+        is Action.Wait -> action.durationMs.coerceAtLeast(0)
         is Action.If -> maxOf(worstCaseBudgetMs(action.then), worstCaseBudgetMs(action.orElse))
         is Action.While -> saturatingMul(
             action.maxIterations.toLong().coerceAtLeast(0),
@@ -844,6 +846,10 @@ class DraftValidator(
             is Action.Vibrate -> {
                 if (action.durationMs !in 1..MAX_VIBRATE_MS)
                     err("vibrate_duration_invalid", "Durata vibrazione fuori intervallo: 1..$MAX_VIBRATE_MS ms")
+            }
+            is Action.Wait -> {
+                if (action.durationMs !in 1..MAX_WAIT_MS)
+                    err("wait_duration_invalid", "Durata pausa fuori intervallo: 1..$MAX_WAIT_MS ms")
             }
             is Action.WriteSetting -> {
                 // PARAMETRICA (D0: nessuna allowlist di chiavi). Solo validazione di forma via

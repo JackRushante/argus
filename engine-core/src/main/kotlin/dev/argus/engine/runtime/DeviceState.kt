@@ -115,6 +115,7 @@ object StateReadPlanner {
         is Action.SetFlashlight,
         is Action.OpenSettingsScreen,
         is Action.Vibrate,
+        is Action.Wait,
         // write_setting non legge stato: namespace/key/value sono letterali approvati.
         is Action.WriteSetting,
         -> StateReadRequest.EMPTY

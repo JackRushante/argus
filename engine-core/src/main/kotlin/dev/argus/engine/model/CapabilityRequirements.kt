@@ -131,6 +131,8 @@ object CapabilityRequirements {
         is Action.SetFlashlight -> setOf(CapabilityIds.ACTION_SET_FLASHLIGHT)
         is Action.OpenSettingsScreen -> setOf(CapabilityIds.ACTION_OPEN_SETTINGS_SCREEN)
         is Action.Vibrate -> setOf(CapabilityIds.ACTION_VIBRATE)
+        // Pausa cooperativa interna all'interprete: nessuna capability OS.
+        is Action.Wait -> emptySet()
         // Come i reader parametrici (che gatano sulla famiglia, non sul singolo canonicalId):
         // il gate runtime è la famiglia ACTION_WRITE_SETTING (pubblicata dal probe solo con
         // Shizuku), mentre il binding per-chiave namespace|key|value è nel fingerprint approvato

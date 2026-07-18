@@ -98,6 +98,7 @@ object InterpolationPolicy {
         is Action.SetVolume,
         is Action.SetFlashlight,
         is Action.Vibrate,
+        is Action.Wait,
         is Action.If,
         is Action.While,
         -> emptyList()

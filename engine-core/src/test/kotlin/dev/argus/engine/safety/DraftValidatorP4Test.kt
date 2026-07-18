@@ -248,6 +248,30 @@ class DraftValidatorP4Test {
         assertTrue("while_delay_invalid" in errors(v.validate(whileDelay(-1), emptySet())))
     }
 
+    @Test fun `wait makes timed body sequences explicit and is bounded`() {
+        val flashing = draft(
+            listOf(
+                Action.While(
+                    Condition.BooleanLiteral(true),
+                    listOf(Action.SetFlashlight(true), Action.Wait(500), Action.SetFlashlight(false)),
+                    maxIterations = 20,
+                    delayBetweenMs = 500,
+                ),
+            ),
+        )
+        assertFalse("wait_duration_invalid" in errors(v.validate(flashing, emptySet())))
+        assertTrue(
+            "wait_duration_invalid" in errors(
+                v.validate(draft(listOf(Action.Wait(0))), emptySet()),
+            ),
+        )
+        assertTrue(
+            "wait_duration_invalid" in errors(
+                v.validate(draft(listOf(Action.Wait(3_600_001))), emptySet()),
+            ),
+        )
+    }
+
     @Test fun `empty control flow branches are rejected`() {
         assertTrue(
             "flow_empty_branch" in errors(
