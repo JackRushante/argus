@@ -203,6 +203,38 @@ class RuleRenderMapperTest {
         assertTrue(render.actions.single().detail.orEmpty().contains("CLEAN, SECRET"))
     }
 
+    @Test fun `nested generative v2 receives the state disclosure privacy note`() {
+        val nested = Action.If(
+            condition = Condition.BooleanLiteral(true),
+            then = listOf(
+                Action.InvokeLlmV2(
+                    goal = "use battery state",
+                    stateContext = listOf(
+                        ApprovedStateContext(
+                            query = StateQuery.Builtin("battery.level"),
+                            valueType = StateValueType.NUMBER,
+                            policyVersion = StateQueryPolicy.VERSION,
+                            integrity = IntegrityLabel.CLEAN,
+                            confidentiality = ConfidentialityLabel.PRIVATE,
+                        ),
+                    ),
+                    allowedTools = emptyList(),
+                    replyTargetSender = false,
+                    timeoutMs = 60_000,
+                ),
+            ),
+        )
+
+        val render = RuleRenderMapper.map(withAction(nested), language = RenderLanguage.EN)
+
+        assertTrue(render.isGenerative)
+        assertEquals(
+            "The notification text and the listed state readers will be sent to Hermes and to the " +
+                "cloud providers to generate the reply.",
+            render.privacyNote,
+        )
+    }
+
     @Test fun `non-humanizable cron falls back to the raw expression`() {
         val a = Automation(
             AutomationId("t1"), "cron strano", CreatedBy.LLM, AutomationStatus.ARMED,

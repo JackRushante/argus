@@ -1,4 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Argus</string>
+    <string name="nav_chat">Chat</string>
+    <string name="nav_automations">Automations</string>
+    <string name="nav_log">Log</string>
+    <string name="nav_system">System</string>
+    <string name="system_setting_unavailable">System setting unavailable.</string>
+    <string name="whitelist_add_title">Add to whitelist</string>
+    <string name="whitelist_empty">No 1:1 conversations observed yet. Receive a WhatsApp message from the contact (with notification access enabled) and try again, or use manual entry.</string>
+    <string name="whitelist_recent">Recently observed 1:1 conversations:</string>
+    <string name="manual_entry">Manual entry</string>
+    <string name="close">Close</string>
+    <string name="rule_unavailable_title">Rule unavailable</string>
+    <string name="rule_unavailable_detail">It may have been deleted or replaced by a newer revision.</string>
+    <string name="back">Back</string>
+    <string name="whitelist_editor_detail">Enter the visible name and stable conversation identifier.</string>
+    <string name="name_label">Name</string>
+    <string name="conversation_id_label">Conversation ID</string>
+    <string name="cancel">Cancel</string>
+    <string name="add">Add</string>
 </resources>

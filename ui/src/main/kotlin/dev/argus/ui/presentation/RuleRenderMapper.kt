@@ -81,7 +81,7 @@ object RuleRenderMapper {
             actions = actions.map { actionRow(it, l) },
             isGenerative = isGenerative,
             privacyNote = when {
-                actions.any { it is Action.InvokeLlmV2 } -> statePrivacyNote(l)
+                containsInvokeLlmV2(actions) -> statePrivacyNote(l)
                 isGenerative -> privacyNote(l)
                 else -> null
             },
@@ -656,4 +656,22 @@ object RuleRenderMapper {
         StateValueType.NUMBER -> l.pick("number", "numero")
         StateValueType.BOOLEAN -> l.pick("boolean", "booleano")
     }
+}
+
+/** Iterative because approval rendering may receive an unvalidated hostile tree. */
+private fun containsInvokeLlmV2(actions: List<Action>): Boolean {
+    val pending = ArrayDeque<Action>()
+    actions.forEach(pending::addLast)
+    while (pending.isNotEmpty()) {
+        when (val action = pending.removeFirst()) {
+            is Action.InvokeLlmV2 -> return true
+            is Action.If -> {
+                action.then.forEach(pending::addLast)
+                action.orElse.forEach(pending::addLast)
+            }
+            is Action.While -> action.body.forEach(pending::addLast)
+            else -> Unit
+        }
+    }
+    return false
 }

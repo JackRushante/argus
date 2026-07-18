@@ -10,6 +10,7 @@ import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.StringRes
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -59,6 +60,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -75,6 +77,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import dev.argus.R
 import dev.argus.automation.vm.ArgusAppViewModel
 import dev.argus.automation.vm.AutomationDetailViewModel
 import dev.argus.automation.vm.AutomationListViewModel
@@ -118,19 +121,24 @@ private object Routes {
         "$LOG?automationId=${Uri.encode(automationId)}&automationName=${Uri.encode(automationName)}"
 }
 
-private data class TopDestination(val route: String, val label: String, val icon: ImageVector)
+private data class TopDestination(
+    val route: String,
+    @StringRes val labelRes: Int,
+    val icon: ImageVector,
+)
 
 private val TopDestinations = listOf(
-    TopDestination(Routes.CHAT, "Chat", Icons.Rounded.ChatBubble),
-    TopDestination(Routes.LIST, "Automazioni", Icons.Rounded.Bolt),
-    TopDestination(Routes.LOG, "Log", Icons.Rounded.History),
-    TopDestination(Routes.SETTINGS, "Sistema", Icons.Rounded.Tune),
+    TopDestination(Routes.CHAT, R.string.nav_chat, Icons.Rounded.ChatBubble),
+    TopDestination(Routes.LIST, R.string.nav_automations, Icons.Rounded.Bolt),
+    TopDestination(Routes.LOG, R.string.nav_log, Icons.Rounded.History),
+    TopDestination(Routes.SETTINGS, R.string.nav_system, Icons.Rounded.Tune),
 )
 private val TopLevelRoutes = TopDestinations.mapTo(hashSetOf()) { it.route }
 
 @Composable
 fun ArgusNavHost() {
     val context = LocalContext.current
+    val systemSettingUnavailable = stringResource(R.string.system_setting_unavailable)
     val navController = rememberNavController()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -181,7 +189,7 @@ fun ArgusNavHost() {
     val openIntent: (Intent) -> Unit = { intent ->
         runCatching {
             context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        }.onFailure { showMessage("Impostazione di sistema non disponibile.") }
+        }.onFailure { showMessage(systemSettingUnavailable) }
     }
     var permissionRefresh by remember { mutableIntStateOf(0) }
     val notificationPermission = rememberLauncherForActivityResult(
@@ -650,17 +658,13 @@ private fun ContactPickerDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Aggiungi alla whitelist") },
+        title = { Text(stringResource(R.string.whitelist_add_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (candidates.isEmpty()) {
-                    Text(
-                        "Nessuna conversazione 1:1 osservata finora. Ricevi un messaggio " +
-                            "WhatsApp dal contatto (con lettura notifiche attiva) e riprova, " +
-                            "oppure usa l'inserimento manuale.",
-                    )
+                    Text(stringResource(R.string.whitelist_empty))
                 } else {
-                    Text("Conversazioni 1:1 osservate di recente:")
+                    Text(stringResource(R.string.whitelist_recent))
                     Column(
                         modifier = Modifier
                             .heightIn(max = 320.dp)
@@ -690,10 +694,10 @@ private fun ContactPickerDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onManualEntry) { Text("Inserimento manuale") }
+            TextButton(onClick = onManualEntry) { Text(stringResource(R.string.manual_entry)) }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Chiudi") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.close)) }
         },
     )
 }
@@ -735,10 +739,13 @@ private fun MissingDetailScreen(onBack: () -> Unit) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("Regola non disponibile", style = MaterialTheme.typography.titleMedium)
-            Text("Potrebbe essere stata eliminata o sostituita da una revisione più recente.")
+            Text(
+                stringResource(R.string.rule_unavailable_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(stringResource(R.string.rule_unavailable_detail))
             Button(onClick = onBack, modifier = Modifier.heightIn(min = 48.dp)) {
-                Text("Indietro")
+                Text(stringResource(R.string.back))
             }
         }
     }
@@ -754,34 +761,34 @@ private fun ContactEditorDialog(
     var conversationId by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Aggiungi alla whitelist") },
+        title = { Text(stringResource(R.string.whitelist_add_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Inserisci il nome visibile e l'identificatore stabile della conversazione.")
+                Text(stringResource(R.string.whitelist_editor_detail))
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
-                    label = { Text("Nome") },
+                    label = { Text(stringResource(R.string.name_label)) },
                 )
                 OutlinedTextField(
                     value = conversationId,
                     onValueChange = { conversationId = it },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
-                    label = { Text("Conversation ID") },
+                    label = { Text(stringResource(R.string.conversation_id_label)) },
                 )
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Annulla") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
         },
         confirmButton = {
             Button(
                 onClick = { onSave(name.trim(), conversationId.trim()) },
                 enabled = name.isNotBlank() && conversationId.isNotBlank(),
-            ) { Text("Aggiungi") }
+            ) { Text(stringResource(R.string.add)) }
         },
     )
 }
@@ -796,6 +803,7 @@ private fun ArgusBottomBar(
 ) {
     NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceVariant) {
         TopDestinations.forEach { destination ->
+            val label = stringResource(destination.labelRes)
             NavigationBarItem(
                 modifier = Modifier.testTag("nav_${destination.route}"),
                 selected = currentRoute == destination.route,
@@ -804,20 +812,20 @@ private fun ArgusBottomBar(
                     when {
                         destination.route == Routes.LIST && pendingCount > 0 ->
                             BadgedBox(badge = { Badge { Text("$pendingCount") } }) {
-                                Icon(destination.icon, contentDescription = destination.label)
+                                Icon(destination.icon, contentDescription = label)
                             }
                         destination.route == Routes.SETTINGS && needsReviewCount > 0 ->
                             BadgedBox(badge = { Badge { Text("!") } }) {
-                                Icon(destination.icon, contentDescription = destination.label)
+                                Icon(destination.icon, contentDescription = label)
                             }
                         destination.route == Routes.CHAT && chatUnread ->
                             BadgedBox(badge = { Badge() }) {
-                                Icon(destination.icon, contentDescription = destination.label)
+                                Icon(destination.icon, contentDescription = label)
                             }
-                        else -> Icon(destination.icon, contentDescription = destination.label)
+                        else -> Icon(destination.icon, contentDescription = label)
                     }
                 },
-                label = { Text(destination.label) },
+                label = { Text(label) },
                 colors = NavigationBarItemDefaults.colors(
                     selectedIconColor = MaterialTheme.colorScheme.onPrimary,
                     selectedTextColor = MaterialTheme.colorScheme.primary,

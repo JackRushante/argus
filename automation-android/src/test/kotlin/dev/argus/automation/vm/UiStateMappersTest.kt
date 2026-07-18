@@ -19,6 +19,7 @@ import dev.argus.engine.runtime.ExecutionStatus
 import dev.argus.engine.safety.DraftId
 import dev.argus.engine.safety.DraftReview
 import dev.argus.engine.safety.PendingDraft
+import dev.argus.ui.presentation.RenderLanguage
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -26,6 +27,59 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class UiStateMappersTest {
+    @Test
+    fun `english automation row removes the english when prefix and localizes relative time`() {
+        val row = Automation(
+            AutomationId("english-row"),
+            "SMS rule",
+            CreatedBy.USER,
+            AutomationStatus.ARMED,
+            Trigger.PhoneState(dev.argus.engine.model.PhoneEvent.SMS_RECEIVED),
+            listOf(Action.ShowNotification("Argus", "received")),
+        ).toAutomationRow(
+            lastFiredAt = 60_000L,
+            nowMillis = 180_000L,
+            language = RenderLanguage.EN,
+        )
+
+        assertEquals("SMS received from anyone", row.triggerSummary)
+        assertEquals("2 min ago", row.lastFiredLabel)
+    }
+
+    @Test
+    fun `english audit row localizes lifecycle summary deleted name and action outcome`() {
+        val row = AuditLogRecord(
+            id = 44L,
+            automationId = "deleted",
+            automationName = null,
+            kind = AuditKind.RULE_DISABLED,
+            atMillis = 1_000L,
+            detail = "one_shot_consumed",
+            executionId = "execution-en",
+            executionStatus = null,
+            succeededCount = null,
+            failedCount = null,
+            submittedCount = null,
+        ).toLogRow(
+            actions = listOf(
+                ActionResultEntity(
+                    executionId = "execution-en",
+                    actionIndex = 0,
+                    actionType = "invoke_llm_v2",
+                    outcome = ActionJournalOutcome.FAILED,
+                    atMillis = 1_000L,
+                    errorCode = "backend_failed",
+                ),
+            ),
+            language = RenderLanguage.EN,
+        )
+
+        assertEquals("Deleted automation", row.automationName)
+        assertEquals("Rule disabled: one-shot consumed", row.summary)
+        assertTrue(assertNotNull(row.expandedDetail).single().contains("failed"))
+        assertTrue(row.isGenerative)
+    }
+
     @Test
     fun `log row preserves audit id and surfaces generative cloud execution`() {
         val row = AuditLogRecord(
@@ -41,7 +95,7 @@ class UiStateMappersTest {
             failedCount = 0,
             submittedCount = 1,
         ).toLogRow(
-            listOf(
+            actions = listOf(
                 ActionResultEntity(
                     executionId = "execution-9",
                     actionIndex = 0,
@@ -50,6 +104,7 @@ class UiStateMappersTest {
                     atMillis = 1_000L,
                 ),
             ),
+            language = RenderLanguage.IT,
         )
 
         assertEquals("42", row.id)
@@ -75,7 +130,7 @@ class UiStateMappersTest {
             submittedCount = 0,
             deferredCount = 1,
         ).toLogRow(
-            listOf(
+            actions = listOf(
                 ActionResultEntity(
                     executionId = "execution-10",
                     actionIndex = 0,
@@ -85,6 +140,7 @@ class UiStateMappersTest {
                     errorCode = "reply_channel_expired",
                 ),
             ),
+            language = RenderLanguage.IT,
         )
 
         assertEquals(dev.argus.ui.model.LogOutcome.DEFERRED, row.outcome)
@@ -106,7 +162,7 @@ class UiStateMappersTest {
             succeededCount = null,
             failedCount = null,
             submittedCount = null,
-        ).toLogRow(emptyList())
+        ).toLogRow(emptyList(), RenderLanguage.IT)
 
         assertEquals("9", row.id)
         assertNull(row.automationId)
@@ -126,7 +182,7 @@ class UiStateMappersTest {
             succeededCount = null,
             failedCount = null,
             submittedCount = null,
-        ).toLogRow(emptyList())
+        ).toLogRow(emptyList(), RenderLanguage.IT)
         val falseCondition = AuditLogRecord(
             id = 11L,
             automationId = "state-rule",
@@ -139,7 +195,7 @@ class UiStateMappersTest {
             succeededCount = null,
             failedCount = null,
             submittedCount = null,
-        ).toLogRow(emptyList())
+        ).toLogRow(emptyList(), RenderLanguage.IT)
 
         assertEquals("stato necessario non disponibile", unavailable.summary)
         assertEquals("condizioni non soddisfatte", falseCondition.summary)
@@ -154,7 +210,12 @@ class UiStateMappersTest {
         val armedRow = Automation(
             AutomationId("a1"), "Rispondi a Ottica", CreatedBy.LLM, AutomationStatus.ARMED,
             trigger, listOf(Action.WhatsAppReply("ok")),
-        ).toAutomationRow(lastFiredAt = null, nowMillis = 0L, conversationLabels = labels)
+        ).toAutomationRow(
+            lastFiredAt = null,
+            nowMillis = 0L,
+            conversationLabels = labels,
+            language = RenderLanguage.IT,
+        )
         assertTrue(armedRow.triggerSummary.contains("Ottica Marci (identità verificata, chat 1:1)"))
         assertTrue(!armedRow.triggerSummary.contains(hash))
 
@@ -173,7 +234,11 @@ class UiStateMappersTest {
         )
         val pendingRow = unsigned
             .copy(fingerprint = ApprovalFingerprints.of(unsigned.pendingAutomation()))
-            .toAutomationRow(review = null, conversationLabels = labels)
+            .toAutomationRow(
+                review = null,
+                conversationLabels = labels,
+                language = RenderLanguage.IT,
+            )
         assertTrue(pendingRow.triggerSummary.contains("Ottica Marci (identità verificata, chat 1:1)"))
         assertTrue(!pendingRow.triggerSummary.contains(hash))
     }
@@ -192,7 +257,7 @@ class UiStateMappersTest {
             succeededCount = null,
             failedCount = null,
             submittedCount = null,
-        ).toLogRow(emptyList())
+        ).toLogRow(emptyList(), RenderLanguage.IT)
 
         val validation = record(AuditKind.VALIDATION_REJECTED, "tz_invalid,cron_invalid")
         assertEquals(dev.argus.ui.model.LogOutcome.FAILED, validation.outcome)
@@ -230,7 +295,7 @@ class UiStateMappersTest {
             succeededCount = null,
             failedCount = null,
             submittedCount = null,
-        ).toLogRow(emptyList())
+        ).toLogRow(emptyList(), RenderLanguage.IT)
 
         val armed = record(AuditKind.RULE_ARMED, "approval")
         assertEquals(dev.argus.ui.model.LogOutcome.SUCCESS, armed.outcome)
@@ -295,6 +360,7 @@ class UiStateMappersTest {
 
         val warnings = reviewWarnings(
             ApprovalFlowReview(DraftReview(snapshot, emptyList()), emptyList()),
+            RenderLanguage.IT,
         )
 
         assertTrue(warnings.any { it.code == "privacy_generative" })
