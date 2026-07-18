@@ -67,6 +67,25 @@ class ReceiverWorkLauncherTest {
     }
 
     @Test
+    fun `a non receiver callback keeps the same foreground lease until completion`() = runTest {
+        val backend = LauncherBackend()
+        val launcher = ReceiverWorkLauncher(
+            scope = this,
+            sentinel = SharedForegroundSentinel(backend),
+        )
+        val finishWork = CompletableDeferred<Unit>()
+
+        val job = launcher.launch("notification") { finishWork.await() }
+        runCurrent()
+        assertEquals(1, backend.startCalls)
+        assertEquals(0, backend.stopCalls)
+
+        finishWork.complete(Unit)
+        job.join()
+        assertEquals(1, backend.stopCalls)
+    }
+
+    @Test
     fun `failed foreground start keeps broadcast protection for a bounded fallback`() = runTest {
         val backend = LauncherBackend(startResult = false)
         val launcher = ReceiverWorkLauncher(

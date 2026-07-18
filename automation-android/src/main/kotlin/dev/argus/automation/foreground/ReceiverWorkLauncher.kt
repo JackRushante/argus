@@ -39,6 +39,15 @@ class ReceiverWorkLauncher(
 ) {
     private val sequence = AtomicLong()
 
+    /**
+     * Variante per callback di sistema che non possiedono un PendingResult (per esempio il
+     * NotificationListenerService): mantiene comunque la stessa lease FGS condivisa.
+     */
+    fun launch(
+        source: String,
+        block: suspend () -> Unit,
+    ): Job = launch(source, releaseReceiver = {}, block = block)
+
     fun launch(
         source: String,
         releaseReceiver: () -> Unit,

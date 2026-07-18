@@ -5,14 +5,12 @@ import android.service.notification.StatusBarNotification
 import android.util.Log
 import dagger.hilt.android.AndroidEntryPoint
 import dev.argus.automation.NotificationEventDispatcher
-import dev.argus.automation.di.ApplicationScope
+import dev.argus.automation.foreground.ReceiverWorkLauncher
 import dev.argus.engine.notification.NotificationEventParser
 import dev.argus.engine.notification.ObservedConversationStore
 import dev.argus.engine.notification.ParsedNotification
 import dev.argus.engine.safety.DraftValidator
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /** Prepara l'evento in modo sincrono, così il reply handle esiste prima della lane asincrona. */
@@ -104,7 +102,7 @@ class NotificationIngress(
 @AndroidEntryPoint
 class ArgusNotificationListenerService : NotificationListenerService() {
     @Inject lateinit var ingress: NotificationIngress
-    @Inject @ApplicationScope lateinit var applicationScope: CoroutineScope
+    @Inject lateinit var workLauncher: ReceiverWorkLauncher
 
     override fun onListenerConnected() {
         super.onListenerConnected()
@@ -118,14 +116,10 @@ class ArgusNotificationListenerService : NotificationListenerService() {
 
     override fun onNotificationPosted(notification: StatusBarNotification) {
         val parsed = ingress.registerPosted(notification) ?: return
-        applicationScope.launch {
-            try {
-                ingress.persistAndDispatch(parsed)
-            } catch (error: CancellationException) {
-                throw error
-            } catch (_: Exception) {
-                // Supervisor scope: il listener resta vivo; Engine/audit sono fail-closed.
-            }
+        // Un programma P4 può durare ore: il callback del listener non possiede il processo.
+        // La lease condivisa lo trasferisce al medesimo FGS usato dai receiver e dai sensori.
+        workLauncher.launch("notification") {
+            ingress.persistAndDispatch(parsed)
         }
     }
 
