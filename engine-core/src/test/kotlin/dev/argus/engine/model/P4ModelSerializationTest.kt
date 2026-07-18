@@ -152,6 +152,16 @@ class P4ModelSerializationTest {
                 listOf(action),
             ),
         )
+        assertEquals(
+            AUTOMATION_SCHEMA_VERSION_P4,
+            AutomationSchema.versionFor(
+                AutomationDraft(
+                    name = "delayed",
+                    trigger = Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+                    actions = listOf(action),
+                ),
+            ),
+        )
     }
 
     @Test fun `var compare serializes exactly one rhs and boolean literal round-trips`() {

@@ -13,24 +13,37 @@ class ConditionEvaluator(private val clock: Clock) {
      * particolare `NOT UNKNOWN` resta UNKNOWN e al confine finale fallisce chiuso. Senza questa
      * semantica, revocare Shizuku/permessi trasformerebbe `not(wifi == on)` in un match.
      */
-    fun eval(c: Condition?, state: DeviceState): Boolean = evaluate(c, state) == Truth.TRUE
+    fun eval(c: Condition?, state: DeviceState): Boolean = evaluate(c, state, null) == Truth.TRUE
 
-    fun result(c: Condition?, state: DeviceState): Result = when (evaluate(c, state)) {
+    fun result(c: Condition?, state: DeviceState): Result = resultOf(evaluate(c, state, null))
+
+    /** Valutazione P4 su stato live + scope variabili. Un valore assente resta UNKNOWN. */
+    fun flowResult(
+        c: Condition,
+        state: DeviceState,
+        variable: (String) -> VarValue?,
+    ): Result = resultOf(evaluate(c, state, variable))
+
+    private fun resultOf(truth: Truth): Result = when (truth) {
         Truth.TRUE -> Result.MET
         Truth.FALSE -> Result.NOT_MET
         Truth.UNKNOWN -> Result.STATE_UNAVAILABLE
     }
 
-    private fun evaluate(c: Condition?, state: DeviceState): Truth = when (c) {
+    private fun evaluate(
+        c: Condition?,
+        state: DeviceState,
+        variable: ((String) -> VarValue?)?,
+    ): Truth = when (c) {
         null -> Truth.TRUE
         is Condition.BooleanLiteral -> Truth.of(c.value)
         is Condition.And -> c.all.fold(Truth.TRUE) { result, child ->
-            result and evaluate(child, state)
+            result and evaluate(child, state, variable)
         }
         is Condition.Or -> c.any.fold(Truth.FALSE) { result, child ->
-            result or evaluate(child, state)
+            result or evaluate(child, state, variable)
         }
-        is Condition.Not -> !evaluate(c.cond, state)
+        is Condition.Not -> !evaluate(c.cond, state, variable)
         is Condition.AppInForeground -> state.foregroundApp
             ?.let { Truth.of(it == c.pkg) }
             ?: Truth.UNKNOWN
@@ -45,10 +58,54 @@ class ConditionEvaluator(private val clock: Clock) {
             Truth.of(haversineM(it.lat, it.lng, c.lat, c.lng) <= c.radiusM)
         } ?: Truth.UNKNOWN
         is Condition.TimeWindow -> Truth.of(inWindow(c))
-        // Le variabili di programma NON esistono nello scope trigger-time: qui un VarCompare è
-        // sempre UNKNOWN (fail-closed). La valutazione reale avviene nell'interprete P4-B con lo
-        // scope per-esecuzione; questo evaluator gestisce solo le condizioni di arming.
-        is Condition.VarCompare -> Truth.UNKNOWN
+        // Senza resolver siamo nel gate trigger-time: le variabili non esistono e falliscono
+        // chiuso. L'interprete P4 passa invece lo scope della singola esecuzione.
+        is Condition.VarCompare -> variable?.let { compareVariables(c, it) } ?: Truth.UNKNOWN
+    }
+
+    private fun compareVariables(
+        condition: Condition.VarCompare,
+        variable: (String) -> VarValue?,
+    ): Truth {
+        val left = variable(condition.varName) ?: return Truth.UNKNOWN
+        val right = condition.expectedVar?.let(variable) ?: condition.expected?.let { expected ->
+            VarValue(
+                text = expected,
+                type = left.type,
+                integrity = IntegrityLabel.CLEAN,
+                confidentiality = ConfidentialityLabel.PUBLIC,
+                provenance = setOf(ValueProvenance.LITERAL),
+            )
+        } ?: return Truth.UNKNOWN
+        if (left.type != right.type) return Truth.UNKNOWN
+        return when (left.type) {
+            VarType.TEXT -> when (condition.op) {
+                CmpOp.EQ -> Truth.of(left.text == right.text)
+                CmpOp.NEQ -> Truth.of(left.text != right.text)
+                CmpOp.CONTAINS -> Truth.of(left.text.contains(right.text))
+                CmpOp.GT, CmpOp.LT -> Truth.UNKNOWN
+            }
+            VarType.NUMBER -> {
+                val leftNumber = StateValueCoercion.number(left.text) ?: return Truth.UNKNOWN
+                val rightNumber = StateValueCoercion.number(right.text) ?: return Truth.UNKNOWN
+                when (condition.op) {
+                    CmpOp.EQ -> Truth.of(leftNumber == rightNumber)
+                    CmpOp.NEQ -> Truth.of(leftNumber != rightNumber)
+                    CmpOp.GT -> Truth.of(leftNumber > rightNumber)
+                    CmpOp.LT -> Truth.of(leftNumber < rightNumber)
+                    CmpOp.CONTAINS -> Truth.UNKNOWN
+                }
+            }
+            VarType.BOOLEAN -> {
+                val leftBoolean = StateValueCoercion.boolean(left.text) ?: return Truth.UNKNOWN
+                val rightBoolean = StateValueCoercion.boolean(right.text) ?: return Truth.UNKNOWN
+                when (condition.op) {
+                    CmpOp.EQ -> Truth.of(leftBoolean == rightBoolean)
+                    CmpOp.NEQ -> Truth.of(leftBoolean != rightBoolean)
+                    CmpOp.GT, CmpOp.LT, CmpOp.CONTAINS -> Truth.UNKNOWN
+                }
+            }
+        }
     }
 
     private fun compare(actual: String?, op: CmpOp, expected: String): Truth {

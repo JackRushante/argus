@@ -43,6 +43,7 @@ object AutomationSchema {
         actions.forEach(pending::addLast)
         while (pending.isNotEmpty()) {
             when (val action = pending.removeFirst()) {
+                is Action.Wait -> return true
                 is Action.If -> {
                     return true
                 }

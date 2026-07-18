@@ -37,7 +37,12 @@ data class VarValue(
     val integrity: IntegrityLabel,
     val confidentiality: ConfidentialityLabel,
     val provenance: Set<ValueProvenance>,
-)
+) {
+    /** Il payload può contenere SMS, stato SECRET o output shell/model: mai in log accidentali. */
+    override fun toString(): String =
+        "VarValue(text=<redacted>, type=$type, integrity=$integrity, " +
+            "confidentiality=$confidentiality, provenance=$provenance)"
+}
 
 /** Campo del payload del trigger catturabile in una variabile. */
 @Serializable
