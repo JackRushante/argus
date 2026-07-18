@@ -1,1071 +1,1070 @@
 # Changelog
 
-Patch notes per ogni commit, dal più recente al più vecchio. Generato dalla storia git del progetto.
+Patch notes for every commit, newest first. Generated from the project's git history.
 
 ## `87c1e9502` — 2026-07-17
 
-**feat(#50 S15 + fix campo): usage Hermes end-to-end + afterMs schedula EXACT di default**
+**feat(#50 S15 + field fix): end-to-end Hermes usage + afterMs schedules EXACT by default**
 
-Fix campo (2026-07-17): un "tra 3 minuti" (afterMs, precision FLEXIBLE -> INEXACT) e' scattato
-con +2m33s di batching OEM su OnePlus; l'utente ha creduto la regola morta e l'ha cancellata.
-Un ritardo relativo esplicito e' puntuale per natura: TimeAlarmPlanner.effectivePrecision ora
-tratta afterMs come EXACT (fallback inexact senza permesso exact-alarm). Politica di SCHEDULING,
-non parte del trigger: fingerprint invariato. Allineato anche il recoveryRecord di deliverLocked.
+Field fix (2026-07-17): a "tra 3 minuti" rule (afterMs, precision FLEXIBLE -> INEXACT) fired
+with +2m33s of OEM batching on a OnePlus; the user assumed the rule was dead and deleted it.
+An explicit relative delay is punctual by nature: TimeAlarmPlanner.effectivePrecision now
+treats afterMs as EXACT (inexact fallback without the exact-alarm permission). A SCHEDULING
+policy, not part of the trigger: fingerprint unchanged. deliverLocked's recoveryRecord aligned too.
 
-S15 lato Kotlin (chiude il filo del commit 9c39863 lato bridge):
-- CompileResult.usage: TurnUsage? (engine-core, additivo).
-- CliBridgeTransport: BridgeUsageEnvelope opzionale negli envelope /compile e /act (parser
-  resta strict: il bridge sanitizza a un set chiuso di chiavi), mappato fail-closed in TurnUsage.
-  L'usage viaggia anche sugli esiti senza draft: il turno e' costato comunque.
-- MeteredBrain.compile registra result.usage (prima: null fisso -> token/costo N/D in budget UI).
+S15 on the Kotlin side (closes the thread opened by commit 9c39863 on the bridge side):
+- CompileResult.usage: TurnUsage? (engine-core, additive).
+- CliBridgeTransport: optional BridgeUsageEnvelope on the /compile and /act envelopes (parser
+  stays strict: the bridge sanitizes down to a closed key set), mapped fail-closed into TurnUsage.
+  Usage also travels on outcomes without a draft: the turn cost something regardless.
+- MeteredBrain.compile records result.usage (before: hardcoded null -> tokens/cost N/A in the budget UI).
 
-Ordine di deploy rispettato: app col campo dichiarato PRIMA del bridge che lo invia.
+Deploy order respected: the app declares the field BEFORE the bridge that sends it.
 
-TDD (RED verificati) + full gate --rerun-tasks 154 task, 0 fail.
+TDD (RED verified) + full gate --rerun-tasks, 154 tasks, 0 failures.
 
 ## `00d62e5e4` — 2026-07-17
 
-**feat(#31-B): audit lifecycle regole — traccia di chi/quando mette e toglie un'automazione**
+**feat(#31-B): rule lifecycle audit — track who/when arms and removes an automation**
 
-Motivazione (Lorenzo): regole sparite dall'inventario senza alcuna traccia; e in campo il log
-non mostrava "creata" alla creazione di una regola. #31-A copriva solo i fallimenti; questo
-completa il ciclo di vita RIUSCITO.
+Motivation (Lorenzo): rules vanished from the inventory without a trace; and in the field the
+log showed no "creata" entry when a rule was created. #31-A only covered failures; this
+completes the SUCCESSFUL lifecycle.
 
-Nuovi AuditKind (engine-core) + reason a vocabolario CHIUSO (redazione in RoomAuditSink,
-pattern SCHEDULING_REASONS — reason fuori set -> token generico, mai testo libero, zero PII):
-- RULE_ARMED("approval") — unico funnel: ApprovalFlow.finalizeRegistration, PRIMA del registrar
-  per l'ordine cronologico con l'eventuale disable immediato.
-- RULE_DISABLED("user" | "one_shot_consumed" | "expired") — EnablementCoordinator (manuale),
-  TimeAlarmCoordinator.deliverLocked + registerImmediate (one-shot post-fire), reconcile EXPIRED.
-- RULE_ENABLED("user") — solo a esito finale riuscito (il rollback resta col solo ENABLE_FAILED).
-- RULE_DELETED("user") — AutomationDetailViewModel.onDelete (unico caller di store.delete).
+New AuditKinds (engine-core) + CLOSED-vocabulary reasons (redaction in RoomAuditSink,
+SCHEDULING_REASONS pattern — a reason outside the set -> generic token, never free text, zero PII):
+- RULE_ARMED("approval") — single funnel: ApprovalFlow.finalizeRegistration, BEFORE the registrar
+  to keep chronological order with a possible immediate disable.
+- RULE_DISABLED("user" | "one_shot_consumed" | "expired") — EnablementCoordinator (manual),
+  TimeAlarmCoordinator.deliverLocked + registerImmediate (one-shot post-fire), EXPIRED reconcile.
+- RULE_ENABLED("user") — only on a successful final outcome (rollback keeps ENABLE_FAILED alone).
+- RULE_DELETED("user") — AutomationDetailViewModel.onDelete (sole caller of store.delete).
 - RULE_NEEDS_REVIEW("fire_policy" | "capability_lost" | "validation_failed" |
-  "requirements_changed" | "planner_failed") — i 3 call-site di markNeedsReviewIfApproved,
-  emesso SOLO se la transizione è avvenuta davvero.
+  "requirements_changed" | "planner_failed") — the 3 call sites of markNeedsReviewIfApproved,
+  emitted ONLY if the transition actually happened.
 
-Tutti gli innesti col pattern non-fatale standard (il logging non cambia mai l'esito).
-UI: etichette italiane in UiStateMappers + icone log/detail. DI: AuditSink iniettato in
-CapabilityReconciler e AndroidArmedAutomationRegistrar.
+All hooks use the standard non-fatal pattern (logging never changes the outcome).
+UI: Italian labels in UiStateMappers + log/detail icons. DI: AuditSink injected into
+CapabilityReconciler and AndroidArmedAutomationRegistrar.
 
-Non tracciato (follow-up di prodotto): quarantena read-path di RoomAutomationStore.toDomain
-(markNeedsReview su ogni lettura, senza idempotenza: spammerebbe un evento per read).
-Retention: già esistente (AuditDao.trim, 2000 righe/30gg via RoomJournalMaintenance).
+Not tracked (product follow-up): the read-path quarantine in RoomAutomationStore.toDomain
+(markNeedsReview on every read, no idempotency: it would spam one event per read).
+Retention: already in place (AuditDao.trim, 2000 rows/30 days via RoomJournalMaintenance).
 
-Gate indipendente --rerun-tasks: engine-core 230, data 68, automation-android 400, ui 36,
-brain-android + app:compileDebugKotlin — BUILD SUCCESSFUL, 0 fail.
+Independent --rerun-tasks gate: engine-core 230, data 68, automation-android 400, ui 36,
+brain-android + app:compileDebugKotlin — BUILD SUCCESSFUL, 0 failures.
 
 ## `9c39863ec` — 2026-07-17
 
-**feat(#50 S15): bridge allega l'usage reale di Hermes a /compile e /act + hardening fail-closed**
+**feat(#50 S15): bridge attaches Hermes' real usage to /compile and /act + fail-closed hardening**
 
-S15: run_gpt passa --usage-file alla CLI hermes e ritorna (output, usage). Le risposte 200 di
-/compile e /act includono un campo "usage" OPZIONALE (mai null esplicito: le app con parser
-strict lo dichiareranno nullable) col subset chiuso sanitizzato del report reale:
+S15: run_gpt passes --usage-file to the hermes CLI and returns (output, usage). The 200 responses
+of /compile and /act include an OPTIONAL "usage" field (never an explicit null: apps with strict
+parsers will declare it nullable) carrying the sanitized closed subset of the real report:
 input/output/total_tokens, api_calls, model, provider, cost_status, estimated_cost_usd.
-Schema catturato live dalla CLI (cost_status="included" sul piano Codex -> costo 0).
-_sanitize_usage e' fail-closed: forma sospetta -> campo omesso; l'usage e' best-effort e non
-puo' mai far fallire una risposta buona (temp file sempre ripulito).
+Schema captured live from the CLI (cost_status="included" on the Codex plan -> cost 0).
+_sanitize_usage is fail-closed: suspicious shape -> field omitted; usage is best-effort and can
+never make a good response fail (temp file always cleaned up).
 
-NOTA DEPLOY: NON deployato su hermes. Ordine obbligato: prima l'app (CliBridgeTransport ha
-ignoreUnknownKeys=false: un campo nuovo non dichiarato romperebbe il parse), poi il bridge.
-Lato Kotlin (envelope + TurnUsage + MeteredBrain.compile) in arrivo.
+DEPLOY NOTE: NOT deployed to hermes. Mandatory order: app first (CliBridgeTransport has
+ignoreUnknownKeys=false: an undeclared new field would break the parse), then the bridge.
+Kotlin side (envelope + TurnUsage + MeteredBrain.compile) coming next.
 
-Fix colti al passaggio:
-- validate_act_request: type-check degli elementi PRIMA del dedup set() — una lista annidata
-  in context_sources causava TypeError invece del 400 pulito (test fail-closed ora verde).
-- mock runner dei test HTTP: firma allineata a run_gpt(prompt, tools=...) — i 2 test /act
-  fallivano con 502 spurio dall'aggiunta del kwarg tools (web).
-Suite bridge: 36/36 verdi (prima: 29/32).
+Fixes picked up along the way:
+- validate_act_request: element type-check BEFORE the set() dedup — a nested list in
+  context_sources caused a TypeError instead of a clean 400 (fail-closed test now green).
+- HTTP tests' mock runner: signature aligned to run_gpt(prompt, tools=...) — the 2 /act
+  tests were failing with a spurious 502 since the tools (web) kwarg was added.
+Bridge suite: 36/36 green (before: 29/32).
 
 ## `b644889b3` — 2026-07-17
 
-**feat(#62): trigger a ritardo relativo (time.afterMs) — "tra N" ri-armabile**
+**feat(#62): relative-delay trigger (time.afterMs) — re-armable "tra N"**
 
-Follow-up #61. "notificami tra 2 minuti" era compilato come time.at assoluto: ri-armando
-la regola il conto NON ripartiva (istante ormai passato). Ora "tra N" -> time.afterMs
-(ritardo RELATIVO in ms), ancorato all'arm e quindi ri-armabile.
+Follow-up to #61. "notificami tra 2 minuti" was compiled as an absolute time.at: re-arming
+the rule did NOT restart the countdown (the instant had already passed). Now "tra N" ->
+time.afterMs (RELATIVE delay in ms), anchored to the arm and therefore re-armable.
 
-Design: campo afterMs: Long? su Trigger.Time (NON un nuovo sottotipo sealed), cosi riusa
-al 100% la macchina d'allarme (reconcile/recovery/exact-inexact) senza toccare i when
-esaustivi altrove. @EncodeDefault(NEVER): quando null e' OMESSO dal wire -> i Time cron/at
-restano byte-identici e i fingerprint v1 pinnati non si rompono. Vincolo: esattamente uno
-tra {cron, at, afterMs}.
+Design: an afterMs: Long? field on Trigger.Time (NOT a new sealed subtype), so it reuses
+100% of the alarm machinery (reconcile/recovery/exact-inexact) without touching the exhaustive
+whens elsewhere. @EncodeDefault(NEVER): when null it is OMITTED from the wire -> cron/at Time
+triggers stay byte-identical and the pinned v1 fingerprints don't break. Constraint: exactly
+one of {cron, at, afterMs}.
 
-Ancora congelata: afterMs si risolve a now+afterMs UNA volta all'arm e si congela sul
-ScheduledTimeAlarm persistito (TimeAlarmPlanner.next(..., existing)); senza freeze ogni
-reconcile (APP_START/BOOT) ricalcolerebbe now+afterMs slittando in avanti. One-shot: fira
-una volta e si auto-disabilita (Trigger.Time.isOneShot() = at != null || afterMs != null);
-il re-arm cancella il record e ne calcola uno nuovo -> il countdown riparte. Reboot: l'ancora
-persistita sopravvive -> scatta al target originale (come un timer/allarme).
+Frozen anchor: afterMs resolves to now+afterMs ONCE at arm time and is frozen onto the
+persisted ScheduledTimeAlarm (TimeAlarmPlanner.next(..., existing)); without the freeze every
+reconcile (APP_START/BOOT) would recompute now+afterMs, drifting forward. One-shot: fires
+once and auto-disables (Trigger.Time.isOneShot() = at != null || afterMs != null);
+a re-arm deletes the record and computes a new one -> the countdown restarts. Reboot: the
+persisted anchor survives -> it fires at the original target (like a timer/alarm).
 
-- engine-core: Trigger.afterMs + isOneShot(); TimeSpecs.nextFire ramo afterMs; DraftValidator
-  esattamente-uno + bound 1s..7g (MIN/MAX_DELAY_MS).
-- automation-android: TimeAlarmCoordinator freeze ancora + one-shot via isOneShot(); GenerativeActionLane.
+- engine-core: Trigger.afterMs + isOneShot(); TimeSpecs.nextFire afterMs branch; DraftValidator
+  exactly-one + 1s..7d bounds (MIN/MAX_DELAY_MS).
+- automation-android: TimeAlarmCoordinator anchor freeze + one-shot via isOneShot(); GenerativeActionLane.
 - ui: RuleRenderMapper "Una volta, tra <umanizzato>".
-- brain-android + ops/hermes/bridge.py: compile prompt "tra N"->afterMs; validate_trigger accetta
-  afterMs (bound 1s..7g). Bridge deployato su hermes.
+- brain-android + ops/hermes/bridge.py: compile prompt "tra N"->afterMs; validate_trigger accepts
+  afterMs (1s..7d bounds). Bridge deployed to hermes.
 
-Verificato: full gate 4 moduli --rerun-tasks verde (incl. V1FingerprintCompatibilityTest byte-stabile);
-suite bridge +1 test afterMs. Live E2E su /compile deployato: "tra 3 minuti"->afterMs=180000,
-"ogni giorno alle 8"->cron "0 8 * * *", "subito"->immediate. APK assemblato e installato.
+Verified: full 4-module --rerun-tasks gate green (incl. byte-stable V1FingerprintCompatibilityTest);
+bridge suite +1 afterMs test. Live E2E against the deployed /compile: "tra 3 minuti"->afterMs=180000,
+"ogni giorno alle 8"->cron "0 8 * * *", "subito"->immediate. APK assembled and installed.
 
 ## `c5bfd9a09` — 2026-07-17
 
-**fix(#61): compile — disambigua trigger (subito/tra N/ogni N) + abilita ricorrenti generativi**
+**fix(#61): compile — disambiguate triggers (now/in N/every N) + enable recurring generatives**
 
-Hermes compilava "notificami tra 2 minuti" come trigger "immediate" (0 ritardo, scatta all'arm, non
-ri-armabile). Verificato dal DB device: trigger={"type":"immediate"} su una regola "tra 2 minuti".
+Hermes compiled "notificami tra 2 minuti" as an "immediate" trigger (0 delay, fires at arm, not
+re-armable). Verified from the device DB: trigger={"type":"immediate"} on a "tra 2 minuti" rule.
 
-Fix compile prompt (app regola 15/16 + bridge 13/14): scelta trigger netta —
-- immediate SOLO per "subito/adesso" (0 ritardo);
-- time.at per "tra N minuti/ore" (at = ora+N, formato ISO locale SENZA offset/Z: LocalDateTime.parse
-  dell'app rifiuta "+02:00");
-- time.cron per RICORRENTI ("ogni 24 ore", "ogni settimana") -> il sink ri-genera ad ogni fire.
-Sblocca i casi reali di Lorenzo: "ogni 24 ore il prezzo BTC", "ogni settimana il risultato del Milan".
+Compile prompt fix (app rule 15/16 + bridge 13/14): clear-cut trigger choice —
+- immediate ONLY for "subito/adesso" (0 delay);
+- time.at for "in N minutes/hours" (at = now+N, local ISO format WITHOUT offset/Z: the app's
+  LocalDateTime.parse rejects "+02:00");
+- time.cron for RECURRING ("ogni 24 ore", "ogni settimana") -> the sink re-generates on every fire.
+Unblocks Lorenzo's real cases: "ogni 24 ore il prezzo BTC", "ogni settimana il risultato del Milan".
 
-Verificato live via Hermes: "tra 2 min"->time.at "2026-07-17T18:52" (no offset); "ogni 24 ore"->
-time.cron "0 18 * * *"; "subito"->immediate. Bridge deployato + repo sync.
+Verified live via Hermes: "tra 2 min"->time.at "2026-07-17T18:52" (no offset); "ogni 24 ore"->
+time.cron "0 18 * * *"; "subito"->immediate. Bridge deployed + repo sync.
 
-TODO follow-up (#61): trigger a ritardo-relativo per "tra N" ri-armabile (oggi time.at e' assoluto,
-il re-arm non fa ripartire il conto alla rovescia; i ricorrenti cron invece ripartono).
+TODO follow-up (#61): relative-delay trigger for a re-armable "tra N" (today time.at is absolute,
+re-arming does not restart the countdown; recurring cron rules do restart).
 
 ## `e42b7fc76` — 2026-07-17
 
-**feat(#31): audit log più ricco — arm/scheduling/validazione/abilitazione falliti**
+**feat(#31): richer audit log — failed arm/scheduling/validation/enablement**
 
-Oggi l'audit registrava solo eventi fire-time (FIRED/SUPPRESSED_*/...); i fallimenti di arm non erano
-persistiti da nessuna parte (ci ha rallentati diagnosticando la sveglia che non si armava). Ora ci sono.
+Until now the audit only recorded fire-time events (FIRED/SUPPRESSED_*/...); arm failures were not
+persisted anywhere (it slowed us down while diagnosing the alarm that would not arm). Now they are.
 
-- AuditSink: 4 nuovi kind VALIDATION_REJECTED, ARM_FAILED, SCHEDULING_FAILED, ENABLE_FAILED.
-- Emissione (AuditSink iniettato dove il reason e' noto, nessun cambio di signature Boolean):
-  ApprovalFlow -> VALIDATION_REJECTED (join dei ValidationIssue.code) e ARM_FAILED (registrar_failed);
+- AuditSink: 4 new kinds VALIDATION_REJECTED, ARM_FAILED, SCHEDULING_FAILED, ENABLE_FAILED.
+- Emission (AuditSink injected where the reason is known, no Boolean signature changes):
+  ApprovalFlow -> VALIDATION_REJECTED (join of ValidationIssue.code) and ARM_FAILED (registrar_failed);
   TimeAlarmCoordinator -> SCHEDULING_FAILED (expired/dispatch_failed/reschedule_failed/scheduling_failed);
   AutomationEnablementCoordinator -> ENABLE_FAILED (review_required/scheduling_failed).
-- Privacy: RoomAuditSink.redactedDetail estesa a VOCABOLARIO CHIUSO per i nuovi kind (code snake_case
-  ^[a-z][a-z0-9_]{0,63}$ bounded per la validazione; set fissi per scheduling/enable). Testo libero
-  (notifiche/SMS/goal) MAI nel detail. FIRED/SUPPRESSED invariati.
-- UI: UiStateMappers.auditSummary etichette IT + toLogOutcome -> FAILED; ExecutionLog/AutomationDetail
-  screen -> icona rossa. I nuovi motivi compaiono automaticamente nel tab Log.
+- Privacy: RoomAuditSink.redactedDetail extended to a CLOSED VOCABULARY for the new kinds (bounded
+  snake_case code ^[a-z][a-z0-9_]{0,63}$ for validation; fixed sets for scheduling/enable). Free text
+  (notifications/SMS/goal) NEVER in the detail. FIRED/SUPPRESSED unchanged.
+- UI: UiStateMappers.auditSummary Italian labels + toLogOutcome -> FAILED; ExecutionLog/AutomationDetail
+  screens -> red icon. The new reasons show up automatically in the Log tab.
 
-Test: RoomStore (redazione), ApprovalFlow (ARM/VALIDATION), EnablementCoordinator (ENABLE),
-TimeAlarmCoordinator (SCHEDULING), UiStateMappers. 1318 testcase, full gate verde.
+Tests: RoomStore (redaction), ApprovalFlow (ARM/VALIDATION), EnablementCoordinator (ENABLE),
+TimeAlarmCoordinator (SCHEDULING), UiStateMappers. 1318 test cases, full gate green.
 
 ## `cab3eb68d` — 2026-07-17
 
-**fix(#41): health check per contenimento invece di uguaglianza esatta delle liste schema**
+**fix(#41): health check by containment instead of exact schema-list equality**
 
-Un redeploy del bridge che AGGIUNGE una schema version (es. annuncia [1,2,3]) faceva cadere offline
-le app vecchie che pinavano esattamente [1,2] (uguaglianza di lista Kotlin = contenuto+ordine esatti).
+A bridge redeploy that ADDS a schema version (e.g. announcing [1,2,3]) knocked old apps offline
+when they pinned exactly [1,2] (Kotlin list equality = exact content+order).
 
-Fix in CliBridgeTransport.health(): compatibilita' per CONTENIMENTO — il bridge e' compatibile se
-ANNUNCIA le versioni che l'app usa (COMPILE_SCHEMA_VERSION in compileSchemaVersions; ACT + ACT_V2 in
-actSchemaVersions), non se le liste sono identiche. health.schemaVersion accettato se >= (non !=).
-Cosi' un redeploy che estende il contratto non rompe le app esistenti; un bridge che TOGLIE una
-versione usata resta correttamente incompatibile. Lo SHA era gia' solo format-checked (regex), nessun
-cambio li'.
+Fix in CliBridgeTransport.health(): compatibility by CONTAINMENT — the bridge is compatible if it
+ANNOUNCES the versions the app uses (COMPILE_SCHEMA_VERSION in compileSchemaVersions; ACT + ACT_V2 in
+actSchemaVersions), not if the lists are identical. health.schemaVersion accepted if >= (not !=).
+This way a redeploy that extends the contract does not break existing apps; a bridge that REMOVES a
+version in use stays correctly incompatible. The SHA was already only format-checked (regex), no
+change there.
 
-Test: [1,2,3] (superset) ora ACCETTATO (nuovo test forward-compat); [1] senza la v2 usata, sha
-malformato, campo sconosciuto restano rifiutati. Doc hermes-bridge-contract aggiornato. Bridge non cambia.
+Tests: [1,2,3] (superset) now ACCEPTED (new forward-compat test); [1] without the v2 in use, malformed
+sha, unknown field remain rejected. hermes-bridge-contract doc updated. Bridge unchanged.
 
 ## `e63ea9a7a` — 2026-07-17
 
-**fix(#60): sink-notifica esegue davvero — race one-shot + timeout web**
+**fix(#60): notification sink actually executes — one-shot race + web timeout**
 
-Il sink compilava+armava+scattava ma l'azione invoke_llm falliva (Log: "rule inactive", "act timeout").
+The sink compiled+armed+fired but the invoke_llm action failed (Log: "rule inactive", "act timeout").
 
-BUG 2 (principale) — race del one-shot generativo: un trigger one-shot (immediate, o time con `at`) si
-disabilita appena dispatchato, ma la lane generativa processa async (brain call di secondi); alla
-ri-validazione trovava status!=ARMED -> "rule_inactive". Fix in GenerativeActionLane.validate: check
-fingerprint+azione PRIMA dello stato, poi stato tollerante al one-shot consumato (isOneShot = Immediate
-o Time.at!=null). Sicuro: ApprovalFingerprints.of normalizza status/enabled -> un one-shot consumato ha
-lo STESSO fingerprint; un edit non ri-approvato resta approval_changed; cancellata resta rule_missing.
-Reply (Notification) e ricorrenti cron disabilitate restano rule_inactive (invariate).
+BUG 2 (main) — generative one-shot race: a one-shot trigger (immediate, or time with `at`) disables
+itself as soon as it is dispatched, but the generative lane processes async (a brain call takes
+seconds); on re-validation it found status!=ARMED -> "rule_inactive". Fix in GenerativeActionLane.validate:
+check fingerprint+action BEFORE the status, then status tolerant of a consumed one-shot (isOneShot =
+Immediate or Time.at!=null). Safe: ApprovalFingerprints.of normalizes status/enabled -> a consumed
+one-shot has the SAME fingerprint; a non-re-approved edit stays approval_changed; deleted stays
+rule_missing. Reply (Notification) and disabled recurring cron rules stay rule_inactive (unchanged).
 
-BUG 1 — "act timeout": la ricerca web via Hermes ha latenza variabile. Fix: compile prompt setta
-timeoutMs=120000 per invoke_llm con web.search; CliBridgeTransport.defaultClient 60s->125s (HTTP >=
-timeout azione max 120s); bridge MODEL_TIMEOUT 55->90s (deployato).
+BUG 1 — "act timeout": web search via Hermes has variable latency. Fix: compile prompt sets
+timeoutMs=120000 for invoke_llm with web.search; CliBridgeTransport.defaultClient 60s->125s (HTTP >=
+max action timeout 120s); bridge MODEL_TIMEOUT 55->90s (deployed).
 
-Test: +5 lane (one-shot immediate/time-at completano da disabilitati; cron ricorrente resta inactive;
-fingerprint cambiato->approval_changed; cancellata->rule_missing) + CliBridge timeout 125s. Full gate verde.
+Tests: +5 lane (one-shot immediate/time-at complete while disabled; recurring cron stays inactive;
+changed fingerprint->approval_changed; deleted->rule_missing) + CliBridge 125s timeout. Full gate green.
 
 ## `e27fbbf36` — 2026-07-17
 
-**feat(#59 O4b): compile prompt + bridge — sink-notifica ora SUPPORTATO end-to-end**
+**feat(#59 O4b): compile prompt + bridge — notification sink now SUPPORTED end-to-end**
 
-Quarta ondata (parte compile+bridge): il modello ora compila "mandami una notifica con X" invece di
-rifiutarlo, e il bridge /act genera il testo senza notifica in arrivo.
+Fourth wave (compile+bridge part): the model now compiles "mandami una notifica con X" instead of
+rejecting it, and the /act bridge generates the text with no incoming notification.
 
-- AgentMessageSupport (app compile prompt): regola 16 da "rifiuta" a due modi di deliver
+- AgentMessageSupport (app compile prompt): rule 16 goes from "reject" to two deliver modes
   (WHATSAPP_REPLY | LOCAL_NOTIFICATION). DRAFT_SCHEMA_TEXT invoke_llm: + deliver + notificationTitle.
-- bridge.py (deployato + repo sync):
-  - _valid_notification_toolset (mirror isNotificationToolset).
-  - validate_act_request v1: branch reply vs sink. Sink (toolset senza whatsapp_reply) accetta
-    context_sources []/[state] (mai notification) e context = {state} soltanto (notifica ASSENTE);
-    reply invariato.
-  - validate_action invoke_llm: campi deliver/notificationTitle ammessi; LOCAL_NOTIFICATION validato
-    (notification toolset, replyTargetSender false, titolo <=120, no "notification" in sources).
-  - Regola 14 di compile: da rifiuto a due modi (mirror app regola 16). Schema invoke_llm aggiornato.
-  - build_act_prompt invariato: produce {"reply_text":...} che l'app mappa sulla consegna (notifica).
+- bridge.py (deployed + repo sync):
+  - _valid_notification_toolset (mirror of isNotificationToolset).
+  - validate_act_request v1: reply vs sink branch. Sink (toolset without whatsapp_reply) accepts
+    context_sources []/[state] (never notification) and context = {state} only (notification ABSENT);
+    reply unchanged.
+  - validate_action invoke_llm: deliver/notificationTitle fields allowed; LOCAL_NOTIFICATION validated
+    (notification toolset, replyTargetSender false, title <=120, no "notification" in sources).
+  - Compile rule 14: from rejection to two modes (mirror of app rule 16). invoke_llm schema updated.
+  - build_act_prompt unchanged: produces {"reply_text":...} which the app maps onto the delivery (notification).
 
-Smoke validatori bridge 11/11 OK. Bridge attivo (source 215d519c757a). Full gate brain verde.
-Prossimo: APK + test live via Hermes (armo una regola sink e verifico la notifica).
+Bridge validator smoke 11/11 OK. Bridge live (source 215d519c757a). Full brain gate green.
+Next: APK + live test via Hermes (arm a sink rule and verify the notification).
 
 ## `9a927ee44` — 2026-07-17
 
-**feat(#59 O4a): path act SENZA notifica per il sink da timer (Kotlin)**
+**feat(#59 O4a): act path WITHOUT a notification for the timer-driven sink (Kotlin)**
 
-Quarta ondata (parte Kotlin): il sink-notifica da trigger time/immediate non ha una notifica WhatsApp
-in arrivo. Reso opzionale il contesto notifica in tutto il path act.
+Fourth wave (Kotlin part): the notification sink on a time/immediate trigger has no incoming WhatsApp
+notification. Made the notification context optional across the whole act path.
 
-- AgentMessageSupport: requireGenerativeContextSources(sources, useReplyTool) — sink accetta [] o
-  subset {state}, mai "notification". Nuovi prompt SENZA framing WhatsApp: actSystemTextNotification
-  (genera il testo di una notifica) + actUserTextNotification (state o "Genera ora..."). Reply invariato.
-- OpenAICompat/Anthropic act(): branch useReplyTool. Sink -> notification=null, niente
-  requireWhatsAppNotification, prompt notifica. generate()/generateViaResponses/generateViaGeminiNative
-  ora accettano notification nullable. Reply invariato.
-- CliBridgeTransport act(): sink -> envelope con context.notification ASSENTE (ActContextEnvelope.
-  notification nullable @EncodeDefault(NEVER)), context_sources []/[state]. Reply-envelope BYTE-INVARIANTE
-  (lockato da test).
+- AgentMessageSupport: requireGenerativeContextSources(sources, useReplyTool) — sink accepts [] or
+  a subset of {state}, never "notification". New prompts WITHOUT WhatsApp framing: actSystemTextNotification
+  (generates the text of a notification) + actUserTextNotification (state or "Genera ora..."). Reply unchanged.
+- OpenAICompat/Anthropic act(): useReplyTool branch. Sink -> notification=null, no
+  requireWhatsAppNotification, notification prompt. generate()/generateViaResponses/generateViaGeminiNative
+  now accept a nullable notification. Reply unchanged.
+- CliBridgeTransport act(): sink -> envelope with context.notification ABSENT (ActContextEnvelope.
+  notification nullable @EncodeDefault(NEVER)), context_sources []/[state]. Reply envelope BYTE-INVARIANT
+  (locked by test).
 
-Contratto wire sink /act (il bridge O4b lo implementa uguale): context.notification omessa, context.state
-null/oggetto, context_sources []/[state], allowed_tools []/[web.search], nessun requisito NotificationPosted.
+Sink /act wire contract (the O4b bridge implements it identically): context.notification omitted,
+context.state null/object, context_sources []/[state], allowed_tools []/[web.search], no NotificationPosted requirement.
 
-Test: +sink su TimeFired (prompt NOTIFICA non-WhatsApp, rifiuto "notification"); reply byte-identico. Full gate verde.
+Tests: +sink on TimeFired (non-WhatsApp NOTIFICATION prompt, "notification" rejected); reply byte-identical. Full gate green.
 
 ## `5dd10108f` — 2026-07-17
 
-**feat(#59 O3): transport plain-path per il sink-notifica (niente reply tool)**
+**feat(#59 O3): plain-path transports for the notification sink (no reply tool)**
 
-Terza ondata: quando allowedTools non contiene whatsapp_reply (sink notifica), i transport producono
-testo PLAIN invece di forzare il reply tool.
+Third wave: when allowedTools does not contain whatsapp_reply (notification sink), the transports
+produce PLAIN text instead of forcing the reply tool.
 
-- AgentMessageSupport.requireGenerativeToolset: accetta isAllowedToolset || isNotificationToolset e
-  ritorna useReplyTool = whatsapp_reply in allowedTools.
-- OpenAICompatTransport / AnthropicMessagesTransport: generate() prende useReplyTool. false -> niente
-  reply tool, niente tool_choice forzato, system = actSystemTextPlain, testo dal content. I path web
-  dedicati (OpenAI Responses / Gemini nativo) erano gia' plain. true -> invariato.
-- CliBridgeTransport act/actV2: gate rilassato a isAllowedToolset || isNotificationToolset; envelope
-  inoltra allowedTools verbatim (il bridge produrra' plain quando manca whatsapp_reply).
+- AgentMessageSupport.requireGenerativeToolset: accepts isAllowedToolset || isNotificationToolset and
+  returns useReplyTool = whatsapp_reply in allowedTools.
+- OpenAICompatTransport / AnthropicMessagesTransport: generate() takes useReplyTool. false -> no
+  reply tool, no forced tool_choice, system = actSystemTextPlain, text from the content. The dedicated
+  web paths (OpenAI Responses / native Gemini) were already plain. true -> unchanged.
+- CliBridgeTransport act/actV2: gate relaxed to isAllowedToolset || isNotificationToolset; the envelope
+  forwards allowedTools verbatim (the bridge will produce plain when whatsapp_reply is missing).
 
-Test: +6 (OpenAICompat/Anthropic sink senza reply tool + con web; CliBridge accetta [web.search]/[]).
+Tests: +6 (OpenAICompat/Anthropic sink without reply tool + with web; CliBridge accepts [web.search]/[]).
 
-NOTA (da chiudere in O4): per il sink da TIMER (evento non-WhatsApp, contextSources senza notification)
-l'act() dei transport fallisce ancora a monte su requireActContextSources/requireWhatsAppNotification —
-l'intero path act assume una notifica WhatsApp. O4 aggiunge il path senza-notifica + bridge + compile.
+NOTE (to close in O4): for the TIMER-driven sink (non-WhatsApp event, contextSources without notification)
+the transports' act() still fails upstream on requireActContextSources/requireWhatsAppNotification —
+the whole act path assumes a WhatsApp notification. O4 adds the notification-free path + bridge + compile.
 
 ## `a8d9ea11b` — 2026-07-17
 
-**feat(#59 O2): la lane generativa posta la notifica locale (LOCAL_NOTIFICATION)**
+**feat(#59 O2): the generative lane posts the local notification (LOCAL_NOTIFICATION)**
 
-Seconda ondata del sink-notifica: GenerativeActionLane esegue davvero il deliver LOCAL_NOTIFICATION.
+Second wave of the notification sink: GenerativeActionLane actually executes the LOCAL_NOTIFICATION deliver.
 
-- AndroidGenerativeLane: nuovo param richiesto `notifier: AutomationNotifier`. validContract branch su
-  deliver (LOCAL_NOTIFICATION = !replyTargetSender + isNotificationToolset + titolo valido + contextSources
-  vuota/subset{state}, specchio del DraftValidator). process(): dopo il testo, se LOCAL_NOTIFICATION ->
-  deliverNotification -> notifier.show(title=notificationTitle, text, context), SUCCEEDED; nessun requisito
-  NotificationPosted (funziona da trigger time/immediate). notifier.show che lancia -> FAILED "notify_failed".
-  Path reply (WHATSAPP_REPLY + InvokeLlmV2) byte-invariato.
-- DI: la lane riceve il notifier reale (AndroidAutomationNotifier, lo stesso di ShizukuActionExecutor).
-- Probe: NON toccato — la capability d'arm LOCAL_NOTIFICATION e' ACTION_SHOW_NOTIFICATION, gia' pubblicata
-  con notificationsGranted; invoke_llm+web.search gia' con generativeReady.
+- AndroidGenerativeLane: new required param `notifier: AutomationNotifier`. validContract branches on
+  deliver (LOCAL_NOTIFICATION = !replyTargetSender + isNotificationToolset + valid title + contextSources
+  empty/subset of {state}, mirroring the DraftValidator). process(): after the text, if LOCAL_NOTIFICATION ->
+  deliverNotification -> notifier.show(title=notificationTitle, text, context), SUCCEEDED; no
+  NotificationPosted requirement (works from time/immediate triggers). notifier.show throwing -> FAILED
+  "notify_failed". Reply path (WHATSAPP_REPLY + InvokeLlmV2) byte-invariant.
+- DI: the lane receives the real notifier (AndroidAutomationNotifier, the same as ShizukuActionExecutor).
+- Probe: NOT touched — the LOCAL_NOTIFICATION arm capability is ACTION_SHOW_NOTIFICATION, already
+  published with notificationsGranted; invoke_llm+web.search already gated on generativeReady.
 
-Test: +4 lane (notifica postata, da trigger non-notifica, notifier che lancia, whatsapp_reply rifiutato);
-12 test reply pre-esistenti verdi. Full gate verde. Restano O3 (transport plain path) e O4 (compile/bridge).
+Tests: +4 lane (notification posted, from a non-notification trigger, throwing notifier, whatsapp_reply
+rejected); 12 pre-existing reply tests green. Full gate green. O3 (transport plain path) and O4 (compile/bridge) remain.
 
 ## `6fb6ff7a5` — 2026-07-17
 
-**feat(#59 O1): contratto sink-notifica generativo (engine-core)**
+**feat(#59 O1): generative notification-sink contract (engine-core)**
 
-Prima ondata del sink-notifica (#59): invoke_llm potra' consegnare il testo generato come NOTIFICA
-LOCALE (non solo reply WhatsApp). O1 = dominio engine-core, inerte finche' O2 (lane) + O4 (compile)
-non lo cablano — nessuna regola LOCAL_NOTIFICATION e' ancora compilabile.
+First wave of the notification sink (#59): invoke_llm will be able to deliver the generated text as a
+LOCAL NOTIFICATION (not just a WhatsApp reply). O1 = engine-core domain, inert until O2 (lane) + O4
+(compile) wire it up — no LOCAL_NOTIFICATION rule is compilable yet.
 
 - Action.InvokeLlm: + deliver: GenerativeDeliverMode {WHATSAPP_REPLY|LOCAL_NOTIFICATION} (default reply)
-  + notificationTitle. @EncodeDefault(NEVER) sui due campi -> le regole reply gia' approvate mantengono
-  il fingerprint SHA-256 byte-identico (V1FingerprintCompatibilityTest verde). Enum senza @SerialName
+  + notificationTitle. @EncodeDefault(NEVER) on both fields -> already-approved reply rules keep the
+  SHA-256 fingerprint byte-identical (V1FingerprintCompatibilityTest green). Enum without @SerialName
   -> UPPERCASE case-sensitive.
-- GenerativeContract.isNotificationToolset: allowedTools del sink = solo web.search opzionale, MAI
-  whatsapp_reply (il sink e' la notifica, non un tool).
-- DraftValidator.validateInvokeLlm: branch su deliver. LOCAL_NOTIFICATION = titolo non-blank/<=120/no
-  control, isNotificationToolset, replyTargetSender=false, contextSources vuota o subset {state} (mai
-  notification). WHATSAPP_REPLY invariato.
-- CapabilityRequirements: LOCAL_NOTIFICATION richiede ACTION_SHOW_NOTIFICATION (+web.search).
+- GenerativeContract.isNotificationToolset: the sink's allowedTools = only optional web.search, NEVER
+  whatsapp_reply (the sink is the notification, not a tool).
+- DraftValidator.validateInvokeLlm: branches on deliver. LOCAL_NOTIFICATION = title non-blank/<=120/no
+  control chars, isNotificationToolset, replyTargetSender=false, contextSources empty or subset of {state}
+  (never notification). WHATSAPP_REPLY unchanged.
+- CapabilityRequirements: LOCAL_NOTIFICATION requires ACTION_SHOW_NOTIFICATION (+web.search).
 - RuleRenderMapper: "Genera e notifica" vs "Genera e rispondi".
 
-Test: serializzazione (deliver UPPERCASE + retro-compat legacy->WHATSAPP_REPLY), validator (valido +
-errori), capability, render. Full gate verde tutti i moduli (automation-android compila; la lane
-rifiuta LOCAL_NOTIFICATION a runtime -> O2).
+Tests: serialization (UPPERCASE deliver + legacy backward-compat -> WHATSAPP_REPLY), validator (valid +
+errors), capability, render. Full gate green across all modules (automation-android compiles; the lane
+rejects LOCAL_NOTIFICATION at runtime -> O2).
 
 ## `55e4e1fc4` — 2026-07-17
 
-**fix(#58): web.search armabile (probe available set) + Hermes rifiuta pulito la notifica-da-timer**
+**fix(#58): web.search armable (probe available set) + Hermes cleanly rejects the timer-generated notification**
 
-Emerso dallo screenshot di Lorenzo (regola "notifica cambio EUR/IDR tra 5 min"):
-(a) BUG F2: web.search era pubblicata in availableTools (compilatore) ma NON nel set `available`
-    (arm). CapabilityRequirements.InvokeLlm fa addAll(allowedTools) -> web.search e' RICHIESTA
-    all'arm -> una regola reply+web compilava ma NON si armava ("capacita non disponibile:
-    web.search"). Fix: AndroidCapabilityProbe aggiunge TOOL_WEB_SEARCH al set `available` quando
-    generativeReady (specchio di availableTools).
-(b) UX: Hermes provava a compilare "notifica generata da un timer" (sink P4 non ancora fatto)
-    producendo un invoke_llm invalido (no context notification, show_notification come tool). Ora il
-    compile prompt (app AgentMessageSupport regola 16 + bridge regola 14) impone: la consegna
-    generativa e' SEMPRE una reply a notifica in arrivo; show_notification NON e' un tool generativo;
-    se l'utente chiede una notifica GENERATA da timer/orario/immediate -> draft null +
-    "unsupported_capability" con spiegazione (arriva con P4).
+Surfaced by Lorenzo's screenshot ("notifica cambio EUR/IDR tra 5 min" rule):
+(a) F2 BUG: web.search was published in availableTools (compiler) but NOT in the `available` set
+    (arm). CapabilityRequirements.InvokeLlm does addAll(allowedTools) -> web.search is REQUIRED
+    at arm -> a reply+web rule compiled but did NOT arm ("capacita non disponibile:
+    web.search"). Fix: AndroidCapabilityProbe adds TOOL_WEB_SEARCH to the `available` set when
+    generativeReady (mirroring availableTools).
+(b) UX: Hermes tried to compile "a notification generated by a timer" (P4 sink not built yet),
+    producing an invalid invoke_llm (no notification context, show_notification as a tool). Now the
+    compile prompt (app AgentMessageSupport rule 16 + bridge rule 14) enforces: generative delivery
+    is ALWAYS a reply to an incoming notification; show_notification is NOT a generative tool;
+    if the user asks for a notification GENERATED by a timer/schedule/immediate -> null draft +
+    "unsupported_capability" with an explanation (lands with P4).
 
-Test: AndroidCapabilityProbeTest asserisce web.search in availableCapabilities. Bridge deployato +
-ops/hermes/bridge.py sincronizzato. Full gate verde.
+Tests: AndroidCapabilityProbeTest asserts web.search in availableCapabilities. Bridge deployed +
+ops/hermes/bridge.py synced. Full gate green.
 
 ## `6801904c0` — 2026-07-17
 
-**feat(#57): web search per OpenAI (Responses API) e Gemini (API nativa) — validato live**
+**feat(#57): web search for OpenAI (Responses API) and Gemini (native API) — validated live**
 
-Il web di OpenAI e Gemini non passa da /chat/completions. Aggiunti i due endpoint corretti, single-turn
-(il provider fa il loop web internamente). Validato LIVE 2026-07-17 con chiavi reali:
-- OpenAI Responses: cambio EUR/USD reale + citazione exchange-rates.org/BCE.
-- Gemini native: cambio EUR/USD reale + groundingMetadata.
+OpenAI's and Gemini's web search does not go through /chat/completions. Added the two correct endpoints,
+single-turn (the provider runs the web loop internally). Validated LIVE on 2026-07-17 with real keys:
+- OpenAI Responses: real EUR/USD rate + exchange-rates.org/ECB citation.
+- Gemini native: real EUR/USD rate + groundingMetadata.
 
-- ProviderCatalog: WebSearchMechanism += OPENAI_RESPONSES, GEMINI_NATIVE (rimossi OPENAI_SEARCH,
+- ProviderCatalog: WebSearchMechanism += OPENAI_RESPONSES, GEMINI_NATIVE (removed OPENAI_SEARCH,
   GEMINI_GROUNDING). OpenAI->OPENAI_RESPONSES, Gemini->GEMINI_NATIVE.
-- OpenAICompatTransport.generate: quando applyWeb, when(webSearch): OPENAI_RESPONSES->generateViaResponses
+- OpenAICompatTransport.generate: when applyWeb, when(webSearch): OPENAI_RESPONSES->generateViaResponses
   (POST {base}/responses, tools:[{type:web_search}], input:[system,user], parse output->message->output_text,
   usage input/output_tokens); GEMINI_NATIVE->generateViaGeminiNative (POST {host}/v1beta/models/{model}:
-  generateContent, header x-goog-api-key, tools:[{google_search:{}}], systemInstruction+contents, parse
-  candidates[0].content.parts[].text, usage usageMetadata). OPENROUTER_ONLINE invariato (:online).
-- AgentMessageSupport.actSystemTextPlain: system prompt PLAIN per il ramo web (no reply-tool: il modello
-  genera il testo diretto). Redazione chiavi invariata.
+  generateContent, x-goog-api-key header, tools:[{google_search:{}}], systemInstruction+contents, parse
+  candidates[0].content.parts[].text, usage usageMetadata). OPENROUTER_ONLINE unchanged (:online).
+- AgentMessageSupport.actSystemTextPlain: PLAIN system prompt for the web branch (no reply-tool: the
+  model generates the text directly). Key redaction unchanged.
 
-Web sui diretti ora: OpenRouter + OpenAI + Gemini + Anthropic (serve credito) tutti coperti. Full gate verde.
+Web on direct providers now: OpenRouter + OpenAI + Gemini + Anthropic (needs credit) all covered. Full gate green.
 
 ## `6056762ce` — 2026-07-17
 
-**chore(hermes): sync ops/hermes/bridge.py con il deployato (web tool + trigger immediate)**
+**chore(hermes): sync ops/hermes/bridge.py with the deployed version (web tool + immediate trigger)**
 
-Il bridge deployato su hermes aveva accumulato le modifiche web (F2: -t web, /act allowed_tools,
-compile schema) e immediate (validate_trigger, AVAILABLE_TRIGGER_IDS, StaticShellSafety mirror,
-Regola 13). Allineo la copia versionata come fonte di verita' per il relay Codex.
+The bridge deployed on hermes had accumulated the web changes (F2: -t web, /act allowed_tools,
+compile schema) and the immediate ones (validate_trigger, AVAILABLE_TRIGGER_IDS, StaticShellSafety
+mirror, Rule 13). Aligning the versioned copy as the source of truth for the Codex relay.
 
 ## `fac7a3afd` — 2026-07-17
 
-**feat(#54): onboarding — lista onesta "cosa richiede Shizuku"**
+**feat(#54): onboarding — honest "what requires Shizuku" list**
 
-L'utente, nello step SHIZUKU dell'onboarding, vede cosa richiede Shizuku e cosa degrada senza,
-cosi' sa cosa non puo' fare. Derivato da ActionPrivilege + fix #53 (activity-launch da background).
+In the SHIZUKU onboarding step the user sees what requires Shizuku and what degrades without it,
+so they know what they cannot do. Derived from ActionPrivilege + fix #53 (activity launch from background).
 
 - ui/UiContracts: ShizukuRequirement {REQUIRED, RECOMMENDED, NOT_REQUIRED}, ShizukuCapabilityRow
-  (con actionTypeIds reali), ShizukuCapabilityCatalog.rows() (invariante: ogni action in una riga).
+  (with real actionTypeIds), ShizukuCapabilityCatalog.rows() (invariant: every action in one row).
   OnboardingState.shizukuCapabilities.
-- OnboardingViewModel: popola la lista.
-- OnboardingScreen: sezione dentro lo step SHIZUKU (non un nuovo step), raggruppata per categoria.
-- Categorie: REQUIRED = set_wifi/set_bluetooth/write_setting/run_shell; RECOMMENDED = activity-launch
-  da background (alarm/timer/launch_app/open_url/open_settings, affidabili solo con Shizuku via am start);
-  NOT_REQUIRED = volume/ringer/dnd/torcia/vibrazione/notifiche/clipboard + alarm/timer da primo piano.
+- OnboardingViewModel: populates the list.
+- OnboardingScreen: section inside the SHIZUKU step (not a new step), grouped by category.
+- Categories: REQUIRED = set_wifi/set_bluetooth/write_setting/run_shell; RECOMMENDED = activity launch
+  from background (alarm/timer/launch_app/open_url/open_settings, reliable only with Shizuku via am start);
+  NOT_REQUIRED = volume/ringer/dnd/torch/vibration/notifications/clipboard + foreground alarm/timer.
 
-Test: ShizukuCapabilityCatalogTest (categorie + unicita'), OnboardingViewModelTest (stato espone lista).
-Full gate verde tutti i moduli.
+Tests: ShizukuCapabilityCatalogTest (categories + uniqueness), OnboardingViewModelTest (state exposes the list).
+Full gate green across all modules.
 
 ## `e0a4fcdeb` — 2026-07-17
 
-**fix(web/F3): Gemini web = NONE (grounding shim OpenAI-compat non raggiungibile) + smoke live**
+**fix(web/F3): Gemini web = NONE (OpenAI-compat grounding shim unreachable) + live smoke**
 
-Smoke live 2026-07-17 con chiavi reali:
-- OpenRouter `:online`: FUNZIONA end-to-end (tasso EUR/USD reale + citazione xe.com). Web validato live.
-- Anthropic web_search_20250305: body accettato (errore solo "credit too low", non schema) -> formato ok.
-- Gemini: `extra_body.google.tools=[{google_search:{}}]` (formato documentato) da 400 "Unknown name
-  'tools' at 'extra_body.google'" anche su gemini-3-flash-preview. Il `tools` OpenAI top-level idem.
-  Mismatch doc<->API lato Google: il web nativo non passa da /chat/completions. -> Gemini webSearch=NONE
-  (degradazione graziosa: nessun extra_body, nessuna richiesta che darebbe 400).
+Live smoke 2026-07-17 with real keys:
+- OpenRouter `:online`: WORKS end-to-end (real EUR/USD rate + xe.com citation). Web validated live.
+- Anthropic web_search_20250305: body accepted (only a "credit too low" error, not schema) -> format ok.
+- Gemini: `extra_body.google.tools=[{google_search:{}}]` (documented format) returns 400 "Unknown name
+  'tools' at 'extra_body.google'" even on gemini-3-flash-preview. Top-level OpenAI `tools` likewise.
+  Google-side doc<->API mismatch: native web does not go through /chat/completions. -> Gemini webSearch=NONE
+  (graceful degradation: no extra_body, no request that would 400).
 
-Web sui provider diretti confermato: OpenRouter (live) + Anthropic (formato ok, serve credito). Gemini/
-OpenAI = NONE onesto; Hermes = bridge (F2). Test ProviderCatalog/OpenAICompat aggiornati. Gate verde.
+Web on direct providers confirmed: OpenRouter (live) + Anthropic (format ok, needs credit). Gemini/
+OpenAI = honest NONE; Hermes = bridge (F2). ProviderCatalog/OpenAICompat tests updated. Gate green.
 
 ## `e4bca2424` — 2026-07-17
 
-**feat(web/F3): web search server-side sui provider diretti (Anthropic/OpenRouter/Gemini)**
+**feat(web/F3): server-side web search on direct providers (Anthropic/OpenRouter/Gemini)**
 
-Terza fase del web tool (#52). Abilita il web nell'invoke_llm sui transport cloud diretti, single-turn
-(il provider fa il loop internamente, una sola chiamata; nessun refactor client-side).
+Third phase of the web tool (#52). Enables web in invoke_llm on the direct cloud transports, single-turn
+(the provider runs the loop internally, a single call; no client-side refactor).
 
 - ProviderCatalog: enum WebSearchMechanism {NONE, ANTHROPIC_TOOL, OPENROUTER_ONLINE, OPENAI_SEARCH,
-  GEMINI_GROUNDING} + ProviderQuirks.webSearch per provider.
-- OpenAICompatTransport: thread webRequested (web.search in allowedTools) in generate();
-  OpenRouter -> model ":online"; Gemini -> extra_body.google.tools=[{google_search:{}}] (verificato:
-  il tools OpenAI standard e' rifiutato dal compat layer); tool_choice=auto quando web attivo.
+  GEMINI_GROUNDING} + per-provider ProviderQuirks.webSearch.
+- OpenAICompatTransport: threads webRequested (web.search in allowedTools) through generate();
+  OpenRouter -> model ":online"; Gemini -> extra_body.google.tools=[{google_search:{}}] (verified:
+  the standard OpenAI tools is rejected by the compat layer); tool_choice=auto when web is active.
 - AnthropicMessagesTransport: tools=[reply, {"type":"web_search_20250305","name":"web_search"}] +
-  tool_choice auto quando web richiesto.
-- OpenAI = NONE (onesto): il web dei gpt-5.x passa dalla Responses API, non da /chat/completions;
-  web_search_options richiede un modello -search-preview. Degradazione graziosa (web ignorato).
-- AgentMessageSupport.requireReplyTool ora usa isAllowedToolset (accetta [reply, web.search]).
+  tool_choice auto when web is requested.
+- OpenAI = NONE (honest): gpt-5.x web goes through the Responses API, not /chat/completions;
+  web_search_options requires a -search-preview model. Graceful degradation (web ignored).
+- AgentMessageSupport.requireReplyTool now uses isAllowedToolset (accepts [reply, web.search]).
 
-Test: OpenAICompat (openrouter :online, gemini extra_body, openai NONE degrada), Anthropic (server
-tool), ProviderCatalog. Full gate verde. Smoke live (Gemini ha credito) = prossimo step del main loop.
+Tests: OpenAICompat (openrouter :online, gemini extra_body, openai NONE degrades), Anthropic (server
+tool), ProviderCatalog. Full gate green. Live smoke (Gemini has credit) = next step of the main loop.
 
 ## `82b6b8be2` — 2026-07-17
 
-**fix(#55): set_volume.level e' una percentuale 0-100 mappata sul max reale dello stream**
+**fix(#55): set_volume.level is a 0-100 percentage mapped onto the stream's real max**
 
-Bug sul campo: `level` era usato come indice assoluto dello stream (ALARM max ~7-16) poi clampato,
-quindi "volume al 35%" (level 35) diventava 100% (clamp a max). L'LLM/utente pensano in percentuale.
+Field bug: `level` was used as the stream's absolute index (ALARM max ~7-16) then clamped,
+so "volume at 35%" (level 35) became 100% (clamped to max). The LLM/user think in percentages.
 
-- AndroidBaseActionExecutor.setVolume: `level` valido 0..100; mappa `actual = if(level==0) 0 else
-  max(1, round(level/100*maxStreamVolume))`. Percent>0 non silenzia mai (min 1); 100% = max.
-- DraftValidator: range gia' 0..100 (MAX_VOLUME_LEVEL=100), aggiornato solo il commento stale.
-- AgentMessageSupport: schema set_volume documenta level come percentuale 0-100.
+- AndroidBaseActionExecutor.setVolume: valid `level` 0..100; maps `actual = if(level==0) 0 else
+  max(1, round(level/100*maxStreamVolume))`. A percent>0 never silences (min 1); 100% = max.
+- DraftValidator: range was already 0..100 (MAX_VOLUME_LEVEL=100), only the stale comment updated.
+- AgentMessageSupport: the set_volume schema documents level as a 0-100 percentage.
 
-Test: AndroidBaseActionExecutorTest riscritto per la semantica percentuale (50%@16->8, 100%->max,
-1%@16->1 no-silenzio, 0->0, 101/-1 invalid); ShizukuActionExecutorTest routing test adattati.
-Full gate verde tutti i moduli. Bridge (descrizione set_volume) = step separato.
+Tests: AndroidBaseActionExecutorTest rewritten for the percentage semantics (50%@16->8, 100%->max,
+1%@16->1 no-silence, 0->0, 101/-1 invalid); ShizukuActionExecutorTest routing tests adapted.
+Full gate green across all modules. Bridge (set_volume description) = separate step.
 
 ## `124fe60c0` — 2026-07-17
 
-**feat(#56): trigger "immediate" (esegui-una-volta-all'arm) — fix root-cause sveglie**
+**feat(#56): "immediate" trigger (run-once-at-arm) — root-cause fix for alarms**
 
-Un time one-shot a "adesso" non e' mai schedulabile (l'istante scappa nel passato tra
-bozza->approva->schedula -> nextFire=null -> EXPIRED -> disableIfApproved -> "pianificazione
-non riuscita" -> regola DISABLED). Diagnosi confermata sul campo con screenshot: "imposti subito
-una sveglia alle 12:15" -> Hermes genera trigger time=now, che fallisce la pianificazione.
+A one-shot time trigger at "now" is never schedulable (the instant slips into the past between
+draft->approve->schedule -> nextFire=null -> EXPIRED -> disableIfApproved -> "pianificazione
+non riuscita" -> rule DISABLED). Diagnosis confirmed in the field with a screenshot: "imposti subito
+una sveglia alle 12:15" -> Hermes generates trigger time=now, which fails scheduling.
 
-Fix: nuovo Trigger.Immediate = fira UNA VOLTA all'armamento, senza orologio. L'orario della
-sveglia/timer sta nell'AZIONE (set_alarm/set_timer), non nel trigger. Nessuna corsa contro il tempo.
+Fix: new Trigger.Immediate = fires ONCE at arm time, no clock involved. The alarm/timer time lives
+in the ACTION (set_alarm/set_timer), not in the trigger. No race against the clock.
 
-engine-core (Ondata A):
+engine-core (Wave A):
 - Trigger.Immediate (data object, @SerialName "immediate"); CapabilityIds.TRIGGER_IMMEDIATE;
-  TriggerEvent.ImmediateFired : Registered (mirror di TimeFired).
-- TriggerMatcher: ImmediateFired matcha SOLO una regola Immediate.
-- StaticShellSafety: Immediate e' trigger FIDATO (fira on-arm per volonta' utente, nessun attore
-  esterno) come Time/Geofence/Sensor/Connectivity.
-- CapabilityRequirements/DraftValidator/RuleRenderMapper: branch Immediate.
+  TriggerEvent.ImmediateFired : Registered (mirror of TimeFired).
+- TriggerMatcher: ImmediateFired matches ONLY an Immediate rule.
+- StaticShellSafety: Immediate is a TRUSTED trigger (fires on-arm by user intent, no external
+  actor) like Time/Geofence/Sensor/Connectivity.
+- CapabilityRequirements/DraftValidator/RuleRenderMapper: Immediate branch.
 
-automation-android (Ondata B):
-- ImmediateEventDispatcher + EngineImmediateEventDispatcher (mirror del time).
-- ArmedAutomationRegistrar.registerImmediate: all'arm dispatcha ImmediateFired (il motore esegue
-  le azioni) poi consuma la regola (disableIfApproved), come un time one-shot dopo il fire. Id con
-  timestamp -> un re-arm ri-fira.
-- AndroidCapabilityProbe: trigger.immediate sempre disponibile (nessuna dipendenza OS) + in
+automation-android (Wave B):
+- ImmediateEventDispatcher + EngineImmediateEventDispatcher (mirror of time).
+- ArmedAutomationRegistrar.registerImmediate: at arm it dispatches ImmediateFired (the engine runs
+  the actions) then consumes the rule (disableIfApproved), like a one-shot time after the fire. Id
+  carries a timestamp -> a re-arm re-fires.
+- AndroidCapabilityProbe: trigger.immediate always available (no OS dependency) + in
   availableTriggers.
-- AgentMessageSupport (compile prompt): regola 15 — comandi one-shot "subito/adesso" e sveglia/timer
-  -> trigger immediate; orario nell'azione, mai un time a istante gia' passato.
+- AgentMessageSupport (compile prompt): rule 15 — one-shot "subito/adesso" commands and alarm/timer
+  -> immediate trigger; time in the action, never a time trigger at an already-past instant.
 
-Bridge Python (immediate declare/map) = prossimo step, poi APK combinato. Full gate verde tutti i moduli.
+Python bridge (immediate declare/map) = next step, then combined APK. Full gate green across all modules.
 
 ## `cff9a5d26` — 2026-07-17
 
-**feat(web/F2-kotlin): probe pubblica web.search, compile prompt lo dichiara, CliBridgeTransport lo inoltra**
+**feat(web/F2-kotlin): probe publishes web.search, compile prompt declares it, CliBridgeTransport forwards it**
 
-Seconda fase (lato Kotlin) del web tool (#52). Rende il web dichiarabile e instradabile verso Hermes.
+Second phase (Kotlin side) of the web tool (#52). Makes web declarable and routable towards Hermes.
 
-- AndroidCapabilityProbe: web.search tolto da PHASE_UNAVAILABLE_TOOLS (non più sempre off) e
-  pubblicato in available_tools quando generativeReady (⇔ invoke_llm disponibile); altrimenti in
-  unavailable con REASON_GENERATIVE_RUNTIME. Resta in KNOWN_TOOLS (noto al validator).
-- AgentMessageSupport: regola 14 di compile — invoke_llm.allowedTools può includere web.search
-  oltre a whatsapp_reply SOLO se il goal richiede dati online/live (cambio, meteo, prezzi, news).
-- CliBridgeTransport: act/actV2 accettano allowedTools via GenerativeContract.isAllowedToolset
-  (non più uguaglianza esatta a [whatsapp_reply]); web.search viaggia nell'envelope campo
-  `allowed_tools`. Rimossa costante ACT_REPLY_TOOL.
+- AndroidCapabilityProbe: web.search removed from PHASE_UNAVAILABLE_TOOLS (no longer always off) and
+  published in available_tools when generativeReady (⇔ invoke_llm available); otherwise in
+  unavailable with REASON_GENERATIVE_RUNTIME. Stays in KNOWN_TOOLS (known to the validator).
+- AgentMessageSupport: compile rule 14 — invoke_llm.allowedTools may include web.search
+  beyond whatsapp_reply ONLY if the goal needs online/live data (exchange rates, weather, prices, news).
+- CliBridgeTransport: act/actV2 accept allowedTools via GenerativeContract.isAllowedToolset
+  (no longer exact equality with [whatsapp_reply]); web.search travels in the envelope's
+  `allowed_tools` field. ACT_REPLY_TOOL constant removed.
 
-Manca il bridge Python (run_gpt -t web,clarify + /act che accetta web + schema compile) per il
-web end-to-end via Hermes: prossimo step, poi rebuild+install APK. Transport diretti = F3.
+The Python bridge (run_gpt -t web,clarify + /act accepting web + compile schema) is still missing for
+end-to-end web via Hermes: next step, then rebuild+install APK. Direct transports = F3.
 
-Test: AndroidCapabilityProbeTest (web available/unavailable per generativeReady), CliBridgeTransportTest
-(act/actV2 inoltrano [reply,web.search], rifiutano [web.search] senza reply). Full gate verde.
+Tests: AndroidCapabilityProbeTest (web available/unavailable per generativeReady), CliBridgeTransportTest
+(act/actV2 forward [reply,web.search], reject [web.search] without reply). Full gate green.
 
 ## `7ab9f3a0d` — 2026-07-17
 
-**feat(web/F1): contratto generativo accetta web.search opzionale accanto al reply**
+**feat(web/F1): generative contract accepts optional web.search alongside the reply**
 
-Prima fase del web tool (#52, piano light server-side). Rilassa il contratto allowedTools
-delle azioni invoke_llm/invoke_llm_v2 per ammettere `web.search` (tool di sola lettura,
-server-side) accanto al reply OBBLIGATORIO. Nessun refactor: architettura single-turn intatta.
+First phase of the web tool (#52, light server-side plan). Relaxes the allowedTools contract
+of the invoke_llm/invoke_llm_v2 actions to allow `web.search` (a read-only, server-side tool)
+alongside the MANDATORY reply. No refactor: single-turn architecture intact.
 
 - GenerativeContract: TOOL_WEB_SEARCH="web.search", OPTIONAL_TOOLS, isAllowedToolset()
-  (reply presente + nessun duplicato + resto solo tool opzionali read-only).
-- DraftValidator: uguaglianza esatta -> isAllowedToolset() nei due path (v1/v2). I check
-  per-tool (shell/automation.* vietati, tool_unknown) restano difesa in profondita'.
-- GenerativeActionLane.validContract: stessa relax (v1 e v2).
+  (reply present + no duplicates + the rest only read-only optional tools).
+- DraftValidator: exact equality -> isAllowedToolset() in both paths (v1/v2). The per-tool
+  checks (shell/automation.* forbidden, tool_unknown) remain defense in depth.
+- GenerativeActionLane.validContract: same relaxation (v1 and v2).
 
-Transport/probe/compile-prompt NON toccati (F2/F3). Fasi successive: bridge Hermes -t web,
-CliBridgeTransport, quirks web per-provider. Design: docs/superpowers/plans/2026-07-17-argus-web-tool-server-side.md
+Transports/probe/compile-prompt NOT touched (F2/F3). Next phases: Hermes bridge -t web,
+CliBridgeTransport, per-provider web quirks. Design: docs/superpowers/plans/2026-07-17-argus-web-tool-server-side.md
 
-Test: +web cases in DraftValidatorTest (reply-only ok, reply+web ok, web-solo/duplicato/shell
-rifiutati) e GenerativeActionLaneTest (contratto web accettato). Full gate verde (tutti i moduli).
+Tests: +web cases in DraftValidatorTest (reply-only ok, reply+web ok, web-only/duplicate/shell
+rejected) and GenerativeActionLaneTest (web contract accepted). Full gate green (all modules).
 
 ## `bae98fbdf` — 2026-07-17
 
-**fix(actions): sveglia/timer/settings/app affidabili da background via Shizuku (caveat BAL)**
+**fix(actions): alarm/timer/settings/app reliable from background via Shizuku (BAL caveat)**
 
-Le azioni activity-launch (set_alarm/set_timer/open_settings_screen/launch_app/open_url)
-partono da un Intent startActivity, che Android 14+/OEM (OnePlus) bloccano da contesto
-BACKGROUND. Da un'automazione (trigger time -> receiver/AlarmManager) fallivano: sul campo
-"Imposta sveglia 10:53" -> set_volume SUCCEEDED, set_alarm FAILED (action_failed, eccezione
-BAL ingoiata silenziosamente da guarded).
+The activity-launch actions (set_alarm/set_timer/open_settings_screen/launch_app/open_url)
+start from a startActivity Intent, which Android 14+/OEMs (OnePlus) block from a BACKGROUND
+context. From an automation (time trigger -> receiver/AlarmManager) they failed: in the field
+"Imposta sveglia 10:53" -> set_volume SUCCEEDED, set_alarm FAILED (action_failed, BAL exception
+silently swallowed by guarded).
 
-Fix (routing Shizuku, deciso da Lorenzo):
-- device-tools: DeviceController.setAlarm/setTimer/openSettingsScreen privilegiati via
-  `am start` argv (identita' shell uid 2000, esente dal blocco BAL). Speculari a launchApp/openUrl.
-- ShizukuActionExecutor: nuovo segnale shizukuReady; le 5 activity-launch preferiscono il
-  privilegiato quando Shizuku e' AUTORIZZATO, altrimenti Intent BASE (foreground). Le azioni
-  Manager (DND/ringer/volume/torcia/vibrazione) restano BASE (gia' ok da background).
-- base: ActivityStartBlockedException -> fallimento onesto `activity_start_blocked` (nel journal)
-  al posto del generico action_failed quando l'Intent BASE viene bloccato da background.
-- DI: shizukuReady = gateway.status()==AUTHORIZED, riletto a ogni scatto (revoca senza riavvio).
+Fix (Shizuku routing, decided by Lorenzo):
+- device-tools: DeviceController.setAlarm/setTimer/openSettingsScreen privileged via
+  `am start` argv (shell identity uid 2000, exempt from the BAL block). Mirrors launchApp/openUrl.
+- ShizukuActionExecutor: new shizukuReady signal; the 5 activity-launch actions prefer the
+  privileged path when Shizuku is AUTHORIZED, otherwise BASE Intent (foreground). Manager
+  actions (DND/ringer/volume/torch/vibration) stay BASE (already fine from background).
+- base: ActivityStartBlockedException -> honest failure `activity_start_blocked` (in the journal)
+  instead of the generic action_failed when the BASE Intent is blocked from background.
+- DI: shizukuReady = gateway.status()==AUTHORIZED, re-read on every fire (revocation without restart).
 
-Test: +2 device-tools (argv am start + validazione), +2 ShizukuActionExecutor (privilegiato
-quando ready / Manager restano base), +1 base (activity_start_blocked). Full gate verde.
+Tests: +2 device-tools (am start argv + validation), +2 ShizukuActionExecutor (privileged
+when ready / Managers stay base), +1 base (activity_start_blocked). Full gate green.
 
 ## `de8b17db7` — 2026-07-17
 
-**fix(#51): namespace write_setting MAIUSCOLO nel prompt compile (era case-mismatch)**
+**fix(#51): UPPERCASE write_setting namespace in the compile prompt (was a case mismatch)**
 
-SettingNamespace e' un enum senza @SerialName -> serializza MAIUSCOLO (SYSTEM),
-e ArgusJson e' case-sensitive (niente decodeEnumsCaseInsensitive). Il prompt
-diceva 'system' minuscolo -> un modello che lo seguiva produceva JSON che l'app
-NON deserializzava. Allineato a MAIUSCOLO (coerente con la lettura state.setting).
-Colto verificando la serializzazione prima di attivare il bridge Hermes.
+SettingNamespace is an enum without @SerialName -> serializes UPPERCASE (SYSTEM),
+and ArgusJson is case-sensitive (no decodeEnumsCaseInsensitive). The prompt
+said lowercase 'system' -> a model following it produced JSON the app would
+NOT deserialize. Aligned to UPPERCASE (consistent with the state.setting read).
+Caught while verifying serialization before activating the Hermes bridge.
 
 ## `704507340` — 2026-07-17
 
-**P3 #51 S4: azioni BASE set_volume + set_flashlight + open_settings_screen + vibrate**
+**P3 #51 S4: BASE actions set_volume + set_flashlight + open_settings_screen + vibrate**
 
-Quarto slice comandi Android, tutte BASE (nessuno Shizuku), via Manager/Intent
-non raggiungibili da write_setting. Opus 4.8 TDD, main loop full gate
---rerun-tasks (394 verdi).
+Fourth Android-commands slice, all BASE (no Shizuku), via Manager/Intent
+not reachable through write_setting. Opus 4.8 TDD, main loop full gate
+--rerun-tasks (394 green).
 
-- set_volume(stream MEDIA|RING|ALARM|NOTIFICATION, level): AudioManager, clamp a
-  getStreamMaxVolume, gate DND per silenziare ring/notif (volume_policy_unavailable).
-- set_flashlight(on): CameraManager.setTorchMode (torch_unavailable se no flash).
-- open_settings_screen(screen enum chiuso, pkg? per APP_DETAILS): Intent
-  Settings.ACTION_* da enum CHIUSO (niente routing sink), settings_screen_unresolved.
-- vibrate(durationMs 1..10000): Vibrator/VibratorManager, permesso normal VIBRATE.
+- set_volume(stream MEDIA|RING|ALARM|NOTIFICATION, level): AudioManager, clamped to
+  getStreamMaxVolume, DND gate to silence ring/notif (volume_policy_unavailable).
+- set_flashlight(on): CameraManager.setTorchMode (torch_unavailable if no flash).
+- open_settings_screen(screen closed enum, pkg? for APP_DETAILS): Intent
+  Settings.ACTION_* from a CLOSED enum (no sink routing), settings_screen_unresolved.
+- vibrate(durationMs 1..10000): Vibrator/VibratorManager, normal VIBRATE permission.
 
-Innesto completo compile-enforced + nuovi enum VolumeStream/SettingsScreen.
-Pubblicate BASE ungated nel probe. Schema client-side + reference aggiornati.
-bridge.py Hermes: attivazione batch dal main loop con Lorenzo.
+Full compile-enforced wiring + new VolumeStream/SettingsScreen enums.
+Published as ungated BASE in the probe. Client-side schema + reference updated.
+Hermes bridge.py: batch activation from the main loop with Lorenzo.
 
 ## `d1deff692` — 2026-07-17
 
-**P3 #51 S3: azione parametrica write_setting (PRIVILEGED, settings put)**
+**P3 #51 S3: parametric write_setting action (PRIVILEGED, settings put)**
 
-Liberta di automazione assoluta: scrivere QUALSIASI impostazione Android
-system|secure|global per chiave, contraltare WRITE dei lettori parametrici.
-Opus 4.8 TDD, verificato dal main loop col full gate --rerun-tasks (394 verdi).
+Absolute automation freedom: write ANY Android setting in system|secure|global
+by key, the WRITE counterpart of the parametric readers.
+Opus 4.8 TDD, verified by the main loop with the full --rerun-tasks gate (394 green).
 
-DECISIONE (D0 vince sul design doc): PARAMETRICA senza allowlist. Invariante D2
-soddisfatto come run_shell: namespace/key/value LETTERALI CLEAN nel fingerprint
-approvato, mai dal trigger. Guardrail = WriteSettingPolicy (regex key stile
-QUERY_NAME, value <=1024 non-vuoto, reject NUL/newline/control char) + review
-umana pre-arm (terna letterale in RuleRenderMapper). Nessun altro limite.
+DECISION (D0 wins over the design doc): PARAMETRIC with no allowlist. Invariant D2
+satisfied like run_shell: CLEAN LITERAL namespace/key/value in the approved
+fingerprint, never from the trigger. Guardrails = WriteSettingPolicy (QUERY_NAME-style
+key regex, value <=1024 non-empty, reject NUL/newline/control chars) + human
+pre-arm review (literal triple in RuleRenderMapper). No other limits.
 
-DECISIONE (bug evitato): forAction deriva SOLO la capability famiglia
-ACTION_WRITE_SETTING, non il canonicalId per-chiave - metterlo brickerebbe ogni
-regola nel CapabilityReconciler stateless (structurally-missing permanente);
-il binding per-chiave sta nel fingerprint, come i lettori parametrici
-(StateCompare/InvokeLlmV2 gatano su family, non su canonicalId).
+DECISION (bug avoided): forAction derives ONLY the ACTION_WRITE_SETTING family
+capability, not the per-key canonicalId - including it would brick every
+rule in the stateless CapabilityReconciler (permanently structurally-missing);
+the per-key binding lives in the fingerprint, like the parametric readers
+(StateCompare/InvokeLlmV2 gate on family, not on canonicalId).
 
-Tier PRIVILEGED (Shizuku): argv /system/bin/settings put <ns> <key> <value>,
-mai sh -c. Probe pubblica write_setting gated su Shizuku. Schema client-side +
-reference con nota stile run_shell. bridge.py Hermes: lo aggiorna il main loop.
+PRIVILEGED tier (Shizuku): argv /system/bin/settings put <ns> <key> <value>,
+never sh -c. Probe publishes write_setting gated on Shizuku. Client-side schema +
+reference with a run_shell-style note. Hermes bridge.py: the main loop updates it.
 
 ## `4cb96fc83` — 2026-07-17
 
-**P3 #51 S1: azioni set_alarm + set_timer (BASE, AlarmClock Intent)**
+**P3 #51 S1: set_alarm + set_timer actions (BASE, AlarmClock Intent)**
 
-Prima slice dei comandi di interazione Android: imposta la SVEGLIA/TIMER REALE
-di Android via Intent AlarmClock (non una notifica), chiude il gap segnalato da
-Lorenzo. Tier BASE: solo permesso normal SET_ALARM, nessuno Shizuku, nessun
-grant runtime. Opus 4.8 TDD, verificato dal main loop col full gate
---rerun-tasks (360 verdi).
+First slice of the Android interaction commands: sets Android's REAL ALARM/TIMER
+via the AlarmClock Intent (not a notification), closing the gap reported by
+Lorenzo. BASE tier: only the normal SET_ALARM permission, no Shizuku, no
+runtime grant. Opus 4.8 TDD, verified by the main loop with the full
+--rerun-tasks gate (360 green).
 
-Innesto completo (~13 punti, gli when esaustivi lo garantiscono): Action.kt
-(ActionTypeIds+data class SetAlarm/SetTimer+tier), ActionPrivilege (BASE),
+Full wiring (~13 spots, the exhaustive whens guarantee it): Action.kt
+(ActionTypeIds+SetAlarm/SetTimer data classes+tier), ActionPrivilege (BASE),
 CapabilityRequirements+ActionCapabilities, DeviceState.forAction, ExecutionJournal,
-DraftValidator (range hour/minute/seconds+label), AndroidBaseActionExecutor+Surface
-(Intent AlarmClock con EXTRA, fail-clean alarm_app_unresolved), ShizukuActionExecutor
-dispatch base-only, AndroidCapabilityProbe (pubblicate sempre BASE, ungated),
-manifest SET_ALARM, RuleRenderMapper. Schema client-side (AgentMessageSupport +
-reference) aggiornato: i provider diretti le generano. bridge.py Hermes: lo
-aggiorna il main loop separatamente.
+DraftValidator (hour/minute/seconds ranges+label), AndroidBaseActionExecutor+Surface
+(AlarmClock Intent with EXTRAs, fail-clean alarm_app_unresolved), ShizukuActionExecutor
+base-only dispatch, AndroidCapabilityProbe (always published BASE, ungated),
+SET_ALARM manifest, RuleRenderMapper. Client-side schema (AgentMessageSupport +
+reference) updated: direct providers generate them. Hermes bridge.py: the main
+loop updates it separately.
 
-Fallback Shizuku am-start per il caveat BAL: TODO futuro. Verifica fisica
-(sveglia reale) a Lorenzo.
+Shizuku am-start fallback for the BAL caveat: future TODO. Physical verification
+(real alarm) left to Lorenzo.
 
 ## `7815673ea` — 2026-07-17
 
-**docs(P3): lista comandi interazione Android + architettura + piano (#51)**
+**docs(P3): Android interaction command list + architecture + plan (#51)**
 
-Da orchestrazione subagent (3 ricercatori Opus + sintesi Fable): lista comandi (sveglia/timer BASE via Intent, brightness/dark-mode/write_setting PRIVILEGED, + ondata toggle), architettura ibrida (azione parametrica write_setting contraltare WRITE dei lettori state + azioni tipizzate curate), sicurezza D0 (authority sink come run_shell), coordinamento Hermes (bridge.py DRAFT_SCHEMA_TEXT + validator), piano TDD S1..S6. S1 = set_alarm+set_timer (BASE, chiude il gap 'imposta sveglia -> solo notifica').
+From subagent orchestration (3 Opus researchers + Fable synthesis): command list (alarm/timer BASE via Intent, brightness/dark-mode/write_setting PRIVILEGED, + toggle wave), hybrid architecture (parametric write_setting action as the WRITE counterpart of the state readers + curated typed actions), D0 security (sink authority like run_shell), Hermes coordination (bridge.py DRAFT_SCHEMA_TEXT + validator), TDD plan S1..S6. S1 = set_alarm+set_timer (BASE, closes the 'set an alarm -> only a notification' gap).
 
 ## `789d2e7f0` — 2026-07-17
 
-**P3 #49 refinement: budget token-only per provider senza prezzo noto**
+**P3 #49 refinement: token-only budget for providers with no known price**
 
-Deciso da Lorenzo: i costi in dollari hanno senso solo per i provider a prezzo
-noto; Hermes/OpenRouter/Custom sono token-only. Implementato inline da Fable 5
-xhigh in TDD, verificato dal main loop col full gate --rerun-tasks (360 verdi).
+Decided by Lorenzo: dollar costs only make sense for providers with known
+pricing; Hermes/OpenRouter/Custom are token-only. Implemented inline by Fable 5
+xhigh in TDD, verified by the main loop with the full --rerun-tasks gate (360 green).
 
-- ProviderSpec.costTracked: true SOLO OpenAI/Anthropic/Gemini; Hermes/OpenRouter/
-  Custom token-only (prices di OpenRouter svuotate: stima da listino statico era
-  fragile - 2 modelli su centinaia - e non leggevamo il costo reale).
-- CostEstimator: null per i provider non costTracked.
-- UsageDao.tokensBetween: aggregato SUM(tokensIn)/SUM(tokensOut) per provider e
-  finestra (null=n/d != 0).
-- BudgetSettingsStore: maxTokensPerMonth (globale + per-provider).
-- BudgetPolicy: priced -> tetto costo mensile; token-only -> tetto TOKEN mensile
-  (in+out); tetto token globale somma SOLO i token-only; limiti chiamate ora/giorno
-  universali invariati; cooldown Engine intatto. Nuovo LimitWindow.MONTH_TOKENS.
-- UI: BudgetSection mostra token in/out per provider+finestra come metrica
-  primaria, dollari (USD+EUR) SOLO per i priced; BudgetLimitsDialog con campo
-  "Token / mese". SUPPRESSED_BUDGET audit detail "month_tokens:<scope>".
+- ProviderSpec.costTracked: true ONLY for OpenAI/Anthropic/Gemini; Hermes/OpenRouter/
+  Custom token-only (OpenRouter prices emptied: estimating from a static price list
+  was fragile - 2 models out of hundreds - and we never read the real cost).
+- CostEstimator: null for non-costTracked providers.
+- UsageDao.tokensBetween: SUM(tokensIn)/SUM(tokensOut) aggregate per provider and
+  window (null=n/a != 0).
+- BudgetSettingsStore: maxTokensPerMonth (global + per-provider).
+- BudgetPolicy: priced -> monthly cost cap; token-only -> monthly TOKEN cap
+  (in+out); the global token cap sums ONLY the token-only providers; universal
+  hourly/daily call limits unchanged; Engine cooldown intact. New LimitWindow.MONTH_TOKENS.
+- UI: BudgetSection shows tokens in/out per provider+window as the primary
+  metric, dollars (USD+EUR) ONLY for the priced ones; BudgetLimitsDialog with a
+  "Token / mese" field. SUPPRESSED_BUDGET audit detail "month_tokens:<scope>".
 
-Note (dai risk report, non bloccanti): il tetto token globale conta solo i
-token-only (i priced restano sul tetto costo); righe legacy OpenRouter con costo
-si auto-risolvono al rollover mese. Verifica visiva Compose su device: Lorenzo.
+Notes (from the risk reports, non-blocking): the global token cap counts only
+token-only providers (priced ones stay on the cost cap); legacy OpenRouter rows
+with a cost self-resolve at the month rollover. Compose visual check on device: Lorenzo.
 
 ## `4db609757` — 2026-07-17
 
 **P3 #49 Wave 5 (budget policy + UI): S13 MeteredBrain/CostEstimator/BudgetPolicy + S14 BudgetUi**
 
-Orchestrazione subagent (Fable build-book + Opus TDD), verificata dal main loop
-col full gate --rerun-tasks --no-build-cache (360 task verdi).
+Subagent orchestration (Fable build-book + Opus TDD), verified by the main loop
+with the full --rerun-tasks --no-build-cache gate (360 tasks green).
 
-S13 - MeteredBrain decorator registrato in ArgusModule.brain() (avvolge
-ConfiguredBridgeBrain, unico choke-point compile/act/actV2): pre-call BudgetPolicy
-hard-block (ActResult metaError=budget_exceeded + usage_event BLOCKED_BUDGET,
-niente transport) o soft-warning one-shot per finestra; post-call scrive
-usage_event con usage + costMicros da CostEstimator (prezzi ProviderCatalog,
-micro-USD, pricingVersion, modello sconosciuto->null). BudgetSettingsStore
-(maxCallsPerHour/Day, maxCostPerMonthMicros, softThreshold; 0/null=illimitato).
-BudgetPolicy globale + per-provider (HOUR->DAY->MONTH_COST, fail-open). Nuovi
-AuditKind/ExecutionStatus.SUPPRESSED_BUDGET (engine-core) sul modello
-SUPPRESSED_COOLDOWN, propagati da GenerativeActionLane e resi visibili nel
-journal/UI (ambra). Cooldown per-regola 60s dell'Engine INVARIATO (il budget e'
-l'aggregato cross-regola, separato).
+S13 - MeteredBrain decorator registered in ArgusModule.brain() (wraps
+ConfiguredBridgeBrain, the single compile/act/actV2 choke-point): pre-call BudgetPolicy
+hard-block (ActResult metaError=budget_exceeded + BLOCKED_BUDGET usage_event,
+no transport) or one-shot soft warning per window; post-call writes a
+usage_event with usage + costMicros from CostEstimator (ProviderCatalog prices,
+micro-USD, pricingVersion, unknown model->null). BudgetSettingsStore
+(maxCallsPerHour/Day, maxCostPerMonthMicros, softThreshold; 0/null=unlimited).
+Global + per-provider BudgetPolicy (HOUR->DAY->MONTH_COST, fail-open). New
+AuditKind/ExecutionStatus.SUPPRESSED_BUDGET (engine-core) modeled on
+SUPPRESSED_COOLDOWN, propagated by GenerativeActionLane and made visible in the
+journal/UI (amber). The Engine's per-rule 60s cooldown UNCHANGED (the budget is
+the cross-rule aggregate, separate).
 
-S14 - BudgetUi tipizzata (usedHour/limitHour, usedDay/limitDay, costMonthMicros/
-costLimitMicros, perProvider, softWarningActive) + BudgetSection reale: progress
-ora/giorno/costo MENSILE, banner soft, breakdown per-provider, costo in USD ed
-EUR (tasso fisso con disclaimer "stima"), BudgetLimitsDialog che persiste i tetti
-su BudgetSettingsStore (onBudgetChange/Day/MonthlyCost, via il placeholder no-op).
-SettingsViewModel legge gli aggregati da UsageDao.
+S14 - Typed BudgetUi (usedHour/limitHour, usedDay/limitDay, costMonthMicros/
+costLimitMicros, perProvider, softWarningActive) + real BudgetSection: hourly/daily/
+MONTHLY cost progress, soft banner, per-provider breakdown, cost in USD and
+EUR (fixed rate with an "estimate" disclaimer), BudgetLimitsDialog persisting the caps
+to BudgetSettingsStore (onBudgetChange/Day/MonthlyCost, replacing the no-op placeholder).
+SettingsViewModel reads the aggregates from UsageDao.
 
-Con questo #48 (multi-provider) e #49 (budget) sono COMPLETI lato codice. Restano
-solo pezzi device/Hermes: verifica visiva UI su device, S15 (bump schema usage
-Hermes), S16 (E2E release da APK pulito).
+With this, #48 (multi-provider) and #49 (budget) are code-COMPLETE. Only
+device/Hermes pieces remain: visual UI check on device, S15 (Hermes usage schema
+bump), S16 (release E2E from a clean APK).
 
 ## `16fca18cd` — 2026-07-16
 
-**P3 #49 Wave 4 (budget fondamenta): S11 Room usage_events + S12 ActResult.usage**
+**P3 #49 Wave 4 (budget foundations): S11 Room usage_events + S12 ActResult.usage**
 
-Orchestrazione subagent (Fable build-book + Opus TDD), verificata dal main loop
-col full gate --rerun-tasks --no-build-cache (360 task verdi).
+Subagent orchestration (Fable build-book + Opus TDD), verified by the main loop
+with the full --rerun-tasks --no-build-cache gate (360 tasks green).
 
-S11 - modulo data: tabella append-only usage_events (providerId, model, kind
+S11 - data module: append-only usage_events table (providerId, model, kind
 COMPILE|ACT|ACT_V2, outcome OK|ERROR|BLOCKED_BUDGET, tokensIn/out?, costMicros?,
-pricingVersion?) + indice timestamp; UsageDao (insert + aggregateBetween con SUM
-nullable per n/d != 0 + purgeBefore); UsageWindows zone/DST-safe (ora rolling,
-giorno, MESE corrente); migrazione Room 9->10 versionata con test host
-(Robolectric + MigrationTestHelper) e device; retention usage 35gg agganciata a
-RoomJournalMaintenance. Schema 10.json generato da KSP incluso.
+pricingVersion?) + timestamp index; UsageDao (insert + aggregateBetween with
+nullable SUM so n/a != 0 + purgeBefore); zone/DST-safe UsageWindows (rolling hour,
+day, current MONTH); versioned Room 9->10 migration with host tests
+(Robolectric + MigrationTestHelper) and device; 35-day usage retention hooked into
+RoomJournalMaintenance. KSP-generated 10.json schema included.
 
-S12 - ActResult.usage: TurnUsage trasloca in engine-core (typealias di compat in
-brain-android); ActResult guadagna val usage: TurnUsage? = null come ultimo
-param con default (XOR text/metaError intatto, ActResult non-@Serializable,
-golden fingerprint v1 provati invariati); OpenAICompat/Anthropic popolano
-ActResult.usage dal parsing token (rimosso il lastUsage @Volatile laterale),
-TransportBackedBrain lo propaga. CliBridge/Hermes resta usage=null fino a S15.
+S12 - ActResult.usage: TurnUsage moves to engine-core (compat typealias in
+brain-android); ActResult gains val usage: TurnUsage? = null as the last
+defaulted param (text/metaError XOR intact, ActResult non-@Serializable,
+proven v1 golden fingerprints unchanged); OpenAICompat/Anthropic populate
+ActResult.usage from token parsing (the side-channel @Volatile lastUsage removed),
+TransportBackedBrain propagates it. CliBridge/Hermes stays usage=null until S15.
 
-NON PROVATO su device: MigrationTest esteso (compila host, run am instrument
-rinviata). Prossimo: Wave 5 = S13 MeteredBrain/CostEstimator/BudgetPolicy/
-SUPPRESSED_BUDGET + S14 BudgetUi USD+EUR/tetto mensile.
+NOT TESTED on device: extended MigrationTest (compiles on host, am instrument run
+deferred). Next: Wave 5 = S13 MeteredBrain/CostEstimator/BudgetPolicy/
+SUPPRESSED_BUDGET + S14 BudgetUi USD+EUR/monthly cap.
 
 ## `af0d3352d` — 2026-07-16
 
-**P3 #48 Wave 3 (UI): S9 Settings multi-provider + S10 onboarding wizard**
+**P3 #48 Wave 3 (UI): S9 multi-provider Settings + S10 onboarding wizard**
 
-Orchestrazione subagent (Fable 5 build-book + Opus 4.8 TDD), verificata dal
-main loop col full gate --rerun-tasks --no-build-cache (360 task verdi).
+Subagent orchestration (Fable 5 build-book + Opus 4.8 TDD), verified by the
+main loop with the full --rerun-tasks --no-build-cache gate (360 tasks green).
 
-S9 - Settings multi-provider: TransportUi.DirectProvider + ProviderChoiceUi;
-SettingsCallbacks.onSelectProvider/onSaveProviderConfig; SettingsViewModel emette
-il ramo transport dal selectedProviderId() dello ProviderConfigStore (Hermes->
-CliBridge come prima; diretti->DirectProvider con authState da hasApiKey);
-TransportSection azionabile (selettore provider, editor chiave masked+modello,
-Test connessione provider-aware); ProviderConfigurationDialog (chiave mai in
-rememberSaveable, mai riproposta, apiKey null conserva l'esistente); via
-InArrivoChip dal ramo provider. La chiave API non entra MAI nel UiState.
+S9 - Multi-provider Settings: TransportUi.DirectProvider + ProviderChoiceUi;
+SettingsCallbacks.onSelectProvider/onSaveProviderConfig; SettingsViewModel emits
+the transport branch from ProviderConfigStore's selectedProviderId() (Hermes->
+CliBridge as before; direct->DirectProvider with authState from hasApiKey);
+actionable TransportSection (provider selector, masked key+model editor,
+provider-aware connection Test); ProviderConfigurationDialog (key never in
+rememberSaveable, never echoed back, null apiKey keeps the existing one);
+InArrivoChip removed from the provider branch. The API key NEVER enters the UiState.
 
-S10 - Onboarding "Scegli il cervello": dentro lo step BRAIN_CONFIG esistente
-(nessun nuovo StepKind) l'utente sceglie Hermes self-hosted o un provider BYOK
-(OpenAI/Anthropic/Gemini/OpenRouter/custom); OnboardingViewModel su
-ProviderConfigStore con selectProvider/saveProviderConfig (persiste, ri-legge
-bearerToken, sonda health, avanza come saveBridge); onSkip continua a rifiutare
-il salto del cervello; canFinish invariato. Chiave mai nello stato onboarding.
+S10 - "Scegli il cervello" onboarding: inside the existing BRAIN_CONFIG step
+(no new StepKind) the user picks self-hosted Hermes or a BYOK provider
+(OpenAI/Anthropic/Gemini/OpenRouter/custom); OnboardingViewModel on
+ProviderConfigStore with selectProvider/saveProviderConfig (persists, re-reads
+bearerToken, probes health, advances like saveBridge); onSkip keeps refusing
+to skip the brain; canFinish unchanged. Key never in the onboarding state.
 
-NON PROVATO: il layer Compose (chip selettore, dialog, rami DirectProvider)
-compila (assembleDebug verde) e le preview rendono, ma va verificato VISIVAMENTE
-da Lorenzo su device. Test ViewModel: 9 (Settings) + 8 (Onboarding) verdi.
+NOT TESTED: the Compose layer (selector chips, dialog, DirectProvider branches)
+compiles (assembleDebug green) and previews render, but it must be VISUALLY
+verified by Lorenzo on device. ViewModel tests: 9 (Settings) + 8 (Onboarding) green.
 
 ## `dd9414307` — 2026-07-16
 
-**P3 #48 S8: harness smoke live opt-in (chiavi da env, auto-skip in CI)**
+**P3 #48 S8: opt-in live smoke harness (keys from env, auto-skip in CI)**
 
-LiveApiSmokeTest colpisce le API reali dei provider SOLO quando le ARGUS_LIVE_*_KEY
-sono nell'ambiente; senza, si auto-salta (nessuna rete, innocuo nel gate/CI).
-Nessuna chiave nel codice. Smoke eseguito dal main loop il 2026-07-16 con le
-chiavi reali di Lorenzo (poi revocate): OpenAI (gpt-5-mini) e Gemini
-(gemini-2.5-flash) generazione reale + sentinel @@META@@ parsato; Anthropic
-(claude-sonnet-4-5) generazione reale; OpenRouter no-credit 402 -> TransportException
-kind=BUDGET (mapping errore validato). Tutti e 4 i transport confermati end-to-end.
+LiveApiSmokeTest hits the providers' real APIs ONLY when the ARGUS_LIVE_*_KEY
+variables are in the environment; without them it auto-skips (no network, harmless
+in the gate/CI). No key in the code. Smoke run by the main loop on 2026-07-16 with
+Lorenzo's real keys (revoked afterwards): OpenAI (gpt-5-mini) and Gemini
+(gemini-2.5-flash) real generation + @@META@@ sentinel parsed; Anthropic
+(claude-sonnet-4-5) real generation; OpenRouter no-credit 402 -> TransportException
+kind=BUDGET (error mapping validated). All 4 transports confirmed end-to-end.
 
 ## `db19ce8f7` — 2026-07-16
 
-**P3 #48 Wave 2: transport concreti (S5 OpenAICompat, S6 compile, S7 Anthropic)**
+**P3 #48 Wave 2: concrete transports (S5 OpenAICompat, S6 compile, S7 Anthropic)**
 
-Prodotta via orchestrazione subagent (Opus 4.8 TDD), verificata dal main loop
-con full gate --rerun-tasks --no-build-cache (360 task verdi).
+Produced via subagent orchestration (Opus 4.8 TDD), verified by the main loop
+with the full --rerun-tasks --no-build-cache gate (360 tasks green).
 
-S5 - OpenAICompatTransport (un solo adapter Chat Completions per OPENAI/GEMINI/
-OPENROUTER/CUSTOM_OPENAI_COMPAT, parametrizzato dai quirks del ProviderCatalog,
-niente if(provider==)): act/actV2 SINGLE-TURN (mirror CliBridgeTransport),
-tool whatsapp_reply + tool_choice/output-cap secondo quirks, parse usage->
-TurnUsage (esposta via lastUsage in attesa di ActResult.usage in S12), health()
-minimale, mapping errori 401->AUTH/402->BUDGET/429->RATE_LIMIT/4xx-5xx->HTTP/
-timeout->TIMEOUT senza trapelare la chiave. Registra i 4 provider nella factory.
+S5 - OpenAICompatTransport (a single Chat Completions adapter for OPENAI/GEMINI/
+OPENROUTER/CUSTOM_OPENAI_COMPAT, parameterized by the ProviderCatalog quirks,
+no if(provider==)): SINGLE-TURN act/actV2 (mirroring CliBridgeTransport),
+whatsapp_reply tool + tool_choice/output-cap per quirks, usage parsing ->
+TurnUsage (exposed via lastUsage pending ActResult.usage in S12), minimal
+health(), error mapping 401->AUTH/402->BUDGET/429->RATE_LIMIT/4xx-5xx->HTTP/
+timeout->TIMEOUT without leaking the key. Registers the 4 providers in the factory.
 
-S6 - OpenAICompatTransport.compile client-side: riproduce il prompt Hermes
-(13 regole + schema draft) tool-less, parsa la riga @@META@@ col parser sentinel
-esistente (CliBridgeParser) -> CompileResult; fail-soft su risposta vuota/senza
-sentinel/malformata (metaError tipizzato, mai crash). La chiave resta solo negli
-header.
+S6 - Client-side OpenAICompatTransport.compile: reproduces the Hermes prompt
+(13 rules + draft schema) tool-less, parses the @@META@@ line with the existing
+sentinel parser (CliBridgeParser) -> CompileResult; fail-soft on empty/sentinel-less/
+malformed responses (typed metaError, never a crash). The key stays only in the
+headers.
 
 S7 - AnthropicMessagesTransport (Messages API): x-api-key + anthropic-version,
-max_tokens obbligatorio, system separato, tool_use/tool_result, usage.input/
-output_tokens->TurnUsage, no-credit 400/402->BUDGET. Estratto AgentMessageSupport
-condiviso (prompt/validazione/redazione) e OpenAICompat rifattorizzato per
-delegarci (comportamento invariato). Registra ANTHROPIC nella factory.
+mandatory max_tokens, separate system, tool_use/tool_result, usage.input/
+output_tokens->TurnUsage, no-credit 400/402->BUDGET. Extracted shared
+AgentMessageSupport (prompt/validation/redaction) and refactored OpenAICompat
+to delegate to it (behavior unchanged). Registers ANTHROPIC in the factory.
 
-Fix main-loop: ConfiguredBridgeBrainTest - il caso "provider senza transport"
-(Wave 1: not_yet_implemented) e' obsoleto ora che tutti i provider hanno un
-transport; riscritto sulla proprieta' reale documentata (un throw della factory
-si propaga fuori dal try di TransportBackedBrain). Questo fallimento e' stato
-colto SOLO dal full gate del main loop, non dal gate per-modulo degli agenti.
+Main-loop fix: ConfiguredBridgeBrainTest - the "provider without a transport"
+case (Wave 1: not_yet_implemented) is obsolete now that every provider has a
+transport; rewritten around the real documented property (a factory throw
+propagates outside TransportBackedBrain's try). This failure was caught ONLY
+by the main loop's full gate, not by the agents' per-module gate.
 
-compile()/act() dei provider diretti restano SINGLE-TURN (il loop multi-turno
-computer-use e' P3-5). Prossimo: S8 smoke live con chiavi reali (main loop).
+Direct providers' compile()/act() stay SINGLE-TURN (the multi-turn computer-use
+loop is P3-5). Next: S8 live smoke with real keys (main loop).
 
 ## `359f72f14` — 2026-07-16
 
-**docs(P3): reference prompt compile Hermes per S6 (compile client-side)**
+**docs(P3): Hermes compile prompt reference for S6 (client-side compile)**
 
-Estratto build_prompt + DRAFT_SCHEMA_TEXT + STATE_QUERY_SCHEMA_TEXT + SENTINEL da hermes:~/argus-bridge/bridge.py, per riusare lo stesso contratto compile sui provider diretti senza divergere. Nessun segreto (solo template).
+Extracted build_prompt + DRAFT_SCHEMA_TEXT + STATE_QUERY_SCHEMA_TEXT + SENTINEL from hermes:~/argus-bridge/bridge.py, to reuse the same compile contract on direct providers without diverging. No secrets (templates only).
 
 ## `a00ec0ff6` — 2026-07-16
 
-**P3 #48 Wave 1: fondamenta transport multi-provider (S1-S4)**
+**P3 #48 Wave 1: multi-provider transport foundations (S1-S4)**
 
-Fondamenta a comportamento INVARIATO (Hermes continua bit-identico). Prodotta
-via orchestrazione subagent (Fable 5 build-book + Opus 4.8 TDD), verificata
-dal main loop con full gate --rerun-tasks --no-build-cache (360 task verdi).
+Foundations with UNCHANGED behavior (Hermes continues bit-identical). Produced
+via subagent orchestration (Fable 5 build-book + Opus 4.8 TDD), verified by
+the main loop with the full --rerun-tasks --no-build-cache gate (360 tasks green).
 
-S1 - contratto transport: AgentTransport + TransportHealth, TransportException
-(kind: CONFIGURATION/TIMEOUT/NETWORK/AUTH/HTTP/PROTOCOL/RATE_LIMIT/BUDGET) con
-typealias BridgeErrorKind/BridgeException (refactor senza riscrittura),
-TurnUsage (pure-data, non popolata in Wave 1). CliBridgeTransport implementa
+S1 - transport contract: AgentTransport + TransportHealth, TransportException
+(kind: CONFIGURATION/TIMEOUT/NETWORK/AUTH/HTTP/PROTOCOL/RATE_LIMIT/BUDGET) with
+BridgeErrorKind/BridgeException typealiases (refactor without a rewrite),
+TurnUsage (pure-data, not populated in Wave 1). CliBridgeTransport implements
 AgentTransport (providerId=HERMES). HermesBrain -> TransportBackedBrain(transport)
-via git mv, mappatura eccezione->metaError identica. ChatViewModel gestisce i
-due nuovi kind. NB: ActResult.usage RIMANDATO a S12 (engine-core non puo'
-dipendere da brain-android dove nasce TurnUsage; ActResult non e' @Serializable,
-zero impatto golden hash).
+via git mv, identical exception->metaError mapping. ChatViewModel handles the
+two new kinds. NB: ActResult.usage POSTPONED to S12 (engine-core cannot depend
+on brain-android where TurnUsage is born; ActResult is not @Serializable,
+zero golden hash impact).
 
 S2 - ProviderId {HERMES,OPENAI,ANTHROPIC,GEMINI,OPENROUTER,CUSTOM_OPENAI_COMPAT}
 + ProviderCatalog (authStyle, quirks forceToolChoiceAuto/outputCapParam/
-extraBodyPassthrough, prezzi micro-USD con PRICING_VERSION). Niente segreti.
-z.ai escluso (decisione Lorenzo). Prezzi da listini pubblici 2026 - DA RIVEDERE.
+extraBodyPassthrough, micro-USD prices with PRICING_VERSION). No secrets.
+z.ai excluded (Lorenzo's decision). Prices from 2026 public price lists - TO REVIEW.
 
-S3 - ProviderConfigStore generalizza BridgeConfigurationStore (selected + per
-provider baseUrl/model; chiavi solo via ProviderSecrets on-demand), riusa
-AesGcmTokenCodec + Keystore (BridgeKeystore estratto), migrazione additiva e
-rollback-safe da config Hermes legacy, test anti-leak chiavi.
+S3 - ProviderConfigStore generalizes BridgeConfigurationStore (selected + per
+provider baseUrl/model; keys only via on-demand ProviderSecrets), reuses
+AesGcmTokenCodec + Keystore (BridgeKeystore extracted), additive rollback-safe
+migration from the legacy Hermes config, key anti-leak tests.
 
-S4 - TransportFactory (HERMES->CliBridge; altri provider -> TransportNotImplemented
-fino a Wave 2) + seam ConfiguredBridgeBrain via factory con cache per config
-+ DI ArgusModule (brain() e grafo a valle invariati).
+S4 - TransportFactory (HERMES->CliBridge; other providers -> TransportNotImplemented
+until Wave 2) + ConfiguredBridgeBrain seam via the factory with a per-config cache
++ ArgusModule DI (brain() and the downstream graph unchanged).
 
-NOT PROVEN (no device sul gate host): i test instrumented brain-android
-(ProviderConfigStoreInstrumentedTest, HermesBridgeInstrumentedTest aggiornato)
-compilano ma non eseguiti - da verificare su device prima della release.
+NOT PROVEN (no device on the host gate): the brain-android instrumented tests
+(ProviderConfigStoreInstrumentedTest, updated HermesBridgeInstrumentedTest)
+compile but were not run - to verify on device before the release.
 
 ## `5c679836f` — 2026-07-16
 
-**docs(P3): decisioni Lorenzo su multi-provider/budget (OpenRouter, no z.ai, USD+EUR, tetto mensile)**
+**docs(P3): Lorenzo's decisions on multi-provider/budget (OpenRouter, no z.ai, USD+EUR, monthly cap)**
 
 ## `b1079901b` — 2026-07-16
 
-**docs(P3): design multi-provider (#48) + budget/costi (#49) da orchestrazione subagent**
+**docs(P3): multi-provider design (#48) + budget/costs (#49) from subagent orchestration**
 
-Piano prodotto da workflow argus-multiprovider-design: 4 ricercatori Opus 4.8 xhigh (codebase Brain/transport + budget; API OpenAI/Anthropic/Gemini/z.ai) + sintesi Fable 5 xhigh. Ancorato a file:linea reali e contratti API 2026. 16 sotto-slice TDD con dipendenze/gate + 7 domande aperte per Lorenzo. DA RIVEDERE prima dell'implementazione.
+Plan produced by the argus-multiprovider-design workflow: 4 Opus 4.8 xhigh researchers (Brain/transport + budget codebase; OpenAI/Anthropic/Gemini/z.ai APIs) + Fable 5 xhigh synthesis. Anchored to real file:line references and 2026 API contracts. 16 TDD sub-slices with dependencies/gates + 7 open questions for Lorenzo. TO REVIEW before implementation.
 
 ## `aff245b35` — 2026-07-16
 
-**test(harness): cleanupGates mirato per gate (-e gate <substr>), niente over-delete**
+**test(harness): per-gate targeted cleanupGates (-e gate <substr>), no over-delete**
 
-cleanupGates cancellava TUTTE le regole 'Argus GATE': pulendo un gate spazzava via anche quelle di un altro ancora armate (le geofence tragitto di Lorenzo cancellate durante il cleanup sensore). Ora con -e gate <sottostringa> rimuove solo quel gate; senza arg pulisce tutto ma lo dichiara a video. I reconcile restano store-driven, quindi le regole non cancellate restano registrate.
+cleanupGates deleted ALL 'Argus GATE' rules: cleaning one gate also wiped another gate's still-armed ones (Lorenzo's commute geofences deleted during the sensor cleanup). Now with -e gate <substring> it removes only that gate; with no arg it cleans everything but says so on screen. Reconciles stay store-driven, so non-deleted rules stay registered.
 
 ## `966a489ae` — 2026-07-16
 
-**P3-3: flip test outage Shizuku -> tier base (DND continua, non si blocca)**
+**P3-3: flip the Shizuku outage test -> base tier (DND keeps going, does not block)**
 
-Con il tier base attivo SetDnd e' una azione BASE (NotificationManager,
-accesso DND implicito dal notification listener), quindi in un outage Shizuku
-la regola DEVE eseguire, non essere bloccata. ArgusShizukuOutageE2E ora
-verifica: FIRED (non BLOCKED_POLICY), nessun blocco policy, journal set_dnd
-SUCCEEDED, DND davvero a TOTAL, regola ancora ARMED. cleanup ripristina il DND
-(ora cambia davvero) via Shizuku riavviato. Compila; la run resta host-driven
-(prepare/verify/cleanup con l'host che ferma/riavvia il daemon).
+With the base tier active SetDnd is a BASE action (NotificationManager,
+DND access implicit from the notification listener), so during a Shizuku outage
+the rule MUST execute, not be blocked. ArgusShizukuOutageE2E now
+verifies: FIRED (not BLOCKED_POLICY), no policy block, set_dnd journal
+SUCCEEDED, DND really at TOTAL, rule still ARMED. cleanup restores DND
+(it now really changes) via a restarted Shizuku. Compiles; the run stays host-driven
+(prepare/verify/cleanup with the host stopping/restarting the daemon).
 
-Chiude P3-3: tier base senza Shizuku completo (router, executor base, routing,
-probe per-azione, attivazione + gate DND su device, test outage aggiornato).
+Closes P3-3: base tier without Shizuku complete (router, base executor, routing,
+per-action probe, activation + DND gate on device, outage test updated).
 
 ## `79c3f1181` — 2026-07-16
 
-**P3-3 B4: gate DND tier base su device (accesso DND implicito via listener)**
+**P3-3 B4: base-tier DND gate on device (implicit DND access via listener)**
 
-ArgusBaseTierDndInstrumentedTest prova sul OnePlus reale che, essendo Argus
-un notification listener abilitato, l'accesso «Non disturbare» è implicito
-(isNotificationPolicyAccessGranted == true) e che AndroidBaseActionSurface
-cambia davvero il filtro via NotificationManager (INTERRUPTION_FILTER_PRIORITY)
-SENZA Shizuku, ripristinando poi lo stato originale. OK (1 test).
+ArgusBaseTierDndInstrumentedTest proves on the real OnePlus that, Argus being
+an enabled notification listener, «Non disturbare» access is implicit
+(isNotificationPolicyAccessGranted == true) and that AndroidBaseActionSurface
+really changes the filter via NotificationManager (INTERRUPTION_FILTER_PRIORITY)
+WITHOUT Shizuku, then restores the original state. OK (1 test).
 
-Conseguenza: la pagina di sistema «Accesso Non disturbare» mostra
-«impossibile abilitare perche' l'app ha accesso alle notifiche» perche' il
-grant e' gia' implicito; nessuna riga di grant DND da aggiungere per il tier
-personal-full. Il grant esplicito resta rilevante solo per un profilo pubblico
-senza listener (P3-3 §4/§5).
+Consequence: the «Accesso Non disturbare» system page shows
+«impossibile abilitare perche' l'app ha accesso alle notifiche» because the
+grant is already implicit; no DND grant row to add for the personal-full
+tier. The explicit grant stays relevant only for a public profile without a
+listener (P3-3 §4/§5).
 
 ## `38881e9da` — 2026-07-16
 
-**P3-3 B4: attiva il tier base (adapter reale + DI + manifest DND)**
+**P3-3 B4: activate the base tier (real adapter + DI + DND manifest)**
 
-- AndroidBaseActionSurface: adapter reale NotificationManager/AudioManager/PackageManager/Intent per DND/Ringer/LaunchApp/OpenUrl senza Shizuku.
-- Manifest: ACCESS_NOTIFICATION_POLICY (grant "Accesso Non disturbare").
-- DI: inietta baseActions nell'executor e baseTierActive=true nel probe, cosi' le azioni base girano via API normali e si pubblicano senza Shizuku.
+- AndroidBaseActionSurface: real NotificationManager/AudioManager/PackageManager/Intent adapter for DND/Ringer/LaunchApp/OpenUrl without Shizuku.
+- Manifest: ACCESS_NOTIFICATION_POLICY ("Accesso Non disturbare" grant).
+- DI: injects baseActions into the executor and baseTierActive=true into the probe, so base actions run via normal APIs and get published without Shizuku.
 
-Con Shizuku autorizzato le capability restano disponibili (nessuna regola armata va in review); l'esecuzione DND/Ringer passa ora da NotificationManager e richiede il grant "Non disturbare", da concedere sul device. Resta il flip del test outage E2E (task #47).
+With Shizuku authorized the capabilities stay available (no armed rule goes into review); DND/Ringer execution now goes through NotificationManager and requires the "Non disturbare" grant, to be granted on the device. The E2E outage test flip remains (task #47).
 
 ## `a3cafd357` — 2026-07-16
 
-**P3-3 B3: probe capability per-azione (tier base, flag baseTierActive)**
+**P3-3 B3: per-action capability probe (base tier, baseTierActive flag)**
 
-Spezza il blocco unico shizukuAvailable: le capability BASE si pubblicano
-per-azione quando baseTierActive - LaunchApp/OpenUrl sempre, SetDnd/SetRinger
-col grant ACCESS_NOTIFICATION_POLICY (dndPolicyGranted) - mentre Wi-Fi/BT/
-shell/lettori restano gated su Shizuku. Default baseTierActive=false =
-comportamento legacy invariato (test esistenti verdi); il flip lo attiva il
-DI in B4, allineato all'executor che esegue davvero le base senza privilegi.
-Nuovi test host coprono i tre casi (base attivo/grant, base attivo/no-grant,
-base inattivo).
+Breaks up the single shizukuAvailable block: BASE capabilities are published
+per-action when baseTierActive - LaunchApp/OpenUrl always, SetDnd/SetRinger
+with the ACCESS_NOTIFICATION_POLICY grant (dndPolicyGranted) - while Wi-Fi/BT/
+shell/readers stay gated on Shizuku. Default baseTierActive=false =
+legacy behavior unchanged (existing tests green); the flip is activated by
+the DI in B4, aligned with the executor that actually runs base actions without
+privileges. New host tests cover the three cases (base active/grant, base
+active/no-grant, base inactive).
 
 ## `25f275c6c` — 2026-07-16
 
-**fix(settings): posizione background concessa non deve apparire grigia**
+**fix(settings): granted background location must not appear greyed out**
 
-backgroundLocationState metteva NOT_NEEDED prima del grant reale: con
-«sempre/precisa» concesso ma nessuna regola geofence armata, la riga restava
-grigia e sembrava non applicata (segnalazione Lorenzo). Ora un grant completo
-(bg+fg) legge sempre GRANTED; NOT_NEEDED solo se davvero non concesso e non
-richiesto. Test host AndroidUiHealthTest (RED riproduceva il bug).
+backgroundLocationState put NOT_NEEDED before the real grant: with
+«sempre/precisa» granted but no geofence rule armed, the row stayed grey
+and looked unapplied (reported by Lorenzo). Now a full grant (bg+fg) always
+reads GRANTED; NOT_NEEDED only when truly not granted and not required.
+Host test AndroidUiHealthTest (RED reproduced the bug).
 
 ## `9c895b9a4` — 2026-07-16
 
-**docs(P3-3): stato A/B1/B2 landed + roadmap B3/B4 (grant DND)**
+**docs(P3-3): A/B1/B2 landed status + B3/B4 roadmap (DND grant)**
 
 ## `e23c9dc26` — 2026-07-16
 
-**P3-3: routing base/privilegiato nell'executor (iniezione opzionale)**
+**P3-3: base/privileged routing in the executor (optional injection)**
 
-ShizukuActionExecutor accetta un AndroidBaseActionExecutor opzionale: quando
-presente, DND/Ringer/LaunchApp/OpenUrl passano dalle API Android normali e
-NON piu' dallo shell Shizuku; le privilegiate (Wi-Fi/BT/shell/tap/input)
-restano su tools. Default null = comportamento legacy invariato, cosi' il
-telefono di Lorenzo non cambia finche' il DI non attiva il tier base (B4,
-che richiedera' il grant DND-access). Test di routing host + regressioni
-verdi.
+ShizukuActionExecutor accepts an optional AndroidBaseActionExecutor: when
+present, DND/Ringer/LaunchApp/OpenUrl go through the normal Android APIs and
+NO longer through the Shizuku shell; the privileged ones (Wi-Fi/BT/shell/tap/input)
+stay on tools. Default null = legacy behavior unchanged, so Lorenzo's
+phone does not change until the DI activates the base tier (B4, which will
+require the DND-access grant). Host routing tests + regressions green.
 
 ## `326043c68` — 2026-07-16
 
-**P3-3: executor base senza Shizuku (DND/Ringer/LaunchApp/OpenUrl)**
+**P3-3: base executor without Shizuku (DND/Ringer/LaunchApp/OpenUrl)**
 
-AndroidBaseActionExecutor esegue le azioni BASE con API Android normali
-tramite un seam iniettabile (BaseActionSurface): mapping mode, grant policy
-DND e validazione package/URL sono JVM-puri e host-testati; l'adapter reale
-NotificationManager/AudioManager/Intent sara' sottile. Grant mancante ->
-fallimento tipizzato (dnd_policy_unavailable/ringer_policy_unavailable),
-mai crash ne' blocco. Non ancora cablato nell'executor live.
+AndroidBaseActionExecutor runs the BASE actions with normal Android APIs
+through an injectable seam (BaseActionSurface): mode mapping, DND grant
+policy and package/URL validation are pure-JVM and host-tested; the real
+NotificationManager/AudioManager/Intent adapter will be thin. Missing grant ->
+typed failure (dnd_policy_unavailable/ringer_policy_unavailable),
+never a crash nor a block. Not yet wired into the live executor.
 
 ## `a586556d4` — 2026-07-16
 
-**P3-3: router esaustivo ActionPrivilege (BASE vs PRIVILEGED)**
+**P3-3: exhaustive ActionPrivilege router (BASE vs PRIVILEGED)**
 
-Classificatore chiuso azione->tier in engine-core (decision record §7.3,
-piano P3-3 §1): separa le azioni eseguibili con API Android normali (BASE)
-da quelle che richiedono lo shell Shizuku (PRIVILEGED). `when` esaustivo
-senza else: una nuova Action non compila finché non se ne dichiara il
-privilegio. Fondamento per lo split executor e il probe capability
-per-azione dei prossimi commit; nessun consumatore ancora ricablato.
+Closed action->tier classifier in engine-core (decision record §7.3,
+P3-3 plan §1): separates actions runnable with normal Android APIs (BASE)
+from those requiring the Shizuku shell (PRIVILEGED). Exhaustive `when`
+with no else: a new Action does not compile until its privilege is
+declared. Foundation for the executor split and the per-action capability
+probe of the upcoming commits; no consumer rewired yet.
 
 ## `bcbeacbeb` — 2026-07-16
 
-**P3-2B: gate negativo sensore (disable/delete/no-leak) su device**
+**P3-2B: negative sensor gate (disable/delete/no-leak) on device**
 
-Aggiunge ArgusSensorNegativeInstrumentedTest (stesso processo, catena di
-produzione) che prova le proprietà complementari al gate positivo:
-- disable -> onSensorTriggered non produce FIRED;
-- delete  -> onSensorTriggered non produce FIRED;
-- delete dell'ultima regola di un kind -> il reconcile deregistra il
-  sensore fisico (no-leak): cleanupSucceeded, requiredBy vuoto, kind fuori
-  da registeredKinds.
+Adds ArgusSensorNegativeInstrumentedTest (same process, production chain)
+proving the properties complementary to the positive gate:
+- disable -> onSensorTriggered produces no FIRED;
+- delete  -> onSensorTriggered produces no FIRED;
+- deleting the last rule of a kind -> the reconcile deregisters the
+  physical sensor (no-leak): cleanupSucceeded, empty requiredBy, kind out
+  of registeredKinds.
 
-Eseguito sul OnePlus: OK (3 tests). dumpsys sensorservice conferma 0
-connessioni dev.argus vive a fine gate (register all'arm, unregister al
-reconcile su ogni pid). Restano a Lorenzo solo il process-restart fisico e
-la misura consumo/tempo FGS.
+Run on the OnePlus: OK (3 tests). dumpsys sensorservice confirms 0 live
+dev.argus connections at gate end (register at arm, unregister at
+reconcile on every pid). Only the physical process-restart and the FGS
+power/time measurement remain for Lorenzo.
 
 ## `73d03c133` — 2026-07-16
 
 **docs(argus): record the physical sensor gate result and the method lesson**
 
-Gate fisico significant-motion passato nella sostanza (2026-07-16 con Lorenzo):
-effetto+routing dalla notifica reale vista camminando, callback+rearm dai log
-backend e framework, catena fino al journal dal test synthetic. Registra la
-lezione: leggere il journal con am instrument uccide il processo e la scrittura
-async non committa - non e' un bug, e' il metodo di lettura. Restano
-osservazionali disable/delete/process-restart e la misura FGS.
+Significant-motion physical gate passed in substance (2026-07-16 with Lorenzo):
+effect+routing from the real notification seen while walking, callback+rearm from
+the backend and framework logs, chain down to the journal from the synthetic test.
+Records the lesson: reading the journal with am instrument kills the process and
+the async write does not commit - not a bug, it is the reading method. The
+disable/delete/process-restart observations and the FGS measurement remain.
 
 ## `39e6ae7e4` — 2026-07-16
 
 **test(sensor): production-path synthetic proves the sensor pipeline end to end**
 
-Chiama sensorEventIngress().onSensorTriggered nello stesso processo, con regola
-armata, e verifica FIRED + show_notification SUCCEEDED nel journal. Passa.
+Calls sensorEventIngress().onSensorTriggered in the same process, with an armed
+rule, and verifies FIRED + show_notification SUCCEEDED in the journal. Passes.
 
-Chiarisce un falso allarme del gate fisico: sul campo il callback c'era (log
-backend "sensor trigger" x2) e il sensore si ri-armava (re-registrazione framework
-stesso pid), ma reportGates via `am instrument` mostrava il journal vuoto. Causa:
-am instrument uccide e ricrea il processo app, e la scrittura async del journal
-(scope.launch nel callback) non faceva in tempo a committare. La catena e'
-corretta: lo strumento di lettura distruggeva il dato. L'effetto reale era gia'
-provato dalla notifica "movimento significativo" vista da Lorenzo camminando.
+Clears up a false alarm from the physical gate: in the field the callback was there
+("sensor trigger" backend log x2) and the sensor re-armed (framework re-registration,
+same pid), but reportGates via `am instrument` showed an empty journal. Cause:
+am instrument kills and recreates the app process, and the journal's async write
+(scope.launch in the callback) did not manage to commit in time. The chain is
+correct: the reading tool was destroying the data. The real effect was already
+proven by the "movimento significativo" notification Lorenzo saw while walking.
 
 ## `bd9565395` — 2026-07-16
 
 **test(sensor): stage the physical significant-motion gate harness**
 
-armSensorGate arma una regola innocua significant-motion, pronta per il gate
-fisico di Lorenzo (muovi il telefono -> una esecuzione -> rearm). Non va lanciata
-finche' Lorenzo non e' pronto: il FGS resta acceso fino a cleanupGates. Installata
-ma NON armata.
+armSensorGate arms a harmless significant-motion rule, ready for Lorenzo's
+physical gate (move the phone -> one execution -> rearm). It must not be launched
+until Lorenzo is ready: the FGS stays on until cleanupGates. Installed
+but NOT armed.
 
 ## `d765c85e6` — 2026-07-16
 
 **test(sensor): probe publishes significant-motion on real hardware**
 
-Instrumented read-only (non tocca store o regole): sul OnePlus il probe pubblica
-sensor.significant_motion ora che il backend e' collegato. Chiude il punto 1 del
-gate device senza Lorenzo. availableTriggers contiene sensor.significant_motion
-= true; regole di Lorenzo intatte dopo il reinstall.
+Read-only instrumented test (touches no store or rules): on the OnePlus the probe
+publishes sensor.significant_motion now that the backend is wired. Closes point 1
+of the device gate without Lorenzo. availableTriggers contains sensor.significant_motion
+= true; Lorenzo's rules intact after the reinstall.
 
 ## `c40e6a915` — 2026-07-16
 
 **docs(argus): record P3-2B host-complete, ready for physical gate**
 
-Implementazione significant-motion chiusa lato host in TDD; stato READY FOR
-PHYSICAL GATE (non COMPLETE) perche' movimenti, process restart e negativi
-disable/delete richiedono Lorenzo. Mappa i 20 test dell'handoff alla copertura
-reale: cosa e' nella suite nuova, cosa e' coperto per composizione/costruzione,
-cosa era gia' di Codex in P3-2A. Full gate 759/759.
+Significant-motion implementation closed on the host side in TDD; status READY FOR
+PHYSICAL GATE (not COMPLETE) because movements, process restart and the
+disable/delete negatives require Lorenzo. Maps the handoff's 20 tests to the real
+coverage: what is in the new suite, what is covered by composition/construction,
+what was already Codex's in P3-2A. Full gate 759/759.
 
 ## `555bef031` — 2026-07-16
 
 **test(sensor): a corrupt detection record fails closed**
 
-Un wire name di kind inesistente nelle prefs deve rendere il pending null, non
-crashare: nessuna redelivery su dati corrotti.
+A wire name of a nonexistent kind in the prefs must make the pending null, not
+crash: no redelivery on corrupt data.
 
 ## `204de74c4` — 2026-07-16
 
 **feat(sensor): wire the significant-motion runtime and publish the capability**
 
-Collega il runtime sensori al ciclo di vita e ABILITA la capability nello stesso
-slice del backend reale, come prescrive il decision record 6.4: il probe pubblica
-sensor.significant_motion solo nell'intersezione hardware + backend collegato.
+Wires the sensor runtime into the lifecycle and ENABLES the capability in the same
+slice as the real backend, as decision record 6.4 prescribes: the probe publishes
+sensor.significant_motion only in the intersection of hardware + wired backend.
 
-- registrar: ramo Trigger.Sensor -> sensor.reconcile(), pre-check sulla
-  capability granulare, esclude needsReview/failed;
-- enablement e runtime controller: reconcile sensori in enable/disable/rollback e
-  su APP_START/boot/package (i one-shot non sopravvivono a process death). Il
-  recovery dei pending usa requiredBy come insieme autorizzato, senza dare lo
-  store al controller;
-- DI: un solo SharedForegroundSentinel possiede il backend FGS; connectivity e
-  sensori ne prendono la vista demand, cosi' il coordinator connectivity resta
-  invariato. Il ciclo backend->ingress->coordinator->backend e' spezzato da un
-  Provider<SensorEventIngress> risolto solo al primo callback;
+- registrar: Trigger.Sensor branch -> sensor.reconcile(), pre-check on the
+  granular capability, excludes needsReview/failed;
+- enablement and runtime controller: sensor reconcile on enable/disable/rollback and
+  on APP_START/boot/package (one-shots do not survive process death). Pending
+  recovery uses requiredBy as the authorized set, without handing the store
+  to the controller;
+- DI: a single SharedForegroundSentinel owns the FGS backend; connectivity and
+  sensors take its demand view, so the connectivity coordinator stays
+  unchanged. The backend->ingress->coordinator->backend cycle is broken by a
+  Provider<SensorEventIngress> resolved only at the first callback;
 - IMPLEMENTED_SENSOR_KINDS = {SIGNIFICANT_MOTION}.
 
-Grafo Hilt verde (nessun ciclo/binding mancante), suite automation-android
-invariata, AndroidTest compilato.
+Hilt graph green (no cycles/missing bindings), automation-android suite
+unchanged, AndroidTest compiled.
 
 ## `b5ed5a09d` — 2026-07-16
 
 **feat(sensor): android significant-motion backend and persisted detection store**
 
-Backend via SensorManager.requestTriggerSensor (one-shot, non registerListener),
-non Shizuku: la capability sopravvive a un outage Shizuku. Il listener rimuove
-se stesso allo scatto e delega all'ingress; non tocca mai TriggerEvent.values.
-Il backend non si fida dello stato calcolato dal probe: rifiuta mode != ONE_SHOT
-o wakeUp=false. Robolectric copre solo i path negativi (kind sbagliato, sensore
-assente, cancel no-op); il path positivo e' il gate fisico.
+Backend via SensorManager.requestTriggerSensor (one-shot, not registerListener),
+not Shizuku: the capability survives a Shizuku outage. The listener removes
+itself on fire and delegates to the ingress; it never touches TriggerEvent.values.
+The backend does not trust the probe-computed state: it rejects mode != ONE_SHOT
+or wakeUp=false. Robolectric covers only the negative paths (wrong kind, missing
+sensor, cancel no-op); the positive path is the physical gate.
 
-Detection store su SharedPreferences con commit sincrono: unico stato sensori
-persistito. Corruption-safe (fingerprint/kind/sequence malformati -> pending
-null, mai crash). Event id stabile sulla redelivery, sequenza monotona per la
-detection successiva, pending di una revisione superata non corrisponde.
+Detection store on SharedPreferences with synchronous commit: the only persisted
+sensor state. Corruption-safe (malformed fingerprint/kind/sequence -> pending
+null, never a crash). Stable event id on redelivery, monotonic sequence for the
+next detection, a pending from a superseded revision does not match.
 
 ## `af8e98c34` — 2026-07-16
 
 **feat(sensor): share one foreground sentinel between connectivity and sensors**
 
-Il decision record P3 6.2 impone un solo FGS con demand reasons condivisi, non
-un servizio per dominio. SharedForegroundSentinel possiede l'unico backend e lo
-accende finche' almeno un dominio lo richiede: togliere il Wi-Fi non spegne il
-sensore e viceversa.
+P3 decision record 6.2 mandates a single FGS with shared demand reasons, not
+one service per domain. SharedForegroundSentinel owns the single backend and
+keeps it on as long as at least one domain demands it: removing Wi-Fi does not
+turn off the sensor and vice versa.
 
-demandBackend(reason) espone il sentinel come ConnectivitySentinelBackend per un
-singolo demand, cosi' il coordinator connectivity lo usa SENZA modifiche (cambia
-solo il wiring) e il coordinator sensori dichiara il proprio demand quando ha
-almeno un kind registrato. start/stop scattano solo sulla transizione
-vuoto<->non-vuoto: nessun avvio o arresto ridondante del FGS.
+demandBackend(reason) exposes the sentinel as a ConnectivitySentinelBackend for a
+single demand, so the connectivity coordinator uses it WITHOUT changes (only the
+wiring changes) and the sensor coordinator declares its own demand when it has
+at least one registered kind. start/stop fire only on the empty<->non-empty
+transition: no redundant FGS start or stop.
 
 ## `b2e9919e0` — 2026-07-16
 
 **feat(sensor): add the significant-motion coordinator and ingress core**
 
-Cuore logico del runtime sensori P3-2B, testato in JVM (14 test). Non pubblica
-ancora la capability: il backend fisico e il wiring arrivano nelle slice
-successive, e IMPLEMENTED_SENSOR_KINDS resta vuoto finche' la catena non e'
-completa.
+Logical core of the P3-2B sensor runtime, JVM-tested (14 tests). Does not
+publish the capability yet: the physical backend and the wiring land in the
+next slices, and IMPLEMENTED_SENSOR_KINDS stays empty until the chain is
+complete.
 
-Coordinator: registrazione fisica CONDIVISA per kind (piu' regole dello stesso
-kind = un solo requestTriggerSensor, fan-out a valle). Lo stato registered vive
-SOLO in memoria: dopo process recreation e' vuoto e il reconcile ri-registra dal
-demand desiderato, cosi' un crash non lascia mai un falso "registrato ma morto".
-Unavailable strutturale -> NEEDS_REVIEW, failure transitorio -> retry bounded.
+Coordinator: SHARED physical registration per kind (multiple rules of the same
+kind = a single requestTriggerSensor, fan-out downstream). The registered state
+lives ONLY in memory: after process recreation it is empty and the reconcile
+re-registers from the desired demand, so a crash never leaves a false
+"registered but dead". Structural unavailable -> NEEDS_REVIEW, transient failure
+-> bounded retry.
 
-Ingress: un sensore one-shot si disattiva da solo allo scatto, quindi il
-callback marca consumed prima di tutto e ri-arma sempre in NonCancellable, senza
-inghiottire la CancellationException (un one-shot non riarmato e' un sensore
-morto in silenzio). Event id stabile sulla redelivery via detection pending;
-la detection successiva ne ottiene uno nuovo. Fingerprint della vecchia
-revisione non corrisponde dopo un edit. Mai azioni dal listener: solo envelope
-verso l'Engine.
+Ingress: a one-shot sensor deactivates itself on fire, so the callback marks
+consumed first of all and always re-arms in NonCancellable, without swallowing
+the CancellationException (a non-rearmed one-shot is a sensor silently dead).
+Stable event id on redelivery via the pending detection; the next detection
+gets a new one. The old revision's fingerprint does not match after an edit.
+Never actions from the listener: only envelopes towards the Engine.
 
 ## `bf487b460` — 2026-07-16
 
@@ -1115,181 +1114,180 @@ verso l'Engine.
 
 **docs(argus): hand P2 back to Codex closed, with the reversals he doesn't know**
 
-P2 chiusa su master con l'evidenza riga per riga. L'handoff mette in testa cio'
-che Codex non puo' dedurre dai diff: le decisioni di Lorenzo che RIBALTANO cose
-scritte come definitive (shell da contatto whitelistato, B8 declassata da
-barriera a trade-off, sensori riaperti) e il principio D0 con la tassonomia
-delle quattro classi.
+P2 closed on master with line-by-line evidence. The handoff puts up front what
+Codex cannot deduce from the diffs: Lorenzo's decisions that OVERTURN things
+written as final (shell from a whitelisted contact, B8 downgraded from a
+barrier to a trade-off, sensors reopened) and the D0 principle with the
+four-class taxonomy.
 
-Registra anche i miei errori: l'anello di retroazione Wi-Fi sovrastimato quando
-l'evidenza contraria era gia' nel mio output, il cooldown 0 nell'harness e il
-cleanup che non annulla le registrazioni OS.
+It also records my mistakes: the Wi-Fi feedback loop overestimated when the
+contrary evidence was already in my own output, the cooldown 0 in the harness
+and the cleanup that does not cancel OS registrations.
 
-E una trappola nuova sul suo 9: il confronto sha256 repo/host mente su Windows
-per via dei CRLF.
+Plus a new trap on his point 9: the repo/host sha256 comparison lies on Windows
+because of CRLF.
 
 ## `5b2efd8fe` — 2026-07-15
 
 **fix(ui): round geofence coordinates and close the physical gate**
 
-La review mostrava 15.266659599999999: Double.toString espone la
-rappresentazione IEEE 754 a chi deve solo riconoscere un posto. Cinque decimali
-valgono ~1 m, e su raggi da centinaia di metri il resto e' rumore. Trovato da
-Lorenzo sul device.
+The review showed 15.266659599999999: Double.toString exposes the IEEE 754
+representation to someone who only needs to recognize a place. Five decimals
+are worth ~1 m, and on radii of hundreds of meters the rest is noise. Found by
+Lorenzo on the device.
 
-Chiude anche l'ultimo punto della DoD P2. Il 2026-07-15 alle 20:03 e alle 20:08
-Lorenzo ha attraversato due confini veri: FIRED una volta ciascuna, tutte le
-azioni riuscite. Le stesse regole, stesso raggio, stesso posto, due ore prima
-scattavano due volte in tre minuti a device fermo: il fix 4339244 regge sul
-campo, non solo negli unit test.
+Also closes the last point of the P2 DoD. On 2026-07-15 at 20:03 and 20:08
+Lorenzo crossed two real boundaries: FIRED once each, all actions succeeded.
+The same rules, same radius, same place, two hours earlier fired twice in
+three minutes with the device still: fix 4339244 holds in the field, not
+just in the unit tests.
 
-Non promettiamo la latenza: due bordi entro il minuto non sono una statistica e
-l'aspettativa dichiarata resta quella di E14.
+We make no latency promise: two edges within the minute are not a statistic and
+the declared expectation remains E14's.
 
 ## `c0386041f` — 2026-07-15
 
 **Merge branch feat/argus-p2-background: P2 background triggers**
 
-Telefonia (SMS + chiamate), OTP autocopy, Connectivity (BT/cavo/Wi-Fi con
-sentinella FGS on-demand), Geofence durable via LocationManager, shell statica da
-trigger fidati, crash-consistency e regex OTP a tempo lineare.
+Telephony (SMS + calls), OTP autocopy, Connectivity (BT/cable/Wi-Fi with an
+on-demand FGS sentinel), durable Geofence via LocationManager, static shell from
+trusted triggers, crash-consistency and linear-time OTP regex.
 
-Gate FISICI passati con Lorenzo il 2026-07-15: SMS/OTP reale, chiamata reale
-(FIRED x1 + duplicato soppresso, cioe' il fix dea6f79 confermato sul campo e non
-solo negli unit test), cavo, Bluetooth ACL. FGS on-demand osservato comparire
-dopo l'arm e sparire dopo il cleanup.
+PHYSICAL gates passed with Lorenzo on 2026-07-15: real SMS/OTP, real call
+(FIRED x1 + duplicate suppressed, i.e. fix dea6f79 confirmed in the field and not
+just in the unit tests), cable, Bluetooth ACL. On-demand FGS observed appearing
+after the arm and disappearing after the cleanup.
 
-Esempio 1 geofence: passato con posizione SIMULATA, con lo stato reale del
-telefono verificato (wifi_on=0, bluetooth_on=1). L'attraversamento FISICO resta
-un gate osservazionale post-merge: rischio residuo accettato esplicitamente da
-Lorenzo, NON dichiarato come PASS.
+Example 1 geofence: passed with a SIMULATED position, with the phone's real
+state verified (wifi_on=0, bluetooth_on=1). The PHYSICAL crossing stays a
+post-merge observational gate: residual risk explicitly accepted by Lorenzo,
+NOT declared a PASS.
 
-Il gate fisico ha ripagato subito: ha trovato un flapping del geofence che
-nessun test sintetico poteva mostrare, perche' nel mock la posizione la decide
-il test (fix in 4339244).
+The physical gate paid off immediately: it found a geofence flapping that no
+synthetic test could show, because in the mock the position is decided by the
+test (fix in 4339244).
 
-Su decisione di Lorenzo, la shell e' ora innescabile anche da una chat WhatsApp
-1:1 whitelistata (f29e8fa): il divieto precedente era piu' largo della sua linea
-etica. SMS e chiamate restano esclusi perche' l'identita' e' falsificabile.
+By Lorenzo's decision, the shell can now also be triggered from a whitelisted
+1:1 WhatsApp chat (f29e8fa): the previous ban was broader than his ethical
+line. SMS and calls stay excluded because the identity is spoofable.
 
-Audit pre-merge: 12 punti, nessun finding bloccante. Full gate 758/758 verde
-dopo ogni cambiamento di codice.
+Pre-merge audit: 12 points, no blocking finding. Full gate 758/758 green after
+every code change.
 
 ## `7024618b2` — 2026-07-15
 
 **docs(argus): record the field flapping bug and the shell whitelist decision**
 
-Piano: la sezione geofence ora contiene la diagnosi PROVATA del flapping (due
-EXIT consecutive sono impossibili per costruzione, quindi l'ENTER intermedio era
-certo anche senza vederlo) e il fix. Registra anche la correzione a una nostra
-analisi frettolosa: avevamo detto che l'Esempio 1 sabota il proprio sensore
-spegnendo il Wi-Fi, ma "Wifi scanning is always available" era gia' nel nostro
-output e lo avevamo ignorato.
+Plan: the geofence section now contains the PROVEN diagnosis of the flapping
+(two consecutive EXITs are impossible by construction, so the intermediate ENTER
+was certain even without seeing it) and the fix. It also records the correction
+to a hasty analysis of ours: we had said Example 1 sabotages its own sensor by
+turning off Wi-Fi, but "Wifi scanning is always available" was already in our
+output and we had ignored it.
 
-DoD: l'Esempio 1 fisico NON diventa un PASS perche' conviene. E' registrato come
-rischio residuo accettato esplicitamente da Lorenzo, che e' una strada che la DoD
-di Codex prevedeva.
+DoD: the physical Example 1 does NOT become a PASS because it's convenient. It
+is recorded as a residual risk explicitly accepted by Lorenzo, which is a path
+Codex's DoD anticipated.
 
-Design: C2/E14 dicono ora che il framework puo' annunciare bordi FALSI a device
-fermo, non solo mancarne di veri. 10.2 riflette la revoca del divieto shell da
-parte di Lorenzo, con la ragione per cui PhoneState resta fuori (identita'
-falsificabile, limite reale e non prudenza). L'intestazione non dichiara piu' P2
-in corso.
+Design: C2/E14 now say the framework can announce FALSE edges on a stationary
+device, not just miss real ones. 10.2 reflects Lorenzo's revocation of the shell
+ban, with the reason PhoneState stays out (spoofable identity, a real limit and
+not caution). The header no longer declares P2 in progress.
 
 ## `4339244c9` — 2026-07-15
 
 **fix(geofence): refuse a framework edge the real position contradicts**
 
-Bug di campo 2026-07-15: device fermo al centro di un'area da 200 m, due EXIT in
-tre minuti, Wi-Fi spento due volte. Il dedup non poteva accorgersene: fra i due
-EXIT era arrivato un ENTER altrettanto spurio, e per lo store erano bordi reali.
-Un EXIT ripetuto e' impossibile per costruzione, quindi il ping-pong era certo
-anche senza vederlo (una regola solo-EXIT non matcha l'ENTER e non lo logga).
+Field bug 2026-07-15: device stationary at the center of a 200 m area, two EXITs
+in three minutes, Wi-Fi turned off twice. Dedup couldn't notice: between the two
+EXITs an equally spurious ENTER had arrived, and to the store they were real
+edges. A repeated EXIT is impossible by construction, so the ping-pong was
+certain even without seeing it (an EXIT-only rule doesn't match the ENTER and
+doesn't log it).
 
-Il design prometteva isteresi contro il rumore ma la implementava solo nel
-recupero post-crash. Ora la stessa difesa, con lo stesso margine di 25 m, copre
-anche il percorso normale: un bordo smentito dalla posizione non avanza la
-sequenza, altrimenti il dedup lo tratterebbe come avvenuto davvero.
+The design promised hysteresis against noise but implemented it only in
+post-crash recovery. Now the same defense, with the same 25 m margin, also
+covers the normal path: an edge contradicted by the position does not advance
+the sequence, otherwise dedup would treat it as if it really happened.
 
-Fail-open deliberato: senza posizione leggibile il bordo si accetta. Perdere un
-attraversamento vero e' peggio che accettarne uno spurio, e senza posizione non
-abbiamo elementi per smentire il framework, che resta il segnale primario.
-Vicino alla circonferenza, entro l'isteresi, l'ultima parola resta sua.
+Deliberate fail-open: without a readable position the edge is accepted. Losing a
+real crossing is worse than accepting a spurious one, and without a position we
+have no basis to contradict the framework, which stays the primary signal. Near
+the circumference, within the hysteresis, the last word stays with it.
 
-Il verificatore dipende da una lookup del trigger, non dall'intero
+The verifier depends on a trigger lookup, not on the whole
 AutomationStore.
 
 ## `f29e8fa7c` — 2026-07-15
 
 **feat(shell): let a whitelisted contact trigger an approved command**
 
-Decisione di Lorenzo: revoca il proprio divieto precedente. La regola era piu'
-larga della sua linea etica — vietava anche di far PARTIRE un comando statico,
-non solo di sceglierlo. L'injection resta impossibile per costruzione: il cmd e'
-letterale nel fingerprint, il messaggio e' un interruttore. Cambia solo chi puo'
-premerlo.
+Lorenzo's decision: he revokes his own previous ban. The rule was broader than
+his ethical line — it also forbade STARTING a static command, not just choosing
+it. Injection stays impossible by construction: the cmd is literal in the
+fingerprint, the message is a switch. Only who can press it changes.
 
-SMS e chiamate restano esclusi, e non per prudenza: mittente e caller ID sono
-falsificabili, quindi nessuna whitelist puo' renderli un'identita'. Il
-conversationId WhatsApp invece e' una chiave stabile (E15).
+SMS and calls stay excluded, and not out of caution: sender and caller ID are
+spoofable, so no whitelist can make them an identity. The WhatsApp
+conversationId, on the other hand, is a stable key (E15).
 
-L'identita' e' verificata tre volte in modo concorde (validator, FirePolicy,
-executor) e sull'evento REALE, non solo sul trigger dichiarato. L'executor
-riceve la whitelist con default vuoto: chi dimentica di cablarla ottiene il
-comportamento chiuso. La whitelist e' riletta a ogni scatto, cosi' rimuovere un
-contatto gli revoca la shell subito.
+The identity is verified three times in agreement (validator, FirePolicy,
+executor) and on the REAL event, not just on the declared trigger. The executor
+receives the whitelist with an empty default: whoever forgets to wire it gets
+the closed behavior. The whitelist is re-read on every fire, so removing a
+contact revokes its shell immediately.
 
-La review guadagna shell_contact_trigger: il rischio nuovo non e' cosa esegue ma
-che il momento lo scelga il contatto.
+The review gains shell_contact_trigger: the new risk is not what it runs but
+that the contact chooses the moment.
 
-Harness: i gate ora armano con cooldown 5 min invece di 0. Il default 0 lasciava
-le regole geofence esposte al flapping del motore di posizione, contro cui il
-design (C2) prescrive proprio un cooldown per-regola.
+Harness: the gates now arm with a 5 min cooldown instead of 0. The default 0
+left geofence rules exposed to the position engine's flapping, against which the
+design (C2) prescribes exactly a per-rule cooldown.
 
 ## `c59b3d42d` — 2026-07-15
 
 **docs(argus): record the pre-merge audit with twelve verdicts**
 
-Dodici punti dell'handoff Codex 5, nessun finding bloccante. Le righe ereditate
-sono marcate come tali: persistenza pending/ack e lifecycle restano prove di
-Codex non rieseguite, non conclusioni mie.
+Twelve points from the Codex 5 handoff, no blocking finding. The inherited lines
+are marked as such: pending/ack persistence and lifecycle stay Codex evidence
+not re-run, not my conclusions.
 
-Due difese meritano di essere citate perche' non si possono dimenticare:
-StaticShellSafety e' fonte unica con when esaustivi sui sealed, quindi una nuova
-famiglia di trigger non compila finche' non si decide se la shell e' ammessa; e
-PrefsCallStateStore impedisce con un require a runtime che un SMS entri nel
-pending persistito.
+Two defenses deserve mention because they must not be forgotten: StaticShellSafety
+is the single source with exhaustive when over the sealed types, so a new trigger
+family doesn't compile until you decide whether the shell is allowed; and
+PrefsCallStateStore prevents, with a runtime require, an SMS from entering the
+persisted pending.
 
 ## `881e876d5` — 2026-07-15
 
 **docs(argus): record the physical gate evidence and correct three misclassed limits**
 
-Piano P2: chiamata/cavo/BT chiusi come physical E2E con l'evidenza del journal
-(la chiamata conferma dea6f79 sul campo: secondo broadcast SUPPRESSED_DUPLICATE).
-Geofence separa esplicitamente il PASS con posizione simulata dall'attraversamento
-fisico ancora aperto, come chiede l'handoff Codex 3.2. DoD ora e' una matrice con
-la classe di evidenza per riga: un solo punto resta aperto.
+P2 plan: call/cable/BT closed as physical E2E with journal evidence (the call
+confirms dea6f79 in the field: second broadcast SUPPRESSED_DUPLICATE). Geofence
+explicitly separates the PASS with a simulated position from the still-open
+physical crossing, as the Codex 3.2 handoff requires. DoD is now a matrix with
+the evidence class per row: only one point stays open.
 
-Design: D0 registra la direttiva di Lorenzo (limiti solo etici) con la tassonomia
-delle quattro classi. B8 declassata da "barriera invalicabile" a trade-off di
-latenza: per automazione non presidiata il brain gratuito basta, quindi il loop
-interattivo diventa due tier e quello a pagamento e' opzionale. Sensori e DWELL
-riportati alla loro classe reale.
+Design: D0 records Lorenzo's directive (ethical-only limits) with the four-class
+taxonomy. B8 downgraded from "insurmountable barrier" to a latency trade-off: for
+unattended automation the free brain is enough, so the interactive loop becomes
+two tiers and the paid one is optional. Sensors and DWELL brought back to their
+real class.
 
 ## `7712afc2f` — 2026-07-15
 
 **test(gates): add the physical trigger harness for P2 radio edges**
 
-I gate fisici non possono iniettare l'evento: l'harness arma le regole
-diagnostiche e lascia il processo morire, cosi' modem/cavo/radio/framework
-consegnano davvero. Da qui i tre tempi (arm* -> azione fisica -> report/cleanup),
-necessari anche perche' una camminata per il geofence eccede qualunque timeout.
+The physical gates can't inject the event: the harness arms the diagnostic rules
+and lets the process die, so modem/cable/radio/framework really deliver. Hence
+the three phases (arm* -> physical action -> report/cleanup), also necessary
+because a walk for the geofence exceeds any timeout.
 
-reportGates non stampa mai il campo detail e asserisce che non contenga run di
-cifre: stamparlo sarebbe la fuga di PII che il gate deve escludere.
-reportInventory conta le regole senza rivelarne il contenuto.
+reportGates never prints the detail field and asserts it contains no run of
+digits: printing it would be the PII leak the gate must exclude. reportInventory
+counts the rules without revealing their content.
 
-La geocodifica dell'indirizzo avviene sul device: non entra nel repo.
+The address geocoding happens on the device: it doesn't enter the repo.
 
 ## `45f95c68b` — 2026-07-15
 
@@ -1331,14 +1329,14 @@ La geocodifica dell'indirizzo avviene sul device: non entra nel repo.
 
 **docs(argus): hand P2 back to Codex with proven state and open questions**
 
-Handoff inverso Claude -> Codex: snapshot verificato oggi (gate verde su
-02592b2, bridge deployato identico al repo, permessi device), i 13 commit P2
-con l'intento dietro, le trappole non deducibili dai diff (entry point Hilt sui
-receiver, encodeDefaults e fingerprint, textMatch), le direttive esplicite di
-Lorenzo e la lista di cio' che NON e' provato.
+Reverse handoff Claude -> Codex: snapshot verified today (green gate on 02592b2,
+deployed bridge identical to the repo, device permissions), the 13 P2 commits
+with the intent behind them, the traps not deducible from the diffs (Hilt entry
+points on the receivers, encodeDefaults and fingerprint, textMatch), Lorenzo's
+explicit directives and the list of what is NOT proven.
 
-Corregge la diagnosi errata della "race Shizuku" nel ledger 23: il rifiuto
-run_shell era strutturale, non una race.
+Corrects the wrong diagnosis of the "Shizuku race" in ledger 23: the run_shell
+refusal was structural, not a race.
 
 ## `02592b2a9` — 2026-07-14
 
@@ -2119,18 +2117,18 @@ engine-core's AutomationStore + AuditSink on Room 2.6.1 + KSP.
 
 **Merge branch 'feat/argus-engine-ui': Argus M1 (engine-core) + M2 (UI + demo APK)**
 
-M1 — engine-core (Kotlin/JVM puro): modelli dominio, Engine (lazy state,
-last-writer-wins, isolamento errori, cooldown generativo), CronSchedule/DST,
-DraftValidator (invarianti sicurezza), CliBridgeParser, CapabilityManifest,
-E2E dei 3 esempi + security gate. 67 test verdi.
+M1 — engine-core (pure Kotlin/JVM): domain models, Engine (lazy state,
+last-writer-wins, error isolation, generative cooldown), CronSchedule/DST,
+DraftValidator (safety invariants), CliBridgeParser, CapabilityManifest,
+E2E of the 3 examples + security gate. 67 tests green.
 
-M2 — ui (Compose M3 dark, italiano) + app: tema da token, contratti verbatim,
-RuleRenderMapper, componenti condivisi, 6 schermi stateless, Fixtures + NavHost,
-APK demo installabile (inerte, zero permessi). 14 test ui verdi.
+M2 — ui (Compose M3 dark, Italian) + app: token-based theme, verbatim contracts,
+RuleRenderMapper, shared components, 6 stateless screens, Fixtures + NavHost,
+installable demo APK (inert, zero permissions). 14 ui tests green.
 
-Sviluppo agent-driven (Opus 4.8) con review per unità (10 unità, tutte Approved),
-review finale whole-branch + fix-pass (tutti Approved). APK installato e
-smoke-tested su oneplus. P0-B (glue Android reale) pianificato per la prossima sessione.
+Agent-driven development (Opus 4.8) with per-unit review (10 units, all Approved),
+final whole-branch review + fix-pass (all Approved). APK installed and
+smoke-tested on oneplus. P0-B (real Android glue) planned for the next session.
 
 ## `644d4986b` — 2026-07-13
 
@@ -2374,54 +2372,54 @@ actions no longer share the generic Bolt fallback with benign ones.
 
 **plan: M2 (UI Compose) + P0-B (Android glue)**
 
-- plan-M2: modulo ui + app demo, 13 task, schermi stateless dai contratti
-  handoff §6, tema da design §5, RuleRenderMapper testato, APK demo.
+- plan-M2: ui module + demo app, 13 tasks, stateless screens from the handoff
+  §6 contracts, theme from design §5, tested RuleRenderMapper, demo APK.
 - plan-P0B: core-shizuku, device-tools, Room, brain-android (CliBridge),
-  automation-android (executor/time-trigger/probe/approval/VM), FGS minimo.
-  Punti da verificare su device marcati 🔬. Eseguito prossima sessione.
+  automation-android (executor/time-trigger/probe/approval/VM), minimal FGS.
+  Points to verify on device marked 🔬. Executed next session.
 
 ## `5bb417f6c` — 2026-07-13
 
-**chore(repo): .gitattributes (LF per gradlew, binari marcati)**
+**chore(repo): .gitattributes (LF for gradlew, binaries marked)**
 
 ## `96cbdc57e` — 2026-07-13
 
 **chore(repo): M0 setup — rev3 docs, design handoff, gradle 8.13 wrapper**
 
-- spec aggiornata a rev 3 + handoff-frontend nei specs/
-- piano P0-A aggiornato a rev 2 (14 file, 13 task TDD)
-- design handoff Claude Design (rev 1a approvata) in docs/design/
-- CLAUDE.md progetto, .gitignore, settings+properties, wrapper 8.13
-- sviluppo spostato su PC negozio (C:\argus), storia importata da oneplus
+- spec updated to rev 3 + handoff-frontend in specs/
+- P0-A plan updated to rev 2 (14 files, 13 TDD tasks)
+- design handoff Claude Design (rev 1a approved) in docs/design/
+- project CLAUDE.md, .gitignore, settings+properties, wrapper 8.13
+- development moved to the negozio PC (C:\argus), history imported from oneplus
 
 ## `d6136377e` — 2026-07-12
 
 **plan: P0-A engine-core (Kotlin puro, device-independent, TDD)**
 
-Motore automazioni completo come libreria JVM: modelli dominio serializzabili,
-ConditionEvaluator, TriggerMatcher, Engine (cooldown/priorita/dispatch),
-ConflictDetector euristico, CliBridgeParser, CapabilityManifest. Shizuku/Room/
-AlarmManager dietro interfacce iniettate (impl in P0-B). 11 task TDD, i 3
-esempi dello spec coperti lato engine.
+Complete automation engine as a JVM library: serializable domain models,
+ConditionEvaluator, TriggerMatcher, Engine (cooldown/priority/dispatch),
+heuristic ConflictDetector, CliBridgeParser, CapabilityManifest. Shizuku/Room/
+AlarmManager behind injected interfaces (impl in P0-B). 11 TDD tasks, the spec's
+3 examples covered on the engine side.
 
 ## `4f58381e7` — 2026-07-12
 
-**design rev2: rianalisi post-verifica Hermes**
+**design rev2: re-analysis after Hermes verification**
 
-- B5 risolto: guida-agent/bridge.py (reference impl HTTP) + hermes proxy verificati
-- Brain rimodellato su 2 transport (CliBridge codex-gratis one-shot / OpenAICompat veloce)
-- B8 nuovo: latenza brain gratuito ~10-30s -> loop interattivo spostato a P3
-- AccessibilityService declassato a opzionale (uiautomator dump + input via Shizuku coprono core)
-- D6 Shizuku-come-astrazione (shell UID default, root solo per boot-persistence)
-- containment injection: reply_target vincolato a trigger.sender
-- edge case privacy (contenuti escono da homelab) + contesto WhatsApp limitato a notifica
-- background-location esplicitato, batteria "bassa" ridimensionata onestamente
-- phasing riordinato: automazioni prima (latency-tolerant), schermo interattivo dopo
+- B5 resolved: guida-agent/bridge.py (HTTP reference impl) + hermes proxy verified
+- Brain remodeled onto 2 transports (CliBridge codex-free one-shot / OpenAICompat fast)
+- B8 new: free brain latency ~10-30s -> interactive loop moved to P3
+- AccessibilityService downgraded to optional (uiautomator dump + input via Shizuku cover the core)
+- D6 Shizuku-as-abstraction (shell UID default, root only for boot-persistence)
+- containment injection: reply_target bound to trigger.sender
+- privacy edge case (content leaves the homelab) + WhatsApp context limited to the notification
+- background-location made explicit, "low" battery honestly rescaled
+- phasing reordered: automations first (latency-tolerant), interactive screen later
 
 ## `522d8bb35` — 2026-07-12
 
 **design: spec Argus — agente LLM automazione Android**
 
-Design approvato in brainstorming: motore Tasker-class always-live con
-LLM compilatore NL->regole, Brain pluggable (Hermes/OAuth), Shizuku,
-approva-alla-creazione, + sezione edge case/barriere/conflitti con soluzioni.
+Design approved in brainstorming: an always-live Tasker-class engine with an
+LLM compiling NL->rules, pluggable Brain (Hermes/OAuth), Shizuku,
+approve-at-creation, + a section of edge cases/barriers/conflicts with solutions.
