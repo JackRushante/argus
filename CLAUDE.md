@@ -53,7 +53,7 @@ Motore di automazione Tasker-class always-on: l'LLM (via Hermes o altro Brain co
 
 - **M1 / P0-A**: engine core JVM completato e coperto da test.
 - **M2 / UI**: 6 schermi Compose e app demo su fixture completati.
-- **M3 / P0-B** (gate finali): persistenza, approvazione, audit, bridge Hermes v1, scheduler, Shizuku executor e wiring Android sono implementati. TUTTI i gate esterni sono chiusi (2026-07-14 sera): E2E Hermes/DND, process-death, outage Shizuku, smoke sei schermi, full gate, reboot/LNP Android 16 e rerun compile live post-clean-install. Il bridge Argus è solo `https://hermes.tail04462d.ts.net`; la porta 8090 appartiene alla Guida Bali e non è un fallback. Il telefono target è `oneplus` (100.74.117.9, Tailscale).
+- **M3 / P0-B** (gate finali): persistenza, approvazione, audit, bridge Hermes v1, scheduler, Shizuku executor e wiring Android sono implementati. I gate esterni storici sono documentati nei report privati; endpoint self-hosted, nomi device e indirizzi del tailnet non appartengono al repository pubblico.
 - **P1 / notifiche generative**: COMPLETA. Lane `invoke_llm`, reply WhatsApp reale, E13 cifrato, whitelist/binding 1:1 e anti-eco verificati.
 - **P2 / background triggers**: COMPLETA e mergiata. SMS/OTP, chiamate, connectivity/power/Bluetooth e geofence fisici verificati; handoff chiusura `2026-07-16-argus-claude-to-codex-p2-closed.md`.
 - **P3**: ATTIVA. Ordine vincolante: decision/dataflow → lettori parametrici → sensori → base senza Shizuku → audit/TTS → computer-use lento e poi veloce opzionale.

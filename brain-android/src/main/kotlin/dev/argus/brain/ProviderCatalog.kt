@@ -45,7 +45,7 @@ data class ModelPrice(
 data class ProviderSpec(
     val id: ProviderId,
     val displayName: String,
-    val defaultBaseUrl: String?, // null per CUSTOM_OPENAI_COMPAT (endpoint dell'utente)
+    val defaultBaseUrl: String?, // null per endpoint self-hosted/custom configurati dall'utente
     val authStyle: AuthStyle,
     val defaultModels: List<String>,
     val quirks: ProviderQuirks = ProviderQuirks(),
@@ -75,7 +75,7 @@ object ProviderCatalog {
         ProviderSpec(
             id = ProviderId.HERMES,
             displayName = "Hermes (self-hosted)",
-            defaultBaseUrl = AndroidBridgeConfigurationStore.DEFAULT_BASE_URL,
+            defaultBaseUrl = null,
             authStyle = AuthStyle.BEARER,
             defaultModels = emptyList(),
             // TOKEN-ONLY: self-hosted, nessun dollaro da mostrare (il wire non trasporta usage fino a S15).

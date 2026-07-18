@@ -41,7 +41,7 @@ class GenerativeRuntimeReadinessTest {
     private class FakeBridgeConfiguration(
         private val bearer: () -> String?,
     ) : BridgeConfigurationStore {
-        override fun baseUrl(): String = "https://hermes.tail04462d.ts.net"
+        override fun baseUrl(): String = "https://hermes.example"
         override suspend fun saveConfiguration(baseUrl: String, bearerToken: String?) = false
         override suspend fun saveBaseUrl(value: String) = false
         override suspend fun saveBearerToken(value: String) = false

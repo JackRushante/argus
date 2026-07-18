@@ -890,7 +890,7 @@ private val previewProviderChoices = listOf(
 )
 
 private val previewAllGreen = SettingsState(
-    transport = TransportUi.CliBridge(url = "https://hermes.tail04462d.ts.net", reachable = true, lastLatencyLabel = "14 s · normale per Hermes"),
+    transport = TransportUi.CliBridge(url = "https://hermes.example", reachable = true, lastLatencyLabel = "14 s · normale per Hermes"),
     shizuku = ShizukuStatus.AUTHORIZED,
     batteryExempt = true,
     notificationsGranted = true,
@@ -943,7 +943,7 @@ private val previewDirectProvider = previewAllGreen.copy(
 )
 
 private val previewDegraded = SettingsState(
-    transport = TransportUi.CliBridge(url = "https://hermes.tail04462d.ts.net", reachable = false, lastLatencyLabel = null),
+    transport = TransportUi.CliBridge(url = "https://hermes.example", reachable = false, lastLatencyLabel = null),
     shizuku = ShizukuStatus.DEGRADED_AFTER_REBOOT,
     batteryExempt = false,
     notificationsGranted = true,

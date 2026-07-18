@@ -24,11 +24,9 @@ class ProviderCatalogTest {
         }
     }
 
-    @Test fun `hermes default url matches the legacy store default`() {
-        assertEquals(
-            AndroidBridgeConfigurationStore.DEFAULT_BASE_URL,
-            ProviderCatalog.spec(ProviderId.HERMES).defaultBaseUrl,
-        )
+    @Test fun `self hosted providers do not embed a developer endpoint`() {
+        assertEquals("", AndroidBridgeConfigurationStore.DEFAULT_BASE_URL)
+        assertNull(ProviderCatalog.spec(ProviderId.HERMES).defaultBaseUrl)
     }
 
     @Test fun `custom provider has no default url and hermes has no prices`() {
