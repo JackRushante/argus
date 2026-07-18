@@ -306,11 +306,13 @@ Open an [Issue](https://github.com/JackRushante/argus/issues) with: what you ask
 
 ## Project status and roadmap
 
-**Active development.** Phases completed and verified on a real device: P0 (engine core + Android glue), P1 (notifications/WhatsApp generative replies), P2 (background triggers: SMS/OTP, calls, connectivity/power/BT, geofence). **P3 in progress**: parametric state readers, sensor triggers, base tier without Shizuku, multi-provider with budget.
+**Active development.** Phases completed and verified on a real device: P0 (engine core + Android glue), P1 (notifications/WhatsApp generative replies), P2 (background triggers: SMS/OTP, calls, connectivity/power/BT, geofence), P3 (parametric state readers, sensor triggers, base tier without Shizuku, multi-provider with per-provider budgets and usage tracking). Since **v0.2.0** the app is fully bilingual (English/Italian, follows the system language).
 
 Short roadmap:
 
-- **P4** — variables and control flow (parity with Tasker's combinatorics: if/then, dynamic values) with taint propagation on every value; first piece already shipped (generative notification sink for `invoke_llm`, recurring too).
+- **P4 — variables and control flow** *(in progress)*: Tasker-class combinatorics — `if`/`while`, values captured from triggers, device state and action outputs — with per-value taint tracking so untrusted external content can fill data fields but never gain execution authority. Design is finalized; the domain model is being implemented. First piece already shipped (generative notification sink for `invoke_llm`, recurring too).
+- **In-app Privacy & Licenses section** — GPL-3.0 notice plus a plain-language privacy summary (keys encrypted on device, no backend, audit log without PII).
+- **Android settings commands** — brightness, dark/light theme, real system settings writes.
 - **Computer-use** — interactive screen→action loop in two tiers (a valid slow/self-hosted path, an optional fast path).
 
 **Disclaimer**: this is a personal project, developed and tested mainly on a single device (OnePlus 15, Android 16, non-root). Expect rough edges on other OEMs — that is exactly the feedback we are looking for. No warranty: rules execute real actions on your phone, read what you approve.
