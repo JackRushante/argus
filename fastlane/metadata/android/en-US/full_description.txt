@@ -1,0 +1,15 @@
+Argus is a Tasker-class automation app where a large language model is the compiler, not the executor.
+
+You describe a rule in plain language — "every day at 9 send me the BTC price", "when I leave home turn off Wi-Fi", "if an OTP arrives, copy it to the clipboard". The model compiles your request into a structured, typed rule (trigger, conditions, actions). You review it rendered from the types — never from the model's paraphrase — and approve a byte-stable SHA-256 fingerprint of the executable data. From then on a deterministic engine runs the rule: OS alarms, system receivers, geofences, the notification listener. The model is never in the execution loop, except for actions you explicitly mark as generative.
+
+Why this matters:
+
+* Predictable — the rule that fires at 3 a.m. is exactly the one you approved, byte for byte.
+* Auditable — every run is logged locally, without personal content.
+* Private — your API keys are encrypted on device; there is no Argus backend.
+
+Language models are optional and pluggable: run a self-hosted bridge, or connect directly to a provider you choose. A base tier works with no elevated privileges; for system-level actions Argus can use Shizuku.
+
+Note: connecting a proprietary provider (OpenAI, Anthropic, Google) is optional — Argus works fully with a self-hosted bridge and the on-device base tier.
+
+Argus is free software (GPL-3.0). The interface, rule rendering and the agent all follow your system language (English or Italian).
