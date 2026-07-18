@@ -207,7 +207,14 @@ private fun auditSummary(record: AuditLogRecord, l: RenderLanguage): String = wh
     }
     AuditKind.SUPPRESSED_DUPLICATE -> l.pick("duplicate event ignored", "evento duplicato ignorato")
     AuditKind.SUPPRESSED_COOLDOWN -> l.pick("suppressed by cooldown", "soppressa dal cooldown")
-    AuditKind.SUPPRESSED_BUDGET -> l.pick("blocked by the LLM budget", "bloccata dal budget LLM")
+    AuditKind.SUPPRESSED_BUDGET -> if (record.detail.startsWith("unpriced_model:")) {
+        l.pick(
+            "blocked: the selected model has no catalog price",
+            "bloccata: il modello selezionato non ha un prezzo nel catalogo",
+        )
+    } else {
+        l.pick("blocked by the LLM budget", "bloccata dal budget LLM")
+    }
     AuditKind.SUPPRESSED_NOT_ELIGIBLE -> l.pick(
         "rule is no longer eligible",
         "regola non più idonea",

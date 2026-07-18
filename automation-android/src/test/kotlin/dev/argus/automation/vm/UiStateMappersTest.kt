@@ -205,6 +205,25 @@ class UiStateMappersTest {
     }
 
     @Test
+    fun `unpriced budget suppression explains why the model was blocked`() {
+        val row = AuditLogRecord(
+            id = 12L,
+            automationId = "ai-rule",
+            automationName = "AI rule",
+            kind = AuditKind.SUPPRESSED_BUDGET,
+            atMillis = 1_000L,
+            detail = "unpriced_model:openai",
+            executionId = "execution-12",
+            executionStatus = ExecutionStatus.SUPPRESSED_BUDGET,
+            succeededCount = 0,
+            failedCount = 0,
+            submittedCount = 0,
+        ).toLogRow(emptyList(), RenderLanguage.EN)
+
+        assertEquals("blocked: the selected model has no catalog price", row.summary)
+    }
+
+    @Test
     fun `list rows resolve the trusted whitelist name instead of the conversation hash`() {
         val hash = "shortcut:com.whatsapp:feedbeef00aabbcc"
         val labels = mapOf(hash to "Ottica Marci")

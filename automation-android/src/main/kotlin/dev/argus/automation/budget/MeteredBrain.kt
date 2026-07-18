@@ -2,6 +2,7 @@ package dev.argus.automation.budget
 
 import dev.argus.brain.ProviderCatalog
 import dev.argus.brain.ProviderConfig
+import dev.argus.brain.ProviderId
 import dev.argus.data.UsageWindows
 import dev.argus.data.dao.UsageDao
 import dev.argus.data.entities.UsageEventEntity
@@ -28,6 +29,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 object BudgetMeta {
     const val BUDGET_EXCEEDED = "budget_exceeded" // rispetta ^[a-z][a-z0-9_]{0,63}$ (invariante ActResult)
+    const val UNPRICED_MODEL = "budget_unpriced_model"
     const val UNKNOWN_MODEL = "unknown" // convenzione T9 di UsageEventEntity
 
     /**
@@ -38,6 +40,13 @@ object BudgetMeta {
     fun blockedReply(l: RenderLanguage = RenderLanguage.system()): String = l.pick(
         "LLM budget exhausted: I blocked the call. Raise or reset the limits in System → Budget.",
         "Budget LLM esaurito: ho bloccato la chiamata. Alza o azzera i limiti in Sistema → Budget.",
+    )
+
+    fun unpricedModelReply(l: RenderLanguage = RenderLanguage.system()): String = l.pick(
+        "The selected model has no price in the Argus catalog, so the monetary budget cannot be " +
+            "enforced. Choose a priced model or remove the dollar limit.",
+        "Il modello selezionato non ha un prezzo nel catalogo Argus, quindi il budget monetario " +
+            "non può essere applicato. Scegli un modello con prezzo noto o rimuovi il limite in dollari.",
     )
 }
 
@@ -87,6 +96,15 @@ class MeteredBrain(
                     metaError = BudgetMeta.BUDGET_EXCEEDED,
                 )
             }
+            is BudgetVerdict.UnpricedModel -> {
+                recordBlocked(config, UsageEventKind.COMPILE, now)
+                notifyUnpricedOnce(verdict.providerId)
+                return CompileResult(
+                    reply = BudgetMeta.unpricedModelReply(),
+                    draft = null,
+                    metaError = BudgetMeta.UNPRICED_MODEL,
+                )
+            }
             is BudgetVerdict.SoftExceeded -> notifyOnce(verdict.tripped, now)
             BudgetVerdict.Ok -> {}
         }
@@ -106,6 +124,8 @@ class MeteredBrain(
         val now = nowMillis()
         when (val verdict = verdictFor(config, now)) {
             is BudgetVerdict.HardExceeded -> return hardBlock(config, UsageEventKind.ACT, now, context, verdict.tripped)
+            is BudgetVerdict.UnpricedModel ->
+                return unpricedModelBlock(config, UsageEventKind.ACT, now, context, verdict.providerId)
             is BudgetVerdict.SoftExceeded -> notifyOnce(verdict.tripped, now)
             BudgetVerdict.Ok -> {}
         }
@@ -121,6 +141,14 @@ class MeteredBrain(
             when (val verdict = verdictFor(config, now)) {
                 is BudgetVerdict.HardExceeded ->
                     return hardBlock(config, UsageEventKind.ACT_V2, now, context, verdict.tripped)
+                is BudgetVerdict.UnpricedModel ->
+                    return unpricedModelBlock(
+                        config,
+                        UsageEventKind.ACT_V2,
+                        now,
+                        context,
+                        verdict.providerId,
+                    )
                 is BudgetVerdict.SoftExceeded -> notifyOnce(verdict.tripped, now)
                 BudgetVerdict.Ok -> {}
             }
@@ -131,7 +159,7 @@ class MeteredBrain(
 
     /** Un errore DB del budget non deve spegnere il cervello: fail-open (ma la cancellazione risale). */
     private suspend fun verdictFor(config: ProviderConfig, now: Long): BudgetVerdict = try {
-        policy.check(config.providerId, now)
+        policy.check(config, now)
     } catch (error: CancellationException) {
         throw error
     } catch (_: Throwable) {
@@ -158,6 +186,28 @@ class MeteredBrain(
         )
         notifyOnce(tripped, now)
         return ActResult(text = null, metaError = BudgetMeta.BUDGET_EXCEEDED)
+    }
+
+    private suspend fun unpricedModelBlock(
+        config: ProviderConfig,
+        kind: UsageEventKind,
+        now: Long,
+        context: FireContext,
+        providerId: ProviderId,
+    ): ActResult {
+        recordBlocked(config, kind, now)
+        tryAudit(
+            AuditEvent(
+                automationId = context.automationId,
+                kind = AuditKind.SUPPRESSED_BUDGET,
+                atMillis = now,
+                detail = "unpriced_model:${providerId.wireName}",
+                eventId = context.eventId,
+                executionId = context.executionId,
+            ),
+        )
+        notifyUnpricedOnce(providerId)
+        return ActResult(text = null, metaError = BudgetMeta.UNPRICED_MODEL)
     }
 
     private suspend fun recordUsage(
@@ -249,6 +299,26 @@ class MeteredBrain(
             } catch (_: Throwable) {
                 // best-effort
             }
+        }
+    }
+
+    private suspend fun notifyUnpricedOnce(providerId: ProviderId) {
+        if (notified.putIfAbsent("unpriced_model:${providerId.wireName}", true) != null) return
+        try {
+            val l = RenderLanguage.system()
+            alerts.notify(
+                l.pick("LLM budget", "Budget LLM"),
+                l.pick(
+                    "The selected model has no catalog price. The call was blocked because a " +
+                        "monetary limit is active.",
+                    "Il modello selezionato non ha un prezzo nel catalogo. La chiamata è stata " +
+                        "bloccata perché è attivo un limite monetario.",
+                ),
+            )
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Throwable) {
+            // best-effort
         }
     }
 

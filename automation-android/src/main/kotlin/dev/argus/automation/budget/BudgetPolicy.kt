@@ -1,6 +1,7 @@
 package dev.argus.automation.budget
 
 import dev.argus.brain.ProviderCatalog
+import dev.argus.brain.ProviderConfig
 import dev.argus.brain.ProviderId
 import dev.argus.data.UsageWindows
 import dev.argus.data.dao.ProviderTokensAggregate
@@ -36,6 +37,7 @@ sealed interface BudgetVerdict {
     data object Ok : BudgetVerdict
     data class SoftExceeded(val tripped: TrippedLimit) : BudgetVerdict
     data class HardExceeded(val tripped: TrippedLimit) : BudgetVerdict
+    data class UnpricedModel(val providerId: ProviderId) : BudgetVerdict
 }
 
 /**
@@ -49,6 +51,29 @@ open class BudgetPolicy(
     private val settings: BudgetSettingsStore,
     private val zone: () -> ZoneId = ZoneId::systemDefault,
 ) {
+    /**
+     * Un tetto monetario non può essere applicato a un modello assente dal listino statico.
+     * In quel caso blocca prima della rete, invece di registrare costo null e lasciare che le
+     * chiamate successive aggirino silenziosamente il limite scelto dall'utente.
+     */
+    open suspend fun check(config: ProviderConfig, nowMillis: Long): BudgetVerdict {
+        val aggregateVerdict = check(config.providerId, nowMillis)
+        if (aggregateVerdict != BudgetVerdict.Ok) return aggregateVerdict
+
+        val spec = ProviderCatalog.spec(config.providerId)
+        if (!spec.costTracked) return BudgetVerdict.Ok
+        if (config.model != null && config.model in spec.prices) return BudgetVerdict.Ok
+
+        val current = settings.observe().value
+        val providerLimit = current.perProvider[config.providerId.wireName]?.maxCostPerMonthMicros
+        val monetaryLimitActive = providerLimit != null || current.global.maxCostPerMonthMicros != null
+        return if (monetaryLimitActive) {
+            BudgetVerdict.UnpricedModel(config.providerId)
+        } else {
+            BudgetVerdict.Ok
+        }
+    }
+
     open suspend fun check(providerId: ProviderId, nowMillis: Long): BudgetVerdict {
         val current = settings.observe().value
         val zoneId = zone()

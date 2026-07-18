@@ -201,6 +201,46 @@ class MeteredBrainTest {
     }
 
     @Test
+    fun `modello senza prezzo non contatta il provider sotto un tetto monetario`() = runTest {
+        val delegate = FakeBrain()
+        val dao = RecordingUsageDao()
+        val brain = metered(
+            delegate,
+            FakePolicy(BudgetVerdict.UnpricedModel(ProviderId.OPENAI)),
+            dao,
+            config = openai.copy(model = "future-model"),
+        )
+
+        val result = brain.compile("create", TEST_MANIFEST, DeviceState())
+
+        assertEquals(0, delegate.calls)
+        assertEquals(BudgetMeta.UNPRICED_MODEL, result.metaError)
+        assertNull(result.draft)
+        assertEquals(BudgetMeta.unpricedModelReply(), result.reply)
+        assertEquals(UsageEventOutcome.BLOCKED_BUDGET, dao.events.single().outcome)
+    }
+
+    @Test
+    fun `act con modello senza prezzo registra una soppressione spiegabile`() = runTest {
+        val delegate = FakeBrain()
+        val dao = RecordingUsageDao()
+        val audit = RecordingAuditSink()
+        val brain = metered(
+            delegate,
+            FakePolicy(BudgetVerdict.UnpricedModel(ProviderId.OPENAI)),
+            dao,
+            config = openai.copy(model = "future-model"),
+            audit = audit,
+        )
+
+        val result = brain.actV2(context(), invokeV2())
+
+        assertEquals(0, delegate.calls)
+        assertEquals(BudgetMeta.UNPRICED_MODEL, result.metaError)
+        assertEquals("unpriced_model:openai", audit.records.single().detail)
+    }
+
+    @Test
     fun `soft chiama il delegate e avvisa una sola volta per finestra`() = runTest {
         var currentNow = 1_700_000_000_000L
         val delegate = FakeBrain(actResult = { ActResult("risposta", null) })

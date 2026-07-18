@@ -1,5 +1,6 @@
 package dev.argus.automation.budget
 
+import dev.argus.brain.ProviderConfig
 import dev.argus.brain.ProviderId
 import dev.argus.data.UsageWindows
 import dev.argus.data.dao.ProviderTokensAggregate
@@ -152,6 +153,53 @@ class BudgetPolicyTest {
             aggregates = listOf(agg("openai", calls = 3, tokensIn = 5_000, tokensOut = 5_000, costMicros = 1_000)),
         )
         assertEquals(BudgetVerdict.Ok, policy.check(ProviderId.OPENAI, now))
+    }
+
+    @Test
+    fun `modello senza prezzo viene bloccato quando e attivo un tetto monetario`() = runTest {
+        val policy = policy(
+            settings = BudgetSettings(global = BudgetLimits(maxCostPerMonthMicros = 10_000_000)),
+            aggregates = emptyList(),
+        )
+
+        val verdict = policy.check(
+            ProviderConfig(ProviderId.OPENAI, "https://api.openai.com/v1", "future-model"),
+            now,
+        )
+
+        assertEquals(BudgetVerdict.UnpricedModel(ProviderId.OPENAI), verdict)
+    }
+
+    @Test
+    fun `modello senza prezzo resta utilizzabile senza tetti monetari`() = runTest {
+        val policy = policy(
+            settings = BudgetSettings(global = BudgetLimits(maxCallsPerDay = 10)),
+            aggregates = emptyList(),
+        )
+
+        assertEquals(
+            BudgetVerdict.Ok,
+            policy.check(
+                ProviderConfig(ProviderId.OPENAI, "https://api.openai.com/v1", "future-model"),
+                now,
+            ),
+        )
+    }
+
+    @Test
+    fun `provider token-only non richiede un prezzo del modello`() = runTest {
+        val policy = policy(
+            settings = BudgetSettings(global = BudgetLimits(maxCostPerMonthMicros = 10_000_000)),
+            aggregates = emptyList(),
+        )
+
+        assertEquals(
+            BudgetVerdict.Ok,
+            policy.check(
+                ProviderConfig(ProviderId.OPENROUTER, "https://openrouter.ai/api/v1", "any/model"),
+                now,
+            ),
+        )
     }
 
     @Test
