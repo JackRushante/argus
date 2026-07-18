@@ -6,8 +6,8 @@ import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
+import dev.argus.engine.model.AutomationSchema
 import dev.argus.engine.model.CreatedBy
-import dev.argus.engine.model.SCHEMA_VERSION
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 
@@ -45,6 +45,7 @@ data class PendingDraft(
         status = AutomationStatus.PENDING_APPROVAL,
         trigger = draft.trigger,
         actions = draft.actions,
+        vars = draft.vars,
         conditions = draft.conditions,
         enabled = false,
         priority = priority,
@@ -60,7 +61,7 @@ data class PendingDraft(
     )
 
     fun hasValidFingerprint(): Boolean =
-        integrityError == null && schemaVersion == SCHEMA_VERSION &&
+        integrityError == null && AutomationSchema.isCompatible(pendingAutomation()) &&
             fingerprint == ApprovalFingerprints.of(pendingAutomation())
 }
 

@@ -1,3 +1,5 @@
+@file:OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+
 package dev.argus.engine.model
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.SerialName
@@ -51,6 +53,9 @@ object ActionTypeIds {
     const val WRITE_SETTING = "write_setting"
     const val INVOKE_LLM = "invoke_llm"
     const val INVOKE_LLM_V2 = "invoke_llm_v2"
+    // Control-flow strutturato P4 §2.3: contenitori, non azioni foglia.
+    const val IF = "if"
+    const val WHILE = "while"
 }
 
 /**
@@ -93,6 +98,19 @@ sealed interface Action {
             is InvokeLlm,
             is InvokeLlmV2,
             -> ActionTier.GENERATIVE
+            // Control-flow: generativo se e solo se contiene (a qualsiasi profondità) un'azione
+            // generativa. Così il gate cooldown generativo del validator scatta anche su generativi
+            // annidati in if/while (fail-closed sul tier aggregato).
+            is If -> if (containsGenerative(then + orElse)) {
+                ActionTier.GENERATIVE
+            } else {
+                ActionTier.DETERMINISTIC
+            }
+            is While -> if (containsGenerative(body)) {
+                ActionTier.GENERATIVE
+            } else {
+                ActionTier.DETERMINISTIC
+            }
             is SetWifi,
             is SetBluetooth,
             is SetDnd,
@@ -125,7 +143,14 @@ sealed interface Action {
     @Serializable @SerialName(ActionTypeIds.TAP) data class Tap(val x: Int, val y: Int) : Action
     @Serializable @SerialName(ActionTypeIds.INPUT_TEXT) data class InputText(val text: String) : Action
     @Serializable @SerialName(ActionTypeIds.WHATSAPP_REPLY) data class WhatsAppReply(val text: String) : Action
-    @Serializable @SerialName(ActionTypeIds.RUN_SHELL) data class RunShell(val cmd: String) : Action
+    /** [captureAs] (P4 §2.2): se presente, lo stdout del comando è catturato nella variabile
+     *  omonima con taint TAINTED. @EncodeDefault(NEVER): assente ⇒ byte v1 stabili. */
+    @Serializable @SerialName(ActionTypeIds.RUN_SHELL)
+    data class RunShell(
+        val cmd: String,
+        @EncodeDefault(EncodeDefault.Mode.NEVER)
+        val captureAs: String? = null,
+    ) : Action
 
     /** Copia negli appunti il payload testuale del trigger (SMS o notifica), opzionalmente
      *  ridotto al primo capture group di una regex RE2 lineare (P2-3, OTP). Estrazione
@@ -219,6 +244,10 @@ sealed interface Action {
         val deliver: GenerativeDeliverMode = GenerativeDeliverMode.WHATSAPP_REPLY,
         @EncodeDefault(EncodeDefault.Mode.NEVER)
         val notificationTitle: String? = null,
+        // [captureAs] (P4 §2.2): output del modello catturato nella variabile omonima (taint
+        // TAINTED). @EncodeDefault(NEVER): assente ⇒ i fingerprint v1 già approvati restano stabili.
+        @EncodeDefault(EncodeDefault.Mode.NEVER)
+        val captureAs: String? = null,
     ) : Action, GenerativeAction
 
     /**
@@ -235,11 +264,53 @@ sealed interface Action {
         val allowedTools: List<String>,
         val replyTargetSender: Boolean,
         val timeoutMs: Long,
+        @EncodeDefault(EncodeDefault.Mode.NEVER)
+        val captureAs: String? = null,
     ) : Action, GenerativeAction
+
+    /**
+     * Control-flow strutturato P4 §2.3 (mai goto, mai eval): esegue [then] se [condition] è vera,
+     * altrimenti [orElse]. NON implementa [GenerativeAction] (è un contenitore, non un'azione
+     * generativa foglia). L'interprete deterministico (P4-B) cammina l'albero; qui è solo modello.
+     */
+    @Serializable @SerialName(ActionTypeIds.IF)
+    data class If(
+        val condition: FlowCondition,
+        val then: List<Action>,
+        val orElse: List<Action> = emptyList(),
+    ) : Action
+
+    /**
+     * Ripetizione BOUNDED P4 §2.3: ri-valuta [condition] a ogni iterazione con stato aggiornato,
+     * fino a [maxIterations] (OBBLIGATORIO, 1..1000 nel validator) con [delayBetweenMs] fra i giri
+     * (0..3_600_000). Contatore + deadline dura impediscono i loop infiniti. Solo modello in P4-A.
+     */
+    @Serializable @SerialName(ActionTypeIds.WHILE)
+    data class While(
+        val condition: FlowCondition,
+        val body: List<Action>,
+        val maxIterations: Int,
+        val delayBetweenMs: Long = 0,
+    ) : Action
 }
 
-enum class IntegrityLabel { CLEAN, TAINTED }
-enum class ConfidentialityLabel { PUBLIC, PRIVATE, SECRET }
+/** Visita iterativa: il tier non può causare stack overflow su un albero non ancora validato. */
+private fun containsGenerative(actions: List<Action>): Boolean {
+    val pending = ArrayDeque<Action>()
+    actions.forEach(pending::addLast)
+    while (pending.isNotEmpty()) {
+        when (val action = pending.removeFirst()) {
+            is Action.InvokeLlm, is Action.InvokeLlmV2 -> return true
+            is Action.If -> {
+                action.then.forEach(pending::addLast)
+                action.orElse.forEach(pending::addLast)
+            }
+            is Action.While -> action.body.forEach(pending::addLast)
+            else -> Unit
+        }
+    }
+    return false
+}
 
 /** Metadati approvati per un singolo valore locale inviato al Brain configurato. */
 @Serializable

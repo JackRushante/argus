@@ -23,6 +23,7 @@ class ConditionEvaluator(private val clock: Clock) {
 
     private fun evaluate(c: Condition?, state: DeviceState): Truth = when (c) {
         null -> Truth.TRUE
+        is Condition.BooleanLiteral -> Truth.of(c.value)
         is Condition.And -> c.all.fold(Truth.TRUE) { result, child ->
             result and evaluate(child, state)
         }
@@ -44,6 +45,10 @@ class ConditionEvaluator(private val clock: Clock) {
             Truth.of(haversineM(it.lat, it.lng, c.lat, c.lng) <= c.radiusM)
         } ?: Truth.UNKNOWN
         is Condition.TimeWindow -> Truth.of(inWindow(c))
+        // Le variabili di programma NON esistono nello scope trigger-time: qui un VarCompare è
+        // sempre UNKNOWN (fail-closed). La valutazione reale avviene nell'interprete P4-B con lo
+        // scope per-esecuzione; questo evaluator gestisce solo le condizioni di arming.
+        is Condition.VarCompare -> Truth.UNKNOWN
     }
 
     private fun compare(actual: String?, op: CmpOp, expected: String): Truth {

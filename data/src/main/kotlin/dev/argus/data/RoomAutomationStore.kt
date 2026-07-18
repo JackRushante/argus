@@ -7,10 +7,10 @@ import dev.argus.engine.model.ArgusJson
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
+import dev.argus.engine.model.AutomationSchema
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.ApprovalFingerprints
 import dev.argus.engine.model.CreatedBy
-import dev.argus.engine.model.SCHEMA_VERSION
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.runtime.FireClaimRequest
@@ -143,7 +143,7 @@ class RoomAutomationStore(private val dao: AutomationDao) : AutomationStore {
 
     private suspend fun toDomain(e: AutomationEntity): Automation {
         val decoded: Automation? =
-            if (e.schemaVersion != SCHEMA_VERSION) null
+            if (!AutomationSchema.isSupportedVersion(e.schemaVersion)) null
             else runCatching { ArgusJson.decodeFromString(Automation.serializer(), e.json) }.getOrNull()
 
         // Le colonne piatte sono autoritative sugli scalari mutabili.
@@ -156,7 +156,7 @@ class RoomAutomationStore(private val dao: AutomationDao) : AutomationStore {
             cooldownMs = e.cooldownMs,
             schemaVersion = e.schemaVersion,
         )
-        if (domain == null ||
+        if (domain == null || !AutomationSchema.isCompatible(domain) ||
             domain.status == AutomationStatus.ARMED &&
             (domain.approvalFingerprint == null ||
                 domain.approvalFingerprint != ApprovalFingerprints.of(domain))

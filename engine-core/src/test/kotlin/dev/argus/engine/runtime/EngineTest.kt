@@ -25,7 +25,7 @@ class EngineTest {
         prio: Int = 0,
     ): Automation {
         val unsigned = Automation(
-            AutomationId(id), id, CreatedBy.LLM, AutomationStatus.ARMED, t, acts, cond,
+            AutomationId(id), id, CreatedBy.LLM, AutomationStatus.ARMED, t, acts, conditions = cond,
             cooldownMs = cooldown, priority = prio,
         )
         return unsigned.copy(approvalFingerprint = ApprovalFingerprints.of(unsigned))

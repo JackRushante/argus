@@ -2,14 +2,19 @@ package dev.argus.engine.runtime
 
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.Automation
+import dev.argus.engine.model.AutomationDraft
+import dev.argus.engine.model.AutomationSchema
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.ApprovalFingerprints
 import dev.argus.engine.model.CapabilityIds
 import dev.argus.engine.model.Condition
+import dev.argus.engine.model.ConfidentialityLabel
 import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.DndMode
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.VarBinding
+import dev.argus.engine.model.VarType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -23,7 +28,11 @@ class RevalidatingFirePolicyTest {
         trigger: Trigger,
         actions: List<Action>,
         conditions: Condition? = null,
+        vars: List<VarBinding> = emptyList(),
     ): Automation {
+        val schemaVersion = AutomationSchema.versionFor(
+            AutomationDraft("test", trigger, actions, vars = vars, conditions = conditions),
+        )
         val value = Automation(
             id = AutomationId("a1"),
             name = "test",
@@ -31,7 +40,9 @@ class RevalidatingFirePolicyTest {
             status = AutomationStatus.ARMED,
             trigger = trigger,
             actions = actions,
+            vars = vars,
             conditions = conditions,
+            schemaVersion = schemaVersion,
         )
         return value.copy(approvalFingerprint = ApprovalFingerprints.of(value))
     }
@@ -431,6 +442,50 @@ class RevalidatingFirePolicyTest {
         )
         assertEquals("capability_requirements_mismatch", block.code)
         assertTrue(block.needsReview)
+    }
+
+    @Test
+    fun `p4 schema and variable capabilities are revalidated at fire time`() = runTest {
+        val automation = automation(
+            Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
+            listOf(
+                Action.While(
+                    Condition.BooleanLiteral(true),
+                    listOf(Action.SetFlashlight(true)),
+                    maxIterations = 1,
+                ),
+            ),
+            vars = listOf(
+                VarBinding.Literal(
+                    "enabled",
+                    "true",
+                    VarType.BOOLEAN,
+                    ConfidentialityLabel.PUBLIC,
+                ),
+            ),
+        )
+        val result = policy(
+            snapshot(
+                availableCapabilities = setOf(
+                    CapabilityIds.TRIGGER_TIME,
+                    CapabilityIds.ACTION_SET_FLASHLIGHT,
+                ),
+            ),
+        ).evaluate(automation, timeEvent(automation))
+        assertEquals(FirePolicyDecision.Allow, result)
+
+        val wrongSchemaUnsigned = automation.copy(
+            schemaVersion = dev.argus.engine.model.AUTOMATION_SCHEMA_VERSION_V1,
+            approvalFingerprint = null,
+        )
+        val wrongSchema = wrongSchemaUnsigned.copy(
+            approvalFingerprint = ApprovalFingerprints.of(wrongSchemaUnsigned),
+        )
+        val blocked = assertIs<FirePolicyDecision.Block>(
+            policy(snapshot(availableCapabilities = automation.requiredCapabilities))
+                .evaluate(wrongSchema, timeEvent(wrongSchema)),
+        )
+        assertEquals("schema_incompatible", blocked.code)
     }
 
     @Test

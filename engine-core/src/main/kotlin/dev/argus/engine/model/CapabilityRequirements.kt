@@ -60,10 +60,21 @@ object CapabilityRequirements {
         trigger: Trigger,
         actions: List<Action>,
         conditions: Condition? = null,
+        vars: List<VarBinding> = emptyList(),
     ): Set<String> = buildSet {
         addAll(forTrigger(trigger))
         conditions?.let { addAll(forCondition(it)) }
         actions.forEach { addAll(forAction(it)) }
+        // Le variabili di stato leggono il device come i reader di P3: ne ereditano la capability
+        // di famiglia (fail-closed: un binding State richiede il grant del suo reader).
+        vars.forEach { addAll(forVarBinding(it)) }
+    }
+
+    private fun forVarBinding(binding: VarBinding): Set<String> = when (binding) {
+        is VarBinding.State -> setOf(binding.query.family.capabilityId)
+        // Letterali e payload del trigger non richiedono capability aggiuntive: il payload viaggia
+        // già col trigger (la cui capability è derivata da forTrigger).
+        is VarBinding.Literal, is VarBinding.TriggerPayload -> emptySet()
     }
 
     private fun forTrigger(trigger: Trigger): Set<String> = when (trigger) {
@@ -89,7 +100,7 @@ object CapabilityRequirements {
     }
 
     private fun forCondition(condition: Condition): Set<String> = when (condition) {
-        is Condition.TimeWindow -> emptySet()
+        is Condition.TimeWindow, is Condition.BooleanLiteral -> emptySet()
         is Condition.StateEquals -> setOf(CapabilityIds.state(condition.key))
         is Condition.StateCompare -> setOf(condition.query.family.capabilityId)
         is Condition.AppInForeground -> setOf(CapabilityIds.STATE_FOREGROUND_APP)
@@ -97,6 +108,8 @@ object CapabilityRequirements {
         is Condition.And -> condition.all.flatMapTo(linkedSetOf(), ::forCondition)
         is Condition.Or -> condition.any.flatMapTo(linkedSetOf(), ::forCondition)
         is Condition.Not -> forCondition(condition.cond)
+        // Le var vivono nello scope di esecuzione: nessuna capability OS per confrontarle.
+        is Condition.VarCompare -> emptySet()
     }
 
     private fun forAction(action: Action): Set<String> = when (action) {
@@ -148,6 +161,17 @@ object CapabilityRequirements {
             add(CapabilityIds.ACTION_INVOKE_LLM)
             addAll(action.allowedTools)
             action.stateContext.forEach { add(it.query.family.capabilityId) }
+        }
+        // Contenitori control-flow: uniscono le capability della condizione di flusso e di TUTTE le
+        // azioni annidate (fail-closed: un while { run_shell } richiede comunque ACTION_RUN_SHELL).
+        is Action.If -> buildSet {
+            addAll(forCondition(action.condition))
+            action.then.forEach { addAll(forAction(it)) }
+            action.orElse.forEach { addAll(forAction(it)) }
+        }
+        is Action.While -> buildSet {
+            addAll(forCondition(action.condition))
+            action.body.forEach { addAll(forAction(it)) }
         }
     }
 }

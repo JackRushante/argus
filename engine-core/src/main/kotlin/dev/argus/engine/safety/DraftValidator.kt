@@ -31,7 +31,6 @@ class DraftValidator(
         const val ARGUS_PACKAGE = "dev.argus"
 
         private const val MAX_NAME_LENGTH = 120
-        private const val MAX_ACTIONS = 32
         private const val MAX_CONDITIONS = 64
         private const val MAX_CONDITION_DEPTH = 8
         private const val MAX_TEXT_LENGTH = 4_000
@@ -48,6 +47,20 @@ class DraftValidator(
         private const val MAX_VOLUME_LEVEL = 100
         private const val MAX_VIBRATE_MS = 10_000
 
+        // --- Bound P4 §2.5 (chiusi, non negoziabili) ---
+        private const val MAX_VARS = 16
+        private const val MAX_FLOW_DEPTH = 4
+        private const val MAX_TOTAL_ACTIONS = 64
+        private const val MIN_WHILE_ITERATIONS = 1
+        private const val MAX_WHILE_ITERATIONS = 1_000
+        private const val MAX_WHILE_DELAY_MS = 3_600_000L
+        private const val MAX_TIME_BUDGET_MS = 6L * 60 * 60 * 1_000 // 6 ore
+
+        // Stime worst-case per il budget tempo statico (§2.5): dominato dai delay dei while, ma
+        // le azioni lunghe (shell, generative) contribuiscono col loro tetto operativo.
+        private const val SHELL_ACTION_BUDGET_MS = 30_000L // limite operativo shell 30 s
+        private const val LEAF_ACTION_BUDGET_MS = 1_000L // nominale per azioni deterministiche brevi
+
         private val PACKAGE_NAME = Regex("^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+$")
     }
 
@@ -59,7 +72,6 @@ class DraftValidator(
         if (d.name.isBlank() || d.name.length > MAX_NAME_LENGTH)
             err("name_invalid", "Nome regola obbligatorio e lungo al massimo $MAX_NAME_LENGTH caratteri")
         if (d.actions.isEmpty()) err("no_actions", "Il draft non contiene azioni")
-        if (d.actions.size > MAX_ACTIONS) err("too_many_actions", "Massimo $MAX_ACTIONS azioni per regola")
         if (d.cooldownMs < 0) err("cooldown_invalid", "Cooldown non può essere negativo")
 
         validateTrigger(d.trigger, ::err, ::warn)
@@ -75,17 +87,457 @@ class DraftValidator(
 
         var conditionCount = 0
         fun countCondition() = ++conditionCount
-        checkConditions(d.conditions, 1, ::countCondition, ::err)
+        // VarCompare NON è ammesso fra le condizioni trigger-time (le var non esistono ancora lì).
+        checkConditions(d.conditions, 1, ::countCondition, ::err, allowVarCompare = false)
+
+        // --- P4 §2.5: variabili, capture, control-flow, interpolazione, budget ---
+        validateVars(d.vars, d.trigger, ::err)
+        val tree = preflightActions(d.actions, ::err)
+        validateCaptureNames(tree.captures, d.vars, ::err)
+        if (d.vars.size + tree.captures.size > MAX_VARS) {
+            err("too_many_vars", "Massimo $MAX_VARS variabili per regola, inclusi i captureAs")
+        }
+        val knownVars = d.vars.mapTo(mutableSetOf()) { it.name }.apply {
+            addAll(tree.captures.map { it.name })
+        }
+        val declaredTypes = buildMap<String, VarType> {
+            d.vars.forEach { put(it.name, it.declaredType) }
+            tree.captures.forEach { putIfAbsent(it.name, it.type) }
+        }
+        val declaredIntegrity = buildMap<String, IntegrityLabel> {
+            d.vars.forEach { put(it.name, it.integrity) }
+            tree.captures.forEach { putIfAbsent(it.name, it.integrity) }
+        }
+        val declaredConfidentiality = buildMap<String, ConfidentialityLabel> {
+            d.vars.forEach { put(it.name, it.confidentiality) }
+            tree.captures.forEach { putIfAbsent(it.name, it.confidentiality) }
+        }
+
+        if (tree.totalActions > MAX_TOTAL_ACTIONS)
+            err("too_many_actions_total", "Massimo $MAX_TOTAL_ACTIONS azioni totali nell'albero appiattito")
+
+        if (!tree.tooDeep && tree.totalActions <= MAX_TOTAL_ACTIONS) {
+            walkActions(
+                actions = d.actions,
+                trigger = d.trigger,
+                whitelist = whitelistedIds,
+                knownVars = knownVars,
+                declaredTypes = declaredTypes,
+                declaredIntegrity = declaredIntegrity,
+                declaredConfidentiality = declaredConfidentiality,
+                availableVars = d.vars.mapTo(mutableSetOf()) { it.name },
+                depth = 0,
+                countCondition = ::countCondition,
+                err = ::err,
+                warn = ::warn,
+            )
+            if (worstCaseBudgetMs(d.actions) > MAX_TIME_BUDGET_MS)
+                err(
+                    "time_budget_exceeded",
+                    "Budget tempo worst-case oltre 6 ore: riduci maxIterations/delay o le azioni lunghe",
+                )
+        }
+
         if (conditionCount > MAX_CONDITIONS)
             err("conditions_too_many", "Massimo $MAX_CONDITIONS condizioni per regola")
 
-        for (a in d.actions) validateAction(a, d.trigger, whitelistedIds, ::err, ::warn)
-
-        if (d.actions.any { it.tier == ActionTier.GENERATIVE } && d.cooldownMs < 60_000)
+        if (tree.hasGenerative && d.cooldownMs < 60_000)
             warn("cooldown_raised", "Cooldown sotto 60 s su regola generativa: l'engine imporrà 60 s")
 
         return issues
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // P4: variabili, control-flow, interpolazione (§2.5)
+    // ---------------------------------------------------------------------------------------------
+
+    /** Valida i binding, incluse classificazioni P3 e matrice trigger-field chiusa. */
+    private fun validateVars(vars: List<VarBinding>, trigger: Trigger, err: (String, String) -> Unit) {
+        if (vars.size > MAX_VARS) err("too_many_vars", "Massimo $MAX_VARS variabili per regola")
+        val names = vars.map { it.name }
+        names.forEach {
+            if (!VarBinding.NAME_REGEX.matches(it)) err("var_name_invalid", "Nome variabile '$it' non valido")
+        }
+        names.groupingBy { it }.eachCount().filterValues { it > 1 }.keys.forEach {
+            err("var_name_duplicate", "Nome variabile duplicato: '$it'")
+        }
+        vars.forEach { binding ->
+            when (binding) {
+                is VarBinding.State -> {
+                    if (!StateQueryPolicy.validQuery(binding.query, stateKeys)) {
+                        err("var_state_query_invalid", "Reader di stato o parametri non validi per '${binding.name}'")
+                    }
+                    if (binding.policyVersion != StateQueryPolicy.VERSION) {
+                        err("var_state_policy_incompatible", "Policy reader non compatibile per '${binding.name}'")
+                    }
+                    if (!StateContextClassification.validValueType(binding.query, binding.valueType)) {
+                        err("var_state_type_invalid", "Tipo dichiarato non valido per '${binding.name}'")
+                    }
+                    val minimum = StateContextClassification.minimumConfidentiality(binding.query)
+                    if (!StateContextClassification.covers(binding.confidentiality, minimum)) {
+                        err(
+                            "var_state_underclassified",
+                            "Reader '${binding.name}' classificato sotto il minimo ${minimum.name}",
+                        )
+                    }
+                }
+                is VarBinding.Literal -> {
+                    if (binding.value.length > MAX_TEXT_LENGTH || binding.value.any(Char::isISOControl)) {
+                        err("var_literal_invalid", "Letterale '${binding.name}' troppo lungo o con caratteri di controllo")
+                    }
+                    when (binding.varType) {
+                        VarType.NUMBER -> if (binding.value.toDoubleOrNull()?.isFinite() != true)
+                            err("var_literal_type_invalid", "Letterale NUMBER '${binding.name}' non numerico")
+                        VarType.BOOLEAN -> if (binding.value !in setOf("true", "false"))
+                            err("var_literal_type_invalid", "Letterale BOOLEAN '${binding.name}' deve essere true/false")
+                        VarType.TEXT -> Unit
+                    }
+                }
+                is VarBinding.TriggerPayload -> {
+                    val fields = triggerPayloadFields(trigger)
+                    if (fields.isEmpty()) {
+                        err(
+                            "var_trigger_payload_unsupported",
+                            "La variabile '${binding.name}' legge il payload del trigger, ma questo trigger non ne ha",
+                        )
+                    } else if (binding.field !in fields) {
+                        err(
+                            "var_trigger_field_unsupported",
+                            "Il campo ${binding.field.name} non esiste per questo trigger ('${binding.name}')",
+                        )
+                    }
+                    if (!StateContextClassification.covers(
+                            binding.confidentiality,
+                            ConfidentialityLabel.PRIVATE,
+                        )
+                    ) {
+                        err(
+                            "var_trigger_underclassified",
+                            "Il payload esterno '${binding.name}' deve essere almeno PRIVATE",
+                        )
+                    }
+                    binding.extractionRegex?.let { pattern ->
+                        if (pattern.isBlank() || !SafeExtractionRegex.isValid(pattern)) {
+                            err(
+                                "var_extraction_regex_invalid",
+                                "extractionRegex non sicura/compatibile RE2 per '${binding.name}'",
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun triggerPayloadFields(trigger: Trigger): Set<TriggerField> = when (trigger) {
+        is Trigger.Notification -> setOf(TriggerField.TEXT, TriggerField.TITLE, TriggerField.SENDER)
+        is Trigger.PhoneState -> when (trigger.event) {
+            PhoneEvent.SMS_RECEIVED -> setOf(TriggerField.TEXT, TriggerField.NUMBER)
+            PhoneEvent.INCOMING_CALL, PhoneEvent.CALL_ENDED -> setOf(TriggerField.NUMBER)
+        }
+        else -> emptySet()
+    }
+
+    private data class CaptureDeclaration(
+        val name: String,
+        val type: VarType = VarType.TEXT,
+        val integrity: IntegrityLabel = IntegrityLabel.TAINTED,
+        val confidentiality: ConfidentialityLabel,
+    )
+
+    private data class ActionFrame(val action: Action, val depth: Int)
+    private data class ActionTreeSummary(
+        val totalActions: Int,
+        val captures: List<CaptureDeclaration>,
+        val tooDeep: Boolean,
+        val hasGenerative: Boolean,
+    )
+
+    /** Preflight iterativo: nessuna ricorsione prima del bound profondità/numero nodi. */
+    private fun preflightActions(
+        actions: List<Action>,
+        err: (String, String) -> Unit,
+    ): ActionTreeSummary {
+        val pending = ArrayDeque<ActionFrame>()
+        actions.forEach { pending.addLast(ActionFrame(it, 0)) }
+        val captures = mutableListOf<CaptureDeclaration>()
+        var total = 0
+        var tooDeep = false
+        var hasGenerative = false
+        while (pending.isNotEmpty()) {
+            val (action, depth) = pending.removeFirst()
+            total = (total + 1).coerceAtMost(MAX_TOTAL_ACTIONS + 1)
+            if (depth > MAX_FLOW_DEPTH) {
+                if (!tooDeep) err("flow_too_deep", "Annidamento if/while oltre profondità $MAX_FLOW_DEPTH")
+                tooDeep = true
+                continue
+            }
+            captureDeclaration(action)?.let(captures::add)
+            when (action) {
+                is Action.InvokeLlm, is Action.InvokeLlmV2 -> hasGenerative = true
+                is Action.If -> {
+                    action.then.forEach { pending.addLast(ActionFrame(it, depth + 1)) }
+                    action.orElse.forEach { pending.addLast(ActionFrame(it, depth + 1)) }
+                }
+                is Action.While -> action.body.forEach { pending.addLast(ActionFrame(it, depth + 1)) }
+                else -> Unit
+            }
+        }
+        return ActionTreeSummary(total, captures, tooDeep, hasGenerative)
+    }
+
+    private fun captureDeclaration(action: Action): CaptureDeclaration? = when (action) {
+        is Action.RunShell -> action.captureAs?.let {
+            CaptureDeclaration(it, confidentiality = ConfidentialityLabel.SECRET)
+        }
+        is Action.InvokeLlm -> action.captureAs?.let {
+            // Il goal può interpolare qualunque sink, incluso un valore SECRET: fino al join
+            // runtime P4-B il floor statico conservativo dell'output del modello è SECRET.
+            CaptureDeclaration(it, confidentiality = ConfidentialityLabel.SECRET)
+        }
+        is Action.InvokeLlmV2 -> action.captureAs?.let {
+            CaptureDeclaration(it, confidentiality = ConfidentialityLabel.SECRET)
+        }
+        else -> null
+    }
+
+    /** captureAs: nome valido, unico fra loro e non in collisione con i binding (§2.5). */
+    private fun validateCaptureNames(
+        captures: List<CaptureDeclaration>,
+        vars: List<VarBinding>,
+        err: (String, String) -> Unit,
+    ) {
+        captures.forEach { capture ->
+            if (!VarBinding.NAME_REGEX.matches(capture.name))
+                err("capture_name_invalid", "captureAs '${capture.name}' non valido")
+        }
+        captures.groupingBy { it.name }.eachCount().filterValues { it > 1 }.keys.forEach {
+            err("capture_name_duplicate", "captureAs duplicato: '$it'")
+        }
+        val bindingNames = vars.mapTo(mutableSetOf()) { it.name }
+        captures.map { it.name }.filter { it in bindingNames }.toSet().forEach {
+            err("capture_name_duplicate", "captureAs '$it' collide con un binding omonimo")
+        }
+    }
+
+    /**
+     * Cammina l'albero delle azioni: profondità di annidamento (≤4), validazione per-azione (foglie),
+     * bound while, condizione di flusso (incl. VarCompare sullo scope var) e interpolazione ${…}.
+     */
+    private fun walkActions(
+        actions: List<Action>,
+        trigger: Trigger,
+        whitelist: Set<String>,
+        knownVars: Set<String>,
+        declaredTypes: Map<String, VarType>,
+        declaredIntegrity: Map<String, IntegrityLabel>,
+        declaredConfidentiality: Map<String, ConfidentialityLabel>,
+        availableVars: MutableSet<String>,
+        depth: Int,
+        countCondition: () -> Int,
+        err: (String, String) -> Unit,
+        warn: (String, String) -> Unit,
+    ): Set<String> {
+        if (depth > MAX_FLOW_DEPTH) {
+            err("flow_too_deep", "Annidamento if/while oltre profondità $MAX_FLOW_DEPTH")
+            return availableVars
+        }
+        for (action in actions) {
+            checkInterpolation(
+                action,
+                knownVars,
+                availableVars,
+                declaredIntegrity,
+                declaredConfidentiality,
+                err,
+                warn,
+            )
+            validateAction(action, trigger, whitelist, err, warn)
+            when (action) {
+                is Action.If -> {
+                    if (action.then.isEmpty() && action.orElse.isEmpty())
+                        err("flow_empty_branch", "if senza azioni in nessun ramo")
+                    checkFlowCondition(
+                        action.condition,
+                        knownVars,
+                        availableVars,
+                        declaredTypes,
+                        countCondition,
+                        err,
+                    )
+                    val thenOut = walkActions(
+                        action.then, trigger, whitelist, knownVars, declaredTypes,
+                        declaredIntegrity, declaredConfidentiality, availableVars.toMutableSet(),
+                        depth + 1, countCondition, err, warn,
+                    )
+                    val elseOut = walkActions(
+                        action.orElse, trigger, whitelist, knownVars, declaredTypes,
+                        declaredIntegrity, declaredConfidentiality, availableVars.toMutableSet(),
+                        depth + 1, countCondition, err, warn,
+                    )
+                    availableVars.retainAll(thenOut.intersect(elseOut))
+                }
+                is Action.While -> {
+                    if (action.body.isEmpty()) err("flow_empty_branch", "while senza corpo")
+                    if (action.maxIterations !in MIN_WHILE_ITERATIONS..MAX_WHILE_ITERATIONS)
+                        err("while_iterations_invalid", "maxIterations fuori intervallo $MIN_WHILE_ITERATIONS..$MAX_WHILE_ITERATIONS")
+                    if (action.delayBetweenMs !in 0..MAX_WHILE_DELAY_MS)
+                        err("while_delay_invalid", "delayBetweenMs fuori intervallo 0..$MAX_WHILE_DELAY_MS")
+                    checkFlowCondition(
+                        action.condition,
+                        knownVars,
+                        availableVars,
+                        declaredTypes,
+                        countCondition,
+                        err,
+                    )
+                    // Il corpo può non partire: i suoi capture non sono definiti dopo il loop.
+                    walkActions(
+                        action.body, trigger, whitelist, knownVars, declaredTypes,
+                        declaredIntegrity, declaredConfidentiality, availableVars.toMutableSet(),
+                        depth + 1, countCondition, err, warn,
+                    )
+                }
+                else -> captureDeclaration(action)?.let { availableVars += it.name }
+            }
+        }
+        return availableVars
+    }
+
+    /** Valida una condizione di flusso (if/while): struttura + VarCompare sullo scope var. */
+    private fun checkFlowCondition(
+        condition: Condition,
+        knownVars: Set<String>,
+        availableVars: Set<String>,
+        declaredTypes: Map<String, VarType>,
+        countCondition: () -> Int,
+        err: (String, String) -> Unit,
+    ) {
+        checkConditions(
+            condition,
+            1,
+            countCondition,
+            err,
+            allowVarCompare = true,
+            knownVars = knownVars,
+            availableVars = availableVars,
+            declaredTypes = declaredTypes,
+        )
+    }
+
+    private fun validateVarCompare(
+        c: Condition.VarCompare,
+        knownVars: Set<String>,
+        availableVars: Set<String>,
+        declaredTypes: Map<String, VarType>,
+        err: (String, String) -> Unit,
+    ) {
+        fun validateAvailable(name: String) {
+            when (name) {
+                !in knownVars -> err("var_compare_undeclared", "VarCompare su variabile non dichiarata: '$name'")
+                !in availableVars -> err("var_not_definitely_assigned", "Variabile '$name' non sicuramente assegnata")
+            }
+        }
+        validateAvailable(c.varName)
+        c.expectedVar?.let(::validateAvailable)
+
+        if ((c.expected == null) == (c.expectedVar == null)) {
+            err("var_compare_rhs_invalid", "VarCompare richiede esattamente uno tra expected ed expectedVar")
+            return
+        }
+        val leftType = declaredTypes[c.varName] ?: return
+        val rightType = c.expectedVar?.let(declaredTypes::get) ?: leftType
+        val expected = c.expected
+        if (expected != null) {
+            if (expected.length > MAX_TEXT_LENGTH || expected.any(Char::isISOControl)) {
+                err("var_compare_invalid", "Valore atteso troppo lungo o con caratteri di controllo")
+                return
+            }
+            val validLiteral = when (leftType) {
+                VarType.TEXT -> true
+                VarType.NUMBER -> expected.toDoubleOrNull()?.isFinite() == true
+                VarType.BOOLEAN -> expected in setOf("true", "false")
+            }
+            if (!validLiteral) {
+                err("var_compare_type_invalid", "RHS letterale incompatibile con $leftType")
+            }
+        }
+        val validOperator = when (c.op) {
+            CmpOp.CONTAINS -> leftType == VarType.TEXT && rightType == VarType.TEXT
+            CmpOp.GT, CmpOp.LT -> leftType == VarType.NUMBER && rightType == VarType.NUMBER
+            CmpOp.EQ, CmpOp.NEQ -> leftType == rightType
+        }
+        if (!validOperator) {
+            err("var_compare_type_invalid", "Operatore ${c.op} incompatibile con $leftType/$rightType")
+        }
+    }
+
+    /** Interpolazione ${…} nei campi testo (§2.4): SINK con var dichiarata; altrove vietata. */
+    private fun checkInterpolation(
+        action: Action,
+        knownVars: Set<String>,
+        availableVars: Set<String>,
+        declaredIntegrity: Map<String, IntegrityLabel>,
+        declaredConfidentiality: Map<String, ConfidentialityLabel>,
+        err: (String, String) -> Unit,
+        warn: (String, String) -> Unit,
+    ) {
+        for (field in InterpolationPolicy.textFields(action)) {
+            if (!InterpolationPolicy.containsInterpolation(field.value)) continue
+            val parsed = InterpolationPolicy.parse(field.value)
+            if (parsed.malformed) {
+                err("interpolation_malformed", "Interpolazione malformata nel campo ${field.label}")
+            }
+            parsed.refs.toSet().forEach { name ->
+                when (name) {
+                    !in knownVars ->
+                        err("interpolation_undeclared_var", "Variabile '\${$name}' non dichiarata (campo ${field.label})")
+                    !in availableVars ->
+                        err("var_not_definitely_assigned", "Variabile '$name' non sicuramente assegnata")
+                    else -> {
+                        if (field.cls == InterpolationPolicy.FieldClass.AUTHORITY &&
+                            declaredIntegrity[name] != IntegrityLabel.CLEAN
+                        ) {
+                            err(
+                                "interpolation_tainted_authority",
+                                "Variabile TAINTED '$name' non ammessa nel campo di autorità ${field.label}",
+                            )
+                        }
+                        if ((action is Action.InvokeLlm || action is Action.InvokeLlmV2) &&
+                            declaredConfidentiality[name] == ConfidentialityLabel.SECRET
+                        ) {
+                            warn(
+                                "secret_interpolation_disclosure",
+                                "La variabile SECRET '$name' sarà inviata al Brain configurato",
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /** Budget tempo worst-case statico (§2.5): somma sleep + azioni, con aritmetica satura. */
+    private fun worstCaseBudgetMs(actions: List<Action>): Long =
+        actions.fold(0L) { acc, action -> saturatingAdd(acc, actionBudgetMs(action)) }
+
+    private fun actionBudgetMs(action: Action): Long = when (action) {
+        is Action.InvokeLlm -> action.timeoutMs.coerceAtLeast(0)
+        is Action.InvokeLlmV2 -> action.timeoutMs.coerceAtLeast(0)
+        is Action.RunShell -> SHELL_ACTION_BUDGET_MS
+        is Action.If -> maxOf(worstCaseBudgetMs(action.then), worstCaseBudgetMs(action.orElse))
+        is Action.While -> saturatingMul(
+            action.maxIterations.toLong().coerceAtLeast(0),
+            saturatingAdd(action.delayBetweenMs.coerceAtLeast(0), worstCaseBudgetMs(action.body)),
+        )
+        else -> LEAF_ACTION_BUDGET_MS
+    }
+
+    private fun saturatingAdd(a: Long, b: Long): Long =
+        if (b > 0 && a > Long.MAX_VALUE - b) Long.MAX_VALUE else a + b
+
+    private fun saturatingMul(a: Long, b: Long): Long =
+        if (a != 0L && b > Long.MAX_VALUE / a) Long.MAX_VALUE else a * b
 
     private fun validateTrigger(
         trigger: Trigger,
@@ -192,6 +644,10 @@ class DraftValidator(
         depth: Int,
         count: () -> Int,
         err: (String, String) -> Unit,
+        allowVarCompare: Boolean = false,
+        knownVars: Set<String> = emptySet(),
+        availableVars: Set<String> = emptySet(),
+        declaredTypes: Map<String, VarType> = emptyMap(),
     ) {
         if (condition == null) return
         count()
@@ -199,16 +655,34 @@ class DraftValidator(
             err("condition_too_deep", "Albero condizioni oltre profondità $MAX_CONDITION_DEPTH")
             return
         }
+        fun recurse(child: Condition) =
+            checkConditions(
+                child,
+                depth + 1,
+                count,
+                err,
+                allowVarCompare,
+                knownVars,
+                availableVars,
+                declaredTypes,
+            )
         when (condition) {
             is Condition.And -> {
                 if (condition.all.isEmpty()) err("condition_empty", "AND senza condizioni")
-                condition.all.forEach { checkConditions(it, depth + 1, count, err) }
+                condition.all.forEach { recurse(it) }
             }
             is Condition.Or -> {
                 if (condition.any.isEmpty()) err("condition_empty", "OR senza condizioni")
-                condition.any.forEach { checkConditions(it, depth + 1, count, err) }
+                condition.any.forEach { recurse(it) }
             }
-            is Condition.Not -> checkConditions(condition.cond, depth + 1, count, err)
+            is Condition.Not -> recurse(condition.cond)
+            // VarCompare: ammesso SOLO nelle condizioni di flusso (if/while), mai trigger-time.
+            is Condition.VarCompare ->
+                if (allowVarCompare) {
+                    validateVarCompare(condition, knownVars, availableVars, declaredTypes, err)
+                }
+                else err("var_compare_outside_flow", "Il confronto su variabili è ammesso solo dentro if/while")
+            is Condition.BooleanLiteral -> Unit
             is Condition.StateEquals -> validateStateCondition(condition, err)
             is Condition.StateCompare -> validateStateCompare(condition, err)
             is Condition.TimeWindow -> {
@@ -275,10 +749,14 @@ class DraftValidator(
     ) {
         when (action) {
             is Action.SetWifi, is Action.SetBluetooth, is Action.SetDnd -> Unit
-            is Action.SetRinger -> if (action.mode !in setOf("normal", "vibrate", "silent"))
+            is Action.SetRinger -> if (!InterpolationPolicy.containsInterpolation(action.mode) &&
+                action.mode !in setOf("normal", "vibrate", "silent")
+            )
                 err("ringer_mode_invalid", "Modalità suoneria non valida")
-            is Action.LaunchApp -> validatePackage(action.pkg, "package_invalid", err)
-            is Action.OpenUrl -> if (!validHttpUrl(action.url))
+            is Action.LaunchApp -> if (!InterpolationPolicy.containsInterpolation(action.pkg)) {
+                validatePackage(action.pkg, "package_invalid", err)
+            }
+            is Action.OpenUrl -> if (!InterpolationPolicy.containsInterpolation(action.url) && !validHttpUrl(action.url))
                 err("url_invalid", "URL non valido o schema non consentito")
             is Action.ShowNotification -> {
                 validateRequiredText(action.title, 120, "title_invalid", err)
@@ -326,7 +804,7 @@ class DraftValidator(
                 if (!textual)
                     err("clipboard_source_missing", "Copia negli appunti richiede un trigger con testo (SMS o notifica)")
                 action.extractionRegex?.let { pattern ->
-                    if (!SafeExtractionRegex.isValid(pattern))
+                    if (!InterpolationPolicy.containsInterpolation(pattern) && !SafeExtractionRegex.isValid(pattern))
                         err(
                             "extraction_regex_invalid",
                             "Regex non sicura/compatibile RE2 o oltre " +
@@ -356,7 +834,9 @@ class DraftValidator(
                 // per APP_DETAILS; per le altre schermate va lasciato assente.
                 if (action.screen == SettingsScreen.APP_DETAILS) {
                     if (action.pkg == null) err("settings_pkg_missing", "APP_DETAILS richiede un package")
-                    else validatePackage(action.pkg, "settings_pkg_invalid", err)
+                    else if (!InterpolationPolicy.containsInterpolation(action.pkg)) {
+                        validatePackage(action.pkg, "settings_pkg_invalid", err)
+                    }
                 } else if (action.pkg != null) {
                     err("settings_pkg_unexpected", "Il package è ammesso solo per la schermata APP_DETAILS")
                 }
@@ -368,9 +848,9 @@ class DraftValidator(
             is Action.WriteSetting -> {
                 // PARAMETRICA (D0: nessuna allowlist di chiavi). Solo validazione di forma via
                 // WriteSettingPolicy: key stile QUERY_NAME, value bounded, control char rifiutati.
-                if (!WriteSettingPolicy.validKey(action.key))
+                if (!InterpolationPolicy.containsInterpolation(action.key) && !WriteSettingPolicy.validKey(action.key))
                     err("write_setting_key_invalid", "Chiave impostazione non valida (forma/limite)")
-                if (!WriteSettingPolicy.validValue(action.value))
+                if (!InterpolationPolicy.containsInterpolation(action.value) && !WriteSettingPolicy.validValue(action.value))
                     err(
                         "write_setting_value_invalid",
                         "Valore impostazione vuoto, troppo lungo o con caratteri di controllo",
@@ -384,6 +864,9 @@ class DraftValidator(
             }
             is Action.InvokeLlm -> validateInvokeLlm(action, trigger, whitelist, err, warn)
             is Action.InvokeLlmV2 -> validateInvokeLlmV2(action, trigger, whitelist, err, warn)
+            // Contenitori control-flow: bound (while), rami non vuoti, condizione di flusso e
+            // ricorsione sono gestiti da walkActions (che ha lo scope var). Qui nessun campo foglia.
+            is Action.If, is Action.While -> Unit
         }
     }
 

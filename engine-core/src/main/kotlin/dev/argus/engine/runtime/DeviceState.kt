@@ -69,6 +69,9 @@ object StateReadPlanner {
     fun forCondition(condition: Condition?): StateReadRequest = when (condition) {
         null,
         is Condition.TimeWindow,
+        is Condition.BooleanLiteral,
+        // VarCompare confronta variabili di scope, non stato del device: nessuna lettura pianificata.
+        is Condition.VarCompare,
         -> StateReadRequest.EMPTY
         is Condition.StateEquals -> StateReadRequest(keys = setOf(condition.key))
         is Condition.StateCompare -> StateReadRequest(queries = setOf(condition.query))
@@ -115,5 +118,13 @@ object StateReadPlanner {
         // write_setting non legge stato: namespace/key/value sono letterali approvati.
         is Action.WriteSetting,
         -> StateReadRequest.EMPTY
+        // Contenitori control-flow: uniscono le letture della condizione di flusso e di tutte le
+        // azioni annidate, così il planner prepara lo stato che l'interprete P4-B leggerà davvero.
+        is Action.If -> (action.then + action.orElse).fold(forCondition(action.condition)) { req, child ->
+            req + forAction(child)
+        }
+        is Action.While -> action.body.fold(forCondition(action.condition)) { req, child ->
+            req + forAction(child)
+        }
     }
 }

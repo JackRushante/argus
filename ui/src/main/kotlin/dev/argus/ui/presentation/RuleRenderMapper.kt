@@ -241,6 +241,14 @@ object RuleRenderMapper {
                 listOf("${pad}Almeno una delle seguenti:") + c.any.flatMap { flattenConditions(it, depth + 1) }
             is Condition.Not ->
                 listOf("${pad}Non deve valere:") + flattenConditions(c.cond, depth + 1)
+            is Condition.BooleanLiteral ->
+                listOf("${pad}${if (c.value) "Sempre" else "Mai"}")
+            // P4: confronto su variabile di programma. La destra è un'altra variabile (${nome}) o un
+            // letterale. Rendering minimale a una riga (l'espansione ricca dei badge provenienza è P4-E).
+            is Condition.VarCompare -> {
+                val right = c.expectedVar?.let { "\${$it}" } ?: c.expected ?: "<?>"
+                listOf("${pad}Solo se \${${c.varName}} ${opLabel(c.op)} $right")
+            }
         }
     }
 
@@ -393,6 +401,25 @@ object RuleRenderMapper {
                 append(" · tool: ${a.allowedTools.joinToString(", ")}")
             },
             isGenerative = true,
+        )
+        // P4 control-flow: rendering MINIMO a una riga (l'espansione ricorsiva con i badge di
+        // provenienza è P4-E). Non nasconde la natura generativa del blocco (isGenerative dal tier
+        // aggregato) così la review resta onesta anche prima del render completo.
+        is Action.If -> row(
+            iconKey = "control_flow",
+            label = "Se (condizione), esegui un blocco",
+            detail = "${a.then.size} azioni se vera" +
+                (if (a.orElse.isNotEmpty()) ", ${a.orElse.size} altrimenti" else "") +
+                " · dettaglio completo nell'approvazione avanzata",
+            isGenerative = a.tier == ActionTier.GENERATIVE,
+        )
+        is Action.While -> row(
+            iconKey = "control_flow",
+            label = "Ripeti (max ${a.maxIterations} volte)",
+            detail = "${a.body.size} azioni per iterazione" +
+                (if (a.delayBetweenMs > 0) " · ogni ${a.delayBetweenMs} ms" else "") +
+                " · dettaglio completo nell'approvazione avanzata",
+            isGenerative = a.tier == ActionTier.GENERATIVE,
         )
     }
 

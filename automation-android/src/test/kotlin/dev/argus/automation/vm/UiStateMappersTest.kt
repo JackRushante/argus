@@ -11,7 +11,7 @@ import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.CreatedBy
-import dev.argus.engine.model.SCHEMA_VERSION
+import dev.argus.engine.model.AUTOMATION_SCHEMA_VERSION_V1
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.ActionJournalOutcome
 import dev.argus.engine.runtime.AuditKind
@@ -167,7 +167,7 @@ class UiStateMappersTest {
             draft = draft,
             createdBy = CreatedBy.LLM,
             priority = 0,
-            schemaVersion = SCHEMA_VERSION,
+            schemaVersion = AUTOMATION_SCHEMA_VERSION_V1,
             createdAtMillis = 1_000L,
             updatedAtMillis = 1_000L,
         )
@@ -285,7 +285,7 @@ class UiStateMappersTest {
             draft = draft,
             createdBy = CreatedBy.LLM,
             priority = 0,
-            schemaVersion = SCHEMA_VERSION,
+            schemaVersion = AUTOMATION_SCHEMA_VERSION_V1,
             createdAtMillis = 1_000L,
             updatedAtMillis = 1_000L,
         )

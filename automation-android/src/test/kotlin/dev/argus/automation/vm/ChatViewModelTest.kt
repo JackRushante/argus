@@ -24,7 +24,7 @@ import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.CapabilityIds
 import dev.argus.engine.model.DndMode
-import dev.argus.engine.model.SCHEMA_VERSION
+import dev.argus.engine.model.AUTOMATION_SCHEMA_VERSION_V1
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.ActionCapabilities
 import dev.argus.engine.runtime.AutomationStore
@@ -357,7 +357,7 @@ private class ViewModelDraftRepository : DraftRepository {
             draft = newDraft.draft,
             createdBy = newDraft.createdBy,
             priority = newDraft.priority,
-            schemaVersion = SCHEMA_VERSION,
+            schemaVersion = AUTOMATION_SCHEMA_VERSION_V1,
             createdAtMillis = newDraft.atMillis,
             updatedAtMillis = newDraft.atMillis,
             baseAutomationFingerprint = newDraft.expectedAutomationFingerprint,

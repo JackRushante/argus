@@ -22,22 +22,30 @@ niente eval).
 
 ## 2. Modello di dominio (engine-core)
 
-### 2.1 Valori tipizzati e taint
+### 2.1 Valori tipizzati, integrità, riservatezza e provenienza
 
 ```kotlin
 @Serializable enum class VarType { TEXT, NUMBER, BOOLEAN }
+@Serializable enum class IntegrityLabel { CLEAN, TAINTED }
+@Serializable enum class ConfidentialityLabel { PUBLIC, PRIVATE, SECRET }
+@Serializable enum class ValueProvenance {
+    LITERAL, DEVICE_STATE, NOTIFICATION, SMS, PHONE, MODEL, SHELL
+}
 
-/** Provenienza di un valore. UNTAINTED = solo letterali approvati e derivazioni pure di essi. */
-@Serializable enum class Taint { UNTAINTED, DEVICE, TAINTED }
-// DEVICE = letture di stato locale (battery, ssid…): non spoofabile da remoto ma non approvato
-//          byte-per-byte. TAINTED = contenuto esterno o generato (SMS/notifiche/web/LLM/shell-out).
-// Ordine: UNTAINTED < DEVICE < TAINTED; una derivazione prende il max degli ingressi.
-
-data class VarValue(val text: String, val type: VarType, val taint: Taint)
+data class VarValue(
+    val text: String,
+    val type: VarType,
+    val integrity: IntegrityLabel,
+    val confidentiality: ConfidentialityLabel,
+    val provenance: Set<ValueProvenance>,
+)
 ```
 
 Runtime-only: `VarValue` NON è serializzato nella regola (le variabili vivono nello scope di
-UNA esecuzione). Nella regola approvata compaiono solo i NOMI e i BINDING.
+UNA esecuzione). Nella regola approvata compaiono solo i NOMI e i BINDING. Integrità e
+riservatezza sono assi separati, come stabilito dal decision record P3 §4: un reader locale è
+`CLEAN` ma può essere `PRIVATE` o `SECRET`. Ogni derivazione propaga il join di integrità e
+riservatezza e l'unione della provenienza; regex, parsing, escaping e LLM non declassificano.
 
 ### 2.2 Sorgenti di variabili (binding dichiarati e approvati)
 
@@ -46,19 +54,31 @@ UNA esecuzione). Nella regola approvata compaiono solo i NOMI e i BINDING.
     val name: String                                   // ^[a-z][a-z0-9_]{0,31}$, unico nella regola
     @Serializable @SerialName("trigger_payload")      // testo SMS/notifica, numero chiamante…
     data class TriggerPayload(override val name: String, val field: TriggerField,
-                              val regexGroup: String? = null) : VarBinding   // taint = TAINTED
+                              val extractionRegex: String? = null,
+                              val confidentiality: ConfidentialityLabel) : VarBinding
+                                                       // integrity = TAINTED; floor PRIVATE
     @Serializable @SerialName("state")                // riusa StateQuerySpec di P3 (famiglie chiuse)
-    data class State(override val name: String, val query: StateQuerySpec) : VarBinding
-                                                       // taint = DEVICE
+    data class State(override val name: String, val query: StateQuery,
+                     val valueType: StateValueType, val policyVersion: Int,
+                     val confidentiality: ConfidentialityLabel) : VarBinding
+                                                       // integrity = CLEAN; floor P3 invariato
     @Serializable @SerialName("literal")
     data class Literal(override val name: String, val value: String,
-                       val varType: VarType = VarType.TEXT) : VarBinding     // taint = UNTAINTED
+                       val varType: VarType,
+                       val confidentiality: ConfidentialityLabel) : VarBinding // integrity = CLEAN
 }
 ```
 
 Più i **binding di output**: alcune azioni possono dichiarare `captureAs: String?`
-(@EncodeDefault(NEVER) per compat fingerprint) — es. `invoke_llm.captureAs` (output → TAINTED),
-`run_shell.captureAs` (stdout → TAINTED). L'elenco delle azioni catturabili è CHIUSO.
+(@EncodeDefault(NEVER) per compat fingerprint) — `invoke_llm` v1/v2 (output `TAINTED`,
+provenienza `MODEL`) e `run_shell` (stdout `TAINTED`, provenienza `SHELL`). La riservatezza
+dell'output è almeno il join degli input e del floor del produttore. L'elenco delle azioni
+catturabili è CHIUSO.
+
+`TriggerField` è validato contro la famiglia concreta: Notification espone `TEXT`, `TITLE` e
+`SENDER`; SMS espone `TEXT` e `NUMBER`; chiamata espone solo `NUMBER`. `SENDER` è sempre il nome
+visuale, mai `conversationId`: quest'ultimo resta un capability token non serializzabile. Se
+presente, `extractionRegex` usa RE2/J e restituisce il primo gruppo o l'intero match.
 
 ### 2.3 Control-flow strutturato
 
@@ -79,9 +99,14 @@ data class While(val condition: FlowCondition, val body: List<Action>,
 
 ```kotlin
 @Serializable @SerialName("var_compare")
-data class VarCompare(val varName: String, val op: CmpOp, val expected: String,
-                      val expectedVar: String? = null) : Condition
+data class VarCompare(val varName: String, val op: CmpOp,
+                      val expected: String? = null, val expectedVar: String? = null) : Condition
 ```
+
+Sul wire `expected` ed `expectedVar` sono alternativi e ne deve comparire esattamente uno. I tipi
+devono coincidere: `CONTAINS` solo TEXT, `GT/LT` solo NUMBER, `EQ/NEQ` sul tipo dichiarato. Una
+`BooleanLiteral(value)` chiusa completa il dominio di `FlowCondition` e rende rappresentabile
+direttamente `while(true)` senza variabili fittizie.
 
 La torcia-lampeggiante di Lorenzo diventa: `while (true, maxIterations=20, delayBetweenMs=500)
 { set_flashlight(on), set_flashlight(off) }` — banale, come voleva lui.
@@ -91,35 +116,49 @@ La torcia-lampeggiante di Lorenzo diventa: `while (true, maxIterations=20, delay
 - Sintassi: `${nome}` dentro i campi TESTO delle azioni. Parser lineare, niente espressioni.
 - **Allowlist statica per campo** (vocabolario chiuso in `InterpolationPolicy`): ogni campo di
   ogni azione è classificato:
-  - `SINK` (accetta anche TAINTED): `show_notification.title/text`, `copy_to_clipboard.text`,
+  - `SINK` (accetta anche `TAINTED`): `show_notification.title/text`,
     `whatsapp_reply.text` (stessa chat verificata), `invoke_llm.goal` — il tainted entra come
     DATO delimitato (il runtime lo passa già oggi con cleanUntrusted; resta così),
-    `vibrate`/`set_flashlight` non hanno testo.
-  - `DEVICE_OK` (accetta UNTAINTED e DEVICE, mai TAINTED): `set_volume.level`? no — numerici
-    restano letterali in P4-A; `open_url.url` con var DEVICE? no: url = autorità. Vuoto per ora.
-  - `AUTHORITY` (SOLO letterali, MAI interpolazione): `run_shell.cmd`, `write_setting.*`,
-    `launch_app.pkg`, `open_url.url`, `set_alarm.*`, `open_settings_screen.*`, `tap`/`input_text`
-    (input verso altre app = autorità), qualsiasi campo di routing/target.
-- Enforcement DOPPIO: statico nel `DraftValidator` (un `${…}` in un campo AUTHORITY = errore,
-  in un campo non in allowlist = errore, var non dichiarata = errore) e dinamico nel runtime
-  (l'interpolatore rifiuta TAINTED/DEVICE dove non ammesso: fail-closed, audita
+    `invoke_llm.notificationTitle`, `set_alarm.label` e `set_timer.label`; `vibrate` e
+    `set_flashlight` non hanno testo.
+  - `AUTHORITY` (accetta solo valori con integrità `CLEAN`): `run_shell.cmd`, `write_setting.*`,
+    `launch_app.pkg`, `open_url.url`, `open_settings_screen.*`, `tap`/`input_text`
+    (input verso altre app = autorità), qualsiasi campo di routing/target. Questo segue la matrice
+    P3 §4.2: `CLEAN` sì, `TAINTED` no; un binding letterale CLEAN resta integralmente nel
+    fingerprint. Campi non catalogati falliscono chiuso.
+- Enforcement DOPPIO: statico nel `DraftValidator` (var `TAINTED` in campo AUTHORITY = errore,
+  campo non catalogato = errore, var non dichiarata/non sicuramente assegnata = errore) e dinamico
+  nel runtime (l'interpolatore rifiuta `TAINTED` dove non ammesso: fail-closed, audita
   `BLOCKED_POLICY` con reason `taint_blocked`). Il fingerprint copre il TEMPLATE approvato.
 
 ### 2.5 Bound del validator (chiusi, non negoziabili)
 
-- ≤ 16 variabili per regola; nomi unici; regex nome come sopra.
+- ≤ 16 variabili per regola contando binding iniziali e `captureAs`; nomi unici; regex nome come
+  sopra.
 - Profondità di annidamento if/while ≤ 4; ≤ 64 azioni TOTALI (albero appiattito).
 - `while.maxIterations` 1..1000; `delayBetweenMs` 0..3_600_000; budget tempo TOTALE
   dell'esecuzione (somma sleep + azioni) ≤ 6h, verificato staticamente sul worst-case.
-- `VarCompare` su var dichiarata; op numerici solo se `VarType.NUMBER` (coercizione esplicita).
+- ≤ 64 condizioni TOTALI fra gate trigger-time e control-flow.
+- `VarCompare` su var sicuramente assegnata; analisi sequenziale dei rami: un capture diventa
+  disponibile dopo l'azione che lo produce, l'uscita di un `if` è l'intersezione dei due rami e
+  un capture prodotto solo nel corpo di un `while` non è disponibile dopo il loop.
+- Operatori e RHS di `VarCompare` devono essere compatibili col `VarType` dichiarato.
 - Niente `captureAs` fuori dall'elenco chiuso delle azioni catturabili.
+- Il preflight dell'albero è iterativo: profondità e conteggi vengono verificati prima di qualunque
+  visita ricorsiva, così un oggetto ostile non causa stack overflow nel validator.
 
-### 2.6 Fingerprint & compat
+### 2.6 Schema automazione, materiale fingerprint e compatibilità
 
-- Nuovi sottotipi sealed (If/While/VarCompare/VarBinding) NON cambiano i byte delle regole
+- Le tre versioni dell'ADR restano indipendenti. P4 introduce `automation_schema_version = 2`
+  e `fingerprint_material_version = 2`; il protocollo bridge non cambia finché non arriva P4-D.
+- L'app continua a leggere/eseguire regole legacy schema v1. Una regola che usa `vars`, control-flow
+  o `captureAs` DEVE dichiarare schema v2; una combinazione feature/versione incoerente fallisce
+  chiuso e va in review.
+- Nuovi sottotipi sealed (If/While/VarCompare/VarBinding) NON cambiano i byte delle regole v1
   esistenti ⇒ `V1FingerprintCompatibilityTest` resta verde per costruzione.
 - Campi nuovi su azioni esistenti (`captureAs`) ⇒ `@EncodeDefault(NEVER)`.
-- Il fixture-test di compat va ESTESO con una regola P4 pinnata (nuovo hash, additivo).
+- `ApprovalFingerprints` usa il prefisso materiale v1 per regole legacy e v2 per programmi P4,
+  senza riscrivere gli hash già approvati. Il fixture-test va esteso con una regola P4 pinnata.
 
 ## 3. Esecuzione (interprete deterministico)
 
@@ -156,7 +195,7 @@ La torcia-lampeggiante di Lorenzo diventa: `while (true, maxIterations=20, delay
 
 | Fase | Contenuto | Moduli |
 |---|---|---|
-| **P4-A** | modello (VarBinding/If/While/VarCompare/Taint/InterpolationPolicy) + DraftValidator + serializzazione + fingerprint-compat pinnata | engine-core |
+| **P4-A** | modello (VarBinding/If/While/VarCompare/label/provenance/InterpolationPolicy) + DraftValidator + schema/fingerprint compat + persistenza Room | engine-core, data |
 | **P4-B** | ProgramInterpreter + VarScope + interpolatore taint-aware + journal path | engine-core |
 | **P4-C** | wiring runtime Android (ActionRunner, FGS per esecuzioni lunghe, cancellazione) | automation-android |
 | **P4-D** | compile prompt (app EN + bridge) + validate bridge + verifica live | brain-android, ops/hermes |

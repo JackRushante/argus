@@ -50,6 +50,29 @@ object ActionPrivileges {
         is Action.InvokeLlm,
         is Action.InvokeLlmV2,
         -> ActionPrivilege.BASE
+
+        // Contenitori control-flow: il privilegio è il MASSIMO dei rami annidati (fail-closed). Un
+        // while che contiene run_shell resta PRIVILEGED, così i gate a monte non lo sottovalutano.
+        is Action.If -> maxPrivilege(action.then + action.orElse)
+        is Action.While -> maxPrivilege(action.body)
+    }
+
+    private fun maxPrivilege(actions: List<Action>): ActionPrivilege {
+        val pending = ArrayDeque<Action>()
+        actions.forEach(pending::addLast)
+        while (pending.isNotEmpty()) {
+            when (val action = pending.removeFirst()) {
+                is Action.If -> {
+                    action.then.forEach(pending::addLast)
+                    action.orElse.forEach(pending::addLast)
+                }
+                is Action.While -> action.body.forEach(pending::addLast)
+                else -> if (of(action) == ActionPrivilege.PRIVILEGED) {
+                    return ActionPrivilege.PRIVILEGED
+                }
+            }
+        }
+        return ActionPrivilege.BASE
     }
 
     fun requiresShizuku(action: Action): Boolean = of(action) == ActionPrivilege.PRIVILEGED

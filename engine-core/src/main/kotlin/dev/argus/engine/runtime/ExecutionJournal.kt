@@ -136,6 +136,8 @@ internal fun Action.journalType(): String = when (this) {
     is Action.WriteSetting -> ActionTypeIds.WRITE_SETTING
     is Action.InvokeLlm -> ActionTypeIds.INVOKE_LLM
     is Action.InvokeLlmV2 -> ActionTypeIds.INVOKE_LLM_V2
+    is Action.If -> ActionTypeIds.IF
+    is Action.While -> ActionTypeIds.WHILE
 }
 
 internal fun ActionResult.journalOutcome(): ActionJournalOutcome = when (this) {

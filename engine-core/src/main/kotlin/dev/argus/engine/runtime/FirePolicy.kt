@@ -3,10 +3,10 @@ package dev.argus.engine.runtime
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationDraft
+import dev.argus.engine.model.AutomationSchema
 import dev.argus.engine.model.ApprovalFingerprints
 import dev.argus.engine.model.CapabilityIds
 import dev.argus.engine.model.CapabilityRequirements
-import dev.argus.engine.model.SCHEMA_VERSION
 import dev.argus.engine.safety.DraftValidator
 import dev.argus.engine.safety.Severity
 import dev.argus.engine.safety.StaticShellSafety
@@ -75,13 +75,13 @@ class RevalidatingFirePolicy(
             return FirePolicyDecision.Block("capability_snapshot_unavailable", needsReview = false)
         }
 
-        if (automation.schemaVersion != SCHEMA_VERSION)
+        if (!AutomationSchema.isCompatible(automation))
             return FirePolicyDecision.Block("schema_incompatible", needsReview = true)
         if (automation.approvalFingerprint == null ||
             automation.approvalFingerprint != ApprovalFingerprints.of(automation)
         ) return FirePolicyDecision.Block("approval_fingerprint_mismatch", needsReview = true)
 
-        val hasStaticShell = automation.actions.any { it is Action.RunShell }
+        val hasStaticShell = containsStaticShell(automation.actions)
         if (hasStaticShell &&
             !StaticShellSafety.allows(automation.trigger, snapshot.whitelistedConversationIds)
         ) return FirePolicyDecision.Block("shell_external_trigger", needsReview = true)
@@ -90,6 +90,7 @@ class RevalidatingFirePolicy(
             name = automation.name,
             trigger = automation.trigger,
             actions = automation.actions,
+            vars = automation.vars,
             conditions = automation.conditions,
             cooldownMs = automation.cooldownMs,
         )
@@ -115,6 +116,7 @@ class RevalidatingFirePolicy(
             automation.trigger,
             automation.actions,
             automation.conditions,
+            automation.vars,
         )
         if (automation.requiredCapabilities != derivedRequirements)
             return FirePolicyDecision.Block("capability_requirements_mismatch", needsReview = true)
@@ -126,7 +128,7 @@ class RevalidatingFirePolicy(
             return FirePolicyDecision.Block("capability_unavailable", needsReview = !onlyTransient)
         }
 
-        if (automation.actions.any(::canReply)) {
+        if (containsReply(automation.actions)) {
             val notification = event as? TriggerEvent.NotificationPosted
                 ?: return FirePolicyDecision.Block("reply_event_unverified", needsReview = false)
             val configured = automation.trigger as? dev.argus.engine.model.Trigger.Notification
@@ -146,10 +148,43 @@ class RevalidatingFirePolicy(
         return FirePolicyDecision.Allow
     }
 
+    private fun containsStaticShell(actions: List<Action>): Boolean {
+        val pending = ArrayDeque<Action>()
+        actions.forEach(pending::addLast)
+        while (pending.isNotEmpty()) {
+            when (val action = pending.removeFirst()) {
+                is Action.RunShell -> return true
+                is Action.If -> {
+                    action.then.forEach(pending::addLast)
+                    action.orElse.forEach(pending::addLast)
+                }
+                is Action.While -> action.body.forEach(pending::addLast)
+                else -> Unit
+            }
+        }
+        return false
+    }
+
     private fun canReply(action: Action): Boolean = when (action) {
         is Action.WhatsAppReply -> true
         is Action.InvokeLlm -> action.allowedTools.any { it.equals("whatsapp_reply", ignoreCase = true) }
         is Action.InvokeLlmV2 -> action.allowedTools.any { it.equals("whatsapp_reply", ignoreCase = true) }
         else -> false
+    }
+
+    private fun containsReply(actions: List<Action>): Boolean {
+        val pending = ArrayDeque<Action>()
+        actions.forEach(pending::addLast)
+        while (pending.isNotEmpty()) {
+            when (val action = pending.removeFirst()) {
+                is Action.If -> {
+                    action.then.forEach(pending::addLast)
+                    action.orElse.forEach(pending::addLast)
+                }
+                is Action.While -> action.body.forEach(pending::addLast)
+                else -> if (canReply(action)) return true
+            }
+        }
+        return false
     }
 }

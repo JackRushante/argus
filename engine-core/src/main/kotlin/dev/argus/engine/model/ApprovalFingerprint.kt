@@ -14,6 +14,12 @@ value class ApprovalFingerprint(val value: String) {
 
 /** Hash canonico dei soli dati eseguibili mostrati all'utente; la prosa LLM è esclusa. */
 object ApprovalFingerprints {
+    const val MATERIAL_VERSION_V1 = 1
+    const val MATERIAL_VERSION_P4 = 2
+
+    fun materialVersionFor(automation: Automation): Int =
+        if (AutomationSchema.requiresP4(automation)) MATERIAL_VERSION_P4 else MATERIAL_VERSION_V1
+
     fun of(automation: Automation): ApprovalFingerprint {
         val normalized = automation.copy(
             status = AutomationStatus.PENDING_APPROVAL,
@@ -25,7 +31,8 @@ object ApprovalFingerprints {
             Automation.serializer(),
             normalized,
         )
-        val material = "argus-approval-v1\u0000$canonical"
+        val materialVersion = materialVersionFor(automation)
+        val material = "argus-approval-v$materialVersion\u0000$canonical"
         val digest = MessageDigest.getInstance("SHA-256")
             .digest(material.toByteArray(StandardCharsets.UTF_8))
         return ApprovalFingerprint(digest.toHex())

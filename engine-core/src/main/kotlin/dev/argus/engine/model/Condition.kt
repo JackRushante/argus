@@ -1,4 +1,7 @@
+@file:OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+
 package dev.argus.engine.model
+import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -44,16 +47,46 @@ sealed interface Condition {
 
     @Serializable @SerialName("not")
     data class Not(val cond: Condition) : Condition
+
+    /** Costante chiusa per il control-flow, ad esempio while(true) bounded. */
+    @Serializable @SerialName("boolean_literal")
+    data class BooleanLiteral(val value: Boolean) : Condition
+
+    /**
+     * Confronto su VARIABILI di programma (P4 §2.3): valutato dall'interprete deterministico su
+     * uno scope per-esecuzione. [varName] e l'eventuale [expectedVar] sono NOMI di variabili
+     * dichiarate; [expected] è il letterale di confronto quando non si confronta un'altra var.
+     * Esattamente uno fra [expected] ed [expectedVar] deve essere presente (validator).
+     * Ammesso solo dentro il control-flow (if/while): il [dev.argus.engine.safety.DraftValidator]
+     * rifiuta un VarCompare fra le condizioni trigger-time (le var non esistono ancora lì).
+     */
+    @Serializable @SerialName("var_compare")
+    data class VarCompare(
+        val varName: String,
+        val op: CmpOp,
+        @EncodeDefault(EncodeDefault.Mode.NEVER)
+        val expected: String? = null,
+        @EncodeDefault(EncodeDefault.Mode.NEVER)
+        val expectedVar: String? = null,
+    ) : Condition
 }
+
+/**
+ * Condizione del control-flow (if/while). È esattamente [Condition] — inclusa [Condition.VarCompare]
+ * — ma il nome documenta che qui vivono anche i confronti su variabili di programma (P4 §2.3).
+ */
+typealias FlowCondition = Condition
 
 fun Condition.stateComparisons(): List<Condition.StateCompare> = when (this) {
     is Condition.StateCompare -> listOf(this)
     is Condition.And -> all.flatMap(Condition::stateComparisons)
     is Condition.Or -> any.flatMap(Condition::stateComparisons)
     is Condition.Not -> cond.stateComparisons()
+    is Condition.BooleanLiteral,
     is Condition.TimeWindow,
     is Condition.StateEquals,
     is Condition.AppInForeground,
     is Condition.LocationIn,
+    is Condition.VarCompare,
     -> emptyList()
 }
