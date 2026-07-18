@@ -38,6 +38,7 @@ import dev.argus.ui.model.AutomationDetailState
 import dev.argus.ui.model.StatusBadge
 import dev.argus.ui.model.UiWarning
 import dev.argus.ui.presentation.RuleRenderMapper
+import dev.argus.ui.presentation.RenderLanguage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -102,6 +103,7 @@ class AutomationDetailViewModel @Inject constructor(
     private val connectivity: ConnectivityTriggerRuntime,
     private val geofence: GeofenceTriggerRuntime,
     private val audit: AuditSink,
+    private val language: RenderLanguage = RenderLanguage.system(),
 ) : ViewModel() {
     private val routeId = requireNotNull(savedStateHandle.get<String>("id")) {
         "Dettaglio senza id"
@@ -189,28 +191,69 @@ class AutomationDetailViewModel @Inject constructor(
                     val result = approvals.arm(snapshot.id, snapshot.revision, snapshot.fingerprint)
                 ) {
                     is FlowArmResult.Armed -> mutableEvents.emit(
-                        DetailEvent.Close("Regola armata: ${result.automation.name}"),
+                        DetailEvent.Close(
+                            language.pick(
+                                "Rule armed: ${result.automation.name}",
+                                "Regola armata: ${result.automation.name}",
+                            ),
+                        ),
                     )
-                    FlowArmResult.Missing -> mutableEvents.emit(DetailEvent.Close("Bozza non più disponibile."))
-                    is FlowArmResult.Stale -> message("La bozza è cambiata: controlla la nuova revisione.")
+                    FlowArmResult.Missing -> mutableEvents.emit(
+                        DetailEvent.Close(
+                            language.pick("Draft no longer available.", "Bozza non più disponibile."),
+                        ),
+                    )
+                    is FlowArmResult.Stale -> message(
+                        language.pick(
+                            "The draft changed; review the new revision.",
+                            "La bozza è cambiata: controlla la nuova revisione.",
+                        ),
+                    )
                     is FlowArmResult.ValidationFailed -> message(
-                        result.issues.firstOrNull { it.severity == Severity.ERROR }?.message
-                            ?: "La regola non supera i controlli di sicurezza.",
+                        result.issues.firstOrNull { it.severity == Severity.ERROR }?.let { issue ->
+                            language.pick(
+                                "The rule failed local validation (${issue.code}).",
+                                issue.message,
+                            )
+                        } ?: language.pick(
+                            "The rule failed local validation.",
+                            "La regola non supera i controlli di sicurezza.",
+                        ),
                     )
-                    FlowArmResult.PolicyUnavailable -> message("Policy del dispositivo non disponibile.")
-                    FlowArmResult.LocationUnavailable -> message("Posizione attuale non disponibile.")
-                    FlowArmResult.IntegrityFailure -> message("Integrità della bozza non valida.")
-                    FlowArmResult.AutomationConflict -> message("La regola è cambiata durante l'approvazione.")
+                    FlowArmResult.PolicyUnavailable -> message(
+                        language.pick(
+                            "Device policy is unavailable.",
+                            "Policy del dispositivo non disponibile.",
+                        ),
+                    )
+                    FlowArmResult.LocationUnavailable -> message(
+                        language.pick(
+                            "Current location is unavailable.",
+                            "Posizione attuale non disponibile.",
+                        ),
+                    )
+                    FlowArmResult.IntegrityFailure -> message(
+                        language.pick("Invalid draft integrity.", "Integrità della bozza non valida."),
+                    )
+                    FlowArmResult.AutomationConflict -> message(
+                        language.pick(
+                            "The rule changed during approval.",
+                            "La regola è cambiata durante l'approvazione.",
+                        ),
+                    )
                     is FlowArmResult.RegistrationFailed -> mutableEvents.emit(
                         DetailEvent.Close(
-                            "Regola salvata ma disattivata: pianificazione non riuscita.",
+                            language.pick(
+                                "Rule saved but disabled: scheduling failed.",
+                                "Regola salvata ma disattivata: pianificazione non riuscita.",
+                            ),
                         ),
                     )
                 }
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
-                message("Impossibile armare la regola.")
+                message(language.pick("Unable to arm the rule.", "Impossibile armare la regola."))
             }
         }
     }
@@ -220,14 +263,25 @@ class AutomationDetailViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 when (val result = drafts.delete(snapshot.id, snapshot.revision)) {
-                    DraftDeleteResult.Deleted -> mutableEvents.emit(DetailEvent.Close("Bozza rifiutata."))
-                    DraftDeleteResult.Missing -> mutableEvents.emit(DetailEvent.Close("Bozza non più disponibile."))
-                    is DraftDeleteResult.Stale -> message("La bozza è cambiata: riaprila prima di rifiutarla.")
+                    DraftDeleteResult.Deleted -> mutableEvents.emit(
+                        DetailEvent.Close(language.pick("Draft rejected.", "Bozza rifiutata.")),
+                    )
+                    DraftDeleteResult.Missing -> mutableEvents.emit(
+                        DetailEvent.Close(
+                            language.pick("Draft no longer available.", "Bozza non più disponibile."),
+                        ),
+                    )
+                    is DraftDeleteResult.Stale -> message(
+                        language.pick(
+                            "The draft changed; reopen it before rejecting it.",
+                            "La bozza è cambiata: riaprila prima di rifiutarla.",
+                        ),
+                    )
                 }
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
-                message("Impossibile rifiutare la bozza.")
+                message(language.pick("Unable to reject the draft.", "Impossibile rifiutare la bozza."))
             }
         }
     }
@@ -239,16 +293,31 @@ class AutomationDetailViewModel @Inject constructor(
                 when (enablement.setEnabled(automation.id, enabled)) {
                     EnablementResult.Updated -> Unit
                     EnablementResult.ReviewRequired ->
-                        message("La regola deve essere rivista prima di essere riattivata.")
+                        message(
+                            language.pick(
+                                "The rule must be reviewed before it can be re-enabled.",
+                                "La regola deve essere rivista prima di essere riattivata.",
+                            ),
+                        )
                     EnablementResult.SchedulingFailed ->
-                        message("Pianificazione non riuscita: la regola è rimasta disattivata.")
+                        message(
+                            language.pick(
+                                "Scheduling failed: the rule remains disabled.",
+                                "Pianificazione non riuscita: la regola è rimasta disattivata.",
+                            ),
+                        )
                     EnablementResult.DisableCleanupDeferred ->
-                        message("Regola disattivata; riconciliazione rinviata.")
+                        message(
+                            language.pick(
+                                "Rule disabled; runtime reconciliation deferred.",
+                                "Regola disattivata; riconciliazione rinviata.",
+                            ),
+                        )
                 }
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
-                message("Impossibile aggiornare la regola.")
+                message(language.pick("Unable to update the rule.", "Impossibile aggiornare la regola."))
             }
         }
     }
@@ -286,21 +355,32 @@ class AutomationDetailViewModel @Inject constructor(
                 } == null) reconciled = false
                 mutableEvents.emit(
                     DetailEvent.Close(
-                        if (reconciled) "Regola eliminata."
-                        else "Regola eliminata; pulizia runtime rinviata.",
+                        if (reconciled) {
+                            language.pick("Rule deleted.", "Regola eliminata.")
+                        } else {
+                            language.pick(
+                                "Rule deleted; runtime cleanup deferred.",
+                                "Regola eliminata; pulizia runtime rinviata.",
+                            )
+                        },
                     ),
                 )
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
-                message("Impossibile eliminare la regola.")
+                message(language.pick("Unable to delete the rule.", "Impossibile eliminare la regola."))
             }
         }
     }
 
     fun onRunNow() {
         mutableEvents.tryEmit(
-            DetailEvent.Message("Esegui ora richiede conferma live ed è disabilitato in P0-B."),
+            DetailEvent.Message(
+                language.pick(
+                    "Run now requires live confirmation and is disabled in P0-B.",
+                    "Esegui ora richiede conferma live ed è disabilitato in P0-B.",
+                ),
+            ),
         )
     }
 
@@ -312,9 +392,9 @@ class AutomationDetailViewModel @Inject constructor(
         mutableEvents.tryEmit(
             DetailEvent.OpenChat(
                 prompt = if (recreating) {
-                    "Ricrea come nuova regola «$name»: "
+                    language.pick("Recreate as a new rule “$name”: ", "Ricrea come nuova regola «$name»: ")
                 } else {
-                    "Modifica la regola «$name»: "
+                    language.pick("Edit the rule “$name”: ", "Modifica la regola «$name»: ")
                 },
                 automationId = automation?.takeIf {
                     draft == null && it.status in setOf(
@@ -342,17 +422,20 @@ class AutomationDetailViewModel @Inject constructor(
         conversationLabels: Map<String, String>,
     ): DetailViewState {
         val review = cancellationSafeOrNull { approvals.review(snapshot.id) }
-        val rule = RuleRenderMapper.mapDraft(snapshot.draft, conversationLabels)
+        val rule = RuleRenderMapper.mapDraft(snapshot.draft, conversationLabels, language)
         val warnings = if (review == null) {
             listOf(
                 UiWarning(
                     Severity.ERROR,
                     "draft_review_unavailable",
-                    "Impossibile verificare questa revisione. Riapri il dettaglio e riprova.",
+                    language.pick(
+                        "Unable to verify this revision. Reopen the details and try again.",
+                        "Impossibile verificare questa revisione. Riapri il dettaglio e riprova.",
+                    ),
                 ),
             )
         } else {
-            reviewWarnings(review)
+            reviewWarnings(review, language)
         }
         val canArm = review?.canArm == true && warnings.none { it.severity == Severity.ERROR }
         val recent = recentRuns(snapshot.automationId.value, records, actionsByExecution)
@@ -372,7 +455,12 @@ class AutomationDetailViewModel @Inject constructor(
                 recentRuns = recent,
                 geofencePreviewLabel = (snapshot.draft.trigger as? Trigger.Geofence)
                     ?.takeIf { it.resolveCurrentLocation }
-                    ?.let { "Posizione: quella attuale al momento dell'attivazione" },
+                    ?.let {
+                        language.pick(
+                            "Location: current position at activation time",
+                            "Posizione: quella attuale al momento dell'attivazione",
+                        )
+                    },
                 verifiedStateReaders = review?.verifiedStateQueries.orEmpty().map { evidence ->
                     readerProbeLabel(evidence.family, evidence.valueType)
                 },
@@ -388,7 +476,7 @@ class AutomationDetailViewModel @Inject constructor(
         actionsByExecution: Map<String, List<ActionResultEntity>>,
         conversationLabels: Map<String, String>,
     ): DetailViewState {
-        val rule = RuleRenderMapper.map(automation, conversationLabels)
+        val rule = RuleRenderMapper.map(automation, conversationLabels, language)
         val warnings = buildList {
             rule.privacyNote?.let {
                 add(UiWarning(Severity.WARNING, "privacy_generative", it))
@@ -398,7 +486,10 @@ class AutomationDetailViewModel @Inject constructor(
                     UiWarning(
                         Severity.ERROR,
                         "schema_or_integrity_review",
-                        "La regola non è più verificabile e deve essere ricreata.",
+                        language.pick(
+                            "The rule can no longer be verified and must be recreated.",
+                            "La regola non è più verificabile e deve essere ricreata.",
+                        ),
                     ),
                 )
             }
@@ -431,28 +522,31 @@ class AutomationDetailViewModel @Inject constructor(
         .take(RECENT_RUN_LIMIT)
         .map { record ->
             val actions = record.executionId?.let(actionsByExecution::get).orEmpty()
-            record.toLogRow(actions)
+            record.toLogRow(actions, language)
         }
         .toList()
 
     private fun generativeEstimate(generative: Boolean): String? = if (generative) {
-        "Disponibile da P1 · cooldown minimo 60 s"
+        language.pick(
+            "Available since P1 · minimum cooldown 60 s",
+            "Disponibile da P1 · cooldown minimo 60 s",
+        )
     } else {
         null
     }
 
     private fun readerProbeLabel(family: StateQueryFamily, type: StateValueType): String {
         val reader = when (family) {
-            StateQueryFamily.BUILTIN -> "stato integrato"
-            StateQueryFamily.SETTING -> "impostazione Android"
-            StateQueryFamily.SYSTEM_PROPERTY -> "proprietà di sistema"
+            StateQueryFamily.BUILTIN -> language.pick("built-in state", "stato integrato")
+            StateQueryFamily.SETTING -> language.pick("Android setting", "impostazione Android")
+            StateQueryFamily.SYSTEM_PROPERTY -> language.pick("system property", "proprietà di sistema")
             StateQueryFamily.SYSFS -> "sysfs"
             StateQueryFamily.DUMPSYS_FIELD -> "dumpsys"
         }
         val valueType = when (type) {
-            StateValueType.TEXT -> "testo"
-            StateValueType.NUMBER -> "numero"
-            StateValueType.BOOLEAN -> "booleano"
+            StateValueType.TEXT -> language.pick("text", "testo")
+            StateValueType.NUMBER -> language.pick("number", "numero")
+            StateValueType.BOOLEAN -> language.pick("boolean", "booleano")
         }
         return "$reader · $valueType · probe OK"
     }

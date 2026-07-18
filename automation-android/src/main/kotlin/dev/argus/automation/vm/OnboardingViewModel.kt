@@ -28,6 +28,7 @@ import dev.argus.ui.model.ShizukuStatus
 import dev.argus.ui.model.StepKind
 import dev.argus.ui.model.StepStatus
 import dev.argus.ui.model.TransportUi
+import dev.argus.ui.presentation.RenderLanguage
 import dev.argus.ui.screens.shizukuOnboardingCopy
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -62,6 +63,7 @@ class OnboardingViewModel @Inject constructor(
     private val shizuku: ShizukuGateway,
     automations: AutomationStore,
     drafts: DraftRepository,
+    private val language: RenderLanguage = RenderLanguage.system(),
 ) : ViewModel() {
     private val currentIndex = savedStateHandle.getStateFlow(CURRENT_INDEX_KEY, 0)
     private val skipped = savedStateHandle.getStateFlow(SKIPPED_KEY, arrayListOf<String>())
@@ -121,7 +123,12 @@ class OnboardingViewModel @Inject constructor(
             if (preferences.setPrivacyAccepted(true)) {
                 advance()
             } else {
-                message("Impossibile salvare il consenso privacy.")
+                message(
+                    language.pick(
+                        "Unable to save privacy consent.",
+                        "Impossibile salvare il consenso privacy.",
+                    ),
+                )
             }
         }
     }
@@ -131,66 +138,105 @@ class OnboardingViewModel @Inject constructor(
             try {
                 if (!configuration.saveConfiguration(url, bearer)) {
                     message(
-                        "Configurazione non valida: usa HTTPS e un bearer ASCII di almeno 16 caratteri.",
+                        language.pick(
+                            "Invalid configuration: use HTTPS and an ASCII bearer of at least 16 characters.",
+                            "Configurazione non valida: usa HTTPS e un bearer ASCII di almeno 16 caratteri.",
+                        ),
                     )
                     return@launch
                 }
                 tokenConfigured.value = true
-                message("Configurazione Hermes salvata in storage protetto.")
+                message(
+                    language.pick(
+                        "Hermes configuration saved in protected storage.",
+                        "Configurazione Hermes salvata in storage protetto.",
+                    ),
+                )
                 when (brain.health()) {
-                    is BridgeHealthResult.Reachable -> message("Hermes raggiungibile.")
+                    is BridgeHealthResult.Reachable -> message(
+                        language.pick("Hermes is reachable.", "Hermes raggiungibile."),
+                    )
                     is BridgeHealthResult.Unreachable -> message(
-                        "Configurazione salvata; Hermes non è raggiungibile ora.",
+                        language.pick(
+                            "Configuration saved; Hermes is not reachable right now.",
+                            "Configurazione salvata; Hermes non è raggiungibile ora.",
+                        ),
                     )
                 }
                 advance()
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
-                message("Impossibile salvare la configurazione Hermes.")
+                message(
+                    language.pick(
+                        "Unable to save the Hermes configuration.",
+                        "Impossibile salvare la configurazione Hermes.",
+                    ),
+                )
             }
         }
     }
 
     fun selectProvider(wireName: String) {
         val id = ProviderId.fromWireName(wireName) ?: run {
-            mutableEvents.tryEmit(OnboardingEvent.Message("Provider sconosciuto."))
+            mutableEvents.tryEmit(
+                OnboardingEvent.Message(language.pick("Unknown provider.", "Provider sconosciuto.")),
+            )
             return
         }
         viewModelScope.launch {
             if (configuration.selectProvider(id)) {
                 refresh()
             } else {
-                message("Impossibile selezionare il provider.")
+                message(
+                    language.pick("Unable to select the provider.", "Impossibile selezionare il provider."),
+                )
             }
         }
     }
 
     fun saveProviderConfig(wireName: String, baseUrl: String?, model: String?, apiKey: String?) {
         val id = ProviderId.fromWireName(wireName) ?: run {
-            mutableEvents.tryEmit(OnboardingEvent.Message("Provider sconosciuto."))
+            mutableEvents.tryEmit(
+                OnboardingEvent.Message(language.pick("Unknown provider.", "Provider sconosciuto.")),
+            )
             return
         }
         viewModelScope.launch {
             try {
                 if (!configuration.saveProviderConfig(id, baseUrl = baseUrl, model = model, apiKey = apiKey)) {
-                    message("Configurazione non valida.")
+                    message(language.pick("Invalid configuration.", "Configurazione non valida."))
                     return@launch
                 }
                 // La chiave salvata potrebbe essere di un provider NON selezionato: rileggi invece di assumere true.
                 tokenConfigured.value = configuration.bearerToken() != null
-                message("Configurazione salvata in storage protetto.")
+                message(
+                    language.pick(
+                        "Configuration saved in protected storage.",
+                        "Configurazione salvata in storage protetto.",
+                    ),
+                )
                 when (brain.health()) {
-                    is BridgeHealthResult.Reachable -> message("Provider raggiungibile.")
+                    is BridgeHealthResult.Reachable -> message(
+                        language.pick("Provider is reachable.", "Provider raggiungibile."),
+                    )
                     is BridgeHealthResult.Unreachable -> message(
-                        "Configurazione salvata; il provider non è raggiungibile ora.",
+                        language.pick(
+                            "Configuration saved; the provider is not reachable right now.",
+                            "Configurazione salvata; il provider non è raggiungibile ora.",
+                        ),
                     )
                 }
                 advance()
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
-                message("Impossibile salvare la configurazione del provider.")
+                message(
+                    language.pick(
+                        "Unable to save the provider configuration.",
+                        "Impossibile salvare la configurazione del provider.",
+                    ),
+                )
             }
         }
     }
@@ -202,14 +248,26 @@ class OnboardingViewModel @Inject constructor(
                 when (result) {
                     ShizukuPermissionResult.GRANTED -> {
                         shizukuRationaleShown = false
-                        "Autorizzazione Shizuku concessa."
+                        language.pick(
+                            "Shizuku authorization granted.",
+                            "Autorizzazione Shizuku concessa.",
+                        )
                     }
-                    ShizukuPermissionResult.DENIED -> "Autorizzazione Shizuku negata."
+                    ShizukuPermissionResult.DENIED -> language.pick(
+                        "Shizuku authorization denied.",
+                        "Autorizzazione Shizuku negata.",
+                    )
                     ShizukuPermissionResult.RATIONALE_REQUIRED -> {
                         shizukuRationaleShown = true
-                        "Premi di nuovo il pulsante per confermare la richiesta Shizuku."
+                        language.pick(
+                            "Tap the button again to confirm the Shizuku request.",
+                            "Premi di nuovo il pulsante per confermare la richiesta Shizuku.",
+                        )
                     }
-                    ShizukuPermissionResult.UNAVAILABLE -> "Shizuku non è disponibile."
+                    ShizukuPermissionResult.UNAVAILABLE -> language.pick(
+                        "Shizuku is unavailable.",
+                        "Shizuku non è disponibile.",
+                    )
                 },
             )
             refresh()
@@ -243,7 +301,12 @@ class OnboardingViewModel @Inject constructor(
             index > 0 -> savedStateHandle[CURRENT_INDEX_KEY] = index - 1
             latestPreferences.onboardingCompleted -> mutableEvents.tryEmit(OnboardingEvent.Close)
             else -> mutableEvents.tryEmit(
-                OnboardingEvent.Message("Completa i due passaggi obbligatori per usare Argus."),
+                OnboardingEvent.Message(
+                    language.pick(
+                        "Complete the two required steps to use Argus.",
+                        "Completa i due passaggi obbligatori per usare Argus.",
+                    ),
+                ),
             )
         }
     }
@@ -252,7 +315,12 @@ class OnboardingViewModel @Inject constructor(
         val current = state.value
         if (!current.canFinish) {
             mutableEvents.tryEmit(
-                OnboardingEvent.Message("Privacy e configurazione Hermes sono obbligatorie."),
+                OnboardingEvent.Message(
+                    language.pick(
+                        "Privacy consent and brain configuration are required.",
+                        "Consenso privacy e configurazione del cervello sono obbligatori.",
+                    ),
+                ),
             )
             return
         }
@@ -260,7 +328,12 @@ class OnboardingViewModel @Inject constructor(
             if (preferences.setOnboardingCompleted(true)) {
                 mutableEvents.emit(OnboardingEvent.Complete)
             } else {
-                message("Impossibile completare la configurazione.")
+                message(
+                    language.pick(
+                        "Unable to complete setup.",
+                        "Impossibile completare la configurazione.",
+                    ),
+                )
             }
         }
     }
@@ -315,7 +388,7 @@ class OnboardingViewModel @Inject constructor(
             bridgeTokenConfigured = configured,
             providerChoices = providerChoices(),
             transport = transportUi(configured),
-            shizukuCapabilities = ShizukuCapabilityCatalog.rows(),
+            shizukuCapabilities = ShizukuCapabilityCatalog.rows(language),
         )
     }
 
@@ -363,14 +436,17 @@ class OnboardingViewModel @Inject constructor(
         geofenceNeeded: Boolean,
         health: AndroidUiHealth,
     ): OnboardingStepState {
-        val (shizukuBody, shizukuCta) = shizukuOnboardingCopy(shizukuStatus)
+        val (shizukuBody, shizukuCta) = shizukuOnboardingCopy(shizukuStatus, language)
         return when (kind) {
             StepKind.WELCOME_PRIVACY -> OnboardingStepState(
                 kind,
                 StepStatus.TODO,
-                "Privacy e consenso",
-                "Ciò che scrivi in chat viaggia verso Hermes, il tuo server, e da lì può raggiungere il provider cloud configurato. Le regole vengono sempre mostrate e approvate prima dell'attivazione.",
-                "Ho capito, acconsento",
+                language.pick("Privacy and consent", "Privacy e consenso"),
+                language.pick(
+                    "What you type in chat is sent to the configured AI service. Depending on your setup, it may go through your Hermes server or directly to a cloud provider. Rules are always shown for approval before activation.",
+                    "Ciò che scrivi in chat viene inviato al servizio AI configurato. In base alla configurazione può passare dal tuo server Hermes oppure andare direttamente a un provider cloud. Le regole vengono sempre mostrate e approvate prima dell'attivazione.",
+                ),
+                language.pick("I understand and consent", "Ho capito, acconsento"),
                 null,
             )
             StepKind.BRAIN_CONFIG -> {
@@ -378,20 +454,26 @@ class OnboardingViewModel @Inject constructor(
                 OnboardingStepState(
                     kind,
                     StepStatus.TODO,
-                    "Scegli il cervello",
+                    language.pick("Choose the brain", "Scegli il cervello"),
                     if (hermesSelected) {
-                        "Configura l'indirizzo HTTPS del bridge e il bearer. Il bearer viene cifrato con Android Keystore e non sarà più mostrato."
+                        language.pick(
+                            "Configure the bridge HTTPS address and bearer. The bearer is encrypted with Android Keystore and will not be shown again.",
+                            "Configura l'indirizzo HTTPS del bridge e il bearer. Il bearer viene cifrato con Android Keystore e non sarà più mostrato.",
+                        )
                     } else {
-                        "Provider diretto: serve una tua chiave API (BYOK), nessun account Argus. La chiave viene cifrata con Android Keystore e non sarà più mostrata."
+                        language.pick(
+                            "Direct provider: use your own API key (BYOK); no Argus account is required. The key is encrypted with Android Keystore and will not be shown again.",
+                            "Provider diretto: serve una tua chiave API (BYOK), nessun account Argus. La chiave viene cifrata con Android Keystore e non sarà più mostrata.",
+                        )
                     },
-                    "Configura il cervello",
+                    language.pick("Configure the brain", "Configura il cervello"),
                     null,
                 )
             }
             StepKind.SHIZUKU -> OnboardingStepState(
                 kind,
                 StepStatus.TODO,
-                "Autorizza Shizuku",
+                language.pick("Authorize Shizuku", "Autorizza Shizuku"),
                 shizukuBody,
                 shizukuCta,
                 null,
@@ -399,37 +481,56 @@ class OnboardingViewModel @Inject constructor(
             StepKind.NOTIFICATION_ACCESS -> OnboardingStepState(
                 kind,
                 StepStatus.TODO,
-                "Notifiche",
+                language.pick("Notifications", "Notifiche"),
                 if (!health.notificationsGranted) {
-                    "Prima consenti ad Argus di mostrare esiti e avvisi. Poi servirà l'accesso " +
-                        "alle notifiche per leggere i messaggi WhatsApp e rispondere."
+                    language.pick(
+                        "First allow Argus to show results and alerts. Then grant notification access to read WhatsApp messages and reply.",
+                        "Prima consenti ad Argus di mostrare esiti e avvisi. Poi servirà l'accesso " +
+                            "alle notifiche per leggere i messaggi WhatsApp e rispondere.",
+                    )
                 } else {
-                    "Esiti e avvisi sono attivi. Ora concedi l'accesso alle notifiche: serve a " +
-                        "leggere i messaggi WhatsApp in arrivo e a rispondere dalle regole approvate."
+                    language.pick(
+                        "Results and alerts are active. Now grant notification access so approved rules can read incoming WhatsApp messages and reply.",
+                        "Esiti e avvisi sono attivi. Ora concedi l'accesso alle notifiche: serve a " +
+                            "leggere i messaggi WhatsApp in arrivo e a rispondere dalle regole approvate.",
+                    )
                 },
-                if (!health.notificationsGranted) "Concedi" else "Consenti lettura notifiche",
+                if (!health.notificationsGranted) {
+                    language.pick("Allow", "Concedi")
+                } else {
+                    language.pick("Grant notification access", "Consenti lettura notifiche")
+                },
                 null,
             )
             StepKind.BATTERY_OEM -> OnboardingStepState(
                 kind,
                 StepStatus.TODO,
-                "Ottimizzazione batteria",
-                "Consigliato: concedi l'esclusione Android, poi verifica manualmente in OxygenOS " +
-                    "attività in background e avvio automatico, se presenti. Argus non può leggere " +
-                    "né cambiare in modo affidabile questi interruttori OEM.",
-                "Apri impostazioni",
+                language.pick("Battery optimization", "Ottimizzazione batteria"),
+                language.pick(
+                    "Recommended: grant the Android exemption, then manually check background activity and auto-launch in OxygenOS if available. Argus cannot reliably read or change these OEM switches.",
+                    "Consigliato: concedi l'esclusione Android, poi verifica manualmente in OxygenOS " +
+                        "attività in background e avvio automatico, se presenti. Argus non può leggere " +
+                        "né cambiare in modo affidabile questi interruttori OEM.",
+                ),
+                language.pick("Open settings", "Apri impostazioni"),
                 null,
             )
             StepKind.BACKGROUND_LOCATION -> OnboardingStepState(
                 kind,
                 StepStatus.TODO,
-                "Posizione in background",
+                language.pick("Background location", "Posizione in background"),
                 if (geofenceNeeded) {
-                    "Una regola geofence richiede posizione precisa e «Consenti sempre» per rilevare entrate e uscite anche a schermo spento."
+                    language.pick(
+                        "A geofence rule requires precise location and “Allow all the time” to detect entries and exits while the screen is off.",
+                        "Una regola geofence richiede posizione precisa e «Consenti sempre» per rilevare entrate e uscite anche a schermo spento.",
+                    )
                 } else {
-                    "Non necessaria finché non crei una regola basata su entrata o uscita da un luogo."
+                    language.pick(
+                        "Not required until you create a rule based on entering or leaving a place.",
+                        "Non necessaria finché non crei una regola basata su entrata o uscita da un luogo.",
+                    )
                 },
-                if (geofenceNeeded) "Apri permessi" else null,
+                if (geofenceNeeded) language.pick("Open permissions", "Apri permessi") else null,
                 null,
             )
         }

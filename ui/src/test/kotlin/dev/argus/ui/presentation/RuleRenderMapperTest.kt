@@ -229,8 +229,8 @@ class RuleRenderMapperTest {
 
         assertTrue(render.isGenerative)
         assertEquals(
-            "The notification text and the listed state readers will be sent to Hermes and to the " +
-                "cloud providers to generate the reply.",
+            "The notification text and values from the listed state readers will be sent to the " +
+                "configured AI service to generate the reply.",
             render.privacyNote,
         )
     }
@@ -418,7 +418,7 @@ class RuleRenderMapperTest {
         assertEquals("When: WhatsApp notification from Wife (1:1 chat)", r.triggerLine)
         assertEquals("Generate and reply with AI", r.actions.single().label)
         assertEquals(
-            "The notification text will be sent to Hermes and to the cloud providers to generate the reply.",
+            "The notification text will be sent to the configured AI service to generate the reply.",
             r.privacyNote,
         )
     }

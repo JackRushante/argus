@@ -51,6 +51,7 @@ import dev.argus.engine.safety.PendingDraft
 import dev.argus.shizuku.ShizukuGateway
 import dev.argus.ui.model.AuthState
 import dev.argus.ui.model.TransportUi
+import dev.argus.ui.presentation.RenderLanguage
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -175,6 +176,19 @@ class SettingsViewModelTest {
         }
 
     @Test
+    fun `english settings emits english runtime feedback`() = runTest(dispatcher) {
+        val vm = settingsViewModel(FakeProviderStore(), language = RenderLanguage.EN)
+        observe(vm)
+        val messages = collectMessages(vm)
+        advanceUntilIdle()
+
+        vm.selectProvider("gpt9000")
+        advanceUntilIdle()
+
+        assertEquals("Unknown provider.", messages.last())
+    }
+
+    @Test
     fun `saveProviderConfig persiste baseUrl modello e chiave su ProviderConfigStore`() =
         runTest(dispatcher) {
             val store = FakeProviderStore()
@@ -273,6 +287,7 @@ class SettingsViewModelTest {
         store: FakeProviderStore,
         usage: UsageDao = FakeUsageDao(),
         budgetSettings: BudgetSettingsStore = FakeBudgetSettingsStore(),
+        language: RenderLanguage = RenderLanguage.IT,
     ): SettingsViewModel {
         val brain = ConfiguredBridgeBrain(store, privacyAccepted = { true }, factory = FakeTransportFactory())
         val preferences = FakePreferences(privacyAccepted = true)
@@ -297,6 +312,7 @@ class SettingsViewModelTest {
             connectivitySentinelStatus = ConnectivitySentinelStatus(),
             usage = usage,
             budgetSettings = budgetSettings,
+            language = language,
         )
     }
 

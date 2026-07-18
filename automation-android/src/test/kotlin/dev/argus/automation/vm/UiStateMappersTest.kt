@@ -76,7 +76,10 @@ class UiStateMappersTest {
 
         assertEquals("Deleted automation", row.automationName)
         assertEquals("Rule disabled: one-shot consumed", row.summary)
-        assertTrue(assertNotNull(row.expandedDetail).single().contains("failed"))
+        assertEquals(
+            "1. AI generation → failed · backend failed",
+            assertNotNull(row.expandedDetail).single(),
+        )
         assertTrue(row.isGenerative)
     }
 
@@ -111,7 +114,7 @@ class UiStateMappersTest {
         assertEquals("automation-7", row.automationId)
         assertEquals(dev.argus.ui.model.LogOutcome.SUBMITTED, row.outcome)
         assertTrue(row.isGenerative)
-        assertTrue(assertNotNull(row.expandedDetail).single().contains("invoke llm"))
+        assertTrue(assertNotNull(row.expandedDetail).single().contains("Generazione AI"))
     }
 
     @Test

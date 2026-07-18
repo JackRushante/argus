@@ -145,6 +145,7 @@ import dev.argus.engine.safety.DraftValidator
 import dev.argus.shizuku.PrivilegedShell
 import dev.argus.shizuku.ShizukuGateway
 import dev.argus.shizuku.ShizukuPrivilegedShell
+import dev.argus.ui.presentation.RenderLanguage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -161,6 +162,9 @@ annotation class ApplicationScope
 @Module
 @InstallIn(SingletonComponent::class)
 object ArgusModule {
+    @Provides
+    fun renderLanguage(): RenderLanguage = RenderLanguage.system()
+
     @Provides
     @Singleton
     @ApplicationScope

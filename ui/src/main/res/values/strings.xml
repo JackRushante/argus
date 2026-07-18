@@ -35,11 +35,11 @@
 
     <!-- Privacy (Sistema) -->
     <string name="cloud_processing">Cloud processing</string>
-    <string name="privacy_section_body">Text sent in chat can reach Hermes and the configured cloud provider. You can revoke consent at any time.</string>
+    <string name="privacy_section_body">Text sent in chat goes to the configured AI service, either directly or through Hermes. You can revoke consent at any time.</string>
     <string name="privacy_revoke_action">Revoke consent</string>
     <string name="privacy_revoke_title">Revoke consent?</string>
-    <string name="privacy_revoke_body">Hermes will be blocked immediately and onboarding will be required again. Deterministic automations already approved stay local.</string>
-    <string name="privacy_revoke_confirm">Revoke and block Hermes</string>
+    <string name="privacy_revoke_body">Access to the configured AI service will be blocked immediately and onboarding will be required again. Deterministic automations already approved stay local.</string>
+    <string name="privacy_revoke_confirm">Revoke and block AI access</string>
 
     <!-- Badge -->
     <string name="badge_status_armed">armed</string>
@@ -53,7 +53,7 @@
     <string name="banner_shizuku_down">Shizuku not active — shell actions paused</string>
     <string name="banner_shizuku_degraded">Shizuku is off after the reboot — shell actions are queued</string>
     <string name="banner_battery_not_exempt">Battery optimization active — background actions may fail</string>
-    <string name="banner_brain_unreachable">Hermes unreachable — chat cannot propose rules</string>
+    <string name="banner_brain_unreachable">AI service unreachable — chat cannot propose rules</string>
     <string name="latency_thinking">Argus is thinking… (%1$d s)</string>
 
     <!-- RuleCard -->
@@ -67,7 +67,7 @@
     <string name="chat_subtitle">chat · rule compiler</string>
     <string name="chat_more">More</string>
     <string name="chat_menu_clear">Clear conversation</string>
-    <string name="chat_menu_check_connection">Check Hermes connection</string>
+    <string name="chat_menu_check_connection">Check AI connection</string>
     <string name="chat_expected_range">usually 10-30 s</string>
     <string name="chat_not_armable">Not armable: %1$s</string>
     <string name="chat_draft_pending">Draft · awaiting approval</string>
@@ -75,10 +75,10 @@
     <string name="chat_draft_rejected">Draft rejected</string>
     <string name="chat_draft_superseded">Superseded by a newer proposal</string>
     <string name="chat_review_cta">Review and approve</string>
-    <string name="chat_brain_down">Hermes unreachable</string>
+    <string name="chat_brain_down">AI service unreachable</string>
     <string name="chat_retry">Retry</string>
-    <string name="chat_error_timeout">Hermes is not responding (60 s timeout). The server may be busy — try again.</string>
-    <string name="chat_error_unreachable">Hermes unreachable. Check the tailnet connection and try again.</string>
+    <string name="chat_error_timeout">The AI service is not responding (60 s timeout). It may be busy — try again.</string>
+    <string name="chat_error_unreachable">AI service unreachable. Check the network connection and provider settings, then try again.</string>
     <string name="chat_error_malformed">The reply did not contain a valid rule. Retry or rephrase.</string>
     <string name="chat_error_detail_show">Technical detail</string>
     <string name="chat_error_detail_hide">Hide technical detail</string>
@@ -187,7 +187,7 @@
     <string name="settings_key_missing">API key missing</string>
     <string name="settings_streaming_label">Streaming (OpenAI-compat)</string>
     <string name="settings_coming_soon">coming soon</string>
-    <string name="settings_privacy_active">Hermes consent active</string>
+    <string name="settings_privacy_active">AI processing consent active</string>
     <string name="settings_privacy_missing">Consent not accepted</string>
     <string name="settings_whitelist_note">Only these contacts can receive automatic replies. Stored by conversationId, not by name — spoofable.</string>
     <string name="settings_add_contact">Add contact</string>

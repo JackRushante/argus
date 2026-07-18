@@ -35,17 +35,17 @@ import dev.argus.ui.model.RuleRender
  */
 object RuleRenderMapper {
 
-    /** IT verbatim da design §7.3 — mai parafrasare (invariante di sicurezza handoff §5). */
+    /** Disclosure provider-neutral: il brain può essere Hermes oppure un provider diretto. */
     private fun privacyNote(l: RenderLanguage): String = l.pick(
-        "The notification text will be sent to Hermes and to the cloud providers to generate the reply.",
-        "Il testo delle notifiche verrà inviato a Hermes e ai provider cloud per generare la risposta.",
+        "The notification text will be sent to the configured AI service to generate the reply.",
+        "Il testo delle notifiche verrà inviato al servizio AI configurato per generare la risposta.",
     )
 
     private fun statePrivacyNote(l: RenderLanguage): String = l.pick(
-        "The notification text and the listed state readers will be sent to Hermes and to the " +
-            "cloud providers to generate the reply.",
-        "Il testo delle notifiche e i reader di stato elencati verranno inviati a Hermes e ai " +
-            "provider cloud per generare la risposta.",
+        "The notification text and values from the listed state readers will be sent to the " +
+            "configured AI service to generate the reply.",
+        "Il testo delle notifiche e i valori prodotti dai reader di stato elencati verranno " +
+            "inviati al servizio AI configurato per generare la risposta.",
     )
 
     /**

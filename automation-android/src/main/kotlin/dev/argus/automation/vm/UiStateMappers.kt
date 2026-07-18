@@ -4,6 +4,7 @@ import dev.argus.automation.ApprovalFlowReview
 import dev.argus.data.dao.AuditLogRecord
 import dev.argus.data.entities.ActionResultEntity
 import dev.argus.engine.model.ActionTier
+import dev.argus.engine.model.ActionTypeIds
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.Trigger
@@ -86,14 +87,26 @@ internal fun reviewWarnings(
             add(UiWarning(Severity.WARNING, "privacy_generative", it))
         }
         review.draft.issues.forEach { issue ->
-            add(UiWarning(issue.severity, issue.code, issue.message))
+            add(
+                UiWarning(
+                    issue.severity,
+                    issue.code,
+                    language.pick(
+                        "Validation issue: ${issue.code.safeDiagnostic()}",
+                        issue.message,
+                    ),
+                ),
+            )
         }
         review.conflicts.forEach { conflict ->
             add(
                 UiWarning(
                     Severity.WARNING,
                     "conflict_${conflict.targetKey.safeCode()}",
-                    conflict.message,
+                    language.pick(
+                        "Conflict on ${conflict.targetKey.safeDiagnostic()}",
+                        conflict.message,
+                    ),
                 ),
             )
         }
@@ -263,7 +276,35 @@ private fun actionDetail(action: ActionResultEntity, l: RenderLanguage): String 
         ActionJournalOutcome.FAILED -> l.pick("failed", "fallita")
     }
     val error = action.errorCode?.let { " · ${it.safeDiagnostic()}" }.orEmpty()
-    return "${action.actionIndex + 1}. ${action.actionType.replace('_', ' ')} → $outcome$error"
+    return "${action.actionIndex + 1}. ${actionTypeLabel(action.actionType, l)} → $outcome$error"
+}
+
+private fun actionTypeLabel(type: String, l: RenderLanguage): String = when (type) {
+    ActionTypeIds.SET_WIFI -> l.pick("Set Wi-Fi", "Imposta Wi-Fi")
+    ActionTypeIds.SET_BLUETOOTH -> l.pick("Set Bluetooth", "Imposta Bluetooth")
+    ActionTypeIds.SET_DND -> l.pick("Set Do Not Disturb", "Imposta Non disturbare")
+    ActionTypeIds.SET_RINGER -> l.pick("Set ringer", "Imposta suoneria")
+    ActionTypeIds.LAUNCH_APP -> l.pick("Launch app", "Apri app")
+    ActionTypeIds.OPEN_URL -> l.pick("Open URL", "Apri URL")
+    ActionTypeIds.SHOW_NOTIFICATION -> l.pick("Show notification", "Mostra notifica")
+    ActionTypeIds.TAP -> l.pick("Tap screen", "Tocco schermo")
+    ActionTypeIds.INPUT_TEXT -> l.pick("Enter text", "Inserisci testo")
+    ActionTypeIds.WHATSAPP_REPLY -> l.pick("WhatsApp reply", "Risposta WhatsApp")
+    ActionTypeIds.RUN_SHELL -> l.pick("Run shell command", "Esegui comando shell")
+    ActionTypeIds.COPY_TO_CLIPBOARD -> l.pick("Copy to clipboard", "Copia negli appunti")
+    ActionTypeIds.SET_ALARM -> l.pick("Set alarm", "Imposta sveglia")
+    ActionTypeIds.SET_TIMER -> l.pick("Set timer", "Imposta timer")
+    ActionTypeIds.SET_VOLUME -> l.pick("Set volume", "Imposta volume")
+    ActionTypeIds.SET_FLASHLIGHT -> l.pick("Set flashlight", "Imposta torcia")
+    ActionTypeIds.OPEN_SETTINGS_SCREEN -> l.pick("Open Settings", "Apri Impostazioni")
+    ActionTypeIds.VIBRATE -> l.pick("Vibrate", "Vibrazione")
+    ActionTypeIds.WRITE_SETTING -> l.pick("Write setting", "Scrivi impostazione")
+    ActionTypeIds.INVOKE_LLM,
+    ActionTypeIds.INVOKE_LLM_V2,
+    -> l.pick("AI generation", "Generazione AI")
+    ActionTypeIds.IF -> l.pick("Conditional block", "Blocco condizionale")
+    ActionTypeIds.WHILE -> l.pick("Repeat block", "Blocco ripetuto")
+    else -> type.replace('_', ' ')
 }
 
 internal fun relativeTimeLabel(

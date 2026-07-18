@@ -24,6 +24,7 @@ import dev.argus.ui.model.AutomationRow
 import dev.argus.ui.model.EngineBanner
 import dev.argus.ui.model.StatusBadge
 import dev.argus.ui.model.StatusFilter
+import dev.argus.ui.presentation.RenderLanguage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -45,6 +46,7 @@ class AutomationListViewModel @Inject constructor(
     whitelist: ContactWhitelistStore,
     private val savedStateHandle: SavedStateHandle,
     @ApplicationContext private val context: Context,
+    private val language: RenderLanguage = RenderLanguage.system(),
 ) : ViewModel() {
     private val filter = savedStateHandle.getStateFlow(FILTER_KEY, StatusFilter.ALL)
     private val mutableMessages = MutableSharedFlow<String>(extraBufferCapacity = 4)
@@ -66,11 +68,16 @@ class AutomationListViewModel @Inject constructor(
         val automationRows = automations
             .filterNot { it.id in pendingAutomationIds }
             .map { automation ->
-                automation.toAutomationRow(lastFiredById[automation.id.value], now, conversationLabels)
+                automation.toAutomationRow(
+                    lastFiredById[automation.id.value],
+                    now,
+                    conversationLabels,
+                    language,
+                )
             }
         val pendingRows = pending.map { snapshot ->
             val review = cancellationSafeOrNull { approvals.review(snapshot.id) }
-            snapshot.toAutomationRow(review, conversationLabels)
+            snapshot.toAutomationRow(review, conversationLabels, language)
         }
         val allRows = pendingRows + automationRows
         val visibleRows = allRows.filter { it.matches(activeFilter) }
@@ -117,19 +124,30 @@ class AutomationListViewModel @Inject constructor(
                 when (enablement.setEnabled(automationId, enabled)) {
                     EnablementResult.Updated -> Unit
                     EnablementResult.ReviewRequired -> mutableMessages.emit(
-                        "La regola è cambiata e va rivista prima di riattivarla.",
+                        language.pick(
+                            "The rule changed and must be reviewed before re-enabling it.",
+                            "La regola è cambiata e va rivista prima di riattivarla.",
+                        ),
                     )
                     EnablementResult.SchedulingFailed -> mutableMessages.emit(
-                        "Pianificazione non riuscita: la regola è rimasta disattivata.",
+                        language.pick(
+                            "Scheduling failed: the rule remains disabled.",
+                            "Pianificazione non riuscita: la regola è rimasta disattivata.",
+                        ),
                     )
                     EnablementResult.DisableCleanupDeferred -> mutableMessages.emit(
-                        "Regola disattivata; riconciliazione rinviata.",
+                        language.pick(
+                            "Rule disabled; runtime reconciliation deferred.",
+                            "Regola disattivata; riconciliazione rinviata.",
+                        ),
                     )
                 }
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
-                mutableMessages.emit("Impossibile aggiornare la regola.")
+                mutableMessages.emit(
+                    language.pick("Unable to update the rule.", "Impossibile aggiornare la regola."),
+                )
             }
         }
     }

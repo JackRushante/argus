@@ -43,6 +43,7 @@ import dev.argus.ui.model.ProviderChoiceUi
 import dev.argus.ui.model.ProviderUsageUi
 import dev.argus.ui.model.SettingsState
 import dev.argus.ui.model.TransportUi
+import dev.argus.ui.presentation.RenderLanguage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -242,6 +243,7 @@ class SettingsViewModel @Inject constructor(
     private val connectivitySentinelStatus: ConnectivitySentinelStatus,
     private val usage: UsageDao,
     private val budgetSettings: BudgetSettingsStore,
+    private val language: RenderLanguage = RenderLanguage.system(),
 ) : ViewModel() {
     private val refreshSignal = MutableStateFlow(0L)
     private val budgetUsage = MutableStateFlow(BudgetUsageSnapshot())
@@ -373,7 +375,10 @@ class SettingsViewModel @Inject constructor(
             try {
                 if (!configuration.saveConfiguration(url, bearer)) {
                     message(
-                        "Configurazione non valida: usa HTTPS e un bearer ASCII di almeno 16 caratteri.",
+                        language.pick(
+                            "Invalid configuration: use HTTPS and an ASCII bearer of at least 16 characters.",
+                            "Configurazione non valida: usa HTTPS e un bearer ASCII di almeno 16 caratteri.",
+                        ),
                     )
                     return@launch
                 }
@@ -384,7 +389,12 @@ class SettingsViewModel @Inject constructor(
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
-                message("Impossibile salvare la configurazione Hermes.")
+                message(
+                    language.pick(
+                        "Unable to save the Hermes configuration.",
+                        "Impossibile salvare la configurazione Hermes.",
+                    ),
+                )
             }
         }
     }
@@ -397,14 +407,14 @@ class SettingsViewModel @Inject constructor(
                 throw error
             } catch (_: Exception) {
                 bridgeHealth.value = BridgeUiHealth(reachable = false)
-                message("Impossibile verificare Hermes.")
+                message(language.pick("Unable to check Hermes.", "Impossibile verificare Hermes."))
             }
         }
     }
 
     fun selectProvider(wireName: String) {
         val id = ProviderId.fromWireName(wireName) ?: run {
-            mutableMessages.tryEmit("Provider sconosciuto.")
+            mutableMessages.tryEmit(language.pick("Unknown provider.", "Provider sconosciuto."))
             return
         }
         viewModelScope.launch {
@@ -413,20 +423,22 @@ class SettingsViewModel @Inject constructor(
                 bridgeHealth.value = BridgeUiHealth()
                 refresh()
             } else {
-                message("Impossibile selezionare il provider.")
+                message(
+                    language.pick("Unable to select the provider.", "Impossibile selezionare il provider."),
+                )
             }
         }
     }
 
     fun saveProviderConfig(wireName: String, baseUrl: String?, model: String?, apiKey: String?) {
         val id = ProviderId.fromWireName(wireName) ?: run {
-            mutableMessages.tryEmit("Provider sconosciuto.")
+            mutableMessages.tryEmit(language.pick("Unknown provider.", "Provider sconosciuto."))
             return
         }
         viewModelScope.launch {
             try {
                 if (!configuration.saveProviderConfig(id, baseUrl = baseUrl, model = model, apiKey = apiKey)) {
-                    message("Configurazione non valida.")
+                    message(language.pick("Invalid configuration.", "Configurazione non valida."))
                     return@launch
                 }
                 bridgeHealth.value = BridgeUiHealth()
@@ -435,7 +447,12 @@ class SettingsViewModel @Inject constructor(
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
-                message("Impossibile salvare la configurazione del provider.")
+                message(
+                    language.pick(
+                        "Unable to save the provider configuration.",
+                        "Impossibile salvare la configurazione del provider.",
+                    ),
+                )
             }
         }
     }
@@ -445,14 +462,26 @@ class SettingsViewModel @Inject constructor(
             val text = when (shizuku.requestPermission(rationaleShown = shizukuRationaleShown)) {
                 ShizukuPermissionResult.GRANTED -> {
                     shizukuRationaleShown = false
-                    "Autorizzazione Shizuku concessa."
+                    language.pick(
+                        "Shizuku authorization granted.",
+                        "Autorizzazione Shizuku concessa.",
+                    )
                 }
-                ShizukuPermissionResult.DENIED -> "Autorizzazione Shizuku negata."
+                ShizukuPermissionResult.DENIED -> language.pick(
+                    "Shizuku authorization denied.",
+                    "Autorizzazione Shizuku negata.",
+                )
                 ShizukuPermissionResult.RATIONALE_REQUIRED -> {
                     shizukuRationaleShown = true
-                    "Premi di nuovo Correggi per confermare la richiesta Shizuku."
+                    language.pick(
+                        "Tap Fix again to confirm the Shizuku request.",
+                        "Premi di nuovo Correggi per confermare la richiesta Shizuku.",
+                    )
                 }
-                ShizukuPermissionResult.UNAVAILABLE -> "Shizuku non è disponibile."
+                ShizukuPermissionResult.UNAVAILABLE -> language.pick(
+                    "Shizuku is unavailable.",
+                    "Shizuku non è disponibile.",
+                )
             }
             message(text)
             refresh()
@@ -463,13 +492,25 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 whitelist.upsert(WhitelistedContact(displayName.trim(), conversationId.trim()))
-                message("Contatto aggiunto alla whitelist.")
+                message(
+                    language.pick(
+                        "Contact added to the whitelist.",
+                        "Contatto aggiunto alla whitelist.",
+                    ),
+                )
             } catch (error: CancellationException) {
                 throw error
             } catch (_: IllegalArgumentException) {
-                message("Nome o conversation ID non valido.")
+                message(
+                    language.pick(
+                        "Invalid name or conversation ID.",
+                        "Nome o conversation ID non valido.",
+                    ),
+                )
             } catch (_: Exception) {
-                message("Impossibile aggiornare la whitelist.")
+                message(
+                    language.pick("Unable to update the whitelist.", "Impossibile aggiornare la whitelist."),
+                )
             }
         }
     }
@@ -478,11 +519,18 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 whitelist.remove(conversationId)
-                message("Contatto rimosso dalla whitelist.")
+                message(
+                    language.pick(
+                        "Contact removed from the whitelist.",
+                        "Contatto rimosso dalla whitelist.",
+                    ),
+                )
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
-                message("Impossibile rimuovere il contatto.")
+                message(
+                    language.pick("Unable to remove the contact.", "Impossibile rimuovere il contatto."),
+                )
             }
         }
     }
@@ -504,15 +552,20 @@ class SettingsViewModel @Inject constructor(
             try {
                 val current = budgetSettings.observe().value.global
                 if (budgetSettings.setGlobalLimits(mutate(current))) {
-                    message("Limiti budget salvati.")
+                    message(language.pick("Budget limits saved.", "Limiti budget salvati."))
                     refresh()
                 } else {
-                    message("Limite non valido.")
+                    message(language.pick("Invalid limit.", "Limite non valido."))
                 }
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
-                message("Impossibile salvare i limiti budget.")
+                message(
+                    language.pick(
+                        "Unable to save budget limits.",
+                        "Impossibile salvare i limiti budget.",
+                    ),
+                )
             }
         }
     }
@@ -522,18 +575,34 @@ class SettingsViewModel @Inject constructor(
             try {
                 when (privacyRevocation.revoke()) {
                     PrivacyRevocationResult.Revoked -> message(
-                        "Consenso revocato: conversazioni osservate e risposte differite eliminate.",
+                        language.pick(
+                            "Consent revoked: observed conversations and deferred replies deleted.",
+                            "Consenso revocato: conversazioni osservate e risposte differite eliminate.",
+                        ),
                     )
                     PrivacyRevocationResult.RevokedWithResidualData -> message(
-                        "Consenso revocato, ma alcuni dati locali non sono stati eliminati: riprova.",
+                        language.pick(
+                            "Consent revoked, but some local data was not deleted; try again.",
+                            "Consenso revocato, ma alcuni dati locali non sono stati eliminati: riprova.",
+                        ),
                     )
                     PrivacyRevocationResult.Failed ->
-                        message("Impossibile revocare il consenso privacy.")
+                        message(
+                            language.pick(
+                                "Unable to revoke privacy consent.",
+                                "Impossibile revocare il consenso privacy.",
+                            ),
+                        )
                 }
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
-                message("Impossibile revocare il consenso privacy.")
+                message(
+                    language.pick(
+                        "Unable to revoke privacy consent.",
+                        "Impossibile revocare il consenso privacy.",
+                    ),
+                )
             }
         }
     }
@@ -552,16 +621,31 @@ class SettingsViewModel @Inject constructor(
                     latencyLabel = latencyLabel(result.latencyMillis),
                 )
                 message(
-                    if (savedMessage) "Configurazione protetta salvata; $label è raggiungibile."
-                    else "$label raggiungibile.",
+                    if (savedMessage) {
+                        language.pick(
+                            "Protected configuration saved; $label is reachable.",
+                            "Configurazione protetta salvata; $label è raggiungibile.",
+                        )
+                    } else {
+                        language.pick("$label is reachable.", "$label raggiungibile.")
+                    },
                 )
             }
             is BridgeHealthResult.Unreachable -> {
                 bridgeHealth.value = BridgeUiHealth(reachable = false)
                 val suffix = result.kind.name.lowercase(Locale.ROOT)
                 message(
-                    if (savedMessage) "Configurazione salvata; $label non raggiungibile ($suffix)."
-                    else "$label non raggiungibile ($suffix).",
+                    if (savedMessage) {
+                        language.pick(
+                            "Configuration saved; $label is unreachable ($suffix).",
+                            "Configurazione salvata; $label non raggiungibile ($suffix).",
+                        )
+                    } else {
+                        language.pick(
+                            "$label is unreachable ($suffix).",
+                            "$label non raggiungibile ($suffix).",
+                        )
+                    },
                 )
             }
         }
@@ -629,6 +713,10 @@ class SettingsViewModel @Inject constructor(
 
     private fun latencyLabel(millis: Long): String = when {
         millis < 1_000 -> "$millis ms"
-        else -> String.format(Locale.ITALIAN, "%.1f s", millis / 1_000.0)
+        else -> String.format(
+            if (language == RenderLanguage.IT) Locale.ITALIAN else Locale.ENGLISH,
+            "%.1f s",
+            millis / 1_000.0,
+        )
     }
 }

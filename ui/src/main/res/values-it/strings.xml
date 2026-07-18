@@ -34,11 +34,11 @@
 
     <!-- Privacy (Sistema) -->
     <string name="cloud_processing">Elaborazione cloud</string>
-    <string name="privacy_section_body">Il testo inviato in chat può raggiungere Hermes e il provider cloud configurato. Puoi revocare il consenso in qualsiasi momento.</string>
+    <string name="privacy_section_body">Il testo inviato in chat raggiunge il servizio AI configurato, direttamente oppure tramite Hermes. Puoi revocare il consenso in qualsiasi momento.</string>
     <string name="privacy_revoke_action">Revoca consenso</string>
     <string name="privacy_revoke_title">Revocare il consenso?</string>
-    <string name="privacy_revoke_body">Hermes verrà bloccato subito e l\'onboarding sarà richiesto di nuovo. Le automazioni deterministiche già approvate restano locali.</string>
-    <string name="privacy_revoke_confirm">Revoca e blocca Hermes</string>
+    <string name="privacy_revoke_body">L\'accesso al servizio AI configurato verrà bloccato subito e l\'onboarding sarà richiesto di nuovo. Le automazioni deterministiche già approvate restano locali.</string>
+    <string name="privacy_revoke_confirm">Revoca e blocca accesso AI</string>
 
     <!-- Badge -->
     <string name="badge_status_armed">armata</string>
@@ -52,7 +52,7 @@
     <string name="banner_shizuku_down">Shizuku non attivo — azioni shell in pausa</string>
     <string name="banner_shizuku_degraded">Dopo il riavvio Shizuku è spento — le azioni shell sono in coda</string>
     <string name="banner_battery_not_exempt">Ottimizzazione batteria attiva — le azioni in background possono fallire</string>
-    <string name="banner_brain_unreachable">Hermes irraggiungibile — la chat non può proporre regole</string>
+    <string name="banner_brain_unreachable">Servizio AI irraggiungibile — la chat non può proporre regole</string>
     <string name="latency_thinking">Argus sta pensando… (%1$d s)</string>
 
     <!-- RuleCard -->
@@ -66,7 +66,7 @@
     <string name="chat_subtitle">chat · compilatore di regole</string>
     <string name="chat_more">Altro</string>
     <string name="chat_menu_clear">Svuota conversazione</string>
-    <string name="chat_menu_check_connection">Verifica connessione Hermes</string>
+    <string name="chat_menu_check_connection">Verifica connessione AI</string>
     <string name="chat_expected_range">di solito 10-30 s</string>
     <string name="chat_not_armable">Non armabile: %1$s</string>
     <string name="chat_draft_pending">Bozza · in attesa di approvazione</string>
@@ -74,10 +74,10 @@
     <string name="chat_draft_rejected">Bozza rifiutata</string>
     <string name="chat_draft_superseded">Sostituita da una proposta più recente</string>
     <string name="chat_review_cta">Rivedi e approva</string>
-    <string name="chat_brain_down">Hermes irraggiungibile</string>
+    <string name="chat_brain_down">Servizio AI irraggiungibile</string>
     <string name="chat_retry">Riprova</string>
-    <string name="chat_error_timeout">Hermes non risponde (timeout 60 s). Il server potrebbe essere occupato — riprova.</string>
-    <string name="chat_error_unreachable">Hermes irraggiungibile. Controlla la connessione al tailnet e riprova.</string>
+    <string name="chat_error_timeout">Il servizio AI non risponde (timeout 60 s). Potrebbe essere occupato — riprova.</string>
+    <string name="chat_error_unreachable">Servizio AI irraggiungibile. Controlla la rete e la configurazione del provider, poi riprova.</string>
     <string name="chat_error_malformed">La risposta non conteneva una regola valida. Riprova o riformula.</string>
     <string name="chat_error_detail_show">Dettaglio tecnico</string>
     <string name="chat_error_detail_hide">Nascondi dettaglio tecnico</string>
@@ -186,7 +186,7 @@
     <string name="settings_key_missing">Chiave mancante</string>
     <string name="settings_streaming_label">Streaming (OpenAI-compat)</string>
     <string name="settings_coming_soon">in arrivo</string>
-    <string name="settings_privacy_active">Consenso Hermes attivo</string>
+    <string name="settings_privacy_active">Consenso elaborazione AI attivo</string>
     <string name="settings_privacy_missing">Consenso non accettato</string>
     <string name="settings_whitelist_note">Solo questi contatti possono ricevere risposte automatiche. Memorizzati per conversationId, non per nome — spoofabile.</string>
     <string name="settings_add_contact">Aggiungi contatto</string>

@@ -1,6 +1,7 @@
 package dev.argus.ui.model
 
 import dev.argus.engine.model.ActionTypeIds
+import dev.argus.ui.presentation.RenderLanguage
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -14,6 +15,14 @@ import kotlin.test.assertTrue
 class ShizukuCapabilityCatalogTest {
 
     private val rows = ShizukuCapabilityCatalog.rows()
+
+    @Test
+    fun `english catalog does not leak italian production copy`() {
+        val english = ShizukuCapabilityCatalog.rows(RenderLanguage.EN)
+
+        assertTrue(english.any { it.title == "Run shell commands" })
+        assertTrue(english.none { it.title.contains("Eseguire") })
+    }
 
     private fun requirementOf(actionTypeId: String): ShizukuRequirement? =
         rows.firstOrNull { actionTypeId in it.actionTypeIds }?.requirement
