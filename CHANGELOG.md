@@ -52,6 +52,13 @@ public release: compile/bridge support (P4-D), recursive UI rendering (P4-E), an
   passed. Room migrations passed `10/10` on device, and the schema-11 APK upgraded existing app data
   and launched without Room or `AndroidRuntime` errors.
 
+## Unreleased — privacy hardening (2026-07-18)
+
+- Public builds no longer embed the maintainer's private Hermes/Tailscale endpoint in production
+  defaults, previews, tests, or contributor notes.
+- Hermes is unconfigured on a fresh install and must be set by the user. Existing installations
+  retain their locally stored URL.
+
 ## `87c1e9502` — 2026-07-17
 
 **feat(#50 S15 + field fix): end-to-end Hermes usage + afterMs schedules EXACT by default**
