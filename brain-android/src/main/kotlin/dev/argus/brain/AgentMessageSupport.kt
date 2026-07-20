@@ -468,7 +468,47 @@ Action, discriminated by "type":
    // whatsapp_reply, replyTargetSender=false, contextSources []/["state"], notificationTitle
    // required (short title).
 - {"type":"invoke_llm_v2", "goal":string, "stateContext":[ApprovedStateContext,...],
-   "allowedTools":["whatsapp_reply"], "replyTargetSender":true, "timeoutMs":integer}"""
+   "allowedTools":["whatsapp_reply"], "replyTargetSender":true, "timeoutMs":integer}
+
+Schema v2 (P4) — OPTIONAL Tasker-class program. A draft stays v1 (flat: trigger + conditions +
+actions, described above and UNCHANGED) unless it uses one of the P4 constructs below. Emit P4 only
+when the request genuinely needs variables, branching or loops; a plain rule must remain v1.
+
+Optional top-level field "vars":[VarBinding,...] — typed, approved program variables. Var names match
+^[a-z][a-z0-9_]{0,31}$. Max 16 variables per rule (captureAs outputs included).
+VarBinding, discriminated by "type":
+- {"type":"literal", "name":string, "value":string, "varType":"TEXT"|"NUMBER"|"BOOLEAN",
+   "confidentiality":"PUBLIC"|"PRIVATE"|"SECRET"}   // trusted constant, integrity CLEAN
+- {"type":"state", "name":string, "query":StateQuery, "valueType":"TEXT"|"NUMBER"|"BOOLEAN",
+   "policyVersion":1, "confidentiality":"PUBLIC"|"PRIVATE"|"SECRET"}   // local reader, integrity CLEAN
+- {"type":"trigger_payload", "name":string, "field":"TEXT"|"TITLE"|"SENDER"|"NUMBER",
+   "extractionRegex":string|null, "confidentiality":"PUBLIC"|"PRIVATE"|"SECRET"}
+   // EXTERNAL payload of the trigger (SMS/notification): integrity TAINTED, confidentiality >= PRIVATE.
+   // extractionRegex = first non-empty capture group, or the whole match; null = full field.
+
+"captureAs":string (optional) — captures the action's OUTPUT into a new same-named variable. Allowed
+ONLY on the three producers run_shell, invoke_llm and invoke_llm_v2; the captured value is TAINTED.
+
+Control-flow actions (containers, NOT leaf actions; never eval, never goto). Nesting depth <= 4;
+at most 64 action nodes total across the whole program:
+- {"type":"if", "condition":FlowCondition, "then":[Action,...], "else":[Action,...] (optional)}
+- {"type":"while", "condition":FlowCondition, "body":[Action,...],
+   "maxIterations":integer 1..1000, "delayBetweenMs":integer 0..3600000 (optional)}
+   // BOUNDED loop: maxIterations is REQUIRED; a counter plus a time deadline forbid infinite loops.
+- {"type":"wait", "durationMs":integer 1..3600000}   // cooperative pause, <= 1 hour.
+The worst-case time budget of the whole program must stay <= 6 hours (reduce maxIterations/delays).
+
+Inside if/while, FlowCondition is a Condition and ALSO supports these two, usable ONLY there
+(never as a trigger-time condition, where variables do not exist yet):
+- {"type":"var_compare", "varName":string, "op":"EQ"|"NEQ"|"GT"|"LT"|"CONTAINS",
+   "expected":string | "expectedVar":string}   // compare a var to a literal OR to another var;
+   // provide EXACTLY ONE of expected / expectedVar.
+- {"type":"boolean_literal", "value":boolean}   // closed constant, e.g. a bounded while(true).
+
+P4 INVARIANTS (non-negotiable): a TAINTED value (trigger_payload, or any captureAs output) may fill
+DATA SINKS only — notification/reply text, clipboard — and NEVER a command, routing, recipient,
+target, URL, or input to another app (same rule as run_shell/write_setting). No eval and no actions
+are ever created at runtime. v1 flat rules keep exactly the meaning and bytes described above."""
 
     const val STATE_QUERY_SCHEMA_TEXT = """Only for /compile schema v2, Condition also supports:
 - {"type":"state_compare","query":StateQuery,"valueType":"TEXT"|"NUMBER"|"BOOLEAN",

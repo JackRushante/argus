@@ -39,6 +39,66 @@ class AgentMessageSupportTest {
         )
     }
 
+    // --- P4-D: lo schema draft insegna la grammatica Tasker-class (schema v2) ---
+
+    @Test
+    fun `compile prompt teaches the P4 vars grammar and bounds`() {
+        val prompt = AgentMessageSupport.compileSystemText()
+
+        // Variabili tipizzate opzionali + regex nome + tetto 16.
+        assertTrue("\"vars\"" in prompt, "lo schema deve descrivere il campo vars")
+        assertTrue(
+            "^[a-z][a-z0-9_]{0,31}\$" in prompt,
+            "lo schema deve dichiarare la regex dei nomi di variabile",
+        )
+        assertTrue("16 variables" in prompt, "il tetto 16 variabili deve comparire")
+        // Le tre sorgenti di binding.
+        assertTrue("\"type\":\"literal\"" in prompt, "binding literal (CLEAN)")
+        assertTrue("\"type\":\"state\"" in prompt, "binding state (CLEAN)")
+        assertTrue("\"type\":\"trigger_payload\"" in prompt, "binding trigger_payload (TAINTED)")
+    }
+
+    @Test
+    fun `compile prompt teaches captureAs only on the three producers`() {
+        val prompt = AgentMessageSupport.compileSystemText()
+
+        assertTrue("captureAs" in prompt, "captureAs deve essere descritto")
+        assertTrue(
+            "run_shell, invoke_llm and invoke_llm_v2" in prompt,
+            "captureAs è ammesso solo sui tre producer",
+        )
+    }
+
+    @Test
+    fun `compile prompt teaches the control-flow actions and their bounds`() {
+        val prompt = AgentMessageSupport.compileSystemText()
+
+        assertTrue("\"type\":\"if\"" in prompt, "azione if")
+        assertTrue("\"type\":\"while\"" in prompt, "azione while")
+        assertTrue("\"type\":\"wait\"" in prompt, "azione wait")
+        // Bound numerici P4 §2.5.
+        assertTrue("maxIterations\":integer 1..1000" in prompt, "while maxIterations 1..1000")
+        assertTrue("durationMs\":integer 1..3600000" in prompt, "wait <= 1 ora")
+        assertTrue("64 action nodes" in prompt, "tetto 64 nodi azione")
+        assertTrue("depth 4" in prompt || "depth <= 4" in prompt, "profondità annidamento 4")
+        assertTrue("6 hours" in prompt, "budget tempo worst-case 6 ore")
+    }
+
+    @Test
+    fun `compile prompt teaches the flow-only conditions and the taint invariant`() {
+        val prompt = AgentMessageSupport.compileSystemText()
+
+        assertTrue("var_compare" in prompt, "condizione var_compare")
+        assertTrue("boolean_literal" in prompt, "condizione boolean_literal")
+        assertTrue("expectedVar" in prompt, "confronto var-vs-var")
+        // Invariante taint: un valore TAINTED riempie SOLO i data sink, mai comandi/routing.
+        assertTrue("TAINTED" in prompt, "l'invariante deve nominare i valori TAINTED")
+        assertTrue(
+            "data sink" in prompt.lowercase(),
+            "l'invariante deve limitare i TAINTED ai soli data sink",
+        )
+    }
+
     // --- #59 Ondata 4a: sink NOTIFICA (nessuna notifica, testo dal solo goal) ---
 
     @Test
