@@ -17,12 +17,31 @@ signing key must be pinned.
 |---|---|
 | applicationId | `dev.argus` |
 | metadata file | `metadata/dev.argus.yml` |
-| version | `0.2.2` / versionCode `4` |
-| tag (v-prefixed) | `v0.2.2` |
-| build commit (full hash) | `bdeb21304042cc91ce28d7865b6ba1fbd9632ea0` |
+| version | `0.2.3` / base versionCode `5` (ABI split → 501/502/503/504) |
+| tag (v-prefixed) | `v0.2.3` |
+| build commit (full hash) | `c34358236fb5650f90ecb961ed1bd9d2f2554b84` |
 | signing cert SHA-256 | `4c09633e64cf9876b0da682f5f259383af8d22742aadd93ef273b9f2c73cca6b` |
-| release asset name | `argus-v0.2.2.apk` (pattern `argus-v%v.apk`) |
+| release asset names | `argus-501.apk` … `argus-504.apk` (pattern `argus-%c.apk`) |
 | License (SPDX) | `GPL-3.0-only` |
+
+### ABI split (F-Droid maintainer request, MR !43234)
+
+The universal APK bundled `libandroidx.graphics.path.so` for four ABIs. Per the
+F-Droid guide (Quick Start → *Setup ABI split*), the release now emits one APK per
+ABI. Mechanics:
+
+- `app/build.gradle.kts`: `splits.abi { isUniversalApk = false; include(...) }`, and
+  a per-output `versionCode = 100 * base + {armeabi-v7a:1, arm64-v8a:2, x86:3, x86_64:4}`
+  → 501/502/503/504. A `-PargusAbi=<abi>` property restricts the build to a single
+  split so F-Droid can build each ABI as its own build block byte-for-byte.
+- Recipe: **one `Builds:` block per ABI** (versionCode 501-504, each with
+  `gradleprops: [argusAbi=<abi>]`), plus top-level `VercodeOperation: [100*%c+n]` so
+  autoupdate generates the four codes for future tags. `CurrentVersionCode: 504`.
+- Release assets are the four **single-ABI** APKs, built with `-PargusAbi=<abi>` so
+  they match F-Droid's per-block rebuild exactly. Naming `argus-<versionCode>.apk`
+  matches `Binaries: .../v%v/argus-%c.apk`.
+- Version-code order must stay `armeabi-v7a < arm64-v8a < x86 < x86_64` with the ABI
+  digit in the lowest position, else clients pick the wrong split.
 
 ## 1. Reproducible release build (already in `app/build.gradle.kts`)
 
