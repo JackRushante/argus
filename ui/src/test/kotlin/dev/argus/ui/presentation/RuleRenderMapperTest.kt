@@ -62,6 +62,15 @@ class RuleRenderMapperTest {
         // nessun riferimento fantasma "approvazione avanzata"
         assertTrue(r.actions.none { (it.detail ?: "").contains("avanzata") })
     }
+    @Test fun `captureAs is shown on the producing action (IT and EN)`() {
+        val a = Automation(
+            AutomationId("c1"), "cap", CreatedBy.LLM, AutomationStatus.PENDING_APPROVAL,
+            Trigger.Immediate,
+            listOf(Action.RunShell("echo hi", captureAs = "out")),
+        )
+        assertEquals("catturato come out", RuleRenderMapper.map(a, language = RenderLanguage.IT).actions.single().detail)
+        assertEquals("captured as out", RuleRenderMapper.map(a, language = RenderLanguage.EN).actions.single().detail)
+    }
     @Test fun `P4 while node renders iterations, delay and body in english`() {
         val a = Automation(
             AutomationId("p2"), "loop", CreatedBy.LLM, AutomationStatus.PENDING_APPROVAL,

@@ -514,6 +514,7 @@ object RuleRenderMapper {
         is Action.RunShell -> row(
             iconKey = "shell",
             label = l.pick("Run shell command", "Esegui comando shell"),
+            detail = captureLabel(a.captureAs, l),
             isShell = true,
             shellCommand = a.cmd, // integrale, mai troncato (invariante §5.4)
         )
@@ -591,7 +592,7 @@ object RuleRenderMapper {
                     "Titolo notifica: ${a.notificationTitle.orEmpty()} · Obiettivo: ${a.goal} · " +
                         "tool: ${a.allowedTools.joinToString(", ")}",
                 )
-            },
+            } + captureSuffix(a.captureAs, l),
             isGenerative = true,
         )
         is Action.InvokeLlmV2 -> row(
@@ -609,6 +610,7 @@ object RuleRenderMapper {
                 )
                 append(l.pick(" · tools: ", " · tool: "))
                 append(a.allowedTools.joinToString(", "))
+                append(captureSuffix(a.captureAs, l))
             },
             isGenerative = true,
         )
@@ -659,6 +661,15 @@ object RuleRenderMapper {
         isGenerative = isGenerative,
         requiresLiveConfirm = requiresLiveConfirm,
     )
+
+    // captureAs: dove l'azione salva il proprio output (P4). Il produttore è l'azione stessa.
+    /** Standalone (RunShell, che non ha altro detail). Null se non cattura. */
+    private fun captureLabel(captureAs: String?, l: RenderLanguage): String? =
+        captureAs?.let { l.pick("captured as $it", "catturato come $it") }
+
+    /** Suffisso per le azioni che hanno già un detail (invoke_llm). Vuoto se non cattura. */
+    private fun captureSuffix(captureAs: String?, l: RenderLanguage): String =
+        captureAs?.let { l.pick(" · captured as $it", " · catturato come $it") } ?: ""
 
     // ---------------------------------------------------------------------------------------------
     // Helpers
