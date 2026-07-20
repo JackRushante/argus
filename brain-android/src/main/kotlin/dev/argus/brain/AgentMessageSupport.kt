@@ -491,7 +491,7 @@ ONLY on the three producers run_shell, invoke_llm and invoke_llm_v2; the capture
 
 Control-flow actions (containers, NOT leaf actions; never eval, never goto). Nesting depth <= 4;
 at most 64 action nodes total across the whole program:
-- {"type":"if", "condition":FlowCondition, "then":[Action,...], "else":[Action,...] (optional)}
+- {"type":"if", "condition":FlowCondition, "then":[Action,...], "orElse":[Action,...] (optional)}
 - {"type":"while", "condition":FlowCondition, "body":[Action,...],
    "maxIterations":integer 1..1000, "delayBetweenMs":integer 0..3600000 (optional)}
    // BOUNDED loop: maxIterations is REQUIRED; a counter plus a time deadline forbid infinite loops.
