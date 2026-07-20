@@ -466,6 +466,149 @@ class BridgeTest(unittest.TestCase):
             )
         )
 
+    # --- P4 (schema v2 program) -------------------------------------------------------------
+    P4_TIME_TRIGGER = {"type": "time", "cron": "0 8 * * *", "tz": "Europe/Rome"}
+
+    def test_p4_valid_program_is_accepted(self):
+        draft = {
+            "name": "torcia lampeggiante",
+            "trigger": self.P4_TIME_TRIGGER,
+            "vars": [
+                {"type": "literal", "name": "soglia", "value": "20",
+                 "varType": "NUMBER", "confidentiality": "PUBLIC"},
+            ],
+            "actions": [
+                {
+                    "type": "if",
+                    "condition": {"type": "var_compare", "varName": "soglia",
+                                  "op": "GT", "expected": "10"},
+                    "then": [
+                        {"type": "run_shell", "cmd": "/system/bin/id", "captureAs": "uid"},
+                        {"type": "wait", "durationMs": 500},
+                        {"type": "show_notification", "title": "Argus", "text": "fatto"},
+                    ],
+                    "orElse": [{"type": "set_flashlight", "on": True}],
+                },
+                {
+                    "type": "while",
+                    "condition": {"type": "boolean_literal", "value": True},
+                    "body": [{"type": "set_flashlight", "on": False}],
+                    "maxIterations": 5,
+                    "delayBetweenMs": 100,
+                },
+            ],
+        }
+        tools = {"run_shell", "show_notification", "set_flashlight"}
+        self.assertTrue(bridge.validate_draft(draft, tools, set(), set()))
+
+    def _nested_shell_draft(self, trigger):
+        return {
+            "name": "shell annidata",
+            "trigger": trigger,
+            "actions": [{
+                "type": "if",
+                "condition": {"type": "boolean_literal", "value": True},
+                "then": [{"type": "run_shell", "cmd": "/system/bin/id"}],
+            }],
+        }
+
+    def test_p4_shell_gate_recurses_into_nested_bodies(self):
+        tools = {"run_shell"}
+        # Trigger fidato (time): la shell annidata è ammessa.
+        self.assertTrue(
+            bridge.validate_draft(self._nested_shell_draft(self.P4_TIME_TRIGGER), tools, set(), set())
+        )
+        # Trigger phone_state SMS: la shell annidata DEVE essere trovata dal gate e rifiutata,
+        # anche se non è al top-level (bug handoff §6).
+        sms = {"type": "phone_state", "event": "SMS_RECEIVED", "number": None, "textMatch": None}
+        self.assertFalse(bridge.validate_draft(self._nested_shell_draft(sms), tools, set(), set()))
+
+    def test_p4_rejects_over_bounds(self):
+        # 17 variabili -> oltre il tetto di 16.
+        seventeen = {
+            "name": "vars", "trigger": self.P4_TIME_TRIGGER,
+            "vars": [{"type": "literal", "name": f"v{i}", "value": "1",
+                      "varType": "TEXT", "confidentiality": "PUBLIC"} for i in range(17)],
+            "actions": [{"type": "set_wifi", "on": True}],
+        }
+        self.assertFalse(bridge.validate_draft(seventeen, {"set_wifi"}, set(), set()))
+        sixteen = json.loads(json.dumps(seventeen))
+        sixteen["vars"] = sixteen["vars"][:16]
+        self.assertTrue(bridge.validate_draft(sixteen, {"set_wifi"}, set(), set()))
+
+        # Profondità di annidamento: 4 ok, 5 rifiutato.
+        def nested_if(depth):
+            node = {"type": "set_wifi", "on": True}
+            for _ in range(depth):
+                node = {"type": "if",
+                        "condition": {"type": "boolean_literal", "value": True},
+                        "then": [node]}
+            return {"name": "n", "trigger": self.P4_TIME_TRIGGER, "actions": [node]}
+        self.assertTrue(bridge.validate_draft(nested_if(4), {"set_wifi"}, set(), set()))
+        self.assertFalse(bridge.validate_draft(nested_if(5), {"set_wifi"}, set(), set()))
+
+        # maxIterations: 1000 ok, 1001 fuori intervallo.
+        def while_iters(n):
+            return {"name": "w", "trigger": self.P4_TIME_TRIGGER, "actions": [{
+                "type": "while", "condition": {"type": "boolean_literal", "value": True},
+                "body": [{"type": "set_wifi", "on": True}], "maxIterations": n}]}
+        self.assertTrue(bridge.validate_draft(while_iters(1_000), {"set_wifi"}, set(), set()))
+        self.assertFalse(bridge.validate_draft(while_iters(1_001), {"set_wifi"}, set(), set()))
+
+        # Conteggio nodi albero: while + 63 corpo = 64 ok; + 64 = 65 rifiutato.
+        def while_body(n):
+            return {"name": "w", "trigger": self.P4_TIME_TRIGGER, "actions": [{
+                "type": "while", "condition": {"type": "boolean_literal", "value": True},
+                "body": [{"type": "set_wifi", "on": True} for _ in range(n)],
+                "maxIterations": 1}]}
+        self.assertTrue(bridge.validate_draft(while_body(63), {"set_wifi"}, set(), set()))
+        self.assertFalse(bridge.validate_draft(while_body(64), {"set_wifi"}, set(), set()))
+
+    def test_p4_v1_flat_draft_still_valid(self):
+        flat = {
+            "name": "dnd sera",
+            "trigger": {"type": "time", "cron": "0 23 * * *", "tz": "Europe/Rome"},
+            "actions": [{"type": "set_dnd", "mode": "PRIORITY"}],
+        }
+        self.assertTrue(bridge.validate_draft(flat, {"set_dnd"}, {"ringer"}, set()))
+
+    def test_p4_capture_as_only_on_producers(self):
+        # captureAs su un'azione non-produttrice -> rifiutato (chiave extra).
+        bad = {
+            "name": "x", "trigger": self.P4_TIME_TRIGGER,
+            "actions": [{"type": "set_wifi", "on": True, "captureAs": "bad"}],
+        }
+        self.assertFalse(bridge.validate_draft(bad, {"set_wifi"}, set(), set()))
+        # captureAs su run_shell -> ammesso.
+        good = {
+            "name": "x", "trigger": self.P4_TIME_TRIGGER,
+            "actions": [{"type": "run_shell", "cmd": "/system/bin/id", "captureAs": "uid"}],
+        }
+        self.assertTrue(bridge.validate_draft(good, {"run_shell"}, set(), set()))
+        # Nome captureAs non valido -> rifiutato.
+        bad_name = json.loads(json.dumps(good))
+        bad_name["actions"][0]["captureAs"] = "Bad-Name"
+        self.assertFalse(bridge.validate_draft(bad_name, {"run_shell"}, set(), set()))
+
+    def test_p4_flow_only_conditions_rejected_at_trigger_time(self):
+        # var_compare/boolean_literal non sono ammesse come condizioni trigger-time.
+        self.assertFalse(bridge.validate_condition(
+            {"type": "var_compare", "varName": "x", "op": "EQ", "expected": "y"},
+            0, set(),
+        ))
+        self.assertFalse(bridge.validate_condition(
+            {"type": "boolean_literal", "value": True}, 0, set(),
+        ))
+        # Dentro un flusso (allow_flow) e con la var dichiarata -> ammesse.
+        self.assertTrue(bridge.validate_condition(
+            {"type": "boolean_literal", "value": True}, 0, set(),
+            allow_flow=True,
+        ))
+        self.assertTrue(bridge.validate_condition(
+            {"type": "var_compare", "varName": "x", "op": "EQ", "expected": "y"},
+            0, set(), allow_flow=True, known_vars={"x"},
+        ))
+
     def test_manifest_available_triggers_is_optional_and_bounded(self):
         # Client pre-P2: campo assente, accettato (retrocompatibilita').
         legacy = self.request()
