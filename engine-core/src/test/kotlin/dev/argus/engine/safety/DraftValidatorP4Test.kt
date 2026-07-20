@@ -301,17 +301,19 @@ class DraftValidatorP4Test {
         assertTrue("var_compare_undeclared" in errors(v.validate(d, emptySet())))
     }
 
-    @Test fun `numeric var compare requires an explicitly typed NUMBER variable`() {
+    @Test fun `numeric operator on a TEXT variable is allowed and coerced at runtime`() {
         val notif = Trigger.Notification("com.whatsapp", conversationId = "jid:1", isGroup = false)
-        // TriggerPayload è TEXT: GT su di essa è un confronto numerico su un tipo non NUMBER → errore.
+        // device-found: una TriggerPayload TEXT (o un output captureAs LLM, sempre TEXT) confrontata
+        // con GT NON è più un errore: GT/LT su TEXT è ammesso e coercizzato numericamente a runtime
+        // (fail-closed se non parsabile). Sblocca il pattern Tasker "chiedi un numero all'AI, poi >".
         val textVar = draft(
             actions = listOf(Action.If(Condition.VarCompare("t", CmpOp.GT, "5"), listOf(Action.SetWifi(true)))),
             vars = listOf(payload("t", TriggerField.TEXT)),
             trigger = notif,
         )
-        assertTrue("var_compare_type_invalid" in errors(v.validate(textVar, emptySet())))
+        assertFalse("var_compare_type_invalid" in errors(v.validate(textVar, emptySet())))
 
-        // Literal NUMBER: GT ammesso (coercizione esplicita).
+        // Literal NUMBER: GT ammesso esattamente come prima (invariato).
         val numVar = draft(
             actions = listOf(Action.If(Condition.VarCompare("n", CmpOp.GT, "5"), listOf(Action.SetWifi(true)))),
             vars = listOf(literal("n", "0", VarType.NUMBER)),
@@ -343,7 +345,11 @@ class DraftValidatorP4Test {
                 Condition.VarCompare("text", CmpOp.EQ, expected = "x", expectedVar = "text"),
             ),
         )
-        assertTrue("var_compare_type_invalid" in validate(Condition.VarCompare("text", CmpOp.GT, expected = "1")))
+        // GT/LT su TEXT sono ammessi (coercizione numerica a runtime, device-found).
+        assertFalse("var_compare_type_invalid" in validate(Condition.VarCompare("text", CmpOp.GT, expected = "1")))
+        assertFalse("var_compare_type_invalid" in validate(Condition.VarCompare("text", CmpOp.LT, expected = "1")))
+        // BOOLEAN resta escluso dagli operatori numerici.
+        assertTrue("var_compare_type_invalid" in validate(Condition.VarCompare("flag", CmpOp.GT, expected = "true")))
         assertTrue("var_compare_type_invalid" in validate(Condition.VarCompare("flag", CmpOp.CONTAINS, expected = "true")))
         assertTrue("var_compare_type_invalid" in validate(Condition.VarCompare("number", CmpOp.EQ, expected = "NaN")))
         assertFalse("var_compare_type_invalid" in validate(Condition.VarCompare("flag", CmpOp.EQ, expected = "false")))

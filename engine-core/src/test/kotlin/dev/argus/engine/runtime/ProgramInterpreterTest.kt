@@ -443,6 +443,67 @@ class ProgramInterpreterTest {
         )
     }
 
+    @Test
+    fun `text operands coerce to numbers for GT and LT and fail closed when non numeric`() {
+        val state = DeviceState()
+        fun textVar(value: String) = VarValue(
+            value,
+            VarType.TEXT,
+            IntegrityLabel.CLEAN,
+            ConfidentialityLabel.PUBLIC,
+            setOf(ValueProvenance.LITERAL),
+        )
+        val values = mapOf(
+            "captured" to textVar("7"),
+            "low" to textVar("3"),
+            "word" to textVar("abc"),
+        )
+
+        // device-found: l'LLM risponde un numero, catturato come TEXT, poi confrontato con GT.
+        // "7" > "5" -> TRUE numericamente.
+        assertEquals(
+            ConditionEvaluator.Result.MET,
+            evaluator.flowResult(Condition.VarCompare("captured", CmpOp.GT, "5"), state, values::get),
+        )
+        // "3" > "5" -> FALSE.
+        assertEquals(
+            ConditionEvaluator.Result.NOT_MET,
+            evaluator.flowResult(Condition.VarCompare("low", CmpOp.GT, "5"), state, values::get),
+        )
+        // LT simmetrico: "3" < "5" -> TRUE, "7" < "5" -> FALSE.
+        assertEquals(
+            ConditionEvaluator.Result.MET,
+            evaluator.flowResult(Condition.VarCompare("low", CmpOp.LT, "5"), state, values::get),
+        )
+        assertEquals(
+            ConditionEvaluator.Result.NOT_MET,
+            evaluator.flowResult(Condition.VarCompare("captured", CmpOp.LT, "5"), state, values::get),
+        )
+        // TEXT non numerico -> fail-closed FALSE (NOT_MET), mai STATE_UNAVAILABLE, mai eccezione.
+        assertEquals(
+            ConditionEvaluator.Result.NOT_MET,
+            evaluator.flowResult(Condition.VarCompare("word", CmpOp.GT, "5"), state, values::get),
+        )
+        assertEquals(
+            ConditionEvaluator.Result.NOT_MET,
+            evaluator.flowResult(Condition.VarCompare("word", CmpOp.LT, "5"), state, values::get),
+        )
+        // Anche il letterale non numerico è fail-closed (nessun crash).
+        assertEquals(
+            ConditionEvaluator.Result.NOT_MET,
+            evaluator.flowResult(Condition.VarCompare("captured", CmpOp.GT, "cinque"), state, values::get),
+        )
+        // Confronto fra due var TEXT: "7" > "3" -> TRUE.
+        assertEquals(
+            ConditionEvaluator.Result.MET,
+            evaluator.flowResult(
+                Condition.VarCompare("captured", CmpOp.GT, expectedVar = "low"),
+                state,
+                values::get,
+            ),
+        )
+    }
+
     private fun interpreter(
         runner: ProgramActionRunner,
         journal: ProgramExecutionJournal = NoopProgramExecutionJournal,

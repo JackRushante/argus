@@ -501,6 +501,37 @@ class BridgeTest(unittest.TestCase):
         tools = {"run_shell", "show_notification", "set_flashlight"}
         self.assertTrue(bridge.validate_draft(draft, tools, set(), set()))
 
+    def test_p4_captured_text_var_compared_with_gt_validates(self):
+        # device-found: un invoke_llm cattura un valore (captureAs, sempre TEXT/TAINTED) e lo confronta
+        # numericamente con GT contro un letterale. Il bridge NON deve rifiutarlo per incompatibilità di
+        # tipo: la coercizione numerica è a runtime (fail-closed). Sblocca "chiedi un numero all'AI, poi >".
+        draft = {
+            "name": "chiedi un numero e confronta",
+            "trigger": self.P4_TIME_TRIGGER,
+            "actions": [
+                {
+                    "type": "invoke_llm",
+                    "goal": "quante notifiche non lette? rispondi solo col numero",
+                    "contextSources": [],
+                    "allowedTools": [],
+                    "replyTargetSender": False,
+                    "captureAs": "answer",
+                },
+                {
+                    "type": "if",
+                    "condition": {"type": "var_compare", "varName": "answer",
+                                  "op": "GT", "expected": "5"},
+                    "then": [{"type": "show_notification", "title": "Argus", "text": "molte"}],
+                    "orElse": [{"type": "show_notification", "title": "Argus", "text": "poche"}],
+                },
+            ],
+        }
+        tools = {"invoke_llm", "show_notification"}
+        self.assertTrue(bridge.validate_draft(draft, tools, set(), set()))
+        # LT sullo stesso operando catturato è ugualmente ammesso.
+        draft["actions"][1]["condition"]["op"] = "LT"
+        self.assertTrue(bridge.validate_draft(draft, tools, set(), set()))
+
     def test_p4_control_flow_is_structural_and_accepted_when_listed_in_available_tools(self):
         # BUG device-found: l'app ora pubblica if/while/wait dentro available_tools (sono STRUTTURALI,
         # non gated dal SO). Il bridge NON deve iniziare a rifiutare né il manifest né il draft per

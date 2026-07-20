@@ -83,7 +83,20 @@ class ConditionEvaluator(private val clock: Clock) {
                 CmpOp.EQ -> Truth.of(left.text == right.text)
                 CmpOp.NEQ -> Truth.of(left.text != right.text)
                 CmpOp.CONTAINS -> Truth.of(left.text.contains(right.text))
-                CmpOp.GT, CmpOp.LT -> Truth.UNKNOWN
+                // device-found: GT/LT su TEXT (es. un numero chiesto all'LLM e catturato come TEXT).
+                // Si prova a coercizzare numericamente ENTRAMBI i lati: se uno solo non è numerico il
+                // confronto è FALSE (fail-closed), mai UNKNOWN (che fermerebbe il programma) e mai una
+                // eccezione. La coercizione tocca solo il boolean del confronto, non declassifica il TAINT.
+                CmpOp.GT, CmpOp.LT -> {
+                    val leftNumber = StateValueCoercion.number(left.text)
+                    val rightNumber = StateValueCoercion.number(right.text)
+                    if (leftNumber == null || rightNumber == null) {
+                        Truth.FALSE
+                    } else when (condition.op) {
+                        CmpOp.GT -> Truth.of(leftNumber > rightNumber)
+                        else -> Truth.of(leftNumber < rightNumber)
+                    }
+                }
             }
             VarType.NUMBER -> {
                 val leftNumber = StateValueCoercion.number(left.text) ?: return Truth.UNKNOWN

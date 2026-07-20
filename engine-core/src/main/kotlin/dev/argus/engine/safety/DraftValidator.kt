@@ -465,7 +465,11 @@ class DraftValidator(
         }
         val validOperator = when (c.op) {
             CmpOp.CONTAINS -> leftType == VarType.TEXT && rightType == VarType.TEXT
-            CmpOp.GT, CmpOp.LT -> leftType == VarType.NUMBER && rightType == VarType.NUMBER
+            // GT/LT sono numerici ma ammessi anche su operandi TEXT (device-found: l'output di una
+            // capture LLM è sempre TEXT). La coercizione numerica avviene a runtime, fail-closed se
+            // non parsabile. BOOLEAN resta escluso; gli operandi devono avere lo stesso tipo, coerente
+            // con l'interprete che confronta solo var dello stesso tipo.
+            CmpOp.GT, CmpOp.LT -> leftType == rightType && leftType != VarType.BOOLEAN
             CmpOp.EQ, CmpOp.NEQ -> leftType == rightType
         }
         if (!validOperator) {
