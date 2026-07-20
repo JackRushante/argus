@@ -33,5 +33,6 @@ fun iconFor(key: String): ImageVector = when (key) {
     "tap" -> Icons.Rounded.TouchApp
     "input_text" -> Icons.Rounded.Keyboard
     "whatsapp_reply" -> Icons.AutoMirrored.Rounded.Reply
+    "control_flow" -> Icons.Rounded.AccountTree // P4: if/while/wait — nodi di flusso
     else -> Icons.Rounded.Bolt
 }
