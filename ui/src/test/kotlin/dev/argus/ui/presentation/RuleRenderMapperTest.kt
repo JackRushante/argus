@@ -2,6 +2,7 @@ package dev.argus.ui.presentation
 import dev.argus.engine.model.*
 import dev.argus.ui.model.RuleRender
 import dev.argus.ui.model.VarRow
+import dev.argus.ui.model.ProgramNode
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -34,6 +35,51 @@ class RuleRenderMapperTest {
             listOf(Action.SetDnd(DndMode.PRIORITY)),
         )
         assertTrue(RuleRenderMapper.map(a, language = RenderLanguage.IT).vars.isEmpty())
+    }
+    @Test fun `P4 program renders nested if_then_else recursively without phantom advanced approval (IT)`() {
+        val a = Automation(
+            AutomationId("p1"), "prog", CreatedBy.LLM, AutomationStatus.PENDING_APPROVAL,
+            Trigger.Immediate,
+            listOf(
+                Action.If(
+                    condition = Condition.VarCompare("n", CmpOp.GT, expected = "5"),
+                    then = listOf(Action.SetFlashlight(true)),
+                    orElse = listOf(Action.SetFlashlight(false)),
+                ),
+            ),
+            vars = listOf(VarBinding.Literal("n", "10", VarType.NUMBER, ConfidentialityLabel.PUBLIC)),
+        )
+        val r = RuleRenderMapper.map(a, language = RenderLanguage.IT)
+        val ifNode = r.program.single() as ProgramNode.IfNode
+        assertEquals("Se:", ifNode.title)
+        assertEquals("Allora:", ifNode.thenTitle)
+        assertEquals("Altrimenti:", ifNode.elseTitle)
+        assertEquals(1, ifNode.then.size)
+        assertEquals(1, ifNode.orElse.size)
+        // la foglia annidata è resa (non nascosta): accendi torcia
+        val leaf = ifNode.then.single() as ProgramNode.Leaf
+        assertTrue(leaf.row.label.contains("torcia", ignoreCase = true))
+        // nessun riferimento fantasma "approvazione avanzata"
+        assertTrue(r.actions.none { (it.detail ?: "").contains("avanzata") })
+    }
+    @Test fun `P4 while node renders iterations, delay and body in english`() {
+        val a = Automation(
+            AutomationId("p2"), "loop", CreatedBy.LLM, AutomationStatus.PENDING_APPROVAL,
+            Trigger.Immediate,
+            listOf(
+                Action.While(
+                    condition = Condition.BooleanLiteral(true),
+                    body = listOf(Action.SetFlashlight(true), Action.Wait(500)),
+                    maxIterations = 3,
+                    delayBetweenMs = 200,
+                ),
+            ),
+        )
+        val r = RuleRenderMapper.map(a, language = RenderLanguage.EN)
+        val w = r.program.single() as ProgramNode.WhileNode
+        assertEquals("Repeat up to 3 times · 200 ms between", w.title)
+        assertEquals(2, w.body.size)
+        assertTrue((w.body[1] as ProgramNode.Leaf).row.label.contains("Wait"))
     }
     // I test pinnano il rendering ITALIANO passando SEMPRE `RenderLanguage.IT` esplicito: senza,
     // passerebbero solo perché la macchina ha locale it-IT (dipendenza nascosta dal locale). I casi

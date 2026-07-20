@@ -22,7 +22,32 @@ data class RuleRender(
     val isGenerative: Boolean,
     val privacyNote: String?,         // valorizzato se generativa: disclosure del servizio AI configurato
     val vars: List<VarRow> = emptyList(), // P4: variabili approvate (vuoto per le regole v1 flat)
+    val program: List<ProgramNode> = emptyList(), // P4: albero azioni ricorsivo (if/while/wait/foglie)
 )
+
+/**
+ * Nodo dell'albero del programma approvato, reso per la review ricorsiva (P4-E). Ogni stringa è
+ * pre-costruita dai tipi dal mapper (§5.1): il Composable si limita a mostrarla e a indentare i
+ * figli, così NESSUNA foglia annidata può restare nascosta. `Wait` è una foglia (usa ActionRow).
+ */
+sealed interface ProgramNode {
+    data class Leaf(val row: ActionRow) : ProgramNode
+
+    data class IfNode(
+        val title: String,                    // "If:" / "Se:"
+        val conditionLines: List<String>,     // condizione resa (albero appiattito indentato)
+        val thenTitle: String,                // "Then:" / "Allora:"
+        val then: List<ProgramNode>,
+        val elseTitle: String?,               // "Otherwise:" / "Altrimenti:" — null se nessun else
+        val orElse: List<ProgramNode>,
+    ) : ProgramNode
+
+    data class WhileNode(
+        val title: String,                    // "Repeat up to N times · Y ms between" / IT
+        val conditionLines: List<String>,     // condizione del loop resa
+        val body: List<ProgramNode>,
+    ) : ProgramNode
+}
 
 /**
  * Una variabile del programma approvato (P4), resa per la review. I valori RUNTIME non compaiono

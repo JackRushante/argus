@@ -26,6 +26,7 @@ import dev.argus.engine.model.integrity
 import dev.argus.engine.model.declaredType
 import dev.argus.engine.model.provenance
 import dev.argus.ui.model.ActionRow
+import dev.argus.ui.model.ProgramNode
 import dev.argus.ui.model.RuleRender
 import dev.argus.ui.model.VarRow
 
@@ -96,7 +97,38 @@ object RuleRenderMapper {
                 else -> null
             },
             vars = vars.map { varRow(it, trigger, l) },
+            program = programNodes(actions, l),
         )
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Programma P4 — albero ricorsivo (if/while/wait/foglie). Ogni stringa è resa dai TIPI; nessuna
+    // foglia annidata può restare nascosta (lo verifica lo snapshot test). Wait è una foglia.
+    // ---------------------------------------------------------------------------------------------
+
+    private fun programNodes(actions: List<Action>, l: RenderLanguage): List<ProgramNode> =
+        actions.map { programNode(it, l) }
+
+    private fun programNode(a: Action, l: RenderLanguage): ProgramNode = when (a) {
+        is Action.If -> ProgramNode.IfNode(
+            title = l.pick("If:", "Se:"),
+            conditionLines = flattenConditions(a.condition, 0, l),
+            thenTitle = l.pick("Then:", "Allora:"),
+            then = programNodes(a.then, l),
+            elseTitle = if (a.orElse.isNotEmpty()) l.pick("Otherwise:", "Altrimenti:") else null,
+            orElse = programNodes(a.orElse, l),
+        )
+        is Action.While -> ProgramNode.WhileNode(
+            title = l.pick(
+                "Repeat up to ${a.maxIterations} times" +
+                    (if (a.delayBetweenMs > 0) " · ${a.delayBetweenMs} ms between" else ""),
+                "Ripeti fino a ${a.maxIterations} volte" +
+                    (if (a.delayBetweenMs > 0) " · ${a.delayBetweenMs} ms tra le iterazioni" else ""),
+            ),
+            conditionLines = flattenConditions(a.condition, 0, l),
+            body = programNodes(a.body, l),
+        )
+        else -> ProgramNode.Leaf(actionRow(a, l))
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -580,19 +612,17 @@ object RuleRenderMapper {
             },
             isGenerative = true,
         )
-        // P4 control-flow: rendering MINIMO a una riga (l'espansione ricorsiva con i badge di
-        // provenienza è P4-E). Non nasconde la natura generativa del blocco (isGenerative dal tier
-        // aggregato) così la review resta onesta anche prima del render completo.
+        // P4 control-flow: nella vista COMPATTA (chip) i blocchi if/while restano un sommario a una
+        // riga; il dettaglio ricorsivo completo è reso dall'albero `program` (ProgramNode) nella
+        // schermata di approvazione. isGenerative dal tier aggregato tiene onesta anche la vista chip.
         is Action.If -> row(
             iconKey = "control_flow",
             label = l.pick("If (condition), run a block", "Se (condizione), esegui un blocco"),
             detail = l.pick(
                 "${a.then.size} actions if true" +
-                    (if (a.orElse.isNotEmpty()) ", ${a.orElse.size} otherwise" else "") +
-                    " · full detail in advanced approval",
+                    (if (a.orElse.isNotEmpty()) ", ${a.orElse.size} otherwise" else ""),
                 "${a.then.size} azioni se vera" +
-                    (if (a.orElse.isNotEmpty()) ", ${a.orElse.size} altrimenti" else "") +
-                    " · dettaglio completo nell'approvazione avanzata",
+                    (if (a.orElse.isNotEmpty()) ", ${a.orElse.size} altrimenti" else ""),
             ),
             isGenerative = a.tier == ActionTier.GENERATIVE,
         )
@@ -604,11 +634,9 @@ object RuleRenderMapper {
             ),
             detail = l.pick(
                 "${a.body.size} actions per iteration" +
-                    (if (a.delayBetweenMs > 0) " · every ${a.delayBetweenMs} ms" else "") +
-                    " · full detail in advanced approval",
+                    (if (a.delayBetweenMs > 0) " · every ${a.delayBetweenMs} ms" else ""),
                 "${a.body.size} azioni per iterazione" +
-                    (if (a.delayBetweenMs > 0) " · ogni ${a.delayBetweenMs} ms" else "") +
-                    " · dettaglio completo nell'approvazione avanzata",
+                    (if (a.delayBetweenMs > 0) " · ogni ${a.delayBetweenMs} ms" else ""),
             ),
             isGenerative = a.tier == ActionTier.GENERATIVE,
         )
