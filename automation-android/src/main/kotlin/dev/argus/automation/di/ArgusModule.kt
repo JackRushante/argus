@@ -18,6 +18,7 @@ import dev.argus.automation.AndroidTimeAlarmBackend
 import dev.argus.automation.AppPreferencesStore
 import dev.argus.automation.ApprovalFlow
 import dev.argus.automation.ArmedAutomationRegistrar
+import dev.argus.automation.ImmediateReArm
 import dev.argus.automation.ArgusRuntimeController
 import dev.argus.automation.AutomationNotifier
 import dev.argus.automation.ConfiguredBridgeBrain
@@ -910,6 +911,16 @@ object ArgusModule {
         oneShotConsumptions,
         foregroundLauncher,
     )
+
+    /**
+     * Ri-arm immediato al ri-enable, servito dal percorso `registerImmediate` del registrar.
+     * Interfaccia stretta apposta: il coordinator non dipende dall'intero registrar (evita il ciclo
+     * Hilt) e il registrar non dipende dal coordinator, quindi il grafo resta aciclico.
+     */
+    @Provides
+    @Singleton
+    fun immediateReArm(registrar: ArmedAutomationRegistrar): ImmediateReArm =
+        ImmediateReArm { automation -> registrar.register(automation) }
 
     @Provides
     @Singleton
