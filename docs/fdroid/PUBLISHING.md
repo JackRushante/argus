@@ -5,11 +5,21 @@ shipping updates. It is distilled from a prior app's F-Droid history (dozens of
 failed pipelines) so the same mistakes are not repeated. **Read it fully before
 opening or updating the merge request.**
 
-F-Droid distributes Argus in **Binaries (reproducible) mode**: F-Droid rebuilds
-the app from the tagged commit, compares it byte-for-byte (minus signatures)
-against the APK we publish on the GitHub release, and — if they match — ships
-*our* signed APK. This is why the release build must be deterministic and the
-signing key must be pinned.
+**CURRENT MODE (since 2026-07-20): build-from-source, F-Droid-signed.** F-Droid
+builds each per-ABI APK from the tagged commit and signs it with *F-Droid's* key.
+The recipe has **no** `Binaries:` and **no** `AllowedAPKSigningKeys:`. Our GitHub
+releases are independent (direct-download users only) and unaffected. To publish an
+update: bump `versionCode`/`versionName`, tag `vX.Y.Z`, push — F-Droid autoupdate
+(Tags + VercodeOperation) picks it up.
+
+Why not reproducible/Binaries mode: we tried it (v0.2.1–v0.2.4). The universal APK
+was reproducible, but the **ABI-split** APK's `classes2.dex` has alignment/layout
+padding that is not byte-stable across build hosts (Windows, a generic Linux box,
+and F-Droid's CI each produced a slightly different size with identical bytecode).
+The reproducible-build sections below are kept as historical reference; the app
+build still carries the reproducible settings (harmless), but they are no longer
+required. Switching back to reproducible would require matching F-Droid's exact
+buildserver image and re-adding `Binaries:` + `AllowedAPKSigningKeys:`.
 
 ## 0. Concrete values for the current release
 

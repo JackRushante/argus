@@ -14,7 +14,6 @@ AutoName: Argus
 
 RepoType: git
 Repo: https://github.com/JackRushante/argus
-Binaries: https://github.com/JackRushante/argus/releases/download/v%v/argus-%c.apk
 
 Builds:
   - versionName: 0.2.4
@@ -52,8 +51,6 @@ Builds:
       - yes
     gradleprops:
       - argusAbi=x86_64
-
-AllowedAPKSigningKeys: 4c09633e64cf9876b0da682f5f259383af8d22742aadd93ef273b9f2c73cca6b
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags
