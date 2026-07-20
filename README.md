@@ -20,6 +20,8 @@ Argus is a Tasker-class Android automation app where the LLM is the *compiler*, 
 
 > The app UI is bilingual (English/Italian, follows the system language).
 
+> **Privacy & license at a glance.** Argus has **no backend, no account, no telemetry, no analytics** — it collects nothing and phones home to nowhere. Your rules, logs and API keys stay **on your device** (keys encrypted; the audit log records outcomes with no personal content). Argus is **free software under [GPL-3.0](LICENSE)**: you may study, modify and share it, but any derivative must stay open under the same license — nobody can close it or take it proprietary.
+
 ---
 
 ## Table of contents
@@ -250,7 +252,7 @@ Note: on non-rooted devices Shizuku must be started via ADB and **does not survi
 | Gradle | wrapper **8.13** (included) |
 | Android Gradle Plugin | **8.13.2** |
 | Kotlin | **2.1.0** (KSP 2.1.0-1.0.29) |
-| JDK | toolchain **17** for the modules (foojay auto-provisioning); Gradle itself must run on JDK 17–21 (e.g. Android Studio's JBR) |
+| JDK | modules target **JVM 17** (explicit; no remote toolchain download); Gradle itself must run on JDK 17–21 (e.g. Android Studio's JBR) |
 | Android SDK | compileSdk/targetSdk **36**, minSdk **30** (Android 11+) |
 | Stack | Jetpack Compose (BOM 2025.05), Room 2.6.1, Hilt 2.57.1, Shizuku API 13.1.5 |
 
@@ -266,7 +268,8 @@ Note: on non-rooted devices Shizuku must be started via ADB and **does not survi
 
 # release APK (signed if a local keystore.properties exists — see below; unsigned otherwise)
 ./gradlew :app:assembleRelease
-# → app/build/outputs/apk/release/app-release.apk
+# → one APK per ABI: app/build/outputs/apk/release/app-<abi>-release.apk
+# (build a single ABI with -PargusAbi=arm64-v8a)
 
 # per-module tests
 ./gradlew :brain-android:test :automation-android:test :data:test :ui:test
@@ -311,7 +314,6 @@ Open an [Issue](https://github.com/JackRushante/argus/issues) with: what you ask
 Short roadmap:
 
 - **P4 — variables and control flow** *(in progress)*: Tasker-class combinatorics — `if`/`while`, values captured from triggers, device state and action outputs — with per-value taint tracking so untrusted external content can fill data fields but never gain execution authority. Design is finalized; the domain model is being implemented. First piece already shipped (generative notification sink for `invoke_llm`, recurring too).
-- **In-app Privacy & Licenses section** — GPL-3.0 notice plus a plain-language privacy summary (keys encrypted on device, no backend, audit log without PII).
 - **Android settings commands** — brightness, dark/light theme, real system settings writes.
 - **Computer-use** — interactive screen→action loop in two tiers (a valid slow/self-hosted path, an optional fast path).
 

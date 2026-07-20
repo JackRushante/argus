@@ -2,6 +2,18 @@
 
 Patch notes for every commit, newest first. Generated from the project's git history.
 
+> **Privacy & license.** Argus has no backend, no account, no telemetry and no analytics — it
+> collects nothing; rules, logs and API keys stay on your device. It is free software under
+> **GPL-3.0**: you may study, modify and share it, but derivatives must remain open under the same
+> license. On F-Droid the app is built from source and signed by F-Droid; our GitHub releases are
+> signed with the project key.
+
+## docs — privacy & license clarified (2026-07-20)
+
+Made the "no data collection" and GPL-3.0 copyleft guarantees explicit and prominent in the README
+and the F-Droid (Fastlane) descriptions. Dropped the planned in-app Privacy & Licenses screen in
+favour of clear documentation. No code change.
+
 ## `v0.2.4` — F-Droid ABI split + reproducible dex (2026-07-20)
 
 Requested by F-Droid maintainer linsui on the packaging MR (fdroiddata!43234): the release now

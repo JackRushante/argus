@@ -6,7 +6,7 @@ Why this matters:
 
 * Predictable — the rule that fires at 3 a.m. is exactly the one you approved, byte for byte.
 * Auditable — every run is logged locally, without personal content.
-* Private — your API keys are encrypted on device; there is no Argus backend.
+* Private — no backend, no account, no telemetry, no analytics: Argus collects nothing. Your API keys are encrypted on device and everything stays on your phone.
 
 Language models are optional and pluggable: run a self-hosted bridge, or connect directly to a provider you choose. A base tier works with no elevated privileges; for system-level actions Argus can use Shizuku.
 

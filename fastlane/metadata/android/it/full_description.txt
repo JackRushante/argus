@@ -6,7 +6,7 @@ Perché conta:
 
 * Prevedibile — la regola che scatta alle 3 di notte è esattamente quella che hai approvato, byte per byte.
 * Verificabile — ogni esecuzione è registrata localmente, senza contenuti personali.
-* Privato — le tue chiavi API sono cifrate sul dispositivo; non esiste alcun backend di Argus.
+* Privato — nessun backend, nessun account, nessuna telemetria, nessuna analitica: Argus non raccoglie nulla. Le tue chiavi API sono cifrate sul dispositivo e tutto resta sul telefono.
 
 I modelli sono opzionali e sostituibili: usa un bridge self-hosted, oppure collega direttamente un provider a tua scelta. Un tier base funziona senza privilegi elevati; per le azioni di sistema Argus può usare Shizuku.
 
