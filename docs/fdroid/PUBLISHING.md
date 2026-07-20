@@ -17,12 +17,31 @@ signing key must be pinned.
 |---|---|
 | applicationId | `dev.argus` |
 | metadata file | `metadata/dev.argus.yml` |
-| version | `0.2.3` / base versionCode `5` (ABI split → 501/502/503/504) |
-| tag (v-prefixed) | `v0.2.3` |
-| build commit (full hash) | `c34358236fb5650f90ecb961ed1bd9d2f2554b84` |
+| version | `0.2.4` / base versionCode `6` (ABI split → 601/602/603/604) |
+| tag (v-prefixed) | `v0.2.4` |
+| build commit (full hash) | see the recipe `commit:` (v0.2.4 build commit) |
 | signing cert SHA-256 | `4c09633e64cf9876b0da682f5f259383af8d22742aadd93ef273b9f2c73cca6b` |
-| release asset names | `argus-501.apk` … `argus-504.apk` (pattern `argus-%c.apk`) |
+| release asset names | `argus-601.apk` … `argus-604.apk` (pattern `argus-%c.apk`) |
 | License (SPDX) | `GPL-3.0-only` |
+
+### Reproducibility: baseline profile dropped (v0.2.4)
+
+v0.2.3's `fdroid build` job failed the byte comparison: F-Droid's clean rebuild produced a
+different `assets/dexopt/baseline.prof` and profile-ordered `classes2.dex` (only those two files;
+`classes.dex`/`classes3.dex` matched). The ART baseline profile compiled from the merged AndroidX
+library profiles is not byte-stable across build hosts. Fix in `app/build.gradle.kts`: disable the
+release ART/startup profile tasks so no baseline profile is packaged and dex layout is
+source-ordered —
+
+```kotlin
+tasks.configureEach {
+    if (name == "compileReleaseArtProfile" ||
+        name == "mergeReleaseArtProfile" ||
+        name == "mergeReleaseStartupProfile") enabled = false
+}
+```
+
+Keep this for every future release. Only cost is losing profile-guided startup optimisation.
 
 ### ABI split (F-Droid maintainer request, MR !43234)
 

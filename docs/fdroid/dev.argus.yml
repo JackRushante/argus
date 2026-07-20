@@ -1,10 +1,8 @@
 AntiFeatures:
   NonFreeNet:
-    en-US: >-
-      Optional. Argus can connect to proprietary LLM provider APIs
-      (OpenAI, Anthropic, Google) if the user configures one. It also
-      works fully with a self-hosted bridge and an on-device base tier,
-      with no proprietary network service.
+    en-US: Optional. Argus can connect to proprietary LLM provider APIs (OpenAI, Anthropic,
+      Google) if the user configures one. It also works fully with a self-hosted bridge
+      and an on-device base tier, with no proprietary network service.
 Categories:
   - System
 License: GPL-3.0-only
@@ -19,33 +17,36 @@ Repo: https://github.com/JackRushante/argus
 Binaries: https://github.com/JackRushante/argus/releases/download/v%v/argus-%c.apk
 
 Builds:
-  - versionName: 0.2.3
-    versionCode: 501
-    commit: c34358236fb5650f90ecb961ed1bd9d2f2554b84
+  - versionName: 0.2.4
+    versionCode: 601
+    commit: d097aed8287d01c9e4bd6cd66084451333d0d46c
     subdir: app
     gradle:
       - yes
     gradleprops:
       - argusAbi=armeabi-v7a
-  - versionName: 0.2.3
-    versionCode: 502
-    commit: c34358236fb5650f90ecb961ed1bd9d2f2554b84
+
+  - versionName: 0.2.4
+    versionCode: 602
+    commit: d097aed8287d01c9e4bd6cd66084451333d0d46c
     subdir: app
     gradle:
       - yes
     gradleprops:
       - argusAbi=arm64-v8a
-  - versionName: 0.2.3
-    versionCode: 503
-    commit: c34358236fb5650f90ecb961ed1bd9d2f2554b84
+
+  - versionName: 0.2.4
+    versionCode: 603
+    commit: d097aed8287d01c9e4bd6cd66084451333d0d46c
     subdir: app
     gradle:
       - yes
     gradleprops:
       - argusAbi=x86
-  - versionName: 0.2.3
-    versionCode: 504
-    commit: c34358236fb5650f90ecb961ed1bd9d2f2554b84
+
+  - versionName: 0.2.4
+    versionCode: 604
+    commit: d097aed8287d01c9e4bd6cd66084451333d0d46c
     subdir: app
     gradle:
       - yes
@@ -61,5 +62,5 @@ VercodeOperation:
   - 100 * %c + 2
   - 100 * %c + 3
   - 100 * %c + 4
-CurrentVersion: 0.2.3
-CurrentVersionCode: 504
+CurrentVersion: 0.2.4
+CurrentVersionCode: 604
