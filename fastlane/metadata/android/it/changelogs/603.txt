@@ -1,0 +1,1 @@
+0.2.4 — ABI split (F-Droid): un APK per architettura (armeabi-v7a, arm64-v8a, x86, x86_64) invece di uno universale. Rimosso anche il baseline profile ART non riproducibile dalla release. Nessuna modifica funzionale rispetto alla 0.2.2.

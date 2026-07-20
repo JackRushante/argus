@@ -1,1 +1,0 @@
-0.2.3 — ABI split (F-Droid): un APK per architettura (armeabi-v7a, arm64-v8a, x86, x86_64) invece di uno universale, così ogni dispositivo scarica solo il proprio codice nativo. Nessuna modifica funzionale rispetto alla 0.2.2.

@@ -22,8 +22,8 @@ android {
         applicationId = "dev.argus"
         minSdk = 30
         targetSdk = 36
-        versionCode = 5
-        versionName = "0.2.3"
+        versionCode = 6
+        versionName = "0.2.4"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
@@ -104,6 +104,21 @@ androidComponents {
             val base = output.versionCode.get() ?: 0
             output.versionCode.set(base * 100 + abiVersionCodes.getValue(abi))
         }
+    }
+}
+
+// Riproducibilita F-Droid: la ricompilazione pulita del buildserver F-Droid produceva un
+// assets/dexopt/baseline.prof diverso dal nostro, e D8 usa il profilo di startup per ordinare
+// classes2.dex (che divergeva a cascata; classes.dex, profile-independent, gia combaciava).
+// Il baseline profile compilato dai profili delle librerie AndroidX non e byte-stabile tra host
+// di build diversi. Disabilitiamo i task ART/startup profile per la release: nessun baseline.prof
+// impacchettato e layout dex in ordine sorgente -> deterministico tra host. (Perde solo
+// l'ottimizzazione di avvio guidata dal profilo, accettabile per la distribuzione F-Droid.)
+tasks.configureEach {
+    if (name == "compileReleaseArtProfile" ||
+        name == "mergeReleaseArtProfile" ||
+        name == "mergeReleaseStartupProfile") {
+        enabled = false
     }
 }
 
