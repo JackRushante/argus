@@ -419,6 +419,38 @@ class AnthropicMessagesTransportTest {
         assertEquals("empty_response", result.metaError)
     }
 
+    // --- P4-D2 slice 1: actResolved — dato runtime TAINTED in un messaggio DATA separato, MAI nel
+    //     campo top-level `system` (che porta solo il marker opaco {{ARGUS_RUNTIME_DATA_n}}) ---
+
+    @Test fun `actResolved keeps the runtime value out of the top-level system and in a data message`(): Unit = runBlocking {
+        server.enqueue(jsonResponse(
+            """
+            {"id":"msg_r","type":"message","role":"assistant","model":"claude-opus-4-8",
+             "content":[{"type":"tool_use","id":"toolu_1","name":"whatsapp_reply","input":{"text":"Fatto."}}],
+             "stop_reason":"tool_use","usage":{"input_tokens":40,"output_tokens":5}}
+            """.trimIndent(),
+        ))
+        val t = transport(model = "claude-opus-4-8")
+        val resolved = RuntimeDataTestFixture.resolved()
+
+        val result = t.actResolved(
+            fireContext(), resolved.goal, listOf("notification"), listOf("whatsapp_reply"), resolved.runtimeData,
+        )
+
+        assertEquals("Fatto.", result.text)
+        val root = Json.parseToJsonElement(
+            assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
+        ).jsonObject
+        val system = root.getValue("system").jsonPrimitive.content
+        val userConcat = root.getValue("messages").jsonArray
+            .filter { it.jsonObject.getValue("role").jsonPrimitive.content == "user" }
+            .joinToString("\n") { it.jsonObject.getValue("content").jsonPrimitive.content }
+        assertFalse(RuntimeDataTestFixture.SENTINEL in system, "il valore runtime non deve entrare nel system Anthropic")
+        assertTrue("{{ARGUS_RUNTIME_DATA_1}}" in system, "il system deve portare solo il marker opaco")
+        assertTrue(RuntimeDataTestFixture.SENTINEL in userConcat, "il valore runtime deve entrare nel messaggio DATA")
+        assertTrue("ARGUS_RUNTIME_DATA_1 = ${RuntimeDataTestFixture.SENTINEL}" in userConcat)
+    }
+
     private fun textContent(text: String): String =
         """
         {"id":"msg_c","type":"message","role":"assistant","model":"claude-opus-4-8",

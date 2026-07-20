@@ -9,6 +9,7 @@ import dev.argus.engine.model.StateQueryPolicy
 import dev.argus.engine.model.StateValueCoercion
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireContext
+import dev.argus.engine.runtime.RuntimeDataBinding
 import dev.argus.engine.runtime.TriggerEvent
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.addJsonObject
@@ -225,6 +226,27 @@ internal object AgentMessageSupport {
         } else {
             append("Device state:")
             stateLines.forEach { append("\n- ").append(it) }
+        }
+    }
+
+    const val RUNTIME_DATA_HEADER = "===== UNTRUSTED RUNTIME DATA ====="
+    const val RUNTIME_DATA_FOOTER = "===== END RUNTIME DATA ====="
+
+    /**
+     * Messaggio DATA separato e delimitato (contratto anti-injection P4-D2): trasporta al modello il
+     * dato runtime TAINTED, una riga `token = value` per binding. Il valore RAW compare SOLO qui e MAI
+     * nel system, che porta unicamente i marker opachi `{{token}}`. Ritorna null quando non c'è dato:
+     * i chiamanti legacy (act/actV2, lista vuota) restano byte-identici e non aggiungono alcun
+     * messaggio. Nessuna sanitizzazione del valore: la delimitazione è ciò che lo isola come dato.
+     */
+    fun actRuntimeDataText(runtimeData: List<RuntimeDataBinding>): String? {
+        if (runtimeData.isEmpty()) return null
+        return buildString {
+            append(RUNTIME_DATA_HEADER)
+            runtimeData.forEach { binding ->
+                append('\n').append(binding.token).append(" = ").append(binding.value.text)
+            }
+            append('\n').append(RUNTIME_DATA_FOOTER)
         }
     }
 

@@ -7,6 +7,7 @@ import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.model.Action
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireContext
+import dev.argus.engine.runtime.RuntimeDataBinding
 
 /**
  * [Brain] su un [AgentTransport] qualunque (ex `HermesBrain`, mappatura errori invariata):
@@ -42,6 +43,18 @@ class TransportBackedBrain(
 
     override suspend fun actV2(context: FireContext, action: Action.InvokeLlmV2): ActResult = try {
         transport.actV2(context, action)
+    } catch (e: TransportException) {
+        ActResult(text = null, metaError = e.toMetaError())
+    }
+
+    override suspend fun actResolved(
+        context: FireContext,
+        goal: String,
+        contextSources: List<String>,
+        allowedTools: List<String>,
+        runtimeData: List<RuntimeDataBinding>,
+    ): ActResult = try {
+        transport.actResolved(context, goal, contextSources, allowedTools, runtimeData)
     } catch (e: TransportException) {
         ActResult(text = null, metaError = e.toMetaError())
     }
