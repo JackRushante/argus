@@ -575,9 +575,11 @@ class CliBridgeTransport internal constructor(
             COMPILE_SCHEMA_VERSION !in health.compileSchemaVersions ||
             ACT_SCHEMA_VERSION !in health.actSchemaVersions ||
             ACT_V2_SCHEMA_VERSION !in health.actSchemaVersions ||
-            // P4-D2 slice 2: il canale RISOLTO anti-injection dev'essere annunciato dal bridge, come
-            // act/act_v2. Contenimento (#41): un bridge che lo AGGIUNGE resta compatibile.
-            ACT_RESOLVED_SCHEMA_VERSION !in health.actSchemaVersions ||
+            // P4-D2: il canale RISOLTO (schema 3, actResolved) NON e' un requisito di health. Un bridge
+            // che annuncia solo [1,2] resta pienamente utilizzabile (compile P4 + act v1/v2); solo la
+            // CAPTURE generativa P4 usa il canale risolto, e quel singolo path fallisce-chiuso per-call
+            // se il bridge non lo supporta. Renderlo obbligatorio qui buttava offline OGNI bridge
+            // esistente (nessuno annuncia ancora 3), violando l'ordine di deploy app-prima-bridge.
             !SOURCE_SHA256.matches(health.sourceSha256)) {
             throw BridgeException(BridgeErrorKind.PROTOCOL, "health incompatibile")
         }
