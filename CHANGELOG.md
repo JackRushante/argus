@@ -2,6 +2,14 @@
 
 Patch notes for every commit, newest first. Generated from the project's git history.
 
+## `v0.2.3` — F-Droid ABI split (2026-07-20)
+
+Requested by F-Droid maintainer linsui on the packaging MR (fdroiddata!43234): the release now
+ships one APK per ABI (armeabi-v7a, arm64-v8a, x86, x86_64) instead of a single universal APK, so
+each device downloads only its own native code (the transitive `libandroidx.graphics.path.so`).
+Per-ABI versionCodes follow F-Droid's `100 * %c + n` scheme (501/502/503/504). No functional or
+behavioural change versus 0.2.2 — build packaging only.
+
 ## Unreleased — privacy hardening (2026-07-18)
 
 - Public builds no longer embed the maintainer's private Hermes/Tailscale endpoint in production

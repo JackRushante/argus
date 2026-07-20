@@ -22,8 +22,8 @@ android {
         applicationId = "dev.argus"
         minSdk = 30
         targetSdk = 36
-        versionCode = 4
-        versionName = "0.2.2"
+        versionCode = 5
+        versionName = "0.2.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
@@ -65,6 +65,46 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
+    // ABI split (richiesta maintainer linsui, MR fdroiddata!43234): l'APK universale imbarcava
+    // libandroidx.graphics.path.so per tutte e 4 le ABI. Produciamo un APK per ABI, niente
+    // universale, così ogni device scarica solo la propria architettura. Il versionCode per-output
+    // e assegnato sotto (androidComponents) e deve combaciare con VercodeOperation nella recipe.
+    // F-Droid compila ogni ABI come build block separato e passa -PargusAbi=<abi>: in quel caso
+    // gradle emette solo quello split (build byte-identico allo split corrispondente della release).
+    // Senza la property una build locale emette tutti e quattro gli APK.
+    val argusAbi = (project.findProperty("argusAbi") as String?)?.takeIf { it.isNotBlank() }
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            if (argusAbi != null) {
+                include(argusAbi)
+            } else {
+                include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+            }
+            isUniversalApk = false
+        }
+    }
+}
+
+// versionCode distinto e monotono per ABI, come da guida F-Droid (VercodeOperation 100*%c+n):
+// armeabi-v7a=+1 < arm64-v8a=+2 < x86=+3 < x86_64=+4. Deve restare allineato alla recipe fdroiddata.
+androidComponents {
+    onVariants { variant ->
+        val abiVersionCodes = mapOf(
+            "armeabi-v7a" to 1,
+            "arm64-v8a" to 2,
+            "x86" to 3,
+            "x86_64" to 4,
+        )
+        variant.outputs.forEach { output ->
+            val abi = output.filters
+                .find { it.filterType == com.android.build.api.variant.FilterConfiguration.FilterType.ABI }
+                ?.identifier ?: return@forEach
+            val base = output.versionCode.get() ?: 0
+            output.versionCode.set(base * 100 + abiVersionCodes.getValue(abi))
+        }
+    }
 }
 
 dependencies {

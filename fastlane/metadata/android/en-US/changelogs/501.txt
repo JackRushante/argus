@@ -1,0 +1,1 @@
+0.2.3 — ABI split (F-Droid): one APK per architecture (armeabi-v7a, arm64-v8a, x86, x86_64) instead of a universal one, so each device downloads only its own native code. No functional changes since 0.2.2.
