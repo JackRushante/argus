@@ -501,6 +501,57 @@ class BridgeTest(unittest.TestCase):
         tools = {"run_shell", "show_notification", "set_flashlight"}
         self.assertTrue(bridge.validate_draft(draft, tools, set(), set()))
 
+    def test_p4_control_flow_is_structural_and_accepted_when_listed_in_available_tools(self):
+        # BUG device-found: l'app ora pubblica if/while/wait dentro available_tools (sono STRUTTURALI,
+        # non gated dal SO). Il bridge NON deve iniziare a rifiutare né il manifest né il draft per
+        # questo: il control-flow è valido a prescindere dalla capability-list.
+        self.assertEqual(bridge.CONTROL_FLOW_TYPES, frozenset({"if", "while", "wait"}))
+
+        # 1) Un manifest che elenca il control-flow in available_tools passa la validazione.
+        req = self.request_v2()
+        req["manifest"]["available_tools"] = ["set_flashlight", "wait", "if", "while"]
+        self.assertIs(req, bridge.validate_request(req, req["request_id"]))
+
+        # available_tools passati al validatore del draft, control-flow incluso.
+        tools = set(req["manifest"]["available_tools"])
+
+        # 2) Un draft con un `wait` di TOP-LEVEL valida (pausa 500ms del bug reale).
+        wait_draft = {
+            "name": "torcia con pausa",
+            "trigger": self.P4_TIME_TRIGGER,
+            "actions": [
+                {"type": "set_flashlight", "on": True},
+                {"type": "wait", "durationMs": 500},
+                {"type": "set_flashlight", "on": False},
+            ],
+        }
+        self.assertTrue(bridge.validate_draft(wait_draft, tools, set(), set()))
+        # Il wait è STRUTTURALE: valida anche se available_tools NON lo elenca.
+        self.assertTrue(bridge.validate_draft(wait_draft, {"set_flashlight"}, set(), set()))
+
+        # 3) Un draft con if/while (con foglia in available_tools) valida.
+        flow_draft = {
+            "name": "flusso strutturale",
+            "trigger": self.P4_TIME_TRIGGER,
+            "actions": [
+                {
+                    "type": "if",
+                    "condition": {"type": "boolean_literal", "value": True},
+                    "then": [{"type": "wait", "durationMs": 250}],
+                    "orElse": [{"type": "set_flashlight", "on": True}],
+                },
+                {
+                    "type": "while",
+                    "condition": {"type": "boolean_literal", "value": True},
+                    "body": [{"type": "wait", "durationMs": 100}],
+                    "maxIterations": 3,
+                    "delayBetweenMs": 50,
+                },
+            ],
+        }
+        self.assertTrue(bridge.validate_draft(flow_draft, tools, set(), set()))
+        self.assertTrue(bridge.validate_draft(flow_draft, {"set_flashlight"}, set(), set()))
+
     def _nested_shell_draft(self, trigger):
         return {
             "name": "shell annidata",

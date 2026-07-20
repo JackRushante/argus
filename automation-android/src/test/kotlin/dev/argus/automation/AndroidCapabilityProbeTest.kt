@@ -418,6 +418,49 @@ class AndroidCapabilityProbeTest {
     }
 
     @Test
+    fun `structural control flow tools are always published regardless of device state`() = runTest {
+        // wait/if/while sono contenitori STRUTTURALI del programma P4: non dipendono da Shizuku,
+        // permessi o hardware. Devono comparire in available_tools in OGNI stato, altrimenti il
+        // compilatore (che usa solo manifest.available_tools) crede che `wait` non esista e rifiuta
+        // una pausa con unsupported_capability (bug device-found).
+        val bareState = state().copy(
+            shizukuStatus = ShizukuGatewayStatus.NOT_INSTALLED,
+            shizukuPermissionGranted = false,
+            notificationsGranted = false,
+            notificationListenerGranted = false,
+            foregroundLocationGranted = false,
+            backgroundLocationGranted = false,
+            batteryOptimizationExempt = false,
+            dndPolicyGranted = false,
+        )
+        val structural = listOf(ActionTypeIds.WAIT, ActionTypeIds.IF, ActionTypeIds.WHILE)
+
+        // Nessun grant, nessuno Shizuku, tier base spento: comunque tutti presenti.
+        val bareManifest = probe(bareState).probe(DeviceState())
+        structural.forEach { type ->
+            assertTrue(type in bareManifest.availableTools, "atteso $type sempre in available_tools")
+            assertFalse(type in bareManifest.unavailableTools, "$type strutturale non può essere indisponibile")
+        }
+
+        // Shizuku revocato: le azioni privilegiate cadono, il control-flow resta.
+        val revokedManifest = probe(
+            state().copy(
+                shizukuStatus = ShizukuGatewayStatus.RUNNING_NOT_AUTHORIZED,
+                shizukuPermissionGranted = false,
+            ),
+        ).probe(DeviceState())
+        structural.forEach { type ->
+            assertTrue(type in revokedManifest.availableTools, "atteso $type con Shizuku revocato")
+        }
+
+        // Dispositivo pienamente autorizzato: restano presenti (nessuna regressione).
+        val authorizedManifest = probe(state()).probe(DeviceState())
+        structural.forEach { type ->
+            assertTrue(type in authorizedManifest.availableTools, "atteso $type su device autorizzato")
+        }
+    }
+
+    @Test
     fun `sensor is advertised only when hardware grant and a real backend all agree`() = runTest {
         val significant = AndroidSensorCapability(
             kind = SensorKind.SIGNIFICANT_MOTION,

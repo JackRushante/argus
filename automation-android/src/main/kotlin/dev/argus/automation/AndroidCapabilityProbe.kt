@@ -284,6 +284,13 @@ class AndroidCapabilityProbe internal constructor(
         val transient = if (shizukuTransient) SHIZUKU_CAPABILITIES + SHIZUKU_TOOLS else emptySet()
 
         val availableTools = buildList {
+            // Control-flow P4 (wait/if/while): contenitori STRUTTURALI del programma, non azioni gated
+            // dal SO. Vanno pubblicati SEMPRE (nessuna dipendenza da Shizuku/permessi/hardware): il
+            // compilatore usa solo manifest.available_tools, quindi senza questi crederebbe che `wait`
+            // non esista e rifiuterebbe una pausa con unsupported_capability (bug device-found).
+            add(ActionTypeIds.WAIT)
+            add(ActionTypeIds.IF)
+            add(ActionTypeIds.WHILE)
             add(ActionTypeIds.COPY_TO_CLIPBOARD)
             addAll(BASE_ALARM_ACTION_TYPES)
             addAll(BASE_MANAGER_ACTION_TYPES)
