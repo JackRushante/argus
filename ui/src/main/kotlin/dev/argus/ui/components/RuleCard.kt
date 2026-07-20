@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import dev.argus.ui.R
 import dev.argus.ui.model.ActionRow
 import dev.argus.ui.model.RuleRender
+import dev.argus.ui.model.VarRow
 import dev.argus.ui.model.iconFor
 import dev.argus.ui.theme.ArgusTheme
 import dev.argus.ui.theme.LocalArgusSemantic
@@ -240,11 +241,38 @@ private fun ExtendedRuleCard(rule: RuleRender, modifier: Modifier, showGenerativ
                 }
             }
         }
+        if (rule.vars.isNotEmpty()) {
+            RuleSection(stringResource(R.string.rule_section_variables)) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    rule.vars.forEach { VarRowItem(it) }
+                }
+            }
+        }
         RuleSection(stringResource(R.string.rule_section_then)) {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 rule.actions.forEach { ActionRowItem(it) }
             }
         }
+    }
+}
+
+/**
+ * Riga variabile P4 (§5.1): nome + una riga di metadati resi dai tipi
+ * (tipo · provenienza · integrità · riservatezza). Nessun valore runtime.
+ */
+@Composable
+private fun VarRowItem(v: VarRow) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            v.name,
+            color = MaterialTheme.colorScheme.onSurface,
+            style = MaterialTheme.typography.bodyLarge,
+        )
+        Text(
+            "${v.typeLabel} · ${v.provenanceLabel} · ${v.integrityLabel} · ${v.confidentialityLabel}",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodyMedium,
+        )
     }
 }
 

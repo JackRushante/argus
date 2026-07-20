@@ -61,6 +61,7 @@
     <string name="rule_section_when">QUANDO</string>
     <string name="rule_section_only_if">SOLO SE</string>
     <string name="rule_section_then">ALLORA</string>
+    <string name="rule_section_variables">VARIABILI</string>
 
     <!-- Chat -->
     <string name="chat_subtitle">chat · compilatore di regole</string>

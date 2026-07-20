@@ -1,10 +1,40 @@
 package dev.argus.ui.presentation
 import dev.argus.engine.model.*
 import dev.argus.ui.model.RuleRender
+import dev.argus.ui.model.VarRow
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 class RuleRenderMapperTest {
+    // --- P4-E: le variabili approvate sono visibili in review (mai i valori runtime) ---
+    private fun otpRule() = Automation(
+        AutomationId("v1"), "OTP", CreatedBy.LLM, AutomationStatus.PENDING_APPROVAL,
+        Trigger.Notification("com.whatsapp", conversationId = "jid:1", sender = "Bank", isGroup = false),
+        listOf(Action.CopyToClipboard()),
+        vars = listOf(
+            VarBinding.TriggerPayload("otp", TriggerField.TEXT, confidentiality = ConfidentialityLabel.SECRET),
+            VarBinding.Literal("soglia", "10", VarType.NUMBER, ConfidentialityLabel.PUBLIC),
+        ),
+    )
+    @Test fun `P4 vars render with type, integrity, confidentiality and provenance (IT)`() {
+        val r = RuleRenderMapper.map(otpRule(), language = RenderLanguage.IT)
+        assertEquals(2, r.vars.size)
+        assertEquals(VarRow("otp", "testo", "esterno", "segreto", "notifica"), r.vars[0])
+        assertEquals(VarRow("soglia", "numero", "attendibile", "pubblico", "valore fisso"), r.vars[1])
+    }
+    @Test fun `P4 vars render english labels by default`() {
+        val r = RuleRenderMapper.map(otpRule(), language = RenderLanguage.EN)
+        assertEquals(VarRow("otp", "text", "external", "secret", "notification"), r.vars[0])
+        assertEquals(VarRow("soglia", "number", "trusted", "public", "fixed value"), r.vars[1])
+    }
+    @Test fun `flat v1 rule renders no vars`() {
+        val a = Automation(
+            AutomationId("f1"), "flat", CreatedBy.LLM, AutomationStatus.ARMED,
+            Trigger.Time(cron = "0 9 * * *", tz = "Europe/Rome"),
+            listOf(Action.SetDnd(DndMode.PRIORITY)),
+        )
+        assertTrue(RuleRenderMapper.map(a, language = RenderLanguage.IT).vars.isEmpty())
+    }
     // I test pinnano il rendering ITALIANO passando SEMPRE `RenderLanguage.IT` esplicito: senza,
     // passerebbero solo perché la macchina ha locale it-IT (dipendenza nascosta dal locale). I casi
     // EN espliciti in fondo verificano il default inglese sulle render principali.

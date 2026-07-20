@@ -17,8 +17,17 @@ import dev.argus.engine.model.StateQuery
 import dev.argus.engine.model.StateValueType
 import dev.argus.engine.model.Transition
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.VarBinding
+import dev.argus.engine.model.VarType
+import dev.argus.engine.model.IntegrityLabel
+import dev.argus.engine.model.ConfidentialityLabel
+import dev.argus.engine.model.ValueProvenance
+import dev.argus.engine.model.integrity
+import dev.argus.engine.model.declaredType
+import dev.argus.engine.model.provenance
 import dev.argus.ui.model.ActionRow
 import dev.argus.ui.model.RuleRender
+import dev.argus.ui.model.VarRow
 
 /**
  * DETERMINISTIC rendering of an automation into [RuleRender] — direttiva sicurezza §5.1.
@@ -58,18 +67,19 @@ object RuleRenderMapper {
         a: Automation,
         conversationLabels: Map<String, String> = emptyMap(),
         language: RenderLanguage = RenderLanguage.system(),
-    ): RuleRender = render(a.trigger, a.actions, a.conditions, conversationLabels, language)
+    ): RuleRender = render(a.trigger, a.actions, a.conditions, a.vars, conversationLabels, language)
 
     fun mapDraft(
         d: AutomationDraft,
         conversationLabels: Map<String, String> = emptyMap(),
         language: RenderLanguage = RenderLanguage.system(),
-    ): RuleRender = render(d.trigger, d.actions, d.conditions, conversationLabels, language)
+    ): RuleRender = render(d.trigger, d.actions, d.conditions, d.vars, conversationLabels, language)
 
     private fun render(
         trigger: Trigger,
         actions: List<Action>,
         conditions: Condition?,
+        vars: List<VarBinding>,
         conversationLabels: Map<String, String>,
         l: RenderLanguage,
     ): RuleRender {
@@ -85,7 +95,48 @@ object RuleRenderMapper {
                 isGenerative -> privacyNote(l)
                 else -> null
             },
+            vars = vars.map { varRow(it, trigger, l) },
         )
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Variabili P4 — resa della DEFINIZIONE (mai valori runtime): tipo, integrità, riservatezza,
+    // provenienza. L'integrità "external" segnala i dati non fidati (payload del trigger).
+    // ---------------------------------------------------------------------------------------------
+
+    private fun varRow(v: VarBinding, trigger: Trigger, l: RenderLanguage): VarRow = VarRow(
+        name = v.name,
+        typeLabel = varTypeLabel(v.declaredType, l),
+        integrityLabel = integrityLabel(v.integrity, l),
+        confidentialityLabel = confidentialityLabel(v.confidentiality, l),
+        provenanceLabel = v.provenance(trigger).joinToString(", ") { provenanceLabel(it, l) },
+    )
+
+    private fun varTypeLabel(t: VarType, l: RenderLanguage): String = when (t) {
+        VarType.TEXT -> l.pick("text", "testo")
+        VarType.NUMBER -> l.pick("number", "numero")
+        VarType.BOOLEAN -> l.pick("boolean", "booleano")
+    }
+
+    private fun integrityLabel(i: IntegrityLabel, l: RenderLanguage): String = when (i) {
+        IntegrityLabel.CLEAN -> l.pick("trusted", "attendibile")
+        IntegrityLabel.TAINTED -> l.pick("external", "esterno")
+    }
+
+    private fun confidentialityLabel(c: ConfidentialityLabel, l: RenderLanguage): String = when (c) {
+        ConfidentialityLabel.PUBLIC -> l.pick("public", "pubblico")
+        ConfidentialityLabel.PRIVATE -> l.pick("private", "privato")
+        ConfidentialityLabel.SECRET -> l.pick("secret", "segreto")
+    }
+
+    private fun provenanceLabel(p: ValueProvenance, l: RenderLanguage): String = when (p) {
+        ValueProvenance.LITERAL -> l.pick("fixed value", "valore fisso")
+        ValueProvenance.DEVICE_STATE -> l.pick("device state", "stato dispositivo")
+        ValueProvenance.NOTIFICATION -> l.pick("notification", "notifica")
+        ValueProvenance.SMS -> "SMS"
+        ValueProvenance.PHONE -> l.pick("call", "chiamata")
+        ValueProvenance.MODEL -> l.pick("AI output", "output AI")
+        ValueProvenance.SHELL -> l.pick("shell output", "output shell")
     }
 
     // ---------------------------------------------------------------------------------------------

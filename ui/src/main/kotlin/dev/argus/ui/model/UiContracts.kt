@@ -21,6 +21,20 @@ data class RuleRender(
     val actions: List<ActionRow>,
     val isGenerative: Boolean,
     val privacyNote: String?,         // valorizzato se generativa: disclosure del servizio AI configurato
+    val vars: List<VarRow> = emptyList(), // P4: variabili approvate (vuoto per le regole v1 flat)
+)
+
+/**
+ * Una variabile del programma approvato (P4), resa per la review. I valori RUNTIME non compaiono
+ * MAI qui: si mostra solo la DEFINIZIONE (nome, tipo, integrità, riservatezza, provenienza) così
+ * l'utente vede da dove arriva ogni dato — e se è esterno/non fidato — prima di armare.
+ */
+data class VarRow(
+    val name: String,                 // "otp"
+    val typeLabel: String,            // "text" | "number" | "boolean"
+    val integrityLabel: String,       // "trusted" | "external" (CLEAN/TAINTED)
+    val confidentialityLabel: String, // "public" | "private" | "secret"
+    val provenanceLabel: String,      // "SMS" | "fixed value" | "device state" | ...
 )
 
 data class ActionRow(
