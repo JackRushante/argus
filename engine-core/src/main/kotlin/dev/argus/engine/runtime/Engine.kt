@@ -261,15 +261,15 @@ class Engine(
                             )
                             val p4Executor = resolvedExecutor
                             when {
+                                // Cablato in P4-D2: il ResolvedActionExecutor Android frama i
+                                // RuntimeDataBinding fuori dal prompt e restituisce testo concreto per
+                                // le capture. Le barriere fail-closed p4_runtime_data_unavailable e
+                                // p4_generative_unavailable sono state rimosse insieme al wiring.
                                 p4Executor != null -> p4Executor.execute(resolved, context)
-                                resolved.runtimeData.isNotEmpty() -> ProgramActionResult(
-                                    ActionResult.Failure("p4_runtime_data_unavailable"),
-                                )
+                                // Senza executor risolto una capture NON è realizzabile (il boundary
+                                // flat sa solo SUBMITTED): resta fail-closed, mai un capture_missing.
                                 resolved.action.captureNameOrNull() != null -> ProgramActionResult(
                                     ActionResult.Failure("p4_capture_unavailable"),
-                                )
-                                resolved.action.tier == ActionTier.GENERATIVE -> ProgramActionResult(
-                                    ActionResult.Failure("p4_generative_unavailable"),
                                 )
                                 else -> ProgramActionResult(executor.execute(resolved.action, context))
                             }

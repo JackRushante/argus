@@ -166,20 +166,64 @@ class EngineTest {
     }
 
     @Test
-    fun `P4 generative leaf stays fail closed without the resolved Android executor`() = runTest {
-        val generative = Action.InvokeLlm(
-            goal = "approved goal",
+    fun `P4 generative capture flows through the resolved executor and captures concrete text`() = runTest {
+        // P4-D2 slice 2: la barriera p4_generative_unavailable è stata rimossa insieme al wiring. Con
+        // il ResolvedActionExecutor la foglia CAPTURE riceve testo concreto (Success + capturedText):
+        // l'interprete cattura e journala SUCCEEDED, mai capture_missing.
+        val capture = Action.InvokeLlm(
+            goal = "riassumi",
             contextSources = emptyList(),
             allowedTools = emptyList(),
             replyTargetSender = false,
-            deliver = GenerativeDeliverMode.LOCAL_NOTIFICATION,
-            notificationTitle = "Argus",
+            captureAs = "summary",
         )
         val automation = armed(
-            id = "p4-generative",
+            id = "p4-capture",
             t = Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
             acts = listOf(
-                Action.If(Condition.BooleanLiteral(true), then = listOf(generative)),
+                Action.If(Condition.BooleanLiteral(true), then = listOf(capture)),
+            ),
+        )
+        val flatExecutor = FakeActionExecutor()
+        val journal = FakeExecutionJournal()
+        val seen = mutableListOf<ResolvedProgramAction>()
+        val resolvedExecutor = ResolvedActionExecutor { action, _ ->
+            seen += action
+            ProgramActionResult(ActionResult.Success, capturedText = "riassunto")
+        }
+
+        val result = engine(
+            FakeAutomationStore(listOf(automation)),
+            flatExecutor,
+            "2026-07-18T10:00:00Z",
+            journal = journal,
+            resolvedExecutor = resolvedExecutor,
+        ).onTrigger(envelope("alarm:p4-capture", timeEvent(automation))) { DeviceState() }
+            .single()
+
+        assertTrue(flatExecutor.executed.isEmpty(), "il boundary flat non deve vedere la foglia generativa")
+        assertEquals(1, seen.size)
+        assertEquals(ActionResult.Success, result.results.single())
+        assertEquals(ActionJournalOutcome.SUCCEEDED, journal.actions.single().outcome)
+        assertEquals(ExecutionStatus.SUCCEEDED, journal.completions.single().status)
+    }
+
+    @Test
+    fun `P4 capture without a resolved executor stays capture fail closed`() = runTest {
+        // La barriera p4_capture_unavailable RESTA: senza executor risolto il boundary flat sa solo
+        // SUBMITTED, quindi una capture non è realizzabile — mai un capture_missing degradato.
+        val capture = Action.InvokeLlm(
+            goal = "riassumi",
+            contextSources = emptyList(),
+            allowedTools = emptyList(),
+            replyTargetSender = false,
+            captureAs = "summary",
+        )
+        val automation = armed(
+            id = "p4-capture-closed",
+            t = Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+            acts = listOf(
+                Action.If(Condition.BooleanLiteral(true), then = listOf(capture)),
             ),
         )
         val flatExecutor = FakeActionExecutor()
@@ -190,15 +234,15 @@ class EngineTest {
             flatExecutor,
             "2026-07-18T10:00:00Z",
             journal = journal,
-        ).onTrigger(envelope("alarm:p4-generative", timeEvent(automation))) { DeviceState() }
+        ).onTrigger(envelope("alarm:p4-capture-closed", timeEvent(automation))) { DeviceState() }
             .single()
 
         assertTrue(flatExecutor.executed.isEmpty())
         assertEquals(
-            "p4_generative_unavailable",
+            "p4_capture_unavailable",
             (result.results.single() as ActionResult.Failure).reason,
         )
-        assertEquals("p4_generative_unavailable", journal.actions.single().errorCode)
+        assertEquals("p4_capture_unavailable", journal.actions.single().errorCode)
         assertEquals(ExecutionStatus.FAILED, journal.completions.single().status)
     }
 

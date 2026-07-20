@@ -24,6 +24,7 @@ import dev.argus.engine.runtime.AuditSink
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.ExecutionId
 import dev.argus.engine.runtime.FireContext
+import dev.argus.engine.runtime.RuntimeDataBinding
 import dev.argus.engine.runtime.TriggerEvent
 import dev.argus.engine.runtime.TriggerEventId
 import kotlinx.coroutines.CancellationException
@@ -175,6 +176,49 @@ class MeteredBrainTest {
         assertEquals(TriggerEventId("event-1"), record.eventId)
         assertEquals(ExecutionId("execution-1"), record.executionId)
         assertEquals("hour:global", record.detail)
+    }
+
+    @Test
+    fun `actResolved ok chiama il delegate e registra un evento act`() = runTest {
+        val usage = TurnUsage(inputTokens = 1_000_000, outputTokens = 100_000, model = "gpt-5.5")
+        val delegate = FakeBrain(actResult = { ActResult("risposta", null, usage) })
+        val dao = RecordingUsageDao()
+        val brain = metered(delegate, FakePolicy(), dao, config = openai)
+
+        val result = brain.actResolved(
+            context(), "riassumi", emptyList(), listOf("whatsapp_reply"), emptyList(),
+        )
+
+        assertEquals("risposta", result.text)
+        assertEquals(1, delegate.calls)
+        val event = dao.events.single()
+        assertEquals(UsageEventKind.ACT, event.kind)
+        assertEquals(UsageEventOutcome.OK, event.outcome)
+    }
+
+    @Test
+    fun `hard su actResolved non chiama il delegate e ritorna budget_exceeded`() = runTest {
+        // La capture generativa RISOLTA passa dallo stesso choke-point: un HARD la sopprime come un act.
+        val delegate = FakeBrain()
+        val dao = RecordingUsageDao()
+        val audit = RecordingAuditSink()
+        val brain = metered(
+            delegate,
+            FakePolicy(BudgetVerdict.HardExceeded(TrippedLimit(LimitWindow.HOUR, BudgetScope.Global))),
+            dao,
+            config = openai,
+            audit = audit,
+        )
+
+        val result = brain.actResolved(
+            context(), "riassumi", emptyList(), listOf("whatsapp_reply"), emptyList(),
+        )
+
+        assertEquals(0, delegate.calls)
+        assertNull(result.text)
+        assertEquals("budget_exceeded", result.metaError)
+        assertEquals(UsageEventOutcome.BLOCKED_BUDGET, dao.events.single().outcome)
+        assertEquals(AuditKind.SUPPRESSED_BUDGET, audit.records.single().kind)
     }
 
     @Test
@@ -396,6 +440,17 @@ class MeteredBrainTest {
         }
 
         override suspend fun actV2(context: FireContext, action: Action.InvokeLlmV2): ActResult {
+            calls++
+            return actResult()
+        }
+
+        override suspend fun actResolved(
+            context: FireContext,
+            goal: String,
+            contextSources: List<String>,
+            allowedTools: List<String>,
+            runtimeData: List<RuntimeDataBinding>,
+        ): ActResult {
             calls++
             return actResult()
         }

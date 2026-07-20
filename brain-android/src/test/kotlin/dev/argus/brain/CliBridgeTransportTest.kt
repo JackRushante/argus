@@ -138,15 +138,17 @@ class CliBridgeTransportTest {
     }
 
     @Test fun `health uses the same authenticated strict boundary`(): Unit = runBlocking {
+        // P4-D2 slice 2: il bridge deve annunciare anche il canale RISOLTO (act_resolved = 3) accanto
+        // ad act (1) e act_v2 (2), altrimenti è incompatibile.
         server.enqueue(jsonResponse(
-            """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1,2],"act_schema_versions":[1,2],"source_sha256":"${"a".repeat(64)}"}""",
+            """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1,2],"act_schema_versions":[1,2,3],"source_sha256":"${"a".repeat(64)}"}""",
         ))
 
         val health = transport().health()
 
         assertEquals(2, health.schemaVersion)
         assertTrue(2 in health.compileSchemaVersions)
-        assertEquals(listOf(1, 2), health.actSchemaVersions)
+        assertEquals(listOf(1, 2, 3), health.actSchemaVersions)
         assertEquals("gpt-5.5", health.model)
         val request = assertNotNull(server.takeRequest(2, TimeUnit.SECONDS))
         assertEquals("/health/v2", request.path)
@@ -159,6 +161,8 @@ class CliBridgeTransportTest {
             """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1],"act_schema_versions":[1,2],"source_sha256":"${"a".repeat(64)}"}""",
             // act senza la v2 (act_v2) usata dall'app -> incompatibile.
             """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1,2],"act_schema_versions":[1],"source_sha256":"${"a".repeat(64)}"}""",
+            // act senza la v3 (act_resolved, P4-D2 slice 2) -> incompatibile.
+            """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1,2],"act_schema_versions":[1,2],"source_sha256":"${"a".repeat(64)}"}""",
             // sha in formato invalido.
             """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1,2],"act_schema_versions":[1,2],"source_sha256":"not-a-sha"}""",
             // campo sconosciuto -> envelope non valido (decoder strict).

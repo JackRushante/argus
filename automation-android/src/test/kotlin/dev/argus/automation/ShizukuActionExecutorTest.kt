@@ -8,8 +8,10 @@ import dev.argus.automation.notification.NotificationReplyRequest
 import dev.argus.device.DeviceController
 import dev.argus.device.DeviceToolException
 import dev.argus.device.RingerMode
+import dev.argus.engine.brain.ActResult
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.GenerativeAction
+import dev.argus.engine.model.GenerativeDeliverMode
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.DndMode
@@ -22,6 +24,7 @@ import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.ExecutionId
 import dev.argus.engine.runtime.FireContext
 import dev.argus.engine.runtime.ProgramActionResult
+import dev.argus.engine.runtime.RuntimeDataBinding
 import dev.argus.engine.runtime.TaintAwareInterpolator
 import dev.argus.engine.runtime.TriggerEvent
 import dev.argus.engine.runtime.TriggerEventId
@@ -228,6 +231,69 @@ class ShizukuActionExecutorTest {
             executor(staticShell = throwingRunner(CancellationException("stop")))
                 .execute(resolved, trusted)
         }
+    }
+
+    @Test
+    fun `resolved generative capture routes through the lane and returns concrete text`() = runTest {
+        val capture = Action.InvokeLlm(
+            goal = "riassumi",
+            contextSources = listOf("notification"),
+            allowedTools = listOf("whatsapp_reply"),
+            replyTargetSender = true,
+            captureAs = "summary",
+        )
+        val resolved = (
+            TaintAwareInterpolator().resolve(capture, VarScope()) as ActionResolution.Resolved
+            ).value
+        val lane = RecordingLane(ActResult("riassunto concreto", null))
+
+        val result = executor(lane = lane).execute(resolved, context)
+
+        assertEquals(ActionResult.Success, result.result)
+        assertEquals("riassunto concreto", result.capturedText)
+        assertEquals(capture, lane.awaited.single().first)
+        assertTrue(lane.submitted.isEmpty(), "la capture NON deve usare il canale async trySubmit")
+    }
+
+    @Test
+    fun `resolved generative capture maps a metaError to a failure without capture`() = runTest {
+        val capture = Action.InvokeLlm(
+            goal = "riassumi",
+            contextSources = listOf("notification"),
+            allowedTools = listOf("whatsapp_reply"),
+            replyTargetSender = true,
+            captureAs = "summary",
+        )
+        val resolved = (
+            TaintAwareInterpolator().resolve(capture, VarScope()) as ActionResolution.Resolved
+            ).value
+        val lane = RecordingLane(ActResult(null, "budget_exceeded"))
+
+        val result = executor(lane = lane).execute(resolved, context)
+
+        assertEquals(ActionResult.Failure("budget_exceeded"), result.result)
+        assertEquals(null, result.capturedText)
+    }
+
+    @Test
+    fun `resolved generative delivery sink without capture stays fail closed`() = runTest {
+        val deliver = Action.InvokeLlm(
+            goal = "genera il cambio",
+            contextSources = listOf("state"),
+            allowedTools = emptyList(),
+            replyTargetSender = false,
+            deliver = GenerativeDeliverMode.LOCAL_NOTIFICATION,
+            notificationTitle = "Argus",
+        )
+        val resolved = (
+            TaintAwareInterpolator().resolve(deliver, VarScope()) as ActionResolution.Resolved
+            ).value
+        val lane = RecordingLane(ActResult("non richiesto", null))
+
+        val result = executor(lane = lane).execute(resolved, context)
+
+        assertEquals(ActionResult.Failure("p4_generative_deliver_unavailable"), result.result)
+        assertTrue(lane.awaited.isEmpty())
     }
 
     @Test
@@ -623,6 +689,25 @@ class ShizukuActionExecutorTest {
             exec.execute(Action.SetAlarm(hour = 24, minute = 0), context),
         )
         assertTrue(surface.alarms.isEmpty())
+    }
+
+    private class RecordingLane(private val result: ActResult) : GenerativeLane {
+        val submitted = mutableListOf<Pair<FireContext, GenerativeAction>>()
+        val awaited = mutableListOf<Pair<Action.InvokeLlm, List<RuntimeDataBinding>>>()
+
+        override fun trySubmit(context: FireContext, action: GenerativeAction): Boolean {
+            submitted += context to action
+            return true
+        }
+
+        override suspend fun submitAndAwait(
+            context: FireContext,
+            action: Action.InvokeLlm,
+            runtimeData: List<RuntimeDataBinding>,
+        ): ActResult {
+            awaited += action to runtimeData
+            return result
+        }
     }
 
     private class RecordingReplyGateway(

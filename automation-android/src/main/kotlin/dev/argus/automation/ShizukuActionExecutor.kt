@@ -7,6 +7,7 @@ import dev.argus.automation.notification.NotificationReplyRequest
 import dev.argus.device.DeviceController
 import dev.argus.device.DeviceToolException
 import dev.argus.device.RingerMode
+import dev.argus.engine.brain.ActResult
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.GenerativeAction
 import dev.argus.engine.runtime.ActionExecutor
@@ -15,6 +16,7 @@ import dev.argus.engine.runtime.FireContext
 import dev.argus.engine.runtime.ProgramActionResult
 import dev.argus.engine.runtime.ResolvedActionExecutor
 import dev.argus.engine.runtime.ResolvedProgramAction
+import dev.argus.engine.runtime.RuntimeDataBinding
 import dev.argus.engine.runtime.TriggerEvent
 import dev.argus.engine.safety.StaticShellSafety
 import kotlinx.coroutines.CancellationException
@@ -25,11 +27,24 @@ fun interface AutomationNotifier {
 }
 
 /**
- * La lane deve limitarsi ad accodare. `trySubmit` non è suspend proprio per impedire
- * all'executor deterministico di attendere la chiamata LLM.
+ * La lane accoda il lavoro generativo. `trySubmit` NON è suspend: impedisce all'executor
+ * deterministico (sink v1 reply/notifica) di attendere la chiamata LLM — l'esito viaggia via
+ * SubmittedActionJournal.
+ *
+ * [submitAndAwait] è invece il canale RISOLTO P4-D2 (capture): sospende finché il modello risponde,
+ * passando il dato runtime TAINTED SOLO in [runtimeData] (mai concatenato al goal) verso
+ * `brain.actResolved`. È l'unica via per cui una foglia generativa con `captureAs` ottiene testo
+ * concreto; l'executor NON deve mai chiamare il brain direttamente scavalcando la lane. Default
+ * fail-closed così i fake trySubmit-only del test non devono implementarlo.
  */
 fun interface GenerativeLane {
     fun trySubmit(context: FireContext, action: GenerativeAction): Boolean
+
+    suspend fun submitAndAwait(
+        context: FireContext,
+        action: Action.InvokeLlm,
+        runtimeData: List<RuntimeDataBinding>,
+    ): ActResult = ActResult(text = null, metaError = "generative_lane_unavailable")
 }
 
 class ShizukuActionExecutor(
@@ -65,26 +80,32 @@ class ShizukuActionExecutor(
         action: ResolvedProgramAction,
         context: FireContext,
     ): ProgramActionResult = try {
-        // Il framing LLM dei RuntimeDataBinding arriva in P4-D: fino ad allora nessun valore
-        // separato può essere degradato concatenandolo al goal approvato.
-        if (action.runtimeData.isNotEmpty()) {
-            ProgramActionResult(ActionResult.Failure("p4_runtime_data_unavailable"))
-        } else {
-            when (val leaf = action.action) {
-                is Action.RunShell -> if (leaf.captureAs != null) {
-                    if (!StaticShellSafety.allows(context.event, whitelistedIds())) {
-                        ProgramActionResult(ActionResult.Failure("shell_external_trigger"))
-                    } else {
-                        staticShell.runCaptured(leaf.cmd, context)
-                    }
+        when (val leaf = action.action) {
+            is Action.RunShell -> if (leaf.captureAs != null) {
+                if (!StaticShellSafety.allows(context.event, whitelistedIds())) {
+                    ProgramActionResult(ActionResult.Failure("shell_external_trigger"))
                 } else {
-                    ProgramActionResult(execute(leaf, context))
+                    staticShell.runCaptured(leaf.cmd, context)
                 }
-                is Action.InvokeLlm,
-                is Action.InvokeLlmV2,
-                -> ProgramActionResult(ActionResult.Failure("p4_generative_unavailable"))
-                else -> ProgramActionResult(execute(leaf, context))
+            } else {
+                ProgramActionResult(execute(leaf, context))
             }
+            // Foglia generativa RISOLTA (P4-D2 slice 2): il dato runtime TAINTED viaggia framato in
+            // [ResolvedProgramAction.runtimeData], MAI nel goal. Solo il profilo CAPTURE è cablato: la
+            // lane chiama brain.actResolved e restituisce testo concreto, così l'interprete cattura.
+            is Action.InvokeLlm -> if (leaf.captureAs != null) {
+                captureGenerative(leaf, action.runtimeData, context)
+            } else {
+                // Sink di CONSEGNA (reply/notifica) dentro un programma P4: il canale sincrono di
+                // consegna non è ancora costruito (l'handshake SubmittedActionJournal è flat-only).
+                // Fail-closed tipizzato — mai la vecchia consegna async silenziosamente persa.
+                ProgramActionResult(ActionResult.Failure("p4_generative_deliver_unavailable"))
+            }
+            // v2: nessun canale RISOLTO (actResolved è solo v1). Capture/framing runtime del profilo
+            // v2 restano fail-closed finché il contratto v2 risolto non esiste.
+            is Action.InvokeLlmV2 ->
+                ProgramActionResult(ActionResult.Failure("p4_generative_deliver_unavailable"))
+            else -> ProgramActionResult(execute(leaf, context))
         }
     } catch (error: CancellationException) {
         throw error
@@ -238,6 +259,26 @@ class ShizukuActionExecutor(
         return when (delivery) {
             NotificationReplyDelivery.Sent -> ActionResult.Success
             is NotificationReplyDelivery.Failed -> ActionResult.Failure(delivery.code)
+        }
+    }
+
+    /**
+     * Capture generativa RISOLTA: delega alla lane (single-consumer, budget via MeteredBrain, policy,
+     * revalidazione) che chiama `brain.actResolved` framando il dato TAINTED fuori dal goal. Testo
+     * concreto ⇒ `Success(capturedText)`; qualsiasi metaError (budget_exceeded, approval_changed,
+     * act_timeout, …) ⇒ `Failure`, MAI un SUBMITTED-only che l'interprete degraderebbe a capture_missing.
+     */
+    private suspend fun captureGenerative(
+        action: Action.InvokeLlm,
+        runtimeData: List<RuntimeDataBinding>,
+        context: FireContext,
+    ): ProgramActionResult {
+        val result = generativeLane.submitAndAwait(context, action, runtimeData)
+        val text = result.text
+        return if (text != null) {
+            ProgramActionResult(ActionResult.Success, capturedText = text)
+        } else {
+            ProgramActionResult(ActionResult.Failure(result.metaError ?: "brain_failed"))
         }
     }
 

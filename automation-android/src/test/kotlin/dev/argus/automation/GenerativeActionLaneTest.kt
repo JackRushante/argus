@@ -20,8 +20,16 @@ import dev.argus.engine.model.StateQuery
 import dev.argus.engine.model.StateQueryPolicy
 import dev.argus.engine.model.StateValueType
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.ValueProvenance
+import dev.argus.engine.model.VarType
+import dev.argus.engine.model.VarValue
 import dev.argus.engine.runtime.ActionJournalOutcome
+import dev.argus.engine.runtime.ActionPath
+import dev.argus.engine.runtime.ActionResolution
 import dev.argus.engine.runtime.AutomationStore
+import dev.argus.engine.runtime.RuntimeDataBinding
+import dev.argus.engine.runtime.TaintAwareInterpolator
+import dev.argus.engine.runtime.VarScope
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.ExecutionId
 import dev.argus.engine.runtime.ExecutionStatus
@@ -37,6 +45,7 @@ import dev.argus.engine.runtime.TriggerEvent
 import dev.argus.engine.runtime.TriggerEventId
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -569,6 +578,145 @@ class GenerativeActionLaneTest {
         assertEquals("action_contract_invalid", fixture.journal.completions.single().errorCode)
     }
 
+    // --- P4-D2 slice 2: canale RISOLTO (capture sincrona via submitAndAwait) -------------------
+
+    /**
+     * INJECTION + revalidazione felice: un valore runtime TAINTED che entra nel goal generativo finisce
+     * SOLO nel canale runtimeData (mai nel goal, che porta il solo marker opaco). Che la capture
+     * RIESCA prova anche che l'azione interpolata (coi marker) NON fa scattare un falso action_changed:
+     * la revalidazione confronta il TEMPLATE approvato, non l'azione risolta.
+     */
+    @Test
+    fun `resolved capture routes the tainted value only through runtimeData and captures`() = runTest {
+        val cap = resolvedCapture()
+        val fixture = fixture(
+            action = cap.template,
+            automation = cap.automation,
+            context = cap.context,
+            act = { ActResult("testo catturato", null) },
+        )
+
+        val result = fixture.lane.submitAndAwait(cap.context, cap.interpolated, cap.runtimeData)
+
+        assertEquals("testo catturato", result.text)
+        assertEquals(1, fixture.brain.resolvedCalls)
+        assertEquals(0, fixture.brain.calls, "la capture NON deve passare da act/actV2")
+        assertFalse(
+            fixture.brain.lastResolvedGoal!!.contains(SENTINEL),
+            "il valore TAINTED non deve mai comparire nel goal (prompt di sistema)",
+        )
+        assertTrue(fixture.brain.lastResolvedGoal!!.contains("{{ARGUS_RUNTIME_DATA_1}}"))
+        assertEquals(SENTINEL, fixture.brain.lastResolvedRuntimeData.single().value.text)
+    }
+
+    /** Il binding runtime non espone mai il valore RAW in toString (nessun leak nei log/journal). */
+    @Test
+    fun `resolved runtime binding redacts the value in toString`() = runTest {
+        val cap = resolvedCapture()
+        assertFalse(cap.runtimeData.single().toString().contains(SENTINEL))
+    }
+
+    /** Budget: un budget_exceeded da actResolved sopprime la capture (nessun testo, nessun falso ok). */
+    @Test
+    fun `resolved capture is suppressed by a budget block`() = runTest {
+        val cap = resolvedCapture()
+        val fixture = fixture(
+            action = cap.template,
+            automation = cap.automation,
+            context = cap.context,
+            act = { ActResult(null, "budget_exceeded") },
+        )
+
+        val result = fixture.lane.submitAndAwait(cap.context, cap.interpolated, cap.runtimeData)
+
+        assertEquals(null, result.text)
+        assertEquals("budget_exceeded", result.metaError)
+    }
+
+    /** Revalidazione: un edit non ri-approvato DURANTE la latenza LLM sopprime la capture. */
+    @Test
+    fun `resolved capture rejects a rule edited while the model runs`() = runTest {
+        val cap = resolvedCapture()
+        val started = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val fixture = fixture(
+            action = cap.template,
+            automation = cap.automation,
+            context = cap.context,
+            act = {
+                started.complete(Unit)
+                release.await()
+                ActResult("testo catturato", null)
+            },
+        )
+
+        val awaited = async { fixture.lane.submitAndAwait(cap.context, cap.interpolated, cap.runtimeData) }
+        runCurrent()
+        assertTrue(started.isCompleted)
+        // Edit non ri-approvato (nome cambiato): fingerprint memorizzato invariato ma != of(current).
+        fixture.store.current = cap.automation.copy(name = "Rinominata")
+        release.complete(Unit)
+        val result = awaited.await()
+
+        assertEquals(null, result.text)
+        assertEquals("approval_changed", result.metaError)
+    }
+
+    /** Cancellazione (delete): la regola sparisce mentre il modello gira → nessun falso successo. */
+    @Test
+    fun `resolved capture is suppressed when the rule is deleted mid-flight`() = runTest {
+        val cap = resolvedCapture()
+        val started = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val fixture = fixture(
+            action = cap.template,
+            automation = cap.automation,
+            context = cap.context,
+            act = {
+                started.complete(Unit)
+                release.await()
+                ActResult("testo catturato", null)
+            },
+        )
+
+        val awaited = async { fixture.lane.submitAndAwait(cap.context, cap.interpolated, cap.runtimeData) }
+        runCurrent()
+        assertTrue(started.isCompleted)
+        fixture.store.current = null
+        release.complete(Unit)
+        val result = awaited.await()
+
+        assertEquals(null, result.text)
+        assertEquals("rule_missing", result.metaError)
+    }
+
+    /** Cancellazione del CHIAMANTE mentre la lane attende il modello: nessun valore osservato. */
+    @Test
+    fun `cancelling the caller yields no captured value`() = runTest {
+        val cap = resolvedCapture()
+        val started = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val fixture = fixture(
+            action = cap.template,
+            automation = cap.automation,
+            context = cap.context,
+            act = {
+                started.complete(Unit)
+                release.await()
+                ActResult("non deve trapelare", null)
+            },
+        )
+
+        val awaited = async { fixture.lane.submitAndAwait(cap.context, cap.interpolated, cap.runtimeData) }
+        runCurrent()
+        assertTrue(started.isCompleted)
+        awaited.cancel()
+        release.complete(Unit)
+        runCurrent()
+
+        assertTrue(awaited.isCancelled)
+    }
+
     private fun kotlinx.coroutines.test.TestScope.fixture(
         action: Action.InvokeLlm = action(),
         automation: Automation = approvedAutomation(action),
@@ -656,6 +804,9 @@ class GenerativeActionLaneTest {
     ) : Brain {
         var calls = 0
         var lastV2: Action.InvokeLlmV2? = null
+        var resolvedCalls = 0
+        var lastResolvedGoal: String? = null
+        var lastResolvedRuntimeData: List<RuntimeDataBinding> = emptyList()
 
         override suspend fun compile(
             nl: String,
@@ -679,6 +830,19 @@ class GenerativeActionLaneTest {
         ): ActResult {
             calls++
             lastV2 = action
+            return actResult()
+        }
+
+        override suspend fun actResolved(
+            context: FireContext,
+            goal: String,
+            contextSources: List<String>,
+            allowedTools: List<String>,
+            runtimeData: List<RuntimeDataBinding>,
+        ): ActResult {
+            resolvedCalls++
+            lastResolvedGoal = goal
+            lastResolvedRuntimeData = runtimeData
             return actResult()
         }
     }
@@ -752,8 +916,56 @@ class GenerativeActionLaneTest {
         override suspend fun lastFiredAt(id: AutomationId): Long? = null
     }
 
+    private data class ResolvedCapture(
+        val template: Action.InvokeLlm,
+        val interpolated: Action.InvokeLlm,
+        val runtimeData: List<RuntimeDataBinding>,
+        val automation: Automation,
+        val context: FireContext,
+    )
+
     private companion object {
         const val CONVERSATION_ID = "shortcut:com.whatsapp:hash"
+        const val SENTINEL = "INJECT_SENTINEL_XYZ"
+
+        /**
+         * Costruisce, tramite il VERO [TaintAwareInterpolator], una foglia generativa CAPTURE con un
+         * dato TAINTED nel goal: il template porta `\${secret}`, l'azione interpolata il solo marker
+         * `{{ARGUS_RUNTIME_DATA_1}}` e il binding il valore RAW [SENTINEL]. È il contratto che l'executor
+         * passa a `submitAndAwait` in P4-D2. Mai fabbricare un binding a mano (ctor internal).
+         */
+        fun resolvedCapture(): ResolvedCapture {
+            val template = Action.InvokeLlm(
+                goal = "Rispondi usando \${secret}",
+                contextSources = listOf("notification"),
+                allowedTools = listOf("whatsapp_reply"),
+                replyTargetSender = true,
+                timeoutMs = 60_000,
+                captureAs = "reply",
+            )
+            val scope = VarScope(
+                mapOf(
+                    "secret" to VarValue(
+                        text = SENTINEL,
+                        type = VarType.TEXT,
+                        integrity = IntegrityLabel.TAINTED,
+                        confidentiality = ConfidentialityLabel.PRIVATE,
+                        provenance = setOf(ValueProvenance.NOTIFICATION),
+                    ),
+                ),
+            )
+            val resolution = TaintAwareInterpolator().resolve(template, scope)
+            check(resolution is ActionResolution.Resolved) { "atteso Resolved, ottenuto $resolution" }
+            val interpolated = resolution.value.action as Action.InvokeLlm
+            val automation = approvedAutomation(template)
+            return ResolvedCapture(
+                template = template,
+                interpolated = interpolated,
+                runtimeData = resolution.value.runtimeData,
+                automation = automation,
+                context = context(automation, template),
+            )
+        }
 
         fun action() = Action.InvokeLlm(
             goal = "rispondi",

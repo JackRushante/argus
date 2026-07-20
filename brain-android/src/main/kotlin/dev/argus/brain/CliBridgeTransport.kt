@@ -575,6 +575,9 @@ class CliBridgeTransport internal constructor(
             COMPILE_SCHEMA_VERSION !in health.compileSchemaVersions ||
             ACT_SCHEMA_VERSION !in health.actSchemaVersions ||
             ACT_V2_SCHEMA_VERSION !in health.actSchemaVersions ||
+            // P4-D2 slice 2: il canale RISOLTO anti-injection dev'essere annunciato dal bridge, come
+            // act/act_v2. Contenimento (#41): un bridge che lo AGGIUNGE resta compatibile.
+            ACT_RESOLVED_SCHEMA_VERSION !in health.actSchemaVersions ||
             !SOURCE_SHA256.matches(health.sourceSha256)) {
             throw BridgeException(BridgeErrorKind.PROTOCOL, "health incompatibile")
         }

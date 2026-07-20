@@ -18,6 +18,7 @@ import dev.argus.engine.runtime.AuditKind
 import dev.argus.engine.runtime.AuditSink
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireContext
+import dev.argus.engine.runtime.RuntimeDataBinding
 import dev.argus.ui.presentation.RenderLanguage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
@@ -130,6 +131,32 @@ class MeteredBrain(
             BudgetVerdict.Ok -> {}
         }
         val result = delegate.act(context, goal, contextSources, allowedTools)
+        recordUsage(config, UsageEventKind.ACT, now, result.metaError, result.usage)
+        return result
+    }
+
+    /**
+     * Canale RISOLTO P4-D2: stessa contabilità di [act] (stesso choke-point, kind ACT). Il framing
+     * anti-injection del dato runtime avviene nel transport a valle; qui conta solo che la capture
+     * generativa passi SEMPRE dal budget — un HARD la sopprime esattamente come un act.
+     */
+    override suspend fun actResolved(
+        context: FireContext,
+        goal: String,
+        contextSources: List<String>,
+        allowedTools: List<String>,
+        runtimeData: List<RuntimeDataBinding>,
+    ): ActResult = callGate.withLock {
+        val config = selectedConfig()
+        val now = nowMillis()
+        when (val verdict = verdictFor(config, now)) {
+            is BudgetVerdict.HardExceeded -> return hardBlock(config, UsageEventKind.ACT, now, context, verdict.tripped)
+            is BudgetVerdict.UnpricedModel ->
+                return unpricedModelBlock(config, UsageEventKind.ACT, now, context, verdict.providerId)
+            is BudgetVerdict.SoftExceeded -> notifyOnce(verdict.tripped, now)
+            BudgetVerdict.Ok -> {}
+        }
+        val result = delegate.actResolved(context, goal, contextSources, allowedTools, runtimeData)
         recordUsage(config, UsageEventKind.ACT, now, result.metaError, result.usage)
         return result
     }
