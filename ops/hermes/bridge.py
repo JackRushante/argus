@@ -925,6 +925,7 @@ def run_gpt(prompt: str, tools: str = "clarify") -> tuple[str, dict[str, Any] | 
     command = [
         str(HERMES_PYTHON), "-m", "hermes_cli.main", "-z", prompt,
         "--cli", "--ignore-rules", "-t", tools,
+        "-m", MODEL,
         "--usage-file", usage_path,
     ]
     environment = dict(os.environ)
