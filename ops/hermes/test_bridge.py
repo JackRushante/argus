@@ -270,6 +270,102 @@ class BridgeTest(unittest.TestCase):
             bridge.validate_action({"type": "copy_to_clipboard", "extractionRegex": "x" * 600}, tools)
         )
 
+    def test_copy_text_action_requires_nonempty_bounded_literal(self):
+        # copy_text (BASE): copia una stringa LETTERALE, nessun trigger testuale. text non vuoto e bounded.
+        tools = {"copy_text"}
+        self.assertTrue(bridge.validate_action({"type": "copy_text", "text": "OTP 1234"}, tools))
+        self.assertTrue(bridge.validate_action({"type": "copy_text", "text": "${codice}"}, tools))
+        # Vuoto -> rifiutato.
+        self.assertFalse(bridge.validate_action({"type": "copy_text", "text": ""}, tools))
+        # Fuori bound (>4096) -> rifiutato.
+        self.assertFalse(bridge.validate_action({"type": "copy_text", "text": "x" * 4_097}, tools))
+        # Tipo errato -> rifiutato.
+        self.assertFalse(bridge.validate_action({"type": "copy_text", "text": 42}, tools))
+        # Chiave extra -> rifiutata (_exact_keys); manca text -> rifiutato.
+        self.assertFalse(
+            bridge.validate_action({"type": "copy_text", "text": "x", "extractionRegex": "y"}, tools)
+        )
+        self.assertFalse(bridge.validate_action({"type": "copy_text"}, tools))
+        # Gated dalla capability list: assente da available_tools -> rifiutato.
+        self.assertFalse(bridge.validate_action({"type": "copy_text", "text": "x"}, set()))
+
+    def test_set_mobile_data_action_mirrors_set_wifi(self):
+        # set_mobile_data (PRIVILEGED/Shizuku): stesso trattamento di set_wifi/set_bluetooth, "on" boolean.
+        tools = {"set_mobile_data"}
+        self.assertTrue(bridge.validate_action({"type": "set_mobile_data", "on": True}, tools))
+        self.assertTrue(bridge.validate_action({"type": "set_mobile_data", "on": False}, tools))
+        self.assertFalse(bridge.validate_action({"type": "set_mobile_data", "on": "yes"}, tools))
+        self.assertFalse(bridge.validate_action({"type": "set_mobile_data"}, tools))
+        # Gated dalla capability list.
+        self.assertFalse(bridge.validate_action({"type": "set_mobile_data", "on": True}, set()))
+
+    def test_state_equals_accepts_screen_key(self):
+        # screen e' una nuova builtin state key (on|off). state_equals la ammette se e' nel manifest.
+        allowed = {"screen"}
+        self.assertTrue(bridge.validate_condition(
+            {"type": "state_equals", "key": "screen", "op": "EQ", "value": "on"},
+            0, allowed,
+        ))
+        self.assertTrue(bridge.validate_condition(
+            {"type": "state_equals", "key": "screen", "op": "NEQ", "value": "off"},
+            0, allowed,
+        ))
+        # Non nel manifest -> rifiutato.
+        self.assertFalse(bridge.validate_condition(
+            {"type": "state_equals", "key": "screen", "op": "EQ", "value": "on"},
+            0, set(),
+        ))
+        # screen e' anche una builtin nota (per state_compare / valori ammessi).
+        self.assertIn("screen", bridge.BUILTIN_STATE_VALUES)
+        self.assertEqual(bridge.BUILTIN_STATE_VALUES["screen"], "on|off")
+        self.assertIn("screen", bridge.ACT_STATE_KEYS)
+
+    def test_state_compare_builtin_screen_validates_on_off(self):
+        # state_compare su builtin screen: TEXT EQ/NEQ, expected in {on, off}.
+        allowed = {"screen"}
+        families = {"builtin"}
+        ok = {
+            "type": "state_compare",
+            "query": {"type": "builtin", "key": "screen"},
+            "valueType": "TEXT", "op": "EQ", "expected": "on", "policyVersion": 1,
+        }
+        self.assertTrue(bridge.validate_state_compare(ok, allowed, families))
+        bad_value = dict(ok, expected="dimmed")
+        self.assertFalse(bridge.validate_state_compare(bad_value, allowed, families))
+
+    def test_var_compare_parity_ops_are_unary(self):
+        # IS_EVEN/IS_ODD: UNARI, nessun RHS. Ammessi SOLO in var_compare dentro il flusso (allow_flow).
+        for op in ("IS_EVEN", "IS_ODD"):
+            self.assertTrue(bridge.validate_condition(
+                {"type": "var_compare", "varName": "n", "op": op},
+                0, set(), allow_flow=True, known_vars={"n"},
+            ), op)
+            # Con expected -> rifiutato (unario).
+            self.assertFalse(bridge.validate_condition(
+                {"type": "var_compare", "varName": "n", "op": op, "expected": "0"},
+                0, set(), allow_flow=True, known_vars={"n"},
+            ), op)
+            # Con expectedVar -> rifiutato (unario).
+            self.assertFalse(bridge.validate_condition(
+                {"type": "var_compare", "varName": "n", "op": op, "expectedVar": "m"},
+                0, set(), allow_flow=True, known_vars={"n", "m"},
+            ), op)
+            # Var non dichiarata -> rifiutato.
+            self.assertFalse(bridge.validate_condition(
+                {"type": "var_compare", "varName": "n", "op": op},
+                0, set(), allow_flow=True, known_vars=set(),
+            ), op)
+            # Fuori dal flusso (trigger-time) -> rifiutato.
+            self.assertFalse(bridge.validate_condition(
+                {"type": "var_compare", "varName": "n", "op": op},
+                0, set(), known_vars={"n"},
+            ), op)
+        # La parita' NON e' ammessa in state_equals (solo op relazionali).
+        self.assertFalse(bridge.validate_condition(
+            {"type": "state_equals", "key": "screen", "op": "IS_EVEN", "value": "on"},
+            0, {"screen"},
+        ))
+
     def test_invoke_llm_v2_requires_explicit_typed_and_classified_state(self):
         query = {"type": "dumpsys_field", "service": "battery", "field": "voltage"}
         action = {
