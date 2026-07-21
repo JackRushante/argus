@@ -628,6 +628,82 @@ class BridgeTest(unittest.TestCase):
         draft["actions"][1]["condition"]["op"] = "LT"
         self.assertTrue(bridge.validate_draft(draft, tools, set(), set()))
 
+    def test_p4_random_int_binding_drives_coinflip_if(self):
+        # random_int: intero CLEAN generato dal motore in [0, max). Un var_compare IS_EVEN sopra
+        # ci costruisce un coin-flip (mirror del test Kotlin DraftValidatorP4Test).
+        draft = {
+            "name": "lancio moneta",
+            "trigger": self.P4_TIME_TRIGGER,
+            "vars": [{"type": "random_int", "name": "dice", "max": 6}],
+            "actions": [
+                {
+                    "type": "if",
+                    "condition": {"type": "var_compare", "varName": "dice", "op": "IS_EVEN"},
+                    "then": [{"type": "set_flashlight", "on": True}],
+                    "orElse": [{"type": "set_flashlight", "on": False}],
+                },
+            ],
+        }
+        tools = {"set_flashlight"}
+        self.assertTrue(bridge.validate_draft(draft, tools, set(), set()))
+        # Una var random_int è confrontabile anche numericamente (GT contro un letterale).
+        draft["actions"][0]["condition"] = {
+            "type": "var_compare", "varName": "dice", "op": "GT", "expected": "2",
+        }
+        self.assertTrue(bridge.validate_draft(draft, tools, set(), set()))
+
+    def test_p4_random_int_coexists_with_state_equals_trigger_condition(self):
+        # Una var random_int convive con una condizione trigger-time state_equals: l'intera regola valida.
+        draft = {
+            "name": "random con condizione di stato",
+            "trigger": self.P4_TIME_TRIGGER,
+            "conditions": {"type": "state_equals", "key": "screen", "op": "EQ", "value": "on"},
+            "vars": [{"type": "random_int", "name": "roll", "max": 100}],
+            "actions": [
+                {
+                    "type": "if",
+                    "condition": {"type": "var_compare", "varName": "roll", "op": "IS_ODD"},
+                    "then": [{"type": "set_flashlight", "on": True}],
+                },
+            ],
+        }
+        self.assertTrue(
+            bridge.validate_draft(draft, {"set_flashlight"}, {"screen"}, set())
+        )
+
+    def test_p4_random_int_max_bounds(self):
+        # max in [0, max) ⇒ max ≥ 1; tetto 1_000_000. Fuori range → draft rifiutato (fail-closed).
+        def draft_with_max(max_value):
+            return {
+                "name": "random bound",
+                "trigger": self.P4_TIME_TRIGGER,
+                "vars": [{"type": "random_int", "name": "r", "max": max_value}],
+                "actions": [{"type": "set_flashlight", "on": True}],
+            }
+        tools = {"set_flashlight"}
+        # Validi agli estremi ammessi.
+        self.assertTrue(bridge.validate_draft(draft_with_max(1), tools, set(), set()))
+        self.assertTrue(bridge.validate_draft(draft_with_max(6), tools, set(), set()))
+        self.assertTrue(bridge.validate_draft(draft_with_max(1_000_000), tools, set(), set()))
+        # Invalidi: zero, negativo, oltre il tetto.
+        self.assertFalse(bridge.validate_draft(draft_with_max(0), tools, set(), set()))
+        self.assertFalse(bridge.validate_draft(draft_with_max(-3), tools, set(), set()))
+        self.assertFalse(bridge.validate_draft(draft_with_max(1_000_001), tools, set(), set()))
+        # Tipo errato: bool e float non sono interi accettabili (fail-closed).
+        self.assertFalse(bridge.validate_draft(draft_with_max(True), tools, set(), set()))
+        self.assertFalse(bridge.validate_draft(draft_with_max(6.0), tools, set(), set()))
+
+    def test_p4_random_int_rejects_extra_keys(self):
+        # Wire chiuso {type,name,max}: qualsiasi chiave extra (es. confidentiality) fa fallire _exact_keys.
+        draft = {
+            "name": "random con chiave extra",
+            "trigger": self.P4_TIME_TRIGGER,
+            "vars": [{"type": "random_int", "name": "r", "max": 6,
+                      "confidentiality": "PUBLIC"}],
+            "actions": [{"type": "set_flashlight", "on": True}],
+        }
+        self.assertFalse(bridge.validate_draft(draft, {"set_flashlight"}, set(), set()))
+
     def test_p4_control_flow_is_structural_and_accepted_when_listed_in_available_tools(self):
         # BUG device-found: l'app ora pubblica if/while/wait dentro available_tools (sono STRUTTURALI,
         # non gated dal SO). Il bridge NON deve iniziare a rifiutare né il manifest né il draft per
