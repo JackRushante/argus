@@ -169,6 +169,7 @@ object RuleRenderMapper {
         ValueProvenance.PHONE -> l.pick("call", "chiamata")
         ValueProvenance.MODEL -> l.pick("AI output", "output AI")
         ValueProvenance.SHELL -> l.pick("shell output", "output shell")
+        ValueProvenance.ENGINE -> l.pick("random", "casuale")
     }
 
     // ---------------------------------------------------------------------------------------------

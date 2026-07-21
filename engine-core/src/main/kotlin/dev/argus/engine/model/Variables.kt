@@ -16,7 +16,7 @@ enum class ConfidentialityLabel { PUBLIC, PRIVATE, SECRET }
 
 /** Vocabolario chiuso della provenienza persistibile in audit senza salvare il contenuto. */
 @Serializable
-enum class ValueProvenance { LITERAL, DEVICE_STATE, NOTIFICATION, SMS, PHONE, MODEL, SHELL }
+enum class ValueProvenance { LITERAL, DEVICE_STATE, NOTIFICATION, SMS, PHONE, MODEL, SHELL, ENGINE }
 
 fun joinIntegrity(a: IntegrityLabel, b: IntegrityLabel): IntegrityLabel =
     if (a == IntegrityLabel.TAINTED || b == IntegrityLabel.TAINTED) IntegrityLabel.TAINTED
@@ -98,6 +98,20 @@ sealed interface VarBinding {
         override val confidentiality: ConfidentialityLabel,
     ) : VarBinding
 
+    /**
+     * Intero casuale generato DAL MOTORE in [0, max): integrità CLEAN (non deriva da input esterno),
+     * risolto UNA volta a inizio esecuzione → valore fisso per tutto il run. Non è un segreto, quindi
+     * il default di riservatezza è il livello più basso (PUBLIC). Utile per branching (IS_EVEN/IS_ODD)
+     * e conteggi. [max] deve essere >= 1 (garantito dal DraftValidator).
+     */
+    @Serializable
+    @SerialName("random_int")
+    data class RandomInt(
+        override val name: String,
+        val max: Int,
+        override val confidentiality: ConfidentialityLabel = ConfidentialityLabel.PUBLIC,
+    ) : VarBinding
+
     companion object {
         val NAME_REGEX = Regex("^[a-z][a-z0-9_]{0,31}$")
     }
@@ -105,7 +119,7 @@ sealed interface VarBinding {
 
 val VarBinding.integrity: IntegrityLabel
     get() = when (this) {
-        is VarBinding.Literal, is VarBinding.State -> IntegrityLabel.CLEAN
+        is VarBinding.Literal, is VarBinding.State, is VarBinding.RandomInt -> IntegrityLabel.CLEAN
         is VarBinding.TriggerPayload -> IntegrityLabel.TAINTED
     }
 
@@ -113,6 +127,7 @@ val VarBinding.declaredType: VarType
     get() = when (this) {
         is VarBinding.Literal -> varType
         is VarBinding.State -> valueType.toVarType()
+        is VarBinding.RandomInt -> VarType.NUMBER
         is VarBinding.TriggerPayload -> VarType.TEXT
     }
 
@@ -125,6 +140,7 @@ fun StateValueType.toVarType(): VarType = when (this) {
 fun VarBinding.provenance(trigger: Trigger): Set<ValueProvenance> = when (this) {
     is VarBinding.Literal -> setOf(ValueProvenance.LITERAL)
     is VarBinding.State -> setOf(ValueProvenance.DEVICE_STATE)
+    is VarBinding.RandomInt -> setOf(ValueProvenance.ENGINE)
     is VarBinding.TriggerPayload -> when (trigger) {
         is Trigger.Notification -> setOf(ValueProvenance.NOTIFICATION)
         is Trigger.PhoneState -> when (trigger.event) {

@@ -113,6 +113,9 @@ class ProgramInterpreter(
     private val interpolator: TaintAwareInterpolator = TaintAwareInterpolator(),
     private val journal: ProgramExecutionJournal = NoopProgramExecutionJournal,
     private val pause: suspend (Long) -> Unit = { delay(it) },
+    // Seam per la casualità (come il Clock in ConditionEvaluator): default di produzione, override
+    // deterministico nei test. Il bound è sempre >= 1 (garantito da resolveBinding + DraftValidator).
+    private val randomInt: (Int) -> Int = { bound -> kotlin.random.Random.nextInt(bound) },
 ) {
     suspend fun execute(
         trigger: Trigger,
@@ -309,6 +312,10 @@ class ProgramInterpreter(
         private fun resolveBinding(binding: VarBinding, state: DeviceState): VarValue? {
             val raw = when (binding) {
                 is VarBinding.Literal -> binding.value
+                // Intero casuale generato dal motore in [0, max). Difesa in profondità: max < 1 non
+                // è realizzabile (Random.nextInt lancerebbe) → null ⇒ binding_unavailable.
+                is VarBinding.RandomInt ->
+                    if (binding.max >= 1) randomInt(binding.max).toString() else null
                 is VarBinding.State -> state.queryValues[binding.query.canonicalId]
                     ?.takeIf { StateValueCoercion.compatible(it, binding.valueType) }
                 is VarBinding.TriggerPayload -> triggerValue(binding.field)?.let { payload ->

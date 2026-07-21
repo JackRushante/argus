@@ -165,6 +165,95 @@ class ProgramInterpreterTest {
     }
 
     @Test
+    fun `random_int is engine-generated CLEAN and drives an if and a bounded while`() = runTest {
+        val seen = mutableListOf<ResolvedProgramAction>()
+        // Seam deterministico: il motore "estrae" 4 (pari). Nessuna Random reale nei test.
+        val even = ProgramInterpreter(
+            runner = ProgramActionRunner { action, _ ->
+                seen += action
+                ProgramActionResult(ActionResult.Success)
+            },
+            stateProvider = { DeviceState() },
+            conditionEvaluator = evaluator,
+            pause = {},
+            randomInt = { bound ->
+                assertEquals(10, bound) // il motore usa max come bound, valore in [0, max).
+                4
+            },
+        )
+
+        val result = even.execute(
+            Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+            timeEvent(),
+            bindings = listOf(VarBinding.RandomInt("r", max = 10)),
+            actions = listOf(
+                Action.If(
+                    Condition.VarCompare("r", CmpOp.IS_EVEN),
+                    then = listOf(
+                        Action.While(
+                            Condition.VarCompare("r", CmpOp.IS_EVEN),
+                            body = listOf(Action.ShowNotification("tick", "v=\${r}")),
+                            maxIterations = 4,
+                        ),
+                    ),
+                    orElse = listOf(Action.ShowNotification("odd", "dispari")),
+                ),
+            ),
+        )
+
+        assertTrue(result.completed)
+        // Ramo PARI scelto, e il while (condizione sempre vera perché il valore è fisso) conta
+        // esattamente maxIterations volte.
+        assertEquals(
+            listOf(
+                "1.then.1.while[1].1", "1.then.1.while[2].1",
+                "1.then.1.while[3].1", "1.then.1.while[4].1",
+            ),
+            result.steps.map { it.path.value },
+        )
+        val notification = seen.first()
+        // Nasce CLEAN, non segreto, provenienza ENGINE, tipo numerico reso "4".
+        assertEquals("v=4", assertIs<Action.ShowNotification>(notification.action).text)
+        assertEquals(IntegrityLabel.CLEAN, notification.inputIntegrity)
+        assertEquals(ConfidentialityLabel.PUBLIC, notification.inputConfidentiality)
+        assertTrue(ValueProvenance.ENGINE in notification.inputProvenance)
+
+        // Con un valore DISPARI lo stesso programma prende il ramo else: IS_EVEN pilota il branch.
+        val oddSeen = mutableListOf<ResolvedProgramAction>()
+        val odd = ProgramInterpreter(
+            runner = ProgramActionRunner { action, _ ->
+                oddSeen += action
+                ProgramActionResult(ActionResult.Success)
+            },
+            stateProvider = { DeviceState() },
+            conditionEvaluator = evaluator,
+            pause = {},
+            randomInt = { 3 },
+        )
+        val oddResult = odd.execute(
+            Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+            timeEvent(),
+            bindings = listOf(VarBinding.RandomInt("r", max = 10)),
+            actions = listOf(
+                Action.If(
+                    Condition.VarCompare("r", CmpOp.IS_EVEN),
+                    then = listOf(
+                        Action.While(
+                            Condition.VarCompare("r", CmpOp.IS_EVEN),
+                            body = listOf(Action.ShowNotification("tick", "v=\${r}")),
+                            maxIterations = 4,
+                        ),
+                    ),
+                    orElse = listOf(Action.ShowNotification("odd", "dispari")),
+                ),
+            ),
+        )
+        assertTrue(oddResult.completed)
+        assertEquals(listOf("1.else.1"), oddResult.steps.map { it.path.value })
+        assertEquals("dispari", assertIs<Action.ShowNotification>(oddSeen.single().action).text)
+    }
+
+    @Test
     fun `capture submission without a concrete output blocks the program`() = runTest {
         var calls = 0
         val interpreter = interpreter(

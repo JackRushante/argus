@@ -76,7 +76,7 @@ object CapabilityRequirements {
         is VarBinding.State -> setOf(binding.query.family.capabilityId)
         // Letterali e payload del trigger non richiedono capability aggiuntive: il payload viaggia
         // già col trigger (la cui capability è derivata da forTrigger).
-        is VarBinding.Literal, is VarBinding.TriggerPayload -> emptySet()
+        is VarBinding.Literal, is VarBinding.TriggerPayload, is VarBinding.RandomInt -> emptySet()
     }
 
     private fun forTrigger(trigger: Trigger): Set<String> = when (trigger) {

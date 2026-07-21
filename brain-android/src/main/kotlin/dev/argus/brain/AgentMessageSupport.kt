@@ -517,6 +517,11 @@ VarBinding, discriminated by "type":
    "extractionRegex":string|null, "confidentiality":"PUBLIC"|"PRIVATE"|"SECRET"}
    // EXTERNAL payload of the trigger (SMS/notification): integrity TAINTED, confidentiality >= PRIVATE.
    // extractionRegex = first non-empty capture group, or the whole match; null = full field.
+- {"type":"random_int", "name":string, "max":integer (1..1000000),
+   "confidentiality":"PUBLIC"|"PRIVATE"|"SECRET" (optional, default PUBLIC)}
+   // ENGINE-generated random integer in [0, max) (i.e. 0..max-1). Integrity CLEAN (not tainted, not a
+   // secret): resolved ONCE per run, so it holds a fixed value for the whole execution. Use it to drive
+   // branching — pair with var_compare IS_EVEN/IS_ODD for a coin-flip if — and counting.
 
 "captureAs":string (optional) — captures the action's OUTPUT into a new same-named variable. Allowed
 ONLY on the three producers run_shell, invoke_llm and invoke_llm_v2; the captured value is TAINTED.

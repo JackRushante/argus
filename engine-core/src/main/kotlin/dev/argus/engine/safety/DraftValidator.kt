@@ -49,6 +49,7 @@ class DraftValidator(
 
         // --- Bound P4 §2.5 (chiusi, non negoziabili) ---
         private const val MAX_VARS = 16
+        private const val MAX_RANDOM_INT = 1_000_000
         private const val MAX_FLOW_DEPTH = 4
         private const val MAX_TOTAL_ACTIONS = 64
         private const val MIN_WHILE_ITERATIONS = 1
@@ -179,6 +180,16 @@ class DraftValidator(
                         err(
                             "var_state_underclassified",
                             "Reader '${binding.name}' classificato sotto il minimo ${minimum.name}",
+                        )
+                    }
+                }
+                is VarBinding.RandomInt -> {
+                    // Intero casuale generato dal motore, CLEAN: serve solo un bound sano. max in
+                    // [0, max) ⇒ max >= 1; tetto ragionevole per evitare conteggi assurdi.
+                    if (binding.max < 1 || binding.max > MAX_RANDOM_INT) {
+                        err(
+                            "var_random_max_invalid",
+                            "random_int '${binding.name}' richiede max tra 1 e $MAX_RANDOM_INT",
                         )
                     }
                 }

@@ -45,6 +45,31 @@ class P4ModelSerializationTest {
         )
     }
 
+    @Test fun `random_int binding round-trips, is CLEAN NUMBER and defaults to PUBLIC`() {
+        val binding: VarBinding = VarBinding.RandomInt("dice", max = 6)
+        val json = ArgusJson.encodeToString(VarBinding.serializer(), binding)
+        assertTrue(json.contains("\"type\":\"random_int\""), json)
+        assertEquals(binding, ArgusJson.decodeFromString(VarBinding.serializer(), json))
+        // Default di riservatezza = livello più basso (PUBLIC); non è un segreto.
+        assertEquals(ConfidentialityLabel.PUBLIC, VarBinding.RandomInt("d", max = 2).confidentiality)
+        // Integrità CLEAN (generato dal motore), tipo dichiarato NUMBER, provenienza ENGINE.
+        assertEquals(IntegrityLabel.CLEAN, binding.integrity)
+        assertEquals(VarType.NUMBER, binding.declaredType)
+        assertEquals(
+            setOf(ValueProvenance.ENGINE),
+            binding.provenance(Trigger.Time(cron = "0 8 * * *", tz = "UTC")),
+        )
+        // Confidentiality esplicita override del default e round-trip.
+        val secret: VarBinding = VarBinding.RandomInt("d", max = 3, ConfidentialityLabel.SECRET)
+        assertEquals(
+            secret,
+            ArgusJson.decodeFromString(
+                VarBinding.serializer(),
+                ArgusJson.encodeToString(VarBinding.serializer(), secret),
+            ),
+        )
+    }
+
     @Test fun `integrity confidentiality and provenance remain separate and monotone`() {
         // Enum senza @SerialName → UPPERCASE (ArgusJson è case-sensitive, come GenerativeDeliverMode).
         val literal = VarBinding.Literal("x", "1", VarType.NUMBER, ConfidentialityLabel.PUBLIC)

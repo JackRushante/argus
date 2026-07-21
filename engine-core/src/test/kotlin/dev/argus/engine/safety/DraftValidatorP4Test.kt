@@ -194,6 +194,27 @@ class DraftValidatorP4Test {
         )
     }
 
+    @Test fun `random_int binding is valid with a sane max and CLEAN by default`() {
+        val ok = draft(
+            actions = listOf(Action.If(Condition.VarCompare("dice", CmpOp.IS_EVEN), listOf(Action.SetWifi(true)))),
+            vars = listOf(VarBinding.RandomInt("dice", max = 6)),
+        )
+        val issues = errors(v.validate(ok, emptySet()))
+        assertFalse("var_random_max_invalid" in issues)
+        assertFalse("var_compare_type_invalid" in issues) // NUMBER + IS_EVEN è ammesso
+        assertEquals(IntegrityLabel.CLEAN, VarBinding.RandomInt("dice", max = 6).integrity)
+        assertEquals(VarType.NUMBER, VarBinding.RandomInt("dice", max = 6).declaredType)
+    }
+
+    @Test fun `random_int max must be at least one and within the ceiling`() {
+        fun rnd(max: Int) = draft(listOf(Action.SetWifi(true)), listOf(VarBinding.RandomInt("r", max = max)))
+        assertTrue("var_random_max_invalid" in errors(v.validate(rnd(0), emptySet())))
+        assertTrue("var_random_max_invalid" in errors(v.validate(rnd(-3), emptySet())))
+        assertTrue("var_random_max_invalid" in errors(v.validate(rnd(1_000_001), emptySet())))
+        assertFalse("var_random_max_invalid" in errors(v.validate(rnd(1), emptySet())))
+        assertFalse("var_random_max_invalid" in errors(v.validate(rnd(1_000_000), emptySet())))
+    }
+
     // --- Nesting / conteggio azioni -----------------------------------------------------------
 
     private fun nestedIf(depth: Int): Action =
