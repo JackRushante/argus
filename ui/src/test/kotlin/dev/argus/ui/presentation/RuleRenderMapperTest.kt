@@ -105,6 +105,25 @@ class RuleRenderMapperTest {
         assertEquals(2, w.body.size)
         assertTrue((w.body[1] as ProgramNode.Leaf).row.label.contains("Wait"))
     }
+    @Test fun `P4 while node renders a variable iteration count with the runtime ceiling (EN and IT)`() {
+        fun rule() = Automation(
+            AutomationId("p3"), "loop-var", CreatedBy.LLM, AutomationStatus.PENDING_APPROVAL,
+            Trigger.Immediate,
+            listOf(
+                Action.While(
+                    condition = Condition.BooleanLiteral(true),
+                    body = listOf(Action.SetFlashlight(true)),
+                    maxIterationsVar = "blinks",
+                ),
+            ),
+            vars = listOf(VarBinding.RandomInt("blinks", max = 5)),
+        )
+        val en = RuleRenderMapper.map(rule(), language = RenderLanguage.EN).program.single() as ProgramNode.WhileNode
+        assertEquals("Repeat up to \${blinks} times (max 1000)", en.title)
+        val it = RuleRenderMapper.map(rule(), language = RenderLanguage.IT).program.single() as ProgramNode.WhileNode
+        assertEquals("Ripeti fino a \${blinks} volte (max 1000)", it.title)
+    }
+
     // I test pinnano il rendering ITALIANO passando SEMPRE `RenderLanguage.IT` esplicito: senza,
     // passerebbero solo perché la macchina ha locale it-IT (dipendenza nascosta dal locale). I casi
     // EN espliciti in fondo verificano il default inglese sulle render principali.

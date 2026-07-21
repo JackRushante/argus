@@ -530,8 +530,11 @@ Control-flow actions (containers, NOT leaf actions; never eval, never goto). Nes
 at most 64 action nodes total across the whole program:
 - {"type":"if", "condition":FlowCondition, "then":[Action,...], "orElse":[Action,...] (optional)}
 - {"type":"while", "condition":FlowCondition, "body":[Action,...],
-   "maxIterations":integer 1..1000, "delayBetweenMs":integer 0..3600000 (optional)}
-   // BOUNDED loop: maxIterations is REQUIRED; a counter plus a time deadline forbid infinite loops.
+   "maxIterations":integer 1..1000 | "maxIterationsVar":string,
+   "delayBetweenMs":integer 0..3600000 (optional)}
+   // BOUNDED loop: provide EXACTLY ONE of maxIterations / maxIterationsVar (a counter plus a time
+   // deadline forbid infinite loops). maxIterationsVar names a NUMBER variable (e.g. a random_int)
+   // read at run time and clamped to 1..1000 — use it to repeat a dynamic number of times.
 - {"type":"wait", "durationMs":integer 1..3600000}   // cooperative pause, <= 1 hour.
 The worst-case time budget of the whole program must stay <= 6 hours (reduce maxIterations/delays).
 If the user asks for a value beyond any of these bounds, do not silently clamp it and do not ask a

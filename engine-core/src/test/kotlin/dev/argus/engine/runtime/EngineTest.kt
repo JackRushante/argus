@@ -166,6 +166,40 @@ class EngineTest {
     }
 
     @Test
+    fun `P4 while iteration count driven by a NUMBER variable runs that many times`() = runTest {
+        val automation = armed(
+            id = "p4-var-loop",
+            t = Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+            acts = listOf(
+                Action.While(
+                    Condition.BooleanLiteral(true),
+                    body = listOf(Action.SetFlashlight(true), Action.SetFlashlight(false)),
+                    maxIterationsVar = "blinks",
+                ),
+            ),
+            vars = listOf(VarBinding.Literal("blinks", "3", VarType.NUMBER, ConfidentialityLabel.PUBLIC)),
+        )
+        val journal = FakeExecutionJournal()
+
+        engine(
+            FakeAutomationStore(listOf(automation)),
+            ActionExecutor { _, _ -> ActionResult.Success },
+            "2026-07-18T10:00:00Z",
+            journal = journal,
+        ).onTrigger(envelope("alarm:p4-var-loop", timeEvent(automation))) { DeviceState() }
+
+        // Il conteggio viene dalla var (3) ⇒ tre giri × (on, off) = 6 foglie, ordinali e path leggibili.
+        assertEquals(
+            listOf(
+                "1.while[1].1", "1.while[1].2",
+                "1.while[2].1", "1.while[2].2",
+                "1.while[3].1", "1.while[3].2",
+            ),
+            journal.actions.map { it.actionPath },
+        )
+    }
+
+    @Test
     fun `P4 generative capture flows through the resolved executor and captures concrete text`() = runTest {
         // P4-D2 slice 2: la barriera p4_generative_unavailable è stata rimossa insieme al wiring. Con
         // il ResolvedActionExecutor la foglia CAPTURE riceve testo concreto (Success + capturedText):

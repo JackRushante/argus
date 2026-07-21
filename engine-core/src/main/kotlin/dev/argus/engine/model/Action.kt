@@ -306,14 +306,26 @@ sealed interface Action {
 
     /**
      * Ripetizione BOUNDED P4 §2.3: ri-valuta [condition] a ogni iterazione con stato aggiornato,
-     * fino a [maxIterations] (OBBLIGATORIO, 1..1000 nel validator) con [delayBetweenMs] fra i giri
-     * (0..3_600_000). Contatore + deadline dura impediscono i loop infiniti. Solo modello in P4-A.
+     * con [delayBetweenMs] fra i giri (0..3_600_000). Contatore + deadline dura impediscono i loop
+     * infiniti.
+     *
+     * Il conteggio massimo è espresso da ESATTAMENTE UNO tra:
+     * - [maxIterations]: intero letterale 1..1000 (invariante storico, wire byte-identico);
+     * - [maxIterationsVar]: nome di una variabile NUMBER (es. un `random_int`) letta a runtime e
+     *   clampata in 1..1000. Sblocca "gira ${'$'}{n} volte" con n dinamico.
+     *
+     * L'invariante XOR è imposto dal DraftValidator (statico) e dal ProgramInterpreter (fail-closed a
+     * runtime). Entrambi @EncodeDefault(NEVER): un while con solo maxIterations serializza byte-identico
+     * a P4-A (fingerprint v1 stabile), e maxIterationsVar è additivo, mai emesso quando assente.
      */
     @Serializable @SerialName(ActionTypeIds.WHILE)
     data class While(
         val condition: FlowCondition,
         val body: List<Action>,
-        val maxIterations: Int,
+        @EncodeDefault(EncodeDefault.Mode.NEVER)
+        val maxIterations: Int? = null,
+        @EncodeDefault(EncodeDefault.Mode.NEVER)
+        val maxIterationsVar: String? = null,
         val delayBetweenMs: Long = 0,
     ) : Action
 }

@@ -391,8 +391,7 @@ class DraftValidator(
                 }
                 is Action.While -> {
                     if (action.body.isEmpty()) err("flow_empty_branch", "while senza corpo")
-                    if (action.maxIterations !in MIN_WHILE_ITERATIONS..MAX_WHILE_ITERATIONS)
-                        err("while_iterations_invalid", "maxIterations fuori intervallo $MIN_WHILE_ITERATIONS..$MAX_WHILE_ITERATIONS")
+                    validateWhileIterations(action, knownVars, availableVars, declaredTypes, err)
                     if (action.delayBetweenMs !in 0..MAX_WHILE_DELAY_MS)
                         err("while_delay_invalid", "delayBetweenMs fuori intervallo 0..$MAX_WHILE_DELAY_MS")
                     checkFlowCondition(
@@ -435,6 +434,54 @@ class DraftValidator(
             availableVars = availableVars,
             declaredTypes = declaredTypes,
         )
+    }
+
+    /**
+     * Conteggio iterazioni del while: ESATTAMENTE UNO tra maxIterations (letterale 1..1000) e
+     * maxIterationsVar (variabile NUMBER, letta e clampata a runtime). Fail-closed sull'invariante XOR.
+     */
+    private fun validateWhileIterations(
+        action: Action.While,
+        knownVars: Set<String>,
+        availableVars: Set<String>,
+        declaredTypes: Map<String, VarType>,
+        err: (String, String) -> Unit,
+    ) {
+        val varName = action.maxIterationsVar
+        if (varName != null) {
+            // XOR: il ramo variabile esclude il letterale.
+            if (action.maxIterations != null) {
+                err(
+                    "while_iterations_ambiguous",
+                    "while richiede esattamente uno tra maxIterations e maxIterationsVar",
+                )
+                return
+            }
+            when (varName) {
+                !in knownVars ->
+                    err("while_iterations_var_undeclared", "maxIterationsVar '$varName' non dichiarata")
+                !in availableVars ->
+                    err("var_not_definitely_assigned", "Variabile '$varName' non sicuramente assegnata")
+                else -> if (declaredTypes[varName] != VarType.NUMBER)
+                    err(
+                        "while_iterations_var_type_invalid",
+                        "maxIterationsVar '$varName' deve essere di tipo NUMBER",
+                    )
+            }
+        } else {
+            val max = action.maxIterations
+            if (max == null) {
+                err(
+                    "while_iterations_ambiguous",
+                    "while richiede esattamente uno tra maxIterations e maxIterationsVar",
+                )
+            } else if (max !in MIN_WHILE_ITERATIONS..MAX_WHILE_ITERATIONS) {
+                err(
+                    "while_iterations_invalid",
+                    "maxIterations fuori intervallo $MIN_WHILE_ITERATIONS..$MAX_WHILE_ITERATIONS",
+                )
+            }
+        }
     }
 
     private fun validateVarCompare(
@@ -566,8 +613,10 @@ class DraftValidator(
         is Action.RunShell -> SHELL_ACTION_BUDGET_MS
         is Action.Wait -> action.durationMs.coerceAtLeast(0)
         is Action.If -> maxOf(worstCaseBudgetMs(action.then), worstCaseBudgetMs(action.orElse))
+        // Con maxIterationsVar il conteggio è ignoto a compile-time: worst-case = MAX_WHILE_ITERATIONS
+        // (1000), così il gate 6h non è bypassabile spostando il conteggio in una variabile.
         is Action.While -> saturatingMul(
-            action.maxIterations.toLong().coerceAtLeast(0),
+            (action.maxIterations?.toLong() ?: MAX_WHILE_ITERATIONS.toLong()).coerceAtLeast(0),
             saturatingAdd(action.delayBetweenMs.coerceAtLeast(0), worstCaseBudgetMs(action.body)),
         )
         else -> LEAF_ACTION_BUDGET_MS

@@ -202,13 +202,21 @@ class ProgramInterpreter(
                         }
                     }
                     is Action.While -> {
-                        if (action.maxIterations !in 1..MAX_WHILE_ITERATIONS ||
-                            action.delayBetweenMs !in 0..MAX_PAUSE_MILLIS || action.body.isEmpty()
+                        if (action.delayBetweenMs !in 0..MAX_PAUSE_MILLIS || action.body.isEmpty() ||
+                            !whileCountWellFormed(action)
                         ) {
                             return stop("invalid_program", path)
                         }
+                        // Conteggio effettivo: letterale, oppure variabile NUMBER letta a runtime e
+                        // clampata in 1..1000. Variabile assente/non coercibile ⇒ fail-closed (nessuna
+                        // iterazione con conteggio ignoto).
+                        val effective: Int = action.maxIterationsVar?.let { varName ->
+                            val n = scope.get(varName)?.text?.let(StateValueCoercion::integer)
+                                ?: return stop("while_count_unavailable", path)
+                            n.coerceIn(1L, MAX_WHILE_ITERATIONS.toLong()).toInt()
+                        } ?: action.maxIterations ?: return stop("invalid_program", path)
                         var iteration = 1
-                        while (iteration <= action.maxIterations) {
+                        while (iteration <= effective) {
                             when (evaluate(action.condition, path)) {
                                 ConditionEvaluator.Result.NOT_MET -> break
                                 ConditionEvaluator.Result.STATE_UNAVAILABLE ->
@@ -223,7 +231,7 @@ class ProgramInterpreter(
                             ) {
                                 return false
                             }
-                            if (iteration < action.maxIterations && action.delayBetweenMs > 0) {
+                            if (iteration < effective && action.delayBetweenMs > 0) {
                                 currentPath = path
                                 pause(action.delayBetweenMs)
                                 currentPath = null
@@ -454,7 +462,7 @@ class ProgramInterpreter(
                     action.orElse.forEach { pending.addLast(Frame(it, depth + 1)) }
                 }
                 is Action.While -> {
-                    if (action.body.isEmpty() || action.maxIterations !in 1..MAX_WHILE_ITERATIONS ||
+                    if (action.body.isEmpty() || !whileCountWellFormed(action) ||
                         action.delayBetweenMs !in 0..MAX_PAUSE_MILLIS
                     ) {
                         return false
@@ -468,6 +476,20 @@ class ProgramInterpreter(
         if (captures.any { !VarBinding.NAME_REGEX.matches(it) }) return false
         val allNames = names + captures
         return allNames.size <= MAX_VARIABLES && allNames.size == allNames.toSet().size
+    }
+
+    /**
+     * XOR sul conteggio del while: esattamente uno tra maxIterations (letterale 1..1000) e
+     * maxIterationsVar (nome ben formato). Il valore effettivo della variabile è risolto e clampato a
+     * runtime; qui vale solo la forma statica (defense-in-depth, il DraftValidator è l'autorità a monte).
+     */
+    private fun whileCountWellFormed(action: Action.While): Boolean {
+        val literal = action.maxIterations
+        val varName = action.maxIterationsVar
+        if ((literal == null) == (varName == null)) return false
+        if (literal != null && literal !in 1..MAX_WHILE_ITERATIONS) return false
+        if (varName != null && !VarBinding.NAME_REGEX.matches(varName)) return false
+        return true
     }
 
     private fun normalize(raw: String, type: VarType): String? = when (type) {

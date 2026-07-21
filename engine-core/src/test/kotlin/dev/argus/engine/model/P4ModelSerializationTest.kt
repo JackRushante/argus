@@ -2,10 +2,8 @@ package dev.argus.engine.model
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
-import kotlinx.serialization.SerializationException
 
 /** Copertura serializzazione + BYTE-COMPAT del modello P4-A. */
 class P4ModelSerializationTest {
@@ -144,7 +142,7 @@ class P4ModelSerializationTest {
         assertEquals(action, ArgusJson.decodeFromString(Action.serializer(), json))
     }
 
-    @Test fun `while action round-trips and maxIterations is a required wire field`() {
+    @Test fun `while with literal maxIterations stays byte-identical and round-trips`() {
         val action: Action = Action.While(
             condition = Condition.VarCompare("run", CmpOp.EQ, "true"),
             body = listOf(Action.SetFlashlight(true), Action.SetFlashlight(false)),
@@ -153,14 +151,24 @@ class P4ModelSerializationTest {
         )
         val json = ArgusJson.encodeToString(Action.serializer(), action)
         assertTrue(json.contains("\"type\":\"while\""), json)
+        assertTrue(json.contains("\"maxIterations\":20"), json)
+        // @EncodeDefault(NEVER): il ramo maxIterationsVar è additivo e NON tocca il byte layout del
+        // while letterale già approvato (fingerprint v1 stabile).
+        assertFalse(json.contains("maxIterationsVar"), json)
         assertEquals(action, ArgusJson.decodeFromString(Action.serializer(), json))
-        // maxIterations OBBLIGATORIO: un while senza il campo non deserializza (come InvokeLlmV2.timeoutMs).
-        assertFailsWith<SerializationException> {
-            ArgusJson.decodeFromString(
-                Action.serializer(),
-                json.replace(",\"maxIterations\":20", ""),
-            )
-        }
+    }
+
+    @Test fun `while with maxIterationsVar is additive, round-trips and omits the literal`() {
+        val action: Action = Action.While(
+            condition = Condition.BooleanLiteral(true),
+            body = listOf(Action.SetFlashlight(true)),
+            maxIterationsVar = "count",
+        )
+        val json = ArgusJson.encodeToString(Action.serializer(), action)
+        assertTrue(json.contains("\"maxIterationsVar\":\"count\""), json)
+        // XOR sul wire: il letterale è assente quando si usa la variabile.
+        assertFalse(json.contains("\"maxIterations\""), json)
+        assertEquals(action, ArgusJson.decodeFromString(Action.serializer(), json))
     }
 
     @Test fun `wait action is explicit and round-trips`() {

@@ -597,6 +597,45 @@ class BridgeTest(unittest.TestCase):
         tools = {"run_shell", "show_notification", "set_flashlight"}
         self.assertTrue(bridge.validate_draft(draft, tools, set(), set()))
 
+    def test_p4_while_max_iterations_var_references_a_variable(self):
+        # Il conteggio del while può essere una variabile NUMBER (es. random_int) invece di un
+        # letterale: "lampeggia la torcia ${blinks} volte". XOR imposto col letterale.
+        tools = {"set_flashlight"}
+
+        def draft(while_extra):
+            action = {
+                "type": "while",
+                "condition": {"type": "boolean_literal", "value": True},
+                "body": [
+                    {"type": "set_flashlight", "on": True},
+                    {"type": "set_flashlight", "on": False},
+                ],
+            }
+            action.update(while_extra)
+            return {
+                "name": "torcia lampeggia n volte",
+                "trigger": self.P4_TIME_TRIGGER,
+                "vars": [{"type": "random_int", "name": "blinks", "max": 5}],
+                "actions": [action],
+            }
+
+        # Variabile dichiarata → valido.
+        self.assertTrue(bridge.validate_draft(draft({"maxIterationsVar": "blinks"}), tools, set(), set()))
+        # Variabile non dichiarata → rifiutato.
+        self.assertFalse(bridge.validate_draft(draft({"maxIterationsVar": "ghost"}), tools, set(), set()))
+        # XOR: entrambi maxIterations e maxIterationsVar → rifiutato.
+        self.assertFalse(
+            bridge.validate_draft(draft({"maxIterations": 5, "maxIterationsVar": "blinks"}), tools, set(), set())
+        )
+        # Nessuno dei due → rifiutato.
+        self.assertFalse(bridge.validate_draft(draft({}), tools, set(), set()))
+        # Budget worst-case: conteggio ignoto ⇒ 1000; con delay 1h il gate 6h scatta e rifiuta.
+        self.assertFalse(
+            bridge.validate_draft(
+                draft({"maxIterationsVar": "blinks", "delayBetweenMs": 3_600_000}), tools, set(), set()
+            )
+        )
+
     def test_p4_captured_text_var_compared_with_gt_validates(self):
         # device-found: un invoke_llm cattura un valore (captureAs, sempre TEXT/TAINTED) e lo confronta
         # numericamente con GT contro un letterale. Il bridge NON deve rifiutarlo per incompatibilità di

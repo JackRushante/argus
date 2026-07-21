@@ -299,8 +299,11 @@ Control-flow actions (containers, NOT leaf actions; never eval, never goto). Nes
 at most 64 action nodes total across the whole program:
 - {"type":"if", "condition":FlowCondition, "then":[Action,...], "orElse":[Action,...] (optional)}
 - {"type":"while", "condition":FlowCondition, "body":[Action,...],
-   "maxIterations":integer 1..1000, "delayBetweenMs":integer 0..3600000 (optional)}
-   // BOUNDED loop: maxIterations is REQUIRED; a counter plus a time deadline forbid infinite loops.
+   "maxIterations":integer 1..1000 | "maxIterationsVar":string,
+   "delayBetweenMs":integer 0..3600000 (optional)}
+   // BOUNDED loop: provide EXACTLY ONE of maxIterations / maxIterationsVar (a counter plus a time
+   // deadline forbid infinite loops). maxIterationsVar names a NUMBER variable (e.g. a random_int)
+   // read at run time and clamped to 1..1000 — use it to repeat "${n} times" with a dynamic count.
 - {"type":"wait", "durationMs":integer 1..3600000}   // cooperative pause, <= 1 hour.
 The worst-case time budget of the whole program must stay <= 6 hours (reduce maxIterations/delays).
 If the user asks for a value beyond any of these bounds, do not silently clamp it and do not ask a
@@ -1405,16 +1408,33 @@ def _validate_action_node(
             for child in list(then) + list(orelse)
         )
     if kind == "while":
-        if not _exact_keys(action, {"type", "condition", "body", "maxIterations"}, {"delayBetweenMs"}):
+        # Conteggio iterazioni: ESATTAMENTE UNO tra maxIterations (letterale 1..1000) e
+        # maxIterationsVar (nome di variabile, clampata a runtime lato app). Allineato al lato Kotlin.
+        if not _exact_keys(
+            action, {"type", "condition", "body"},
+            {"maxIterations", "maxIterationsVar", "delayBetweenMs"},
+        ):
             return False
         body = action["body"]
         if not isinstance(body, list) or not body:
             return False
-        max_iterations = action["maxIterations"]
-        if not _is_int(max_iterations) or not (
-            MIN_WHILE_ITERATIONS <= max_iterations <= MAX_WHILE_ITERATIONS
-        ):
+        has_literal = "maxIterations" in action
+        has_var = "maxIterationsVar" in action
+        if has_literal == has_var:  # XOR: né entrambi né nessuno.
             return False
+        if has_literal:
+            max_iterations = action["maxIterations"]
+            if not _is_int(max_iterations) or not (
+                MIN_WHILE_ITERATIONS <= max_iterations <= MAX_WHILE_ITERATIONS
+            ):
+                return False
+        else:
+            # Il bridge NON traccia i tipi delle var (l'app è l'autorità): richiede solo che il nome
+            # sia una variabile DICHIARATA (binding o captureAs). Divergenza permissiva coerente con
+            # _validate_var_compare.
+            iterations_var = action["maxIterationsVar"]
+            if not isinstance(iterations_var, str) or iterations_var not in known_vars:
+                return False
         delay = action.get("delayBetweenMs", 0)
         if not _is_int(delay) or not 0 <= delay <= MAX_WHILE_DELAY_MS:
             return False
@@ -1459,9 +1479,14 @@ def _action_budget_ms(action: Any) -> int:
             _worst_case_budget_ms(action.get("orElse", [])),
         )
     if kind == "while":
-        iterations = action.get("maxIterations", 0)
+        # Con maxIterationsVar il conteggio è ignoto a compile-time → worst-case = MAX_WHILE_ITERATIONS
+        # (1000), così il gate 6h non è aggirabile spostando il conteggio in una variabile.
+        if "maxIterationsVar" in action:
+            iterations = MAX_WHILE_ITERATIONS
+        else:
+            iterations = action.get("maxIterations", 0)
+            iterations = iterations if _is_int(iterations) and iterations > 0 else 0
         delay = action.get("delayBetweenMs", 0)
-        iterations = iterations if _is_int(iterations) and iterations > 0 else 0
         delay = delay if _is_int(delay) and delay > 0 else 0
         return iterations * (delay + _worst_case_budget_ms(action.get("body", [])))
     return LEAF_ACTION_BUDGET_MS

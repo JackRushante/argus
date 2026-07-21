@@ -254,6 +254,126 @@ class ProgramInterpreterTest {
     }
 
     @Test
+    fun `while iteration count comes from a NUMBER variable`() = runTest {
+        val interpreter = interpreter(
+            runner = ProgramActionRunner { _, _ -> ProgramActionResult(ActionResult.Success) },
+        )
+        val result = interpreter.execute(
+            Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+            timeEvent(),
+            bindings = listOf(VarBinding.Literal("n", "3", VarType.NUMBER, ConfidentialityLabel.PUBLIC)),
+            actions = listOf(
+                Action.While(
+                    Condition.BooleanLiteral(true),
+                    body = listOf(Action.SetFlashlight(true)),
+                    maxIterationsVar = "n",
+                ),
+            ),
+        )
+        assertTrue(result.completed)
+        assertEquals(
+            listOf("1.while[1].1", "1.while[2].1", "1.while[3].1"),
+            result.steps.map { it.path.value },
+        )
+    }
+
+    @Test
+    fun `while with a non-integer variable count fails closed`() = runTest {
+        var calls = 0
+        val interpreter = interpreter(
+            runner = ProgramActionRunner { _, _ ->
+                calls += 1
+                ProgramActionResult(ActionResult.Success)
+            },
+        )
+        // "3.5" è un NUMBER valido come binding ma non coercibile a intero ⇒ conteggio ignoto.
+        val result = interpreter.execute(
+            Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+            timeEvent(),
+            bindings = listOf(VarBinding.Literal("n", "3.5", VarType.NUMBER, ConfidentialityLabel.PUBLIC)),
+            actions = listOf(
+                Action.While(
+                    Condition.BooleanLiteral(true),
+                    body = listOf(Action.SetFlashlight(true)),
+                    maxIterationsVar = "n",
+                ),
+            ),
+        )
+        assertEquals("while_count_unavailable", result.stopCode)
+        assertEquals("1", result.stopPath?.value)
+        assertEquals(0, calls)
+    }
+
+    @Test
+    fun `while variable count above the ceiling is clamped to 1000`() = runTest {
+        var calls = 0
+        val interpreter = interpreter(
+            runner = ProgramActionRunner { _, _ ->
+                calls += 1
+                ProgramActionResult(ActionResult.Success)
+            },
+        )
+        val result = interpreter.execute(
+            Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+            timeEvent(),
+            bindings = listOf(VarBinding.Literal("n", "5000", VarType.NUMBER, ConfidentialityLabel.PUBLIC)),
+            actions = listOf(
+                Action.While(
+                    Condition.BooleanLiteral(true),
+                    body = listOf(Action.SetFlashlight(true)),
+                    maxIterationsVar = "n",
+                ),
+            ),
+        )
+        assertTrue(result.completed)
+        // 5000 clampato a 1000: esattamente 1000 iterazioni eseguite.
+        assertEquals(1000, calls)
+        assertEquals(1000, result.steps.size)
+    }
+
+    @Test
+    fun `random_int drives the number of flashlight blinks in a while`() = runTest {
+        // Il caso d'uso: lampeggia la torcia il numero-di-volte di un random_int.
+        val seen = mutableListOf<ResolvedProgramAction>()
+        val interpreter = ProgramInterpreter(
+            runner = ProgramActionRunner { action, _ ->
+                seen += action
+                ProgramActionResult(ActionResult.Success)
+            },
+            stateProvider = { DeviceState() },
+            conditionEvaluator = evaluator,
+            pause = {},
+            randomInt = { bound ->
+                assertEquals(5, bound)
+                3 // il motore "estrae" 3 lampeggi.
+            },
+        )
+        val result = interpreter.execute(
+            Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+            timeEvent(),
+            bindings = listOf(VarBinding.RandomInt("blinks", max = 5)),
+            actions = listOf(
+                Action.While(
+                    Condition.BooleanLiteral(true),
+                    body = listOf(Action.SetFlashlight(true), Action.SetFlashlight(false)),
+                    maxIterationsVar = "blinks",
+                ),
+            ),
+        )
+        assertTrue(result.completed)
+        // 3 giri × (on, off) = 6 foglie.
+        assertEquals(
+            listOf(
+                "1.while[1].1", "1.while[1].2",
+                "1.while[2].1", "1.while[2].2",
+                "1.while[3].1", "1.while[3].2",
+            ),
+            result.steps.map { it.path.value },
+        )
+        assertEquals(6, seen.size)
+    }
+
+    @Test
     fun `capture submission without a concrete output blocks the program`() = runTest {
         var calls = 0
         val interpreter = interpreter(

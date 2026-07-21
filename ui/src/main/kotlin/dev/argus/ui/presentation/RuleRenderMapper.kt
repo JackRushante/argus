@@ -120,9 +120,9 @@ object RuleRenderMapper {
         )
         is Action.While -> ProgramNode.WhileNode(
             title = l.pick(
-                "Repeat up to ${a.maxIterations} times" +
+                "Repeat ${whileCountEn(a)}" +
                     (if (a.delayBetweenMs > 0) " · ${a.delayBetweenMs} ms between" else ""),
-                "Ripeti fino a ${a.maxIterations} volte" +
+                "Ripeti ${whileCountIt(a)}" +
                     (if (a.delayBetweenMs > 0) " · ${a.delayBetweenMs} ms tra le iterazioni" else ""),
             ),
             conditionLines = flattenConditions(a.condition, 0, l),
@@ -130,6 +130,15 @@ object RuleRenderMapper {
         )
         else -> ProgramNode.Leaf(actionRow(a, l))
     }
+
+    // Conteggio iterazioni del while: letterale ("up to N times") oppure variabile NUMBER, che
+    // mostra il nome in sintassi di interpolazione col tetto runtime esplicito ("up to ${n} times
+    // (max 1000)").
+    private fun whileCountEn(a: Action.While): String =
+        a.maxIterationsVar?.let { "up to \${$it} times (max 1000)" } ?: "up to ${a.maxIterations} times"
+
+    private fun whileCountIt(a: Action.While): String =
+        a.maxIterationsVar?.let { "fino a \${$it} volte (max 1000)" } ?: "fino a ${a.maxIterations} volte"
 
     // ---------------------------------------------------------------------------------------------
     // Variabili P4 — resa della DEFINIZIONE (mai valori runtime): tipo, integrità, riservatezza,
@@ -647,8 +656,9 @@ object RuleRenderMapper {
         is Action.While -> row(
             iconKey = "control_flow",
             label = l.pick(
-                "Repeat (up to ${a.maxIterations} times)",
-                "Ripeti (max ${a.maxIterations} volte)",
+                "Repeat (${whileCountEn(a)})",
+                a.maxIterationsVar?.let { "Ripeti (fino a \${$it} volte, max 1000)" }
+                    ?: "Ripeti (max ${a.maxIterations} volte)",
             ),
             detail = l.pick(
                 "${a.body.size} actions per iteration" +

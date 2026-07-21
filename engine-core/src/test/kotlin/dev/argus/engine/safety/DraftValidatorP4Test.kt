@@ -269,6 +269,112 @@ class DraftValidatorP4Test {
         assertTrue("while_delay_invalid" in errors(v.validate(whileDelay(-1), emptySet())))
     }
 
+    // --- while maxIterationsVar (conteggio da variabile NUMBER) --------------------------------
+
+    @Test fun `while iteration count may reference an existing NUMBER variable`() {
+        val d = draft(
+            actions = listOf(
+                Action.While(
+                    condition = flowCond,
+                    body = listOf(Action.SetFlashlight(true), Action.SetFlashlight(false)),
+                    maxIterationsVar = "n",
+                ),
+            ),
+            vars = listOf(literal("n", "3", VarType.NUMBER)),
+        )
+        val issues = errors(v.validate(d, emptySet()))
+        assertFalse("while_iterations_ambiguous" in issues)
+        assertFalse("while_iterations_var_undeclared" in issues)
+        assertFalse("while_iterations_var_type_invalid" in issues)
+        assertFalse("var_not_definitely_assigned" in issues)
+        // Un random_int (NUMBER, CLEAN) è il caso d'uso canonico e resta valido.
+        val random = draft(
+            actions = listOf(
+                Action.While(flowCond, listOf(Action.SetFlashlight(true)), maxIterationsVar = "dice"),
+            ),
+            vars = listOf(VarBinding.RandomInt("dice", max = 6)),
+        )
+        assertFalse("while_iterations_var_type_invalid" in errors(v.validate(random, emptySet())))
+    }
+
+    @Test fun `while maxIterationsVar rejects non-NUMBER, undeclared and unassigned variables`() {
+        fun whileVar(name: String, vars: List<VarBinding>) = draft(
+            actions = listOf(Action.While(flowCond, listOf(Action.SetFlashlight(true)), maxIterationsVar = name)),
+            vars = vars,
+        )
+        // TEXT → tipo non valido.
+        assertTrue(
+            "while_iterations_var_type_invalid" in
+                errors(v.validate(whileVar("t", listOf(literal("t", "3", VarType.TEXT))), emptySet())),
+        )
+        // BOOLEAN → tipo non valido.
+        assertTrue(
+            "while_iterations_var_type_invalid" in
+                errors(v.validate(whileVar("b", listOf(literal("b", "true", VarType.BOOLEAN))), emptySet())),
+        )
+        // Nome non dichiarato → undeclared.
+        assertTrue(
+            "while_iterations_var_undeclared" in
+                errors(v.validate(whileVar("missing", emptyList()), emptySet())),
+        )
+        // Dichiarata ma non ancora assegnata (capture in un ramo che può non partire).
+        val unassigned = draft(
+            actions = listOf(
+                Action.If(
+                    Condition.BooleanLiteral(true),
+                    then = listOf(Action.RunShell("id", captureAs = "out")),
+                ),
+                Action.While(flowCond, listOf(Action.SetFlashlight(true)), maxIterationsVar = "out"),
+            ),
+        )
+        assertTrue("var_not_definitely_assigned" in errors(v.validate(unassigned, emptySet())))
+    }
+
+    @Test fun `while requires exactly one of maxIterations and maxIterationsVar`() {
+        // Entrambi presenti → ambiguo.
+        val both = draft(
+            actions = listOf(
+                Action.While(
+                    flowCond, listOf(Action.SetFlashlight(true)),
+                    maxIterations = 5, maxIterationsVar = "n",
+                ),
+            ),
+            vars = listOf(literal("n", "3", VarType.NUMBER)),
+        )
+        assertTrue("while_iterations_ambiguous" in errors(v.validate(both, emptySet())))
+
+        // Nessuno dei due → ambiguo.
+        val neither = draft(
+            actions = listOf(Action.While(flowCond, listOf(Action.SetFlashlight(true)))),
+        )
+        assertTrue("while_iterations_ambiguous" in errors(v.validate(neither, emptySet())))
+    }
+
+    @Test fun `worst case budget with a variable count uses the 1000 ceiling`() {
+        // Conteggio ignoto a compile-time ⇒ worst case 1000: con delay 1h il budget 6h è superato.
+        val heavy = draft(
+            actions = listOf(
+                Action.While(
+                    flowCond, listOf(Action.SetWifi(true)),
+                    maxIterationsVar = "n", delayBetweenMs = 3_600_000,
+                ),
+            ),
+            vars = listOf(literal("n", "2", VarType.NUMBER)),
+        )
+        assertTrue("time_budget_exceeded" in errors(v.validate(heavy, emptySet())))
+        // Con delay breve resta sotto il tetto (1000 * 1000 ms).
+        val light = draft(
+            actions = listOf(
+                Action.While(
+                    flowCond, listOf(Action.SetWifi(true)),
+                    maxIterationsVar = "n", delayBetweenMs = 1_000,
+                ),
+            ),
+            vars = listOf(literal("n", "2", VarType.NUMBER)),
+        )
+        assertFalse("time_budget_exceeded" in errors(v.validate(light, emptySet())))
+    }
+
     @Test fun `wait makes timed body sequences explicit and is bounded`() {
         val flashing = draft(
             listOf(
