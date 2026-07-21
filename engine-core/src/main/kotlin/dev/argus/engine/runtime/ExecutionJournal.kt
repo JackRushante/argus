@@ -28,6 +28,8 @@ data class ActionJournalEntry(
     val atMillis: Long,
     /** Codice diagnostico non sensibile; mai messaggi/command/contact/text raw. */
     val errorCode: String? = null,
+    /** Path P4 stabile; per le esecuzioni legacy è l'indice one-based. */
+    val actionPath: String = (actionIndex + 1).toString(),
 ) {
     init {
         require(actionIndex >= 0) { "actionIndex non può essere negativo" }
@@ -36,6 +38,7 @@ data class ActionJournalEntry(
             "errorCode non valido"
         }
         require(atMillis >= 0) { "atMillis non può essere negativo" }
+        ActionPath(actionPath)
     }
 }
 
@@ -117,6 +120,7 @@ object NoopExecutionJournal : ExecutionJournal {
 internal fun Action.journalType(): String = when (this) {
     is Action.SetWifi -> ActionTypeIds.SET_WIFI
     is Action.SetBluetooth -> ActionTypeIds.SET_BLUETOOTH
+    is Action.SetMobileData -> ActionTypeIds.SET_MOBILE_DATA
     is Action.SetDnd -> ActionTypeIds.SET_DND
     is Action.SetRinger -> ActionTypeIds.SET_RINGER
     is Action.LaunchApp -> ActionTypeIds.LAUNCH_APP
@@ -127,15 +131,20 @@ internal fun Action.journalType(): String = when (this) {
     is Action.WhatsAppReply -> ActionTypeIds.WHATSAPP_REPLY
     is Action.RunShell -> ActionTypeIds.RUN_SHELL
     is Action.CopyToClipboard -> ActionTypeIds.COPY_TO_CLIPBOARD
+    is Action.CopyText -> ActionTypeIds.COPY_TEXT
     is Action.SetAlarm -> ActionTypeIds.SET_ALARM
     is Action.SetTimer -> ActionTypeIds.SET_TIMER
     is Action.SetVolume -> ActionTypeIds.SET_VOLUME
     is Action.SetFlashlight -> ActionTypeIds.SET_FLASHLIGHT
+    is Action.SetDarkMode -> ActionTypeIds.SET_DARK_MODE
     is Action.OpenSettingsScreen -> ActionTypeIds.OPEN_SETTINGS_SCREEN
     is Action.Vibrate -> ActionTypeIds.VIBRATE
+    is Action.Wait -> ActionTypeIds.WAIT
     is Action.WriteSetting -> ActionTypeIds.WRITE_SETTING
     is Action.InvokeLlm -> ActionTypeIds.INVOKE_LLM
     is Action.InvokeLlmV2 -> ActionTypeIds.INVOKE_LLM_V2
+    is Action.If -> ActionTypeIds.IF
+    is Action.While -> ActionTypeIds.WHILE
 }
 
 internal fun ActionResult.journalOutcome(): ActionJournalOutcome = when (this) {

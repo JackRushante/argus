@@ -78,6 +78,71 @@ class V1FingerprintCompatibilityTest {
         )
     }
 
+    /**
+     * ADDITIVO (P4 §2.6): una regola con variabili, control-flow (if/while), VarCompare, captureAs
+     * e interpolazione ${…}, con un hash PROPRIO calcolato e PINNATO. Non tocca gli hash v1 sopra:
+     * quelle regole non usano le feature P4 e serializzano byte-identiche (verificato dal test sopra).
+     * Se questo hash cambia, la serializzazione del modello P4 è cambiata e va ri-approvata a monte.
+     */
+    @Test
+    fun `p4 rule fingerprint is pinned`() {
+        val p4 = Automation(
+            id = AutomationId("v1-p4"),
+            name = "v1-p4",
+            createdBy = CreatedBy.USER,
+            status = AutomationStatus.PENDING_APPROVAL,
+            trigger = Trigger.Notification("com.whatsapp", "conversation:fixture", isGroup = false),
+            actions = listOf(
+                Action.If(
+                    condition = Condition.VarCompare("cmd", CmpOp.CONTAINS, "urgente"),
+                    then = listOf(
+                        Action.RunShell("id", captureAs = "uid"),
+                        Action.While(
+                            condition = Condition.VarCompare("flag", CmpOp.EQ, "true"),
+                            body = listOf(Action.SetFlashlight(true), Action.SetFlashlight(false)),
+                            maxIterations = 20,
+                            delayBetweenMs = 500,
+                        ),
+                    ),
+                    orElse = listOf(Action.ShowNotification("stato", "Da: \${sender}")),
+                ),
+                Action.InvokeLlm(
+                    "riassumi",
+                    listOf("notification"),
+                    listOf("whatsapp_reply"),
+                    true,
+                    captureAs = "answer",
+                ),
+            ),
+            vars = listOf(
+                VarBinding.TriggerPayload(
+                    "cmd",
+                    TriggerField.TEXT,
+                    confidentiality = ConfidentialityLabel.PRIVATE,
+                ),
+                VarBinding.TriggerPayload(
+                    "sender",
+                    TriggerField.SENDER,
+                    confidentiality = ConfidentialityLabel.PRIVATE,
+                ),
+                VarBinding.Literal(
+                    "flag",
+                    "true",
+                    VarType.BOOLEAN,
+                    ConfidentialityLabel.PUBLIC,
+                ),
+            ),
+            enabled = false,
+            priority = 3,
+            cooldownMs = 12_345,
+            schemaVersion = AUTOMATION_SCHEMA_VERSION_P4,
+        )
+        assertEquals(
+            "f50bc0201fca1bef5feaa2e2dad3677b2e204ee8a6d696261d2d74dc42b6fa40",
+            ApprovalFingerprints.of(p4).value,
+        )
+    }
+
     private fun automation(
         id: String,
         trigger: Trigger,

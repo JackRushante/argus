@@ -147,6 +147,24 @@ class OpenAICompatTransportTest {
         assertEquals(0L, usage.outputTokens)
     }
 
+    @Test fun `implausible remote usage is discarded without losing a valid reply`(): Unit = runBlocking {
+        server.enqueue(jsonResponse(
+            """
+            {"id":"1","model":"gpt-5.5",
+             "choices":[{"index":0,"message":{"role":"assistant","content":"Risposta valida"}}],
+             "usage":{"prompt_tokens":${dev.argus.engine.brain.TurnUsage.MAX_TOKENS_PER_TURN + 1},
+                      "completion_tokens":1}}
+            """.trimIndent(),
+        ))
+        val t = transport(ProviderId.OPENAI, model = "gpt-5.5")
+
+        val result = t.act(fireContext(), "rispondi", listOf("notification"), listOf("whatsapp_reply"))
+
+        assertEquals("Risposta valida", result.text)
+        assertNull(result.metaError)
+        assertNull(result.usage)
+    }
+
     @Test fun `openrouter default model is resolved from catalog`(): Unit = runBlocking {
         server.enqueue(jsonResponse(
             """
@@ -624,6 +642,100 @@ class OpenAICompatTransportTest {
 
         assertEquals(TransportErrorKind.CONFIGURATION, error.kind)
         assertNull(server.takeRequest(200, TimeUnit.MILLISECONDS))
+    }
+
+    // --- P4-D2 slice 1: actResolved — dato runtime TAINTED in un messaggio DATA separato,
+    //     MAI nel system (che porta solo il marker opaco {{ARGUS_RUNTIME_DATA_n}}) ---
+
+    @Test fun `actResolved keeps the runtime value out of system and in a delimited data message`(): Unit = runBlocking {
+        server.enqueue(jsonResponse(
+            """
+            {"id":"1","model":"gpt-5.5",
+             "choices":[{"index":0,"message":{"role":"assistant",
+               "tool_calls":[{"id":"c1","type":"function","function":{"name":"whatsapp_reply","arguments":"{\"text\":\"Fatto.\"}"}}]}}],
+             "usage":{"prompt_tokens":40,"completion_tokens":5}}
+            """.trimIndent(),
+        ))
+        val t = transport(ProviderId.OPENAI, model = "gpt-5.5")
+        val resolved = RuntimeDataTestFixture.resolved()
+
+        val result = t.actResolved(
+            fireContext(), resolved.goal, listOf("notification"), listOf("whatsapp_reply"), resolved.runtimeData,
+        )
+
+        assertEquals("Fatto.", result.text)
+        val root = Json.parseToJsonElement(
+            assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
+        ).jsonObject
+        val messages = root.getValue("messages").jsonArray
+        val system = messages.first { it.jsonObject.getValue("role").jsonPrimitive.content == "system" }
+            .jsonObject.getValue("content").jsonPrimitive.content
+        val userConcat = messages.filter { it.jsonObject.getValue("role").jsonPrimitive.content == "user" }
+            .joinToString("\n") { it.jsonObject.getValue("content").jsonPrimitive.content }
+        assertFalse(RuntimeDataTestFixture.SENTINEL in system, "il valore runtime non deve entrare nel system")
+        assertTrue("{{ARGUS_RUNTIME_DATA_1}}" in system, "il system deve portare solo il marker opaco")
+        assertTrue(RuntimeDataTestFixture.SENTINEL in userConcat, "il valore runtime deve entrare nel messaggio DATA")
+        assertTrue("ARGUS_RUNTIME_DATA_1 = ${RuntimeDataTestFixture.SENTINEL}" in userConcat)
+    }
+
+    @Test fun `actResolved on the responses endpoint isolates the runtime value from the system input`(): Unit = runBlocking {
+        server.enqueue(jsonResponse(
+            """
+            {"model":"gpt-5.5",
+             "output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Fatto."}]}],
+             "usage":{"input_tokens":100,"output_tokens":10}}
+            """.trimIndent(),
+        ))
+        val t = transport(ProviderId.OPENAI, model = "gpt-5.5")
+        val resolved = RuntimeDataTestFixture.resolved()
+
+        val result = t.actResolved(
+            fireContext(), resolved.goal, listOf("notification"),
+            listOf("whatsapp_reply", "web.search"), resolved.runtimeData,
+        )
+
+        assertEquals("Fatto.", result.text)
+        val request = assertNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("/responses", request.path)
+        val input = Json.parseToJsonElement(request.body.readUtf8()).jsonObject.getValue("input").jsonArray
+        val system = input.first { it.jsonObject.getValue("role").jsonPrimitive.content == "system" }
+            .jsonObject.getValue("content").jsonPrimitive.content
+        val userConcat = input.filter { it.jsonObject.getValue("role").jsonPrimitive.content == "user" }
+            .joinToString("\n") { it.jsonObject.getValue("content").jsonPrimitive.content }
+        assertFalse(RuntimeDataTestFixture.SENTINEL in system)
+        assertTrue("{{ARGUS_RUNTIME_DATA_1}}" in system)
+        assertTrue(RuntimeDataTestFixture.SENTINEL in userConcat)
+    }
+
+    @Test fun `actResolved on gemini native keeps the runtime value out of systemInstruction`(): Unit = runBlocking {
+        server.enqueue(jsonResponse(
+            """
+            {"candidates":[{"content":{"role":"model","parts":[{"text":"Fatto."}]}}],
+             "usageMetadata":{"promptTokenCount":45,"candidatesTokenCount":9},
+             "modelVersion":"gemini-2.5-flash"}
+            """.trimIndent(),
+        ))
+        val t = transport(ProviderId.GEMINI, model = "gemini-2.5-flash")
+        val resolved = RuntimeDataTestFixture.resolved()
+
+        val result = t.actResolved(
+            fireContext(), resolved.goal, listOf("notification"),
+            listOf("whatsapp_reply", "web.search"), resolved.runtimeData,
+        )
+
+        assertEquals("Fatto.", result.text)
+        val request = assertNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertTrue(request.path.orEmpty().contains(":generateContent"), "path nativo: ${request.path}")
+        val root = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
+        val systemInstruction = root.getValue("systemInstruction").jsonObject
+            .getValue("parts").jsonArray.joinToString("\n") { it.jsonObject.getValue("text").jsonPrimitive.content }
+        val contentsConcat = root.getValue("contents").jsonArray.joinToString("\n") { content ->
+            content.jsonObject.getValue("parts").jsonArray
+                .joinToString("\n") { it.jsonObject.getValue("text").jsonPrimitive.content }
+        }
+        assertFalse(RuntimeDataTestFixture.SENTINEL in systemInstruction)
+        assertTrue("{{ARGUS_RUNTIME_DATA_1}}" in systemInstruction)
+        assertTrue(RuntimeDataTestFixture.SENTINEL in contentsConcat)
     }
 
     private fun chatContent(content: String): String = buildJsonObject {

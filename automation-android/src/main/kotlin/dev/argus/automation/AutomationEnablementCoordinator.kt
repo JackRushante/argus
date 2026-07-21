@@ -1,8 +1,10 @@
 package dev.argus.automation
 
+import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.ApprovalFingerprint
+import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.AuditEvent
 import dev.argus.engine.runtime.AuditKind
 import dev.argus.engine.runtime.AuditSink
@@ -29,6 +31,25 @@ sealed interface EnablementResult {
     data object DisableCleanupDeferred : EnablementResult
 }
 
+/**
+ * Ri-arma un trigger [Trigger.Immediate] quando la regola one-shot viene RI-abilitata dalla lista.
+ *
+ * Un immediate fira una sola volta all'arm iniziale e si auto-consuma (disable). Riabilitarlo deve
+ * quindi ri-firare + ri-consumare, come chiede Lorenzo ("run again" alla Tasker). In produzione è
+ * implementato dal percorso `registerImmediate` del registrar (dispatch al motore via FGS +
+ * `disableIfApproved`), iniettato in [ArgusModule]. Interfaccia stretta apposta: evita di iniettare
+ * l'intero registrar nel coordinator e qualunque ciclo Hilt.
+ */
+fun interface ImmediateReArm {
+    /** @return true se il ri-arm immediato è partito (dispatch avviato); false se non applicabile. */
+    suspend fun rearm(automation: Automation): Boolean
+}
+
+/** Default per i caller/test esistenti: nessun ri-arm. */
+object NoopImmediateReArm : ImmediateReArm {
+    override suspend fun rearm(automation: Automation): Boolean = false
+}
+
 /** Mantiene stato Room e registrazione AlarmManager coerenti anche se il reconcile fallisce. */
 @Singleton
 class AutomationEnablementCoordinator @Inject constructor(
@@ -38,6 +59,7 @@ class AutomationEnablementCoordinator @Inject constructor(
     private val geofence: GeofenceTriggerRuntime = NoopGeofenceTriggerRuntime,
     private val sensor: SensorTriggerRuntime = NoopSensorTriggerRuntime,
     private val audit: AuditSink = NoopAuditSink,
+    private val immediateReArm: ImmediateReArm = NoopImmediateReArm,
 ) {
     private val mutex = Mutex()
 
@@ -89,6 +111,12 @@ class AutomationEnablementCoordinator @Inject constructor(
                 // Solo l'esito finale riuscito è un RULE_ENABLED: il rollback resta
                 // tracciato dal solo ENABLE_FAILED, senza doppi eventi ambigui.
                 recordLifecycle(id, AuditKind.RULE_ENABLED, "user")
+                // Il trigger immediato fira solo all'arm e si auto-consuma: riabilitarlo deve
+                // ri-firare + ri-consumare ("run again"). Gli altri trigger restano gestiti dai
+                // reconcile sopra e non vanno ri-armati qui.
+                if (current.trigger is Trigger.Immediate) {
+                    rearmImmediate(current)
+                }
                 EnablementResult.Updated
             }
         } catch (error: CancellationException) {
@@ -98,6 +126,22 @@ class AutomationEnablementCoordinator @Inject constructor(
             rollbackEnable(id, fingerprint)
             recordEnableFailed(id, "scheduling_failed")
             EnablementResult.SchedulingFailed
+        }
+    }
+
+    /**
+     * Ri-arma l'immediato riusando il percorso del registrar (`registerImmediate`): dispatch al
+     * motore e ri-consumo one-shot. In produzione il registrar sgancia il lavoro sull'FGS e torna
+     * subito, quindi non blocca la coroutine di enable. Un guasto qui non invalida un enable già
+     * durevole: la regola resta legittimamente armata, semplicemente non ha ri-firato.
+     */
+    private suspend fun rearmImmediate(automation: Automation) {
+        try {
+            immediateReArm.rearm(automation)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            // L'enable è già durevole in Room; non rieseguire né rollbackare per un fire mancato.
         }
     }
 

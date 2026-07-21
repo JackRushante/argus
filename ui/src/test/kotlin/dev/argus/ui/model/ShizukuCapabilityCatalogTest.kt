@@ -1,6 +1,7 @@
 package dev.argus.ui.model
 
 import dev.argus.engine.model.ActionTypeIds
+import dev.argus.ui.presentation.RenderLanguage
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -15,6 +16,14 @@ class ShizukuCapabilityCatalogTest {
 
     private val rows = ShizukuCapabilityCatalog.rows()
 
+    @Test
+    fun `english catalog does not leak italian production copy`() {
+        val english = ShizukuCapabilityCatalog.rows(RenderLanguage.EN)
+
+        assertTrue(english.any { it.title == "Run shell commands" })
+        assertTrue(english.none { it.title.contains("Eseguire") })
+    }
+
     private fun requirementOf(actionTypeId: String): ShizukuRequirement? =
         rows.firstOrNull { actionTypeId in it.actionTypeIds }?.requirement
 
@@ -23,8 +32,10 @@ class ShizukuCapabilityCatalogTest {
         listOf(
             ActionTypeIds.SET_WIFI,
             ActionTypeIds.SET_BLUETOOTH,
+            ActionTypeIds.SET_MOBILE_DATA,
             ActionTypeIds.RUN_SHELL,
             ActionTypeIds.WRITE_SETTING,
+            ActionTypeIds.SET_DARK_MODE,
         ).forEach { id ->
             assertEquals(ShizukuRequirement.REQUIRED, requirementOf(id), "atteso REQUIRED per $id")
         }
@@ -53,6 +64,7 @@ class ShizukuCapabilityCatalogTest {
             ActionTypeIds.VIBRATE,
             ActionTypeIds.SHOW_NOTIFICATION,
             ActionTypeIds.COPY_TO_CLIPBOARD,
+            ActionTypeIds.COPY_TEXT,
         ).forEach { id ->
             assertEquals(ShizukuRequirement.NOT_REQUIRED, requirementOf(id), "atteso NOT_REQUIRED per $id")
         }

@@ -15,6 +15,8 @@ class ActionPrivilegeTest {
         val privileged = listOf<Action>(
             Action.SetWifi(true),
             Action.SetBluetooth(true),
+            Action.SetMobileData(true),
+            Action.SetDarkMode(NightMode.ON),
             Action.RunShell("id"),
             Action.Tap(1, 2),
             Action.InputText("x"),
@@ -45,6 +47,7 @@ class ActionPrivilegeTest {
             Action.Vibrate(durationMs = 200),
             Action.WhatsAppReply("ok"),
             Action.CopyToClipboard(),
+            Action.CopyText("codice 1234"),
             Action.InvokeLlm(
                 goal = "rispondi",
                 contextSources = listOf("notification"),
@@ -72,6 +75,9 @@ class ActionPrivilegeTest {
     fun `requiresShizuku is true only for privileged actions`() {
         assertEquals(true, ActionPrivileges.requiresShizuku(Action.RunShell("id")))
         assertEquals(true, ActionPrivileges.requiresShizuku(Action.SetWifi(false)))
+        assertEquals(true, ActionPrivileges.requiresShizuku(Action.SetMobileData(false)))
+        assertEquals(true, ActionPrivileges.requiresShizuku(Action.SetDarkMode(NightMode.AUTO)))
+        assertEquals(false, ActionPrivileges.requiresShizuku(Action.CopyText("x")))
         assertEquals(false, ActionPrivileges.requiresShizuku(Action.LaunchApp("com.example")))
         assertEquals(false, ActionPrivileges.requiresShizuku(Action.SetDnd(DndMode.OFF)))
         assertEquals(false, ActionPrivileges.requiresShizuku(Action.SetAlarm(hour = 8, minute = 0)))

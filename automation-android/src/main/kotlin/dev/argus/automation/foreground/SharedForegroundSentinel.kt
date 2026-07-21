@@ -11,6 +11,8 @@ import kotlinx.coroutines.sync.withLock
 sealed interface SentinelDemand {
     data object Connectivity : SentinelDemand
     data object Sensor : SentinelDemand
+    /** Lease univoca per un dispatch nato da BroadcastReceiver: più eventi possono sovrapporsi. */
+    data class Execution(val token: Long) : SentinelDemand
 }
 
 /**
@@ -28,13 +30,23 @@ class SharedForegroundSentinel(
     private val active = mutableSetOf<SentinelDemand>()
 
     suspend fun setDemand(demand: SentinelDemand, required: Boolean): Boolean = mutex.withLock {
-        val wasActive = active.isNotEmpty()
-        if (required) active.add(demand) else active.remove(demand)
-        val nowActive = active.isNotEmpty()
-        when {
-            nowActive && !wasActive -> backend.start()
-            !nowActive && wasActive -> backend.stop()
-            else -> true
+        if (required) {
+            if (demand in active) return@withLock true
+            if (active.isEmpty() && !backend.start()) {
+                // Non memorizzare una transizione OS fallita: il prossimo reconcile deve
+                // ritentare davvero start(), non credere il servizio già vivo.
+                return@withLock false
+            }
+            active.add(demand)
+            true
+        } else {
+            if (demand !in active) return@withLock true
+            if (active.size == 1 && !backend.stop()) {
+                // Mantieni il demand finché lo stop non riesce, così la cleanup è ritentabile.
+                return@withLock false
+            }
+            active.remove(demand)
+            true
         }
     }
 

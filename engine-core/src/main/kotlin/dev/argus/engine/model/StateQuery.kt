@@ -90,6 +90,9 @@ object StateQueryPolicy {
 object StateValueCoercion {
     fun number(raw: String): Double? = raw.toDoubleOrNull()?.takeIf(Double::isFinite)
 
+    /** Coercizione a intero condivisa da probe e fire-time: un decimale non intero non è ammesso. */
+    fun integer(raw: String): Long? = number(raw)?.takeIf { it % 1.0 == 0.0 }?.toLong()
+
     fun boolean(raw: String): Boolean? = when (raw.trim().lowercase()) {
         "true", "1", "on" -> true
         "false", "0", "off" -> false

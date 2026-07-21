@@ -24,7 +24,7 @@ import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.CapabilityIds
 import dev.argus.engine.model.DndMode
-import dev.argus.engine.model.SCHEMA_VERSION
+import dev.argus.engine.model.AUTOMATION_SCHEMA_VERSION_V1
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.ActionCapabilities
 import dev.argus.engine.runtime.AutomationStore
@@ -44,6 +44,7 @@ import dev.argus.engine.safety.DraftWriteResult
 import dev.argus.engine.safety.NewDraft
 import dev.argus.engine.safety.PendingDraft
 import dev.argus.ui.model.ChatItem
+import dev.argus.ui.presentation.RenderLanguage
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -204,6 +205,32 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun `english chat emits english system notices`() = runTest(dispatcher) {
+        val viewModel = chatViewModel(QueuedBrain(), language = RenderLanguage.EN)
+        viewModel.prefillEdit(
+            text = "change it",
+            baseDraft = AutomationDraft(
+                name = "Rule",
+                trigger = Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
+                actions = listOf(Action.SetDnd(DndMode.TOTAL)),
+            ),
+        )
+        assertEquals(
+            "To preserve every field, Argus will send the configured AI service the full context " +
+                "of the displayed rule.",
+            viewModel.state.value.items.filterIsInstance<ChatItem.SystemNotice>().last().text,
+        )
+
+        viewModel.onInputChange("test")
+        viewModel.onSend()
+        runCurrent()
+        viewModel.onCancelPending()
+
+        val notice = viewModel.state.value.items.filterIsInstance<ChatItem.SystemNotice>().last()
+        assertEquals("Request cancelled.", notice.text)
+    }
+
+    @Test
     fun `edit prompt carries the complete current draft without persisting it`() {
         val base = AutomationDraft(
             name = "DND sera",
@@ -215,6 +242,7 @@ class ChatViewModelTest {
         val prompt = composeEditPrompt("spostala alle 22", base)
 
         assertTrue(prompt.contains("ARGUS_CURRENT_RULE_JSON"))
+        assertTrue(prompt.startsWith("Edit the Argus rule shown below."))
         assertTrue(prompt.contains("DND sera"))
         assertTrue(prompt.contains("TOTAL"))
         assertTrue(prompt.contains("60000"))
@@ -224,6 +252,7 @@ class ChatViewModelTest {
     private fun chatViewModel(
         brain: Brain,
         whitelist: ContactWhitelistStore = ViewModelWhitelistStore(),
+        language: RenderLanguage = RenderLanguage.IT,
     ): ChatViewModel {
         val automations = ViewModelAutomationStore()
         val drafts = ViewModelDraftRepository()
@@ -268,6 +297,7 @@ class ChatViewModelTest {
             approvalFlow = flow,
             drafts = drafts,
             whitelist = whitelist,
+            language = language,
         )
     }
 
@@ -357,7 +387,7 @@ private class ViewModelDraftRepository : DraftRepository {
             draft = newDraft.draft,
             createdBy = newDraft.createdBy,
             priority = newDraft.priority,
-            schemaVersion = SCHEMA_VERSION,
+            schemaVersion = AUTOMATION_SCHEMA_VERSION_V1,
             createdAtMillis = newDraft.atMillis,
             updatedAtMillis = newDraft.atMillis,
             baseAutomationFingerprint = newDraft.expectedAutomationFingerprint,

@@ -10,9 +10,7 @@ import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
-import dev.argus.automation.di.ApplicationScope
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.launch
+import dev.argus.automation.foreground.launchReceiverWork
 
 /**
  * Dipendenze dei receiver telefonia risolte via entry point espliciti: l'injection Hilt dei
@@ -25,9 +23,6 @@ import kotlinx.coroutines.launch
 @InstallIn(SingletonComponent::class)
 interface PhoneIngressEntryPoint {
     fun phoneEventIngress(): PhoneEventIngress
-
-    @ApplicationScope
-    fun applicationScope(): CoroutineScope
 }
 
 private fun entryPoint(context: Context): PhoneIngressEntryPoint = EntryPointAccessors
@@ -52,13 +47,8 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
         Log.d(TAG, "sms ricevuto: parts=${parts.size}")
         if (parts.isEmpty()) return
         val entry = entryPoint(context)
-        val pending = goAsync()
-        entry.applicationScope().launch {
-            try {
-                entry.phoneEventIngress().onSms(parts)
-            } finally {
-                pending.finish()
-            }
+        launchReceiverWork(context, "sms") {
+            entry.phoneEventIngress().onSms(parts)
         }
     }
 
@@ -76,13 +66,8 @@ class PhoneStateBroadcastReceiver : BroadcastReceiver() {
         val atMillis = System.currentTimeMillis()
         Log.d(TAG, "call state: $state number=${number != null}")
         val entry = entryPoint(context)
-        val pending = goAsync()
-        entry.applicationScope().launch {
-            try {
-                entry.phoneEventIngress().onCallStateChanged(state, number, atMillis)
-            } finally {
-                pending.finish()
-            }
+        launchReceiverWork(context, "phone_state") {
+            entry.phoneEventIngress().onCallStateChanged(state, number, atMillis)
         }
     }
 

@@ -1,10 +1,129 @@
 package dev.argus.ui.presentation
 import dev.argus.engine.model.*
 import dev.argus.ui.model.RuleRender
+import dev.argus.ui.model.VarRow
+import dev.argus.ui.model.ProgramNode
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 class RuleRenderMapperTest {
+    // --- P4-E: le variabili approvate sono visibili in review (mai i valori runtime) ---
+    private fun otpRule() = Automation(
+        AutomationId("v1"), "OTP", CreatedBy.LLM, AutomationStatus.PENDING_APPROVAL,
+        Trigger.Notification("com.whatsapp", conversationId = "jid:1", sender = "Bank", isGroup = false),
+        listOf(Action.CopyToClipboard()),
+        vars = listOf(
+            VarBinding.TriggerPayload("otp", TriggerField.TEXT, confidentiality = ConfidentialityLabel.SECRET),
+            VarBinding.Literal("soglia", "10", VarType.NUMBER, ConfidentialityLabel.PUBLIC),
+        ),
+    )
+    @Test fun `P4 vars render with type, integrity, confidentiality and provenance (IT)`() {
+        val r = RuleRenderMapper.map(otpRule(), language = RenderLanguage.IT)
+        assertEquals(2, r.vars.size)
+        assertEquals(VarRow("otp", "testo", "esterno", "segreto", "notifica"), r.vars[0])
+        assertEquals(VarRow("soglia", "numero", "attendibile", "pubblico", "valore fisso"), r.vars[1])
+    }
+    @Test fun `P4 vars render english labels by default`() {
+        val r = RuleRenderMapper.map(otpRule(), language = RenderLanguage.EN)
+        assertEquals(VarRow("otp", "text", "external", "secret", "notification"), r.vars[0])
+        assertEquals(VarRow("soglia", "number", "trusted", "public", "fixed value"), r.vars[1])
+    }
+    @Test fun `flat v1 rule renders no vars`() {
+        val a = Automation(
+            AutomationId("f1"), "flat", CreatedBy.LLM, AutomationStatus.ARMED,
+            Trigger.Time(cron = "0 9 * * *", tz = "Europe/Rome"),
+            listOf(Action.SetDnd(DndMode.PRIORITY)),
+        )
+        assertTrue(RuleRenderMapper.map(a, language = RenderLanguage.IT).vars.isEmpty())
+    }
+    @Test fun `P4 program renders nested if_then_else recursively without phantom advanced approval (IT)`() {
+        val a = Automation(
+            AutomationId("p1"), "prog", CreatedBy.LLM, AutomationStatus.PENDING_APPROVAL,
+            Trigger.Immediate,
+            listOf(
+                Action.If(
+                    condition = Condition.VarCompare("n", CmpOp.GT, expected = "5"),
+                    then = listOf(Action.SetFlashlight(true)),
+                    orElse = listOf(Action.SetFlashlight(false)),
+                ),
+            ),
+            vars = listOf(VarBinding.Literal("n", "10", VarType.NUMBER, ConfidentialityLabel.PUBLIC)),
+        )
+        val r = RuleRenderMapper.map(a, language = RenderLanguage.IT)
+        val ifNode = r.program.single() as ProgramNode.IfNode
+        assertEquals("Se:", ifNode.title)
+        assertEquals("Allora:", ifNode.thenTitle)
+        assertEquals("Altrimenti:", ifNode.elseTitle)
+        assertEquals(1, ifNode.then.size)
+        assertEquals(1, ifNode.orElse.size)
+        // la foglia annidata è resa (non nascosta): accendi torcia
+        val leaf = ifNode.then.single() as ProgramNode.Leaf
+        assertTrue(leaf.row.label.contains("torcia", ignoreCase = true))
+        // nessun riferimento fantasma "approvazione avanzata"
+        assertTrue(r.actions.none { (it.detail ?: "").contains("avanzata") })
+    }
+    @Test fun `P4 parity var_compare renders a unary label without rhs (IT and EN)`() {
+        fun rule(op: CmpOp) = Automation(
+            AutomationId("par"), "parity", CreatedBy.LLM, AutomationStatus.PENDING_APPROVAL,
+            Trigger.Immediate,
+            listOf(Action.If(Condition.VarCompare("n", op), listOf(Action.SetFlashlight(true)))),
+            vars = listOf(VarBinding.Literal("n", "4", VarType.NUMBER, ConfidentialityLabel.PUBLIC)),
+        )
+        val itEven = RuleRenderMapper.map(rule(CmpOp.IS_EVEN), language = RenderLanguage.IT)
+            .program.single() as ProgramNode.IfNode
+        assertEquals(listOf("Solo se \${n} è pari"), itEven.conditionLines)
+        val enOdd = RuleRenderMapper.map(rule(CmpOp.IS_ODD), language = RenderLanguage.EN)
+            .program.single() as ProgramNode.IfNode
+        assertEquals(listOf("Only if \${n} is odd"), enOdd.conditionLines)
+    }
+
+    @Test fun `captureAs is shown on the producing action (IT and EN)`() {
+        val a = Automation(
+            AutomationId("c1"), "cap", CreatedBy.LLM, AutomationStatus.PENDING_APPROVAL,
+            Trigger.Immediate,
+            listOf(Action.RunShell("echo hi", captureAs = "out")),
+        )
+        assertEquals("catturato come out", RuleRenderMapper.map(a, language = RenderLanguage.IT).actions.single().detail)
+        assertEquals("captured as out", RuleRenderMapper.map(a, language = RenderLanguage.EN).actions.single().detail)
+    }
+    @Test fun `P4 while node renders iterations, delay and body in english`() {
+        val a = Automation(
+            AutomationId("p2"), "loop", CreatedBy.LLM, AutomationStatus.PENDING_APPROVAL,
+            Trigger.Immediate,
+            listOf(
+                Action.While(
+                    condition = Condition.BooleanLiteral(true),
+                    body = listOf(Action.SetFlashlight(true), Action.Wait(500)),
+                    maxIterations = 3,
+                    delayBetweenMs = 200,
+                ),
+            ),
+        )
+        val r = RuleRenderMapper.map(a, language = RenderLanguage.EN)
+        val w = r.program.single() as ProgramNode.WhileNode
+        assertEquals("Repeat up to 3 times · 200 ms between", w.title)
+        assertEquals(2, w.body.size)
+        assertTrue((w.body[1] as ProgramNode.Leaf).row.label.contains("Wait"))
+    }
+    @Test fun `P4 while node renders a variable iteration count with the runtime ceiling (EN and IT)`() {
+        fun rule() = Automation(
+            AutomationId("p3"), "loop-var", CreatedBy.LLM, AutomationStatus.PENDING_APPROVAL,
+            Trigger.Immediate,
+            listOf(
+                Action.While(
+                    condition = Condition.BooleanLiteral(true),
+                    body = listOf(Action.SetFlashlight(true)),
+                    maxIterationsVar = "blinks",
+                ),
+            ),
+            vars = listOf(VarBinding.RandomInt("blinks", max = 5)),
+        )
+        val en = RuleRenderMapper.map(rule(), language = RenderLanguage.EN).program.single() as ProgramNode.WhileNode
+        assertEquals("Repeat up to \${blinks} times (max 1000)", en.title)
+        val it = RuleRenderMapper.map(rule(), language = RenderLanguage.IT).program.single() as ProgramNode.WhileNode
+        assertEquals("Ripeti fino a \${blinks} volte (max 1000)", it.title)
+    }
+
     // I test pinnano il rendering ITALIANO passando SEMPRE `RenderLanguage.IT` esplicito: senza,
     // passerebbero solo perché la macchina ha locale it-IT (dipendenza nascosta dal locale). I casi
     // EN espliciti in fondo verificano il default inglese sulle render principali.
@@ -203,6 +322,38 @@ class RuleRenderMapperTest {
         assertTrue(render.actions.single().detail.orEmpty().contains("CLEAN, SECRET"))
     }
 
+    @Test fun `nested generative v2 receives the state disclosure privacy note`() {
+        val nested = Action.If(
+            condition = Condition.BooleanLiteral(true),
+            then = listOf(
+                Action.InvokeLlmV2(
+                    goal = "use battery state",
+                    stateContext = listOf(
+                        ApprovedStateContext(
+                            query = StateQuery.Builtin("battery.level"),
+                            valueType = StateValueType.NUMBER,
+                            policyVersion = StateQueryPolicy.VERSION,
+                            integrity = IntegrityLabel.CLEAN,
+                            confidentiality = ConfidentialityLabel.PRIVATE,
+                        ),
+                    ),
+                    allowedTools = emptyList(),
+                    replyTargetSender = false,
+                    timeoutMs = 60_000,
+                ),
+            ),
+        )
+
+        val render = RuleRenderMapper.map(withAction(nested), language = RenderLanguage.EN)
+
+        assertTrue(render.isGenerative)
+        assertEquals(
+            "The notification text and values from the listed state readers will be sent to the " +
+                "configured AI service to generate the reply.",
+            render.privacyNote,
+        )
+    }
+
     @Test fun `non-humanizable cron falls back to the raw expression`() {
         val a = Automation(
             AutomationId("t1"), "cron strano", CreatedBy.LLM, AutomationStatus.ARMED,
@@ -230,6 +381,51 @@ class RuleRenderMapperTest {
             language = RenderLanguage.IT,
         ).actions.single()
         assertEquals("il testo integrale del messaggio", whole.detail)
+    }
+
+    @Test fun `copy text and set mobile data render their own rows`() {
+        val copy = Automation(
+            AutomationId("ct"), "copia testo", CreatedBy.LLM, AutomationStatus.PENDING_APPROVAL,
+            Trigger.Immediate,
+            listOf(Action.CopyText("ordine #4821")),
+        )
+        val copyRow = RuleRenderMapper.map(copy, language = RenderLanguage.IT).actions.single()
+        assertEquals("Copia testo negli appunti", copyRow.label)
+        assertEquals("ordine #4821", copyRow.detail)
+
+        val data = Automation(
+            AutomationId("md"), "dati mobili", CreatedBy.LLM, AutomationStatus.PENDING_APPROVAL,
+            Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
+            listOf(Action.SetMobileData(false)),
+        )
+        assertEquals(
+            "Disattiva dati mobili",
+            RuleRenderMapper.map(data, language = RenderLanguage.IT).actions.single().label,
+        )
+        assertEquals(
+            "Turn on mobile data",
+            RuleRenderMapper.map(
+                data.copy(actions = listOf(Action.SetMobileData(true))),
+                language = RenderLanguage.EN,
+            ).actions.single().label,
+        )
+    }
+
+    @Test fun `set dark mode renders a bilingual row with the mode`() {
+        val rule = Automation(
+            AutomationId("dm"), "tema scuro", CreatedBy.LLM, AutomationStatus.PENDING_APPROVAL,
+            Trigger.Time(cron = "0 21 * * *", tz = "Europe/Rome"),
+            listOf(Action.SetDarkMode(NightMode.ON)),
+        )
+        val it = RuleRenderMapper.map(rule, language = RenderLanguage.IT).actions.single()
+        assertEquals("Imposta modalità scura", it.label)
+        assertEquals("on", it.detail)
+        val en = RuleRenderMapper.map(
+            rule.copy(actions = listOf(Action.SetDarkMode(NightMode.AUTO))),
+            language = RenderLanguage.EN,
+        ).actions.single()
+        assertEquals("Set dark mode", en.label)
+        assertEquals("auto", en.detail)
     }
 
     @Test fun `sms trigger renders its text filter integrally`() {
@@ -386,7 +582,7 @@ class RuleRenderMapperTest {
         assertEquals("When: WhatsApp notification from Wife (1:1 chat)", r.triggerLine)
         assertEquals("Generate and reply with AI", r.actions.single().label)
         assertEquals(
-            "The notification text will be sent to Hermes and to the cloud providers to generate the reply.",
+            "The notification text will be sent to the configured AI service to generate the reply.",
             r.privacyNote,
         )
     }

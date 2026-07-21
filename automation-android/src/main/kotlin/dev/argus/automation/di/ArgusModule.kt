@@ -18,6 +18,7 @@ import dev.argus.automation.AndroidTimeAlarmBackend
 import dev.argus.automation.AppPreferencesStore
 import dev.argus.automation.ApprovalFlow
 import dev.argus.automation.ArmedAutomationRegistrar
+import dev.argus.automation.ImmediateReArm
 import dev.argus.automation.ArgusRuntimeController
 import dev.argus.automation.AutomationNotifier
 import dev.argus.automation.ConfiguredBridgeBrain
@@ -42,6 +43,8 @@ import dev.argus.automation.FrameworkCurrentLocationProvider
 import dev.argus.automation.GenerativeLane
 import dev.argus.automation.LazyDeviceStateProvider
 import dev.argus.automation.NotificationEventDispatcher
+import dev.argus.automation.OneShotConsumptionRegistry
+import dev.argus.automation.ProcessOneShotConsumptionRegistry
 import dev.argus.automation.EngineSensorEventDispatcher
 import dev.argus.automation.RoomTimeAlarmStateStore
 import dev.argus.automation.ShizukuActionExecutor
@@ -49,6 +52,7 @@ import dev.argus.automation.base.AndroidBaseActionExecutor
 import dev.argus.automation.base.AndroidBaseActionSurface
 import dev.argus.automation.base.BaseActionSurface
 import dev.argus.automation.foreground.SharedForegroundSentinel
+import dev.argus.automation.foreground.ReceiverWorkLauncher
 import dev.argus.automation.foreground.SentinelDemand
 import dev.argus.automation.sensor.AndroidSignificantMotionBackend
 import dev.argus.automation.sensor.EligibleSensorRule
@@ -131,6 +135,7 @@ import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.runtime.ConditionEvaluator
 import dev.argus.engine.runtime.Engine
 import dev.argus.engine.runtime.ExecutionJournal
+import dev.argus.engine.runtime.ResolvedActionExecutor
 import dev.argus.engine.runtime.FirePolicy
 import dev.argus.engine.runtime.FirePolicySnapshotProvider
 import dev.argus.engine.runtime.RevalidatingFirePolicy
@@ -143,6 +148,7 @@ import dev.argus.engine.safety.DraftValidator
 import dev.argus.shizuku.PrivilegedShell
 import dev.argus.shizuku.ShizukuGateway
 import dev.argus.shizuku.ShizukuPrivilegedShell
+import dev.argus.ui.presentation.RenderLanguage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -159,6 +165,9 @@ annotation class ApplicationScope
 @Module
 @InstallIn(SingletonComponent::class)
 object ArgusModule {
+    @Provides
+    fun renderLanguage(): RenderLanguage = RenderLanguage.system()
+
     @Provides
     @Singleton
     @ApplicationScope
@@ -469,6 +478,11 @@ object ArgusModule {
 
     @Provides
     @Singleton
+    fun oneShotConsumptionRegistry(): OneShotConsumptionRegistry =
+        ProcessOneShotConsumptionRegistry()
+
+    @Provides
+    @Singleton
     fun androidGenerativeLane(
         @ApplicationScope scope: CoroutineScope,
         journal: SubmittedActionJournal,
@@ -478,6 +492,7 @@ object ArgusModule {
         replies: NotificationReplyGateway,
         deferredReplies: DeferredReplySink,
         notifier: AutomationNotifier,
+        oneShotConsumptions: OneShotConsumptionRegistry,
     ): AndroidGenerativeLane = AndroidGenerativeLane(
         scope,
         journal,
@@ -487,6 +502,7 @@ object ArgusModule {
         replies,
         deferredReplies,
         notifier,
+        oneShotConsumptions,
     )
 
     @Provides
@@ -547,6 +563,9 @@ object ArgusModule {
     fun actionExecutorBoundary(executor: ShizukuActionExecutor): ActionExecutor = executor
 
     @Provides
+    fun resolvedActionExecutorBoundary(executor: ShizukuActionExecutor): ResolvedActionExecutor = executor
+
+    @Provides
     @Singleton
     fun engine(
         store: AutomationStore,
@@ -554,6 +573,7 @@ object ArgusModule {
         firePolicy: FirePolicy,
         audit: AuditSink,
         journal: ExecutionJournal,
+        resolvedExecutor: ResolvedActionExecutor,
     ): Engine = Engine(
         store = store,
         executor = executor,
@@ -562,6 +582,7 @@ object ArgusModule {
         firePolicy = firePolicy,
         audit = audit,
         journal = journal,
+        resolvedExecutor = resolvedExecutor,
         now = System::currentTimeMillis,
     )
 
@@ -675,6 +696,13 @@ object ArgusModule {
     fun sharedForegroundSentinel(
         backend: ConnectivitySentinelBackend,
     ): SharedForegroundSentinel = SharedForegroundSentinel(backend)
+
+    @Provides
+    @Singleton
+    fun receiverWorkLauncher(
+        @ApplicationScope scope: CoroutineScope,
+        sentinel: SharedForegroundSentinel,
+    ): ReceiverWorkLauncher = ReceiverWorkLauncher(scope, sentinel)
 
     @Provides
     @Singleton
@@ -840,8 +868,17 @@ object ArgusModule {
         backend: TimeAlarmBackend,
         dispatcher: TimeEventDispatcher,
         audit: AuditSink,
+        oneShotConsumptions: OneShotConsumptionRegistry,
     ): TimeAlarmCoordinator =
-        TimeAlarmCoordinator(store, state, backend, dispatcher, Instant::now, audit)
+        TimeAlarmCoordinator(
+            store,
+            state,
+            backend,
+            dispatcher,
+            Instant::now,
+            audit,
+            oneShotConsumptions,
+        )
 
     @Provides
     @Singleton
@@ -859,6 +896,8 @@ object ArgusModule {
         sensor: SensorTriggerRuntime,
         immediateDispatcher: ImmediateEventDispatcher,
         audit: AuditSink,
+        oneShotConsumptions: OneShotConsumptionRegistry,
+        foregroundLauncher: ReceiverWorkLauncher,
     ): ArmedAutomationRegistrar = AndroidArmedAutomationRegistrar(
         coordinator,
         store,
@@ -869,7 +908,19 @@ object ArgusModule {
         immediateDispatcher,
         Instant::now,
         audit,
+        oneShotConsumptions,
+        foregroundLauncher,
     )
+
+    /**
+     * Ri-arm immediato al ri-enable, servito dal percorso `registerImmediate` del registrar.
+     * Interfaccia stretta apposta: il coordinator non dipende dall'intero registrar (evita il ciclo
+     * Hilt) e il registrar non dipende dal coordinator, quindi il grafo resta aciclico.
+     */
+    @Provides
+    @Singleton
+    fun immediateReArm(registrar: ArmedAutomationRegistrar): ImmediateReArm =
+        ImmediateReArm { automation -> registrar.register(automation) }
 
     @Provides
     @Singleton

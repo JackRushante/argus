@@ -12,12 +12,15 @@ data class FireContext(
     val approvalFingerprint: ApprovalFingerprint,
     val eventId: TriggerEventId,
     val executionId: ExecutionId,
-    /** Indice stabile dell'azione nello snapshot approvato. */
+    /** Ordinale runtime univoco; nelle regole flat coincide con l'indice nello snapshot. */
     val actionIndex: Int,
     val priority: Int = 0,
+    /** Path P4 user-readable; per le regole flat coincide con l'indice one-based. */
+    val actionPath: String = (actionIndex + 1).toString(),
 ) {
     init {
         require(actionIndex >= 0) { "actionIndex non può essere negativo" }
+        ActionPath(actionPath)
     }
 }
 
@@ -31,3 +34,12 @@ sealed interface ActionResult {
 }
 
 fun interface ActionExecutor { suspend fun execute(action: Action, ctx: FireContext): ActionResult }
+
+/**
+ * Boundary opzionale P4 per foglie già interpolate. Un'implementazione Android che accetta
+ * [ResolvedProgramAction.runtimeData] deve mantenerli fuori dalle istruzioni di sistema; inoltre
+ * deve restituire output concreto per le azioni con captureAs, mai soltanto SUBMITTED.
+ */
+fun interface ResolvedActionExecutor {
+    suspend fun execute(action: ResolvedProgramAction, context: FireContext): ProgramActionResult
+}

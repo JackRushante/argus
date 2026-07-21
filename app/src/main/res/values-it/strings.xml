@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Argus</string>
+    <string name="nav_chat">Chat</string>
+    <string name="nav_automations">Automazioni</string>
+    <string name="nav_log">Log</string>
+    <string name="nav_system">Sistema</string>
+    <string name="system_setting_unavailable">Impostazione di sistema non disponibile.</string>
+    <string name="whitelist_add_title">Aggiungi alla whitelist</string>
+    <string name="whitelist_empty">Nessuna conversazione 1:1 osservata finora. Ricevi un messaggio WhatsApp dal contatto (con lettura notifiche attiva) e riprova, oppure usa l\'inserimento manuale.</string>
+    <string name="whitelist_recent">Conversazioni 1:1 osservate di recente:</string>
+    <string name="manual_entry">Inserimento manuale</string>
+    <string name="close">Chiudi</string>
+    <string name="rule_unavailable_title">Regola non disponibile</string>
+    <string name="rule_unavailable_detail">Potrebbe essere stata eliminata o sostituita da una revisione più recente.</string>
+    <string name="back">Indietro</string>
+    <string name="whitelist_editor_detail">Inserisci il nome visibile e l\'identificatore stabile della conversazione.</string>
+    <string name="name_label">Nome</string>
+    <string name="conversation_id_label">Conversation ID</string>
+    <string name="cancel">Annulla</string>
+    <string name="add">Aggiungi</string>
+</resources>

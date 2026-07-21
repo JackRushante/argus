@@ -3,10 +3,10 @@ package dev.argus.engine.runtime
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationDraft
+import dev.argus.engine.model.AutomationSchema
 import dev.argus.engine.model.ApprovalFingerprints
 import dev.argus.engine.model.CapabilityIds
 import dev.argus.engine.model.CapabilityRequirements
-import dev.argus.engine.model.SCHEMA_VERSION
 import dev.argus.engine.safety.DraftValidator
 import dev.argus.engine.safety.Severity
 import dev.argus.engine.safety.StaticShellSafety
@@ -38,6 +38,7 @@ fun interface FirePolicySnapshotProvider {
 object ActionCapabilities {
     const val SET_WIFI = CapabilityIds.ACTION_SET_WIFI
     const val SET_BLUETOOTH = CapabilityIds.ACTION_SET_BLUETOOTH
+    const val SET_MOBILE_DATA = CapabilityIds.ACTION_SET_MOBILE_DATA
     const val SET_DND = CapabilityIds.ACTION_SET_DND
     const val SET_RINGER = CapabilityIds.ACTION_SET_RINGER
     const val LAUNCH_APP = CapabilityIds.ACTION_LAUNCH_APP
@@ -48,10 +49,12 @@ object ActionCapabilities {
     const val WHATSAPP_REPLY = CapabilityIds.ACTION_WHATSAPP_REPLY
     const val RUN_SHELL = CapabilityIds.ACTION_RUN_SHELL
     const val COPY_TO_CLIPBOARD = CapabilityIds.ACTION_COPY_TO_CLIPBOARD
+    const val COPY_TEXT = CapabilityIds.ACTION_COPY_TEXT
     const val SET_ALARM = CapabilityIds.ACTION_SET_ALARM
     const val SET_TIMER = CapabilityIds.ACTION_SET_TIMER
     const val SET_VOLUME = CapabilityIds.ACTION_SET_VOLUME
     const val SET_FLASHLIGHT = CapabilityIds.ACTION_SET_FLASHLIGHT
+    const val SET_DARK_MODE = CapabilityIds.ACTION_SET_DARK_MODE
     const val OPEN_SETTINGS_SCREEN = CapabilityIds.ACTION_OPEN_SETTINGS_SCREEN
     const val VIBRATE = CapabilityIds.ACTION_VIBRATE
     const val WRITE_SETTING = CapabilityIds.ACTION_WRITE_SETTING
@@ -75,13 +78,13 @@ class RevalidatingFirePolicy(
             return FirePolicyDecision.Block("capability_snapshot_unavailable", needsReview = false)
         }
 
-        if (automation.schemaVersion != SCHEMA_VERSION)
+        if (!AutomationSchema.isCompatible(automation))
             return FirePolicyDecision.Block("schema_incompatible", needsReview = true)
         if (automation.approvalFingerprint == null ||
             automation.approvalFingerprint != ApprovalFingerprints.of(automation)
         ) return FirePolicyDecision.Block("approval_fingerprint_mismatch", needsReview = true)
 
-        val hasStaticShell = automation.actions.any { it is Action.RunShell }
+        val hasStaticShell = containsStaticShell(automation.actions)
         if (hasStaticShell &&
             !StaticShellSafety.allows(automation.trigger, snapshot.whitelistedConversationIds)
         ) return FirePolicyDecision.Block("shell_external_trigger", needsReview = true)
@@ -90,6 +93,7 @@ class RevalidatingFirePolicy(
             name = automation.name,
             trigger = automation.trigger,
             actions = automation.actions,
+            vars = automation.vars,
             conditions = automation.conditions,
             cooldownMs = automation.cooldownMs,
         )
@@ -115,6 +119,7 @@ class RevalidatingFirePolicy(
             automation.trigger,
             automation.actions,
             automation.conditions,
+            automation.vars,
         )
         if (automation.requiredCapabilities != derivedRequirements)
             return FirePolicyDecision.Block("capability_requirements_mismatch", needsReview = true)
@@ -126,7 +131,7 @@ class RevalidatingFirePolicy(
             return FirePolicyDecision.Block("capability_unavailable", needsReview = !onlyTransient)
         }
 
-        if (automation.actions.any(::canReply)) {
+        if (containsReply(automation.actions)) {
             val notification = event as? TriggerEvent.NotificationPosted
                 ?: return FirePolicyDecision.Block("reply_event_unverified", needsReview = false)
             val configured = automation.trigger as? dev.argus.engine.model.Trigger.Notification
@@ -146,10 +151,43 @@ class RevalidatingFirePolicy(
         return FirePolicyDecision.Allow
     }
 
+    private fun containsStaticShell(actions: List<Action>): Boolean {
+        val pending = ArrayDeque<Action>()
+        actions.forEach(pending::addLast)
+        while (pending.isNotEmpty()) {
+            when (val action = pending.removeFirst()) {
+                is Action.RunShell -> return true
+                is Action.If -> {
+                    action.then.forEach(pending::addLast)
+                    action.orElse.forEach(pending::addLast)
+                }
+                is Action.While -> action.body.forEach(pending::addLast)
+                else -> Unit
+            }
+        }
+        return false
+    }
+
     private fun canReply(action: Action): Boolean = when (action) {
         is Action.WhatsAppReply -> true
         is Action.InvokeLlm -> action.allowedTools.any { it.equals("whatsapp_reply", ignoreCase = true) }
         is Action.InvokeLlmV2 -> action.allowedTools.any { it.equals("whatsapp_reply", ignoreCase = true) }
         else -> false
+    }
+
+    private fun containsReply(actions: List<Action>): Boolean {
+        val pending = ArrayDeque<Action>()
+        actions.forEach(pending::addLast)
+        while (pending.isNotEmpty()) {
+            when (val action = pending.removeFirst()) {
+                is Action.If -> {
+                    action.then.forEach(pending::addLast)
+                    action.orElse.forEach(pending::addLast)
+                }
+                is Action.While -> action.body.forEach(pending::addLast)
+                else -> if (canReply(action)) return true
+            }
+        }
+        return false
     }
 }

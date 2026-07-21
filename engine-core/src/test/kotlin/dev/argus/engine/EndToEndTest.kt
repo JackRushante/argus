@@ -30,7 +30,7 @@ class EndToEndTest {
         // 3) approva -> Automation ARMED
         val auto = approved(
             Automation(AutomationId("a1"), draft.name, CreatedBy.LLM, AutomationStatus.ARMED,
-                draft.trigger, draft.actions, draft.conditions),
+                draft.trigger, draft.actions, conditions = draft.conditions),
         )
         // 4) next-fire calcolabile (P0-B lo passa ad AlarmManager)
         assertNotNull(TimeSpecs.nextFire(draft.trigger as Trigger.Time, Instant.parse("2026-07-12T10:00:00Z")))

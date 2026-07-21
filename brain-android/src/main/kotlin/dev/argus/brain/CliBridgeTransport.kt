@@ -19,6 +19,7 @@ import dev.argus.engine.model.StateValueCoercion
 import dev.argus.engine.model.StateValueType
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireContext
+import dev.argus.engine.runtime.RuntimeDataBinding
 import dev.argus.engine.runtime.TriggerEvent
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.EncodeDefault
@@ -150,6 +151,19 @@ private data class ActRequestEnvelope(
     @SerialName("context_sources") val contextSources: List<String>,
     @SerialName("allowed_tools") val allowedTools: List<String>,
     val context: ActContextEnvelope,
+    // P4-D2 (anti-injection): il dato runtime TAINTED viaggia separato dal goal (che porta solo i
+    // marker opachi). @EncodeDefault(NEVER) + default vuoto: act/actV2 restano byte-identici (campo
+    // OMESSO), solo actResolved (schema 3) lo emette. Il bridge già inquadra il contesto non fidato a
+    // parte: questo aggiunge il canale dati risolto.
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    @SerialName("runtime_data") val runtimeData: List<RuntimeDataEnvelope> = emptyList(),
+)
+
+/** Coppia opaca marker⇄valore del canale dati risolto: `token` compare come `{{token}}` nel goal. */
+@Serializable
+private data class RuntimeDataEnvelope(
+    val token: String,
+    val value: String,
 )
 
 @Serializable
@@ -390,6 +404,87 @@ class CliBridgeTransport internal constructor(
         )
     }
 
+    override suspend fun actResolved(
+        context: FireContext,
+        goal: String,
+        contextSources: List<String>,
+        allowedTools: List<String>,
+        runtimeData: List<RuntimeDataBinding>,
+    ): ActResult {
+        val token = requireToken()
+        // Il goal risolto porta SOLO i marker opachi {{ARGUS_RUNTIME_DATA_n}}; il valore RAW viaggia
+        // nel campo separato runtime_data. Stessa validazione e stesso inquadramento del contesto di
+        // act(), su schema 3 così un bridge vecchio (che non conosce il canale) non lo interpreta male.
+        val cleanGoal = goal.trim().takeIf { it.isNotEmpty() && it.length <= MAX_GOAL_CHARS }
+            ?: throw BridgeException(BridgeErrorKind.CONFIGURATION, "goal act vuoto o troppo lungo")
+        if (!GenerativeContract.isAllowedToolset(allowedTools) &&
+            !GenerativeContract.isNotificationToolset(allowedTools)
+        ) {
+            throw BridgeException(BridgeErrorKind.CONFIGURATION, "allowed_tools act non supportati")
+        }
+        val useReplyTool = GenerativeContract.TOOL_WHATSAPP_REPLY in allowedTools
+        val actContext = if (useReplyTool) {
+            if (contextSources.isEmpty() || contextSources != contextSources.distinct() ||
+                "notification" !in contextSources || contextSources.any { it !in ACT_CONTEXT_SOURCES }
+            ) {
+                throw BridgeException(BridgeErrorKind.CONFIGURATION, "context_sources act non supportate")
+            }
+            val notification = context.event as? TriggerEvent.NotificationPosted
+                ?: throw BridgeException(BridgeErrorKind.CONFIGURATION, "act richiede un evento Notification")
+            if (notification.pkg !in WHATSAPP_PACKAGES || notification.isGroup != false) {
+                throw BridgeException(BridgeErrorKind.CONFIGURATION, "reply act non autorizzata")
+            }
+            val cleanText = notification.text.cleanUntrusted(MAX_NOTIFICATION_TEXT_CHARS)
+                ?: throw BridgeException(BridgeErrorKind.CONFIGURATION, "testo notifica assente")
+            ActContextEnvelope(
+                notification = NotificationContextEnvelope(
+                    packageName = notification.pkg,
+                    sender = notification.sender.cleanUntrusted(MAX_NOTIFICATION_SENDER_CHARS),
+                    title = notification.title.cleanUntrusted(MAX_NOTIFICATION_TITLE_CHARS),
+                    text = cleanText,
+                    isGroup = false,
+                ),
+                state = context.state.toActEnvelope().takeIf { "state" in contextSources },
+            )
+        } else {
+            if (contextSources != contextSources.distinct() ||
+                contextSources.any { it !in SINK_CONTEXT_SOURCES }
+            ) {
+                throw BridgeException(BridgeErrorKind.CONFIGURATION, "context_sources sink non supportate")
+            }
+            ActContextEnvelope(
+                notification = null,
+                state = context.state.toActEnvelope().takeIf { "state" in contextSources },
+            )
+        }
+        val requestId = deterministicActRequestId(context)
+        val envelope = ActRequestEnvelope(
+            schemaVersion = ACT_RESOLVED_SCHEMA_VERSION,
+            requestId = requestId,
+            goal = cleanGoal,
+            contextSources = contextSources,
+            allowedTools = allowedTools,
+            context = actContext,
+            runtimeData = runtimeData.map { RuntimeDataEnvelope(it.token, it.value.text) },
+        )
+        val payload = json.encodeToString(envelope)
+        if (payload.toByteArray(Charsets.UTF_8).size > MAX_REQUEST_BYTES) {
+            throw BridgeException(BridgeErrorKind.CONFIGURATION, "richiesta act troppo grande")
+        }
+        val request = Request.Builder()
+            .url(actUrl)
+            .header("Accept", "application/json")
+            .header("Authorization", "Bearer $token")
+            .header("Idempotency-Key", requestId)
+            .post(payload.toRequestBody(JSON_MEDIA))
+            .build()
+        return parseActResponse(
+            execute(request),
+            expectedRequestId = requestId,
+            expectedSchemaVersion = ACT_RESOLVED_SCHEMA_VERSION,
+        )
+    }
+
     override suspend fun actV2(context: FireContext, action: Action.InvokeLlmV2): ActResult {
         val token = requireToken()
         val cleanGoal = action.goal.trim().takeIf {
@@ -480,6 +575,11 @@ class CliBridgeTransport internal constructor(
             COMPILE_SCHEMA_VERSION !in health.compileSchemaVersions ||
             ACT_SCHEMA_VERSION !in health.actSchemaVersions ||
             ACT_V2_SCHEMA_VERSION !in health.actSchemaVersions ||
+            // P4-D2: il canale RISOLTO (schema 3, actResolved) NON e' un requisito di health. Un bridge
+            // che annuncia solo [1,2] resta pienamente utilizzabile (compile P4 + act v1/v2); solo la
+            // CAPTURE generativa P4 usa il canale risolto, e quel singolo path fallisce-chiuso per-call
+            // se il bridge non lo supporta. Renderlo obbligatorio qui buttava offline OGNI bridge
+            // esistente (nessuno annuncia ancora 3), violando l'ordine di deploy app-prima-bridge.
             !SOURCE_SHA256.matches(health.sourceSha256)) {
             throw BridgeException(BridgeErrorKind.PROTOCOL, "health incompatibile")
         }
@@ -726,6 +826,13 @@ class CliBridgeTransport internal constructor(
         const val COMPILE_SCHEMA_VERSION = 2
         const val ACT_SCHEMA_VERSION = 1
         const val ACT_V2_SCHEMA_VERSION = 2
+
+        /**
+         * P4-D2 (slice 1): schema del canale RISOLTO anti-injection. Distinto da act/actV2 così il
+         * campo additivo `runtime_data` è negoziabile a parte; l'aggancio a `health()` (annuncio della
+         * versione) è materia di slice 2 quando si solleva la barriera fail-closed.
+         */
+        const val ACT_RESOLVED_SCHEMA_VERSION = 3
         const val HEALTH_SCHEMA_VERSION = 2
         const val MAX_REQUEST_BYTES = 256 * 1024
         const val MAX_RESPONSE_BYTES = 512 * 1024

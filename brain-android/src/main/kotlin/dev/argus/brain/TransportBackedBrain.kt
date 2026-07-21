@@ -7,6 +7,7 @@ import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.model.Action
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireContext
+import dev.argus.engine.runtime.RuntimeDataBinding
 
 /**
  * [Brain] su un [AgentTransport] qualunque (ex `HermesBrain`, mappatura errori invariata):
@@ -24,7 +25,18 @@ class TransportBackedBrain(
 ) : Brain {
     override suspend fun compile(nl: String, manifest: CapabilityManifest, state: DeviceState): CompileResult =
         try {
-            transport.compile(message = nl, manifest = manifest, state = state)
+            val first = transport.compile(message = nl, manifest = manifest, state = state)
+            // Retry-once, provider-agnostico: `draft_invalid` è una BOZZA malformata dal modello
+            // (JSON non deserializzabile), non un esito legittimo. Il non-determinismo del modello
+            // spesso basta a produrre una bozza valida alla seconda chiamata IDENTICA. UN solo retry
+            // (nessun loop): tutti gli altri metaError — clarification_required, unsupported_*,
+            // unsafe_tainted_command, limit_exceeded, i bridge_* di trasporto — NON sono
+            // malformazioni e vengono restituiti tal quali.
+            if (first.metaError == DRAFT_INVALID) {
+                transport.compile(message = nl, manifest = manifest, state = state)
+            } else {
+                first
+            }
         } catch (e: TransportException) {
             CompileResult(reply = UNREACHABLE_REPLY, draft = null, metaError = e.toMetaError())
         }
@@ -46,9 +58,24 @@ class TransportBackedBrain(
         ActResult(text = null, metaError = e.toMetaError())
     }
 
+    override suspend fun actResolved(
+        context: FireContext,
+        goal: String,
+        contextSources: List<String>,
+        allowedTools: List<String>,
+        runtimeData: List<RuntimeDataBinding>,
+    ): ActResult = try {
+        transport.actResolved(context, goal, contextSources, allowedTools, runtimeData)
+    } catch (e: TransportException) {
+        ActResult(text = null, metaError = e.toMetaError())
+    }
+
     private fun TransportException.toMetaError(): String = "bridge_${kind.name.lowercase()}"
 
     companion object {
         const val UNREACHABLE_REPLY = "Non riesco a contattare l'assistente adesso. Riprova tra poco."
+
+        /** Unico metaError su cui si ritenta: bozza malformata (JSON non deserializzabile). */
+        const val DRAFT_INVALID = "draft_invalid"
     }
 }

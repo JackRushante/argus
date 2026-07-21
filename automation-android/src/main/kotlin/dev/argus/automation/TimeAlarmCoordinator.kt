@@ -149,6 +149,7 @@ class TimeAlarmCoordinator(
     private val dispatcher: TimeEventDispatcher,
     private val now: () -> Instant,
     private val audit: AuditSink = NoopAuditSink,
+    private val oneShotConsumptions: OneShotConsumptionRegistry = NoopOneShotConsumptionRegistry,
 ) {
     private val mutex = Mutex()
 
@@ -310,7 +311,14 @@ class TimeAlarmCoordinator(
             }
         }
         if (latestTrigger.isOneShot()) {
-            if (store.disableIfApproved(automationId, eventFingerprint)) {
+            val attempt = oneShotConsumptions.begin(envelope.id)
+            var consumed = false
+            try {
+                consumed = store.disableIfApproved(automationId, eventFingerprint)
+            } finally {
+                attempt.complete(consumed)
+            }
+            if (consumed) {
                 // Lifecycle (task #31-B): auto-disable post fire della one-shot (immediate/at/afterMs).
                 recordAuditEvent(automationId, AuditKind.RULE_DISABLED, "one_shot_consumed")
                 cancelAndForget(automationId)

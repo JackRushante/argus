@@ -9,7 +9,7 @@ import dev.argus.engine.model.ArgusJson
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.AutomationStatus
-import dev.argus.engine.model.SCHEMA_VERSION
+import dev.argus.engine.model.AutomationSchema
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.safety.DraftArmResult
 import dev.argus.engine.safety.DraftDeleteResult
@@ -194,7 +194,9 @@ class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository {
         persistQuarantine: Boolean,
     ): PendingDraft {
         var error = entity.quarantineCode
-        if (error == null && entity.schemaVersion != SCHEMA_VERSION) error = "schema_incompatible"
+        if (error == null && !AutomationSchema.isSupportedVersion(entity.schemaVersion)) {
+            error = "schema_incompatible"
+        }
         if (error == null && entity.revision < 1) error = "revision_invalid"
         if (error == null && entity.automationId.isBlank()) error = "automation_id_invalid"
         if (error == null && (entity.createdAtMillis < 0 || entity.updatedAtMillis < entity.createdAtMillis))
@@ -257,6 +259,7 @@ class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository {
         updatedAtMillis: Long,
         baseAutomationFingerprint: ApprovalFingerprint?,
     ): PendingDraft {
+        val schemaVersion = AutomationSchema.versionFor(draft)
         val unsigned = Automation(
             id = automationId,
             name = draft.name,
@@ -264,11 +267,12 @@ class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository {
             status = AutomationStatus.PENDING_APPROVAL,
             trigger = draft.trigger,
             actions = draft.actions,
+            vars = draft.vars,
             conditions = draft.conditions,
             enabled = false,
             priority = priority,
             cooldownMs = draft.cooldownMs,
-            schemaVersion = SCHEMA_VERSION,
+            schemaVersion = schemaVersion,
         )
         return PendingDraft(
             id = id,
@@ -278,7 +282,7 @@ class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository {
             draft = draft,
             createdBy = createdBy,
             priority = priority,
-            schemaVersion = SCHEMA_VERSION,
+            schemaVersion = schemaVersion,
             createdAtMillis = createdAtMillis,
             updatedAtMillis = updatedAtMillis,
             baseAutomationFingerprint = baseAutomationFingerprint,
@@ -315,7 +319,7 @@ class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository {
 
     /** Verifica sia il JSON sia le colonne indicizzate, che fanno parte del contenuto approvato. */
     private fun verifiedAutomation(entity: AutomationEntity): Automation? {
-        if (entity.schemaVersion != SCHEMA_VERSION) return null
+        if (!AutomationSchema.isSupportedVersion(entity.schemaVersion)) return null
         val decoded = runCatching {
             ArgusJson.decodeFromString(Automation.serializer(), entity.json)
         }.getOrNull() ?: return null
@@ -328,6 +332,7 @@ class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository {
             cooldownMs = entity.cooldownMs,
             schemaVersion = entity.schemaVersion,
         )
+        if (!AutomationSchema.isCompatible(domain)) return null
         val fingerprint = domain.approvalFingerprint ?: return null
         return domain.takeIf { fingerprint == ApprovalFingerprints.of(domain) }
     }

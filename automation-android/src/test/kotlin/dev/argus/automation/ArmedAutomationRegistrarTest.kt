@@ -14,7 +14,10 @@ import dev.argus.engine.model.PhoneEvent
 import dev.argus.engine.model.TimePrecision
 import dev.argus.engine.model.Trigger
 import dev.argus.automation.connectivity.ConnectivityReconcileReport
+import dev.argus.automation.connectivity.ConnectivitySentinelBackend
 import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
+import dev.argus.automation.foreground.ReceiverWorkLauncher
+import dev.argus.automation.foreground.SharedForegroundSentinel
 import dev.argus.automation.geofence.GeofenceReconcileReport
 import dev.argus.automation.geofence.GeofenceTriggerRuntime
 import dev.argus.automation.geofence.NoopGeofenceTriggerRuntime
@@ -28,8 +31,11 @@ import dev.argus.engine.runtime.FirePolicySnapshot
 import dev.argus.engine.runtime.FirePolicySnapshotProvider
 import dev.argus.engine.runtime.TriggerEnvelope
 import dev.argus.engine.runtime.TriggerEvent
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import java.time.Instant
 import kotlin.test.Test
@@ -205,6 +211,7 @@ class ArmedAutomationRegistrarTest {
         val store = RecordingStore(immediate)
         val dispatched = mutableListOf<TriggerEnvelope>()
         val audit = RegistrarAuditRecorder()
+        val oneShotConsumptions = ProcessOneShotConsumptionRegistry()
         val registrar = AndroidArmedAutomationRegistrar(
             coordinator = coordinator(store),
             store = store,
@@ -218,6 +225,7 @@ class ArmedAutomationRegistrarTest {
             immediateDispatcher = { dispatched += it },
             now = { Instant.parse("2026-07-14T08:00:00Z") },
             audit = audit,
+            oneShotConsumptions = oneShotConsumptions,
         )
 
         assertTrue(registrar.register(immediate), "il dispatch riuscito arma la regola one-shot")
@@ -231,6 +239,7 @@ class ArmedAutomationRegistrarTest {
         assertTrue(event is TriggerEvent.ImmediateFired)
         assertEquals(immediate.id, event.automationId)
         assertEquals(immediate.approvalFingerprint, event.approvalFingerprint)
+        assertTrue(oneShotConsumptions.wasAutoConsumed(envelope.id))
         assertEquals(
             listOf(immediate.id),
             store.disabled,
@@ -239,6 +248,66 @@ class ArmedAutomationRegistrarTest {
         val consumed = audit.events.single { it.kind == AuditKind.RULE_DISABLED }
         assertEquals("one_shot_consumed", consumed.detail)
         assertEquals(immediate.id, consumed.automationId)
+    }
+
+    @Test
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun `production immediate registration returns while long work remains foreground owned`() = runTest {
+        val immediate = signed(
+            rule("imm-long").copy(
+                trigger = Trigger.Immediate,
+                actions = listOf(Action.Wait(60_000)),
+            ),
+        )
+        val store = RecordingStore(immediate)
+        val dispatched = mutableListOf<TriggerEnvelope>()
+        val finishWork = CompletableDeferred<Unit>()
+        var foregroundStarts = 0
+        var foregroundStops = 0
+        val foregroundLauncher = ReceiverWorkLauncher(
+            scope = this,
+            sentinel = SharedForegroundSentinel(
+                object : ConnectivitySentinelBackend {
+                    override suspend fun start(): Boolean {
+                        foregroundStarts += 1
+                        return true
+                    }
+
+                    override suspend fun stop(): Boolean {
+                        foregroundStops += 1
+                        return true
+                    }
+                },
+            ),
+        )
+        val registrar = AndroidArmedAutomationRegistrar(
+            coordinator = coordinator(store),
+            store = store,
+            snapshots = FirePolicySnapshotProvider {
+                FirePolicySnapshot(
+                    knownTools = AndroidCapabilityProbe.KNOWN_TOOLS,
+                    availableCapabilities = setOf(CapabilityIds.TRIGGER_IMMEDIATE),
+                    whitelistedConversationIds = setOf(CONVERSATION_ID),
+                )
+            },
+            immediateDispatcher = { envelope ->
+                dispatched += envelope
+                finishWork.await()
+            },
+            now = { Instant.parse("2026-07-14T08:00:00Z") },
+            foregroundLauncher = foregroundLauncher,
+        )
+
+        assertTrue(registrar.register(immediate))
+        assertEquals(1, dispatched.size)
+        assertTrue(store.disabled.isEmpty(), "non consumare la regola prima della fine reale")
+        assertEquals(1, foregroundStarts)
+        assertEquals(0, foregroundStops)
+
+        finishWork.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(listOf(immediate.id), store.disabled)
+        assertEquals(1, foregroundStops)
     }
 
     @Test

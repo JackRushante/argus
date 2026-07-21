@@ -34,6 +34,7 @@ import dev.argus.engine.runtime.FirePolicySnapshot
 import dev.argus.engine.runtime.FirePolicySnapshotProvider
 import dev.argus.engine.safety.ApprovalService
 import dev.argus.engine.safety.DraftValidator
+import dev.argus.ui.presentation.RenderLanguage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -105,12 +106,37 @@ class AutomationDetailViewModelTest {
         )
     }
 
+    @Test
+    fun `english detail emits english runtime messages`() = runTest {
+        seedArmedAutomation("english")
+        val viewModel = viewModel(
+            "english",
+            RoomAutomationStore(db.automationDao()),
+            DetailAuditRecorder(),
+            RenderLanguage.EN,
+        )
+        awaitUntil("english detail loaded") { viewModel.state.value.detail != null }
+        val events = mutableListOf<DetailEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.events.collect(events::add)
+        }
+
+        viewModel.onRunNow()
+        awaitUntil("english run-now feedback") { events.isNotEmpty() }
+
+        assertEquals(
+            "Run now requires live confirmation and is disabled in P0-B.",
+            (events.single() as DetailEvent.Message).text,
+        )
+    }
+
     // --- helpers -------------------------------------------------------------
 
     private fun viewModel(
         routeId: String,
         store: RoomAutomationStore,
         audit: AuditSink,
+        language: RenderLanguage = RenderLanguage.IT,
     ): AutomationDetailViewModel {
         val drafts = RoomDraftRepository(db)
         val whitelist = RoomContactWhitelistStore(db.contactWhitelistDao())
@@ -146,6 +172,7 @@ class AutomationDetailViewModelTest {
             connectivity = NoopConnectivityTriggerRuntime,
             geofence = NoopGeofenceTriggerRuntime,
             audit = audit,
+            language = language,
         ).also { lastViewModel = it }
     }
 

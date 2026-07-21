@@ -10,7 +10,7 @@ import org.junit.runner.RunWith
 
 /**
  * Verifica strutturale: claim/audit v2, bozze v3, journal v4/v7, scheduler v5, whitelist v6,
- * conversazioni osservate v8, reply differite cifrate v9 ed eventi di consumo LLM v10.
+ * conversazioni osservate v8, reply differite cifrate v9, consumo LLM v10 e path azioni P4 v11.
  */
 @RunWith(AndroidJUnit4::class)
 class MigrationTest {
@@ -271,6 +271,44 @@ class MigrationTest {
         }
     }
 
+    @Test
+    fun migrate_v10_to_v11_backfills_legacy_action_paths() {
+        helper.createDatabase(TEST_DB_V10, 10).apply {
+            execSQL(
+                "INSERT INTO automations " +
+                    "(id, name, status, enabled, priority, cooldownMs, schemaVersion, lastFiredAt, json) " +
+                    "VALUES ('legacy', 'legacy', 'ARMED', 1, 0, 0, 1, NULL, '{}')",
+            )
+            execSQL(
+                "INSERT INTO fire_claims " +
+                    "(automationId, eventIdHash, executionId, claimedAtMillis, status, " +
+                    "completedAtMillis, succeededCount, failedCount, submittedCount, deferredCount) " +
+                    "VALUES ('legacy', 'hash', 'legacy-execution', 123, 'SUCCEEDED', " +
+                    "200, 1, 0, 0, 0)",
+            )
+            execSQL(
+                "INSERT INTO action_results " +
+                    "(executionId, actionIndex, actionType, outcome, atMillis, errorCode) " +
+                    "VALUES ('legacy-execution', 2, 'set_wifi', 'SUCCEEDED', 200, NULL)",
+            )
+            close()
+        }
+
+        helper.runMigrationsAndValidate(
+            TEST_DB_V10,
+            11,
+            true,
+            ArgusDatabase.MIGRATION_10_11,
+        ).use { db ->
+            db.query(
+                "SELECT actionPath FROM action_results WHERE executionId = 'legacy-execution'",
+            ).use { cursor ->
+                cursor.moveToFirst()
+                assertEquals("3", cursor.getString(0))
+            }
+        }
+    }
+
     private companion object {
         const val TEST_DB_V1 = "argus-migration-v1-test.db"
         const val TEST_DB_V2 = "argus-migration-v2-test.db"
@@ -281,5 +319,6 @@ class MigrationTest {
         const val TEST_DB_V7 = "argus-migration-v7-test.db"
         const val TEST_DB_V8 = "argus-migration-v8-test.db"
         const val TEST_DB_V9 = "argus-migration-v9-test.db"
+        const val TEST_DB_V10 = "argus-migration-v10-test.db"
     }
 }

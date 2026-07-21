@@ -2,9 +2,11 @@ package dev.argus.engine.runtime
 
 import dev.argus.engine.model.*
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import java.time.Clock
 import java.time.Instant
@@ -23,10 +25,22 @@ class EngineTest {
         cond: Condition? = null,
         cooldown: Long = 0,
         prio: Int = 0,
+        vars: List<VarBinding> = emptyList(),
     ): Automation {
+        val draft = AutomationDraft(
+            name = id,
+            trigger = t,
+            actions = acts,
+            vars = vars,
+            conditions = cond,
+            cooldownMs = cooldown,
+        )
         val unsigned = Automation(
-            AutomationId(id), id, CreatedBy.LLM, AutomationStatus.ARMED, t, acts, cond,
-            cooldownMs = cooldown, priority = prio,
+            AutomationId(id), id, CreatedBy.LLM, AutomationStatus.ARMED, t, acts, conditions = cond,
+            vars = vars,
+            cooldownMs = cooldown,
+            priority = prio,
+            schemaVersion = AutomationSchema.versionFor(draft),
         )
         return unsigned.copy(approvalFingerprint = ApprovalFingerprints.of(unsigned))
     }
@@ -49,6 +63,7 @@ class EngineTest {
         journal: ExecutionJournal = NoopExecutionJournal,
         policy: FirePolicy = allowAll,
         now: () -> Long = { 1_000 },
+        resolvedExecutor: ResolvedActionExecutor? = null,
     ) = Engine(
         store = store,
         executor = ex,
@@ -57,8 +72,268 @@ class EngineTest {
         firePolicy = policy,
         audit = audit,
         journal = journal,
+        resolvedExecutor = resolvedExecutor,
         now = now,
     )
+
+    @Test
+    fun `P4 program executes interpolated branch and journals its stable path`() = runTest {
+        val automation = armed(
+            id = "p4-branch",
+            t = Trigger.Notification("com.whatsapp"),
+            acts = listOf(
+                Action.If(
+                    condition = Condition.VarCompare("body", CmpOp.CONTAINS, expected = "go"),
+                    then = listOf(Action.ShowNotification("Argus", "Received: \${body}")),
+                ),
+            ),
+            vars = listOf(
+                VarBinding.TriggerPayload(
+                    "body",
+                    TriggerField.TEXT,
+                    confidentiality = ConfidentialityLabel.PRIVATE,
+                ),
+            ),
+        )
+        val seen = mutableListOf<Pair<Action, FireContext>>()
+        val journal = FakeExecutionJournal()
+
+        val outcome = engine(
+            FakeAutomationStore(listOf(automation)),
+            ActionExecutor { action, context ->
+                seen += action to context
+                ActionResult.Success
+            },
+            "2026-07-18T10:00:00Z",
+            journal = journal,
+        ).onTrigger(
+            envelope(
+                "sbn:p4:1",
+                TriggerEvent.NotificationPosted("com.whatsapp", text = "please go now"),
+            ),
+        ) { DeviceState() }.single()
+
+        assertEquals(
+            "Received: please go now",
+            (seen.single().first as Action.ShowNotification).text,
+        )
+        assertEquals("1.then.1", seen.single().second.actionPath)
+        assertEquals(0, seen.single().second.actionIndex)
+        assertEquals(listOf("1.then.1"), journal.actions.map { it.actionPath })
+        assertEquals(ActionResult.Success, outcome.results.single())
+        assertEquals(ExecutionStatus.SUCCEEDED, journal.completions.single().status)
+    }
+
+    @Test
+    fun `P4 loop gives every executed leaf a unique ordinal and readable path`() = runTest {
+        val automation = armed(
+            id = "p4-loop",
+            t = Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+            acts = listOf(
+                Action.While(
+                    Condition.BooleanLiteral(true),
+                    body = listOf(
+                        Action.SetFlashlight(true),
+                        Action.Wait(1),
+                        Action.SetFlashlight(false),
+                    ),
+                    maxIterations = 2,
+                ),
+            ),
+        )
+        val contexts = mutableListOf<FireContext>()
+        val journal = FakeExecutionJournal()
+
+        engine(
+            FakeAutomationStore(listOf(automation)),
+            ActionExecutor { _, context ->
+                contexts += context
+                ActionResult.Success
+            },
+            "2026-07-18T10:00:00Z",
+            journal = journal,
+        ).onTrigger(envelope("alarm:p4-loop", timeEvent(automation))) { DeviceState() }
+
+        assertEquals(listOf(0, 2, 3, 5), contexts.map { it.actionIndex })
+        assertEquals(
+            listOf(
+                "1.while[1].1", "1.while[1].2", "1.while[1].3",
+                "1.while[2].1", "1.while[2].2", "1.while[2].3",
+            ),
+            journal.actions.map { it.actionPath },
+        )
+        assertEquals((0..5).toList(), journal.actions.map { it.actionIndex })
+    }
+
+    @Test
+    fun `P4 while iteration count driven by a NUMBER variable runs that many times`() = runTest {
+        val automation = armed(
+            id = "p4-var-loop",
+            t = Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+            acts = listOf(
+                Action.While(
+                    Condition.BooleanLiteral(true),
+                    body = listOf(Action.SetFlashlight(true), Action.SetFlashlight(false)),
+                    maxIterationsVar = "blinks",
+                ),
+            ),
+            vars = listOf(VarBinding.Literal("blinks", "3", VarType.NUMBER, ConfidentialityLabel.PUBLIC)),
+        )
+        val journal = FakeExecutionJournal()
+
+        engine(
+            FakeAutomationStore(listOf(automation)),
+            ActionExecutor { _, _ -> ActionResult.Success },
+            "2026-07-18T10:00:00Z",
+            journal = journal,
+        ).onTrigger(envelope("alarm:p4-var-loop", timeEvent(automation))) { DeviceState() }
+
+        // Il conteggio viene dalla var (3) ⇒ tre giri × (on, off) = 6 foglie, ordinali e path leggibili.
+        assertEquals(
+            listOf(
+                "1.while[1].1", "1.while[1].2",
+                "1.while[2].1", "1.while[2].2",
+                "1.while[3].1", "1.while[3].2",
+            ),
+            journal.actions.map { it.actionPath },
+        )
+    }
+
+    @Test
+    fun `P4 generative capture flows through the resolved executor and captures concrete text`() = runTest {
+        // P4-D2 slice 2: la barriera p4_generative_unavailable è stata rimossa insieme al wiring. Con
+        // il ResolvedActionExecutor la foglia CAPTURE riceve testo concreto (Success + capturedText):
+        // l'interprete cattura e journala SUCCEEDED, mai capture_missing.
+        val capture = Action.InvokeLlm(
+            goal = "riassumi",
+            contextSources = emptyList(),
+            allowedTools = emptyList(),
+            replyTargetSender = false,
+            captureAs = "summary",
+        )
+        val automation = armed(
+            id = "p4-capture",
+            t = Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+            acts = listOf(
+                Action.If(Condition.BooleanLiteral(true), then = listOf(capture)),
+            ),
+        )
+        val flatExecutor = FakeActionExecutor()
+        val journal = FakeExecutionJournal()
+        val seen = mutableListOf<ResolvedProgramAction>()
+        val resolvedExecutor = ResolvedActionExecutor { action, _ ->
+            seen += action
+            ProgramActionResult(ActionResult.Success, capturedText = "riassunto")
+        }
+
+        val result = engine(
+            FakeAutomationStore(listOf(automation)),
+            flatExecutor,
+            "2026-07-18T10:00:00Z",
+            journal = journal,
+            resolvedExecutor = resolvedExecutor,
+        ).onTrigger(envelope("alarm:p4-capture", timeEvent(automation))) { DeviceState() }
+            .single()
+
+        assertTrue(flatExecutor.executed.isEmpty(), "il boundary flat non deve vedere la foglia generativa")
+        assertEquals(1, seen.size)
+        assertEquals(ActionResult.Success, result.results.single())
+        assertEquals(ActionJournalOutcome.SUCCEEDED, journal.actions.single().outcome)
+        assertEquals(ExecutionStatus.SUCCEEDED, journal.completions.single().status)
+    }
+
+    @Test
+    fun `P4 capture without a resolved executor stays capture fail closed`() = runTest {
+        // La barriera p4_capture_unavailable RESTA: senza executor risolto il boundary flat sa solo
+        // SUBMITTED, quindi una capture non è realizzabile — mai un capture_missing degradato.
+        val capture = Action.InvokeLlm(
+            goal = "riassumi",
+            contextSources = emptyList(),
+            allowedTools = emptyList(),
+            replyTargetSender = false,
+            captureAs = "summary",
+        )
+        val automation = armed(
+            id = "p4-capture-closed",
+            t = Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+            acts = listOf(
+                Action.If(Condition.BooleanLiteral(true), then = listOf(capture)),
+            ),
+        )
+        val flatExecutor = FakeActionExecutor()
+        val journal = FakeExecutionJournal()
+
+        val result = engine(
+            FakeAutomationStore(listOf(automation)),
+            flatExecutor,
+            "2026-07-18T10:00:00Z",
+            journal = journal,
+        ).onTrigger(envelope("alarm:p4-capture-closed", timeEvent(automation))) { DeviceState() }
+            .single()
+
+        assertTrue(flatExecutor.executed.isEmpty())
+        assertEquals(
+            "p4_capture_unavailable",
+            (result.results.single() as ActionResult.Failure).reason,
+        )
+        assertEquals("p4_capture_unavailable", journal.actions.single().errorCode)
+        assertEquals(ExecutionStatus.FAILED, journal.completions.single().status)
+    }
+
+    @Test
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun `disabling a waiting P4 program cancels only that rule and continues the batch`() = runTest {
+        val waiting = armed(
+            id = "p4-waiting",
+            t = Trigger.Notification("com.example"),
+            acts = listOf(
+                Action.Wait(60_000),
+                Action.ShowNotification("Argus", "must not run"),
+            ),
+            prio = 0,
+        )
+        val next = armed(
+            id = "next-rule",
+            t = Trigger.Notification("com.example"),
+            acts = listOf(Action.ShowNotification("Argus", "next runs")),
+            prio = 1,
+        )
+        val store = FakeAutomationStore(listOf(waiting, next))
+        val audit = FakeAuditSink()
+        val journal = FakeExecutionJournal()
+        val executed = mutableListOf<Action>()
+        val eventId = TriggerEventId("notification:p4-cancel")
+        val pending = async {
+            engine(
+                store,
+                ActionExecutor { action, _ ->
+                    executed += action
+                    ActionResult.Success
+                },
+                "2026-07-18T10:00:00Z",
+                audit = audit,
+                journal = journal,
+            ).onTrigger(
+                TriggerEnvelope(eventId, TriggerEvent.NotificationPosted("com.example")),
+            ) { DeviceState() }
+        }
+
+        runCurrent()
+        assertTrue(!pending.isCompleted)
+        store.disable(waiting.id)
+        runCurrent()
+
+        assertEquals(listOf(next.id), pending.await().map { it.automation.id })
+        assertEquals(listOf<Action>(Action.ShowNotification("Argus", "next runs")), executed)
+        assertEquals(
+            ExecutionStatus.CANCELLED,
+            journal.completions.first {
+                it.executionId == StableExecutionIdFactory.create(waiting.id, eventId)
+            }.status,
+        )
+        assertTrue(audit.events.any { it.automationId == waiting.id && it.detail == "cancelled" })
+        assertTrue(audit.events.none { it.automationId == waiting.id && it.kind == AuditKind.FIRED })
+    }
 
     @Test
     fun `time trigger fires deterministic action when condition holds`() = runTest {

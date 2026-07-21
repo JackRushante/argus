@@ -14,6 +14,7 @@ import kotlinx.coroutines.test.runTest
 import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 
 class StaticShellRunnerTest {
     private val context = FireContext(
@@ -53,7 +54,43 @@ class StaticShellRunnerTest {
         val failed = ShizukuStaticShellRunner(
             RecordingShell(ShellResult(exitCode = 9, stderr = "secret".encodeToByteArray())),
         )
-        assertEquals(ActionResult.Failure("shell_failed"), failed.run("false", context))
+        assertEquals(ActionResult.Failure("shell_failed_exit_9"), failed.run("false", context))
+
+        // Comando allucinato: 127 = command not found. L'exit code è diagnosticabile nel codice.
+        val notFound = ShizukuStaticShellRunner(
+            RecordingShell(ShellResult(exitCode = 127, stderr = "not found".encodeToByteArray())),
+        )
+        assertEquals(ActionResult.Failure("shell_failed_exit_127"), notFound.run("cmd flashlight", context))
+
+        // Errore di TRASPORTO (Binder/gateway): resta "shell_failed", l'exit code non è affidabile.
+        val transport = ShizukuStaticShellRunner(
+            RecordingShell(ShellResult(exitCode = 0, errorCode = "gateway_down")),
+        )
+        assertEquals(ActionResult.Failure("shell_failed"), transport.run("id", context))
+    }
+
+    @Test
+    fun `capture returns bounded stdout and rejects truncated output`() = runTest {
+        val successfulShell = RecordingShell(
+            ShellResult(exitCode = 0, stdout = "captured\n".encodeToByteArray()),
+        )
+        val successful = ShizukuStaticShellRunner(successfulShell)
+        val captured = successful.runCaptured("printf captured", context)
+        assertEquals(ActionResult.Success, captured.result)
+        assertEquals("captured\n", captured.capturedText)
+        assertEquals(64 * 1_024, successfulShell.maxOutputBytes)
+
+        val truncated = ShizukuStaticShellRunner(
+            RecordingShell(
+                ShellResult(
+                    exitCode = 0,
+                    stdout = "partial-secret".encodeToByteArray(),
+                    truncated = true,
+                ),
+            ),
+        ).runCaptured("large-output", context)
+        assertEquals(ActionResult.Failure("shell_output_too_large"), truncated.result)
+        assertNull(truncated.capturedText)
     }
 }
 

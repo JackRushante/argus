@@ -23,6 +23,10 @@ object ActionPrivileges {
         // Privilegiate: toggle radio, shell e injection UI passano dal gateway Shizuku.
         is Action.SetWifi,
         is Action.SetBluetooth,
+        // Dati mobili: `svc data enable|disable` non ha percorso app-normale, come i toggle radio.
+        is Action.SetMobileData,
+        // Tema scuro/chiaro: `cmd uimode night ...` non ha percorso app-normale, come i toggle radio.
+        is Action.SetDarkMode,
         is Action.RunShell,
         is Action.Tap,
         is Action.InputText,
@@ -39,6 +43,7 @@ object ActionPrivileges {
         is Action.ShowNotification,
         is Action.WhatsAppReply,
         is Action.CopyToClipboard,
+        is Action.CopyText,
         // Sveglia/timer: Intent AlarmClock col permesso normal SET_ALARM, nessuno Shizuku.
         is Action.SetAlarm,
         is Action.SetTimer,
@@ -47,9 +52,33 @@ object ActionPrivileges {
         is Action.SetFlashlight,
         is Action.OpenSettingsScreen,
         is Action.Vibrate,
+        is Action.Wait,
         is Action.InvokeLlm,
         is Action.InvokeLlmV2,
         -> ActionPrivilege.BASE
+
+        // Contenitori control-flow: il privilegio è il MASSIMO dei rami annidati (fail-closed). Un
+        // while che contiene run_shell resta PRIVILEGED, così i gate a monte non lo sottovalutano.
+        is Action.If -> maxPrivilege(action.then + action.orElse)
+        is Action.While -> maxPrivilege(action.body)
+    }
+
+    private fun maxPrivilege(actions: List<Action>): ActionPrivilege {
+        val pending = ArrayDeque<Action>()
+        actions.forEach(pending::addLast)
+        while (pending.isNotEmpty()) {
+            when (val action = pending.removeFirst()) {
+                is Action.If -> {
+                    action.then.forEach(pending::addLast)
+                    action.orElse.forEach(pending::addLast)
+                }
+                is Action.While -> action.body.forEach(pending::addLast)
+                else -> if (of(action) == ActionPrivilege.PRIVILEGED) {
+                    return ActionPrivilege.PRIVILEGED
+                }
+            }
+        }
+        return ActionPrivilege.BASE
     }
 
     fun requiresShizuku(action: Action): Boolean = of(action) == ActionPrivilege.PRIVILEGED

@@ -26,6 +26,7 @@ import dev.argus.engine.safety.DraftArmResult
 import dev.argus.engine.safety.DraftId
 import dev.argus.engine.safety.DraftWriteResult
 import dev.argus.engine.safety.NewDraft
+import dev.argus.ui.presentation.RenderLanguage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -133,6 +134,21 @@ class ExecutionLogViewModelTest {
         assertEquals("Nessuna risposta differita per questa voce.", messages.last())
     }
 
+    @Test
+    fun `english log actions emit english runtime feedback`() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val viewModel = viewModel(context, RenderLanguage.EN)
+        val messages = mutableListOf<String>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.messages.collect(messages::add)
+        }
+
+        viewModel.onSendNow("missing")
+        awaitUntil("english missing-reply feedback") { messages.isNotEmpty() }
+
+        assertEquals("No deferred reply is associated with this entry.", messages.single())
+    }
+
     /** Il lavoro attraversa executor Room reali: attesa in tempo reale, non virtuale. */
     private suspend fun awaitUntil(label: String, condition: () -> Boolean) {
         try {
@@ -146,7 +162,10 @@ class ExecutionLogViewModelTest {
         }
     }
 
-    private fun viewModel(context: Context) = ExecutionLogViewModel(
+    private fun viewModel(
+        context: Context,
+        language: RenderLanguage = RenderLanguage.IT,
+    ) = ExecutionLogViewModel(
         savedStateHandle = SavedStateHandle(),
         context = context,
         database = db,
@@ -154,6 +173,7 @@ class ExecutionLogViewModelTest {
             RoomDeferredReplyStore(db.deferredReplyDao()),
             cipher,
         ) { NOW_MILLIS },
+        language = language,
     ).also { lastViewModel = it }
 
     private suspend fun seedDeferredExecution(

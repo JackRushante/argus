@@ -2,6 +2,7 @@ package dev.argus.device
 
 import android.content.Context
 import dev.argus.engine.model.DndMode
+import dev.argus.engine.model.NightMode
 import dev.argus.engine.model.SettingNamespace
 import dev.argus.engine.model.SettingsScreen
 import dev.argus.engine.model.WriteSettingPolicy
@@ -37,7 +38,9 @@ class DeviceToolException(
 interface DeviceController {
     suspend fun setWifi(on: Boolean, executionId: ExecutionId, priority: Int = 0)
     suspend fun setBluetooth(on: Boolean, executionId: ExecutionId, priority: Int = 0)
+    suspend fun setMobileData(on: Boolean, executionId: ExecutionId, priority: Int = 0)
     suspend fun setDnd(mode: DndMode, executionId: ExecutionId, priority: Int = 0)
+    suspend fun setDarkMode(mode: NightMode, executionId: ExecutionId, priority: Int = 0)
     suspend fun setRinger(mode: RingerMode, executionId: ExecutionId, priority: Int = 0)
     suspend fun launchApp(packageName: String, executionId: ExecutionId, priority: Int = 0)
     suspend fun openUrl(url: String, executionId: ExecutionId, priority: Int = 0)
@@ -110,6 +113,15 @@ class DeviceTools(
         )
     }
 
+    override suspend fun setMobileData(on: Boolean, executionId: ExecutionId, priority: Int) {
+        runChecked(
+            operation = "set_mobile_data",
+            command = listOf(SVC, "data", if (on) "enable" else "disable"),
+            executionId = executionId,
+            priority = priority,
+        )
+    }
+
     override suspend fun setDnd(mode: DndMode, executionId: ExecutionId, priority: Int) {
         val shellMode = when (mode) {
             DndMode.OFF -> "all"
@@ -119,6 +131,20 @@ class DeviceTools(
         runChecked(
             operation = "set_dnd",
             command = listOf(CMD, "notification", "set_dnd", shellMode),
+            executionId = executionId,
+            priority = priority,
+        )
+    }
+
+    override suspend fun setDarkMode(mode: NightMode, executionId: ExecutionId, priority: Int) {
+        val nightArg = when (mode) {
+            NightMode.OFF -> "no"
+            NightMode.ON -> "yes"
+            NightMode.AUTO -> "auto"
+        }
+        runChecked(
+            operation = "set_dark_mode",
+            command = listOf(CMD, "uimode", "night", nightArg),
             executionId = executionId,
             priority = priority,
         )

@@ -86,6 +86,15 @@ class StateReader(private val shell: PrivilegedShell) {
                 }
             }
         }
+        if (StateKeys.SCREEN in keys) {
+            commandOutput(
+                listOf(DUMPSYS, "power"),
+                timeoutMillis,
+                scalarOutputBytes,
+            )?.let(::parseScreen)?.let {
+                values[StateKeys.SCREEN] = it
+            }
+        }
 
         val foregroundApp = if (includeForegroundApp) {
             commandOutput(
@@ -141,6 +150,8 @@ class StateReader(private val shell: PrivilegedShell) {
         private val RESUMED_ACTIVITY_FIELD = Regex(
             "\\b(?:topResumedActivity|mResumedActivity|ResumedActivity)\\b",
         )
+        private val WAKEFULNESS = Regex("mWakefulness=([A-Za-z]+)")
+        private val DISPLAY_POWER_STATE = Regex("Display Power:\\s*state=([A-Za-z]+)")
 
         fun parseRinger(raw: String): String? = when (raw.trim()) {
             "0" -> "silent"
@@ -189,6 +200,30 @@ class StateReader(private val shell: PrivilegedShell) {
                 else -> null
             }
             return BatterySnapshot(level, charging)
+        }
+
+        /**
+         * Stato schermo da `dumpsys power`. Fonte primaria `mWakefulness=` (Awake -> on;
+         * Asleep/Dozing -> off); fallback robusto su `Display Power: state=ON|OFF` quando il campo
+         * wakefulness manca. Ritorna esattamente "on"/"off" (i valori dichiarati in StateKeys.ALL),
+         * null se nessun marcatore riconoscibile (fail-closed: chiave resta assente).
+         */
+        fun parseScreen(raw: String): String? {
+            WAKEFULNESS.find(raw)?.groupValues?.get(1)?.let { wakefulness ->
+                return when (wakefulness.lowercase()) {
+                    "awake" -> "on"
+                    "asleep", "dozing" -> "off"
+                    else -> null
+                }
+            }
+            DISPLAY_POWER_STATE.find(raw)?.groupValues?.get(1)?.let { state ->
+                return when (state.uppercase()) {
+                    "ON" -> "on"
+                    "OFF" -> "off"
+                    else -> null
+                }
+            }
+            return null
         }
 
         fun parseForegroundPackage(raw: String): String? = raw.lineSequence()

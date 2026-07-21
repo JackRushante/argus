@@ -8,6 +8,41 @@ import kotlin.test.assertTrue
 
 class AgentMessageSupportTest {
     @Test
+    fun `compile prompt teaches set_dark_mode and screen_brightness via write_setting`() {
+        val prompt = AgentMessageSupport.compileSystemText()
+
+        // IO-6 A: azione dedicata tema scuro/chiaro.
+        assertTrue(
+            "{\"type\":\"set_dark_mode\", \"mode\":\"off\"|\"on\"|\"auto\"}" in prompt,
+            "lo schema deve descrivere set_dark_mode con mode off/on/auto",
+        )
+        // IO-6 B: la luminosità è documentata come long-tail di write_setting (nessuna azione nuova).
+        assertTrue(
+            "screen_brightness (0-255, SYSTEM; set screen_brightness_mode=0 first to disable auto-brightness)"
+                in prompt,
+            "write_setting deve documentare screen_brightness e la disattivazione dell'auto-brightness",
+        )
+    }
+
+    @Test
+    fun `compile prompt frames run_shell as a last resort with a real-command cookbook`() {
+        val prompt = AgentMessageSupport.compileSystemText()
+        val lower = prompt.lowercase()
+
+        // IO-7 A: la shell è l'ULTIMA SPIAGGIA — prima le azioni tipizzate.
+        assertTrue("last resort" in lower, "il prompt deve marcare run_shell come ultima spiaggia")
+        // Cookbook di comandi REALI (un paio di campioni curati).
+        assertTrue("svc wifi|data|bluetooth enable|disable" in prompt, "cookbook: svc")
+        assertTrue("cmd uimode night yes|no|auto" in prompt, "cookbook: cmd uimode night")
+        assertTrue("input keyevent" in prompt, "cookbook: input keyevent")
+        // Anti-allucinazione: la torcia NON è `cmd flashlight`, è l'azione set_flashlight.
+        assertTrue(
+            "cmd flashlight" in prompt && "set_flashlight" in prompt,
+            "il prompt deve segnalare che cmd flashlight non esiste e rimandare a set_flashlight",
+        )
+    }
+
+    @Test
     fun `compile prompt teaches the immediate one-shot trigger`() {
         val prompt = AgentMessageSupport.compileSystemText()
 
@@ -36,6 +71,72 @@ class AgentMessageSupportTest {
         assertTrue(
             "\"afterMs\":integer|null" in prompt,
             "lo schema draft time deve descrivere afterMs",
+        )
+    }
+
+    // --- P4-D: lo schema draft insegna la grammatica Tasker-class (schema v2) ---
+
+    @Test
+    fun `compile prompt teaches the P4 vars grammar and bounds`() {
+        val prompt = AgentMessageSupport.compileSystemText()
+
+        // Variabili tipizzate opzionali + regex nome + tetto 16.
+        assertTrue("\"vars\"" in prompt, "lo schema deve descrivere il campo vars")
+        assertTrue(
+            "^[a-z][a-z0-9_]{0,31}\$" in prompt,
+            "lo schema deve dichiarare la regex dei nomi di variabile",
+        )
+        assertTrue("16 variables" in prompt, "il tetto 16 variabili deve comparire")
+        // Le tre sorgenti di binding.
+        assertTrue("\"type\":\"literal\"" in prompt, "binding literal (CLEAN)")
+        assertTrue("\"type\":\"state\"" in prompt, "binding state (CLEAN)")
+        assertTrue("\"type\":\"trigger_payload\"" in prompt, "binding trigger_payload (TAINTED)")
+    }
+
+    @Test
+    fun `compile prompt teaches captureAs only on the three producers`() {
+        val prompt = AgentMessageSupport.compileSystemText()
+
+        assertTrue("captureAs" in prompt, "captureAs deve essere descritto")
+        assertTrue(
+            "run_shell, invoke_llm and invoke_llm_v2" in prompt,
+            "captureAs è ammesso solo sui tre producer",
+        )
+    }
+
+    @Test
+    fun `compile prompt teaches the control-flow actions and their bounds`() {
+        val prompt = AgentMessageSupport.compileSystemText()
+
+        assertTrue("\"type\":\"if\"" in prompt, "azione if")
+        assertTrue("\"type\":\"while\"" in prompt, "azione while")
+        assertTrue("\"type\":\"wait\"" in prompt, "azione wait")
+        // Bound numerici P4 §2.5.
+        assertTrue("maxIterations\":integer 1..1000" in prompt, "while maxIterations 1..1000")
+        assertTrue("durationMs\":integer 1..3600000" in prompt, "wait <= 1 ora")
+        assertTrue("64 action nodes" in prompt, "tetto 64 nodi azione")
+        assertTrue("depth 4" in prompt || "depth <= 4" in prompt, "profondità annidamento 4")
+        assertTrue("6 hours" in prompt, "budget tempo worst-case 6 ore")
+    }
+
+    @Test
+    fun `compile prompt teaches the flow conditions and the aggressive posture with kept shell-gating`() {
+        val prompt = AgentMessageSupport.compileSystemText()
+
+        assertTrue("var_compare" in prompt, "condizione var_compare")
+        assertTrue("boolean_literal" in prompt, "condizione boolean_literal")
+        assertTrue("expectedVar" in prompt, "confronto var-vs-var")
+        // Posture AGGRESSIVO: il prompt permette di usare liberamente i valori runtime nei campi,
+        // inclusi comandi/URL/target — non li confina più ai soli data sink.
+        assertTrue(
+            "freely" in prompt.lowercase(),
+            "il prompt deve permettere l'uso libero dei valori runtime",
+        )
+        // Dente che teniamo: run_shell resta innescabile solo da contatti whitelistati.
+        assertTrue("run_shell" in prompt, "il prompt deve nominare run_shell")
+        assertTrue(
+            "whitelist" in prompt.lowercase(),
+            "il prompt deve mantenere lo shell-gating sui contatti whitelistati",
         )
     }
 

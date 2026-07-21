@@ -138,6 +138,8 @@ class CliBridgeTransportTest {
     }
 
     @Test fun `health uses the same authenticated strict boundary`(): Unit = runBlocking {
+        // P4-D2: un bridge che annuncia solo act [1,2] (SENZA il canale risolto 3) resta compatibile;
+        // il canale risolto non e' un requisito di health (solo la capture P4 lo usa, fail-closed per-call).
         server.enqueue(jsonResponse(
             """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1,2],"act_schema_versions":[1,2],"source_sha256":"${"a".repeat(64)}"}""",
         ))
@@ -732,6 +734,42 @@ class CliBridgeTransportTest {
         // Retro-compat: il campo è opzionale, un bridge vecchio (o run senza report) non lo manda.
         server.enqueue(validNoDraftResponse())
         assertNull(transport().compile("dopo le 23 dnd", manifest, DeviceState()).usage)
+    }
+
+    // --- P4-D2 slice 1: actResolved — il dato runtime TAINTED viaggia in un campo envelope
+    //     additivo `runtime_data` (token+value), separato dal goal (solo marker opaco) ---
+
+    @Test fun `actResolved carries the runtime data in a separate additive envelope field`(): Unit = runBlocking {
+        val expectedRequestId = actRequestId("execution-1", 0)
+        server.enqueue(jsonResponse(
+            """{"schema_version":3,"request_id":"$expectedRequestId","result":{"text":"Fatto."},"error_code":null}""",
+        ))
+        val resolved = RuntimeDataTestFixture.resolved()
+
+        val result = transport().actResolved(
+            context = fireContext(),
+            goal = resolved.goal,
+            contextSources = listOf("notification"),
+            allowedTools = listOf("whatsapp_reply"),
+            runtimeData = resolved.runtimeData,
+        )
+
+        assertEquals("Fatto.", result.text)
+        assertNull(result.metaError)
+        val request = assertNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("/act", request.path)
+        val raw = request.body.readUtf8()
+        val root = Json.parseToJsonElement(raw).jsonObject
+        assertEquals(3, root.getValue("schema_version").jsonPrimitive.content.toInt())
+        // Il goal porta solo il marker opaco: il valore RAW non vi compare mai.
+        val goal = root.getValue("goal").jsonPrimitive.content
+        assertFalse(goal.contains(RuntimeDataTestFixture.SENTINEL), "il valore runtime non deve entrare nel goal")
+        assertTrue(goal.contains("{{ARGUS_RUNTIME_DATA_1}}"), "il goal deve portare il marker opaco")
+        val binding = root.getValue("runtime_data").jsonArray.single().jsonObject
+        assertEquals("ARGUS_RUNTIME_DATA_1", binding.getValue("token").jsonPrimitive.content)
+        assertEquals(RuntimeDataTestFixture.SENTINEL, binding.getValue("value").jsonPrimitive.content)
+        // Separazione stretta: il valore compare SOLO nel campo runtime_data, una volta sola.
+        assertEquals(1, raw.split(RuntimeDataTestFixture.SENTINEL).size - 1)
     }
 
     private fun validNoDraftResponse(reply: String = "ok") = jsonResponse(

@@ -4,6 +4,7 @@ import dev.argus.automation.budget.BudgetMeta
 import dev.argus.automation.notification.NotificationReplyDelivery
 import dev.argus.automation.notification.NotificationReplyGateway
 import dev.argus.automation.notification.NotificationReplyRequest
+import dev.argus.engine.brain.ActResult
 import dev.argus.engine.brain.Brain
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.ApprovalFingerprints
@@ -18,15 +19,18 @@ import dev.argus.engine.model.StateValueCoercion
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.model.isOneShot
 import dev.argus.engine.runtime.ActionJournalOutcome
+import dev.argus.engine.runtime.ActionPath
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.runtime.ExecutionStatus
 import dev.argus.engine.runtime.FireContext
 import dev.argus.engine.runtime.FirePolicy
 import dev.argus.engine.runtime.FirePolicyDecision
+import dev.argus.engine.runtime.RuntimeDataBinding
 import dev.argus.engine.runtime.SubmittedActionCompletion
 import dev.argus.engine.runtime.SubmittedActionJournal
 import dev.argus.engine.runtime.TriggerEvent
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.Channel
@@ -55,6 +59,7 @@ class AndroidGenerativeLane(
     private val replies: NotificationReplyGateway,
     private val deferredReplies: DeferredReplySink,
     private val notifier: AutomationNotifier,
+    private val oneShotConsumptions: OneShotConsumptionRegistry = NoopOneShotConsumptionRegistry,
     capacity: Int = DEFAULT_CAPACITY,
     private val submissionHandshakeTimeoutMillis: Long = DEFAULT_HANDSHAKE_TIMEOUT_MILLIS,
     private val nowMillis: () -> Long = System::currentTimeMillis,
@@ -67,7 +72,9 @@ class AndroidGenerativeLane(
         queue = Channel(capacity)
         scope.launch {
             try {
-                for (queued in queue) processSafely(queued)
+                for (queued in queue) {
+                    if (queued.resolved != null) processResolvedSafely(queued) else processSafely(queued)
+                }
             } finally {
                 queue.close()
             }
@@ -92,6 +99,133 @@ class AndroidGenerativeLane(
             )
         }
         return queue.trySend(QueuedAction(frozenContext, frozenAction)).isSuccess
+    }
+
+    /**
+     * Canale RISOLTO P4-D2 (capture): accoda sulla STESSA lane single-consumer e sospende finché il
+     * worker completa il deferred con l'esito di `brain.actResolved`. Il dato TAINTED resta in
+     * [runtimeData], mai nel goal. Il TEMPLATE approvato (pre-interpolazione) viene catturato ORA così
+     * la revalidazione confronta template⇄template, non l'azione interpolata (che porta i marker).
+     */
+    override suspend fun submitAndAwait(
+        context: FireContext,
+        action: Action.InvokeLlm,
+        runtimeData: List<RuntimeDataBinding>,
+    ): ActResult {
+        val frozenContext = context.copy(
+            state = context.state.copy(
+                values = context.state.values.toMap(),
+                queryValues = context.state.queryValues.toMap(),
+            ),
+        )
+        val frozenAction = action.copy(
+            contextSources = action.contextSources.toList(),
+            allowedTools = action.allowedTools.toList(),
+        )
+        val approvedTemplate = try {
+            automations.get(context.automationId)
+                ?.let { ActionPath(context.actionPath).resolve(it.actions) }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            null
+        }
+        val deferred = CompletableDeferred<ActResult>()
+        val request = ResolvedRequest(deferred, runtimeData.toList(), approvedTemplate)
+        if (!queue.trySend(QueuedAction(frozenContext, frozenAction, request)).isSuccess) {
+            return ActResult(text = null, metaError = "generative_lane_unavailable")
+        }
+        return try {
+            deferred.await()
+        } catch (error: CancellationException) {
+            // Cancellazione del CHIAMANTE (es. regola disabilitata mid-flight, Engine.cancelAndJoin):
+            // il worker resta indipendente ma il suo esito non viene mai osservato → nessuna capture.
+            deferred.cancel(error)
+            throw error
+        }
+    }
+
+    private suspend fun processResolvedSafely(queued: QueuedAction) {
+        val request = queued.resolved ?: return
+        try {
+            request.deferred.complete(processResolved(queued, request))
+        } catch (error: CancellationException) {
+            request.deferred.cancel(error)
+            throw error
+        } catch (_: Exception) {
+            request.deferred.complete(ActResult(text = null, metaError = "lane_failed"))
+        }
+    }
+
+    /**
+     * Esegue la capture RISOLTA: revalida (pre e post modello), chiama `brain.actResolved` sotto
+     * [withTimeout]/budget/policy e restituisce l'esito. MAI consegna reply/notifica (è capture): il
+     * testo torna al chiamante che lo cattura. Un metaError (budget_exceeded, approval_changed,
+     * act_timeout, brain_failed) sopprime la capture senza falso successo.
+     */
+    private suspend fun processResolved(queued: QueuedAction, request: ResolvedRequest): ActResult {
+        validateResolved(queued, request)?.let { return ActResult(text = null, metaError = it) }
+        val action = queued.action as? Action.InvokeLlm
+            ?: return ActResult(text = null, metaError = "action_contract_invalid")
+
+        val act = try {
+            withTimeout(action.timeoutMs) {
+                brain.actResolved(
+                    context = queued.context,
+                    goal = action.goal,
+                    contextSources = action.contextSources,
+                    allowedTools = action.allowedTools,
+                    runtimeData = request.runtimeData,
+                )
+            }
+        } catch (_: TimeoutCancellationException) {
+            return ActResult(text = null, metaError = "act_timeout")
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            return ActResult(text = null, metaError = "brain_failed")
+        }
+
+        if (act.text == null) {
+            return ActResult(text = null, metaError = safeCode(act.metaError, "brain_failed"))
+        }
+        // Revalidazione POST-modello: un edit/disabilitazione/policy revocata durante la latenza LLM
+        // sopprime la capture (nessun falso successo), esattamente come il sink async.
+        validateResolved(queued, request)?.let { return ActResult(text = null, metaError = it) }
+        return act
+    }
+
+    /**
+     * Revalidazione del canale RISOLTO. La sicurezza è tutta nel fingerprint (nessuna approvazione
+     * stale). Il confronto d'azione NON usa l'azione interpolata (i marker `{{ARGUS_RUNTIME_DATA_n}}`
+     * romperebbero l'uguaglianza byte-per-byte): confronta il TEMPLATE approvato risolto dal path con
+     * quello catturato al submit. Regola cambiata ⇒ fingerprint diverso ⇒ approval_changed; foglia
+     * spostata/cambiata ⇒ template diverso ⇒ action_changed.
+     */
+    private suspend fun validateResolved(queued: QueuedAction, request: ResolvedRequest): String? {
+        val current = automations.get(queued.context.automationId) ?: return "rule_missing"
+        if (
+            current.approvalFingerprint != queued.context.approvalFingerprint ||
+            current.approvalFingerprint != ApprovalFingerprints.of(current)
+        ) return "approval_changed"
+        val template = try {
+            ActionPath(queued.context.actionPath).resolve(current.actions)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            null
+        }
+        if (template == null || template != request.approvedTemplate) return "action_changed"
+        if (current.status != AutomationStatus.ARMED || !current.enabled) {
+            if (
+                !isOneShot(current.trigger) ||
+                !oneShotConsumptions.wasAutoConsumed(queued.context.eventId)
+            ) return "rule_inactive"
+        }
+        return when (val decision = firePolicy.evaluate(current, queued.context.event)) {
+            FirePolicyDecision.Allow -> null
+            is FirePolicyDecision.Block -> safeCode(decision.code, "policy_blocked")
+        }
     }
 
     private suspend fun processSafely(queued: QueuedAction) {
@@ -230,7 +364,7 @@ class AndroidGenerativeLane(
             current.approvalFingerprint != queued.context.approvalFingerprint ||
             current.approvalFingerprint != ApprovalFingerprints.of(current)
         ) return "approval_changed"
-        if (current.actions.getOrNull(queued.context.actionIndex) != queued.action) {
+        if (ActionPath(queued.context.actionPath).resolve(current.actions) != queued.action) {
             return "action_changed"
         }
         // RACE one-shot (#60): un trigger one-shot (immediate, o time con `at`) si DISABILITA appena
@@ -239,7 +373,10 @@ class AndroidGenerativeLane(
         // la regola era ARMATA e fingerprint+azione combaciano ancora: DEVE poter completare. Le regole
         // ricorrenti disabilitate dall'utente (time con cron, ecc.) restano invece "rule_inactive".
         if (current.status != AutomationStatus.ARMED || !current.enabled) {
-            if (!isOneShot(current.trigger)) return "rule_inactive"
+            if (
+                !isOneShot(current.trigger) ||
+                !oneShotConsumptions.wasAutoConsumed(queued.context.eventId)
+            ) return "rule_inactive"
         }
         return when (val decision = firePolicy.evaluate(current, queued.context.event)) {
             FirePolicyDecision.Allow -> null
@@ -350,7 +487,23 @@ class AndroidGenerativeLane(
     private class QueuedAction(
         val context: FireContext,
         val action: GenerativeAction,
+        /** Non-null solo per il canale RISOLTO (capture sincrona via [submitAndAwait]). */
+        val resolved: ResolvedRequest? = null,
     )
+
+    /**
+     * Richiesta del canale RISOLTO: il [deferred] che il worker completa, il dato runtime TAINTED da
+     * framare in [runtimeData] e il [approvedTemplate] (pre-interpolazione) per la revalidazione. Il
+     * toString non espone mai il valore runtime.
+     */
+    private class ResolvedRequest(
+        val deferred: CompletableDeferred<ActResult>,
+        val runtimeData: List<RuntimeDataBinding>,
+        val approvedTemplate: Action?,
+    ) {
+        override fun toString(): String =
+            "ResolvedRequest(runtimeData=${runtimeData.size}, template=${approvedTemplate?.let { it::class.simpleName }})"
+    }
 
     private companion object {
         const val DEFAULT_CAPACITY = 8

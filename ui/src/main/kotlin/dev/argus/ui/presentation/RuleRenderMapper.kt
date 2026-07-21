@@ -11,14 +11,25 @@ import dev.argus.engine.model.ConnState
 import dev.argus.engine.model.Condition
 import dev.argus.engine.model.DndMode
 import dev.argus.engine.model.GenerativeDeliverMode
+import dev.argus.engine.model.NightMode
 import dev.argus.engine.model.PhoneEvent
 import dev.argus.engine.model.SensorKind
 import dev.argus.engine.model.StateQuery
 import dev.argus.engine.model.StateValueType
 import dev.argus.engine.model.Transition
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.VarBinding
+import dev.argus.engine.model.VarType
+import dev.argus.engine.model.IntegrityLabel
+import dev.argus.engine.model.ConfidentialityLabel
+import dev.argus.engine.model.ValueProvenance
+import dev.argus.engine.model.integrity
+import dev.argus.engine.model.declaredType
+import dev.argus.engine.model.provenance
 import dev.argus.ui.model.ActionRow
+import dev.argus.ui.model.ProgramNode
 import dev.argus.ui.model.RuleRender
+import dev.argus.ui.model.VarRow
 
 /**
  * DETERMINISTIC rendering of an automation into [RuleRender] — direttiva sicurezza §5.1.
@@ -35,17 +46,17 @@ import dev.argus.ui.model.RuleRender
  */
 object RuleRenderMapper {
 
-    /** IT verbatim da design §7.3 — mai parafrasare (invariante di sicurezza handoff §5). */
+    /** Disclosure provider-neutral: il brain può essere Hermes oppure un provider diretto. */
     private fun privacyNote(l: RenderLanguage): String = l.pick(
-        "The notification text will be sent to Hermes and to the cloud providers to generate the reply.",
-        "Il testo delle notifiche verrà inviato a Hermes e ai provider cloud per generare la risposta.",
+        "The notification text will be sent to the configured AI service to generate the reply.",
+        "Il testo delle notifiche verrà inviato al servizio AI configurato per generare la risposta.",
     )
 
     private fun statePrivacyNote(l: RenderLanguage): String = l.pick(
-        "The notification text and the listed state readers will be sent to Hermes and to the " +
-            "cloud providers to generate the reply.",
-        "Il testo delle notifiche e i reader di stato elencati verranno inviati a Hermes e ai " +
-            "provider cloud per generare la risposta.",
+        "The notification text and values from the listed state readers will be sent to the " +
+            "configured AI service to generate the reply.",
+        "Il testo delle notifiche e i valori prodotti dai reader di stato elencati verranno " +
+            "inviati al servizio AI configurato per generare la risposta.",
     )
 
     /**
@@ -58,18 +69,19 @@ object RuleRenderMapper {
         a: Automation,
         conversationLabels: Map<String, String> = emptyMap(),
         language: RenderLanguage = RenderLanguage.system(),
-    ): RuleRender = render(a.trigger, a.actions, a.conditions, conversationLabels, language)
+    ): RuleRender = render(a.trigger, a.actions, a.conditions, a.vars, conversationLabels, language)
 
     fun mapDraft(
         d: AutomationDraft,
         conversationLabels: Map<String, String> = emptyMap(),
         language: RenderLanguage = RenderLanguage.system(),
-    ): RuleRender = render(d.trigger, d.actions, d.conditions, conversationLabels, language)
+    ): RuleRender = render(d.trigger, d.actions, d.conditions, d.vars, conversationLabels, language)
 
     private fun render(
         trigger: Trigger,
         actions: List<Action>,
         conditions: Condition?,
+        vars: List<VarBinding>,
         conversationLabels: Map<String, String>,
         l: RenderLanguage,
     ): RuleRender {
@@ -81,11 +93,93 @@ object RuleRenderMapper {
             actions = actions.map { actionRow(it, l) },
             isGenerative = isGenerative,
             privacyNote = when {
-                actions.any { it is Action.InvokeLlmV2 } -> statePrivacyNote(l)
+                containsInvokeLlmV2(actions) -> statePrivacyNote(l)
                 isGenerative -> privacyNote(l)
                 else -> null
             },
+            vars = vars.map { varRow(it, trigger, l) },
+            program = programNodes(actions, l),
         )
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Programma P4 — albero ricorsivo (if/while/wait/foglie). Ogni stringa è resa dai TIPI; nessuna
+    // foglia annidata può restare nascosta (lo verifica lo snapshot test). Wait è una foglia.
+    // ---------------------------------------------------------------------------------------------
+
+    private fun programNodes(actions: List<Action>, l: RenderLanguage): List<ProgramNode> =
+        actions.map { programNode(it, l) }
+
+    private fun programNode(a: Action, l: RenderLanguage): ProgramNode = when (a) {
+        is Action.If -> ProgramNode.IfNode(
+            title = l.pick("If:", "Se:"),
+            conditionLines = flattenConditions(a.condition, 0, l),
+            thenTitle = l.pick("Then:", "Allora:"),
+            then = programNodes(a.then, l),
+            elseTitle = if (a.orElse.isNotEmpty()) l.pick("Otherwise:", "Altrimenti:") else null,
+            orElse = programNodes(a.orElse, l),
+        )
+        is Action.While -> ProgramNode.WhileNode(
+            title = l.pick(
+                "Repeat ${whileCountEn(a)}" +
+                    (if (a.delayBetweenMs > 0) " · ${a.delayBetweenMs} ms between" else ""),
+                "Ripeti ${whileCountIt(a)}" +
+                    (if (a.delayBetweenMs > 0) " · ${a.delayBetweenMs} ms tra le iterazioni" else ""),
+            ),
+            conditionLines = flattenConditions(a.condition, 0, l),
+            body = programNodes(a.body, l),
+        )
+        else -> ProgramNode.Leaf(actionRow(a, l))
+    }
+
+    // Conteggio iterazioni del while: letterale ("up to N times") oppure variabile NUMBER, che
+    // mostra il nome in sintassi di interpolazione col tetto runtime esplicito ("up to ${n} times
+    // (max 1000)").
+    private fun whileCountEn(a: Action.While): String =
+        a.maxIterationsVar?.let { "up to \${$it} times (max 1000)" } ?: "up to ${a.maxIterations} times"
+
+    private fun whileCountIt(a: Action.While): String =
+        a.maxIterationsVar?.let { "fino a \${$it} volte (max 1000)" } ?: "fino a ${a.maxIterations} volte"
+
+    // ---------------------------------------------------------------------------------------------
+    // Variabili P4 — resa della DEFINIZIONE (mai valori runtime): tipo, integrità, riservatezza,
+    // provenienza. L'integrità "external" segnala i dati non fidati (payload del trigger).
+    // ---------------------------------------------------------------------------------------------
+
+    private fun varRow(v: VarBinding, trigger: Trigger, l: RenderLanguage): VarRow = VarRow(
+        name = v.name,
+        typeLabel = varTypeLabel(v.declaredType, l),
+        integrityLabel = integrityLabel(v.integrity, l),
+        confidentialityLabel = confidentialityLabel(v.confidentiality, l),
+        provenanceLabel = v.provenance(trigger).joinToString(", ") { provenanceLabel(it, l) },
+    )
+
+    private fun varTypeLabel(t: VarType, l: RenderLanguage): String = when (t) {
+        VarType.TEXT -> l.pick("text", "testo")
+        VarType.NUMBER -> l.pick("number", "numero")
+        VarType.BOOLEAN -> l.pick("boolean", "booleano")
+    }
+
+    private fun integrityLabel(i: IntegrityLabel, l: RenderLanguage): String = when (i) {
+        IntegrityLabel.CLEAN -> l.pick("trusted", "attendibile")
+        IntegrityLabel.TAINTED -> l.pick("external", "esterno")
+    }
+
+    private fun confidentialityLabel(c: ConfidentialityLabel, l: RenderLanguage): String = when (c) {
+        ConfidentialityLabel.PUBLIC -> l.pick("public", "pubblico")
+        ConfidentialityLabel.PRIVATE -> l.pick("private", "privato")
+        ConfidentialityLabel.SECRET -> l.pick("secret", "segreto")
+    }
+
+    private fun provenanceLabel(p: ValueProvenance, l: RenderLanguage): String = when (p) {
+        ValueProvenance.LITERAL -> l.pick("fixed value", "valore fisso")
+        ValueProvenance.DEVICE_STATE -> l.pick("device state", "stato dispositivo")
+        ValueProvenance.NOTIFICATION -> l.pick("notification", "notifica")
+        ValueProvenance.SMS -> "SMS"
+        ValueProvenance.PHONE -> l.pick("call", "chiamata")
+        ValueProvenance.MODEL -> l.pick("AI output", "output AI")
+        ValueProvenance.SHELL -> l.pick("shell output", "output shell")
+        ValueProvenance.ENGINE -> l.pick("random", "casuale")
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -338,6 +432,21 @@ object RuleRenderMapper {
             is Condition.Not ->
                 listOf(l.pick("${pad}Must not hold:", "${pad}Non deve valere:")) +
                     flattenConditions(c.cond, depth + 1, l)
+            is Condition.BooleanLiteral ->
+                listOf("$pad${if (c.value) l.pick("Always", "Sempre") else l.pick("Never", "Mai")}")
+            // P4: confronto su variabile di programma. La destra è un'altra variabile (${nome}) o un
+            // letterale. Rendering minimale a una riga (l'espansione ricca dei badge provenienza è P4-E).
+            is Condition.VarCompare -> {
+                // IS_EVEN/IS_ODD sono UNARI: nessun operando destro da rendere.
+                val unary = c.op == CmpOp.IS_EVEN || c.op == CmpOp.IS_ODD
+                val right = if (unary) "" else " " + (c.expectedVar?.let { "\${$it}" } ?: c.expected ?: "<?>")
+                listOf(
+                    l.pick(
+                        "${pad}Only if \${${c.varName}} ${opLabel(c.op, l)}$right",
+                        "${pad}Solo se \${${c.varName}} ${opLabel(c.op, l)}$right",
+                    ),
+                )
+            }
         }
     }
 
@@ -347,6 +456,8 @@ object RuleRenderMapper {
         CmpOp.GT -> ">"
         CmpOp.LT -> "<"
         CmpOp.CONTAINS -> l.pick("contains", "contiene")
+        CmpOp.IS_EVEN -> l.pick("is even", "è pari")
+        CmpOp.IS_ODD -> l.pick("is odd", "è dispari")
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -363,6 +474,11 @@ object RuleRenderMapper {
             iconKey = "bluetooth",
             label = if (a.on) l.pick("Turn on Bluetooth", "Attiva Bluetooth")
             else l.pick("Turn off Bluetooth", "Disattiva Bluetooth"),
+        )
+        is Action.SetMobileData -> row(
+            iconKey = "mobile_data",
+            label = if (a.on) l.pick("Turn on mobile data", "Attiva dati mobili")
+            else l.pick("Turn off mobile data", "Disattiva dati mobili"),
         )
         is Action.SetDnd -> row(
             iconKey = "dnd",
@@ -418,6 +534,7 @@ object RuleRenderMapper {
         is Action.RunShell -> row(
             iconKey = "shell",
             label = l.pick("Run shell command", "Esegui comando shell"),
+            detail = captureLabel(a.captureAs, l),
             isShell = true,
             shellCommand = a.cmd, // integrale, mai troncato (invariante §5.4)
         )
@@ -427,6 +544,12 @@ object RuleRenderMapper {
             // §5: la regex è il criterio reale di estrazione, resta visibile integrale.
             detail = a.extractionRegex?.let { l.pick("extraction: $it", "estrazione: $it") }
                 ?: l.pick("the full text of the message", "il testo integrale del messaggio"),
+        )
+        is Action.CopyText -> row(
+            iconKey = "clipboard",
+            label = l.pick("Copy text to clipboard", "Copia testo negli appunti"),
+            // Il testo letterale approvato è il criterio reale: resta visibile integrale.
+            detail = a.text,
         )
         is Action.SetAlarm -> row(
             iconKey = "alarm",
@@ -451,6 +574,15 @@ object RuleRenderMapper {
             else l.pick("Turn off flashlight", "Spegni torcia"),
             detail = if (a.on) "on" else "off",
         )
+        is Action.SetDarkMode -> row(
+            iconKey = "settings",
+            label = l.pick("Set dark mode", "Imposta modalità scura"),
+            detail = when (a.mode) {
+                NightMode.OFF -> l.pick("off", "off")
+                NightMode.ON -> l.pick("on", "on")
+                NightMode.AUTO -> l.pick("auto", "auto")
+            },
+        )
         is Action.OpenSettingsScreen -> row(
             iconKey = "settings",
             label = l.pick("Open Settings", "Apri Impostazioni"),
@@ -460,6 +592,11 @@ object RuleRenderMapper {
         is Action.Vibrate -> row(
             iconKey = "vibrate",
             label = l.pick("Vibrate", "Vibra"),
+            detail = "${a.durationMs} ms",
+        )
+        is Action.Wait -> row(
+            iconKey = "control_flow",
+            label = l.pick("Wait", "Attendi"),
             detail = "${a.durationMs} ms",
         )
         is Action.WriteSetting -> row(
@@ -490,7 +627,7 @@ object RuleRenderMapper {
                     "Titolo notifica: ${a.notificationTitle.orEmpty()} · Obiettivo: ${a.goal} · " +
                         "tool: ${a.allowedTools.joinToString(", ")}",
                 )
-            },
+            } + captureSuffix(a.captureAs, l),
             isGenerative = true,
         )
         is Action.InvokeLlmV2 -> row(
@@ -508,8 +645,38 @@ object RuleRenderMapper {
                 )
                 append(l.pick(" · tools: ", " · tool: "))
                 append(a.allowedTools.joinToString(", "))
+                append(captureSuffix(a.captureAs, l))
             },
             isGenerative = true,
+        )
+        // P4 control-flow: nella vista COMPATTA (chip) i blocchi if/while restano un sommario a una
+        // riga; il dettaglio ricorsivo completo è reso dall'albero `program` (ProgramNode) nella
+        // schermata di approvazione. isGenerative dal tier aggregato tiene onesta anche la vista chip.
+        is Action.If -> row(
+            iconKey = "control_flow",
+            label = l.pick("If (condition), run a block", "Se (condizione), esegui un blocco"),
+            detail = l.pick(
+                "${a.then.size} actions if true" +
+                    (if (a.orElse.isNotEmpty()) ", ${a.orElse.size} otherwise" else ""),
+                "${a.then.size} azioni se vera" +
+                    (if (a.orElse.isNotEmpty()) ", ${a.orElse.size} altrimenti" else ""),
+            ),
+            isGenerative = a.tier == ActionTier.GENERATIVE,
+        )
+        is Action.While -> row(
+            iconKey = "control_flow",
+            label = l.pick(
+                "Repeat (${whileCountEn(a)})",
+                a.maxIterationsVar?.let { "Ripeti (fino a \${$it} volte, max 1000)" }
+                    ?: "Ripeti (max ${a.maxIterations} volte)",
+            ),
+            detail = l.pick(
+                "${a.body.size} actions per iteration" +
+                    (if (a.delayBetweenMs > 0) " · every ${a.delayBetweenMs} ms" else ""),
+                "${a.body.size} azioni per iterazione" +
+                    (if (a.delayBetweenMs > 0) " · ogni ${a.delayBetweenMs} ms" else ""),
+            ),
+            isGenerative = a.tier == ActionTier.GENERATIVE,
         )
     }
 
@@ -530,6 +697,15 @@ object RuleRenderMapper {
         isGenerative = isGenerative,
         requiresLiveConfirm = requiresLiveConfirm,
     )
+
+    // captureAs: dove l'azione salva il proprio output (P4). Il produttore è l'azione stessa.
+    /** Standalone (RunShell, che non ha altro detail). Null se non cattura. */
+    private fun captureLabel(captureAs: String?, l: RenderLanguage): String? =
+        captureAs?.let { l.pick("captured as $it", "catturato come $it") }
+
+    /** Suffisso per le azioni che hanno già un detail (invoke_llm). Vuoto se non cattura. */
+    private fun captureSuffix(captureAs: String?, l: RenderLanguage): String =
+        captureAs?.let { l.pick(" · captured as $it", " · catturato come $it") } ?: ""
 
     // ---------------------------------------------------------------------------------------------
     // Helpers
@@ -611,4 +787,22 @@ object RuleRenderMapper {
         StateValueType.NUMBER -> l.pick("number", "numero")
         StateValueType.BOOLEAN -> l.pick("boolean", "booleano")
     }
+}
+
+/** Iterative because approval rendering may receive an unvalidated hostile tree. */
+private fun containsInvokeLlmV2(actions: List<Action>): Boolean {
+    val pending = ArrayDeque<Action>()
+    actions.forEach(pending::addLast)
+    while (pending.isNotEmpty()) {
+        when (val action = pending.removeFirst()) {
+            is Action.InvokeLlmV2 -> return true
+            is Action.If -> {
+                action.then.forEach(pending::addLast)
+                action.orElse.forEach(pending::addLast)
+            }
+            is Action.While -> action.body.forEach(pending::addLast)
+            else -> Unit
+        }
+    }
+    return false
 }

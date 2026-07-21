@@ -10,20 +10,15 @@ import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
-import dev.argus.automation.di.ApplicationScope
+import dev.argus.automation.foreground.launchReceiverWork
 import dev.argus.engine.model.ConnMedium
 import dev.argus.engine.model.ConnState
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.launch
 
 @EntryPoint
 @InstallIn(SingletonComponent::class)
 interface ConnectivityIngressEntryPoint {
     fun connectivityEventIngress(): ConnectivityEventIngress
-
-    @ApplicationScope
-    fun applicationScope(): CoroutineScope
 }
 
 private fun entryPoint(context: Context): ConnectivityIngressEntryPoint = EntryPointAccessors
@@ -51,8 +46,7 @@ class BluetoothConnectivityReceiver : BroadcastReceiver() {
         Log.d(TAG, "bluetooth ACL: state=$state named=${name != null}")
 
         val entry = entryPoint(context)
-        val pending = goAsync()
-        entry.applicationScope().launch {
+        launchReceiverWork(context, "bluetooth_acl") {
             try {
                 entry.connectivityEventIngress().observe(
                     medium = ConnMedium.BT,
@@ -65,8 +59,6 @@ class BluetoothConnectivityReceiver : BroadcastReceiver() {
                 throw error
             } catch (error: Exception) {
                 Log.w(TAG, "dispatch bluetooth fallito: ${error::class.java.simpleName}")
-            } finally {
-                pending.finish()
             }
         }
     }

@@ -22,6 +22,7 @@ class RoomExecutionJournal(
                 outcome = entry.outcome,
                 atMillis = entry.atMillis,
                 errorCode = entry.errorCode,
+                actionPath = entry.actionPath,
             ),
         )) { "Esecuzione assente o già terminale" }
     }

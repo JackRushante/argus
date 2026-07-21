@@ -19,6 +19,7 @@ fun iconFor(key: String): ImageVector = when (key) {
     "phone" -> Icons.Rounded.Call
     "connectivity" -> Icons.Rounded.Wifi
     "wifi_off" -> Icons.Rounded.WifiOff
+    "mobile_data" -> Icons.Rounded.NetworkCell
     "bluetooth" -> Icons.Rounded.Bluetooth
     "dnd" -> Icons.Rounded.DoNotDisturbOn
     "shell" -> Icons.Rounded.Terminal
@@ -33,5 +34,6 @@ fun iconFor(key: String): ImageVector = when (key) {
     "tap" -> Icons.Rounded.TouchApp
     "input_text" -> Icons.Rounded.Keyboard
     "whatsapp_reply" -> Icons.AutoMirrored.Rounded.Reply
+    "control_flow" -> Icons.Rounded.AccountTree // P4: if/while/wait — nodi di flusso
     else -> Icons.Rounded.Bolt
 }

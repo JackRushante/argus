@@ -74,6 +74,22 @@ class DraftValidatorTest {
         )
     }
 
+    @Test fun `copy text needs no textual trigger and only a non-blank bounded literal`() {
+        fun draft(trigger: Trigger, text: String) = AutomationDraft(
+            name = "copy literale",
+            trigger = trigger,
+            actions = listOf(Action.CopyText(text)),
+        )
+        // A differenza di copy_to_clipboard, non serve un trigger con testo: un Time va bene.
+        val time = Trigger.Time(cron = "0 8 * * *", tz = "Europe/Rome")
+        assertEquals(emptyList(), errors(v.validate(draft(time, "ordine #4821"), emptySet())))
+        // Vuoto o fuori bound: draft incoerente.
+        assertTrue("text_invalid" in errors(v.validate(draft(time, ""), emptySet())))
+        assertTrue("text_invalid" in errors(v.validate(draft(time, "z".repeat(5_000)), emptySet())))
+        // Nessuna dipendenza dal trigger: clipboard_source_missing non deve mai comparire.
+        assertTrue("clipboard_source_missing" !in errors(v.validate(draft(time, "x"), emptySet())))
+    }
+
     @Test fun `sms text match is valid only on SMS_RECEIVED`() {
         val sms = AutomationDraft(
             name = "sms prova",
@@ -699,6 +715,10 @@ class DraftValidatorTest {
             actions = listOf(action),
         )
         assertEquals(emptyList(), errors(v.validate(draft(Action.SetFlashlight(on = true)), emptySet())))
+        // set_dark_mode: NightMode è un enum chiuso, ogni valore valida senza errori.
+        assertEquals(emptyList(), errors(v.validate(draft(Action.SetDarkMode(NightMode.OFF)), emptySet())))
+        assertEquals(emptyList(), errors(v.validate(draft(Action.SetDarkMode(NightMode.ON)), emptySet())))
+        assertEquals(emptyList(), errors(v.validate(draft(Action.SetDarkMode(NightMode.AUTO)), emptySet())))
         assertEquals(emptyList(), errors(v.validate(draft(Action.Vibrate(1)), emptySet())))
         assertEquals(emptyList(), errors(v.validate(draft(Action.Vibrate(10_000)), emptySet())))
         assertTrue("vibrate_duration_invalid" in errors(v.validate(draft(Action.Vibrate(0)), emptySet())))

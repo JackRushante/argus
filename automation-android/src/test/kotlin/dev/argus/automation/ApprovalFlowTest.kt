@@ -674,7 +674,7 @@ private class MemoryDraftRepository(
             draft = draft,
             createdBy = newDraft.createdBy,
             priority = newDraft.priority,
-            schemaVersion = dev.argus.engine.model.SCHEMA_VERSION,
+            schemaVersion = dev.argus.engine.model.AUTOMATION_SCHEMA_VERSION_V1,
             createdAtMillis = newDraft.atMillis,
             updatedAtMillis = updatedAtMillis,
             baseAutomationFingerprint = newDraft.expectedAutomationFingerprint,

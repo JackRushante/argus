@@ -9,6 +9,7 @@ import dev.argus.engine.model.GenerativeContract
 import dev.argus.engine.model.StateContextClassification
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireContext
+import dev.argus.engine.runtime.RuntimeDataBinding
 import dev.argus.engine.runtime.TriggerEvent
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.SerialName
@@ -145,6 +146,32 @@ class AnthropicMessagesTransport internal constructor(
         )
     }
 
+    override suspend fun actResolved(
+        context: FireContext,
+        goal: String,
+        contextSources: List<String>,
+        allowedTools: List<String>,
+        runtimeData: List<RuntimeDataBinding>,
+    ): ActResult {
+        // Stessa validazione di act(): il goal risolto porta solo i marker opachi. Il dato runtime
+        // TAINTED viaggia in un messaggio DATA separato (mai nel campo top-level `system`).
+        val cleanGoal = AgentMessageSupport.requireGoal(goal)
+        val useReplyTool = AgentMessageSupport.requireGenerativeToolset(allowedTools)
+        AgentMessageSupport.requireGenerativeContextSources(contextSources, useReplyTool)
+        val notification =
+            if (useReplyTool) AgentMessageSupport.requireWhatsAppNotification(context) else null
+        val stateLines = if ("state" in contextSources) AgentMessageSupport.safeStateLines(context.state) else emptyList()
+        val webRequested = GenerativeContract.TOOL_WEB_SEARCH in allowedTools
+        return generate(
+            goal = cleanGoal,
+            notification = notification,
+            stateLines = stateLines,
+            webRequested = webRequested,
+            useReplyTool = useReplyTool,
+            runtimeData = runtimeData,
+        )
+    }
+
     override suspend fun actV2(context: FireContext, action: Action.InvokeLlmV2): ActResult {
         val cleanGoal = AgentMessageSupport.requireGoal(action.goal)
         if (!GenerativeContract.isAllowedToolset(action.allowedTools) || !action.replyTargetSender) {
@@ -190,6 +217,7 @@ class AnthropicMessagesTransport internal constructor(
         stateLines: List<String>,
         webRequested: Boolean,
         useReplyTool: Boolean,
+        runtimeData: List<RuntimeDataBinding> = emptyList(),
     ): ActResult {
         val token = requireKey()
         val model = resolveModel()
@@ -210,13 +238,17 @@ class AnthropicMessagesTransport internal constructor(
             model = model,
             maxTokens = MAX_OUTPUT_TOKENS,
             system = if (useReplyTool) AgentMessageSupport.actSystemText(goal) else AgentMessageSupport.actSystemTextNotification(goal),
-            messages = listOf(
-                InputMessage(
-                    "user",
-                    if (notification != null) AgentMessageSupport.actUserText(notification, stateLines)
-                    else AgentMessageSupport.actUserTextNotification(stateLines),
-                ),
-            ),
+            messages = buildList {
+                add(
+                    InputMessage(
+                        "user",
+                        if (notification != null) AgentMessageSupport.actUserText(notification, stateLines)
+                        else AgentMessageSupport.actUserTextNotification(stateLines),
+                    ),
+                )
+                // Dato runtime TAINTED: messaggio DATA separato, MAI nel campo top-level `system`.
+                AgentMessageSupport.actRuntimeDataText(runtimeData)?.let { add(InputMessage("user", it)) }
+            },
             tools = tools,
             // Con il web attivo (o senza reply tool) il reply NON va forzato: il testo finale (blocco
             // text dopo i risultati web) arriva via textContent(); forzare il reply tool impedirebbe la
@@ -299,12 +331,14 @@ class AnthropicMessagesTransport internal constructor(
         val input = u.inputTokens ?: return null
         val output = u.outputTokens ?: return null
         if (input < 0 || output < 0) return null
-        return TurnUsage(
-            inputTokens = input,
-            outputTokens = output,
-            cachedInputTokens = u.cacheReadInputTokens?.takeIf { it >= 0 },
-            model = model?.takeIf { it.isNotBlank() } ?: fallbackModel,
-        )
+        return runCatching {
+            TurnUsage(
+                inputTokens = input,
+                outputTokens = output,
+                cachedInputTokens = u.cacheReadInputTokens?.takeIf { it >= 0 },
+                model = model?.takeIf { it.isNotBlank() } ?: fallbackModel,
+            )
+        }.getOrNull()
     }
 
     private fun parseResponse(body: String): MessagesResponse =

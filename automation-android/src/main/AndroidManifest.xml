@@ -43,7 +43,7 @@
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="continuous_wifi_and_power_transition_monitoring_for_user_armed_automations" />
+                android:value="user_armed_automation_trigger_monitoring_and_bounded_execution" />
         </service>
 
         <receiver

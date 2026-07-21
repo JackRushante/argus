@@ -1,8 +1,9 @@
 package dev.argus.ui.model
 
 import dev.argus.engine.model.ActionTypeIds
-import dev.argus.engine.safety.Severity
 import dev.argus.engine.runtime.AuditKind
+import dev.argus.engine.safety.Severity
+import dev.argus.ui.presentation.RenderLanguage
 
 // =============================================================================
 // Contratti di stato UI (handoff-frontend.md §6). Kotlin UI-layer: stringhe
@@ -19,7 +20,46 @@ data class RuleRender(
     val conditionLines: List<String>, // ["Solo tra le 18:00 e le 22:00 (Europe/Rome)"] — albero appiattito con indentazione
     val actions: List<ActionRow>,
     val isGenerative: Boolean,
-    val privacyNote: String?,         // valorizzato se generativa: "Il testo delle notifiche verrà inviato a Hermes…"
+    val privacyNote: String?,         // valorizzato se generativa: disclosure del servizio AI configurato
+    val vars: List<VarRow> = emptyList(), // P4: variabili approvate (vuoto per le regole v1 flat)
+    val program: List<ProgramNode> = emptyList(), // P4: albero azioni ricorsivo (if/while/wait/foglie)
+)
+
+/**
+ * Nodo dell'albero del programma approvato, reso per la review ricorsiva (P4-E). Ogni stringa è
+ * pre-costruita dai tipi dal mapper (§5.1): il Composable si limita a mostrarla e a indentare i
+ * figli, così NESSUNA foglia annidata può restare nascosta. `Wait` è una foglia (usa ActionRow).
+ */
+sealed interface ProgramNode {
+    data class Leaf(val row: ActionRow) : ProgramNode
+
+    data class IfNode(
+        val title: String,                    // "If:" / "Se:"
+        val conditionLines: List<String>,     // condizione resa (albero appiattito indentato)
+        val thenTitle: String,                // "Then:" / "Allora:"
+        val then: List<ProgramNode>,
+        val elseTitle: String?,               // "Otherwise:" / "Altrimenti:" — null se nessun else
+        val orElse: List<ProgramNode>,
+    ) : ProgramNode
+
+    data class WhileNode(
+        val title: String,                    // "Repeat up to N times · Y ms between" / IT
+        val conditionLines: List<String>,     // condizione del loop resa
+        val body: List<ProgramNode>,
+    ) : ProgramNode
+}
+
+/**
+ * Una variabile del programma approvato (P4), resa per la review. I valori RUNTIME non compaiono
+ * MAI qui: si mostra solo la DEFINIZIONE (nome, tipo, integrità, riservatezza, provenienza) così
+ * l'utente vede da dove arriva ogni dato — e se è esterno/non fidato — prima di armare.
+ */
+data class VarRow(
+    val name: String,                 // "otp"
+    val typeLabel: String,            // "text" | "number" | "boolean"
+    val integrityLabel: String,       // "trusted" | "external" (CLEAN/TAINTED)
+    val confidentialityLabel: String, // "public" | "private" | "secret"
+    val provenanceLabel: String,      // "SMS" | "fixed value" | "device state" | ...
 )
 
 data class ActionRow(
@@ -355,37 +395,76 @@ data class ShizukuCapabilityRow(
  * categoria di un'azione è univoca (verificato a host).
  */
 object ShizukuCapabilityCatalog {
-    fun rows(): List<ShizukuCapabilityRow> = listOf(
+    fun rows(
+        language: RenderLanguage = RenderLanguage.system(),
+    ): List<ShizukuCapabilityRow> = listOf(
         // --- Richiede Shizuku (PRIVILEGED): senza, impossibile ---
         ShizukuCapabilityRow(
-            title = "Attivare o disattivare Wi-Fi e Bluetooth",
+            title = language.pick(
+                "Turn Wi-Fi, Bluetooth, and mobile data on or off",
+                "Attivare o disattivare Wi-Fi, Bluetooth e dati mobili",
+            ),
             requirement = ShizukuRequirement.REQUIRED,
-            note = "Gli interruttori radio passano dallo shell privilegiato di Shizuku.",
-            actionTypeIds = listOf(ActionTypeIds.SET_WIFI, ActionTypeIds.SET_BLUETOOTH),
+            note = language.pick(
+                "Radio switches use Shizuku's privileged shell.",
+                "Gli interruttori radio passano dallo shell privilegiato di Shizuku.",
+            ),
+            actionTypeIds = listOf(
+                ActionTypeIds.SET_WIFI,
+                ActionTypeIds.SET_BLUETOOTH,
+                ActionTypeIds.SET_MOBILE_DATA,
+            ),
         ),
         ShizukuCapabilityRow(
-            title = "Scrivere impostazioni di sistema",
+            title = language.pick("Write system settings", "Scrivere impostazioni di sistema"),
             requirement = ShizukuRequirement.REQUIRED,
-            note = "Modifiche a impostazioni secure/global (settings put): nessuna via da app normale.",
+            note = language.pick(
+                "Changes to secure/global settings (settings put) are unavailable to a normal app.",
+                "Modifiche a impostazioni secure/global (settings put): nessuna via da app normale.",
+            ),
             actionTypeIds = listOf(ActionTypeIds.WRITE_SETTING),
         ),
         ShizukuCapabilityRow(
-            title = "Eseguire comandi shell",
+            title = language.pick("Switch dark/light theme", "Cambiare tema scuro/chiaro"),
             requirement = ShizukuRequirement.REQUIRED,
-            note = "Comandi in stile adb: disponibili solo tramite Shizuku.",
+            note = language.pick(
+                "Setting the night mode (cmd uimode night) needs Shizuku's privileged shell.",
+                "Impostare la modalità notte (cmd uimode night) richiede lo shell privilegiato di Shizuku.",
+            ),
+            actionTypeIds = listOf(ActionTypeIds.SET_DARK_MODE),
+        ),
+        ShizukuCapabilityRow(
+            title = language.pick("Run shell commands", "Eseguire comandi shell"),
+            requirement = ShizukuRequirement.REQUIRED,
+            note = language.pick(
+                "adb-style commands are available only through Shizuku.",
+                "Comandi in stile adb: disponibili solo tramite Shizuku.",
+            ),
             actionTypeIds = listOf(ActionTypeIds.RUN_SHELL),
         ),
         ShizukuCapabilityRow(
-            title = "Leggere stato di sistema privilegiato",
+            title = language.pick(
+                "Read privileged system state",
+                "Leggere stato di sistema privilegiato",
+            ),
             requirement = ShizukuRequirement.REQUIRED,
-            note = "App in primo piano, valori delle impostazioni e altri lettori che servono a certe regole.",
+            note = language.pick(
+                "Foreground app, setting values, and other readers required by some rules.",
+                "App in primo piano, valori delle impostazioni e altri lettori che servono a certe regole.",
+            ),
         ),
         // --- Meglio con Shizuku (BASE, degrada senza) ---
         ShizukuCapabilityRow(
-            title = "Sveglia, timer, apri app o URL e schermate impostazioni da una regola",
+            title = language.pick(
+                "Alarm, timer, app, URL, and Settings launches from a rule",
+                "Sveglia, timer, apri app o URL e schermate impostazioni da una regola",
+            ),
             requirement = ShizukuRequirement.RECOMMENDED,
-            note = "Da un'automazione in background sono affidabili solo con Shizuku. Senza, partono " +
-                "solo mentre Argus è aperto in primo piano.",
+            note = language.pick(
+                "From a background automation these are reliable only with Shizuku. Without it, they launch only while Argus is open in the foreground.",
+                "Da un'automazione in background sono affidabili solo con Shizuku. Senza, partono " +
+                    "solo mentre Argus è aperto in primo piano.",
+            ),
             actionTypeIds = listOf(
                 ActionTypeIds.SET_ALARM,
                 ActionTypeIds.SET_TIMER,
@@ -396,9 +475,15 @@ object ShizukuCapabilityCatalog {
         ),
         // --- Non richiede Shizuku (BASE, sempre disponibile) ---
         ShizukuCapabilityRow(
-            title = "Volume, suoneria e Non disturbare",
+            title = language.pick(
+                "Volume, ringer, and Do Not Disturb",
+                "Volume, suoneria e Non disturbare",
+            ),
             requirement = ShizukuRequirement.NOT_REQUIRED,
-            note = "Per suoneria e Non disturbare basta concedere una volta l'accesso «Non disturbare», non Shizuku.",
+            note = language.pick(
+                "Ringer and Do Not Disturb only need one-time Do Not Disturb access, not Shizuku.",
+                "Per suoneria e Non disturbare basta concedere una volta l'accesso «Non disturbare», non Shizuku.",
+            ),
             actionTypeIds = listOf(
                 ActionTypeIds.SET_VOLUME,
                 ActionTypeIds.SET_RINGER,
@@ -406,19 +491,32 @@ object ShizukuCapabilityCatalog {
             ),
         ),
         ShizukuCapabilityRow(
-            title = "Torcia e vibrazione",
+            title = language.pick("Flashlight and vibration", "Torcia e vibrazione"),
             requirement = ShizukuRequirement.NOT_REQUIRED,
             actionTypeIds = listOf(ActionTypeIds.SET_FLASHLIGHT, ActionTypeIds.VIBRATE),
         ),
         ShizukuCapabilityRow(
-            title = "Notifiche di Argus e copia negli appunti",
+            title = language.pick(
+                "Argus notifications and clipboard copy",
+                "Notifiche di Argus e copia negli appunti",
+            ),
             requirement = ShizukuRequirement.NOT_REQUIRED,
-            actionTypeIds = listOf(ActionTypeIds.SHOW_NOTIFICATION, ActionTypeIds.COPY_TO_CLIPBOARD),
+            actionTypeIds = listOf(
+                ActionTypeIds.SHOW_NOTIFICATION,
+                ActionTypeIds.COPY_TO_CLIPBOARD,
+                ActionTypeIds.COPY_TEXT,
+            ),
         ),
         ShizukuCapabilityRow(
-            title = "Sveglia e timer avviati a mano dalla chat",
+            title = language.pick(
+                "Alarms and timers started manually from chat",
+                "Sveglia e timer avviati a mano dalla chat",
+            ),
             requirement = ShizukuRequirement.NOT_REQUIRED,
-            note = "Quando li chiedi in chat (app in primo piano) partono sempre, senza Shizuku.",
+            note = language.pick(
+                "When requested in chat (app in the foreground), they always start without Shizuku.",
+                "Quando li chiedi in chat (app in primo piano) partono sempre, senza Shizuku.",
+            ),
         ),
     )
 }

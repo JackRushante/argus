@@ -29,6 +29,7 @@ object CapabilityIds {
 
     const val ACTION_SET_WIFI = "action.set_wifi"
     const val ACTION_SET_BLUETOOTH = "action.set_bluetooth"
+    const val ACTION_SET_MOBILE_DATA = "action.set_mobile_data"
     const val ACTION_SET_DND = "action.set_dnd"
     const val ACTION_SET_RINGER = "action.set_ringer"
     const val ACTION_LAUNCH_APP = "action.launch_app"
@@ -39,10 +40,12 @@ object CapabilityIds {
     const val ACTION_WHATSAPP_REPLY = "action.whatsapp_reply"
     const val ACTION_RUN_SHELL = "action.run_shell"
     const val ACTION_COPY_TO_CLIPBOARD = "action.copy_to_clipboard"
+    const val ACTION_COPY_TEXT = "action.copy_text"
     const val ACTION_SET_ALARM = "action.set_alarm"
     const val ACTION_SET_TIMER = "action.set_timer"
     const val ACTION_SET_VOLUME = "action.set_volume"
     const val ACTION_SET_FLASHLIGHT = "action.set_flashlight"
+    const val ACTION_SET_DARK_MODE = "action.set_dark_mode"
     const val ACTION_OPEN_SETTINGS_SCREEN = "action.open_settings_screen"
     const val ACTION_VIBRATE = "action.vibrate"
     const val ACTION_WRITE_SETTING = "action.write_setting"
@@ -60,10 +63,21 @@ object CapabilityRequirements {
         trigger: Trigger,
         actions: List<Action>,
         conditions: Condition? = null,
+        vars: List<VarBinding> = emptyList(),
     ): Set<String> = buildSet {
         addAll(forTrigger(trigger))
         conditions?.let { addAll(forCondition(it)) }
         actions.forEach { addAll(forAction(it)) }
+        // Le variabili di stato leggono il device come i reader di P3: ne ereditano la capability
+        // di famiglia (fail-closed: un binding State richiede il grant del suo reader).
+        vars.forEach { addAll(forVarBinding(it)) }
+    }
+
+    private fun forVarBinding(binding: VarBinding): Set<String> = when (binding) {
+        is VarBinding.State -> setOf(binding.query.family.capabilityId)
+        // Letterali e payload del trigger non richiedono capability aggiuntive: il payload viaggia
+        // già col trigger (la cui capability è derivata da forTrigger).
+        is VarBinding.Literal, is VarBinding.TriggerPayload, is VarBinding.RandomInt -> emptySet()
     }
 
     private fun forTrigger(trigger: Trigger): Set<String> = when (trigger) {
@@ -89,7 +103,7 @@ object CapabilityRequirements {
     }
 
     private fun forCondition(condition: Condition): Set<String> = when (condition) {
-        is Condition.TimeWindow -> emptySet()
+        is Condition.TimeWindow, is Condition.BooleanLiteral -> emptySet()
         is Condition.StateEquals -> setOf(CapabilityIds.state(condition.key))
         is Condition.StateCompare -> setOf(condition.query.family.capabilityId)
         is Condition.AppInForeground -> setOf(CapabilityIds.STATE_FOREGROUND_APP)
@@ -97,11 +111,14 @@ object CapabilityRequirements {
         is Condition.And -> condition.all.flatMapTo(linkedSetOf(), ::forCondition)
         is Condition.Or -> condition.any.flatMapTo(linkedSetOf(), ::forCondition)
         is Condition.Not -> forCondition(condition.cond)
+        // Le var vivono nello scope di esecuzione: nessuna capability OS per confrontarle.
+        is Condition.VarCompare -> emptySet()
     }
 
     private fun forAction(action: Action): Set<String> = when (action) {
         is Action.SetWifi -> setOf(CapabilityIds.ACTION_SET_WIFI)
         is Action.SetBluetooth -> setOf(CapabilityIds.ACTION_SET_BLUETOOTH)
+        is Action.SetMobileData -> setOf(CapabilityIds.ACTION_SET_MOBILE_DATA)
         is Action.SetDnd -> setOf(CapabilityIds.ACTION_SET_DND)
         is Action.SetRinger -> setOf(CapabilityIds.ACTION_SET_RINGER)
         is Action.LaunchApp -> setOf(CapabilityIds.ACTION_LAUNCH_APP)
@@ -112,12 +129,17 @@ object CapabilityRequirements {
         is Action.WhatsAppReply -> setOf(CapabilityIds.ACTION_WHATSAPP_REPLY)
         is Action.RunShell -> setOf(CapabilityIds.ACTION_RUN_SHELL)
         is Action.CopyToClipboard -> setOf(CapabilityIds.ACTION_COPY_TO_CLIPBOARD)
+        is Action.CopyText -> setOf(CapabilityIds.ACTION_COPY_TEXT)
         is Action.SetAlarm -> setOf(CapabilityIds.ACTION_SET_ALARM)
         is Action.SetTimer -> setOf(CapabilityIds.ACTION_SET_TIMER)
         is Action.SetVolume -> setOf(CapabilityIds.ACTION_SET_VOLUME)
         is Action.SetFlashlight -> setOf(CapabilityIds.ACTION_SET_FLASHLIGHT)
+        // Tema scuro: gate famiglia PRIVILEGED (pubblicato solo con Shizuku), come set_mobile_data.
+        is Action.SetDarkMode -> setOf(CapabilityIds.ACTION_SET_DARK_MODE)
         is Action.OpenSettingsScreen -> setOf(CapabilityIds.ACTION_OPEN_SETTINGS_SCREEN)
         is Action.Vibrate -> setOf(CapabilityIds.ACTION_VIBRATE)
+        // Pausa cooperativa interna all'interprete: nessuna capability OS.
+        is Action.Wait -> emptySet()
         // Come i reader parametrici (che gatano sulla famiglia, non sul singolo canonicalId):
         // il gate runtime è la famiglia ACTION_WRITE_SETTING (pubblicata dal probe solo con
         // Shizuku), mentre il binding per-chiave namespace|key|value è nel fingerprint approvato
@@ -148,6 +170,17 @@ object CapabilityRequirements {
             add(CapabilityIds.ACTION_INVOKE_LLM)
             addAll(action.allowedTools)
             action.stateContext.forEach { add(it.query.family.capabilityId) }
+        }
+        // Contenitori control-flow: uniscono le capability della condizione di flusso e di TUTTE le
+        // azioni annidate (fail-closed: un while { run_shell } richiede comunque ACTION_RUN_SHELL).
+        is Action.If -> buildSet {
+            addAll(forCondition(action.condition))
+            action.then.forEach { addAll(forAction(it)) }
+            action.orElse.forEach { addAll(forAction(it)) }
+        }
+        is Action.While -> buildSet {
+            addAll(forCondition(action.condition))
+            action.body.forEach { addAll(forAction(it)) }
         }
     }
 }

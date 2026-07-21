@@ -2,6 +2,7 @@ package dev.argus.automation.budget
 
 import dev.argus.brain.ProviderCatalog
 import dev.argus.brain.ProviderConfig
+import dev.argus.brain.ProviderId
 import dev.argus.data.UsageWindows
 import dev.argus.data.dao.UsageDao
 import dev.argus.data.entities.UsageEventEntity
@@ -17,8 +18,11 @@ import dev.argus.engine.runtime.AuditKind
 import dev.argus.engine.runtime.AuditSink
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireContext
+import dev.argus.engine.runtime.RuntimeDataBinding
 import dev.argus.ui.presentation.RenderLanguage
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.time.Instant
 import java.time.YearMonth
 import java.time.ZoneId
@@ -26,6 +30,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 object BudgetMeta {
     const val BUDGET_EXCEEDED = "budget_exceeded" // rispetta ^[a-z][a-z0-9_]{0,63}$ (invariante ActResult)
+    const val UNPRICED_MODEL = "budget_unpriced_model"
     const val UNKNOWN_MODEL = "unknown" // convenzione T9 di UsageEventEntity
 
     /**
@@ -36,6 +41,13 @@ object BudgetMeta {
     fun blockedReply(l: RenderLanguage = RenderLanguage.system()): String = l.pick(
         "LLM budget exhausted: I blocked the call. Raise or reset the limits in System → Budget.",
         "Budget LLM esaurito: ho bloccato la chiamata. Alza o azzera i limiti in Sistema → Budget.",
+    )
+
+    fun unpricedModelReply(l: RenderLanguage = RenderLanguage.system()): String = l.pick(
+        "The selected model has no price in the Argus catalog, so the monetary budget cannot be " +
+            "enforced. Choose a priced model or remove the dollar limit.",
+        "Il modello selezionato non ha un prezzo nel catalogo Argus, quindi il budget monetario " +
+            "non può essere applicato. Scegli un modello con prezzo noto o rimuovi il limite in dollari.",
     )
 }
 
@@ -61,12 +73,18 @@ class MeteredBrain(
     private val zone: () -> ZoneId = ZoneId::systemDefault,
 ) : Brain {
     private val notified = ConcurrentHashMap<String, Boolean>()
+    /**
+     * Il check e la registrazione del consumo formano un'unica sezione critica. Senza questo gate
+     * due trigger concorrenti possono leggere entrambi N-1 chiamate, oltrepassare un limite HARD e
+     * contattare entrambi il provider prima che uno dei due eventi usage sia persistito.
+     */
+    private val callGate = Mutex()
 
     override suspend fun compile(
         nl: String,
         manifest: CapabilityManifest,
         state: DeviceState,
-    ): CompileResult {
+    ): CompileResult = callGate.withLock {
         val config = selectedConfig()
         val now = nowMillis()
         when (val verdict = verdictFor(config, now)) {
@@ -77,6 +95,15 @@ class MeteredBrain(
                     reply = BudgetMeta.blockedReply(),
                     draft = null,
                     metaError = BudgetMeta.BUDGET_EXCEEDED,
+                )
+            }
+            is BudgetVerdict.UnpricedModel -> {
+                recordBlocked(config, UsageEventKind.COMPILE, now)
+                notifyUnpricedOnce(verdict.providerId)
+                return CompileResult(
+                    reply = BudgetMeta.unpricedModelReply(),
+                    draft = null,
+                    metaError = BudgetMeta.UNPRICED_MODEL,
                 )
             }
             is BudgetVerdict.SoftExceeded -> notifyOnce(verdict.tripped, now)
@@ -93,11 +120,13 @@ class MeteredBrain(
         goal: String,
         contextSources: List<String>,
         allowedTools: List<String>,
-    ): ActResult {
+    ): ActResult = callGate.withLock {
         val config = selectedConfig()
         val now = nowMillis()
         when (val verdict = verdictFor(config, now)) {
             is BudgetVerdict.HardExceeded -> return hardBlock(config, UsageEventKind.ACT, now, context, verdict.tripped)
+            is BudgetVerdict.UnpricedModel ->
+                return unpricedModelBlock(config, UsageEventKind.ACT, now, context, verdict.providerId)
             is BudgetVerdict.SoftExceeded -> notifyOnce(verdict.tripped, now)
             BudgetVerdict.Ok -> {}
         }
@@ -106,22 +135,58 @@ class MeteredBrain(
         return result
     }
 
-    override suspend fun actV2(context: FireContext, action: Action.InvokeLlmV2): ActResult {
+    /**
+     * Canale RISOLTO P4-D2: stessa contabilità di [act] (stesso choke-point, kind ACT). Il framing
+     * anti-injection del dato runtime avviene nel transport a valle; qui conta solo che la capture
+     * generativa passi SEMPRE dal budget — un HARD la sopprime esattamente come un act.
+     */
+    override suspend fun actResolved(
+        context: FireContext,
+        goal: String,
+        contextSources: List<String>,
+        allowedTools: List<String>,
+        runtimeData: List<RuntimeDataBinding>,
+    ): ActResult = callGate.withLock {
         val config = selectedConfig()
         val now = nowMillis()
         when (val verdict = verdictFor(config, now)) {
-            is BudgetVerdict.HardExceeded -> return hardBlock(config, UsageEventKind.ACT_V2, now, context, verdict.tripped)
+            is BudgetVerdict.HardExceeded -> return hardBlock(config, UsageEventKind.ACT, now, context, verdict.tripped)
+            is BudgetVerdict.UnpricedModel ->
+                return unpricedModelBlock(config, UsageEventKind.ACT, now, context, verdict.providerId)
             is BudgetVerdict.SoftExceeded -> notifyOnce(verdict.tripped, now)
             BudgetVerdict.Ok -> {}
         }
-        val result = delegate.actV2(context, action)
-        recordUsage(config, UsageEventKind.ACT_V2, now, result.metaError, result.usage)
+        val result = delegate.actResolved(context, goal, contextSources, allowedTools, runtimeData)
+        recordUsage(config, UsageEventKind.ACT, now, result.metaError, result.usage)
         return result
     }
 
+    override suspend fun actV2(context: FireContext, action: Action.InvokeLlmV2): ActResult =
+        callGate.withLock {
+            val config = selectedConfig()
+            val now = nowMillis()
+            when (val verdict = verdictFor(config, now)) {
+                is BudgetVerdict.HardExceeded ->
+                    return hardBlock(config, UsageEventKind.ACT_V2, now, context, verdict.tripped)
+                is BudgetVerdict.UnpricedModel ->
+                    return unpricedModelBlock(
+                        config,
+                        UsageEventKind.ACT_V2,
+                        now,
+                        context,
+                        verdict.providerId,
+                    )
+                is BudgetVerdict.SoftExceeded -> notifyOnce(verdict.tripped, now)
+                BudgetVerdict.Ok -> {}
+            }
+            val result = delegate.actV2(context, action)
+            recordUsage(config, UsageEventKind.ACT_V2, now, result.metaError, result.usage)
+            return result
+        }
+
     /** Un errore DB del budget non deve spegnere il cervello: fail-open (ma la cancellazione risale). */
     private suspend fun verdictFor(config: ProviderConfig, now: Long): BudgetVerdict = try {
-        policy.check(config.providerId, now)
+        policy.check(config, now)
     } catch (error: CancellationException) {
         throw error
     } catch (_: Throwable) {
@@ -150,6 +215,28 @@ class MeteredBrain(
         return ActResult(text = null, metaError = BudgetMeta.BUDGET_EXCEEDED)
     }
 
+    private suspend fun unpricedModelBlock(
+        config: ProviderConfig,
+        kind: UsageEventKind,
+        now: Long,
+        context: FireContext,
+        providerId: ProviderId,
+    ): ActResult {
+        recordBlocked(config, kind, now)
+        tryAudit(
+            AuditEvent(
+                automationId = context.automationId,
+                kind = AuditKind.SUPPRESSED_BUDGET,
+                atMillis = now,
+                detail = "unpriced_model:${providerId.wireName}",
+                eventId = context.eventId,
+                executionId = context.executionId,
+            ),
+        )
+        notifyUnpricedOnce(providerId)
+        return ActResult(text = null, metaError = BudgetMeta.UNPRICED_MODEL)
+    }
+
     private suspend fun recordUsage(
         config: ProviderConfig,
         kind: UsageEventKind,
@@ -158,7 +245,14 @@ class MeteredBrain(
         usage: dev.argus.engine.brain.TurnUsage?,
     ) {
         val model = usage?.model ?: config.model ?: BudgetMeta.UNKNOWN_MODEL
-        val cost = CostEstimator.estimate(config.providerId, model, usage)
+        // Alcuni provider restituiscono un alias/versione datata del modello configurato. Se
+        // quell'alias non è nel listino ma il modello scelto dall'utente sì, usa quest'ultimo per
+        // il prezzo senza falsificare il model registrato nell'evento.
+        val prices = ProviderCatalog.spec(config.providerId).prices
+        val pricingModel = sequenceOf(usage?.model, config.model)
+            .filterNotNull()
+            .firstOrNull(prices::containsKey)
+        val cost = CostEstimator.estimate(config.providerId, pricingModel, usage)
         tryInsert(
             UsageEventEntity(
                 timestampMs = now,
@@ -232,6 +326,26 @@ class MeteredBrain(
             } catch (_: Throwable) {
                 // best-effort
             }
+        }
+    }
+
+    private suspend fun notifyUnpricedOnce(providerId: ProviderId) {
+        if (notified.putIfAbsent("unpriced_model:${providerId.wireName}", true) != null) return
+        try {
+            val l = RenderLanguage.system()
+            alerts.notify(
+                l.pick("LLM budget", "Budget LLM"),
+                l.pick(
+                    "The selected model has no catalog price. The call was blocked because a " +
+                        "monetary limit is active.",
+                    "Il modello selezionato non ha un prezzo nel catalogo. La chiamata è stata " +
+                        "bloccata perché è attivo un limite monetario.",
+                ),
+            )
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Throwable) {
+            // best-effort
         }
     }
 

@@ -270,6 +270,133 @@ class BridgeTest(unittest.TestCase):
             bridge.validate_action({"type": "copy_to_clipboard", "extractionRegex": "x" * 600}, tools)
         )
 
+    def test_copy_text_action_requires_nonempty_bounded_literal(self):
+        # copy_text (BASE): copia una stringa LETTERALE, nessun trigger testuale. text non vuoto e bounded.
+        tools = {"copy_text"}
+        self.assertTrue(bridge.validate_action({"type": "copy_text", "text": "OTP 1234"}, tools))
+        self.assertTrue(bridge.validate_action({"type": "copy_text", "text": "${codice}"}, tools))
+        # Vuoto -> rifiutato.
+        self.assertFalse(bridge.validate_action({"type": "copy_text", "text": ""}, tools))
+        # Fuori bound (>4096) -> rifiutato.
+        self.assertFalse(bridge.validate_action({"type": "copy_text", "text": "x" * 4_097}, tools))
+        # Tipo errato -> rifiutato.
+        self.assertFalse(bridge.validate_action({"type": "copy_text", "text": 42}, tools))
+        # Chiave extra -> rifiutata (_exact_keys); manca text -> rifiutato.
+        self.assertFalse(
+            bridge.validate_action({"type": "copy_text", "text": "x", "extractionRegex": "y"}, tools)
+        )
+        self.assertFalse(bridge.validate_action({"type": "copy_text"}, tools))
+        # Gated dalla capability list: assente da available_tools -> rifiutato.
+        self.assertFalse(bridge.validate_action({"type": "copy_text", "text": "x"}, set()))
+
+    def test_set_mobile_data_action_mirrors_set_wifi(self):
+        # set_mobile_data (PRIVILEGED/Shizuku): stesso trattamento di set_wifi/set_bluetooth, "on" boolean.
+        tools = {"set_mobile_data"}
+        self.assertTrue(bridge.validate_action({"type": "set_mobile_data", "on": True}, tools))
+        self.assertTrue(bridge.validate_action({"type": "set_mobile_data", "on": False}, tools))
+        self.assertFalse(bridge.validate_action({"type": "set_mobile_data", "on": "yes"}, tools))
+        self.assertFalse(bridge.validate_action({"type": "set_mobile_data"}, tools))
+        # Gated dalla capability list.
+        self.assertFalse(bridge.validate_action({"type": "set_mobile_data", "on": True}, set()))
+
+    def test_set_dark_mode_action_is_a_closed_enum(self):
+        # set_dark_mode (PRIVILEGED/Shizuku): mode chiuso off/on/auto (cmd uimode night no|yes|auto).
+        tools = {"set_dark_mode"}
+        for mode in ("off", "on", "auto"):
+            self.assertTrue(bridge.validate_action({"type": "set_dark_mode", "mode": mode}, tools))
+        # Valori fuori enum, tipo errato o campo mancante: fail-closed.
+        self.assertFalse(bridge.validate_action({"type": "set_dark_mode", "mode": "dark"}, tools))
+        self.assertFalse(bridge.validate_action({"type": "set_dark_mode", "mode": "ON"}, tools))
+        self.assertFalse(bridge.validate_action({"type": "set_dark_mode", "mode": True}, tools))
+        self.assertFalse(bridge.validate_action({"type": "set_dark_mode"}, tools))
+        # Gated dalla capability list: assente da available_tools -> rifiutato.
+        self.assertFalse(bridge.validate_action({"type": "set_dark_mode", "mode": "on"}, set()))
+
+    def test_prompt_documents_set_dark_mode_and_screen_brightness(self):
+        prompt = bridge.build_prompt(self.request())
+        self.assertIn('"type":"set_dark_mode"', prompt)
+        # La riga schema può andare a capo: verifico i frammenti chiave separatamente.
+        self.assertIn("screen_brightness (0-255, SYSTEM; set screen_brightness_mode=0 first to", prompt)
+        self.assertIn("auto-brightness", prompt)
+
+    def test_prompt_frames_run_shell_as_last_resort_with_cookbook(self):
+        # IO-7 A: run_shell è ultima spiaggia + cookbook di comandi reali + nota anti-allucinazione.
+        prompt = bridge.build_prompt(self.request())
+        self.assertIn("last resort", prompt.lower())
+        self.assertIn("svc wifi|data|bluetooth enable|disable", prompt)
+        self.assertIn("cmd uimode night yes|no|auto", prompt)
+        self.assertIn("input keyevent", prompt)
+        # La torcia NON è `cmd flashlight`: è l'azione set_flashlight.
+        self.assertIn("cmd flashlight", prompt)
+        self.assertIn("set_flashlight", prompt)
+
+    def test_state_equals_accepts_screen_key(self):
+        # screen e' una nuova builtin state key (on|off). state_equals la ammette se e' nel manifest.
+        allowed = {"screen"}
+        self.assertTrue(bridge.validate_condition(
+            {"type": "state_equals", "key": "screen", "op": "EQ", "value": "on"},
+            0, allowed,
+        ))
+        self.assertTrue(bridge.validate_condition(
+            {"type": "state_equals", "key": "screen", "op": "NEQ", "value": "off"},
+            0, allowed,
+        ))
+        # Non nel manifest -> rifiutato.
+        self.assertFalse(bridge.validate_condition(
+            {"type": "state_equals", "key": "screen", "op": "EQ", "value": "on"},
+            0, set(),
+        ))
+        # screen e' anche una builtin nota (per state_compare / valori ammessi).
+        self.assertIn("screen", bridge.BUILTIN_STATE_VALUES)
+        self.assertEqual(bridge.BUILTIN_STATE_VALUES["screen"], "on|off")
+        self.assertIn("screen", bridge.ACT_STATE_KEYS)
+
+    def test_state_compare_builtin_screen_validates_on_off(self):
+        # state_compare su builtin screen: TEXT EQ/NEQ, expected in {on, off}.
+        allowed = {"screen"}
+        families = {"builtin"}
+        ok = {
+            "type": "state_compare",
+            "query": {"type": "builtin", "key": "screen"},
+            "valueType": "TEXT", "op": "EQ", "expected": "on", "policyVersion": 1,
+        }
+        self.assertTrue(bridge.validate_state_compare(ok, allowed, families))
+        bad_value = dict(ok, expected="dimmed")
+        self.assertFalse(bridge.validate_state_compare(bad_value, allowed, families))
+
+    def test_var_compare_parity_ops_are_unary(self):
+        # IS_EVEN/IS_ODD: UNARI, nessun RHS. Ammessi SOLO in var_compare dentro il flusso (allow_flow).
+        for op in ("IS_EVEN", "IS_ODD"):
+            self.assertTrue(bridge.validate_condition(
+                {"type": "var_compare", "varName": "n", "op": op},
+                0, set(), allow_flow=True, known_vars={"n"},
+            ), op)
+            # Con expected -> rifiutato (unario).
+            self.assertFalse(bridge.validate_condition(
+                {"type": "var_compare", "varName": "n", "op": op, "expected": "0"},
+                0, set(), allow_flow=True, known_vars={"n"},
+            ), op)
+            # Con expectedVar -> rifiutato (unario).
+            self.assertFalse(bridge.validate_condition(
+                {"type": "var_compare", "varName": "n", "op": op, "expectedVar": "m"},
+                0, set(), allow_flow=True, known_vars={"n", "m"},
+            ), op)
+            # Var non dichiarata -> rifiutato.
+            self.assertFalse(bridge.validate_condition(
+                {"type": "var_compare", "varName": "n", "op": op},
+                0, set(), allow_flow=True, known_vars=set(),
+            ), op)
+            # Fuori dal flusso (trigger-time) -> rifiutato.
+            self.assertFalse(bridge.validate_condition(
+                {"type": "var_compare", "varName": "n", "op": op},
+                0, set(), known_vars={"n"},
+            ), op)
+        # La parita' NON e' ammessa in state_equals (solo op relazionali).
+        self.assertFalse(bridge.validate_condition(
+            {"type": "state_equals", "key": "screen", "op": "IS_EVEN", "value": "on"},
+            0, {"screen"},
+        ))
+
     def test_invoke_llm_v2_requires_explicit_typed_and_classified_state(self):
         query = {"type": "dumpsys_field", "service": "battery", "field": "voltage"}
         action = {
@@ -465,6 +592,346 @@ class BridgeTest(unittest.TestCase):
                 draft, {"run_shell"}, set(), set(), {"sensor.stationary_detect"}
             )
         )
+
+    # --- P4 (schema v2 program) -------------------------------------------------------------
+    P4_TIME_TRIGGER = {"type": "time", "cron": "0 8 * * *", "tz": "Europe/Rome"}
+
+    def test_p4_valid_program_is_accepted(self):
+        draft = {
+            "name": "torcia lampeggiante",
+            "trigger": self.P4_TIME_TRIGGER,
+            "vars": [
+                {"type": "literal", "name": "soglia", "value": "20",
+                 "varType": "NUMBER", "confidentiality": "PUBLIC"},
+            ],
+            "actions": [
+                {
+                    "type": "if",
+                    "condition": {"type": "var_compare", "varName": "soglia",
+                                  "op": "GT", "expected": "10"},
+                    "then": [
+                        {"type": "run_shell", "cmd": "/system/bin/id", "captureAs": "uid"},
+                        {"type": "wait", "durationMs": 500},
+                        {"type": "show_notification", "title": "Argus", "text": "fatto"},
+                    ],
+                    "orElse": [{"type": "set_flashlight", "on": True}],
+                },
+                {
+                    "type": "while",
+                    "condition": {"type": "boolean_literal", "value": True},
+                    "body": [{"type": "set_flashlight", "on": False}],
+                    "maxIterations": 5,
+                    "delayBetweenMs": 100,
+                },
+            ],
+        }
+        tools = {"run_shell", "show_notification", "set_flashlight"}
+        self.assertTrue(bridge.validate_draft(draft, tools, set(), set()))
+
+    def test_p4_while_max_iterations_var_references_a_variable(self):
+        # Il conteggio del while può essere una variabile NUMBER (es. random_int) invece di un
+        # letterale: "lampeggia la torcia ${blinks} volte". XOR imposto col letterale.
+        tools = {"set_flashlight"}
+
+        def draft(while_extra):
+            action = {
+                "type": "while",
+                "condition": {"type": "boolean_literal", "value": True},
+                "body": [
+                    {"type": "set_flashlight", "on": True},
+                    {"type": "set_flashlight", "on": False},
+                ],
+            }
+            action.update(while_extra)
+            return {
+                "name": "torcia lampeggia n volte",
+                "trigger": self.P4_TIME_TRIGGER,
+                "vars": [{"type": "random_int", "name": "blinks", "max": 5}],
+                "actions": [action],
+            }
+
+        # Variabile dichiarata → valido.
+        self.assertTrue(bridge.validate_draft(draft({"maxIterationsVar": "blinks"}), tools, set(), set()))
+        # Variabile non dichiarata → rifiutato.
+        self.assertFalse(bridge.validate_draft(draft({"maxIterationsVar": "ghost"}), tools, set(), set()))
+        # XOR: entrambi maxIterations e maxIterationsVar → rifiutato.
+        self.assertFalse(
+            bridge.validate_draft(draft({"maxIterations": 5, "maxIterationsVar": "blinks"}), tools, set(), set())
+        )
+        # Nessuno dei due → rifiutato.
+        self.assertFalse(bridge.validate_draft(draft({}), tools, set(), set()))
+        # Budget worst-case: conteggio ignoto ⇒ 1000; con delay 1h il gate 6h scatta e rifiuta.
+        self.assertFalse(
+            bridge.validate_draft(
+                draft({"maxIterationsVar": "blinks", "delayBetweenMs": 3_600_000}), tools, set(), set()
+            )
+        )
+
+    def test_p4_captured_text_var_compared_with_gt_validates(self):
+        # device-found: un invoke_llm cattura un valore (captureAs, sempre TEXT/TAINTED) e lo confronta
+        # numericamente con GT contro un letterale. Il bridge NON deve rifiutarlo per incompatibilità di
+        # tipo: la coercizione numerica è a runtime (fail-closed). Sblocca "chiedi un numero all'AI, poi >".
+        draft = {
+            "name": "chiedi un numero e confronta",
+            "trigger": self.P4_TIME_TRIGGER,
+            "actions": [
+                {
+                    "type": "invoke_llm",
+                    "goal": "quante notifiche non lette? rispondi solo col numero",
+                    "contextSources": [],
+                    "allowedTools": [],
+                    "replyTargetSender": False,
+                    "captureAs": "answer",
+                },
+                {
+                    "type": "if",
+                    "condition": {"type": "var_compare", "varName": "answer",
+                                  "op": "GT", "expected": "5"},
+                    "then": [{"type": "show_notification", "title": "Argus", "text": "molte"}],
+                    "orElse": [{"type": "show_notification", "title": "Argus", "text": "poche"}],
+                },
+            ],
+        }
+        tools = {"invoke_llm", "show_notification"}
+        self.assertTrue(bridge.validate_draft(draft, tools, set(), set()))
+        # LT sullo stesso operando catturato è ugualmente ammesso.
+        draft["actions"][1]["condition"]["op"] = "LT"
+        self.assertTrue(bridge.validate_draft(draft, tools, set(), set()))
+
+    def test_p4_random_int_binding_drives_coinflip_if(self):
+        # random_int: intero CLEAN generato dal motore in [0, max). Un var_compare IS_EVEN sopra
+        # ci costruisce un coin-flip (mirror del test Kotlin DraftValidatorP4Test).
+        draft = {
+            "name": "lancio moneta",
+            "trigger": self.P4_TIME_TRIGGER,
+            "vars": [{"type": "random_int", "name": "dice", "max": 6}],
+            "actions": [
+                {
+                    "type": "if",
+                    "condition": {"type": "var_compare", "varName": "dice", "op": "IS_EVEN"},
+                    "then": [{"type": "set_flashlight", "on": True}],
+                    "orElse": [{"type": "set_flashlight", "on": False}],
+                },
+            ],
+        }
+        tools = {"set_flashlight"}
+        self.assertTrue(bridge.validate_draft(draft, tools, set(), set()))
+        # Una var random_int è confrontabile anche numericamente (GT contro un letterale).
+        draft["actions"][0]["condition"] = {
+            "type": "var_compare", "varName": "dice", "op": "GT", "expected": "2",
+        }
+        self.assertTrue(bridge.validate_draft(draft, tools, set(), set()))
+
+    def test_p4_random_int_coexists_with_state_equals_trigger_condition(self):
+        # Una var random_int convive con una condizione trigger-time state_equals: l'intera regola valida.
+        draft = {
+            "name": "random con condizione di stato",
+            "trigger": self.P4_TIME_TRIGGER,
+            "conditions": {"type": "state_equals", "key": "screen", "op": "EQ", "value": "on"},
+            "vars": [{"type": "random_int", "name": "roll", "max": 100}],
+            "actions": [
+                {
+                    "type": "if",
+                    "condition": {"type": "var_compare", "varName": "roll", "op": "IS_ODD"},
+                    "then": [{"type": "set_flashlight", "on": True}],
+                },
+            ],
+        }
+        self.assertTrue(
+            bridge.validate_draft(draft, {"set_flashlight"}, {"screen"}, set())
+        )
+
+    def test_p4_random_int_max_bounds(self):
+        # max in [0, max) ⇒ max ≥ 1; tetto 1_000_000. Fuori range → draft rifiutato (fail-closed).
+        def draft_with_max(max_value):
+            return {
+                "name": "random bound",
+                "trigger": self.P4_TIME_TRIGGER,
+                "vars": [{"type": "random_int", "name": "r", "max": max_value}],
+                "actions": [{"type": "set_flashlight", "on": True}],
+            }
+        tools = {"set_flashlight"}
+        # Validi agli estremi ammessi.
+        self.assertTrue(bridge.validate_draft(draft_with_max(1), tools, set(), set()))
+        self.assertTrue(bridge.validate_draft(draft_with_max(6), tools, set(), set()))
+        self.assertTrue(bridge.validate_draft(draft_with_max(1_000_000), tools, set(), set()))
+        # Invalidi: zero, negativo, oltre il tetto.
+        self.assertFalse(bridge.validate_draft(draft_with_max(0), tools, set(), set()))
+        self.assertFalse(bridge.validate_draft(draft_with_max(-3), tools, set(), set()))
+        self.assertFalse(bridge.validate_draft(draft_with_max(1_000_001), tools, set(), set()))
+        # Tipo errato: bool e float non sono interi accettabili (fail-closed).
+        self.assertFalse(bridge.validate_draft(draft_with_max(True), tools, set(), set()))
+        self.assertFalse(bridge.validate_draft(draft_with_max(6.0), tools, set(), set()))
+
+    def test_p4_random_int_rejects_extra_keys(self):
+        # Wire chiuso {type,name,max}: qualsiasi chiave extra (es. confidentiality) fa fallire _exact_keys.
+        draft = {
+            "name": "random con chiave extra",
+            "trigger": self.P4_TIME_TRIGGER,
+            "vars": [{"type": "random_int", "name": "r", "max": 6,
+                      "confidentiality": "PUBLIC"}],
+            "actions": [{"type": "set_flashlight", "on": True}],
+        }
+        self.assertFalse(bridge.validate_draft(draft, {"set_flashlight"}, set(), set()))
+
+    def test_p4_control_flow_is_structural_and_accepted_when_listed_in_available_tools(self):
+        # BUG device-found: l'app ora pubblica if/while/wait dentro available_tools (sono STRUTTURALI,
+        # non gated dal SO). Il bridge NON deve iniziare a rifiutare né il manifest né il draft per
+        # questo: il control-flow è valido a prescindere dalla capability-list.
+        self.assertEqual(bridge.CONTROL_FLOW_TYPES, frozenset({"if", "while", "wait"}))
+
+        # 1) Un manifest che elenca il control-flow in available_tools passa la validazione.
+        req = self.request_v2()
+        req["manifest"]["available_tools"] = ["set_flashlight", "wait", "if", "while"]
+        self.assertIs(req, bridge.validate_request(req, req["request_id"]))
+
+        # available_tools passati al validatore del draft, control-flow incluso.
+        tools = set(req["manifest"]["available_tools"])
+
+        # 2) Un draft con un `wait` di TOP-LEVEL valida (pausa 500ms del bug reale).
+        wait_draft = {
+            "name": "torcia con pausa",
+            "trigger": self.P4_TIME_TRIGGER,
+            "actions": [
+                {"type": "set_flashlight", "on": True},
+                {"type": "wait", "durationMs": 500},
+                {"type": "set_flashlight", "on": False},
+            ],
+        }
+        self.assertTrue(bridge.validate_draft(wait_draft, tools, set(), set()))
+        # Il wait è STRUTTURALE: valida anche se available_tools NON lo elenca.
+        self.assertTrue(bridge.validate_draft(wait_draft, {"set_flashlight"}, set(), set()))
+
+        # 3) Un draft con if/while (con foglia in available_tools) valida.
+        flow_draft = {
+            "name": "flusso strutturale",
+            "trigger": self.P4_TIME_TRIGGER,
+            "actions": [
+                {
+                    "type": "if",
+                    "condition": {"type": "boolean_literal", "value": True},
+                    "then": [{"type": "wait", "durationMs": 250}],
+                    "orElse": [{"type": "set_flashlight", "on": True}],
+                },
+                {
+                    "type": "while",
+                    "condition": {"type": "boolean_literal", "value": True},
+                    "body": [{"type": "wait", "durationMs": 100}],
+                    "maxIterations": 3,
+                    "delayBetweenMs": 50,
+                },
+            ],
+        }
+        self.assertTrue(bridge.validate_draft(flow_draft, tools, set(), set()))
+        self.assertTrue(bridge.validate_draft(flow_draft, {"set_flashlight"}, set(), set()))
+
+    def _nested_shell_draft(self, trigger):
+        return {
+            "name": "shell annidata",
+            "trigger": trigger,
+            "actions": [{
+                "type": "if",
+                "condition": {"type": "boolean_literal", "value": True},
+                "then": [{"type": "run_shell", "cmd": "/system/bin/id"}],
+            }],
+        }
+
+    def test_p4_shell_gate_recurses_into_nested_bodies(self):
+        tools = {"run_shell"}
+        # Trigger fidato (time): la shell annidata è ammessa.
+        self.assertTrue(
+            bridge.validate_draft(self._nested_shell_draft(self.P4_TIME_TRIGGER), tools, set(), set())
+        )
+        # Trigger phone_state SMS: la shell annidata DEVE essere trovata dal gate e rifiutata,
+        # anche se non è al top-level (bug handoff §6).
+        sms = {"type": "phone_state", "event": "SMS_RECEIVED", "number": None, "textMatch": None}
+        self.assertFalse(bridge.validate_draft(self._nested_shell_draft(sms), tools, set(), set()))
+
+    def test_p4_rejects_over_bounds(self):
+        # 17 variabili -> oltre il tetto di 16.
+        seventeen = {
+            "name": "vars", "trigger": self.P4_TIME_TRIGGER,
+            "vars": [{"type": "literal", "name": f"v{i}", "value": "1",
+                      "varType": "TEXT", "confidentiality": "PUBLIC"} for i in range(17)],
+            "actions": [{"type": "set_wifi", "on": True}],
+        }
+        self.assertFalse(bridge.validate_draft(seventeen, {"set_wifi"}, set(), set()))
+        sixteen = json.loads(json.dumps(seventeen))
+        sixteen["vars"] = sixteen["vars"][:16]
+        self.assertTrue(bridge.validate_draft(sixteen, {"set_wifi"}, set(), set()))
+
+        # Profondità di annidamento: 4 ok, 5 rifiutato.
+        def nested_if(depth):
+            node = {"type": "set_wifi", "on": True}
+            for _ in range(depth):
+                node = {"type": "if",
+                        "condition": {"type": "boolean_literal", "value": True},
+                        "then": [node]}
+            return {"name": "n", "trigger": self.P4_TIME_TRIGGER, "actions": [node]}
+        self.assertTrue(bridge.validate_draft(nested_if(4), {"set_wifi"}, set(), set()))
+        self.assertFalse(bridge.validate_draft(nested_if(5), {"set_wifi"}, set(), set()))
+
+        # maxIterations: 1000 ok, 1001 fuori intervallo.
+        def while_iters(n):
+            return {"name": "w", "trigger": self.P4_TIME_TRIGGER, "actions": [{
+                "type": "while", "condition": {"type": "boolean_literal", "value": True},
+                "body": [{"type": "set_wifi", "on": True}], "maxIterations": n}]}
+        self.assertTrue(bridge.validate_draft(while_iters(1_000), {"set_wifi"}, set(), set()))
+        self.assertFalse(bridge.validate_draft(while_iters(1_001), {"set_wifi"}, set(), set()))
+
+        # Conteggio nodi albero: while + 63 corpo = 64 ok; + 64 = 65 rifiutato.
+        def while_body(n):
+            return {"name": "w", "trigger": self.P4_TIME_TRIGGER, "actions": [{
+                "type": "while", "condition": {"type": "boolean_literal", "value": True},
+                "body": [{"type": "set_wifi", "on": True} for _ in range(n)],
+                "maxIterations": 1}]}
+        self.assertTrue(bridge.validate_draft(while_body(63), {"set_wifi"}, set(), set()))
+        self.assertFalse(bridge.validate_draft(while_body(64), {"set_wifi"}, set(), set()))
+
+    def test_p4_v1_flat_draft_still_valid(self):
+        flat = {
+            "name": "dnd sera",
+            "trigger": {"type": "time", "cron": "0 23 * * *", "tz": "Europe/Rome"},
+            "actions": [{"type": "set_dnd", "mode": "PRIORITY"}],
+        }
+        self.assertTrue(bridge.validate_draft(flat, {"set_dnd"}, {"ringer"}, set()))
+
+    def test_p4_capture_as_only_on_producers(self):
+        # captureAs su un'azione non-produttrice -> rifiutato (chiave extra).
+        bad = {
+            "name": "x", "trigger": self.P4_TIME_TRIGGER,
+            "actions": [{"type": "set_wifi", "on": True, "captureAs": "bad"}],
+        }
+        self.assertFalse(bridge.validate_draft(bad, {"set_wifi"}, set(), set()))
+        # captureAs su run_shell -> ammesso.
+        good = {
+            "name": "x", "trigger": self.P4_TIME_TRIGGER,
+            "actions": [{"type": "run_shell", "cmd": "/system/bin/id", "captureAs": "uid"}],
+        }
+        self.assertTrue(bridge.validate_draft(good, {"run_shell"}, set(), set()))
+        # Nome captureAs non valido -> rifiutato.
+        bad_name = json.loads(json.dumps(good))
+        bad_name["actions"][0]["captureAs"] = "Bad-Name"
+        self.assertFalse(bridge.validate_draft(bad_name, {"run_shell"}, set(), set()))
+
+    def test_p4_flow_only_conditions_rejected_at_trigger_time(self):
+        # var_compare/boolean_literal non sono ammesse come condizioni trigger-time.
+        self.assertFalse(bridge.validate_condition(
+            {"type": "var_compare", "varName": "x", "op": "EQ", "expected": "y"},
+            0, set(),
+        ))
+        self.assertFalse(bridge.validate_condition(
+            {"type": "boolean_literal", "value": True}, 0, set(),
+        ))
+        # Dentro un flusso (allow_flow) e con la var dichiarata -> ammesse.
+        self.assertTrue(bridge.validate_condition(
+            {"type": "boolean_literal", "value": True}, 0, set(),
+            allow_flow=True,
+        ))
+        self.assertTrue(bridge.validate_condition(
+            {"type": "var_compare", "varName": "x", "op": "EQ", "expected": "y"},
+            0, set(), allow_flow=True, known_vars={"x"},
+        ))
 
     def test_manifest_available_triggers_is_optional_and_bounded(self):
         # Client pre-P2: campo assente, accettato (retrocompatibilita').
@@ -755,8 +1222,10 @@ class BridgeTest(unittest.TestCase):
         self.assertIsNone(bridge._sanitize_usage(None))
         self.assertIsNone(bridge._sanitize_usage([full]))
         self.assertIsNone(bridge._sanitize_usage({**full, "input_tokens": -1}))
+        self.assertIsNone(bridge._sanitize_usage({**full, "input_tokens": bridge.MAX_USAGE_TOKENS + 1}))
         self.assertIsNone(bridge._sanitize_usage({**full, "output_tokens": "5"}))
         self.assertIsNone(bridge._sanitize_usage({**full, "api_calls": True}))
+        self.assertIsNone(bridge._sanitize_usage({**full, "api_calls": bridge.MAX_USAGE_API_CALLS + 1}))
         self.assertIsNone(bridge._sanitize_usage({**full, "model": "x" * 65}))
         self.assertIsNone(bridge._sanitize_usage({**full, "estimated_cost_usd": float("inf")}))
         self.assertIsNone(bridge._sanitize_usage({**full, "estimated_cost_usd": -0.1}))

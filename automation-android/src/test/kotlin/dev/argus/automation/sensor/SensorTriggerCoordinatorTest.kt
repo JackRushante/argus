@@ -147,6 +147,39 @@ class SensorTriggerCoordinatorTest {
     }
 
     @Test
+    fun `a failed foreground start reports every dependent rule as failed`() = runTest {
+        val fgs = RecordingForegroundDemand(startResult = false)
+        val report = SensorTriggerCoordinator(
+            RulesStore(listOf(rule("a"), rule("b"))),
+            RecordingSensorBackend(),
+            implemented,
+            foregroundDemand = fgs,
+        ).reconcile()
+
+        assertEquals(listOf(AutomationId("a"), AutomationId("b")), report.failed)
+        assertEquals(1, fgs.startCalls)
+    }
+
+    @Test
+    fun `a failed foreground stop marks cleanup incomplete`() = runTest {
+        val fgs = RecordingForegroundDemand(stopResult = false)
+        val store = MutableRulesStore(listOf(rule("a")))
+        val coordinator = SensorTriggerCoordinator(
+            store,
+            RecordingSensorBackend(),
+            implemented,
+            foregroundDemand = fgs,
+        )
+        coordinator.reconcile()
+        store.rules = emptyList()
+
+        val report = coordinator.reconcile()
+
+        assertFalse(report.cleanupSucceeded)
+        assertEquals(1, fgs.stopCalls)
+    }
+
+    @Test
     fun `a fresh coordinator does not believe a previous physical registration`() = runTest {
         // Process recreation: nuovo coordinator, stessa regola armata. Deve ri-registrare
         // il sensore da zero, senza fidarsi di alcuno stato "registered" persistito.
@@ -190,11 +223,14 @@ private class RecordingSensorBackend(
     }
 }
 
-private class RecordingForegroundDemand : dev.argus.automation.connectivity.ConnectivitySentinelBackend {
+private class RecordingForegroundDemand(
+    private val startResult: Boolean = true,
+    private val stopResult: Boolean = true,
+) : dev.argus.automation.connectivity.ConnectivitySentinelBackend {
     var startCalls = 0
     var stopCalls = 0
-    override suspend fun start(): Boolean { startCalls += 1; return true }
-    override suspend fun stop(): Boolean { stopCalls += 1; return true }
+    override suspend fun start(): Boolean { startCalls += 1; return startResult }
+    override suspend fun stop(): Boolean { stopCalls += 1; return stopResult }
 }
 
 private open class RulesStore(private val rules: List<Automation>) : AutomationStore {

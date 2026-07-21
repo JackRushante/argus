@@ -40,6 +40,7 @@ import dev.argus.ui.model.ShizukuRequirement
 import dev.argus.ui.model.StepKind
 import dev.argus.ui.model.StepStatus
 import dev.argus.ui.model.TransportUi
+import dev.argus.ui.presentation.RenderLanguage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -190,6 +191,24 @@ class OnboardingViewModelTest {
     }
 
     @Test
+    fun `english onboarding localizes generated steps and events`() = runTest(dispatcher) {
+        val vm = onboardingViewModel(OnbFakeProviderStore(), language = RenderLanguage.EN)
+        observe(vm)
+        val events = collectEvents(vm)
+        advanceUntilIdle()
+
+        assertEquals("Privacy and consent", vm.state.value.steps.first().title)
+        assertTrue(
+            vm.state.value.steps.first().body.contains("configured AI service"),
+        )
+        assertEquals("Choose the brain", vm.state.value.steps[1].title)
+
+        vm.selectProvider("skynet")
+        advanceUntilIdle()
+        assertEquals("Unknown provider.", (events.last() as OnboardingEvent.Message).text)
+    }
+
+    @Test
     fun `la chiave API non compare mai nello stato onboarding`() = runTest(dispatcher) {
         val store = OnbFakeProviderStore()
         val vm = onboardingViewModel(store, index = 1)
@@ -253,7 +272,11 @@ class OnboardingViewModelTest {
         return out
     }
 
-    private fun onboardingViewModel(store: OnbFakeProviderStore, index: Int = 0): OnboardingViewModel {
+    private fun onboardingViewModel(
+        store: OnbFakeProviderStore,
+        index: Int = 0,
+        language: RenderLanguage = RenderLanguage.IT,
+    ): OnboardingViewModel {
         val brain = ConfiguredBridgeBrain(store, privacyAccepted = { true }, factory = OnbFakeTransportFactory())
         val handle = SavedStateHandle(mapOf("currentIndex" to index))
         return OnboardingViewModel(
@@ -265,6 +288,7 @@ class OnboardingViewModelTest {
             shizuku = ShizukuGateway(context),
             automations = OnbFakeAutomationStore(),
             drafts = OnbFakeDraftRepository(),
+            language = language,
         )
     }
 }

@@ -60,7 +60,7 @@ class RoomAuditSink(private val dao: AuditDao) : AuditSink {
 
     private companion object {
         val RETRY_AT = Regex("^retry_at=[0-9]{1,19}$")
-        val BUDGET_DETAIL = Regex("^(hour|day|month_cost):(global|[a-z][a-z0-9_]{0,32})$")
+        val BUDGET_DETAIL = Regex("^(hour|day|month_cost|month_tokens):(global|[a-z][a-z0-9_]{0,32})$")
         /** Codice snake_case a vocabolario chiuso (ValidationIssue.code o reason interno). */
         val REASON_CODE = Regex("^[a-z][a-z0-9_]{0,63}$")
         const val MAX_VALIDATION_CODES = 8

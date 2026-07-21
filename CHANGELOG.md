@@ -1,6 +1,76 @@
 # Changelog
 
-Patch notes for every commit, newest first. Generated from the project's git history.
+Release and engineering notes, newest first.
+
+## Unreleased — Anti-injection posture set to Aggressive (2026-07-21)
+
+### Changed (security posture)
+
+- The taint-based anti-injection posture is now **Aggressive**, centralized in a single policy point
+  `TaintPolicy.allowTaintedInAuthority()` (engine-core `model/TaintPolicy.kt`). Consequence: a
+  runtime/TAINTED value (a `trigger_payload` or any `captureAs` output) may now fill **authority /
+  command fields** too — `run_shell.cmd`, `open_url.url`, `launch_app.pkg`, `input_text`, ringer
+  mode, `write_setting` — and no longer only data sinks (notification/reply text, clipboard). Both the
+  static gate (`DraftValidator.interpolation_tainted_authority`) and the dynamic gate
+  (`TaintAwareInterpolator` `taint_blocked`) consult this policy; flipping one flag restores the
+  previous "surgical" posture (tainted allowed only in sinks).
+- This relaxes the **integrity** axis only. Deliberately kept intact:
+  - **Shell trigger-gating** (`StaticShellSafety`): an approved `run_shell` is still triggerable only
+    by whitelisted 1:1 WhatsApp contacts, never by SMS/phone or unknown senders.
+  - **Confidentiality floor**: shell/LLM captures remain `TAINTED` + `SECRET` (protects bank/OTP
+    secrets); this is orthogonal to the integrity relaxation.
+  - **SYSTEM/DATA separation**: untrusted runtime data still travels in the `runtime_data` channel and
+    never enters the model's system prompt at fire time.
+- Brain prompt (`AgentMessageSupport`) softened accordingly so the model no longer refuses legitimate
+  rules that interpolate captured/trigger values into command/URL/target fields, while still stating
+  that `run_shell` is triggerable only by whitelisted contacts.
+
+## Unreleased — P4 variables and structured control flow (2026-07-18)
+
+P4-A through P4-C are implemented on the `p4a` branch. This is an integration preview, not a
+public release: compile/bridge support (P4-D), recursive UI rendering (P4-E), and final device E2E
+(P4-F) are intentionally still pending.
+
+### Added
+
+- Schema-v2 automation programs with typed variables, literal/device/trigger bindings,
+  `if`/`else`, bounded `while`, and explicit cooperative `wait` actions.
+- Per-value integrity, confidentiality, and provenance labels. Runtime values never alter the
+  approved program structure; tainted data is accepted only by the closed sink policy.
+- A deterministic program interpreter with definite assignment, typed conditions, hard limits,
+  taint-aware interpolation, bounded execution time, redacted runtime values, and stable nested
+  action paths such as `1.while[2].3`.
+- Room schema 11 stores action paths and enforces one journal row per execution/path. The v10→v11
+  migration backfills legacy one-based paths without losing historical rows.
+- Android `run_shell.captureAs` support with a 30-second timeout and a 64 KiB stdout ceiling.
+  Truncated, failed, or timed-out commands never expose partial captured output.
+
+### Fixed and hardened
+
+- Disabling, deleting, or changing the fingerprint of a running P4 rule now cancels only that
+  program—even while it is waiting—without aborting other rules dispatched by the same event.
+- Receiver, notification-listener, sensor, and immediate-trigger work now retain the shared
+  foreground-service lease for the real execution lifetime. Immediate rules no longer keep the
+  approval coroutine suspended and are consumed only after execution finishes.
+- Static-shell policy is rechecked at execution time. Unexpected transport failures become bounded
+  error codes while coroutine cancellation still propagates.
+- Android ICU-compatible interpolation matching replaces the JVM-only regex construct that crashed
+  on a real device.
+- Provider usage accounting rejects malformed/negative values, preserves nullable token semantics,
+  and blocks capped models whose cost cannot be priced instead of silently treating them as free.
+- Sensor registration/unregistration, shared foreground demand, and one-shot consumption races are
+  serialized and covered by regression tests.
+- The app shell, runtime logs, generated notifications, onboarding/settings copy, capability labels,
+  and diagnostics now honor English-default/Italian-system-locale rendering, including historical
+  structured log rows.
+### Verification
+
+- Full clean Gradle gate: all JVM/Robolectric suites across eight modules plus `:app:assembleDebug`
+  (`226` tasks) passed on 2026-07-18.
+- Hermes bridge suite: `37/37` tests passed.
+- Real OnePlus/Shizuku gate: literal shell success, non-zero failure, and bounded stdout capture all
+  passed. Room migrations passed `10/10` on device, and the schema-11 APK upgraded existing app data
+  and launched without Room or `AndroidRuntime` errors.
 
 > **Privacy & license.** Argus has no backend, no account, no telemetry and no analytics — it
 > collects nothing; rules, logs and API keys stay on your device. It is free software under

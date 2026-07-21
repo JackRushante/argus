@@ -2,6 +2,7 @@ package dev.argus.engine.runtime
 import dev.argus.engine.model.*
 import java.time.*
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 class ConditionEvaluatorTest {
@@ -87,6 +88,33 @@ class ConditionEvaluatorTest {
                 state,
             ),
         )
+    }
+
+    @Test fun `parity operators coerce the left operand to integer and fail closed`() {
+        val ev = ConditionEvaluator(clockAt("2026-07-12T10:00:00Z"))
+        val state = DeviceState()
+        fun numberVar(value: String) = VarValue(
+            value, VarType.NUMBER, IntegrityLabel.CLEAN, ConfidentialityLabel.PUBLIC, setOf(ValueProvenance.LITERAL),
+        )
+        fun textVar(value: String) = VarValue(
+            value, VarType.TEXT, IntegrityLabel.CLEAN, ConfidentialityLabel.PUBLIC, setOf(ValueProvenance.LITERAL),
+        )
+        val values = mapOf(
+            "four" to numberVar("4"),
+            "six" to textVar("6"), // TEXT coercibile a intero, come GT/LT
+            "five" to numberVar("5"),
+            "word" to textVar("abc"),
+            "half" to numberVar("4.5"),
+        )
+        // 4 e "6" sono pari; 5 è dispari.
+        assertEquals(ConditionEvaluator.Result.MET, ev.flowResult(Condition.VarCompare("four", CmpOp.IS_EVEN), state, values::get))
+        assertEquals(ConditionEvaluator.Result.MET, ev.flowResult(Condition.VarCompare("six", CmpOp.IS_EVEN), state, values::get))
+        assertEquals(ConditionEvaluator.Result.MET, ev.flowResult(Condition.VarCompare("five", CmpOp.IS_ODD), state, values::get))
+        assertEquals(ConditionEvaluator.Result.NOT_MET, ev.flowResult(Condition.VarCompare("four", CmpOp.IS_ODD), state, values::get))
+        // "abc" non coercibile a intero -> fail-closed FALSE (NOT_MET), mai STATE_UNAVAILABLE.
+        assertEquals(ConditionEvaluator.Result.NOT_MET, ev.flowResult(Condition.VarCompare("word", CmpOp.IS_EVEN), state, values::get))
+        // 4.5 è finito ma NON intero -> fail-closed FALSE.
+        assertEquals(ConditionEvaluator.Result.NOT_MET, ev.flowResult(Condition.VarCompare("half", CmpOp.IS_EVEN), state, values::get))
     }
 
     @Test fun `typed boolean values are normalized while missing remains unknown under not`() {

@@ -17,6 +17,7 @@ import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.model.Action
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireContext
+import dev.argus.engine.runtime.RuntimeDataBinding
 import kotlinx.coroutines.CancellationException
 
 sealed interface BridgeHealthResult {
@@ -61,6 +62,18 @@ class ConfiguredBridgeBrain(
     override suspend fun actV2(context: FireContext, action: Action.InvokeLlmV2): ActResult {
         requirePrivacyConsent()
         return TransportBackedBrain(currentTransport()).actV2(context, action)
+    }
+
+    override suspend fun actResolved(
+        context: FireContext,
+        goal: String,
+        contextSources: List<String>,
+        allowedTools: List<String>,
+        runtimeData: List<RuntimeDataBinding>,
+    ): ActResult {
+        requirePrivacyConsent()
+        return TransportBackedBrain(currentTransport())
+            .actResolved(context, goal, contextSources, allowedTools, runtimeData)
     }
 
     suspend fun health(): BridgeHealthResult {

@@ -1,3 +1,5 @@
+@file:OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+
 package dev.argus.engine.model
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.SerialName
@@ -5,6 +7,12 @@ import kotlinx.serialization.Serializable
 
 enum class DndMode { OFF, PRIORITY, TOTAL }
 enum class ActionTier { DETERMINISTIC, GENERATIVE }
+
+/**
+ * Modalità tema di [Action.SetDarkMode]. Enum CHIUSO: mappato 1:1 sull'argomento di
+ * `cmd uimode night no|yes|auto` (OFF→"no", ON→"yes", AUTO→"auto"). Nessuna stringa arbitraria.
+ */
+enum class NightMode { OFF, ON, AUTO }
 
 /**
  * Sink di consegna del testo generato da [Action.InvokeLlm] (#59). Enum CHIUSO e SENZA @SerialName:
@@ -42,15 +50,22 @@ object ActionTypeIds {
     const val WHATSAPP_REPLY = "whatsapp_reply"
     const val RUN_SHELL = "run_shell"
     const val COPY_TO_CLIPBOARD = "copy_to_clipboard"
+    const val COPY_TEXT = "copy_text"
+    const val SET_MOBILE_DATA = "set_mobile_data"
     const val SET_ALARM = "set_alarm"
     const val SET_TIMER = "set_timer"
     const val SET_VOLUME = "set_volume"
     const val SET_FLASHLIGHT = "set_flashlight"
+    const val SET_DARK_MODE = "set_dark_mode"
     const val OPEN_SETTINGS_SCREEN = "open_settings_screen"
     const val VIBRATE = "vibrate"
     const val WRITE_SETTING = "write_setting"
     const val INVOKE_LLM = "invoke_llm"
     const val INVOKE_LLM_V2 = "invoke_llm_v2"
+    const val WAIT = "wait"
+    // Control-flow strutturato P4 §2.3: contenitori, non azioni foglia.
+    const val IF = "if"
+    const val WHILE = "while"
 }
 
 /**
@@ -93,8 +108,22 @@ sealed interface Action {
             is InvokeLlm,
             is InvokeLlmV2,
             -> ActionTier.GENERATIVE
+            // Control-flow: generativo se e solo se contiene (a qualsiasi profondità) un'azione
+            // generativa. Così il gate cooldown generativo del validator scatta anche su generativi
+            // annidati in if/while (fail-closed sul tier aggregato).
+            is If -> if (containsGenerative(then + orElse)) {
+                ActionTier.GENERATIVE
+            } else {
+                ActionTier.DETERMINISTIC
+            }
+            is While -> if (containsGenerative(body)) {
+                ActionTier.GENERATIVE
+            } else {
+                ActionTier.DETERMINISTIC
+            }
             is SetWifi,
             is SetBluetooth,
+            is SetMobileData,
             is SetDnd,
             is SetRinger,
             is LaunchApp,
@@ -105,18 +134,25 @@ sealed interface Action {
             is WhatsAppReply,
             is RunShell,
             is CopyToClipboard,
+            is CopyText,
             is SetAlarm,
             is SetTimer,
             is SetVolume,
             is SetFlashlight,
+            is SetDarkMode,
             is OpenSettingsScreen,
             is Vibrate,
             is WriteSetting,
+            is Wait,
             -> ActionTier.DETERMINISTIC
         }
 
     @Serializable @SerialName(ActionTypeIds.SET_WIFI) data class SetWifi(val on: Boolean) : Action
     @Serializable @SerialName(ActionTypeIds.SET_BLUETOOTH) data class SetBluetooth(val on: Boolean) : Action
+
+    /** Toggle dei DATI MOBILI via `svc data enable|disable`. Clone privilegiato di [SetWifi]:
+     *  PRIVILEGED (Shizuku), nessun percorso app-normale. */
+    @Serializable @SerialName(ActionTypeIds.SET_MOBILE_DATA) data class SetMobileData(val on: Boolean) : Action
     @Serializable @SerialName(ActionTypeIds.SET_DND) data class SetDnd(val mode: DndMode) : Action
     @Serializable @SerialName(ActionTypeIds.SET_RINGER) data class SetRinger(val mode: String) : Action
     @Serializable @SerialName(ActionTypeIds.LAUNCH_APP) data class LaunchApp(val pkg: String) : Action
@@ -125,13 +161,26 @@ sealed interface Action {
     @Serializable @SerialName(ActionTypeIds.TAP) data class Tap(val x: Int, val y: Int) : Action
     @Serializable @SerialName(ActionTypeIds.INPUT_TEXT) data class InputText(val text: String) : Action
     @Serializable @SerialName(ActionTypeIds.WHATSAPP_REPLY) data class WhatsAppReply(val text: String) : Action
-    @Serializable @SerialName(ActionTypeIds.RUN_SHELL) data class RunShell(val cmd: String) : Action
+    /** [captureAs] (P4 §2.2): se presente, lo stdout del comando è catturato nella variabile
+     *  omonima con taint TAINTED. @EncodeDefault(NEVER): assente ⇒ byte v1 stabili. */
+    @Serializable @SerialName(ActionTypeIds.RUN_SHELL)
+    data class RunShell(
+        val cmd: String,
+        @EncodeDefault(EncodeDefault.Mode.NEVER)
+        val captureAs: String? = null,
+    ) : Action
 
     /** Copia negli appunti il payload testuale del trigger (SMS o notifica), opzionalmente
      *  ridotto al primo capture group di una regex RE2 lineare (P2-3, OTP). Estrazione
      *  DETERMINISTICA: il testo non lascia mai il telefono. */
     @Serializable @SerialName(ActionTypeIds.COPY_TO_CLIPBOARD)
     data class CopyToClipboard(val extractionRegex: String? = null) : Action
+
+    /** Copia negli appunti una stringa LETTERALE approvata. A differenza di [CopyToClipboard] non
+     *  dipende dal trigger (nessun payload testuale richiesto): il campo [text] è il testo da
+     *  copiare, interpolabile con `${'$'}{var}`. BASE: nessuno Shizuku, scrittura clipboard locale. */
+    @Serializable @SerialName(ActionTypeIds.COPY_TEXT)
+    data class CopyText(val text: String) : Action
 
     /** Imposta la SVEGLIA reale dell'app orologio via Intent `AlarmClock.ACTION_SET_ALARM`
      *  (NON una notifica). BASE: solo il permesso manifest normal `SET_ALARM`, nessuno Shizuku.
@@ -170,6 +219,12 @@ sealed interface Action {
     @Serializable @SerialName(ActionTypeIds.SET_FLASHLIGHT)
     data class SetFlashlight(val on: Boolean) : Action
 
+    /** Tema chiaro/scuro via `cmd uimode night no|yes|auto` (shell privilegiata, argv separati, mai
+     *  `sh -c`). Clone privilegiato semplice di [SetMobileData]: PRIVILEGED (Shizuku), nessun
+     *  percorso app-normale. [NightMode] è un enum CHIUSO → arg letterale, nessun campo testo. */
+    @Serializable @SerialName(ActionTypeIds.SET_DARK_MODE)
+    data class SetDarkMode(val mode: NightMode) : Action
+
     /** Apre una schermata Impostazioni via Intent `Settings.ACTION_*` mappato da un enum CHIUSO
      *  ([SettingsScreen]): nessuna action-string arbitraria (evita il routing-sink). BASE,
      *  `startActivity` NEW_TASK. `pkg` serve solo per [SettingsScreen.APP_DETAILS]. */
@@ -183,6 +238,14 @@ sealed interface Action {
      *  normal `VIBRATE`. `durationMs` validato in 1..10000. */
     @Serializable @SerialName(ActionTypeIds.VIBRATE)
     data class Vibrate(val durationMs: Int) : Action
+
+    /**
+     * Pausa cooperativa dentro un programma P4. È interpretata dal [ProgramInterpreter], non da
+     * Android/Shizuku: serve a rendere esprimibili sequenze temporali reali (per esempio torcia
+     * on → wait 500 ms → off) senza attribuire una semantica sorprendente al delay fra i loop.
+     */
+    @Serializable @SerialName(ActionTypeIds.WAIT)
+    data class Wait(val durationMs: Long) : Action
 
     /**
      * Scrittura PARAMETRICA di un'impostazione Android (`system|secure|global`) per chiave —
@@ -219,6 +282,10 @@ sealed interface Action {
         val deliver: GenerativeDeliverMode = GenerativeDeliverMode.WHATSAPP_REPLY,
         @EncodeDefault(EncodeDefault.Mode.NEVER)
         val notificationTitle: String? = null,
+        // [captureAs] (P4 §2.2): output del modello catturato nella variabile omonima (taint
+        // TAINTED). @EncodeDefault(NEVER): assente ⇒ i fingerprint v1 già approvati restano stabili.
+        @EncodeDefault(EncodeDefault.Mode.NEVER)
+        val captureAs: String? = null,
     ) : Action, GenerativeAction
 
     /**
@@ -235,11 +302,65 @@ sealed interface Action {
         val allowedTools: List<String>,
         val replyTargetSender: Boolean,
         val timeoutMs: Long,
+        @EncodeDefault(EncodeDefault.Mode.NEVER)
+        val captureAs: String? = null,
     ) : Action, GenerativeAction
+
+    /**
+     * Control-flow strutturato P4 §2.3 (mai goto, mai eval): esegue [then] se [condition] è vera,
+     * altrimenti [orElse]. NON implementa [GenerativeAction] (è un contenitore, non un'azione
+     * generativa foglia). L'interprete deterministico (P4-B) cammina l'albero; qui è solo modello.
+     */
+    @Serializable @SerialName(ActionTypeIds.IF)
+    data class If(
+        val condition: FlowCondition,
+        val then: List<Action>,
+        val orElse: List<Action> = emptyList(),
+    ) : Action
+
+    /**
+     * Ripetizione BOUNDED P4 §2.3: ri-valuta [condition] a ogni iterazione con stato aggiornato,
+     * con [delayBetweenMs] fra i giri (0..3_600_000). Contatore + deadline dura impediscono i loop
+     * infiniti.
+     *
+     * Il conteggio massimo è espresso da ESATTAMENTE UNO tra:
+     * - [maxIterations]: intero letterale 1..1000 (invariante storico, wire byte-identico);
+     * - [maxIterationsVar]: nome di una variabile NUMBER (es. un `random_int`) letta a runtime e
+     *   clampata in 1..1000. Sblocca "gira ${'$'}{n} volte" con n dinamico.
+     *
+     * L'invariante XOR è imposto dal DraftValidator (statico) e dal ProgramInterpreter (fail-closed a
+     * runtime). Entrambi @EncodeDefault(NEVER): un while con solo maxIterations serializza byte-identico
+     * a P4-A (fingerprint v1 stabile), e maxIterationsVar è additivo, mai emesso quando assente.
+     */
+    @Serializable @SerialName(ActionTypeIds.WHILE)
+    data class While(
+        val condition: FlowCondition,
+        val body: List<Action>,
+        @EncodeDefault(EncodeDefault.Mode.NEVER)
+        val maxIterations: Int? = null,
+        @EncodeDefault(EncodeDefault.Mode.NEVER)
+        val maxIterationsVar: String? = null,
+        val delayBetweenMs: Long = 0,
+    ) : Action
 }
 
-enum class IntegrityLabel { CLEAN, TAINTED }
-enum class ConfidentialityLabel { PUBLIC, PRIVATE, SECRET }
+/** Visita iterativa: il tier non può causare stack overflow su un albero non ancora validato. */
+private fun containsGenerative(actions: List<Action>): Boolean {
+    val pending = ArrayDeque<Action>()
+    actions.forEach(pending::addLast)
+    while (pending.isNotEmpty()) {
+        when (val action = pending.removeFirst()) {
+            is Action.InvokeLlm, is Action.InvokeLlmV2 -> return true
+            is Action.If -> {
+                action.then.forEach(pending::addLast)
+                action.orElse.forEach(pending::addLast)
+            }
+            is Action.While -> action.body.forEach(pending::addLast)
+            else -> Unit
+        }
+    }
+    return false
+}
 
 /** Metadati approvati per un singolo valore locale inviato al Brain configurato. */
 @Serializable

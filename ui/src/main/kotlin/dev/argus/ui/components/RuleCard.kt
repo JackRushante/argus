@@ -35,7 +35,9 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import dev.argus.ui.R
 import dev.argus.ui.model.ActionRow
+import dev.argus.ui.model.ProgramNode
 import dev.argus.ui.model.RuleRender
+import dev.argus.ui.model.VarRow
 import dev.argus.ui.model.iconFor
 import dev.argus.ui.theme.ArgusTheme
 import dev.argus.ui.theme.LocalArgusSemantic
@@ -240,11 +242,100 @@ private fun ExtendedRuleCard(rule: RuleRender, modifier: Modifier, showGenerativ
                 }
             }
         }
-        RuleSection(stringResource(R.string.rule_section_then)) {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                rule.actions.forEach { ActionRowItem(it) }
+        if (rule.vars.isNotEmpty()) {
+            RuleSection(stringResource(R.string.rule_section_variables)) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    rule.vars.forEach { VarRowItem(it) }
+                }
             }
         }
+        RuleSection(stringResource(R.string.rule_section_then)) {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                // Albero ricorsivo P4 (if/while/wait/foglie). Fallback ai top-level per i RuleRender
+                // costruiti a mano (preview/test) senza `program`.
+                val program = rule.program.ifEmpty { rule.actions.map { ProgramNode.Leaf(it) } }
+                program.forEach { ProgramNodeItem(it) }
+            }
+        }
+    }
+}
+
+/**
+ * Nodo del programma reso ricorsivamente (P4-E): foglia = ActionRow; if/while = intestazione
+ * (titolo + condizione) e figli indentati. L'indentazione cresce con la profondità così ogni
+ * ramo/foglia annidata resta visibile — nessun "dettaglio in approvazione avanzata" nascosto.
+ */
+@Composable
+private fun ProgramNodeItem(node: ProgramNode, depth: Int = 0) {
+    val indent = (depth * 14).dp
+    when (node) {
+        is ProgramNode.Leaf -> Box(Modifier.padding(start = indent)) { ActionRowItem(node.row) }
+        is ProgramNode.IfNode -> Column(
+            modifier = Modifier.padding(start = indent),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            ControlHeader(node.title, node.conditionLines)
+            ControlBranchLabel(node.thenTitle)
+            node.then.forEach { ProgramNodeItem(it, depth + 1) }
+            if (node.elseTitle != null) {
+                ControlBranchLabel(node.elseTitle)
+                node.orElse.forEach { ProgramNodeItem(it, depth + 1) }
+            }
+        }
+        is ProgramNode.WhileNode -> Column(
+            modifier = Modifier.padding(start = indent),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            ControlHeader(node.title, node.conditionLines)
+            node.body.forEach { ProgramNodeItem(it, depth + 1) }
+        }
+    }
+}
+
+@Composable
+private fun ControlHeader(title: String, conditionLines: List<String>) {
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Icon(
+            iconFor("control_flow"),
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(20.dp),
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyLarge)
+            conditionLines.forEach {
+                Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ControlBranchLabel(label: String) {
+    Text(
+        label,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.labelLarge,
+    )
+}
+
+/**
+ * Riga variabile P4 (§5.1): nome + una riga di metadati resi dai tipi
+ * (tipo · provenienza · integrità · riservatezza). Nessun valore runtime.
+ */
+@Composable
+private fun VarRowItem(v: VarRow) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            v.name,
+            color = MaterialTheme.colorScheme.onSurface,
+            style = MaterialTheme.typography.bodyLarge,
+        )
+        Text(
+            "${v.typeLabel} · ${v.provenanceLabel} · ${v.integrityLabel} · ${v.confidentialityLabel}",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodyMedium,
+        )
     }
 }
 

@@ -18,6 +18,7 @@ import dev.argus.data.ArgusDatabase
 import dev.argus.data.dao.AuditLogRecord
 import dev.argus.data.entities.ActionResultEntity
 import dev.argus.ui.model.ExecutionLogState
+import dev.argus.ui.presentation.RenderLanguage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -37,6 +38,7 @@ class ExecutionLogViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     database: ArgusDatabase,
     private val deferredReplies: DeferredReplyManager,
+    private val language: RenderLanguage = RenderLanguage.system(),
 ) : ViewModel() {
     private val audit = database.auditDao()
     private val journal = database.executionJournalDao()
@@ -74,7 +76,7 @@ class ExecutionLogViewModel @Inject constructor(
         val actionsByExecution = sources.actions.groupBy { it.executionId }
         val rows = sources.records.map { record ->
                 val executionActions = record.executionId?.let(actionsByExecution::get).orEmpty()
-                record.toLogRow(executionActions)
+                record.toLogRow(executionActions, language)
             }
         ExecutionLogState(
             entries = rows,
@@ -103,15 +105,30 @@ class ExecutionLogViewModel @Inject constructor(
         viewModelScope.launch {
             val executionId = executionIdsByLogId[logId]
             if (executionId == null) {
-                message("Nessuna risposta differita per questa voce.")
+                message(
+                    language.pick(
+                        "No deferred reply is associated with this entry.",
+                        "Nessuna risposta differita per questa voce.",
+                    ),
+                )
                 return@launch
             }
             when (val resolution = deferredReplies.resolve(executionId)) {
                 is DeferredReplyResolution.Ready -> deliver(resolution.reply)
                 DeferredReplyResolution.Unavailable ->
-                    message("La risposta non è più disponibile: scaduta o già consegnata.")
+                    message(
+                        language.pick(
+                            "The reply is no longer available: it expired or was already delivered.",
+                            "La risposta non è più disponibile: scaduta o già consegnata.",
+                        ),
+                    )
                 DeferredReplyResolution.Failed ->
-                    message("Impossibile recuperare la risposta differita.")
+                    message(
+                        language.pick(
+                            "Unable to retrieve the deferred reply.",
+                            "Impossibile recuperare la risposta differita.",
+                        ),
+                    )
             }
         }
     }
@@ -125,7 +142,7 @@ class ExecutionLogViewModel @Inject constructor(
         val copied = try {
             val clipboard = requireNotNull(context.getSystemService(ClipboardManager::class.java))
             clipboard.setPrimaryClip(
-                ClipData.newPlainText("Risposta Argus", reply.text).apply {
+                ClipData.newPlainText(language.pick("Argus reply", "Risposta Argus"), reply.text).apply {
                     description.extras = PersistableBundle().apply {
                         putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true)
                     }
@@ -138,7 +155,12 @@ class ExecutionLogViewModel @Inject constructor(
             false
         }
         if (!copied) {
-            message("Impossibile copiare la risposta negli appunti.")
+            message(
+                language.pick(
+                    "Unable to copy the reply to the clipboard.",
+                    "Impossibile copiare la risposta negli appunti.",
+                ),
+            )
             return
         }
         deferredReplies.markDelivered(reply)
@@ -153,9 +175,15 @@ class ExecutionLogViewModel @Inject constructor(
         }
         message(
             if (opened) {
-                "Risposta copiata: incollala nella chat e premi invia."
+                language.pick(
+                    "Reply copied: paste it into the chat and tap send.",
+                    "Risposta copiata: incollala nella chat e premi invia.",
+                )
             } else {
-                "Risposta copiata negli appunti."
+                language.pick(
+                    "Reply copied to the clipboard.",
+                    "Risposta copiata negli appunti.",
+                )
             },
         )
     }

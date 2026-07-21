@@ -8,8 +8,10 @@ import dev.argus.automation.notification.NotificationReplyRequest
 import dev.argus.device.DeviceController
 import dev.argus.device.DeviceToolException
 import dev.argus.device.RingerMode
+import dev.argus.engine.brain.ActResult
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.GenerativeAction
+import dev.argus.engine.model.GenerativeDeliverMode
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.DndMode
@@ -17,11 +19,16 @@ import dev.argus.engine.model.PhoneEvent
 import dev.argus.engine.model.SettingsScreen
 import dev.argus.engine.model.VolumeStream
 import dev.argus.engine.runtime.ActionResult
+import dev.argus.engine.runtime.ActionResolution
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.ExecutionId
 import dev.argus.engine.runtime.FireContext
+import dev.argus.engine.runtime.ProgramActionResult
+import dev.argus.engine.runtime.RuntimeDataBinding
+import dev.argus.engine.runtime.TaintAwareInterpolator
 import dev.argus.engine.runtime.TriggerEvent
 import dev.argus.engine.runtime.TriggerEventId
+import dev.argus.engine.runtime.VarScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -52,7 +59,7 @@ class ShizukuActionExecutorTest {
             },
             generativeLane = GenerativeLane { _, _ -> true },
             replies = RecordingReplyGateway(NotificationReplyDelivery.Sent),
-            clipboard = { _, _ -> ActionResult.Success },
+            clipboard = RecordingClipboard(),
         )
 
         val actions = listOf(
@@ -153,12 +160,140 @@ class ShizukuActionExecutorTest {
 
         assertEquals(
             ActionResult.Success,
-            executor(staticShell = runner).execute(
+            executor(staticShell = runner, shizukuReady = { true }).execute(
                 Action.RunShell("/system/bin/id >/dev/null"),
                 trustedContext,
             ),
         )
         assertEquals(listOf("/system/bin/id >/dev/null" to trustedContext), calls)
+    }
+
+    @Test
+    fun `resolved shell capture preserves policy check and returns concrete stdout`() = runTest {
+        val calls = mutableListOf<String>()
+        val runner = object : StaticShellRunner {
+            override suspend fun run(command: String, context: FireContext): ActionResult =
+                error("flat run non atteso")
+
+            override suspend fun runCaptured(
+                command: String,
+                context: FireContext,
+            ): ProgramActionResult {
+                calls += command
+                return ProgramActionResult(ActionResult.Success, capturedText = "uid=2000")
+            }
+        }
+        val action = Action.RunShell("id", captureAs = "identity")
+        val resolved = (TaintAwareInterpolator().resolve(action, VarScope()) as ActionResolution.Resolved).value
+        val trusted = context.copy(
+            event = TriggerEvent.TimeFired(context.automationId, context.approvalFingerprint),
+        )
+
+        val captured = executor(staticShell = runner, shizukuReady = { true }).execute(resolved, trusted)
+        assertEquals(ActionResult.Success, captured.result)
+        assertEquals("uid=2000", captured.capturedText)
+        assertEquals(listOf("id"), calls)
+
+        val blocked = executor(staticShell = runner, shizukuReady = { true }).execute(resolved, context)
+        assertEquals(ActionResult.Failure("shell_external_trigger"), blocked.result)
+        assertEquals(listOf("id"), calls)
+    }
+
+    @Test
+    fun `resolved shell capture contains transport failures but propagates cancellation`() = runTest {
+        val resolved = (
+            TaintAwareInterpolator().resolve(
+                Action.RunShell("id", captureAs = "identity"),
+                VarScope(),
+            ) as ActionResolution.Resolved
+            ).value
+        val trusted = context.copy(
+            event = TriggerEvent.TimeFired(context.automationId, context.approvalFingerprint),
+        )
+
+        fun throwingRunner(error: Exception) = object : StaticShellRunner {
+            override suspend fun run(command: String, context: FireContext): ActionResult =
+                error("flat run non atteso")
+
+            override suspend fun runCaptured(
+                command: String,
+                context: FireContext,
+            ): ProgramActionResult = throw error
+        }
+
+        assertEquals(
+            ActionResult.Failure("action_failed"),
+            executor(staticShell = throwingRunner(IllegalStateException("sensitive")), shizukuReady = { true })
+                .execute(resolved, trusted)
+                .result,
+        )
+        assertFailsWith<CancellationException> {
+            executor(staticShell = throwingRunner(CancellationException("stop")), shizukuReady = { true })
+                .execute(resolved, trusted)
+        }
+    }
+
+    @Test
+    fun `resolved generative capture routes through the lane and returns concrete text`() = runTest {
+        val capture = Action.InvokeLlm(
+            goal = "riassumi",
+            contextSources = listOf("notification"),
+            allowedTools = listOf("whatsapp_reply"),
+            replyTargetSender = true,
+            captureAs = "summary",
+        )
+        val resolved = (
+            TaintAwareInterpolator().resolve(capture, VarScope()) as ActionResolution.Resolved
+            ).value
+        val lane = RecordingLane(ActResult("riassunto concreto", null))
+
+        val result = executor(lane = lane).execute(resolved, context)
+
+        assertEquals(ActionResult.Success, result.result)
+        assertEquals("riassunto concreto", result.capturedText)
+        assertEquals(capture, lane.awaited.single().first)
+        assertTrue(lane.submitted.isEmpty(), "la capture NON deve usare il canale async trySubmit")
+    }
+
+    @Test
+    fun `resolved generative capture maps a metaError to a failure without capture`() = runTest {
+        val capture = Action.InvokeLlm(
+            goal = "riassumi",
+            contextSources = listOf("notification"),
+            allowedTools = listOf("whatsapp_reply"),
+            replyTargetSender = true,
+            captureAs = "summary",
+        )
+        val resolved = (
+            TaintAwareInterpolator().resolve(capture, VarScope()) as ActionResolution.Resolved
+            ).value
+        val lane = RecordingLane(ActResult(null, "budget_exceeded"))
+
+        val result = executor(lane = lane).execute(resolved, context)
+
+        assertEquals(ActionResult.Failure("budget_exceeded"), result.result)
+        assertEquals(null, result.capturedText)
+    }
+
+    @Test
+    fun `resolved generative delivery sink without capture stays fail closed`() = runTest {
+        val deliver = Action.InvokeLlm(
+            goal = "genera il cambio",
+            contextSources = listOf("state"),
+            allowedTools = emptyList(),
+            replyTargetSender = false,
+            deliver = GenerativeDeliverMode.LOCAL_NOTIFICATION,
+            notificationTitle = "Argus",
+        )
+        val resolved = (
+            TaintAwareInterpolator().resolve(deliver, VarScope()) as ActionResolution.Resolved
+            ).value
+        val lane = RecordingLane(ActResult("non richiesto", null))
+
+        val result = executor(lane = lane).execute(resolved, context)
+
+        assertEquals(ActionResult.Failure("p4_generative_deliver_unavailable"), result.result)
+        assertTrue(lane.awaited.isEmpty())
     }
 
     @Test
@@ -172,7 +307,7 @@ class ShizukuActionExecutorTest {
 
         assertEquals(
             ActionResult.Success,
-            executor(staticShell = runner, whitelistedIds = { setOf(WHITELISTED_ID) })
+            executor(staticShell = runner, whitelistedIds = { setOf(WHITELISTED_ID) }, shizukuReady = { true })
                 .execute(Action.RunShell("/system/bin/id >/dev/null"), whitelisted),
         )
         assertEquals(listOf("/system/bin/id >/dev/null" to whitelisted), calls)
@@ -206,6 +341,61 @@ class ShizukuActionExecutorTest {
                 .execute(Action.RunShell("id"), sms),
         )
         assertEquals(emptyList(), calls)
+    }
+
+    /**
+     * IO-7: la shell è ultima spiaggia e privilegiata. Trigger fidato ma Shizuku non pronto ⇒
+     * fallimento tipizzato "shizuku_unavailable" (non l'IllegalStateException degradato ad
+     * "action_failed"). Ramo deterministico (flat execute).
+     */
+    @Test
+    fun `flat run_shell fails typed when shizuku is not ready`() = runTest {
+        val calls = mutableListOf<String>()
+        val runner = StaticShellRunner { command, _ -> calls += command; ActionResult.Success }
+        val trusted = context.copy(
+            event = TriggerEvent.TimeFired(context.automationId, context.approvalFingerprint),
+        )
+
+        assertEquals(
+            ActionResult.Failure("shizuku_unavailable"),
+            executor(staticShell = runner, shizukuReady = { false })
+                .execute(Action.RunShell("/system/bin/id >/dev/null"), trusted),
+        )
+        // La shell non deve nemmeno essere invocata quando Shizuku manca.
+        assertEquals(emptyList(), calls)
+    }
+
+    /** IO-7: stesso gate sul ramo RISOLTO con captureAs (runCaptured). */
+    @Test
+    fun `resolved run_shell capture fails typed when shizuku is not ready`() = runTest {
+        val ran = mutableListOf<String>()
+        val runner = object : StaticShellRunner {
+            override suspend fun run(command: String, context: FireContext): ActionResult =
+                error("flat run non atteso")
+
+            override suspend fun runCaptured(
+                command: String,
+                context: FireContext,
+            ): ProgramActionResult {
+                ran += command
+                return ProgramActionResult(ActionResult.Success, capturedText = "uid=2000")
+            }
+        }
+        val resolved = (
+            TaintAwareInterpolator().resolve(
+                Action.RunShell("id", captureAs = "identity"),
+                VarScope(),
+            ) as ActionResolution.Resolved
+            ).value
+        val trusted = context.copy(
+            event = TriggerEvent.TimeFired(context.automationId, context.approvalFingerprint),
+        )
+
+        assertEquals(
+            ActionResult.Failure("shizuku_unavailable"),
+            executor(staticShell = runner, shizukuReady = { false }).execute(resolved, trusted).result,
+        )
+        assertEquals(emptyList(), ran)
     }
 
     private fun whatsappEvent() = TriggerEvent.NotificationPosted(
@@ -322,17 +512,58 @@ class ShizukuActionExecutorTest {
         whitelistedIds: suspend () -> Set<String> = { emptySet() },
         baseActions: AndroidBaseActionExecutor? = null,
         shizukuReady: () -> Boolean = { false },
+        clipboard: ClipboardCopier = RecordingClipboard(),
     ) = ShizukuActionExecutor(
         tools = tools,
         notifier = AutomationNotifier { _, _, _ -> },
         generativeLane = lane,
         replies = replies,
-        clipboard = { _, _ -> ActionResult.Success },
+        clipboard = clipboard,
         staticShell = staticShell,
         whitelistedIds = whitelistedIds,
         baseActions = baseActions,
         shizukuReady = shizukuReady,
     )
+
+    @Test
+    fun `mobile data toggle routes to the privileged device controller`() = runTest {
+        val tools = RecordingDeviceController()
+        val exec = executor(tools = tools)
+
+        assertEquals(ActionResult.Success, exec.execute(Action.SetMobileData(true), context))
+        assertEquals(ActionResult.Success, exec.execute(Action.SetMobileData(false), context))
+
+        assertEquals(listOf("mobile_data:true", "mobile_data:false"), tools.calls)
+    }
+
+    @Test
+    fun `dark mode toggle routes to the privileged device controller`() = runTest {
+        val tools = RecordingDeviceController()
+        val exec = executor(tools = tools)
+
+        assertEquals(
+            ActionResult.Success,
+            exec.execute(Action.SetDarkMode(dev.argus.engine.model.NightMode.ON), context),
+        )
+        assertEquals(
+            ActionResult.Success,
+            exec.execute(Action.SetDarkMode(dev.argus.engine.model.NightMode.AUTO), context),
+        )
+
+        assertEquals(listOf("dark_mode:ON", "dark_mode:AUTO"), tools.calls)
+    }
+
+    @Test
+    fun `copy text writes the literal string via copyLiteral`() = runTest {
+        val clipboard = RecordingClipboard()
+        val exec = executor(clipboard = clipboard)
+
+        assertEquals(ActionResult.Success, exec.execute(Action.CopyText("ordine #4821"), context))
+
+        assertEquals(listOf("ordine #4821"), clipboard.literals)
+        // copy_text non passa mai dal percorso event-based copy().
+        assertTrue(clipboard.eventCopies.isEmpty())
+    }
 
     @Test
     fun `activity-launch actions prefer privileged am start when shizuku is ready`() = runTest {
@@ -556,6 +787,25 @@ class ShizukuActionExecutorTest {
         assertTrue(surface.alarms.isEmpty())
     }
 
+    private class RecordingLane(private val result: ActResult) : GenerativeLane {
+        val submitted = mutableListOf<Pair<FireContext, GenerativeAction>>()
+        val awaited = mutableListOf<Pair<Action.InvokeLlm, List<RuntimeDataBinding>>>()
+
+        override fun trySubmit(context: FireContext, action: GenerativeAction): Boolean {
+            submitted += context to action
+            return true
+        }
+
+        override suspend fun submitAndAwait(
+            context: FireContext,
+            action: Action.InvokeLlm,
+            runtimeData: List<RuntimeDataBinding>,
+        ): ActResult {
+            awaited += action to runtimeData
+            return result
+        }
+    }
+
     private class RecordingReplyGateway(
         private val delivery: NotificationReplyDelivery,
     ) : NotificationReplyGateway {
@@ -587,8 +837,15 @@ private class RecordingDeviceController : DeviceController {
         record(executionId, priority, "wifi:$on")
     override suspend fun setBluetooth(on: Boolean, executionId: ExecutionId, priority: Int) =
         record(executionId, priority, "bluetooth:$on")
+    override suspend fun setMobileData(on: Boolean, executionId: ExecutionId, priority: Int) =
+        record(executionId, priority, "mobile_data:$on")
     override suspend fun setDnd(mode: DndMode, executionId: ExecutionId, priority: Int) =
         record(executionId, priority, "dnd:$mode")
+    override suspend fun setDarkMode(
+        mode: dev.argus.engine.model.NightMode,
+        executionId: ExecutionId,
+        priority: Int,
+    ) = record(executionId, priority, "dark_mode:$mode")
     override suspend fun setRinger(mode: RingerMode, executionId: ExecutionId, priority: Int) =
         record(executionId, priority, "ringer:$mode")
     override suspend fun launchApp(packageName: String, executionId: ExecutionId, priority: Int) =
@@ -629,11 +886,30 @@ private class RecordingDeviceController : DeviceController {
     ) = record(executionId, priority, "setting:${namespace.name.lowercase()}:$key=$value")
 }
 
+private class RecordingClipboard : ClipboardCopier {
+    val literals = mutableListOf<String>()
+    val eventCopies = mutableListOf<String?>()
+    override fun copy(event: TriggerEvent, extractionRegex: String?): ActionResult {
+        eventCopies += extractionRegex
+        return ActionResult.Success
+    }
+    override fun copyLiteral(text: String): ActionResult {
+        literals += text
+        return ActionResult.Success
+    }
+}
+
 private class ThrowingDeviceController(private val failure: RuntimeException) : DeviceController {
     private fun fail(): Nothing = throw failure
     override suspend fun setWifi(on: Boolean, executionId: ExecutionId, priority: Int) = fail()
     override suspend fun setBluetooth(on: Boolean, executionId: ExecutionId, priority: Int) = fail()
+    override suspend fun setMobileData(on: Boolean, executionId: ExecutionId, priority: Int) = fail()
     override suspend fun setDnd(mode: DndMode, executionId: ExecutionId, priority: Int) = fail()
+    override suspend fun setDarkMode(
+        mode: dev.argus.engine.model.NightMode,
+        executionId: ExecutionId,
+        priority: Int,
+    ) = fail()
     override suspend fun setRinger(mode: RingerMode, executionId: ExecutionId, priority: Int) = fail()
     override suspend fun launchApp(packageName: String, executionId: ExecutionId, priority: Int) = fail()
     override suspend fun openUrl(url: String, executionId: ExecutionId, priority: Int) = fail()

@@ -7,11 +7,16 @@ import dev.argus.automation.notification.NotificationReplyRequest
 import dev.argus.device.DeviceController
 import dev.argus.device.DeviceToolException
 import dev.argus.device.RingerMode
+import dev.argus.engine.brain.ActResult
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.GenerativeAction
 import dev.argus.engine.runtime.ActionExecutor
 import dev.argus.engine.runtime.ActionResult
 import dev.argus.engine.runtime.FireContext
+import dev.argus.engine.runtime.ProgramActionResult
+import dev.argus.engine.runtime.ResolvedActionExecutor
+import dev.argus.engine.runtime.ResolvedProgramAction
+import dev.argus.engine.runtime.RuntimeDataBinding
 import dev.argus.engine.runtime.TriggerEvent
 import dev.argus.engine.safety.StaticShellSafety
 import kotlinx.coroutines.CancellationException
@@ -22,11 +27,24 @@ fun interface AutomationNotifier {
 }
 
 /**
- * La lane deve limitarsi ad accodare. `trySubmit` non è suspend proprio per impedire
- * all'executor deterministico di attendere la chiamata LLM.
+ * La lane accoda il lavoro generativo. `trySubmit` NON è suspend: impedisce all'executor
+ * deterministico (sink v1 reply/notifica) di attendere la chiamata LLM — l'esito viaggia via
+ * SubmittedActionJournal.
+ *
+ * [submitAndAwait] è invece il canale RISOLTO P4-D2 (capture): sospende finché il modello risponde,
+ * passando il dato runtime TAINTED SOLO in [runtimeData] (mai concatenato al goal) verso
+ * `brain.actResolved`. È l'unica via per cui una foglia generativa con `captureAs` ottiene testo
+ * concreto; l'executor NON deve mai chiamare il brain direttamente scavalcando la lane. Default
+ * fail-closed così i fake trySubmit-only del test non devono implementarlo.
  */
 fun interface GenerativeLane {
     fun trySubmit(context: FireContext, action: GenerativeAction): Boolean
+
+    suspend fun submitAndAwait(
+        context: FireContext,
+        action: Action.InvokeLlm,
+        runtimeData: List<RuntimeDataBinding>,
+    ): ActResult = ActResult(text = null, metaError = "generative_lane_unavailable")
 }
 
 class ShizukuActionExecutor(
@@ -57,12 +75,66 @@ class ShizukuActionExecutor(
      * da background. Default **false**: senza segnale si resta sul percorso BASE (foreground-only).
      */
     private val shizukuReady: () -> Boolean = { false },
-) : ActionExecutor {
+) : ActionExecutor, ResolvedActionExecutor {
+    override suspend fun execute(
+        action: ResolvedProgramAction,
+        context: FireContext,
+    ): ProgramActionResult = try {
+        when (val leaf = action.action) {
+            is Action.RunShell -> if (leaf.captureAs != null) {
+                if (!StaticShellSafety.allows(context.event, whitelistedIds())) {
+                    ProgramActionResult(ActionResult.Failure("shell_external_trigger"))
+                } else if (!shizukuReady()) {
+                    // La shell è l'ULTIMA SPIAGGIA e gira solo privilegiata: senza Shizuku pronto
+                    // fallisce tipizzata ("shizuku_unavailable") invece di esplodere in un
+                    // IllegalStateException degradato a "action_failed" generico.
+                    ProgramActionResult(ActionResult.Failure("shizuku_unavailable"))
+                } else {
+                    staticShell.runCaptured(leaf.cmd, context)
+                }
+            } else {
+                ProgramActionResult(execute(leaf, context))
+            }
+            // Foglia generativa RISOLTA (P4-D2 slice 2): il dato runtime TAINTED viaggia framato in
+            // [ResolvedProgramAction.runtimeData], MAI nel goal. Solo il profilo CAPTURE è cablato: la
+            // lane chiama brain.actResolved e restituisce testo concreto, così l'interprete cattura.
+            is Action.InvokeLlm -> if (leaf.captureAs != null) {
+                captureGenerative(leaf, action.runtimeData, context)
+            } else {
+                // Sink di CONSEGNA (reply/notifica) dentro un programma P4: il canale sincrono di
+                // consegna non è ancora costruito (l'handshake SubmittedActionJournal è flat-only).
+                // Fail-closed tipizzato — mai la vecchia consegna async silenziosamente persa.
+                ProgramActionResult(ActionResult.Failure("p4_generative_deliver_unavailable"))
+            }
+            // v2: nessun canale RISOLTO (actResolved è solo v1). Capture/framing runtime del profilo
+            // v2 restano fail-closed finché il contratto v2 risolto non esiste.
+            is Action.InvokeLlmV2 ->
+                ProgramActionResult(ActionResult.Failure("p4_generative_deliver_unavailable"))
+            else -> ProgramActionResult(execute(leaf, context))
+        }
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: DeviceToolException) {
+        ProgramActionResult(ActionResult.Failure(error.code))
+    } catch (_: IllegalArgumentException) {
+        ProgramActionResult(ActionResult.Failure("action_invalid"))
+    } catch (_: Exception) {
+        ProgramActionResult(ActionResult.Failure("action_failed"))
+    }
+
     override suspend fun execute(action: Action, ctx: FireContext): ActionResult = try {
         when (action) {
             is Action.SetWifi -> success { tools.setWifi(action.on, ctx.executionId, ctx.priority) }
             is Action.SetBluetooth -> success {
                 tools.setBluetooth(action.on, ctx.executionId, ctx.priority)
+            }
+            // Dati mobili: PRIVILEGED puro come i toggle radio (`svc data enable|disable`).
+            is Action.SetMobileData -> success {
+                tools.setMobileData(action.on, ctx.executionId, ctx.priority)
+            }
+            // Tema scuro/chiaro: PRIVILEGED puro (`cmd uimode night ...`), come i dati mobili.
+            is Action.SetDarkMode -> success {
+                tools.setDarkMode(action.mode, ctx.executionId, ctx.priority)
             }
             // Scrittura impostazioni PARAMETRICA: PRIVILEGED puro (nessun fallback base). key/value
             // sono letterali dell'azione approvata; DeviceTools li ri-valida e costruisce argv.
@@ -110,14 +182,20 @@ class ShizukuActionExecutor(
 
             // Ultima linea dopo validator e FirePolicy: l'identità si verifica sull'evento
             // realmente arrivato, non su quella dichiarata nella regola.
-            is Action.RunShell -> if (StaticShellSafety.allows(ctx.event, whitelistedIds())) {
-                staticShell.run(action.cmd, ctx)
-            } else {
+            is Action.RunShell -> if (!StaticShellSafety.allows(ctx.event, whitelistedIds())) {
                 ActionResult.Failure("shell_external_trigger")
+            } else if (!shizukuReady()) {
+                // Ultima spiaggia + privilegio: se Shizuku non è pronto la shell non parte,
+                // e lo dice con un codice parlante invece del generico "action_failed".
+                ActionResult.Failure("shizuku_unavailable")
+            } else {
+                staticShell.run(action.cmd, ctx)
             }
 
             // Clipboard: locale, senza privilegi; il payload arriva dall'evento del trigger.
             is Action.CopyToClipboard -> clipboard.copy(ctx.event, action.extractionRegex)
+            // Clipboard letterale: la stringa è già risolta dall'engine, nessun trigger richiesto.
+            is Action.CopyText -> clipboard.copyLiteral(action.text)
 
             // Sveglia/timer: privilegiato `am start` quando Shizuku è pronto (unica via affidabile da
             // background, caveat BAL), altrimenti Intent AlarmClock BASE (permesso normal SET_ALARM,
@@ -161,6 +239,14 @@ class ShizukuActionExecutor(
             } else {
                 ActionResult.Failure("generative_lane_unavailable")
             }
+
+            // Control-flow strutturato (P4): l'interprete deterministico arriva con P4-B/P4-C. Fino
+            // ad allora l'esecuzione è rifiutata in modo pulito e tipizzato (fail-closed), come le
+            // azioni UI non ancora eseguibili in questa fase: mai eseguire un albero senza interprete.
+            is Action.Wait,
+            is Action.If,
+            is Action.While,
+            -> ActionResult.Failure("p4_not_yet_executable")
         }
     } catch (error: CancellationException) {
         throw error
@@ -192,6 +278,26 @@ class ShizukuActionExecutor(
         return when (delivery) {
             NotificationReplyDelivery.Sent -> ActionResult.Success
             is NotificationReplyDelivery.Failed -> ActionResult.Failure(delivery.code)
+        }
+    }
+
+    /**
+     * Capture generativa RISOLTA: delega alla lane (single-consumer, budget via MeteredBrain, policy,
+     * revalidazione) che chiama `brain.actResolved` framando il dato TAINTED fuori dal goal. Testo
+     * concreto ⇒ `Success(capturedText)`; qualsiasi metaError (budget_exceeded, approval_changed,
+     * act_timeout, …) ⇒ `Failure`, MAI un SUBMITTED-only che l'interprete degraderebbe a capture_missing.
+     */
+    private suspend fun captureGenerative(
+        action: Action.InvokeLlm,
+        runtimeData: List<RuntimeDataBinding>,
+        context: FireContext,
+    ): ProgramActionResult {
+        val result = generativeLane.submitAndAwait(context, action, runtimeData)
+        val text = result.text
+        return if (text != null) {
+            ProgramActionResult(ActionResult.Success, capturedText = text)
+        } else {
+            ProgramActionResult(ActionResult.Failure(result.metaError ?: "brain_failed"))
         }
     }
 

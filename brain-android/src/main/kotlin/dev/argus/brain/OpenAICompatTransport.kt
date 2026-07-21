@@ -9,6 +9,7 @@ import dev.argus.engine.model.GenerativeContract
 import dev.argus.engine.model.StateContextClassification
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireContext
+import dev.argus.engine.runtime.RuntimeDataBinding
 import dev.argus.engine.runtime.TriggerEvent
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.DeserializationStrategy
@@ -174,6 +175,32 @@ class OpenAICompatTransport internal constructor(
         )
     }
 
+    override suspend fun actResolved(
+        context: FireContext,
+        goal: String,
+        contextSources: List<String>,
+        allowedTools: List<String>,
+        runtimeData: List<RuntimeDataBinding>,
+    ): ActResult {
+        // Stessa validazione di act(): il goal risolto porta solo i marker opachi. Il dato runtime
+        // TAINTED viaggia in un messaggio DATA separato (mai nel system) via [runtimeData].
+        val cleanGoal = AgentMessageSupport.requireGoal(goal)
+        val useReplyTool = AgentMessageSupport.requireGenerativeToolset(allowedTools)
+        AgentMessageSupport.requireGenerativeContextSources(contextSources, useReplyTool)
+        val notification =
+            if (useReplyTool) AgentMessageSupport.requireWhatsAppNotification(context) else null
+        val stateLines = if ("state" in contextSources) AgentMessageSupport.safeStateLines(context.state) else emptyList()
+        val webRequested = GenerativeContract.TOOL_WEB_SEARCH in allowedTools
+        return generate(
+            goal = cleanGoal,
+            notification = notification,
+            stateLines = stateLines,
+            webRequested = webRequested,
+            useReplyTool = useReplyTool,
+            runtimeData = runtimeData,
+        )
+    }
+
     override suspend fun actV2(context: FireContext, action: Action.InvokeLlmV2): ActResult {
         val cleanGoal = AgentMessageSupport.requireGoal(action.goal)
         if (!GenerativeContract.isAllowedToolset(action.allowedTools) || !action.replyTargetSender) {
@@ -233,6 +260,7 @@ class OpenAICompatTransport internal constructor(
         stateLines: List<String>,
         webRequested: Boolean,
         useReplyTool: Boolean,
+        runtimeData: List<RuntimeDataBinding> = emptyList(),
     ): ActResult {
         val token = requireKey()
         val baseModel = resolveModel()
@@ -245,9 +273,9 @@ class OpenAICompatTransport internal constructor(
         if (applyWeb) {
             when (spec.quirks.webSearch) {
                 WebSearchMechanism.OPENAI_RESPONSES ->
-                    return generateViaResponses(goal, notification, stateLines, token, baseModel)
+                    return generateViaResponses(goal, notification, stateLines, token, baseModel, runtimeData)
                 WebSearchMechanism.GEMINI_NATIVE ->
-                    return generateViaGeminiNative(goal, notification, stateLines, token, baseModel)
+                    return generateViaGeminiNative(goal, notification, stateLines, token, baseModel, runtimeData)
                 else -> Unit // OPENROUTER_ONLINE resta su Chat Completions (slug `:online`).
             }
         }
@@ -262,13 +290,17 @@ class OpenAICompatTransport internal constructor(
         // testo semplice preso dal `content`. Reply (useReplyTool=true): invariato (reply tool + actSystemText).
         val request = ChatRequest(
             model = model,
-            messages = listOf(
-                ChatMessage(
-                    "system",
-                    if (useReplyTool) AgentMessageSupport.actSystemText(goal) else AgentMessageSupport.actSystemTextNotification(goal),
-                ),
-                ChatMessage("user", userMessageFor(notification, stateLines)),
-            ),
+            messages = buildList {
+                add(
+                    ChatMessage(
+                        "system",
+                        if (useReplyTool) AgentMessageSupport.actSystemText(goal) else AgentMessageSupport.actSystemTextNotification(goal),
+                    ),
+                )
+                add(ChatMessage("user", userMessageFor(notification, stateLines)))
+                // Dato runtime TAINTED: messaggio DATA separato, MAI concatenato al system.
+                AgentMessageSupport.actRuntimeDataText(runtimeData)?.let { add(ChatMessage("user", it)) }
+            },
             tools = if (useReplyTool) listOf(replyToolDef()) else null,
             // Con il web attivo il reply NON va forzato: forzarlo impedirebbe la ricerca. `replyText()`
             // fa `fromTool ?: content`, quindi il testo finale post-web (content) arriva comunque.
@@ -302,19 +334,24 @@ class OpenAICompatTransport internal constructor(
         stateLines: List<String>,
         token: String,
         baseModel: String,
+        runtimeData: List<RuntimeDataBinding> = emptyList(),
     ): ActResult {
         // Reply (notification presente) → system PLAIN con framing WhatsApp. Sink NOTIFICA #59
         // (notification null) → system della NOTIFICA, senza alcun riferimento a un messaggio ricevuto.
         val request = ResponsesRequest(
             model = baseModel,
-            input = listOf(
-                ResponsesInputMessage(
-                    "system",
-                    if (notification != null) AgentMessageSupport.actSystemTextPlain(goal)
-                    else AgentMessageSupport.actSystemTextNotification(goal),
-                ),
-                ResponsesInputMessage("user", userMessageFor(notification, stateLines)),
-            ),
+            input = buildList {
+                add(
+                    ResponsesInputMessage(
+                        "system",
+                        if (notification != null) AgentMessageSupport.actSystemTextPlain(goal)
+                        else AgentMessageSupport.actSystemTextNotification(goal),
+                    ),
+                )
+                add(ResponsesInputMessage("user", userMessageFor(notification, stateLines)))
+                // Dato runtime TAINTED: input DATA separato, MAI nel system.
+                AgentMessageSupport.actRuntimeDataText(runtimeData)?.let { add(ResponsesInputMessage("user", it)) }
+            },
             tools = listOf(WEB_SEARCH_TOOL),
         )
         val payload = json.encodeToString(request)
@@ -340,16 +377,23 @@ class OpenAICompatTransport internal constructor(
         stateLines: List<String>,
         token: String,
         baseModel: String,
+        runtimeData: List<RuntimeDataBinding> = emptyList(),
     ): ActResult {
         // Reply (notification presente) → system PLAIN con framing WhatsApp. Sink NOTIFICA #59
         // (notification null) → system della NOTIFICA, senza riferimenti a un messaggio ricevuto.
         val request = GeminiNativeRequest(
-            contents = listOf(
-                GeminiContent(
-                    role = "user",
-                    parts = listOf(GeminiPart(userMessageFor(notification, stateLines))),
-                ),
-            ),
+            contents = buildList {
+                add(
+                    GeminiContent(
+                        role = "user",
+                        parts = listOf(GeminiPart(userMessageFor(notification, stateLines))),
+                    ),
+                )
+                // Dato runtime TAINTED: content DATA separato, MAI nella systemInstruction.
+                AgentMessageSupport.actRuntimeDataText(runtimeData)?.let {
+                    add(GeminiContent(role = "user", parts = listOf(GeminiPart(it))))
+                }
+            },
             systemInstruction = GeminiSystemInstruction(
                 parts = listOf(
                     GeminiPart(
@@ -461,12 +505,14 @@ class OpenAICompatTransport internal constructor(
         val input = u.promptTokens ?: return null
         val output = u.completionTokens ?: return null
         if (input < 0 || output < 0) return null
-        return TurnUsage(
-            inputTokens = input,
-            outputTokens = output,
-            cachedInputTokens = u.promptTokensDetails?.cachedTokens?.takeIf { it >= 0 },
-            model = model?.takeIf { it.isNotBlank() } ?: fallbackModel,
-        )
+        return runCatching {
+            TurnUsage(
+                inputTokens = input,
+                outputTokens = output,
+                cachedInputTokens = u.promptTokensDetails?.cachedTokens?.takeIf { it >= 0 },
+                model = model?.takeIf { it.isNotBlank() } ?: fallbackModel,
+            )
+        }.getOrNull()
     }
 
     private fun parseChatResponse(body: String): ChatResponse = parseJson(body, ChatResponse.serializer())
@@ -498,11 +544,13 @@ class OpenAICompatTransport internal constructor(
         val input = u.inputTokens ?: return null
         val output = u.outputTokens ?: return null
         if (input < 0 || output < 0) return null
-        return TurnUsage(
-            inputTokens = input,
-            outputTokens = output,
-            model = model?.takeIf { it.isNotBlank() } ?: fallbackModel,
-        )
+        return runCatching {
+            TurnUsage(
+                inputTokens = input,
+                outputTokens = output,
+                model = model?.takeIf { it.isNotBlank() } ?: fallbackModel,
+            )
+        }.getOrNull()
     }
 
     /** Testo Gemini nativo: `candidates[0].content.parts[].text` concatenati. */
@@ -520,11 +568,13 @@ class OpenAICompatTransport internal constructor(
         val input = u.promptTokenCount ?: return null
         val output = u.candidatesTokenCount ?: return null
         if (input < 0 || output < 0) return null
-        return TurnUsage(
-            inputTokens = input,
-            outputTokens = output,
-            model = modelVersion?.takeIf { it.isNotBlank() } ?: fallbackModel,
-        )
+        return runCatching {
+            TurnUsage(
+                inputTokens = input,
+                outputTokens = output,
+                model = modelVersion?.takeIf { it.isNotBlank() } ?: fallbackModel,
+            )
+        }.getOrNull()
     }
 
     private suspend fun execute(request: Request): String {

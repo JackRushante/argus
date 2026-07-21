@@ -24,9 +24,13 @@ import dev.argus.engine.runtime.AuditSink
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.ExecutionId
 import dev.argus.engine.runtime.FireContext
+import dev.argus.engine.runtime.RuntimeDataBinding
 import dev.argus.engine.runtime.TriggerEvent
 import dev.argus.engine.runtime.TriggerEventId
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.test.runTest
@@ -67,6 +71,29 @@ class MeteredBrainTest {
         assertEquals("openai", event.providerId)
         assertEquals(1_000_000L, event.tokensIn)
         assertEquals(100_000L, event.tokensOut)
+        assertEquals(2_250_000L, event.costMicros)
+        assertEquals(ProviderCatalog.PRICING_VERSION, event.pricingVersion)
+    }
+
+    @Test
+    fun `a provider model alias falls back to the approved configured price`() = runTest {
+        val usage = TurnUsage(
+            inputTokens = 1_000_000,
+            outputTokens = 100_000,
+            model = "gpt-5.5-2026-07-01",
+        )
+        val dao = RecordingUsageDao()
+        val brain = metered(
+            FakeBrain(actResult = { ActResult("risposta", null, usage) }),
+            FakePolicy(),
+            dao,
+            config = openai,
+        )
+
+        brain.actV2(context(), invokeV2())
+
+        val event = dao.events.single()
+        assertEquals("gpt-5.5-2026-07-01", event.model)
         assertEquals(2_250_000L, event.costMicros)
         assertEquals(ProviderCatalog.PRICING_VERSION, event.pricingVersion)
     }
@@ -152,6 +179,49 @@ class MeteredBrainTest {
     }
 
     @Test
+    fun `actResolved ok chiama il delegate e registra un evento act`() = runTest {
+        val usage = TurnUsage(inputTokens = 1_000_000, outputTokens = 100_000, model = "gpt-5.5")
+        val delegate = FakeBrain(actResult = { ActResult("risposta", null, usage) })
+        val dao = RecordingUsageDao()
+        val brain = metered(delegate, FakePolicy(), dao, config = openai)
+
+        val result = brain.actResolved(
+            context(), "riassumi", emptyList(), listOf("whatsapp_reply"), emptyList(),
+        )
+
+        assertEquals("risposta", result.text)
+        assertEquals(1, delegate.calls)
+        val event = dao.events.single()
+        assertEquals(UsageEventKind.ACT, event.kind)
+        assertEquals(UsageEventOutcome.OK, event.outcome)
+    }
+
+    @Test
+    fun `hard su actResolved non chiama il delegate e ritorna budget_exceeded`() = runTest {
+        // La capture generativa RISOLTA passa dallo stesso choke-point: un HARD la sopprime come un act.
+        val delegate = FakeBrain()
+        val dao = RecordingUsageDao()
+        val audit = RecordingAuditSink()
+        val brain = metered(
+            delegate,
+            FakePolicy(BudgetVerdict.HardExceeded(TrippedLimit(LimitWindow.HOUR, BudgetScope.Global))),
+            dao,
+            config = openai,
+            audit = audit,
+        )
+
+        val result = brain.actResolved(
+            context(), "riassumi", emptyList(), listOf("whatsapp_reply"), emptyList(),
+        )
+
+        assertEquals(0, delegate.calls)
+        assertNull(result.text)
+        assertEquals("budget_exceeded", result.metaError)
+        assertEquals(UsageEventOutcome.BLOCKED_BUDGET, dao.events.single().outcome)
+        assertEquals(AuditKind.SUPPRESSED_BUDGET, audit.records.single().kind)
+    }
+
+    @Test
     fun `hard su compile ritorna reply e metaError senza audit`() = runTest {
         val delegate = FakeBrain()
         val dao = RecordingUsageDao()
@@ -172,6 +242,46 @@ class MeteredBrainTest {
         val event = dao.events.single()
         assertEquals(UsageEventOutcome.BLOCKED_BUDGET, event.outcome)
         assertEquals(UsageEventKind.COMPILE, event.kind)
+    }
+
+    @Test
+    fun `modello senza prezzo non contatta il provider sotto un tetto monetario`() = runTest {
+        val delegate = FakeBrain()
+        val dao = RecordingUsageDao()
+        val brain = metered(
+            delegate,
+            FakePolicy(BudgetVerdict.UnpricedModel(ProviderId.OPENAI)),
+            dao,
+            config = openai.copy(model = "future-model"),
+        )
+
+        val result = brain.compile("create", TEST_MANIFEST, DeviceState())
+
+        assertEquals(0, delegate.calls)
+        assertEquals(BudgetMeta.UNPRICED_MODEL, result.metaError)
+        assertNull(result.draft)
+        assertEquals(BudgetMeta.unpricedModelReply(), result.reply)
+        assertEquals(UsageEventOutcome.BLOCKED_BUDGET, dao.events.single().outcome)
+    }
+
+    @Test
+    fun `act con modello senza prezzo registra una soppressione spiegabile`() = runTest {
+        val delegate = FakeBrain()
+        val dao = RecordingUsageDao()
+        val audit = RecordingAuditSink()
+        val brain = metered(
+            delegate,
+            FakePolicy(BudgetVerdict.UnpricedModel(ProviderId.OPENAI)),
+            dao,
+            config = openai.copy(model = "future-model"),
+            audit = audit,
+        )
+
+        val result = brain.actV2(context(), invokeV2())
+
+        assertEquals(0, delegate.calls)
+        assertEquals(BudgetMeta.UNPRICED_MODEL, result.metaError)
+        assertEquals("unpriced_model:openai", audit.records.single().detail)
     }
 
     @Test
@@ -232,6 +342,40 @@ class MeteredBrainTest {
 
         assertFailsWith<CancellationException> { brain.actV2(context(), invokeV2()) }
         assertTrue(dao.events.isEmpty())
+    }
+
+    @Test
+    fun `concurrent calls cannot both cross a one-call hard limit`() = runTest {
+        val dao = RecordingUsageDao()
+        val delegate = FakeBrain(
+            actResult = {
+                // Lascia alla seconda coroutine il tempo di arrivare al pre-check. Senza il gate
+                // atomico entrambe vedono zero eventi e contattano il provider.
+                delay(1)
+                ActResult("risposta", null)
+            },
+        )
+        val policy = object : BudgetPolicy(NoopUsageDaoForTest, NoopSettingsForTest) {
+            override suspend fun check(providerId: ProviderId, nowMillis: Long): BudgetVerdict =
+                if (dao.events.any { it.outcome != UsageEventOutcome.BLOCKED_BUDGET }) {
+                    BudgetVerdict.HardExceeded(TrippedLimit(LimitWindow.HOUR, BudgetScope.Global))
+                } else {
+                    BudgetVerdict.Ok
+                }
+        }
+        val brain = metered(delegate, policy, dao, config = openai)
+
+        val first = async { brain.actV2(context(), invokeV2()) }
+        val second = async { brain.actV2(context(), invokeV2()) }
+        val results = awaitAll(first, second)
+
+        assertEquals(1, delegate.calls)
+        assertEquals(1, results.count { it.text == "risposta" })
+        assertEquals(1, results.count { it.metaError == BudgetMeta.BUDGET_EXCEEDED })
+        assertEquals(
+            listOf(UsageEventOutcome.OK, UsageEventOutcome.BLOCKED_BUDGET),
+            dao.events.map { it.outcome },
+        )
     }
 
     // --- helpers -------------------------------------------------------------
@@ -296,6 +440,17 @@ class MeteredBrainTest {
         }
 
         override suspend fun actV2(context: FireContext, action: Action.InvokeLlmV2): ActResult {
+            calls++
+            return actResult()
+        }
+
+        override suspend fun actResolved(
+            context: FireContext,
+            goal: String,
+            contextSources: List<String>,
+            allowedTools: List<String>,
+            runtimeData: List<RuntimeDataBinding>,
+        ): ActResult {
             calls++
             return actResult()
         }

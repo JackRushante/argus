@@ -8,9 +8,14 @@ import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
+import dev.argus.engine.model.AUTOMATION_SCHEMA_VERSION_P4
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.CreatedBy
+import dev.argus.engine.model.ConfidentialityLabel
+import dev.argus.engine.model.Condition
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.VarBinding
+import dev.argus.engine.model.VarType
 import dev.argus.engine.safety.ApprovalResult
 import dev.argus.engine.safety.ApprovalService
 import dev.argus.engine.safety.ApprovalWhitelistProvider
@@ -248,6 +253,41 @@ class RoomDraftRepositoryTest {
 
         assertEquals(AutomationStatus.NEEDS_REVIEW, store.get(unsigned.id)?.status)
         assertTrue(store.armed().isEmpty())
+    }
+
+    @Test
+    fun `p4 draft persists variables schema and fingerprint through arm`() = runTest {
+        val p4Draft = AutomationDraft(
+            name = "loop",
+            trigger = Trigger.Time(cron = "0 8 * * *", tz = "Europe/Rome"),
+            actions = listOf(
+                Action.While(
+                    condition = Condition.BooleanLiteral(true),
+                    body = listOf(Action.SetFlashlight(true), Action.SetFlashlight(false)),
+                    maxIterations = 2,
+                ),
+            ),
+            vars = listOf(
+                VarBinding.Literal(
+                    "enabled",
+                    "true",
+                    VarType.BOOLEAN,
+                    ConfidentialityLabel.PUBLIC,
+                ),
+            ),
+        )
+        val saved = assertIs<DraftWriteResult.Saved>(
+            repository.create(candidate("p4").copy(draft = p4Draft)),
+        ).snapshot
+        assertEquals(AUTOMATION_SCHEMA_VERSION_P4, saved.schemaVersion)
+        assertEquals(p4Draft.vars, saved.pendingAutomation().vars)
+
+        val armed = assertIs<DraftArmResult.Armed>(
+            repository.arm(saved.id, saved.revision, saved.fingerprint),
+        ).automation
+        assertEquals(AUTOMATION_SCHEMA_VERSION_P4, armed.schemaVersion)
+        assertEquals(p4Draft.vars, store.get(armed.id)?.vars)
+        assertEquals(saved.fingerprint, store.get(armed.id)?.approvalFingerprint)
     }
 
     private fun candidate(id: String) = NewDraft(

@@ -4,6 +4,8 @@ import dev.argus.automation.connectivity.ConnectivitySentinelBackend
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class SharedForegroundSentinelTest {
     @Test
@@ -41,11 +43,62 @@ class SharedForegroundSentinelTest {
         sentinel.setDemand(SentinelDemand.Sensor, required = false)
         assertEquals(1, backend.stopCalls)
     }
+
+    @Test
+    fun `a failed start is not remembered and the next demand retries it`() = runTest {
+        val backend = RecordingBackend(startResults = ArrayDeque(listOf(false, true)))
+        val sentinel = SharedForegroundSentinel(backend)
+
+        assertFalse(sentinel.setDemand(SentinelDemand.Sensor, required = true))
+        assertTrue(sentinel.setDemand(SentinelDemand.Sensor, required = true))
+
+        assertEquals(2, backend.startCalls)
+        assertEquals(0, backend.stopCalls)
+    }
+
+    @Test
+    fun `a failed stop keeps the demand so cleanup can retry`() = runTest {
+        val backend = RecordingBackend(stopResults = ArrayDeque(listOf(false, true)))
+        val sentinel = SharedForegroundSentinel(backend)
+
+        assertTrue(sentinel.setDemand(SentinelDemand.Sensor, required = true))
+        assertFalse(sentinel.setDemand(SentinelDemand.Sensor, required = false))
+        assertTrue(sentinel.setDemand(SentinelDemand.Sensor, required = false))
+
+        assertEquals(1, backend.startCalls)
+        assertEquals(2, backend.stopCalls)
+    }
+
+    @Test
+    fun `concurrent executions hold independent demands`() = runTest {
+        val backend = RecordingBackend()
+        val sentinel = SharedForegroundSentinel(backend)
+        val first = SentinelDemand.Execution(1)
+        val second = SentinelDemand.Execution(2)
+
+        assertTrue(sentinel.setDemand(first, required = true))
+        assertTrue(sentinel.setDemand(second, required = true))
+        assertEquals(1, backend.startCalls)
+
+        assertTrue(sentinel.setDemand(first, required = false))
+        assertEquals(0, backend.stopCalls)
+        assertTrue(sentinel.setDemand(second, required = false))
+        assertEquals(1, backend.stopCalls)
+    }
 }
 
-private class RecordingBackend : ConnectivitySentinelBackend {
+private class RecordingBackend(
+    private val startResults: ArrayDeque<Boolean> = ArrayDeque(),
+    private val stopResults: ArrayDeque<Boolean> = ArrayDeque(),
+) : ConnectivitySentinelBackend {
     var startCalls = 0
     var stopCalls = 0
-    override suspend fun start(): Boolean { startCalls += 1; return true }
-    override suspend fun stop(): Boolean { stopCalls += 1; return true }
+    override suspend fun start(): Boolean {
+        startCalls += 1
+        return startResults.removeFirstOrNull() ?: true
+    }
+    override suspend fun stop(): Boolean {
+        stopCalls += 1
+        return stopResults.removeFirstOrNull() ?: true
+    }
 }

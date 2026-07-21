@@ -120,6 +120,44 @@ class AndroidCapabilityProbeTest {
     }
 
     @Test
+    fun `copy text is a base action always published while mobile data is gated on shizuku`() = runTest {
+        val authorized = probe(state())
+        val manifest = authorized.probe(DeviceState())
+        val snapshot = authorized.current()
+
+        // copy_text: BASE, sempre disponibile come copy_to_clipboard.
+        assertTrue(ActionTypeIds.COPY_TEXT in manifest.availableTools)
+        assertFalse(ActionTypeIds.COPY_TEXT in manifest.unavailableTools)
+        assertTrue(ActionCapabilities.COPY_TEXT in snapshot.availableCapabilities)
+
+        // set_mobile_data: PRIVILEGED, presente con Shizuku autorizzato.
+        assertTrue(ActionTypeIds.SET_MOBILE_DATA in manifest.availableTools)
+        assertTrue(ActionCapabilities.SET_MOBILE_DATA in snapshot.availableCapabilities)
+
+        // set_dark_mode: PRIVILEGED come set_mobile_data (`cmd uimode night ...`).
+        assertTrue(ActionTypeIds.SET_DARK_MODE in manifest.availableTools)
+        assertTrue(ActionCapabilities.SET_DARK_MODE in snapshot.availableCapabilities)
+
+        // Shizuku revocato: copy_text resta, set_mobile_data cade con ragione.
+        val revoked = probe(
+            state().copy(
+                shizukuStatus = ShizukuGatewayStatus.RUNNING_NOT_AUTHORIZED,
+                shizukuPermissionGranted = false,
+            ),
+        )
+        val revokedManifest = revoked.probe(DeviceState())
+        assertTrue(ActionTypeIds.COPY_TEXT in revokedManifest.availableTools)
+        assertFalse(ActionTypeIds.SET_MOBILE_DATA in revokedManifest.availableTools)
+        assertTrue(ActionTypeIds.SET_MOBILE_DATA in revokedManifest.unavailableTools)
+        assertFalse(ActionCapabilities.SET_MOBILE_DATA in revoked.current().availableCapabilities)
+
+        // set_dark_mode segue lo stesso gate: cade con Shizuku revocato.
+        assertFalse(ActionTypeIds.SET_DARK_MODE in revokedManifest.availableTools)
+        assertTrue(ActionTypeIds.SET_DARK_MODE in revokedManifest.unavailableTools)
+        assertFalse(ActionCapabilities.SET_DARK_MODE in revoked.current().availableCapabilities)
+    }
+
+    @Test
     fun `write setting is a privileged action gated on shizuku`() = runTest {
         val authorized = probe(state())
         val manifest = authorized.probe(DeviceState())
@@ -415,6 +453,49 @@ class AndroidCapabilityProbeTest {
         val bare = probe(state())
         assertTrue(CapabilityIds.TRIGGER_IMMEDIATE in bare.current().availableCapabilities)
         assertTrue("immediate" in bare.probe(DeviceState()).availableTriggers)
+    }
+
+    @Test
+    fun `structural control flow tools are always published regardless of device state`() = runTest {
+        // wait/if/while sono contenitori STRUTTURALI del programma P4: non dipendono da Shizuku,
+        // permessi o hardware. Devono comparire in available_tools in OGNI stato, altrimenti il
+        // compilatore (che usa solo manifest.available_tools) crede che `wait` non esista e rifiuta
+        // una pausa con unsupported_capability (bug device-found).
+        val bareState = state().copy(
+            shizukuStatus = ShizukuGatewayStatus.NOT_INSTALLED,
+            shizukuPermissionGranted = false,
+            notificationsGranted = false,
+            notificationListenerGranted = false,
+            foregroundLocationGranted = false,
+            backgroundLocationGranted = false,
+            batteryOptimizationExempt = false,
+            dndPolicyGranted = false,
+        )
+        val structural = listOf(ActionTypeIds.WAIT, ActionTypeIds.IF, ActionTypeIds.WHILE)
+
+        // Nessun grant, nessuno Shizuku, tier base spento: comunque tutti presenti.
+        val bareManifest = probe(bareState).probe(DeviceState())
+        structural.forEach { type ->
+            assertTrue(type in bareManifest.availableTools, "atteso $type sempre in available_tools")
+            assertFalse(type in bareManifest.unavailableTools, "$type strutturale non può essere indisponibile")
+        }
+
+        // Shizuku revocato: le azioni privilegiate cadono, il control-flow resta.
+        val revokedManifest = probe(
+            state().copy(
+                shizukuStatus = ShizukuGatewayStatus.RUNNING_NOT_AUTHORIZED,
+                shizukuPermissionGranted = false,
+            ),
+        ).probe(DeviceState())
+        structural.forEach { type ->
+            assertTrue(type in revokedManifest.availableTools, "atteso $type con Shizuku revocato")
+        }
+
+        // Dispositivo pienamente autorizzato: restano presenti (nessuna regressione).
+        val authorizedManifest = probe(state()).probe(DeviceState())
+        structural.forEach { type ->
+            assertTrue(type in authorizedManifest.availableTools, "atteso $type su device autorizzato")
+        }
     }
 
     @Test
