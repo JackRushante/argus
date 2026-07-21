@@ -2,7 +2,7 @@
 
 Release and engineering notes, newest first.
 
-## Unreleased — Anti-injection posture set to Aggressive (2026-07-21)
+## v0.3.0 (2026-07-21) — P4 complete (variables + control flow) + Aggressive anti-injection
 
 ### Changed (security posture)
 
