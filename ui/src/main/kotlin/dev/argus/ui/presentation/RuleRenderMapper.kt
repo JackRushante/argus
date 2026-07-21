@@ -11,6 +11,7 @@ import dev.argus.engine.model.ConnState
 import dev.argus.engine.model.Condition
 import dev.argus.engine.model.DndMode
 import dev.argus.engine.model.GenerativeDeliverMode
+import dev.argus.engine.model.NightMode
 import dev.argus.engine.model.PhoneEvent
 import dev.argus.engine.model.SensorKind
 import dev.argus.engine.model.StateQuery
@@ -572,6 +573,15 @@ object RuleRenderMapper {
             label = if (a.on) l.pick("Turn on flashlight", "Accendi torcia")
             else l.pick("Turn off flashlight", "Spegni torcia"),
             detail = if (a.on) "on" else "off",
+        )
+        is Action.SetDarkMode -> row(
+            iconKey = "settings",
+            label = l.pick("Set dark mode", "Imposta modalità scura"),
+            detail = when (a.mode) {
+                NightMode.OFF -> l.pick("off", "off")
+                NightMode.ON -> l.pick("on", "on")
+                NightMode.AUTO -> l.pick("auto", "auto")
+            },
         )
         is Action.OpenSettingsScreen -> row(
             iconKey = "settings",

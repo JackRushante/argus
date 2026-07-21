@@ -715,6 +715,10 @@ class DraftValidatorTest {
             actions = listOf(action),
         )
         assertEquals(emptyList(), errors(v.validate(draft(Action.SetFlashlight(on = true)), emptySet())))
+        // set_dark_mode: NightMode è un enum chiuso, ogni valore valida senza errori.
+        assertEquals(emptyList(), errors(v.validate(draft(Action.SetDarkMode(NightMode.OFF)), emptySet())))
+        assertEquals(emptyList(), errors(v.validate(draft(Action.SetDarkMode(NightMode.ON)), emptySet())))
+        assertEquals(emptyList(), errors(v.validate(draft(Action.SetDarkMode(NightMode.AUTO)), emptySet())))
         assertEquals(emptyList(), errors(v.validate(draft(Action.Vibrate(1)), emptySet())))
         assertEquals(emptyList(), errors(v.validate(draft(Action.Vibrate(10_000)), emptySet())))
         assertTrue("vibrate_duration_invalid" in errors(v.validate(draft(Action.Vibrate(0)), emptySet())))

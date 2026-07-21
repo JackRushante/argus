@@ -298,6 +298,11 @@ class GenerativeEndToEndInstrumentedTest {
             Unit
 
         override suspend fun setDnd(mode: DndMode, executionId: ExecutionId, priority: Int) = Unit
+        override suspend fun setDarkMode(
+            mode: dev.argus.engine.model.NightMode,
+            executionId: ExecutionId,
+            priority: Int,
+        ) = Unit
         override suspend fun setRinger(mode: RingerMode, executionId: ExecutionId, priority: Int) =
             Unit
 

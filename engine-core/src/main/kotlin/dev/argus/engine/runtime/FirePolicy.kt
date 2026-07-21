@@ -54,6 +54,7 @@ object ActionCapabilities {
     const val SET_TIMER = CapabilityIds.ACTION_SET_TIMER
     const val SET_VOLUME = CapabilityIds.ACTION_SET_VOLUME
     const val SET_FLASHLIGHT = CapabilityIds.ACTION_SET_FLASHLIGHT
+    const val SET_DARK_MODE = CapabilityIds.ACTION_SET_DARK_MODE
     const val OPEN_SETTINGS_SCREEN = CapabilityIds.ACTION_OPEN_SETTINGS_SCREEN
     const val VIBRATE = CapabilityIds.ACTION_VIBRATE
     const val WRITE_SETTING = CapabilityIds.ACTION_WRITE_SETTING

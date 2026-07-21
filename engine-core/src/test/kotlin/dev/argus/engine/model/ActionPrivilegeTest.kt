@@ -16,6 +16,7 @@ class ActionPrivilegeTest {
             Action.SetWifi(true),
             Action.SetBluetooth(true),
             Action.SetMobileData(true),
+            Action.SetDarkMode(NightMode.ON),
             Action.RunShell("id"),
             Action.Tap(1, 2),
             Action.InputText("x"),
@@ -75,6 +76,7 @@ class ActionPrivilegeTest {
         assertEquals(true, ActionPrivileges.requiresShizuku(Action.RunShell("id")))
         assertEquals(true, ActionPrivileges.requiresShizuku(Action.SetWifi(false)))
         assertEquals(true, ActionPrivileges.requiresShizuku(Action.SetMobileData(false)))
+        assertEquals(true, ActionPrivileges.requiresShizuku(Action.SetDarkMode(NightMode.AUTO)))
         assertEquals(false, ActionPrivileges.requiresShizuku(Action.CopyText("x")))
         assertEquals(false, ActionPrivileges.requiresShizuku(Action.LaunchApp("com.example")))
         assertEquals(false, ActionPrivileges.requiresShizuku(Action.SetDnd(DndMode.OFF)))

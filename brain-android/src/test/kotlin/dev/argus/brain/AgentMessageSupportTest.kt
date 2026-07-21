@@ -8,6 +8,23 @@ import kotlin.test.assertTrue
 
 class AgentMessageSupportTest {
     @Test
+    fun `compile prompt teaches set_dark_mode and screen_brightness via write_setting`() {
+        val prompt = AgentMessageSupport.compileSystemText()
+
+        // IO-6 A: azione dedicata tema scuro/chiaro.
+        assertTrue(
+            "{\"type\":\"set_dark_mode\", \"mode\":\"off\"|\"on\"|\"auto\"}" in prompt,
+            "lo schema deve descrivere set_dark_mode con mode off/on/auto",
+        )
+        // IO-6 B: la luminosità è documentata come long-tail di write_setting (nessuna azione nuova).
+        assertTrue(
+            "screen_brightness (0-255, SYSTEM; set screen_brightness_mode=0 first to disable auto-brightness)"
+                in prompt,
+            "write_setting deve documentare screen_brightness e la disattivazione dell'auto-brightness",
+        )
+    }
+
+    @Test
     fun `compile prompt teaches the immediate one-shot trigger`() {
         val prompt = AgentMessageSupport.compileSystemText()
 

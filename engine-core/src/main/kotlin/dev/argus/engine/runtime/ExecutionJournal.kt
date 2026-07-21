@@ -136,6 +136,7 @@ internal fun Action.journalType(): String = when (this) {
     is Action.SetTimer -> ActionTypeIds.SET_TIMER
     is Action.SetVolume -> ActionTypeIds.SET_VOLUME
     is Action.SetFlashlight -> ActionTypeIds.SET_FLASHLIGHT
+    is Action.SetDarkMode -> ActionTypeIds.SET_DARK_MODE
     is Action.OpenSettingsScreen -> ActionTypeIds.OPEN_SETTINGS_SCREEN
     is Action.Vibrate -> ActionTypeIds.VIBRATE
     is Action.Wait -> ActionTypeIds.WAIT

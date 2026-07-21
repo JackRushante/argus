@@ -115,6 +115,8 @@ object StateReadPlanner {
         is Action.SetTimer,
         is Action.SetVolume,
         is Action.SetFlashlight,
+        // set_dark_mode non legge stato: la modalità è un enum approvato.
+        is Action.SetDarkMode,
         is Action.OpenSettingsScreen,
         is Action.Vibrate,
         is Action.Wait,

@@ -411,6 +411,23 @@ class RuleRenderMapperTest {
         )
     }
 
+    @Test fun `set dark mode renders a bilingual row with the mode`() {
+        val rule = Automation(
+            AutomationId("dm"), "tema scuro", CreatedBy.LLM, AutomationStatus.PENDING_APPROVAL,
+            Trigger.Time(cron = "0 21 * * *", tz = "Europe/Rome"),
+            listOf(Action.SetDarkMode(NightMode.ON)),
+        )
+        val it = RuleRenderMapper.map(rule, language = RenderLanguage.IT).actions.single()
+        assertEquals("Imposta modalità scura", it.label)
+        assertEquals("on", it.detail)
+        val en = RuleRenderMapper.map(
+            rule.copy(actions = listOf(Action.SetDarkMode(NightMode.AUTO))),
+            language = RenderLanguage.EN,
+        ).actions.single()
+        assertEquals("Set dark mode", en.label)
+        assertEquals("auto", en.detail)
+    }
+
     @Test fun `sms trigger renders its text filter integrally`() {
         val a = Automation(
             AutomationId("s2"), "SMS prova", CreatedBy.LLM, AutomationStatus.PENDING_APPROVAL,

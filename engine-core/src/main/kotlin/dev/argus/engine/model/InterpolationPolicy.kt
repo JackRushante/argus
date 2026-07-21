@@ -101,6 +101,7 @@ object InterpolationPolicy {
         is Action.Tap,
         is Action.SetVolume,
         is Action.SetFlashlight,
+        is Action.SetDarkMode,
         is Action.Vibrate,
         is Action.Wait,
         is Action.If,

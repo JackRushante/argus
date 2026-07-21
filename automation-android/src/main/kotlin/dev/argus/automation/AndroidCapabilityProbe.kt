@@ -407,6 +407,8 @@ class AndroidCapabilityProbe internal constructor(
             ActionTypeIds.SET_BLUETOOTH,
             // Dati mobili: `svc data enable|disable`, nessun percorso app-normale (come i toggle radio).
             ActionTypeIds.SET_MOBILE_DATA,
+            // Tema scuro: `cmd uimode night ...`, nessun percorso app-normale (come i toggle radio).
+            ActionTypeIds.SET_DARK_MODE,
             ActionTypeIds.RUN_SHELL,
             // Scrittura impostazioni parametrica: `settings put` non ha percorso app-normale.
             ActionTypeIds.WRITE_SETTING,
@@ -456,6 +458,7 @@ class AndroidCapabilityProbe internal constructor(
             add(ActionCapabilities.SET_WIFI)
             add(ActionCapabilities.SET_BLUETOOTH)
             add(ActionCapabilities.SET_MOBILE_DATA)
+            add(ActionCapabilities.SET_DARK_MODE)
             add(ActionCapabilities.RUN_SHELL)
             // Gate famiglia della scrittura parametrica: forAction(WriteSetting) richiede questa,
             // pubblicata solo con Shizuku (e transiente se Shizuku è fermo ma autorizzato).

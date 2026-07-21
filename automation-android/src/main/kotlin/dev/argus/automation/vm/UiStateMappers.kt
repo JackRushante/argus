@@ -304,6 +304,7 @@ private fun actionTypeLabel(type: String, l: RenderLanguage): String = when (typ
     ActionTypeIds.SET_TIMER -> l.pick("Set timer", "Imposta timer")
     ActionTypeIds.SET_VOLUME -> l.pick("Set volume", "Imposta volume")
     ActionTypeIds.SET_FLASHLIGHT -> l.pick("Set flashlight", "Imposta torcia")
+    ActionTypeIds.SET_DARK_MODE -> l.pick("Set dark mode", "Imposta modalità scura")
     ActionTypeIds.OPEN_SETTINGS_SCREEN -> l.pick("Open Settings", "Apri Impostazioni")
     ActionTypeIds.VIBRATE -> l.pick("Vibrate", "Vibrazione")
     ActionTypeIds.WAIT -> l.pick("Wait", "Attesa")

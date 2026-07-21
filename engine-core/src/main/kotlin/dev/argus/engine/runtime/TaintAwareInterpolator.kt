@@ -58,6 +58,7 @@ class TaintAwareInterpolator {
                 is Action.Tap,
                 is Action.SetVolume,
                 is Action.SetFlashlight,
+                is Action.SetDarkMode,
                 is Action.Vibrate,
                 is Action.Wait,
                 -> action
@@ -240,6 +241,7 @@ class TaintAwareInterpolator {
             is Action.Tap,
             is Action.SetVolume,
             is Action.SetFlashlight,
+            is Action.SetDarkMode,
             is Action.Vibrate,
             is Action.Wait,
             -> true

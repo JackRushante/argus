@@ -134,6 +134,10 @@ class AndroidCapabilityProbeTest {
         assertTrue(ActionTypeIds.SET_MOBILE_DATA in manifest.availableTools)
         assertTrue(ActionCapabilities.SET_MOBILE_DATA in snapshot.availableCapabilities)
 
+        // set_dark_mode: PRIVILEGED come set_mobile_data (`cmd uimode night ...`).
+        assertTrue(ActionTypeIds.SET_DARK_MODE in manifest.availableTools)
+        assertTrue(ActionCapabilities.SET_DARK_MODE in snapshot.availableCapabilities)
+
         // Shizuku revocato: copy_text resta, set_mobile_data cade con ragione.
         val revoked = probe(
             state().copy(
@@ -146,6 +150,11 @@ class AndroidCapabilityProbeTest {
         assertFalse(ActionTypeIds.SET_MOBILE_DATA in revokedManifest.availableTools)
         assertTrue(ActionTypeIds.SET_MOBILE_DATA in revokedManifest.unavailableTools)
         assertFalse(ActionCapabilities.SET_MOBILE_DATA in revoked.current().availableCapabilities)
+
+        // set_dark_mode segue lo stesso gate: cade con Shizuku revocato.
+        assertFalse(ActionTypeIds.SET_DARK_MODE in revokedManifest.availableTools)
+        assertTrue(ActionTypeIds.SET_DARK_MODE in revokedManifest.unavailableTools)
+        assertFalse(ActionCapabilities.SET_DARK_MODE in revoked.current().availableCapabilities)
     }
 
     @Test

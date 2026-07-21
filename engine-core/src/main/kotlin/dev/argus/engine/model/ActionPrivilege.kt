@@ -25,6 +25,8 @@ object ActionPrivileges {
         is Action.SetBluetooth,
         // Dati mobili: `svc data enable|disable` non ha percorso app-normale, come i toggle radio.
         is Action.SetMobileData,
+        // Tema scuro/chiaro: `cmd uimode night ...` non ha percorso app-normale, come i toggle radio.
+        is Action.SetDarkMode,
         is Action.RunShell,
         is Action.Tap,
         is Action.InputText,

@@ -220,6 +220,13 @@ class CapabilityRequirementsTest {
                 actions = listOf(Action.SetMobileData(false)),
             ),
         )
+        assertEquals(
+            setOf(CapabilityIds.TRIGGER_TIME, CapabilityIds.ACTION_SET_DARK_MODE),
+            CapabilityRequirements.derive(
+                trigger = Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
+                actions = listOf(Action.SetDarkMode(NightMode.ON)),
+            ),
+        )
     }
 
     @Test

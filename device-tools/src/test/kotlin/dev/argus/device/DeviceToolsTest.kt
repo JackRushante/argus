@@ -1,6 +1,7 @@
 package dev.argus.device
 
 import dev.argus.engine.model.DndMode
+import dev.argus.engine.model.NightMode
 import dev.argus.engine.model.SettingNamespace
 import dev.argus.engine.model.SettingsScreen
 import dev.argus.engine.runtime.ExecutionId
@@ -35,6 +36,9 @@ class DeviceToolsTest {
         tools.setDnd(DndMode.OFF, EXECUTION_ID, PRIORITY)
         tools.setDnd(DndMode.PRIORITY, EXECUTION_ID, PRIORITY)
         tools.setDnd(DndMode.TOTAL, EXECUTION_ID, PRIORITY)
+        tools.setDarkMode(NightMode.OFF, EXECUTION_ID, PRIORITY)
+        tools.setDarkMode(NightMode.ON, EXECUTION_ID, PRIORITY)
+        tools.setDarkMode(NightMode.AUTO, EXECUTION_ID, PRIORITY)
         tools.setRinger(RingerMode.VIBRATE, EXECUTION_ID, PRIORITY)
         tools.launchApp("com.example.app", EXECUTION_ID, PRIORITY)
         tools.openUrl("https://example.com/a?q=uno%20due", EXECUTION_ID, PRIORITY)
@@ -52,6 +56,9 @@ class DeviceToolsTest {
                 listOf("/system/bin/cmd", "notification", "set_dnd", "all"),
                 listOf("/system/bin/cmd", "notification", "set_dnd", "priority"),
                 listOf("/system/bin/cmd", "notification", "set_dnd", "none"),
+                listOf("/system/bin/cmd", "uimode", "night", "no"),
+                listOf("/system/bin/cmd", "uimode", "night", "yes"),
+                listOf("/system/bin/cmd", "uimode", "night", "auto"),
                 listOf("/system/bin/cmd", "audio", "set-ringer-mode", "VIBRATE"),
                 listOf(
                     "/system/bin/am",

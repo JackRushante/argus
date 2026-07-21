@@ -127,6 +127,10 @@ class ShizukuActionExecutor(
             is Action.SetMobileData -> success {
                 tools.setMobileData(action.on, ctx.executionId, ctx.priority)
             }
+            // Tema scuro/chiaro: PRIVILEGED puro (`cmd uimode night ...`), come i dati mobili.
+            is Action.SetDarkMode -> success {
+                tools.setDarkMode(action.mode, ctx.executionId, ctx.priority)
+            }
             // Scrittura impostazioni PARAMETRICA: PRIVILEGED puro (nessun fallback base). key/value
             // sono letterali dell'azione approvata; DeviceTools li ri-valida e costruisce argv.
             is Action.WriteSetting -> success {

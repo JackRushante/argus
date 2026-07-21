@@ -45,6 +45,7 @@ object CapabilityIds {
     const val ACTION_SET_TIMER = "action.set_timer"
     const val ACTION_SET_VOLUME = "action.set_volume"
     const val ACTION_SET_FLASHLIGHT = "action.set_flashlight"
+    const val ACTION_SET_DARK_MODE = "action.set_dark_mode"
     const val ACTION_OPEN_SETTINGS_SCREEN = "action.open_settings_screen"
     const val ACTION_VIBRATE = "action.vibrate"
     const val ACTION_WRITE_SETTING = "action.write_setting"
@@ -133,6 +134,8 @@ object CapabilityRequirements {
         is Action.SetTimer -> setOf(CapabilityIds.ACTION_SET_TIMER)
         is Action.SetVolume -> setOf(CapabilityIds.ACTION_SET_VOLUME)
         is Action.SetFlashlight -> setOf(CapabilityIds.ACTION_SET_FLASHLIGHT)
+        // Tema scuro: gate famiglia PRIVILEGED (pubblicato solo con Shizuku), come set_mobile_data.
+        is Action.SetDarkMode -> setOf(CapabilityIds.ACTION_SET_DARK_MODE)
         is Action.OpenSettingsScreen -> setOf(CapabilityIds.ACTION_OPEN_SETTINGS_SCREEN)
         is Action.Vibrate -> setOf(CapabilityIds.ACTION_VIBRATE)
         // Pausa cooperativa interna all'interprete: nessuna capability OS.

@@ -16,6 +16,7 @@ class ConflictDetector {
         is Action.SetMobileData -> Setting("mobile_data", a.on.toString())
         is Action.SetDnd -> Setting("dnd", a.mode.name)
         is Action.SetRinger -> Setting("ringer", a.mode)
+        is Action.SetDarkMode -> Setting("dark_mode", a.mode.name)
         else -> null
     }
 

@@ -425,6 +425,15 @@ object ShizukuCapabilityCatalog {
             actionTypeIds = listOf(ActionTypeIds.WRITE_SETTING),
         ),
         ShizukuCapabilityRow(
+            title = language.pick("Switch dark/light theme", "Cambiare tema scuro/chiaro"),
+            requirement = ShizukuRequirement.REQUIRED,
+            note = language.pick(
+                "Setting the night mode (cmd uimode night) needs Shizuku's privileged shell.",
+                "Impostare la modalità notte (cmd uimode night) richiede lo shell privilegiato di Shizuku.",
+            ),
+            actionTypeIds = listOf(ActionTypeIds.SET_DARK_MODE),
+        ),
+        ShizukuCapabilityRow(
             title = language.pick("Run shell commands", "Eseguire comandi shell"),
             requirement = ShizukuRequirement.REQUIRED,
             note = language.pick(

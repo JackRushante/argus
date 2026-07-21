@@ -35,6 +35,7 @@ class ShizukuCapabilityCatalogTest {
             ActionTypeIds.SET_MOBILE_DATA,
             ActionTypeIds.RUN_SHELL,
             ActionTypeIds.WRITE_SETTING,
+            ActionTypeIds.SET_DARK_MODE,
         ).forEach { id ->
             assertEquals(ShizukuRequirement.REQUIRED, requirementOf(id), "atteso REQUIRED per $id")
         }

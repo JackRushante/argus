@@ -480,6 +480,8 @@ Action, discriminated by "type":
    // "volume at 50%" -> level:50, "volume at maximum" -> level:100. Setting RING/NOTIFICATION to 0
    // silences and may require "Do Not Disturb" access
 - {"type":"set_flashlight", "on":boolean}  // flashlight on/off
+- {"type":"set_dark_mode", "mode":"off"|"on"|"auto"}  // switches the system dark/light theme
+   // (cmd uimode night). Requires Shizuku (appears in available_tools only when available).
 - {"type":"open_settings_screen", "screen":"WIFI"|"BLUETOOTH"|"DISPLAY"|"SOUND"|"LOCATION"|
    "BATTERY"|"DATE"|"APP_DETAILS"|"SETTINGS", "pkg":string|null}  // opens a Settings screen
    // (closed enum); pkg ONLY with APP_DETAILS, otherwise null
@@ -490,8 +492,9 @@ Action, discriminated by "type":
    // and shown in full during review: never embed message/notification content in the
    // key or the value (same rule as run_shell). key without spaces/control chars; value non-empty,
    // <=1024 chars, no NUL/newline/control chars. Prefer a typed action when one
-   // exists (e.g. set_dnd, set_alarm): use write_setting for the long tail (screen_off_timeout,
-   // accelerometer_rotation, font_scale, ...)
+   // exists (e.g. set_dnd, set_alarm, set_dark_mode): use write_setting for the long tail
+   // (screen_off_timeout, accelerometer_rotation, font_scale,
+   // screen_brightness (0-255, SYSTEM; set screen_brightness_mode=0 first to disable auto-brightness), ...)
 - {"type":"invoke_llm", "goal":string, "contextSources":[string,...],
    "allowedTools":[string,...], "replyTargetSender":boolean, "timeoutMs":integer,
    "deliver":"WHATSAPP_REPLY"|"LOCAL_NOTIFICATION", "notificationTitle":string|null}

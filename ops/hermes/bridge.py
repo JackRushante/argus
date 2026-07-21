@@ -255,6 +255,8 @@ Action, discriminated by "type":
 - {"type":"set_volume", "stream":"MEDIA"|"RING"|"ALARM"|"NOTIFICATION", "level":integer 0-100}
    // per-stream volume; setting RING/NOTIFICATION to 0 may require Do Not Disturb access
 - {"type":"set_flashlight", "on":boolean}  // flashlight on/off
+- {"type":"set_dark_mode", "mode":"off"|"on"|"auto"}  // switches the system dark/light theme
+   // (cmd uimode night). Requires Shizuku (appears in available_tools only when available).
 - {"type":"open_settings_screen", "screen":"WIFI"|"BLUETOOTH"|"DISPLAY"|"SOUND"|"LOCATION"|
    "BATTERY"|"DATE"|"APP_DETAILS"|"SETTINGS", "pkg":string|null}  // pkg ONLY with APP_DETAILS, otherwise null
 - {"type":"vibrate", "durationMs":integer 1-10000}  // one-shot vibration
@@ -263,6 +265,9 @@ Action, discriminated by "type":
    // Requires Shizuku. key/value are LITERAL and shown in full during review: never embed
    // message/notification content in the key or the value (same rule as run_shell). key without
    // spaces/control chars; value non-empty, <=1024 chars, no NUL/newline/control chars.
+   // Prefer a typed action when one exists (e.g. set_dnd, set_alarm, set_dark_mode); use write_setting
+   // for the long tail, e.g. screen_brightness (0-255, SYSTEM; set screen_brightness_mode=0 first to
+   // disable auto-brightness).
 - {"type":"invoke_llm", "goal":string, "contextSources":[string,...],
    "allowedTools":[string,...], "replyTargetSender":boolean, "timeoutMs":integer,
    "deliver":"WHATSAPP_REPLY"|"LOCAL_NOTIFICATION", "notificationTitle":string|null}
@@ -1870,6 +1875,7 @@ def validate_action(
         "set_timer": ({"type", "seconds"}, {"label", "skipUi"}),
         "set_volume": ({"type", "stream", "level"}, set()),
         "set_flashlight": ({"type", "on"}, set()),
+        "set_dark_mode": ({"type", "mode"}, set()),
         "open_settings_screen": ({"type", "screen"}, {"pkg"}),
         "vibrate": ({"type", "durationMs"}, set()),
         "write_setting": ({"type", "namespace", "key", "value"}, set()),
@@ -1997,6 +2003,8 @@ def validate_action(
         )
     if kind == "set_flashlight":
         return isinstance(value["on"], bool)
+    if kind == "set_dark_mode":
+        return isinstance(value["mode"], str) and value["mode"] in {"off", "on", "auto"}
     if kind == "open_settings_screen":
         screen = value["screen"]
         if not (isinstance(screen, str) and screen in {

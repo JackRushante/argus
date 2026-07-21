@@ -9,6 +9,12 @@ enum class DndMode { OFF, PRIORITY, TOTAL }
 enum class ActionTier { DETERMINISTIC, GENERATIVE }
 
 /**
+ * Modalità tema di [Action.SetDarkMode]. Enum CHIUSO: mappato 1:1 sull'argomento di
+ * `cmd uimode night no|yes|auto` (OFF→"no", ON→"yes", AUTO→"auto"). Nessuna stringa arbitraria.
+ */
+enum class NightMode { OFF, ON, AUTO }
+
+/**
  * Sink di consegna del testo generato da [Action.InvokeLlm] (#59). Enum CHIUSO e SENZA @SerialName:
  * serializza col nome UPPERCASE, coerente con [ArgusJson] case-sensitive.
  * - [WHATSAPP_REPLY]: il testo è inviato come reply WhatsApp al mittente del trigger (profilo P1).
@@ -50,6 +56,7 @@ object ActionTypeIds {
     const val SET_TIMER = "set_timer"
     const val SET_VOLUME = "set_volume"
     const val SET_FLASHLIGHT = "set_flashlight"
+    const val SET_DARK_MODE = "set_dark_mode"
     const val OPEN_SETTINGS_SCREEN = "open_settings_screen"
     const val VIBRATE = "vibrate"
     const val WRITE_SETTING = "write_setting"
@@ -132,6 +139,7 @@ sealed interface Action {
             is SetTimer,
             is SetVolume,
             is SetFlashlight,
+            is SetDarkMode,
             is OpenSettingsScreen,
             is Vibrate,
             is WriteSetting,
@@ -210,6 +218,12 @@ sealed interface Action {
      *  (API 23+). Fallisce `torch_unavailable` se nessuna camera con flash o CameraAccessException. */
     @Serializable @SerialName(ActionTypeIds.SET_FLASHLIGHT)
     data class SetFlashlight(val on: Boolean) : Action
+
+    /** Tema chiaro/scuro via `cmd uimode night no|yes|auto` (shell privilegiata, argv separati, mai
+     *  `sh -c`). Clone privilegiato semplice di [SetMobileData]: PRIVILEGED (Shizuku), nessun
+     *  percorso app-normale. [NightMode] è un enum CHIUSO → arg letterale, nessun campo testo. */
+    @Serializable @SerialName(ActionTypeIds.SET_DARK_MODE)
+    data class SetDarkMode(val mode: NightMode) : Action
 
     /** Apre una schermata Impostazioni via Intent `Settings.ACTION_*` mappato da un enum CHIUSO
      *  ([SettingsScreen]): nessuna action-string arbitraria (evita il routing-sink). BASE,

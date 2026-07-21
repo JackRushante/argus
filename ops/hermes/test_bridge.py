@@ -299,6 +299,26 @@ class BridgeTest(unittest.TestCase):
         # Gated dalla capability list.
         self.assertFalse(bridge.validate_action({"type": "set_mobile_data", "on": True}, set()))
 
+    def test_set_dark_mode_action_is_a_closed_enum(self):
+        # set_dark_mode (PRIVILEGED/Shizuku): mode chiuso off/on/auto (cmd uimode night no|yes|auto).
+        tools = {"set_dark_mode"}
+        for mode in ("off", "on", "auto"):
+            self.assertTrue(bridge.validate_action({"type": "set_dark_mode", "mode": mode}, tools))
+        # Valori fuori enum, tipo errato o campo mancante: fail-closed.
+        self.assertFalse(bridge.validate_action({"type": "set_dark_mode", "mode": "dark"}, tools))
+        self.assertFalse(bridge.validate_action({"type": "set_dark_mode", "mode": "ON"}, tools))
+        self.assertFalse(bridge.validate_action({"type": "set_dark_mode", "mode": True}, tools))
+        self.assertFalse(bridge.validate_action({"type": "set_dark_mode"}, tools))
+        # Gated dalla capability list: assente da available_tools -> rifiutato.
+        self.assertFalse(bridge.validate_action({"type": "set_dark_mode", "mode": "on"}, set()))
+
+    def test_prompt_documents_set_dark_mode_and_screen_brightness(self):
+        prompt = bridge.build_prompt(self.request())
+        self.assertIn('"type":"set_dark_mode"', prompt)
+        # La riga schema può andare a capo: verifico i frammenti chiave separatamente.
+        self.assertIn("screen_brightness (0-255, SYSTEM; set screen_brightness_mode=0 first to", prompt)
+        self.assertIn("auto-brightness", prompt)
+
     def test_state_equals_accepts_screen_key(self):
         # screen e' una nuova builtin state key (on|off). state_equals la ammette se e' nel manifest.
         allowed = {"screen"}

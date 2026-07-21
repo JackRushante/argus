@@ -482,6 +482,23 @@ class ShizukuActionExecutorTest {
     }
 
     @Test
+    fun `dark mode toggle routes to the privileged device controller`() = runTest {
+        val tools = RecordingDeviceController()
+        val exec = executor(tools = tools)
+
+        assertEquals(
+            ActionResult.Success,
+            exec.execute(Action.SetDarkMode(dev.argus.engine.model.NightMode.ON), context),
+        )
+        assertEquals(
+            ActionResult.Success,
+            exec.execute(Action.SetDarkMode(dev.argus.engine.model.NightMode.AUTO), context),
+        )
+
+        assertEquals(listOf("dark_mode:ON", "dark_mode:AUTO"), tools.calls)
+    }
+
+    @Test
     fun `copy text writes the literal string via copyLiteral`() = runTest {
         val clipboard = RecordingClipboard()
         val exec = executor(clipboard = clipboard)
@@ -769,6 +786,11 @@ private class RecordingDeviceController : DeviceController {
         record(executionId, priority, "mobile_data:$on")
     override suspend fun setDnd(mode: DndMode, executionId: ExecutionId, priority: Int) =
         record(executionId, priority, "dnd:$mode")
+    override suspend fun setDarkMode(
+        mode: dev.argus.engine.model.NightMode,
+        executionId: ExecutionId,
+        priority: Int,
+    ) = record(executionId, priority, "dark_mode:$mode")
     override suspend fun setRinger(mode: RingerMode, executionId: ExecutionId, priority: Int) =
         record(executionId, priority, "ringer:$mode")
     override suspend fun launchApp(packageName: String, executionId: ExecutionId, priority: Int) =
@@ -828,6 +850,11 @@ private class ThrowingDeviceController(private val failure: RuntimeException) : 
     override suspend fun setBluetooth(on: Boolean, executionId: ExecutionId, priority: Int) = fail()
     override suspend fun setMobileData(on: Boolean, executionId: ExecutionId, priority: Int) = fail()
     override suspend fun setDnd(mode: DndMode, executionId: ExecutionId, priority: Int) = fail()
+    override suspend fun setDarkMode(
+        mode: dev.argus.engine.model.NightMode,
+        executionId: ExecutionId,
+        priority: Int,
+    ) = fail()
     override suspend fun setRinger(mode: RingerMode, executionId: ExecutionId, priority: Int) = fail()
     override suspend fun launchApp(packageName: String, executionId: ExecutionId, priority: Int) = fail()
     override suspend fun openUrl(url: String, executionId: ExecutionId, priority: Int) = fail()

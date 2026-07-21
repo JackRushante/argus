@@ -922,6 +922,7 @@ class DraftValidator(
                     err("volume_level_invalid", "Livello volume fuori intervallo: 0..$MAX_VOLUME_LEVEL")
             }
             is Action.SetFlashlight -> Unit // solo booleano, nulla da validare
+            is Action.SetDarkMode -> Unit // NightMode è un enum chiuso: nulla da validare
             is Action.OpenSettingsScreen -> {
                 // Enum chiuso: nessuna action-string arbitraria. `pkg` è obbligatorio e valido solo
                 // per APP_DETAILS; per le altre schermate va lasciato assente.
