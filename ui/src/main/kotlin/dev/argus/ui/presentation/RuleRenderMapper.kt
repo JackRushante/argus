@@ -460,6 +460,11 @@ object RuleRenderMapper {
             label = if (a.on) l.pick("Turn on Bluetooth", "Attiva Bluetooth")
             else l.pick("Turn off Bluetooth", "Disattiva Bluetooth"),
         )
+        is Action.SetMobileData -> row(
+            iconKey = "mobile_data",
+            label = if (a.on) l.pick("Turn on mobile data", "Attiva dati mobili")
+            else l.pick("Turn off mobile data", "Disattiva dati mobili"),
+        )
         is Action.SetDnd -> row(
             iconKey = "dnd",
             label = when (a.mode) {
@@ -524,6 +529,12 @@ object RuleRenderMapper {
             // §5: la regex è il criterio reale di estrazione, resta visibile integrale.
             detail = a.extractionRegex?.let { l.pick("extraction: $it", "estrazione: $it") }
                 ?: l.pick("the full text of the message", "il testo integrale del messaggio"),
+        )
+        is Action.CopyText -> row(
+            iconKey = "clipboard",
+            label = l.pick("Copy text to clipboard", "Copia testo negli appunti"),
+            // Il testo letterale approvato è il criterio reale: resta visibile integrale.
+            detail = a.text,
         )
         is Action.SetAlarm -> row(
             iconKey = "alarm",

@@ -23,6 +23,8 @@ object ActionPrivileges {
         // Privilegiate: toggle radio, shell e injection UI passano dal gateway Shizuku.
         is Action.SetWifi,
         is Action.SetBluetooth,
+        // Dati mobili: `svc data enable|disable` non ha percorso app-normale, come i toggle radio.
+        is Action.SetMobileData,
         is Action.RunShell,
         is Action.Tap,
         is Action.InputText,
@@ -39,6 +41,7 @@ object ActionPrivileges {
         is Action.ShowNotification,
         is Action.WhatsAppReply,
         is Action.CopyToClipboard,
+        is Action.CopyText,
         // Sveglia/timer: Intent AlarmClock col permesso normal SET_ALARM, nessuno Shizuku.
         is Action.SetAlarm,
         is Action.SetTimer,

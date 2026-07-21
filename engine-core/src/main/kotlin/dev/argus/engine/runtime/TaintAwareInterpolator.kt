@@ -52,6 +52,7 @@ class TaintAwareInterpolator {
             when (action) {
                 is Action.SetWifi,
                 is Action.SetBluetooth,
+                is Action.SetMobileData,
                 is Action.SetDnd,
                 is Action.Tap,
                 is Action.SetVolume,
@@ -86,6 +87,9 @@ class TaintAwareInterpolator {
                     extractionRegex = action.extractionRegex?.let {
                         accumulator.field("extractionRegex", it, SafeExtractionRegex.MAX_PATTERN_CHARS)
                     },
+                )
+                is Action.CopyText -> action.copy(
+                    text = accumulator.field("text", action.text, MAX_TEXT_CHARS),
                 )
                 is Action.SetAlarm -> action.copy(
                     label = action.label?.let { accumulator.field("label", it, MAX_TEXT_CHARS) },
@@ -226,8 +230,10 @@ class TaintAwareInterpolator {
             is Action.InvokeLlmV2 -> action.goal.isNotBlank() && action.goal.length <= MAX_TEXT_CHARS
             is Action.CopyToClipboard -> action.extractionRegex == null ||
                 SafeExtractionRegex.isValid(action.extractionRegex)
+            is Action.CopyText -> action.text.isNotBlank() && action.text.length <= MAX_TEXT_CHARS
             is Action.SetWifi,
             is Action.SetBluetooth,
+            is Action.SetMobileData,
             is Action.SetDnd,
             is Action.Tap,
             is Action.SetVolume,

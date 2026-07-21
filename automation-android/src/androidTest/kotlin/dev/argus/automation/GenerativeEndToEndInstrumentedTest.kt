@@ -294,6 +294,9 @@ class GenerativeEndToEndInstrumentedTest {
         override suspend fun setBluetooth(on: Boolean, executionId: ExecutionId, priority: Int) =
             Unit
 
+        override suspend fun setMobileData(on: Boolean, executionId: ExecutionId, priority: Int) =
+            Unit
+
         override suspend fun setDnd(mode: DndMode, executionId: ExecutionId, priority: Int) = Unit
         override suspend fun setRinger(mode: RingerMode, executionId: ExecutionId, priority: Int) =
             Unit

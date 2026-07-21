@@ -30,6 +30,8 @@ class DeviceToolsTest {
         tools.setWifi(true, EXECUTION_ID, PRIORITY)
         tools.setWifi(false, EXECUTION_ID, PRIORITY)
         tools.setBluetooth(true, EXECUTION_ID, PRIORITY)
+        tools.setMobileData(true, EXECUTION_ID, PRIORITY)
+        tools.setMobileData(false, EXECUTION_ID, PRIORITY)
         tools.setDnd(DndMode.OFF, EXECUTION_ID, PRIORITY)
         tools.setDnd(DndMode.PRIORITY, EXECUTION_ID, PRIORITY)
         tools.setDnd(DndMode.TOTAL, EXECUTION_ID, PRIORITY)
@@ -45,6 +47,8 @@ class DeviceToolsTest {
                 listOf("/system/bin/svc", "wifi", "enable"),
                 listOf("/system/bin/svc", "wifi", "disable"),
                 listOf("/system/bin/svc", "bluetooth", "enable"),
+                listOf("/system/bin/svc", "data", "enable"),
+                listOf("/system/bin/svc", "data", "disable"),
                 listOf("/system/bin/cmd", "notification", "set_dnd", "all"),
                 listOf("/system/bin/cmd", "notification", "set_dnd", "priority"),
                 listOf("/system/bin/cmd", "notification", "set_dnd", "none"),

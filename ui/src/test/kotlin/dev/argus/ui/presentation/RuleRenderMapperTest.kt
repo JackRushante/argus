@@ -349,6 +349,34 @@ class RuleRenderMapperTest {
         assertEquals("il testo integrale del messaggio", whole.detail)
     }
 
+    @Test fun `copy text and set mobile data render their own rows`() {
+        val copy = Automation(
+            AutomationId("ct"), "copia testo", CreatedBy.LLM, AutomationStatus.PENDING_APPROVAL,
+            Trigger.Immediate,
+            listOf(Action.CopyText("ordine #4821")),
+        )
+        val copyRow = RuleRenderMapper.map(copy, language = RenderLanguage.IT).actions.single()
+        assertEquals("Copia testo negli appunti", copyRow.label)
+        assertEquals("ordine #4821", copyRow.detail)
+
+        val data = Automation(
+            AutomationId("md"), "dati mobili", CreatedBy.LLM, AutomationStatus.PENDING_APPROVAL,
+            Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
+            listOf(Action.SetMobileData(false)),
+        )
+        assertEquals(
+            "Disattiva dati mobili",
+            RuleRenderMapper.map(data, language = RenderLanguage.IT).actions.single().label,
+        )
+        assertEquals(
+            "Turn on mobile data",
+            RuleRenderMapper.map(
+                data.copy(actions = listOf(Action.SetMobileData(true))),
+                language = RenderLanguage.EN,
+            ).actions.single().label,
+        )
+    }
+
     @Test fun `sms trigger renders its text filter integrally`() {
         val a = Automation(
             AutomationId("s2"), "SMS prova", CreatedBy.LLM, AutomationStatus.PENDING_APPROVAL,

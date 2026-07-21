@@ -243,6 +243,8 @@ class AndroidCapabilityProbe internal constructor(
             }
             // Clipboard locale: nessun permesso OS richiesto (scrittura verificata su device).
             add(ActionCapabilities.COPY_TO_CLIPBOARD)
+            // copy_text (clipboard letterale): stesso regime BASE, sempre disponibile.
+            add(ActionCapabilities.COPY_TEXT)
             // Sveglia/timer: Intent AlarmClock col permesso normal SET_ALARM (auto-concesso), quindi
             // sempre armabili senza Shizuku né grant runtime, come la clipboard.
             addAll(BASE_ALARM_CAPABILITIES)
@@ -292,6 +294,7 @@ class AndroidCapabilityProbe internal constructor(
             add(ActionTypeIds.IF)
             add(ActionTypeIds.WHILE)
             add(ActionTypeIds.COPY_TO_CLIPBOARD)
+            add(ActionTypeIds.COPY_TEXT)
             addAll(BASE_ALARM_ACTION_TYPES)
             addAll(BASE_MANAGER_ACTION_TYPES)
             if (shizukuAvailable) {
@@ -402,6 +405,8 @@ class AndroidCapabilityProbe internal constructor(
         val PRIVILEGED_ACTION_TYPES = setOf(
             ActionTypeIds.SET_WIFI,
             ActionTypeIds.SET_BLUETOOTH,
+            // Dati mobili: `svc data enable|disable`, nessun percorso app-normale (come i toggle radio).
+            ActionTypeIds.SET_MOBILE_DATA,
             ActionTypeIds.RUN_SHELL,
             // Scrittura impostazioni parametrica: `settings put` non ha percorso app-normale.
             ActionTypeIds.WRITE_SETTING,
@@ -450,6 +455,7 @@ class AndroidCapabilityProbe internal constructor(
         val PRIVILEGED_CAPABILITIES: Set<String> = buildSet {
             add(ActionCapabilities.SET_WIFI)
             add(ActionCapabilities.SET_BLUETOOTH)
+            add(ActionCapabilities.SET_MOBILE_DATA)
             add(ActionCapabilities.RUN_SHELL)
             // Gate famiglia della scrittura parametrica: forAction(WriteSetting) richiede questa,
             // pubblicata solo con Shizuku (e transiente se Shizuku è fermo ma autorizzato).

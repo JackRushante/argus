@@ -29,6 +29,7 @@ object CapabilityIds {
 
     const val ACTION_SET_WIFI = "action.set_wifi"
     const val ACTION_SET_BLUETOOTH = "action.set_bluetooth"
+    const val ACTION_SET_MOBILE_DATA = "action.set_mobile_data"
     const val ACTION_SET_DND = "action.set_dnd"
     const val ACTION_SET_RINGER = "action.set_ringer"
     const val ACTION_LAUNCH_APP = "action.launch_app"
@@ -39,6 +40,7 @@ object CapabilityIds {
     const val ACTION_WHATSAPP_REPLY = "action.whatsapp_reply"
     const val ACTION_RUN_SHELL = "action.run_shell"
     const val ACTION_COPY_TO_CLIPBOARD = "action.copy_to_clipboard"
+    const val ACTION_COPY_TEXT = "action.copy_text"
     const val ACTION_SET_ALARM = "action.set_alarm"
     const val ACTION_SET_TIMER = "action.set_timer"
     const val ACTION_SET_VOLUME = "action.set_volume"
@@ -115,6 +117,7 @@ object CapabilityRequirements {
     private fun forAction(action: Action): Set<String> = when (action) {
         is Action.SetWifi -> setOf(CapabilityIds.ACTION_SET_WIFI)
         is Action.SetBluetooth -> setOf(CapabilityIds.ACTION_SET_BLUETOOTH)
+        is Action.SetMobileData -> setOf(CapabilityIds.ACTION_SET_MOBILE_DATA)
         is Action.SetDnd -> setOf(CapabilityIds.ACTION_SET_DND)
         is Action.SetRinger -> setOf(CapabilityIds.ACTION_SET_RINGER)
         is Action.LaunchApp -> setOf(CapabilityIds.ACTION_LAUNCH_APP)
@@ -125,6 +128,7 @@ object CapabilityRequirements {
         is Action.WhatsAppReply -> setOf(CapabilityIds.ACTION_WHATSAPP_REPLY)
         is Action.RunShell -> setOf(CapabilityIds.ACTION_RUN_SHELL)
         is Action.CopyToClipboard -> setOf(CapabilityIds.ACTION_COPY_TO_CLIPBOARD)
+        is Action.CopyText -> setOf(CapabilityIds.ACTION_COPY_TEXT)
         is Action.SetAlarm -> setOf(CapabilityIds.ACTION_SET_ALARM)
         is Action.SetTimer -> setOf(CapabilityIds.ACTION_SET_TIMER)
         is Action.SetVolume -> setOf(CapabilityIds.ACTION_SET_VOLUME)

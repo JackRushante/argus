@@ -32,6 +32,7 @@ class ShizukuCapabilityCatalogTest {
         listOf(
             ActionTypeIds.SET_WIFI,
             ActionTypeIds.SET_BLUETOOTH,
+            ActionTypeIds.SET_MOBILE_DATA,
             ActionTypeIds.RUN_SHELL,
             ActionTypeIds.WRITE_SETTING,
         ).forEach { id ->
@@ -62,6 +63,7 @@ class ShizukuCapabilityCatalogTest {
             ActionTypeIds.VIBRATE,
             ActionTypeIds.SHOW_NOTIFICATION,
             ActionTypeIds.COPY_TO_CLIPBOARD,
+            ActionTypeIds.COPY_TEXT,
         ).forEach { id ->
             assertEquals(ShizukuRequirement.NOT_REQUIRED, requirementOf(id), "atteso NOT_REQUIRED per $id")
         }

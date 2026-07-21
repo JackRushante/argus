@@ -86,4 +86,26 @@ class ClipboardCopierTest {
         assertEquals(ActionResult.Success, copier.copy(sms("pin 55443"), extractionRegex = "\\d{4,8}"))
         assertEquals("55443", manager.primaryClip?.getItemAt(0)?.text?.toString())
     }
+
+    @Test
+    fun `copyLiteral writes the exact string and marks the clip sensitive`() {
+        val result = copier.copyLiteral("ordine #4821 confermato")
+
+        assertEquals(ActionResult.Success, result)
+        val clip = manager.primaryClip
+        assertEquals("ordine #4821 confermato", clip?.getItemAt(0)?.text?.toString())
+        assertTrue(
+            clip?.description?.extras?.getBoolean(ClipDescription.EXTRA_IS_SENSITIVE) == true,
+            "anche il literal è marcato sensibile come copy_to_clipboard",
+        )
+    }
+
+    @Test
+    fun `copyLiteral of a blank string is an honest failure without touching the clipboard`() {
+        copier.copyLiteral("valore precedente")
+
+        assertEquals(ActionResult.Failure("clipboard_source_missing"), copier.copyLiteral("   "))
+        // Il contenuto precedente resta intatto dopo il fallimento.
+        assertEquals("valore precedente", manager.primaryClip?.getItemAt(0)?.text?.toString())
+    }
 }

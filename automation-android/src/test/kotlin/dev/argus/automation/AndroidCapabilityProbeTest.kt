@@ -120,6 +120,35 @@ class AndroidCapabilityProbeTest {
     }
 
     @Test
+    fun `copy text is a base action always published while mobile data is gated on shizuku`() = runTest {
+        val authorized = probe(state())
+        val manifest = authorized.probe(DeviceState())
+        val snapshot = authorized.current()
+
+        // copy_text: BASE, sempre disponibile come copy_to_clipboard.
+        assertTrue(ActionTypeIds.COPY_TEXT in manifest.availableTools)
+        assertFalse(ActionTypeIds.COPY_TEXT in manifest.unavailableTools)
+        assertTrue(ActionCapabilities.COPY_TEXT in snapshot.availableCapabilities)
+
+        // set_mobile_data: PRIVILEGED, presente con Shizuku autorizzato.
+        assertTrue(ActionTypeIds.SET_MOBILE_DATA in manifest.availableTools)
+        assertTrue(ActionCapabilities.SET_MOBILE_DATA in snapshot.availableCapabilities)
+
+        // Shizuku revocato: copy_text resta, set_mobile_data cade con ragione.
+        val revoked = probe(
+            state().copy(
+                shizukuStatus = ShizukuGatewayStatus.RUNNING_NOT_AUTHORIZED,
+                shizukuPermissionGranted = false,
+            ),
+        )
+        val revokedManifest = revoked.probe(DeviceState())
+        assertTrue(ActionTypeIds.COPY_TEXT in revokedManifest.availableTools)
+        assertFalse(ActionTypeIds.SET_MOBILE_DATA in revokedManifest.availableTools)
+        assertTrue(ActionTypeIds.SET_MOBILE_DATA in revokedManifest.unavailableTools)
+        assertFalse(ActionCapabilities.SET_MOBILE_DATA in revoked.current().availableCapabilities)
+    }
+
+    @Test
     fun `write setting is a privileged action gated on shizuku`() = runTest {
         val authorized = probe(state())
         val manifest = authorized.probe(DeviceState())

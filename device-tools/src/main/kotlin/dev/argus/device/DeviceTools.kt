@@ -37,6 +37,7 @@ class DeviceToolException(
 interface DeviceController {
     suspend fun setWifi(on: Boolean, executionId: ExecutionId, priority: Int = 0)
     suspend fun setBluetooth(on: Boolean, executionId: ExecutionId, priority: Int = 0)
+    suspend fun setMobileData(on: Boolean, executionId: ExecutionId, priority: Int = 0)
     suspend fun setDnd(mode: DndMode, executionId: ExecutionId, priority: Int = 0)
     suspend fun setRinger(mode: RingerMode, executionId: ExecutionId, priority: Int = 0)
     suspend fun launchApp(packageName: String, executionId: ExecutionId, priority: Int = 0)
@@ -105,6 +106,15 @@ class DeviceTools(
         runChecked(
             operation = "set_bluetooth",
             command = listOf(SVC, "bluetooth", if (on) "enable" else "disable"),
+            executionId = executionId,
+            priority = priority,
+        )
+    }
+
+    override suspend fun setMobileData(on: Boolean, executionId: ExecutionId, priority: Int) {
+        runChecked(
+            operation = "set_mobile_data",
+            command = listOf(SVC, "data", if (on) "enable" else "disable"),
             executionId = executionId,
             priority = priority,
         )

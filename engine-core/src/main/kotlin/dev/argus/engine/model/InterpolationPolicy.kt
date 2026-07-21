@@ -61,6 +61,9 @@ object InterpolationPolicy {
             TemplateField("text", action.text, FieldClass.SINK),
         )
         is Action.WhatsAppReply -> listOf(TemplateField("text", action.text, FieldClass.SINK))
+        // Clipboard letterale: uscita dato locale, non un sink di autorità. Il tainted può entrare
+        // come dato (l'utente usa ${'$'}{var}), come una notifica/reply.
+        is Action.CopyText -> listOf(TemplateField("text", action.text, FieldClass.SINK))
         is Action.InvokeLlm -> buildList {
             add(TemplateField("goal", action.goal, FieldClass.SINK))
             action.notificationTitle?.let { add(TemplateField("notificationTitle", it, FieldClass.SINK)) }
@@ -93,6 +96,7 @@ object InterpolationPolicy {
         // --- Nessun campo testuale interpolabile ---
         is Action.SetWifi,
         is Action.SetBluetooth,
+        is Action.SetMobileData,
         is Action.SetDnd,
         is Action.Tap,
         is Action.SetVolume,

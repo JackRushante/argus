@@ -754,7 +754,7 @@ class DraftValidator(
         warn: (String, String) -> Unit,
     ) {
         when (action) {
-            is Action.SetWifi, is Action.SetBluetooth, is Action.SetDnd -> Unit
+            is Action.SetWifi, is Action.SetBluetooth, is Action.SetMobileData, is Action.SetDnd -> Unit
             is Action.SetRinger -> if (!InterpolationPolicy.containsInterpolation(action.mode) &&
                 action.mode !in setOf("normal", "vibrate", "silent")
             )
@@ -818,6 +818,10 @@ class DraftValidator(
                         )
                 }
             }
+            // Clipboard letterale: nessun trigger testuale richiesto (a differenza di CopyToClipboard).
+            // `text` è SINK interpolabile: basta che sia non vuoto e bounded (i ${'$'}{var} passano il
+            // bound; la risoluzione taint-aware valida a runtime la stringa resa).
+            is Action.CopyText -> validateRequiredText(action.text, MAX_TEXT_LENGTH, "text_invalid", err)
             is Action.SetAlarm -> {
                 if (action.hour !in 0..23 || action.minute !in 0..59)
                     err("alarm_time_invalid", "Ora sveglia fuori intervallo: hour 0..23, minute 0..59")

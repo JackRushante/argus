@@ -99,6 +99,7 @@ object StateReadPlanner {
         )
         is Action.SetWifi,
         is Action.SetBluetooth,
+        is Action.SetMobileData,
         is Action.SetDnd,
         is Action.SetRinger,
         is Action.LaunchApp,
@@ -109,6 +110,7 @@ object StateReadPlanner {
         is Action.WhatsAppReply,
         is Action.RunShell,
         is Action.CopyToClipboard,
+        is Action.CopyText,
         is Action.SetAlarm,
         is Action.SetTimer,
         is Action.SetVolume,

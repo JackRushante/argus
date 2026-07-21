@@ -205,6 +205,24 @@ class CapabilityRequirementsTest {
     }
 
     @Test
+    fun `copy text and set mobile data derive their own action capabilities`() {
+        assertEquals(
+            setOf(CapabilityIds.TRIGGER_IMMEDIATE, CapabilityIds.ACTION_COPY_TEXT),
+            CapabilityRequirements.derive(
+                trigger = Trigger.Immediate,
+                actions = listOf(Action.CopyText("codice 1234")),
+            ),
+        )
+        assertEquals(
+            setOf(CapabilityIds.TRIGGER_TIME, CapabilityIds.ACTION_SET_MOBILE_DATA),
+            CapabilityRequirements.derive(
+                trigger = Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
+                actions = listOf(Action.SetMobileData(false)),
+            ),
+        )
+    }
+
+    @Test
     fun `set alarm and set timer derive their own base action capabilities`() {
         assertEquals(
             setOf(CapabilityIds.TRIGGER_TIME, CapabilityIds.ACTION_SET_ALARM),

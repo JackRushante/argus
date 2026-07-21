@@ -44,6 +44,8 @@ object ActionTypeIds {
     const val WHATSAPP_REPLY = "whatsapp_reply"
     const val RUN_SHELL = "run_shell"
     const val COPY_TO_CLIPBOARD = "copy_to_clipboard"
+    const val COPY_TEXT = "copy_text"
+    const val SET_MOBILE_DATA = "set_mobile_data"
     const val SET_ALARM = "set_alarm"
     const val SET_TIMER = "set_timer"
     const val SET_VOLUME = "set_volume"
@@ -114,6 +116,7 @@ sealed interface Action {
             }
             is SetWifi,
             is SetBluetooth,
+            is SetMobileData,
             is SetDnd,
             is SetRinger,
             is LaunchApp,
@@ -124,6 +127,7 @@ sealed interface Action {
             is WhatsAppReply,
             is RunShell,
             is CopyToClipboard,
+            is CopyText,
             is SetAlarm,
             is SetTimer,
             is SetVolume,
@@ -137,6 +141,10 @@ sealed interface Action {
 
     @Serializable @SerialName(ActionTypeIds.SET_WIFI) data class SetWifi(val on: Boolean) : Action
     @Serializable @SerialName(ActionTypeIds.SET_BLUETOOTH) data class SetBluetooth(val on: Boolean) : Action
+
+    /** Toggle dei DATI MOBILI via `svc data enable|disable`. Clone privilegiato di [SetWifi]:
+     *  PRIVILEGED (Shizuku), nessun percorso app-normale. */
+    @Serializable @SerialName(ActionTypeIds.SET_MOBILE_DATA) data class SetMobileData(val on: Boolean) : Action
     @Serializable @SerialName(ActionTypeIds.SET_DND) data class SetDnd(val mode: DndMode) : Action
     @Serializable @SerialName(ActionTypeIds.SET_RINGER) data class SetRinger(val mode: String) : Action
     @Serializable @SerialName(ActionTypeIds.LAUNCH_APP) data class LaunchApp(val pkg: String) : Action
@@ -159,6 +167,12 @@ sealed interface Action {
      *  DETERMINISTICA: il testo non lascia mai il telefono. */
     @Serializable @SerialName(ActionTypeIds.COPY_TO_CLIPBOARD)
     data class CopyToClipboard(val extractionRegex: String? = null) : Action
+
+    /** Copia negli appunti una stringa LETTERALE approvata. A differenza di [CopyToClipboard] non
+     *  dipende dal trigger (nessun payload testuale richiesto): il campo [text] è il testo da
+     *  copiare, interpolabile con `${'$'}{var}`. BASE: nessuno Shizuku, scrittura clipboard locale. */
+    @Serializable @SerialName(ActionTypeIds.COPY_TEXT)
+    data class CopyText(val text: String) : Action
 
     /** Imposta la SVEGLIA reale dell'app orologio via Intent `AlarmClock.ACTION_SET_ALARM`
      *  (NON una notifica). BASE: solo il permesso manifest normal `SET_ALARM`, nessuno Shizuku.

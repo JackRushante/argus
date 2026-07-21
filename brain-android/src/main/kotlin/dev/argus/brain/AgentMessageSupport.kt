@@ -446,6 +446,8 @@ Condition, discriminated by "type":
 Action, discriminated by "type":
 - {"type":"set_wifi", "on":boolean}
 - {"type":"set_bluetooth", "on":boolean}
+- {"type":"set_mobile_data", "on":boolean}  // toggles mobile data; requires Shizuku (appears in
+  available_tools only when available), like set_wifi/set_bluetooth
 - {"type":"set_dnd", "mode":"OFF"|"PRIORITY"|"TOTAL"}
 - {"type":"set_ringer", "mode":string}
 - {"type":"launch_app", "pkg":string}
@@ -460,6 +462,8 @@ Action, discriminated by "type":
 - {"type":"copy_to_clipboard", "extractionRegex":string|null (deterministic regex: copies the
    first capture group — or the whole match — from the trigger SMS/notification text; null = full
    text; for OTPs use "(?:^|[^+0-9])([0-9]{4,8})(?:[^0-9]|${'$'})")}
+- {"type":"copy_text", "text":string}  // copies a LITERAL approved string to the clipboard; unlike
+  copy_to_clipboard it needs no textual trigger. text supports ${'$'}{var} interpolation
 - {"type":"set_alarm", "hour":integer 0-23, "minute":integer 0-59, "label":string|null,
    "skipUi":boolean}  // sets the clock's real ALARM (not a notification); skipUi=true
    normally so the clock app is not opened

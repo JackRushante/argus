@@ -59,7 +59,7 @@ class ShizukuActionExecutorTest {
             },
             generativeLane = GenerativeLane { _, _ -> true },
             replies = RecordingReplyGateway(NotificationReplyDelivery.Sent),
-            clipboard = { _, _ -> ActionResult.Success },
+            clipboard = RecordingClipboard(),
         )
 
         val actions = listOf(
@@ -457,17 +457,41 @@ class ShizukuActionExecutorTest {
         whitelistedIds: suspend () -> Set<String> = { emptySet() },
         baseActions: AndroidBaseActionExecutor? = null,
         shizukuReady: () -> Boolean = { false },
+        clipboard: ClipboardCopier = RecordingClipboard(),
     ) = ShizukuActionExecutor(
         tools = tools,
         notifier = AutomationNotifier { _, _, _ -> },
         generativeLane = lane,
         replies = replies,
-        clipboard = { _, _ -> ActionResult.Success },
+        clipboard = clipboard,
         staticShell = staticShell,
         whitelistedIds = whitelistedIds,
         baseActions = baseActions,
         shizukuReady = shizukuReady,
     )
+
+    @Test
+    fun `mobile data toggle routes to the privileged device controller`() = runTest {
+        val tools = RecordingDeviceController()
+        val exec = executor(tools = tools)
+
+        assertEquals(ActionResult.Success, exec.execute(Action.SetMobileData(true), context))
+        assertEquals(ActionResult.Success, exec.execute(Action.SetMobileData(false), context))
+
+        assertEquals(listOf("mobile_data:true", "mobile_data:false"), tools.calls)
+    }
+
+    @Test
+    fun `copy text writes the literal string via copyLiteral`() = runTest {
+        val clipboard = RecordingClipboard()
+        val exec = executor(clipboard = clipboard)
+
+        assertEquals(ActionResult.Success, exec.execute(Action.CopyText("ordine #4821"), context))
+
+        assertEquals(listOf("ordine #4821"), clipboard.literals)
+        // copy_text non passa mai dal percorso event-based copy().
+        assertTrue(clipboard.eventCopies.isEmpty())
+    }
 
     @Test
     fun `activity-launch actions prefer privileged am start when shizuku is ready`() = runTest {
@@ -741,6 +765,8 @@ private class RecordingDeviceController : DeviceController {
         record(executionId, priority, "wifi:$on")
     override suspend fun setBluetooth(on: Boolean, executionId: ExecutionId, priority: Int) =
         record(executionId, priority, "bluetooth:$on")
+    override suspend fun setMobileData(on: Boolean, executionId: ExecutionId, priority: Int) =
+        record(executionId, priority, "mobile_data:$on")
     override suspend fun setDnd(mode: DndMode, executionId: ExecutionId, priority: Int) =
         record(executionId, priority, "dnd:$mode")
     override suspend fun setRinger(mode: RingerMode, executionId: ExecutionId, priority: Int) =
@@ -783,10 +809,24 @@ private class RecordingDeviceController : DeviceController {
     ) = record(executionId, priority, "setting:${namespace.name.lowercase()}:$key=$value")
 }
 
+private class RecordingClipboard : ClipboardCopier {
+    val literals = mutableListOf<String>()
+    val eventCopies = mutableListOf<String?>()
+    override fun copy(event: TriggerEvent, extractionRegex: String?): ActionResult {
+        eventCopies += extractionRegex
+        return ActionResult.Success
+    }
+    override fun copyLiteral(text: String): ActionResult {
+        literals += text
+        return ActionResult.Success
+    }
+}
+
 private class ThrowingDeviceController(private val failure: RuntimeException) : DeviceController {
     private fun fail(): Nothing = throw failure
     override suspend fun setWifi(on: Boolean, executionId: ExecutionId, priority: Int) = fail()
     override suspend fun setBluetooth(on: Boolean, executionId: ExecutionId, priority: Int) = fail()
+    override suspend fun setMobileData(on: Boolean, executionId: ExecutionId, priority: Int) = fail()
     override suspend fun setDnd(mode: DndMode, executionId: ExecutionId, priority: Int) = fail()
     override suspend fun setRinger(mode: RingerMode, executionId: ExecutionId, priority: Int) = fail()
     override suspend fun launchApp(packageName: String, executionId: ExecutionId, priority: Int) = fail()

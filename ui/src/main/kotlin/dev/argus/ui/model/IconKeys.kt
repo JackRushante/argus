@@ -19,6 +19,7 @@ fun iconFor(key: String): ImageVector = when (key) {
     "phone" -> Icons.Rounded.Call
     "connectivity" -> Icons.Rounded.Wifi
     "wifi_off" -> Icons.Rounded.WifiOff
+    "mobile_data" -> Icons.Rounded.NetworkCell
     "bluetooth" -> Icons.Rounded.Bluetooth
     "dnd" -> Icons.Rounded.DoNotDisturbOn
     "shell" -> Icons.Rounded.Terminal

@@ -38,6 +38,7 @@ fun interface FirePolicySnapshotProvider {
 object ActionCapabilities {
     const val SET_WIFI = CapabilityIds.ACTION_SET_WIFI
     const val SET_BLUETOOTH = CapabilityIds.ACTION_SET_BLUETOOTH
+    const val SET_MOBILE_DATA = CapabilityIds.ACTION_SET_MOBILE_DATA
     const val SET_DND = CapabilityIds.ACTION_SET_DND
     const val SET_RINGER = CapabilityIds.ACTION_SET_RINGER
     const val LAUNCH_APP = CapabilityIds.ACTION_LAUNCH_APP
@@ -48,6 +49,7 @@ object ActionCapabilities {
     const val WHATSAPP_REPLY = CapabilityIds.ACTION_WHATSAPP_REPLY
     const val RUN_SHELL = CapabilityIds.ACTION_RUN_SHELL
     const val COPY_TO_CLIPBOARD = CapabilityIds.ACTION_COPY_TO_CLIPBOARD
+    const val COPY_TEXT = CapabilityIds.ACTION_COPY_TEXT
     const val SET_ALARM = CapabilityIds.ACTION_SET_ALARM
     const val SET_TIMER = CapabilityIds.ACTION_SET_TIMER
     const val SET_VOLUME = CapabilityIds.ACTION_SET_VOLUME

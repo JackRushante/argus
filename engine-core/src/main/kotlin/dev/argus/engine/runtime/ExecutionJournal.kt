@@ -120,6 +120,7 @@ object NoopExecutionJournal : ExecutionJournal {
 internal fun Action.journalType(): String = when (this) {
     is Action.SetWifi -> ActionTypeIds.SET_WIFI
     is Action.SetBluetooth -> ActionTypeIds.SET_BLUETOOTH
+    is Action.SetMobileData -> ActionTypeIds.SET_MOBILE_DATA
     is Action.SetDnd -> ActionTypeIds.SET_DND
     is Action.SetRinger -> ActionTypeIds.SET_RINGER
     is Action.LaunchApp -> ActionTypeIds.LAUNCH_APP
@@ -130,6 +131,7 @@ internal fun Action.journalType(): String = when (this) {
     is Action.WhatsAppReply -> ActionTypeIds.WHATSAPP_REPLY
     is Action.RunShell -> ActionTypeIds.RUN_SHELL
     is Action.CopyToClipboard -> ActionTypeIds.COPY_TO_CLIPBOARD
+    is Action.CopyText -> ActionTypeIds.COPY_TEXT
     is Action.SetAlarm -> ActionTypeIds.SET_ALARM
     is Action.SetTimer -> ActionTypeIds.SET_TIMER
     is Action.SetVolume -> ActionTypeIds.SET_VOLUME

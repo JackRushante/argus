@@ -401,15 +401,19 @@ object ShizukuCapabilityCatalog {
         // --- Richiede Shizuku (PRIVILEGED): senza, impossibile ---
         ShizukuCapabilityRow(
             title = language.pick(
-                "Turn Wi-Fi and Bluetooth on or off",
-                "Attivare o disattivare Wi-Fi e Bluetooth",
+                "Turn Wi-Fi, Bluetooth, and mobile data on or off",
+                "Attivare o disattivare Wi-Fi, Bluetooth e dati mobili",
             ),
             requirement = ShizukuRequirement.REQUIRED,
             note = language.pick(
                 "Radio switches use Shizuku's privileged shell.",
                 "Gli interruttori radio passano dallo shell privilegiato di Shizuku.",
             ),
-            actionTypeIds = listOf(ActionTypeIds.SET_WIFI, ActionTypeIds.SET_BLUETOOTH),
+            actionTypeIds = listOf(
+                ActionTypeIds.SET_WIFI,
+                ActionTypeIds.SET_BLUETOOTH,
+                ActionTypeIds.SET_MOBILE_DATA,
+            ),
         ),
         ShizukuCapabilityRow(
             title = language.pick("Write system settings", "Scrivere impostazioni di sistema"),
@@ -488,7 +492,11 @@ object ShizukuCapabilityCatalog {
                 "Notifiche di Argus e copia negli appunti",
             ),
             requirement = ShizukuRequirement.NOT_REQUIRED,
-            actionTypeIds = listOf(ActionTypeIds.SHOW_NOTIFICATION, ActionTypeIds.COPY_TO_CLIPBOARD),
+            actionTypeIds = listOf(
+                ActionTypeIds.SHOW_NOTIFICATION,
+                ActionTypeIds.COPY_TO_CLIPBOARD,
+                ActionTypeIds.COPY_TEXT,
+            ),
         ),
         ShizukuCapabilityRow(
             title = language.pick(

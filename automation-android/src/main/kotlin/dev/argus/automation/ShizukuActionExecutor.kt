@@ -123,6 +123,10 @@ class ShizukuActionExecutor(
             is Action.SetBluetooth -> success {
                 tools.setBluetooth(action.on, ctx.executionId, ctx.priority)
             }
+            // Dati mobili: PRIVILEGED puro come i toggle radio (`svc data enable|disable`).
+            is Action.SetMobileData -> success {
+                tools.setMobileData(action.on, ctx.executionId, ctx.priority)
+            }
             // Scrittura impostazioni PARAMETRICA: PRIVILEGED puro (nessun fallback base). key/value
             // sono letterali dell'azione approvata; DeviceTools li ri-valida e costruisce argv.
             is Action.WriteSetting -> success {
@@ -177,6 +181,8 @@ class ShizukuActionExecutor(
 
             // Clipboard: locale, senza privilegi; il payload arriva dall'evento del trigger.
             is Action.CopyToClipboard -> clipboard.copy(ctx.event, action.extractionRegex)
+            // Clipboard letterale: la stringa è già risolta dall'engine, nessun trigger richiesto.
+            is Action.CopyText -> clipboard.copyLiteral(action.text)
 
             // Sveglia/timer: privilegiato `am start` quando Shizuku è pronto (unica via affidabile da
             // background, caveat BAL), altrimenti Intent AlarmClock BASE (permesso normal SET_ALARM,
