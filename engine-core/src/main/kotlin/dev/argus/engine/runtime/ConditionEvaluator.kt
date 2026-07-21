@@ -68,6 +68,14 @@ class ConditionEvaluator(private val clock: Clock) {
         variable: (String) -> VarValue?,
     ): Truth {
         val left = variable(condition.varName) ?: return Truth.UNKNOWN
+        // Operatori UNARI di parità: nessun RHS. Si coercizza il SOLO lato sinistro a INTERO e si
+        // valuta la parità; fail-closed Truth.FALSE se non coercibile a intero (stesso pattern di
+        // GT/LT su TEXT: mai UNKNOWN, mai eccezione, il TAINT non è declassificato).
+        if (condition.op == CmpOp.IS_EVEN || condition.op == CmpOp.IS_ODD) {
+            val number = StateValueCoercion.integer(left.text) ?: return Truth.FALSE
+            val even = number % 2L == 0L
+            return Truth.of(if (condition.op == CmpOp.IS_EVEN) even else !even)
+        }
         val right = condition.expectedVar?.let(variable) ?: condition.expected?.let { expected ->
             VarValue(
                 text = expected,
@@ -97,6 +105,8 @@ class ConditionEvaluator(private val clock: Clock) {
                         else -> Truth.of(leftNumber < rightNumber)
                     }
                 }
+                // Parità: unaria, già gestita e ritornata sopra. Irraggiungibile qui.
+                CmpOp.IS_EVEN, CmpOp.IS_ODD -> Truth.UNKNOWN
             }
             VarType.NUMBER -> {
                 val leftNumber = StateValueCoercion.number(left.text) ?: return Truth.UNKNOWN
@@ -106,7 +116,8 @@ class ConditionEvaluator(private val clock: Clock) {
                     CmpOp.NEQ -> Truth.of(leftNumber != rightNumber)
                     CmpOp.GT -> Truth.of(leftNumber > rightNumber)
                     CmpOp.LT -> Truth.of(leftNumber < rightNumber)
-                    CmpOp.CONTAINS -> Truth.UNKNOWN
+                    // CONTAINS non applicabile; parità unaria già gestita sopra (irraggiungibile).
+                    CmpOp.CONTAINS, CmpOp.IS_EVEN, CmpOp.IS_ODD -> Truth.UNKNOWN
                 }
             }
             VarType.BOOLEAN -> {
@@ -115,7 +126,7 @@ class ConditionEvaluator(private val clock: Clock) {
                 when (condition.op) {
                     CmpOp.EQ -> Truth.of(leftBoolean == rightBoolean)
                     CmpOp.NEQ -> Truth.of(leftBoolean != rightBoolean)
-                    CmpOp.GT, CmpOp.LT, CmpOp.CONTAINS -> Truth.UNKNOWN
+                    CmpOp.GT, CmpOp.LT, CmpOp.CONTAINS, CmpOp.IS_EVEN, CmpOp.IS_ODD -> Truth.UNKNOWN
                 }
             }
         }
@@ -124,13 +135,15 @@ class ConditionEvaluator(private val clock: Clock) {
     private fun compare(actual: String?, op: CmpOp, expected: String): Truth {
         if (actual == null) return Truth.UNKNOWN
         val an = actual.toDoubleOrNull(); val en = expected.toDoubleOrNull()
-        return Truth.of(when (op) {
-            CmpOp.EQ -> actual == expected
-            CmpOp.NEQ -> actual != expected
-            CmpOp.CONTAINS -> actual.contains(expected)
-            CmpOp.GT -> if (an != null && en != null) an > en else actual > expected
-            CmpOp.LT -> if (an != null && en != null) an < en else actual < expected
-        })
+        return when (op) {
+            CmpOp.EQ -> Truth.of(actual == expected)
+            CmpOp.NEQ -> Truth.of(actual != expected)
+            CmpOp.CONTAINS -> Truth.of(actual.contains(expected))
+            CmpOp.GT -> Truth.of(if (an != null && en != null) an > en else actual > expected)
+            CmpOp.LT -> Truth.of(if (an != null && en != null) an < en else actual < expected)
+            // Parità non applicabile a state_equals (il validator la esclude): irraggiungibile qui.
+            CmpOp.IS_EVEN, CmpOp.IS_ODD -> Truth.UNKNOWN
+        }
     }
 
     private fun inWindow(c: Condition.TimeWindow): Boolean {
@@ -159,7 +172,8 @@ class ConditionEvaluator(private val clock: Clock) {
                 CmpOp.EQ -> Truth.of(actual == expected)
                 CmpOp.NEQ -> Truth.of(actual != expected)
                 CmpOp.CONTAINS -> Truth.of(actual.contains(expected))
-                CmpOp.GT, CmpOp.LT -> Truth.UNKNOWN
+                // Parità esclusa da state_compare dal validator: non applicabile qui.
+                CmpOp.GT, CmpOp.LT, CmpOp.IS_EVEN, CmpOp.IS_ODD -> Truth.UNKNOWN
             }
             StateValueType.NUMBER -> {
                 val left = StateValueCoercion.number(actual) ?: return Truth.UNKNOWN
@@ -169,7 +183,7 @@ class ConditionEvaluator(private val clock: Clock) {
                     CmpOp.NEQ -> Truth.of(left != right)
                     CmpOp.GT -> Truth.of(left > right)
                     CmpOp.LT -> Truth.of(left < right)
-                    CmpOp.CONTAINS -> Truth.UNKNOWN
+                    CmpOp.CONTAINS, CmpOp.IS_EVEN, CmpOp.IS_ODD -> Truth.UNKNOWN
                 }
             }
             StateValueType.BOOLEAN -> {
@@ -178,7 +192,7 @@ class ConditionEvaluator(private val clock: Clock) {
                 when (op) {
                     CmpOp.EQ -> Truth.of(left == right)
                     CmpOp.NEQ -> Truth.of(left != right)
-                    CmpOp.GT, CmpOp.LT, CmpOp.CONTAINS -> Truth.UNKNOWN
+                    CmpOp.GT, CmpOp.LT, CmpOp.CONTAINS, CmpOp.IS_EVEN, CmpOp.IS_ODD -> Truth.UNKNOWN
                 }
             }
         }

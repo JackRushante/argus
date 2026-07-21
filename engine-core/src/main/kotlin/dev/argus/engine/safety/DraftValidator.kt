@@ -440,6 +440,23 @@ class DraftValidator(
             }
         }
         validateAvailable(c.varName)
+
+        // IS_EVEN/IS_ODD sono UNARI: operano solo sulla variabile di sinistra, senza alcun RHS.
+        // Rilassano il vincolo "esattamente uno tra expected/expectedVar": qui NESSUNO dei due è
+        // ammesso. Sul tipo si comportano come GT/LT: NUMBER nativo o TEXT coercibile a intero a
+        // runtime (fail-closed), BOOLEAN escluso.
+        if (c.op == CmpOp.IS_EVEN || c.op == CmpOp.IS_ODD) {
+            if (c.expected != null || c.expectedVar != null) {
+                err("var_compare_rhs_invalid", "L'operatore ${c.op} è unario: nessun expected/expectedVar ammesso")
+                return
+            }
+            val leftType = declaredTypes[c.varName] ?: return
+            if (leftType == VarType.BOOLEAN) {
+                err("var_compare_type_invalid", "Operatore ${c.op} incompatibile con $leftType")
+            }
+            return
+        }
+
         c.expectedVar?.let(::validateAvailable)
 
         if ((c.expected == null) == (c.expectedVar == null)) {
@@ -471,6 +488,8 @@ class DraftValidator(
             // con l'interprete che confronta solo var dello stesso tipo.
             CmpOp.GT, CmpOp.LT -> leftType == rightType && leftType != VarType.BOOLEAN
             CmpOp.EQ, CmpOp.NEQ -> leftType == rightType
+            // Unari, già gestiti e ritornati sopra: irraggiungibili qui.
+            CmpOp.IS_EVEN, CmpOp.IS_ODD -> false
         }
         if (!validOperator) {
             err("var_compare_type_invalid", "Operatore ${c.op} incompatibile con $leftType/$rightType")

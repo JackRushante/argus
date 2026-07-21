@@ -355,6 +355,35 @@ class DraftValidatorP4Test {
         assertFalse("var_compare_type_invalid" in validate(Condition.VarCompare("flag", CmpOp.EQ, expected = "false")))
     }
 
+    @Test fun `parity operators are unary, allowed on NUMBER and coercible TEXT, rejected with rhs or on BOOLEAN`() {
+        val notif = Trigger.Notification("com.whatsapp", conversationId = "jid:1", isGroup = false)
+        val vars = listOf(
+            literal("number", "1", VarType.NUMBER),
+            literal("flag", "true", VarType.BOOLEAN),
+        )
+        fun validate(condition: Condition.VarCompare, bindings: List<VarBinding> = vars, trigger: Trigger = timeTrigger) =
+            errors(v.validate(draft(listOf(Action.If(condition, listOf(Action.SetWifi(true)))), bindings, trigger), emptySet()))
+
+        // NUMBER + IS_EVEN/IS_ODD senza RHS → valido.
+        assertFalse("var_compare_type_invalid" in validate(Condition.VarCompare("number", CmpOp.IS_EVEN)))
+        assertFalse("var_compare_rhs_invalid" in validate(Condition.VarCompare("number", CmpOp.IS_ODD)))
+
+        // TEXT coercibile a intero a runtime (come GT/LT) → valido, nessun errore di tipo.
+        val textPayload = listOf<VarBinding>(payload("t", TriggerField.TEXT))
+        assertFalse(
+            "var_compare_type_invalid" in validate(Condition.VarCompare("t", CmpOp.IS_EVEN), textPayload, notif),
+        )
+
+        // RHS presente (letterale o variabile) → invalido: gli operatori sono unari.
+        assertTrue("var_compare_rhs_invalid" in validate(Condition.VarCompare("number", CmpOp.IS_EVEN, expected = "2")))
+        assertTrue(
+            "var_compare_rhs_invalid" in validate(Condition.VarCompare("number", CmpOp.IS_ODD, expectedVar = "number")),
+        )
+
+        // BOOLEAN → non coercibile a intero, escluso come per GT/LT.
+        assertTrue("var_compare_type_invalid" in validate(Condition.VarCompare("flag", CmpOp.IS_EVEN)))
+    }
+
     // --- Interpolazione -----------------------------------------------------------------------
 
     @Test fun `interpolation routes tainted values to sinks and clean values to authority`() {

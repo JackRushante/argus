@@ -426,11 +426,13 @@ object RuleRenderMapper {
             // P4: confronto su variabile di programma. La destra è un'altra variabile (${nome}) o un
             // letterale. Rendering minimale a una riga (l'espansione ricca dei badge provenienza è P4-E).
             is Condition.VarCompare -> {
-                val right = c.expectedVar?.let { "\${$it}" } ?: c.expected ?: "<?>"
+                // IS_EVEN/IS_ODD sono UNARI: nessun operando destro da rendere.
+                val unary = c.op == CmpOp.IS_EVEN || c.op == CmpOp.IS_ODD
+                val right = if (unary) "" else " " + (c.expectedVar?.let { "\${$it}" } ?: c.expected ?: "<?>")
                 listOf(
                     l.pick(
-                        "${pad}Only if \${${c.varName}} ${opLabel(c.op, l)} $right",
-                        "${pad}Solo se \${${c.varName}} ${opLabel(c.op, l)} $right",
+                        "${pad}Only if \${${c.varName}} ${opLabel(c.op, l)}$right",
+                        "${pad}Solo se \${${c.varName}} ${opLabel(c.op, l)}$right",
                     ),
                 )
             }
@@ -443,6 +445,8 @@ object RuleRenderMapper {
         CmpOp.GT -> ">"
         CmpOp.LT -> "<"
         CmpOp.CONTAINS -> l.pick("contains", "contiene")
+        CmpOp.IS_EVEN -> l.pick("is even", "è pari")
+        CmpOp.IS_ODD -> l.pick("is odd", "è dispari")
     }
 
     // ---------------------------------------------------------------------------------------------

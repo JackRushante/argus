@@ -46,6 +46,11 @@ class StateReaderTest {
             ACTIVITY MANAGER ACTIVITIES
               topResumedActivity=ActivityRecord{123 u0 com.example.foreground/.MainActivity t7}
         """.trimIndent()
+        val power = """
+            POWER MANAGER (dumpsys power)
+              mWakefulness=Awake
+              Display Power: state=ON
+        """.trimIndent()
         val shell = FakeStateShell(
             outputs = mapOf(
                 command("settings", "get", "global", "mode_ringer") to "1",
@@ -54,6 +59,7 @@ class StateReaderTest {
                 command("settings", "get", "global", "zen_mode") to "1",
                 command("settings", "get", "global", "airplane_mode_on") to "0",
                 command("dumpsys", "battery") to battery,
+                command("dumpsys", "power") to power,
                 command("dumpsys", "activity", "activities") to activities,
             ),
         )
@@ -69,6 +75,7 @@ class StateReaderTest {
                 StateKeys.AIRPLANE to "off",
                 StateKeys.BATTERY to "87",
                 StateKeys.CHARGING to "true",
+                StateKeys.SCREEN to "on",
             ),
             state.values,
         )
@@ -119,6 +126,32 @@ class StateReaderTest {
             StateReader.BatterySnapshot(level = 42, charging = false),
             StateReader.parseBattery("level: 42\nstatus: 3"),
         )
+    }
+
+    @Test
+    fun `screen parser maps wakefulness and display power fallback to on off`() {
+        assertEquals("on", StateReader.parseScreen("mWakefulness=Awake\nDisplay Power: state=ON"))
+        assertEquals("off", StateReader.parseScreen("  mWakefulness=Asleep"))
+        assertEquals("off", StateReader.parseScreen("mWakefulness=Dozing"))
+        // Fallback su Display Power quando manca il campo wakefulness.
+        assertEquals("on", StateReader.parseScreen("Display Power: state=ON"))
+        assertEquals("off", StateReader.parseScreen("Display Power: state=OFF"))
+        // Nessun marcatore riconoscibile -> null (chiave assente, fail-closed).
+        assertNull(StateReader.parseScreen("random unrelated dump"))
+    }
+
+    @Test
+    fun `read screen issues dumpsys power and normalizes to on`() = runTest {
+        val shell = FakeStateShell(
+            outputs = mapOf(
+                command("dumpsys", "power") to "mWakefulness=Awake\nDisplay Power: state=ON",
+            ),
+        )
+
+        val state = StateReader(shell).read(setOf(StateKeys.SCREEN))
+
+        assertEquals(mapOf(StateKeys.SCREEN to "on"), state.values)
+        assertEquals(listOf(command("dumpsys", "power")), shell.calls)
     }
 
     @Test

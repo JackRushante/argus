@@ -5,7 +5,7 @@ import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-enum class CmpOp { EQ, NEQ, GT, LT, CONTAINS }
+enum class CmpOp { EQ, NEQ, GT, LT, CONTAINS, IS_EVEN, IS_ODD }
 
 @Serializable
 sealed interface Condition {

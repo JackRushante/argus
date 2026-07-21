@@ -62,6 +62,21 @@ class RuleRenderMapperTest {
         // nessun riferimento fantasma "approvazione avanzata"
         assertTrue(r.actions.none { (it.detail ?: "").contains("avanzata") })
     }
+    @Test fun `P4 parity var_compare renders a unary label without rhs (IT and EN)`() {
+        fun rule(op: CmpOp) = Automation(
+            AutomationId("par"), "parity", CreatedBy.LLM, AutomationStatus.PENDING_APPROVAL,
+            Trigger.Immediate,
+            listOf(Action.If(Condition.VarCompare("n", op), listOf(Action.SetFlashlight(true)))),
+            vars = listOf(VarBinding.Literal("n", "4", VarType.NUMBER, ConfidentialityLabel.PUBLIC)),
+        )
+        val itEven = RuleRenderMapper.map(rule(CmpOp.IS_EVEN), language = RenderLanguage.IT)
+            .program.single() as ProgramNode.IfNode
+        assertEquals(listOf("Solo se \${n} è pari"), itEven.conditionLines)
+        val enOdd = RuleRenderMapper.map(rule(CmpOp.IS_ODD), language = RenderLanguage.EN)
+            .program.single() as ProgramNode.IfNode
+        assertEquals(listOf("Only if \${n} is odd"), enOdd.conditionLines)
+    }
+
     @Test fun `captureAs is shown on the producing action (IT and EN)`() {
         val a = Automation(
             AutomationId("c1"), "cap", CreatedBy.LLM, AutomationStatus.PENDING_APPROVAL,
