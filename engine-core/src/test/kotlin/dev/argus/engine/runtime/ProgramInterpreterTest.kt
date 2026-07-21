@@ -25,6 +25,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class ProgramInterpreterTest {
@@ -221,7 +222,7 @@ class ProgramInterpreterTest {
     }
 
     @Test
-    fun `missing binding and tainted authority stop before unsafe execution`() = runTest {
+    fun `missing binding stops, but tainted authority now executes in aggressive posture`() = runTest {
         var calls = 0
         val interpreter = interpreter(
             runner = ProgramActionRunner { _, _ ->
@@ -245,7 +246,10 @@ class ProgramInterpreterTest {
         assertEquals("binding_unavailable", missing.stopCode)
         assertEquals(0, calls)
 
-        val blocked = interpreter.execute(
+        // Posture AGGRESSIVO: un payload TAINTED interpolato in RunShell.cmd non è più bloccato
+        // dall'interpolatore; l'azione risolve ed esegue. Lo shell-gating sui mittenti resta
+        // enforced altrove (DraftValidator / FirePolicy / ShizukuActionExecutor), non qui.
+        val executed = interpreter.execute(
             smsTrigger,
             smsEvent,
             listOf(
@@ -257,8 +261,9 @@ class ProgramInterpreterTest {
             ),
             listOf(Action.RunShell("echo \${body}")),
         )
-        assertEquals("taint_blocked", blocked.stopCode)
-        assertEquals(0, calls)
+        assertTrue(executed.completed)
+        assertNull(executed.stopCode)
+        assertEquals(1, calls)
     }
 
     @Test

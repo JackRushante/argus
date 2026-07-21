@@ -5,6 +5,7 @@ import dev.argus.engine.model.ConfidentialityLabel
 import dev.argus.engine.model.IntegrityLabel
 import dev.argus.engine.model.InterpolationPolicy
 import dev.argus.engine.model.SettingsScreen
+import dev.argus.engine.model.TaintPolicy
 import dev.argus.engine.model.ValueProvenance
 import dev.argus.engine.model.VarValue
 import dev.argus.engine.model.WriteSettingPolicy
@@ -152,7 +153,8 @@ class TaintAwareInterpolator {
                     val name = match.groupValues[1]
                     val value = scope[name] ?: throw ResolutionException("variable_unavailable")
                     if (policyField.cls == InterpolationPolicy.FieldClass.AUTHORITY &&
-                        value.integrity != IntegrityLabel.CLEAN
+                        value.integrity != IntegrityLabel.CLEAN &&
+                        !TaintPolicy.allowTaintedInAuthority()
                     ) {
                         throw ResolutionException("taint_blocked")
                     }

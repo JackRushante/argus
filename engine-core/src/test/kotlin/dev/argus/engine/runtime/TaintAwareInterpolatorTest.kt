@@ -30,14 +30,33 @@ class TaintAwareInterpolatorTest {
     }
 
     @Test
-    fun `tainted values cannot fill execution authority`() {
-        val scope = scope("arg", tainted("; rm -rf ignored"))
+    fun `tainted values may fill execution authority in aggressive posture`() {
+        // Posture AGGRESSIVO (TaintPolicy.allowTaintedInAuthority()): un valore TAINTED non viene
+        // piu bloccato in un campo AUTHORITY. La riservatezza e lo shell-gating restano altrove.
+        val scope = scope("arg", tainted("\$(whoami)"))
 
-        val blocked = assertIs<ActionResolution.Blocked>(
+        val resolved = assertIs<ActionResolution.Resolved>(
             interpolator.resolve(Action.RunShell("echo \${arg}"), scope),
-        )
+        ).value
 
-        assertEquals("taint_blocked", blocked.code)
+        assertEquals("echo \$(whoami)", assertIs<Action.RunShell>(resolved.action).cmd)
+        // L'integrita del risultato resta TAINTED: rilassiamo il blocco, non le label.
+        assertEquals(IntegrityLabel.TAINTED, resolved.inputIntegrity)
+    }
+
+    @Test
+    fun `tainted trigger payload flows into RunShell cmd and OpenUrl url`() {
+        val shell = assertIs<ActionResolution.Resolved>(
+            interpolator.resolve(Action.RunShell("curl \${arg}"), scope("arg", tainted("http://evil.example"))),
+        ).value
+        assertEquals("curl http://evil.example", assertIs<Action.RunShell>(shell.action).cmd)
+        assertEquals(IntegrityLabel.TAINTED, shell.inputIntegrity)
+
+        val url = assertIs<ActionResolution.Resolved>(
+            interpolator.resolve(Action.OpenUrl("https://\${host}/x"), scope("host", tainted("example.com"))),
+        ).value
+        assertEquals("https://example.com/x", assertIs<Action.OpenUrl>(url.action).url)
+        assertEquals(IntegrityLabel.TAINTED, url.inputIntegrity)
     }
 
     @Test

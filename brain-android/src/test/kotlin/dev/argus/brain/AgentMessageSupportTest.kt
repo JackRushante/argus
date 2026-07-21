@@ -85,17 +85,23 @@ class AgentMessageSupportTest {
     }
 
     @Test
-    fun `compile prompt teaches the flow-only conditions and the taint invariant`() {
+    fun `compile prompt teaches the flow conditions and the aggressive posture with kept shell-gating`() {
         val prompt = AgentMessageSupport.compileSystemText()
 
         assertTrue("var_compare" in prompt, "condizione var_compare")
         assertTrue("boolean_literal" in prompt, "condizione boolean_literal")
         assertTrue("expectedVar" in prompt, "confronto var-vs-var")
-        // Invariante taint: un valore TAINTED riempie SOLO i data sink, mai comandi/routing.
-        assertTrue("TAINTED" in prompt, "l'invariante deve nominare i valori TAINTED")
+        // Posture AGGRESSIVO: il prompt permette di usare liberamente i valori runtime nei campi,
+        // inclusi comandi/URL/target — non li confina più ai soli data sink.
         assertTrue(
-            "data sink" in prompt.lowercase(),
-            "l'invariante deve limitare i TAINTED ai soli data sink",
+            "freely" in prompt.lowercase(),
+            "il prompt deve permettere l'uso libero dei valori runtime",
+        )
+        // Dente che teniamo: run_shell resta innescabile solo da contatti whitelistati.
+        assertTrue("run_shell" in prompt, "il prompt deve nominare run_shell")
+        assertTrue(
+            "whitelist" in prompt.lowercase(),
+            "il prompt deve mantenere lo shell-gating sui contatti whitelistati",
         )
     }
 

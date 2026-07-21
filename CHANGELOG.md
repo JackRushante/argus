@@ -2,6 +2,29 @@
 
 Release and engineering notes, newest first.
 
+## Unreleased — Anti-injection posture set to Aggressive (2026-07-21)
+
+### Changed (security posture)
+
+- The taint-based anti-injection posture is now **Aggressive**, centralized in a single policy point
+  `TaintPolicy.allowTaintedInAuthority()` (engine-core `model/TaintPolicy.kt`). Consequence: a
+  runtime/TAINTED value (a `trigger_payload` or any `captureAs` output) may now fill **authority /
+  command fields** too — `run_shell.cmd`, `open_url.url`, `launch_app.pkg`, `input_text`, ringer
+  mode, `write_setting` — and no longer only data sinks (notification/reply text, clipboard). Both the
+  static gate (`DraftValidator.interpolation_tainted_authority`) and the dynamic gate
+  (`TaintAwareInterpolator` `taint_blocked`) consult this policy; flipping one flag restores the
+  previous "surgical" posture (tainted allowed only in sinks).
+- This relaxes the **integrity** axis only. Deliberately kept intact:
+  - **Shell trigger-gating** (`StaticShellSafety`): an approved `run_shell` is still triggerable only
+    by whitelisted 1:1 WhatsApp contacts, never by SMS/phone or unknown senders.
+  - **Confidentiality floor**: shell/LLM captures remain `TAINTED` + `SECRET` (protects bank/OTP
+    secrets); this is orthogonal to the integrity relaxation.
+  - **SYSTEM/DATA separation**: untrusted runtime data still travels in the `runtime_data` channel and
+    never enters the model's system prompt at fire time.
+- Brain prompt (`AgentMessageSupport`) softened accordingly so the model no longer refuses legitimate
+  rules that interpolate captured/trigger values into command/URL/target fields, while still stating
+  that `run_shell` is triggerable only by whitelisted contacts.
+
 ## Unreleased — P4 variables and structured control flow (2026-07-18)
 
 P4-A through P4-C are implemented on the `p4a` branch. This is an integration preview, not a

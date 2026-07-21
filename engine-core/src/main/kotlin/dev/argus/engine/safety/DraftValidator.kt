@@ -519,8 +519,12 @@ class DraftValidator(
                     !in availableVars ->
                         err("var_not_definitely_assigned", "Variabile '$name' non sicuramente assegnata")
                     else -> {
+                        // Posture anti-injection centralizzata in TaintPolicy: in AGGRESSIVO un
+                        // valore TAINTED è ammesso anche nei campi AUTHORITY. Il floor SECRET e lo
+                        // shell-gating sui mittenti restano enforced altrove, indipendenti da qui.
                         if (field.cls == InterpolationPolicy.FieldClass.AUTHORITY &&
-                            declaredIntegrity[name] != IntegrityLabel.CLEAN
+                            declaredIntegrity[name] != IntegrityLabel.CLEAN &&
+                            !TaintPolicy.allowTaintedInAuthority()
                         ) {
                             err(
                                 "interpolation_tainted_authority",

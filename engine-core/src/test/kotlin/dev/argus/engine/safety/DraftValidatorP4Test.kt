@@ -386,7 +386,7 @@ class DraftValidatorP4Test {
 
     // --- Interpolazione -----------------------------------------------------------------------
 
-    @Test fun `interpolation routes tainted values to sinks and clean values to authority`() {
+    @Test fun `interpolation admits tainted values in sinks and, in aggressive posture, in authority`() {
         val notif = Trigger.Notification("com.whatsapp", conversationId = "jid:1", isGroup = false)
         // SINK con var dichiarata → ok.
         val ok = draft(
@@ -407,13 +407,14 @@ class DraftValidatorP4Test {
         )
         assertFalse("interpolation_tainted_authority" in errors(v.validate(cleanAuthority, emptySet())))
 
-        // Lo stesso sink con payload esterno TAINTED fallisce chiuso.
+        // Posture AGGRESSIVO (TaintPolicy.allowTaintedInAuthority()): lo stesso sink con payload
+        // esterno TAINTED ora NON è più bloccato dal validator statico.
         val taintedAuthority = draft(
             actions = listOf(Action.RunShell("echo \${x}")),
             vars = listOf(payload("x", TriggerField.TEXT)),
             trigger = notif,
         )
-        assertTrue("interpolation_tainted_authority" in errors(v.validate(taintedAuthority, emptySet())))
+        assertFalse("interpolation_tainted_authority" in errors(v.validate(taintedAuthority, emptySet())))
 
         // ${Malformato} in un SINK → malformed.
         val malformed = draft(
