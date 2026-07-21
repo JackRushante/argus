@@ -319,6 +319,17 @@ class BridgeTest(unittest.TestCase):
         self.assertIn("screen_brightness (0-255, SYSTEM; set screen_brightness_mode=0 first to", prompt)
         self.assertIn("auto-brightness", prompt)
 
+    def test_prompt_frames_run_shell_as_last_resort_with_cookbook(self):
+        # IO-7 A: run_shell è ultima spiaggia + cookbook di comandi reali + nota anti-allucinazione.
+        prompt = bridge.build_prompt(self.request())
+        self.assertIn("last resort", prompt.lower())
+        self.assertIn("svc wifi|data|bluetooth enable|disable", prompt)
+        self.assertIn("cmd uimode night yes|no|auto", prompt)
+        self.assertIn("input keyevent", prompt)
+        # La torcia NON è `cmd flashlight`: è l'azione set_flashlight.
+        self.assertIn("cmd flashlight", prompt)
+        self.assertIn("set_flashlight", prompt)
+
     def test_state_equals_accepts_screen_key(self):
         # screen e' una nuova builtin state key (on|off). state_equals la ammette se e' nel manifest.
         allowed = {"screen"}

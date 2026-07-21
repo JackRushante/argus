@@ -4,6 +4,7 @@ import dev.argus.engine.runtime.ActionResult
 import dev.argus.engine.runtime.FireContext
 import dev.argus.engine.runtime.ProgramActionResult
 import dev.argus.shizuku.PrivilegedShell
+import dev.argus.shizuku.ShellResult
 
 fun interface StaticShellRunner {
     suspend fun run(command: String, context: FireContext): ActionResult
@@ -28,7 +29,7 @@ class ShizukuStaticShellRunner(
         )
         return when {
             result.timedOut -> ActionResult.Failure("shell_timeout")
-            !result.successful -> ActionResult.Failure("shell_failed")
+            !result.successful -> ActionResult.Failure(result.failureCode())
             else -> ActionResult.Success
         }
     }
@@ -45,10 +46,18 @@ class ShizukuStaticShellRunner(
         return when {
             result.timedOut -> ProgramActionResult(ActionResult.Failure("shell_timeout"))
             result.truncated -> ProgramActionResult(ActionResult.Failure("shell_output_too_large"))
-            !result.successful -> ProgramActionResult(ActionResult.Failure("shell_failed"))
+            !result.successful -> ProgramActionResult(ActionResult.Failure(result.failureCode()))
             else -> ProgramActionResult(ActionResult.Success, capturedText = result.stdoutText)
         }
     }
+
+    /**
+     * Fallimento shell diagnosticabile: un errore di trasporto (Binder/gateway) resta "shell_failed",
+     * ma un exit code non-zero diventa "shell_failed_exit_<n>" così un comando allucinato è
+     * riconoscibile (127 = command not found, 126 = not executable, ...).
+     */
+    private fun ShellResult.failureCode(): String =
+        if (errorCode != null) "shell_failed" else "shell_failed_exit_$exitCode"
 
     private companion object {
         const val SYSTEM_SHELL = "/system/bin/sh"

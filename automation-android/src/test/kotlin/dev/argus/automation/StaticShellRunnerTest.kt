@@ -54,7 +54,19 @@ class StaticShellRunnerTest {
         val failed = ShizukuStaticShellRunner(
             RecordingShell(ShellResult(exitCode = 9, stderr = "secret".encodeToByteArray())),
         )
-        assertEquals(ActionResult.Failure("shell_failed"), failed.run("false", context))
+        assertEquals(ActionResult.Failure("shell_failed_exit_9"), failed.run("false", context))
+
+        // Comando allucinato: 127 = command not found. L'exit code è diagnosticabile nel codice.
+        val notFound = ShizukuStaticShellRunner(
+            RecordingShell(ShellResult(exitCode = 127, stderr = "not found".encodeToByteArray())),
+        )
+        assertEquals(ActionResult.Failure("shell_failed_exit_127"), notFound.run("cmd flashlight", context))
+
+        // Errore di TRASPORTO (Binder/gateway): resta "shell_failed", l'exit code non è affidabile.
+        val transport = ShizukuStaticShellRunner(
+            RecordingShell(ShellResult(exitCode = 0, errorCode = "gateway_down")),
+        )
+        assertEquals(ActionResult.Failure("shell_failed"), transport.run("id", context))
     }
 
     @Test

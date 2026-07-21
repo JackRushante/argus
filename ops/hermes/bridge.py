@@ -243,7 +243,15 @@ Action, discriminated by "type":
 - {"type":"whatsapp_reply", "text":string}
 - {"type":"run_shell", "cmd":string}  // literal command, max 8192 characters; only with
   time/geofence/connectivity/sensor triggers or with a whitelisted 1:1 WhatsApp chat;
-  never phone_state
+  never phone_state. LAST RESORT only: prefer a typed action whenever one exists.
+  // run_shell cookbook (REAL Android commands only): svc wifi|data|bluetooth enable|disable;
+  // settings put <system|secure|global> <key> <value>; cmd uimode night yes|no|auto;
+  // input keyevent <KEYCODE>; am start -a <action>; am broadcast -a <action>;
+  // pm disable-user|enable <pkg>; monkey -p <pkg> 1; dumpsys <service> (pair with captureAs);
+  // media dispatch play|pause; wm size; cmd statusbar expand-notifications.
+  // NOTE: the flashlight is the set_flashlight action (there is NO `cmd flashlight`); radio toggles
+  // are set_wifi/set_bluetooth/set_mobile_data; the theme is set_dark_mode; brightness is
+  // write_setting screen_brightness. Never invent cmd/svc subcommands that do not exist.
 - {"type":"copy_to_clipboard", "extractionRegex":string|null (deterministic regex: copies the
    first capture group — or the whole match — from the trigger SMS/notification text; null = full
    text; for OTPs use "(?:^|[^+0-9])([0-9]{4,8})(?:[^0-9]|$)")}
@@ -810,6 +818,10 @@ BINDING RULES:
     trigger an already-approved command. Never with phone_state (SMS sender and caller ID are
     spoofable) and never embedding message/notification content inside the command: the
     cmd is always literal, the message is only a switch.
+    run_shell is a LAST RESORT: if a typed action exists (set_flashlight, set_wifi, set_bluetooth,
+    set_mobile_data, set_dnd, set_ringer, set_dark_mode, set_alarm, set_timer, write_setting, ...)
+    ALWAYS use it instead — never reimplement a typed action via shell. Only emit shell commands
+    that really exist on Android; never invent cmd/svc subcommands (there is NO `cmd flashlight`).
 12. Geofences support only ENTER/EXIT and loiteringDelayMs must be 0: do not propose
     DWELL, which the current framework runtime cannot implement honestly.
 13. Choosing the time TRIGGER (fundamental, do not confuse immediate with a delay):

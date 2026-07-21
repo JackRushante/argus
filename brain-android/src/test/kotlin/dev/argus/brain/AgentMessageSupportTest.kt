@@ -25,6 +25,24 @@ class AgentMessageSupportTest {
     }
 
     @Test
+    fun `compile prompt frames run_shell as a last resort with a real-command cookbook`() {
+        val prompt = AgentMessageSupport.compileSystemText()
+        val lower = prompt.lowercase()
+
+        // IO-7 A: la shell è l'ULTIMA SPIAGGIA — prima le azioni tipizzate.
+        assertTrue("last resort" in lower, "il prompt deve marcare run_shell come ultima spiaggia")
+        // Cookbook di comandi REALI (un paio di campioni curati).
+        assertTrue("svc wifi|data|bluetooth enable|disable" in prompt, "cookbook: svc")
+        assertTrue("cmd uimode night yes|no|auto" in prompt, "cookbook: cmd uimode night")
+        assertTrue("input keyevent" in prompt, "cookbook: input keyevent")
+        // Anti-allucinazione: la torcia NON è `cmd flashlight`, è l'azione set_flashlight.
+        assertTrue(
+            "cmd flashlight" in prompt && "set_flashlight" in prompt,
+            "il prompt deve segnalare che cmd flashlight non esiste e rimandare a set_flashlight",
+        )
+    }
+
+    @Test
     fun `compile prompt teaches the immediate one-shot trigger`() {
         val prompt = AgentMessageSupport.compileSystemText()
 

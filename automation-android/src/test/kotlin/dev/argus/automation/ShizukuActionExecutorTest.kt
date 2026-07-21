@@ -160,7 +160,7 @@ class ShizukuActionExecutorTest {
 
         assertEquals(
             ActionResult.Success,
-            executor(staticShell = runner).execute(
+            executor(staticShell = runner, shizukuReady = { true }).execute(
                 Action.RunShell("/system/bin/id >/dev/null"),
                 trustedContext,
             ),
@@ -189,12 +189,12 @@ class ShizukuActionExecutorTest {
             event = TriggerEvent.TimeFired(context.automationId, context.approvalFingerprint),
         )
 
-        val captured = executor(staticShell = runner).execute(resolved, trusted)
+        val captured = executor(staticShell = runner, shizukuReady = { true }).execute(resolved, trusted)
         assertEquals(ActionResult.Success, captured.result)
         assertEquals("uid=2000", captured.capturedText)
         assertEquals(listOf("id"), calls)
 
-        val blocked = executor(staticShell = runner).execute(resolved, context)
+        val blocked = executor(staticShell = runner, shizukuReady = { true }).execute(resolved, context)
         assertEquals(ActionResult.Failure("shell_external_trigger"), blocked.result)
         assertEquals(listOf("id"), calls)
     }
@@ -223,12 +223,12 @@ class ShizukuActionExecutorTest {
 
         assertEquals(
             ActionResult.Failure("action_failed"),
-            executor(staticShell = throwingRunner(IllegalStateException("sensitive")))
+            executor(staticShell = throwingRunner(IllegalStateException("sensitive")), shizukuReady = { true })
                 .execute(resolved, trusted)
                 .result,
         )
         assertFailsWith<CancellationException> {
-            executor(staticShell = throwingRunner(CancellationException("stop")))
+            executor(staticShell = throwingRunner(CancellationException("stop")), shizukuReady = { true })
                 .execute(resolved, trusted)
         }
     }
@@ -307,7 +307,7 @@ class ShizukuActionExecutorTest {
 
         assertEquals(
             ActionResult.Success,
-            executor(staticShell = runner, whitelistedIds = { setOf(WHITELISTED_ID) })
+            executor(staticShell = runner, whitelistedIds = { setOf(WHITELISTED_ID) }, shizukuReady = { true })
                 .execute(Action.RunShell("/system/bin/id >/dev/null"), whitelisted),
         )
         assertEquals(listOf("/system/bin/id >/dev/null" to whitelisted), calls)
@@ -341,6 +341,61 @@ class ShizukuActionExecutorTest {
                 .execute(Action.RunShell("id"), sms),
         )
         assertEquals(emptyList(), calls)
+    }
+
+    /**
+     * IO-7: la shell è ultima spiaggia e privilegiata. Trigger fidato ma Shizuku non pronto ⇒
+     * fallimento tipizzato "shizuku_unavailable" (non l'IllegalStateException degradato ad
+     * "action_failed"). Ramo deterministico (flat execute).
+     */
+    @Test
+    fun `flat run_shell fails typed when shizuku is not ready`() = runTest {
+        val calls = mutableListOf<String>()
+        val runner = StaticShellRunner { command, _ -> calls += command; ActionResult.Success }
+        val trusted = context.copy(
+            event = TriggerEvent.TimeFired(context.automationId, context.approvalFingerprint),
+        )
+
+        assertEquals(
+            ActionResult.Failure("shizuku_unavailable"),
+            executor(staticShell = runner, shizukuReady = { false })
+                .execute(Action.RunShell("/system/bin/id >/dev/null"), trusted),
+        )
+        // La shell non deve nemmeno essere invocata quando Shizuku manca.
+        assertEquals(emptyList(), calls)
+    }
+
+    /** IO-7: stesso gate sul ramo RISOLTO con captureAs (runCaptured). */
+    @Test
+    fun `resolved run_shell capture fails typed when shizuku is not ready`() = runTest {
+        val ran = mutableListOf<String>()
+        val runner = object : StaticShellRunner {
+            override suspend fun run(command: String, context: FireContext): ActionResult =
+                error("flat run non atteso")
+
+            override suspend fun runCaptured(
+                command: String,
+                context: FireContext,
+            ): ProgramActionResult {
+                ran += command
+                return ProgramActionResult(ActionResult.Success, capturedText = "uid=2000")
+            }
+        }
+        val resolved = (
+            TaintAwareInterpolator().resolve(
+                Action.RunShell("id", captureAs = "identity"),
+                VarScope(),
+            ) as ActionResolution.Resolved
+            ).value
+        val trusted = context.copy(
+            event = TriggerEvent.TimeFired(context.automationId, context.approvalFingerprint),
+        )
+
+        assertEquals(
+            ActionResult.Failure("shizuku_unavailable"),
+            executor(staticShell = runner, shizukuReady = { false }).execute(resolved, trusted).result,
+        )
+        assertEquals(emptyList(), ran)
     }
 
     private fun whatsappEvent() = TriggerEvent.NotificationPosted(

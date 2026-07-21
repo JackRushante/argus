@@ -84,6 +84,11 @@ class ShizukuActionExecutor(
             is Action.RunShell -> if (leaf.captureAs != null) {
                 if (!StaticShellSafety.allows(context.event, whitelistedIds())) {
                     ProgramActionResult(ActionResult.Failure("shell_external_trigger"))
+                } else if (!shizukuReady()) {
+                    // La shell è l'ULTIMA SPIAGGIA e gira solo privilegiata: senza Shizuku pronto
+                    // fallisce tipizzata ("shizuku_unavailable") invece di esplodere in un
+                    // IllegalStateException degradato a "action_failed" generico.
+                    ProgramActionResult(ActionResult.Failure("shizuku_unavailable"))
                 } else {
                     staticShell.runCaptured(leaf.cmd, context)
                 }
@@ -177,10 +182,14 @@ class ShizukuActionExecutor(
 
             // Ultima linea dopo validator e FirePolicy: l'identità si verifica sull'evento
             // realmente arrivato, non su quella dichiarata nella regola.
-            is Action.RunShell -> if (StaticShellSafety.allows(ctx.event, whitelistedIds())) {
-                staticShell.run(action.cmd, ctx)
-            } else {
+            is Action.RunShell -> if (!StaticShellSafety.allows(ctx.event, whitelistedIds())) {
                 ActionResult.Failure("shell_external_trigger")
+            } else if (!shizukuReady()) {
+                // Ultima spiaggia + privilegio: se Shizuku non è pronto la shell non parte,
+                // e lo dice con un codice parlante invece del generico "action_failed".
+                ActionResult.Failure("shizuku_unavailable")
+            } else {
+                staticShell.run(action.cmd, ctx)
             }
 
             // Clipboard: locale, senza privilegi; il payload arriva dall'evento del trigger.
