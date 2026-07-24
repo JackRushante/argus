@@ -6,6 +6,8 @@ Release and engineering notes, newest first.
 
 ### Fixed
 
+- Clarification replies are now treated as normal conversation instead of malformed-rule errors.
+  The next user answer carries the original request and clarification dialogue back into compilation.
 - Added the missing Hermes `/act` schema v3 path for resolved runtime data, strict marker/data
   validation, capability negotiation in `/health/v2`, and a shared Kotlin/Python golden request.
 - Made P4 `invoke_llm` capture and WhatsApp/local-notification delivery synchronous and explicit.

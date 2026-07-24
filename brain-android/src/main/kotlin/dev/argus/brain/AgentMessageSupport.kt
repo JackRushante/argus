@@ -414,7 +414,10 @@ BINDING RULES:
       approved program as that variable and is never delivered directly. allowedTools=[] or
       ["web.search"], replyTargetSender=false, contextSources=[] or ["state"], and
       notificationTitle=null. Use trigger-payload vars for notification/SMS text.
-    "show_notification" is NEVER a generative tool (never in allowedTools); invoke_llm_v2 stays reply-only."""
+    "show_notification" is NEVER a generative tool (never in allowedTools); invoke_llm_v2 stays reply-only.
+17. One compile response can contain exactly ONE AutomationDraft. Never offer to create two drafts
+    in one response. If independent triggers require separate automations, ask which one to create
+    first, compile only that one, and tell the user to submit the second separately after approval."""
 
     const val DRAFT_SCHEMA_TEXT = """AutomationDraft JSON (names and casing are exact):
 {

@@ -9,7 +9,8 @@
     "invoke_llm_v2 is flat-v1 only",
     "A P4 state binding may also feed",
     "[\"whatsapp_reply\",\"web.search\"]",
-    "\"CAPTURE_ONLY\""
+    "\"CAPTURE_ONLY\"",
+    "exactly ONE AutomationDraft"
   ],
   "forbidden": [
     "\"confidentiality\":\"PUBLIC\"|\"PRIVATE\"|\"SECRET\" (optional, default PUBLIC)",
