@@ -44,6 +44,8 @@ class Engine(
             "interpolation_too_long",
             "resolved_action_invalid",
             "taint_blocked",
+            "remote_egress_blocked",
+            "p4_invoke_llm_v2_unsupported",
         )
     }
 

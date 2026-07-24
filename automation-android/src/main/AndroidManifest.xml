@@ -25,6 +25,15 @@
     <!-- Vibrazione one-shot (S4): permesso normal, auto-concesso. -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- Package visibility minima per risolvere localmente nomi come "Google Messaggi".
+         Non richiede QUERY_ALL_PACKAGES: sono visibili soltanto le app avviabili dall'utente. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
     <application>
         <service
             android:name="dev.argus.automation.notification.ArgusNotificationListenerService"

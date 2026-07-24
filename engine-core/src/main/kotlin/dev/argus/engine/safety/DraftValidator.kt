@@ -95,6 +95,12 @@ class DraftValidator(
         // --- P4 §2.5: variabili, capture, control-flow, interpolazione, budget ---
         validateVars(d.vars, d.trigger, ::err)
         val tree = preflightActions(d.actions, ::err)
+        if (AutomationSchema.versionFor(d) == AUTOMATION_SCHEMA_VERSION_P4 && tree.hasInvokeLlmV2) {
+            err(
+                "p4_invoke_llm_v2_unsupported",
+                "InvokeLlm v2 non è ancora ammesso nei programmi P4; usa invoke_llm o una regola flat",
+            )
+        }
         validateCaptureNames(tree.captures, d.vars, ::err)
         if (d.vars.size + tree.captures.size > MAX_VARS) {
             err("too_many_vars", "Massimo $MAX_VARS variabili per regola, inclusi i captureAs")
@@ -263,6 +269,7 @@ class DraftValidator(
         val captures: List<CaptureDeclaration>,
         val tooDeep: Boolean,
         val hasGenerative: Boolean,
+        val hasInvokeLlmV2: Boolean,
     )
 
     /** Preflight iterativo: nessuna ricorsione prima del bound profondità/numero nodi. */
@@ -276,6 +283,7 @@ class DraftValidator(
         var total = 0
         var tooDeep = false
         var hasGenerative = false
+        var hasInvokeLlmV2 = false
         while (pending.isNotEmpty()) {
             val (action, depth) = pending.removeFirst()
             total = (total + 1).coerceAtMost(MAX_TOTAL_ACTIONS + 1)
@@ -286,7 +294,11 @@ class DraftValidator(
             }
             captureDeclaration(action)?.let(captures::add)
             when (action) {
-                is Action.InvokeLlm, is Action.InvokeLlmV2 -> hasGenerative = true
+                is Action.InvokeLlm -> hasGenerative = true
+                is Action.InvokeLlmV2 -> {
+                    hasGenerative = true
+                    hasInvokeLlmV2 = true
+                }
                 is Action.If -> {
                     action.then.forEach { pending.addLast(ActionFrame(it, depth + 1)) }
                     action.orElse.forEach { pending.addLast(ActionFrame(it, depth + 1)) }
@@ -295,7 +307,7 @@ class DraftValidator(
                 else -> Unit
             }
         }
-        return ActionTreeSummary(total, captures, tooDeep, hasGenerative)
+        return ActionTreeSummary(total, captures, tooDeep, hasGenerative, hasInvokeLlmV2)
     }
 
     private fun captureDeclaration(action: Action): CaptureDeclaration? = when (action) {
@@ -1079,7 +1091,7 @@ class DraftValidator(
         err: (String, String) -> Unit,
         warn: (String, String) -> Unit,
     ) {
-        // Controlli comuni ai due sink (goal + forma delle context sources).
+        // Controlli comuni ai tre sink (goal + forma delle context sources).
         validateRequiredText(action.goal, MAX_TEXT_LENGTH, "goal_invalid", err)
         if (action.contextSources.size > MAX_TOOL_COUNT || action.contextSources.any { it.isBlank() || it.length > 120 })
             err("context_sources_invalid", "Context sources non valide o troppe")
@@ -1089,9 +1101,11 @@ class DraftValidator(
                 validateInvokeLlmReplyDeliver(action, trigger, whitelist, err, warn)
             GenerativeDeliverMode.LOCAL_NOTIFICATION ->
                 validateInvokeLlmNotificationDeliver(action, err)
+            GenerativeDeliverMode.CAPTURE_ONLY ->
+                validateInvokeLlmCaptureOnly(action, err)
         }
 
-        // Difesa in profondità per-tool + timeout: valgono per ENTRAMBI i sink (web.search è in
+        // Difesa in profondità per-tool + timeout: valgono per tutti i sink (web.search è in
         // knownTools; shell.run/automation.* restano vietati e i tool ignoti respinti).
         if (action.allowedTools.size > MAX_TOOL_COUNT) err("too_many_tools", "Troppi tool in InvokeLlm")
         if (action.timeoutMs !in 1_000..MAX_LLM_TIMEOUT_MS)
@@ -1105,6 +1119,34 @@ class DraftValidator(
                 forbidden -> err("tool_forbidden", "Tool '$tool' vietato al fire-time generativo")
                 tool !in knownTools -> err("tool_unknown", "Tool '$tool' non nel catalogo")
             }
+        }
+    }
+
+    /** Sink interno P4: genera testo per captureAs, senza reply né notifica. */
+    private fun validateInvokeLlmCaptureOnly(
+        action: Action.InvokeLlm,
+        err: (String, String) -> Unit,
+    ) {
+        if (action.captureAs == null) {
+            err("capture_required", "CAPTURE_ONLY richiede captureAs")
+        }
+        if (action.replyTargetSender) {
+            err("reply_target_forbidden", "CAPTURE_ONLY non può vincolare un destinatario")
+        }
+        if (action.notificationTitle != null) {
+            err("notification_title_forbidden", "CAPTURE_ONLY non usa un titolo notifica")
+        }
+        if (!GenerativeContract.isNotificationToolset(action.allowedTools)) {
+            err(
+                "allowed_tools_unsupported",
+                "CAPTURE_ONLY ammette al più web.search, mai whatsapp_reply",
+            )
+        }
+        action.contextSources.filterNot { it == GenerativeContract.CONTEXT_STATE }.forEach { source ->
+            err("context_source_unsupported", "Context source '$source' non supportata da CAPTURE_ONLY")
+        }
+        if (action.contextSources.size != action.contextSources.distinct().size) {
+            err("context_sources_duplicated", "Context sources duplicate in CAPTURE_ONLY")
         }
     }
 

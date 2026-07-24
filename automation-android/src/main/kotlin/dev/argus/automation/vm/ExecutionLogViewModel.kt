@@ -165,9 +165,12 @@ class ExecutionLogViewModel @Inject constructor(
         }
         deferredReplies.markDelivered(reply)
         val opened = try {
-            context.packageManager.getLaunchIntentForPackage(reply.packageName)
-                ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                ?.also(context::startActivity) != null
+            val launch = Intent(Intent.ACTION_MAIN)
+                .addCategory(Intent.CATEGORY_LAUNCHER)
+                .setPackage(reply.packageName)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(launch)
+            true
         } catch (error: CancellationException) {
             throw error
         } catch (_: Exception) {

@@ -102,10 +102,10 @@ class AndroidGenerativeLane(
     }
 
     /**
-     * Canale RISOLTO P4-D2 (capture): accoda sulla STESSA lane single-consumer e sospende finché il
-     * worker completa il deferred con l'esito di `brain.actResolved`. Il dato TAINTED resta in
-     * [runtimeData], mai nel goal. Il TEMPLATE approvato (pre-interpolazione) viene catturato ORA così
-     * la revalidazione confronta template⇄template, non l'azione interpolata (che porta i marker).
+     * Canale sincrono P4 per [Action.InvokeLlm]: gestisce sia capture sia consegna. Accoda sulla
+     * STESSA lane single-consumer e sospende fino a modello + revalidazione + eventuale sink. Il dato
+     * TAINTED resta in [runtimeData], mai nel goal. Il TEMPLATE approvato (pre-interpolazione) viene
+     * catturato ORA così la revalidazione confronta template⇄template, non l'azione interpolata.
      */
     override suspend fun submitAndAwait(
         context: FireContext,
@@ -158,25 +158,37 @@ class AndroidGenerativeLane(
     }
 
     /**
-     * Esegue la capture RISOLTA: revalida (pre e post modello), chiama `brain.actResolved` sotto
-     * [withTimeout]/budget/policy e restituisce l'esito. MAI consegna reply/notifica (è capture): il
-     * testo torna al chiamante che lo cattura. Un metaError (budget_exceeded, approval_changed,
-     * act_timeout, brain_failed) sopprime la capture senza falso successo.
+     * Esegue una foglia generativa P4 sincrona. Con runtime data usa `brain.actResolved`; senza usa
+     * il normale `brain.act` (evita di negoziare schema 3 con una lista vuota). Dopo la seconda
+     * revalidazione, `captureAs` restituisce il testo all'interprete; una foglia senza capture lo
+     * consegna qui, dove esistono anche defer cifrato e notifier.
      */
     private suspend fun processResolved(queued: QueuedAction, request: ResolvedRequest): ActResult {
         validateResolved(queued, request)?.let { return ActResult(text = null, metaError = it) }
         val action = queued.action as? Action.InvokeLlm
             ?: return ActResult(text = null, metaError = "action_contract_invalid")
+        if (!validContract(queued)) {
+            return ActResult(text = null, metaError = "action_contract_invalid")
+        }
 
         val act = try {
             withTimeout(action.timeoutMs) {
-                brain.actResolved(
-                    context = queued.context,
-                    goal = action.goal,
-                    contextSources = action.contextSources,
-                    allowedTools = action.allowedTools,
-                    runtimeData = request.runtimeData,
-                )
+                if (request.runtimeData.isEmpty()) {
+                    brain.act(
+                        context = queued.context,
+                        goal = action.goal,
+                        contextSources = action.contextSources,
+                        allowedTools = action.allowedTools,
+                    )
+                } else {
+                    brain.actResolved(
+                        context = queued.context,
+                        goal = action.goal,
+                        contextSources = action.contextSources,
+                        allowedTools = action.allowedTools,
+                        runtimeData = request.runtimeData,
+                    )
+                }
             }
         } catch (_: TimeoutCancellationException) {
             return ActResult(text = null, metaError = "act_timeout")
@@ -186,13 +198,61 @@ class AndroidGenerativeLane(
             return ActResult(text = null, metaError = "brain_failed")
         }
 
-        if (act.text == null) {
+        val text = act.text
+        if (text == null) {
             return ActResult(text = null, metaError = safeCode(act.metaError, "brain_failed"))
         }
         // Revalidazione POST-modello: un edit/disabilitazione/policy revocata durante la latenza LLM
         // sopprime la capture (nessun falso successo), esattamente come il sink async.
         validateResolved(queued, request)?.let { return ActResult(text = null, metaError = it) }
-        return act
+        if (action.captureAs != null) return act
+        return deliverResolved(queued, action, text)
+    }
+
+    /** Consegna sincrona P4. Il testo restituito segnala successo all'executor ma non viene catturato. */
+    private suspend fun deliverResolved(
+        queued: QueuedAction,
+        action: Action.InvokeLlm,
+        text: String,
+    ): ActResult {
+        if (action.deliver == GenerativeDeliverMode.LOCAL_NOTIFICATION) {
+            return try {
+                notifier.show(requireNotNull(action.notificationTitle), text, queued.context)
+                ActResult(text = text, metaError = null)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                ActResult(text = null, metaError = "notify_failed")
+            }
+        }
+        if (action.deliver == GenerativeDeliverMode.CAPTURE_ONLY) {
+            return ActResult(text = null, metaError = "capture_required")
+        }
+        val notification = queued.context.event as? TriggerEvent.NotificationPosted
+            ?: return ActResult(text = null, metaError = "reply_event_unverified")
+        return when (
+            val delivery = replies.send(
+                NotificationReplyRequest(
+                    packageName = notification.pkg,
+                    notificationKey = notification.notificationKey.orEmpty(),
+                    conversationId = notification.conversationId.orEmpty(),
+                    eventId = queued.context.eventId,
+                    text = text,
+                ),
+            )
+        ) {
+            NotificationReplyDelivery.Sent -> ActResult(text = text, metaError = null)
+            is NotificationReplyDelivery.Failed -> {
+                if (delivery.code in DEFER_ELIGIBLE_CODES && deferSafely(queued.context, text)) {
+                    ActResult(text = text, metaError = null)
+                } else {
+                    ActResult(
+                        text = null,
+                        metaError = safeCode(delivery.code, "reply_send_failed"),
+                    )
+                }
+            }
+        }
     }
 
     /**
@@ -405,6 +465,13 @@ class AndroidGenerativeLane(
             GenerativeDeliverMode.LOCAL_NOTIFICATION -> !action.replyTargetSender &&
                 GenerativeContract.isNotificationToolset(action.allowedTools) &&
                 validNotificationTitle(action.notificationTitle) &&
+                action.contextSources == action.contextSources.distinct() &&
+                action.contextSources.all { it == GenerativeContract.CONTEXT_STATE } &&
+                action.timeoutMs in MIN_TIMEOUT_MILLIS..MAX_TIMEOUT_MILLIS
+            GenerativeDeliverMode.CAPTURE_ONLY -> action.captureAs != null &&
+                !action.replyTargetSender &&
+                action.notificationTitle == null &&
+                GenerativeContract.isNotificationToolset(action.allowedTools) &&
                 action.contextSources == action.contextSources.distinct() &&
                 action.contextSources.all { it == GenerativeContract.CONTEXT_STATE } &&
                 action.timeoutMs in MIN_TIMEOUT_MILLIS..MAX_TIMEOUT_MILLIS

@@ -13,6 +13,11 @@ data class CompileResult(
     val usage: TurnUsage? = null,
 )
 
+/** Codici compile condivisi tra transport e decorator: evitano retry basati su stringhe duplicate. */
+object CompileMetaError {
+    const val DRAFT_INVALID = "draft_invalid"
+}
+
 data class ActResult(
     val text: String?,
     val metaError: String?,

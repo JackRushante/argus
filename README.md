@@ -171,16 +171,16 @@ program tree and fingerprint do not.
 | `open_settings_screen` | Opens a Settings screen from a **closed enum** (never arbitrary action strings) | Base |
 | `show_notification` | Local Argus notification | Base |
 | `set_alarm` / `set_timer` | **Real** clock-app alarm/timer via the `AlarmClock` Intent | Base |
-| `copy_to_clipboard` / `copy_text` | Copies the trigger payload (optionally through a linear regex) or resolved literal/variable text. The OTP extraction path is deterministic and local | Base |
+| `copy_to_clipboard` / `copy_text` | Copies the trigger payload (optionally through a linear regex) or resolved literal/variable text. The OTP path is local; Argus schedules compare-and-clear of its unchanged clip after 60 seconds (process-local) | Base |
 | `set_flashlight` / `vibrate` | Flashlight on/off, one-shot vibration | Base |
-| `set_dark_mode` | Light/dark/automatic system theme. Executor support exists, but v0.3.0 has a known lowercase/uppercase compiler-wire mismatch | Shizuku |
+| `set_dark_mode` | Light/dark/automatic system theme; accepts the lowercase compiler wire and legacy persisted uppercase values | Shizuku |
 | `whatsapp_reply` | WhatsApp reply via the notification's RemoteInput | Base (notification listener) |
 | `run_shell` | Shell command template, shown in full at approval; P4 variables may be interpolated under the Aggressive policy | Shizuku |
 | `write_setting` | Parametric `settings put` on `system\|secure\|global` (any validated key/value template) | Shizuku |
-| `tap` / `input_text` | Reserved UI input primitives; v0.3.0 rejects them with `unsupported_phase` | Not available |
+| `tap` / `input_text` | Reserved UI input primitives; rejected with `unsupported_phase` and never advertised as available | Not available |
 | `wait` / `if` / `while` | Cooperative pause and structured, bounded control flow | Engine |
-| `invoke_llm` | **Generative**: at fire time the LLM produces text and delivers it to an approved WhatsApp/local-notification sink. With `captureAs`, P4 instead captures the result without delivery; this currently works with direct providers but is blocked by the known Hermes schema-3 server gap | Base |
-| `invoke_llm_v2` | P3 variant with explicit state context: every reader, type and classification enters the approved fingerprint. Flat delivery is supported; P4 capture/delivery remains a known limitation | Base |
+| `invoke_llm` | **Generative**: at fire time the LLM produces text for an explicit `WHATSAPP_REPLY`, `LOCAL_NOTIFICATION`, or P4 `CAPTURE_ONLY` sink. Hermes and direct providers support the resolved capture path | Base |
+| `invoke_llm_v2` | P3 variant with explicit state context: every reader, type and classification enters the approved fingerprint. Flat delivery is supported; nesting it inside P4 is rejected before approval | Base |
 
 ---
 
@@ -202,7 +202,7 @@ The "Brain" is pluggable: the app always owns the loop, the LLM is a reasoning s
 
 ### Hermes bridge (optional, self-hosted)
 
-`ops/hermes/bridge.py` is a one-shot service meant for people who already run a self-hosted LLM agent on their own server: it exposes `POST /compile` (NL → rule draft) and strict versioned `POST /act` lanes, with bearer token, idempotent request-ids, body/output limits and fail-closed parsing. The checked-in server currently implements `/act` v1/v2; the Android P4 resolved-capture client already defines v3, but server support and health negotiation are still missing. The service binds to loopback only and should be published over HTTPS on a private network (e.g. a mesh VPN / Tailscale Serve). Example systemd unit and `.env` are included in `ops/hermes/`.
+`ops/hermes/bridge.py` is a one-shot service meant for people who already run a self-hosted LLM agent on their own server: it exposes `POST /compile` (NL → rule draft) and strict versioned `POST /act` lanes, with bearer token, idempotent request-ids, body/output limits and fail-closed parsing. `/act` v1/v2 cover legacy and state-aware delivery; v3 carries P4 resolved runtime values in a strictly validated DATA envelope. Android requires v3 in `/health/v2`, so a stale bridge fails visibly before execution. The service binds to loopback only and should be published over HTTPS on a private network (e.g. a mesh VPN / Tailscale Serve). Example systemd unit and `.env` are included in `ops/hermes/`.
 
 **The app works without the bridge**: just pick a direct provider with your own key. The bridge exists only for those who want to compile rules with their own self-hosted agent instead of a commercial API.
 
@@ -217,7 +217,7 @@ The main threat model is **prompt injection from external content** (SMS, notifi
 - **Approval fingerprint** — SHA-256 (`argus-approval-v1`) of the canonical JSON of the **executable data only**; the LLM's prose is excluded from the hash. What fires is byte-for-byte what you approved; any change requires re-approval.
 - **Rendering from the types** — the approval screen shows the rule reconstructed from the domain types, never the LLM's paraphrase. Shell commands are shown in full, in monospace, never truncated.
 - **`DraftValidator`** — no draft enters the engine without validation: closed vocabularies (state keys, enums, tools), bounds on every field (lengths, ranges, condition-tree depth), hard invariants (e.g. `invoke_llm`'s `allowed_tools` can never contain `shell.run` or `automation.*` — re-checked at fire time as well).
-- **Centralized taint policy** — integrity labels remain monotonic, but v0.3.0 deliberately enables the **Aggressive** policy: a TAINTED trigger/capture value may be interpolated into approved authority templates such as commands, URLs, packages and settings. The program structure and capabilities remain fingerprinted, but data-driven authority creates a real injection surface. The policy can be reverted at one central switch; do not treat SYSTEM/DATA prompt separation as a sandbox.
+- **Centralized taint and egress policy** — integrity labels remain monotonic, but the **Aggressive** policy deliberately permits a TAINTED trigger/capture value in approved authority templates such as commands, URLs, packages and settings. The program structure and capabilities remain fingerprinted, but data-driven authority creates a real injection surface. Remote egress is a separate decision: future credential-vault values are blocked from every remote Brain regardless of the taint posture, while generic `SECRET` data requires explicit review.
 - **`StaticShellSafety`** — `run_shell` can only be triggered by triggers with a non-forgeable identity (time, immediate, geofence, connectivity, sensor) or by a **whitelisted** WhatsApp 1:1 chat identified by a stable `conversationId`. SMS and caller ID are excluded as a hard limit (spoofable), and the approved-trigger ↔ live-event binding is verified at runtime.
 - **PII-free audit log** — every fire, suppression, error and lifecycle transition (arm/disable/delete/needs-review) is recorded in append-only Room with **closed-vocabulary reason codes**: never free text, never message content; event ids are hashed.
 - **Minimization toward the Brain** — compile receives a capability manifest and a **redacted** device state (only keys from the approved registry); GPS coordinates never leave the phone (only `location_available` is sent). Generative replies are bound to the trigger's sender, whitelisted 1:1 chats only.
@@ -254,7 +254,7 @@ Argus degrades explicitly: the onboarding shows an honest list of what depends o
 Note: on non-rooted devices Shizuku must be started via ADB and **does not survive a reboot**; Argus detects this and degrades fail-closed (the privileged action is never executed late), guiding you through recovery.
 
 `tap` and `input_text` are present in the domain/tooling as foundations for future computer-use,
-but the production executor intentionally rejects them in v0.3.0.
+but the production executor rejects them and the capability manifest marks them unavailable.
 
 ---
 
@@ -327,13 +327,13 @@ Open an [Issue](https://github.com/JackRushante/argus/issues) with: what you ask
 
 ## Project status and roadmap
 
-**Active development.** Phases completed and verified on a real device: P0 (engine core + Android glue), P1 (notifications/WhatsApp generative replies), P2 (background triggers: SMS/OTP, calls, connectivity/power/BT, geofence), P3 (parametric state readers, sensor triggers, base tier without Shizuku, multi-provider with per-provider budgets and usage tracking). P4 variables, deterministic structured flow and capture are shipped in **v0.3.0**; the remaining generative-in-P4 limitations are documented below. Since **v0.2.0** the app is fully bilingual (English/Italian, follows the system language).
+**Active development.** Phases completed and verified on a real device: P0 (engine core + Android glue), P1 (notifications/WhatsApp generative replies), P2 (background triggers: SMS/OTP, calls, connectivity/power/BT, geofence), P3 (parametric state readers, sensor triggers, base tier without Shizuku, multi-provider with per-provider budgets and usage tracking), and P4 variables, deterministic structured flow, resolved model capture and nested delivery. Since **v0.2.0** the app is fully bilingual (English/Italian, follows the system language).
 
 Short roadmap:
 
-- **Close the remaining P4 generative gap** — synchronous delivery for `invoke_llm` nested in
-  `if`/`while`, plus a resolved `invoke_llm_v2` capture lane. Today these paths fail closed; flat
-  generative delivery and `invoke_llm.captureAs` are supported.
+- **State-aware P4 generation** — design a resolved `invoke_llm_v2` lane with the same strict
+  runtime-data framing as v3. Until that contract exists, the compiler and validator reject this
+  combination before approval.
 - **Broader device control** — complete and validate interactive screen→action execution, including a
   conservative accessibility/vision fallback for UI surfaces that expose insufficient semantics.
 - **Cross-OEM hardening** — expand the real-device matrix beyond the current OnePlus/Android 16 test

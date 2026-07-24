@@ -144,4 +144,30 @@ class AutomationSerializationTest {
         assertTrue(StateKeys.RINGER in StateKeys.ALL)
         assertTrue(StateKeys.ALL.getValue(StateKeys.RINGER).contains("silent"))
     }
+
+    @Test fun `night mode accepts lowercase compiler wire and preserves uppercase storage`() {
+        val lower = """{"type":"set_dark_mode","mode":"on"}"""
+        val decoded = ArgusJson.decodeFromString(Action.serializer(), lower)
+        assertEquals(Action.SetDarkMode(NightMode.ON), decoded)
+
+        val persisted = ArgusJson.encodeToString(Action.serializer(), decoded)
+        assertTrue(persisted.contains("\"mode\":\"ON\""), persisted)
+        assertEquals(decoded, ArgusJson.decodeFromString(Action.serializer(), persisted))
+    }
+
+    @Test fun `invoke llm capture only serializes an explicit internal sink`() {
+        val capture = Action.InvokeLlm(
+            goal = "summarize",
+            contextSources = emptyList(),
+            allowedTools = emptyList(),
+            replyTargetSender = false,
+            deliver = GenerativeDeliverMode.CAPTURE_ONLY,
+            captureAs = "summary",
+        )
+
+        val json = ArgusJson.encodeToString(Action.serializer(), capture)
+        assertTrue(json.contains("\"deliver\":\"CAPTURE_ONLY\""), json)
+        assertTrue(json.contains("\"captureAs\":\"summary\""), json)
+        assertEquals(capture, ArgusJson.decodeFromString(Action.serializer(), json))
+    }
 }

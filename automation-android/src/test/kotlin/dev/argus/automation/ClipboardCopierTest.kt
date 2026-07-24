@@ -1,5 +1,6 @@
 package dev.argus.automation
 
+import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
@@ -18,7 +19,12 @@ import kotlin.test.assertTrue
 @Config(sdk = [34])
 class ClipboardCopierTest {
     private val context: Context = ApplicationProvider.getApplicationContext()
-    private val copier = AndroidClipboardCopier(context)
+    private val scheduled = mutableListOf<() -> Unit>()
+    private val copier = AndroidClipboardCopier(
+        context = context,
+        expiryMillis = 60_000,
+        expiryScheduler = ClipboardExpiryScheduler { _, block -> scheduled += block },
+    )
     private val manager: ClipboardManager
         get() = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
 
@@ -107,5 +113,36 @@ class ClipboardCopierTest {
         assertEquals(ActionResult.Failure("clipboard_source_missing"), copier.copyLiteral("   "))
         // Il contenuto precedente resta intatto dopo il fallimento.
         assertEquals("valore precedente", manager.primaryClip?.getItemAt(0)?.text?.toString())
+    }
+
+    @Test
+    fun `expiry clears an unchanged Argus clip`() {
+        assertEquals(ActionResult.Success, copier.copyLiteral("482913"))
+
+        scheduled.single().invoke()
+
+        assertTrue(manager.primaryClip == null || manager.primaryClip?.itemCount == 0)
+    }
+
+    @Test
+    fun `expiry preserves a clip replaced by the user`() {
+        assertEquals(ActionResult.Success, copier.copyLiteral("482913"))
+        manager.setPrimaryClip(ClipData.newPlainText("user", "non cancellare"))
+
+        scheduled.single().invoke()
+
+        assertEquals("non cancellare", manager.primaryClip?.getItemAt(0)?.text?.toString())
+    }
+
+    @Test
+    fun `an older expiry cannot clear a newer Argus clip`() {
+        assertEquals(ActionResult.Success, copier.copyLiteral("primo"))
+        assertEquals(ActionResult.Success, copier.copyLiteral("secondo"))
+
+        scheduled[0].invoke()
+        assertEquals("secondo", manager.primaryClip?.getItemAt(0)?.text?.toString())
+
+        scheduled[1].invoke()
+        assertTrue(manager.primaryClip == null || manager.primaryClip?.itemCount == 0)
     }
 }

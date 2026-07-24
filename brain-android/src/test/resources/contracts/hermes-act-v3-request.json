@@ -1,0 +1,27 @@
+{
+  "schema_version": 3,
+  "request_id": "act-d942ad1dca04866665b9e75219976300a81e2374066a956549ddd541830986e3",
+  "goal": "Rispondi usando il dato {{ARGUS_RUNTIME_DATA_1}}",
+  "context_sources": [
+    "notification"
+  ],
+  "allowed_tools": [
+    "whatsapp_reply"
+  ],
+  "context": {
+    "notification": {
+      "package": "com.whatsapp",
+      "sender": "Moglie",
+      "title": "Moglie",
+      "text": "ciao",
+      "is_group": false
+    },
+    "state": null
+  },
+  "runtime_data": [
+    {
+      "token": "ARGUS_RUNTIME_DATA_1",
+      "value": "INJECT_SENTINEL_XYZ"
+    }
+  ]
+}

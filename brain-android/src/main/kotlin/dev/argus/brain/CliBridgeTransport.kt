@@ -575,11 +575,10 @@ class CliBridgeTransport internal constructor(
             COMPILE_SCHEMA_VERSION !in health.compileSchemaVersions ||
             ACT_SCHEMA_VERSION !in health.actSchemaVersions ||
             ACT_V2_SCHEMA_VERSION !in health.actSchemaVersions ||
-            // P4-D2: il canale RISOLTO (schema 3, actResolved) NON e' un requisito di health. Un bridge
-            // che annuncia solo [1,2] resta pienamente utilizzabile (compile P4 + act v1/v2); solo la
-            // CAPTURE generativa P4 usa il canale risolto, e quel singolo path fallisce-chiuso per-call
-            // se il bridge non lo supporta. Renderlo obbligatorio qui buttava offline OGNI bridge
-            // esistente (nessuno annuncia ancora 3), violando l'ordine di deploy app-prima-bridge.
+            // P4-D2: la capture generativa usa sempre actResolved/schema 3. Un bridge che non la
+            // annuncia non soddisfa più il contratto dell'app e deve risultare incompatibile subito,
+            // non fallire soltanto al primo programma P4 sul device.
+            ACT_RESOLVED_SCHEMA_VERSION !in health.actSchemaVersions ||
             !SOURCE_SHA256.matches(health.sourceSha256)) {
             throw BridgeException(BridgeErrorKind.PROTOCOL, "health incompatibile")
         }
@@ -828,9 +827,8 @@ class CliBridgeTransport internal constructor(
         const val ACT_V2_SCHEMA_VERSION = 2
 
         /**
-         * P4-D2 (slice 1): schema del canale RISOLTO anti-injection. Distinto da act/actV2 così il
-         * campo additivo `runtime_data` è negoziabile a parte; l'aggancio a `health()` (annuncio della
-         * versione) è materia di slice 2 quando si solleva la barriera fail-closed.
+         * Schema del canale risolto anti-injection. Distinto da act/actV2 perché il campo
+         * `runtime_data` è negoziato esplicitamente; health() richiede che il bridge annunci v3.
          */
         const val ACT_RESOLVED_SCHEMA_VERSION = 3
         const val HEALTH_SCHEMA_VERSION = 2
@@ -859,7 +857,11 @@ class CliBridgeTransport internal constructor(
         private val PACKAGE_NAME = Regex("[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z0-9_]+)+")
         private val SOURCE_SHA256 = Regex("[0-9a-f]{64}")
         private val SUPPORTED_COMPILE_SCHEMA_VERSIONS = listOf(1, COMPILE_SCHEMA_VERSION)
-        private val SUPPORTED_ACT_SCHEMA_VERSIONS = listOf(ACT_SCHEMA_VERSION, ACT_V2_SCHEMA_VERSION)
+        private val SUPPORTED_ACT_SCHEMA_VERSIONS = listOf(
+            ACT_SCHEMA_VERSION,
+            ACT_V2_SCHEMA_VERSION,
+            ACT_RESOLVED_SCHEMA_VERSION,
+        )
         private val ACT_CONTEXT_SOURCES = setOf("notification", "state")
 
         /** Sink NOTIFICA #59: sorgenti ammesse senza reply — solo "state" (opzionale), MAI

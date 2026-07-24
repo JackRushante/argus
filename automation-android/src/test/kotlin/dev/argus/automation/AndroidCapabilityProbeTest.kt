@@ -58,7 +58,9 @@ class AndroidCapabilityProbeTest {
         assertEquals(StateKeys.ALL, manifest.stateKeys)
         assertEquals(listOf(WhitelistedContact("Moglie", "jid:42")), manifest.whitelistedContacts)
         assertTrue("notification_listener" in manifest.grantedPermissions)
-        assertTrue(AndroidCapabilityProbe.TOOL_STATE_READ in manifest.availableTools)
+        assertFalse(AndroidCapabilityProbe.TOOL_STATE_READ in manifest.availableTools)
+        assertFalse(AndroidCapabilityProbe.TOOL_STATE_READ in manifest.unavailableTools)
+        assertTrue(AndroidCapabilityProbe.TOOL_STATE_READ in snapshot.availableCapabilities)
         assertTrue(AndroidCapabilityProbe.TOOL_NOTIFY_SHOW in manifest.availableTools)
         assertTrue(ActionTypeIds.SET_DND in manifest.availableTools)
         assertTrue(ActionTypeIds.SET_WIFI in manifest.availableTools)
@@ -537,21 +539,15 @@ class AndroidCapabilityProbeTest {
     }
 
     @Test
-    fun `shizuku raw tools stay aligned between manifest and policy snapshot`() = runTest {
-        val authorized = probe(state()).current()
-        AndroidCapabilityProbe.SHIZUKU_TOOLS.forEach { tool ->
-            assertTrue(tool in authorized.availableCapabilities, "manca $tool")
-        }
-
-        val stopped = probe(
-            state().copy(
-                shizukuStatus = ShizukuGatewayStatus.INSTALLED_NOT_RUNNING,
-                shizukuPermissionGranted = true,
-            ),
-        ).current()
-        AndroidCapabilityProbe.SHIZUKU_TOOLS.forEach { tool ->
-            assertFalse(tool in stopped.availableCapabilities)
-            assertTrue(tool in stopped.transientlyUnavailableCapabilities, "manca transiente $tool")
+    fun `unimplemented raw tools are never advertised even with Shizuku`() = runTest {
+        val authorized = probe(state())
+        val manifest = authorized.probe(DeviceState())
+        val snapshot = authorized.current()
+        AndroidCapabilityProbe.UNIMPLEMENTED_RAW_TOOLS.forEach { tool ->
+            assertFalse(tool in manifest.availableTools, "$tool non ha un Action wire eseguibile")
+            assertTrue(tool in manifest.unavailableTools, "manca la ragione per $tool")
+            assertFalse(tool in snapshot.availableCapabilities, "$tool non deve armare regole")
+            assertFalse(tool in snapshot.transientlyUnavailableCapabilities)
         }
     }
 

@@ -609,6 +609,54 @@ class GenerativeActionLaneTest {
         assertEquals(SENTINEL, fixture.brain.lastResolvedRuntimeData.single().value.text)
     }
 
+    @Test
+    fun `p4 synchronous notification delivery uses act v1 when runtime data is empty`() = runTest {
+        val action = notificationAction()
+        val automation = approvedAutomation(action)
+        val event = TriggerEvent.ImmediateFired(
+            automation.id,
+            requireNotNull(automation.approvalFingerprint),
+        )
+        val fixture = fixture(
+            action = action,
+            automation = automation,
+            context = context(automation, action, event = event),
+        )
+
+        val result = fixture.lane.submitAndAwait(fixture.context, action, emptyList())
+
+        assertEquals("risposta", result.text)
+        assertEquals(1, fixture.brain.calls)
+        assertEquals(0, fixture.brain.resolvedCalls)
+        assertEquals("Cambio EUR/USD", fixture.notifier.calls.single().title)
+        assertEquals("risposta", fixture.notifier.calls.single().text)
+    }
+
+    @Test
+    fun `explicit capture only returns text without touching a delivery sink`() = runTest {
+        val action = captureOnlyAction()
+        val automation = approvedAutomation(
+            action,
+            Trigger.Time(cron = "0 8 * * *", tz = "Europe/Rome"),
+        )
+        val event = TriggerEvent.TimeFired(
+            automationId = automation.id,
+            approvalFingerprint = requireNotNull(automation.approvalFingerprint),
+        )
+        val fixture = fixture(
+            action = action,
+            automation = automation,
+            context = context(automation, action, event = event),
+        )
+
+        val result = fixture.lane.submitAndAwait(fixture.context, action, emptyList())
+
+        assertEquals("risposta", result.text)
+        assertEquals(1, fixture.brain.calls)
+        assertEquals(0, fixture.gateway.calls)
+        assertTrue(fixture.notifier.calls.isEmpty())
+    }
+
     /** Il binding runtime non espone mai il valore RAW in toString (nessun leak nei log/journal). */
     @Test
     fun `resolved runtime binding redacts the value in toString`() = runTest {
@@ -987,6 +1035,16 @@ class GenerativeActionLaneTest {
             timeoutMs = 60_000,
             deliver = GenerativeDeliverMode.LOCAL_NOTIFICATION,
             notificationTitle = notificationTitle,
+        )
+
+        fun captureOnlyAction() = Action.InvokeLlm(
+            goal = "summarize",
+            contextSources = emptyList(),
+            allowedTools = emptyList(),
+            replyTargetSender = false,
+            timeoutMs = 60_000,
+            deliver = GenerativeDeliverMode.CAPTURE_ONLY,
+            captureAs = "summary",
         )
 
         fun approvedAutomation(

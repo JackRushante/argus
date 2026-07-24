@@ -11,6 +11,7 @@ import dev.argus.data.entities.UsageEventOutcome
 import dev.argus.engine.brain.ActResult
 import dev.argus.engine.brain.Brain
 import dev.argus.engine.brain.CapabilityManifest
+import dev.argus.engine.brain.CompileMetaError
 import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.model.Action
 import dev.argus.engine.runtime.AuditEvent
@@ -109,10 +110,42 @@ class MeteredBrain(
             is BudgetVerdict.SoftExceeded -> notifyOnce(verdict.tripped, now)
             BudgetVerdict.Ok -> {}
         }
-        val result = delegate.compile(nl, manifest, state)
-        // S15: il transport (bridge Hermes incluso) ora riporta l'usage reale anche in compile.
-        recordUsage(config, UsageEventKind.COMPILE, now, result.metaError, result.usage)
-        return result
+        val first = delegate.compile(nl, manifest, state)
+        // Ogni tentativo costa ed entra nel budget, anche quando il JSON del modello è malformato.
+        recordUsage(config, UsageEventKind.COMPILE, now, first.metaError, first.usage)
+        if (first.metaError != CompileMetaError.DRAFT_INVALID) return first
+
+        // Retry-once provider-agnostico, ma VISIBILE al choke-point: il primo evento appena
+        // persistito partecipa al nuovo check e un HARD impedisce il secondo contatto. Se l'utente
+        // cambia provider/modello durante il primo turno, non ritentare su una destinazione diversa
+        // da quella appena contabilizzata: un retry manuale ripartirà col nuovo config.
+        if (selectedConfig() != config) return first
+        val retryNow = nowMillis()
+        when (val retryVerdict = verdictFor(config, retryNow)) {
+            is BudgetVerdict.HardExceeded -> {
+                recordBlocked(config, UsageEventKind.COMPILE, retryNow)
+                notifyOnce(retryVerdict.tripped, retryNow)
+                return CompileResult(
+                    reply = BudgetMeta.blockedReply(),
+                    draft = null,
+                    metaError = BudgetMeta.BUDGET_EXCEEDED,
+                )
+            }
+            is BudgetVerdict.UnpricedModel -> {
+                recordBlocked(config, UsageEventKind.COMPILE, retryNow)
+                notifyUnpricedOnce(retryVerdict.providerId)
+                return CompileResult(
+                    reply = BudgetMeta.unpricedModelReply(),
+                    draft = null,
+                    metaError = BudgetMeta.UNPRICED_MODEL,
+                )
+            }
+            is BudgetVerdict.SoftExceeded -> notifyOnce(retryVerdict.tripped, retryNow)
+            BudgetVerdict.Ok -> Unit
+        }
+        val retry = delegate.compile(nl, manifest, state)
+        recordUsage(config, UsageEventKind.COMPILE, retryNow, retry.metaError, retry.usage)
+        return retry
     }
 
     override suspend fun act(

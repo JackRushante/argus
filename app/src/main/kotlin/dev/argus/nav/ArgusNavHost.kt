@@ -284,10 +284,14 @@ fun ArgusNavHost() {
         }
     }
     val openShizukuManager = {
-        val launch = context.packageManager.getLaunchIntentForPackage(SHIZUKU_PACKAGE)
-        if (launch != null) {
-            openIntent(launch)
-        } else {
+        // Evita getLaunchIntentForPackage(): la package visibility di Android 11+ può nascondere
+        // Shizuku pur essendo installato. Proviamo direttamente un selector limitato al package.
+        val launch = Intent(Intent.ACTION_MAIN)
+            .addCategory(Intent.CATEGORY_LAUNCHER)
+            .setPackage(SHIZUKU_PACKAGE)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val opened = runCatching { context.startActivity(launch) }.isSuccess
+        if (!opened) {
             openIntent(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$SHIZUKU_PACKAGE")))
         }
     }
