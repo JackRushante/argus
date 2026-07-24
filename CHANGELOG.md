@@ -8,6 +8,9 @@ Release and engineering notes, newest first.
 
 - Clarification replies are now treated as normal conversation instead of malformed-rule errors.
   The next user answer carries the original request and clarification dialogue back into compilation.
+- Friendly app names in rule requests are now resolved locally against launchable apps. Only
+  matching candidates are sent to the compiler, so Argus can select packages such as Google
+  Messages without asking the user or exposing the complete installed-app inventory.
 - Added the missing Hermes `/act` schema v3 path for resolved runtime data, strict marker/data
   validation, capability negotiation in `/health/v2`, and a shared Kotlin/Python golden request.
 - Made P4 `invoke_llm` capture and WhatsApp/local-notification delivery synchronous and explicit.

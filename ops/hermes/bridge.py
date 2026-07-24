@@ -913,6 +913,9 @@ BINDING RULES:
 15. One compile response can contain exactly ONE AutomationDraft. Never offer to create two drafts
     in one response. If independent triggers require separate automations, ask which one to create
     first, compile only that one, and tell the user to submit the second separately after approval.
+16. installed_app_candidates, when present in the user DATA, were matched locally from launcher apps.
+    If exactly one candidate clearly matches the requested app, use its package and do NOT ask the
+    user for an exact package name. Never invent a package outside those candidates.
 {state_query_rules}
 
 Local time Europe/Rome: {now}

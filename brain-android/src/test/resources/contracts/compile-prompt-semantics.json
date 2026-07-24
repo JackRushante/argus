@@ -10,7 +10,8 @@
     "A P4 state binding may also feed",
     "[\"whatsapp_reply\",\"web.search\"]",
     "\"CAPTURE_ONLY\"",
-    "exactly ONE AutomationDraft"
+    "exactly ONE AutomationDraft",
+    "installed_app_candidates"
   ],
   "forbidden": [
     "\"confidentiality\":\"PUBLIC\"|\"PRIVATE\"|\"SECRET\" (optional, default PUBLIC)",
