@@ -30,12 +30,12 @@ URL cannot be built yet.
 |---|---|
 | applicationId | `dev.argus` |
 | metadata file | `metadata/dev.argus.yml` |
-| version | `0.3.0` / base versionCode `7` (ABI split → 701/702/703/704) |
-| tag (v-prefixed) | `v0.3.0` |
-| build commit (full hash) | `5a73ea62f9837f5371c1216fd4f9e57b5bc94c72` |
+| version | `0.3.1` / base versionCode `8` (ABI split → 801/802/803/804) |
+| tag (v-prefixed) | `v0.3.1` |
+| build commit (full hash) | `4c3261cb1e42d80ea497af63bd35d231956f19c7` |
 | signing cert SHA-256 | `4c09633e64cf9876b0da682f5f259383af8d22742aadd93ef273b9f2c73cca6b` |
-| F-Droid release assets | `argus-701.apk` … `argus-704.apk` (pattern `argus-%c.apk`) |
-| direct-download asset | `argus-v0.3.0-universal.apk` (ignored by F-Droid) |
+| F-Droid release assets | `argus-801.apk` … `argus-804.apk` (pattern `argus-%c.apk`) |
+| direct-download asset | none for v0.3.1; use the matching per-ABI APK (`argus-802.apk` for arm64-v8a) |
 | License (SPDX) | `GPL-3.0-only` |
 
 ### Reproducibility: baseline profile dropped (v0.2.4)

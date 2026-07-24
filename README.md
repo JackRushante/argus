@@ -292,10 +292,12 @@ but the production executor rejects them and the capability manifest marks them 
 
 To sign your own release: create `keystore.properties` in the root (`storeFile`, `storePassword`, `keyAlias`, `keyPassword`) — the file and the keystores are gitignored and must never be committed. Official signed APKs are on the [GitHub Releases](https://github.com/JackRushante/argus/releases).
 
-Installation: download the universal APK from the latest GitHub release and sideload it (`adb install`
-or APK transfer). The F-Droid submission is still under review; do not assume it is available in the
-official client until the metadata merge request is merged. There is no Play Store distribution.
-On first launch the onboarding walks you through the LLM provider and permissions.
+Installation: download the APK matching your device from the latest GitHub release and sideload it
+(`adb install` or APK transfer). Most current Android phones use the `arm64-v8a` asset (for v0.3.1,
+`argus-802.apk`); the release notes map every filename to its ABI. The F-Droid submission is still
+under review; do not assume it is available in the official client until the metadata merge request
+is merged. There is no Play Store distribution. On first launch the onboarding walks you through the
+LLM provider and permissions.
 
 Create a `local.properties` file with `sdk.dir=<path to your Android SDK>` if Android Studio does not generate it by itself.
 
