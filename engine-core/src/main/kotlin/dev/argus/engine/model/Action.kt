@@ -2,8 +2,14 @@
 
 package dev.argus.engine.model
 import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 
 enum class DndMode { OFF, PRIORITY, TOTAL }
 enum class ActionTier { DETERMINISTIC, GENERATIVE }
@@ -11,17 +17,42 @@ enum class ActionTier { DETERMINISTIC, GENERATIVE }
 /**
  * Modalità tema di [Action.SetDarkMode]. Enum CHIUSO: mappato 1:1 sull'argomento di
  * `cmd uimode night no|yes|auto` (OFF→"no", ON→"yes", AUTO→"auto"). Nessuna stringa arbitraria.
+ *
+ * Il compilatore LLM usa il wire lowercase documentato (`off|on|auto`), mentre gli snapshot
+ * persistiti fino alla v0.3.0 usano l'enum uppercase. Il serializer accetta entrambi ma continua a
+ * scrivere uppercase: così correggiamo il confine LLM senza invalidare fingerprint già approvati.
  */
+@Serializable(with = NightModeSerializer::class)
 enum class NightMode { OFF, ON, AUTO }
+
+object NightModeSerializer : KSerializer<NightMode> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("dev.argus.engine.model.NightMode", PrimitiveKind.STRING)
+
+    override fun serialize(encoder: Encoder, value: NightMode) {
+        encoder.encodeString(value.name)
+    }
+
+    override fun deserialize(decoder: Decoder): NightMode {
+        val raw = decoder.decodeString()
+        return when (raw) {
+            "off", "OFF" -> NightMode.OFF
+            "on", "ON" -> NightMode.ON
+            "auto", "AUTO" -> NightMode.AUTO
+            else -> throw IllegalArgumentException("NightMode non valido: $raw")
+        }
+    }
+}
 
 /**
  * Sink di consegna del testo generato da [Action.InvokeLlm] (#59). Enum CHIUSO e SENZA @SerialName:
  * serializza col nome UPPERCASE, coerente con [ArgusJson] case-sensitive.
  * - [WHATSAPP_REPLY]: il testo è inviato come reply WhatsApp al mittente del trigger (profilo P1).
  * - [LOCAL_NOTIFICATION]: il testo diventa una notifica locale, da un trigger qualsiasi.
+ * - [CAPTURE_ONLY]: il testo resta nel programma P4 come variabile [Action.InvokeLlm.captureAs].
  */
 @Serializable
-enum class GenerativeDeliverMode { WHATSAPP_REPLY, LOCAL_NOTIFICATION }
+enum class GenerativeDeliverMode { WHATSAPP_REPLY, LOCAL_NOTIFICATION, CAPTURE_ONLY }
 
 /** Stream audio target di [Action.SetVolume]. Enum chiuso: mappato 1:1 su AudioManager.STREAM_*. */
 enum class VolumeStream { MEDIA, RING, ALARM, NOTIFICATION }

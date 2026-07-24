@@ -18,7 +18,13 @@ four ABIs and across Windows/F-Droid Linux. F-Droid's own `check apk` job verifi
 the match on 2026-07-21. Every release must therefore use clean, project-signed
 per-ABI builds; uploading an incremental APK will break the pipeline.
 
-## 0. Concrete values for the current release
+## 0. Concrete values for the current published release
+
+The table and checked-in recipe intentionally stay on the last **tagged release with uploaded,
+reproducible assets**. A development branch may already carry the next `versionName` and Fastlane
+changelog; do not point F-Droid at it until the GitHub PR is merged, the final full commit is tagged,
+and all four signed `argus-%c.apk` assets exist. This avoids a recipe whose `commit:` or `Binaries:`
+URL cannot be built yet.
 
 | Field | Value |
 |---|---|

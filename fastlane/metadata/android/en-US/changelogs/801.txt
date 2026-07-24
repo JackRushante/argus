@@ -1,0 +1,1 @@
+0.3.1 stabilizes P4 and Hermes: resolved model capture now works end-to-end, nested generative delivery is synchronous, dark-mode drafts decode correctly, and compile retries respect HARD budgets. Runtime data is strictly framed, credential-vault values cannot reach a remote model, clipboard content expires safely, and unavailable computer-use tools are no longer advertised.

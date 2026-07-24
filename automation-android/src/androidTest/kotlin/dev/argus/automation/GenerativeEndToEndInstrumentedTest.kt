@@ -13,6 +13,10 @@ import android.os.UserHandle
 import android.service.notification.StatusBarNotification
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import dev.argus.brain.BridgeAuthProvider
+import dev.argus.brain.CliBridgeTransport
+import dev.argus.brain.TransportBackedBrain
 import dev.argus.automation.notification.ActiveNotificationReplyRegistry
 import dev.argus.automation.notification.AndroidNotificationReplyGateway
 import dev.argus.automation.notification.AndroidNotificationSnapshotFactory
@@ -37,9 +41,15 @@ import dev.argus.engine.model.Action
 import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.CapabilityIds
+import dev.argus.engine.model.CmpOp
+import dev.argus.engine.model.Condition
+import dev.argus.engine.model.ConfidentialityLabel
 import dev.argus.engine.model.DndMode
 import dev.argus.engine.model.GenerativeContract
+import dev.argus.engine.model.GenerativeDeliverMode
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.TriggerField
+import dev.argus.engine.model.VarBinding
 import dev.argus.engine.notification.NotificationEventParser
 import dev.argus.engine.runtime.ActionCapabilities
 import dev.argus.engine.runtime.ConditionEvaluator
@@ -52,6 +62,8 @@ import dev.argus.engine.runtime.FirePolicySnapshot
 import dev.argus.engine.runtime.FirePolicySnapshotProvider
 import dev.argus.engine.runtime.RevalidatingFirePolicy
 import dev.argus.engine.runtime.TriggerEvent
+import dev.argus.engine.runtime.TriggerEnvelope
+import dev.argus.engine.runtime.TriggerEventId
 import dev.argus.engine.runtime.TriggerMatcher
 import dev.argus.engine.safety.DraftId
 import dev.argus.engine.safety.NewDraft
@@ -66,6 +78,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -153,7 +166,7 @@ class GenerativeEndToEndInstrumentedTest {
                 { _, _, _ -> },
                 lane,
                 gateway,
-                { _, _ -> dev.argus.engine.runtime.ActionResult.Success },
+                AndroidClipboardCopier(context),
             ),
             evaluator = ConditionEvaluator(java.time.Clock.systemDefaultZone()),
             matcher = TriggerMatcher(),
@@ -215,6 +228,139 @@ class GenerativeEndToEndInstrumentedTest {
 
         val terminal = awaitTerminalStatus()
         assertEquals(ExecutionStatus.SUCCEEDED, terminal)
+    }
+
+    @Test
+    fun liveHermesV3CaptureFlowsThroughBranchAndAction() {
+        assumeTrue(
+            "P4 live non richiesto",
+            InstrumentationRegistry.getArguments().getString("runLiveP4Resolved") == "true",
+        )
+        val automations = RoomAutomationStore(db.automationDao())
+        val journal = RoomExecutionJournal(db.executionJournalDao())
+        val shown = mutableListOf<Pair<String, String>>()
+        val notifier = AutomationNotifier { title, text, _ -> shown += title to text }
+        val policy = RevalidatingFirePolicy(
+            FirePolicySnapshotProvider {
+                FirePolicySnapshot(
+                    knownTools = AndroidCapabilityProbe.KNOWN_TOOLS,
+                    availableCapabilities = setOf(
+                        CapabilityIds.TRIGGER_NOTIFICATION,
+                        ActionCapabilities.INVOKE_LLM,
+                        ActionCapabilities.SHOW_NOTIFICATION,
+                    ),
+                    whitelistedConversationIds = emptySet(),
+                )
+            },
+        )
+        val transport = CliBridgeTransport(
+            baseUrl = requireNotNull(
+                InstrumentationRegistry.getArguments().getString("bridgeBaseUrl"),
+            ),
+            authProvider = BridgeAuthProvider { consumeBridgeToken() },
+            client = CliBridgeTransport.defaultClient(timeoutSeconds = 65),
+        )
+        val replies = dev.argus.automation.notification.NotificationReplyGateway {
+            dev.argus.automation.notification.NotificationReplyDelivery.Failed("unused")
+        }
+        val lane = AndroidGenerativeLane(
+            scope = scope,
+            journal = journal,
+            automations = automations,
+            firePolicy = policy,
+            brain = TransportBackedBrain(transport),
+            replies = replies,
+            deferredReplies = DeferredReplySink { _, _ -> false },
+            notifier = notifier,
+        )
+        val executor = ShizukuActionExecutor(
+            tools = InertDeviceController(),
+            notifier = notifier,
+            generativeLane = lane,
+            replies = replies,
+            clipboard = AndroidClipboardCopier(context),
+        )
+        val engine = Engine(
+            store = automations,
+            executor = executor,
+            evaluator = ConditionEvaluator(java.time.Clock.systemDefaultZone()),
+            matcher = TriggerMatcher(),
+            firePolicy = policy,
+            audit = RoomAuditSink(db.auditDao()),
+            journal = journal,
+            resolvedExecutor = executor,
+            now = System::currentTimeMillis,
+        )
+        val drafts = RoomDraftRepository(db)
+        val id = AutomationId("rule-live-p4-v3")
+        runBlocking {
+            val created = drafts.create(
+                NewDraft(
+                    id = DraftId("draft-live-p4-v3"),
+                    automationId = id,
+                    draft = AutomationDraft(
+                        name = "P4 v3 device E2E",
+                        trigger = Trigger.Notification(pkg = FIXTURE_PACKAGE),
+                        vars = listOf(
+                            VarBinding.TriggerPayload(
+                                name = "incoming",
+                                field = TriggerField.TEXT,
+                                confidentiality = ConfidentialityLabel.PRIVATE,
+                            ),
+                        ),
+                        actions = listOf(
+                            Action.InvokeLlm(
+                                goal = "Return exactly this runtime value and nothing else: \${incoming}",
+                                contextSources = emptyList(),
+                                allowedTools = emptyList(),
+                                replyTargetSender = false,
+                                deliver = GenerativeDeliverMode.CAPTURE_ONLY,
+                                captureAs = "answer",
+                            ),
+                            Action.If(
+                                condition = Condition.VarCompare(
+                                    varName = "answer",
+                                    op = CmpOp.EQ,
+                                    expected = LIVE_P4_SENTINEL,
+                                ),
+                                then = listOf(
+                                    Action.ShowNotification(
+                                        title = "P4 v3",
+                                        text = "branch passed",
+                                    ),
+                                ),
+                            ),
+                        ),
+                        cooldownMs = 60_000,
+                    ),
+                    atMillis = 1,
+                ),
+            ) as dev.argus.engine.safety.DraftWriteResult.Saved
+            drafts.arm(created.snapshot.id, created.snapshot.revision, created.snapshot.fingerprint)
+            val event = TriggerEvent.NotificationPosted(
+                pkg = FIXTURE_PACKAGE,
+                text = LIVE_P4_SENTINEL,
+                isGroup = false,
+            )
+            val outcome = engine.onTrigger(
+                TriggerEnvelope(TriggerEventId("event-live-p4-v3"), event),
+            ) { DeviceState() }.single()
+
+            assertTrue(outcome.results.all { it == dev.argus.engine.runtime.ActionResult.Success })
+        }
+
+        assertEquals(listOf("P4 v3" to "branch passed"), shown)
+        assertEquals(ExecutionStatus.SUCCEEDED, awaitTerminalStatus())
+    }
+
+    private fun consumeBridgeToken(): String {
+        val file = context.getFileStreamPath(BRIDGE_TOKEN_FILE)
+        check(file.isFile) { "Token bridge live non predisposto" }
+        return context.openFileInput(BRIDGE_TOKEN_FILE).bufferedReader().use { it.readText().trim() }
+            .also {
+                check(context.deleteFile(BRIDGE_TOKEN_FILE)) { "Token bridge live non eliminato" }
+                require(it.isNotBlank()) { "Token bridge live vuoto" }
+            }
     }
 
     private fun awaitTerminalStatus(): ExecutionStatus? {
@@ -346,5 +492,8 @@ class GenerativeEndToEndInstrumentedTest {
         const val REPLY_ACTION = "dev.argus.automation.test.E2E_REPLY"
         const val RESULT_KEY = "reply_text"
         const val GENERATED_REPLY = "risposta sintetica generata"
+        const val BRIDGE_TOKEN_FILE = "argus-e2e-bridge-token"
+        const val FIXTURE_PACKAGE = "dev.argus.fixture"
+        const val LIVE_P4_SENTINEL = "ARGUS_P4_BRANCH_OK"
     }
 }

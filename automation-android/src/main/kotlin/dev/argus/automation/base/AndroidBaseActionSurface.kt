@@ -1,6 +1,7 @@
 package dev.argus.automation.base
 
 import android.app.NotificationManager
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.hardware.camera2.CameraAccessException
@@ -53,9 +54,14 @@ class AndroidBaseActionSurface(context: Context) : BaseActionSurface {
     }
 
     override fun launchPackage(pkg: String): Boolean {
-        val intent = appContext.packageManager.getLaunchIntentForPackage(pkg) ?: return false
-        startActivityGuarded(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        return true
+        // Non interrogare PackageManager: da Android 11 la package visibility può restituire un
+        // falso negativo anche se startActivity è autorizzato. Il selector resta vincolato al
+        // package validato dall'executor e Android risolve direttamente la sua launcher activity.
+        val intent = Intent(Intent.ACTION_MAIN)
+            .addCategory(Intent.CATEGORY_LAUNCHER)
+            .setPackage(pkg)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return startIfAvailable(intent)
     }
 
     override fun openHttpUrl(url: String) {
@@ -71,7 +77,7 @@ class AndroidBaseActionSurface(context: Context) : BaseActionSurface {
             .putExtra(AlarmClock.EXTRA_SKIP_UI, skipUi)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         if (!label.isNullOrBlank()) intent.putExtra(AlarmClock.EXTRA_MESSAGE, label)
-        return startIfResolvable(intent)
+        return startIfAvailable(intent)
     }
 
     override fun setTimer(seconds: Int, label: String?, skipUi: Boolean): Boolean {
@@ -80,7 +86,7 @@ class AndroidBaseActionSurface(context: Context) : BaseActionSurface {
             .putExtra(AlarmClock.EXTRA_SKIP_UI, skipUi)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         if (!label.isNullOrBlank()) intent.putExtra(AlarmClock.EXTRA_MESSAGE, label)
-        return startIfResolvable(intent)
+        return startIfAvailable(intent)
     }
 
     override fun maxStreamVolume(stream: VolumeStream): Int =
@@ -106,7 +112,7 @@ class AndroidBaseActionSurface(context: Context) : BaseActionSurface {
 
     override fun openSettingsScreen(screen: SettingsScreen, pkg: String?): Boolean {
         val intent = settingsIntent(screen, pkg).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        return startIfResolvable(intent)
+        return startIfAvailable(intent)
     }
 
     override fun vibrateOneShot(durationMs: Int): Boolean {
@@ -147,12 +153,16 @@ class AndroidBaseActionSurface(context: Context) : BaseActionSurface {
             appContext.getSystemService(Vibrator::class.java)
         }
 
-    /** Nessuna app orologio gestisce l'Intent → false, così l'executor emette `alarm_app_unresolved`
-     *  invece di crashare con ActivityNotFoundException. */
-    private fun startIfResolvable(intent: Intent): Boolean {
-        if (intent.resolveActivity(appContext.packageManager) == null) return false
-        startActivityGuarded(intent)
-        return true
+    /** Prova direttamente l'Intent senza query preventive soggette a package visibility. */
+    private fun startIfAvailable(intent: Intent): Boolean {
+        return try {
+            appContext.startActivity(intent)
+            true
+        } catch (_: ActivityNotFoundException) {
+            false
+        } catch (error: Exception) {
+            throw ActivityStartBlockedException(error)
+        }
     }
 
     /** `startActivity` da background è bloccato da Android 14+/OEM (caveat BAL): traduciamo il fallimento

@@ -2,6 +2,41 @@
 
 Release and engineering notes, newest first.
 
+## v0.3.1 (2026-07-24) — P4/Hermes contract stabilization
+
+### Fixed
+
+- Added the missing Hermes `/act` schema v3 path for resolved runtime data, strict marker/data
+  validation, capability negotiation in `/health/v2`, and a shared Kotlin/Python golden request.
+- Made P4 `invoke_llm` capture and WhatsApp/local-notification delivery synchronous and explicit.
+  The new `CAPTURE_ONLY` wire mode removes the ambiguous “capture implies no delivery” behavior;
+  unsupported P4 `invoke_llm_v2` programs are rejected before approval.
+- Moved compile retry into the metered boundary: every attempt is recorded and the HARD budget is
+  checked again before a retry.
+- Made `set_dark_mode` accept the lowercase compiler wire while remaining backward-compatible with
+  previously persisted uppercase enum values.
+- Removed phantom computer-use tools from the capability manifest and stopped pre-querying package
+  visibility before launching apps, settings, Shizuku, alarms, or timers.
+
+### Security and privacy
+
+- Separated confidentiality labels from remote-egress policy. Values marked with credential-vault
+  provenance can never be interpolated into a remote Brain request, even under Aggressive taint
+  policy; generic `SECRET` data remains an explicit review decision.
+- Framed runtime values as a strict JSON DATA block in Android and Hermes prompts and added hostile
+  newline/delimiter tests plus shared prompt-semantics fixtures.
+- Clipboard writes schedule a 60-second process-local expiry with compare-and-clear semantics:
+  Argus removes only its own unchanged clip and never overwrites a newer user/app clip.
+
+### Verification
+
+- Hermes bridge tests pass locally and on the deployed service; production health announces
+  `/compile` v1/v2 and `/act` v1/v2/v3.
+- Real-device tests on OnePlus/Android 16 cover authenticated `/act` v3 and the complete
+  `trigger → interpolation → Hermes → capture → branch → Android action` path.
+- A live Hermes compile on the device produces lowercase `set_dark_mode=auto` and decodes it as
+  `NightMode.AUTO`.
+
 ## v0.3.0 (2026-07-21) — P4 variables/control flow + Aggressive anti-injection
 
 ### Changed (security posture)

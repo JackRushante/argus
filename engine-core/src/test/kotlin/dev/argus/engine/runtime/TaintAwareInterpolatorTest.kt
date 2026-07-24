@@ -104,6 +104,31 @@ class TaintAwareInterpolatorTest {
     }
 
     @Test
+    fun `credential provenance is never exported to the brain regardless of aggressive posture`() {
+        val credential = VarValue(
+            text = "do-not-export",
+            type = VarType.TEXT,
+            integrity = IntegrityLabel.CLEAN,
+            confidentiality = ConfidentialityLabel.SECRET,
+            provenance = setOf(ValueProvenance.CREDENTIAL),
+        )
+
+        val blocked = assertIs<ActionResolution.Blocked>(
+            interpolator.resolve(
+                Action.InvokeLlm(
+                    goal = "Use \${password}",
+                    contextSources = emptyList(),
+                    allowedTools = emptyList(),
+                    replyTargetSender = false,
+                ),
+                scope("password", credential),
+            ),
+        )
+
+        assertEquals("remote_egress_blocked", blocked.code)
+    }
+
+    @Test
     fun `missing and oversized runtime values fail closed`() {
         val missing = assertIs<ActionResolution.Blocked>(
             interpolator.resolve(Action.ShowNotification("x", "\${missing}"), VarScope()),

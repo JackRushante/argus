@@ -276,7 +276,7 @@ class ShizukuActionExecutorTest {
     }
 
     @Test
-    fun `resolved generative delivery sink without capture stays fail closed`() = runTest {
+    fun `resolved generative delivery sink without capture routes synchronously through the lane`() = runTest {
         val deliver = Action.InvokeLlm(
             goal = "genera il cambio",
             contextSources = listOf("state"),
@@ -292,8 +292,9 @@ class ShizukuActionExecutorTest {
 
         val result = executor(lane = lane).execute(resolved, context)
 
-        assertEquals(ActionResult.Failure("p4_generative_deliver_unavailable"), result.result)
-        assertTrue(lane.awaited.isEmpty())
+        assertEquals(ActionResult.Success, result.result)
+        assertEquals(null, result.capturedText)
+        assertEquals(deliver, lane.awaited.single().first)
     }
 
     @Test

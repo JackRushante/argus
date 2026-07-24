@@ -1,0 +1,22 @@
+{
+  "required": [
+    "P4 DATA-FLOW",
+    "may be used FREELY",
+    "flat v1: literal command; P4: ${var} interpolation allowed",
+    "P4 may interpolate ${var}",
+    "v1-flat ONLY",
+    "\"type\":\"random_int\", \"name\":string, \"max\":",
+    "invoke_llm_v2 is flat-v1 only",
+    "A P4 state binding may also feed",
+    "[\"whatsapp_reply\",\"web.search\"]",
+    "\"CAPTURE_ONLY\""
+  ],
+  "forbidden": [
+    "\"confidentiality\":\"PUBLIC\"|\"PRIVATE\"|\"SECRET\" (optional, default PUBLIC)",
+    "key/value are LITERAL",
+    "cmd is always literal",
+    "STATIC command",
+    "Never interpolate the value that was read",
+    "run_shell, invoke_llm and invoke_llm_v2"
+  ]
+}

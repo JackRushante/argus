@@ -180,6 +180,7 @@ object RuleRenderMapper {
         ValueProvenance.MODEL -> l.pick("AI output", "output AI")
         ValueProvenance.SHELL -> l.pick("shell output", "output shell")
         ValueProvenance.ENGINE -> l.pick("random", "casuale")
+        ValueProvenance.CREDENTIAL -> l.pick("credential", "credenziale")
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -614,6 +615,8 @@ object RuleRenderMapper {
                     l.pick("Generate and reply with AI", "Genera e rispondi con l'AI")
                 GenerativeDeliverMode.LOCAL_NOTIFICATION ->
                     l.pick("Generate and notify", "Genera e notifica")
+                GenerativeDeliverMode.CAPTURE_ONLY ->
+                    l.pick("Generate a value", "Genera un valore")
             },
             detail = when (a.deliver) {
                 GenerativeDeliverMode.WHATSAPP_REPLY -> l.pick(
@@ -626,6 +629,10 @@ object RuleRenderMapper {
                         "tools: ${a.allowedTools.joinToString(", ")}",
                     "Titolo notifica: ${a.notificationTitle.orEmpty()} · Obiettivo: ${a.goal} · " +
                         "tool: ${a.allowedTools.joinToString(", ")}",
+                )
+                GenerativeDeliverMode.CAPTURE_ONLY -> l.pick(
+                    "Internal value · Goal: ${a.goal} · tools: ${a.allowedTools.joinToString(", ")}",
+                    "Valore interno · Obiettivo: ${a.goal} · tool: ${a.allowedTools.joinToString(", ")}",
                 )
             } + captureSuffix(a.captureAs, l),
             isGenerative = true,

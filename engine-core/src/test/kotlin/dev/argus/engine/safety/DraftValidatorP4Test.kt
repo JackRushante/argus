@@ -621,7 +621,7 @@ class DraftValidatorP4Test {
         assertTrue("too_many_vars" in errors(v.validate(draft, emptySet())))
     }
 
-    @Test fun `invoke llm v2 is a closed capture producer`() {
+    @Test fun `invoke llm v2 is rejected in p4 until a resolved v2 transport exists`() {
         val action = Action.InvokeLlmV2(
             goal = "g",
             stateContext = listOf(
@@ -639,16 +639,27 @@ class DraftValidatorP4Test {
             captureAs = "answer",
         )
         val notification = Trigger.Notification("com.whatsapp", conversationId = "jid:1", isGroup = false)
-        assertFalse(
-            "interpolation_undeclared_var" in errors(
-                v.validate(
-                    draft(
-                        listOf(action, Action.ShowNotification("x", "\${answer}")),
-                        trigger = notification,
-                    ),
-                    setOf("jid:1"),
-                ),
+        assertTrue(
+            "p4_invoke_llm_v2_unsupported" in errors(
+                v.validate(draft(listOf(action), trigger = notification), setOf("jid:1")),
             ),
+        )
+    }
+
+    @Test fun `capture only is a valid internal P4 sink and requires captureAs`() {
+        val valid = Action.InvokeLlm(
+            goal = "summarize",
+            contextSources = emptyList(),
+            allowedTools = emptyList(),
+            replyTargetSender = false,
+            deliver = GenerativeDeliverMode.CAPTURE_ONLY,
+            captureAs = "summary",
+        )
+        assertEquals(emptyList(), errors(v.validate(draft(listOf(valid)), emptySet())))
+
+        val missingCapture = valid.copy(captureAs = null)
+        assertTrue(
+            "capture_required" in errors(v.validate(draft(listOf(missingCapture)), emptySet())),
         )
     }
 }

@@ -95,21 +95,14 @@ class ShizukuActionExecutor(
             } else {
                 ProgramActionResult(execute(leaf, context))
             }
-            // Foglia generativa RISOLTA (P4-D2 slice 2): il dato runtime TAINTED viaggia framato in
-            // [ResolvedProgramAction.runtimeData], MAI nel goal. Solo il profilo CAPTURE è cablato: la
-            // lane chiama brain.actResolved e restituisce testo concreto, così l'interprete cattura.
-            is Action.InvokeLlm -> if (leaf.captureAs != null) {
-                captureGenerative(leaf, action.runtimeData, context)
-            } else {
-                // Sink di CONSEGNA (reply/notifica) dentro un programma P4: il canale sincrono di
-                // consegna non è ancora costruito (l'handshake SubmittedActionJournal è flat-only).
-                // Fail-closed tipizzato — mai la vecchia consegna async silenziosamente persa.
-                ProgramActionResult(ActionResult.Failure("p4_generative_deliver_unavailable"))
-            }
-            // v2: nessun canale RISOLTO (actResolved è solo v1). Capture/framing runtime del profilo
-            // v2 restano fail-closed finché il contratto v2 risolto non esiste.
+            // Foglia generativa P4 sincrona: la stessa lane gestisce capture e consegna, con
+            // revalidazione pre/post, budget e framing runtime.
+            is Action.InvokeLlm ->
+                executeProgramGenerative(leaf, action.runtimeData, context)
+            // Il compilatore/validator rifiuta InvokeLlmV2 nei programmi P4 finché non esiste un
+            // contratto actResolvedV2. Questa è l'ultima difesa per snapshot legacy/manomessi.
             is Action.InvokeLlmV2 ->
-                ProgramActionResult(ActionResult.Failure("p4_generative_deliver_unavailable"))
+                ProgramActionResult(ActionResult.Failure("p4_invoke_llm_v2_unsupported"))
             else -> ProgramActionResult(execute(leaf, context))
         }
     } catch (error: CancellationException) {
@@ -286,7 +279,7 @@ class ShizukuActionExecutor(
      * concreto ⇒ `Success(capturedText)`; qualsiasi metaError (budget_exceeded, approval_changed,
      * act_timeout, …) ⇒ `Failure`, MAI un SUBMITTED-only che l'interprete degraderebbe a capture_missing.
      */
-    private suspend fun captureGenerative(
+    private suspend fun executeProgramGenerative(
         action: Action.InvokeLlm,
         runtimeData: List<RuntimeDataBinding>,
         context: FireContext,
@@ -294,7 +287,10 @@ class ShizukuActionExecutor(
         val result = generativeLane.submitAndAwait(context, action, runtimeData)
         val text = result.text
         return if (text != null) {
-            ProgramActionResult(ActionResult.Success, capturedText = text)
+            ProgramActionResult(
+                ActionResult.Success,
+                capturedText = text.takeIf { action.captureAs != null },
+            )
         } else {
             ProgramActionResult(ActionResult.Failure(result.metaError ?: "brain_failed"))
         }
