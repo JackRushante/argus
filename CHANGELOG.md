@@ -2,7 +2,7 @@
 
 Release and engineering notes, newest first.
 
-## v0.3.0 (2026-07-21) — P4 complete (variables + control flow) + Aggressive anti-injection
+## v0.3.0 (2026-07-21) — P4 variables/control flow + Aggressive anti-injection
 
 ### Changed (security posture)
 
@@ -17,26 +17,25 @@ Release and engineering notes, newest first.
 - This relaxes the **integrity** axis only. Deliberately kept intact:
   - **Shell trigger-gating** (`StaticShellSafety`): an approved `run_shell` is still triggerable only
     by whitelisted 1:1 WhatsApp contacts, never by SMS/phone or unknown senders.
-  - **Confidentiality floor**: shell/LLM captures remain `TAINTED` + `SECRET` (protects bank/OTP
-    secrets); this is orthogonal to the integrity relaxation.
+  - **Confidentiality labels**: shell/LLM captures remain `TAINTED` + `SECRET`, stay redacted from
+    logs, and produce an approval warning before disclosure to a Brain. These labels are metadata,
+    not a non-exportability boundary.
   - **SYSTEM/DATA separation**: untrusted runtime data still travels in the `runtime_data` channel and
     never enters the model's system prompt at fire time.
 - Brain prompt (`AgentMessageSupport`) softened accordingly so the model no longer refuses legitimate
   rules that interpolate captured/trigger values into command/URL/target fields, while still stating
   that `run_shell` is triggerable only by whitelisted contacts.
 
-## Unreleased — P4 variables and structured control flow (2026-07-18)
+### P4 variables and structured control flow
 
-P4-A through P4-C are implemented on the `p4a` branch. This is an integration preview, not a
-public release: compile/bridge support (P4-D), recursive UI rendering (P4-E), and final device E2E
-(P4-F) are intentionally still pending.
-
-### Added
+#### Added
 
 - Schema-v2 automation programs with typed variables, literal/device/trigger bindings,
-  `if`/`else`, bounded `while`, and explicit cooperative `wait` actions.
+  engine-generated `random_int`, `if`/`else`, bounded `while` (including a variable iteration
+  count), and explicit cooperative `wait` actions.
 - Per-value integrity, confidentiality, and provenance labels. Runtime values never alter the
-  approved program structure; tainted data is accepted only by the closed sink policy.
+  approved program structure; whether TAINTED values may enter authority templates is governed by
+  the centralized policy described above.
 - A deterministic program interpreter with definite assignment, typed conditions, hard limits,
   taint-aware interpolation, bounded execution time, redacted runtime values, and stable nested
   action paths such as `1.while[2].3`.
@@ -44,8 +43,15 @@ public release: compile/bridge support (P4-D), recursive UI rendering (P4-E), an
   migration backfills legacy one-based paths without losing historical rows.
 - Android `run_shell.captureAs` support with a 30-second timeout and a 64 KiB stdout ceiling.
   Truncated, failed, or timed-out commands never expose partial captured output.
+- P4 schema-v2 support in the app compiler prompt and Hermes bridge, including recursive
+  validation, retry-on-invalid, bounded `limit_exceeded` errors, screen-state/parity conditions,
+  `copy_text`, `set_mobile_data`, `set_dark_mode`, and the shell cookbook.
+- An Android-side resolved `/act` contract that keeps runtime values in a separate DATA envelope
+  and lets direct-provider transports return `invoke_llm.captureAs` output to the deterministic
+  interpreter without also delivering a reply or notification.
+- Recursive review rendering for variables, captures, `if` branches, bounded loops and waits.
 
-### Fixed and hardened
+#### Fixed and hardened
 
 - Disabling, deleting, or changing the fingerprint of a running P4 rule now cancels only that
   program—even while it is waiting—without aborting other rules dispatched by the same event.
@@ -63,20 +69,37 @@ public release: compile/bridge support (P4-D), recursive UI rendering (P4-E), an
 - The app shell, runtime logs, generated notifications, onboarding/settings copy, capability labels,
   and diagnostics now honor English-default/Italian-system-locale rendering, including historical
   structured log rows.
-### Verification
+
+#### Known limitations
+
+- A non-capturing `invoke_llm` nested in a P4 program is not yet delivered synchronously and fails
+  closed with `p4_generative_deliver_unavailable`. `invoke_llm_v2` capture/delivery in a P4 program
+  is likewise unavailable. Flat generative delivery and `invoke_llm.captureAs` are supported.
+- The checked-in Hermes bridge accepts `/act` schema 1/2 only, while the Android resolved capture
+  client sends schema 3. Therefore `invoke_llm.captureAs` currently fails against Hermes with a
+  protocol error; direct-provider transports are not affected. Health v2 does not currently expose
+  this missing capability.
+- `set_dark_mode` has a wire-enum mismatch: both compile prompts and the Python validator require
+  lowercase `off|on|auto`, while Kotlin serializes `NightMode` as uppercase `OFF|ON|AUTO`.
+  Natural-language compilation therefore produces a draft the Android decoder cannot accept.
+- The real-device P4 gate proved shell capture and a complex random→branch→notification/flashlight
+  program. A complete model-capture→later-action device E2E remains to be recorded.
+
+#### Verification
 
 - Full clean Gradle gate: all JVM/Robolectric suites across eight modules plus `:app:assembleDebug`
-  (`226` tasks) passed on 2026-07-18.
-- Hermes bridge suite: `37/37` tests passed.
+  (`226` tasks) passed again independently on 2026-07-24.
+- Hermes bridge suite: `58/58` tests passed independently on 2026-07-24.
 - Real OnePlus/Shizuku gate: literal shell success, non-zero failure, and bounded stdout capture all
   passed. Room migrations passed `10/10` on device, and the schema-11 APK upgraded existing app data
   and launched without Room or `AndroidRuntime` errors.
+- The user confirmed correct real-device execution of the final complex random/branch program.
 
-> **Privacy & license.** Argus has no backend, no account, no telemetry and no analytics — it
-> collects nothing; rules, logs and API keys stay on your device. It is free software under
-> **GPL-3.0**: you may study, modify and share it, but derivatives must remain open under the same
-> license. On F-Droid the app is built from source and signed by F-Droid; our GitHub releases are
-> signed with the project key.
+> **Privacy & license.** Argus operates no project backend or account service and includes no
+> telemetry or analytics; it contacts only the provider/bridge configured by the user. Rules, logs
+> and API keys stay on-device. It is GPL-3.0 free software. The current F-Droid submission uses
+> reproducible developer-signed `Binaries`: F-Droid rebuilds and verifies each per-ABI APK before
+> publishing it.
 
 ## docs — privacy & license clarified (2026-07-20)
 

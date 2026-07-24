@@ -1,1 +1,1 @@
-Automazioni in linguaggio naturale: le compila un LLM, le esegue un motore.
+Un LLM compila automazioni; un motore deterministico le esegue.

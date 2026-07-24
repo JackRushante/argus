@@ -240,9 +240,8 @@ class ShizukuActionExecutor(
                 ActionResult.Failure("generative_lane_unavailable")
             }
 
-            // Control-flow strutturato (P4): l'interprete deterministico arriva con P4-B/P4-C. Fino
-            // ad allora l'esecuzione è rifiutata in modo pulito e tipizzato (fail-closed), come le
-            // azioni UI non ancora eseguibili in questa fase: mai eseguire un albero senza interprete.
+            // I contenitori P4 sono eseguiti dal ProgramInterpreter e non devono mai arrivare al
+            // boundary delle foglie. Se succede, il wiring è incoerente e fallisce chiuso.
             is Action.Wait,
             is Action.If,
             is Action.While,

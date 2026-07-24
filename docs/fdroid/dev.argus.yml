@@ -1,8 +1,3 @@
-AntiFeatures:
-  NonFreeNet:
-    en-US: Optional. Argus can connect to proprietary LLM provider APIs (OpenAI, Anthropic,
-      Google) if the user configures one. It also works fully with a self-hosted bridge
-      and an on-device base tier, with no proprietary network service.
 Categories:
   - System
 License: GPL-3.0-only
@@ -14,43 +9,46 @@ AutoName: Argus
 
 RepoType: git
 Repo: https://github.com/JackRushante/argus
+Binaries: https://github.com/JackRushante/argus/releases/download/v%v/argus-%c.apk
 
 Builds:
-  - versionName: 0.2.4
-    versionCode: 601
-    commit: d097aed8287d01c9e4bd6cd66084451333d0d46c
+  - versionName: 0.3.0
+    versionCode: 701
+    commit: 5a73ea62f9837f5371c1216fd4f9e57b5bc94c72
     subdir: app
     gradle:
       - yes
     gradleprops:
       - argusAbi=armeabi-v7a
 
-  - versionName: 0.2.4
-    versionCode: 602
-    commit: d097aed8287d01c9e4bd6cd66084451333d0d46c
+  - versionName: 0.3.0
+    versionCode: 702
+    commit: 5a73ea62f9837f5371c1216fd4f9e57b5bc94c72
     subdir: app
     gradle:
       - yes
     gradleprops:
       - argusAbi=arm64-v8a
 
-  - versionName: 0.2.4
-    versionCode: 603
-    commit: d097aed8287d01c9e4bd6cd66084451333d0d46c
+  - versionName: 0.3.0
+    versionCode: 703
+    commit: 5a73ea62f9837f5371c1216fd4f9e57b5bc94c72
     subdir: app
     gradle:
       - yes
     gradleprops:
       - argusAbi=x86
 
-  - versionName: 0.2.4
-    versionCode: 604
-    commit: d097aed8287d01c9e4bd6cd66084451333d0d46c
+  - versionName: 0.3.0
+    versionCode: 704
+    commit: 5a73ea62f9837f5371c1216fd4f9e57b5bc94c72
     subdir: app
     gradle:
       - yes
     gradleprops:
       - argusAbi=x86_64
+
+AllowedAPKSigningKeys: 4c09633e64cf9876b0da682f5f259383af8d22742aadd93ef273b9f2c73cca6b
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags
@@ -59,5 +57,5 @@ VercodeOperation:
   - 100 * %c + 2
   - 100 * %c + 3
   - 100 * %c + 4
-CurrentVersion: 0.2.4
-CurrentVersionCode: 604
+CurrentVersion: 0.3.0
+CurrentVersionCode: 704

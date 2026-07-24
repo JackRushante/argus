@@ -1,1 +1,1 @@
-Natural-language automation compiled by an LLM, run by a safe engine.
+Natural-language automation compiled by an LLM, run by a deterministic engine.

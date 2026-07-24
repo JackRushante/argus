@@ -6,8 +6,9 @@ package dev.argus.engine.model
  * (niente espressioni, niente eval). L'enforcement è DOPPIO: statico nel
  * [dev.argus.engine.safety.DraftValidator] (qui) e dinamico nel runtime taint-aware (P4-B).
  *
- * Invariante D0: il contenuto esterno non fidato può riempire solo [FieldClass.SINK]. I campi
- * [FieldClass.AUTHORITY] accettano esclusivamente valori con integrità CLEAN.
+ * [FieldClass] conserva la distinzione tra dato e autorità. L'ammissione di valori TAINTED nei
+ * campi [FieldClass.AUTHORITY] è decisa centralmente da [TaintPolicy] (abilitata nella postura
+ * Aggressive corrente), non da questa tabella.
  */
 object InterpolationPolicy {
 
@@ -16,7 +17,7 @@ object InterpolationPolicy {
         /** Accetta `${var}` anche TAINTED: il valore entra come DATO delimitato (cleanUntrusted). */
         SINK,
 
-        /** Autorità/routing: interpolazione ammessa soltanto da variabili CLEAN. */
+        /** Autorità/routing: l'ammissione di TAINTED dipende da [TaintPolicy]. */
         AUTHORITY,
     }
 
@@ -70,7 +71,7 @@ object InterpolationPolicy {
         }
         is Action.InvokeLlmV2 -> listOf(TemplateField("goal", action.goal, FieldClass.SINK))
 
-        // --- AUTHORITY: solo letterali approvati, mai ${var} ---
+        // --- AUTHORITY: template fingerprintati; TAINTED dipende da TaintPolicy ---
         is Action.RunShell -> listOf(TemplateField("cmd", action.cmd, FieldClass.AUTHORITY))
         is Action.OpenUrl -> listOf(TemplateField("url", action.url, FieldClass.AUTHORITY))
         is Action.LaunchApp -> listOf(TemplateField("pkg", action.pkg, FieldClass.AUTHORITY))

@@ -254,12 +254,10 @@ sealed interface Action {
      *
      * Sempre PRIVILEGED (Shizuku): `settings put` su secure/global non ha percorso app-normale.
      *
-     * L'unico invariante NON negoziabile è D2 (decision-record §4.2, "un dato non fidato non può
-     * creare autorità"): `namespace`/`key`/`value` sono LETTERALI CLEAN nel fingerprint approvato,
-     * MAI interpolati dal contenuto del trigger (SMS/notifiche) — identico regime di [RunShell].
-     * Guardrail = validazione ([WriteSettingPolicy]: regex key, value bounded, control char/NUL/
-     * newline rifiutati; argv separati quindi niente shell injection) + review umana pre-arm
-     * (l'utente vede namespace/key/value letterali). Nessun altro limite.
+     * `namespace` resta un enum chiuso; `key` e `value` sono template fingerprintati e possono
+     * interpolare variabili P4 secondo la postura centralizzata [TaintPolicy]. Restano sempre attive
+     * la validazione post-risoluzione ([WriteSettingPolicy]: regex key, value bounded, caratteri di
+     * controllo/NUL/newline rifiutati) e la costruzione ad argv separati.
      */
     @Serializable @SerialName(ActionTypeIds.WRITE_SETTING)
     data class WriteSetting(

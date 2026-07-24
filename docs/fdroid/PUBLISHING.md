@@ -5,21 +5,18 @@ shipping updates. It is distilled from a prior app's F-Droid history (dozens of
 failed pipelines) so the same mistakes are not repeated. **Read it fully before
 opening or updating the merge request.**
 
-**CURRENT MODE (since 2026-07-20): build-from-source, F-Droid-signed.** F-Droid
-builds each per-ABI APK from the tagged commit and signs it with *F-Droid's* key.
-The recipe has **no** `Binaries:` and **no** `AllowedAPKSigningKeys:`. Our GitHub
-releases are independent (direct-download users only) and unaffected. To publish an
-update: bump `versionCode`/`versionName`, tag `vX.Y.Z`, push — F-Droid autoupdate
-(Tags + VercodeOperation) picks it up.
+**CURRENT MODE (since 2026-07-21): reproducible, developer-signed `Binaries`.**
+F-Droid rebuilds each per-ABI APK from the pinned commit, strips the signature for
+comparison, and publishes the verified developer-signed APK. The recipe therefore
+**must keep** both `Binaries:` and `AllowedAPKSigningKeys:`.
 
-Why not reproducible/Binaries mode: we tried it (v0.2.1–v0.2.4). The universal APK
-was reproducible, but the **ABI-split** APK's `classes2.dex` has alignment/layout
-padding that is not byte-stable across build hosts (Windows, a generic Linux box,
-and F-Droid's CI each produced a slightly different size with identical bytecode).
-The reproducible-build sections below are kept as historical reference; the app
-build still carries the reproducible settings (harmless), but they are no longer
-required. Switching back to reproducible would require matching F-Droid's exact
-buildserver image and re-adding `Binaries:` + `AllowedAPKSigningKeys:`.
+The initial mismatch was not an unavoidable Windows/Linux difference. The APKs
+originally uploaded for v0.2.4 came from a dirty incremental build. After dropping
+the non-byte-stable ART baseline profile (`d097aed`) and rebuilding from a clean
+tree with the build cache disabled, `classes2.dex` became deterministic across all
+four ABIs and across Windows/F-Droid Linux. F-Droid's own `check apk` job verified
+the match on 2026-07-21. Every release must therefore use clean, project-signed
+per-ABI builds; uploading an incremental APK will break the pipeline.
 
 ## 0. Concrete values for the current release
 
@@ -27,11 +24,12 @@ buildserver image and re-adding `Binaries:` + `AllowedAPKSigningKeys:`.
 |---|---|
 | applicationId | `dev.argus` |
 | metadata file | `metadata/dev.argus.yml` |
-| version | `0.2.4` / base versionCode `6` (ABI split → 601/602/603/604) |
-| tag (v-prefixed) | `v0.2.4` |
-| build commit (full hash) | see the recipe `commit:` (v0.2.4 build commit) |
+| version | `0.3.0` / base versionCode `7` (ABI split → 701/702/703/704) |
+| tag (v-prefixed) | `v0.3.0` |
+| build commit (full hash) | `5a73ea62f9837f5371c1216fd4f9e57b5bc94c72` |
 | signing cert SHA-256 | `4c09633e64cf9876b0da682f5f259383af8d22742aadd93ef273b9f2c73cca6b` |
-| release asset names | `argus-601.apk` … `argus-604.apk` (pattern `argus-%c.apk`) |
+| F-Droid release assets | `argus-701.apk` … `argus-704.apk` (pattern `argus-%c.apk`) |
+| direct-download asset | `argus-v0.3.0-universal.apk` (ignored by F-Droid) |
 | License (SPDX) | `GPL-3.0-only` |
 
 ### Reproducibility: baseline profile dropped (v0.2.4)
@@ -61,11 +59,12 @@ ABI. Mechanics:
 
 - `app/build.gradle.kts`: `splits.abi { isUniversalApk = false; include(...) }`, and
   a per-output `versionCode = 100 * base + {armeabi-v7a:1, arm64-v8a:2, x86:3, x86_64:4}`
-  → 501/502/503/504. A `-PargusAbi=<abi>` property restricts the build to a single
+  → for base code 7: 701/702/703/704. A `-PargusAbi=<abi>` property restricts the build to a single
   split so F-Droid can build each ABI as its own build block byte-for-byte.
-- Recipe: **one `Builds:` block per ABI** (versionCode 501-504, each with
+- Recipe: **one `Builds:` block per ABI** (for v0.3.0: versionCode 701-704, each with
   `gradleprops: [argusAbi=<abi>]`), plus top-level `VercodeOperation: [100*%c+n]` so
-  autoupdate generates the four codes for future tags. `CurrentVersionCode: 504`.
+  autoupdate generates the four codes for future tags. `CurrentVersionCode` is the
+  highest split code.
 - Release assets are the four **single-ABI** APKs, built with `-PargusAbi=<abi>` so
   they match F-Droid's per-block rebuild exactly. Naming `argus-<versionCode>.apk`
   matches `Binaries: .../v%v/argus-%c.apk`.
@@ -86,10 +85,10 @@ rebuild match ours. **Do not remove them.**
 - `isShrinkResources = false` (and `isMinifyEnabled = false`) — resource shrinking
   renamed resources non-deterministically.
 
-**Build the published APK from a full `git clone` checked out at the tag — NEVER a
-git worktree.** In a worktree `.git` is a pointer file; AGP fails to read it,
-injects `NO_VALID_GIT_FOUND`, and reproducibility mismatches. The main tree
-`C:\argus` is a normal clone and is fine.
+Build from a clean clone or a clean, detached worktree checked out at the exact tag.
+`vcsInfo.include = false`, so the `.git` representation is not embedded in the APK.
+Never build release assets from a dirty/incremental tree. Use `clean`,
+`--no-build-cache`, stop competing Gradle daemons, and build one ABI at a time.
 
 Verify the produced APK before publishing:
 
@@ -104,11 +103,12 @@ apksigner verify --print-certs app-release.apk | grep -i SHA-256
 
 ## 2. GitHub release
 
-- Tag must be **v-prefixed** (`v0.2.1`) so the `Binaries` URL `.../v%v/...` resolves.
-- The release asset name must match the `Binaries` pattern exactly: `argus-v0.2.1.apk`.
-- The release must target the **exact build commit**: `gh release create v0.2.1
-  argus-v0.2.1.apk --target b84dd0c6...`.
-- Publish only the **latest** APK per release (no historical bundle).
+- Tag must be **v-prefixed** (`v0.3.0`) so the `Binaries` URL `.../v%v/...` resolves.
+- The four F-Droid assets must match `argus-%c.apk` exactly (`argus-701.apk` through
+  `argus-704.apk` for v0.3.0).
+- The release must target the exact commit pinned by every recipe block.
+- An extra universal APK may be published for direct downloads. Its name must not
+  match `argus-%c.apk`; F-Droid intentionally ignores it.
 
 ## 3. The recipe (`metadata/dev.argus.yml`)
 
@@ -121,10 +121,9 @@ cost the prior app its pipelines:
   a trailing space after `Binaries:` matter). Do NOT hand-format — run
   `fdroid rewritemeta dev.argus` in the fork checkout and commit its output.
 - `AllowedAPKSigningKeys` is the lowercase SHA-256, no colons.
-- `AntiFeatures: NonFreeNet` is declared honestly (optional proprietary provider
-  APIs); the app is otherwise fully functional with the self-hosted bridge and the
-  on-device base tier, and has **no** proprietary code dependencies (re2j and
-  Dagger/Hilt are Apache-2.0).
+- Do **not** add `AntiFeatures: NonFreeNet` for the optional proprietary LLM
+  providers. Maintainer linsui explicitly requested its removal: the integrations
+  are optional and the app can use a self-hosted bridge.
 - `gradle: [yes]` — Argus has no product flavors, so `yes` is the correct token.
 - Keep `CurrentVersion`/`CurrentVersionCode` in sync with the highest git tag, or
   the `checkupdates` job fails.
@@ -156,18 +155,24 @@ F-Droid — it does not go in the recipe.
 | `fdroid build` | clone → checkout `commit` → gradle build | commit hash unreachable after a force-push |
 | `checkupdates` | highest tag vs `CurrentVersion` | a tag higher than the metadata version |
 | `check apk` | scans the published Binaries APK | dependency-metadata block, signing mismatch |
-| reproducible | rebuild matches our APK (minus sig) | VCS info / worktree build / shrink on |
+| reproducible | rebuild matches our APK (minus sig) | dirty cache / baseline profile / shrink on |
 
 ## 5. Per-version update procedure
 
 1. Bump `versionCode`/`versionName`; commit on `master`.
-2. Build the reproducible release APK from a clean clone at the new commit; verify
-   (section 1).
-3. Tag `vX.Y.Z`, push; `gh release create vX.Y.Z argus-vX.Y.Z.apk --target <hash>`.
-4. Add a `Builds:` entry (new versionName/versionCode/**full commit hash**); bump
-   `CurrentVersion`/`CurrentVersionCode`. Add `fastlane/.../changelogs/<code>.txt`
-   in both locales (**≤ 500 chars each** — the client truncates longer).
-5. `fdroid rewritemeta` + `fdroid lint`; rebase on upstream; push; watch the pipeline.
+2. Commit and tag the exact release commit (`vX.Y.Z`), then create a clean detached
+   clone/worktree at that tag.
+3. For each ABI, run `clean` followed by `:app:assembleRelease
+   -PargusAbi=<abi> --no-build-cache`; rename the signed output to
+   `argus-<splitVersionCode>.apk`. Verify the cert fingerprint and compare the dex
+   CRCs across clean rebuilds.
+4. Create the GitHub release at the tag and upload all four split APKs. Optionally
+   add a separately built universal APK for direct downloads.
+5. Add four `Builds:` entries with the new versionName, split versionCodes and the
+   same **full commit hash**; bump `CurrentVersion`/`CurrentVersionCode`. Add
+   `fastlane/.../changelogs/<splitCode>.txt` in both locales (**≤ 500 chars each**).
+6. Run `fdroid rewritemeta` + `fdroid lint`; rebase on upstream; push; require both
+   `fdroid build` and `check apk` to pass before calling the release reproducible.
 
 ## 5b. Gotchas found on the first MR (!43234)
 

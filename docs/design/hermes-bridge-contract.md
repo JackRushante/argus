@@ -1,7 +1,9 @@
 # Contratto Argus ↔ Hermes bridge
 
-Stato: `/compile` v2 corrente; `/compile` v1 mantenuto solo per rollout; `/act` v2 corrente con
-v1 mantenuto per le regole già approvate.
+Stato reale a `v0.3.0`: `/compile` v2 corrente (`AutomationDraft` piatto v1 o programma P4 v2);
+`/compile` v1 è mantenuto per rollout. Il server Hermes implementa `/act` v1/v2. Il client Android
+definisce inoltre `/act` v3 per la capture P4 risolta, ma il server non la accetta ancora: questa
+divergenza è un difetto aperto, non una capability disponibile.
 
 > **Confine di versione P3:** `schema_version` in questo documento versiona esclusivamente il
 > protocollo bridge. Non è la versione dello schema Room/automazioni e non è la versione del
@@ -46,7 +48,7 @@ Il client Android corrente non usa più questo endpoint. Usa `GET /health/v2`:
 {
   "schema_version": 2,
   "status": "ok",
-  "model": "gpt-5.5",
+  "model": "<ARGUS_MODEL configurato>",
   "compile_schema_versions": [1, 2],
   "act_schema_versions": [1, 2],
   "source_sha256": "<64 caratteri esadecimali lowercase>"
@@ -60,6 +62,11 @@ TOGLIE una versione usata dall'app è incompatibile. `health.schema_version` è 
 atteso dall'app. `source_sha256` è l'hash di `bridge.py` dopo normalizzazione `CRLF|CR → LF`; permette di
 confrontare checkout Windows e deploy Linux senza falso drift. Il client rifiuta anche campi
 sconosciuti, status/modello non validi, body non JSON o oltre il limite.
+
+Limite noto: l'health Android non richiede la v3 risolta. Perciò un bridge `[1,2]` appare healthy
+anche se una successiva `invoke_llm.captureAs` invia schema 3 e riceve `409`. La correzione deve
+aggiungere v3 al server, ai test di contratto incrociati e alla negoziazione della singola
+capability, senza rendere inutilizzabili compile e `/act` legacy.
 
 ## `POST /compile`
 
@@ -132,9 +139,9 @@ server non sostituisce la rivalidazione delle capability sul telefono.
 I sensori usano `sensor.<kind>`. Il dominio corrente rappresenta soltanto `significant_motion`,
 `stationary_detect`, `motion_detect`, `step_detector` e `step_counter`: accelerometro/giroscopio raw
 e sampling high-rate non sono compilabili. Un kind entra nel manifest soltanto se coincidono
-hardware con reporting mode corretto, grant runtime e backend realmente collegato. P3-2A lascia
-intenzionalmente quest'ultimo insieme vuoto: il server conosce il wire in anticipo, ma Android non
-pubblicherà `sensor.significant_motion` finché P3-2B non installerà il listener. I draft sensore
+hardware con reporting mode corretto, grant runtime e backend realmente collegato. Il listener
+P3-2B è implementato: non va più descritto come futuro, ma il manifest continua a pubblicare solo
+i kind realmente armabili sul dispositivo corrente. I draft sensore
 richiedono cooldown `60000..604800000` ms; `minimumEventCount` è 1 per i motion e `1..100000` per
 gli step. I campi sampling/latency restano null finché una slice batched non li implementa.
 
@@ -237,6 +244,17 @@ statica è riservata a testi dettati letteralmente dall'utente. Il draft resta c
 `DraftValidator` locale: la regola serve a produrre draft armabili al primo colpo, non a
 sostituire i controlli.
 
+Lo schema P4 aggiunge variabili tipate, capture, `if`, `while` bounded e `wait`. La postura
+`TaintPolicy` corrente è **Aggressive**: il runtime Android consente una variabile TAINTED anche in
+campi di autorità fingerprintati. La struttura del programma resta immutabile e la shell conserva
+il trigger-gating, ma questa scelta non elimina la command injection dentro un template approvato.
+
+Difetto di prompt noto: le sezioni legacy su `run_shell`, `write_setting` e state reader continuano
+in alcuni punti a vietare l'interpolazione, mentre la sezione P4 successiva la autorizza. Il
+validator Android segue `TaintPolicy`, ma il compilatore riceve istruzioni contraddittorie e può
+rifiutare o evitare regole ora ammesse. Le due copie del prompt (`AgentMessageSupport` e
+`bridge.py`) vanno riallineate e testate contro gli stessi fixture.
+
 In `/compile` v2 la regola 13 consente `state_compare` soltanto per famiglie pubblicate in
 `manifest.state_readers`, impone `policyVersion=1` e chiede chiarimento se mancano soglia o unità.
 Per il voltaggio del device corrente il profilo noto è `dumpsys_field(battery, voltage)` in
@@ -274,7 +292,8 @@ Request v1:
 ```
 
 Il v1 resta operativo byte-for-byte per le regole `Action.InvokeLlm` già approvate. Il suo profilo
-`state` legacy può inviare le sette chiavi builtin e foreground app; non viene esteso con default.
+`state` legacy può inviare le chiavi builtin registrate (inclusa `screen`) e foreground app; non
+viene esteso con reader parametrici impliciti.
 
 Request v2 (`Action.InvokeLlmV2`):
 
@@ -346,6 +365,24 @@ telefono. In caso di rifiuto semantico `result` è `null` e `error_code` è uno 
 esattamente uno dei due deve essere valorizzato. Campi sconosciuti, target aggiunti, body incoerenti,
 versione o request ID diversi sono errori di protocollo fail-closed.
 
+### `/act` v3 risolto — contratto Android presente, server mancante
+
+Quando un `Action.InvokeLlm` P4 ha `captureAs`, l'interpolatore Android sostituisce i valori TAINTED
+nel goal con marker opachi `{{ARGUS_RUNTIME_DATA_n}}` e il client invia schema 3 con un campo
+`runtime_data` separato. La lane attende il testo concreto e lo salva nella variabile senza inviare
+reply o notifica.
+
+Questo percorso è implementato nei transport Android diretti, ma non nel bridge Python corrente:
+`SUPPORTED_ACT_SCHEMA_VERSIONS` è `(1, 2)` e `validate_act_request()` risponde `409
+schema_version_incompatible` alla v3. Non dichiarare quindi P4-F generativa verde su Hermes finché
+non esistono:
+
+1. parser/validator/server v3 con limiti su token, conteggio e valori runtime;
+2. prompt DATA separato e test con delimitatori ostili/newline;
+3. annuncio health o capability negotiation coerente;
+4. test end-to-end che serializza l'envelope Kotlin reale e lo valida col parser Python;
+5. prova device `captureAs → condizione/azione successiva`, non soltanto un programma random/branch.
+
 ## Idempotenza e limiti
 
 - Il server lega endpoint, versione schema, `request_id`, `Idempotency-Key` e SHA-256 dei byte del
@@ -356,7 +393,9 @@ versione o request ID diversi sono errori di protocollo fail-closed.
 - Riutilizzare lo stesso ID con un body diverso restituisce `409 idempotency_conflict`.
 - Cache massima: 128 richieste; un solo processo modello concorrente condiviso tra compile e act;
   richieste con ID diverso durante una chiamata ricevono `429`, senza aprire un secondo processo.
-- Request massimo 256 KiB; response massimo 512 KiB; timeout server 55 s, client 60 s.
+- Request massimo 256 KiB; response massimo 512 KiB. Il timeout modello del server è configurabile
+  con `ARGUS_MODEL_TIMEOUT_SECONDS`; il client HTTP deve restare più lungo del timeout azione
+  approvato, senza promettere un valore fisso diverso dalla configurazione deployata.
 - I log contengono solo prefisso del request ID, status e durata: mai messaggio, stato, contatti o token.
 
 ## Errori HTTP

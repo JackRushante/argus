@@ -6,10 +6,10 @@ Why this matters:
 
 * Predictable — the rule that fires at 3 a.m. is exactly the one you approved, byte for byte.
 * Auditable — every run is logged locally, without personal content.
-* Private — no backend, no account, no telemetry, no analytics: Argus collects nothing. Your API keys are encrypted on device and everything stays on your phone.
+* Private by design — no Argus-operated backend or account, no telemetry and no analytics. Rules, logs and encrypted API keys stay on your phone; only the provider or self-hosted bridge you explicitly configure receives compile/generative requests.
 
-Language models are optional and pluggable: run a self-hosted bridge, or connect directly to a provider you choose. A base tier works with no elevated privileges; for system-level actions Argus can use Shizuku.
+The language-model transport is pluggable: run a self-hosted bridge, or connect directly to a provider you choose. A base tier works with no elevated privileges; for system-level actions Argus can use Shizuku.
 
-Note: connecting a proprietary provider (OpenAI, Anthropic, Google) is optional — Argus works fully with a self-hosted bridge and the on-device base tier.
+Note: connecting a proprietary provider (OpenAI, Anthropic, Google) is optional — Argus can instead use a self-hosted bridge together with its on-device deterministic actions.
 
 Argus is free software (GPL-3.0). The interface, rule rendering and the agent all follow your system language (English or Italian).
