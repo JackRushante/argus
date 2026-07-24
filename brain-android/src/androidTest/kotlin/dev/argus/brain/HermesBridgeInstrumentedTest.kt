@@ -16,16 +16,23 @@ import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.DndMode
 import dev.argus.engine.model.ConfidentialityLabel
 import dev.argus.engine.model.IntegrityLabel
+import dev.argus.engine.model.NightMode
 import dev.argus.engine.model.StateQuery
 import dev.argus.engine.model.StateQueryFamily
 import dev.argus.engine.model.StateQueryPolicy
 import dev.argus.engine.model.StateValueType
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.VarType
+import dev.argus.engine.model.VarValue
+import dev.argus.engine.model.ValueProvenance
+import dev.argus.engine.runtime.ActionResolution
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.ExecutionId
 import dev.argus.engine.runtime.FireContext
 import dev.argus.engine.runtime.TriggerEvent
 import dev.argus.engine.runtime.TriggerEventId
+import dev.argus.engine.runtime.TaintAwareInterpolator
+import dev.argus.engine.runtime.VarScope
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -65,6 +72,7 @@ class HermesBridgeInstrumentedTest {
             assertTrue(CliBridgeTransport.COMPILE_SCHEMA_VERSION in health.compileSchemaVersions)
             assertTrue(CliBridgeTransport.ACT_SCHEMA_VERSION in health.actSchemaVersions)
             assertTrue(CliBridgeTransport.ACT_V2_SCHEMA_VERSION in health.actSchemaVersions)
+            assertTrue(CliBridgeTransport.ACT_RESOLVED_SCHEMA_VERSION in health.actSchemaVersions)
             assertEquals("ok", health.status)
         } catch (error: BridgeException) {
             if (expectReachable) throw error
@@ -153,6 +161,35 @@ class HermesBridgeInstrumentedTest {
         val draft = requireNotNull(result.draft)
         assertTrue(draft.trigger is Trigger.Time)
         assertEquals(Action.SetDnd(DndMode.PRIORITY), draft.actions.single())
+    }
+
+    @Test fun liveCompileDarkModeDecodesCompilerWire(): Unit = runBlocking {
+        assumeTrue(
+            "compile dark mode live non richiesto",
+            arguments.getString("runLiveCompileDarkMode") == "true",
+        )
+        val manifest = CapabilityManifest(
+            deviceModel = "OnePlus CPH2747",
+            androidVersion = 16,
+            androidApi = 36,
+            shizukuAvailable = true,
+            grantedPermissions = listOf("android.permission.INTERNET"),
+            availableTools = listOf("set_dark_mode"),
+            unavailableTools = emptyMap(),
+            whitelistedContacts = emptyList(),
+            availableTriggers = listOf("immediate"),
+        )
+
+        val result = TransportBackedBrain(transport()).compile(
+            "Imposta subito il tema scuro automatico. Non aggiungere altre azioni.",
+            manifest,
+            DeviceState(),
+        )
+
+        assertNull(result.metaError)
+        val draft = requireNotNull(result.draft)
+        assertTrue(draft.trigger is Trigger.Immediate)
+        assertEquals(Action.SetDarkMode(NightMode.AUTO), draft.actions.single())
     }
 
     @Test fun liveCompileV2ReturnsExplicitClassifiedStateAction(): Unit = runBlocking {
@@ -257,6 +294,57 @@ class HermesBridgeInstrumentedTest {
 
         assertNull(result.metaError)
         assertTrue(requireNotNull(result.text).length in 1..4_096)
+    }
+
+    @Test fun liveActResolvedV3FramesRuntimeDataAndReturnsIt(): Unit = runBlocking {
+        assumeTrue("act resolved live non richiesto", arguments.getString("runLiveActResolved") == "true")
+        val template = Action.InvokeLlm(
+            goal = "Return exactly this runtime value and nothing else: \${message}",
+            contextSources = emptyList(),
+            allowedTools = emptyList(),
+            replyTargetSender = false,
+            deliver = dev.argus.engine.model.GenerativeDeliverMode.CAPTURE_ONLY,
+            captureAs = "answer",
+        )
+        val resolution = TaintAwareInterpolator().resolve(
+            template,
+            VarScope(
+                mapOf(
+                    "message" to VarValue(
+                        text = "ARGUS_P4_V3_OK",
+                        type = VarType.TEXT,
+                        integrity = IntegrityLabel.TAINTED,
+                        confidentiality = ConfidentialityLabel.PRIVATE,
+                        provenance = setOf(ValueProvenance.NOTIFICATION),
+                    ),
+                ),
+            ),
+        )
+        check(resolution is ActionResolution.Resolved)
+        val resolved = resolution.value
+        val action = resolved.action as Action.InvokeLlm
+        val automationId = AutomationId("live-act-resolved-automation")
+        val fingerprint = ApprovalFingerprint("0".repeat(64))
+        val context = FireContext(
+            event = TriggerEvent.ImmediateFired(automationId, fingerprint),
+            state = DeviceState(),
+            automationId = automationId,
+            approvalFingerprint = fingerprint,
+            eventId = TriggerEventId("live-act-resolved-event"),
+            executionId = ExecutionId("live-act-resolved-20260724-1"),
+            actionIndex = 0,
+        )
+
+        val result = TransportBackedBrain(transport()).actResolved(
+            context = context,
+            goal = action.goal,
+            contextSources = action.contextSources,
+            allowedTools = action.allowedTools,
+            runtimeData = resolved.runtimeData,
+        )
+
+        assertNull(result.metaError)
+        assertEquals("ARGUS_P4_V3_OK", requireNotNull(result.text).trim())
     }
 
     private fun bridgeToken(): String {

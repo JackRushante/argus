@@ -13,6 +13,7 @@ import dev.argus.engine.runtime.RuntimeDataBinding
 import dev.argus.engine.runtime.TriggerEvent
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.addJsonObject
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
@@ -234,18 +235,24 @@ internal object AgentMessageSupport {
 
     /**
      * Messaggio DATA separato e delimitato (contratto anti-injection P4-D2): trasporta al modello il
-     * dato runtime TAINTED, una riga `token = value` per binding. Il valore RAW compare SOLO qui e MAI
+     * dato runtime TAINTED come array JSON `token`/`value`. Il valore RAW compare SOLO qui e MAI
      * nel system, che porta unicamente i marker opachi `{{token}}`. Ritorna null quando non c'è dato:
      * i chiamanti legacy (act/actV2, lista vuota) restano byte-identici e non aggiungono alcun
-     * messaggio. Nessuna sanitizzazione del valore: la delimitazione è ciò che lo isola come dato.
+     * messaggio. JSON rende newline/quote non ambigui; resta dato non fidato, non un sandbox.
      */
     fun actRuntimeDataText(runtimeData: List<RuntimeDataBinding>): String? {
         if (runtimeData.isEmpty()) return null
+        val payload = buildJsonArray {
+            runtimeData.forEach { binding ->
+                addJsonObject {
+                    put("token", binding.token)
+                    put("value", binding.value.text)
+                }
+            }
+        }
         return buildString {
             append(RUNTIME_DATA_HEADER)
-            runtimeData.forEach { binding ->
-                append('\n').append(binding.token).append(" = ").append(binding.value.text)
-            }
+            append('\n').append(payload)
             append('\n').append(RUNTIME_DATA_FOOTER)
         }
     }
@@ -354,12 +361,12 @@ BINDING RULES:
     A requested trigger that is not in the list must NOT be compiled: briefly point out the
     missing grant or mechanism in Settings and return draft null with error_code
     "unsupported_capability".
-11. run_shell is an autonomous shell with a STATIC command shown in full during review. Use it
-    with time, geofence, connectivity or sensor triggers, or with notification if it is a 1:1
+11. run_shell is an autonomous shell whose approved template is shown in review. In flat v1 the
+    command is literal; in P4 it may interpolate declared variables under the DATA-FLOW rules below.
+    Use it with time, immediate, geofence, connectivity or sensor triggers, or with notification if it is a 1:1
     WhatsApp chat (isGroup=false) whose conversationId is whitelisted: a verified contact can
-    trigger an already-approved command. Never with phone_state (SMS sender and caller ID are
-    spoofable) and never embedding message/notification content inside the command: the
-    cmd is always literal, the message is only a switch.
+    trigger an already-approved template. Never with phone_state (SMS sender and caller ID are
+    spoofable); this trigger gate remains even for a P4 template.
     run_shell is a LAST RESORT: if a typed action exists (set_flashlight, set_wifi, set_bluetooth,
     set_mobile_data, set_dnd, set_ringer, set_dark_mode, set_alarm, set_timer, write_setting, ...)
     ALWAYS use it instead — never reimplement a typed action via shell. Only emit shell commands
@@ -392,7 +399,7 @@ BINDING RULES:
     "notify me the exchange rate in 2 minutes" -> time afterMs=120000 (NOT immediate, NOT at);
     "alert me at 14:30" -> time at=2026-07-17T14:30; "send me the BTC price every 24 hours" ->
     time cron every 24h; "alert me right away" -> immediate.
-16. The generative delivery of invoke_llm has TWO modes ("deliver" field):
+16. The generative delivery of invoke_llm has THREE modes ("deliver" field):
     - "WHATSAPP_REPLY" (default): replies to an incoming notification (notification trigger, whitelisted
       1:1 chat), contextSources ["notification"], allowedTools ["whatsapp_reply"] (+ optional
       "web.search"), replyTargetSender=true. It is the mode for REPLYING to a received message.
@@ -403,7 +410,14 @@ BINDING RULES:
       whatsapp_reply), replyTargetSender=false, contextSources=[] (or ["state"] if state is needed), and
       "notificationTitle"=a short synthetic title. The trigger is chosen with rule 15
       (in N -> time.afterMs, at HH:MM -> time.at, every N -> time.cron).
-    "show_notification" is NEVER a generative tool (never in allowedTools); invoke_llm_v2 stays reply-only."""
+    - "CAPTURE_ONLY": P4 only and "captureAs" is REQUIRED. The generated text stays inside the
+      approved program as that variable and is never delivered directly. allowedTools=[] or
+      ["web.search"], replyTargetSender=false, contextSources=[] or ["state"], and
+      notificationTitle=null. Use trigger-payload vars for notification/SMS text.
+    "show_notification" is NEVER a generative tool (never in allowedTools); invoke_llm_v2 stays reply-only.
+17. One compile response can contain exactly ONE AutomationDraft. Never offer to create two drafts
+    in one response. If independent triggers require separate automations, ask which one to create
+    first, compile only that one, and tell the user to submit the second separately after approval."""
 
     const val DRAFT_SCHEMA_TEXT = """AutomationDraft JSON (names and casing are exact):
 {
@@ -466,7 +480,8 @@ Action, discriminated by "type":
 - {"type":"tap", "x":integer, "y":integer}
 - {"type":"input_text", "text":string}
 - {"type":"whatsapp_reply", "text":string}
-- {"type":"run_shell", "cmd":string}  // literal command, max 8192 characters; only with
+- {"type":"run_shell", "cmd":string}  // flat v1: literal command; P4: ${'$'}{var} interpolation allowed;
+  // max 8192 characters; only with
   time/geofence/connectivity/sensor triggers or with a whitelisted 1:1 WhatsApp chat;
   never phone_state. LAST RESORT only: prefer a typed action whenever one exists.
   // run_shell cookbook (REAL Android commands only): svc wifi|data|bluetooth enable|disable;
@@ -500,22 +515,29 @@ Action, discriminated by "type":
 - {"type":"vibrate", "durationMs":integer 1-10000}  // one-shot vibration
 - {"type":"write_setting", "namespace":"SYSTEM"|"SECURE"|"GLOBAL", "key":string, "value":string}
    // writes ANY Android setting by key (write-side counterpart of state.setting).
-   // Requires Shizuku (appears in available_tools only when available). key/value are LITERAL
-   // and shown in full during review: never embed message/notification content in the
-   // key or the value (same rule as run_shell). key without spaces/control chars; value non-empty,
+   // Requires Shizuku (appears in available_tools only when available). Flat v1 key/value are
+   // literal; P4 may interpolate ${'$'}{var} under the approved data-flow policy. The template is shown
+   // in review. key without spaces/control chars; value non-empty,
    // <=1024 chars, no NUL/newline/control chars. Prefer a typed action when one
    // exists (e.g. set_dnd, set_alarm, set_dark_mode): use write_setting for the long tail
    // (screen_off_timeout, accelerometer_rotation, font_scale,
    // screen_brightness (0-255, SYSTEM; set screen_brightness_mode=0 first to disable auto-brightness), ...)
 - {"type":"invoke_llm", "goal":string, "contextSources":[string,...],
    "allowedTools":[string,...], "replyTargetSender":boolean, "timeoutMs":integer,
-   "deliver":"WHATSAPP_REPLY"|"LOCAL_NOTIFICATION", "notificationTitle":string|null}
+   "deliver":"WHATSAPP_REPLY"|"LOCAL_NOTIFICATION"|"CAPTURE_ONLY",
+   "notificationTitle":string|null}
    // deliver defaults to WHATSAPP_REPLY (reply to an incoming notification). LOCAL_NOTIFICATION =
    // posts a local notification with the generated text (any trigger): allowedTools without
    // whatsapp_reply, replyTargetSender=false, contextSources []/["state"], notificationTitle
    // required (short title).
+   // CAPTURE_ONLY = P4 only, captureAs required; keeps the generated text inside the program:
+   // allowedTools []/["web.search"], replyTargetSender=false, contextSources []/["state"],
+   // notificationTitle null.
 - {"type":"invoke_llm_v2", "goal":string, "stateContext":[ApprovedStateContext,...],
-   "allowedTools":["whatsapp_reply"], "replyTargetSender":true, "timeoutMs":integer}
+   "allowedTools":["whatsapp_reply"] or ["whatsapp_reply","web.search"],
+   "replyTargetSender":true, "timeoutMs":integer}
+   // v1-flat ONLY: never use invoke_llm_v2 in a draft with vars, captureAs, if/while/wait or any
+   // other P4 construct. Use invoke_llm for a generative action inside a P4 program.
 
 Schema v2 (P4) — OPTIONAL Tasker-class program. A draft stays v1 (flat: trigger + conditions +
 actions, described above and UNCHANGED) unless it uses one of the P4 constructs below. Emit P4 only
@@ -532,14 +554,13 @@ VarBinding, discriminated by "type":
    "extractionRegex":string|null, "confidentiality":"PUBLIC"|"PRIVATE"|"SECRET"}
    // EXTERNAL payload of the trigger (SMS/notification): integrity TAINTED, confidentiality >= PRIVATE.
    // extractionRegex = first non-empty capture group, or the whole match; null = full field.
-- {"type":"random_int", "name":string, "max":integer (1..1000000),
-   "confidentiality":"PUBLIC"|"PRIVATE"|"SECRET" (optional, default PUBLIC)}
+- {"type":"random_int", "name":string, "max":integer (1..1000000)}
    // ENGINE-generated random integer in [0, max) (i.e. 0..max-1). Integrity CLEAN (not tainted, not a
    // secret): resolved ONCE per run, so it holds a fixed value for the whole execution. Use it to drive
    // branching — pair with var_compare IS_EVEN/IS_ODD for a coin-flip if — and counting.
 
 "captureAs":string (optional) — captures the action's OUTPUT into a new same-named variable. Allowed
-ONLY on the three producers run_shell, invoke_llm and invoke_llm_v2; the captured value is TAINTED.
+ONLY on run_shell and invoke_llm; the captured value is TAINTED. invoke_llm_v2 is flat-v1 only.
 
 Control-flow actions (containers, NOT leaf actions; never eval, never goto). Nesting depth <= 4;
 at most 64 action nodes total across the whole program:
@@ -591,8 +612,8 @@ ApprovedStateContext (invoke_llm_v2 only; all fields are required):
 The minimum classification is PRIVATE for builtin and SECRET for setting, system_property, sysfs
 and dumpsys_field. Never classify a local reader as TAINTED and never lower the minimum.
 
-Readers are always read-only: state_compare stays a local condition; only invoke_llm_v2
-can share at fire time the queries listed and classified in its fingerprint.
-Never interpolate the value that was read into commands, routing, recipients, URLs or
-automation mutations. The probe/compile sample is never sent to the bridge."""
+Readers are always read-only: state_compare stays a local condition; invoke_llm_v2 can share at
+fire time the queries listed and classified in its fingerprint. A P4 state binding may also feed
+the approved data-flow fields described above; that does not grant any extra reader or action.
+The probe/compile sample is never sent to the bridge."""
 }

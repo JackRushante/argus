@@ -13,6 +13,7 @@ import dev.argus.brain.ProviderCatalog
 import dev.argus.engine.brain.ActResult
 import dev.argus.engine.brain.Brain
 import dev.argus.engine.brain.CapabilityManifest
+import dev.argus.engine.brain.CompileMetaError
 import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.brain.TurnUsage
 import dev.argus.engine.model.Action
@@ -115,6 +116,106 @@ class MeteredBrainTest {
         assertEquals(2_785L, event.tokensIn)
         assertEquals(5L, event.tokensOut)
         assertEquals("gpt-5.5", event.model)
+    }
+
+    @Test
+    fun `compile retry registra entrambi i tentativi e ritorna il secondo`() = runTest {
+        var attempt = 0
+        val firstUsage = TurnUsage(inputTokens = 100, outputTokens = 10, model = "gpt-5.5")
+        val secondUsage = TurnUsage(inputTokens = 120, outputTokens = 12, model = "gpt-5.5")
+        val delegate = FakeBrain(
+            compileResult = {
+                attempt++
+                if (attempt == 1) {
+                    CompileResult("malformed", null, "draft_invalid", firstUsage)
+                } else {
+                    CompileResult("ok", null, null, secondUsage)
+                }
+            },
+        )
+        val dao = RecordingUsageDao()
+        val brain = metered(delegate, FakePolicy(), dao, config = openai)
+
+        val result = brain.compile("crea", TEST_MANIFEST, DeviceState())
+
+        assertEquals("ok", result.reply)
+        assertEquals(2, delegate.calls)
+        assertEquals(
+            listOf(UsageEventOutcome.ERROR, UsageEventOutcome.OK),
+            dao.events.map { it.outcome },
+        )
+        assertEquals(listOf(100L, 120L), dao.events.map { it.tokensIn })
+    }
+
+    @Test
+    fun `compile retry ricontrolla hard dopo aver contato il primo tentativo`() = runTest {
+        val delegate = FakeBrain(
+            compileResult = {
+                CompileResult(
+                    "malformed",
+                    null,
+                    "draft_invalid",
+                    TurnUsage(inputTokens = 100, outputTokens = 10, model = "gpt-5.5"),
+                )
+            },
+        )
+        val dao = RecordingUsageDao()
+        val policy = object : BudgetPolicy(NoopUsageDaoForTest, NoopSettingsForTest) {
+            override suspend fun check(providerId: ProviderId, nowMillis: Long): BudgetVerdict =
+                if (dao.events.any { it.outcome == UsageEventOutcome.ERROR }) {
+                    BudgetVerdict.HardExceeded(TrippedLimit(LimitWindow.HOUR, BudgetScope.Global))
+                } else {
+                    BudgetVerdict.Ok
+                }
+        }
+        val brain = metered(delegate, policy, dao, config = openai)
+
+        val result = brain.compile("crea", TEST_MANIFEST, DeviceState())
+
+        assertEquals(1, delegate.calls)
+        assertEquals(BudgetMeta.BUDGET_EXCEEDED, result.metaError)
+        assertEquals(
+            listOf(UsageEventOutcome.ERROR, UsageEventOutcome.BLOCKED_BUDGET),
+            dao.events.map { it.outcome },
+        )
+    }
+
+    @Test
+    fun `compile non ritenta su un provider cambiato durante il primo tentativo`() = runTest {
+        var selected = openai
+        val anthropic = ProviderConfig(
+            ProviderId.ANTHROPIC,
+            "https://api.anthropic.com",
+            "claude-sonnet-4-5",
+        )
+        val delegate = FakeBrain(
+            compileResult = {
+                selected = anthropic
+                CompileResult(
+                    "malformed",
+                    null,
+                    CompileMetaError.DRAFT_INVALID,
+                    TurnUsage(inputTokens = 100, outputTokens = 10, model = "gpt-5.5"),
+                )
+            },
+        )
+        val dao = RecordingUsageDao()
+        val brain = MeteredBrain(
+            delegate = delegate,
+            policy = FakePolicy(),
+            usage = dao,
+            selectedConfig = { selected },
+            audit = RecordingAuditSink(),
+            alerts = RecordingAlerts(),
+            nowMillis = { 1_700_000_000_000L },
+        )
+
+        val result = brain.compile("crea", TEST_MANIFEST, DeviceState())
+
+        assertEquals(CompileMetaError.DRAFT_INVALID, result.metaError)
+        assertEquals(1, delegate.calls)
+        assertEquals(1, dao.events.size)
+        assertEquals(ProviderId.OPENAI.wireName, dao.events.single().providerId)
     }
 
     @Test

@@ -258,7 +258,9 @@ class AndroidCapabilityProbe internal constructor(
             // deve contenere gli stessi nomi wire, senza alias con le capability typed.
             if (shizukuAvailable) {
                 addAll(PRIVILEGED_CAPABILITIES)
-                addAll(SHIZUKU_TOOLS)
+                // Capability runtime usata da contextSources=["state"]; non è un Action wire e
+                // quindi non va pubblicata in manifest.available_tools.
+                add(TOOL_STATE_READ)
             }
             if (shizukuAvailable || dndBase) addAll(BASE_DND_CAPABILITIES)
             if (shizukuAvailable || launchBase) addAll(BASE_LAUNCH_CAPABILITIES)
@@ -283,7 +285,11 @@ class AndroidCapabilityProbe internal constructor(
             }
             armableSensorKinds.forEach { add(CapabilityIds.triggerSensor(it)) }
         }
-        val transient = if (shizukuTransient) SHIZUKU_CAPABILITIES + SHIZUKU_TOOLS else emptySet()
+        val transient = if (shizukuTransient) {
+            SHIZUKU_CAPABILITIES + TOOL_STATE_READ
+        } else {
+            emptySet()
+        }
 
         val availableTools = buildList {
             // Control-flow P4 (wait/if/while): contenitori STRUTTURALI del programma, non azioni gated
@@ -299,7 +305,6 @@ class AndroidCapabilityProbe internal constructor(
             addAll(BASE_MANAGER_ACTION_TYPES)
             if (shizukuAvailable) {
                 addAll(PRIVILEGED_ACTION_TYPES)
-                addAll(SHIZUKU_TOOLS)
             }
             if (shizukuAvailable || dndBase) addAll(BASE_DND_ACTION_TYPES)
             if (shizukuAvailable || launchBase) addAll(BASE_LAUNCH_ACTION_TYPES)
@@ -322,7 +327,6 @@ class AndroidCapabilityProbe internal constructor(
         if (!shizukuAvailable) {
             val reason = shizukuReason(state.shizukuStatus)
             PRIVILEGED_ACTION_TYPES.forEach { unavailableTools[it] = reason }
-            SHIZUKU_TOOLS.forEach { unavailableTools[it] = reason }
             if (!launchBase) BASE_LAUNCH_ACTION_TYPES.forEach { unavailableTools[it] = reason }
             if (!dndBase) BASE_DND_ACTION_TYPES.forEach {
                 unavailableTools[it] = if (baseTierActive) REASON_DND_POLICY else reason
@@ -392,8 +396,11 @@ class AndroidCapabilityProbe internal constructor(
         const val TOOL_APP_LAUNCH = "app.launch"
         const val TOOL_NOTIFY_SHOW = "notify.show"
 
-        val SHIZUKU_TOOLS = setOf(
-            TOOL_STATE_READ,
+        /**
+         * Vecchi nomi raw mai collegati a un Action wire eseguibile. Pubblicarli in
+         * `available_tools` induceva il compilatore a produrre draft che il validator rifiutava.
+         */
+        val UNIMPLEMENTED_RAW_TOOLS = setOf(
             TOOL_SCREEN_CAPTURE,
             TOOL_SCREEN_DUMP_UI,
             TOOL_TOGGLE_SET,
@@ -430,6 +437,10 @@ class AndroidCapabilityProbe internal constructor(
         val SHIZUKU_ACTION_TYPES =
             PRIVILEGED_ACTION_TYPES + BASE_DND_ACTION_TYPES + BASE_LAUNCH_ACTION_TYPES
         val PHASE_UNAVAILABLE_TOOLS = linkedMapOf(
+            TOOL_SCREEN_CAPTURE to "ciclo computer-use tipato non implementato",
+            TOOL_SCREEN_DUMP_UI to "ciclo computer-use tipato non implementato",
+            TOOL_TOGGLE_SET to "alias raw sostituito dalle azioni toggle tipate",
+            TOOL_APP_LAUNCH to "alias raw sostituito da launch_app",
             "screen.tap" to "azione UI non disponibile in questa fase",
             "screen.swipe" to "azione UI non disponibile in questa fase",
             "screen.type" to "azione UI non disponibile in questa fase",
@@ -437,7 +448,7 @@ class AndroidCapabilityProbe internal constructor(
             "shell.run" to "conferma live non implementata",
             "vision.analyze" to "provider multimodale non configurato",
         )
-        val KNOWN_TOOLS: Set<String> = SHIZUKU_TOOLS + TOOL_NOTIFY_SHOW +
+        val KNOWN_TOOLS: Set<String> = UNIMPLEMENTED_RAW_TOOLS + TOOL_STATE_READ + TOOL_NOTIFY_SHOW +
             GenerativeContract.TOOL_WHATSAPP_REPLY + GenerativeContract.TOOL_WEB_SEARCH +
             PHASE_UNAVAILABLE_TOOLS.keys
         val BASE_DND_CAPABILITIES = setOf(ActionCapabilities.SET_DND, ActionCapabilities.SET_RINGER)

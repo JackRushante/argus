@@ -40,6 +40,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.SocketPolicy
 import java.security.MessageDigest
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.TimeUnit
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -138,17 +139,15 @@ class CliBridgeTransportTest {
     }
 
     @Test fun `health uses the same authenticated strict boundary`(): Unit = runBlocking {
-        // P4-D2: un bridge che annuncia solo act [1,2] (SENZA il canale risolto 3) resta compatibile;
-        // il canale risolto non e' un requisito di health (solo la capture P4 lo usa, fail-closed per-call).
         server.enqueue(jsonResponse(
-            """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1,2],"act_schema_versions":[1,2],"source_sha256":"${"a".repeat(64)}"}""",
+            """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1,2],"act_schema_versions":[1,2,3],"source_sha256":"${"a".repeat(64)}"}""",
         ))
 
         val health = transport().health()
 
         assertEquals(2, health.schemaVersion)
         assertTrue(2 in health.compileSchemaVersions)
-        assertEquals(listOf(1, 2), health.actSchemaVersions)
+        assertEquals(listOf(1, 2, 3), health.actSchemaVersions)
         assertEquals("gpt-5.5", health.model)
         val request = assertNotNull(server.takeRequest(2, TimeUnit.SECONDS))
         assertEquals("/health/v2", request.path)
@@ -160,11 +159,13 @@ class CliBridgeTransportTest {
             // compile senza la v2 usata dall'app -> incompatibile.
             """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1],"act_schema_versions":[1,2],"source_sha256":"${"a".repeat(64)}"}""",
             // act senza la v2 (act_v2) usata dall'app -> incompatibile.
-            """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1,2],"act_schema_versions":[1],"source_sha256":"${"a".repeat(64)}"}""",
+            """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1,2],"act_schema_versions":[1,3],"source_sha256":"${"a".repeat(64)}"}""",
+            // act senza la v3 (capture P4 risolta) -> incompatibile.
+            """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1,2],"act_schema_versions":[1,2],"source_sha256":"${"a".repeat(64)}"}""",
             // sha in formato invalido.
-            """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1,2],"act_schema_versions":[1,2],"source_sha256":"not-a-sha"}""",
+            """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1,2],"act_schema_versions":[1,2,3],"source_sha256":"not-a-sha"}""",
             // campo sconosciuto -> envelope non valido (decoder strict).
-            """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1,2],"act_schema_versions":[1,2],"source_sha256":"${"a".repeat(64)}","surprise":true}""",
+            """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1,2],"act_schema_versions":[1,2,3],"source_sha256":"${"a".repeat(64)}","surprise":true}""",
         )
 
         invalid.forEach { body ->
@@ -770,6 +771,11 @@ class CliBridgeTransportTest {
         assertEquals(RuntimeDataTestFixture.SENTINEL, binding.getValue("value").jsonPrimitive.content)
         // Separazione stretta: il valore compare SOLO nel campo runtime_data, una volta sola.
         assertEquals(1, raw.split(RuntimeDataTestFixture.SENTINEL).size - 1)
+        val golden = javaClass.classLoader!!
+            .getResourceAsStream("contracts/hermes-act-v3-request.json")!!
+            .bufferedReader(StandardCharsets.UTF_8)
+            .use { Json.parseToJsonElement(it.readText()) }
+        assertEquals(golden, Json.parseToJsonElement(raw), "il wire Kotlin deve restare uguale al golden Python")
     }
 
     private fun validNoDraftResponse(reply: String = "ok") = jsonResponse(

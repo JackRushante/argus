@@ -163,6 +163,16 @@ object CapabilityRequirements {
                 GenerativeDeliverMode.LOCAL_NOTIFICATION -> {
                     add(CapabilityIds.ACTION_SHOW_NOTIFICATION)
                     addAll(action.allowedTools)
+                    if (GenerativeContract.CONTEXT_STATE in action.contextSources) {
+                        add(GenerativeContract.TOOL_STATE_READ)
+                    }
+                }
+                // Sink interno P4: nessun listener/reply/notifica, solo stato e web opzionali.
+                GenerativeDeliverMode.CAPTURE_ONLY -> {
+                    addAll(action.allowedTools)
+                    if (GenerativeContract.CONTEXT_STATE in action.contextSources) {
+                        add(GenerativeContract.TOOL_STATE_READ)
+                    }
                 }
             }
         }

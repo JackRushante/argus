@@ -7,16 +7,31 @@ import kotlinx.serialization.Serializable
 @Serializable
 enum class VarType { TEXT, NUMBER, BOOLEAN }
 
-/** Integrità e riservatezza sono assi distinti (decision record P3 §4). */
+/** Integrità e classificazione/redazione sono assi distinti (decision record P3 §4). */
 @Serializable
 enum class IntegrityLabel { CLEAN, TAINTED }
 
+/**
+ * Classificazione usata per review, redazione e join monotono. `SECRET` non significa da sola
+ * “non esportabile”: l'egress remoto è deciso separatamente da [RemoteEgressPolicy].
+ */
 @Serializable
 enum class ConfidentialityLabel { PUBLIC, PRIVATE, SECRET }
 
 /** Vocabolario chiuso della provenienza persistibile in audit senza salvare il contenuto. */
 @Serializable
-enum class ValueProvenance { LITERAL, DEVICE_STATE, NOTIFICATION, SMS, PHONE, MODEL, SHELL, ENGINE }
+enum class ValueProvenance {
+    LITERAL,
+    DEVICE_STATE,
+    NOTIFICATION,
+    SMS,
+    PHONE,
+    MODEL,
+    SHELL,
+    ENGINE,
+    /** Segreto proveniente da un credential vault: mai esportabile al Brain o a sink remoti. */
+    CREDENTIAL,
+}
 
 fun joinIntegrity(a: IntegrityLabel, b: IntegrityLabel): IntegrityLabel =
     if (a == IntegrityLabel.TAINTED || b == IntegrityLabel.TAINTED) IntegrityLabel.TAINTED

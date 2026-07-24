@@ -33,20 +33,52 @@ ufficiale richiede infatti un processo CLI locale avviato con `bw serve`
 ([Bitwarden APIs](https://bitwarden.com/help/bitwarden-apis/)); può essere utile in uno spike
 isolato, non è un'architettura di produzione.
 
-## Strategia consigliata
+## Decisione make-or-buy
 
-### Prima iterazione: Argus come fallback, Bitwarden resta il provider principale
+La prima scelta non deve essere implementare un password manager dentro Argus.
+
+| Opzione | Uso consigliato | Limite decisivo |
+| --- | --- | --- |
+| Keyguard | prova privata immediata sul device per capire quanti casi risolve già | il repository dichiara il sorgente disponibile soltanto per uso personale: non è una base adatta a un fork pubblico Argus |
+| Bitwarden Android upstream | strada principale per correggere autofill normale, custom fields e split-login | richiede lavorare nel codebase del client, ma mantiene protocollo vault, crypto, sessione e `AutofillService` nel componente che già li possiede |
+| Fork GPL del client Bitwarden | fallback se le patch upstream restano ferme o la roadmap non copre i nostri casi | costo continuativo di merge, release, firma, supply-chain e security maintenance |
+| Argus companion | casi patologici: WebView/canvas, gerarchie Accessibility incomplete, flussi multi-step non rappresentabili | deve restare separato dal vault e usare vision soltanto per il piano dei campi, mai per leggere segreti |
+
+Il client Android ufficiale Bitwarden è GPL-3.0 e integra già Autofill, Credentials, biometria,
+storage e protocollo del vault
+([repository Android](https://github.com/bitwarden/android)). Esiste inoltre una PR upstream aperta
+che implementa l'autofill dei custom field con URI matching stretto
+([PR #6243](https://github.com/bitwarden/android/pull/6243)). Prima di duplicarla bisogna provarne il
+branch sul OnePlus, revisionarne il threat model e contribuire test/fix. Lo split-login va trattato
+come seconda patch indipendente.
+
+Keyguard è un buon confronto funzionale perché dichiara compatibilità Bitwarden/Vaultwarden,
+autofill e uso offline ([Keyguard](https://keyguard.dev/)). Non va però copiato o pubblicamente
+forkato: il repository limita il sorgente al solo uso personale
+([licenza](https://github.com/AChep/keyguard-app#license)).
+
+Decisione raccomandata:
+
+1. test A/B privato di Bitwarden stabile, branch della PR #6243 e Keyguard sugli stessi casi;
+2. contribuire a Bitwarden upstream per custom fields, split-login e bug riproducibili;
+3. mantenere un fork Bitwarden solo se upstream non è praticabile;
+4. costruire in Argus esclusivamente il companion per le superfici che restano impossibili, senza
+   reimplementare crypto o importare l'intero vault.
+
+## Strategia Argus companion
+
+### Prima iterazione Argus: fallback, Bitwarden resta il provider principale
 
 Bitwarden continua a gestire l'autofill normale. Quando non compare o non riconosce una pagina,
 l'utente invoca “Compila con Argus” da quick tile, notifica persistente o accessibility button.
 Argus usa un servizio Accessibility strettamente limitato alla sessione di fill.
 
-È la via più utile nel breve periodo perché:
+È la via Argus più utile dopo il confronto fra client perché:
 
 - non sostituisce subito l'autofill che già funziona nella maggioranza dei casi;
 - copre split login e custom fields, che Bitwarden dichiara non supportati nel mobile autofill
   ([Bitwarden Android autofill](https://bitwarden.com/help/auto-fill-android/));
-- consente di diagnosticare target e campi prima di costruire un password manager completo.
+- consente di diagnosticare target e campi senza costruire un secondo password manager.
 
 ### Seconda iterazione opzionale: provider Android completo
 
@@ -327,7 +359,19 @@ URI/matching e impostazioni OEM, come indicato dalla guida Bitwarden.
 **Exit gate:** almeno dieci casi riproducibili classificati e una lista dei pattern non risolvibili
 con la configurazione esistente.
 
-### Fase 1 — spike Vaultwarden on-device
+### Fase 1 — confronto dei client e contributo upstream
+
+- eseguire la matrice della fase 0 con Bitwarden stabile, Keyguard e il branch Bitwarden PR #6243;
+- verificare in particolare Firefox, Brave, Chrome, app native, custom fields, split-login e OTP;
+- revisionare e completare i test di sicurezza della PR custom-fields senza duplicarne il lavoro;
+- aprire issue/PR Bitwarden separate per i bug generici e per lo split-login;
+- decidere con evidenza se basta upstream, serve un fork GPL mantenuto oppure restano casi da
+  companion Argus.
+
+**Exit gate:** per ciascun fallimento è documentato se appartiene a configurazione/OEM, client
+Bitwarden, limite del framework Android o UI patologica. Argus riceve soltanto l'ultimo gruppo.
+
+### Fase 2 — spike Vaultwarden on-device, solo se il companion ne ha ancora bisogno
 
 - mappare protocollo sync, KDF, unlock, rotazione chiavi e TOTP;
 - valutare riuso del codice upstream rispetto a un client minimale;
@@ -338,7 +382,11 @@ con la configurazione esistente.
 **Exit gate:** un record di test viene sincronizzato, decifrato dopo biometria e azzerato dalla
 memoria; nessun plaintext persistente.
 
-### Fase 2 — fallback Accessibility senza vision
+Questa fase si elimina completamente se il client Bitwarden/fork può esporre al companion un
+protocollo locale ristretto, autenticato e monouso che restituisce una `SecretLease` senza duplicare
+il vault.
+
+### Fase 3 — fallback Accessibility senza vision
 
 - quick action esplicita;
 - target binding app/browser;
@@ -350,7 +398,7 @@ memoria; nessun plaintext persistente.
 **Exit gate:** E2E reali su app native e almeno Firefox, Brave e Chrome, inclusi cambio origin e app
 clone di test.
 
-### Fase 3 — vision fallback
+### Fase 4 — vision fallback
 
 - classificatore locale dei campi;
 - screenshot single-window pre-unlock;
@@ -360,7 +408,7 @@ clone di test.
 
 **Exit gate:** vision non riceve mai segreti e non può autorizzare target o record.
 
-### Fase 4 — TOTP
+### Fase 5 — TOTP
 
 - generatore locale e test vector RFC;
 - field role OTP;
@@ -369,7 +417,7 @@ clone di test.
 
 **Exit gate:** OTP compilato senza clipboard e senza comparire in log/screenshot.
 
-### Fase 5 — provider nativo opzionale
+### Fase 6 — provider nativo opzionale
 
 - `AutofillService`/Dataset;
 - Credential Manager su Android 14+;
@@ -378,7 +426,7 @@ clone di test.
 
 **Exit gate:** nessuna regressione rispetto al fallback e UX di selezione provider comprensibile.
 
-### Fase 6 — hardening e distribuzione
+### Fase 7 — hardening e distribuzione
 
 - security review indipendente del vault boundary;
 - dependency/SBOM e supply-chain review;
@@ -404,8 +452,8 @@ clone di test.
 
 ## Decisioni ancora da prendere
 
-1. **Fallback o provider completo:** raccomandazione iniziale: fallback Accessibility user-initiated,
-   lasciando Bitwarden provider principale.
+1. **Upstream, fork o Argus:** raccomandazione: Bitwarden upstream prima, fork GPL soltanto se
+   necessario, Argus companion per i soli casi patologici.
 2. **Codice crypto:** riuso upstream se praticabile; altrimenti il progetto richiede un audit
    crittografico dedicato prima della produzione.
 3. **Vision remota:** raccomandazione: vietata nella modalità credenziali; solo locale.

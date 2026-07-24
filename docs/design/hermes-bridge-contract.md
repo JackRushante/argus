@@ -1,9 +1,8 @@
 # Contratto Argus ↔ Hermes bridge
 
-Stato reale a `v0.3.0`: `/compile` v2 corrente (`AutomationDraft` piatto v1 o programma P4 v2);
-`/compile` v1 è mantenuto per rollout. Il server Hermes implementa `/act` v1/v2. Il client Android
-definisce inoltre `/act` v3 per la capture P4 risolta, ma il server non la accetta ancora: questa
-divergenza è un difetto aperto, non una capability disponibile.
+Stato reale da `v0.3.1`: `/compile` v2 corrente (`AutomationDraft` piatto v1 o programma P4 v2);
+`/compile` v1 è mantenuto per rollout. Server Hermes e client Android implementano `/act` v1/v2/v3:
+la v3 è il canale P4 risolto con dati runtime separati, validazione strict e negoziazione health.
 
 > **Confine di versione P3:** `schema_version` in questo documento versiona esclusivamente il
 > protocollo bridge. Non è la versione dello schema Room/automazioni e non è la versione del
@@ -50,23 +49,22 @@ Il client Android corrente non usa più questo endpoint. Usa `GET /health/v2`:
   "status": "ok",
   "model": "<ARGUS_MODEL configurato>",
   "compile_schema_versions": [1, 2],
-  "act_schema_versions": [1, 2],
+  "act_schema_versions": [1, 2, 3],
   "source_sha256": "<64 caratteri esadecimali lowercase>"
 }
 ```
 
 Compatibilità per CONTENIMENTO (#41): Android accetta il bridge se le liste `compile_schema_versions`
-/`act_schema_versions` CONTENGONO le versioni che l'app usa (compile v2, act v1+v2). Un redeploy che
+/`act_schema_versions` CONTENGONO le versioni che l'app usa (compile v2, act v1+v2+v3). Un redeploy che
 AGGIUNGE una versione (es. annuncia `[1,2,3]`) resta compatibile con le app vecchie; un bridge che
 TOGLIE una versione usata dall'app è incompatibile. `health.schema_version` è accettato se >= a quello
 atteso dall'app. `source_sha256` è l'hash di `bridge.py` dopo normalizzazione `CRLF|CR → LF`; permette di
 confrontare checkout Windows e deploy Linux senza falso drift. Il client rifiuta anche campi
 sconosciuti, status/modello non validi, body non JSON o oltre il limite.
 
-Limite noto: l'health Android non richiede la v3 risolta. Perciò un bridge `[1,2]` appare healthy
-anche se una successiva `invoke_llm.captureAs` invia schema 3 e riceve `409`. La correzione deve
-aggiungere v3 al server, ai test di contratto incrociati e alla negoziazione della singola
-capability, senza rendere inutilizzabili compile e `/act` legacy.
+La v3 è richiesta dalla health Android: un bridge fermo a `[1,2]` è dichiarato incompatibile prima
+dell'esecuzione. L'aggiunta resta backward-compatible per containment: i client vecchi continuano a
+usare v1/v2.
 
 ## `POST /compile`
 
@@ -91,7 +89,7 @@ Request v2 corrente:
     "android_api": 36,
     "shizuku_available": true,
     "granted_permissions": ["android.permission.INTERNET"],
-    "available_tools": ["set_dnd", "state.read", "toggle.set"],
+    "available_tools": ["set_dnd", "set_wifi", "show_notification"],
     "available_triggers": [
       "time", "notification", "geofence", "phone_state.sms", "phone_state.call",
       "connectivity.wifi", "connectivity.wifi.identity",
@@ -123,11 +121,13 @@ Request v2 corrente:
 }
 ```
 
-`available_tools` contiene sia i discriminatori delle azioni compilabili (`set_dnd`,
-`show_notification`, …), usati dal validator del bridge, sia gli eventuali tool di contesto/runtime
-(`state.read`, `screen.capture`, …) selezionabili da azioni generative. Il probe Android deve
-derivare entrambi dallo stesso snapshot di capability: un'azione non disponibile va esclusa e
-riportata in `unavailable_tools` con il motivo.
+`available_tools` contiene discriminatori di azioni realmente compilabili (`set_dnd`,
+`show_notification`, …) e i soli tool generativi effettivi (`whatsapp_reply`, `web.search`,
+`notify.show`). `state.read` è una capability runtime interna per `contextSources=["state"]` e viene
+negoziata nei requisiti/reader, non è un'azione wire. Alias raw senza esecutore (`screen.capture`,
+`screen.dump_ui`, `toggle.set`, `app.launch`) sono sempre esclusi dagli available e dichiarati in
+`unavailable_tools` con una ragione chiusa. Il probe Android deriva tutto dallo stesso snapshot:
+un'azione non disponibile non deve mai apparire compilabile.
 
 In v2 `available_triggers` è obbligatorio, univoco e in ordine canonico. Nel solo v1 legacy può
 essere omesso per i client pre-P2. Quando è presente, il prompt e il validator del bridge rifiutano
@@ -249,11 +249,10 @@ Lo schema P4 aggiunge variabili tipate, capture, `if`, `while` bounded e `wait`.
 campi di autorità fingerprintati. La struttura del programma resta immutabile e la shell conserva
 il trigger-gating, ma questa scelta non elimina la command injection dentro un template approvato.
 
-Difetto di prompt noto: le sezioni legacy su `run_shell`, `write_setting` e state reader continuano
-in alcuni punti a vietare l'interpolazione, mentre la sezione P4 successiva la autorizza. Il
-validator Android segue `TaintPolicy`, ma il compilatore riceve istruzioni contraddittorie e può
-rifiutare o evitare regole ora ammesse. Le due copie del prompt (`AgentMessageSupport` e
-`bridge.py`) vanno riallineate e testate contro gli stessi fixture.
+Le sezioni legacy e P4 su `run_shell`, `write_setting` e state reader seguono ora la stessa semantica:
+i programmi flat v1 restano letterali, mentre P4 può interpolare `${var}` secondo la `TaintPolicy`
+approvata. `AgentMessageSupport` e `bridge.py` restano due implementazioni, ma una fixture semantica
+condivisa fallisce se tornano a divergere sui vincoli critici.
 
 In `/compile` v2 la regola 13 consente `state_compare` soltanto per famiglie pubblicate in
 `manifest.state_readers`, impone `policyVersion=1` e chiede chiarimento se mancano soglia o unità.
@@ -365,23 +364,43 @@ telefono. In caso di rifiuto semantico `result` è `null` e `error_code` è uno 
 esattamente uno dei due deve essere valorizzato. Campi sconosciuti, target aggiunti, body incoerenti,
 versione o request ID diversi sono errori di protocollo fail-closed.
 
-### `/act` v3 risolto — contratto Android presente, server mancante
+### `/act` v3 risolto
 
-Quando un `Action.InvokeLlm` P4 ha `captureAs`, l'interpolatore Android sostituisce i valori TAINTED
-nel goal con marker opachi `{{ARGUS_RUNTIME_DATA_n}}` e il client invia schema 3 con un campo
-`runtime_data` separato. La lane attende il testo concreto e lo salva nella variabile senza inviare
-reply o notifica.
+Quando un `Action.InvokeLlm` P4 usa valori runtime nel goal, l'interpolatore Android li sostituisce
+con marker opachi `{{ARGUS_RUNTIME_DATA_n}}`; i valori raw viaggiano esclusivamente nel campo
+`runtime_data`. `deliver=CAPTURE_ONLY` salva il testo nella variabile senza reply/notifica; i sink
+`WHATSAPP_REPLY` e `LOCAL_NOTIFICATION` possono invece consegnarlo in modo sincrono prima che il
+programma continui.
 
-Questo percorso è implementato nei transport Android diretti, ma non nel bridge Python corrente:
-`SUPPORTED_ACT_SCHEMA_VERSIONS` è `(1, 2)` e `validate_act_request()` risponde `409
-schema_version_incompatible` alla v3. Non dichiarare quindi P4-F generativa verde su Hermes finché
-non esistono:
+Esempio minimo (la fixture completa condivisa è
+`brain-android/src/test/resources/contracts/hermes-act-v3-request.json`):
 
-1. parser/validator/server v3 con limiti su token, conteggio e valori runtime;
-2. prompt DATA separato e test con delimitatori ostili/newline;
-3. annuncio health o capability negotiation coerente;
-4. test end-to-end che serializza l'envelope Kotlin reale e lo valida col parser Python;
-5. prova device `captureAs → condizione/azione successiva`, non soltanto un programma random/branch.
+```json
+{
+  "schema_version": 3,
+  "request_id": "act-<sha256>",
+  "goal": "Usa {{ARGUS_RUNTIME_DATA_1}}",
+  "context_sources": [],
+  "allowed_tools": [],
+  "context": {"notification": null, "state": null},
+  "runtime_data": [
+    {"token": "ARGUS_RUNTIME_DATA_1", "value": "dato runtime non fidato"}
+  ]
+}
+```
+
+Il server richiede una corrispondenza biunivoca tra marker e record, token canonici e univoci,
+nessun campo sconosciuto e limiti bounded su conteggio/lunghezza. Nel prompt del modello il blocco
+runtime è JSON serializzato dentro una sezione DATA esplicitamente non fidata: newline e delimitatori
+nel valore non possono modificare il framing.
+
+Copertura attuale:
+
+1. golden request serializzata in Kotlin e validata dallo stesso parser Python usato in produzione;
+2. test ostili su marker mancanti/duplicati, newline e delimitatori;
+3. health Android che richiede v3;
+4. suite bridge eseguita anche sul deploy Hermes;
+5. E2E device reale `trigger → interpolation → /act v3 → capture → branch → action`.
 
 ## Idempotenza e limiti
 

@@ -448,7 +448,9 @@ class AnthropicMessagesTransportTest {
         assertFalse(RuntimeDataTestFixture.SENTINEL in system, "il valore runtime non deve entrare nel system Anthropic")
         assertTrue("{{ARGUS_RUNTIME_DATA_1}}" in system, "il system deve portare solo il marker opaco")
         assertTrue(RuntimeDataTestFixture.SENTINEL in userConcat, "il valore runtime deve entrare nel messaggio DATA")
-        assertTrue("ARGUS_RUNTIME_DATA_1 = ${RuntimeDataTestFixture.SENTINEL}" in userConcat)
+        assertTrue(
+            "\"token\":\"ARGUS_RUNTIME_DATA_1\",\"value\":\"${RuntimeDataTestFixture.SENTINEL}\"" in userConcat,
+        )
     }
 
     private fun textContent(text: String): String =

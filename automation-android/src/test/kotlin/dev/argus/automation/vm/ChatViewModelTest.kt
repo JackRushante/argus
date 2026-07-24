@@ -24,6 +24,7 @@ import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.CapabilityIds
 import dev.argus.engine.model.DndMode
+import dev.argus.engine.model.PhoneEvent
 import dev.argus.engine.model.AUTOMATION_SCHEMA_VERSION_V1
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.ActionCapabilities
@@ -125,6 +126,65 @@ class ChatViewModelTest {
                     it.rule.actions.any { action -> action.label.contains("Non disturbare") }
             },
         )
+    }
+
+    @Test
+    fun `clarification is conversational and the next answer retains its context`() = runTest(dispatcher) {
+        val brain = QueuedBrain()
+        val viewModel = chatViewModel(brain)
+        val original = "copia dagli SMS e dagli RCS i codici OTP e mettili negli appunti"
+        val question = "Vuoi una regola per SMS e una separata per RCS?"
+
+        viewModel.onInputChange(original)
+        viewModel.onSend()
+        runCurrent()
+        brain.removeFirst().response.complete(
+            CompileResult(
+                reply = question,
+                draft = null,
+                metaError = "clarification_required",
+            ),
+        )
+        advanceUntilIdle()
+
+        val clarified = viewModel.state.value
+        assertEquals(null, clarified.error)
+        assertEquals(true, clarified.brainReachable)
+        assertTrue(
+            clarified.items.any {
+                it is ChatItem.AssistantMessage && it.text == question
+            },
+        )
+        assertFalse(clarified.items.any { it is ChatItem.SystemNotice })
+
+        val answer = "Due regole separate."
+        viewModel.onInputChange(answer)
+        viewModel.onSend()
+        runCurrent()
+        val continuation = brain.removeFirst()
+
+        assertTrue(continuation.prompt.contains(original), continuation.prompt)
+        assertTrue(continuation.prompt.contains(question), continuation.prompt)
+        assertTrue(continuation.prompt.contains(answer), continuation.prompt)
+
+        continuation.response.complete(
+            CompileResult(
+                reply = "Regola SMS pronta",
+                draft = AutomationDraft(
+                    name = "OTP da SMS",
+                    trigger = Trigger.PhoneState(
+                        event = PhoneEvent.SMS_RECEIVED,
+                        textMatch = "codice",
+                    ),
+                    actions = listOf(Action.CopyText("OTP ricevuto")),
+                ),
+                metaError = null,
+            ),
+        )
+        advanceUntilIdle()
+
+        assertEquals(null, viewModel.state.value.error)
+        assertTrue(viewModel.state.value.items.any { it is ChatItem.DraftCard })
     }
 
     @Test

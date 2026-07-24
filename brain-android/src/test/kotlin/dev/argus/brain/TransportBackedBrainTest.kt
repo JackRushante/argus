@@ -78,19 +78,18 @@ class TransportBackedBrainTest {
         }
     }
 
-    @Test fun `compile retries once on draft_invalid and returns the successful retry`(): Unit = runBlocking {
+    @Test fun `compile exposes draft_invalid without a hidden unmetered retry`(): Unit = runBlocking {
         var calls = 0
         val brain = TransportBackedBrain(
             FakeTransport(onCompile = {
                 calls++
-                if (calls == 1) CompileResult(reply = "malformed", draft = null, metaError = "draft_invalid")
-                else CompileResult(reply = "ok", draft = null, metaError = null)
+                CompileResult(reply = "malformed", draft = null, metaError = "draft_invalid")
             }),
         )
         val result = brain.compile("x", manifest, DeviceState())
-        assertEquals(2, calls)
-        assertNull(result.metaError)
-        assertEquals("ok", result.reply)
+        assertEquals(1, calls)
+        assertEquals("draft_invalid", result.metaError)
+        assertEquals("malformed", result.reply)
     }
 
     @Test fun `compile does not retry on legitimate non-malformation outcomes`(): Unit = runBlocking {
@@ -110,16 +109,6 @@ class TransportBackedBrainTest {
             assertEquals(1, calls, "must not retry on $code")
             assertEquals(code, result.metaError)
         }
-    }
-
-    @Test fun `compile retries at most once even when the retry is also draft_invalid`(): Unit = runBlocking {
-        var calls = 0
-        val brain = TransportBackedBrain(
-            FakeTransport(onCompile = { calls++; CompileResult(reply = "still bad", draft = null, metaError = "draft_invalid") }),
-        )
-        val result = brain.compile("x", manifest, DeviceState())
-        assertEquals(2, calls)
-        assertEquals("draft_invalid", result.metaError)
     }
 
     @Test fun `act and actV2 map transport failures and pass successes through`(): Unit = runBlocking {
