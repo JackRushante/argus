@@ -65,9 +65,9 @@ ABI. Mechanics:
 
 - `app/build.gradle.kts`: `splits.abi { isUniversalApk = false; include(...) }`, and
   a per-output `versionCode = 100 * base + {armeabi-v7a:1, arm64-v8a:2, x86:3, x86_64:4}`
-  → for base code 7: 701/702/703/704. A `-PargusAbi=<abi>` property restricts the build to a single
-  split so F-Droid can build each ABI as its own build block byte-for-byte.
-- Recipe: **one `Builds:` block per ABI** (for v0.3.0: versionCode 701-704, each with
+  → for the current base code 9: 901/902/903/904. A `-PargusAbi=<abi>` property restricts the build
+  to a single split so F-Droid can build each ABI as its own build block byte-for-byte.
+- Recipe: **one `Builds:` block per ABI** (for v0.3.2: versionCode 901-904, each with
   `gradleprops: [argusAbi=<abi>]`), plus top-level `VercodeOperation: [100*%c+n]` so
   autoupdate generates the four codes for future tags. `CurrentVersionCode` is the
   highest split code.
