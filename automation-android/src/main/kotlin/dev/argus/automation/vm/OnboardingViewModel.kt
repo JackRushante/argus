@@ -39,6 +39,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.util.Locale
 import javax.inject.Inject
 
 sealed interface OnboardingEvent {
@@ -51,6 +52,11 @@ private data class OnboardingSources(
     val preferences: AppPreferences,
     val shizuku: ShizukuGatewayStatus,
     val geofenceNeeded: Boolean,
+)
+
+private data class BrainSetupState(
+    val configured: Boolean = false,
+    val verified: Boolean = false,
 )
 
 @HiltViewModel
@@ -68,7 +74,9 @@ class OnboardingViewModel @Inject constructor(
     private val currentIndex = savedStateHandle.getStateFlow(CURRENT_INDEX_KEY, 0)
     private val skipped = savedStateHandle.getStateFlow(SKIPPED_KEY, arrayListOf<String>())
     private val refreshSignal = MutableStateFlow(0L)
-    private val tokenConfigured = MutableStateFlow(false)
+    private val brainSetup = MutableStateFlow(
+        BrainSetupState(verified = savedStateHandle[BRAIN_VERIFIED_KEY] ?: false),
+    )
     private var shizukuRationaleShown = false
     private val mutableEvents = MutableSharedFlow<OnboardingEvent>(extraBufferCapacity = 4)
     val events = mutableEvents.asSharedFlow()
@@ -95,10 +103,10 @@ class OnboardingViewModel @Inject constructor(
         sources,
         currentIndex,
         skipped,
-        tokenConfigured,
+        brainSetup,
         refreshSignal,
-    ) { values, index, skippedSteps, configured, _ ->
-        buildState(values, index, skippedSteps.toSet(), configured)
+    ) { values, index, skippedSteps, setup, _ ->
+        buildState(values, index, skippedSteps.toSet(), setup)
     }.stateIn(
         viewModelScope,
         SharingStarted.WhileSubscribed(5_000),
@@ -110,7 +118,7 @@ class OnboardingViewModel @Inject constructor(
             ),
             currentIndex.value,
             skipped.value.toSet(),
-            configured = false,
+            setup = BrainSetupState(),
         ),
     )
 
@@ -145,25 +153,23 @@ class OnboardingViewModel @Inject constructor(
                     )
                     return@launch
                 }
-                tokenConfigured.value = true
+                markBrainVerification(configured = true, verified = false)
                 message(
                     language.pick(
                         "Hermes configuration saved in protected storage.",
                         "Configurazione Hermes salvata in storage protetto.",
                     ),
                 )
-                when (brain.health()) {
-                    is BridgeHealthResult.Reachable -> message(
-                        language.pick("Hermes is reachable.", "Hermes raggiungibile."),
-                    )
-                    is BridgeHealthResult.Unreachable -> message(
-                        language.pick(
-                            "Configuration saved; Hermes is not reachable right now.",
-                            "Configurazione salvata; Hermes non è raggiungibile ora.",
-                        ),
-                    )
+                when (val health = brain.health()) {
+                    is BridgeHealthResult.Reachable -> {
+                        markBrainVerification(configured = true, verified = true)
+                        message(language.pick("Hermes is reachable.", "Hermes raggiungibile."))
+                        advance()
+                    }
+                    is BridgeHealthResult.Unreachable -> {
+                        message(unreachableAfterSave("Hermes", health.kind.name.lowercase(Locale.ROOT)))
+                    }
                 }
-                advance()
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
@@ -186,6 +192,7 @@ class OnboardingViewModel @Inject constructor(
         }
         viewModelScope.launch {
             if (configuration.selectProvider(id)) {
+                markBrainVerification(configured = false, verified = false)
                 refresh()
             } else {
                 message(
@@ -209,25 +216,25 @@ class OnboardingViewModel @Inject constructor(
                     return@launch
                 }
                 // La chiave salvata potrebbe essere di un provider NON selezionato: rileggi invece di assumere true.
-                tokenConfigured.value = configuration.bearerToken() != null
+                val configured = configuration.bearerToken() != null
+                markBrainVerification(configured = configured, verified = false)
                 message(
                     language.pick(
                         "Configuration saved in protected storage.",
                         "Configurazione salvata in storage protetto.",
                     ),
                 )
-                when (brain.health()) {
-                    is BridgeHealthResult.Reachable -> message(
-                        language.pick("Provider is reachable.", "Provider raggiungibile."),
-                    )
-                    is BridgeHealthResult.Unreachable -> message(
-                        language.pick(
-                            "Configuration saved; the provider is not reachable right now.",
-                            "Configurazione salvata; il provider non è raggiungibile ora.",
-                        ),
-                    )
+                when (val health = brain.health()) {
+                    is BridgeHealthResult.Reachable -> {
+                        markBrainVerification(configured = true, verified = true)
+                        message(language.pick("Provider is reachable.", "Provider raggiungibile."))
+                        advance()
+                    }
+                    is BridgeHealthResult.Unreachable -> {
+                        val label = ProviderCatalog.spec(id).displayName
+                        message(unreachableAfterSave(label, health.kind.name.lowercase(Locale.ROOT)))
+                    }
                 }
-                advance()
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
@@ -278,9 +285,13 @@ class OnboardingViewModel @Inject constructor(
     fun refresh() {
         refreshSignal.value = System.nanoTime()
         viewModelScope.launch {
-            tokenConfigured.value = cancellationSafeOrNull {
+            val configured = cancellationSafeOrNull {
                 configuration.bearerToken() != null
             } ?: false
+            brainSetup.value = brainSetup.value.copy(
+                configured = configured,
+                verified = configured && brainSetup.value.verified,
+            )
         }
     }
 
@@ -350,13 +361,14 @@ class OnboardingViewModel @Inject constructor(
         sources: OnboardingSources,
         requestedIndex: Int,
         skipped: Set<String>,
-        configured: Boolean,
+        setup: BrainSetupState,
     ): OnboardingState {
+        val verified = setup.configured && setup.verified
         val health = readAndroidUiHealth(context)
         val uiShizuku = sources.shizuku.toUiStatus(degradedAfterReboot = false)
         val done = mapOf(
             StepKind.WELCOME_PRIVACY to sources.preferences.privacyAccepted,
-            StepKind.BRAIN_CONFIG to configured,
+            StepKind.BRAIN_CONFIG to verified,
             StepKind.SHIZUKU to (sources.shizuku == ShizukuGatewayStatus.AUTHORIZED),
             // Lo step notifiche è "fatto" solo con pubblicazione E lettura: le CTA arrivano in
             // quest'ordine e restano skippabili (le regole WhatsApp resteranno non armabili).
@@ -383,11 +395,11 @@ class OnboardingViewModel @Inject constructor(
         return OnboardingState(
             steps = steps,
             currentIndex = index,
-            canFinish = sources.preferences.privacyAccepted && configured,
+            canFinish = sources.preferences.privacyAccepted && verified,
             bridgeUrl = configuration.baseUrl(),
-            bridgeTokenConfigured = configured,
+            bridgeTokenConfigured = setup.configured,
             providerChoices = providerChoices(),
-            transport = transportUi(configured),
+            transport = transportUi(setup.configured),
             shizukuCapabilities = ShizukuCapabilityCatalog.rows(language),
         )
     }
@@ -429,6 +441,16 @@ class OnboardingViewModel @Inject constructor(
             ProviderChoiceUi(it.id.wireName, it.displayName, it.id == selected)
         }
     }
+
+    private fun markBrainVerification(configured: Boolean, verified: Boolean) {
+        brainSetup.value = BrainSetupState(configured = configured, verified = verified)
+        savedStateHandle[BRAIN_VERIFIED_KEY] = verified
+    }
+
+    private fun unreachableAfterSave(provider: String, reason: String): String = language.pick(
+        "Configuration saved, but $provider verification failed ($reason). Check the credentials and try again.",
+        "Configurazione salvata, ma la verifica di $provider è fallita ($reason). Controlla le credenziali e riprova.",
+    )
 
     private fun step(
         kind: StepKind,
@@ -507,10 +529,10 @@ class OnboardingViewModel @Inject constructor(
                 StepStatus.TODO,
                 language.pick("Battery optimization", "Ottimizzazione batteria"),
                 language.pick(
-                    "Recommended: grant the Android exemption, then manually check background activity and auto-launch in OxygenOS if available. Argus cannot reliably read or change these OEM switches.",
-                    "Consigliato: concedi l'esclusione Android, poi verifica manualmente in OxygenOS " +
-                        "attività in background e avvio automatico, se presenti. Argus non può leggere " +
-                        "né cambiare in modo affidabile questi interruttori OEM.",
+                    "Recommended: grant the Android exemption, then manually check any manufacturer-specific background activity and auto-launch controls. Argus cannot reliably read or change these controls.",
+                    "Consigliato: concedi l'esclusione Android, poi verifica manualmente gli eventuali " +
+                        "controlli del produttore per attività in background e avvio automatico. Argus non " +
+                        "può leggerli né modificarli in modo affidabile.",
                 ),
                 language.pick("Open settings", "Apri impostazioni"),
                 null,
@@ -548,6 +570,7 @@ class OnboardingViewModel @Inject constructor(
     private companion object {
         const val CURRENT_INDEX_KEY = "currentIndex"
         const val SKIPPED_KEY = "skippedSteps"
+        const val BRAIN_VERIFIED_KEY = "brainVerified"
         val STEP_ORDER = listOf(
             StepKind.WELCOME_PRIVACY,
             StepKind.BRAIN_CONFIG,

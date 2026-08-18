@@ -7,6 +7,8 @@ import dev.argus.automation.AppPreferences
 import dev.argus.automation.AppPreferencesStore
 import dev.argus.automation.ConfiguredBridgeBrain
 import dev.argus.brain.AgentTransport
+import dev.argus.brain.BridgeErrorKind
+import dev.argus.brain.BridgeException
 import dev.argus.brain.ProviderCatalog
 import dev.argus.brain.ProviderConfig
 import dev.argus.brain.ProviderConfigStore
@@ -138,6 +140,33 @@ class OnboardingViewModelTest {
             assertEquals(2, state.currentIndex)
             assertTrue(state.canFinish, "con privacy accettata e chiave configurata canFinish deve essere true")
         }
+
+    @Test
+    fun `authentication failure keeps brain required and wizard blocked`() = runTest(dispatcher) {
+        val store = OnbFakeProviderStore()
+        val vm = onboardingViewModel(
+            store = store,
+            index = 1,
+            factory = OnbFakeTransportFactory(healthError = BridgeErrorKind.AUTH),
+            language = RenderLanguage.EN,
+        )
+        observe(vm)
+        val events = collectEvents(vm)
+        advanceUntilIdle()
+
+        vm.selectProvider("openai")
+        advanceUntilIdle()
+        vm.saveProviderConfig("openai", baseUrl = null, model = "gpt-5-mini", apiKey = "sk-invalid-1234567890")
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertNotEquals(StepStatus.DONE, state.steps.first { it.kind == StepKind.BRAIN_CONFIG }.status)
+        assertEquals(1, state.currentIndex)
+        assertFalse(state.canFinish)
+        assertTrue(
+            events.filterIsInstance<OnboardingEvent.Message>().last().text.contains("verification failed (auth)"),
+        )
+    }
 
     @Test
     fun `selezionare un provider senza chiave non marca il passo fatto`() = runTest(dispatcher) {
@@ -276,8 +305,9 @@ class OnboardingViewModelTest {
         store: OnbFakeProviderStore,
         index: Int = 0,
         language: RenderLanguage = RenderLanguage.IT,
+        factory: TransportFactory = OnbFakeTransportFactory(),
     ): OnboardingViewModel {
-        val brain = ConfiguredBridgeBrain(store, privacyAccepted = { true }, factory = OnbFakeTransportFactory())
+        val brain = ConfiguredBridgeBrain(store, privacyAccepted = { true }, factory = factory)
         val handle = SavedStateHandle(mapOf("currentIndex" to index))
         return OnboardingViewModel(
             savedStateHandle = handle,
@@ -353,12 +383,16 @@ private class OnbFakeProviderStore(
     }
 }
 
-private class OnbFakeTransportFactory : TransportFactory {
-    override fun create(config: ProviderConfig): AgentTransport = OnbFakeAgentTransport(config.providerId)
+private class OnbFakeTransportFactory(
+    private val healthError: BridgeErrorKind? = null,
+) : TransportFactory {
+    override fun create(config: ProviderConfig): AgentTransport =
+        OnbFakeAgentTransport(config.providerId, healthError)
 }
 
 private class OnbFakeAgentTransport(
     override val providerId: ProviderId,
+    private val healthError: BridgeErrorKind?,
 ) : AgentTransport {
     override suspend fun compile(
         message: String,
@@ -376,8 +410,11 @@ private class OnbFakeAgentTransport(
     override suspend fun actV2(context: FireContext, action: Action.InvokeLlmV2): ActResult =
         ActResult(text = "ok", metaError = null)
 
-    override suspend fun health(): TransportHealth = object : TransportHealth {
-        override val model: String = "fake-model"
+    override suspend fun health(): TransportHealth {
+        healthError?.let { throw BridgeException(it, "test health failure") }
+        return object : TransportHealth {
+            override val model: String = "fake-model"
+        }
     }
 }
 

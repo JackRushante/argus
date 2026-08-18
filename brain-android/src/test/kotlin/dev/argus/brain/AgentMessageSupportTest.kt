@@ -4,6 +4,9 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneId
 import java.nio.charset.StandardCharsets
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -12,6 +15,17 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class AgentMessageSupportTest {
+    @Test
+    fun `compile prompt uses the device timezone instead of hardcoded Rome`() {
+        val zone = ZoneId.of("Europe/Berlin")
+        val clock = Clock.fixed(Instant.parse("2026-08-15T14:50:00Z"), zone)
+
+        val prompt = AgentMessageSupport.compileSystemText(zone, clock)
+
+        assertTrue("Device local time (Europe/Berlin): 2026-08-15T16:50" in prompt)
+        assertFalse("Local time Europe/Rome" in prompt)
+    }
+
     @Test
     fun `compile prompt teaches set_dark_mode and screen_brightness via write_setting`() {
         val prompt = AgentMessageSupport.compileSystemText()

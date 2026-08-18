@@ -577,7 +577,7 @@ private fun stepsFixture(currentKind: StepKind, shizuku: ShizukuStatus = Shizuku
             StepKind.BATTERY_OEM,
             if (currentKind == StepKind.BATTERY_OEM) StepStatus.IN_PROGRESS else StepStatus.TODO,
             "Escludi dall'ottimizzazione batteria",
-            "OxygenOS può sospendere Argus in background. Escludilo per far girare le azioni pianificate e le risposte AI.",
+            "La gestione energetica del produttore può sospendere Argus in background. Escludilo per far girare le azioni pianificate e le risposte AI.",
             ctaLabel = "Apri impostazioni", blockedReason = null,
         ),
         OnboardingStepState(

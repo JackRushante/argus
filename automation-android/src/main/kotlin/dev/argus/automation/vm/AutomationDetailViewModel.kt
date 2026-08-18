@@ -461,6 +461,7 @@ class AutomationDetailViewModel @Inject constructor(
                             "Posizione: quella attuale al momento dell'attivazione",
                         )
                     },
+                runNowBlockedReason = runNowBlockedReason(),
                 verifiedStateReaders = review?.verifiedStateQueries.orEmpty().map { evidence ->
                     readerProbeLabel(evidence.family, evidence.valueType)
                 },
@@ -507,11 +508,17 @@ class AutomationDetailViewModel @Inject constructor(
                 estimatedLlmCallsPerDay = generativeEstimate(rule.isGenerative),
                 recentRuns = recentRuns(automation.id.value, records, actionsByExecution),
                 geofencePreviewLabel = null,
+                runNowBlockedReason = runNowBlockedReason(),
             ),
             automationId = automation.id.value,
             loading = false,
         )
     }
+
+    private fun runNowBlockedReason(): String = language.pick(
+        "Manual execution is not available at this stage.",
+        "Esecuzione manuale non disponibile in questa fase.",
+    )
 
     private fun recentRuns(
         automationId: String,

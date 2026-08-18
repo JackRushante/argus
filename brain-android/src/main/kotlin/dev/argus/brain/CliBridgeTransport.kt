@@ -41,6 +41,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.io.IOException
 import java.io.InterruptedIOException
 import java.security.MessageDigest
+import java.time.ZoneId
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
@@ -252,6 +253,7 @@ class CliBridgeTransport internal constructor(
     private val client: OkHttpClient,
     private val allowCleartextForTests: Boolean,
     private val requestIdFactory: () -> String,
+    private val deviceTimeZone: () -> String = { ZoneId.systemDefault().id },
 ) : AgentTransport {
     override val providerId: ProviderId get() = ProviderId.HERMES
 
@@ -315,6 +317,7 @@ class CliBridgeTransport internal constructor(
             .header("Accept", "application/json")
             .header("Authorization", "Bearer $token")
             .header("Idempotency-Key", requestId)
+            .header(DEVICE_TIME_ZONE_HEADER, deviceTimeZone())
             .post(payload.toRequestBody(JSON_MEDIA))
             .build()
         return parseCompileResponse(execute(request), expectedRequestId = requestId)
@@ -846,6 +849,7 @@ class CliBridgeTransport internal constructor(
         private const val MAX_TOKEN_CHARS = 2_048
         private const val MAX_PACKAGE_CHARS = 255
         private const val COMPILE_PATH_SEGMENT = "compile"
+        internal const val DEVICE_TIME_ZONE_HEADER = "X-Argus-Device-Time-Zone"
         private const val ACT_PATH_SEGMENT = "act"
         private const val HEALTH_PATH_SEGMENT = "health"
         private const val HEALTH_VERSION_SEGMENT = "v2"

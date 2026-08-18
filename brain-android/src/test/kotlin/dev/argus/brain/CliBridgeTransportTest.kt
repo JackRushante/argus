@@ -41,6 +41,7 @@ import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.SocketPolicy
 import java.security.MessageDigest
 import java.nio.charset.StandardCharsets
+import java.time.ZoneId
 import java.util.concurrent.TimeUnit
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -105,6 +106,7 @@ class CliBridgeTransportTest {
         assertEquals("/compile", request.path)
         assertEquals("Bearer $TOKEN", request.getHeader("Authorization"))
         assertEquals(REQUEST_ID, request.getHeader("Idempotency-Key"))
+        assertEquals(ZoneId.systemDefault().id, request.getHeader(CliBridgeTransport.DEVICE_TIME_ZONE_HEADER))
         assertEquals("application/json", request.getHeader("Accept"))
         val raw = request.body.readUtf8()
         val root = Json.parseToJsonElement(raw).jsonObject
