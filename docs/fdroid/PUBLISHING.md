@@ -109,12 +109,12 @@ apksigner verify --print-certs app-release.apk | grep -i SHA-256
 
 ## 2. GitHub release
 
-- Tag must be **v-prefixed** (`v0.3.0`) so the `Binaries` URL `.../v%v/...` resolves.
-- The four F-Droid assets must match `argus-%c.apk` exactly (`argus-701.apk` through
-  `argus-704.apk` for v0.3.0).
+- Tag must be **v-prefixed** (`v0.3.2`) so the `Binaries` URL `.../v%v/...` resolves.
+- The four F-Droid assets must match `argus-%c.apk` exactly (`argus-901.apk` through
+  `argus-904.apk` for v0.3.2).
 - The release must target the exact commit pinned by every recipe block.
-- An extra universal APK may be published for direct downloads. Its name must not
-  match `argus-%c.apk`; F-Droid intentionally ignores it.
+- v0.3.2 intentionally publishes no universal APK. If one is added in a future release,
+  its name must not match `argus-%c.apk`; F-Droid intentionally ignores it.
 
 ## 3. The recipe (`metadata/dev.argus.yml`)
 
