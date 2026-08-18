@@ -116,6 +116,10 @@ class AutomationDetailViewModelTest {
             RenderLanguage.EN,
         )
         awaitUntil("english detail loaded") { viewModel.state.value.detail != null }
+        assertEquals(
+            "Manual execution is not available at this stage.",
+            viewModel.state.value.detail?.runNowBlockedReason,
+        )
         val events = mutableListOf<DetailEvent>()
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.events.collect(events::add)

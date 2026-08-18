@@ -21,6 +21,7 @@ import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.DndMode
 import dev.argus.engine.model.Trigger
+import dev.argus.ui.presentation.RenderLanguage
 import kotlinx.coroutines.runBlocking
 import org.junit.Rule
 import org.junit.Test
@@ -65,11 +66,12 @@ class ArgusNavigationInstrumentedTest {
 
     @Test
     fun firstLaunchIsGatedByPrivacyAndHidesTopLevelNavigation() {
+        val language = RenderLanguage.system()
         compose.onNodeWithTag("screen_onboarding").assertIsDisplayed()
         compose.onNodeWithTag("nav_chat").assertDoesNotExist()
         compose.onNodeWithTag("nav_list").assertDoesNotExist()
-        compose.onNodeWithText("Ho capito, acconsento").performClick()
-        compose.onNodeWithText("Collega Hermes").assertIsDisplayed()
+        compose.onNodeWithText(language.pick("I understand and consent", "Ho capito, acconsento")).performClick()
+        compose.onNodeWithText(language.pick("Choose the brain", "Scegli il cervello")).assertIsDisplayed()
     }
 
     @Test

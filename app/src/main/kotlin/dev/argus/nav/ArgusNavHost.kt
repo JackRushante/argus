@@ -292,7 +292,7 @@ fun ArgusNavHost() {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         val opened = runCatching { context.startActivity(launch) }.isSuccess
         if (!opened) {
-            openIntent(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$SHIZUKU_PACKAGE")))
+            openIntent(Intent(Intent.ACTION_VIEW, Uri.parse(SHIZUKU_DOWNLOAD_URL)))
         }
     }
 
@@ -843,3 +843,4 @@ private fun ArgusBottomBar(
 }
 
 private const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
+internal const val SHIZUKU_DOWNLOAD_URL = "https://shizuku.rikka.app/download/"

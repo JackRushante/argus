@@ -1,6 +1,6 @@
 # Contratto Argus ↔ Hermes bridge
 
-Stato reale da `v0.3.1`: `/compile` v2 corrente (`AutomationDraft` piatto v1 o programma P4 v2);
+Stato reale da `v0.3.2`: `/compile` v2 corrente (`AutomationDraft` piatto v1 o programma P4 v2);
 `/compile` v1 è mantenuto per rollout. Server Hermes e client Android implementano `/act` v1/v2/v3:
 la v3 è il canale P4 risolto con dati runtime separati, validazione strict e negoziazione health.
 
@@ -75,7 +75,11 @@ Authorization: Bearer <token>
 Content-Type: application/json
 Accept: application/json
 Idempotency-Key: <request_id>
+X-Argus-Device-Time-Zone: <IANA ZoneId del dispositivo>
 ```
+
+Il fuso viene validato dal bridge e inserito nel prompt insieme all'ora locale del dispositivo.
+I client precedenti a `0.3.2`, che non inviano l'header, restano accettati con fallback `UTC`.
 
 Request v2 corrente:
 
@@ -405,8 +409,8 @@ Copertura attuale:
 ## Idempotenza e limiti
 
 - Il server lega endpoint, versione schema, `request_id`, `Idempotency-Key` e SHA-256 dei byte del
-  request. Endpoint e versioni hanno namespace separati, quindi lo stesso ID non collide tra
-  operazioni o profili wire.
+  request; per `/compile` il digest comprende anche `X-Argus-Device-Time-Zone`. Endpoint e versioni
+  hanno namespace separati, quindi lo stesso ID non collide tra operazioni o profili wire.
 - La stessa richiesta entro 15 minuti restituisce la risposta cached senza richiamare il modello;
   due duplicati concorrenti attendono lo stesso risultato e producono una sola chiamata Hermes.
 - Riutilizzare lo stesso ID con un body diverso restituisce `409 idempotency_conflict`.

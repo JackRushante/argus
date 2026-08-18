@@ -18,6 +18,10 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
+import java.time.Clock
+import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 
 /**
  * Logica di prompt/validazione/redazione condivisa dai transport LLM cloud
@@ -257,10 +261,13 @@ internal object AgentMessageSupport {
         }
     }
 
-    /** Prompt di sistema per /compile: regole Hermes + ora locale + schema draft + schema state-query. */
-    fun compileSystemText(): String = buildString {
+    /** Prompt di sistema per /compile: regole Hermes + ora/fuso del device + schemi supportati. */
+    fun compileSystemText(
+        zoneId: ZoneId = ZoneId.systemDefault(),
+        clock: Clock = Clock.system(zoneId),
+    ): String = buildString {
         append(COMPILE_RULES)
-        append("\n\nLocal time Europe/Rome: ").append(nowEuropeRome())
+        append("\n\nDevice local time (").append(zoneId.id).append("): ").append(nowLocal(clock))
         append("\n\n").append(DRAFT_SCHEMA_TEXT)
         append("\n\n").append(STATE_QUERY_SCHEMA_TEXT)
     }
@@ -274,9 +281,9 @@ internal object AgentMessageSupport {
         append("\n===== END REQUEST =====")
     }
 
-    private fun nowEuropeRome(): String =
-        java.time.LocalDateTime.now(java.time.ZoneId.of("Europe/Rome"))
-            .truncatedTo(java.time.temporal.ChronoUnit.MINUTES)
+    private fun nowLocal(clock: Clock): String =
+        LocalDateTime.now(clock)
+            .truncatedTo(ChronoUnit.MINUTES)
             .toString()
 
     /** Contesto compatto `{"manifest":..,"state":..}`: solo metadati, valori di stato filtrati e safe. */

@@ -330,6 +330,15 @@ class BridgeTest(unittest.TestCase):
         self.assertIn("screen_brightness (0-255, SYSTEM; set screen_brightness_mode=0 first to", prompt)
         self.assertIn("auto-brightness", prompt)
 
+    def test_prompt_uses_the_validated_device_timezone(self):
+        request = self.request()
+        request["_device_time_zone"] = "Europe/Berlin"
+
+        prompt = bridge.build_prompt(request)
+
+        self.assertIn("Device local time (Europe/Berlin):", prompt)
+        self.assertNotIn("Local time Europe/Rome", prompt)
+
     def test_prompt_matches_the_shared_android_semantic_contract(self):
         fixture_path = shared_contract_path("compile-prompt-semantics.json")
         fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
@@ -1344,10 +1353,12 @@ class BridgeHttpTest(unittest.TestCase):
 
     def setUp(self):
         self.calls = 0
+        self.prompts = []
 
         # Stessa firma di run_gpt (il kwarg tools= è usato dal path /act): ritorna (output, usage).
         def runner(_prompt, tools="clarify"):
             self.calls += 1
+            self.prompts.append(_prompt)
             if "ONE-SHOT GENERATOR" in _prompt:
                 return (
                     '@@META@@ {"reply_text":"Ciao, a dopo.","error_code":null}',
@@ -1380,7 +1391,15 @@ class BridgeHttpTest(unittest.TestCase):
         for patcher in reversed(self.patchers):
             patcher.stop()
 
-    def request(self, path, body=None, token="test-token", request_id="req-http-1", content_type="application/json"):
+    def request(
+        self,
+        path,
+        body=None,
+        token="test-token",
+        request_id="req-http-1",
+        content_type="application/json",
+        device_time_zone=None,
+    ):
         data = None if body is None else json.dumps(body, separators=(",", ":")).encode()
         request = urllib.request.Request(self.url + path, data=data)
         if token is not None:
@@ -1388,6 +1407,8 @@ class BridgeHttpTest(unittest.TestCase):
         if data is not None:
             request.add_header("Content-Type", content_type)
             request.add_header("Idempotency-Key", request_id)
+        if device_time_zone is not None:
+            request.add_header("X-Argus-Device-Time-Zone", device_time_zone)
         try:
             with urllib.request.urlopen(request, timeout=2) as response:
                 return response.status, json.loads(response.read())
@@ -1429,6 +1450,31 @@ class BridgeHttpTest(unittest.TestCase):
         status, body = self.request("/compile", changed)
         self.assertEqual(409, status)
         self.assertEqual("idempotency_conflict", body["error"])
+
+    def test_compile_uses_device_timezone_header_and_rejects_invalid_zone(self):
+        request = self.valid_request(message="timezone header")
+        request["request_id"] = "req-http-timezone"
+
+        status, _ = self.request(
+            "/compile",
+            request,
+            request_id=request["request_id"],
+            device_time_zone="Europe/Berlin",
+        )
+
+        self.assertEqual(200, status)
+        self.assertIn("Device local time (Europe/Berlin):", self.prompts[-1])
+
+        invalid = self.valid_request(message="bad timezone")
+        invalid["request_id"] = "req-http-bad-timezone"
+        status, body = self.request(
+            "/compile",
+            invalid,
+            request_id=invalid["request_id"],
+            device_time_zone="Not/A_Real_Zone",
+        )
+        self.assertEqual(400, status)
+        self.assertEqual("invalid_device_time_zone", body["error"])
 
     def test_legacy_compile_stays_strict_during_v2_rollout(self):
         request = self.valid_request()

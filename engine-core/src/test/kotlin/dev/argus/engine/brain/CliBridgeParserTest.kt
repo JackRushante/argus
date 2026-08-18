@@ -36,11 +36,16 @@ class CliBridgeParserTest {
     @Test fun `meta without draft field is an explicit error`() {
         val r = p.parseCompile("""ok @@META@@ {"Draft": {"name":"typo"}}""")
         assertNull(r.draft)
-        assertNotNull(r.metaError)
+        assertEquals("draft_missing", r.metaError)
     }
     @Test fun `malformed meta yields reply plus error, no crash`() {
         val r = p.parseCompile("ok @@META@@ {non json}")
         assertNull(r.draft)
-        assertNotNull(r.metaError)
+        assertEquals("meta_parse_error", r.metaError)
+    }
+    @Test fun `missing json after sentinel yields a stable english code`() {
+        val r = p.parseCompile("ok @@META@@ no-json-here")
+        assertNull(r.draft)
+        assertEquals("meta_json_missing", r.metaError)
     }
 }

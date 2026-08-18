@@ -30,6 +30,7 @@ from zoneinfo import ZoneInfo
 LEGACY_COMPILE_SCHEMA_VERSION = 1
 COMPILE_SCHEMA_VERSION = 2
 ACT_SCHEMA_VERSION = 1
+DEFAULT_DEVICE_TIME_ZONE = "UTC"
 ACT_V2_SCHEMA_VERSION = 2
 ACT_RESOLVED_SCHEMA_VERSION = 3
 SUPPORTED_ACT_SCHEMA_VERSIONS = (
@@ -809,8 +810,19 @@ def validate_state(value: Any, allowed_keys: set[str]) -> None:
         raise RequestError(400, "invalid_state")
 
 
+def validate_device_time_zone(value: Any) -> str:
+    if not isinstance(value, str) or not (1 <= len(value) <= 64):
+        raise RequestError(400, "invalid_device_time_zone")
+    try:
+        ZoneInfo(value)
+    except (KeyError, ValueError):
+        raise RequestError(400, "invalid_device_time_zone")
+    return value
+
+
 def build_prompt(data: dict[str, Any]) -> str:
-    now = datetime.now(ZoneInfo("Europe/Rome")).isoformat(timespec="minutes")
+    device_time_zone = data.get("_device_time_zone", DEFAULT_DEVICE_TIME_ZONE)
+    now = datetime.now(ZoneInfo(device_time_zone)).isoformat(timespec="minutes")
     compile_v2 = data["schema_version"] == COMPILE_SCHEMA_VERSION
     draft_schema = DRAFT_SCHEMA_TEXT + (f"\n\n{STATE_QUERY_SCHEMA_TEXT}" if compile_v2 else "")
     state_query_rules = """\
@@ -918,7 +930,7 @@ BINDING RULES:
     user for an exact package name. Never invent a package outside those candidates.
 {state_query_rules}
 
-Local time Europe/Rome: {now}
+Device local time ({device_time_zone}): {now}
 
 {draft_schema}
 
@@ -2422,13 +2434,20 @@ class Handler(BaseHTTPRequestHandler):
             data = STRICT_JSON_DECODER.decode(raw.decode("utf-8"))
             if self.path == "/compile":
                 validate_request(data, self.headers.get("Idempotency-Key"))
+                device_time_zone = validate_device_time_zone(
+                    self.headers.get("X-Argus-Device-Time-Zone", DEFAULT_DEVICE_TIME_ZONE)
+                )
+                data["_device_time_zone"] = device_time_zone
                 producer = lambda: compile_request(data)
                 endpoint = "compile"
             else:
                 validate_act_request(data, self.headers.get("Idempotency-Key"))
                 producer = lambda: act_request(data)
                 endpoint = "act"
-            digest = hashlib.sha256(raw).hexdigest()
+            digest_material = raw
+            if self.path == "/compile":
+                digest_material += b"\0" + data["_device_time_zone"].encode("ascii")
+            digest = hashlib.sha256(digest_material).hexdigest()
             started = time.monotonic()
             status, response, replayed = IDEMPOTENCY.execute(
                 f"{endpoint}:v{data['schema_version']}:{data['request_id']}", digest, producer

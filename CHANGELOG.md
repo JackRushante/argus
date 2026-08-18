@@ -2,6 +2,27 @@
 
 Release and engineering notes, newest first.
 
+## v0.3.2 (2026-08-18) — F-Droid review fixes
+
+### Fixed
+
+- Time rules now use the Android device time zone instead of assuming `Europe/Rome`. Direct
+  providers receive it in their system prompt; Hermes receives the same validated zone through a
+  dedicated request header.
+- English UI no longer exposes Italian parser diagnostics or the manual-execution blocked reason.
+- Brain setup is marked complete only after a successful authenticated health check. A saved but
+  rejected API key remains visibly unverified and cannot advance the mandatory step.
+- Battery guidance is manufacturer-neutral instead of naming OxygenOS on every device.
+- The Shizuku download action opens Shizuku's official HTTPS download page instead of forcing the
+  Play Store.
+
+### Verification
+
+- Added regression coverage for device time zones, stable parser errors, failed authentication,
+  localized manual-execution copy, and the store-neutral Shizuku URL.
+- Passed the full JVM/Python suites, Android lint, build checks, and navigation instrumentation on
+  an Android API 36 emulator in English.
+
 ## v0.3.1 (2026-07-24) — P4/Hermes contract stabilization
 
 ### Fixed

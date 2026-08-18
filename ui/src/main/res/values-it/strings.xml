@@ -149,8 +149,8 @@
     <string name="settings_shizuku_not_authorized">attivo, Argus non autorizzato</string>
     <string name="settings_shizuku_degraded">spento dopo il riavvio — azioni shell in coda</string>
     <string name="settings_battery_title">Ottimizzazione batteria</string>
-    <string name="settings_battery_ok">esclusione Android concessa — i controlli attività in background/avvio automatico OxygenOS restano manuali</string>
-    <string name="settings_battery_warn">attiva — concedi l\'esclusione e verifica anche attività in background/avvio automatico in OxygenOS</string>
+    <string name="settings_battery_ok">esclusione Android concessa — gli eventuali controlli del produttore per attività in background/avvio automatico restano manuali</string>
+    <string name="settings_battery_warn">attiva — concedi l\'esclusione e verifica anche gli eventuali controlli del produttore per attività in background/avvio automatico</string>
     <string name="settings_notifications_title">Notifiche Argus</string>
     <string name="settings_notifications_ok">consentite</string>
     <string name="settings_notifications_warn">non consentite — esiti e avvisi non saranno visibili</string>
@@ -238,5 +238,5 @@
     <string name="onboarding_shizuku_required_sub">Senza autorizzazione, queste azioni non sono disponibili.</string>
     <string name="onboarding_shizuku_recommended_sub">Funzionano anche senza, ma solo con Argus aperto in primo piano.</string>
     <string name="onboarding_shizuku_not_required_sub">Sempre disponibili, con o senza Shizuku.</string>
-    <string name="onboarding_battery_consequence">Senza l\'esclusione, OxygenOS può ritardare il lavoro in background. Gli allarmi restano event-driven e non usano un servizio persistente.</string>
+    <string name="onboarding_battery_consequence">Senza l\'esclusione, Android o la gestione energetica del produttore può ritardare il lavoro in background. Gli allarmi restano event-driven e non usano un servizio persistente.</string>
 </resources>

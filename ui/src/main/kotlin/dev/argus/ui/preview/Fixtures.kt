@@ -626,7 +626,7 @@ object Fixtures {
             OnboardingStepState(
                 StepKind.BATTERY_OEM, statusFor(StepKind.BATTERY_OEM),
                 "Escludi dall'ottimizzazione batteria",
-                "OxygenOS può sospendere Argus in background. Escludilo per far girare le azioni pianificate e le risposte AI.",
+                "La gestione energetica del produttore può sospendere Argus in background. Escludilo per far girare le azioni pianificate e le risposte AI.",
                 ctaLabel = "Apri impostazioni", blockedReason = null,
             ),
             OnboardingStepState(

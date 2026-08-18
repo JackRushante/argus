@@ -15,13 +15,13 @@ class CliBridgeParser(private val json: Json = lenient()) {
         if (idx < 0) return CompileResult(raw.trim(), null, null)
         val prose = raw.substring(0, idx).trim()
         val obj = extractJsonObject(raw.substring(idx + SENTINEL.length))
-            ?: return CompileResult(prose, null, "nessun oggetto JSON dopo il sentinel")
+            ?: return CompileResult(prose, null, "meta_json_missing")
         return try {
             val draft = json.decodeFromString(MetaEnvelope.serializer(), obj).draft
-            if (draft == null) CompileResult(prose, null, "meta presente ma senza campo 'draft'")
+            if (draft == null) CompileResult(prose, null, "draft_missing")
             else CompileResult(prose, draft, null)
-        } catch (e: Exception) {
-            CompileResult(prose, null, e.message ?: "meta parse error")
+        } catch (_: Exception) {
+            CompileResult(prose, null, "meta_parse_error")
         }
     }
 
