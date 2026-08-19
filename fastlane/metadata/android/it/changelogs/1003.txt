@@ -1,0 +1,1 @@
+La 0.3.3 rimuove il controllo LLM automatico all'avvio dell'app e della Chat. Il provider configurato viene contattato solo per un test connessione esplicito, una richiesta di compilazione o un'azione generativa approvata. Le compilazioni oltre il limite di 65 secondi ora mostrano correttamente un timeout invece del generico avviso di servizio irraggiungibile.

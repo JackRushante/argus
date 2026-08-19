@@ -9,9 +9,13 @@ import dev.argus.automation.DeviceStateSnapshotProvider
 import dev.argus.automation.apps.EmptyInstalledAppResolver
 import dev.argus.automation.apps.InstalledAppCandidate
 import dev.argus.automation.apps.InstalledAppResolver
+import dev.argus.brain.AgentTransport
 import dev.argus.brain.ProviderConfig
 import dev.argus.brain.ProviderConfigStore
 import dev.argus.brain.ProviderId
+import dev.argus.brain.TransportFactory
+import dev.argus.brain.TransportHealth
+import dev.argus.engine.brain.ActResult
 import dev.argus.engine.brain.Brain
 import dev.argus.engine.brain.CapabilityManifest
 import dev.argus.engine.brain.CapabilityProbe
@@ -35,6 +39,7 @@ import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireClaimRequest
 import dev.argus.engine.runtime.FireClaimResult
+import dev.argus.engine.runtime.FireContext
 import dev.argus.engine.runtime.FirePolicySnapshot
 import dev.argus.engine.runtime.FirePolicySnapshotProvider
 import dev.argus.engine.safety.ApprovalService
@@ -48,6 +53,7 @@ import dev.argus.engine.safety.DraftWriteResult
 import dev.argus.engine.safety.NewDraft
 import dev.argus.engine.safety.PendingDraft
 import dev.argus.ui.model.ChatItem
+import dev.argus.ui.model.ChatError
 import dev.argus.ui.presentation.RenderLanguage
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -57,6 +63,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -80,6 +87,52 @@ class ChatViewModelTest {
     @AfterEach
     fun tearDown() {
         Dispatchers.resetMain()
+    }
+
+    @Test
+    fun `cold start does not contact the configured brain until health is requested`() =
+        runTest(dispatcher) {
+            val transport = CountingHealthTransport()
+            val configuration = ViewModelBridgeConfiguration()
+            val configuredBridge = ConfiguredBridgeBrain(
+                configuration = configuration,
+                privacyAccepted = { true },
+                factory = TransportFactory { transport },
+                elapsedRealtimeMillis = { 0L },
+            )
+            val viewModel = chatViewModel(
+                brain = QueuedBrain(),
+                configuredBridge = configuredBridge,
+            )
+
+            runCurrent()
+
+            assertEquals(0, transport.healthCalls)
+            assertEquals(null, viewModel.state.value.brainReachable)
+
+            viewModel.refreshHealth()
+            runCurrent()
+
+            assertEquals(1, transport.healthCalls)
+            assertEquals(true, viewModel.state.value.brainReachable)
+        }
+
+    @Test
+    fun `compile timeout is shown as timeout instead of unreachable`() = runTest(dispatcher) {
+        val brain = QueuedBrain()
+        val viewModel = chatViewModel(brain)
+
+        viewModel.onInputChange("slow local model")
+        viewModel.onSend()
+        runCurrent()
+        brain.removeFirst()
+
+        advanceTimeBy(65_001L)
+        runCurrent()
+
+        assertEquals(ChatError.Timeout, viewModel.state.value.error)
+        assertEquals(null, viewModel.state.value.brainReachable)
+        assertFalse(viewModel.state.value.sending)
     }
 
     @Test
@@ -326,6 +379,7 @@ class ChatViewModelTest {
         whitelist: ContactWhitelistStore = ViewModelWhitelistStore(),
         language: RenderLanguage = RenderLanguage.IT,
         installedApps: InstalledAppResolver = EmptyInstalledAppResolver,
+        configuredBridge: ConfiguredBridgeBrain? = null,
     ): ChatViewModel {
         val automations = ViewModelAutomationStore()
         val drafts = ViewModelDraftRepository()
@@ -357,7 +411,7 @@ class ChatViewModelTest {
         val configuration = ViewModelBridgeConfiguration()
         return ChatViewModel(
             brain = brain,
-            configuredBridge = ConfiguredBridgeBrain(
+            configuredBridge = configuredBridge ?: ConfiguredBridgeBrain(
                 configuration = configuration,
                 privacyAccepted = { true },
                 elapsedRealtimeMillis = { 0L },
@@ -386,6 +440,35 @@ class ChatViewModelTest {
             unavailableTools = emptyMap(),
             whitelistedContacts = emptyList(),
         )
+    }
+}
+
+private class CountingHealthTransport : AgentTransport {
+    override val providerId: ProviderId = ProviderId.HERMES
+    var healthCalls: Int = 0
+        private set
+
+    override suspend fun compile(
+        message: String,
+        manifest: CapabilityManifest,
+        state: DeviceState,
+    ): CompileResult = error("compile must not run during a health-only test")
+
+    override suspend fun act(
+        context: FireContext,
+        goal: String,
+        contextSources: List<String>,
+        allowedTools: List<String>,
+    ): ActResult = error("act must not run during a health-only test")
+
+    override suspend fun actV2(context: FireContext, action: Action.InvokeLlmV2): ActResult =
+        error("actV2 must not run during a health-only test")
+
+    override suspend fun health(): TransportHealth {
+        healthCalls += 1
+        return object : TransportHealth {
+            override val model: String = "test-model"
+        }
     }
 }
 

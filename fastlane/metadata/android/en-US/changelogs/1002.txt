@@ -1,0 +1,1 @@
+0.3.3 removes the automatic LLM health request on app and Chat startup. The configured provider is contacted only for an explicit connection check, a compile request, or an approved generative action. Compile requests that exceed the 65-second budget now show an accurate timeout instead of the generic unreachable-service banner.
