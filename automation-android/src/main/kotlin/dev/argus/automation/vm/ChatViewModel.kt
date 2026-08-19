@@ -116,7 +116,6 @@ class ChatViewModel @Inject constructor(
                     }
                 }
         }
-        refreshHealth()
     }
 
     fun onInputChange(text: String) {
@@ -295,7 +294,7 @@ class ChatViewModel @Inject constructor(
             } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
                 if (generation == requestGeneration) {
                     mutableState.update {
-                        it.copy(brainReachable = false, error = ChatError.Timeout)
+                        it.copy(brainReachable = null, error = ChatError.Timeout)
                     }
                 }
             } catch (error: CancellationException) {
@@ -417,8 +416,13 @@ class ChatViewModel @Inject constructor(
         mutableState.update {
             it.copy(
                 brainReachable = when (kind) {
-                    BridgeErrorKind.CONFIGURATION, BridgeErrorKind.AUTH -> null
-                    else -> false
+                    BridgeErrorKind.CONFIGURATION,
+                    BridgeErrorKind.AUTH,
+                    BridgeErrorKind.TIMEOUT -> null
+                    BridgeErrorKind.NETWORK, BridgeErrorKind.HTTP -> false
+                    BridgeErrorKind.PROTOCOL,
+                    BridgeErrorKind.RATE_LIMIT,
+                    BridgeErrorKind.BUDGET -> true
                 },
                 error = when (kind) {
                     BridgeErrorKind.TIMEOUT -> ChatError.Timeout

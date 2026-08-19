@@ -77,7 +77,7 @@
     <string name="chat_review_cta">Rivedi e approva</string>
     <string name="chat_brain_down">Servizio AI irraggiungibile</string>
     <string name="chat_retry">Riprova</string>
-    <string name="chat_error_timeout">Il servizio AI non risponde (timeout 60 s). Potrebbe essere occupato — riprova.</string>
+    <string name="chat_error_timeout">Il servizio AI non risponde (timeout 65 s). Potrebbe essere occupato — riprova.</string>
     <string name="chat_error_unreachable">Servizio AI irraggiungibile. Controlla la rete e la configurazione del provider, poi riprova.</string>
     <string name="chat_error_malformed">La risposta non conteneva una regola valida. Riprova o riformula.</string>
     <string name="chat_error_detail_show">Dettaglio tecnico</string>

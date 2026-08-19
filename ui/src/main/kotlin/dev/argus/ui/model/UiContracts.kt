@@ -109,7 +109,7 @@ enum class DraftCardStatus { PROPOSED, APPROVED, REJECTED, SUPERSEDED }
 enum class NoticeKind { INFO, ERROR }
 
 sealed interface ChatError {
-    data object Timeout : ChatError                    // "Hermes non ha risposto entro 60 s. Riprova."
+    data object Timeout : ChatError                    // Il servizio AI non ha risposto entro 65 s.
     data object BridgeUnreachable : ChatError
     data class MalformedReply(val detail: String) : ChatError  // metaError dal parser: mostrare "risposta senza regola valida" + dettaglio espandibile
 }

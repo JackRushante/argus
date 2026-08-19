@@ -78,7 +78,7 @@
     <string name="chat_review_cta">Review and approve</string>
     <string name="chat_brain_down">AI service unreachable</string>
     <string name="chat_retry">Retry</string>
-    <string name="chat_error_timeout">The AI service is not responding (60 s timeout). It may be busy — try again.</string>
+    <string name="chat_error_timeout">The AI service is not responding (65 s timeout). It may be busy — try again.</string>
     <string name="chat_error_unreachable">AI service unreachable. Check the network connection and provider settings, then try again.</string>
     <string name="chat_error_malformed">The reply did not contain a valid rule. Retry or rephrase.</string>
     <string name="chat_error_detail_show">Technical detail</string>

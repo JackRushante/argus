@@ -167,8 +167,6 @@ fun ArgusNavHost() {
                 popUpTo(navController.graph.findStartDestination().id) { inclusive = true }
                 launchSingleTop = true
             }
-        } else if (onboardingCompleted && currentBaseRoute == Routes.CHAT) {
-            chatViewModel.refreshHealth()
         }
     }
     var unreadChat by rememberSaveable { mutableStateOf(false) }

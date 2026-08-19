@@ -2,6 +2,22 @@
 
 Release and engineering notes, newest first.
 
+## v0.3.3 (2026-08-19) — No unsolicited provider traffic
+
+### Fixed
+
+- Opening Argus or returning to Chat no longer sends an automatic health completion to the
+  configured LLM provider. Network access now starts only after an explicit connection check, a
+  user compile request, or an approved generative action.
+- A compile that exceeds the 65-second budget is reported as a timeout instead of being masked by
+  the generic "AI service unreachable" banner.
+
+### Verification
+
+- Added regression coverage proving that `ChatViewModel` performs zero health calls at cold start
+  while the explicit connection check still performs exactly one.
+- Added virtual-time coverage for the 65-second compile timeout and its non-misleading UI state.
+
 ## v0.3.2 (2026-08-18) — F-Droid review fixes
 
 ### Fixed

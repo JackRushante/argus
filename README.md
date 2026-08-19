@@ -20,7 +20,7 @@ Argus is a Tasker-class Android automation app where the LLM is the *compiler*, 
 
 > The app UI is bilingual (English/Italian, follows the system language).
 
-> **Privacy & license at a glance.** Argus operates **no project backend or account service** and includes no telemetry or analytics. It contacts only the LLM provider or self-hosted bridge that you explicitly configure. Rules, logs and API keys stay **on your device** (keys encrypted; the audit log records outcomes with no personal content). Argus is **free software under [GPL-3.0](LICENSE)**: you may study, modify and share it, but any derivative must stay open under the same license.
+> **Privacy & license at a glance.** Argus operates **no project backend or account service** and includes no telemetry or analytics. It contacts only the LLM provider or self-hosted bridge that you explicitly configure, and never probes it automatically on app start: network access begins with an explicit connection check, a compile request, or an approved generative action. Rules, logs and API keys stay **on your device** (keys encrypted; the audit log records outcomes with no personal content). Argus is **free software under [GPL-3.0](LICENSE)**: you may study, modify and share it, but any derivative must stay open under the same license.
 
 ---
 
@@ -293,8 +293,8 @@ but the production executor rejects them and the capability manifest marks them 
 To sign your own release: create `keystore.properties` in the root (`storeFile`, `storePassword`, `keyAlias`, `keyPassword`) — the file and the keystores are gitignored and must never be committed. Official signed APKs are on the [GitHub Releases](https://github.com/JackRushante/argus/releases).
 
 Installation: download the APK matching your device from the latest GitHub release and sideload it
-(`adb install` or APK transfer). Most current Android phones use the `arm64-v8a` asset (for v0.3.2,
-`argus-902.apk`); the release notes map every filename to its ABI. The F-Droid submission is still
+(`adb install` or APK transfer). Most current Android phones use the `arm64-v8a` asset (for v0.3.3,
+`argus-1002.apk`); the release notes map every filename to its ABI. The F-Droid submission is still
 under review; do not assume it is available in the official client until the metadata merge request
 is merged. There is no Play Store distribution. On first launch the onboarding walks you through the
 LLM provider and permissions.
