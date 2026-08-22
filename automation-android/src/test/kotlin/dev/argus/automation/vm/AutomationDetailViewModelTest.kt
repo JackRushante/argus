@@ -91,7 +91,9 @@ class AutomationDetailViewModelTest {
         val viewModel = viewModel("a1", store, audit)
         awaitUntil("dettaglio caricato") { viewModel.state.value.detail != null }
         val events = mutableListOf<DetailEvent>()
-        backgroundScope.launch { viewModel.events.collect(events::add) }
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.events.collect(events::add)
+        }
 
         viewModel.onDelete()
         awaitUntil("chiusura dopo delete") { events.any { it is DetailEvent.Close } }
