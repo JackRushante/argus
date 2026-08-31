@@ -30,12 +30,13 @@ URL cannot be built yet.
 |---|---|
 | applicationId | `dev.argus` |
 | metadata file | `metadata/dev.argus.yml` |
-| version | `0.3.3` / base versionCode `10` (ABI split → 1001/1002/1003/1004) |
-| tag (v-prefixed) | `v0.3.3` |
-| build commit (full hash) | `23d86cf0b37aaa6a7ed25481b726c5a9860fd460` |
+| version | `0.3.4` / base versionCode `11` (ABI split → 1101/1102/1103/1104) |
+| tag (v-prefixed) | `v0.3.4` |
+| build commit (full hash) | `5311efb417ec0fafd148b89a328954382e376fdf` |
 | signing cert SHA-256 | `4c09633e64cf9876b0da682f5f259383af8d22742aadd93ef273b9f2c73cca6b` |
-| F-Droid release assets | `argus-1001.apk` … `argus-1004.apk` (pattern `argus-%c.apk`) |
-| direct-download asset | none for v0.3.3; use the matching per-ABI APK (`argus-1002.apk` for arm64-v8a) |
+| F-Droid release assets | `argus-1101.apk` … `argus-1104.apk` (pattern `argus-%c.apk`) |
+| artifact SHA-256 | `1101`: `d1990846e4753761dcaf2a1010a3c048306ec87b87b5251c9f22d08a22f4b4a7`; `1102`: `ad8738b03beac7f652fab63458f3e41ed7e482e0c3875507f64c62656b7f318b`; `1103`: `65759f21639bcd3d7c85080c6b175f648a87d96c945df9f49b9cbc4a74601b55`; `1104`: `c8a88696a7ff3e9b8c5d101b1feec4067aec8d606425cf34487700d3a3dcec9b` |
+| direct-download asset | none for v0.3.4; use the matching per-ABI APK (`argus-1102.apk` for arm64-v8a) |
 | License (SPDX) | `GPL-3.0-only` |
 
 ### Reproducibility: baseline profile dropped (v0.2.4)
@@ -65,9 +66,9 @@ ABI. Mechanics:
 
 - `app/build.gradle.kts`: `splits.abi { isUniversalApk = false; include(...) }`, and
   a per-output `versionCode = 100 * base + {armeabi-v7a:1, arm64-v8a:2, x86:3, x86_64:4}`
-  → for the current base code 10: 1001/1002/1003/1004. A `-PargusAbi=<abi>` property restricts the build
+  → for the current base code 11: 1101/1102/1103/1104. A `-PargusAbi=<abi>` property restricts the build
   to a single split so F-Droid can build each ABI as its own build block byte-for-byte.
-- Recipe: **one `Builds:` block per ABI** (for v0.3.3: versionCode 1001-1004, each with
+- Recipe: **one `Builds:` block per ABI** (for v0.3.4: versionCode 1101-1104, each with
   `gradleprops: [argusAbi=<abi>]`), plus top-level `VercodeOperation: [100*%c+n]` so
   autoupdate generates the four codes for future tags. `CurrentVersionCode` is the
   highest split code.
@@ -109,11 +110,11 @@ apksigner verify --print-certs app-release.apk | grep -i SHA-256
 
 ## 2. GitHub release
 
-- Tag must be **v-prefixed** (`v0.3.3`) so the `Binaries` URL `.../v%v/...` resolves.
-- The four F-Droid assets must match `argus-%c.apk` exactly (`argus-1001.apk` through
-  `argus-1004.apk` for v0.3.3).
+- Tag must be **v-prefixed** (`v0.3.4`) so the `Binaries` URL `.../v%v/...` resolves.
+- The four F-Droid assets must match `argus-%c.apk` exactly (`argus-1101.apk` through
+  `argus-1104.apk` for v0.3.4).
 - The release must target the exact commit pinned by every recipe block.
-- v0.3.3 intentionally publishes no universal APK. If one is added in a future release,
+- v0.3.4 intentionally publishes no universal APK. If one is added in a future release,
   its name must not match `argus-%c.apk`; F-Droid intentionally ignores it.
 
 ## 3. The recipe (`metadata/dev.argus.yml`)
