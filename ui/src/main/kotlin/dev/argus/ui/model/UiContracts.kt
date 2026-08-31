@@ -265,6 +265,10 @@ sealed interface TransportUi {
         val defaultModels: List<String> = emptyList(),   // suggerimenti dal catalog
         val baseUrlEditable: Boolean = false,            // true solo per CUSTOM_OPENAI_COMPAT
         val apiKeyPrefixHint: String? = null,            // hint soft, MAI bloccante
+        val apiKeyRequired: Boolean = true,
+        /** Nome enum UI: default/none/low/medium/high. */
+        val reasoningEffort: String = "default",
+        val reasoningEffortEditable: Boolean = false,
     ) : TransportUi
 }
 enum class AuthState { OK, EXPIRED, NOT_CONFIGURED }
@@ -293,6 +297,8 @@ data class ProviderUsageUi(
     val tokensOutDay: Long? = null,
     val tokensInMonth: Long? = null,
     val tokensOutMonth: Long? = null,
+    val reasoningTokensMonth: Long? = null,
+    val lastFinishReason: String? = null,
 )
 
 /**
@@ -342,7 +348,13 @@ interface SettingsCallbacks {
     /** Selettore provider: id = ProviderId.wireName. Id sconosciuti = no-op lato VM. */
     fun onSelectProvider(providerId: String) {}
     /** apiKey null = conserva la chiave esistente (pattern onSaveBridge). La chiave NON torna mai nello stato. */
-    fun onSaveProviderConfig(providerId: String, baseUrl: String?, model: String?, apiKey: String?) {}
+    fun onSaveProviderConfig(
+        providerId: String,
+        baseUrl: String?,
+        model: String?,
+        apiKey: String?,
+        reasoningEffort: String? = null,
+    ) {}
 }
 
 // --- 6.6 Onboarding / permessi ---
@@ -539,5 +551,11 @@ interface OnboardingCallbacks {
     /** Selettore provider: id = ProviderId.wireName. Id sconosciuti = no-op lato VM. */
     fun onSelectProvider(providerId: String) {}
     /** apiKey null = conserva la chiave esistente (pattern onSaveBridge). La chiave NON torna mai nello stato. */
-    fun onSaveProviderConfig(providerId: String, baseUrl: String?, model: String?, apiKey: String?) {}
+    fun onSaveProviderConfig(
+        providerId: String,
+        baseUrl: String?,
+        model: String?,
+        apiKey: String?,
+        reasoningEffort: String? = null,
+    ) {}
 }

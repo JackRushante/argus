@@ -479,7 +479,10 @@ fun ArgusNavHost() {
                             baseUrl: String?,
                             model: String?,
                             apiKey: String?,
-                        ) = settingsViewModel.saveProviderConfig(providerId, baseUrl, model, apiKey)
+                            reasoningEffort: String?,
+                        ) = settingsViewModel.saveProviderConfig(
+                            providerId, baseUrl, model, apiKey, reasoningEffort,
+                        )
                     },
                     modifier = Modifier.testTag("screen_settings"),
                 )
@@ -610,7 +613,10 @@ fun ArgusNavHost() {
                             baseUrl: String?,
                             model: String?,
                             apiKey: String?,
-                        ) = viewModel.saveProviderConfig(providerId, baseUrl, model, apiKey)
+                            reasoningEffort: String?,
+                        ) = viewModel.saveProviderConfig(
+                            providerId, baseUrl, model, apiKey, reasoningEffort,
+                        )
                         override fun onSkip(kind: StepKind) = viewModel.onSkip(kind)
                         override fun onNext() = viewModel.onNext()
                         override fun onBack() = viewModel.onBack()

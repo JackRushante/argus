@@ -100,8 +100,10 @@ class OpenAICompatTransport internal constructor(
     init {
         require(base.username.isEmpty() && base.password.isEmpty()) { "baseUrl non deve contenere credenziali" }
         require(base.query == null && base.fragment == null) { "baseUrl non deve contenere query o fragment" }
-        require(base.isHttps || allowCleartextForTests && base.host in TEST_HTTP_HOSTS) {
-            "Il provider OpenAI-compat richiede HTTPS"
+        val loopbackCleartext = base.scheme == "http" && base.host in LOOPBACK_HTTP_HOSTS &&
+            (providerId == ProviderId.CUSTOM_OPENAI_COMPAT || allowCleartextForTests)
+        require(base.isHttps || loopbackCleartext) {
+            "Il provider OpenAI-compat richiede HTTPS o HTTP loopback per Custom"
         }
     }
 
@@ -119,27 +121,30 @@ class OpenAICompatTransport internal constructor(
         state: DeviceState,
     ): CompileResult {
         val cleanMessage = AgentMessageSupport.requireMessage(message)
-        val token = requireKey()
+        val token = resolveApiKey()
         val model = resolveModel()
         val request = ChatRequest(
             model = model,
             messages = compileMessages(cleanMessage, manifest, state),
             maxTokens = if (spec.quirks.outputCapParam == OutputCapParam.MAX_TOKENS) COMPILE_MAX_TOKENS else null,
             maxCompletionTokens = if (spec.quirks.outputCapParam == OutputCapParam.MAX_COMPLETION_TOKENS) COMPILE_MAX_TOKENS else null,
+            reasoningEffort = config.reasoningEffort.wireValue,
         )
         val payload = json.encodeToString(request)
         val response = parseChatResponse(execute(buildRequest(token, payload)))
+        val usage = response.toTurnUsage(fallbackModel = model)
         val text = response.choices.firstOrNull()?.message?.content?.trim()
-        if (text.isNullOrEmpty()) return CompileResult("", null, "empty_response")
+        if (text.isNullOrEmpty()) return CompileResult("", null, "empty_response", usage)
         val parsed = compileParser.parseCompile(text)
         // "nessun sentinel": il parser restituisce reply-only senza metaError; qui diventa un
         // codice tipizzato coerente col wire Hermes ("draft_missing"), così il chiamante distingue
         // sempre un draft assente da un successo.
-        return if (parsed.draft == null && parsed.metaError == null) {
+        val normalized = if (parsed.draft == null && parsed.metaError == null) {
             parsed.copy(metaError = "draft_missing")
         } else {
             parsed
         }
+        return normalized.copy(usage = usage)
     }
 
     private fun compileMessages(
@@ -229,7 +234,7 @@ class OpenAICompatTransport internal constructor(
     }
 
     override suspend fun health(): TransportHealth {
-        val token = requireKey()
+        val token = resolveApiKey()
         val model = resolveModel()
         val body = json.encodeToString(
             ChatRequest(
@@ -237,6 +242,7 @@ class OpenAICompatTransport internal constructor(
                 messages = listOf(ChatMessage("user", HEALTH_PING)),
                 maxTokens = if (spec.quirks.outputCapParam == OutputCapParam.MAX_TOKENS) HEALTH_MAX_TOKENS else null,
                 maxCompletionTokens = if (spec.quirks.outputCapParam == OutputCapParam.MAX_COMPLETION_TOKENS) HEALTH_MAX_TOKENS else null,
+                reasoningEffort = config.reasoningEffort.wireValue,
             ),
         )
         val response = parseChatResponse(execute(buildRequest(token, body)))
@@ -262,7 +268,7 @@ class OpenAICompatTransport internal constructor(
         useReplyTool: Boolean,
         runtimeData: List<RuntimeDataBinding> = emptyList(),
     ): ActResult {
-        val token = requireKey()
+        val token = resolveApiKey()
         val baseModel = resolveModel()
         // Web search server-side, single-turn: applica il meccanismo del provider SOLO se il web è
         // richiesto E supportato. Se richiesto ma NONE → degradazione graziosa (genera normalmente).
@@ -273,9 +279,13 @@ class OpenAICompatTransport internal constructor(
         if (applyWeb) {
             when (spec.quirks.webSearch) {
                 WebSearchMechanism.OPENAI_RESPONSES ->
-                    return generateViaResponses(goal, notification, stateLines, token, baseModel, runtimeData)
+                    return generateViaResponses(
+                        goal, notification, stateLines, requireNotNull(token), baseModel, runtimeData,
+                    )
                 WebSearchMechanism.GEMINI_NATIVE ->
-                    return generateViaGeminiNative(goal, notification, stateLines, token, baseModel, runtimeData)
+                    return generateViaGeminiNative(
+                        goal, notification, stateLines, requireNotNull(token), baseModel, runtimeData,
+                    )
                 else -> Unit // OPENROUTER_ONLINE resta su Chat Completions (slug `:online`).
             }
         }
@@ -311,6 +321,7 @@ class OpenAICompatTransport internal constructor(
             },
             maxTokens = if (spec.quirks.outputCapParam == OutputCapParam.MAX_TOKENS) MAX_OUTPUT_TOKENS else null,
             maxCompletionTokens = if (spec.quirks.outputCapParam == OutputCapParam.MAX_COMPLETION_TOKENS) MAX_OUTPUT_TOKENS else null,
+            reasoningEffort = config.reasoningEffort.wireValue,
         )
         val payload = json.encodeToString(request)
         val response = parseChatResponse(execute(buildRequest(token, payload)))
@@ -430,14 +441,16 @@ class OpenAICompatTransport internal constructor(
             .build()
     }
 
-    private fun buildRequest(token: String, payload: String): Request {
+    private fun buildRequest(token: String?, payload: String): Request {
         val builder = Request.Builder()
             .url(chatUrl)
             .header("Accept", "application/json")
             .post(payload.toRequestBody(JSON_MEDIA))
-        when (spec.authStyle) {
-            AuthStyle.BEARER -> builder.header("Authorization", "Bearer $token")
-            AuthStyle.X_API_KEY -> builder.header("x-api-key", token)
+        if (token != null) {
+            when (spec.authStyle) {
+                AuthStyle.BEARER -> builder.header("Authorization", "Bearer $token")
+                AuthStyle.X_API_KEY -> builder.header("x-api-key", token)
+            }
         }
         spec.quirks.extraHeaders.forEach { (name, value) -> builder.header(name, value) }
         return builder.build()
@@ -461,7 +474,12 @@ class OpenAICompatTransport internal constructor(
             .post(payload.toRequestBody(JSON_MEDIA))
             .build()
 
-    private suspend fun requireKey(): String = AgentMessageSupport.requireKey(apiKey())
+    private suspend fun resolveApiKey(): String? {
+        val stored = apiKey()
+        if (stored != null) return AgentMessageSupport.requireKey(stored)
+        if (spec.apiKeyRequired) return AgentMessageSupport.requireKey(null)
+        return null
+    }
 
     private fun resolveModel(): String =
         config.model?.trim()?.takeIf { it.isNotEmpty() }
@@ -510,7 +528,9 @@ class OpenAICompatTransport internal constructor(
                 inputTokens = input,
                 outputTokens = output,
                 cachedInputTokens = u.promptTokensDetails?.cachedTokens?.takeIf { it >= 0 },
+                reasoningTokens = u.completionTokensDetails?.reasoningTokens?.takeIf { it >= 0 },
                 model = model?.takeIf { it.isNotBlank() } ?: fallbackModel,
+                finishReason = choices.firstOrNull()?.finishReason,
             )
         }.getOrNull()
     }
@@ -656,6 +676,7 @@ class OpenAICompatTransport internal constructor(
         @SerialName("tool_choice") val toolChoice: JsonElement? = null,
         @SerialName("max_tokens") val maxTokens: Int? = null,
         @SerialName("max_completion_tokens") val maxCompletionTokens: Int? = null,
+        @SerialName("reasoning_effort") val reasoningEffort: String? = null,
     )
 
     @Serializable
@@ -772,11 +793,17 @@ class OpenAICompatTransport internal constructor(
         @SerialName("prompt_tokens") val promptTokens: Long? = null,
         @SerialName("completion_tokens") val completionTokens: Long? = null,
         @SerialName("prompt_tokens_details") val promptTokensDetails: PromptTokensDetails? = null,
+        @SerialName("completion_tokens_details") val completionTokensDetails: CompletionTokensDetails? = null,
     )
 
     @Serializable
     private data class PromptTokensDetails(
         @SerialName("cached_tokens") val cachedTokens: Long? = null,
+    )
+
+    @Serializable
+    private data class CompletionTokensDetails(
+        @SerialName("reasoning_tokens") val reasoningTokens: Long? = null,
     )
 
     private companion object {
@@ -793,7 +820,6 @@ class OpenAICompatTransport internal constructor(
         const val COMPILE_MAX_TOKENS = 4_096
         const val MAX_RESPONSE_BYTES = 512L * 1024L
         val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
-        val TEST_HTTP_HOSTS = setOf("localhost", "127.0.0.1", "::1")
         val FORCED_REPLY_CHOICE: JsonElement = buildJsonObject {
             put("type", "function")
             putJsonObject("function") { put("name", AgentMessageSupport.REPLY_TOOL) }

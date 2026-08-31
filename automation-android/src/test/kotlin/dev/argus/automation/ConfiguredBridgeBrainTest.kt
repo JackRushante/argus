@@ -193,6 +193,7 @@ private class FakeBridgeConfiguration : ProviderConfigStore {
         baseUrl: String?,
         model: String?,
         apiKey: String?,
+        reasoningEffort: dev.argus.brain.ReasoningEffort?,
     ): Boolean {
         baseUrl?.let { url = it }
         model?.let { this.model = it }

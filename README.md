@@ -195,14 +195,16 @@ The "Brain" is pluggable: the app always owns the loop, the LLM is a reasoning s
 | **Anthropic** | Messages API (`web_search` server tool) | yes | $ estimate from price list |
 | **Google Gemini** | OpenAI-compat shim + native API for grounding (`google_search`) | yes | $ estimate from price list |
 | **OpenRouter** | OpenAI-compat (web via the `:online` slug) | yes | tokens only |
-| **Custom (OpenAI-compat)** | endpoint of your choice (Ollama, LiteLLM, z.ai, etc.) | no | n/a |
+| **Custom (OpenAI-compat)** | endpoint of your choice (llama.cpp, Ollama, LiteLLM, etc.) | no | n/a |
 
-- **BYOK**: direct providers require **your own** API key, entered in-app and stored encrypted on the device. No Argus account, no project backend.
+- **BYOK**: hosted direct providers require **your own** API key, entered in-app and stored encrypted on the device. A Custom endpoint may omit authentication. No Argus account, no project backend.
 - **Budget**: per-turn usage tracking (tokens and, where the price list is known, micro-USD), configurable limits; a generative rule that exceeds its budget is suppressed and audited (`SUPPRESSED_BUDGET`).
+- **On-device models**: Custom accepts unauthenticated OpenAI-compatible servers and cleartext HTTP only on the exact loopback hosts `localhost`, `127.0.0.1`, and `::1`. Every LAN or remote endpoint still requires HTTPS.
+- **Reasoning diagnostics**: Custom can omit reasoning control or send `none`, `low`, `medium`, or `high` per request. When the server reports them, Settings shows reasoning-token usage and the latest `finish_reason`.
 
 ### Hermes bridge (optional, self-hosted)
 
-`ops/hermes/bridge.py` is a one-shot service meant for people who already run a self-hosted LLM agent on their own server: it exposes `POST /compile` (NL → rule draft) and strict versioned `POST /act` lanes, with bearer token, idempotent request-ids, body/output limits and fail-closed parsing. `/act` v1/v2 cover legacy and state-aware delivery; v3 carries P4 resolved runtime values in a strictly validated DATA envelope. Android requires v3 in `/health/v2`, so a stale bridge fails visibly before execution. The service binds to loopback only and should be published over HTTPS on a private network (e.g. a mesh VPN / Tailscale Serve). Example systemd unit and `.env` are included in `ops/hermes/`.
+`ops/hermes/bridge.py` is a one-shot service meant for people who already run a self-hosted LLM agent on their own server: it exposes `POST /compile` (NL → rule draft) and strict versioned `POST /act` lanes, with bearer token, idempotent request-ids, body/output limits and fail-closed parsing. `/act` v1/v2 cover legacy and state-aware delivery; v3 carries P4 resolved runtime values in a strictly validated DATA envelope. Android requires v3 in `/health/v2`, so a stale bridge fails visibly before execution. The service binds to loopback only and should be published over HTTPS on a private network (e.g. a mesh VPN / Tailscale Serve). Follow the [step-by-step installation guide](ops/hermes/README.md); the systemd unit and `.env` template are included beside it.
 
 **The app works without the bridge**: just pick a direct provider with your own key. The bridge exists only for those who want to compile rules with their own self-hosted agent instead of a commercial API.
 

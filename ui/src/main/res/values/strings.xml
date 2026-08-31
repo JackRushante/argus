@@ -26,6 +26,13 @@
     <string name="provider_key_label">API key</string>
     <string name="provider_key_keep_hint">Leave blank to keep the current key.</string>
     <string name="provider_key_required_hint">Required.</string>
+    <string name="provider_key_optional_hint">Optional for endpoints without authentication.</string>
+    <string name="provider_reasoning_label">Reasoning per request</string>
+    <string name="provider_reasoning_default">Server default</string>
+    <string name="provider_reasoning_none">Off</string>
+    <string name="provider_reasoning_low">Low</string>
+    <string name="provider_reasoning_medium">Medium</string>
+    <string name="provider_reasoning_high">High</string>
 
     <!-- Dialog conferme (dettaglio) -->
     <string name="delete_dialog_title">Delete the automation?</string>
@@ -201,6 +208,8 @@
     <string name="settings_budget_limit">Limit: %1$s</string>
     <string name="settings_budget_provider_tokens">tokens · hour %1$s · today %2$s · month %3$s</string>
     <string name="settings_budget_provider_calls">calls · hour %1$d · today %2$d</string>
+    <string name="settings_budget_provider_reasoning">reasoning tokens · month %1$d</string>
+    <string name="settings_budget_provider_finish">last finish reason · %1$s</string>
     <string name="settings_budget_provider_cost">monthly cost %1$s</string>
     <string name="settings_budget_footnote">Dollar costs estimated from the public price list only for priced providers (indicative estimate, not an invoice) · EUR at fixed rate ≈ · Hermes/OpenRouter/Custom: tokens only</string>
     <string name="settings_budget_edit_limits">Edit limits</string>

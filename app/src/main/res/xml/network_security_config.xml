@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- Il bridge accetta solo HTTPS; nessun fallback HTTP è ammesso nel runtime. -->
+    <!-- HTTPS resta obbligatorio ovunque; eccezione stretta per un modello sullo stesso device. -->
     <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">::1</domain>
+    </domain-config>
 </network-security-config>

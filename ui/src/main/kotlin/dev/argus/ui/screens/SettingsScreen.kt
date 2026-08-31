@@ -138,8 +138,10 @@ fun SettingsScreen(
             is TransportUi.DirectProvider -> ProviderConfigurationDialog(
                 provider = transport,
                 onDismiss = { showBridgeEditor = false },
-                onSave = { baseUrl, model, apiKey ->
-                    callbacks.onSaveProviderConfig(transport.providerId, baseUrl, model, apiKey)
+                onSave = { baseUrl, model, apiKey, reasoningEffort ->
+                    callbacks.onSaveProviderConfig(
+                        transport.providerId, baseUrl, model, apiKey, reasoningEffort,
+                    )
                 },
             )
         }
@@ -698,6 +700,20 @@ private fun BudgetSection(budget: BudgetUi, callbacks: SettingsCallbacks) {
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodyMedium,
                         )
+                        provider.reasoningTokensMonth?.let { reasoningTokens ->
+                            Text(
+                                stringResource(R.string.settings_budget_provider_reasoning, reasoningTokens),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
+                        provider.lastFinishReason?.let { finishReason ->
+                            Text(
+                                stringResource(R.string.settings_budget_provider_finish, finishReason),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
                         // Dollari SOLO per i provider a listino noto: mai per Hermes/OpenRouter/Custom.
                         if (provider.costTracked) {
                             Text(

@@ -13,6 +13,7 @@ import dev.argus.automation.ConfiguredBridgeBrain
 import dev.argus.brain.ProviderCatalog
 import dev.argus.brain.ProviderConfigStore
 import dev.argus.brain.ProviderId
+import dev.argus.brain.ReasoningEffort
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.safety.DraftRepository
@@ -202,21 +203,41 @@ class OnboardingViewModel @Inject constructor(
         }
     }
 
-    fun saveProviderConfig(wireName: String, baseUrl: String?, model: String?, apiKey: String?) {
+    fun saveProviderConfig(
+        wireName: String,
+        baseUrl: String?,
+        model: String?,
+        apiKey: String?,
+        reasoningEffort: String? = null,
+    ) {
         val id = ProviderId.fromWireName(wireName) ?: run {
             mutableEvents.tryEmit(
                 OnboardingEvent.Message(language.pick("Unknown provider.", "Provider sconosciuto.")),
             )
             return
         }
+        val effort = reasoningEffort?.let { value ->
+            ReasoningEffort.entries.firstOrNull { it.name.equals(value, ignoreCase = true) }
+                ?: run {
+                    mutableEvents.tryEmit(
+                        OnboardingEvent.Message(
+                            language.pick("Invalid reasoning mode.", "Modalità reasoning non valida."),
+                        ),
+                    )
+                    return
+                }
+        }
         viewModelScope.launch {
             try {
-                if (!configuration.saveProviderConfig(id, baseUrl = baseUrl, model = model, apiKey = apiKey)) {
+                if (!configuration.saveProviderConfig(
+                        id, baseUrl = baseUrl, model = model, apiKey = apiKey, reasoningEffort = effort,
+                    )
+                ) {
                     message(language.pick("Invalid configuration.", "Configurazione non valida."))
                     return@launch
                 }
                 // La chiave salvata potrebbe essere di un provider NON selezionato: rileggi invece di assumere true.
-                val configured = configuration.bearerToken() != null
+                val configured = selectedProviderAuthConfigured()
                 markBrainVerification(configured = configured, verified = false)
                 message(
                     language.pick(
@@ -286,7 +307,7 @@ class OnboardingViewModel @Inject constructor(
         refreshSignal.value = System.nanoTime()
         viewModelScope.launch {
             val configured = cancellationSafeOrNull {
-                configuration.bearerToken() != null
+                selectedProviderAuthConfigured()
             } ?: false
             brainSetup.value = brainSetup.value.copy(
                 configured = configured,
@@ -425,12 +446,15 @@ class OnboardingViewModel @Inject constructor(
                 providerLabel = spec.displayName,
                 baseUrl = config.baseUrl,
                 model = config.model,
-                authState = if (configured) AuthState.OK else AuthState.NOT_CONFIGURED,
+                authState = if (configured || !spec.apiKeyRequired) AuthState.OK else AuthState.NOT_CONFIGURED,
                 reachable = null,
                 lastLatencyLabel = null,
                 defaultModels = spec.defaultModels,
                 baseUrlEditable = id == ProviderId.CUSTOM_OPENAI_COMPAT,
                 apiKeyPrefixHint = spec.apiKeyPrefixHint,
+                apiKeyRequired = spec.apiKeyRequired,
+                reasoningEffort = config.reasoningEffort.name.lowercase(Locale.ROOT),
+                reasoningEffortEditable = id == ProviderId.CUSTOM_OPENAI_COMPAT,
             )
         }
     }
@@ -440,6 +464,11 @@ class OnboardingViewModel @Inject constructor(
         return ProviderCatalog.specs.values.map {
             ProviderChoiceUi(it.id.wireName, it.displayName, it.id == selected)
         }
+    }
+
+    private suspend fun selectedProviderAuthConfigured(): Boolean {
+        val id = configuration.selectedProviderId()
+        return !ProviderCatalog.spec(id).apiKeyRequired || configuration.hasApiKey(id)
     }
 
     private fun markBrainVerification(configured: Boolean, verified: Boolean) {

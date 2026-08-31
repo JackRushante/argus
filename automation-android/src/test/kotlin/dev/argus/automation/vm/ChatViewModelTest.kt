@@ -523,6 +523,7 @@ private class ViewModelBridgeConfiguration : ProviderConfigStore {
         baseUrl: String?,
         model: String?,
         apiKey: String?,
+        reasoningEffort: dev.argus.brain.ReasoningEffort?,
     ): Boolean = false
     override suspend fun apiKey(id: ProviderId): String? = null
     override suspend fun hasApiKey(id: ProviderId): Boolean = false

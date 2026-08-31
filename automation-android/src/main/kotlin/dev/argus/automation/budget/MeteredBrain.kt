@@ -297,6 +297,8 @@ class MeteredBrain(
                 tokensOut = usage?.outputTokens,
                 costMicros = cost,
                 pricingVersion = if (cost != null) ProviderCatalog.PRICING_VERSION else null,
+                reasoningTokens = usage?.reasoningTokens,
+                finishReason = usage?.finishReason,
             ),
         )
     }

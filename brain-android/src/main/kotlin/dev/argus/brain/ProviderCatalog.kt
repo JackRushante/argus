@@ -6,6 +6,16 @@ enum class AuthStyle { BEARER, X_API_KEY }
 /** Come il transport nomina il tetto output: OpenAI gpt-5.x rigetta max_tokens. */
 enum class OutputCapParam { MAX_TOKENS, MAX_COMPLETION_TOKENS }
 
+/** Controllo reasoning per-request. Il wire coincide con OpenAI/llama.cpp; DEFAULT omette il campo. */
+enum class ReasoningEffort(val wireValue: String?) {
+    DEFAULT(null), NONE("none"), LOW("low"), MEDIUM("medium"), HIGH("high");
+
+    companion object {
+        fun fromWireValue(value: String?): ReasoningEffort =
+            entries.firstOrNull { it.wireValue == value } ?: DEFAULT
+    }
+}
+
 /**
  * Meccanismo di attivazione del web search SERVER-SIDE per provider (#52 F3). Il web dei provider è
  * server-side: si aggiunge un tool/flag alla richiesta, il provider fa il loop interno e ritorna il
@@ -58,6 +68,8 @@ data class ProviderSpec(
      * solo token: nessuna stima in dollari da listino statico.
      */
     val costTracked: Boolean = false,
+    /** false solo per endpoint Custom che accettano richieste anonime (es. llama-server locale). */
+    val apiKeyRequired: Boolean = true,
 )
 
 /**
@@ -168,6 +180,7 @@ object ProviderCatalog {
             defaultModels = emptyList(),
             // Endpoint e listino sconosciuti a priori: costo "n/d".
             prices = emptyMap(),
+            apiKeyRequired = false,
         ),
     ).associateBy { it.id }
 

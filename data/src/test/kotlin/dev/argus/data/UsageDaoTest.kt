@@ -40,6 +40,8 @@ class UsageDaoTest {
         tokensOut: Long? = null,
         costMicros: Long? = null,
         pricingVersion: String? = null,
+        reasoningTokens: Long? = null,
+        finishReason: String? = null,
     ) = UsageEventEntity(
         timestampMs = timestampMs,
         providerId = providerId,
@@ -50,6 +52,8 @@ class UsageDaoTest {
         tokensOut = tokensOut,
         costMicros = costMicros,
         pricingVersion = pricingVersion,
+        reasoningTokens = reasoningTokens,
+        finishReason = finishReason,
     )
 
     @Test
@@ -129,6 +133,23 @@ class UsageDaoTest {
         db.usageDao().insert(event(providerId = "openai", timestampMs = 1_100, costMicros = null))
         val agg = db.usageDao().aggregateBetween(0, 10_000).single()
         assertEquals(1_250L, agg.costMicros)
+    }
+
+    @Test
+    fun `aggregate exposes reasoning total and latest finish reason inside the window`() = runTest {
+        db.usageDao().insert(
+            event(timestampMs = 1_000, tokensOut = 10, reasoningTokens = 4, finishReason = "stop"),
+        )
+        db.usageDao().insert(
+            event(timestampMs = 1_100, tokensOut = 20, reasoningTokens = 7, finishReason = "length"),
+        )
+        db.usageDao().insert(
+            event(timestampMs = 9_000, tokensOut = 30, reasoningTokens = 9, finishReason = "tool_calls"),
+        )
+
+        val aggregate = db.usageDao().aggregateBetween(500, 2_000).single()
+        assertEquals(11L, aggregate.reasoningTokens)
+        assertEquals("length", aggregate.lastFinishReason)
     }
 
     @Test

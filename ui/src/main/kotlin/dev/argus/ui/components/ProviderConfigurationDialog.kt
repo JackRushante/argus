@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -35,10 +36,13 @@ import dev.argus.ui.model.TransportUi
 fun ProviderConfigurationDialog(
     provider: TransportUi.DirectProvider,
     onDismiss: () -> Unit,
-    onSave: (baseUrl: String?, model: String?, apiKey: String?) -> Unit,
+    onSave: (baseUrl: String?, model: String?, apiKey: String?, reasoningEffort: String?) -> Unit,
 ) {
     var baseUrl by rememberSaveable(provider.baseUrl) { mutableStateOf(provider.baseUrl) }
     var model by rememberSaveable(provider.model) { mutableStateOf(provider.model.orEmpty()) }
+    var reasoningEffort by rememberSaveable(provider.reasoningEffort) {
+        mutableStateOf(provider.reasoningEffort)
+    }
     // Non serializzare mai la chiave in SavedState/process-death storage.
     var key by remember { mutableStateOf("") }
     val cleanBaseUrl = baseUrl.trim()
@@ -46,8 +50,15 @@ fun ProviderConfigurationDialog(
     val cleanKey = key.trim()
     val keyConfigured = provider.authState == AuthState.OK
     val canSave = cleanModel.isNotEmpty() &&
-        (keyConfigured || cleanKey.isNotEmpty()) &&
+        (!provider.apiKeyRequired || keyConfigured || cleanKey.isNotEmpty()) &&
         (!provider.baseUrlEditable || cleanBaseUrl.isNotEmpty())
+    val reasoningOptions = listOf(
+        "default" to stringResource(R.string.provider_reasoning_default),
+        "none" to stringResource(R.string.provider_reasoning_none),
+        "low" to stringResource(R.string.provider_reasoning_low),
+        "medium" to stringResource(R.string.provider_reasoning_medium),
+        "high" to stringResource(R.string.provider_reasoning_high),
+    )
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -79,6 +90,18 @@ fun ProviderConfigurationDialog(
                         }
                     }
                 }
+                if (provider.reasoningEffortEditable) {
+                    Text(stringResource(R.string.provider_reasoning_label))
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        reasoningOptions.forEach { (value, label) ->
+                            FilterChip(
+                                selected = reasoningEffort == value,
+                                onClick = { reasoningEffort = value },
+                                label = { Text(label) },
+                            )
+                        }
+                    }
+                }
                 OutlinedTextField(
                     value = key,
                     onValueChange = { key = it },
@@ -89,8 +112,11 @@ fun ProviderConfigurationDialog(
                     placeholder = provider.apiKeyPrefixHint?.let { { Text(it) } },
                     supportingText = {
                         Text(
-                            if (keyConfigured) stringResource(R.string.provider_key_keep_hint)
-                            else stringResource(R.string.provider_key_required_hint),
+                            when {
+                                keyConfigured -> stringResource(R.string.provider_key_keep_hint)
+                                provider.apiKeyRequired -> stringResource(R.string.provider_key_required_hint)
+                                else -> stringResource(R.string.provider_key_optional_hint)
+                            },
                         )
                     },
                 )
@@ -107,6 +133,7 @@ fun ProviderConfigurationDialog(
                         cleanBaseUrl.takeIf { provider.baseUrlEditable },
                         cleanModel,
                         cleanKey.takeIf(String::isNotEmpty),
+                        reasoningEffort.takeIf { provider.reasoningEffortEditable },
                     )
                     key = ""
                     onDismiss()

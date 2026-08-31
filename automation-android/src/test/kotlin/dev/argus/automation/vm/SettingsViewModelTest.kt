@@ -16,6 +16,7 @@ import dev.argus.brain.ProviderCatalog
 import dev.argus.brain.ProviderConfig
 import dev.argus.brain.ProviderConfigStore
 import dev.argus.brain.ProviderId
+import dev.argus.brain.ReasoningEffort
 import dev.argus.brain.TransportFactory
 import dev.argus.brain.TransportHealth
 import dev.argus.data.DeferredReplyStore
@@ -255,9 +256,9 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun `custom openai compat espone baseUrlEditable`() = runTest(dispatcher) {
+    fun `custom locale non richiede chiave ed espone reasoning configurabile`() = runTest(dispatcher) {
         val store = FakeProviderStore().apply {
-            seed(ProviderId.CUSTOM_OPENAI_COMPAT, baseUrl = "https://ollama.local/v1", key = "k-1234567890")
+            seed(ProviderId.CUSTOM_OPENAI_COMPAT, baseUrl = "http://127.0.0.1:8080/v1")
             select(ProviderId.CUSTOM_OPENAI_COMPAT)
         }
         val vm = settingsViewModel(store)
@@ -267,7 +268,22 @@ class SettingsViewModelTest {
 
         val transport = vm.state.value.transport
         assertTrue(transport is TransportUi.DirectProvider, "atteso DirectProvider, era $transport")
-        assertTrue((transport as TransportUi.DirectProvider).baseUrlEditable)
+        transport as TransportUi.DirectProvider
+        assertTrue(transport.baseUrlEditable)
+        assertFalse(transport.apiKeyRequired)
+        assertEquals(AuthState.OK, transport.authState)
+        assertTrue(transport.reasoningEffortEditable)
+
+        vm.saveProviderConfig(
+            "custom_openai_compat",
+            baseUrl = "http://127.0.0.1:8080/v1",
+            model = "qwen-local",
+            apiKey = null,
+            reasoningEffort = "low",
+        )
+        advanceUntilIdle()
+
+        assertEquals(ReasoningEffort.LOW, store.saveCalls.last().reasoningEffort)
     }
 
     // ------------------------------------------------------------------ helper
@@ -561,8 +577,19 @@ private class FakeBudgetSettingsStore(
 private class FakeProviderStore(
     initialSelected: ProviderId = ProviderId.HERMES,
 ) : ProviderConfigStore {
-    class Slot(var baseUrl: String? = null, var model: String? = null, var key: String? = null)
-    data class SaveCall(val id: ProviderId, val baseUrl: String?, val model: String?, val apiKey: String?)
+    class Slot(
+        var baseUrl: String? = null,
+        var model: String? = null,
+        var key: String? = null,
+        var reasoningEffort: ReasoningEffort = ReasoningEffort.DEFAULT,
+    )
+    data class SaveCall(
+        val id: ProviderId,
+        val baseUrl: String?,
+        val model: String?,
+        val apiKey: String?,
+        val reasoningEffort: ReasoningEffort?,
+    )
 
     private var selected = initialSelected
     private val slots = mutableMapOf<ProviderId, Slot>()
@@ -593,7 +620,12 @@ private class FakeProviderStore(
     override fun providerConfig(id: ProviderId): ProviderConfig {
         val s = slots[id]
         val baseUrl = s?.baseUrl ?: ProviderCatalog.spec(id).defaultBaseUrl ?: ""
-        return ProviderConfig(providerId = id, baseUrl = baseUrl, model = s?.model)
+        return ProviderConfig(
+            providerId = id,
+            baseUrl = baseUrl,
+            model = s?.model,
+            reasoningEffort = s?.reasoningEffort ?: ReasoningEffort.DEFAULT,
+        )
     }
 
     override suspend fun saveProviderConfig(
@@ -601,12 +633,14 @@ private class FakeProviderStore(
         baseUrl: String?,
         model: String?,
         apiKey: String?,
+        reasoningEffort: ReasoningEffort?,
     ): Boolean {
-        saveCalls += SaveCall(id, baseUrl, model, apiKey)
+        saveCalls += SaveCall(id, baseUrl, model, apiKey, reasoningEffort)
         val s = slot(id)
         baseUrl?.let { s.baseUrl = it }
         model?.let { s.model = it }
         apiKey?.let { s.key = it }
+        reasoningEffort?.let { s.reasoningEffort = it }
         return true
     }
 

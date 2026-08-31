@@ -33,4 +33,21 @@ class BridgeConfigurationStoreTest {
         assertNull(normalizeBridgeBaseUrl("https://token@hermes.example"))
         assertNull(normalizeBridgeBaseUrl("https://hermes.example?token=secret"))
     }
+
+    @Test
+    fun `custom provider alone accepts exact loopback HTTP hosts`() {
+        val custom = ProviderId.CUSTOM_OPENAI_COMPAT
+        assertEquals("http://localhost:8080/v1", normalizeProviderBaseUrl("http://localhost:8080/v1/", custom))
+        assertEquals("http://127.0.0.1:8080/v1", normalizeProviderBaseUrl("http://127.0.0.1:8080/v1", custom))
+        assertEquals("http://[::1]:8080/v1", normalizeProviderBaseUrl("http://[::1]:8080/v1", custom))
+
+        assertNull(normalizeProviderBaseUrl("http://192.168.1.10:8080/v1", custom))
+        assertNull(normalizeProviderBaseUrl("http://localhost.example/v1", custom))
+        assertNull(normalizeProviderBaseUrl("http://127.0.0.2:8080/v1", custom))
+        assertNull(normalizeProviderBaseUrl("http://localhost:8080/v1", ProviderId.OPENAI))
+        assertEquals(
+            "https://custom.example/v1",
+            normalizeProviderBaseUrl("https://custom.example/v1", custom),
+        )
+    }
 }

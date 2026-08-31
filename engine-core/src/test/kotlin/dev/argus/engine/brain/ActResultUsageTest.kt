@@ -49,6 +49,7 @@ class ActResultUsageTest {
         assertFailsWith<IllegalArgumentException> { TurnUsage(-1, 0) }
         assertFailsWith<IllegalArgumentException> { TurnUsage(0, -1) }
         assertFailsWith<IllegalArgumentException> { TurnUsage(0, 0, cachedInputTokens = -1) }
+        assertFailsWith<IllegalArgumentException> { TurnUsage(0, 5, reasoningTokens = 6) }
     }
 
     @Test fun `turn usage rejects impossible remote accounting values`() {
@@ -63,6 +64,9 @@ class ActResultUsageTest {
         }
         assertFailsWith<IllegalArgumentException> {
             TurnUsage(1, 1, model = "m".repeat(TurnUsage.MAX_MODEL_CHARS + 1))
+        }
+        assertFailsWith<IllegalArgumentException> {
+            TurnUsage(1, 1, finishReason = "invalid reason with spaces")
         }
     }
 

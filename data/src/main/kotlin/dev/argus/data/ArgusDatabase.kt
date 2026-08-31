@@ -40,7 +40,7 @@ import dev.argus.data.entities.WhitelistedContactEntity
         DeferredReplyEntity::class,
         UsageEventEntity::class,
     ],
-    version = 11,
+    version = 12,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -305,6 +305,13 @@ abstract class ArgusDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `usage_events` ADD COLUMN `reasoningTokens` INTEGER")
+                db.execSQL("ALTER TABLE `usage_events` ADD COLUMN `finishReason` TEXT")
+            }
+        }
+
         fun build(context: Context, name: String = "argus.db"): ArgusDatabase =
             Room.databaseBuilder(context, ArgusDatabase::class.java, name)
                 .addMigrations(
@@ -318,6 +325,7 @@ abstract class ArgusDatabase : RoomDatabase() {
                     MIGRATION_8_9,
                     MIGRATION_9_10,
                     MIGRATION_10_11,
+                    MIGRATION_11_12,
                 )
                 .build()
 

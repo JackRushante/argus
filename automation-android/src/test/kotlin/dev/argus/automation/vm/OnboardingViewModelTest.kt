@@ -142,6 +142,29 @@ class OnboardingViewModelTest {
         }
 
     @Test
+    fun `custom locale completa il setup senza chiave API`() = runTest(dispatcher) {
+        val store = OnbFakeProviderStore()
+        val vm = onboardingViewModel(store, index = 1)
+        observe(vm)
+        advanceUntilIdle()
+
+        vm.selectProvider("custom_openai_compat")
+        advanceUntilIdle()
+        vm.saveProviderConfig(
+            "custom_openai_compat",
+            baseUrl = "http://127.0.0.1:8080/v1",
+            model = "qwen-local",
+            apiKey = null,
+            reasoningEffort = "none",
+        )
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(StepStatus.DONE, state.steps.first { it.kind == StepKind.BRAIN_CONFIG }.status)
+        assertEquals(2, state.currentIndex)
+    }
+
+    @Test
     fun `authentication failure keeps brain required and wizard blocked`() = runTest(dispatcher) {
         val store = OnbFakeProviderStore()
         val vm = onboardingViewModel(
@@ -366,6 +389,7 @@ private class OnbFakeProviderStore(
         baseUrl: String?,
         model: String?,
         apiKey: String?,
+        reasoningEffort: dev.argus.brain.ReasoningEffort?,
     ): Boolean {
         saveCalls += SaveCall(id, baseUrl, model, apiKey)
         val s = slot(id)

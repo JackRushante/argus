@@ -15,6 +15,7 @@ internal object ProviderPrefsSchema {
     fun baseUrlKey(id: ProviderId): String = "provider.${id.wireName}.base_url"
     fun modelKey(id: ProviderId): String = "provider.${id.wireName}.model"
     fun apiKeyKey(id: ProviderId): String = "provider.${id.wireName}.key_v1"
+    fun reasoningEffortKey(id: ProviderId): String = "provider.${id.wireName}.reasoning_effort"
 
     /**
      * Edits (soli put) da applicare in un unico commit prefs. Mappa vuota = niente da fare.

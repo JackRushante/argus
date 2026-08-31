@@ -19,6 +19,7 @@ import dev.argus.automation.budget.BudgetSettingsStore
 import dev.argus.brain.ProviderCatalog
 import dev.argus.brain.ProviderConfigStore
 import dev.argus.brain.ProviderId
+import dev.argus.brain.ReasoningEffort
 import dev.argus.data.UsageWindows
 import dev.argus.data.dao.ProviderUsageAggregate
 import dev.argus.data.dao.UsageDao
@@ -181,6 +182,10 @@ internal fun budgetUi(usage: BudgetUsageSnapshot, settings: BudgetSettings): Bud
             tokensOutDay = dayAgg?.tokensOut,
             tokensInMonth = monthAgg?.tokensIn,
             tokensOutMonth = monthAgg?.tokensOut,
+            reasoningTokensMonth = monthAgg?.reasoningTokens,
+            lastFinishReason = hourAgg?.lastFinishReason
+                ?: dayAgg?.lastFinishReason
+                ?: monthAgg?.lastFinishReason,
         )
     }
 
@@ -348,7 +353,7 @@ class SettingsViewModel @Inject constructor(
         refreshSignal.value = System.nanoTime()
         viewModelScope.launch {
             mutableTokenConfigured.value = cancellationSafeOrNull {
-                configuration.bearerToken() != null
+                selectedProviderAuthConfigured()
             } ?: false
         }
         viewModelScope.launch {
@@ -430,14 +435,30 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun saveProviderConfig(wireName: String, baseUrl: String?, model: String?, apiKey: String?) {
+    fun saveProviderConfig(
+        wireName: String,
+        baseUrl: String?,
+        model: String?,
+        apiKey: String?,
+        reasoningEffort: String? = null,
+    ) {
         val id = ProviderId.fromWireName(wireName) ?: run {
             mutableMessages.tryEmit(language.pick("Unknown provider.", "Provider sconosciuto."))
             return
         }
+        val effort = reasoningEffort?.let { value ->
+            ReasoningEffort.entries.firstOrNull { it.name.equals(value, ignoreCase = true) }
+                ?: run {
+                    mutableMessages.tryEmit(language.pick("Invalid reasoning mode.", "Modalità reasoning non valida."))
+                    return
+                }
+        }
         viewModelScope.launch {
             try {
-                if (!configuration.saveProviderConfig(id, baseUrl = baseUrl, model = model, apiKey = apiKey)) {
+                if (!configuration.saveProviderConfig(
+                        id, baseUrl = baseUrl, model = model, apiKey = apiKey, reasoningEffort = effort,
+                    )
+                ) {
                     message(language.pick("Invalid configuration.", "Configurazione non valida."))
                     return@launch
                 }
@@ -668,12 +689,15 @@ class SettingsViewModel @Inject constructor(
                 providerLabel = spec.displayName,
                 baseUrl = config.baseUrl,
                 model = config.model,
-                authState = if (hasToken) AuthState.OK else AuthState.NOT_CONFIGURED,
+                authState = if (hasToken || !spec.apiKeyRequired) AuthState.OK else AuthState.NOT_CONFIGURED,
                 reachable = bridge.reachable,
                 lastLatencyLabel = bridge.latencyLabel,
                 defaultModels = spec.defaultModels,
                 baseUrlEditable = id == ProviderId.CUSTOM_OPENAI_COMPAT,
                 apiKeyPrefixHint = spec.apiKeyPrefixHint,
+                apiKeyRequired = spec.apiKeyRequired,
+                reasoningEffort = config.reasoningEffort.name.lowercase(Locale.ROOT),
+                reasoningEffortEditable = id == ProviderId.CUSTOM_OPENAI_COMPAT,
             )
         }
     }
@@ -683,6 +707,11 @@ class SettingsViewModel @Inject constructor(
         return ProviderCatalog.specs.values.map {
             ProviderChoiceUi(it.id.wireName, it.displayName, it.id == selected)
         }
+    }
+
+    private suspend fun selectedProviderAuthConfigured(): Boolean {
+        val id = configuration.selectedProviderId()
+        return !ProviderCatalog.spec(id).apiKeyRequired || configuration.hasApiKey(id)
     }
 
     private fun initialState(): SettingsState {

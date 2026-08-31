@@ -10,7 +10,9 @@ data class TurnUsage(
     val inputTokens: Long,
     val outputTokens: Long,
     val cachedInputTokens: Long? = null,
+    val reasoningTokens: Long? = null,
     val model: String? = null,
+    val finishReason: String? = null,
 ) {
     init {
         require(inputTokens in 0..MAX_TOKENS_PER_TURN && outputTokens in 0..MAX_TOKENS_PER_TURN) {
@@ -19,11 +21,17 @@ data class TurnUsage(
         require(cachedInputTokens == null || cachedInputTokens in 0..inputTokens) {
             "conteggio token cached incoerente"
         }
+        require(reasoningTokens == null || reasoningTokens in 0..outputTokens) {
+            "conteggio token reasoning incoerente"
+        }
         require(
             model == null ||
                 model.isNotBlank() && model.length <= MAX_MODEL_CHARS && model.none(Char::isISOControl),
         ) {
             "identificatore modello non valido"
+        }
+        require(finishReason == null || FINISH_REASON.matches(finishReason)) {
+            "finish reason non valido"
         }
     }
 
@@ -31,5 +39,6 @@ data class TurnUsage(
         /** Bound difensivo molto sopra i context window correnti, ma sicuro per DB e costo intero. */
         const val MAX_TOKENS_PER_TURN: Long = 100_000_000L
         const val MAX_MODEL_CHARS: Int = 256
+        private val FINISH_REASON = Regex("^[A-Za-z0-9_.:-]{1,64}$")
     }
 }

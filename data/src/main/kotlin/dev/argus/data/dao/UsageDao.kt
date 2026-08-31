@@ -19,6 +19,8 @@ data class ProviderUsageAggregate(
     val tokensIn: Long?,
     val tokensOut: Long?,
     val costMicros: Long?,
+    val reasoningTokens: Long? = null,
+    val lastFinishReason: String? = null,
 )
 
 /**
@@ -44,14 +46,19 @@ interface UsageDao {
      * combaciano con `Enum.name` persistito dai converter (T3).
      */
     @Query(
-        "SELECT providerId, COUNT(*) AS calls, " +
+        "SELECT u.providerId, COUNT(*) AS calls, " +
             "SUM(CASE WHEN outcome = 'OK' THEN 1 ELSE 0 END) AS okCalls, " +
             "SUM(CASE WHEN outcome = 'ERROR' THEN 1 ELSE 0 END) AS errorCalls, " +
             "SUM(CASE WHEN outcome = 'BLOCKED_BUDGET' THEN 1 ELSE 0 END) AS blockedCalls, " +
-            "SUM(tokensIn) AS tokensIn, SUM(tokensOut) AS tokensOut, SUM(costMicros) AS costMicros " +
-            "FROM usage_events " +
-            "WHERE timestampMs >= :startMillis AND timestampMs < :endMillisExclusive " +
-            "GROUP BY providerId ORDER BY providerId ASC",
+            "SUM(tokensIn) AS tokensIn, SUM(tokensOut) AS tokensOut, SUM(costMicros) AS costMicros, " +
+            "SUM(reasoningTokens) AS reasoningTokens, " +
+            "(SELECT d.finishReason FROM usage_events AS d " +
+            "WHERE d.providerId = u.providerId AND d.finishReason IS NOT NULL " +
+            "AND d.timestampMs >= :startMillis AND d.timestampMs < :endMillisExclusive " +
+            "ORDER BY d.timestampMs DESC, d.id DESC LIMIT 1) AS lastFinishReason " +
+            "FROM usage_events AS u " +
+            "WHERE u.timestampMs >= :startMillis AND u.timestampMs < :endMillisExclusive " +
+            "GROUP BY u.providerId ORDER BY u.providerId ASC",
     )
     suspend fun aggregateBetween(startMillis: Long, endMillisExclusive: Long): List<ProviderUsageAggregate>
 

@@ -126,6 +126,42 @@ class OpenAICompatTransportTest {
         assertFalse("max_completion_tokens" in root)
     }
 
+    @Test fun `custom loopback works without key and carries typed reasoning diagnostics`(): Unit = runBlocking {
+        server.enqueue(jsonResponse(
+            """
+            {"model":"qwen-local",
+             "choices":[{"index":0,"finish_reason":"length","message":{"role":"assistant","content":"Risposta locale"}}],
+             "usage":{"prompt_tokens":30,"completion_tokens":12,
+                      "completion_tokens_details":{"reasoning_tokens":8}}}
+            """.trimIndent(),
+        ))
+        val id = ProviderId.CUSTOM_OPENAI_COMPAT
+        val transport = OpenAICompatTransport(
+            providerId = id,
+            spec = ProviderCatalog.spec(id),
+            config = ProviderConfig(
+                id,
+                server.url("v1").toString().trimEnd('/'),
+                model = "qwen-local",
+                reasoningEffort = ReasoningEffort.LOW,
+            ),
+            apiKey = { null },
+        )
+
+        val result = transport.act(
+            fireContext(), "rispondi", listOf("notification"), listOf("whatsapp_reply"),
+        )
+
+        assertEquals("Risposta locale", result.text)
+        val usage = assertNotNull(result.usage)
+        assertEquals(8L, usage.reasoningTokens)
+        assertEquals("length", usage.finishReason)
+        val request = assertNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertNull(request.getHeader("Authorization"))
+        val root = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
+        assertEquals("low", root.getValue("reasoning_effort").jsonPrimitive.content)
+    }
+
     @Test fun `usage is attached even when the reply is empty`(): Unit = runBlocking {
         // choices senza testo né tool_call, ma con usage: i token sono stati consumati e devono
         // viaggiare con l'ActResult anche sul ramo empty_response (S13 li deve poter contare).
@@ -570,6 +606,8 @@ class OpenAICompatTransportTest {
         assertEquals("dnd sera", draft.name)
         assertNull(result.metaError)
         assertTrue(result.reply.startsWith("Ho creato"))
+        assertEquals(200L, assertNotNull(result.usage).inputTokens)
+        assertEquals("stop", result.usage?.finishReason)
 
         val request = assertNotNull(server.takeRequest(2, TimeUnit.SECONDS))
         assertEquals("/chat/completions", request.path)

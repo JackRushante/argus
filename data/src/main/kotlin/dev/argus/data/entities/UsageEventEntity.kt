@@ -36,4 +36,8 @@ data class UsageEventEntity(
     val tokensOut: Long?,
     val costMicros: Long?,
     val pricingVersion: String?,
+    /** Sottinsieme degli output token usato dal reasoning, quando il provider lo dichiara. */
+    val reasoningTokens: Long? = null,
+    /** Motivo di terminazione provider, già validato e limitato dal transport. */
+    val finishReason: String? = null,
 )

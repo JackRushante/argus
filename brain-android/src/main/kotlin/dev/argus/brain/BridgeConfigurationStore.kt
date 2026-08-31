@@ -128,10 +128,27 @@ internal object BridgeKeystore {
     }
 }
 
-internal fun normalizeBridgeBaseUrl(raw: String): String? {
+internal val LOOPBACK_HTTP_HOSTS = setOf("localhost", "127.0.0.1", "::1")
+
+private fun normalizedUrl(raw: String): okhttp3.HttpUrl? {
     val url = raw.trim().toHttpUrlOrNull() ?: return null
-    if (!url.isHttps || url.username.isNotEmpty() || url.password.isNotEmpty()) return null
+    if (url.username.isNotEmpty() || url.password.isNotEmpty()) return null
     if (url.query != null || url.fragment != null) return null
+    return url
+}
+
+internal fun normalizeBridgeBaseUrl(raw: String): String? {
+    val url = normalizedUrl(raw) ?: return null
+    if (!url.isHttps) return null
+    return url.toString().trimEnd('/')
+}
+
+/** HTTPS per tutti; HTTP è ammesso soltanto per Custom verso un host loopback esatto. */
+internal fun normalizeProviderBaseUrl(raw: String, providerId: ProviderId): String? {
+    val url = normalizedUrl(raw) ?: return null
+    val allowedCleartext = providerId == ProviderId.CUSTOM_OPENAI_COMPAT &&
+        url.scheme == "http" && url.host in LOOPBACK_HTTP_HOSTS
+    if (!url.isHttps && !allowedCleartext) return null
     return url.toString().trimEnd('/')
 }
 

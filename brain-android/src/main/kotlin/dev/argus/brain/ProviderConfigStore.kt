@@ -8,6 +8,7 @@ data class ProviderConfig(
     val providerId: ProviderId,
     val baseUrl: String,
     val model: String?,
+    val reasoningEffort: ReasoningEffort = ReasoningEffort.DEFAULT,
 )
 
 /** Sorgente segreti on-demand: mai cache del plaintext, lettura suspend dallo storage cifrato. */
@@ -34,6 +35,7 @@ interface ProviderConfigStore : BridgeConfigurationStore, ProviderSecrets {
         baseUrl: String? = null,
         model: String? = null,
         apiKey: String? = null,
+        reasoningEffort: ReasoningEffort? = null,
     ): Boolean
 
     suspend fun hasApiKey(id: ProviderId): Boolean

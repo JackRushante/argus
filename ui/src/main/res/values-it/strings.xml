@@ -25,6 +25,13 @@
     <string name="provider_key_label">Chiave API</string>
     <string name="provider_key_keep_hint">Lascia vuoto per conservare la chiave attuale.</string>
     <string name="provider_key_required_hint">Obbligatoria.</string>
+    <string name="provider_key_optional_hint">Opzionale per endpoint senza autenticazione.</string>
+    <string name="provider_reasoning_label">Ragionamento per richiesta</string>
+    <string name="provider_reasoning_default">Predefinito server</string>
+    <string name="provider_reasoning_none">Disattivato</string>
+    <string name="provider_reasoning_low">Basso</string>
+    <string name="provider_reasoning_medium">Medio</string>
+    <string name="provider_reasoning_high">Alto</string>
 
     <!-- Dialog conferme (dettaglio) -->
     <string name="delete_dialog_title">Eliminare l\'automazione?</string>
@@ -200,6 +207,8 @@
     <string name="settings_budget_limit">Limite: %1$s</string>
     <string name="settings_budget_provider_tokens">token · ora %1$s · oggi %2$s · mese %3$s</string>
     <string name="settings_budget_provider_calls">chiamate · ora %1$d · oggi %2$d</string>
+    <string name="settings_budget_provider_reasoning">token reasoning · mese %1$d</string>
+    <string name="settings_budget_provider_finish">ultimo motivo di termine · %1$s</string>
     <string name="settings_budget_provider_cost">costo mese %1$s</string>
     <string name="settings_budget_footnote">Costi in dollari stimati dal listino pubblico solo per i provider a prezzo noto (stima indicativa, non fattura) · EUR a tasso fisso ≈ · Hermes/OpenRouter/Custom: solo token</string>
     <string name="settings_budget_edit_limits">Modifica limiti</string>

@@ -2,6 +2,29 @@
 
 Release and engineering notes, newest first.
 
+## v0.3.4 (2026-08-31) — On-device AI and Hermes setup
+
+### Added
+
+- Custom OpenAI-compatible providers can connect without an API key and may use cleartext HTTP on
+  the exact device-loopback hosts `localhost`, `127.0.0.1`, and `::1`. HTTPS remains mandatory for
+  every LAN and remote endpoint.
+- Custom providers expose optional `reasoning_effort` controls (`none`, `low`, `medium`, `high`).
+  Reported reasoning-token usage and the latest `finish_reason` are persisted and shown in Settings.
+- Added a complete Hermes bridge installation, systemd, Tailscale Serve, upgrade, and
+  troubleshooting guide under `ops/hermes/`.
+
+### Fixed
+
+- Direct compile calls now retain provider usage metadata instead of discarding it.
+- Custom local endpoints that intentionally omit authentication no longer leave onboarding blocked.
+
+### Verification
+
+- Full JVM/Robolectric suites, Android lint, and all 64 Hermes bridge tests pass on DevHub.
+- Android 16 real-device gates confirm the exact cleartext policy, a real HTTP request to
+  `127.0.0.1`, and the Room 11→12 migration without touching the installed production app.
+
 ## v0.3.3 (2026-08-19) — No unsolicited provider traffic
 
 ### Fixed

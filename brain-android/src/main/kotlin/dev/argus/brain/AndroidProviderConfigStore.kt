@@ -45,10 +45,13 @@ class AndroidProviderConfigStore(context: Context) : ProviderConfigStore {
         }
         val raw = stored ?: legacy ?: spec.defaultBaseUrl
         val baseUrl = raw
-            ?.let { normalizeBridgeBaseUrl(it) ?: spec.defaultBaseUrl }
+            ?.let { normalizeProviderBaseUrl(it, id) ?: spec.defaultBaseUrl }
             ?: ""
         val model = preferences.getString(ProviderPrefsSchema.modelKey(id), null)
-        return ProviderConfig(providerId = id, baseUrl = baseUrl, model = model)
+        val reasoningEffort = ReasoningEffort.fromWireValue(
+            preferences.getString(ProviderPrefsSchema.reasoningEffortKey(id), null),
+        )
+        return ProviderConfig(id, baseUrl, model, reasoningEffort)
     }
 
     override suspend fun saveProviderConfig(
@@ -56,9 +59,10 @@ class AndroidProviderConfigStore(context: Context) : ProviderConfigStore {
         baseUrl: String?,
         model: String?,
         apiKey: String?,
+        reasoningEffort: ReasoningEffort?,
     ): Boolean = withContext(Dispatchers.IO) {
         val normalizedBase = if (baseUrl != null) {
-            normalizeBridgeBaseUrl(baseUrl) ?: return@withContext false
+            normalizeProviderBaseUrl(baseUrl, id) ?: return@withContext false
         } else {
             null
         }
@@ -68,6 +72,9 @@ class AndroidProviderConfigStore(context: Context) : ProviderConfigStore {
                 val editor = preferences.edit()
                 if (normalizedBase != null) editor.putString(ProviderPrefsSchema.baseUrlKey(id), normalizedBase)
                 if (model != null) editor.putString(ProviderPrefsSchema.modelKey(id), model)
+                if (reasoningEffort != null) {
+                    editor.putString(ProviderPrefsSchema.reasoningEffortKey(id), reasoningEffort.wireValue)
+                }
                 if (apiKey != null) {
                     val encoded = AesGcmTokenCodec.encrypt(apiKey, BridgeKeystore.encryptionKey())
                     editor.putString(ProviderPrefsSchema.apiKeyKey(id), encoded)

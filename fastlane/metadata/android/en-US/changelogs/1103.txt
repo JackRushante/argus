@@ -1,0 +1,1 @@
+0.3.4 adds on-device OpenAI-compatible models. Custom endpoints may omit an API key and use HTTP only on exact device loopback; LAN and remote endpoints still require HTTPS. Optional reasoning controls now send per-request effort, while reported reasoning tokens and finish reason appear in Settings. A step-by-step Hermes bridge and Tailscale Serve guide is included.

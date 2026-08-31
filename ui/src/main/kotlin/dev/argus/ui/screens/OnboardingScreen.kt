@@ -223,8 +223,10 @@ fun OnboardingScreen(
             is TransportUi.DirectProvider -> ProviderConfigurationDialog(
                 provider = transport,
                 onDismiss = { showBridgeEditor = false },
-                onSave = { baseUrl, model, apiKey ->
-                    callbacks.onSaveProviderConfig(transport.providerId, baseUrl, model, apiKey)
+                onSave = { baseUrl, model, apiKey, reasoningEffort ->
+                    callbacks.onSaveProviderConfig(
+                        transport.providerId, baseUrl, model, apiKey, reasoningEffort,
+                    )
                 },
             )
             // Fallback legacy: stato senza transport (fixture vecchie). Il VM reale emette sempre un ramo.
