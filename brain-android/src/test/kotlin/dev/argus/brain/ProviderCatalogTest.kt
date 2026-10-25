@@ -35,6 +35,13 @@ class ProviderCatalogTest {
         assertTrue(ProviderCatalog.spec(ProviderId.CUSTOM_OPENAI_COMPAT).prices.isEmpty())
     }
 
+    @Test fun `la temperatura del compile e' prevista solo per openrouter e custom`() {
+        for (id in ProviderId.entries) {
+            val expected = if (id == ProviderId.OPENROUTER || id == ProviderId.CUSTOM_OPENAI_COMPAT) 0.2 else null
+            assertEquals(expected, ProviderCatalog.spec(id).quirks.compileTemperature, "compileTemperature per $id")
+        }
+    }
+
     @Test fun `costTracked solo per i provider a prezzo noto`() {
         val tracked = setOf(ProviderId.OPENAI, ProviderId.ANTHROPIC, ProviderId.GEMINI)
         for (id in ProviderId.entries) {

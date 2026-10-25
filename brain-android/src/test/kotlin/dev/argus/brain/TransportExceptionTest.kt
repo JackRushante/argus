@@ -26,6 +26,19 @@ class TransportExceptionTest {
         assertNull(budget.statusCode)
     }
 
+    @Test fun `provider message defaults to null and never reaches message or toString`() {
+        assertNull(TransportException(TransportErrorKind.HTTP, "Provider HTTP 400", statusCode = 400).providerMessage)
+        val exception = TransportException(
+            TransportErrorKind.HTTP,
+            "Provider HTTP 400",
+            statusCode = 400,
+            providerMessage = "unknown model",
+        )
+        assertEquals("unknown model", exception.providerMessage)
+        assertFalse("unknown model" in exception.message.orEmpty())
+        assertFalse("unknown model" in exception.toString())
+    }
+
     @Test fun `exception toString never leaks tokens`() {
         // Il messaggio dell'eccezione è sempre nostro; la causa può contenere dettagli ma non
         // deve trapelare dal message/toString del confine.
