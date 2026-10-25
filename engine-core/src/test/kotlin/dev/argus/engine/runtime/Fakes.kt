@@ -130,8 +130,9 @@ class FakeAutomationStore(seed: List<Automation> = emptyList()) : AutomationStor
             return@withLock FireClaimResult.NotEligible
 
         val last = fired[request.automationId]
+        // Un lastFiredAt nel futuro (orologio tornato indietro) e' un cooldown gia' scaduto.
         if (last != null && request.cooldownMs > 0 &&
-            (request.atMillis <= last || request.atMillis - last < request.cooldownMs)
+            last <= request.atMillis && request.atMillis - last < request.cooldownMs
         ) {
             return@withLock FireClaimResult.Cooldown(saturatingAdd(last, request.cooldownMs))
         }
