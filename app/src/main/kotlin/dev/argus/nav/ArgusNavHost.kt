@@ -344,6 +344,7 @@ fun ArgusNavHost() {
                         override fun onClearConversation() = chatViewModel.onClearConversation()
                         override fun onCheckConnection() = chatViewModel.refreshHealth()
                         override fun onOpenSystem() = switchTop(Routes.SETTINGS)
+                        override fun onCopyRawResponse() = chatViewModel.onCopyRawResponse()
                     },
                     modifier = Modifier.testTag("screen_chat"),
                 )
