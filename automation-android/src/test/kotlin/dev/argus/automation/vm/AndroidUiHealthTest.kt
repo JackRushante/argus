@@ -95,3 +95,17 @@ class ShizukuStatusNoteTest {
         assertNotEquals(ShizukuStatus.RUNNING_NOT_AUTHORIZED, ui)
     }
 }
+
+class ShizukuAwaitingAnswerNoteTest {
+    @Test
+    fun `an unanswered permission request is described in both languages`() {
+        assertEquals(
+            "In attesa della tua risposta in Shizuku",
+            shizukuAwaitingAnswerNote(RenderLanguage.IT),
+        )
+        assertEquals(
+            "Waiting for your answer in Shizuku",
+            shizukuAwaitingAnswerNote(RenderLanguage.EN),
+        )
+    }
+}

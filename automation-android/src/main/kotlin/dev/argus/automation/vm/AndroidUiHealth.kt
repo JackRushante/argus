@@ -94,3 +94,13 @@ internal fun ShizukuGatewayStatus.statusNote(language: RenderLanguage): String? 
     ShizukuGatewayStatus.AUTHORIZED,
     -> null
 }
+
+/**
+ * Messaggio per [dev.argus.shizuku.ShizukuPermissionOutcome.AWAITING_USER]: la richiesta di
+ * permesso e' scaduta senza risposta, ma la finestra di Shizuku puo' essere ancora aperta. Non e'
+ * «Shizuku non disponibile»: se l'utente risponde dopo, lo stato si aggiorna da solo.
+ */
+internal fun shizukuAwaitingAnswerNote(language: RenderLanguage): String = language.pick(
+    "Waiting for your answer in Shizuku",
+    "In attesa della tua risposta in Shizuku",
+)
