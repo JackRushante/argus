@@ -112,12 +112,13 @@ class ProcessTreeKillerTest {
     }
 
     @Test
-    fun `reflected pid is read from Process pid when available and null otherwise`() {
-        assertEquals(31337, ProcessTreeKiller.reflectedPid(FakeProcess(fakePid = 31337L)))
-        assertNull(ProcessTreeKiller.reflectedPid(FakeProcess(fakePid = null)))
+    fun `reflected pid is read from the pid field and null when it is not available`() {
+        // Su JDK `Process.pid()` base lancia UnsupportedOperationException: il ripiego legge il campo.
+        assertEquals(31337, ProcessTreeKiller.reflectedPid(FakeProcess(pid = 31337)))
+        assertNull(ProcessTreeKiller.reflectedPid(ProcessWithoutPid()))
     }
 
-    private class FakeProcess(private val fakePid: Long? = 1L) : Process() {
+    private open class BaseFakeProcess : Process() {
         var destroyed = 0
 
         override fun getOutputStream(): OutputStream = object : OutputStream() {
@@ -132,7 +133,11 @@ class ProcessTreeKillerTest {
             destroyed += 1
             return this
         }
-
-        override fun pid(): Long = fakePid ?: throw UnsupportedOperationException()
     }
+
+    private class FakeProcess(private val pid: Int = 1) : BaseFakeProcess() {
+        fun pidForTest(): Int = pid
+    }
+
+    private class ProcessWithoutPid : BaseFakeProcess()
 }
