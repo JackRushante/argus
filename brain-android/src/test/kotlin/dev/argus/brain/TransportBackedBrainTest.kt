@@ -3,7 +3,11 @@ package dev.argus.brain
 import dev.argus.engine.brain.ActResult
 import dev.argus.engine.brain.CapabilityManifest
 import dev.argus.engine.brain.CompileResult
+import dev.argus.engine.brain.WhitelistedContact
 import dev.argus.engine.model.Action
+import dev.argus.engine.model.AutomationDraft
+import dev.argus.engine.model.DndMode
+import dev.argus.engine.model.Trigger
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.runtime.DeviceState
@@ -20,6 +24,7 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -74,8 +79,86 @@ class TransportBackedBrainTest {
             val result = brain.compile("x", manifest, DeviceState())
             assertEquals("bridge_${kind.name.lowercase()}", result.metaError)
             assertNull(result.draft)
-            assertEquals(TransportBackedBrain.UNREACHABLE_REPLY, result.reply)
+            // Nessun testo utente per gli errori di trasporto: lo dà la UI localizzata dal metaError.
+            assertEquals("", result.reply)
         }
+    }
+
+    @Test fun `http failures carry their status in the meta error`(): Unit = runBlocking {
+        val statuses = mapOf(400 to "bridge_http_400", 422 to "bridge_http_422", 500 to "bridge_http_500", 503 to "bridge_http_503")
+        for ((status, expected) in statuses) {
+            val brain = TransportBackedBrain(
+                FakeTransport(
+                    onCompile = { throw TransportException(TransportErrorKind.HTTP, "boom", statusCode = status) },
+                    onAct = { throw TransportException(TransportErrorKind.HTTP, "boom", statusCode = status) },
+                ),
+            )
+            assertEquals(expected, brain.compile("x", manifest, DeviceState()).metaError)
+            assertEquals(
+                expected,
+                brain.act(fireContext(), "g", listOf("notification"), listOf("whatsapp_reply")).metaError,
+            )
+        }
+        // Senza status (non dovrebbe accadere) resta il codice storico.
+        val noStatus = TransportBackedBrain(
+            FakeTransport(onCompile = { throw TransportException(TransportErrorKind.HTTP, "boom") }),
+        )
+        assertEquals("bridge_http", noStatus.compile("x", manifest, DeviceState()).metaError)
+    }
+
+    @Test fun `the closed bridge error code never leaks into the meta error`(): Unit = runBlocking {
+        val brain = TransportBackedBrain(
+            FakeTransport(
+                onCompile = {
+                    throw TransportException(
+                        TransportErrorKind.HTTP, "boom", statusCode = 503, errorCode = "provider_quota_exhausted",
+                    )
+                },
+            ),
+        )
+        assertEquals("bridge_http_503", brain.compile("x", manifest, DeviceState()).metaError)
+    }
+
+    @Test fun `compile restores the real conversation id from the contact alias`(): Unit = runBlocking {
+        val withContacts = manifest.copy(
+            whitelistedContacts = listOf(
+                WhitelistedContact("Moglie", "shortcut:com.whatsapp:moglie"),
+                WhitelistedContact("Ottica", "shortcut:com.whatsapp:ottica"),
+            ),
+        )
+        val fromModel = AutomationDraft(
+            name = "Rispondi a Ottica",
+            trigger = Trigger.Notification("com.whatsapp", conversationId = "contact_2", isGroup = false),
+            actions = listOf(Action.SetDnd(DndMode.PRIORITY)),
+        )
+        val brain = TransportBackedBrain(
+            FakeTransport(onCompile = { CompileResult("ok", fromModel, null) }),
+        )
+
+        val result = brain.compile("x", withContacts, DeviceState())
+
+        val trigger = assertIs<Trigger.Notification>(assertNotNull(result.draft).trigger)
+        assertEquals("shortcut:com.whatsapp:ottica", trigger.conversationId)
+    }
+
+    @Test fun `an unknown alias is left untouched so the validator rejects it`(): Unit = runBlocking {
+        val withContacts = manifest.copy(
+            whitelistedContacts = listOf(WhitelistedContact("Moglie", "shortcut:com.whatsapp:moglie")),
+        )
+        val fromModel = AutomationDraft(
+            name = "x",
+            trigger = Trigger.Notification("com.whatsapp", conversationId = "contact_9", isGroup = false),
+            actions = listOf(Action.SetDnd(DndMode.PRIORITY)),
+        )
+        val brain = TransportBackedBrain(
+            FakeTransport(onCompile = { CompileResult("ok", fromModel, null) }),
+        )
+
+        val trigger = assertIs<Trigger.Notification>(
+            assertNotNull(brain.compile("x", withContacts, DeviceState()).draft).trigger,
+        )
+
+        assertEquals("contact_9", trigger.conversationId)
     }
 
     @Test fun `compile exposes draft_invalid without a hidden unmetered retry`(): Unit = runBlocking {

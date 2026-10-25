@@ -27,6 +27,11 @@ open class TransportException(
     message: String,
     val statusCode: Int? = null,
     cause: Throwable? = null,
+    /**
+     * Codice d'errore CHIUSO letto dal bridge Hermes (`^[a-z][a-z0-9_]{0,63}$`), mai il body remoto.
+     * Solo diagnostica: la UI lo mostra nel dettaglio tecnico.
+     */
+    val errorCode: String? = null,
 ) : IOException(message, cause)
 
 /**

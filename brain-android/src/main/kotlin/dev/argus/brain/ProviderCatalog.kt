@@ -49,6 +49,11 @@ data class ModelPrice(
     val inputMicrosPerMTok: Long,
     val outputMicrosPerMTok: Long,
     val cachedInputMicrosPerMTok: Long? = null,
+    /**
+     * Micro-USD per ricerca web server-side. null = prezzo non in catalogo: le ricerche vengono
+     * contate (`TurnUsage.webSearches`) ma NON addebitate (niente prezzi inventati).
+     */
+    val webSearchMicrosPerCall: Long? = null,
 )
 
 /** Solo metadati pubblici: questo oggetto finisce nell'APK, un segreto qui è un bug di release. */

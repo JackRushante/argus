@@ -9,8 +9,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 
 private const val SENTINEL = "@@META@@"
-private const val THINK_OPEN = "<think>"
-private const val THINK_CLOSE = "</think>"
 private const val MAX_DETAIL_CHARS = 200
 
 @Serializable
@@ -29,7 +27,7 @@ private data class MetaEnvelope(
  */
 class CliBridgeParser(private val json: Json = lenient()) {
     fun parseCompile(raw: String): CompileResult {
-        val cleaned = stripThinking(raw)
+        val cleaned = ThinkBlocks.strip(raw)
         val idx = cleaned.lastIndexOf(SENTINEL)
         if (idx < 0) return parseFencedFallback(cleaned) ?: CompileResult(cleaned.trim(), null, null)
         return parseMeta(prose = cleaned.substring(0, idx).trim(), tail = cleaned.substring(idx + SENTINEL.length))
@@ -79,21 +77,6 @@ class CliBridgeParser(private val json: Json = lenient()) {
         val withoutInput = message.substringBefore("JSON input:").trim()
         return withoutInput.replace(Regex("\\s+"), " ").take(MAX_DETAIL_CHARS)
             .ifBlank { error::class.simpleName.orEmpty() }
-    }
-
-    /** Rimuove i blocchi di ragionamento: completi, chiusura orfana (`<think>` implicito) e apertura mai chiusa. */
-    private fun stripThinking(raw: String): String {
-        var text = raw
-        while (true) {
-            val open = text.indexOf(THINK_OPEN, ignoreCase = true)
-            if (open < 0) break
-            val close = text.indexOf(THINK_CLOSE, startIndex = open + THINK_OPEN.length, ignoreCase = true)
-            text = if (close < 0) text.substring(0, open) else text.removeRange(open, close + THINK_CLOSE.length)
-        }
-        // Chiusura senza apertura: il template del modello ha aperto il ragionamento fuori dall'output.
-        val orphan = text.lastIndexOf(THINK_CLOSE, ignoreCase = true)
-        if (orphan >= 0) text = text.substring(orphan + THINK_CLOSE.length)
-        return text
     }
 
     /**

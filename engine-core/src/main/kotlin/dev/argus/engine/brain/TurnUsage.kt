@@ -13,6 +13,12 @@ data class TurnUsage(
     val reasoningTokens: Long? = null,
     val model: String? = null,
     val finishReason: String? = null,
+    /**
+     * Ricerche web eseguite lato provider nel turno (Anthropic `server_tool_use.web_search_requests`,
+     * OpenAI item `web_search_call`). Solo conteggio: si addebitano soltanto se il catalogo ha un
+     * prezzo per ricerca.
+     */
+    val webSearches: Int? = null,
 ) {
     init {
         require(inputTokens in 0..MAX_TOKENS_PER_TURN && outputTokens in 0..MAX_TOKENS_PER_TURN) {
@@ -33,12 +39,16 @@ data class TurnUsage(
         require(finishReason == null || FINISH_REASON.matches(finishReason)) {
             "finish reason non valido"
         }
+        require(webSearches == null || webSearches in 0..MAX_WEB_SEARCHES) {
+            "conteggio ricerche web fuori intervallo"
+        }
     }
 
     companion object {
         /** Bound difensivo molto sopra i context window correnti, ma sicuro per DB e costo intero. */
         const val MAX_TOKENS_PER_TURN: Long = 100_000_000L
         const val MAX_MODEL_CHARS: Int = 256
+        const val MAX_WEB_SEARCHES: Int = 1_000
         private val FINISH_REASON = Regex("^[A-Za-z0-9_.:-]{1,64}$")
     }
 }

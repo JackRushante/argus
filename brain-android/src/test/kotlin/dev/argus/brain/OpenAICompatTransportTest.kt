@@ -130,7 +130,7 @@ class OpenAICompatTransportTest {
         server.enqueue(jsonResponse(
             """
             {"model":"qwen-local",
-             "choices":[{"index":0,"finish_reason":"length","message":{"role":"assistant","content":"Risposta locale"}}],
+             "choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"Risposta locale"}}],
              "usage":{"prompt_tokens":30,"completion_tokens":12,
                       "completion_tokens_details":{"reasoning_tokens":8}}}
             """.trimIndent(),
@@ -155,7 +155,7 @@ class OpenAICompatTransportTest {
         assertEquals("Risposta locale", result.text)
         val usage = assertNotNull(result.usage)
         assertEquals(8L, usage.reasoningTokens)
-        assertEquals("length", usage.finishReason)
+        assertEquals("stop", usage.finishReason)
         val request = assertNotNull(server.takeRequest(2, TimeUnit.SECONDS))
         assertNull(request.getHeader("Authorization"))
         val root = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
@@ -187,7 +187,7 @@ class OpenAICompatTransportTest {
         server.enqueue(jsonResponse(
             """
             {"id":"1","model":"gpt-5.5",
-             "choices":[{"index":0,"message":{"role":"assistant","content":"Risposta valida"}}],
+             "choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"Risposta valida"}}],
              "usage":{"prompt_tokens":${dev.argus.engine.brain.TurnUsage.MAX_TOKENS_PER_TURN + 1},
                       "completion_tokens":1}}
             """.trimIndent(),
@@ -636,7 +636,7 @@ class OpenAICompatTransportTest {
         val result = t.compile("avvisa quando arrivo", manifest(), deviceState())
 
         assertNull(result.draft)
-        assertNotNull(result.metaError)
+        assertEquals("clarification_required", result.metaError)
         assertTrue(result.reply.contains("Quale contatto"))
     }
 

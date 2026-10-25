@@ -780,6 +780,81 @@ class CliBridgeTransportTest {
         assertEquals(golden, Json.parseToJsonElement(raw), "il wire Kotlin deve restare uguale al golden Python")
     }
 
+    @Test fun `compile sends contact aliases and never the real conversation id`(): Unit = runBlocking {
+        server.enqueue(validNoDraftResponse())
+
+        transport().compile("rispondi a Moglie", manifest, DeviceState())
+
+        val raw = assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8()
+        val contacts = Json.parseToJsonElement(raw).jsonObject.getValue("manifest").jsonObject
+            .getValue("whitelisted_contacts").jsonArray
+        assertEquals(1, contacts.size)
+        assertEquals("contact_1", contacts.single().jsonObject.getValue("alias").jsonPrimitive.content)
+        assertEquals("Moglie", contacts.single().jsonObject.getValue("display_name").jsonPrimitive.content)
+        assertFalse("id" in contacts.single().jsonObject)
+        assertFalse(raw.contains("jid:42"), "l'id reale della conversazione non lascia il telefono")
+    }
+
+    @Test fun `429 is a rate limit and carries the closed bridge error code`(): Unit = runBlocking {
+        server.enqueue(jsonResponse("""{"error":"model_busy"}""").setResponseCode(429))
+
+        val error = assertFailsWith<BridgeException> { transport().compile("x", manifest, DeviceState()) }
+
+        assertEquals(BridgeErrorKind.RATE_LIMIT, error.kind)
+        assertEquals(429, error.statusCode)
+        assertEquals("model_busy", error.errorCode)
+    }
+
+    @Test fun `5xx errors keep the status and read only a closed error code`(): Unit = runBlocking {
+        listOf(502 to "model_failure", 503 to "provider_quota_exhausted", 504 to "model_timeout").forEach { (status, code) ->
+            server.enqueue(jsonResponse("""{"error":"$code"}""").setResponseCode(status))
+            val error = assertFailsWith<BridgeException> { transport().act(
+                fireContext(), "rispondi", listOf("notification"), listOf("whatsapp_reply"),
+            ) }
+            assertEquals(BridgeErrorKind.HTTP, error.kind)
+            assertEquals(status, error.statusCode)
+            assertEquals(code, error.errorCode)
+        }
+
+        // Un body che non è un codice chiuso (o che prova a farsi leggere) non entra mai nell'errore.
+        server.enqueue(jsonResponse("""{"error":"Not A Code! secret-body"}""").setResponseCode(503))
+        val error = assertFailsWith<BridgeException> { transport().compile("x", manifest, DeviceState()) }
+        assertNull(error.errorCode)
+        assertFalse(error.message.orEmpty().contains("secret-body"))
+        server.enqueue(MockResponse().setResponseCode(502).setBody("<html>bad gateway</html>"))
+        assertNull(assertFailsWith<BridgeException> { transport().compile("x", manifest, DeviceState()) }.errorCode)
+    }
+
+    @Test fun `model_invalid_output on compile is a retryable meta parse error`(): Unit = runBlocking {
+        server.enqueue(jsonResponse("""{"error":"model_invalid_output"}""").setResponseCode(502))
+
+        val result = transport().compile("x", manifest, DeviceState())
+
+        assertNull(result.draft)
+        assertEquals("meta_parse_error", result.metaError)
+        assertEquals("model_invalid_output", result.detail)
+    }
+
+    @Test fun `model_failure on compile stays an http failure`(): Unit = runBlocking {
+        server.enqueue(jsonResponse("""{"error":"model_failure"}""").setResponseCode(502))
+
+        val error = assertFailsWith<BridgeException> { transport().compile("x", manifest, DeviceState()) }
+
+        assertEquals(502, error.statusCode)
+    }
+
+    @Test fun `compile accepts 32768 characters and refuses more before the network`(): Unit = runBlocking {
+        server.enqueue(validNoDraftResponse())
+        transport().compile("a".repeat(32_768), manifest, DeviceState())
+        assertNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+
+        val error = assertFailsWith<BridgeException> {
+            transport().compile("a".repeat(32_769), manifest, DeviceState())
+        }
+        assertEquals(BridgeErrorKind.CONFIGURATION, error.kind)
+        assertNull(server.takeRequest(200, TimeUnit.MILLISECONDS))
+    }
+
     private fun validNoDraftResponse(reply: String = "ok") = jsonResponse(
         """{"schema_version":2,"request_id":"$REQUEST_ID","reply":"$reply","meta":{"draft":null,"error_code":"clarification_required"}}"""
     )

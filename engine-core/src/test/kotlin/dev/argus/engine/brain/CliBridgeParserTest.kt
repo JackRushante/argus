@@ -106,9 +106,9 @@ class CliBridgeParserTest {
     }
 
     @Test fun `line comments are accepted`() {
-        val raw = "ok @@META@@ {
-\"draft\": $goodDraft // niente {graffe} qui
-}}"
+        val raw = """ok @@META@@ {
+"draft": $goodDraft // niente {graffe} qui
+}}"""
         val r = p.parseCompile(raw)
         assertNull(r.metaError)
         assertNotNull(r.draft)
@@ -144,10 +144,10 @@ class CliBridgeParserTest {
     }
 
     @Test fun `json fence with a draft key is used when the sentinel is missing`() {
-        val raw = "Ecco la regola.
+        val raw = """Ecco la regola.
 ```json
-{\"draft\":$goodDraft}}
-```"
+{"draft":$goodDraft}}
+```"""
         val r = p.parseCompile(raw)
         assertNull(r.metaError)
         assertNotNull(r.draft)
@@ -155,10 +155,10 @@ class CliBridgeParserTest {
     }
 
     @Test fun `json fence without a draft key is not treated as meta`() {
-        val raw = "Esempio:
+        val raw = """Esempio:
 ```json
-{\"altro\":1}
-```"
+{"altro":1}
+```"""
         val r = p.parseCompile(raw)
         assertNull(r.draft)
         assertNull(r.metaError)
