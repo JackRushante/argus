@@ -76,6 +76,7 @@ import dev.argus.ui.components.WarningBanner
 import dev.argus.engine.safety.Severity
 import dev.argus.ui.model.UiWarning
 import dev.argus.ui.model.ProviderUsageUi
+import dev.argus.ui.preview.Fixtures
 import dev.argus.ui.presentation.BudgetFormat
 import dev.argus.ui.R
 import dev.argus.ui.theme.ArgusTheme
@@ -252,6 +253,16 @@ private fun HealthSection(state: SettingsState, callbacks: SettingsCallbacks) {
                 if (state.notificationListenerGranted) HealthLevel.OK else HealthLevel.WARN,
                 onFix = callbacks::onOpenNotificationListenerFix,
             )
+            // Android 13+ con installazione da APK: l'accesso può essere bloccato da «Impostazione con
+            // restrizioni»; la guida compare solo se l'accesso non è concesso.
+            if (state.notificationListenerRestrictedHint) {
+                Text(
+                    stringResource(R.string.settings_listener_restricted_hint),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(horizontal = 14.dp),
+                )
+            }
             HealthRow(
                 Icons.Rounded.MyLocation, stringResource(R.string.settings_location_title), locSub, locLevel,
                 onFix = callbacks::onOpenLocationFix,
@@ -949,7 +960,7 @@ private val previewAllGreen = SettingsState(
         softWarningActive = false,
     ),
     privacyAccepted = true,
-    appVersionLabel = "Argus v0.1.0 · MVP (sideload)",
+    appVersionLabel = "Argus v0.3.6 · F-Droid",
     providerChoices = previewProviderChoices,
 )
 
@@ -994,7 +1005,7 @@ private val previewDegraded = SettingsState(
         softWarningActive = true,
     ),
     privacyAccepted = true,
-    appVersionLabel = "Argus v0.1.0 · MVP (sideload)",
+    appVersionLabel = "Argus v0.3.6 · APK",
 )
 
 @Preview(name = "Sistema · tutto verde + 1 contatto", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 1100)
@@ -1013,4 +1024,10 @@ private fun SettingsDegradedPreview() {
 @Composable
 private fun SettingsDirectProviderPreview() {
     ArgusTheme { SettingsScreen(previewDirectProvider, NoopSettingsCallbacks) }
+}
+
+@Preview(name = "Sistema · guida impostazioni con restrizioni (APK, Android 13+)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 1100)
+@Composable
+private fun SettingsRestrictedHintPreview() {
+    ArgusTheme { SettingsScreen(Fixtures.settingsRestrictedHint, NoopSettingsCallbacks) }
 }

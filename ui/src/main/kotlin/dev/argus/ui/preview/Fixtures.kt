@@ -9,6 +9,7 @@ import dev.argus.ui.model.AutomationRow
 import dev.argus.ui.model.BgLocationState
 import dev.argus.ui.model.BudgetUi
 import dev.argus.ui.model.ChatItem
+import dev.argus.ui.model.ChatError
 import dev.argus.ui.model.ChatState
 import dev.argus.ui.model.ContactRow
 import dev.argus.ui.model.DraftCardStatus
@@ -225,6 +226,23 @@ object Fixtures {
         brainReachable = true,
         error = null,
     )
+
+    /** Ultimo turno senza regola valida: errore + «Risposta grezza» per la segnalazione (0.3.6). */
+    val chatRawResponse = ChatState(
+        items = listOf(
+            ChatItem.UserMessage("Quando esco di casa spegni il Wi-Fi.", "13:10"),
+            ChatItem.AssistantMessage("Ho capito, ma non riesco a preparare la regola.", "13:10"),
+        ),
+        input = "",
+        sending = false,
+        sendingElapsedSec = null,
+        brainReachable = true,
+        error = ChatError.MalformedReply("draft_missing"),
+        rawResponse = "Ho capito, ma non riesco a preparare la regola.\n@@META@@ {\"draft\": null}",
+    )
+
+    /** Errore locale dell'app: non dipende dal provider (0.3.6). */
+    val chatInternalError = chatEmpty.copy(error = ChatError.Internal("illegal_state_exception"))
 
     // -------------------------------------------------------------------------
     // Automazioni · lista (§6.2) — volutamente in ordine "sbagliato": lo schermo
@@ -538,7 +556,7 @@ object Fixtures {
             softWarningActive = false,
         ),
         privacyAccepted = true,
-        appVersionLabel = "Argus v0.1.0 · MVP (sideload)",
+        appVersionLabel = "Argus v0.3.6 · F-Droid",
         providerChoices = providerChoices,
     )
 
@@ -569,7 +587,7 @@ object Fixtures {
             softWarningActive = true,
         ),
         privacyAccepted = true,
-        appVersionLabel = "Argus v0.1.0 · MVP (sideload)",
+        appVersionLabel = "Argus v0.3.6 · APK",
         providerChoices = providerChoices,
     )
 
@@ -586,6 +604,27 @@ object Fixtures {
             defaultModels = listOf("gpt-5.5", "gpt-5-mini"),
         ),
         providerChoices = providerChoices.map { it.copy(selected = it.id == "openai") },
+    )
+
+    /**
+     * OpenRouter con suggerimento sui preset, installazione da APK e accesso notifiche non concesso:
+     * la riga mostra la guida «Impostazione con restrizioni» (0.3.6).
+     */
+    val settingsRestrictedHint = settingsDegraded.copy(
+        notificationListenerGranted = false,
+        notificationListenerRestrictedHint = true,
+        transport = TransportUi.DirectProvider(
+            providerId = "openrouter",
+            providerLabel = "OpenRouter",
+            baseUrl = "https://openrouter.ai/api/v1",
+            model = "@preset/mio",
+            authState = AuthState.OK,
+            reachable = null,
+            lastLatencyLabel = null,
+            defaultModels = listOf("openai/gpt-5.5"),
+            modelPresetHint = true,
+        ),
+        providerChoices = providerChoices.map { it.copy(selected = it.id == "openrouter") },
     )
 
     // -------------------------------------------------------------------------

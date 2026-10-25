@@ -130,12 +130,16 @@ class OpenAICompatTransport internal constructor(
             maxTokens = if (spec.quirks.outputCapParam == OutputCapParam.MAX_TOKENS) COMPILE_MAX_TOKENS else null,
             maxCompletionTokens = if (spec.quirks.outputCapParam == OutputCapParam.MAX_COMPLETION_TOKENS) COMPILE_MAX_TOKENS else null,
             reasoningEffort = config.reasoningEffort.wireValue,
+            // Solo il compile (e solo dove il catalogo lo prevede): risposte più costanti. Act e health no.
+            temperature = spec.quirks.compileTemperature,
         )
         val payload = json.encodeToString(request)
         val response = parseChatResponse(execute(buildRequest(token, payload)))
         val usage = response.toTurnUsage(fallbackModel = model)
         val choice = response.choices.firstOrNull()
         val text = choice?.message?.content?.trim()
+        // F5: la risposta grezza resta in memoria per le segnalazioni (mai nei log né nel DB).
+        val rawText = CompileResult.capRaw(choice?.message?.content)
         val parsed = if (text.isNullOrEmpty()) {
             null
         } else {
@@ -145,16 +149,16 @@ class OpenAICompatTransport internal constructor(
             // distingue sempre un draft assente da un successo.
             if (raw.draft == null && raw.metaError == null) raw.copy(metaError = "draft_missing") else raw
         }
-        if (parsed?.draft != null) return parsed.copy(usage = usage)
+        if (parsed?.draft != null) return parsed.copy(usage = usage, raw = rawText)
         // B6: senza una bozza valida, distingui un output tagliato o istruzioni tagliate dal server
         // da un semplice "il modello non ha prodotto la regola".
         AgentMessageSupport.compileTruncationCode(
             outputLimitHit = choice?.finishReason == "length",
             reportedPromptTokens = response.usage?.promptTokens,
             promptChars = messages.sumOf { it.content.length },
-        )?.let { code -> return CompileResult(parsed?.reply.orEmpty(), null, code, usage) }
+        )?.let { code -> return CompileResult(parsed?.reply.orEmpty(), null, code, usage, raw = rawText) }
         if (parsed == null) return CompileResult("", null, "empty_response", usage)
-        return parsed.copy(usage = usage)
+        return parsed.copy(usage = usage, raw = rawText)
     }
 
     private fun compileMessages(
@@ -255,7 +259,8 @@ class OpenAICompatTransport internal constructor(
                 reasoningEffort = config.reasoningEffort.wireValue,
             ),
         )
-        val response = parseChatResponse(execute(buildRequest(token, body)))
+        // Solo il test di connessione chiede il messaggio del provider (e maschera la chiave configurata).
+        val response = parseChatResponse(execute(buildRequest(token, body), ErrorDiagnostics(listOf(token))))
         return OpenAiCompatHealth(model = response.model?.takeIf { it.isNotBlank() } ?: model)
     }
 
@@ -641,7 +646,11 @@ class OpenAICompatTransport internal constructor(
         }.getOrNull()
     }
 
-    private suspend fun execute(request: Request): String {
+    /**
+     * Esegue la chiamata. Con [diagnostics] (solo `health()`) un errore HTTP porta anche il messaggio
+     * ripulito del provider in [TransportException.providerMessage]; senza, il body d'errore non si legge.
+     */
+    private suspend fun execute(request: Request, diagnostics: ErrorDiagnostics? = null): String {
         val call = client.newCall(request)
         return suspendCancellableCoroutine { continuation ->
             continuation.invokeOnCancellation { call.cancel() }
@@ -658,7 +667,7 @@ class OpenAICompatTransport internal constructor(
                 }
 
                 override fun onResponse(call: Call, response: Response) {
-                    val result = runCatching { response.use(::readSuccessfulJson) }
+                    val result = runCatching { response.use { readSuccessfulJson(it, diagnostics) } }
                     result.fold(
                         onSuccess = { continuation.resume(it) },
                         onFailure = { error ->
@@ -682,7 +691,7 @@ class OpenAICompatTransport internal constructor(
         }
     }
 
-    private fun readSuccessfulJson(response: Response): String {
+    private fun readSuccessfulJson(response: Response, diagnostics: ErrorDiagnostics?): String {
         if (!response.isSuccessful) {
             val kind = when (response.code) {
                 401, 403 -> TransportErrorKind.AUTH
@@ -690,7 +699,16 @@ class OpenAICompatTransport internal constructor(
                 429 -> TransportErrorKind.RATE_LIMIT
                 else -> TransportErrorKind.HTTP
             }
-            throw TransportException(kind, "Provider HTTP ${response.code}", statusCode = response.code)
+            val providerMessage = diagnostics?.let {
+                val body = runCatching { response.peekBody(MAX_ERROR_BODY_BYTES).string() }.getOrNull()
+                ProviderErrorMessage.extract(body, it.secrets)
+            }
+            throw TransportException(
+                kind,
+                "Provider HTTP ${response.code}",
+                statusCode = response.code,
+                providerMessage = providerMessage,
+            )
         }
         val body = response.body
             ?: throw TransportException(TransportErrorKind.PROTOCOL, "risposta senza body")
@@ -712,6 +730,9 @@ class OpenAICompatTransport internal constructor(
 
     private fun config(message: String) = TransportException(TransportErrorKind.CONFIGURATION, message)
 
+    /** Richiesta di diagnostica dell'errore HTTP: [secrets] sono i valori da mascherare nel messaggio. */
+    private class ErrorDiagnostics(val secrets: List<String?>)
+
     @Serializable
     private data class ChatRequest(
         val model: String,
@@ -721,6 +742,7 @@ class OpenAICompatTransport internal constructor(
         @SerialName("max_tokens") val maxTokens: Int? = null,
         @SerialName("max_completion_tokens") val maxCompletionTokens: Int? = null,
         @SerialName("reasoning_effort") val reasoningEffort: String? = null,
+        val temperature: Double? = null,
     )
 
     @Serializable
@@ -882,6 +904,7 @@ class OpenAICompatTransport internal constructor(
         const val GEMINI_THINKING_BUDGET = 1_024
         const val REPLY_TOOL_MISSING = "reply_tool_missing"
         const val MAX_RESPONSE_BYTES = 512L * 1024L
+        const val MAX_ERROR_BODY_BYTES = 16L * 1024L
         val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
         val FORCED_REPLY_CHOICE: JsonElement = buildJsonObject {
             put("type", "function")

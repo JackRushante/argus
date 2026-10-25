@@ -23,6 +23,8 @@
     <string name="provider_dialog_title">Configure %1$s</string>
     <string name="provider_endpoint_label">Endpoint</string>
     <string name="provider_model_label">Model</string>
+    <string name="provider_model_hint_openrouter">Model (e.g. deepseek/deepseek-v4.1-flash) or preset: @preset/&lt;name&gt;</string>
+    <string name="provider_model_preset_format">The format is @preset/&lt;name&gt;</string>
     <string name="provider_key_label">API key</string>
     <string name="provider_key_keep_hint">Leave blank to keep the current key.</string>
     <string name="provider_key_required_hint">Required.</string>
@@ -98,6 +100,12 @@
     <string name="chat_error_service_unavailable">The service is not available right now (HTTP %1$d). Try again later.</string>
     <string name="chat_error_too_long">This request is too long (%1$d characters, max %2$d). Shorten it.</string>
     <string name="chat_error_not_configured">The AI service is not set up. Check the provider, the API key and the privacy notice in System.</string>
+    <string name="chat_error_internal">Argus internal error (%1$s): it does not depend on the provider. If it happens again, open an issue.</string>
+    <string name="chat_raw_action">Raw response</string>
+    <string name="chat_raw_title">Raw response</string>
+    <string name="chat_raw_warning">It may contain personal data (names, messages, locations): check it before sharing it</string>
+    <string name="chat_raw_copy">Copy for the report</string>
+    <string name="chat_raw_close">Close</string>
     <string name="chat_open_system">Open System</string>
     <string name="chat_error_detail_show">Technical detail</string>
     <string name="chat_error_detail_hide">Hide technical detail</string>
@@ -179,6 +187,7 @@
     <string name="settings_listener_title">Notification access</string>
     <string name="settings_listener_ok">active — WhatsApp triggers and replies available</string>
     <string name="settings_listener_warn">not active — WhatsApp triggers and replies not armable</string>
+    <string name="settings_listener_restricted_hint">If Android says \"Restricted setting\": Settings › Apps › Argus › ⋮ › Allow restricted settings, then try again.</string>
     <string name="settings_location_title">Background location</string>
     <string name="settings_location_granted">always — geofences are reliable</string>
     <string name="settings_location_while_in_use">only while in use — «Allow all the time» is needed for geofences</string>

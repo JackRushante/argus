@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowUpward
@@ -34,6 +35,7 @@ import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Pending
 import androidx.compose.material.icons.rounded.Shield
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -77,6 +79,7 @@ import dev.argus.ui.model.DraftCardStatus
 import dev.argus.ui.model.NoticeKind
 import dev.argus.ui.model.RuleRender
 import dev.argus.ui.model.UiWarning
+import dev.argus.ui.preview.Fixtures
 import dev.argus.ui.R
 import dev.argus.ui.theme.ArgusTheme
 import dev.argus.ui.theme.LocalArgusSemantic
@@ -105,6 +108,13 @@ fun ChatScreen(
     // nessun probe di connessione automatico (zero rete all'avvio/entrando in Chat), quindi un
     // "irraggiungibile" vecchio non può impedire di riprovare; si toglie al prossimo invio riuscito.
     val inputEnabled = !state.sending
+    // «Risposta grezza» (0.3.6): il testo vive nello stato (solo memoria); qui si decide solo se il dialogo è aperto.
+    var showRawResponse by remember { mutableStateOf(false) }
+    val rawAvailable = state.rawResponse != null && !state.sending
+    // Nuovo invio o nuova conversazione: la risposta grezza sparisce e il dialogo non deve riaprirsi da solo.
+    LaunchedEffect(state.rawResponse != null) {
+        if (state.rawResponse == null) showRawResponse = false
+    }
 
     Surface(color = MaterialTheme.colorScheme.background, modifier = modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
@@ -131,6 +141,12 @@ fun ChatScreen(
                             state.items,
                             key = { index, item -> chatItemKey(index, item) },
                         ) { _, item -> ChatItemRow(item, callbacks) }
+                        // Senza errore l'azione sta sotto l'ultimo messaggio; con un errore, sotto il suo banner.
+                        if (rawAvailable && state.error == null) {
+                            item(key = "raw-response-action") {
+                                RawResponseAction(onClick = { showRawResponse = true })
+                            }
+                        }
                     }
                 }
             }
@@ -144,6 +160,9 @@ fun ChatScreen(
                     brainDown -> BrainDownBanner(callbacks::onRetry)
                     state.error != null && !state.sending ->
                         ChatErrorBanner(state.error, callbacks::onRetry, callbacks::onOpenSystem)
+                }
+                if (rawAvailable && state.error != null) {
+                    RawResponseAction(onClick = { showRawResponse = true })
                 }
                 // §4: attesa one-shot, nessuno streaming. elapsed onesto e visibile.
                 if (state.sending) {
@@ -163,6 +182,17 @@ fun ChatScreen(
                 onSend = callbacks::onSend,
             )
         }
+    }
+    val rawText = state.rawResponse
+    if (showRawResponse && rawText != null) {
+        RawResponseDialog(
+            raw = rawText,
+            onCopy = {
+                callbacks.onCopyRawResponse()
+                showRawResponse = false
+            },
+            onDismiss = { showRawResponse = false },
+        )
     }
 }
 
@@ -431,6 +461,7 @@ private fun ChatErrorBanner(error: ChatError, onRetry: () -> Unit, onOpenSystem:
         is ChatError.ServiceUnavailable -> stringResource(R.string.chat_error_service_unavailable, error.status)
         is ChatError.TooLong -> stringResource(R.string.chat_error_too_long, error.chars, error.max)
         ChatError.NotConfigured -> stringResource(R.string.chat_error_not_configured)
+        is ChatError.Internal -> stringResource(R.string.chat_error_internal, error.code)
     }
     val detail = chatErrorDetail(error)
     val opensSystem = error == ChatError.Auth || error == ChatError.Budget || error == ChatError.NotConfigured
@@ -489,6 +520,64 @@ internal fun chatErrorDetail(error: ChatError): String? = when (error) {
     is ChatError.ServiceUnavailable -> "HTTP ${error.status}"
     is ChatError.TooLong -> null
     ChatError.NotConfigured -> "not_configured"
+    is ChatError.Internal -> error.code
+}
+
+// -----------------------------------------------------------------------------
+// Risposta grezza dell'AI (0.3.6): per le segnalazioni, solo in memoria
+// -----------------------------------------------------------------------------
+
+/** Azione testuale «Risposta grezza» sotto l'ultimo messaggio o sotto l'errore dell'ultimo turno. */
+@Composable
+private fun RawResponseAction(onClick: () -> Unit) {
+    TextButton(onClick = onClick, modifier = Modifier.heightIn(min = 48.dp).testTag("chat_raw_action")) {
+        Text(stringResource(R.string.chat_raw_action))
+    }
+}
+
+/**
+ * Dialogo con la risposta grezza del modello: avviso sui dati personali, testo selezionabile e
+ * scorrevole, copia per la segnalazione (versione, provider, modello e codice d'errore li aggiunge la copia).
+ */
+@Composable
+private fun RawResponseDialog(raw: String, onCopy: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.chat_raw_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    stringResource(R.string.chat_raw_warning),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 320.dp)
+                        .verticalScroll(rememberScrollState())
+                        .testTag("chat_raw_text"),
+                ) {
+                    SelectionContainer {
+                        Text(
+                            raw,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                    }
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.chat_raw_close)) }
+        },
+        confirmButton = {
+            Button(onClick = onCopy, modifier = Modifier.testTag("chat_raw_copy")) {
+                Text(stringResource(R.string.chat_raw_copy))
+            }
+        },
+    )
 }
 
 // -----------------------------------------------------------------------------
@@ -651,6 +740,19 @@ private object NoopChatCallbacks : ChatCallbacks {
     override fun onClearConversation() {}
     override fun onCheckConnection() {}
     override fun onOpenSystem() {}
+    override fun onCopyRawResponse() {}
+}
+
+@Preview(name = "Chat · risposta grezza", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)
+@Composable
+private fun ChatRawResponsePreview() {
+    ArgusTheme { ChatScreen(Fixtures.chatRawResponse, NoopChatCallbacks) }
+}
+
+@Preview(name = "Chat · errore interno", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)
+@Composable
+private fun ChatInternalErrorPreview() {
+    ArgusTheme { ChatScreen(Fixtures.chatInternalError, NoopChatCallbacks) }
 }
 
 @Preview(name = "Chat · conversazione + DraftCard", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)

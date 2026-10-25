@@ -552,6 +552,71 @@ class OpenAICompatTransportTest {
         }
     }
 
+    // --- 0.3.6 voce 1: il test di connessione spiega la causa ---
+
+    @Test fun `health carries the provider message with the key masked`(): Unit = runBlocking {
+        server.enqueue(
+            jsonResponse(
+                """{"error":{"message":"No endpoints found matching your data policy. Bad key $API_KEY"}}""",
+            ).setResponseCode(400),
+        )
+        val t = transport(ProviderId.OPENROUTER, model = "deepseek/deepseek-v4.1-flash")
+
+        val error = assertFailsWith<TransportException> { t.health() }
+
+        assertEquals(TransportErrorKind.HTTP, error.kind)
+        assertEquals(400, error.statusCode)
+        val providerMessage = assertNotNull(error.providerMessage)
+        assertTrue(providerMessage.startsWith("No endpoints found matching your data policy."), providerMessage)
+        assertFalse(API_KEY in providerMessage, providerMessage)
+        assertTrue(providerMessage.length <= 160)
+        // Il messaggio del provider vive solo nel campo dedicato.
+        assertFalse(error.message.orEmpty().contains("endpoints"))
+        assertFalse(error.toString().contains("endpoints"))
+    }
+
+    @Test fun `health 404 on a custom endpoint keeps the status and a null message for an html body`(): Unit = runBlocking {
+        server.enqueue(
+            MockResponse().setResponseCode(404)
+                .addHeader("Content-Type", "text/html").setBody("<html>Not Found</html>"),
+        )
+        val t = transport(ProviderId.CUSTOM_OPENAI_COMPAT, model = "m")
+
+        val error = assertFailsWith<TransportException> { t.health() }
+
+        assertEquals(404, error.statusCode)
+        assertNull(error.providerMessage)
+    }
+
+    @Test fun `health maps 401 402 and 429 to their kinds and still carries the message`(): Unit = runBlocking {
+        mapOf(
+            401 to TransportErrorKind.AUTH,
+            402 to TransportErrorKind.BUDGET,
+            429 to TransportErrorKind.RATE_LIMIT,
+        ).forEach { (code, kind) ->
+            server.enqueue(jsonResponse("""{"error":{"message":"detail $code"}}""").setResponseCode(code))
+            val error = assertFailsWith<TransportException> {
+                transport(ProviderId.OPENAI, model = "gpt-5.5").health()
+            }
+            assertEquals(kind, error.kind, "code $code")
+            assertEquals("detail $code", error.providerMessage)
+        }
+    }
+
+    @Test fun `compile and act never read the provider error message`(): Unit = runBlocking {
+        server.enqueue(jsonResponse("""{"error":{"message":"secret detail"}}""").setResponseCode(400))
+        server.enqueue(jsonResponse("""{"error":{"message":"secret detail"}}""").setResponseCode(400))
+        val t = transport(ProviderId.OPENROUTER, model = "deepseek/deepseek-v4.1-flash")
+
+        val compileError = assertFailsWith<TransportException> { t.compile("crea", manifest(), deviceState()) }
+        val actError = assertFailsWith<TransportException> {
+            t.act(timerContext(), "scrivi", emptyList(), emptyList())
+        }
+
+        assertNull(compileError.providerMessage)
+        assertNull(actError.providerMessage)
+    }
+
     @Test fun `timeout is typed`(): Unit = runBlocking {
         val fast = OkHttpClient.Builder()
             .callTimeout(250, TimeUnit.MILLISECONDS)
@@ -625,6 +690,76 @@ class OpenAICompatTransportTest {
         assertTrue(prompt.contains("@@META@@"), "il prompt deve richiedere la riga sentinel")
         assertTrue(prompt.contains("AutomationDraft"), "il prompt deve includere lo schema draft")
         assertTrue(prompt.contains("metti in silenzioso alle 23"), "il messaggio utente deve entrare nel prompt")
+    }
+
+    // --- 0.3.6 voce 4: temperatura bassa solo nel compile di OpenRouter e Custom ---
+
+    private fun compileBody(provider: ProviderId, model: String): String = runBlocking {
+        server.enqueue(jsonResponse(chatContent("Ciao! Come posso aiutarti oggi?")))
+        transport(provider, model = model).compile("ciao", manifest(), deviceState())
+        assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8()
+    }
+
+    @Test fun `compile sends temperature 0_2 for openrouter and custom only`() {
+        assertTrue("\"temperature\":0.2" in compileBody(ProviderId.OPENROUTER, "deepseek/deepseek-v4.1-flash"))
+        assertTrue("\"temperature\":0.2" in compileBody(ProviderId.CUSTOM_OPENAI_COMPAT, "qwen-local"))
+    }
+
+    @Test fun `compile never sends a temperature for openai and gemini`() {
+        assertFalse("temperature" in compileBody(ProviderId.OPENAI, "gpt-5.5"))
+        assertFalse("temperature" in compileBody(ProviderId.GEMINI, "gemini-2.5-flash"))
+    }
+
+    @Test fun `act and health never send a temperature even for openrouter and custom`(): Unit = runBlocking {
+        listOf(
+            ProviderId.OPENROUTER to "deepseek/deepseek-v4.1-flash",
+            ProviderId.CUSTOM_OPENAI_COMPAT to "qwen-local",
+        ).forEach { (provider, model) ->
+            val ok = jsonResponse(chatContent("Promemoria: bevi acqua."))
+            server.enqueue(ok)
+            transport(provider, model = model).act(timerContext(), "genera un promemoria", emptyList(), emptyList())
+            val actBody = assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8()
+            assertFalse("temperature" in actBody, "act $provider")
+
+            server.enqueue(jsonResponse(chatContent("pong")))
+            transport(provider, model = model).health()
+            val healthBody = assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8()
+            assertFalse("temperature" in healthBody, "health $provider")
+        }
+    }
+
+    // --- 0.3.6 F5: risposta grezza solo in memoria ---
+
+    @Test fun `compile returns the raw model text capped at 16000 characters`(): Unit = runBlocking {
+        server.enqueue(jsonResponse(chatContent("Ciao! " + "x".repeat(20_000))))
+        val t = transport(ProviderId.OPENROUTER, model = "deepseek/deepseek-v4.1-flash")
+
+        val result = t.compile("ciao", manifest(), deviceState())
+
+        val raw = assertNotNull(result.raw)
+        assertEquals(16_000, raw.length)
+        assertTrue(raw.startsWith("Ciao! "))
+    }
+
+    @Test fun `compile with a draft and with a truncated output both carry the raw text`(): Unit = runBlocking {
+        val content = "Fatto.\n@@META@@ {\"draft\": {\"name\":\"dnd sera\"," +
+            "\"trigger\":{\"type\":\"time\",\"cron\":\"0 23 * * *\",\"tz\":\"Europe/Rome\"}," +
+            "\"actions\":[{\"type\":\"set_dnd\",\"mode\":\"PRIORITY\"}]}}"
+        server.enqueue(jsonResponse(chatContent(content)))
+        val ok = transport(ProviderId.OPENAI, model = "gpt-5.5").compile("dnd alle 23", manifest(), deviceState())
+        assertNotNull(ok.draft)
+        assertEquals(content, ok.raw)
+
+        server.enqueue(jsonResponse(chatContent("risposta tagliata @@META@@ {\"draft\": {\"na").replace("\"stop\"", "\"length\"")))
+        val cut = transport(ProviderId.OPENAI, model = "gpt-5.5").compile("dnd alle 23", manifest(), deviceState())
+        assertNull(cut.draft)
+        assertEquals("risposta tagliata @@META@@ {\"draft\": {\"na", cut.raw)
+    }
+
+    @Test fun `an empty model answer leaves the raw text null`(): Unit = runBlocking {
+        server.enqueue(jsonResponse(chatContent("")))
+
+        assertNull(transport(ProviderId.OPENAI, model = "gpt-5.5").compile("x", manifest(), deviceState()).raw)
     }
 
     @Test fun `compile clarification keeps draft null and preserves the reply`(): Unit = runBlocking {

@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import dev.argus.ui.R
 import dev.argus.ui.model.AuthState
 import dev.argus.ui.model.TransportUi
+import dev.argus.ui.presentation.ModelFieldHints
 
 /**
  * Editor di un provider diretto BYOK. Stessa disciplina di [BridgeConfigurationDialog]: la chiave
@@ -49,6 +50,7 @@ fun ProviderConfigurationDialog(
     val cleanModel = model.trim()
     val cleanKey = key.trim()
     val keyConfigured = provider.authState == AuthState.OK
+    val presetMistyped = provider.modelPresetHint && ModelFieldHints.isMistypedPreset(model)
     val canSave = cleanModel.isNotEmpty() &&
         (!provider.apiKeyRequired || keyConfigured || cleanKey.isNotEmpty()) &&
         (!provider.baseUrlEditable || cleanBaseUrl.isNotEmpty())
@@ -78,7 +80,23 @@ fun ProviderConfigurationDialog(
                     onValueChange = { model = it },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
+                    isError = presetMistyped,
                     label = { Text(stringResource(R.string.provider_model_label)) },
+                    // OpenRouter: suggerisce i preset `@preset/<nome>`; se si scrive `@presets/…` avvisa
+                    // del formato giusto senza correggere il valore e senza bloccare il salvataggio.
+                    supportingText = if (provider.modelPresetHint) {
+                        {
+                            Text(
+                                if (presetMistyped) {
+                                    stringResource(R.string.provider_model_preset_format)
+                                } else {
+                                    stringResource(R.string.provider_model_hint_openrouter)
+                                },
+                            )
+                        }
+                    } else {
+                        null
+                    },
                 )
                 if (provider.defaultModels.isNotEmpty()) {
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

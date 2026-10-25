@@ -42,6 +42,17 @@ data class ProviderQuirks(
     val extraHeaders: Map<String, String> = emptyMap(),
     /** Come il transport attiva il web search server-side (o [WebSearchMechanism.NONE]). */
     val webSearch: WebSearchMechanism = WebSearchMechanism.NONE,
+    /**
+     * Temperatura inviata SOLO nelle richieste di compile (null = campo omesso, default del provider):
+     * una temperatura bassa rende costante la compilazione della stessa richiesta (stessa regola, non una
+     * volta una regola e una volta una domanda di chiarimento). Act e health non la inviano mai.
+     *
+     * Solo OpenRouter e Custom (OpenAI-compatibile). NON per gli altri, di proposito:
+     * - OpenAI: con i modelli di ragionamento una temperatura diversa da 1 dà errore 400;
+     * - Anthropic: con il thinking attivo la temperatura non è accettata;
+     * - Gemini 3: abbassarla degrada le risposte.
+     */
+    val compileTemperature: Double? = null,
 )
 
 /** Prezzi in micro-USD per 1M token (es. $2.50/MTok = 2_500_000). Interi: niente float sui soldi. */
@@ -87,6 +98,9 @@ data class ProviderSpec(
  */
 object ProviderCatalog {
     const val PRICING_VERSION: String = "2026-07"
+
+    /** Temperatura del compile per i provider OpenAI-compatibili «aperti» (vedi [ProviderQuirks.compileTemperature]). */
+    private const val COMPILE_TEMPERATURE = 0.2
 
     val specs: Map<ProviderId, ProviderSpec> = listOf(
         ProviderSpec(
@@ -171,7 +185,10 @@ object ProviderCatalog {
             authStyle = AuthStyle.BEARER,
             defaultModels = listOf("openai/gpt-5.5", "anthropic/claude-sonnet-4-5"),
             // Web attivato dallo slug modello `<model>:online` (loop di ricerca interno lato OpenRouter).
-            quirks = ProviderQuirks(webSearch = WebSearchMechanism.OPENROUTER_ONLINE),
+            quirks = ProviderQuirks(
+                webSearch = WebSearchMechanism.OPENROUTER_ONLINE,
+                compileTemperature = COMPILE_TEMPERATURE,
+            ),
             // TOKEN-ONLY: il listino statico copriva 2 modelli su centinaia e non leggiamo il
             // costo reale dal wire — niente stime in dollari, si contano solo i token.
             prices = emptyMap(),
@@ -184,6 +201,7 @@ object ProviderCatalog {
             authStyle = AuthStyle.BEARER,
             defaultModels = emptyList(),
             // Endpoint e listino sconosciuti a priori: costo "n/d".
+            quirks = ProviderQuirks(compileTemperature = COMPILE_TEMPERATURE),
             prices = emptyMap(),
             apiKeyRequired = false,
         ),

@@ -2,10 +2,12 @@ package dev.argus.automation.vm
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import dev.argus.automation.AppInstallInfo
 import dev.argus.automation.AppPreferences
 import dev.argus.automation.AppPreferencesStore
 import dev.argus.automation.ConfiguredBridgeBrain
 import dev.argus.automation.PrivacyRevocationCoordinator
+import dev.argus.automation.RenderLanguageSource
 import dev.argus.automation.budget.BudgetLimits
 import dev.argus.automation.budget.BudgetSettings
 import dev.argus.automation.budget.BudgetSettingsStore
@@ -17,6 +19,8 @@ import dev.argus.brain.ProviderConfig
 import dev.argus.brain.ProviderConfigStore
 import dev.argus.brain.ProviderId
 import dev.argus.brain.ReasoningEffort
+import dev.argus.brain.TransportErrorKind
+import dev.argus.brain.TransportException
 import dev.argus.brain.TransportFactory
 import dev.argus.brain.TransportHealth
 import dev.argus.data.DeferredReplyStore
@@ -305,8 +309,11 @@ class SettingsViewModelTest {
         usage: UsageDao = FakeUsageDao(),
         budgetSettings: BudgetSettingsStore = FakeBudgetSettingsStore(),
         language: RenderLanguage = RenderLanguage.IT,
+        transportFactory: TransportFactory = FakeTransportFactory(),
+        installInfo: AppInstallInfo = AppInstallInfo(versionName = "0.3.6", installerPackage = null, sdkInt = 34),
+        languageSource: RenderLanguageSource = RenderLanguageSource { language },
     ): SettingsViewModel {
-        val brain = ConfiguredBridgeBrain(store, privacyAccepted = { true }, factory = FakeTransportFactory())
+        val brain = ConfiguredBridgeBrain(store, privacyAccepted = { true }, factory = transportFactory)
         val preferences = FakePreferences(privacyAccepted = true)
         val observed = FakeObservedConversationStore()
         val privacy = PrivacyRevocationCoordinator(
@@ -329,9 +336,420 @@ class SettingsViewModelTest {
             connectivitySentinelStatus = ConnectivitySentinelStatus(),
             usage = usage,
             budgetSettings = budgetSettings,
-            language = language,
+            languageSource = languageSource,
+            installInfo = installInfo,
         )
     }
+
+    // ------------------------------------------------------------------ 0.3.6 voce 1: il test spiega la causa
+
+    private data class FailureCase(
+        val error: TransportException,
+        val expectedIt: String,
+        val expectedEn: String,
+    )
+
+    private fun failureCases(): List<FailureCase> = listOf(
+        FailureCase(
+            TransportException(TransportErrorKind.NETWORK, "chiamata provider fallita"),
+            "OpenRouter non raggiungibile: errore di rete o DNS.",
+            "OpenRouter is unreachable: network or DNS error.",
+        ),
+        FailureCase(
+            TransportException(TransportErrorKind.TIMEOUT, "chiamata provider fallita"),
+            "OpenRouter non ha risposto in tempo (timeout).",
+            "OpenRouter did not answer in time (timeout).",
+        ),
+        FailureCase(
+            TransportException(TransportErrorKind.AUTH, "Provider HTTP 401", statusCode = 401),
+            "OpenRouter ha rifiutato la chiave API (HTTP 401): controllala.",
+            "OpenRouter rejected the API key (HTTP 401): check it.",
+        ),
+        FailureCase(
+            TransportException(TransportErrorKind.AUTH, "Provider HTTP 403", statusCode = 403),
+            "OpenRouter ha rifiutato la chiave API (HTTP 403): controllala.",
+            "OpenRouter rejected the API key (HTTP 403): check it.",
+        ),
+        FailureCase(
+            TransportException(TransportErrorKind.BUDGET, "Provider HTTP 402", statusCode = 402),
+            "OpenRouter segnala credito o budget esaurito (HTTP 402).",
+            "OpenRouter reports no credit or budget left (HTTP 402).",
+        ),
+        FailureCase(
+            TransportException(TransportErrorKind.HTTP, "Provider HTTP 404", statusCode = 404),
+            "OpenRouter: endpoint non trovato (HTTP 404): controlla l'URL.",
+            "OpenRouter: endpoint not found (HTTP 404): check the URL.",
+        ),
+        FailureCase(
+            TransportException(TransportErrorKind.RATE_LIMIT, "Provider HTTP 429", statusCode = 429),
+            "OpenRouter sta limitando le richieste (HTTP 429): riprova tra poco.",
+            "OpenRouter is limiting requests (HTTP 429): try again shortly.",
+        ),
+        FailureCase(
+            TransportException(
+                TransportErrorKind.HTTP,
+                "Provider HTTP 400",
+                statusCode = 400,
+                providerMessage = "No endpoints found matching your data policy",
+            ),
+            "OpenRouter ha rifiutato la richiesta (HTTP 400). Messaggio del provider: «No endpoints found matching your data policy»",
+            "OpenRouter rejected the request (HTTP 400). Provider message: “No endpoints found matching your data policy”",
+        ),
+        FailureCase(
+            TransportException(TransportErrorKind.HTTP, "Provider HTTP 503", statusCode = 503),
+            "OpenRouter: servizio non disponibile (HTTP 503). Riprova più tardi.",
+            "OpenRouter: service not available (HTTP 503). Try again later.",
+        ),
+    )
+
+    private fun TestScope.connectionMessage(
+        error: TransportException,
+        language: RenderLanguage,
+        provider: ProviderId = ProviderId.OPENROUTER,
+        baseUrl: String? = null,
+    ): String {
+        val store = FakeProviderStore().apply {
+            seed(provider, baseUrl = baseUrl, key = "sk-or-test-1234567890")
+            select(provider)
+        }
+        val vm = settingsViewModel(
+            store,
+            language = language,
+            transportFactory = TransportFactory { FailingHealthTransport(provider, error) },
+        )
+        observe(vm)
+        val messages = collectMessages(vm)
+        advanceUntilIdle()
+
+        vm.testConnection()
+        advanceUntilIdle()
+        return messages.last()
+    }
+
+    @Test
+    fun `il test di connessione spiega la causa in italiano`() = runTest(dispatcher) {
+        failureCases().forEach { case ->
+            assertEquals(case.expectedIt, connectionMessage(case.error, RenderLanguage.IT), case.error.toString())
+        }
+    }
+
+    @Test
+    fun `il test di connessione spiega la causa in inglese`() = runTest(dispatcher) {
+        failureCases().forEach { case ->
+            assertEquals(case.expectedEn, connectionMessage(case.error, RenderLanguage.EN), case.error.toString())
+        }
+    }
+
+    @Test
+    fun `un 404 su un endpoint custom che finisce con chat completions lo dice esplicitamente`() =
+        runTest(dispatcher) {
+            val error = TransportException(TransportErrorKind.HTTP, "Provider HTTP 404", statusCode = 404)
+            listOf("http://192.168.1.20:8080/v1/chat/completions", "http://192.168.1.20:8080/v1/chat/completions/")
+                .forEach { url ->
+                    val italian = connectionMessage(error, RenderLanguage.IT, ProviderId.CUSTOM_OPENAI_COMPAT, url)
+                    assertTrue("endpoint non trovato" in italian && "/chat/completions" in italian, italian)
+                    assertTrue("Argus lo aggiunge da solo" in italian, italian)
+                    val en = connectionMessage(error, RenderLanguage.EN, ProviderId.CUSTOM_OPENAI_COMPAT, url)
+                    assertTrue("endpoint not found" in en && "/chat/completions" in en, en)
+                    assertTrue("Argus adds it by itself" in en, en)
+                }
+            val plain = connectionMessage(
+                error, RenderLanguage.IT, ProviderId.CUSTOM_OPENAI_COMPAT, "http://192.168.1.20:8080/v1",
+            )
+            assertFalse("/chat/completions" in plain, plain)
+        }
+
+    @Test
+    fun `il messaggio del test di connessione non contiene la chiave anche se il provider la ripete`() =
+        runTest(dispatcher) {
+            val key = "sk-or-test-1234567890"
+            // Il transport vero maschera la chiave prima di valorizzare providerMessage: qui il fake simula
+            // un messaggio già ripulito e verifica che l'unico testo remoto mostrato sia quello.
+            val error = TransportException(
+                TransportErrorKind.HTTP,
+                "Provider HTTP 400",
+                statusCode = 400,
+                providerMessage = "Invalid key ***",
+            )
+            val text = connectionMessage(error, RenderLanguage.IT)
+            assertFalse(key in text, text)
+            assertTrue("Invalid key ***" in text, text)
+        }
+
+    @Test
+    fun `dopo il salvataggio un errore del test porta il prefisso configurazione salvata`() =
+        runTest(dispatcher) {
+            val store = FakeProviderStore().apply { select(ProviderId.OPENROUTER) }
+            val vm = settingsViewModel(
+                store,
+                transportFactory = TransportFactory {
+                    FailingHealthTransport(
+                        ProviderId.OPENROUTER,
+                        TransportException(TransportErrorKind.AUTH, "Provider HTTP 401", statusCode = 401),
+                    )
+                },
+            )
+            observe(vm)
+            val messages = collectMessages(vm)
+            advanceUntilIdle()
+
+            vm.saveProviderConfig("openrouter", baseUrl = null, model = "deepseek/deepseek-v4.1-flash", apiKey = "sk-or-test-1234567890")
+            advanceUntilIdle()
+
+            assertEquals(
+                "Configurazione salvata; OpenRouter ha rifiutato la chiave API (HTTP 401): controllala.",
+                messages.last(),
+            )
+        }
+
+    // ------------------------------------------------------------------ 0.3.6 voce 2: /chat/completions
+
+    @Test
+    fun `withoutChatCompletions toglie il suffisso con e senza slash e ignora il resto`() {
+        assertEquals("http://h:8080/v1", withoutChatCompletions("http://h:8080/v1/chat/completions"))
+        assertEquals("http://h:8080/v1", withoutChatCompletions("http://h:8080/v1/chat/completions/"))
+        assertEquals("http://h:8080/v1", withoutChatCompletions("  http://h:8080/v1/Chat/Completions  "))
+        assertEquals("https://h", withoutChatCompletions("https://h/chat/completions"))
+        assertNull(withoutChatCompletions("http://h:8080/v1"))
+        assertNull(withoutChatCompletions("http://h:8080/v1/"))
+        assertNull(withoutChatCompletions("http://h:8080/chat/completions/extra"))
+    }
+
+    @Test
+    fun `salvando un custom con chat completions l'url viene salvato senza il suffisso e l'utente lo sa`() =
+        runTest(dispatcher) {
+            val store = FakeProviderStore()
+            val vm = settingsViewModel(store)
+            observe(vm)
+            val messages = collectMessages(vm)
+            advanceUntilIdle()
+
+            vm.saveProviderConfig(
+                "custom_openai_compat",
+                baseUrl = "http://192.168.1.20:8080/v1/chat/completions/",
+                model = "qwen-local",
+                apiKey = null,
+            )
+            advanceUntilIdle()
+
+            assertEquals("http://192.168.1.20:8080/v1", store.saveCalls.last().baseUrl)
+            assertTrue(
+                "Ho tolto /chat/completions dall'indirizzo: Argus lo aggiunge da solo." in messages,
+                messages.toString(),
+            )
+        }
+
+    @Test
+    fun `l'avviso sul suffisso e' in inglese con la lingua inglese`() = runTest(dispatcher) {
+        val vm = settingsViewModel(FakeProviderStore(), language = RenderLanguage.EN)
+        observe(vm)
+        val messages = collectMessages(vm)
+        advanceUntilIdle()
+
+        vm.saveProviderConfig(
+            "custom_openai_compat",
+            baseUrl = "http://192.168.1.20:8080/v1/chat/completions",
+            model = "qwen-local",
+            apiKey = null,
+        )
+        advanceUntilIdle()
+
+        assertTrue(
+            "I removed /chat/completions from the address: Argus adds it by itself." in messages,
+            messages.toString(),
+        )
+    }
+
+    @Test
+    fun `un url custom senza il suffisso viene salvato com'e' e senza avviso`() = runTest(dispatcher) {
+        val store = FakeProviderStore()
+        val vm = settingsViewModel(store)
+        observe(vm)
+        val messages = collectMessages(vm)
+        advanceUntilIdle()
+
+        vm.saveProviderConfig(
+            "custom_openai_compat",
+            baseUrl = "http://192.168.1.20:8080/v1",
+            model = "qwen-local",
+            apiKey = null,
+        )
+        advanceUntilIdle()
+
+        assertEquals("http://192.168.1.20:8080/v1", store.saveCalls.last().baseUrl)
+        assertTrue(messages.none { "chat/completions" in it }, messages.toString())
+    }
+
+    @Test
+    fun `il suffisso non viene toccato per i provider con url fisso`() = runTest(dispatcher) {
+        val store = FakeProviderStore()
+        val vm = settingsViewModel(store)
+        observe(vm)
+        advanceUntilIdle()
+
+        vm.saveProviderConfig("openai", baseUrl = "https://x.example/v1/chat/completions", model = "gpt-5.5", apiKey = null)
+        advanceUntilIdle()
+
+        assertEquals("https://x.example/v1/chat/completions", store.saveCalls.last().baseUrl)
+    }
+
+    // ------------------------------------------------------------------ 0.3.6 voce 3: preset OpenRouter
+
+    @Test
+    fun `solo openrouter espone il suggerimento sui preset`() = runTest(dispatcher) {
+        for (provider in listOf(ProviderId.OPENROUTER, ProviderId.OPENAI, ProviderId.ANTHROPIC, ProviderId.GEMINI)) {
+            val store = FakeProviderStore().apply { select(provider) }
+            val vm = settingsViewModel(store)
+            observe(vm)
+            vm.refresh()
+            advanceUntilIdle()
+
+            val transport = vm.state.value.transport as TransportUi.DirectProvider
+            assertEquals(provider == ProviderId.OPENROUTER, transport.modelPresetHint, provider.name)
+        }
+    }
+
+    @Test
+    fun `un preset scritto con la s avvisa senza correggere il modello`() = runTest(dispatcher) {
+        val store = FakeProviderStore()
+        val vm = settingsViewModel(store)
+        observe(vm)
+        val messages = collectMessages(vm)
+        advanceUntilIdle()
+
+        vm.saveProviderConfig("openrouter", baseUrl = null, model = "@presets/mio", apiKey = "sk-or-test-1234567890")
+        advanceUntilIdle()
+
+        assertEquals("@presets/mio", store.saveCalls.last().model, "il valore non si corregge da solo")
+        assertTrue("Il formato è @preset/<nome>." in messages, messages.toString())
+    }
+
+    @Test
+    fun `l'avviso sui preset e' in inglese con la lingua inglese`() = runTest(dispatcher) {
+        val vm = settingsViewModel(FakeProviderStore(), language = RenderLanguage.EN)
+        observe(vm)
+        val messages = collectMessages(vm)
+        advanceUntilIdle()
+
+        vm.saveProviderConfig("openrouter", baseUrl = null, model = "@presets/mio", apiKey = "sk-or-test-1234567890")
+        advanceUntilIdle()
+
+        assertTrue("The format is @preset/<name>." in messages, messages.toString())
+    }
+
+    @Test
+    fun `un preset corretto o un modello normale non avvisano`() = runTest(dispatcher) {
+        val vm = settingsViewModel(FakeProviderStore())
+        observe(vm)
+        val messages = collectMessages(vm)
+        advanceUntilIdle()
+
+        vm.saveProviderConfig("openrouter", baseUrl = null, model = "@preset/mio", apiKey = "sk-or-test-1234567890")
+        vm.saveProviderConfig("openrouter", baseUrl = null, model = "deepseek/deepseek-v4.1-flash", apiKey = null)
+        advanceUntilIdle()
+
+        assertTrue(messages.none { "@preset/<" in it }, messages.toString())
+    }
+
+    @Test
+    fun `l'avviso sui preset vale solo per openrouter`() = runTest(dispatcher) {
+        val vm = settingsViewModel(FakeProviderStore())
+        observe(vm)
+        val messages = collectMessages(vm)
+        advanceUntilIdle()
+
+        vm.saveProviderConfig("openai", baseUrl = null, model = "@presets/mio", apiKey = "sk-test-1234567890ab")
+        advanceUntilIdle()
+
+        assertTrue(messages.none { "@preset/<" in it }, messages.toString())
+    }
+
+    // ------------------------------------------------------------------ 0.3.6 voce 7: etichetta di installazione
+
+    @Test
+    fun `l'etichetta versione dice F-Droid per i client F-Droid noti e APK per tutto il resto`() =
+        runTest(dispatcher) {
+            val expectations = listOf(
+                "org.fdroid.fdroid" to "F-Droid",
+                "org.fdroid.basic" to "F-Droid",
+                "com.looker.droidify" to "F-Droid",
+                "com.machiav3lli.fdroid" to "F-Droid",
+                "eu.bubu1.fdroidclassic" to "F-Droid",
+                "com.android.vending" to "APK",
+                "com.google.android.packageinstaller" to "APK",
+                "com.example.unknown" to "APK",
+                null to "APK",
+            )
+            expectations.forEach { (installer, label) ->
+                val vm = settingsViewModel(
+                    FakeProviderStore(),
+                    installInfo = AppInstallInfo("0.3.6", installer, 34),
+                )
+                observe(vm)
+                vm.refresh()
+                advanceUntilIdle()
+                assertEquals("Argus v0.3.6 · $label", vm.state.value.appVersionLabel, "installer=$installer")
+            }
+        }
+
+    @Test
+    fun `l'etichetta versione non dice mai sideload`() = runTest(dispatcher) {
+        val vm = settingsViewModel(FakeProviderStore(), installInfo = AppInstallInfo(null, null, 34))
+        observe(vm)
+        vm.refresh()
+        advanceUntilIdle()
+
+        assertEquals("Argus v? · APK", vm.state.value.appVersionLabel)
+        assertFalse("sideload" in vm.state.value.appVersionLabel.lowercase())
+    }
+
+    // ------------------------------------------------------------------ 0.3.6 voce 8: impostazioni con restrizioni
+
+    @Test
+    fun `la guida alle impostazioni con restrizioni compare solo per APK su Android 13 con accesso non concesso`() =
+        runTest(dispatcher) {
+            suspend fun hint(installer: String?, sdk: Int): Boolean {
+                val vm = settingsViewModel(
+                    FakeProviderStore(),
+                    installInfo = AppInstallInfo("0.3.6", installer, sdk),
+                )
+                observe(vm)
+                vm.refresh()
+                advanceUntilIdle()
+                // In Robolectric l'accesso alle notifiche non è concesso.
+                assertFalse(vm.state.value.notificationListenerGranted)
+                return vm.state.value.notificationListenerRestrictedHint
+            }
+
+            assertTrue(hint(installer = null, sdk = 33))
+            assertTrue(hint(installer = "com.google.android.packageinstaller", sdk = 34))
+            assertFalse(hint(installer = "org.fdroid.fdroid", sdk = 34), "F-Droid non ha restrizioni")
+            assertFalse(hint(installer = "com.android.vending", sdk = 34), "lo store di sistema non ha restrizioni")
+            assertFalse(hint(installer = null, sdk = 32), "prima di Android 13 non esiste")
+        }
+
+    // ------------------------------------------------------------------ 0.3.6 voce 5c: lingua dinamica
+
+    @Test
+    fun `i messaggi seguono il cambio di lingua del telefono senza ricreare il view model`() =
+        runTest(dispatcher) {
+            var system = RenderLanguage.IT
+            val source = RenderLanguageSource { system }
+            val vm = settingsViewModel(FakeProviderStore(), languageSource = source)
+            observe(vm)
+            val messages = collectMessages(vm)
+            advanceUntilIdle()
+
+            vm.selectProvider("gpt9000")
+            advanceUntilIdle()
+            assertEquals("Provider sconosciuto.", messages.last())
+
+            system = RenderLanguage.EN
+            source.refresh()
+            vm.selectProvider("gpt9000")
+            advanceUntilIdle()
+            assertEquals("Unknown provider.", messages.last())
+        }
 
     // ------------------------------------------------------------------ budget (S14)
 
@@ -945,4 +1363,27 @@ private class FakeDeferredReplyStore : DeferredReplyStore {
 
     override suspend fun purgeExpired(nowMillis: Long): Int = 0
     override suspend fun clear(): Int = 0
+}
+
+/** Transport il cui test di connessione fallisce con l'eccezione data (voce «il test spiega la causa»). */
+private class FailingHealthTransport(
+    override val providerId: ProviderId,
+    private val failure: TransportException,
+) : AgentTransport {
+    override suspend fun compile(
+        message: String,
+        manifest: CapabilityManifest,
+        state: DeviceState,
+    ): CompileResult = error("non usato")
+
+    override suspend fun act(
+        context: FireContext,
+        goal: String,
+        contextSources: List<String>,
+        allowedTools: List<String>,
+    ): ActResult = error("non usato")
+
+    override suspend fun actV2(context: FireContext, action: Action.InvokeLlmV2): ActResult = error("non usato")
+
+    override suspend fun health(): TransportHealth = throw failure
 }

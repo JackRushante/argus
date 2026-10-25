@@ -63,6 +63,7 @@ class ChatScreenLogicTest {
         assertEquals("HTTP 422", chatErrorDetail(ChatError.ServerRejected(422)))
         assertEquals("HTTP 503", chatErrorDetail(ChatError.ServiceUnavailable(503)))
         assertEquals("not_configured", chatErrorDetail(ChatError.NotConfigured))
+        assertEquals("illegal_state_exception", chatErrorDetail(ChatError.Internal("illegal_state_exception")))
         assertNull(chatErrorDetail(ChatError.TooLong(40_000, 32_768)), "il messaggio si spiega da solo")
         assertNotEquals<ChatError>(ChatError.ServerRejected(400), ChatError.ServiceUnavailable(400))
     }

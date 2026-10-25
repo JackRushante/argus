@@ -101,6 +101,12 @@ data class ChatState(
     val sendingElapsedSec: Int?,      // per "Argus sta pensando… (12 s)"
     val brainReachable: Boolean?,     // null = mai verificato; false = banner "Hermes irraggiungibile" + retry
     val error: ChatError?,
+    /**
+     * 0.3.6 (F5): testo grezzo restituito dal modello nell'ULTIMO turno (max 16 000 caratteri), per le
+     * segnalazioni. Solo in memoria: si azzera con nuovo invio, nuova conversazione o uscita dalla
+     * modifica; mai nel DB, nei log, nell'audit o nella bozza. null = niente da mostrare.
+     */
+    val rawResponse: String? = null,
 )
 
 sealed interface ChatItem {
@@ -143,6 +149,11 @@ sealed interface ChatError {
     data class TooLong(val chars: Int, val max: Int) : ChatError
     /** Provider/chiave/informativa privacy non configurati: NON è un servizio irraggiungibile. Azione: apri Sistema. */
     data object NotConfigured : ChatError
+    /**
+     * 0.3.6 (B34b): errore LOCALE dell'app (eccezione imprevista), non del modello né della rete.
+     * [code] è il nome semplice della classe d'eccezione in snake_case, mai il suo messaggio.
+     */
+    data class Internal(val code: String) : ChatError
 }
 
 interface ChatCallbacks {
@@ -154,6 +165,12 @@ interface ChatCallbacks {
     fun onCheckConnection()
     /** Azione degli errori Auth/Budget/NotConfigured: porta alla scheda Sistema. Default no-op per i vecchi host. */
     fun onOpenSystem() {}
+    /**
+     * «Copia per la segnalazione» nel dialogo «Risposta grezza»: la copia (versione, provider, modello,
+     * codice d'errore e testo grezzo) la compone il ViewModel e la scrive il copiatore appunti esistente.
+     * Default no-op per i vecchi host: il NavHost deve cablarla su `ChatViewModel.onCopyRawResponse()`.
+     */
+    fun onCopyRawResponse() {}
 }
 
 // --- 6.2 Automazioni · lista ---
@@ -291,6 +308,11 @@ data class SettingsState(
     val privacyAccepted: Boolean,
     val appVersionLabel: String,
     val providerChoices: List<ProviderChoiceUi> = emptyList(),
+    /**
+     * 0.3.6 (F11): true quando l'accesso alle notifiche NON è concesso e l'app è installata da APK su
+     * Android 13+ (Android può bloccarlo con «Impostazione con restrizioni»): la riga mostra la guida.
+     */
+    val notificationListenerRestrictedHint: Boolean = false,
 )
 
 sealed interface TransportUi {
@@ -323,6 +345,8 @@ sealed interface TransportUi {
          * app sul telefono potrebbe ascoltare su quella porta e fingersi il modello. Solo avviso.
          */
         val unauthenticatedLoopback: Boolean = false,
+        /** true per OpenRouter: il campo modello mostra il suggerimento sui preset `@preset/<nome>`. */
+        val modelPresetHint: Boolean = false,
     ) : TransportUi
 }
 enum class AuthState { OK, EXPIRED, NOT_CONFIGURED }
