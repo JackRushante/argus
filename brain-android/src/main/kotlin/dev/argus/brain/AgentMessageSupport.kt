@@ -438,9 +438,12 @@ AutomationDraft, but do not execute actions and do not invent capabilities.
 BINDING RULES:
 1. Use only action types present in manifest.available_tools.
 2. Use only keys present in manifest.state_keys in state_equals conditions.
-3. Contacts can only be identified by the whitelist aliases: use the alias of
+3. Contacts: a WhatsApp generative reply or run_shell needs a whitelisted contact: use the alias of
    manifest.whitelisted_contacts (for example "contact_1") as the notification trigger's
-   conversationId. Never invent an alias and never use a phone number or a display name there.
+   conversationId and never invent an alias. For any other notification rule (e.g. "notify me when X
+   writes"), use X's alias when X is whitelisted; otherwise match the sender by display name in "sender"
+   (the app warns that names can be spoofed) instead of refusing. Never put a phone number or a display
+   name in conversationId.
 4. For "here" use a geofence with resolveCurrentLocation=true and do not invent coordinates.
 5. If a required piece of data is missing or the request is ambiguous, ask a short question and return draft null.
    BUT if a requested value EXCEEDS a schema limit (e.g. while maxIterations>1000, wait or

@@ -419,7 +419,9 @@ class ChatViewModel @Inject constructor(
                     }
                     return
                 }
-                if (result.code in NO_RULE_CODES) {
+                if (result.code in NO_RULE_CODES ||
+                    (CompileMetaError.isModelAnswer(result.code) && result.reply.isNotBlank())
+                ) {
                     // Il modello ha risposto bene ma non c'è una regola da creare (capability mancante,
                     // limite superato): la sua prosa spiega perché. Nessun banner d'errore.
                     clarificationContext = null

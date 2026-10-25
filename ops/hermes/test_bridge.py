@@ -357,8 +357,10 @@ class BridgeTest(unittest.TestCase):
         # B38(f): i valori TAINTED in run_shell.cmd sono quotati da Argus, il modello non aggiunge apici.
         self.assertIn("ONE single-quoted shell argument", prompt)
         self.assertIn("never add your own quotes around it", prompt)
-        # D4
-        self.assertIn("alias (for example \"contact_1\")", prompt)
+        # D4: alias obbligatorio solo per reply generative e shell; le altre regole notifica possono
+        # usare il nome del mittente invece di rifiutare (contatto fuori whitelist).
+        self.assertIn("(for example \"contact_1\") as the notification trigger's", prompt)
+        self.assertIn("match the sender by display name in \"sender\"", prompt)
 
     def test_manifest_accepts_contact_aliases_and_the_legacy_id_form(self):
         aliased = self.request()

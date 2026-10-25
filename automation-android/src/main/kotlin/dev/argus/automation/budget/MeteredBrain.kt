@@ -353,7 +353,7 @@ class MeteredBrain(
                 kind = kind,
                 // Chiarimento, capability non supportata e limite superato sono risposte BUONE del
                 // modello (nessuna regola da creare), non errori: non sporcano le statistiche.
-                outcome = if (metaError == null || metaError in CompileMetaError.BENIGN_NO_DRAFT) {
+                outcome = if (metaError == null || CompileMetaError.isModelAnswer(metaError)) {
                     UsageEventOutcome.OK
                 } else {
                     UsageEventOutcome.ERROR

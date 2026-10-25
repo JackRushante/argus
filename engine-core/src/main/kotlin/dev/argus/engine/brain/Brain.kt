@@ -35,6 +35,26 @@ object CompileMetaError {
 
     /** Errori di formato del modello: il retry-once del decorator ha senso (B5). */
     val FORMAT_ERRORS: Set<String> = setOf(DRAFT_INVALID, META_PARSE_ERROR, META_JSON_MISSING)
+
+    /** Codici prodotti dall'app (parser, transport, budget, flusso locale), mai dal modello. */
+    private val APP_CODES: Set<String> = FORMAT_ERRORS + setOf(
+        DRAFT_MISSING,
+        OUTPUT_TRUNCATED,
+        CONTEXT_TRUNCATED,
+        "empty_response",
+        "compile_without_draft",
+        "budget_exceeded",
+        "budget_unpriced_model",
+    )
+
+    /**
+     * true se [code] è un `error_code` scelto dal MODELLO (es. un rifiuto motivato come
+     * `contact_not_whitelisted`): il modello ha risposto, solo che non c'era una regola da creare.
+     * Va mostrato come risposta normale, non come errore. Errori di trasporto (`bridge_*`) e codici
+     * dell'app restano errori.
+     */
+    fun isModelAnswer(code: String): Boolean =
+        code in BENIGN_NO_DRAFT || (code !in APP_CODES && !code.startsWith("bridge_"))
 }
 
 data class ActResult(

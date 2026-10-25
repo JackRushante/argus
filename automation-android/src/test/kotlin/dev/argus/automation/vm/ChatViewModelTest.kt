@@ -444,7 +444,7 @@ class ChatViewModelTest {
                 RenderLanguage.IT to "Nessuna regola creata.",
                 RenderLanguage.EN to "No rule was created.",
             )) {
-                for (code in listOf("unsupported_capability", "limit_exceeded")) {
+                for (code in listOf("unsupported_capability", "limit_exceeded", "contact_not_whitelisted")) {
                     val brain = QueuedBrain()
                     val viewModel = chatViewModel(brain, language = language)
 
