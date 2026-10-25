@@ -93,6 +93,15 @@ class CliBridgeParserTest {
     private val goodDraft =
         """{"name":"x","trigger":{"type":"time","cron":"0 8 * * *","tz":"Europe/Rome"},"actions":[{"type":"set_wifi","on":true}]"""
 
+    @Test fun `unknown enum value is rejected, never coerced to the default`() {
+        // Con coerceInputValues "SOMETIMES" diventerebbe in silenzio il default FLEXIBLE.
+        val draft = """{"name":"x","trigger":{"type":"time","cron":"0 8 * * *","tz":"Europe/Rome",""" +
+            """"precision":"SOMETIMES"},"actions":[{"type":"set_wifi","on":true}]}"""
+        val r = p.parseCompile("""ok @@META@@ {"draft":$draft}""")
+        assertNull(r.draft)
+        assertEquals("meta_parse_error", r.metaError)
+    }
+
     @Test fun `null rationale is coerced to the default`() {
         val r = p.parseCompile("""ok @@META@@ {"draft":$goodDraft,"rationale":null}}""")
         assertNull(r.metaError)

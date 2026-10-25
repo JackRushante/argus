@@ -5,6 +5,9 @@ import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 
@@ -37,7 +40,10 @@ class CliBridgeParser(private val json: Json = lenient()) {
         val obj = extractJsonObject(tail)
             ?: return CompileResult(prose, null, "meta_json_missing")
         val meta = try {
-            json.decodeFromString(MetaEnvelope.serializer(), obj)
+            // `null` al posto di un campo con default (es. `"rationale": null`) vale come campo
+            // assente. Volutamente NON `coerceInputValues`: coercerebbe anche un valore enum
+            // sconosciuto al default (es. un sink scritto male → WHATSAPP_REPLY) in silenzio.
+            json.decodeFromJsonElement(MetaEnvelope.serializer(), stripNulls(json.parseToJsonElement(obj)))
         } catch (error: Exception) {
             return CompileResult(prose, null, "meta_parse_error", detail = safeDetail(error))
         }
@@ -70,6 +76,15 @@ class CliBridgeParser(private val json: Json = lenient()) {
     }
 
     private fun hasDraftKey(obj: JsonObject): Boolean = "draft" in obj
+
+    /** Toglie dagli oggetti le chiavi con valore `null`, ricorsivamente (gli array restano com'erano). */
+    private fun stripNulls(element: JsonElement): JsonElement = when (element) {
+        is JsonObject -> JsonObject(
+            element.filterValues { it !is JsonNull }.mapValues { (_, value) -> stripNulls(value) },
+        )
+        is JsonArray -> JsonArray(element.map(::stripNulls))
+        else -> element
+    }
 
     /** Solo percorso e tipo dell'errore kotlinx: mai il frammento di input (può contenere dati utente). */
     private fun safeDetail(error: Exception): String {
@@ -119,7 +134,6 @@ class CliBridgeParser(private val json: Json = lenient()) {
         fun lenient() = Json(ArgusJson) {
             isLenient = true
             ignoreUnknownKeys = true
-            coerceInputValues = true
             allowTrailingComma = true
             allowComments = true
         }
