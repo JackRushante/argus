@@ -17,7 +17,9 @@ import dev.argus.engine.model.integrity
 import dev.argus.engine.model.provenance
 import dev.argus.engine.safety.SafeExtractionRegex
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 /** Percorso user-readable, one-based, stabile nell'albero approvato. */
@@ -130,8 +132,13 @@ class ProgramInterpreter(
             return ProgramExecutionResult(emptyList(), stopCode = "trigger_mismatch")
         }
         val runtime = Runtime(trigger, event)
-        val completed = withTimeoutOrNull(MAX_EXECUTION_MILLIS) {
-            runtime.initialize(bindings) && runtime.runActions(actions, ActionPath::root, depth = 0)
+        val completed = try {
+            withTimeoutOrNull(MAX_EXECUTION_MILLIS) {
+                runtime.initialize(bindings) && runtime.runActions(actions, ActionPath::root, depth = 0)
+            }
+        } finally {
+            // Anche se l'esecuzione si ferma o viene cancellata, il Log deve dire quante voci mancano.
+            withContext(NonCancellable) { runtime.flushOmittedSummary() }
         }
         return when {
             completed == null -> runtime.result("deadline_exceeded", runtime.currentPath)
@@ -152,6 +159,12 @@ class ProgramInterpreter(
             private set
         var currentPath: ActionPath? = null
             private set
+
+        // B27: il journal e' solo osservabilita' (la UI). Oltre MAX_JOURNAL_ENTRIES si scrivono solo
+        // le voci che non sono riuscite; lo stato in memoria (steps) resta completo.
+        private var journalWritten = 0
+        private var omittedCount = 0
+        private var firstOmittedPath: ActionPath? = null
 
         suspend fun initialize(bindings: List<VarBinding>): Boolean {
             if (bindings.size > MAX_VARIABLES) return stop("invalid_program", null)
@@ -378,15 +391,47 @@ class ProgramInterpreter(
         private suspend fun record(path: ActionPath, action: Action, result: ActionResult) {
             val step = ProgramStep(path, action.journalType(), result)
             steps += step
+            val outcome = result.journalOutcome()
+            // Una voce non riuscita (FAILED) o ancora aperta (SUBMITTED/DEFERRED) si scrive sempre: la
+            // risoluzione asincrona delle azioni generative rilegge proprio quelle righe.
+            if (journalWritten >= MAX_JOURNAL_ENTRIES && outcome == ActionJournalOutcome.SUCCEEDED) {
+                omittedCount += 1
+                if (firstOmittedPath == null) firstOmittedPath = path
+                return
+            }
+            journalWritten += 1
+            writeJournal(
+                ProgramJournalEntry(
+                    path = path,
+                    actionType = step.actionType,
+                    outcome = outcome,
+                    errorCode = (result as? ActionResult.Failure)?.reason?.boundedCode(),
+                ),
+            )
+        }
+
+        /**
+         * Riepilogo finale delle voci non scritte. Usa il path del primo passaggio omesso: e' un path
+         * valido e, non avendo una riga sua, non ne sovrascrive nessuna.
+         */
+        suspend fun flushOmittedSummary() {
+            val path = firstOmittedPath ?: return
+            val count = omittedCount
+            firstOmittedPath = null
+            omittedCount = 0
+            writeJournal(
+                ProgramJournalEntry(
+                    path = path,
+                    actionType = OmittedSteps.ACTION_TYPE,
+                    outcome = ActionJournalOutcome.SUCCEEDED,
+                    errorCode = OmittedSteps.code(count),
+                ),
+            )
+        }
+
+        private suspend fun writeJournal(entry: ProgramJournalEntry) {
             try {
-                journal.record(
-                    ProgramJournalEntry(
-                        path = path,
-                        actionType = step.actionType,
-                        outcome = result.journalOutcome(),
-                        errorCode = (result as? ActionResult.Failure)?.reason?.boundedCode(),
-                    ),
-                )
+                journal.record(entry)
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
@@ -508,5 +553,7 @@ class ProgramInterpreter(
         private const val MAX_ACTION_NODES = 64
         private const val MAX_WHILE_ITERATIONS = 1_000
         private const val MAX_PAUSE_MILLIS = 3_600_000L
+        /** Voci di journal scritte per esecuzione prima di tenere solo quelle non riuscite (B27). */
+        const val MAX_JOURNAL_ENTRIES = 100
     }
 }
