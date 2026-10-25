@@ -41,7 +41,10 @@ class ParametricStateReader(
             .groupBy(StateQuery.DumpsysField::service)
             .toSortedMap()
             .forEach { (service, fields) ->
-                val raw = commandOutput(listOf(DUMPSYS, service)) ?: return@forEach
+                // I dumpsys sono lunghi per natura: un campo trovato prima del limite di byte vale,
+                // e l'ultima riga (forse tagliata) non conta. Oltre il limite resta non disponibile.
+                val raw = commandOutput(listOf(DUMPSYS, service), allowTruncated = true)
+                    ?: return@forEach
                 fields.forEach { query ->
                     parseDumpsysField(raw, query.field)?.let { value ->
                         values[query.canonicalId] = value
@@ -68,14 +71,21 @@ class ParametricStateReader(
         -> null
     }
 
-    private suspend fun commandOutput(command: List<String>): String? = try {
-        shell.run(
+    private suspend fun commandOutput(
+        command: List<String>,
+        allowTruncated: Boolean = false,
+    ): String? = try {
+        val result = shell.run(
             command = command,
             timeoutMillis = StateQueryPolicy.QUERY_TIMEOUT_MILLIS,
             maxOutputBytes = StateQueryPolicy.MAX_QUERY_OUTPUT_BYTES,
-        ).takeIf { result ->
-            result.successful && !result.truncated && !result.timedOut
-        }?.stdoutText
+        )
+        when {
+            !result.successful || result.timedOut -> null
+            !result.truncated -> result.stdoutText
+            allowTruncated -> StateReader.completeLines(result.stdoutText)
+            else -> null
+        }
     } catch (error: CancellationException) {
         throw error
     } catch (_: Exception) {
