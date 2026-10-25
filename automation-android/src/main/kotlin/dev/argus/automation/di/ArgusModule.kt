@@ -56,6 +56,7 @@ import dev.argus.automation.NotificationEventDispatcher
 import dev.argus.automation.OneShotConsumptionRegistry
 import dev.argus.automation.ProcessOneShotConsumptionRegistry
 import dev.argus.automation.EngineSensorEventDispatcher
+import dev.argus.automation.LogRetentionStore
 import dev.argus.automation.RenderLanguageSource
 import dev.argus.automation.RoomTimeAlarmStateStore
 import dev.argus.automation.ShizukuActionExecutor
@@ -241,8 +242,16 @@ object ArgusModule {
 
     @Provides
     @Singleton
-    fun journalMaintenance(database: ArgusDatabase): RoomJournalMaintenance =
-        RoomJournalMaintenance(database)
+    fun journalMaintenance(
+        database: ArgusDatabase,
+        logRetention: LogRetentionStore,
+    ): RoomJournalMaintenance =
+        RoomJournalMaintenance(database, logRetentionDays = logRetention::currentDays)
+
+    @Provides
+    @Singleton
+    fun logRetentionStore(@ApplicationContext context: Context): LogRetentionStore =
+        LogRetentionStore(context)
 
     @Provides
     @Singleton

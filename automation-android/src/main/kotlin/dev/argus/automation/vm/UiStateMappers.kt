@@ -3,6 +3,7 @@ package dev.argus.automation.vm
 import dev.argus.automation.ApprovalFlowReview
 import dev.argus.data.dao.AuditLogRecord
 import dev.argus.data.entities.ActionResultEntity
+import dev.argus.data.entities.ScheduledTimeAlarmEntity
 import dev.argus.engine.model.ActionTier
 import dev.argus.engine.model.ActionTypeIds
 import dev.argus.engine.model.Automation
@@ -11,6 +12,7 @@ import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.ActionJournalOutcome
 import dev.argus.engine.runtime.AuditKind
 import dev.argus.engine.runtime.ExecutionStatus
+import dev.argus.engine.runtime.OmittedSteps
 import dev.argus.engine.runtime.TimeSpecs
 import dev.argus.engine.safety.PendingDraft
 import dev.argus.engine.safety.Severity
@@ -42,6 +44,8 @@ internal fun Automation.toAutomationRow(
     language: RenderLanguage = RenderLanguage.system(),
     /** D5: id della bozza di modifica in attesa su questa regola (la regola resta attiva). */
     pendingEditDraftId: String? = null,
+    /** Sveglia persistita della regola: da qui si legge il vero «prossimo scatto» dei ritardi relativi. */
+    scheduledAlarm: ScheduledTimeAlarmEntity? = null,
 ): AutomationRow {
     val render = RuleRenderMapper.map(this, conversationLabels, language)
     return AutomationRow(
@@ -54,7 +58,7 @@ internal fun Automation.toAutomationRow(
         isGenerative = actions.any { it.tier == ActionTier.GENERATIVE },
         hasWarnings = status == AutomationStatus.NEEDS_REVIEW || render.privacyNote != null,
         lastFiredLabel = lastFiredAt?.let { relativeTimeLabel(it, nowMillis, language) },
-        nextFireLabel = nextFireLabel(this, nowMillis, language),
+        nextFireLabel = nextFireLabel(this, nowMillis, language, scheduledAlarm),
         pendingEditDraftId = pendingEditDraftId,
     )
 }
@@ -135,6 +139,8 @@ private fun ExecutionStatus?.toLogOutcome(kind: AuditKind): LogOutcome = when {
         kind == AuditKind.RULE_ENABLED || kind == AuditKind.RULE_DELETED -> LogOutcome.SUCCESS
     this == ExecutionStatus.PARTIAL -> LogOutcome.PARTIAL
     this == ExecutionStatus.DEFERRED -> LogOutcome.DEFERRED
+    // Risposta AI bloccata dal budget: non e' un successo, e' un avviso (ambra).
+    this == ExecutionStatus.SUPPRESSED_BUDGET -> LogOutcome.PARTIAL
     this in setOf(
         ExecutionStatus.FAILED,
         ExecutionStatus.CANCELLED,
@@ -220,29 +226,29 @@ private fun auditSummary(record: AuditLogRecord, l: RenderLanguage): String = wh
             "registrazione non più approvata",
         )
         else -> l.pick(
-            "blocked by policy (${record.detail.safeDiagnostic()})",
-            "bloccata dalla policy (${record.detail.safeDiagnostic()})",
+            "blocked by policy (${LogReasonLabels.text(record.detail, l)})",
+            "bloccata dalla policy (${LogReasonLabels.text(record.detail, l)})",
         )
     }
     AuditKind.ERROR -> l.pick(
-        "execution error (${record.detail.safeDiagnostic()})",
-        "errore di esecuzione (${record.detail.safeDiagnostic()})",
+        "execution error (${LogReasonLabels.text(record.detail, l)})",
+        "errore di esecuzione (${LogReasonLabels.text(record.detail, l)})",
     )
     AuditKind.VALIDATION_REJECTED -> l.pick(
         "Validation rejected: ${record.detail.validationReasons(l)}",
         "Validazione rifiutata: ${record.detail.validationReasons(l)}",
     )
     AuditKind.ARM_FAILED -> l.pick(
-        "Activation failed: ${record.detail.safeDiagnostic()}",
-        "Attivazione fallita: ${record.detail.safeDiagnostic()}",
+        "Activation failed: ${LogReasonLabels.text(record.detail, l)}",
+        "Attivazione fallita: ${LogReasonLabels.text(record.detail, l)}",
     )
     AuditKind.SCHEDULING_FAILED -> l.pick(
-        "Scheduling failed: ${record.detail.safeDiagnostic()}",
-        "Pianificazione non riuscita: ${record.detail.safeDiagnostic()}",
+        "Scheduling failed: ${LogReasonLabels.text(record.detail, l)}",
+        "Pianificazione non riuscita: ${LogReasonLabels.text(record.detail, l)}",
     )
     AuditKind.ENABLE_FAILED -> l.pick(
-        "Enable failed: ${record.detail.safeDiagnostic()}",
-        "Abilitazione non riuscita: ${record.detail.safeDiagnostic()}",
+        "Enable failed: ${LogReasonLabels.text(record.detail, l)}",
+        "Abilitazione non riuscita: ${LogReasonLabels.text(record.detail, l)}",
     )
     // Lifecycle riuscito (task #31-B): chi/quando mette e toglie una regola.
     AuditKind.RULE_ARMED -> l.pick("Rule armed", "Regola armata")
@@ -267,6 +273,16 @@ private fun auditSummary(record: AuditLogRecord, l: RenderLanguage): String = wh
 private const val COALESCED_REPLY_CODE = "coalesced"
 
 private fun actionDetail(action: ActionResultEntity, l: RenderLanguage): String {
+    // Riga di riepilogo dei cicli lunghi (B27): nessun path ne' esito, solo quanti passaggi mancano.
+    if (action.actionType == OmittedSteps.ACTION_TYPE) {
+        OmittedSteps.countFrom(action.errorCode)?.let { count ->
+            return if (count == 1) {
+                l.pick("1 repeated step not recorded", "1 passaggio ripetuto non registrato")
+            } else {
+                l.pick("$count repeated steps not recorded", "$count passaggi ripetuti non registrati")
+            }
+        }
+    }
     val outcome = when (action.outcome) {
         ActionJournalOutcome.SUCCEEDED -> "ok"
         ActionJournalOutcome.SUBMITTED -> l.pick("queued", "accodata")
@@ -278,7 +294,7 @@ private fun actionDetail(action: ActionResultEntity, l: RenderLanguage): String 
         null -> ""
         // D8: messaggio accorpato nella risposta unica della raffica, nessuna seconda generazione.
         COALESCED_REPLY_CODE -> l.pick(" · merged into one reply", " · unito in un'unica risposta")
-        else -> " · ${code.safeDiagnostic()}"
+        else -> " · ${LogReasonLabels.text(code, l)}"
     }
     val path = action.actionPath.ifBlank { (action.actionIndex + 1).toString() }
     return "$path. ${actionTypeLabel(action.actionType, l)} → $outcome$error"
@@ -357,11 +373,24 @@ private fun nextFireLabel(
     automation: Automation,
     nowMillis: Long,
     language: RenderLanguage,
+    scheduledAlarm: ScheduledTimeAlarmEntity?,
 ): String? {
     if (automation.status != AutomationStatus.ARMED || !automation.enabled) return null
     val trigger = automation.trigger as? Trigger.Time ?: return null
-    val next = runCatching { TimeSpecs.nextFire(trigger, Instant.ofEpochMilli(nowMillis)) }.getOrNull()
-        ?: return null
+    val next = if (trigger.afterMs != null) {
+        // «Tra N ore» e' ancorato all'arm, non a «adesso»: now + N sarebbe sempre sbagliato. Vale
+        // solo l'istante gia' programmato (stato persistito della sveglia della revisione corrente);
+        // senza, meglio nessuna etichetta che un orario inventato.
+        scheduledAlarm
+            ?.takeIf { it.approvalFingerprint == automation.approvalFingerprint?.value }
+            ?.eventAtMillis
+            ?.takeIf { it > nowMillis }
+            ?.let(Instant::ofEpochMilli)
+            ?: return null
+    } else {
+        runCatching { TimeSpecs.nextFire(trigger, Instant.ofEpochMilli(nowMillis)) }.getOrNull()
+            ?: return null
+    }
     val zone = ZoneId.systemDefault()
     val value = next.atZone(zone)
     val today = Instant.ofEpochMilli(nowMillis).atZone(zone).toLocalDate()

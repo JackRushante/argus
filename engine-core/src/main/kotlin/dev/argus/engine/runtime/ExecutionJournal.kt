@@ -42,6 +42,27 @@ data class ActionJournalEntry(
     }
 }
 
+/**
+ * Riga di riepilogo che sostituisce le righe di journal che un ciclo lungo non ha scritto (B27).
+ * Viaggia come una normale [ActionJournalEntry] (nessuna colonna nuova): il numero di passaggi
+ * omessi e' nel codice (`omitted_<N>`), cosi' la UI lo mostra senza parsare testo libero.
+ */
+object OmittedSteps {
+    const val ACTION_TYPE = "omitted_steps"
+    private const val PREFIX = "omitted_"
+    private const val MAX_DIGITS = 9
+
+    fun code(count: Int): String = "$PREFIX$count"
+
+    /** Numero di passaggi omessi, oppure null se [errorCode] non e' un codice di riepilogo. */
+    fun countFrom(errorCode: String?): Int? =
+        errorCode
+            ?.takeIf { it.startsWith(PREFIX) }
+            ?.removePrefix(PREFIX)
+            ?.takeIf { it.isNotEmpty() && it.length <= MAX_DIGITS && it.all(Char::isDigit) }
+            ?.toInt()
+}
+
 data class ExecutionCompletion(
     val executionId: ExecutionId,
     val status: ExecutionStatus,

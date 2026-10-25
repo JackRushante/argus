@@ -382,10 +382,28 @@ fun ArgusNavHost() {
                         defaultValue = null
                     },
                 ),
-            ) {
+            ) { logEntry ->
                 val viewModel: ExecutionLogViewModel = hiltViewModel()
                 val state by viewModel.state.collectAsStateWithLifecycle()
                 MessageEffect(viewModel.messages, snackbarHostState)
+                // Il filtro su una regola esiste solo se la destinazione lo porta negli argomenti
+                // (si arriva dal Dettaglio): riaprire il Log da qui con argomenti vuoti lo toglie.
+                val routeAutomationId = logEntry.arguments?.getString("automationId")
+                val routeAutomationName = logEntry.arguments?.getString("automationName")
+                LaunchedEffect(routeAutomationId, routeAutomationName) {
+                    viewModel.onRouteArguments(routeAutomationId, routeAutomationName)
+                }
+                // Esporta: il testo (senza dati personali) si condivide con il foglio di Android.
+                LaunchedEffect(viewModel) {
+                    viewModel.exports.collect { text ->
+                        val send = Intent(Intent.ACTION_SEND)
+                            .setType("text/plain")
+                            .putExtra(Intent.EXTRA_TEXT, text)
+                        val chooser = Intent.createChooser(send, null)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        runCatching { context.startActivity(chooser) }
+                    }
+                }
                 ExecutionLogScreen(
                     state = state,
                     callbacks = object : ExecutionLogCallbacks {
@@ -396,6 +414,9 @@ fun ArgusNavHost() {
                         }
                         override fun onSendNow(logId: String) = viewModel.onSendNow(logId)
                         override fun onMarkSent(logId: String) = viewModel.onMarkSent(logId)
+                        override fun onSetRetention(days: Int) = viewModel.onSetRetention(days)
+                        override fun onClearLog() = viewModel.onClearLog()
+                        override fun onExport() = viewModel.onExport()
                     },
                     modifier = Modifier.testTag("screen_log"),
                 )

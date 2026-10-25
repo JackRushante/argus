@@ -104,4 +104,47 @@ class TriggerMatcherTest {
             ),
         )
     }
+
+    private fun numberMatches(spec: String, actual: String?) = m.matches(
+        Trigger.PhoneState(PhoneEvent.INCOMING_CALL, number = spec),
+        TriggerEvent.PhoneStateChanged(PhoneEvent.INCOMING_CALL, actual),
+    )
+
+    @Test fun `a short number never matches a longer number that merely ends with its digits`() {
+        assertFalse(numberMatches("1234567", "3331234567"))
+        assertFalse(numberMatches("3331234567", "1234567"))
+        // 8 cifre: ancora sotto la soglia del suffisso (9).
+        assertFalse(numberMatches("31234567", "3331234567"))
+    }
+
+    @Test fun `international prefix of up to four digits still matches by suffix`() {
+        assertTrue(numberMatches("3331234567", "+39 333 123 4567"))
+        assertTrue(numberMatches("+39 333 123 4567", "3331234567"))
+        assertTrue(numberMatches("3331234567", "00393331234567"))
+        // Una cifra in piu' davanti (9 cifre contro 10).
+        assertTrue(numberMatches("333123456", "1333123456"))
+        // Cinque cifre davanti: oltre il limite del prefisso.
+        assertFalse(numberMatches("3331234567", "0039 0 333 123 4567"))
+        // Sei cifre davanti, anche con il corto lungo 9 cifre.
+        assertFalse(numberMatches("333123456", "123456333123456"))
+    }
+
+    @Test fun `suffix match needs the nine digit floor on the shorter number`() {
+        assertTrue(numberMatches("333123456", "39333123456"))
+        assertFalse(numberMatches("33123456", "3933123456"))
+    }
+
+    @Test fun `identical digits match whatever the length and format`() {
+        assertTrue(numberMatches("112", "112"))
+        assertTrue(numberMatches("1234567", "123-4567"))
+        assertTrue(numberMatches("+39 333 123 4567", "39 3331234567"))
+    }
+
+    @Test fun `different or missing numbers do not match`() {
+        assertFalse(numberMatches("112", "3331234567"))
+        assertFalse(numberMatches("3331234567", "3331234568"))
+        assertFalse(numberMatches("3331234567", null))
+        assertFalse(numberMatches("abc", "3331234567"))
+        assertFalse(numberMatches("3331234567", ""))
+    }
 }

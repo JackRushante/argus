@@ -252,7 +252,15 @@ data class ExecutionLogState(
     val entries: List<LogRow>,
     val filterAutomationName: String?,      // null = tutte; settato quando si arriva dal dettaglio
     val loading: Boolean,
+    /** Giorni di conservazione del Log (7, 30 o 90), scelti dal menu in alto. */
+    val retentionDays: Int = LogRetentionOptions.DEFAULT_DAYS,
 )
+
+/** Opzioni di conservazione del Log mostrate nel menu: 7, 30 o 90 giorni. */
+object LogRetentionOptions {
+    val DAYS: List<Int> = listOf(7, 30, 90)
+    const val DEFAULT_DAYS: Int = 30
+}
 
 data class LogRow(
     val id: String,
@@ -281,6 +289,15 @@ interface ExecutionLogCallbacks {
      * (il copia-e-apri non lo segna in anticipo). Riceve l'id della riga di log. Default no-op.
      */
     fun onMarkSent(logId: String) {}
+
+    /** Menu in alto: sceglie la conservazione del Log (uno dei valori di [LogRetentionOptions.DAYS]). Default no-op. */
+    fun onSetRetention(days: Int) {}
+
+    /** Menu in alto: «Svuota il log». Arriva solo dopo la conferma dentro la schermata. Default no-op. */
+    fun onClearLog() {}
+
+    /** Menu in alto: «Esporta (senza dati personali)». Default no-op. */
+    fun onExport() {}
 }
 
 // --- 6.5 Sistema (settings) ---

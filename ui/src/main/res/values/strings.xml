@@ -161,6 +161,14 @@
     <string name="log_copy_and_open">Copy and open WhatsApp</string>
     <string name="log_mark_sent">Mark as sent</string>
     <string name="log_open_automation">Open automation</string>
+    <string name="log_menu_open">Log options</string>
+    <string name="log_menu_retention_title">Keep the log for</string>
+    <string name="log_menu_retention_option">%1$d days</string>
+    <string name="log_menu_clear">Clear the log</string>
+    <string name="log_menu_export">Export (no personal data)</string>
+    <string name="log_clear_confirm">Clear the log? This cannot be undone.</string>
+    <string name="log_clear_confirm_action">Clear</string>
+    <string name="log_clear_confirm_cancel">Cancel</string>
 
     <!-- Sistema (settings) -->
     <string name="settings_title">System</string>
