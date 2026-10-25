@@ -72,6 +72,9 @@ import dev.argus.ui.model.TransportUi
 import dev.argus.ui.components.BridgeConfigurationDialog
 import dev.argus.ui.components.BudgetLimitsDialog
 import dev.argus.ui.components.ProviderConfigurationDialog
+import dev.argus.ui.components.WarningBanner
+import dev.argus.engine.safety.Severity
+import dev.argus.ui.model.UiWarning
 import dev.argus.ui.model.ProviderUsageUi
 import dev.argus.ui.presentation.BudgetFormat
 import dev.argus.ui.R
@@ -469,6 +472,15 @@ private fun TransportSection(
                         color = if (transport.authState == AuthState.OK) semantic.armed.fg else semantic.error.fg,
                         style = MaterialTheme.typography.bodyMedium,
                     )
+                    if (transport.unauthenticatedLoopback) {
+                        WarningBanner(
+                            UiWarning(
+                                Severity.WARNING,
+                                "unauthenticated_loopback",
+                                stringResource(R.string.settings_unauthenticated_loopback),
+                            ),
+                        )
+                    }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(
                             transport.lastLatencyLabel?.let { stringResource(R.string.settings_latency_last, it) }

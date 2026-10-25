@@ -159,7 +159,8 @@
     <string name="settings_shizuku_degraded">off after the reboot — shell actions queued</string>
     <string name="settings_battery_title">Battery optimization</string>
     <string name="settings_battery_ok">Android exemption granted — any manufacturer-specific background activity/auto-start controls remain manual</string>
-    <string name="settings_battery_warn">active — grant the exemption and also check any manufacturer-specific background activity/auto-start controls</string>
+    <string name="settings_battery_warn">active — grant the exemption and also check any manufacturer-specific background activity/auto-start controls; otherwise scheduled actions, and AI actions too, may arrive late</string>
+    <string name="settings_unauthenticated_loopback">Local server without a key: another app on this phone could impersonate the model. Set a key on the local server as well.</string>
     <string name="settings_notifications_title">Argus notifications</string>
     <string name="settings_notifications_ok">allowed</string>
     <string name="settings_notifications_warn">not allowed — outcomes and alerts won\'t be visible</string>

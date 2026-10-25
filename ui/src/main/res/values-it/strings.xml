@@ -158,7 +158,8 @@
     <string name="settings_shizuku_degraded">spento dopo il riavvio — azioni shell in coda</string>
     <string name="settings_battery_title">Ottimizzazione batteria</string>
     <string name="settings_battery_ok">esclusione Android concessa — gli eventuali controlli del produttore per attività in background/avvio automatico restano manuali</string>
-    <string name="settings_battery_warn">attiva — concedi l\'esclusione e verifica anche gli eventuali controlli del produttore per attività in background/avvio automatico</string>
+    <string name="settings_battery_warn">attiva — concedi l\'esclusione e verifica anche gli eventuali controlli del produttore per attività in background/avvio automatico; altrimenti le azioni pianificate, e anche quelle AI, potrebbero arrivare in ritardo</string>
+    <string name="settings_unauthenticated_loopback">Server locale senza chiave: un\'altra app sul telefono potrebbe fingersi il modello. Imposta una chiave anche sul server locale.</string>
     <string name="settings_notifications_title">Notifiche Argus</string>
     <string name="settings_notifications_ok">consentite</string>
     <string name="settings_notifications_warn">non consentite — esiti e avvisi non saranno visibili</string>

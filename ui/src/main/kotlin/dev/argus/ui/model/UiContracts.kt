@@ -274,6 +274,11 @@ sealed interface TransportUi {
         /** Nome enum UI: default/none/low/medium/high. */
         val reasoningEffort: String = "default",
         val reasoningEffortEditable: Boolean = false,
+        /**
+         * Custom verso un host loopback (localhost, 127.0.0.1, ::1) senza alcuna chiave salvata: un'altra
+         * app sul telefono potrebbe ascoltare su quella porta e fingersi il modello. Solo avviso.
+         */
+        val unauthenticatedLoopback: Boolean = false,
     ) : TransportUi
 }
 enum class AuthState { OK, EXPIRED, NOT_CONFIGURED }

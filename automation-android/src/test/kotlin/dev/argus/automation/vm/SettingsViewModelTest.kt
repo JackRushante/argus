@@ -515,6 +515,72 @@ class SettingsViewModelTest {
         )
     }
 
+    // ------------------------------------------------------------------ D3: server locale senza chiave
+
+    private fun TestScope.customTransport(
+        baseUrl: String,
+        key: String? = null,
+        provider: ProviderId = ProviderId.CUSTOM_OPENAI_COMPAT,
+    ): TransportUi.DirectProvider {
+        val store = FakeProviderStore().apply {
+            seed(provider, baseUrl = baseUrl, key = key)
+            select(provider)
+        }
+        val vm = settingsViewModel(store)
+        observe(vm)
+        vm.refresh()
+        advanceUntilIdle()
+        val transport = vm.state.value.transport
+        assertTrue(transport is TransportUi.DirectProvider, "atteso DirectProvider, era $transport")
+        return transport as TransportUi.DirectProvider
+    }
+
+    @Test
+    fun `custom su host loopback senza chiave segnala il server locale non autenticato`() =
+        runTest(dispatcher) {
+            for (url in listOf("http://127.0.0.1:8080/v1", "http://localhost:11434/v1", "http://[::1]:8080/v1")) {
+                assertTrue(customTransport(url).unauthenticatedLoopback, "atteso avviso per $url")
+            }
+        }
+
+    @Test
+    fun `custom loopback con una chiave salvata non segnala nulla`() = runTest(dispatcher) {
+        assertFalse(customTransport("http://127.0.0.1:8080/v1", key = "local-key-0123456789").unauthenticatedLoopback)
+    }
+
+    @Test
+    fun `custom su host non loopback non segnala il server locale`() = runTest(dispatcher) {
+        for (url in listOf(
+            "https://llm.example.com/v1",
+            "http://localhost.evil.example/v1",
+            "https://127.0.0.1.nip.io/v1",
+            "http://192.168.1.10:8080/v1",
+        )) {
+            assertFalse(customTransport(url).unauthenticatedLoopback, "nessun avviso atteso per $url")
+        }
+    }
+
+    @Test
+    fun `un provider diverso da custom non segnala il server locale anche senza chiave`() =
+        runTest(dispatcher) {
+            val transport = customTransport(
+                baseUrl = "http://127.0.0.1:8080/v1",
+                provider = ProviderId.OPENROUTER,
+            )
+            assertFalse(transport.unauthenticatedLoopback)
+        }
+
+    @Test
+    fun `isLoopbackBaseUrl accetta solo gli host loopback esatti`() {
+        assertTrue(isLoopbackBaseUrl("http://localhost/v1"))
+        assertTrue(isLoopbackBaseUrl("http://127.0.0.1:1/v1"))
+        assertTrue(isLoopbackBaseUrl("http://[::1]/v1"))
+        assertFalse(isLoopbackBaseUrl("http://127.0.0.2/v1"))
+        assertFalse(isLoopbackBaseUrl("http://localhost.evil.example/v1"))
+        assertFalse(isLoopbackBaseUrl("not a url"))
+        assertFalse(isLoopbackBaseUrl(""))
+    }
+
     @Test
     fun `budget espone token per provider e nessun dollaro per i token-only`() = runTest(dispatcher) {
         val usage = FakeUsageDao(

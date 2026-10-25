@@ -56,6 +56,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.net.URI
 import java.time.ZoneId
 import java.util.Locale
 import javax.inject.Inject
@@ -235,6 +236,14 @@ internal fun budgetUi(usage: BudgetUsageSnapshot, settings: BudgetSettings): Bud
     )
 }
 
+private val LOOPBACK_HOSTS = setOf("localhost", "127.0.0.1", "::1")
+
+/** true se l'host dell'URL è esattamente uno dei loopback ammessi per il cleartext del Custom. */
+internal fun isLoopbackBaseUrl(baseUrl: String): Boolean {
+    val host = runCatching { URI(baseUrl.trim()).host }.getOrNull() ?: return false
+    return host.removeSurrounding("[", "]").lowercase(Locale.ROOT) in LOOPBACK_HOSTS
+}
+
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -256,6 +265,9 @@ class SettingsViewModel @Inject constructor(
     private val budgetUsage = MutableStateFlow(BudgetUsageSnapshot())
     private val bridgeHealth = MutableStateFlow(BridgeUiHealth())
     private val mutableTokenConfigured = MutableStateFlow(false)
+
+    /** Chiave realmente salvata per il provider selezionato; null = non ancora letta (niente avvisi). */
+    private val mutableKeySaved = MutableStateFlow<Boolean?>(null)
     val tokenConfigured: StateFlow<Boolean> = mutableTokenConfigured
     private var shizukuRationaleShown = false
     private val budgetWriteMutex = Mutex()
@@ -312,6 +324,7 @@ class SettingsViewModel @Inject constructor(
         connectivitySentinelStatus.active,
         budgetUsage,
         budgetSettings.observe(),
+        mutableKeySaved,
     ) { values: Array<Any?> ->
         val settingsSources = values[0] as SettingsSources
         val bridge = values[1] as BridgeUiHealth
@@ -320,9 +333,10 @@ class SettingsViewModel @Inject constructor(
         val sentinelActive = values[4] as Boolean
         val usageSnapshot = values[5] as BudgetUsageSnapshot
         val budgetConfig = values[6] as BudgetSettings
+        val keySaved = values[7] as Boolean?
         val health = readAndroidUiHealth(context)
         SettingsState(
-            transport = transportUi(bridge, hasToken),
+            transport = transportUi(bridge, hasToken, keySaved),
             providerChoices = providerChoices(),
             shizuku = settingsSources.shizukuStatus.toUiStatus(
                 degradedAfterReboot = settingsSources.shizukuNeeded &&
@@ -358,6 +372,11 @@ class SettingsViewModel @Inject constructor(
             mutableTokenConfigured.value = cancellationSafeOrNull {
                 selectedProviderAuthConfigured()
             } ?: false
+        }
+        viewModelScope.launch {
+            mutableKeySaved.value = cancellationSafeOrNull {
+                configuration.hasApiKey(configuration.selectedProviderId())
+            }
         }
         viewModelScope.launch {
             budgetUsage.value = cancellationSafeOrNull {
@@ -707,7 +726,7 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    private fun transportUi(bridge: BridgeUiHealth, hasToken: Boolean): TransportUi {
+    private fun transportUi(bridge: BridgeUiHealth, hasToken: Boolean, keySaved: Boolean? = null): TransportUi {
         val id = configuration.selectedProviderId()
         val config = configuration.providerConfig(id)
         return if (id == ProviderId.HERMES) {
@@ -733,6 +752,9 @@ class SettingsViewModel @Inject constructor(
                 apiKeyRequired = spec.apiKeyRequired,
                 reasoningEffort = config.reasoningEffort.name.lowercase(Locale.ROOT),
                 reasoningEffortEditable = id == ProviderId.CUSTOM_OPENAI_COMPAT,
+                unauthenticatedLoopback = id == ProviderId.CUSTOM_OPENAI_COMPAT &&
+                    keySaved == false &&
+                    isLoopbackBaseUrl(config.baseUrl),
             )
         }
     }
