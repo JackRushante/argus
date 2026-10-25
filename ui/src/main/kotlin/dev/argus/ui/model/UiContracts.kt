@@ -212,9 +212,14 @@ enum class LogOutcome { SUCCESS, PARTIAL, FAILED, SUBMITTED, DEFERRED }
 
 interface ExecutionLogCallbacks {
     fun onExpand(id: String); fun onClearFilter(); fun onOpenAutomation(id: String)
-    // E13: "Invia ora" su una riga DEFERRED. Riceve l'id della RIGA di log (non un id
+    // E13: «Copia e apri WhatsApp» su una riga DEFERRED (non consuma la risposta: v. onMarkSent). Riceve l'id della RIGA di log (non un id
     // automazione): P0-B risolve la reply differita dalla entry, NON naviga. Default no-op.
     fun onSendNow(logId: String) {}
+    /**
+     * «Segna come inviata» su una riga DEFERRED: l'utente conferma di aver inviato il messaggio
+     * (il copia-e-apri non lo segna in anticipo). Riceve l'id della riga di log. Default no-op.
+     */
+    fun onMarkSent(logId: String) {}
 }
 
 // --- 6.5 Sistema (settings) ---
@@ -383,16 +388,16 @@ data class OnboardingState(
      * cosa NON potrà fare senza concederlo (task #54). Statica, derivata da ActionPrivileges.
      */
     val shizukuCapabilities: List<ShizukuCapabilityRow> = emptyList(),
-)
-
-/**
- * Grado di dipendenza da Shizuku di una capacità (task #54). Derivato da
- * [dev.argus.engine.model.ActionPrivileges] (BASE vs PRIVILEGED) e dal comportamento reale delle
     /**
      * Cervello configurato ma con connessione non (ancora) verificata. Non blocca il setup: lo step
      * Brain mostra solo l'avviso e la verifica si rifà da Sistema.
      */
     val brainUnverified: Boolean = false,
+)
+
+/**
+ * Grado di dipendenza da Shizuku di una capacità (task #54). Derivato da
+ * [dev.argus.engine.model.ActionPrivileges] (BASE vs PRIVILEGED) e dal comportamento reale delle
  * azioni activity-launch da automazione in background (fix #53).
  */
 enum class ShizukuRequirement {

@@ -393,6 +393,7 @@ fun ArgusNavHost() {
                             navController.navigate(Routes.detail(id))
                         }
                         override fun onSendNow(logId: String) = viewModel.onSendNow(logId)
+                        override fun onMarkSent(logId: String) = viewModel.onMarkSent(logId)
                     },
                     modifier = Modifier.testTag("screen_log"),
                 )

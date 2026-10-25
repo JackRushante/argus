@@ -7,6 +7,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -75,7 +77,7 @@ import dev.argus.ui.theme.LocalArgusSemantic
 //  - SUPPRESSED_COOLDOWN / CONDITIONS_NOT_MET = rumore utile → riga ATTENUATA
 //    (opacity ~.5), non evento (§6.4/§7.4).
 //  - Righe con dettaglio espandibili: chevron ruota 180°, mostra i passi per-azione.
-//  - Righe DEFERRED (E13): bottone "Invia ora" nel pannello espanso.
+//  - Righe DEFERRED (E13): «Copia e apri WhatsApp» e «Segna come inviata» nel pannello espanso.
 //  - `filterAutomationName` → header "Solo: <nome>" con "×" (onClearFilter).
 // Stateless: (state, callbacks). L'espansione è pura UI-state effimera (remember),
 // come ChatErrorBanner; onExpand(id) notifica comunque l'host. Il contratto §6.4
@@ -137,6 +139,7 @@ fun ExecutionLogScreen(
                                         callbacks.onExpand(row.id)
                                     },
                                     onSendNow = { callbacks.onSendNow(row.id) },
+                                    onMarkSent = { callbacks.onMarkSent(row.id) },
                                     onOpenAutomation = {
                                         row.automationId?.let(callbacks::onOpenAutomation)
                                     },
@@ -211,6 +214,7 @@ private fun LogRowItem(
     onToggle: () -> Unit,
     onSendNow: () -> Unit,
     onOpenAutomation: () -> Unit,
+    onMarkSent: () -> Unit = {},
 ) {
     val (icon, color) = outcomeVisual(row)
     val isDeferred = row.kind == AuditKind.FIRED && row.outcome == LogOutcome.DEFERRED
@@ -270,16 +274,18 @@ private fun LogRowItem(
         }
 
         AnimatedVisibility(visible = expanded && expandable) {
-            ExpandedDetail(row, isDeferred, onSendNow, onOpenAutomation)
+            ExpandedDetail(row, isDeferred, onSendNow, onMarkSent, onOpenAutomation)
         }
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ExpandedDetail(
     row: LogRow,
     isDeferred: Boolean,
     onSendNow: () -> Unit,
+    onMarkSent: () -> Unit,
     onOpenAutomation: () -> Unit,
 ) {
     Column(
@@ -302,18 +308,30 @@ private fun ExpandedDetail(
         }
         if (isDeferred) {
             // E13: la risposta è pronta ma non più consegnabile in automatico → invio manuale.
-            Button(
-                onClick = onSendNow,
-                modifier = Modifier.heightIn(min = 48.dp),
-                contentPadding = PaddingValues(start = 16.dp, end = 18.dp, top = 8.dp, bottom = 8.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                ),
+            // «Copia e apri» NON segna niente: solo «Segna come inviata» chiude la risposta.
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(stringResource(R.string.log_send_now))
+                Button(
+                    onClick = onSendNow,
+                    modifier = Modifier.heightIn(min = 48.dp),
+                    contentPadding = PaddingValues(start = 16.dp, end = 18.dp, top = 8.dp, bottom = 8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                    ),
+                ) {
+                    Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.log_copy_and_open))
+                }
+                TextButton(
+                    onClick = onMarkSent,
+                    modifier = Modifier.heightIn(min = 48.dp),
+                ) {
+                    Text(stringResource(R.string.log_mark_sent))
+                }
             }
         }
         if (row.automationId != null) {
@@ -444,7 +462,7 @@ private fun LogExpandedPreview() {
                     onSendNow = {},
                     onOpenAutomation = {},
                 )
-                // Riga DEFERRED pre-espansa → mostra "Invia ora".
+                // Riga DEFERRED pre-espansa → mostra «Copia e apri WhatsApp» e «Segna come inviata».
                 LogRowItem(
                     previewEntries[1],
                     expanded = true,

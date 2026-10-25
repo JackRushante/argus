@@ -138,7 +138,8 @@
     <string name="log_filter_remove">Remove filter</string>
     <string name="log_expand">Expand</string>
     <string name="log_collapse">Collapse</string>
-    <string name="log_send_now">Send now</string>
+    <string name="log_copy_and_open">Copy and open WhatsApp</string>
+    <string name="log_mark_sent">Mark as sent</string>
     <string name="log_open_automation">Open automation</string>
 
     <!-- Sistema (settings) -->
@@ -250,6 +251,6 @@
     <string name="onboarding_shizuku_required_sub">Without authorization, these actions are not available.</string>
     <string name="onboarding_shizuku_recommended_sub">They also work without it, but only with Argus open in the foreground.</string>
     <string name="onboarding_shizuku_not_required_sub">Always available, with or without Shizuku.</string>
-    <string name="onboarding_battery_consequence">Without the exemption, Android or manufacturer power management may delay background work. Alarms stay event-driven and don\'t use a persistent service.</string>
     <string name="onboarding_brain_unverified">Connection not verified yet: you can check it from System.</string>
+    <string name="onboarding_battery_consequence">Without the exemption, Android or manufacturer power management may delay background work. Alarms stay event-driven and don\'t use a persistent service.</string>
 </resources>
