@@ -22,6 +22,8 @@
     <string name="provider_dialog_title">Configura %1$s</string>
     <string name="provider_endpoint_label">Endpoint</string>
     <string name="provider_model_label">Modello</string>
+    <string name="provider_model_hint_openrouter">Modello (es. deepseek/deepseek-v4.1-flash) o preset: @preset/&lt;nome&gt;</string>
+    <string name="provider_model_preset_format">Il formato è @preset/&lt;nome&gt;</string>
     <string name="provider_key_label">Chiave API</string>
     <string name="provider_key_keep_hint">Lascia vuoto per conservare la chiave attuale.</string>
     <string name="provider_key_required_hint">Obbligatoria.</string>
@@ -97,6 +99,12 @@
     <string name="chat_error_service_unavailable">Il servizio non è disponibile in questo momento (HTTP %1$d). Riprova più tardi.</string>
     <string name="chat_error_too_long">Richiesta troppo lunga (%1$d caratteri, massimo %2$d). Accorciala.</string>
     <string name="chat_error_not_configured">Il servizio AI non è configurato. Controlla provider, chiave API e informativa privacy in Sistema.</string>
+    <string name="chat_error_internal">Errore interno di Argus (%1$s): non dipende dal provider. Se si ripete, apri una segnalazione.</string>
+    <string name="chat_raw_action">Risposta grezza</string>
+    <string name="chat_raw_title">Risposta grezza</string>
+    <string name="chat_raw_warning">Può contenere dati personali (nomi, messaggi, posizioni): controllala prima di condividerla</string>
+    <string name="chat_raw_copy">Copia per la segnalazione</string>
+    <string name="chat_raw_close">Chiudi</string>
     <string name="chat_open_system">Apri Sistema</string>
     <string name="chat_error_detail_show">Dettaglio tecnico</string>
     <string name="chat_error_detail_hide">Nascondi dettaglio tecnico</string>
@@ -178,6 +186,7 @@
     <string name="settings_listener_title">Lettura notifiche</string>
     <string name="settings_listener_ok">attiva — trigger WhatsApp e risposte disponibili</string>
     <string name="settings_listener_warn">non attiva — trigger WhatsApp e risposte non armabili</string>
+    <string name="settings_listener_restricted_hint">Se Android dice \"Impostazione con restrizioni\": Impostazioni › App › Argus › ⋮ › Consenti impostazioni con restrizioni, poi riprova.</string>
     <string name="settings_location_title">Posizione in background</string>
     <string name="settings_location_granted">sempre — i geofence sono affidabili</string>
     <string name="settings_location_while_in_use">solo mentre in uso — serve «Consenti sempre» per i geofence</string>
