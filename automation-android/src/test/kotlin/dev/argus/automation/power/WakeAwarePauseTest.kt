@@ -229,7 +229,7 @@ class WakeAwarePauseTest {
     }
 
     @Test
-    fun `a failing alarm backend degrades to the plain delay instead of failing the wait`() = runTest {
+    fun `a failing alarm backend keeps the wakelock and waits with a plain delay`() = runTest {
         val pause = newPause()
         alarms.failSchedule = true
         var finished = false
@@ -241,6 +241,8 @@ class WakeAwarePauseTest {
             }
         }
         runCurrent()
+        // Senza sveglia la quota resta tenuta: il processore non dorme e il delay dura quanto deve.
+        assertEquals(1, wakeLock.activeHolders)
         elapsed += 120_000
         advanceTimeBy(120_000)
         runCurrent()

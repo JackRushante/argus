@@ -41,7 +41,7 @@ import java.time.ZoneId
  * E2E host-driven in tre fasi. `schedule` arma una regola sufficientemente lontana; l'host
  * riavvia davvero il device e, dopo aver ripristinato Shizuku/ADB, invoca `verify`. Il test prova
  * che BOOT_COMPLETED ha ricreato la registrazione AlarmManager confrontando `updatedAtMillis`:
- * APP_START lascia invariato un record equivalente, mentre ReconcileReason.BOOT forza l'upsert.
+ * BOOT forza l'upsert del record (dalla 0.3.6 lo fa anche APP_START, per l'arresto forzato).
  * Senza fase esplicita una normale connectedAndroidTest resta sicura.
  */
 @RunWith(AndroidJUnit4::class)

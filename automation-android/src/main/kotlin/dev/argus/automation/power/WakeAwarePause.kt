@@ -55,15 +55,16 @@ class WaitWakeSignals(
  * Attesa («attendi N») che sopravvive al deep sleep (B19). Iniettata come `Engine(pause = …)`.
  *
  * - Fino a [shortWaitMillis]: un semplice `delay`; il wakelock resta tenuto dal dispatch.
- * - Oltre: rilascia la propria quota del wakelock per tutta l'attesa, così il processore può
- *   dormire, e programma una sveglia `ELAPSED_REALTIME_WAKEUP` alla scadenza. Aspetta il primo fra
+ * - Oltre: programma una sveglia `ELAPSED_REALTIME_WAKEUP` alla scadenza e rilascia la propria
+ *   quota del wakelock per tutta l'attesa, così il processore può dormire. Aspetta il primo fra
  *   il segnale della sveglia e un `delay` della stessa durata (che vale se il telefono resta
  *   sveglio). Al risveglio riacquisisce la quota e, se secondo `elapsedRealtime` mancano ancora
  *   millisecondi, aspetta il resto.
  *
- * Su cancellazione la sveglia viene annullata e la quota riacquisita, così il `holding` del
- * dispatch che la rilascia resta bilanciato. Se la quota non era tenuta (pausa fuori da un
- * dispatch) non si tocca il contatore.
+ * Se la sveglia non si può programmare la quota resta tenuta e l'attesa è un `delay` a
+ * processore sveglio. Su cancellazione la sveglia viene annullata e la quota riacquisita, così il
+ * `holding` del dispatch che la rilascia resta bilanciato. Se la quota non era tenuta (pausa fuori
+ * da un dispatch) non si tocca il contatore.
  */
 class WakeAwarePause(
     private val wakeLock: ExecutionWakeLock,
@@ -82,17 +83,20 @@ class WakeAwarePause(
         val deadline = elapsedRealtime() + millis
         val token = nextToken()
         val signal = signals.register(token)
-        val released = wakeLock.release()
+        // Prima la sveglia, poi il rilascio della quota: il processore non può addormentarsi fra
+        // le due senza nulla che lo risvegli.
+        val scheduled = try {
+            alarms.schedule(token, deadline)
+            true
+        } catch (error: CancellationException) {
+            signals.unregister(token)
+            throw error
+        } catch (_: Exception) {
+            // Senza sveglia la quota resta tenuta: l'attesa costa batteria ma dura quanto deve.
+            false
+        }
+        val released = scheduled && wakeLock.release()
         try {
-            val scheduled = try {
-                alarms.schedule(token, deadline)
-                true
-            } catch (error: CancellationException) {
-                throw error
-            } catch (_: Exception) {
-                // Senza sveglia resta il solo `delay`: peggiore, ma l'attesa non fallisce.
-                false
-            }
             if (scheduled) withTimeoutOrNull(millis) { signal.await() } else delay(millis)
         } finally {
             withContext(NonCancellable) {

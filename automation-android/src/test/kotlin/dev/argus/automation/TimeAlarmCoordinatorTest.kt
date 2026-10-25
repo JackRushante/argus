@@ -662,7 +662,7 @@ class TimeAlarmCoordinatorTest {
     }
 
     @Test
-    fun `timezone change keeps cancelling a due record instead of recovering it`() = runTest {
+    fun `timezone change recovers a due record like a time change`() = runTest {
         val automation = automation(Trigger.Time(cron = "0 9 * * *", tz = "UTC"))
         val dueAt = now.minusSeconds(3_600).toEpochMilli()
         val state = FakeTimeAlarmStateStore(record(automation, dueAt))
@@ -677,8 +677,12 @@ class TimeAlarmCoordinatorTest {
 
         val report = coordinator.reconcile(ReconcileReason.TIMEZONE_CHANGED)
 
-        assertEquals(listOf(automation.id), report.cancelled)
-        assertEquals(emptyList(), dispatched)
+        assertEquals(listOf(automation.id), report.recovered)
+        assertEquals(emptyList(), report.cancelled)
+        assertEquals(
+            listOf("time:${requireNotNull(automation.approvalFingerprint).value}:$dueAt"),
+            dispatched.map { it.id.value },
+        )
     }
 
     @Test

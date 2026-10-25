@@ -106,7 +106,13 @@ enum class ReconcileReason(
      * event id: il journal deduplica. Cancellarla e dimenticarla la perderebbe.
      */
     TIME_CHANGED(true),
-    TIMEZONE_CHANGED(false),
+
+    /**
+     * Gli istanti persistiti sono assoluti: un'occorrenza già scaduta al cambio di fuso (anche
+     * quello impostato dalla rete subito dopo il boot) è stata davvero persa e si recupera come
+     * per TIME_CHANGED.
+     */
+    TIMEZONE_CHANGED(true),
 }
 
 data class ReconcileReport(
