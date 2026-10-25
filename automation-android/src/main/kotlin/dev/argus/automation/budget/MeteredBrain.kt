@@ -4,6 +4,8 @@ import dev.argus.brain.ProviderCatalog
 import dev.argus.brain.ProviderConfig
 import dev.argus.brain.ProviderId
 import dev.argus.data.UsageWindows
+import dev.argus.data.dao.ProviderTokensAggregate
+import dev.argus.data.dao.ProviderUsageAggregate
 import dev.argus.data.dao.UsageDao
 import dev.argus.data.entities.UsageEventEntity
 import dev.argus.data.entities.UsageEventKind
@@ -13,6 +15,7 @@ import dev.argus.engine.brain.Brain
 import dev.argus.engine.brain.CapabilityManifest
 import dev.argus.engine.brain.CompileMetaError
 import dev.argus.engine.brain.CompileResult
+import dev.argus.engine.brain.TurnUsage
 import dev.argus.engine.model.Action
 import dev.argus.engine.runtime.AuditEvent
 import dev.argus.engine.runtime.AuditKind
@@ -22,6 +25,8 @@ import dev.argus.engine.runtime.FireContext
 import dev.argus.engine.runtime.RuntimeDataBinding
 import dev.argus.ui.presentation.RenderLanguage
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.time.Instant
@@ -62,6 +67,12 @@ fun interface BudgetAlerts {
  * Pre-call: [BudgetPolicy.check] → HARD blocca il transport; SOFT avvisa una sola volta per finestra.
  * Post-call: scrive un evento usage con token e costo stimato. Il cooldown per-regola dell'Engine
  * resta invariato: qui si misura solo l'aggregato.
+ *
+ * Il lock NON è tenuto durante la rete (B16): una compile da 50 s non blocca un act concorrente.
+ * Check e PRENOTAZIONE dello slot avvengono sotto lock; la chiamata di rete è fuori; la
+ * registrazione dell'usage e la liberazione dello slot di nuovo sotto lock. Le chiamate in volo
+ * contano nei tetti chiamate/ora e chiamate/giorno (con [settings] disponibile): due trigger
+ * concorrenti con un solo slot rimasto non possono passare entrambi.
  */
 class MeteredBrain(
     private val delegate: Brain,
@@ -72,80 +83,72 @@ class MeteredBrain(
     private val alerts: BudgetAlerts,
     private val nowMillis: () -> Long = System::currentTimeMillis,
     private val zone: () -> ZoneId = ZoneId::systemDefault,
+    /** Tetti utente: serve a contare le chiamate in volo. Senza, vale solo il verdetto di [policy]. */
+    settings: BudgetSettingsStore? = null,
 ) : Brain {
     private val notified = ConcurrentHashMap<String, Boolean>()
+
     /**
-     * Il check e la registrazione del consumo formano un'unica sezione critica. Senza questo gate
-     * due trigger concorrenti possono leggere entrambi N-1 chiamate, oltrepassare un limite HARD e
+     * Sezione critica corta: check + prenotazione, e registrazione + rilascio. Senza questo gate due
+     * trigger concorrenti possono leggere entrambi N-1 chiamate, oltrepassare un limite HARD e
      * contattare entrambi il provider prima che uno dei due eventi usage sia persistito.
      */
     private val callGate = Mutex()
+
+    /** Chiamate in volo per provider (wireName). Si legge e scrive SOLO sotto [callGate]. */
+    private val inFlight = HashMap<String, Int>()
+
+    /** La stessa [BudgetPolicy] su una vista dell'usage che somma le chiamate in volo. */
+    private val inFlightPolicy: BudgetPolicy? = settings?.let {
+        BudgetPolicy(InFlightAwareUsageDao(usage) { inFlight.toMap() }, it, zone)
+    }
 
     override suspend fun compile(
         nl: String,
         manifest: CapabilityManifest,
         state: DeviceState,
-    ): CompileResult = callGate.withLock {
+    ): CompileResult {
         val config = selectedConfig()
-        val now = nowMillis()
-        when (val verdict = verdictFor(config, now)) {
-            is BudgetVerdict.HardExceeded -> {
-                recordBlocked(config, UsageEventKind.COMPILE, now)
-                notifyOnce(verdict.tripped, now)
-                return CompileResult(
-                    reply = BudgetMeta.blockedReply(),
-                    draft = null,
-                    metaError = BudgetMeta.BUDGET_EXCEEDED,
-                )
-            }
-            is BudgetVerdict.UnpricedModel -> {
-                recordBlocked(config, UsageEventKind.COMPILE, now)
-                notifyUnpricedOnce(verdict.providerId)
-                return CompileResult(
-                    reply = BudgetMeta.unpricedModelReply(),
-                    draft = null,
-                    metaError = BudgetMeta.UNPRICED_MODEL,
-                )
-            }
-            is BudgetVerdict.SoftExceeded -> notifyOnce(verdict.tripped, now)
-            BudgetVerdict.Ok -> {}
-        }
-        val first = delegate.compile(nl, manifest, state)
-        // Ogni tentativo costa ed entra nel budget, anche quando il JSON del modello è malformato.
-        recordUsage(config, UsageEventKind.COMPILE, now, first.metaError, first.usage)
-        if (first.metaError != CompileMetaError.DRAFT_INVALID) return first
-
-        // Retry-once provider-agnostico, ma VISIBILE al choke-point: il primo evento appena
+        val first = meteredCompile(config) { delegate.compile(nl, manifest, state) }
+        // Retry-once degli errori di FORMATO del modello (draft_invalid, meta_parse_error,
+        // meta_json_missing), provider-agnostico ma VISIBILE al choke-point: il primo evento appena
         // persistito partecipa al nuovo check e un HARD impedisce il secondo contatto. Se l'utente
         // cambia provider/modello durante il primo turno, non ritentare su una destinazione diversa
         // da quella appena contabilizzata: un retry manuale ripartirà col nuovo config.
+        if (first.metaError !in CompileMetaError.FORMAT_ERRORS) return first
         if (selectedConfig() != config) return first
-        val retryNow = nowMillis()
-        when (val retryVerdict = verdictFor(config, retryNow)) {
-            is BudgetVerdict.HardExceeded -> {
-                recordBlocked(config, UsageEventKind.COMPILE, retryNow)
-                notifyOnce(retryVerdict.tripped, retryNow)
-                return CompileResult(
-                    reply = BudgetMeta.blockedReply(),
-                    draft = null,
-                    metaError = BudgetMeta.BUDGET_EXCEEDED,
-                )
+        return meteredCompile(config) { delegate.compile(nl, manifest, state) }
+    }
+
+    private suspend fun meteredCompile(
+        config: ProviderConfig,
+        call: suspend () -> CompileResult,
+    ): CompileResult {
+        val now = nowMillis()
+        when (val admission = admit(config, UsageEventKind.COMPILE, now)) {
+            is Admission.Blocked -> return when (val verdict = admission.verdict) {
+                is BudgetVerdict.UnpricedModel -> {
+                    notifyUnpricedOnce(verdict.providerId)
+                    CompileResult(
+                        reply = BudgetMeta.unpricedModelReply(),
+                        draft = null,
+                        metaError = BudgetMeta.UNPRICED_MODEL,
+                    )
+                }
+                is BudgetVerdict.HardExceeded -> {
+                    notifyOnce(verdict.tripped, now)
+                    CompileResult(
+                        reply = BudgetMeta.blockedReply(),
+                        draft = null,
+                        metaError = BudgetMeta.BUDGET_EXCEEDED,
+                    )
+                }
+                else -> error("verdict non bloccante")
             }
-            is BudgetVerdict.UnpricedModel -> {
-                recordBlocked(config, UsageEventKind.COMPILE, retryNow)
-                notifyUnpricedOnce(retryVerdict.providerId)
-                return CompileResult(
-                    reply = BudgetMeta.unpricedModelReply(),
-                    draft = null,
-                    metaError = BudgetMeta.UNPRICED_MODEL,
-                )
-            }
-            is BudgetVerdict.SoftExceeded -> notifyOnce(retryVerdict.tripped, retryNow)
-            BudgetVerdict.Ok -> Unit
+            Admission.Granted -> Unit
         }
-        val retry = delegate.compile(nl, manifest, state)
-        recordUsage(config, UsageEventKind.COMPILE, retryNow, retry.metaError, retry.usage)
-        return retry
+        // Ogni tentativo costa ed entra nel budget, anche quando il JSON del modello è malformato.
+        return metered(config, UsageEventKind.COMPILE, now, call, { it.metaError }, { it.usage })
     }
 
     override suspend fun act(
@@ -153,19 +156,8 @@ class MeteredBrain(
         goal: String,
         contextSources: List<String>,
         allowedTools: List<String>,
-    ): ActResult = callGate.withLock {
-        val config = selectedConfig()
-        val now = nowMillis()
-        when (val verdict = verdictFor(config, now)) {
-            is BudgetVerdict.HardExceeded -> return hardBlock(config, UsageEventKind.ACT, now, context, verdict.tripped)
-            is BudgetVerdict.UnpricedModel ->
-                return unpricedModelBlock(config, UsageEventKind.ACT, now, context, verdict.providerId)
-            is BudgetVerdict.SoftExceeded -> notifyOnce(verdict.tripped, now)
-            BudgetVerdict.Ok -> {}
-        }
-        val result = delegate.act(context, goal, contextSources, allowedTools)
-        recordUsage(config, UsageEventKind.ACT, now, result.metaError, result.usage)
-        return result
+    ): ActResult = meteredAct(UsageEventKind.ACT, context) {
+        delegate.act(context, goal, contextSources, allowedTools)
     }
 
     /**
@@ -179,43 +171,116 @@ class MeteredBrain(
         contextSources: List<String>,
         allowedTools: List<String>,
         runtimeData: List<RuntimeDataBinding>,
-    ): ActResult = callGate.withLock {
-        val config = selectedConfig()
-        val now = nowMillis()
-        when (val verdict = verdictFor(config, now)) {
-            is BudgetVerdict.HardExceeded -> return hardBlock(config, UsageEventKind.ACT, now, context, verdict.tripped)
-            is BudgetVerdict.UnpricedModel ->
-                return unpricedModelBlock(config, UsageEventKind.ACT, now, context, verdict.providerId)
-            is BudgetVerdict.SoftExceeded -> notifyOnce(verdict.tripped, now)
-            BudgetVerdict.Ok -> {}
-        }
-        val result = delegate.actResolved(context, goal, contextSources, allowedTools, runtimeData)
-        recordUsage(config, UsageEventKind.ACT, now, result.metaError, result.usage)
-        return result
+    ): ActResult = meteredAct(UsageEventKind.ACT, context) {
+        delegate.actResolved(context, goal, contextSources, allowedTools, runtimeData)
     }
 
     override suspend fun actV2(context: FireContext, action: Action.InvokeLlmV2): ActResult =
-        callGate.withLock {
-            val config = selectedConfig()
-            val now = nowMillis()
-            when (val verdict = verdictFor(config, now)) {
-                is BudgetVerdict.HardExceeded ->
-                    return hardBlock(config, UsageEventKind.ACT_V2, now, context, verdict.tripped)
-                is BudgetVerdict.UnpricedModel ->
-                    return unpricedModelBlock(
-                        config,
-                        UsageEventKind.ACT_V2,
-                        now,
-                        context,
-                        verdict.providerId,
-                    )
-                is BudgetVerdict.SoftExceeded -> notifyOnce(verdict.tripped, now)
-                BudgetVerdict.Ok -> {}
+        meteredAct(UsageEventKind.ACT_V2, context) { delegate.actV2(context, action) }
+
+    private suspend fun meteredAct(
+        kind: UsageEventKind,
+        context: FireContext,
+        call: suspend () -> ActResult,
+    ): ActResult {
+        val config = selectedConfig()
+        val now = nowMillis()
+        when (val admission = admit(config, kind, now)) {
+            is Admission.Blocked -> return when (val verdict = admission.verdict) {
+                is BudgetVerdict.HardExceeded -> hardBlock(now, context, verdict.tripped)
+                is BudgetVerdict.UnpricedModel -> unpricedModelBlock(now, context, verdict.providerId)
+                else -> error("verdict non bloccante")
             }
-            val result = delegate.actV2(context, action)
-            recordUsage(config, UsageEventKind.ACT_V2, now, result.metaError, result.usage)
-            return result
+            Admission.Granted -> Unit
         }
+        return metered(config, kind, now, call, { it.metaError }, { it.usage })
+    }
+
+    private sealed interface Admission {
+        data object Granted : Admission
+        data class Blocked(val verdict: BudgetVerdict) : Admission
+    }
+
+    /**
+     * Sotto lock: verdetto del budget (comprese le chiamate già in volo) e, se la chiamata è
+     * ammessa, prenotazione dello slot. Un blocco viene registrato come evento BLOCKED_BUDGET.
+     */
+    private suspend fun admit(config: ProviderConfig, kind: UsageEventKind, now: Long): Admission =
+        callGate.withLock {
+            val verdict = admissionVerdict(config, now)
+            when (verdict) {
+                is BudgetVerdict.HardExceeded, is BudgetVerdict.UnpricedModel -> {
+                    recordBlocked(config, kind, now)
+                    Admission.Blocked(verdict)
+                }
+                is BudgetVerdict.SoftExceeded -> {
+                    notifyOnce(verdict.tripped, now)
+                    reserve(config)
+                    Admission.Granted
+                }
+                BudgetVerdict.Ok -> {
+                    reserve(config)
+                    Admission.Granted
+                }
+            }
+        }
+
+    /** Verdetto di [policy], inasprito se contando le chiamate in volo un tetto chiamate scatta. */
+    private suspend fun admissionVerdict(config: ProviderConfig, now: Long): BudgetVerdict {
+        val base = verdictFor(config, now)
+        if (base is BudgetVerdict.HardExceeded || base is BudgetVerdict.UnpricedModel) return base
+        val aware = inFlightPolicy
+        if (aware != null && inFlight.isNotEmpty()) {
+            val withInFlight = try {
+                aware.check(config, now)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Throwable) {
+                BudgetVerdict.Ok
+            }
+            if (withInFlight is BudgetVerdict.HardExceeded) return withInFlight
+        }
+        return base
+    }
+
+    private fun reserve(config: ProviderConfig) {
+        inFlight.merge(config.providerId.wireName, 1, Int::plus)
+    }
+
+    private fun release(config: ProviderConfig) {
+        val wire = config.providerId.wireName
+        val left = (inFlight[wire] ?: 0) - 1
+        if (left > 0) inFlight[wire] = left else inFlight.remove(wire)
+    }
+
+    /**
+     * Esegue la chiamata di rete FUORI dal lock; poi, sotto lock, registra l'usage e libera la
+     * prenotazione. Il rilascio è garantito anche su eccezione o cancellazione (la cancellazione non
+     * registra alcun evento, come prima).
+     */
+    private suspend fun <R> metered(
+        config: ProviderConfig,
+        kind: UsageEventKind,
+        now: Long,
+        call: suspend () -> R,
+        metaErrorOf: (R) -> String?,
+        usageOf: (R) -> TurnUsage?,
+    ): R {
+        var released = false
+        try {
+            val result = call()
+            callGate.withLock {
+                recordUsage(config, kind, now, metaErrorOf(result), usageOf(result))
+                release(config)
+                released = true
+            }
+            return result
+        } finally {
+            if (!released) {
+                withContext(NonCancellable) { callGate.withLock { release(config) } }
+            }
+        }
+    }
 
     /** Un errore DB del budget non deve spegnere il cervello: fail-open (ma la cancellazione risale). */
     private suspend fun verdictFor(config: ProviderConfig, now: Long): BudgetVerdict = try {
@@ -227,13 +292,10 @@ class MeteredBrain(
     }
 
     private suspend fun hardBlock(
-        config: ProviderConfig,
-        kind: UsageEventKind,
         now: Long,
         context: FireContext,
         tripped: TrippedLimit,
     ): ActResult {
-        recordBlocked(config, kind, now)
         tryAudit(
             AuditEvent(
                 automationId = context.automationId,
@@ -249,13 +311,10 @@ class MeteredBrain(
     }
 
     private suspend fun unpricedModelBlock(
-        config: ProviderConfig,
-        kind: UsageEventKind,
         now: Long,
         context: FireContext,
         providerId: ProviderId,
     ): ActResult {
-        recordBlocked(config, kind, now)
         tryAudit(
             AuditEvent(
                 automationId = context.automationId,
@@ -275,7 +334,7 @@ class MeteredBrain(
         kind: UsageEventKind,
         now: Long,
         metaError: String?,
-        usage: dev.argus.engine.brain.TurnUsage?,
+        usage: TurnUsage?,
     ) {
         val model = usage?.model ?: config.model ?: BudgetMeta.UNKNOWN_MODEL
         // Alcuni provider restituiscono un alias/versione datata del modello configurato. Se
@@ -292,7 +351,13 @@ class MeteredBrain(
                 providerId = config.providerId.wireName,
                 model = model,
                 kind = kind,
-                outcome = if (metaError == null) UsageEventOutcome.OK else UsageEventOutcome.ERROR,
+                // Chiarimento, capability non supportata e limite superato sono risposte BUONE del
+                // modello (nessuna regola da creare), non errori: non sporcano le statistiche.
+                outcome = if (metaError == null || metaError in CompileMetaError.BENIGN_NO_DRAFT) {
+                    UsageEventOutcome.OK
+                } else {
+                    UsageEventOutcome.ERROR
+                },
                 tokensIn = usage?.inputTokens,
                 tokensOut = usage?.outputTokens,
                 costMicros = cost,
@@ -393,4 +458,50 @@ class MeteredBrain(
         }
         return "${tripped.auditDetail()}:$bucket"
     }
+}
+
+/**
+ * Vista dell'usage che somma le chiamate in volo (prenotazioni di [MeteredBrain]) alle chiamate già
+ * registrate. Una prenotazione è per definizione "adesso", quindi rientra in ogni finestra
+ * interrogata dalla policy (ultima ora, giorno corrente). Serve a far contare lo slot prenotato nei
+ * tetti chiamate/ora e chiamate/giorno senza duplicare la logica di [BudgetPolicy]. Sola lettura:
+ * l'unica scrittura reale resta quella di [MeteredBrain].
+ */
+internal class InFlightAwareUsageDao(
+    private val delegate: UsageDao,
+    private val reservations: () -> Map<String, Int>,
+) : UsageDao {
+    override suspend fun insert(event: UsageEventEntity): Long = delegate.insert(event)
+
+    override suspend fun aggregateBetween(
+        startMillis: Long,
+        endMillisExclusive: Long,
+    ): List<ProviderUsageAggregate> {
+        val stored = delegate.aggregateBetween(startMillis, endMillisExclusive)
+        val pending = reservations()
+        if (pending.isEmpty()) return stored
+        val byProvider = stored.associateBy { it.providerId }.toMutableMap()
+        pending.forEach { (wire, count) ->
+            val row = byProvider[wire]
+            byProvider[wire] = row?.copy(calls = row.calls + count)
+                ?: ProviderUsageAggregate(
+                    providerId = wire,
+                    calls = count.toLong(),
+                    okCalls = 0,
+                    errorCalls = 0,
+                    blockedCalls = 0,
+                    tokensIn = null,
+                    tokensOut = null,
+                    costMicros = null,
+                )
+        }
+        return byProvider.values.sortedBy { it.providerId }
+    }
+
+    override suspend fun tokensBetween(
+        startMillis: Long,
+        endMillisExclusive: Long,
+    ): List<ProviderTokensAggregate> = delegate.tokensBetween(startMillis, endMillisExclusive)
+
+    override suspend fun purgeBefore(cutoffMillis: Long): Int = delegate.purgeBefore(cutoffMillis)
 }

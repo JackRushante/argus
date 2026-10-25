@@ -5,6 +5,7 @@ import dev.argus.brain.AgentTransport
 import dev.argus.brain.BridgeErrorKind
 import dev.argus.brain.BridgeException
 import dev.argus.brain.DefaultTransportFactory
+import dev.argus.brain.ProviderCatalog
 import dev.argus.brain.ProviderConfig
 import dev.argus.brain.ProviderConfigStore
 import dev.argus.brain.TransportBackedBrain
@@ -95,7 +96,14 @@ class ConfiguredBridgeBrain(
         }
     }
 
-    suspend fun configured(): Boolean = configuration.bearerToken() != null
+    /** Config del provider selezionato (senza segreti): la chat ne ricava il timeout del compile. */
+    fun selectedConfig(): ProviderConfig = configuration.selectedProviderConfig()
+
+    /** Pronto = ha la chiave che il provider selezionato richiede (nessuna per un Custom anonimo). */
+    suspend fun configured(): Boolean {
+        val id = configuration.selectedProviderId()
+        return !ProviderCatalog.spec(id).apiKeyRequired || configuration.hasApiKey(id)
+    }
 
     /**
      * Cache single-slot keyed sulla [ProviderConfig] selezionata (che NON contiene la chiave API:

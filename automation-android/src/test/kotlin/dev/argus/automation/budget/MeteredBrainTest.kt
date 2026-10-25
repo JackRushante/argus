@@ -34,10 +34,13 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -446,35 +449,178 @@ class MeteredBrainTest {
     }
 
     @Test
-    fun `concurrent calls cannot both cross a one-call hard limit`() = runTest {
-        val dao = RecordingUsageDao()
+    fun `two concurrent calls with one slot left - the second is blocked by HARD`() = runTest {
+        val dao = AggregatingUsageDao()
+        val settings = FixedSettings(BudgetSettings(global = BudgetLimits(maxCallsPerHour = 1)))
         val delegate = FakeBrain(
             actResult = {
-                // Lascia alla seconda coroutine il tempo di arrivare al pre-check. Senza il gate
-                // atomico entrambe vedono zero eventi e contattano il provider.
-                delay(1)
+                // La prima chiamata è ancora in volo (nessun evento persistito) quando arriva la seconda:
+                // la prenotazione dello slot è l'unica cosa che la ferma.
+                delay(1_000)
                 ActResult("risposta", null)
             },
         )
-        val policy = object : BudgetPolicy(NoopUsageDaoForTest, NoopSettingsForTest) {
-            override suspend fun check(providerId: ProviderId, nowMillis: Long): BudgetVerdict =
-                if (dao.events.any { it.outcome != UsageEventOutcome.BLOCKED_BUDGET }) {
-                    BudgetVerdict.HardExceeded(TrippedLimit(LimitWindow.HOUR, BudgetScope.Global))
-                } else {
-                    BudgetVerdict.Ok
-                }
-        }
-        val brain = metered(delegate, policy, dao, config = openai)
+        val brain = metered(delegate, BudgetPolicy(dao, settings), dao, config = openai, settings = settings)
 
         val first = async { brain.actV2(context(), invokeV2()) }
+        runCurrent()
         val second = async { brain.actV2(context(), invokeV2()) }
         val results = awaitAll(first, second)
 
         assertEquals(1, delegate.calls)
-        assertEquals(1, results.count { it.text == "risposta" })
-        assertEquals(1, results.count { it.metaError == BudgetMeta.BUDGET_EXCEEDED })
+        assertEquals("risposta", results[0].text)
+        assertEquals(BudgetMeta.BUDGET_EXCEEDED, results[1].metaError)
         assertEquals(
-            listOf(UsageEventOutcome.OK, UsageEventOutcome.BLOCKED_BUDGET),
+            listOf(UsageEventOutcome.BLOCKED_BUDGET, UsageEventOutcome.OK),
+            dao.events.map { it.outcome },
+        )
+    }
+
+    @Test
+    fun `with two slots left two concurrent calls both go through and both are recorded`() = runTest {
+        val dao = AggregatingUsageDao()
+        val settings = FixedSettings(BudgetSettings(global = BudgetLimits(maxCallsPerHour = 2)))
+        val delegate = FakeBrain(actResult = { delay(1_000); ActResult("risposta", null) })
+        val brain = metered(delegate, BudgetPolicy(dao, settings), dao, config = openai, settings = settings)
+
+        val first = async { brain.actV2(context(), invokeV2()) }
+        runCurrent()
+        val second = async { brain.actV2(context(), invokeV2()) }
+        val third = async { brain.actV2(context(), invokeV2()) }
+        val results = awaitAll(first, second, third)
+
+        assertEquals(2, delegate.calls)
+        assertEquals(2, results.count { it.text == "risposta" })
+        assertEquals(1, results.count { it.metaError == BudgetMeta.BUDGET_EXCEEDED })
+        assertEquals(2, dao.events.count { it.outcome == UsageEventOutcome.OK })
+    }
+
+    @Test
+    fun `a slow compile does not hold the lock so a concurrent act is not delayed`() = runTest {
+        val dao = RecordingUsageDao()
+        val delegate = FakeBrain(
+            compileResult = {
+                delay(50_000)
+                CompileResult("ok", null, null)
+            },
+            actResult = { ActResult("risposta", null) },
+        )
+        val brain = metered(delegate, FakePolicy(), dao, config = openai)
+
+        val compile = async { brain.compile("crea", TEST_MANIFEST, DeviceState()) }
+        runCurrent()
+        val act = async { brain.actV2(context(), invokeV2()) }
+        runCurrent()
+
+        assertTrue(act.isCompleted, "l'act non deve aspettare la rete della compile")
+        assertEquals("risposta", act.await().text)
+        assertFalse(compile.isCompleted)
+
+        advanceTimeBy(50_001)
+        runCurrent()
+        assertTrue(compile.isCompleted)
+        assertEquals(2, dao.events.size)
+    }
+
+    @Test
+    fun `the reservation is released when the call throws or is cancelled`() = runTest {
+        val dao = AggregatingUsageDao()
+        val settings = FixedSettings(BudgetSettings(global = BudgetLimits(maxCallsPerHour = 1)))
+        var mode = "throw"
+        val delegate = FakeBrain(
+            actResult = {
+                when (mode) {
+                    "throw" -> throw IllegalStateException("rete morta")
+                    "hang" -> { delay(1_000_000); ActResult("mai", null) }
+                    else -> ActResult("risposta", null)
+                }
+            },
+        )
+        val brain = metered(delegate, BudgetPolicy(dao, settings), dao, config = openai, settings = settings)
+
+        assertFailsWith<IllegalStateException> { brain.actV2(context(), invokeV2()) }
+        mode = "hang"
+        val hanging = async { brain.actV2(context(), invokeV2()) }
+        runCurrent()
+        hanging.cancel()
+        runCurrent()
+        mode = "ok"
+
+        // Né l'eccezione né la cancellazione hanno lasciato lo slot prenotato.
+        val result = brain.actV2(context(), invokeV2())
+        assertEquals("risposta", result.text)
+        assertEquals(listOf(UsageEventOutcome.OK), dao.events.map { it.outcome })
+    }
+
+    @Test
+    fun `clarification unsupported capability and limit exceeded are not recorded as errors`() = runTest {
+        for (code in listOf("clarification_required", "unsupported_capability", "limit_exceeded")) {
+            val dao = RecordingUsageDao()
+            val delegate = FakeBrain(compileResult = { CompileResult("Spiegazione.", null, code) })
+            val brain = metered(delegate, FakePolicy(), dao, config = openai)
+
+            val result = brain.compile("crea", TEST_MANIFEST, DeviceState())
+
+            assertEquals(code, result.metaError)
+            assertEquals(1, delegate.calls, "nessun retry per $code")
+            assertEquals(UsageEventOutcome.OK, dao.events.single().outcome, code)
+        }
+        // Un errore vero resta un errore.
+        val dao = RecordingUsageDao()
+        val brain = metered(FakeBrain(compileResult = { CompileResult("", null, "draft_missing") }), FakePolicy(), dao, config = openai)
+        brain.compile("crea", TEST_MANIFEST, DeviceState())
+        assertEquals(UsageEventOutcome.ERROR, dao.events.single().outcome)
+    }
+
+    @Test
+    fun `meta parse error and missing meta json are retried once like an invalid draft`() = runTest {
+        for (code in listOf("meta_parse_error", "meta_json_missing", "draft_invalid")) {
+            var attempt = 0
+            val first = TurnUsage(inputTokens = 100, outputTokens = 10, model = "gpt-5.5")
+            val second = TurnUsage(inputTokens = 120, outputTokens = 12, model = "gpt-5.5")
+            val delegate = FakeBrain(
+                compileResult = {
+                    attempt++
+                    if (attempt == 1) CompileResult("rotto", null, code, first) else CompileResult("ok", null, null, second)
+                },
+            )
+            val dao = RecordingUsageDao()
+            val brain = metered(delegate, FakePolicy(), dao, config = openai)
+
+            val result = brain.compile("crea", TEST_MANIFEST, DeviceState())
+
+            assertEquals("ok", result.reply, code)
+            assertEquals(2, delegate.calls, code)
+            // entrambi gli usage sono registrati
+            assertEquals(listOf(100L, 120L), dao.events.map { it.tokensIn }, code)
+            assertEquals(listOf(UsageEventOutcome.ERROR, UsageEventOutcome.OK), dao.events.map { it.outcome }, code)
+        }
+    }
+
+    @Test
+    fun `other outcomes are never retried`() = runTest {
+        for (code in listOf("draft_missing", "output_truncated", "context_truncated", "empty_response", "bridge_http_500")) {
+            val delegate = FakeBrain(compileResult = { CompileResult("x", null, code) })
+            val brain = metered(delegate, FakePolicy(), RecordingUsageDao(), config = openai)
+
+            assertEquals(code, brain.compile("crea", TEST_MANIFEST, DeviceState()).metaError)
+            assertEquals(1, delegate.calls, "nessun retry per $code")
+        }
+    }
+
+    @Test
+    fun `the retry of a format error is blocked when the first attempt consumed the last slot`() = runTest {
+        val dao = AggregatingUsageDao()
+        val settings = FixedSettings(BudgetSettings(global = BudgetLimits(maxCallsPerHour = 1)))
+        val delegate = FakeBrain(compileResult = { CompileResult("rotto", null, "meta_parse_error") })
+        val brain = metered(delegate, BudgetPolicy(dao, settings), dao, config = openai, settings = settings)
+
+        val result = brain.compile("crea", TEST_MANIFEST, DeviceState())
+
+        assertEquals(1, delegate.calls)
+        assertEquals(BudgetMeta.BUDGET_EXCEEDED, result.metaError)
+        assertEquals(
+            listOf(UsageEventOutcome.ERROR, UsageEventOutcome.BLOCKED_BUDGET),
             dao.events.map { it.outcome },
         )
     }
@@ -484,10 +630,11 @@ class MeteredBrainTest {
     private fun metered(
         delegate: Brain,
         policy: BudgetPolicy,
-        dao: RecordingUsageDao,
+        dao: UsageDao,
         config: ProviderConfig,
         audit: AuditSink = RecordingAuditSink(),
         alerts: BudgetAlerts = RecordingAlerts(),
+        settings: BudgetSettingsStore? = null,
     ): MeteredBrain = MeteredBrain(
         delegate = delegate,
         policy = policy,
@@ -496,6 +643,7 @@ class MeteredBrainTest {
         audit = audit,
         alerts = alerts,
         nowMillis = { 1_700_000_000_000L },
+        settings = settings,
     )
 
     private fun invokeV2(): Action.InvokeLlmV2 = Action.InvokeLlmV2(
@@ -565,6 +713,50 @@ class MeteredBrainTest {
             if (fail) throw IllegalStateException("boom")
             return verdict
         }
+    }
+
+    /** DAO che aggrega davvero gli eventi inseriti: serve a una [BudgetPolicy] reale. */
+    private class AggregatingUsageDao : UsageDao {
+        val events = mutableListOf<UsageEventEntity>()
+
+        override suspend fun insert(event: UsageEventEntity): Long {
+            events += event
+            return events.size.toLong()
+        }
+
+        override suspend fun aggregateBetween(
+            startMillis: Long,
+            endMillisExclusive: Long,
+        ): List<ProviderUsageAggregate> = events
+            .filter { it.timestampMs >= startMillis && it.timestampMs < endMillisExclusive }
+            .groupBy { it.providerId }
+            .map { (provider, rows) ->
+                ProviderUsageAggregate(
+                    providerId = provider,
+                    calls = rows.size.toLong(),
+                    okCalls = rows.count { it.outcome == UsageEventOutcome.OK }.toLong(),
+                    errorCalls = rows.count { it.outcome == UsageEventOutcome.ERROR }.toLong(),
+                    blockedCalls = rows.count { it.outcome == UsageEventOutcome.BLOCKED_BUDGET }.toLong(),
+                    tokensIn = rows.mapNotNull { it.tokensIn }.takeIf { it.isNotEmpty() }?.sum(),
+                    tokensOut = rows.mapNotNull { it.tokensOut }.takeIf { it.isNotEmpty() }?.sum(),
+                    costMicros = rows.mapNotNull { it.costMicros }.takeIf { it.isNotEmpty() }?.sum(),
+                )
+            }
+
+        override suspend fun tokensBetween(
+            startMillis: Long,
+            endMillisExclusive: Long,
+        ): List<ProviderTokensAggregate> = emptyList()
+
+        override suspend fun purgeBefore(cutoffMillis: Long): Int = 0
+    }
+
+    private class FixedSettings(settings: BudgetSettings) : BudgetSettingsStore {
+        private val state = MutableStateFlow(settings)
+        override fun observe(): StateFlow<BudgetSettings> = state
+        override suspend fun setGlobalLimits(limits: BudgetLimits): Boolean = true
+        override suspend fun setProviderLimits(id: ProviderId, limits: BudgetLimits): Boolean = true
+        override suspend fun setSoftThresholdPct(pct: Int): Boolean = true
     }
 
     private class RecordingUsageDao(private val failInsert: Boolean = false) : UsageDao {
