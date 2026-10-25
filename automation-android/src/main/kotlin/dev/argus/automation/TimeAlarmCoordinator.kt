@@ -17,8 +17,10 @@ import dev.argus.engine.runtime.TriggerEnvelope
 import dev.argus.engine.runtime.TriggerEvent
 import dev.argus.engine.runtime.TriggerEventId
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.time.Instant
 
 enum class ScheduledAlarmMode { INEXACT, EXACT }
@@ -141,6 +143,14 @@ object TimeAlarmPlanner {
 /**
  * Coordinatore single-writer di AlarmManager. Non mantiene un service: viene invocato da
  * Application/receiver e riconcilia Room con lo stato OS in modo idempotente.
+ *
+ * **Il lock non copre mai l'esecuzione (B3).** `dispatcher.dispatch` esegue l'intero programma
+ * della regola (anche ore, con `wait`): una consegna procede in tre tempi.
+ * 1. sotto lock: decide, prepara l'envelope e mette la regola in [inFlight];
+ * 2. fuori dal lock: `dispatch`;
+ * 3. di nuovo sotto lock: riprogramma o consuma, e toglie la regola da [inFlight].
+ * Per tutta la durata il record di stato resta «dovuto» (come oggi): se il processo muore a metà,
+ * APP_START/BOOT lo recupera con lo stesso event id e il journal Engine deduplica.
  */
 class TimeAlarmCoordinator(
     private val store: AutomationStore,
@@ -153,96 +163,161 @@ class TimeAlarmCoordinator(
 ) {
     private val mutex = Mutex()
 
-    suspend fun reconcile(reason: ReconcileReason): ReconcileReport = mutex.withLock {
+    /**
+     * Regole con un dispatch in corso fuori dal lock. Si legge e si scrive SOLO sotto [mutex].
+     * `reconcile` le salta (niente recupero né seconda consegna) e un secondo `onAlarm` per la
+     * stessa regola viene ignorato; a fine dispatch il completamento sotto lock è l'unico a
+     * decidere (riprogrammare, consumare, oppure `cancelAndForget` se la regola è stata
+     * disattivata o eliminata nel frattempo).
+     */
+    private val inFlight = mutableSetOf<AutomationId>()
+
+    suspend fun reconcile(reason: ReconcileReason): ReconcileReport {
         val scheduled = mutableListOf<AutomationId>()
         val cancelled = mutableListOf<AutomationId>()
         val recovered = mutableListOf<AutomationId>()
         val failed = mutableListOf<AutomationId>()
-        val currentNow = now()
-        val desired = store.armed()
-            .filter { it.trigger is Trigger.Time }
-            .associateBy { it.id }
+        // Record dovuti da recuperare: la consegna avviene dopo aver rilasciato il lock.
+        val dueRecoveries = mutableListOf<Pair<AutomationId, Long>>()
 
-        state.all().sortedBy { it.automationId.value }.forEach { persisted ->
-            if (persisted.automationId !in desired) {
-                cancelAndForget(persisted.automationId)
-                cancelled += persisted.automationId
+        mutex.withLock {
+            val currentNow = now()
+            val desired = store.armed()
+                .filter { it.trigger is Trigger.Time }
+                .associateBy { it.id }
+
+            state.all().sortedBy { it.automationId.value }.forEach { persisted ->
+                if (persisted.automationId in inFlight) return@forEach
+                if (persisted.automationId !in desired) {
+                    cancelAndForget(persisted.automationId)
+                    cancelled += persisted.automationId
+                }
             }
-        }
 
-        desired.values.sortedBy { it.id.value }.forEach { automation ->
-            var persisted = state.get(automation.id)
-            if (persisted != null && persisted.eventAtMillis <= currentNow.toEpochMilli()) {
-                if (reason.recoverDueAlarm) {
-                    when (deliverLocked(automation.id, persisted.eventAtMillis, currentNow)) {
-                        AlarmDeliveryResult.Delivered -> recovered += automation.id
-                        AlarmDeliveryResult.Ignored -> Unit
-                        is AlarmDeliveryResult.Failed -> failed += automation.id
+            desired.values.sortedBy { it.id.value }.forEach { automation ->
+                if (automation.id in inFlight) return@forEach
+                var persisted = state.get(automation.id)
+                if (persisted != null && persisted.eventAtMillis <= currentNow.toEpochMilli()) {
+                    if (reason.recoverDueAlarm) {
+                        dueRecoveries += automation.id to persisted.eventAtMillis
+                        return@forEach
                     }
-                    return@forEach
+                    cancelAndForget(automation.id)
+                    cancelled += automation.id
+                    persisted = null
                 }
-                cancelAndForget(automation.id)
-                cancelled += automation.id
-                persisted = null
-            }
 
-            when (
-                scheduleLocked(
-                    automation,
-                    currentNow,
-                    persisted,
-                    force = reason.recreateOsRegistration,
-                )
-            ) {
-                ScheduleResult.SCHEDULED -> scheduled += automation.id
-                ScheduleResult.FAILED -> {
-                    failed += automation.id
-                    recordSchedulingFailed(automation.id, "scheduling_failed")
-                }
-                ScheduleResult.EXPIRED -> {
-                    if (persisted != null) cancelled += automation.id
-                    if ((automation.trigger as Trigger.Time).isOneShot()) {
-                        val disabled = store.disableIfApproved(
-                            automation.id,
-                            requireNotNull(automation.approvalFingerprint),
-                        )
-                        // Lifecycle (task #31-B): la regola sparisce dalle armate, va tracciato.
-                        if (disabled) {
-                            recordAuditEvent(automation.id, AuditKind.RULE_DISABLED, "expired")
+                when (
+                    scheduleLocked(
+                        automation,
+                        currentNow,
+                        persisted,
+                        force = reason.recreateOsRegistration,
+                    )
+                ) {
+                    ScheduleResult.SCHEDULED -> scheduled += automation.id
+                    ScheduleResult.FAILED -> {
+                        failed += automation.id
+                        recordSchedulingFailed(automation.id, "scheduling_failed")
+                    }
+                    ScheduleResult.EXPIRED -> {
+                        if (persisted != null) cancelled += automation.id
+                        if ((automation.trigger as Trigger.Time).isOneShot()) {
+                            val disabled = store.disableIfApproved(
+                                automation.id,
+                                requireNotNull(automation.approvalFingerprint),
+                            )
+                            // Lifecycle (task #31-B): la regola sparisce dalle armate, va tracciato.
+                            if (disabled) {
+                                recordAuditEvent(automation.id, AuditKind.RULE_DISABLED, "expired")
+                            }
                         }
+                        recordSchedulingFailed(automation.id, "expired")
                     }
-                    recordSchedulingFailed(automation.id, "expired")
+                    ScheduleResult.UNCHANGED -> Unit
                 }
-                ScheduleResult.UNCHANGED -> Unit
             }
         }
 
-        ReconcileReport(scheduled, cancelled, recovered, failed)
+        // Fuori dal lock: ogni recupero ripassa da prepare/dispatch/complete, quindi una regola nel
+        // frattempo consegnata da un onAlarm (o già in volo) viene ignorata, mai consegnata due volte.
+        dueRecoveries.forEach { (automationId, eventAtMillis) ->
+            when (deliver(automationId, eventAtMillis, deliveredFingerprint = null)) {
+                AlarmDeliveryResult.Delivered -> recovered += automationId
+                AlarmDeliveryResult.Ignored -> Unit
+                is AlarmDeliveryResult.Failed -> failed += automationId
+            }
+        }
+        return ReconcileReport(scheduled, cancelled, recovered, failed)
     }
 
     suspend fun onAlarm(
         automationId: AutomationId,
         approvalFingerprint: ApprovalFingerprint,
         eventAtMillis: Long,
-    ): AlarmDeliveryResult = mutex.withLock {
-        deliverLocked(automationId, eventAtMillis, now(), approvalFingerprint)
+    ): AlarmDeliveryResult = deliver(automationId, eventAtMillis, approvalFingerprint)
+
+    private suspend fun deliver(
+        automationId: AutomationId,
+        eventAtMillis: Long,
+        deliveredFingerprint: ApprovalFingerprint?,
+    ): AlarmDeliveryResult {
+        val prepared = when (
+            val preparation = mutex.withLock {
+                prepareDelivery(automationId, eventAtMillis, now(), deliveredFingerprint)
+            }
+        ) {
+            is Preparation.Done -> return preparation.result
+            is Preparation.Ready -> preparation
+        }
+
+        // Da qui la regola è in `inFlight`: va sempre rilasciata, anche su cancellazione.
+        var released = false
+        try {
+            var dispatchFailed = false
+            try {
+                dispatcher.dispatch(prepared.envelope)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                // Il record resta intenzionalmente dovuto: APP_START/BOOT riprova lo stesso event ID.
+                dispatchFailed = true
+            }
+            return mutex.withLock {
+                inFlight -= automationId
+                released = true
+                if (dispatchFailed) {
+                    deliveryFailed(automationId, "dispatch_failed")
+                } else {
+                    completeDelivery(prepared)
+                }
+            }
+        } finally {
+            if (!released) {
+                // Cancellazione durante il dispatch (o in attesa del lock): il record resta dovuto
+                // per il recupero, ma il marker in memoria non deve restare appeso.
+                withContext(NonCancellable) { mutex.withLock { inFlight -= automationId } }
+            }
+        }
     }
 
-    private suspend fun deliverLocked(
+    /** Sotto lock: decide e prepara la consegna; marca la regola in volo solo se si procede. */
+    private suspend fun prepareDelivery(
         automationId: AutomationId,
         eventAtMillis: Long,
         currentNow: Instant,
-        deliveredFingerprint: ApprovalFingerprint? = null,
-    ): AlarmDeliveryResult {
+        deliveredFingerprint: ApprovalFingerprint?,
+    ): Preparation {
+        if (automationId in inFlight) return Preparation.Done(AlarmDeliveryResult.Ignored)
         val persisted = state.get(automationId)
         if (persisted != null && persisted.eventAtMillis != eventAtMillis)
-            return AlarmDeliveryResult.Ignored
+            return Preparation.Done(AlarmDeliveryResult.Ignored)
         if (persisted != null && deliveredFingerprint != null &&
             persisted.approvalFingerprint != deliveredFingerprint
-        ) return AlarmDeliveryResult.Ignored
+        ) return Preparation.Done(AlarmDeliveryResult.Ignored)
         val eventFingerprint = persisted?.approvalFingerprint
             ?: deliveredFingerprint
-            ?: return AlarmDeliveryResult.Ignored
+            ?: return Preparation.Done(AlarmDeliveryResult.Ignored)
 
         val automation = store.get(automationId)
         val trigger = automation?.trigger as? Trigger.Time
@@ -250,13 +325,15 @@ class TimeAlarmCoordinator(
             !automation.enabled
         ) {
             cancelAndForget(automationId)
-            return AlarmDeliveryResult.Ignored
+            return Preparation.Done(AlarmDeliveryResult.Ignored)
         }
         if (automation.approvalFingerprint != eventFingerprint) {
-            return when (scheduleLocked(automation, currentNow, existing = persisted)) {
-                ScheduleResult.FAILED -> deliveryFailed(automationId, "reschedule_failed")
-                else -> AlarmDeliveryResult.Ignored
-            }
+            return Preparation.Done(
+                when (scheduleLocked(automation, currentNow, existing = persisted)) {
+                    ScheduleResult.FAILED -> deliveryFailed(automationId, "reschedule_failed")
+                    else -> AlarmDeliveryResult.Ignored
+                },
+            )
         }
 
         // Stessa politica del planner (afterMs -> EXACT): il record di recovery deve rispecchiare
@@ -283,18 +360,31 @@ class TimeAlarmCoordinator(
             }
         }
 
-        val envelope = TriggerEnvelope(
-            id = TriggerEventId("time:${eventFingerprint.value}:$eventAtMillis"),
-            event = TriggerEvent.TimeFired(automationId, eventFingerprint),
+        inFlight += automationId
+        return Preparation.Ready(
+            envelope = TriggerEnvelope(
+                id = TriggerEventId("time:${eventFingerprint.value}:$eventAtMillis"),
+                event = TriggerEvent.TimeFired(automationId, eventFingerprint),
+            ),
+            automationId = automationId,
+            eventFingerprint = eventFingerprint,
+            eventAtMillis = eventAtMillis,
+            recoveryRecord = recoveryRecord,
         )
-        try {
-            dispatcher.dispatch(envelope)
-        } catch (error: CancellationException) {
-            throw error
-        } catch (_: Exception) {
-            // Il record resta intenzionalmente due: APP_START/BOOT riprova lo stesso event ID.
-            return deliveryFailed(automationId, "dispatch_failed")
-        }
+    }
+
+    /**
+     * Sotto lock, a dispatch concluso: riprogramma o consuma. L'orologio si rilegge qui perché il
+     * programma può essere durato a lungo: la prossima occorrenza parte da «adesso», senza
+     * accumulare scatti arretrati per i minuti passati a eseguire.
+     */
+    private suspend fun completeDelivery(prepared: Preparation.Ready): AlarmDeliveryResult {
+        val automationId = prepared.automationId
+        val eventFingerprint = prepared.eventFingerprint
+        val eventAtMillis = prepared.eventAtMillis
+        val recoveryRecord = prepared.recoveryRecord
+        val envelope = prepared.envelope
+        val currentNow = now()
 
         val latest = store.get(automationId)
         val latestTrigger = latest?.trigger as? Trigger.Time
@@ -344,6 +434,18 @@ class TimeAlarmCoordinator(
             ScheduleResult.EXPIRED -> deliveryFailed(automationId, "reschedule_expired")
             ScheduleResult.FAILED -> deliveryFailed(automationId, "reschedule_failed")
         }
+    }
+
+    private sealed interface Preparation {
+        data class Done(val result: AlarmDeliveryResult) : Preparation
+
+        class Ready(
+            val envelope: TriggerEnvelope,
+            val automationId: AutomationId,
+            val eventFingerprint: ApprovalFingerprint,
+            val eventAtMillis: Long,
+            val recoveryRecord: ScheduledTimeAlarm,
+        ) : Preparation
     }
 
     private suspend fun scheduleLocked(
