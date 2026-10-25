@@ -583,10 +583,102 @@ class TimeAlarmCoordinatorTest {
 
         // now avanza: senza il freeze l'ancora slitterebbe a now+afterMs. Deve restare congelata.
         clock = start.plusSeconds(30)
-        val second = coordinator.reconcile(ReconcileReason.APP_START)
+        val second = coordinator.reconcile(ReconcileReason.CAPABILITY_CHANGED)
         assertEquals(emptyList(), second.scheduled) // UNCHANGED, nessuna nuova schedule
         assertEquals(anchor, state.get(automation.id)?.eventAtMillis)
         assertEquals(1, backend.scheduled.size) // il backend NON è stato richiamato
+
+        // All'avvio la sveglia si ri-registra sempre (B17), ma sulla STESSA ancora congelata.
+        clock = start.plusSeconds(60)
+        val third = coordinator.reconcile(ReconcileReason.APP_START)
+        assertEquals(listOf(automation.id), third.scheduled)
+        assertEquals(anchor, state.get(automation.id)?.eventAtMillis)
+        assertEquals(listOf(anchor, anchor), backend.scheduled.map { it.eventAtMillis })
+    }
+
+    // --- B17: dopo un arresto forzato le sveglie si ricreano ----------------------------------
+
+    @Test
+    fun `app start re-registers every armed time rule even when Room already has the record`() = runTest {
+        val first = automation(Trigger.Time(at = "2026-07-13T22:00", tz = "UTC"), "a1")
+        val second = automation(Trigger.Time(cron = "0 23 * * *", tz = "UTC"), "a2")
+        val firstAt = Instant.parse("2026-07-13T22:00:00Z").toEpochMilli()
+        val secondAt = Instant.parse("2026-07-13T23:00:00Z").toEpochMilli()
+        // Stato persistito identico a ciò che il planner calcolerebbe: prima era UNCHANGED.
+        val state = FakeTimeAlarmStateStore(record(first, firstAt), record(second, secondAt))
+        val backend = FakeTimeAlarmBackend()
+
+        val report = coordinator(FakeAutomationStore(first, second), state, backend)
+            .reconcile(ReconcileReason.APP_START)
+
+        assertEquals(listOf(first.id, second.id), report.scheduled)
+        assertEquals(
+            listOf(first.id to firstAt, second.id to secondAt),
+            backend.scheduled.map { it.automationId to it.eventAtMillis },
+        )
+        assertEquals(emptyList(), backend.cancelled)
+    }
+
+    // --- B37: cambio d'ora, le occorrenze perse si recuperano ---------------------------------
+
+    @Test
+    fun `time change right after boot recovers the occurrence missed while the phone was off`() = runTest {
+        var clock = Instant.parse("2026-07-14T08:55:00Z")
+        val automation = automation(Trigger.Time(cron = "0 9 * * *", tz = "UTC"))
+        val dueAt = Instant.parse("2026-07-14T09:00:00Z").toEpochMilli()
+        val nextAt = Instant.parse("2026-07-15T09:00:00Z").toEpochMilli()
+        val state = FakeTimeAlarmStateStore(record(automation, dueAt))
+        val backend = FakeTimeAlarmBackend()
+        val dispatched = mutableListOf<TriggerEnvelope>()
+        val coordinator = TimeAlarmCoordinator(
+            store = FakeAutomationStore(automation),
+            state = state,
+            backend = backend,
+            dispatcher = TimeEventDispatcher { dispatched += it },
+            now = { clock },
+        )
+
+        // Boot alle 8:55: l'occorrenza delle 9:00 non è ancora dovuta, si riprogramma soltanto.
+        coordinator.reconcile(ReconcileReason.BOOT)
+        assertEquals(emptyList(), dispatched)
+        assertEquals(dueAt, state.get(automation.id)?.eventAtMillis)
+
+        // L'orario di rete porta l'orologio alle 10:00: l'occorrenza delle 9:00 è dovuta.
+        clock = Instant.parse("2026-07-14T10:00:00Z")
+        val report = coordinator.reconcile(ReconcileReason.TIME_CHANGED)
+
+        assertEquals(listOf(automation.id), report.recovered)
+        assertEquals(emptyList(), report.cancelled)
+        assertEquals(
+            listOf("time:${requireNotNull(automation.approvalFingerprint).value}:$dueAt"),
+            dispatched.map { it.id.value },
+        )
+        assertEquals(nextAt, state.get(automation.id)?.eventAtMillis)
+        assertEquals(nextAt, backend.scheduled.last().eventAtMillis)
+
+        // Un secondo cambio d'ora non riconsegna la stessa occorrenza.
+        coordinator.reconcile(ReconcileReason.TIME_CHANGED)
+        assertEquals(1, dispatched.size)
+    }
+
+    @Test
+    fun `timezone change keeps cancelling a due record instead of recovering it`() = runTest {
+        val automation = automation(Trigger.Time(cron = "0 9 * * *", tz = "UTC"))
+        val dueAt = now.minusSeconds(3_600).toEpochMilli()
+        val state = FakeTimeAlarmStateStore(record(automation, dueAt))
+        val dispatched = mutableListOf<TriggerEnvelope>()
+        val coordinator = TimeAlarmCoordinator(
+            store = FakeAutomationStore(automation),
+            state = state,
+            backend = FakeTimeAlarmBackend(),
+            dispatcher = TimeEventDispatcher { dispatched += it },
+            now = { now },
+        )
+
+        val report = coordinator.reconcile(ReconcileReason.TIMEZONE_CHANGED)
+
+        assertEquals(listOf(automation.id), report.cancelled)
+        assertEquals(emptyList(), dispatched)
     }
 
     @Test

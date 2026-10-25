@@ -9,4 +9,6 @@
     <string name="argus_connectivity_notification_text">Esecuzione automazioni armate e monitoraggio dei trigger necessari</string>
     <string name="argus_budget_channel_name">Budget LLM</string>
     <string name="argus_budget_channel_description">Avvisi quando il budget delle chiamate LLM è quasi o del tutto esaurito</string>
+    <string name="argus_foreground_denied_title">Regole in pausa</string>
+    <string name="argus_foreground_denied_text">Regole Wi-Fi e alimentazione in pausa: apri Argus per riattivarle</string>
 </resources>

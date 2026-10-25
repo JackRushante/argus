@@ -1,6 +1,10 @@
 package dev.argus.automation
 
+import dev.argus.automation.connectivity.ConnectivitySentinelBackend
+import dev.argus.automation.foreground.SharedForegroundSentinel
 import dev.argus.automation.notification.NotificationReplyDelivery
+import dev.argus.automation.power.ExecutionWakeLock
+import dev.argus.automation.power.PowerLock
 import dev.argus.automation.notification.NotificationReplyGateway
 import dev.argus.automation.notification.ReplyBurst
 import dev.argus.automation.notification.BurstMessage
@@ -909,6 +913,121 @@ class GenerativeActionLaneTest {
         assertTrue(awaited.isCancelled)
     }
 
+    // --- B18/B19: un'elaborazione AI non viene congelata a metà ----------------------------------
+
+    @Test
+    fun `an elaboration holds the wakelock and the foreground lease around the model call`() = runTest {
+        val events = mutableListOf<String>()
+        val fixture = fixture(
+            sentinel = recordingSentinel(events),
+            wakeLock = recordingWakeLock(events),
+            act = {
+                events += "brain"
+                ActResult("risposta", null)
+            },
+        )
+
+        assertTrue(fixture.lane.trySubmit(fixture.context, fixture.action))
+        fixture.journal.ready()
+        runCurrent()
+
+        assertEquals(listOf("wake", "lease", "brain", "unlease", "unwake"), events)
+        assertEquals(1, fixture.gateway.calls)
+    }
+
+    @Test
+    fun `the lease and the wakelock are released when the model call fails`() = runTest {
+        val events = mutableListOf<String>()
+        val fixture = fixture(
+            sentinel = recordingSentinel(events),
+            wakeLock = recordingWakeLock(events),
+            act = {
+                events += "brain"
+                error("forced model failure")
+            },
+        )
+
+        fixture.lane.trySubmit(fixture.context, fixture.action)
+        fixture.journal.ready()
+        runCurrent()
+
+        assertEquals(listOf("wake", "lease", "brain", "unlease", "unwake"), events)
+        assertEquals(ActionJournalOutcome.FAILED, fixture.journal.completions.single().outcome)
+    }
+
+    @Test
+    fun `the lease and the wakelock are released when the lane is cancelled mid call`() = runTest {
+        val events = mutableListOf<String>()
+        val fixture = fixture(
+            sentinel = recordingSentinel(events),
+            wakeLock = recordingWakeLock(events),
+            act = {
+                events += "brain"
+                awaitCancellation()
+            },
+        )
+
+        fixture.lane.trySubmit(fixture.context, fixture.action)
+        fixture.journal.ready()
+        runCurrent()
+        assertEquals(listOf("wake", "lease", "brain"), events)
+
+        backgroundScope.coroutineContext[kotlinx.coroutines.Job]!!.cancel()
+        runCurrent()
+
+        assertEquals(listOf("wake", "lease", "brain", "unlease", "unwake"), events)
+    }
+
+    @Test
+    fun `a denied lease does not stop the elaboration`() = runTest {
+        val events = mutableListOf<String>()
+        val fixture = fixture(
+            sentinel = recordingSentinel(events, startResult = false),
+            wakeLock = recordingWakeLock(events),
+            act = {
+                events += "brain"
+                ActResult("risposta", null)
+            },
+        )
+
+        fixture.lane.trySubmit(fixture.context, fixture.action)
+        fixture.journal.ready()
+        runCurrent()
+
+        assertEquals(listOf("wake", "lease", "brain", "unwake"), events)
+        assertEquals(1, fixture.gateway.calls)
+        assertEquals(ActionJournalOutcome.SUCCEEDED, fixture.journal.completions.single().outcome)
+    }
+
+    private fun recordingSentinel(
+        events: MutableList<String>,
+        startResult: Boolean = true,
+    ): SharedForegroundSentinel = SharedForegroundSentinel(
+        object : ConnectivitySentinelBackend {
+            override suspend fun start(): Boolean {
+                events += "lease"
+                return startResult
+            }
+
+            override suspend fun stop(): Boolean {
+                events += "unlease"
+                return true
+            }
+        },
+    )
+
+    private fun recordingWakeLock(events: MutableList<String>): ExecutionWakeLock = ExecutionWakeLock(
+        object : PowerLock {
+            override fun acquire(timeoutMillis: Long) {
+                events += "wake"
+            }
+
+            override fun release() {
+                events += "unwake"
+            }
+        },
+    )
+
     private fun kotlinx.coroutines.test.TestScope.fixture(
         action: Action.InvokeLlm = action(),
         automation: Automation = approvedAutomation(action),
@@ -920,6 +1039,8 @@ class GenerativeActionLaneTest {
         act: suspend () -> ActResult = { ActResult("risposta", null) },
         oneShotConsumptions: OneShotConsumptionRegistry = NoopOneShotConsumptionRegistry,
         bursts: ReplyBurstSource? = null,
+        sentinel: SharedForegroundSentinel? = null,
+        wakeLock: ExecutionWakeLock = ExecutionWakeLock.NONE,
     ): Fixture {
         val store = MutableAutomationStore(automation)
         val journal = FakeSubmittedJournal()
@@ -940,6 +1061,8 @@ class GenerativeActionLaneTest {
             submissionHandshakeTimeoutMillis = 5_000,
             nowMillis = { 2_000L },
             replyBursts = bursts,
+            wakeLock = wakeLock,
+            sentinel = sentinel,
         )
         return Fixture(lane, action, context, store, journal, brain, gateway, policy, notifier)
     }

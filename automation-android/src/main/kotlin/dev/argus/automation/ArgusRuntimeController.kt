@@ -3,6 +3,12 @@ package dev.argus.automation
 import android.util.Log
 import dev.argus.automation.notification.ActiveNotificationReplyRegistry
 import dev.argus.data.RoomJournalMaintenance
+import dev.argus.engine.model.Trigger
+import dev.argus.engine.runtime.AuditEvent
+import dev.argus.engine.runtime.AuditKind
+import dev.argus.engine.runtime.AuditSink
+import dev.argus.engine.runtime.AutomationStore
+import dev.argus.engine.runtime.NoopAuditSink
 import dev.argus.shizuku.ShizukuGatewayStatus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -40,14 +46,37 @@ class ArgusRuntimeController(
     private val sensor: SensorTriggerRuntime = NoopSensorTriggerRuntime,
     private val sensorIngress: SensorEventIngress? = null,
     private val nowMillis: () -> Long = System::currentTimeMillis,
+    /**
+     * Store delle regole, per due compiti del ciclo di vita: disarmare all'avvio le regole
+     * «subito» interrotte a metà (B31a) e togliere la registrazione del sensore quando l'ultima
+     * regola sensore sparisce, ad esempio eliminata (B31c). Senza store entrambi sono inattivi.
+     */
+    private val store: AutomationStore? = null,
+    private val audit: AuditSink = NoopAuditSink,
+    /**
+     * `true` se nessun dispatch di evento è in corso nel processo. La pulizia periodica non parte
+     * mentre un programma lungo è in esecuzione: marcherebbe come interrotta un'esecuzione viva.
+     */
+    private val dispatchesIdle: () -> Boolean = { true },
 ) {
     private val started = AtomicBoolean(false)
     private val reconcileMutex = Mutex()
+    private val periodicMaintenance = PeriodicMaintenance(
+        run = { now -> maintenance.run(now) },
+        nowMillis = nowMillis,
+        canRun = dispatchesIdle,
+    )
+
+    /** Istante di avvio di QUESTO processo: ciò che è stato scattato prima è di un processo morto. */
+    @Volatile
+    private var startedAtMillis: Long = Long.MAX_VALUE
 
     fun start() {
         if (!started.compareAndSet(false, true)) return
+        startedAtMillis = nowMillis()
         scope.launch {
-            runCatchingPreservingCancellation { maintenance.run(nowMillis()) }
+            // Prima la pulizia, poi il reconcile: stesso ordine di sempre all'avvio.
+            runMaintenanceIfDue()
             reconcile(ReconcileReason.APP_START)
         }
         scope.launch {
@@ -67,31 +96,80 @@ class ArgusRuntimeController(
                     reconcile(ReconcileReason.CAPABILITY_CHANGED)
                 }
         }
+        store?.let { rules ->
+            scope.launch {
+                // Quando l'insieme delle regole sensore armate cambia (per esempio l'ultima viene
+                // eliminata) la registrazione fisica e il servizio devono seguirlo: reconcile è
+                // idempotente e il coordinator sensori serializza da sé le chiamate concorrenti.
+                // La prima emissione è lo stato iniziale, già coperto dal reconcile di avvio.
+                rules.observeAll()
+                    .map { automations ->
+                        automations
+                            .filter { it.enabled && it.trigger is Trigger.Sensor }
+                            .map { it.id }
+                            .toSet()
+                    }
+                    .distinctUntilChanged()
+                    .drop(1)
+                    .collect {
+                        runCatchingPreservingCancellation { sensor.reconcile() }
+                            .onFailure { error ->
+                                Log.w(TAG, "reconcile sensor fallito: ${error::class.java.simpleName}")
+                            }
+                    }
+            }
+        }
     }
 
     fun onForeground() {
         if (!started.get()) return
+        maintenanceIfDue()
         scope.launch { reconcile(ReconcileReason.CAPABILITY_CHANGED) }
     }
+
+    /**
+     * Pulizia dei dati vecchi, al massimo una volta ogni 24 h di orologio reale (B28). Parte in
+     * background e non blocca chi la chiama: la usano `onForeground` e la fine di ogni dispatch.
+     */
+    fun maintenanceIfDue() {
+        if (!periodicMaintenance.isDue()) return
+        scope.launch { runMaintenanceIfDue() }
+    }
+
+    internal suspend fun runMaintenanceIfDue(): Boolean =
+        runCatchingPreservingCancellation { periodicMaintenance.runIfDue() }
+            .onFailure { error ->
+                Log.w(TAG, "manutenzione fallita: ${error::class.java.simpleName}")
+            }
+            .getOrDefault(false)
 
     internal suspend fun reconcile(reason: ReconcileReason) = reconcileMutex.withLock {
         runCatchingPreservingCancellation { capabilities.reconcile() }
             .onFailure { error ->
                 Log.w(TAG, "reconcile capability fallito: ${error::class.java.simpleName}")
             }
+        if (reason == ReconcileReason.APP_START) {
+            runCatchingPreservingCancellation { disarmInterruptedImmediates() }
+                .onFailure { error ->
+                    Log.w(TAG, "recupero regole immediate fallito: ${error::class.java.simpleName}")
+                }
+        }
+        // I recuperi dovuti del coordinator partono in background (RecoveryLauncher): il reconcile
+        // non aspetta un programma che può durare un'ora.
         runCatchingPreservingCancellation { scheduler.reconcile(reason) }
             .onFailure { error ->
                 Log.w(TAG, "reconcile scheduler fallito: ${error::class.java.simpleName}")
             }
         if (reason == ReconcileReason.APP_START) {
-            runCatchingPreservingCancellation { phoneIngress?.recoverPending() }
-                .onFailure { error ->
-                    Log.w(TAG, "recovery chiamata fallito: ${error::class.java.simpleName}")
-                }
-            runCatchingPreservingCancellation { connectivityIngress?.recoverPending() }
-                .onFailure { error ->
-                    Log.w(TAG, "recovery connectivity fallito: ${error::class.java.simpleName}")
-                }
+            // Un recupero per sorgente, in background: ognuno ha la sua coda sequenziale
+            // nell'ingress (SequentialLanes), quindi l'ordine per sorgente si preserva e un evento
+            // già in consegna non viene riconsegnato. Il reconcile non ne attende la fine.
+            phoneIngress?.let { ingress ->
+                launchRecovery("chiamata") { ingress.recoverPending() }
+            }
+            connectivityIngress?.let { ingress ->
+                launchRecovery("connectivity") { ingress.recoverPending() }
+            }
         }
         runCatchingPreservingCancellation { connectivity.reconcile() }
             .onFailure { error ->
@@ -114,13 +192,55 @@ class ArgusRuntimeController(
             }
             .getOrNull()
         if (reason == ReconcileReason.APP_START && sensorReport != null) {
-            runCatchingPreservingCancellation {
-                sensorIngress?.recoverPending(sensorReport.requiredBy.toSet())
-            }.onFailure { error ->
-                Log.w(TAG, "recovery sensor fallito: ${error::class.java.simpleName}")
+            sensorIngress?.let { ingress ->
+                val required = sensorReport.requiredBy.toSet()
+                launchRecovery("sensor") { ingress.recoverPending(required) }
             }
         }
         Unit
+    }
+
+    private fun launchRecovery(label: String, block: suspend () -> Unit) {
+        scope.launch {
+            runCatchingPreservingCancellation { block() }
+                .onFailure { error ->
+                    Log.w(TAG, "recovery $label fallito: ${error::class.java.simpleName}")
+                }
+        }
+    }
+
+    /**
+     * Una regola «subito» fira una sola volta all'arm e si disarma a esecuzione conclusa. Se
+     * all'avvio è ancora armata ma ha già un claim di scatto di un processo precedente
+     * (`lastFiredAt` anteriore a questo avvio), l'app è stata uccisa a metà: si disarma con un
+     * audit e NON si riesegue, perché potrebbe ripetere effetti già avvenuti. Il confronto con
+     * l'avvio del processo evita di toccare una regola armata e in esecuzione proprio ora.
+     */
+    private suspend fun disarmInterruptedImmediates() {
+        val rules = store ?: return
+        rules.armed()
+            .filter { it.trigger is Trigger.Immediate }
+            .forEach { automation ->
+                val fingerprint = automation.approvalFingerprint ?: return@forEach
+                val firedAt = rules.lastFiredAt(automation.id) ?: return@forEach
+                if (firedAt >= startedAtMillis) return@forEach
+                if (rules.disableIfApproved(automation.id, fingerprint)) {
+                    recordInterrupted(automation.id)
+                }
+            }
+    }
+
+    private suspend fun recordInterrupted(id: dev.argus.engine.model.AutomationId) {
+        runCatchingPreservingCancellation {
+            audit.record(
+                AuditEvent(
+                    id,
+                    AuditKind.ERROR,
+                    nowMillis(),
+                    detail = EXECUTION_INTERRUPTED,
+                ),
+            )
+        }
     }
 
     private suspend fun <T> runCatchingPreservingCancellation(block: suspend () -> T): Result<T> =
@@ -134,5 +254,6 @@ class ArgusRuntimeController(
 
     private companion object {
         const val TAG = "ArgusRuntime"
+        const val EXECUTION_INTERRUPTED = "execution_interrupted"
     }
 }

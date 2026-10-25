@@ -49,7 +49,7 @@ class TimeAlarmReceiver : BroadcastReceiver() {
             Log.w(TAG, "runtime scheduler non inizializzato; alarm recuperabile da Room")
             return
         }
-        launchReceiverWork(context, "time_alarm") {
+        launchReceiverWork(context, "time_alarm", signal.automationId) {
             runtime.onAlarm(signal.automationId, signal.approvalFingerprint, signal.eventAtMillis)
         }
     }

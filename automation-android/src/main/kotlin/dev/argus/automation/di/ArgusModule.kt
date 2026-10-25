@@ -1,6 +1,7 @@
 package dev.argus.automation.di
 
 import android.content.Context
+import android.os.SystemClock
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -18,7 +19,15 @@ import dev.argus.automation.AndroidTimeAlarmBackend
 import dev.argus.automation.AppPreferencesStore
 import dev.argus.automation.ApprovalFlow
 import dev.argus.automation.ArmedAutomationRegistrar
+import dev.argus.automation.DispatchFrame
 import dev.argus.automation.ImmediateReArm
+import dev.argus.automation.power.AndroidPowerLock
+import dev.argus.automation.power.AndroidWakeAlarmBackend
+import dev.argus.automation.power.ExecutionWakeLock
+import dev.argus.automation.power.WaitWakeSignals
+import dev.argus.automation.power.WakeAlarmBackend
+import dev.argus.automation.power.WakeAwarePause
+import dev.argus.automation.RecoveryLauncher
 import dev.argus.automation.ArgusRuntimeController
 import dev.argus.automation.AutomationNotifier
 import dev.argus.automation.ConfiguredBridgeBrain
@@ -54,7 +63,9 @@ import dev.argus.automation.apps.InstalledAppResolver
 import dev.argus.automation.base.AndroidBaseActionExecutor
 import dev.argus.automation.base.AndroidBaseActionSurface
 import dev.argus.automation.base.BaseActionSurface
+import dev.argus.automation.foreground.AndroidForegroundDeniedNotice
 import dev.argus.automation.foreground.SharedForegroundSentinel
+import dev.argus.automation.connectivity.ForegroundDeniedNotice
 import dev.argus.automation.foreground.ReceiverWorkLauncher
 import dev.argus.automation.foreground.SentinelDemand
 import dev.argus.automation.sensor.AndroidSignificantMotionBackend
@@ -510,6 +521,8 @@ object ArgusModule {
         notifier: AutomationNotifier,
         oneShotConsumptions: OneShotConsumptionRegistry,
         replyRegistry: ActiveNotificationReplyRegistry,
+        wakeLock: ExecutionWakeLock,
+        sentinel: SharedForegroundSentinel,
     ): AndroidGenerativeLane = AndroidGenerativeLane(
         scope,
         journal,
@@ -521,6 +534,8 @@ object ArgusModule {
         notifier,
         oneShotConsumptions,
         replyBursts = replyRegistry,
+        wakeLock = wakeLock,
+        sentinel = sentinel,
     )
 
     @Provides
@@ -583,6 +598,44 @@ object ArgusModule {
     @Provides
     fun resolvedActionExecutorBoundary(executor: ShizukuActionExecutor): ResolvedActionExecutor = executor
 
+    /** Wakelock parziale «argus:execution» con contatore (B19). */
+    @Provides
+    @Singleton
+    fun executionWakeLock(@ApplicationContext context: Context): ExecutionWakeLock =
+        ExecutionWakeLock(AndroidPowerLock(context, AndroidPowerLock.EXECUTION_TAG))
+
+    /** Registro delle attese lunghe + wakelock breve «argus:wait-wakeup» del receiver di ripresa. */
+    @Provides
+    @Singleton
+    fun waitWakeSignals(@ApplicationContext context: Context): WaitWakeSignals =
+        WaitWakeSignals(AndroidPowerLock(context, AndroidPowerLock.WAIT_WAKEUP_TAG))
+
+    @Provides
+    @Singleton
+    fun wakeAlarmBackend(@ApplicationContext context: Context): WakeAlarmBackend =
+        AndroidWakeAlarmBackend(context)
+
+    /** Attese che sopravvivono al deep sleep, iniettate come `Engine(pause = …)`. */
+    @Provides
+    @Singleton
+    fun wakeAwarePause(
+        wakeLock: ExecutionWakeLock,
+        alarms: WakeAlarmBackend,
+        signals: WaitWakeSignals,
+    ): WakeAwarePause = WakeAwarePause(wakeLock, alarms, signals, SystemClock::elapsedRealtime)
+
+    /**
+     * Cornice di ogni dispatch verso l'Engine: wakelock, conteggio dei dispatch in corso e pulizia
+     * periodica a fine dispatch. Il controller si risolve in modo pigro (Provider) perché dipende
+     * a sua volta dagli ingress, che dipendono dai dispatcher.
+     */
+    @Provides
+    @Singleton
+    fun dispatchFrame(
+        wakeLock: ExecutionWakeLock,
+        controller: Provider<ArgusRuntimeController>,
+    ): DispatchFrame = DispatchFrame(wakeLock) { controller.get().maintenanceIfDue() }
+
     @Provides
     @Singleton
     fun engine(
@@ -592,6 +645,7 @@ object ArgusModule {
         audit: AuditSink,
         journal: ExecutionJournal,
         resolvedExecutor: ResolvedActionExecutor,
+        wakeAwarePause: WakeAwarePause,
     ): Engine = Engine(
         store = store,
         executor = executor,
@@ -601,13 +655,14 @@ object ArgusModule {
         audit = audit,
         journal = journal,
         resolvedExecutor = resolvedExecutor,
+        pause = { millis -> wakeAwarePause.pause(millis) },
         now = System::currentTimeMillis,
     )
 
     @Provides
     @Singleton
-    fun timeEventDispatcher(engine: Engine, state: LazyDeviceStateProvider): EngineTimeEventDispatcher =
-        EngineTimeEventDispatcher(engine, state)
+    fun timeEventDispatcher(engine: Engine, state: LazyDeviceStateProvider, frame: DispatchFrame): EngineTimeEventDispatcher =
+        EngineTimeEventDispatcher(engine, state, frame)
 
     @Provides
     fun timeEventDispatcherBoundary(dispatcher: EngineTimeEventDispatcher): TimeEventDispatcher =
@@ -618,7 +673,8 @@ object ArgusModule {
     fun immediateEventDispatcher(
         engine: Engine,
         state: LazyDeviceStateProvider,
-    ): EngineImmediateEventDispatcher = EngineImmediateEventDispatcher(engine, state)
+        frame: DispatchFrame,
+    ): EngineImmediateEventDispatcher = EngineImmediateEventDispatcher(engine, state, frame)
 
     @Provides
     fun immediateEventDispatcherBoundary(
@@ -630,7 +686,8 @@ object ArgusModule {
     fun notificationEventDispatcher(
         engine: Engine,
         state: DeviceStateSnapshotProvider,
-    ): EngineNotificationEventDispatcher = EngineNotificationEventDispatcher(engine, state)
+        frame: DispatchFrame,
+    ): EngineNotificationEventDispatcher = EngineNotificationEventDispatcher(engine, state, frame)
 
     @Provides
     fun notificationEventDispatcherBoundary(
@@ -663,10 +720,11 @@ object ArgusModule {
         engine: Engine,
         state: DeviceStateSnapshotProvider,
         @ApplicationContext context: Context,
+        frame: DispatchFrame,
     ): PhoneEventIngress = PhoneEventIngress(
         parser = PhoneEventParser(),
         callState = PrefsCallStateStore(context),
-        dispatcher = EnginePhoneEventDispatcher(engine, state),
+        dispatcher = EnginePhoneEventDispatcher(engine, state, frame),
     )
 
     @Provides
@@ -674,7 +732,8 @@ object ArgusModule {
     fun connectivityEventDispatcher(
         engine: Engine,
         state: DeviceStateSnapshotProvider,
-    ): EngineConnectivityEventDispatcher = EngineConnectivityEventDispatcher(engine, state)
+        frame: DispatchFrame,
+    ): EngineConnectivityEventDispatcher = EngineConnectivityEventDispatcher(engine, state, frame)
 
     @Provides
     fun connectivityEventDispatcherBoundary(
@@ -720,15 +779,28 @@ object ArgusModule {
     fun receiverWorkLauncher(
         @ApplicationScope scope: CoroutineScope,
         sentinel: SharedForegroundSentinel,
-    ): ReceiverWorkLauncher = ReceiverWorkLauncher(scope, sentinel)
+        audit: AuditSink,
+    ): ReceiverWorkLauncher = ReceiverWorkLauncher(scope, sentinel, audit)
 
     @Provides
     @Singleton
     fun connectivitySentinelCoordinator(
         store: AutomationStore,
         sentinel: SharedForegroundSentinel,
+        audit: AuditSink,
+        notice: ForegroundDeniedNotice,
     ): ConnectivitySentinelCoordinator =
-        ConnectivitySentinelCoordinator(store, sentinel.demandBackend(SentinelDemand.Connectivity))
+        ConnectivitySentinelCoordinator(
+            store,
+            sentinel.demandBackend(SentinelDemand.Connectivity),
+            audit,
+            notice,
+        )
+
+    @Provides
+    @Singleton
+    fun foregroundDeniedNotice(@ApplicationContext context: Context): ForegroundDeniedNotice =
+        AndroidForegroundDeniedNotice(context)
 
     @Provides
     fun connectivityTriggerRuntime(
@@ -779,7 +851,8 @@ object ArgusModule {
     fun sensorEventDispatcher(
         engine: Engine,
         state: DeviceStateSnapshotProvider,
-    ): EngineSensorEventDispatcher = EngineSensorEventDispatcher(engine, state)
+        frame: DispatchFrame,
+    ): EngineSensorEventDispatcher = EngineSensorEventDispatcher(engine, state, frame)
 
     @Provides
     fun sensorEventDispatcherBoundary(
@@ -828,7 +901,8 @@ object ArgusModule {
     fun geofenceEventDispatcher(
         engine: Engine,
         state: DeviceStateSnapshotProvider,
-    ): EngineGeofenceEventDispatcher = EngineGeofenceEventDispatcher(engine, state)
+        frame: DispatchFrame,
+    ): EngineGeofenceEventDispatcher = EngineGeofenceEventDispatcher(engine, state, frame)
 
     @Provides
     fun geofenceEventDispatcherBoundary(
@@ -887,6 +961,7 @@ object ArgusModule {
         dispatcher: TimeEventDispatcher,
         audit: AuditSink,
         oneShotConsumptions: OneShotConsumptionRegistry,
+        launcher: ReceiverWorkLauncher,
     ): TimeAlarmCoordinator =
         TimeAlarmCoordinator(
             store,
@@ -896,6 +971,9 @@ object ArgusModule {
             Instant::now,
             audit,
             oneShotConsumptions,
+            // I recuperi dovuti partono in background e tengono la lease del servizio in primo
+            // piano per tutta la loro durata: il reconcile non aspetta un programma lungo (B3).
+            recoveryLauncher = RecoveryLauncher { block -> launcher.launch("time_recovery", block) },
         )
 
     @Provides
@@ -994,6 +1072,9 @@ object ArgusModule {
         phoneIngress: PhoneEventIngress,
         sensor: SensorTriggerRuntime,
         sensorIngress: SensorEventIngress,
+        store: AutomationStore,
+        audit: AuditSink,
+        frame: DispatchFrame,
     ): ArgusRuntimeController = ArgusRuntimeController(
         scope,
         scheduler,
@@ -1008,5 +1089,8 @@ object ArgusModule {
         phoneIngress,
         sensor,
         sensorIngress,
+        store = store,
+        audit = audit,
+        dispatchesIdle = { frame.idle },
     )
 }

@@ -21,6 +21,7 @@ import dev.argus.automation.geofence.GeofenceEventDispatcher
 import dev.argus.automation.geofence.GeofenceTriggerRuntime
 import dev.argus.automation.geofence.NoopGeofenceTriggerRuntime
 import dev.argus.automation.foreground.ReceiverWorkLauncher
+import dev.argus.automation.power.ExecutionWakeLock
 import dev.argus.automation.sensor.NoopSensorTriggerRuntime
 import dev.argus.automation.sensor.SensorEventDispatcher
 import dev.argus.automation.sensor.SensorTriggerRuntime
@@ -122,12 +123,51 @@ class LazyDeviceStateProvider(
     }
 }
 
+/**
+ * Cornice comune di ogni dispatch verso l'Engine. Il dispatch esegue l'intero programma della
+ * regola, anche con attese di ore, quindi:
+ * - gira dentro [ExecutionWakeLock.holding] (B19): a schermo spento il processore non dorme finché
+ *   la regola lavora; le attese lunghe rilasciano la propria quota ([WakeAwarePause]);
+ * - conta i dispatch in corso, così la pulizia periodica non parte mentre un programma lungo è
+ *   ancora in esecuzione (la manutenzione marcherebbe come interrotta un'esecuzione viva);
+ * - a fine dispatch chiama [onDispatchEnd] (la pulizia periodica, B28), che non deve bloccarlo.
+ */
+class DispatchFrame(
+    private val wakeLock: ExecutionWakeLock = ExecutionWakeLock.NONE,
+    private val onDispatchEnd: () -> Unit = {},
+) {
+    private val inFlight = java.util.concurrent.atomic.AtomicInteger()
+
+    /** `true` se nessun dispatch è in corso nel processo. */
+    val idle: Boolean
+        get() = inFlight.get() == 0
+
+    suspend fun <T> run(block: suspend () -> T): T {
+        inFlight.incrementAndGet()
+        try {
+            return wakeLock.holding(block)
+        } finally {
+            inFlight.decrementAndGet()
+            try {
+                onDispatchEnd()
+            } catch (_: RuntimeException) {
+                // La pulizia periodica non deve mai cambiare l'esito di un dispatch.
+            }
+        }
+    }
+
+    companion object {
+        val NONE = DispatchFrame()
+    }
+}
+
 class EngineTimeEventDispatcher(
     private val engine: Engine,
     private val state: LazyDeviceStateProvider,
+    private val frame: DispatchFrame = DispatchFrame.NONE,
 ) : TimeEventDispatcher {
     override suspend fun dispatch(envelope: TriggerEnvelope) {
-        engine.onTrigger(envelope) { request -> state.current(request) }
+        frame.run { engine.onTrigger(envelope) { request -> state.current(request) } }
     }
 }
 
@@ -139,9 +179,10 @@ fun interface ImmediateEventDispatcher {
 class EngineImmediateEventDispatcher(
     private val engine: Engine,
     private val state: LazyDeviceStateProvider,
+    private val frame: DispatchFrame = DispatchFrame.NONE,
 ) : ImmediateEventDispatcher {
     override suspend fun dispatch(envelope: TriggerEnvelope) {
-        engine.onTrigger(envelope) { request -> state.current(request) }
+        frame.run { engine.onTrigger(envelope) { request -> state.current(request) } }
     }
 }
 
@@ -152,9 +193,10 @@ fun interface NotificationEventDispatcher {
 class EngineNotificationEventDispatcher(
     private val engine: Engine,
     private val state: DeviceStateSnapshotProvider,
+    private val frame: DispatchFrame = DispatchFrame.NONE,
 ) : NotificationEventDispatcher {
     override suspend fun dispatch(envelope: TriggerEnvelope) {
-        engine.onTrigger(envelope) { request -> state.current(request) }
+        frame.run { engine.onTrigger(envelope) { request -> state.current(request) } }
     }
 }
 
@@ -162,36 +204,40 @@ class EngineNotificationEventDispatcher(
 class EnginePhoneEventDispatcher(
     private val engine: Engine,
     private val state: DeviceStateSnapshotProvider,
+    private val frame: DispatchFrame = DispatchFrame.NONE,
 ) : dev.argus.automation.phone.PhoneEventDispatcher {
     override suspend fun dispatch(envelope: TriggerEnvelope) {
-        engine.onTrigger(envelope) { request -> state.current(request) }
+        frame.run { engine.onTrigger(envelope) { request -> state.current(request) } }
     }
 }
 
 class EngineConnectivityEventDispatcher(
     private val engine: Engine,
     private val state: DeviceStateSnapshotProvider,
+    private val frame: DispatchFrame = DispatchFrame.NONE,
 ) : ConnectivityEventDispatcher {
     override suspend fun dispatch(envelope: TriggerEnvelope) {
-        engine.onTrigger(envelope) { request -> state.current(request) }
+        frame.run { engine.onTrigger(envelope) { request -> state.current(request) } }
     }
 }
 
 class EngineGeofenceEventDispatcher(
     private val engine: Engine,
     private val state: DeviceStateSnapshotProvider,
+    private val frame: DispatchFrame = DispatchFrame.NONE,
 ) : GeofenceEventDispatcher {
     override suspend fun dispatch(envelope: TriggerEnvelope) {
-        engine.onTrigger(envelope) { request -> state.current(request) }
+        frame.run { engine.onTrigger(envelope) { request -> state.current(request) } }
     }
 }
 
 class EngineSensorEventDispatcher(
     private val engine: Engine,
     private val state: DeviceStateSnapshotProvider,
+    private val frame: DispatchFrame = DispatchFrame.NONE,
 ) : SensorEventDispatcher {
     override suspend fun dispatch(envelope: TriggerEnvelope) {
-        engine.onTrigger(envelope) { request -> state.current(request) }
+        frame.run { engine.onTrigger(envelope) { request -> state.current(request) } }
     }
 }
 
@@ -258,7 +304,7 @@ class AndroidArmedAutomationRegistrar(
                 // Percorso sincrono conservato per test/fake e caller non Android.
                 dispatchAndConsumeImmediate(automation, fingerprint, envelope)
             } else {
-                launcher.launch("immediate") {
+                launcher.launch("immediate", automation.id) {
                     try {
                         dispatchAndConsumeImmediate(automation, fingerprint, envelope)
                     } catch (error: CancellationException) {
@@ -455,6 +501,17 @@ class FrameworkCurrentLocationProvider(context: Context) : CurrentLocationProvid
     }
 }
 
+/**
+ * Id della notifica, unico per esecuzione E azione (B24). `executionId.hashCode()` da solo faceva
+ * sovrascrivere fra loro le notifiche della stessa regola: due `show_notification`, oppure una
+ * normale e una generata dall'AI, ne mostravano una sola e senza suono (`setOnlyAlertOnce`). Il
+ * percorso dell'azione (`1`, `2`, `3.then.1`, `4.while[2].1`…) le distingue: anche un'azione
+ * `invoke_llm` che notifica ha un percorso proprio. La stessa azione nello stesso ciclo, alla stessa
+ * iterazione, ripubblica lo stesso id.
+ */
+internal fun notificationId(context: FireContext): Int =
+    "${context.executionId.value}#${context.actionPath}".hashCode()
+
 class AndroidAutomationNotifier(context: Context) : AutomationNotifier {
     private val appContext = context.applicationContext
     private val manager = NotificationManagerCompat.from(appContext)
@@ -503,7 +560,7 @@ class AndroidAutomationNotifier(context: Context) : AutomationNotifier {
             .setContentIntent(contentIntent)
             .build()
         try {
-            manager.notify(context.executionId.value.hashCode(), notification)
+            manager.notify(notificationId(context), notification)
         } catch (error: SecurityException) {
             throw IllegalStateException("notification_permission_unavailable", error)
         }

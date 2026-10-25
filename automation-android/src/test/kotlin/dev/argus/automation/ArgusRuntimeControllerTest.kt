@@ -58,7 +58,7 @@ import kotlin.test.assertEquals
 @Config(sdk = [34])
 class ArgusRuntimeControllerTest {
     @Test
-    fun `app start drains durable call and connectivity events before normal runtime resumes`() {
+    fun `app start drains durable call and connectivity events in the background`() {
         runBlocking {
             val context = ApplicationProvider.getApplicationContext<Context>()
             val db = ArgusDatabase.inMemory(context)
@@ -83,8 +83,8 @@ class ArgusRuntimeControllerTest {
                 )
                 val phoneState = PendingCallStore(phoneEnvelope)
                 val connectivityState = PendingConnectivityStore(connectivityEnvelope)
-                val phoneRecovered = mutableListOf<TriggerEnvelope>()
-                val connectivityRecovered = mutableListOf<TriggerEnvelope>()
+                val phoneRecovered = CopyOnWriteArrayList<TriggerEnvelope>()
+                val connectivityRecovered = CopyOnWriteArrayList<TriggerEnvelope>()
                 val controller = ArgusRuntimeController(
                     scope = scope,
                     scheduler = RecordingTimeAlarmRuntime(),
@@ -111,6 +111,11 @@ class ArgusRuntimeControllerTest {
 
                 controller.reconcile(ReconcileReason.APP_START)
 
+                // I recuperi girano in background (B3): il reconcile non ne attende la fine.
+                awaitUntil("recupero chiamata e connectivity") {
+                    phoneRecovered.size == 1 && connectivityRecovered.size == 1 &&
+                        phoneState.pending() == null && connectivityState.pending().isEmpty()
+                }
                 assertEquals(listOf(phoneEnvelope), phoneRecovered)
                 assertEquals(listOf(connectivityEnvelope), connectivityRecovered)
                 assertEquals(null, phoneState.pending())
