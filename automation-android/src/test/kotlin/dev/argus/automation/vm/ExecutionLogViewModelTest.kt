@@ -201,7 +201,8 @@ class ExecutionLogViewModelTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val viewModel = viewModel(context)
         val messages = mutableListOf<String>()
-        backgroundScope.launch { viewModel.messages.collect(messages::add) }
+        // Unconfined: la sottoscrizione parte subito, prima dell'emit sotto test (SharedFlow senza replay).
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.messages.collect(messages::add) }
 
         viewModel.onMarkSent("999999")
         awaitUntil("esito per riga sconosciuta") { messages.isNotEmpty() }
