@@ -501,6 +501,17 @@ class FrameworkCurrentLocationProvider(context: Context) : CurrentLocationProvid
     }
 }
 
+/**
+ * Id della notifica, unico per esecuzione E azione (B24). `executionId.hashCode()` da solo faceva
+ * sovrascrivere fra loro le notifiche della stessa regola: due `show_notification`, oppure una
+ * normale e una generata dall'AI, ne mostravano una sola e senza suono (`setOnlyAlertOnce`). Il
+ * percorso dell'azione (`1`, `2`, `3.then.1`, `4.while[2].1`…) le distingue: anche un'azione
+ * `invoke_llm` che notifica ha un percorso proprio. La stessa azione nello stesso ciclo, alla stessa
+ * iterazione, ripubblica lo stesso id.
+ */
+internal fun notificationId(context: FireContext): Int =
+    "${context.executionId.value}#${context.actionPath}".hashCode()
+
 class AndroidAutomationNotifier(context: Context) : AutomationNotifier {
     private val appContext = context.applicationContext
     private val manager = NotificationManagerCompat.from(appContext)
@@ -549,7 +560,7 @@ class AndroidAutomationNotifier(context: Context) : AutomationNotifier {
             .setContentIntent(contentIntent)
             .build()
         try {
-            manager.notify(context.executionId.value.hashCode(), notification)
+            manager.notify(notificationId(context), notification)
         } catch (error: SecurityException) {
             throw IllegalStateException("notification_permission_unavailable", error)
         }
