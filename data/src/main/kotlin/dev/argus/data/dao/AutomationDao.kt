@@ -149,11 +149,16 @@ interface AutomationDao {
     @Query("SELECT COUNT(*) FROM fire_claims WHERE automationId = :automationId")
     suspend fun claimCount(automationId: String): Int
 
+    /**
+     * Un `lastFiredAt` successivo ad `atMillis` significa che l'orologio e' tornato indietro:
+     * lo scatto e' piu' vecchio di "adesso", quindi il cooldown e' da considerare scaduto invece
+     * di bloccare la regola finche' l'orologio non lo raggiunge.
+     */
     @Query(
         "UPDATE automations SET lastFiredAt = :atMillis " +
             "WHERE id = :automationId AND status = 'ARMED' AND enabled = 1 AND (" +
             ":cooldownMs = 0 OR lastFiredAt IS NULL OR " +
-            "(:atMillis > lastFiredAt AND :atMillis - lastFiredAt >= :cooldownMs))",
+            "lastFiredAt > :atMillis OR :atMillis - lastFiredAt >= :cooldownMs)",
     )
     suspend fun acquireCooldown(
         automationId: String,
