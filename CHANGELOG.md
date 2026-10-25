@@ -2,6 +2,74 @@
 
 Release and engineering notes, newest first.
 
+## v0.3.5 (2026-10-25) — Audit fixes: reliability, approval transparency, AI translation
+
+This release closes the high-severity findings and the security fixes from a full code audit.
+
+### Fixed
+
+- Armed P4 rules that declare variables were moved to "needs review" every time the app returned
+  to the foreground, because the capability reconciler validated them without their variables.
+- Direct providers (OpenAI, Anthropic, Gemini, OpenRouter, Custom) ignored the model's `error_code`:
+  clarification questions, unsupported capabilities and limits were shown as `draft_missing` and the
+  clarification dialogue never started (#8).
+- Malformed model replies (`meta_parse_error`, `meta_json_missing`) are now retried once, metered,
+  for every provider, not only Hermes (#5). The parser tolerates `null` fields, trailing commas,
+  comments, `<think>` blocks and a repeated sentinel, and reports a short technical detail.
+- Truncation is detected: `output_truncated` when the model hits its output cap and
+  `context_truncated` when the server reports far fewer prompt tokens than were sent (e.g. a small
+  Ollama context). Compile and act output caps were raised to 8192 and 2048 tokens.
+- Chat errors explain their cause (rejected key, budget, rate limit, truncation, HTTP status,
+  request too long) instead of "check the network", and English users no longer see Italian errors.
+  The chat input is no longer locked after an error and follows new replies.
+- A rule running a long `wait` no longer blocks other time rules, arming and toggles: dispatch now
+  runs outside the scheduler and ingress locks, with no double delivery.
+- Without Shizuku, app/URL/alarm/timer launches from the background are reported as
+  `activity_start_blocked` instead of a false success.
+- The budget dialog saved only the monthly token cap; all four limits are now saved in one write and
+  invalid input is rejected instead of meaning "unlimited".
+- Editing an armed rule keeps the current version active until the new draft is armed; rejecting
+  the draft leaves the rule untouched.
+- Editing a P4 rule in chat no longer drops its variables. Double taps on Arm/Reject/Delete are ignored.
+- Onboarding can always be finished from the last step; an unreachable server no longer blocks setup
+  (a rejected key still does). "Copy and open WhatsApp" no longer marks a deferred reply as sent.
+- Custom endpoints without an API key can use generative actions; compile waits up to 180 s for
+  local and private-network servers. Anthropic compile usage now counts toward the cost cap, and
+  budget metering no longer holds its lock during the network call.
+
+### Security and privacy
+
+- Approval shows every executable field, including literal variable values and each variable's
+  source; a coverage test fails if a new field is not rendered.
+- The privacy note lists exactly what reaches the AI service (notification text, device state,
+  variables used in the goal).
+- External (tainted) data interpolated into `run_shell` commands is always shell-quoted for its
+  context; unmodelled contexts are blocked at fire time.
+- Arm applies the revision that is on screen, never a newer one received meanwhile.
+- "Edit in chat" no longer sends resolved home coordinates or real conversation ids to the model;
+  whitelisted contacts are sent as aliases (`contact_1`…).
+- Act prompts of direct providers treat messages and runtime data as untrusted, strip reasoning
+  blocks, and web paths cap searches and output (`store=false` on OpenAI Responses).
+- Clipboard cleanup now also runs when Argus returns to the foreground; privileged commands that
+  time out are killed with their whole process group.
+- `write_setting` warns at approval for security-sensitive keys and for values from external data.
+- The Gradle wrapper distribution checksum is pinned. `SECURITY.md` describes private reporting.
+
+### Changed
+
+- Missing capabilities (revoked permission, Shizuku off, AI not configured) block a rule
+  temporarily instead of sending it to "needs review"; generative actions no longer require the
+  battery-optimization exemption.
+- Bursts of WhatsApp messages from a whitelisted 1:1 chat are answered once, after 8 s of silence.
+- Arming a Wi-Fi/power rule uses the current state as reference instead of a stale stored one.
+- The Hermes bridge accepts contact aliases and larger requests (32 KiB), rejects oversized prompts
+  and does not cache 429 responses; update `ops/hermes/bridge.py` together with the app.
+
+### Verification
+
+- Full JVM/Robolectric suites, Android lint and debug assembly on the Unraid builder; 76 Hermes
+  bridge tests; release APKs rebuilt twice from clean trees with byte-identical output.
+
 ## v0.3.4 (2026-08-31) — On-device AI and Hermes setup
 
 ### Added
