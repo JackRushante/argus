@@ -9,11 +9,15 @@ import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.ApprovalFingerprints
+import dev.argus.engine.model.AUTOMATION_SCHEMA_VERSION_P4
 import dev.argus.engine.model.CapabilityIds
+import dev.argus.engine.model.CmpOp
+import dev.argus.engine.model.Condition
 import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.DndMode
 import dev.argus.engine.model.GenerativeContract
 import dev.argus.engine.model.SensorKind
+import dev.argus.engine.model.VarBinding
 import dev.argus.engine.model.StateKeys
 import dev.argus.engine.model.StateQueryFamily
 import dev.argus.engine.model.Trigger
@@ -619,6 +623,41 @@ class AndroidCapabilityProbeTest {
     }
 
     @Test
+    fun `reconciler does not flag armed P4 rules with variables as needing review`() = runTest {
+        // Regressione B1: validazione e requisiti venivano calcolati SENZA le var dichiarate, quindi
+        // ogni regola con `random_int`/`${var}` risultava "da rivedere" al primo reconcile.
+        val branching = signedP4Rule(
+            id = "branching",
+            actions = listOf(
+                Action.If(
+                    Condition.VarCompare("dice", CmpOp.IS_EVEN),
+                    then = listOf(Action.ShowNotification("pari", "pari")),
+                    orElse = listOf(Action.ShowNotification("dispari", "dispari")),
+                ),
+            ),
+        )
+        val interpolating = signedP4Rule(
+            id = "interpolating",
+            actions = listOf(Action.ShowNotification("dado", "uscito \${dice}")),
+        )
+        val audit = ReconcilerAuditRecorder()
+        val shownNotifications = state().copy(notificationsGranted = true)
+
+        listOf(branching, interpolating).forEach { rule ->
+            val store = ReconcileAutomationStore(rule)
+            val report = CapabilityReconciler(store, probe(shownNotifications), audit).reconcile()
+
+            assertEquals(emptyList(), report.needsReview, rule.name)
+            assertEquals(emptyList(), report.temporarilyBlocked, rule.name)
+            assertEquals(AutomationStatus.ARMED, store.get(rule.id)?.status, rule.name)
+        }
+        assertTrue(
+            audit.events.none { it.kind == AuditKind.RULE_NEEDS_REVIEW },
+            "nessun audit RULE_NEEDS_REVIEW per regole P4 integre",
+        )
+    }
+
+    @Test
     fun `reconciler cannot quarantine a newer approved revision`() = runTest {
         val original = signedRule("race")
         val revised = sign(original.copy(name = "nuova revisione", approvalFingerprint = null))
@@ -795,6 +834,19 @@ class AndroidCapabilityProbeTest {
             status = AutomationStatus.ARMED,
             trigger = Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
             actions = listOf(Action.SetDnd(DndMode.PRIORITY)),
+        ),
+    )
+
+    private fun signedP4Rule(id: String, actions: List<Action>): Automation = sign(
+        Automation(
+            id = AutomationId(id),
+            name = id,
+            createdBy = CreatedBy.USER,
+            status = AutomationStatus.ARMED,
+            trigger = Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
+            actions = actions,
+            vars = listOf(VarBinding.RandomInt("dice", max = 6)),
+            schemaVersion = AUTOMATION_SCHEMA_VERSION_P4,
         ),
     )
 
