@@ -3,6 +3,7 @@ package dev.argus.automation
 import android.Manifest
 import android.app.NotificationManager
 import android.content.Context
+import android.location.LocationManager
 import androidx.test.core.app.ApplicationProvider
 import dev.argus.shizuku.ShizukuGateway
 import org.junit.Test
@@ -31,6 +32,21 @@ class SystemAndroidCapabilityStateSourceTest {
 
         shadowOf(manager).setNotificationsEnabled(true)
         assertTrue(source.read().notificationsGranted)
+        gateway.close()
+    }
+
+    @Test
+    fun `location services switched off from the quick settings are reflected in the state`() {
+        val context: Context = ApplicationProvider.getApplicationContext()
+        val locationManager = context.getSystemService(LocationManager::class.java)
+        val gateway = ShizukuGateway(context)
+        val source = SystemAndroidCapabilityStateSource(context, gateway)
+
+        shadowOf(locationManager).setLocationEnabled(false)
+        assertFalse(source.read().locationEnabled)
+
+        shadowOf(locationManager).setLocationEnabled(true)
+        assertTrue(source.read().locationEnabled)
         gateway.close()
     }
 }

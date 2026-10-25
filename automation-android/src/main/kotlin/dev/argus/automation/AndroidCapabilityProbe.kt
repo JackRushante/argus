@@ -5,10 +5,12 @@ import android.app.AlarmManager
 import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.PackageManager
+import android.location.LocationManager
 import android.os.Build
 import android.os.PowerManager
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.core.location.LocationManagerCompat
 import dev.argus.engine.brain.CapabilityManifest
 import dev.argus.engine.brain.CapabilityProbe
 import dev.argus.engine.brain.ContactWhitelistStore
@@ -58,7 +60,19 @@ internal data class AndroidCapabilityState(
     val activityRecognitionGranted: Boolean = false,
     /** Accesso «Non disturbare» (`ACCESS_NOTIFICATION_POLICY`): abilita DND/Ringer senza Shizuku. */
     val dndPolicyGranted: Boolean = false,
-)
+    /**
+     * Servizi di localizzazione accesi (`LocationManagerCompat.isLocationEnabled`). Con la posizione
+     * spenta dalle impostazioni rapide geofence e identita' Wi-Fi (SSID) non funzionano anche con
+     * tutti i permessi concessi.
+     */
+    val locationEnabled: Boolean = true,
+) {
+    /** Permessi di posizione precisi, in primo piano e in background. */
+    val locationGranted: Boolean get() = foregroundLocationGranted && backgroundLocationGranted
+
+    /** Geofence e SSID funzionano: permessi concessi e servizi di localizzazione accesi. */
+    val locationUsable: Boolean get() = locationGranted && locationEnabled
+}
 
 internal fun interface AndroidCapabilityStateSource {
     fun read(): AndroidCapabilityState
@@ -106,6 +120,11 @@ internal class SystemAndroidCapabilityStateSource(
             appContext.getSystemService(NotificationManager::class.java)
                 .isNotificationPolicyAccessGranted
         }.getOrDefault(false),
+        // Se non si riesce a leggere non si inventa un blocco: resta «accesa» come prima.
+        locationEnabled = runCatching {
+            appContext.getSystemService(LocationManager::class.java)
+                ?.let(LocationManagerCompat::isLocationEnabled)
+        }.getOrNull() ?: true,
     )
 
     private fun granted(permission: String): Boolean =
@@ -124,6 +143,7 @@ private data class ResolvedCapabilities(
     val availableTools: List<String>,
     val unavailableTools: Map<String, String>,
     val armableSensorKinds: List<SensorKind>,
+    val blockDetails: Map<String, String> = emptyMap(),
 )
 
 class AndroidCapabilityProbe internal constructor(
@@ -185,17 +205,23 @@ class AndroidCapabilityProbe internal constructor(
         // Sempre armabile: fira on-arm, nessuna dipendenza OS o grant.
         add("immediate")
         if (state.notificationListenerGranted) add("notification")
-        if (state.foregroundLocationGranted && state.backgroundLocationGranted) add("geofence")
+        if (state.locationUsable) add("geofence")
         if (state.receiveSmsGranted) add("phone_state.sms")
         if (state.readPhoneStateGranted && state.readCallLogGranted) add("phone_state.call")
         add("connectivity.wifi")
-        if (state.foregroundLocationGranted && state.backgroundLocationGranted) {
-            add("connectivity.wifi.identity")
-        }
+        if (state.locationUsable) add("connectivity.wifi.identity")
         if (state.bluetoothConnectGranted) add("connectivity.bt")
         add("connectivity.power")
         armableSensorKinds.forEach { add("sensor.${it.wireName}") }
     }
+
+    /**
+     * Dettaglio stabile del PERCHE' una capability e' bloccata quando la causa non e' un permesso
+     * mancante: capability → codice (oggi solo `location_disabled`: permessi di posizione concessi
+     * ma servizi di localizzazione spenti). Vuota se nulla e' bloccato per questi motivi. Il
+     * blocco al fire-time resta `capability_unavailable`; questo e' il dettaglio da auditare.
+     */
+    suspend fun capabilityBlockDetails(): Map<String, String> = resolve().blockDetails
 
     override suspend fun current(): FirePolicySnapshot {
         val resolved = resolve()
@@ -230,17 +256,15 @@ class AndroidCapabilityProbe internal constructor(
             add(CapabilityIds.TRIGGER_TIME)
             // Trigger immediato: nessuna dipendenza OS, fira on-arm ⇒ sempre disponibile.
             add(CapabilityIds.TRIGGER_IMMEDIATE)
-            if (state.foregroundLocationGranted && state.backgroundLocationGranted) {
-                add(CapabilityIds.TRIGGER_GEOFENCE)
-            }
+            // Geofence e SSID richiedono permessi E servizi di localizzazione accesi: con la
+            // posizione spenta dalle impostazioni rapide non funzionano (blocco temporaneo, D6).
+            if (state.locationUsable) add(CapabilityIds.TRIGGER_GEOFENCE)
             add(CapabilityIds.TRIGGER_CONNECTIVITY_WIFI)
             add(CapabilityIds.TRIGGER_CONNECTIVITY_POWER)
             if (state.bluetoothConnectGranted) add(CapabilityIds.TRIGGER_CONNECTIVITY_BT)
-            if (state.foregroundLocationGranted && state.backgroundLocationGranted) {
-                add(CapabilityIds.TRIGGER_CONNECTIVITY_WIFI_IDENTITY)
-                // Fire-time location conditions use framework LocationManager, not Shizuku.
-                add(CapabilityIds.STATE_LOCATION)
-            }
+            if (state.locationUsable) add(CapabilityIds.TRIGGER_CONNECTIVITY_WIFI_IDENTITY)
+            // Fire-time location conditions use framework LocationManager, not Shizuku.
+            if (state.locationGranted) add(CapabilityIds.STATE_LOCATION)
             // Clipboard locale: nessun permesso OS richiesto (scrittura verificata su device).
             add(ActionCapabilities.COPY_TO_CLIPBOARD)
             // copy_text (clipboard letterale): stesso regime BASE, sempre disponibile.
@@ -345,6 +369,15 @@ class AndroidCapabilityProbe internal constructor(
             unavailableTools[GenerativeContract.TOOL_WEB_SEARCH] = REASON_GENERATIVE_RUNTIME
         }
         PHASE_UNAVAILABLE_TOOLS.forEach { (tool, reason) -> unavailableTools[tool] = reason }
+        // Permessi di posizione concessi ma servizi spenti: la causa del blocco e' questa, e il
+        // modello deve saperlo (con i permessi mancanti il trigger e' gia' assente dal manifest).
+        val blockDetails = linkedMapOf<String, String>()
+        if (state.locationGranted && !state.locationEnabled) {
+            LOCATION_DEPENDENT_CAPABILITIES.forEach { capability ->
+                unavailableTools[capability] = REASON_LOCATION_OFF
+                blockDetails[capability] = DETAIL_LOCATION_DISABLED
+            }
+        }
 
         return ResolvedCapabilities(
             state = state,
@@ -354,6 +387,7 @@ class AndroidCapabilityProbe internal constructor(
             availableTools = availableTools,
             unavailableTools = unavailableTools.toSortedMap(),
             armableSensorKinds = armableSensorKinds,
+            blockDetails = blockDetails,
         )
     }
 
@@ -387,6 +421,18 @@ class AndroidCapabilityProbe internal constructor(
          */
         val IMPLEMENTED_SENSOR_KINDS: Set<SensorKind> = setOf(SensorKind.SIGNIFICANT_MOTION)
         const val REASON_NOTIFICATION_LISTENER = "notification access not granted"
+
+        /** Motivo (in inglese, va al modello) per geofence e SSID con la posizione spenta. */
+        const val REASON_LOCATION_OFF = "location services are off"
+
+        /** Dettaglio stabile per il Log/audit dello stesso blocco. */
+        const val DETAIL_LOCATION_DISABLED = "location_disabled"
+
+        /** Capability che non funzionano con i servizi di localizzazione spenti. */
+        val LOCATION_DEPENDENT_CAPABILITIES = listOf(
+            CapabilityIds.TRIGGER_GEOFENCE,
+            CapabilityIds.TRIGGER_CONNECTIVITY_WIFI_IDENTITY,
+        )
         const val REASON_GENERATIVE_RUNTIME =
             "generative runtime not ready (provider key or privacy consent missing)"
         const val TOOL_STATE_READ = "state.read"

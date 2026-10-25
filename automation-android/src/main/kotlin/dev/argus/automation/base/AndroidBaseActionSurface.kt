@@ -55,6 +55,9 @@ class AndroidBaseActionSurface(
         )
     }
 
+    override fun currentDndMode(): DndMode? =
+        dndModeOf(notificationManager.currentInterruptionFilter)
+
     override fun setRingerMode(mode: RingerMode) {
         audioManager.ringerMode = when (mode) {
             RingerMode.NORMAL -> AudioManager.RINGER_MODE_NORMAL
@@ -195,6 +198,14 @@ class AndroidBaseActionSurface(
             throw ActivityStartBlockedException(error)
         }
     }
+}
+
+/** Filtro di interruzione di Android → modalita' Non disturbare; solo-sveglie e sconosciuto = `null`. */
+internal fun dndModeOf(filter: Int): DndMode? = when (filter) {
+    NotificationManager.INTERRUPTION_FILTER_ALL -> DndMode.OFF
+    NotificationManager.INTERRUPTION_FILTER_PRIORITY -> DndMode.PRIORITY
+    NotificationManager.INTERRUPTION_FILTER_NONE -> DndMode.TOTAL
+    else -> null
 }
 
 /** Primo piano = `ProcessLifecycleOwner` almeno STARTED. Se il lifecycle non è leggibile non si blocca. */

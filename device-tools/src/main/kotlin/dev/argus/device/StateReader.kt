@@ -77,6 +77,7 @@ class StateReader(private val shell: PrivilegedShell) {
                 listOf(DUMPSYS, "battery"),
                 timeoutMillis,
                 scalarOutputBytes,
+                allowTruncated = true,
             )?.let(::parseBattery)?.let { battery ->
                 if (StateKeys.BATTERY in keys && battery.level != null) {
                     values[StateKeys.BATTERY] = battery.level.toString()
@@ -91,6 +92,7 @@ class StateReader(private val shell: PrivilegedShell) {
                 listOf(DUMPSYS, "power"),
                 timeoutMillis,
                 scalarOutputBytes,
+                allowTruncated = true,
             )?.let(::parseScreen)?.let {
                 values[StateKeys.SCREEN] = it
             }
@@ -101,6 +103,7 @@ class StateReader(private val shell: PrivilegedShell) {
                 command = listOf(DUMPSYS, "activity", "activities"),
                 timeoutMillis = timeoutMillis,
                 maxOutputBytes = foregroundOutputBytes,
+                allowTruncated = true,
             )?.let(::parseForegroundPackage)
         } else {
             null
@@ -121,18 +124,30 @@ class StateReader(private val shell: PrivilegedShell) {
         it.isEmpty() || it == "null"
     }
 
+    /**
+     * Output del comando, `null` se è fallito o scaduto. Un output troncato dal limite di byte si
+     * scarta (un valore scalare tagliato non è affidabile), salvo [allowTruncated]: per i dumpsys,
+     * che sono lunghi per natura, si tiene la parte letta senza l'ultima riga, che può essere
+     * tagliata a metà. Se il valore cercato sta oltre il limite il parser non lo trova e la
+     * condizione resta sconosciuta; se sta prima, si usa.
+     */
     private suspend fun commandOutput(
         command: List<String>,
         timeoutMillis: Long = PrivilegedShell.DEFAULT_TIMEOUT_MILLIS,
         maxOutputBytes: Int = 64 * 1024,
+        allowTruncated: Boolean = false,
     ): String? = try {
-        shell.run(
+        val result = shell.run(
             command,
             timeoutMillis = timeoutMillis,
             maxOutputBytes = maxOutputBytes,
-        ).takeIf {
-            it.successful && !it.truncated
-        }?.stdoutText
+        )
+        when {
+            !result.successful -> null
+            !result.truncated -> result.stdoutText
+            allowTruncated -> completeLines(result.stdoutText)
+            else -> null
+        }
     } catch (error: CancellationException) {
         throw error
     } catch (_: Exception) {
@@ -150,6 +165,10 @@ class StateReader(private val shell: PrivilegedShell) {
         private val RESUMED_ACTIVITY_FIELD = Regex(
             "\\b(?:topResumedActivity|mResumedActivity|ResumedActivity)\\b",
         )
+        private val DISPLAY_HEADER = Regex("^\\s*Display #(\\d+)\\b")
+        private const val DEFAULT_DISPLAY_ID = 0
+        private val FOCUS_SECTION = Regex("Resumed activities in task display areas")
+        private val FOCUSED_ACTIVITY = Regex("^\\s*Resumed:\\s")
         private val WAKEFULNESS = Regex("mWakefulness=([A-Za-z]+)")
         private val DISPLAY_POWER_STATE = Regex("Display Power:\\s*state=([A-Za-z]+)")
 
@@ -226,9 +245,63 @@ class StateReader(private val shell: PrivilegedShell) {
             return null
         }
 
-        fun parseForegroundPackage(raw: String): String? = raw.lineSequence()
-            .filter(RESUMED_ACTIVITY_FIELD::containsMatchIn)
-            .mapNotNull { COMPONENT.find(it)?.groupValues?.get(1) }
-            .firstOrNull()
+        /**
+         * Parte dell'output fino all'ultimo a capo: scarta una riga finale tagliata a metà dal
+         * limite di byte, che darebbe un valore sbagliato (un livello «8» al posto di «85»).
+         */
+        fun completeLines(raw: String): String = raw.substring(0, raw.lastIndexOf('\n') + 1)
+
+        /**
+         * App in primo piano da `dumpsys activity activities`. Il dump ha una riga
+         * `topResumedActivity=` per ogni task foglia: in schermo diviso ce ne sono due e la prima
+         * elencata non è necessariamente quella con il focus. La regola, in ordine:
+         * 1. l'attività con il focus: una riga `Resumed:` della sezione «Resumed activities in task
+         *    display areas» (l'attività focalizzata di ogni task display area);
+         *    ma solo se è anche resumed nel display di default (#0), così un display esterno non
+         *    ruba il primo piano;
+         * 2. altrimenti la prima attività resumed elencata nel display di default;
+         * 3. se l'output non ha intestazioni `Display #n` (altri formati) la prima resumed nel testo.
+         * Con intestazioni ma nessuna resumed nel display di default il valore è sconosciuto
+         * (`null`), mai quello di un altro display.
+         */
+        fun parseForegroundPackage(raw: String): String? {
+            var display: Int? = null
+            var inFocusSection = false
+            var sawDisplayHeader = false
+            val anywhere = mutableListOf<String>()
+            val onDefaultDisplay = mutableListOf<String>()
+            val focused = mutableListOf<String>()
+            for (line in raw.lineSequence()) {
+                // Una riga non indentata chiude il blocco del display corrente (altra sezione).
+                if (line.isNotEmpty() && !line[0].isWhitespace()) {
+                    display = null
+                    inFocusSection = false
+                }
+                DISPLAY_HEADER.find(line)?.let { header ->
+                    display = header.groupValues[1].toIntOrNull()
+                    inFocusSection = false
+                    sawDisplayHeader = true
+                }
+                if (FOCUS_SECTION.containsMatchIn(line)) {
+                    display = null
+                    inFocusSection = true
+                    continue
+                }
+                if (inFocusSection) {
+                    if (FOCUSED_ACTIVITY.containsMatchIn(line)) {
+                        COMPONENT.find(line)?.groupValues?.get(1)?.let { focused += it }
+                    }
+                    continue
+                }
+                if (RESUMED_ACTIVITY_FIELD.containsMatchIn(line)) {
+                    COMPONENT.find(line)?.groupValues?.get(1)?.let { pkg ->
+                        anywhere += pkg
+                        if (display == DEFAULT_DISPLAY_ID) onDefaultDisplay += pkg
+                    }
+                }
+            }
+            val candidates = if (sawDisplayHeader) onDefaultDisplay else anywhere
+            return focused.firstOrNull { it in candidates } ?: candidates.firstOrNull()
+        }
     }
 }

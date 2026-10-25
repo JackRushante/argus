@@ -155,6 +155,167 @@ class StateReaderTest {
     }
 
     @Test
+    fun `split screen foreground app is the focused activity and not the first one listed`() {
+        // Due task affiancati: il primo elencato (mail) non ha il focus, il secondo (notes) si'.
+        val dump = """
+            ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)
+            Display #0 (activities from top to bottom):
+              * Task{a1 #21 type=standard A=10001:com.example.mail U=0 visible=true mode=multi-window sz=1}
+                mBounds=Rect(0, 0 - 1080, 1200)
+                topResumedActivity=ActivityRecord{b2 u0 com.example.mail/.InboxActivity t21}
+                  * Hist  #0: ActivityRecord{b2 u0 com.example.mail/.InboxActivity t21}
+              * Task{c3 #22 type=standard A=10002:com.example.notes U=0 visible=true mode=multi-window sz=1}
+                mBounds=Rect(0, 1200 - 1080, 2400)
+                topResumedActivity=ActivityRecord{d4 u0 com.example.notes/.EditorActivity t22}
+                  * Hist  #0: ActivityRecord{d4 u0 com.example.notes/.EditorActivity t22}
+
+              Resumed activities in task display areas (from top to bottom):
+                Resumed: ActivityRecord{d4 u0 com.example.notes/.EditorActivity t22}
+        """.trimIndent()
+
+        assertEquals("com.example.notes", StateReader.parseForegroundPackage(dump))
+    }
+
+    @Test
+    fun `foreground app ignores resumed activities of other displays`() {
+        // Il display esterno (#2) e' in cima e ha il suo Resumed: conta solo quello di #0.
+        val dump = """
+            Display #2 (activities from top to bottom):
+              * Task{e5 #31 type=standard A=10003:com.example.video U=0 visible=true mode=fullscreen sz=1}
+                topResumedActivity=ActivityRecord{f6 u0 com.example.video/.PlayerActivity t31}
+            Display #0 (activities from top to bottom):
+              * Task{a1 #21 type=standard A=10001:com.example.mail U=0 visible=true mode=fullscreen sz=1}
+                topResumedActivity=ActivityRecord{b2 u0 com.example.mail/.InboxActivity t21}
+
+              Resumed activities in task display areas (from top to bottom):
+                Resumed: ActivityRecord{f6 u0 com.example.video/.PlayerActivity t31}
+                Resumed: ActivityRecord{b2 u0 com.example.mail/.InboxActivity t21}
+        """.trimIndent()
+
+        assertEquals("com.example.mail", StateReader.parseForegroundPackage(dump))
+    }
+
+    @Test
+    fun `foreground app falls back to the first resumed activity of the default display`() {
+        val dump = """
+            Display #1 (activities from top to bottom):
+              topResumedActivity=ActivityRecord{f6 u0 com.example.video/.PlayerActivity t31}
+            Display #0 (activities from top to bottom):
+              topResumedActivity=ActivityRecord{b2 u0 com.example.mail/.InboxActivity t21}
+              topResumedActivity=ActivityRecord{d4 u0 com.example.notes/.EditorActivity t22}
+        """.trimIndent()
+
+        assertEquals("com.example.mail", StateReader.parseForegroundPackage(dump))
+    }
+
+    @Test
+    fun `foreground app is unknown when the default display has no resumed activity`() {
+        val dump = """
+            Display #1 (activities from top to bottom):
+              topResumedActivity=ActivityRecord{f6 u0 com.example.video/.PlayerActivity t31}
+            Display #0 (activities from top to bottom):
+              * Task{a1 #21 type=home U=0 visible=false mode=fullscreen sz=1}
+        """.trimIndent()
+
+        assertNull(StateReader.parseForegroundPackage(dump))
+    }
+
+    @Test
+    fun `resumed lines after the display blocks are not attributed to the last display`() {
+        val dump = """
+            Display #0 (activities from top to bottom):
+              * Task{a1 #21 type=standard A=10001:com.example.mail U=0 visible=true sz=1}
+            ActivityTaskSupervisor state:
+              topResumedActivity=ActivityRecord{b2 u0 com.example.stale/.OldActivity t9}
+        """.trimIndent()
+
+        assertNull(StateReader.parseForegroundPackage(dump))
+    }
+
+    @Test
+    fun `screen found before the output limit is used and a cut line is dropped`() = runTest {
+        val power = ShellResult(
+            exitCode = 0,
+            stdout = (
+                "Power Manager State:\n  mWakefulness=Awake\n  mWakefulnessChanging=false\n  mHalAutoSusp"
+                ).toByteArray(),
+            truncated = true,
+        )
+        val shell = FakeStateShell(results = mapOf(command("dumpsys", "power") to power))
+
+        val state = StateReader(shell).read(setOf(StateKeys.SCREEN))
+
+        assertEquals(mapOf(StateKeys.SCREEN to "on"), state.values)
+    }
+
+    @Test
+    fun `value cut in the middle by the output limit stays unknown`() = runTest {
+        val battery = ShellResult(
+            exitCode = 0,
+            stdout = "  status: 2\n  health: 2\n  level: 8".toByteArray(),
+            truncated = true,
+        )
+        val shell = FakeStateShell(results = mapOf(command("dumpsys", "battery") to battery))
+
+        val state = StateReader(shell).read(setOf(StateKeys.BATTERY, StateKeys.CHARGING))
+
+        // Il livello e' tagliato a meta' ("8" di "85"): ignoto. Lo stato di carica era gia' stato letto.
+        assertEquals(mapOf(StateKeys.CHARGING to "true"), state.values)
+    }
+
+    @Test
+    fun `screen cut before the field stays unknown`() = runTest {
+        val power = ShellResult(
+            exitCode = 0,
+            stdout = "Power Manager State:\n  mSuspendBlockers=\n".toByteArray(),
+            truncated = true,
+        )
+        val shell = FakeStateShell(results = mapOf(command("dumpsys", "power") to power))
+
+        assertEquals(emptyMap(), StateReader(shell).read(setOf(StateKeys.SCREEN)).values)
+    }
+
+    @Test
+    fun `foreground app found before the limit survives a truncated activities dump`() = runTest {
+        val dump = ShellResult(
+            exitCode = 0,
+            stdout = (
+                "Display #0 (activities from top to bottom):\n" +
+                    "  * Task{a1 #21 type=standard A=10001:com.example.mail U=0 visible=true sz=1}\n" +
+                    "    topResumedActivity=ActivityRecord{b2 u0 com.example.mail/.InboxActivity t21}\n" +
+                    "      * Hist  #0: ActivityRecord{b2 u0 com.example.mail/.Inb"
+                ).toByteArray(),
+            truncated = true,
+        )
+        val shell = FakeStateShell(results = mapOf(command("dumpsys", "activity", "activities") to dump))
+
+        val state = StateReader(shell).read(emptySet(), includeForegroundApp = true)
+
+        assertEquals("com.example.mail", state.foregroundApp)
+    }
+
+    @Test
+    fun `truncated or timed out scalar settings are still discarded`() = runTest {
+        val truncated = ShellResult(0, stdout = "1".toByteArray(), truncated = true)
+        val timedOut = ShellResult(-1, stdout = "1".toByteArray(), timedOut = true)
+        val shell = FakeStateShell(
+            results = mapOf(
+                command("settings", "get", "global", "wifi_on") to truncated,
+                command("dumpsys", "power") to ShellResult(
+                    -1,
+                    stdout = "  mWakefulness=Awake\n".toByteArray(),
+                    timedOut = true,
+                ),
+                command("settings", "get", "global", "zen_mode") to timedOut,
+            ),
+        )
+
+        val state = StateReader(shell).read(setOf(StateKeys.WIFI, StateKeys.SCREEN, StateKeys.DND))
+
+        assertEquals(emptyMap(), state.values)
+    }
+
+    @Test
     fun `reader never converts coroutine cancellation into a missing value`() = runTest {
         val shell = object : PrivilegedShell {
             override suspend fun run(
@@ -185,8 +346,9 @@ private fun command(binary: String, vararg arguments: String): List<String> =
     listOf("/system/bin/$binary", *arguments)
 
 private class FakeStateShell(
-    private val outputs: Map<List<String>, String>,
+    private val outputs: Map<List<String>, String> = emptyMap(),
     private val failing: Set<List<String>> = emptySet(),
+    private val results: Map<List<String>, ShellResult> = emptyMap(),
 ) : PrivilegedShell {
     val calls = mutableListOf<List<String>>()
 
@@ -199,6 +361,7 @@ private class FakeStateShell(
     ): ShellResult {
         calls += command
         if (command in failing) throw IllegalStateException("transport")
+        results[command]?.let { return it }
         return outputs[command]?.let { ShellResult(0, stdout = it.toByteArray()) } ?: ShellResult(1)
     }
 

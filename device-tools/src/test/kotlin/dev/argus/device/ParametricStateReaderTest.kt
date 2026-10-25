@@ -105,6 +105,65 @@ class ParametricStateReaderTest {
     }
 
     @Test
+    fun `dumpsys field found before the output limit is used even when the dump was truncated`() = runTest {
+        val level = StateQuery.DumpsysField("fixture", "level")
+        val tail = StateQuery.DumpsysField("fixture", "tail")
+        val shell = QueryShell(
+            outputs = mapOf(
+                // Il dump supera il limite: "level" sta prima, "tail" oltre, e l'ultima riga e' tagliata.
+                command("dumpsys", "fixture") to result(
+                    "head: 1\nlevel: 80\nother: 3\nta",
+                    truncated = true,
+                ),
+            ),
+        )
+
+        val values = ParametricStateReader(shell).read(setOf(level, tail))
+
+        assertEquals("80", values[level.canonicalId])
+        assertFalse(tail.canonicalId in values)
+    }
+
+    @Test
+    fun `dumpsys field cut in the middle by the limit stays unavailable`() = runTest {
+        val voltage = StateQuery.DumpsysField("fixture", "voltage")
+        val shell = QueryShell(
+            outputs = mapOf(
+                command("dumpsys", "fixture") to result("level: 80\nvoltage: 42", truncated = true),
+            ),
+        )
+
+        assertEquals(emptyMap(), ParametricStateReader(shell).read(setOf(voltage)))
+    }
+
+    @Test
+    fun `timed out dumpsys stays unavailable even when it printed the field`() = runTest {
+        val level = StateQuery.DumpsysField("fixture", "level")
+        val shell = QueryShell(
+            outputs = mapOf(
+                command("dumpsys", "fixture") to result("level: 80\n", timedOut = true),
+            ),
+        )
+
+        assertEquals(emptyMap(), ParametricStateReader(shell).read(setOf(level)))
+    }
+
+    @Test
+    fun `builtin screen state is read from a truncated dumpsys power`() = runTest {
+        val screen = StateQuery.Builtin(StateKeys.SCREEN)
+        val shell = QueryShell(
+            outputs = mapOf(
+                command("dumpsys", "power") to result(
+                    "Power Manager State:\n  mWakefulness=Awake\n  mWakeLock",
+                    truncated = true,
+                ),
+            ),
+        )
+
+        assertEquals("on", ParametricStateReader(shell).read(setOf(screen))[screen.canonicalId])
+    }
+
+    @Test
     fun `multiple fields from one dumpsys service share one bounded process`() = runTest {
         val level = StateQuery.DumpsysField("battery", "level")
         val voltage = StateQuery.DumpsysField("battery", "voltage")

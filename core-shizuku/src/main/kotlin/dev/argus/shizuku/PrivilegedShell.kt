@@ -165,9 +165,11 @@ internal class PrioritizedPrivilegedShell(
                     } catch (error: CancellationException) {
                         pending.result.cancel(error)
                         throw error
-                    } catch (_: Exception) {
+                    } catch (error: ShizukuShellException) {
+                        pending.result.completeExceptionally(error)
+                    } catch (error: Exception) {
                         pending.result.completeExceptionally(
-                            IllegalStateException("Trasporto Shizuku non disponibile"),
+                            ShizukuShellException(ShizukuShellException.UNAVAILABLE, error),
                         )
                     }
                 }

@@ -13,6 +13,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import rikka.shizuku.Shizuku
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.resume
 
 enum class ShizukuGatewayStatus {
@@ -28,6 +29,41 @@ enum class ShizukuPermissionResult {
     DENIED,
     RATIONALE_REQUIRED,
     UNAVAILABLE,
+}
+
+/**
+ * Esito esteso della richiesta di permesso. A differenza di [ShizukuPermissionResult] distingue
+ * [AWAITING_USER] (la finestra di Shizuku è ancora aperta e l'utente non ha risposto entro il
+ * timeout) da [UNAVAILABLE] (Shizuku assente, spento o troppo vecchio).
+ */
+enum class ShizukuPermissionOutcome {
+    GRANTED,
+    DENIED,
+    RATIONALE_REQUIRED,
+    UNAVAILABLE,
+    AWAITING_USER,
+    ;
+
+    /** Vista compatibile con i chiamanti che conoscono solo [ShizukuPermissionResult]. */
+    fun toResult(): ShizukuPermissionResult = when (this) {
+        GRANTED -> ShizukuPermissionResult.GRANTED
+        DENIED -> ShizukuPermissionResult.DENIED
+        RATIONALE_REQUIRED -> ShizukuPermissionResult.RATIONALE_REQUIRED
+        UNAVAILABLE, AWAITING_USER -> ShizukuPermissionResult.UNAVAILABLE
+    }
+}
+
+/**
+ * Identità con cui gira il servizio privilegiato di Shizuku, letta una volta per sessione del
+ * servizio. Con Shizuku avviato da adb l'uid è 2000 (shell); su un telefono con root Shizuku può
+ * girare come root (uid 0) e allora i comandi delle regole girano come root.
+ */
+data class ShizukuIdentity(val uid: Int) {
+    val runsAsRoot: Boolean get() = uid == ROOT_UID
+
+    companion object {
+        const val ROOT_UID = 0
+    }
 }
 
 internal interface ShizukuApi {
@@ -112,8 +148,11 @@ class ShizukuGateway internal constructor(
     constructor(context: Context) : this(AndroidShizukuApi(context))
 
     private val state = MutableStateFlow(resolveStatus())
-    private val binderReceivedListener: () -> Unit = { refresh() }
-    private val binderDeadListener: () -> Unit = { refresh() }
+    private val identityState = MutableStateFlow<ShizukuIdentity?>(null)
+    private val publishLock = Any()
+    private val epoch = AtomicLong()
+    private val binderReceivedListener: () -> Unit = { onBinderEvent() }
+    private val binderDeadListener: () -> Unit = { onBinderEvent() }
     private val permissionResultListener: (Int, Int) -> Unit = { _, _ -> refresh() }
     private val permissionRequestMutex = Mutex()
 
@@ -126,28 +165,59 @@ class ShizukuGateway internal constructor(
 
     fun observeStatus(): StateFlow<ShizukuGatewayStatus> = state.asStateFlow()
 
-    fun status(): ShizukuGatewayStatus = resolveStatus().also { state.value = it }
+    /**
+     * Identità del servizio privilegiato collegato, `null` finché il servizio non è collegato
+     * (Shizuku spento, non autorizzato, oppure nessuna richiesta privilegiata ha ancora aperto il
+     * collegamento in questa sessione). Viene letta una volta per sessione del servizio, dopo il
+     * bind, e azzerata quando il servizio o Shizuku si scollegano.
+     * `identity.runsAsRoot` è vero quando Shizuku gira come root: i comandi delle regole girano
+     * allora come root, non con i permessi shell (uid 2000).
+     */
+    fun observeIdentity(): StateFlow<ShizukuIdentity?> = identityState.asStateFlow()
+
+    fun status(): ShizukuGatewayStatus = resolveStatus().also { publish(it) }
+
+    /**
+     * Contatore che avanza a ogni cambio di stato di Shizuku e a ogni evento del binder
+     * (anche se lo stato letto resta uguale: un riavvio rapido è comunque un'altra istanza).
+     * Chi memorizza un blocco legato a "lo stato di prima" lo azzera quando il contatore cambia.
+     */
+    internal fun statusEpoch(): Long = epoch.get()
+
+    internal fun publishIdentity(identity: ShizukuIdentity?) {
+        identityState.value = identity
+    }
 
     suspend fun requestPermission(
         rationaleShown: Boolean = false,
-    ): ShizukuPermissionResult = permissionRequestMutex.withLock {
+    ): ShizukuPermissionResult = requestPermissionOutcome(rationaleShown).toResult()
+
+    /**
+     * Come [requestPermission] ma distingue il timeout della richiesta
+     * ([ShizukuPermissionOutcome.AWAITING_USER]: la finestra di Shizuku può essere ancora aperta)
+     * da Shizuku non disponibile. Se l'utente risponde dopo il timeout lo stato si aggiorna da
+     * solo: il listener globale dei risultati di permesso resta registrato.
+     */
+    suspend fun requestPermissionOutcome(
+        rationaleShown: Boolean = false,
+    ): ShizukuPermissionOutcome = permissionRequestMutex.withLock {
         when (status()) {
-            ShizukuGatewayStatus.AUTHORIZED -> return@withLock ShizukuPermissionResult.GRANTED
+            ShizukuGatewayStatus.AUTHORIZED -> return@withLock ShizukuPermissionOutcome.GRANTED
             ShizukuGatewayStatus.NOT_INSTALLED,
             ShizukuGatewayStatus.INSTALLED_NOT_RUNNING,
             ShizukuGatewayStatus.UNSUPPORTED,
-            -> return@withLock ShizukuPermissionResult.UNAVAILABLE
+            -> return@withLock ShizukuPermissionOutcome.UNAVAILABLE
             ShizukuGatewayStatus.RUNNING_NOT_AUTHORIZED -> Unit
         }
         if (api.shouldShowPermissionRationale() && !rationaleShown) {
-            return@withLock ShizukuPermissionResult.RATIONALE_REQUIRED
+            return@withLock ShizukuPermissionOutcome.RATIONALE_REQUIRED
         }
         withTimeoutOrNull(PERMISSION_REQUEST_TIMEOUT_MILLIS) {
             awaitPermissionResult()
-        } ?: ShizukuPermissionResult.UNAVAILABLE
+        } ?: ShizukuPermissionOutcome.AWAITING_USER
     }
 
-    private suspend fun awaitPermissionResult(): ShizukuPermissionResult =
+    private suspend fun awaitPermissionResult(): ShizukuPermissionOutcome =
         suspendCancellableCoroutine { continuation ->
             val requestCode = REQUEST_CODES.incrementAndGet()
             lateinit var listener: (Int, Int) -> Unit
@@ -157,9 +227,9 @@ class ShizukuGateway internal constructor(
                     refresh()
                     continuation.resume(
                         if (grantResult == PackageManager.PERMISSION_GRANTED) {
-                            ShizukuPermissionResult.GRANTED
+                            ShizukuPermissionOutcome.GRANTED
                         } else {
-                            ShizukuPermissionResult.DENIED
+                            ShizukuPermissionOutcome.DENIED
                         },
                     )
                 }
@@ -175,12 +245,29 @@ class ShizukuGateway internal constructor(
                 throw error
             } catch (_: Exception) {
                 api.removePermissionResultListener(listener)
-                if (continuation.isActive) continuation.resume(ShizukuPermissionResult.UNAVAILABLE)
+                if (continuation.isActive) continuation.resume(ShizukuPermissionOutcome.UNAVAILABLE)
             }
         }
 
     private fun refresh() {
-        state.value = resolveStatus()
+        publish(resolveStatus())
+    }
+
+    private fun onBinderEvent() {
+        epoch.incrementAndGet()
+        identityState.value = null
+        refresh()
+    }
+
+    private fun publish(next: ShizukuGatewayStatus) {
+        synchronized(publishLock) {
+            val previous = state.value
+            state.value = next
+            if (previous != next) {
+                epoch.incrementAndGet()
+                if (next != ShizukuGatewayStatus.AUTHORIZED) identityState.value = null
+            }
+        }
     }
 
     private fun resolveStatus(): ShizukuGatewayStatus {
