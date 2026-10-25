@@ -128,6 +128,16 @@ class PrefsGeofenceStateStore internal constructor(
             .commitOrThrow()
     }
 
+    override fun markUnknown(
+        automationId: AutomationId,
+        approvalFingerprint: ApprovalFingerprint,
+    ) = synchronized(lock) {
+        readLocked(automationId)
+            ?.takeIf { it.approvalFingerprint == approvalFingerprint }
+            ?: return@synchronized
+        preferences.edit().remove(keys(automationId).transition).commitOrThrow()
+    }
+
     override fun delete(automationId: AutomationId) = synchronized(lock) {
         val keys = keys(automationId)
         val ids = preferences.getStringSet(KEY_KNOWN_IDS, emptySet()).orEmpty().toMutableSet()

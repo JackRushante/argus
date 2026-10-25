@@ -65,6 +65,30 @@ class GeofenceEventIngressTest {
     }
 
     @Test
+    fun `an enter or an exit from an unknown state is delivered and never a duplicate`() = runTest {
+        listOf(Transition.ENTER, Transition.EXIT).forEach { edge ->
+            val id = AutomationId("unknown-${edge.name}")
+            val fingerprint = ApprovalFingerprint("a".repeat(64))
+            val state = MemoryGeofenceStateStore().apply {
+                prepare(GeofenceRegistration(id, fingerprint, 45.0, 9.0, 150f))
+                activate(id, fingerprint)
+                // Stato noto «dentro», poi dimenticato al riavvio con la posizione ignota.
+                beginTransition(id, fingerprint, Transition.ENTER)!!.also {
+                    completeTransition(id, fingerprint, it.sequence)
+                }
+                markUnknown(id, fingerprint)
+            }
+            val delivered = mutableListOf<TriggerEnvelope>()
+            val ingress = GeofenceEventIngress(state, GeofenceEventDispatcher { delivered += it })
+
+            assertTrue(ingress.onTransition(id, fingerprint, edge))
+
+            assertEquals(1, delivered.size)
+            assertEquals(edge, state.get(id)?.lastTransition)
+        }
+    }
+
+    @Test
     fun `alternating transitions get stable sequence ids while duplicate callbacks are suppressed`() = runTest {
         val id = AutomationId("home")
         val fingerprint = ApprovalFingerprint("a".repeat(64))

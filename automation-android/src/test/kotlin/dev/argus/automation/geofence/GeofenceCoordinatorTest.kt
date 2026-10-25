@@ -23,6 +23,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class GeofenceCoordinatorTest {
@@ -119,6 +120,160 @@ class GeofenceCoordinatorTest {
         assertEquals(emptyList(), report.recovered)
         assertEquals(emptyList(), envelopes)
         assertEquals(Transition.ENTER, requireNotNull(state.get(rule.id)).lastTransition)
+    }
+
+    /**
+     * Bug B22: al riavvio la posizione non si legge (al chiuso, senza GPS), l'uscita avvenuta con
+     * il telefono spento non viene registrata, e lo stato resta «dentro». Il rientro a casa
+     * veniva poi scambiato per un doppione e scartato. Ora lo stato diventa sconosciuto.
+     */
+    @Test
+    fun `reboot with an unreadable position forgets the last state so the return home is delivered`() = runTest {
+        val rule = rule("home")
+        val fingerprint = requireNotNull(rule.approvalFingerprint)
+        val state = persistedState(rule, Transition.ENTER)
+        val envelopes = mutableListOf<TriggerEnvelope>()
+        val ingress = GeofenceEventIngress(state, GeofenceEventDispatcher { envelopes += it })
+
+        val report = GeofenceCoordinator(
+            RulesStore(listOf(rule)),
+            state,
+            RecordingBackend(),
+            CurrentLocationProvider { null },
+            ingress,
+        ).reconcile(recreateOsRegistrations = true)
+
+        assertEquals(listOf(rule.id), report.markedUnknown)
+        assertNull(requireNotNull(state.get(rule.id)).lastTransition)
+        assertEquals(emptyList(), report.recovered)
+        assertEquals(emptyList(), envelopes)
+
+        // Piu' tardi il framework segnala il rientro: da sconosciuto non e' un doppione.
+        assertTrue(ingress.onTransition(rule.id, fingerprint, Transition.ENTER))
+        assertEquals(1, envelopes.size)
+        assertEquals(Transition.ENTER, requireNotNull(state.get(rule.id)).lastTransition)
+    }
+
+    @Test
+    fun `with a known inside state a repeated enter stays a duplicate`() = runTest {
+        // Controprova del dedup: con lo stato noto «dentro» un secondo ENTER viene scartato.
+        val rule = rule("home")
+        val fingerprint = requireNotNull(rule.approvalFingerprint)
+        val state = persistedState(rule, Transition.ENTER)
+        val envelopes = mutableListOf<TriggerEnvelope>()
+        val ingress = GeofenceEventIngress(state, GeofenceEventDispatcher { envelopes += it })
+
+        assertFalse(ingress.onTransition(rule.id, fingerprint, Transition.ENTER))
+        assertEquals(emptyList(), envelopes)
+    }
+
+    @Test
+    fun `reboot forgets the known state also when the position provider fails or is invalid`() = runTest {
+        val failing = CurrentLocationProvider { error("location unavailable") }
+        val invalid = CurrentLocationProvider { DeviceLocation(0.0, 0.0) }
+        listOf(failing, invalid).forEachIndexed { index, provider ->
+            val rule = rule("home-$index")
+            val state = persistedState(rule, Transition.EXIT)
+
+            val report = GeofenceCoordinator(
+                RulesStore(listOf(rule)),
+                state,
+                RecordingBackend(),
+                provider,
+                GeofenceEventIngress(state, GeofenceEventDispatcher { }),
+            ).reconcile(recreateOsRegistrations = true)
+
+            assertEquals(listOf(rule.id), report.markedUnknown)
+            assertNull(requireNotNull(state.get(rule.id)).lastTransition)
+        }
+    }
+
+    @Test
+    fun `a readable position keeps the known state`() = runTest {
+        val rule = rule("home")
+        val state = persistedState(rule, Transition.ENTER)
+        // A pochi metri dal centro: coerente con «dentro», nessun bordo da recuperare.
+        val current = CurrentLocationProvider { DeviceLocation(45.0001, 9.0) }
+
+        val report = GeofenceCoordinator(
+            RulesStore(listOf(rule)),
+            state,
+            RecordingBackend(),
+            current,
+            GeofenceEventIngress(state, GeofenceEventDispatcher { }),
+        ).reconcile(recreateOsRegistrations = true)
+
+        assertEquals(emptyList(), report.markedUnknown)
+        assertEquals(Transition.ENTER, requireNotNull(state.get(rule.id)).lastTransition)
+    }
+
+    @Test
+    fun `an ordinary reconcile never reads the position nor forgets the state`() = runTest {
+        val rule = rule("home")
+        val state = persistedState(rule, Transition.ENTER)
+        var reads = 0
+        val current = CurrentLocationProvider { reads += 1; null }
+
+        val report = GeofenceCoordinator(
+            RulesStore(listOf(rule)),
+            state,
+            RecordingBackend(),
+            current,
+            GeofenceEventIngress(state, GeofenceEventDispatcher { }),
+        ).reconcile(recreateOsRegistrations = false)
+
+        assertEquals(0, reads)
+        assertEquals(emptyList(), report.markedUnknown)
+        assertEquals(Transition.ENTER, requireNotNull(state.get(rule.id)).lastTransition)
+    }
+
+    @Test
+    fun `a rule that never had a known state is not touched and wakes no position read`() = runTest {
+        val rule = rule("fresh")
+        var reads = 0
+        val current = CurrentLocationProvider { reads += 1; null }
+        val state = MemoryGeofenceStateStore()
+
+        val report = GeofenceCoordinator(
+            RulesStore(listOf(rule)),
+            state,
+            RecordingBackend(),
+            current,
+            GeofenceEventIngress(state, GeofenceEventDispatcher { }),
+        ).reconcile(recreateOsRegistrations = true)
+
+        assertEquals(0, reads)
+        assertEquals(emptyList(), report.markedUnknown)
+    }
+
+    @Test
+    fun `forgetting the state keeps the transition sequence so event ids stay unique`() = runTest {
+        val rule = rule("home")
+        val fingerprint = requireNotNull(rule.approvalFingerprint)
+        val state = persistedState(rule, Transition.ENTER)
+        val sequenceBefore = requireNotNull(state.get(rule.id)).sequence
+
+        state.markUnknown(rule.id, fingerprint)
+
+        val after = requireNotNull(state.get(rule.id))
+        assertNull(after.lastTransition)
+        assertEquals(sequenceBefore, after.sequence)
+        // Revisione diversa: nessun effetto.
+        persistedState(rule, Transition.ENTER).let { other ->
+            other.markUnknown(rule.id, ApprovalFingerprint("9".repeat(64)))
+            assertEquals(Transition.ENTER, requireNotNull(other.get(rule.id)).lastTransition)
+        }
+    }
+
+    private fun persistedState(rule: Automation, transition: Transition): MemoryGeofenceStateStore {
+        val fingerprint = requireNotNull(rule.approvalFingerprint)
+        return MemoryGeofenceStateStore().apply {
+            prepare(GeofenceRegistration.from(rule))
+            activate(rule.id, fingerprint)
+            beginTransition(rule.id, fingerprint, transition)!!.also {
+                completeTransition(rule.id, fingerprint, it.sequence)
+            }
+        }
     }
 
     @Test
