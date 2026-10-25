@@ -31,6 +31,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.androidx.lifecycle.viewmodel.ktx)
+    implementation(libs.androidx.lifecycle.process)
     implementation(libs.hilt.android)
     // CliBridgeTransport espone OkHttpClient nel costruttore pubblico: dipendenza compile diretta.
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
