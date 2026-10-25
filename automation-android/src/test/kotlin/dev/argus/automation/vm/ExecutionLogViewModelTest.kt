@@ -1,10 +1,13 @@
 package dev.argus.automation.vm
 
+import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import androidx.test.core.app.ApplicationProvider
+import dev.argus.automation.AndroidClipboardCopier
+import dev.argus.automation.ClipboardCopier
 import dev.argus.automation.DeferredReplyCipher
 import dev.argus.automation.DeferredReplyManager
 import dev.argus.data.ArgusDatabase
@@ -17,10 +20,12 @@ import dev.argus.engine.model.Action
 import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.runtime.ActionResult
 import dev.argus.engine.runtime.AuditEvent
 import dev.argus.engine.runtime.AuditKind
 import dev.argus.engine.runtime.ExecutionId
 import dev.argus.engine.runtime.FireClaimRequest
+import dev.argus.engine.runtime.TriggerEvent
 import dev.argus.engine.runtime.TriggerEventId
 import dev.argus.engine.safety.DraftArmResult
 import dev.argus.engine.safety.DraftId
@@ -83,7 +88,7 @@ class ExecutionLogViewModelTest {
     }
 
     @Test
-    fun `send now decrypts copies as sensitive clip and consumes exactly once`() = runTest {
+    fun `send now copies a sensitive clip without consuming the reply`() = runTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val executionId = seedDeferredExecution("rule-e13", "ci vediamo alle 19:30")
         val logId = seedAuditRow("rule-e13", executionId)
@@ -94,24 +99,115 @@ class ExecutionLogViewModelTest {
         awaitUntil("righe log caricate") { viewModel.state.value.entries.isNotEmpty() }
 
         viewModel.onSendNow(logId)
-        awaitUntil("primo esito consegna") { messages.isNotEmpty() }
+        awaitUntil("primo esito copia") { messages.isNotEmpty() }
 
         val clipboard = requireNotNull(context.getSystemService(ClipboardManager::class.java))
         val clip = requireNotNull(clipboard.primaryClip)
         assertEquals("ci vediamo alle 19:30", clip.getItemAt(0).text.toString())
+        assertTrue(
+            clip.description.extras?.getBoolean(ClipDescription.EXTRA_IS_SENSITIVE) == true,
+            "la clip deve essere marcata sensibile",
+        )
         assertEquals(1, messages.size)
         assertFalse(
             messages.single().contains("19:30"),
             "il testo della reply non entra nei messaggi UI",
         )
 
+        // Niente è stato segnato: finché non scade si può ricopiare, ogni volta con lo stesso testo.
+        clipboard.clearPrimaryClip()
         viewModel.onSendNow(logId)
-        awaitUntil("secondo esito consegna") { messages.size >= 2 }
+        awaitUntil("secondo esito copia") { messages.size >= 2 }
+        assertEquals(messages.first(), messages.last(), "la seconda copia riesce come la prima")
+        assertEquals("ci vediamo alle 19:30", clipboard.primaryClip?.getItemAt(0)?.text.toString())
+    }
+
+    @Test
+    fun `send now uses the injected clipboard copier with the literal reply text`() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val executionId = seedDeferredExecution("rule-copier", "testo da copiare")
+        val logId = seedAuditRow("rule-copier", executionId)
+        val copier = RecordingClipboardCopier()
+        val viewModel = viewModel(context, clipboard = copier)
+        val messages = mutableListOf<String>()
+        backgroundScope.launch { viewModel.messages.collect(messages::add) }
+        backgroundScope.launch { viewModel.state.collect { } }
+        awaitUntil("righe log caricate") { viewModel.state.value.entries.isNotEmpty() }
+
+        viewModel.onSendNow(logId)
+        awaitUntil("esito copia") { messages.isNotEmpty() }
+
+        assertEquals(listOf("testo da copiare"), copier.literals)
+    }
+
+    @Test
+    fun `clipboard failure reports the error and leaves the reply available`() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val executionId = seedDeferredExecution("rule-fail", "testo")
+        val logId = seedAuditRow("rule-fail", executionId)
+        val copier = RecordingClipboardCopier(result = ActionResult.Failure("clipboard_write_failed"))
+        val viewModel = viewModel(context, clipboard = copier)
+        val messages = mutableListOf<String>()
+        backgroundScope.launch { viewModel.messages.collect(messages::add) }
+        backgroundScope.launch { viewModel.state.collect { } }
+        awaitUntil("righe log caricate") { viewModel.state.value.entries.isNotEmpty() }
+
+        viewModel.onSendNow(logId)
+        awaitUntil("esito copia fallita") { messages.isNotEmpty() }
+        assertEquals("Impossibile copiare la risposta negli appunti.", messages.last())
+
+        // Non consumata: dopo il ripristino della clipboard la stessa risposta si copia ancora.
+        copier.result = ActionResult.Success
+        viewModel.onSendNow(logId)
+        awaitUntil("copia riuscita al secondo tentativo") { messages.size >= 2 }
+        assertEquals(2, copier.literals.size)
+        assertTrue(messages.last().startsWith("Risposta copiata"), messages.last())
+    }
+
+    @Test
+    fun `mark as sent consumes the reply exactly once`() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val executionId = seedDeferredExecution("rule-mark", "ok")
+        val logId = seedAuditRow("rule-mark", executionId)
+        val viewModel = viewModel(context)
+        val messages = mutableListOf<String>()
+        backgroundScope.launch { viewModel.messages.collect(messages::add) }
+        backgroundScope.launch { viewModel.state.collect { } }
+        awaitUntil("righe log caricate") { viewModel.state.value.entries.isNotEmpty() }
+
+        viewModel.onMarkSent(logId)
+        awaitUntil("segnata come inviata") { messages.isNotEmpty() }
+        assertEquals("Segnata come inviata.", messages.last())
+
+        viewModel.onMarkSent(logId)
+        awaitUntil("secondo segna come inviata") { messages.size >= 2 }
         assertEquals(
             "La risposta non è più disponibile: scaduta o già consegnata.",
             messages.last(),
             "il consumo è one-shot",
         )
+
+        viewModel.onSendNow(logId)
+        awaitUntil("copia dopo il consumo") { messages.size >= 3 }
+        assertEquals(
+            "La risposta non è più disponibile: scaduta o già consegnata.",
+            messages.last(),
+            "una risposta segnata come inviata non si ricopia",
+        )
+    }
+
+    @Test
+    fun `mark as sent on an unknown row explains itself`() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val viewModel = viewModel(context)
+        val messages = mutableListOf<String>()
+        // Unconfined: la sottoscrizione parte subito, prima dell'emit sotto test (SharedFlow senza replay).
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.messages.collect(messages::add) }
+
+        viewModel.onMarkSent("999999")
+        awaitUntil("esito per riga sconosciuta") { messages.isNotEmpty() }
+
+        assertEquals("Nessuna risposta differita per questa voce.", messages.single())
     }
 
     @Test
@@ -165,6 +261,7 @@ class ExecutionLogViewModelTest {
     private fun viewModel(
         context: Context,
         language: RenderLanguage = RenderLanguage.IT,
+        clipboard: ClipboardCopier = AndroidClipboardCopier(context, expiryScheduler = { _, _ -> }),
     ) = ExecutionLogViewModel(
         savedStateHandle = SavedStateHandle(),
         context = context,
@@ -173,6 +270,7 @@ class ExecutionLogViewModelTest {
             RoomDeferredReplyStore(db.deferredReplyDao()),
             cipher,
         ) { NOW_MILLIS },
+        clipboard = clipboard,
         language = language,
     ).also { lastViewModel = it }
 
@@ -234,5 +332,19 @@ class ExecutionLogViewModelTest {
 
     private companion object {
         const val NOW_MILLIS = 10_000L
+    }
+}
+
+private class RecordingClipboardCopier(
+    var result: ActionResult = ActionResult.Success,
+) : ClipboardCopier {
+    val literals = mutableListOf<String>()
+
+    override fun copy(event: TriggerEvent, extractionRegex: String?): ActionResult =
+        error("non usato dal log")
+
+    override fun copyLiteral(text: String): ActionResult {
+        literals += text
+        return result
     }
 }

@@ -175,6 +175,17 @@ fun OnboardingScreen(
                     ProviderSelector(state.providerChoices, callbacks::onSelectProvider)
                 }
 
+                // BRAIN_CONFIG configurato ma non verificato: avviso, mai un blocco (D9).
+                if (step.kind == StepKind.BRAIN_CONFIG && state.brainUnverified) {
+                    WarningBanner(
+                        UiWarning(
+                            Severity.WARNING,
+                            "brain_unverified",
+                            stringResource(R.string.onboarding_brain_unverified),
+                        ),
+                    )
+                }
+
                 // SHIZUKU: lista onesta di cosa richiede/degrada senza Shizuku (task #54).
                 if (step.kind == StepKind.SHIZUKU && state.shizukuCapabilities.isNotEmpty()) {
                     ShizukuCapabilityList(state.shizukuCapabilities)
@@ -518,15 +529,37 @@ private fun OnboardingFooter(
                     Text(stringResource(R.string.onboarding_mandatory), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    // Salta solo per gli step non obbligatori (§6.6: il resto è skippabile).
-                    if (!isMandatory(step.kind)) {
+                    // Salta solo per gli step non obbligatori (§6.6: il resto è skippabile). Sull'ultimo
+                    // passo c'è sempre «Concludi»: Salta sarebbe un doppione.
+                    if (!isMandatory(step.kind) && !isLast) {
                         OutlinedButton(onClick = { callbacks.onSkip(step.kind) }, modifier = Modifier.heightIn(min = 48.dp)) {
                             Text(stringResource(R.string.onboarding_skip))
                         }
                     }
                     // Primario: azione dello step (ctaLabel) se presente; altrimenti nav
-                    // "Avanti" o "Concludi" (gate su canFinish, §6.6).
+                    // "Avanti" o "Concludi" (gate su canFinish, §6.6). Ultimo passo: «Concludi» c'è
+                    // sempre, accanto all'eventuale CTA, così nessuna CTA ignorata blocca la fine.
+                    // Cervello non verificato: la CTA (correggi le credenziali) sta accanto ad «Avanti».
+                    val navAlongsideCta = isLast || (step.kind == StepKind.BRAIN_CONFIG && state.brainUnverified)
                     when {
+                        step.ctaLabel != null && navAlongsideCta -> {
+                            OutlinedButton(
+                                onClick = { onStepCta(step.kind) },
+                                modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                            ) { Text(step.ctaLabel) }
+                            if (isLast) {
+                                Button(
+                                    onClick = callbacks::onFinish,
+                                    enabled = state.canFinish,
+                                    modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                                ) { Text(stringResource(R.string.onboarding_finish)) }
+                            } else {
+                                Button(
+                                    onClick = callbacks::onNext,
+                                    modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                                ) { Text(stringResource(R.string.onboarding_next)) }
+                            }
+                        }
                         step.ctaLabel != null -> Button(
                             onClick = { onStepCta(step.kind) },
                             modifier = Modifier.weight(1f).heightIn(min = 48.dp),

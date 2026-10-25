@@ -1,22 +1,20 @@
 package dev.argus.automation.vm
 
-import android.content.ClipData
-import android.content.ClipDescription
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.os.PersistableBundle
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import dev.argus.automation.ClipboardCopier
 import dev.argus.automation.DeferredReplyManager
 import dev.argus.automation.DeferredReplyResolution
 import dev.argus.automation.DeliverableReply
 import dev.argus.data.ArgusDatabase
 import dev.argus.data.dao.AuditLogRecord
 import dev.argus.data.entities.ActionResultEntity
+import dev.argus.engine.runtime.ActionResult
 import dev.argus.ui.model.ExecutionLogState
 import dev.argus.ui.presentation.RenderLanguage
 import kotlinx.coroutines.CancellationException
@@ -38,6 +36,7 @@ class ExecutionLogViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     database: ArgusDatabase,
     private val deferredReplies: DeferredReplyManager,
+    private val clipboard: ClipboardCopier,
     private val language: RenderLanguage = RenderLanguage.system(),
 ) : ViewModel() {
     private val audit = database.auditDao()
@@ -115,40 +114,51 @@ class ExecutionLogViewModel @Inject constructor(
             }
             when (val resolution = deferredReplies.resolve(executionId)) {
                 is DeferredReplyResolution.Ready -> deliver(resolution.reply)
-                DeferredReplyResolution.Unavailable ->
-                    message(
-                        language.pick(
-                            "The reply is no longer available: it expired or was already delivered.",
-                            "La risposta non è più disponibile: scaduta o già consegnata.",
-                        ),
-                    )
-                DeferredReplyResolution.Failed ->
-                    message(
-                        language.pick(
-                            "Unable to retrieve the deferred reply.",
-                            "Impossibile recuperare la risposta differita.",
-                        ),
-                    )
+                DeferredReplyResolution.Unavailable -> message(unavailableMessage())
+                DeferredReplyResolution.Failed -> message(unableToRetrieveMessage())
+            }
+        }
+    }
+
+    /**
+     * «Segna come inviata»: unico punto che consuma la reply differita. Il copia-e-apri non segna
+     * niente in anticipo, perché Argus non può sapere se il messaggio è davvero partito.
+     */
+    fun onMarkSent(logId: String) {
+        viewModelScope.launch {
+            val executionId = executionIdsByLogId[logId]
+            if (executionId == null) {
+                message(
+                    language.pick(
+                        "No deferred reply is associated with this entry.",
+                        "Nessuna risposta differita per questa voce.",
+                    ),
+                )
+                return@launch
+            }
+            when (val resolution = deferredReplies.resolve(executionId)) {
+                is DeferredReplyResolution.Ready ->
+                    if (deferredReplies.markDelivered(resolution.reply)) {
+                        message(language.pick("Marked as sent.", "Segnata come inviata."))
+                    } else {
+                        message(unavailableMessage())
+                    }
+                DeferredReplyResolution.Unavailable -> message(unavailableMessage())
+                DeferredReplyResolution.Failed -> message(unableToRetrieveMessage())
             }
         }
     }
 
     /**
      * E13: nessun invio automatico dopo che il canale originario è scaduto. Il testo viene
-     * copiato negli appunti (marcati sensibili) e WhatsApp viene soltanto aperto: incollare
-     * e premere invio resta un gesto esplicito dell'utente.
+     * copiato negli appunti con [ClipboardCopier] (marcati sensibili, svuotati dopo il TTL solo se
+     * ancora nostri) e WhatsApp viene soltanto aperto: incollare e premere invio resta un gesto
+     * esplicito dell'utente. La reply NON viene consumata qui: finché non scade si può ricopiare;
+     * la consuma «Segna come inviata».
      */
     private suspend fun deliver(reply: DeliverableReply) {
         val copied = try {
-            val clipboard = requireNotNull(context.getSystemService(ClipboardManager::class.java))
-            clipboard.setPrimaryClip(
-                ClipData.newPlainText(language.pick("Argus reply", "Risposta Argus"), reply.text).apply {
-                    description.extras = PersistableBundle().apply {
-                        putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true)
-                    }
-                },
-            )
-            true
+            clipboard.copyLiteral(reply.text) == ActionResult.Success
         } catch (error: CancellationException) {
             throw error
         } catch (_: Exception) {
@@ -163,7 +173,6 @@ class ExecutionLogViewModel @Inject constructor(
             )
             return
         }
-        deferredReplies.markDelivered(reply)
         val opened = try {
             val launch = Intent(Intent.ACTION_MAIN)
                 .addCategory(Intent.CATEGORY_LAUNCHER)
@@ -179,8 +188,8 @@ class ExecutionLogViewModel @Inject constructor(
         message(
             if (opened) {
                 language.pick(
-                    "Reply copied: paste it into the chat and tap send.",
-                    "Risposta copiata: incollala nella chat e premi invia.",
+                    "Reply copied: paste it into the chat and tap send, then mark it as sent.",
+                    "Risposta copiata: incollala nella chat, premi invia e poi segnala come inviata.",
                 )
             } else {
                 language.pick(
@@ -190,6 +199,16 @@ class ExecutionLogViewModel @Inject constructor(
             },
         )
     }
+
+    private fun unavailableMessage(): String = language.pick(
+        "The reply is no longer available: it expired or was already delivered.",
+        "La risposta non è più disponibile: scaduta o già consegnata.",
+    )
+
+    private fun unableToRetrieveMessage(): String = language.pick(
+        "Unable to retrieve the deferred reply.",
+        "Impossibile recuperare la risposta differita.",
+    )
 
     private suspend fun message(text: String) {
         mutableMessages.emit(text)
