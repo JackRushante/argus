@@ -501,6 +501,7 @@ object ArgusModule {
         deferredReplies: DeferredReplySink,
         notifier: AutomationNotifier,
         oneShotConsumptions: OneShotConsumptionRegistry,
+        replyRegistry: ActiveNotificationReplyRegistry,
     ): AndroidGenerativeLane = AndroidGenerativeLane(
         scope,
         journal,
@@ -511,6 +512,7 @@ object ArgusModule {
         deferredReplies,
         notifier,
         oneShotConsumptions,
+        replyBursts = replyRegistry,
     )
 
     @Provides
