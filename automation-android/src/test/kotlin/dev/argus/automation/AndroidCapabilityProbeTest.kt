@@ -20,6 +20,7 @@ import dev.argus.engine.model.SensorKind
 import dev.argus.engine.model.VarBinding
 import dev.argus.engine.model.StateKeys
 import dev.argus.engine.model.StateQueryFamily
+import dev.argus.engine.model.Transition
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.ActionCapabilities
 import dev.argus.engine.runtime.AuditEvent
@@ -516,6 +517,76 @@ class AndroidCapabilityProbeTest {
     }
 
     @Test
+    fun `location services off make geofence and wifi identity unavailable with a reason for the model`() = runTest {
+        val ready = state().copy(foregroundLocationGranted = true, backgroundLocationGranted = true)
+        val on = probe(ready)
+        assertTrue(CapabilityIds.TRIGGER_GEOFENCE in on.current().availableCapabilities)
+        assertTrue("geofence" in on.probe(DeviceState()).availableTriggers)
+        assertFalse(CapabilityIds.TRIGGER_GEOFENCE in on.probe(DeviceState()).unavailableTools)
+
+        val off = probe(ready.copy(locationEnabled = false))
+        val snapshot = off.current()
+        assertFalse(CapabilityIds.TRIGGER_GEOFENCE in snapshot.availableCapabilities)
+        assertFalse(CapabilityIds.TRIGGER_CONNECTIVITY_WIFI_IDENTITY in snapshot.availableCapabilities)
+        val manifest = off.probe(DeviceState())
+        assertFalse("geofence" in manifest.availableTriggers)
+        assertFalse("connectivity.wifi.identity" in manifest.availableTriggers)
+        assertEquals(
+            "location services are off",
+            manifest.unavailableTools[CapabilityIds.TRIGGER_GEOFENCE],
+        )
+        assertEquals(
+            "location services are off",
+            manifest.unavailableTools[CapabilityIds.TRIGGER_CONNECTIVITY_WIFI_IDENTITY],
+        )
+        // Il resto non cambia: il Wi-Fi senza identita' e gli altri trigger restano disponibili.
+        assertTrue("connectivity.wifi" in manifest.availableTriggers)
+        assertTrue(CapabilityIds.TRIGGER_CONNECTIVITY_WIFI in snapshot.availableCapabilities)
+        assertTrue("time" in manifest.availableTriggers)
+        // Come un permesso revocato: non e' un outage "transitorio" per l'armo.
+        assertFalse(CapabilityIds.TRIGGER_GEOFENCE in snapshot.transientlyUnavailableCapabilities)
+    }
+
+    @Test
+    fun `location services off are exposed as the location_disabled detail only while they block something`() = runTest {
+        val ready = state().copy(foregroundLocationGranted = true, backgroundLocationGranted = true)
+
+        assertEquals(emptyMap(), probe(ready).capabilityBlockDetails())
+        assertEquals(
+            mapOf(
+                CapabilityIds.TRIGGER_GEOFENCE to "location_disabled",
+                CapabilityIds.TRIGGER_CONNECTIVITY_WIFI_IDENTITY to "location_disabled",
+            ),
+            probe(ready.copy(locationEnabled = false)).capabilityBlockDetails(),
+        )
+    }
+
+    @Test
+    fun `reconciler blocks a geofence rule temporarily when location is switched off and never sends it to review`() = runTest {
+        val rule = geofenceRule("home")
+        val ready = state().copy(foregroundLocationGranted = true, backgroundLocationGranted = true)
+
+        val healthy = CapabilityReconciler(ReconcileAutomationStore(rule), probe(ready)).reconcile()
+        assertEquals(emptyList(), healthy.needsReview)
+        assertEquals(emptyList(), healthy.temporarilyBlocked)
+
+        val store = ReconcileAutomationStore(rule)
+        val audit = ReconcilerAuditRecorder()
+        val off = CapabilityReconciler(store, probe(ready.copy(locationEnabled = false)), audit)
+            .reconcile()
+
+        assertEquals(emptyList(), off.needsReview)
+        assertEquals(listOf(rule.id), off.temporarilyBlocked)
+        assertEquals(AutomationStatus.ARMED, store.get(rule.id)?.status)
+        assertTrue(store.get(rule.id)?.enabled == true)
+        assertTrue(audit.events.isEmpty())
+
+        // Riaccesa la posizione la regola e' di nuovo a posto, senza interventi.
+        val back = CapabilityReconciler(store, probe(ready)).reconcile()
+        assertEquals(emptyList(), back.temporarilyBlocked)
+    }
+
+    @Test
     fun `manifest lists armable triggers so hermes never proposes a dead one`() = runTest {
         val manifest = probe(
             state().copy(notificationListenerGranted = true, receiveSmsGranted = true),
@@ -953,6 +1024,17 @@ class AndroidCapabilityProbeTest {
             status = AutomationStatus.ARMED,
             trigger = Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
             actions = listOf(Action.SetDnd(DndMode.PRIORITY)),
+        ),
+    )
+
+    private fun geofenceRule(id: String): Automation = sign(
+        Automation(
+            id = AutomationId(id),
+            name = id,
+            createdBy = CreatedBy.USER,
+            status = AutomationStatus.ARMED,
+            trigger = Trigger.Geofence(45.0, 9.0, 150.0, Transition.EXIT),
+            actions = listOf(Action.SetWifi(false)),
         ),
     )
 
