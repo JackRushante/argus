@@ -45,13 +45,22 @@ class RoomJournalMaintenance(
     private val policy: JournalRetentionPolicy = JournalRetentionPolicy(),
     private val logRetentionDays: (() -> Int)? = null,
 ) {
-    suspend fun run(nowMillis: Long): JournalMaintenanceResult {
+    /**
+     * @param interruptStale `false` quando nel processo possono esserci dispatch in corso (per esempio
+     *   la conservazione appena cambiata dal Log): un programma vivo in un'attesa lunga risulta RUNNING
+     *   da più di [JournalRetentionPolicy.runningStaleAfterMillis] e verrebbe marcato come interrotto.
+     */
+    suspend fun run(nowMillis: Long, interruptStale: Boolean = true): JournalMaintenanceResult {
         require(nowMillis >= 0) { "nowMillis non può essere negativo" }
         val staleBefore = (nowMillis - policy.runningStaleAfterMillis).coerceAtLeast(0)
         val olderThan = (nowMillis - policy.maxAgeMillis).coerceAtLeast(0)
         val logOlderThan = (nowMillis - logAgeMillis()).coerceAtLeast(0)
         return db.withTransaction {
-            val interrupted = db.executionJournalDao().interruptStale(staleBefore, nowMillis)
+            val interrupted = if (interruptStale) {
+                db.executionJournalDao().interruptStale(staleBefore, nowMillis)
+            } else {
+                0
+            }
             val deletedExecutions = db.executionJournalDao().trim(logOlderThan, policy.maxExecutions)
             val deletedAuditRows = db.auditDao().trim(logOlderThan, policy.maxAuditRows)
             // Il ciphertext di una reply consumata o scaduta non deve sopravvivere al suo TTL.

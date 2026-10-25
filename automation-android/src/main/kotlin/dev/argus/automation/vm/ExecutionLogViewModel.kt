@@ -139,7 +139,9 @@ class ExecutionLogViewModel @Inject constructor(
         if (!retention.setDays(days)) return
         viewModelScope.launch {
             try {
-                maintenance.run(System.currentTimeMillis())
+                // Qui possono esserci dispatch in corso: la conservazione si applica subito, senza
+                // marcare come interrotto un programma vivo in un'attesa lunga.
+                maintenance.run(System.currentTimeMillis(), interruptStale = false)
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {

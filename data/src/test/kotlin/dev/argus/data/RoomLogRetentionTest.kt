@@ -127,6 +127,17 @@ class RoomLogRetentionTest {
     // --- svuota il log --------------------------------------------------------------------
 
     @Test
+    fun `maintenance can apply retention without interrupting a long running execution`() = runTest {
+        val id = arm("long-wait")
+        // Un programma vivo in un'attesa lunga: claim RUNNING da più di quindici minuti.
+        store.claimFire(claim(id, "waiting", ExecutionId("exec-waiting"), now - 30L * 60 * 1_000))
+
+        assertEquals(0, RoomJournalMaintenance(db).run(now, interruptStale = false).interrupted)
+        // Lo stesso claim è ancora RUNNING: la manutenzione di avvio, che lo interrompe, lo trova.
+        assertEquals(1, RoomJournalMaintenance(db).run(now).interrupted)
+    }
+
+    @Test
     fun `clearing the log removes concluded audit and actions and keeps open and recoverable work`() = runTest {
         val id = arm("clear")
         val statuses = mapOf(
