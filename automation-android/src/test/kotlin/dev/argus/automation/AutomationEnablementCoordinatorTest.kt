@@ -332,6 +332,54 @@ class AutomationEnablementCoordinatorTest {
         assertTrue(harness.dispatched.isEmpty())
     }
 
+    // --- B31b: una regola una tantum il cui orario è passato non si riattiva ------------------
+
+    @Test
+    fun `reactivating a one shot whose time is already past fails with one_shot_in_past`() = runTest {
+        val store = ToggleStore(
+            enableResult = true,
+            trigger = Trigger.Time(at = "2020-01-01T09:00", tz = "UTC"),
+        )
+        val runtime = RecordingRuntime { report() }
+        val audit = EnableAuditRecorder()
+
+        val result = AutomationEnablementCoordinator(store, runtime, audit = audit).setEnabled(id, true)
+
+        assertEquals(EnablementResult.SchedulingFailed, result)
+        assertEquals(AutomationStatus.DISABLED, store.currentStatus)
+        assertEquals(0, runtime.reconcileCalls, "la regola non viene nemmeno armata")
+        val event = audit.events.single()
+        assertEquals(AuditKind.ENABLE_FAILED, event.kind)
+        assertEquals("one_shot_in_past", event.detail)
+        assertEquals(id, event.automationId)
+    }
+
+    @Test
+    fun `reactivating a one shot whose time is still ahead succeeds`() = runTest {
+        val store = ToggleStore(
+            enableResult = true,
+            trigger = Trigger.Time(at = "2099-01-01T09:00", tz = "UTC"),
+        )
+        val runtime = RecordingRuntime { report() }
+        val audit = EnableAuditRecorder()
+
+        val result = AutomationEnablementCoordinator(store, runtime, audit = audit).setEnabled(id, true)
+
+        assertEquals(EnablementResult.Updated, result)
+        assertEquals(AutomationStatus.ARMED, store.currentStatus)
+        assertEquals(listOf(AuditKind.RULE_ENABLED), audit.events.map { it.kind })
+    }
+
+    @Test
+    fun `a recurring rule is never reported as a one shot in the past`() = runTest {
+        val store = ToggleStore(enableResult = true)
+        val runtime = RecordingRuntime { report() }
+
+        val result = AutomationEnablementCoordinator(store, runtime).setEnabled(id, true)
+
+        assertEquals(EnablementResult.Updated, result)
+    }
+
     private fun report(failed: List<AutomationId> = emptyList()) = ReconcileReport(
         scheduled = emptyList(),
         cancelled = emptyList(),
