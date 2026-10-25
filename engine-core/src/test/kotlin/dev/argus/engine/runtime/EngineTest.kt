@@ -64,6 +64,7 @@ class EngineTest {
         policy: FirePolicy = allowAll,
         now: () -> Long = { 1_000 },
         resolvedExecutor: ResolvedActionExecutor? = null,
+        pause: suspend (Long) -> Unit = { kotlinx.coroutines.delay(it) },
     ) = Engine(
         store = store,
         executor = ex,
@@ -73,6 +74,7 @@ class EngineTest {
         audit = audit,
         journal = journal,
         resolvedExecutor = resolvedExecutor,
+        pause = pause,
         now = now,
     )
 
@@ -122,6 +124,30 @@ class EngineTest {
         assertEquals(listOf("1.then.1"), journal.actions.map { it.actionPath })
         assertEquals(ActionResult.Success, outcome.results.single())
         assertEquals(ExecutionStatus.SUCCEEDED, journal.completions.single().status)
+    }
+
+    @Test
+    fun `P4 wait goes through the injected pause`() = runTest {
+        val automation = armed(
+            id = "p4-pause",
+            t = Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+            acts = listOf(Action.Wait(1_500), Action.SetFlashlight(true)),
+        )
+        val pauses = mutableListOf<Long>()
+        val seen = mutableListOf<Action>()
+
+        engine(
+            FakeAutomationStore(listOf(automation)),
+            ActionExecutor { action, _ ->
+                seen += action
+                ActionResult.Success
+            },
+            "2026-07-18T10:00:00Z",
+            pause = { pauses += it },
+        ).onTrigger(envelope("alarm:p4-pause", timeEvent(automation))) { DeviceState() }
+
+        assertEquals(listOf(1_500L), pauses)
+        assertEquals(listOf<Action>(Action.SetFlashlight(true)), seen)
     }
 
     @Test

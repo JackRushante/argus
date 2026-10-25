@@ -46,6 +46,7 @@ import dev.argus.automation.NotificationEventDispatcher
 import dev.argus.automation.OneShotConsumptionRegistry
 import dev.argus.automation.ProcessOneShotConsumptionRegistry
 import dev.argus.automation.EngineSensorEventDispatcher
+import dev.argus.automation.RenderLanguageSource
 import dev.argus.automation.RoomTimeAlarmStateStore
 import dev.argus.automation.ShizukuActionExecutor
 import dev.argus.automation.apps.AndroidInstalledAppResolver
@@ -169,6 +170,10 @@ annotation class ApplicationScope
 object ArgusModule {
     @Provides
     fun renderLanguage(): RenderLanguage = RenderLanguage.system()
+
+    @Provides
+    @Singleton
+    fun renderLanguageSource(): RenderLanguageSource = RenderLanguageSource()
 
     @Provides
     @Singleton
