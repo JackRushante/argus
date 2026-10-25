@@ -35,7 +35,7 @@ URL cannot be built yet.
 | build commit (full hash) | `5cfd0a243ceafba1682aeb6831765ca72067d8ba` |
 | signing cert SHA-256 | `4c09633e64cf9876b0da682f5f259383af8d22742aadd93ef273b9f2c73cca6b` |
 | F-Droid release assets | `argus-1201.apk` … `argus-1204.apk` (pattern `argus-%c.apk`) |
-| artifact SHA-256 | `1201`: `f433ceb4b7e6d9cb9ef9e435c73fcdccd630f3232b234ffc0a532c35c42698d5`; `1202`: `84ecf42cc825317618729a46d70efb7664a02eb947d233f7289fb46ab61c9f98`; `1203`: `680e3b9a9dcfed279cd76754c2c72b4c76266562470ecab7e5d6221351657c10`; `1204`: `e613624411e0db3dda4cfd3bef34daa99a08c01d9bca5273053ae12502f4bbbe` |
+| artifact SHA-256 | `1201`: `012db3a64aeeeae39cf4a66fb0d168e4fe9710de4258942e2716b161505bb1d8`; `1202`: `d7311a03415895cda024fb2ba3424ede78f586603c05323206c5cf77f0f791a2`; `1203`: `0d78ed9d8c11d81d224b79578c9b37d3c910f22493cc689b2c8eb4d18e4abce1`; `1204`: `cce4741344d4f251efa540d28468e8c37c64d55a981b23531d37e4e1b2076774` |
 | direct-download asset | none for v0.3.5; use the matching per-ABI APK (`argus-1202.apk` for arm64-v8a) |
 | License (SPDX) | `GPL-3.0-only` |
 
@@ -96,6 +96,11 @@ Build from a clean clone or a clean, detached worktree checked out at the exact 
 `vcsInfo.include = false`, so the `.git` representation is not embedded in the APK.
 Never build release assets from a dirty/incremental tree. Use `clean`,
 `--no-build-cache`, stop competing Gradle daemons, and build one ABI at a time.
+
+Build with **JDK 21**, the same major version as F-Droid's buildserver (OpenJDK 21 on
+Debian 13). javac 21 writes `MethodParameters` attributes for mandated/synthetic
+parameters that javac 17 omits (for example in Hilt-generated members injectors), so a
+JDK 17 build differs from F-Droid's rebuild in `classes2.dex` (v0.3.5, MR !54215).
 
 Verify the produced APK before publishing:
 
@@ -169,7 +174,7 @@ F-Droid — it does not go in the recipe.
 1. Bump `versionCode`/`versionName`; commit on `master`.
 2. Commit and tag the exact release commit (`vX.Y.Z`), then create a clean detached
    clone/worktree at that tag.
-3. For each ABI, run `clean` followed by `:app:assembleRelease
+3. For each ABI, on JDK 21, run `clean` followed by `:app:assembleRelease
    -PargusAbi=<abi> --no-build-cache`; rename the signed output to
    `argus-<splitVersionCode>.apk`. Verify the cert fingerprint and compare the dex
    CRCs across clean rebuilds.
@@ -192,8 +197,9 @@ The first pipeline failed two jobs — both fixed in v0.2.2. Watch for these:
   "usual suspect" (it provisions JDKs from a remote service at build time) and blocks
   the build. It was removed from `settings.gradle.kts`; `engine-core` sets the JVM 17
   target explicitly instead of `jvmToolchain(17)`. **Never reintroduce foojay or a
-  `jvmToolchain{}` that triggers a remote download** — F-Droid builds with a local
-  JDK 17.
+  `jvmToolchain{}` that triggers a remote download** — F-Droid builds with its local
+  JDK (OpenJDK 21 since the Debian 13 buildserver; see §1 for why the reference build
+  must use the same major version).
 
 ## 6. Privacy / distribution invariants
 
