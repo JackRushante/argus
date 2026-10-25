@@ -388,6 +388,11 @@ data class OnboardingState(
 /**
  * Grado di dipendenza da Shizuku di una capacità (task #54). Derivato da
  * [dev.argus.engine.model.ActionPrivileges] (BASE vs PRIVILEGED) e dal comportamento reale delle
+    /**
+     * Cervello configurato ma con connessione non (ancora) verificata. Non blocca il setup: lo step
+     * Brain mostra solo l'avviso e la verifica si rifà da Sistema.
+     */
+    val brainUnverified: Boolean = false,
  * azioni activity-launch da automazione in background (fix #53).
  */
 enum class ShizukuRequirement {

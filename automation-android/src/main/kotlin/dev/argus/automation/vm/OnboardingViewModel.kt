@@ -55,6 +55,11 @@ private data class OnboardingSources(
     val geofenceNeeded: Boolean,
 )
 
+/**
+ * [configured] = credenziali del provider selezionato presenti (chiave solo se richiesta);
+ * [verified] = ultimo controllo di raggiungibilità riuscito. Il setup si conclude con la sola
+ * configurazione: la verifica non è più un requisito, solo uno stato mostrato (D9).
+ */
 private data class BrainSetupState(
     val configured: Boolean = false,
     val verified: Boolean = false,
@@ -320,7 +325,12 @@ class OnboardingViewModel @Inject constructor(
         if (kind == StepKind.WELCOME_PRIVACY || kind == StepKind.BRAIN_CONFIG) return
         val values = skipped.value.toMutableSet().apply { add(kind.name) }
         savedStateHandle[SKIPPED_KEY] = ArrayList(values)
-        advance()
+        // Sull'ultimo passo non c'è un "dopo": se i due passi obbligatori sono a posto, Salta conclude.
+        if (kind == STEP_ORDER.last() && state.value.canFinish) {
+            onFinish()
+        } else {
+            advance()
+        }
     }
 
     fun onNext() {
@@ -384,12 +394,16 @@ class OnboardingViewModel @Inject constructor(
         skipped: Set<String>,
         setup: BrainSetupState,
     ): OnboardingState {
-        val verified = setup.configured && setup.verified
+        // Configurato = provider scelto con configurazione valida salvata: chiave se richiesta
+        // (setup.configured) ed endpoint non vuoto (Hermes e Custom non hanno un default).
+        val brainConfigured = setup.configured &&
+            configuration.providerConfig(configuration.selectedProviderId()).baseUrl.isNotBlank()
+        val brainVerified = brainConfigured && setup.verified
         val health = readAndroidUiHealth(context)
         val uiShizuku = sources.shizuku.toUiStatus(degradedAfterReboot = false)
         val done = mapOf(
             StepKind.WELCOME_PRIVACY to sources.preferences.privacyAccepted,
-            StepKind.BRAIN_CONFIG to verified,
+            StepKind.BRAIN_CONFIG to brainConfigured,
             StepKind.SHIZUKU to (sources.shizuku == ShizukuGatewayStatus.AUTHORIZED),
             // Lo step notifiche è "fatto" solo con pubblicazione E lettura: le CTA arrivano in
             // quest'ordine e restano skippabili (le regole WhatsApp resteranno non armabili).
@@ -409,14 +423,18 @@ class OnboardingViewModel @Inject constructor(
                     stepIndex == index -> StepStatus.IN_PROGRESS
                     else -> StepStatus.TODO
                 },
+                // Il cervello configurato ma non verificato tiene la CTA: si possono correggere le credenziali.
                 ctaLabel = step(kind, uiShizuku, sources.geofenceNeeded, health).ctaLabel
-                    .takeUnless { done.getValue(kind) },
+                    .takeUnless {
+                        done.getValue(kind) && !(kind == StepKind.BRAIN_CONFIG && !brainVerified)
+                    },
             )
         }
         return OnboardingState(
             steps = steps,
             currentIndex = index,
-            canFinish = sources.preferences.privacyAccepted && verified,
+            canFinish = sources.preferences.privacyAccepted && brainConfigured,
+            brainUnverified = brainConfigured && !brainVerified,
             bridgeUrl = configuration.baseUrl(),
             bridgeTokenConfigured = setup.configured,
             providerChoices = providerChoices(),
@@ -474,6 +492,8 @@ class OnboardingViewModel @Inject constructor(
     private fun markBrainVerification(configured: Boolean, verified: Boolean) {
         brainSetup.value = BrainSetupState(configured = configured, verified = verified)
         savedStateHandle[BRAIN_VERIFIED_KEY] = verified
+        // L'endpoint salvato fa parte di "configurato" ma non del BrainSetupState: forza il ricalcolo.
+        refreshSignal.value = System.nanoTime()
     }
 
     private fun unreachableAfterSave(provider: String, reason: String): String = language.pick(

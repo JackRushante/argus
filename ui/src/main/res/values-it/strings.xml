@@ -250,4 +250,5 @@
     <string name="onboarding_shizuku_recommended_sub">Funzionano anche senza, ma solo con Argus aperto in primo piano.</string>
     <string name="onboarding_shizuku_not_required_sub">Sempre disponibili, con o senza Shizuku.</string>
     <string name="onboarding_battery_consequence">Senza l\'esclusione, Android o la gestione energetica del produttore può ritardare il lavoro in background. Gli allarmi restano event-driven e non usano un servizio persistente.</string>
+    <string name="onboarding_brain_unverified">Connessione non ancora verificata: potrai controllarla da Sistema.</string>
 </resources>

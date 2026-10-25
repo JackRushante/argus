@@ -24,6 +24,10 @@ import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.AutomationId
+import dev.argus.engine.model.AutomationStatus
+import dev.argus.engine.model.CreatedBy
+import dev.argus.engine.model.Transition
+import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireClaimRequest
@@ -65,6 +69,8 @@ import org.robolectric.annotation.Config
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -165,30 +171,158 @@ class OnboardingViewModelTest {
     }
 
     @Test
-    fun `authentication failure keeps brain required and wizard blocked`() = runTest(dispatcher) {
+    fun `verifica fallita: la configurazione salvata basta a concludere ma resta non verificata`() =
+        runTest(dispatcher) {
+            val store = OnbFakeProviderStore()
+            val vm = onboardingViewModel(
+                store = store,
+                index = 1,
+                factory = OnbFakeTransportFactory(healthError = BridgeErrorKind.AUTH),
+                language = RenderLanguage.EN,
+            )
+            observe(vm)
+            val events = collectEvents(vm)
+            advanceUntilIdle()
+
+            vm.selectProvider("openai")
+            advanceUntilIdle()
+            vm.saveProviderConfig("openai", baseUrl = null, model = "gpt-5-mini", apiKey = "sk-invalid-1234567890")
+            advanceUntilIdle()
+
+            val state = vm.state.value
+            val brain = state.steps.first { it.kind == StepKind.BRAIN_CONFIG }
+            assertEquals(StepStatus.DONE, brain.status)
+            assertTrue(state.canFinish, "privacy accettata + provider configurato: la verifica non serve")
+            assertTrue(state.brainUnverified, "senza verifica riuscita lo step Brain lo dichiara")
+            // Nessun avanzamento automatico e la CTA resta, per correggere le credenziali.
+            assertEquals(1, state.currentIndex)
+            assertEquals("Configure the brain", brain.ctaLabel)
+            assertTrue(
+                events.filterIsInstance<OnboardingEvent.Message>().last().text.contains("verification failed (auth)"),
+            )
+        }
+
+    @Test
+    fun `verifica riuscita: niente avviso non verificato e CTA del cervello tolta`() = runTest(dispatcher) {
         val store = OnbFakeProviderStore()
+        val vm = onboardingViewModel(store, index = 1)
+        observe(vm)
+        advanceUntilIdle()
+
+        vm.selectProvider("openai")
+        advanceUntilIdle()
+        vm.saveProviderConfig("openai", baseUrl = null, model = "gpt-5-mini", apiKey = "sk-test-1234567890ab")
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertTrue(state.canFinish)
+        assertFalse(state.brainUnverified)
+        assertNull(state.steps.first { it.kind == StepKind.BRAIN_CONFIG }.ctaLabel)
+    }
+
+    @Test
+    fun `provider con chiave gia salvata e mai verificato in sessione puo concludere ed e non verificato`() =
+        runTest(dispatcher) {
+            val store = OnbFakeProviderStore().apply {
+                seed(ProviderId.OPENAI, key = "sk-existing-1234567890")
+                select(ProviderId.OPENAI)
+            }
+            val vm = onboardingViewModel(store, index = 1)
+            observe(vm)
+            advanceUntilIdle()
+
+            val state = vm.state.value
+            assertTrue(state.canFinish)
+            assertTrue(state.brainUnverified)
+        }
+
+    @Test
+    fun `custom senza endpoint salvato non e configurato anche se non richiede chiave`() =
+        runTest(dispatcher) {
+            val store = OnbFakeProviderStore()
+            val vm = onboardingViewModel(store, index = 1)
+            observe(vm)
+            advanceUntilIdle()
+
+            vm.selectProvider("custom_openai_compat")
+            advanceUntilIdle()
+
+            val state = vm.state.value
+            assertFalse(state.canFinish)
+            assertFalse(state.brainUnverified)
+            assertNotEquals(StepStatus.DONE, state.steps.first { it.kind == StepKind.BRAIN_CONFIG }.status)
+        }
+
+    @Test
+    fun `hermes senza bearer o senza url non e configurato`() = runTest(dispatcher) {
+        val onlyUrl = OnbFakeProviderStore().apply { seed(ProviderId.HERMES, baseUrl = "https://hermes.example") }
+        val vmUrl = onboardingViewModel(onlyUrl, index = 1)
+        observe(vmUrl)
+        advanceUntilIdle()
+        assertFalse(vmUrl.state.value.canFinish)
+
+        val onlyKey = OnbFakeProviderStore().apply { seed(ProviderId.HERMES, key = "bearer-existing-0123456789") }
+        val vmKey = onboardingViewModel(onlyKey, index = 1)
+        observe(vmKey)
+        advanceUntilIdle()
+        assertFalse(vmKey.state.value.canFinish)
+    }
+
+    // ------------------------------------------------------------------ B41: ultimo passo
+
+    @Test
+    fun `geofence esistente e posizione in background negata: Salta sull'ultimo passo conclude`() =
+        runTest(dispatcher) {
+            val vm = onboardingViewModel(
+                store = configuredOpenAiStore(),
+                index = LAST_STEP_INDEX,
+                automations = OnbFakeAutomationStore(listOf(geofenceRule())),
+            )
+            observe(vm)
+            val events = collectEvents(vm)
+            advanceUntilIdle()
+
+            val last = vm.state.value.steps.last()
+            assertEquals(StepKind.BACKGROUND_LOCATION, last.kind)
+            assertNotNull(last.ctaLabel, "la CTA permessi resta disponibile: la posizione non è concessa")
+            assertTrue(vm.state.value.canFinish)
+
+            vm.onSkip(StepKind.BACKGROUND_LOCATION)
+            advanceUntilIdle()
+
+            assertTrue(events.any { it is OnboardingEvent.Complete }, "Salta sull'ultimo passo deve concludere")
+        }
+
+    @Test
+    fun `geofence esistente e posizione in background negata: onFinish conclude`() = runTest(dispatcher) {
         val vm = onboardingViewModel(
-            store = store,
-            index = 1,
-            factory = OnbFakeTransportFactory(healthError = BridgeErrorKind.AUTH),
-            language = RenderLanguage.EN,
+            store = configuredOpenAiStore(),
+            index = LAST_STEP_INDEX,
+            automations = OnbFakeAutomationStore(listOf(geofenceRule())),
         )
         observe(vm)
         val events = collectEvents(vm)
         advanceUntilIdle()
 
-        vm.selectProvider("openai")
-        advanceUntilIdle()
-        vm.saveProviderConfig("openai", baseUrl = null, model = "gpt-5-mini", apiKey = "sk-invalid-1234567890")
+        vm.onFinish()
         advanceUntilIdle()
 
-        val state = vm.state.value
-        assertNotEquals(StepStatus.DONE, state.steps.first { it.kind == StepKind.BRAIN_CONFIG }.status)
-        assertEquals(1, state.currentIndex)
-        assertFalse(state.canFinish)
-        assertTrue(
-            events.filterIsInstance<OnboardingEvent.Message>().last().text.contains("verification failed (auth)"),
-        )
+        assertTrue(events.any { it is OnboardingEvent.Complete })
+    }
+
+    @Test
+    fun `Salta sull'ultimo passo senza i passi obbligatori non conclude`() = runTest(dispatcher) {
+        val vm = onboardingViewModel(store = OnbFakeProviderStore(), index = LAST_STEP_INDEX)
+        observe(vm)
+        val events = collectEvents(vm)
+        advanceUntilIdle()
+        assertFalse(vm.state.value.canFinish)
+
+        vm.onSkip(StepKind.BACKGROUND_LOCATION)
+        advanceUntilIdle()
+
+        assertFalse(events.any { it is OnboardingEvent.Complete })
+        assertEquals(LAST_STEP_INDEX, vm.state.value.currentIndex)
     }
 
     @Test
@@ -324,11 +458,26 @@ class OnboardingViewModelTest {
         return out
     }
 
+    private fun configuredOpenAiStore() = OnbFakeProviderStore().apply {
+        seed(ProviderId.OPENAI, key = "sk-existing-1234567890")
+        select(ProviderId.OPENAI)
+    }
+
+    private fun geofenceRule() = Automation(
+        id = AutomationId("geo"),
+        name = "geo",
+        createdBy = CreatedBy.USER,
+        status = AutomationStatus.ARMED,
+        trigger = Trigger.Geofence(lat = 45.0, lng = 9.0, radiusM = 150.0, transition = Transition.EXIT),
+        actions = listOf(Action.ShowNotification("Argus", "uscita")),
+    )
+
     private fun onboardingViewModel(
         store: OnbFakeProviderStore,
         index: Int = 0,
         language: RenderLanguage = RenderLanguage.IT,
         factory: TransportFactory = OnbFakeTransportFactory(),
+        automations: AutomationStore = OnbFakeAutomationStore(),
     ): OnboardingViewModel {
         val brain = ConfiguredBridgeBrain(store, privacyAccepted = { true }, factory = factory)
         val handle = SavedStateHandle(mapOf("currentIndex" to index))
@@ -339,10 +488,14 @@ class OnboardingViewModelTest {
             configuration = store,
             brain = brain,
             shizuku = ShizukuGateway(context),
-            automations = OnbFakeAutomationStore(),
+            automations = automations,
             drafts = OnbFakeDraftRepository(),
             language = language,
         )
+    }
+
+    private companion object {
+        const val LAST_STEP_INDEX = 5
     }
 }
 
@@ -459,8 +612,8 @@ private class OnbFakePreferences(privacyAccepted: Boolean) : AppPreferencesStore
     }
 }
 
-private class OnbFakeAutomationStore : AutomationStore {
-    private val state = MutableStateFlow<List<Automation>>(emptyList())
+private class OnbFakeAutomationStore(initial: List<Automation> = emptyList()) : AutomationStore {
+    private val state = MutableStateFlow(initial)
     override suspend fun get(id: AutomationId): Automation? = null
     override suspend fun all(): List<Automation> = state.value
     override fun observeAll(): Flow<List<Automation>> = state.asStateFlow()
