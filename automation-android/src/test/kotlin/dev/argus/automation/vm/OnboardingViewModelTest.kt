@@ -171,7 +171,7 @@ class OnboardingViewModelTest {
     }
 
     @Test
-    fun `verifica fallita: la configurazione salvata basta a concludere ma resta non verificata`() =
+    fun `verifica fallita - la configurazione salvata basta a concludere ma resta non verificata`() =
         runTest(dispatcher) {
             val store = OnbFakeProviderStore()
             val vm = onboardingViewModel(
@@ -203,7 +203,7 @@ class OnboardingViewModelTest {
         }
 
     @Test
-    fun `verifica riuscita: niente avviso non verificato e CTA del cervello tolta`() = runTest(dispatcher) {
+    fun `verifica riuscita - niente avviso non verificato e CTA del cervello tolta`() = runTest(dispatcher) {
         val store = OnbFakeProviderStore()
         val vm = onboardingViewModel(store, index = 1)
         observe(vm)
@@ -271,7 +271,7 @@ class OnboardingViewModelTest {
     // ------------------------------------------------------------------ B41: ultimo passo
 
     @Test
-    fun `geofence esistente e posizione in background negata: Salta sull'ultimo passo conclude`() =
+    fun `geofence esistente e posizione in background negata - Salta sull'ultimo passo conclude`() =
         runTest(dispatcher) {
             val vm = onboardingViewModel(
                 store = configuredOpenAiStore(),
@@ -294,7 +294,7 @@ class OnboardingViewModelTest {
         }
 
     @Test
-    fun `geofence esistente e posizione in background negata: onFinish conclude`() = runTest(dispatcher) {
+    fun `geofence esistente e posizione in background negata - onFinish conclude`() = runTest(dispatcher) {
         val vm = onboardingViewModel(
             store = configuredOpenAiStore(),
             index = LAST_STEP_INDEX,
