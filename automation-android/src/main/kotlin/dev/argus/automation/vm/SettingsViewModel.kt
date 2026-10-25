@@ -568,13 +568,20 @@ class SettingsViewModel @Inject constructor(
         maxPerDay: Int,
         maxCostMonthMicros: Long,
         maxTokensMonth: Long,
-    ) = updateGlobalLimits {
-        BudgetLimits(
-            maxCallsPerHour = maxPerHour.takeIf { v -> v > 0 },
-            maxCallsPerDay = maxPerDay.takeIf { v -> v > 0 },
-            maxCostPerMonthMicros = maxCostMonthMicros.takeIf { v -> v > 0 },
-            maxTokensPerMonth = maxTokensMonth.takeIf { v -> v > 0 },
-        )
+    ) {
+        // Un valore negativo non è «illimitato»: si rifiuta l'intero salvataggio senza toccare nulla.
+        if (maxPerHour < 0 || maxPerDay < 0 || maxCostMonthMicros < 0 || maxTokensMonth < 0) {
+            mutableMessages.tryEmit(language.pick("Invalid limit.", "Limite non valido."))
+            return
+        }
+        updateGlobalLimits {
+            BudgetLimits(
+                maxCallsPerHour = maxPerHour.takeIf { v -> v > 0 },
+                maxCallsPerDay = maxPerDay.takeIf { v -> v > 0 },
+                maxCostPerMonthMicros = maxCostMonthMicros.takeIf { v -> v > 0 },
+                maxTokensPerMonth = maxTokensMonth.takeIf { v -> v > 0 },
+            )
+        }
     }
 
     fun onBudgetChange(maxPerHour: Int) =
