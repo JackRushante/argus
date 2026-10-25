@@ -120,7 +120,7 @@ class PrivilegedShellUserService() : IPrivilegedShellService.Stub() {
         }
     }
 
-    private fun startProcess(argv: List<String>): Process =
+    private fun startProcess(argv: List<String>): java.lang.Process =
         ProcessBuilder(argv)
             .directory(java.io.File("/"))
             .start()
