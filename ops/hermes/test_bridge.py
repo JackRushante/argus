@@ -446,6 +446,9 @@ class BridgeTest(unittest.TestCase):
             self.assertIn(required, prompt)
         for forbidden in fixture["forbidden"]:
             self.assertNotIn(forbidden, prompt)
+        # La riga dell'orologio (local_time / tomorrow / timezone) e' parte del prompt come nel messaggio utente Android.
+        for required in fixture.get("userRequired", []):
+            self.assertIn(required, prompt)
 
     def test_prompt_frames_run_shell_as_last_resort_with_cookbook(self):
         # IO-7 A: run_shell è ultima spiaggia + cookbook di comandi reali + nota anti-allucinazione.

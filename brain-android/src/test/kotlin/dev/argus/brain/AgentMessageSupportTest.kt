@@ -300,6 +300,12 @@ class AgentMessageSupportTest {
         fixture.getValue("forbidden").jsonArray.forEach {
             assertFalse(it.jsonPrimitive.content in prompt, "frammento obsoleto presente: $it")
         }
+        // L'orologio sta nel messaggio utente, non nel system (che resta statico e cache-friendly).
+        val user = AgentMessageSupport.compileUserText("domani alle 8", emptyManifest, DeviceState())
+        fixture.getValue("userRequired").jsonArray.forEach {
+            assertTrue(it.jsonPrimitive.content in user, "frammento richiesto assente dal messaggio utente: $it")
+            assertFalse(it.jsonPrimitive.content in prompt, "l'orologio non deve stare nel system: $it")
+        }
     }
 
     @Test

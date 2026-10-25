@@ -64,6 +64,6 @@ class ChatScreenLogicTest {
         assertEquals("HTTP 503", chatErrorDetail(ChatError.ServiceUnavailable(503)))
         assertEquals("not_configured", chatErrorDetail(ChatError.NotConfigured))
         assertNull(chatErrorDetail(ChatError.TooLong(40_000, 32_768)), "il messaggio si spiega da solo")
-        assertNotEquals(ChatError.ServerRejected(400), ChatError.ServiceUnavailable(400))
+        assertNotEquals<ChatError>(ChatError.ServerRejected(400), ChatError.ServiceUnavailable(400))
     }
 }

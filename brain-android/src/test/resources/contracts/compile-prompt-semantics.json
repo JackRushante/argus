@@ -25,5 +25,10 @@
     "Never interpolate the value that was read",
     "run_shell, invoke_llm and invoke_llm_v2",
     "Contacts can only be identified by the whitelist ids."
+  ],
+  "userRequired": [
+    "local_time: ",
+    "; tomorrow: ",
+    "; timezone: "
   ]
 }
