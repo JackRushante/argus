@@ -55,9 +55,9 @@ Why this separation matters:
 
 - **Predictability** — the rule that fires at 3 a.m. is exactly the one you approved, byte for byte.
 - **Cost** — no LLM calls on every fire: you pay for (or self-host) the LLM only at compile time and in generative actions.
-- **Security** — the executable program structure and its targets are fingerprinted before arming. In the current **Aggressive** policy, approved templates may also interpolate runtime data into authority fields; this is powerful and intentionally carries injection risk (see [Security & privacy](#security--privacy)).
+- **Security** — the executable program structure and its targets are fingerprinted before arming. External content (SMS, notifications, web pages, model output) can feed local or constrained sinks and, inside approved shell commands, only as one quoted argument; it never becomes command syntax, routing, a target or a change to your automations (see [Security & privacy](#security--privacy)).
 
-The project's current philosophy is **Tasker-class power with explicit, reviewable risk**: the program tree is immutable after approval, bounds and capability checks remain enforced, while the optional use of untrusted runtime data in command/routing fields is permitted by the centralized Aggressive taint policy.
+The project's current philosophy is **Tasker-class power with explicit, reviewable risk**: the program tree is immutable after approval, bounds and capability checks remain enforced, and untrusted runtime data can fill values but cannot change what a rule does.
 
 ---
 
@@ -175,7 +175,7 @@ program tree and fingerprint do not.
 | `set_flashlight` / `vibrate` | Flashlight on/off, one-shot vibration | Base |
 | `set_dark_mode` | Light/dark/automatic system theme; accepts the lowercase compiler wire and legacy persisted uppercase values | Shizuku |
 | `whatsapp_reply` | WhatsApp reply via the notification's RemoteInput | Base (notification listener) |
-| `run_shell` | Shell command template, shown in full at approval; P4 variables may be interpolated under the Aggressive policy | Shizuku |
+| `run_shell` | Shell command template, shown in full at approval; external data enters only as one quoted argument | Shizuku |
 | `write_setting` | Parametric `settings put` on `system\|secure\|global` (any validated key/value template) | Shizuku |
 | `tap` / `input_text` | Reserved UI input primitives; rejected with `unsupported_phase` and never advertised as available | Not available |
 | `wait` / `if` / `while` | Cooperative pause and structured, bounded control flow | Engine |
@@ -219,7 +219,8 @@ The main threat model is **prompt injection from external content** (SMS, notifi
 - **Approval fingerprint** — SHA-256 (`argus-approval-v1`) of the canonical JSON of the **executable data only**; the LLM's prose is excluded from the hash. What fires is byte-for-byte what you approved; any change requires re-approval.
 - **Rendering from the types** — the approval screen shows the rule reconstructed from the domain types, never the LLM's paraphrase. Shell commands are shown in full, in monospace, never truncated.
 - **`DraftValidator`** — no draft enters the engine without validation: closed vocabularies (state keys, enums, tools), bounds on every field (lengths, ranges, condition-tree depth), hard invariants (e.g. `invoke_llm`'s `allowed_tools` can never contain `shell.run` or `automation.*` — re-checked at fire time as well).
-- **Centralized taint and egress policy** — integrity labels remain monotonic, but the **Aggressive** policy deliberately permits a TAINTED trigger/capture value in approved authority templates such as commands, URLs, packages and settings. The program structure and capabilities remain fingerprinted, but data-driven authority creates a real injection surface. Remote egress is a separate decision: future credential-vault values are blocked from every remote Brain regardless of the taint posture, while generic `SECRET` data requires explicit review.
+- **Centralized taint and egress policy** — integrity labels remain monotonic. External (TAINTED) content can feed local or constrained sinks, and inside approved shell commands only as a single quoted argument; it can never become command syntax, routing, a target, a path/package, or a mutation of the automations. Remote egress is a separate decision: future credential-vault values are blocked from every remote Brain regardless of the taint posture, while generic `SECRET` data requires explicit review.
+- **Shell arguments are always quoted** — external data placed in an approved shell command always enters as one single-quoted argument (decision D1), so it cannot add, remove or reorder words, or otherwise change the command that was approved.
 - **`StaticShellSafety`** — `run_shell` can only be triggered by triggers with a non-forgeable identity (time, immediate, geofence, connectivity, sensor) or by a **whitelisted** WhatsApp 1:1 chat identified by a stable `conversationId`. SMS and caller ID are excluded as a hard limit (spoofable), and the approved-trigger ↔ live-event binding is verified at runtime.
 - **PII-free audit log** — every fire, suppression, error and lifecycle transition (arm/disable/delete/needs-review) is recorded in append-only Room with **closed-vocabulary reason codes**: never free text, never message content; event ids are hashed.
 - **Minimization toward the Brain** — compile receives a capability manifest and a **redacted** device state (only keys from the approved registry); GPS coordinates never leave the phone (only `location_available` is sent). Generative replies are bound to the trigger's sender, whitelisted 1:1 chats only.
@@ -294,12 +295,21 @@ but the production executor rejects them and the capability manifest marks them 
 
 To sign your own release: create `keystore.properties` in the root (`storeFile`, `storePassword`, `keyAlias`, `keyPassword`) — the file and the keystores are gitignored and must never be committed. Official signed APKs are on the [GitHub Releases](https://github.com/JackRushante/argus/releases).
 
-Installation: download the APK matching your device from the latest GitHub release and sideload it
-(`adb install` or APK transfer). Most current Android phones use the `arm64-v8a` asset (for v0.3.3,
-`argus-1002.apk`); the release notes map every filename to its ABI. The F-Droid submission is still
-under review; do not assume it is available in the official client until the metadata merge request
-is merged. There is no Play Store distribution. On first launch the onboarding walks you through the
-LLM provider and permissions.
+Installation:
+
+1. **F-Droid (recommended).** Argus is available at
+   [f-droid.org/packages/dev.argus](https://f-droid.org/packages/dev.argus/); install it from the
+   F-Droid client and updates arrive through it.
+2. **GitHub release APKs.** Alternatively download the APK matching your device from the
+   [latest release](https://github.com/JackRushante/argus/releases/latest) and sideload it
+   (`adb install` or APK transfer). Each release ships one APK per ABI, named
+   `argus-<versionCode>.apk`; the last two digits of the version code select the ABI: `01`
+   `armeabi-v7a`, `02` `arm64-v8a`, `03` `x86`, `04` `x86_64`. For example, `argus-1102.apk` is the
+   `arm64-v8a` build of base version code 11. Most current Android phones are `arm64-v8a`; the
+   release notes map every filename to its ABI.
+
+There is no Play Store distribution. On first launch the onboarding walks you through the LLM
+provider and permissions.
 
 Create a `local.properties` file with `sdk.dir=<path to your Android SDK>` if Android Studio does not generate it by itself.
 
