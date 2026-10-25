@@ -78,6 +78,7 @@ import dev.argus.automation.notification.ActiveNotificationReplyRegistry
 import dev.argus.automation.notification.AndroidNotificationReplyGateway
 import dev.argus.automation.notification.AndroidNotificationSnapshotFactory
 import dev.argus.automation.notification.NotificationIngress
+import dev.argus.automation.notification.NotificationTriggerDemand
 import dev.argus.automation.notification.NotificationReplyGateway
 import dev.argus.automation.notification.NotificationReplyHandleFactory
 import dev.argus.automation.budget.AndroidBudgetAlerts
@@ -656,6 +657,14 @@ object ArgusModule {
         dispatcher,
         privacyAccepted = { preferences.observe().value.privacyAccepted },
     )
+
+    /** Quali package interessano alle regole armate con trigger notifica (solo lettura delle regole). */
+    @Provides
+    @Singleton
+    fun notificationTriggerDemand(
+        store: AutomationStore,
+        @ApplicationScope scope: CoroutineScope,
+    ): NotificationTriggerDemand = NotificationTriggerDemand(store.observeAll(), scope)
 
     @Provides
     @Singleton

@@ -72,6 +72,20 @@ class NotificationIngress(
     suspend fun persistAndDispatch(parsed: ParsedNotification) {
         // Ricontrollo del gate: la revoca può avvenire tra il callback main thread e questa coroutine.
         if (!privacyAccepted()) return
+        recordObserved(parsed)
+        dispatcher.dispatch(parsed.envelope)
+    }
+
+    /**
+     * Solo il salvataggio della conversazione osservata (selettore dei contatti), senza controllo
+     * delle regole: per le notifiche WhatsApp quando nessuna regola armata le riguarda.
+     */
+    suspend fun persistObserved(parsed: ParsedNotification) {
+        if (!privacyAccepted()) return
+        recordObserved(parsed)
+    }
+
+    private suspend fun recordObserved(parsed: ParsedNotification) {
         parsed.observedConversation
             ?.takeIf { it.packageName in DraftValidator.WHATSAPP_PACKAGES }
             ?.let { conversation ->
@@ -85,7 +99,6 @@ class NotificationIngress(
                     Log.w(TAG, "record osservata fallita: ${error::class.java.simpleName}")
                 }
             }
-        dispatcher.dispatch(parsed.envelope)
     }
 
     private companion object {
@@ -103,6 +116,17 @@ class NotificationIngress(
 class ArgusNotificationListenerService : NotificationListenerService() {
     @Inject lateinit var ingress: NotificationIngress
     @Inject lateinit var workLauncher: ReceiverWorkLauncher
+    @Inject lateinit var demand: NotificationTriggerDemand
+
+    /** Il lavoro parte solo se una regola armata con trigger notifica può riguardare il package. */
+    private val gate by lazy {
+        NotificationWorkGate(
+            demand = demand,
+            startWork = { block -> workLauncher.launch("notification", block) },
+            persistAndDispatch = ingress::persistAndDispatch,
+            persistObserved = ingress::persistObserved,
+        )
+    }
 
     override fun onListenerConnected() {
         super.onListenerConnected()
@@ -118,9 +142,9 @@ class ArgusNotificationListenerService : NotificationListenerService() {
         val parsed = ingress.registerPosted(notification) ?: return
         // Un programma P4 può durare ore: il callback del listener non possiede il processo.
         // La lease condivisa lo trasferisce al medesimo FGS usato dai receiver e dai sensori.
-        workLauncher.launch("notification") {
-            ingress.persistAndDispatch(parsed)
-        }
+        // Prima però si controlla la domanda: se nessuna regola armata può riguardare questo
+        // package (un navigatore che si aggiorna ogni secondo) non parte nessun lavoro.
+        gate.onParsed(parsed)
     }
 
     override fun onNotificationRemoved(notification: StatusBarNotification) {
