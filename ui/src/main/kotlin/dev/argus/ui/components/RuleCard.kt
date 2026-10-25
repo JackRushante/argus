@@ -321,10 +321,12 @@ private fun ControlBranchLabel(label: String) {
 
 /**
  * Riga variabile P4 (§5.1): nome + una riga di metadati resi dai tipi
- * (tipo · provenienza · integrità · riservatezza). Nessun valore runtime.
+ * (tipo · provenienza · integrità · riservatezza), l'origine del valore e, per i soli letterali,
+ * il valore approvato INTEGRALE in monospace e a capo (mai troncato, S1). Nessun valore runtime.
  */
 @Composable
 private fun VarRowItem(v: VarRow) {
+    val semantic = LocalArgusSemantic.current
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(
             v.name,
@@ -336,6 +338,27 @@ private fun VarRowItem(v: VarRow) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodyMedium,
         )
+        if (v.sourceText.isNotBlank()) {
+            Text(
+                v.sourceText,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        v.valueText?.let { value ->
+            Text(
+                stringResource(R.string.rule_var_value_label),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.labelSmall,
+            )
+            // Integrale: softWrap di default (a capo), nessun maxLines/overflow.
+            Text(
+                value,
+                color = semantic.codeText,
+                fontFamily = FontFamily.Monospace,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
     }
 }
 

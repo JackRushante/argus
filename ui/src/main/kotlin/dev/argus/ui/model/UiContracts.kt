@@ -60,6 +60,17 @@ data class VarRow(
     val integrityLabel: String,       // "trusted" | "external" (CLEAN/TAINTED)
     val confidentialityLabel: String, // "public" | "private" | "secret"
     val provenanceLabel: String,      // "SMS" | "fixed value" | "device state" | ...
+    /**
+     * Valore integrale approvato: valorizzato SOLO per i letterali ([dev.argus.engine.model.VarBinding.Literal]),
+     * `null` per ogni altro binding (i valori runtime non compaiono mai in review). Si rende in
+     * monospace, a capo, mai troncato (§5.3).
+     */
+    val valueText: String? = null,
+    /**
+     * Da dove nasce il valore, reso dai tipi: campo del trigger (+ estrazione), query di stato col
+     * tipo, intervallo del numero casuale o "valore fisso". Vuoto solo per righe costruite a mano.
+     */
+    val sourceText: String = "",
 )
 
 data class ActionRow(

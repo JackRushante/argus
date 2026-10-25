@@ -70,6 +70,7 @@
     <string name="rule_section_only_if">ONLY IF</string>
     <string name="rule_section_then">THEN</string>
     <string name="rule_section_variables">VARIABLES</string>
+    <string name="rule_var_value_label">value</string>
 
     <!-- Chat -->
     <string name="chat_subtitle">chat · rule compiler</string>
