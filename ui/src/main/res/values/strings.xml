@@ -222,6 +222,8 @@
     <string name="budget_cost_label">Cost / month (USD)</string>
     <string name="budget_tokens_label">Tokens / month</string>
     <string name="budget_unlimited_hint">0 or empty = unlimited</string>
+    <string name="budget_error_integer">Digits only. 0 or empty = unlimited</string>
+    <string name="budget_error_cost">Enter an amount like 2.50: digits and at most one comma or dot</string>
     <string name="budget_cost_hint">Priced providers (OpenAI/Anthropic/Gemini) · 0 or empty = unlimited</string>
     <string name="budget_tokens_hint">Token-only providers (Hermes/OpenRouter/Custom) · 0 or empty = unlimited</string>
 

@@ -221,6 +221,8 @@
     <string name="budget_cost_label">Costo / mese (USD)</string>
     <string name="budget_tokens_label">Token / mese</string>
     <string name="budget_unlimited_hint">0 o vuoto = illimitato</string>
+    <string name="budget_error_integer">Solo cifre. 0 o vuoto = illimitato</string>
+    <string name="budget_error_cost">Inserisci un importo come 2,50: cifre e al massimo una virgola o un punto</string>
     <string name="budget_cost_hint">Provider a listino (OpenAI/Anthropic/Gemini) · 0 o vuoto = illimitato</string>
     <string name="budget_tokens_hint">Provider token-only (Hermes/OpenRouter/Custom) · 0 o vuoto = illimitato</string>
 

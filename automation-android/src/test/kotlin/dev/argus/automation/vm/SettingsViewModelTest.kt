@@ -67,6 +67,7 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.junit.After
 import org.junit.Before
@@ -450,6 +451,71 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun `onSaveBudgetLimits salva ora giorno costo e token con una sola scrittura`() = runTest(dispatcher) {
+        val settings = SlowBudgetSettingsStore()
+        val vm = settingsViewModel(FakeProviderStore(), budgetSettings = settings)
+        observe(vm)
+        val messages = collectMessages(vm)
+        advanceUntilIdle()
+
+        vm.onSaveBudgetLimits(
+            maxPerHour = 12,
+            maxPerDay = 90,
+            maxCostMonthMicros = 4_500_000L,
+            maxTokensMonth = 2_000_000L,
+        )
+        advanceUntilIdle()
+
+        val global = settings.observe().value.global
+        assertEquals(12, global.maxCallsPerHour)
+        assertEquals(90, global.maxCallsPerDay)
+        assertEquals(4_500_000L, global.maxCostPerMonthMicros)
+        assertEquals(2_000_000L, global.maxTokensPerMonth)
+        assertEquals(1, settings.setGlobalCalls)
+        assertEquals(listOf("Limiti budget salvati."), messages.toList())
+    }
+
+    @Test
+    fun `onSaveBudgetLimits con zero azzera il limite e con un valore negativo non tocca nulla`() =
+        runTest(dispatcher) {
+            val settings = SlowBudgetSettingsStore(
+                BudgetSettings(global = BudgetLimits(5, 50, 1_000_000L, 9_000L)),
+            )
+            val vm = settingsViewModel(FakeProviderStore(), budgetSettings = settings)
+            observe(vm)
+            val messages = collectMessages(vm)
+            advanceUntilIdle()
+
+            vm.onSaveBudgetLimits(0, 50, 0L, 9_000L)
+            advanceUntilIdle()
+            assertEquals(BudgetLimits(null, 50, null, 9_000L), settings.observe().value.global)
+
+            vm.onSaveBudgetLimits(-1, 1, 1L, 1L)
+            advanceUntilIdle()
+            assertEquals(BudgetLimits(null, 50, null, 9_000L), settings.observe().value.global)
+            assertEquals(listOf("Limiti budget salvati.", "Limite non valido."), messages.toList())
+        }
+
+    @Test
+    fun `i quattro metodi singoli in fila non si sovrascrivono a vicenda`() = runTest(dispatcher) {
+        val settings = SlowBudgetSettingsStore()
+        val vm = settingsViewModel(FakeProviderStore(), budgetSettings = settings)
+        observe(vm)
+        advanceUntilIdle()
+
+        vm.onBudgetChange(7)
+        vm.onBudgetDayChange(70)
+        vm.onBudgetMonthlyCostChange(3_000_000L)
+        vm.onBudgetMonthlyTokensChange(800_000L)
+        advanceUntilIdle()
+
+        assertEquals(
+            BudgetLimits(7, 70, 3_000_000L, 800_000L),
+            settings.observe().value.global,
+        )
+    }
+
+    @Test
     fun `budget espone token per provider e nessun dollaro per i token-only`() = runTest(dispatcher) {
         val usage = FakeUsageDao(
             all = listOf(
@@ -570,6 +636,43 @@ private class FakeBudgetSettingsStore(
         maxCostPerMonthMicros = l.maxCostPerMonthMicros?.takeIf { it > 0L },
         maxTokensPerMonth = l.maxTokensPerMonth?.takeIf { it > 0L },
     )
+}
+
+/**
+ * Store con scrittura sospesa (come il commit() su Dispatchers.IO del vero store): lo snapshot letto
+ * prima di scrivere diventa stantio se due scritture si accavallano.
+ */
+private class SlowBudgetSettingsStore(
+    initial: BudgetSettings = BudgetSettings(),
+) : BudgetSettingsStore {
+    private val flow = MutableStateFlow(initial)
+    var setGlobalCalls = 0
+        private set
+
+    override fun observe(): StateFlow<BudgetSettings> = flow.asStateFlow()
+
+    override suspend fun setGlobalLimits(limits: BudgetLimits): Boolean {
+        setGlobalCalls++
+        delay(10)
+        if ((limits.maxCallsPerHour ?: 0) < 0 || (limits.maxCallsPerDay ?: 0) < 0 ||
+            (limits.maxCostPerMonthMicros ?: 0L) < 0L || (limits.maxTokensPerMonth ?: 0L) < 0L
+        ) {
+            return false
+        }
+        flow.value = flow.value.copy(
+            global = BudgetLimits(
+                maxCallsPerHour = limits.maxCallsPerHour?.takeIf { it > 0 },
+                maxCallsPerDay = limits.maxCallsPerDay?.takeIf { it > 0 },
+                maxCostPerMonthMicros = limits.maxCostPerMonthMicros?.takeIf { it > 0L },
+                maxTokensPerMonth = limits.maxTokensPerMonth?.takeIf { it > 0L },
+            ),
+        )
+        return true
+    }
+
+    override suspend fun setProviderLimits(id: ProviderId, limits: BudgetLimits): Boolean = false
+
+    override suspend fun setSoftThresholdPct(pct: Int): Boolean = false
 }
 
 // ----------------------------------------------------------------------- fakes

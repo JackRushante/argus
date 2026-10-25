@@ -54,6 +54,8 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.time.ZoneId
 import java.util.Locale
 import javax.inject.Inject
@@ -256,6 +258,7 @@ class SettingsViewModel @Inject constructor(
     private val mutableTokenConfigured = MutableStateFlow(false)
     val tokenConfigured: StateFlow<Boolean> = mutableTokenConfigured
     private var shizukuRationaleShown = false
+    private val budgetWriteMutex = Mutex()
     private val mutableMessages = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val messages = mutableMessages.asSharedFlow()
 
@@ -556,6 +559,24 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Salvataggio unico dei quattro tetti globali: UNA scrittura e UN messaggio. 0 = illimitato.
+     * Il dialog usa solo questo; i quattro metodi singoli restano per i chiamanti esistenti.
+     */
+    fun onSaveBudgetLimits(
+        maxPerHour: Int,
+        maxPerDay: Int,
+        maxCostMonthMicros: Long,
+        maxTokensMonth: Long,
+    ) = updateGlobalLimits {
+        BudgetLimits(
+            maxCallsPerHour = maxPerHour.takeIf { v -> v > 0 },
+            maxCallsPerDay = maxPerDay.takeIf { v -> v > 0 },
+            maxCostPerMonthMicros = maxCostMonthMicros.takeIf { v -> v > 0 },
+            maxTokensPerMonth = maxTokensMonth.takeIf { v -> v > 0 },
+        )
+    }
+
     fun onBudgetChange(maxPerHour: Int) =
         updateGlobalLimits { it.copy(maxCallsPerHour = maxPerHour.takeIf { v -> v > 0 }) }
 
@@ -568,11 +589,18 @@ class SettingsViewModel @Inject constructor(
     fun onBudgetMonthlyTokensChange(maxTokensPerMonth: Long) =
         updateGlobalLimits { it.copy(maxTokensPerMonth = maxTokensPerMonth.takeIf { v -> v > 0 }) }
 
+    /**
+     * Lettura dello snapshot e scrittura sotto lo stesso mutex: due aggiornamenti ravvicinati non
+     * partono più dallo stesso stato vecchio (l'ultimo non cancella più i precedenti).
+     */
     private fun updateGlobalLimits(mutate: (BudgetLimits) -> BudgetLimits) {
         viewModelScope.launch {
             try {
-                val current = budgetSettings.observe().value.global
-                if (budgetSettings.setGlobalLimits(mutate(current))) {
+                val saved = budgetWriteMutex.withLock {
+                    val current = budgetSettings.observe().value.global
+                    budgetSettings.setGlobalLimits(mutate(current))
+                }
+                if (saved) {
                     message(language.pick("Budget limits saved.", "Limiti budget salvati."))
                     refresh()
                 } else {

@@ -343,6 +343,16 @@ interface SettingsCallbacks {
     fun onBudgetMonthlyCostChange(maxCostMonthMicros: Long) {}
     /** Tetto TOKEN mensile globale (provider token-only). 0 = illimitato. Default no-op. */
     fun onBudgetMonthlyTokensChange(maxTokensPerMonth: Long) {}
+    /**
+     * Salva insieme i quattro tetti globali (0 = illimitato): una sola scrittura, un solo messaggio.
+     * È l'unica callback che il dialog dei limiti invoca.
+     */
+    fun onSaveBudgetLimits(
+        maxPerHour: Int,
+        maxPerDay: Int,
+        maxCostMonthMicros: Long,
+        maxTokensMonth: Long,
+    ) {}
     fun onRevokePrivacy()
     fun onRerunOnboarding()
     /** Selettore provider: id = ProviderId.wireName. Id sconosciuti = no-op lato VM. */

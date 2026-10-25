@@ -744,10 +744,7 @@ private fun BudgetSection(budget: BudgetUi, callbacks: SettingsCallbacks) {
             initialMaxTokensMonth = budget.tokenLimitMonth,
             onDismiss = { showLimitsEditor = false },
             onSave = { maxPerHour, maxPerDay, maxCostMonthMicros, maxTokensMonth ->
-                callbacks.onBudgetChange(maxPerHour)
-                callbacks.onBudgetDayChange(maxPerDay)
-                callbacks.onBudgetMonthlyCostChange(maxCostMonthMicros)
-                callbacks.onBudgetMonthlyTokensChange(maxTokensMonth)
+                callbacks.onSaveBudgetLimits(maxPerHour, maxPerDay, maxCostMonthMicros, maxTokensMonth)
             },
         )
     }

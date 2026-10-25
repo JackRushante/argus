@@ -20,13 +20,55 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import dev.argus.ui.R
 import dev.argus.ui.presentation.BudgetFormat
+import java.math.BigDecimal
+import java.math.RoundingMode
 
 /**
- * Editor dei tetti budget globali. La dialog fa solo parse input → callback tipizzata (nessuna
- * matematica sui soldi qui). Convenzione al confine UI: 0 o campo vuoto = illimitato. Il costo si
- * inserisce in USD (vale per i provider a listino noto) e viene convertito in micro-USD via
- * [BudgetFormat.parseUsdToMicros]; il tetto TOKEN mensile vale per i provider token-only
- * (Hermes/OpenRouter/Custom) e si inserisce come intero via [BudgetFormat.parseTokens].
+ * Parsing rigoroso dei campi della dialog. Convenzione al confine UI: campo vuoto = 0 = illimitato;
+ * qualunque testo non numerico (anche «NaN», «Infinity», «1e5», segni) è `null` = errore, mai
+ * «illimitato». Solo cifre ASCII; per il costo anche UN separatore decimale (virgola o punto).
+ */
+internal object BudgetLimitsInput {
+    private val digits = Regex("[0-9]+")
+    private val amount = Regex("[0-9]+(?:[.,][0-9]*)?|[.,][0-9]+")
+    private const val MICROS_PER_UNIT = 1_000_000L
+
+    /** Chiamate/ora e /giorno: intero >= 0 che sta in Int. */
+    fun parseCount(text: String): Int? {
+        val cleaned = text.trim()
+        if (cleaned.isEmpty()) return 0
+        if (!digits.matches(cleaned)) return null
+        return cleaned.toIntOrNull()
+    }
+
+    /** Token/mese: intero >= 0 che sta in Long. */
+    fun parseTokens(text: String): Long? {
+        val cleaned = text.trim()
+        if (cleaned.isEmpty()) return 0L
+        if (!digits.matches(cleaned)) return null
+        return cleaned.toLongOrNull()
+    }
+
+    /** USD con al più un separatore decimale -> micro-USD (arrotondati); fuori da Long -> null. */
+    fun parseCostMicros(text: String): Long? {
+        val cleaned = text.trim()
+        if (cleaned.isEmpty()) return 0L
+        if (!amount.matches(cleaned)) return null
+        val normalized = cleaned.replace(',', '.').let { if (it.startsWith('.')) "0$it" else it }
+        val micros = BigDecimal(normalized)
+            .multiply(BigDecimal.valueOf(MICROS_PER_UNIT))
+            .setScale(0, RoundingMode.HALF_UP)
+        return if (micros > BigDecimal.valueOf(Long.MAX_VALUE)) null else micros.toLong()
+    }
+}
+
+/**
+ * Editor dei tetti budget globali. La dialog fa solo parse input → callback tipizzata unica
+ * (nessuna matematica sui soldi qui). Convenzione al confine UI: 0 o campo vuoto = illimitato. Il
+ * costo si inserisce in USD (vale per i provider a listino noto) e viene convertito in micro-USD
+ * da [BudgetLimitsInput.parseCostMicros]; il tetto TOKEN mensile vale per i provider token-only
+ * (Hermes/OpenRouter/Custom) e si inserisce come intero. Un campo non valido mostra l'errore e
+ * blocca il salvataggio: mai un testo sbagliato silenziosamente trasformato in «illimitato».
  */
 @Composable
 fun BudgetLimitsDialog(
@@ -48,13 +90,12 @@ fun BudgetLimitsDialog(
         mutableStateOf(initialMaxTokensMonth?.takeIf { it > 0 }?.toString() ?: "")
     }
 
-    // Vuoto = illimitato (0). Un intero non parsabile invalida solo quel campo.
-    val hour = hourText.trim().ifEmpty { "0" }.toIntOrNull()
-    val day = dayText.trim().ifEmpty { "0" }.toIntOrNull()
-    val costMicros = BudgetFormat.parseUsdToMicros(costText)
-    val tokensMonth = BudgetFormat.parseTokens(tokensText)
-    val canSave = hour != null && hour >= 0 && day != null && day >= 0 &&
-        costMicros != null && tokensMonth != null
+    // Vuoto = illimitato (0). Un testo non valido invalida solo quel campo.
+    val hour = BudgetLimitsInput.parseCount(hourText)
+    val day = BudgetLimitsInput.parseCount(dayText)
+    val costMicros = BudgetLimitsInput.parseCostMicros(costText)
+    val tokensMonth = BudgetLimitsInput.parseTokens(tokensText)
+    val canSave = hour != null && day != null && costMicros != null && tokensMonth != null
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -66,18 +107,32 @@ fun BudgetLimitsDialog(
                     onValueChange = { hourText = it },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
+                    isError = hour == null,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     label = { Text(stringResource(R.string.budget_calls_hour_label)) },
-                    supportingText = { Text(stringResource(R.string.budget_unlimited_hint)) },
+                    supportingText = {
+                        Text(
+                            stringResource(
+                                if (hour == null) R.string.budget_error_integer else R.string.budget_unlimited_hint,
+                            ),
+                        )
+                    },
                 )
                 OutlinedTextField(
                     value = dayText,
                     onValueChange = { dayText = it },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
+                    isError = day == null,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     label = { Text(stringResource(R.string.budget_calls_day_label)) },
-                    supportingText = { Text(stringResource(R.string.budget_unlimited_hint)) },
+                    supportingText = {
+                        Text(
+                            stringResource(
+                                if (day == null) R.string.budget_error_integer else R.string.budget_unlimited_hint,
+                            ),
+                        )
+                    },
                 )
                 OutlinedTextField(
                     value = costText,
@@ -87,7 +142,13 @@ fun BudgetLimitsDialog(
                     isError = costMicros == null,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     label = { Text(stringResource(R.string.budget_cost_label)) },
-                    supportingText = { Text(stringResource(R.string.budget_cost_hint)) },
+                    supportingText = {
+                        Text(
+                            stringResource(
+                                if (costMicros == null) R.string.budget_error_cost else R.string.budget_cost_hint,
+                            ),
+                        )
+                    },
                 )
                 OutlinedTextField(
                     value = tokensText,
@@ -97,7 +158,13 @@ fun BudgetLimitsDialog(
                     isError = tokensMonth == null,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     label = { Text(stringResource(R.string.budget_tokens_label)) },
-                    supportingText = { Text(stringResource(R.string.budget_tokens_hint)) },
+                    supportingText = {
+                        Text(
+                            stringResource(
+                                if (tokensMonth == null) R.string.budget_error_integer else R.string.budget_tokens_hint,
+                            ),
+                        )
+                    },
                 )
             }
         },
@@ -108,8 +175,11 @@ fun BudgetLimitsDialog(
             Button(
                 enabled = canSave,
                 onClick = {
-                    onSave(hour ?: 0, day ?: 0, costMicros ?: 0L, tokensMonth ?: 0L)
-                    onDismiss()
+                    // canSave garantisce che nessun campo sia null: niente fallback silenzioso a 0.
+                    if (hour != null && day != null && costMicros != null && tokensMonth != null) {
+                        onSave(hour, day, costMicros, tokensMonth)
+                        onDismiss()
+                    }
                 },
             ) { Text(stringResource(R.string.action_save)) }
         },
