@@ -108,6 +108,7 @@
     <string name="list_filter_armed">Armed</string>
     <string name="list_filter_disabled">Disabled</string>
     <string name="list_filter_needs_review">Needs review</string>
+    <string name="list_pending_edit_badge">edit pending</string>
     <string name="list_empty_title">No automations</string>
     <string name="list_empty_body">Ask in chat: describe what you want Argus to do and it will propose a rule to review and arm.</string>
     <string name="list_empty_cta">Go to chat</string>

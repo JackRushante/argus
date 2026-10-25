@@ -8,7 +8,17 @@ import java.time.LocalTime
 import java.time.ZoneId
 
 enum class Severity { ERROR, WARNING }
-data class ValidationIssue(val severity: Severity, val code: String, val message: String)
+/**
+ * [code] è il vocabolario chiuso mostrato in UI (testo localizzato: `ValidationMessages`); [message]
+ * è solo il testo diagnostico in italiano. [detail] porta, quando serve, il dato che il codice da
+ * solo non dice (per esempio la capability mancante), in forma già sicura da mostrare.
+ */
+data class ValidationIssue(
+    val severity: Severity,
+    val code: String,
+    val message: String,
+    val detail: String? = null,
+)
 
 /**
  * Gate di dominio per i draft LLM. ERROR blocca l'arm; WARNING è mostrato in approvazione.

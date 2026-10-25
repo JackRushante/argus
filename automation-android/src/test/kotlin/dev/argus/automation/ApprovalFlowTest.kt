@@ -282,7 +282,7 @@ class ApprovalFlowTest {
     }
 
     @Test
-    fun `edit pauses and replaces the exact approved automation id`() = runTest {
+    fun `edit keeps the approved automation armed and replaces the exact id on arm`() = runTest {
         val original = signed(
             Automation(
                 id = AutomationId("existing"),
@@ -316,7 +316,10 @@ class ApprovalFlowTest {
 
         assertEquals(original.id, ready.automationId)
         assertEquals(original.approvalFingerprint, ready.baseAutomationFingerprint)
-        assertEquals(AutomationStatus.PENDING_APPROVAL, fixture.store.get(original.id)?.status)
+        // D5: la regola esistente non e' stata toccata e continua a essere armata.
+        assertEquals(AutomationStatus.ARMED, fixture.store.get(original.id)?.status)
+        assertEquals(original, fixture.store.get(original.id))
+        assertEquals(listOf(original.id), fixture.store.armed().map { it.id })
 
         val armed = assertIs<FlowArmResult.Armed>(
             fixture.flow.arm(ready.id, ready.revision, ready.fingerprint),
@@ -593,11 +596,7 @@ private class MemoryDraftRepository(
         }
         val snapshot = snapshot(newDraft, revision = 1, draft = newDraft.draft)
         values.value += snapshot.id to snapshot
-        if (existing != null) {
-            automations.put(
-                existing.copy(status = AutomationStatus.PENDING_APPROVAL, enabled = false),
-            )
-        }
+        // D5: modificare una regola approvata non la mette in pausa: resta com'e' finche' non si arma.
         return DraftWriteResult.Saved(snapshot)
     }
 

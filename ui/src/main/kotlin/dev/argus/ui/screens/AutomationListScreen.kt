@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Pending
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -33,6 +34,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -142,6 +144,8 @@ fun AutomationListScreen(
                         AutomationCard(
                             row = row,
                             onOpen = { callbacks.onOpen(row.id) },
+                            // D5: il badge «modifica in attesa» apre la BOZZA, non la regola.
+                            onOpenPendingEdit = { draftId -> callbacks.onOpen(draftId) },
                             onToggleEnabled = { enabled -> callbacks.onToggleEnabled(row.id, enabled) },
                         )
                     }
@@ -221,6 +225,7 @@ private fun rowTint(status: StatusBadge): Pair<Color, Color> {
 private fun AutomationCard(
     row: AutomationRow,
     onOpen: () -> Unit,
+    onOpenPendingEdit: (String) -> Unit,
     onToggleEnabled: (Boolean) -> Unit,
 ) {
     val semantic = LocalArgusSemantic.current
@@ -295,6 +300,9 @@ private fun AutomationCard(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 StatusBadgeChip(row.status)
+                row.pendingEditDraftId?.let { draftId ->
+                    PendingEditBadge(onClick = { onOpenPendingEdit(draftId) })
+                }
                 if (row.isGenerative) GenerativeTag()
             }
             if (row.nextFireLabel != null || row.lastFiredLabel != null) {
@@ -308,6 +316,32 @@ private fun AutomationCard(
                 }
             }
         }
+    }
+}
+
+/**
+ * D5: «modifica in attesa». La regola armata continua a scattare mentre una sua modifica aspetta
+ * l'approvazione; il tocco apre la bozza. Colori dal ruolo semantico `pending`, mai hardcoded.
+ */
+@Composable
+private fun PendingEditBadge(onClick: () -> Unit) {
+    val role = LocalArgusSemantic.current.pending
+    Row(
+        modifier = Modifier
+            .minimumInteractiveComponentSize()
+            .clip(RoundedCornerShape(20.dp))
+            .background(role.bg)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Icon(Icons.Rounded.Pending, contentDescription = null, tint = role.fg, modifier = Modifier.size(14.dp))
+        Text(
+            stringResource(R.string.list_pending_edit_badge),
+            color = role.fg,
+            style = MaterialTheme.typography.labelSmall,
+        )
     }
 }
 

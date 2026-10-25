@@ -128,8 +128,9 @@ class ApprovalFlow(
     }
 
     /**
-     * Apre una revisione della versione approvata corrente. Il repository mette la regola in
-     * PENDING_APPROVAL nella stessa transazione che salva il draft, senza finestra di esecuzione.
+     * Apre una bozza di modifica della versione approvata corrente (D5). La regola NON viene messa
+     * in pausa: resta com'è e continua a scattare finché l'utente non arma la modifica; l'arm la
+     * sostituisce in modo atomico, solo se è ancora la versione su cui la bozza si basava.
      */
     suspend fun submitEdit(
         compile: CompileResult,
@@ -349,12 +350,14 @@ class ApprovalFlow(
                     Severity.WARNING,
                     "capability_temporarily_unavailable",
                     "Capacità temporaneamente non disponibile: $capability",
+                    detail = capability,
                 )
             } else {
                 ValidationIssue(
                     Severity.ERROR,
                     "capability_unavailable",
                     "Capacità non disponibile in questa fase: $capability",
+                    detail = capability,
                 )
             }
         }
@@ -385,11 +388,13 @@ class ApprovalFlow(
                             Severity.ERROR,
                             "state_query_unavailable",
                             "Reader non disponibile sul dispositivo: ${request.query.family.wireName}",
+                            detail = request.query.family.wireName,
                         )
                     StateQueryProbeResult.TYPE_MISMATCH -> issues += ValidationIssue(
                             Severity.ERROR,
                             "state_query_type_mismatch",
                             "Il reader non restituisce il tipo dichiarato: ${request.valueType.name.lowercase()}",
+                            detail = request.valueType.name.lowercase(),
                         )
                 }
             }

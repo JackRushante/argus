@@ -107,6 +107,7 @@
     <string name="list_filter_armed">Armate</string>
     <string name="list_filter_disabled">Disattivate</string>
     <string name="list_filter_needs_review">Da rivedere</string>
+    <string name="list_pending_edit_badge">modifica in attesa</string>
     <string name="list_empty_title">Nessuna automazione</string>
     <string name="list_empty_body">Chiedila in chat: descrivi cosa vuoi che Argus faccia e proporrà una regola da rivedere e armare.</string>
     <string name="list_empty_cta">Vai in chat</string>

@@ -33,6 +33,7 @@ import dev.argus.ui.model.ProgramNode
 import dev.argus.ui.model.RuleRender
 import dev.argus.ui.presentation.RenderLanguage
 import dev.argus.ui.presentation.RuleRenderMapper
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.descriptors.elementDescriptors
@@ -54,6 +55,7 @@ import kotlin.test.assertTrue
  * lista scritta a mano: aggiungere un sottotipo (o un campo) senza aggiornare questo test lo fa
  * fallire, quindi nessun comportamento nuovo può arrivare in approvazione senza essere reso.
  */
+@OptIn(ExperimentalSerializationApi::class)
 class RuleRenderCoverageTest {
 
     /** Frammento atteso nel render; `it` differisce da `en` solo se il testo dipende dalla lingua. */
