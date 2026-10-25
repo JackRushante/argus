@@ -73,4 +73,14 @@ interface AuditDao {
             "SELECT id FROM audit ORDER BY atMillis DESC, id DESC LIMIT :maxRows)",
     )
     suspend fun trim(olderThanMillis: Long, maxRows: Int): Int
+
+    /**
+     * «Svuota il log»: tutto l'audit tranne le righe di esecuzioni ancora aperte o recuperabili
+     * (RUNNING, SUBMITTED, DEFERRED). Le righe senza esecuzione (lifecycle, condizioni) vanno via.
+     */
+    @Query(
+        "DELETE FROM audit WHERE executionId IS NULL OR executionId NOT IN (" +
+            "SELECT executionId FROM fire_claims WHERE status IN ('RUNNING', 'SUBMITTED', 'DEFERRED'))",
+    )
+    suspend fun deleteExceptOpenExecutions(): Int
 }
