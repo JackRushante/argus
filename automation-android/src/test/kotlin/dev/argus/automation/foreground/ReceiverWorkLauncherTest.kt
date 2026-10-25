@@ -1,6 +1,10 @@
 package dev.argus.automation.foreground
 
 import dev.argus.automation.connectivity.ConnectivitySentinelBackend
+import dev.argus.engine.model.AutomationId
+import dev.argus.engine.runtime.AuditEvent
+import dev.argus.engine.runtime.AuditKind
+import dev.argus.engine.runtime.AuditSink
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.joinAll
@@ -110,6 +114,66 @@ class ReceiverWorkLauncherTest {
 
         finishWork.complete(Unit)
         advanceUntilIdle()
+    }
+
+    // --- B20: lease negata, traccia nel Log -------------------------------------------------------
+
+    @Test
+    fun `a denied lease for a known rule leaves an ERROR audit and the work still runs`() = runTest {
+        val audit = RecordingAudit()
+        val launcher = ReceiverWorkLauncher(
+            scope = this,
+            sentinel = SharedForegroundSentinel(LauncherBackend(startResult = false)),
+            audit = audit,
+            nowMillis = { 7_000L },
+        )
+        var ran = false
+
+        launcher.launch("time_alarm", AutomationId("rule-1")) { ran = true }
+        advanceUntilIdle()
+
+        assertTrue(ran, "il lavoro prosegue best-effort anche senza lease")
+        val event = audit.events.single()
+        assertEquals(AutomationId("rule-1"), event.automationId)
+        assertEquals(AuditKind.ERROR, event.kind)
+        assertEquals("foreground_service_denied", event.detail)
+        assertEquals(7_000L, event.atMillis)
+    }
+
+    @Test
+    fun `a denied lease without a known rule leaves no audit`() = runTest {
+        val audit = RecordingAudit()
+        val launcher = ReceiverWorkLauncher(
+            scope = this,
+            sentinel = SharedForegroundSentinel(LauncherBackend(startResult = false)),
+            audit = audit,
+        )
+
+        launcher.launch("sms") { }
+        advanceUntilIdle()
+
+        assertEquals(emptyList(), audit.events)
+    }
+
+    @Test
+    fun `a granted lease leaves no audit`() = runTest {
+        val audit = RecordingAudit()
+        val launcher = ReceiverWorkLauncher(
+            scope = this,
+            sentinel = SharedForegroundSentinel(LauncherBackend()),
+            audit = audit,
+        )
+
+        launcher.launch("time_alarm", AutomationId("rule-1")) { }.join()
+
+        assertEquals(emptyList(), audit.events)
+    }
+}
+
+private class RecordingAudit : AuditSink {
+    val events = mutableListOf<AuditEvent>()
+    override suspend fun record(e: AuditEvent) {
+        events += e
     }
 }
 

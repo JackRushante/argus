@@ -304,7 +304,7 @@ class AndroidArmedAutomationRegistrar(
                 // Percorso sincrono conservato per test/fake e caller non Android.
                 dispatchAndConsumeImmediate(automation, fingerprint, envelope)
             } else {
-                launcher.launch("immediate") {
+                launcher.launch("immediate", automation.id) {
                     try {
                         dispatchAndConsumeImmediate(automation, fingerprint, envelope)
                     } catch (error: CancellationException) {
