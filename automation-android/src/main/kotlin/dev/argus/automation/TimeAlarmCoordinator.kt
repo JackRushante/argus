@@ -81,12 +81,23 @@ enum class ReconcileReason(
     val recoverDueAlarm: Boolean,
     val recreateOsRegistration: Boolean = false,
 ) {
-    APP_START(true),
+    /**
+     * Un arresto forzato (a mano o dalla «pulizia» del produttore) cancella le sveglie ma lascia
+     * lo stato persistito «registrato» (B17): all'avvio le sveglie armate si ri-registrano sempre.
+     * Registrare di nuovo un PendingIntent identico costa poco.
+     */
+    APP_START(true, recreateOsRegistration = true),
     BOOT(true, recreateOsRegistration = true),
     PACKAGE_REPLACED(true, recreateOsRegistration = true),
     EXACT_ALARM_PERMISSION_CHANGED(true),
     CAPABILITY_CHANGED(true),
-    TIME_CHANGED(false),
+
+    /**
+     * Se l'orario di rete corregge l'ora subito dopo l'accensione, un'occorrenza scaduta mentre il
+     * telefono era spento è «dovuta» e va recuperata come ad APP_START/BOOT (B37), con lo stesso
+     * event id: il journal deduplica. Cancellarla e dimenticarla la perderebbe.
+     */
+    TIME_CHANGED(true),
     TIMEZONE_CHANGED(false),
 }
 
