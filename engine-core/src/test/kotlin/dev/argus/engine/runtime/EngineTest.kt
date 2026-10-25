@@ -609,6 +609,31 @@ class EngineTest {
     }
 
     @Test
+    fun `clock moved backwards does not freeze a rule on a future lastFiredAt`() = runTest {
+        val a = armed("a1", Trigger.Notification("com.whatsapp"), listOf(Action.SetWifi(false)), cooldown = 5_000)
+        val ex = FakeActionExecutor()
+        val store = FakeAutomationStore(listOf(a))
+        val audit = FakeAuditSink()
+        // L'ultimo scatto e' "nel futuro" rispetto all'orologio attuale: l'orologio e' tornato indietro.
+        store.recordFired(a.id, 9_000_000L)
+        var now = 1_000L
+        val engine = engine(store, ex, "2026-07-12T10:00:00Z", audit, now = { now })
+
+        engine.onTrigger(envelope("sbn:wa:1", TriggerEvent.NotificationPosted("com.whatsapp"))) { DeviceState() }
+        assertEquals(1, ex.executed.size)
+        assertEquals(1_000L, store.lastFiredAt(a.id))
+
+        // Dopo lo scatto il cooldown torna a funzionare normalmente.
+        now = 2_000L
+        engine.onTrigger(envelope("sbn:wa:2", TriggerEvent.NotificationPosted("com.whatsapp"))) { DeviceState() }
+        assertEquals(1, ex.executed.size)
+        assertEquals(1, audit.events.count { it.kind == AuditKind.SUPPRESSED_COOLDOWN })
+        now = 7_000L
+        engine.onTrigger(envelope("sbn:wa:3", TriggerEvent.NotificationPosted("com.whatsapp"))) { DeviceState() }
+        assertEquals(2, ex.executed.size)
+    }
+
+    @Test
     fun `generative rules get a minimum 60s cooldown even when configured zero`() = runTest {
         val a = armed(
             "a1",
