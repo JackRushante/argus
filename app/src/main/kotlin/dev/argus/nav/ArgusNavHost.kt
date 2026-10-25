@@ -343,6 +343,7 @@ fun ArgusNavHost() {
                         override fun onRetry() = chatViewModel.onRetry()
                         override fun onClearConversation() = chatViewModel.onClearConversation()
                         override fun onCheckConnection() = chatViewModel.refreshHealth()
+                        override fun onOpenSystem() = switchTop(Routes.SETTINGS)
                     },
                     modifier = Modifier.testTag("screen_chat"),
                 )

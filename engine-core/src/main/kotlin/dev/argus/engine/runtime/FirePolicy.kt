@@ -127,8 +127,10 @@ class RevalidatingFirePolicy(
         val required = automation.requiredCapabilities
         val missing = required - snapshot.availableCapabilities
         if (missing.isNotEmpty()) {
-            val onlyTransient = snapshot.transientlyUnavailableCapabilities.containsAll(missing)
-            return FirePolicyDecision.Block("capability_unavailable", needsReview = !onlyTransient)
+            // D6: una capability mancante (permesso revocato, Shizuku spento, runtime generativo
+            // non pronto) blocca lo scatto ma non manda la regola «da rivedere»: il contenuto
+            // approvato non è cambiato. NEEDS_REVIEW resta per impronta, validazione e requisiti.
+            return FirePolicyDecision.Block("capability_unavailable", needsReview = false)
         }
 
         if (containsReply(automation.actions)) {

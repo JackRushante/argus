@@ -119,8 +119,8 @@ fun shizukuOnboardingCopy(
         ) to null
     ShizukuStatus.DEGRADED_AFTER_REBOOT ->
         language.pick(
-            "After the reboot Shizuku is off. Shell actions are queued; everything else works.",
-            "Dopo il riavvio Shizuku è spento. Le azioni shell sono in coda; il resto funziona.",
+            "After the reboot Shizuku is off. Privileged actions are skipped until you re-enable it; everything else works.",
+            "Dopo il riavvio Shizuku è spento. Le azioni privilegiate vengono saltate finché non lo riattivi; il resto funziona.",
         ) to language.pick("Re-enable", "Riattiva")
 }
 

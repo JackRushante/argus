@@ -382,6 +382,25 @@ class ChatViewModelTest {
         assertTrue(prompt.endsWith("spostala alle 22"))
     }
 
+    @Test
+    fun `edit prompt never carries the real conversation id and the placeholder is restored`() {
+        val realId = "shortcut:com.whatsapp:abc123def456"
+        val base = AutomationDraft(
+            name = "Rispondi a Moglie",
+            trigger = Trigger.Notification("com.whatsapp", conversationId = realId, isGroup = false),
+            actions = listOf(Action.ShowNotification("Argus", "Messaggio")),
+        )
+
+        val prompt = composeEditPrompt("solo la sera", base)
+
+        assertFalse(prompt.contains(realId))
+        assertTrue(prompt.contains(CURRENT_CONTACT_PLACEHOLDER))
+        val fromModel = redactConversationId(base).copy(name = "Rispondi a Moglie la sera")
+        assertEquals(realId, (restoreConversationId(fromModel, base).trigger as Trigger.Notification).conversationId)
+        val changedContact = base.copy(trigger = Trigger.Notification("com.whatsapp", conversationId = "other"))
+        assertEquals("other", (restoreConversationId(changedContact, base).trigger as Trigger.Notification).conversationId)
+    }
+
     // --- B2: un provider diretto restituisce error_code nel meta ---
 
     @Test

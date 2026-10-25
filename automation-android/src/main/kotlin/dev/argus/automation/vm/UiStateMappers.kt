@@ -263,6 +263,9 @@ private fun auditSummary(record: AuditLogRecord, l: RenderLanguage): String = wh
     )
 }
 
+/** Codice con cui la lane chiude un evento già accorpato in una raffica (D8). */
+private const val COALESCED_REPLY_CODE = "coalesced"
+
 private fun actionDetail(action: ActionResultEntity, l: RenderLanguage): String {
     val outcome = when (action.outcome) {
         ActionJournalOutcome.SUCCEEDED -> "ok"
@@ -270,7 +273,12 @@ private fun actionDetail(action: ActionResultEntity, l: RenderLanguage): String 
         ActionJournalOutcome.DEFERRED -> l.pick("deferred", "differita")
         ActionJournalOutcome.FAILED -> l.pick("failed", "fallita")
     }
-    val error = action.errorCode?.let { " · ${it.safeDiagnostic()}" }.orEmpty()
+    val error = when (action.errorCode) {
+        null -> ""
+        // D8: messaggio accorpato nella risposta unica della raffica, nessuna seconda generazione.
+        COALESCED_REPLY_CODE -> l.pick(" · merged into one reply", " · unito in un'unica risposta")
+        else -> " · ${action.errorCode.safeDiagnostic()}"
+    }
     val path = action.actionPath.ifBlank { (action.actionIndex + 1).toString() }
     return "$path. ${actionTypeLabel(action.actionType, l)} → $outcome$error"
 }

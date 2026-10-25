@@ -165,7 +165,7 @@ class RevalidatingFirePolicyTest {
     }
 
     @Test
-    fun `revoked action capability pauses the automation`() = runTest {
+    fun `revoked action capability blocks the fire without needing review`() = runTest {
         val automation = automation(
             Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
             listOf(Action.SetDnd(DndMode.PRIORITY)),
@@ -174,7 +174,7 @@ class RevalidatingFirePolicyTest {
             policy(snapshot(availableCapabilities = setOf(CapabilityIds.TRIGGER_TIME)))
                 .evaluate(automation, timeEvent(automation)),
         )
-        assertTrue(block.needsReview)
+        assertTrue(!block.needsReview)
         assertEquals("capability_unavailable", block.code)
     }
 
@@ -219,7 +219,7 @@ class RevalidatingFirePolicyTest {
                 ),
         )
         assertEquals("capability_unavailable", block.code)
-        assertTrue(block.needsReview)
+        assertTrue(!block.needsReview)
     }
 
     @Test
@@ -241,7 +241,7 @@ class RevalidatingFirePolicyTest {
                 .evaluate(automation, timeEvent(automation)),
         )
         assertEquals("capability_unavailable", block.code)
-        assertTrue(block.needsReview)
+        assertTrue(!block.needsReview)
     }
 
     @Test
