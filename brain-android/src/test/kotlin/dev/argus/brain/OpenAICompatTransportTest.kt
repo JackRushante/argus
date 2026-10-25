@@ -606,7 +606,7 @@ class OpenAICompatTransportTest {
         assertEquals("dnd sera", draft.name)
         assertNull(result.metaError)
         assertTrue(result.reply.startsWith("Ho creato"))
-        assertEquals(200L, assertNotNull(result.usage).inputTokens)
+        assertEquals(12_000L, assertNotNull(result.usage).inputTokens)
         assertEquals("stop", result.usage?.finishReason)
 
         val request = assertNotNull(server.takeRequest(2, TimeUnit.SECONDS))
@@ -792,7 +792,7 @@ class OpenAICompatTransportTest {
             }
         }
         putJsonObject("usage") {
-            put("prompt_tokens", 200)
+            put("prompt_tokens", 12_000)
             put("completion_tokens", 40)
         }
     }.toString()
