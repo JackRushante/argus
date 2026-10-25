@@ -10,6 +10,8 @@ from pathlib import Path
 from unittest import mock
 
 import bridge
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 
 def shared_contract_path(name: str) -> Path:
@@ -333,11 +335,100 @@ class BridgeTest(unittest.TestCase):
     def test_prompt_uses_the_validated_device_timezone(self):
         request = self.request()
         request["_device_time_zone"] = "Europe/Berlin"
+        fixed = datetime(2026, 10, 25, 18, 30, tzinfo=ZoneInfo("Europe/Berlin"))
 
-        prompt = bridge.build_prompt(request)
+        with mock.patch.object(bridge, "_local_now", return_value=fixed):
+            prompt = bridge.build_prompt(request)
 
-        self.assertIn("Device local time (Europe/Berlin):", prompt)
+        # B38(b): ora locale + giorno della settimana + data di domani, in una riga sola.
+        self.assertIn(
+            "local_time: 2026-10-25T18:30 (Sunday); tomorrow: 2026-10-26 (Monday); "
+            "timezone: Europe/Berlin",
+            prompt,
+        )
+        self.assertNotIn("Device local time", prompt)
         self.assertNotIn("Local time Europe/Rome", prompt)
+
+    def test_prompt_teaches_proposed_rule_aliases_and_shell_quoting(self):
+        prompt = bridge.build_prompt(self.request())
+
+        # B38(a)
+        self.assertIn("Describe the PROPOSED rule; never claim it is already set or active.", prompt)
+        # B38(f): i valori TAINTED in run_shell.cmd sono quotati da Argus, il modello non aggiunge apici.
+        self.assertIn("ONE single-quoted shell argument", prompt)
+        self.assertIn("never add your own quotes around it", prompt)
+        # D4
+        self.assertIn("alias (for example \"contact_1\")", prompt)
+
+    def test_manifest_accepts_contact_aliases_and_the_legacy_id_form(self):
+        aliased = self.request()
+        aliased["manifest"]["whitelisted_contacts"] = [
+            {"alias": "contact_1", "display_name": "Moglie"},
+            {"alias": "contact_2", "display_name": "Ottica"},
+        ]
+        self.assertIs(aliased, bridge.validate_request(aliased, "req-test-1"))
+
+        legacy = self.request()
+        legacy["manifest"]["whitelisted_contacts"] = [{"display_name": "Moglie", "id": "jid:42"}]
+        self.assertIs(legacy, bridge.validate_request(legacy, "req-test-1"))
+
+        for contact in (
+            {"alias": "contact_0", "display_name": "x"},
+            {"alias": "jid:42", "display_name": "x"},
+            {"alias": "contact_1", "display_name": "x", "id": "jid:42"},
+            {"alias": "contact_1"},
+            {"alias": 1, "display_name": "x"},
+        ):
+            invalid = self.request()
+            invalid["manifest"]["whitelisted_contacts"] = [contact]
+            with self.assertRaises(bridge.RequestError):
+                bridge.validate_request(invalid, "req-test-1")
+
+    def test_a_draft_using_a_contact_alias_is_validated_against_the_request_aliases(self):
+        tools = {"run_shell"}
+        draft = {
+            "name": "shell da contatto",
+            "trigger": {
+                "type": "notification", "pkg": "com.whatsapp", "conversationId": "contact_1",
+                "sender": None, "isGroup": False, "titleMatch": None, "textMatch": "esegui",
+            },
+            "actions": [{"type": "run_shell", "cmd": "/system/bin/id"}],
+        }
+        keys = {
+            bridge._contact_key(contact)
+            for contact in [{"alias": "contact_1", "display_name": "Moglie"}]
+        }
+        self.assertEqual({"contact_1"}, keys)
+        self.assertTrue(bridge.validate_draft(draft, tools, set(), keys))
+        # Un alias che la richiesta non ha inviato resta fuori whitelist.
+        draft["trigger"]["conversationId"] = "contact_2"
+        self.assertFalse(bridge.validate_draft(draft, tools, set(), keys))
+
+    def test_oversized_prompt_is_rejected_before_any_exec(self):
+        huge = "x" * (bridge.MAX_PROMPT_BYTES + 1)
+        with mock.patch.object(bridge.subprocess, "run") as run:
+            with self.assertRaises(bridge.ModelProcessError) as caught:
+                bridge.run_gpt(huge)
+        self.assertEqual("prompt_too_large", caught.exception.code)
+        self.assertEqual(413, caught.exception.status)
+        run.assert_not_called()
+
+    def test_prompt_limit_counts_utf8_bytes_not_characters(self):
+        # 40_000 caratteri da 3 byte = 120_000 byte > 100_000, pur essendo < 100_000 caratteri.
+        multibyte = "\u20ac" * 40_000
+        with mock.patch.object(bridge.subprocess, "run") as run:
+            with self.assertRaises(bridge.ModelProcessError):
+                bridge.run_gpt(multibyte)
+        run.assert_not_called()
+
+    def test_a_message_up_to_32768_characters_is_accepted(self):
+        long_message = self.request()
+        long_message["message"] = "a" * 32_768
+        self.assertIs(long_message, bridge.validate_request(long_message, "req-test-1"))
+        too_long = self.request()
+        too_long["message"] = "a" * 32_769
+        with self.assertRaises(bridge.RequestError):
+            bridge.validate_request(too_long, "req-test-1")
 
     def test_prompt_matches_the_shared_android_semantic_contract(self):
         fixture_path = shared_contract_path("compile-prompt-semantics.json")
@@ -355,6 +446,9 @@ class BridgeTest(unittest.TestCase):
             self.assertIn(required, prompt)
         for forbidden in fixture["forbidden"]:
             self.assertNotIn(forbidden, prompt)
+        # La riga dell'orologio (local_time / tomorrow / timezone) e' parte del prompt come nel messaggio utente Android.
+        for required in fixture.get("userRequired", []):
+            self.assertIn(required, prompt)
 
     def test_prompt_frames_run_shell_as_last_resort_with_cookbook(self):
         # IO-7 A: run_shell è ultima spiaggia + cookbook di comandi reali + nota anti-allucinazione.
@@ -1335,6 +1429,32 @@ class BridgeTest(unittest.TestCase):
         }
 
 
+class DeploymentFilesTest(unittest.TestCase):
+    """S11/B38(e): hardening e valori di esempio dei file di deploy restano coerenti col codice."""
+
+    HERE = Path(__file__).parent
+
+    def unit_directives(self):
+        lines = (self.HERE / "argus-bridge.service").read_text(encoding="utf-8").splitlines()
+        return {line.split("=", 1)[0]: line.split("=", 1)[1] for line in lines if "=" in line}
+
+    def test_service_unit_hides_other_processes_and_keeps_privileges_locked(self):
+        directives = self.unit_directives()
+        self.assertEqual("invisible", directives["ProtectProc"])
+        self.assertEqual("pid", directives["ProcSubset"])
+        self.assertEqual("true", directives["NoNewPrivileges"])
+        self.assertEqual("true", directives["PrivateTmp"])
+
+    def test_service_unit_does_not_claim_a_strict_filesystem_without_read_write_paths(self):
+        directives = self.unit_directives()
+        self.assertNotEqual("strict", directives.get("ProtectSystem"))
+        self.assertNotIn("ReadWritePaths", directives)
+
+    def test_env_example_aligns_the_model_timeout_with_the_android_client(self):
+        text = (self.HERE / "argus-bridge.env.example").read_text(encoding="utf-8")
+        self.assertIn("\nARGUS_MODEL_TIMEOUT_SECONDS=125\n", "\n" + text)
+
+
 class BridgeHttpTest(unittest.TestCase):
     # Forma reale del report hermes --usage-file (S15).
     USAGE_REPORT = {
@@ -1463,7 +1583,8 @@ class BridgeHttpTest(unittest.TestCase):
         )
 
         self.assertEqual(200, status)
-        self.assertIn("Device local time (Europe/Berlin):", self.prompts[-1])
+        self.assertIn("timezone: Europe/Berlin", self.prompts[-1])
+        self.assertIn("local_time: ", self.prompts[-1])
 
         invalid = self.valid_request(message="bad timezone")
         invalid["request_id"] = "req-http-bad-timezone"
@@ -1665,6 +1786,51 @@ class BridgeHttpTest(unittest.TestCase):
         self.assertEqual(503, status)
         self.assertEqual({"error": "provider_quota_exhausted"}, body)
         run.assert_called_once()
+
+    def test_model_busy_429_is_not_cached_so_the_same_key_can_retry(self):
+        request = self.valid_request()
+        request["request_id"] = "req-http-busy"
+        results = [
+            (429, {"error": "model_busy"}),
+            (200, {
+                "schema_version": 2, "request_id": "req-http-busy", "reply": "ok",
+                "meta": {"draft": None, "error_code": "clarification_required"},
+            }),
+        ]
+        with mock.patch.object(bridge, "compile_request", side_effect=results) as compile_request:
+            status, body = self.request("/compile", request, request_id="req-http-busy")
+            self.assertEqual(429, status)
+            self.assertEqual({"error": "model_busy"}, body)
+            status, body = self.request("/compile", request, request_id="req-http-busy")
+            self.assertEqual(200, status)
+        self.assertEqual(2, compile_request.call_count)
+
+    def test_other_errors_stay_cached_but_429_does_not(self):
+        cache = bridge.IdempotencyCache()
+        calls = []
+
+        def busy():
+            calls.append("busy")
+            return 429, {"error": "model_busy"}
+
+        def failing():
+            calls.append("failing")
+            return 503, {"error": "provider_quota_exhausted"}
+
+        cache.execute("k1", "d", busy)
+        cache.execute("k1", "d", busy)
+        cache.execute("k2", "d", failing)
+        cache.execute("k2", "d", failing)
+        self.assertEqual(["busy", "busy", "failing"], calls)
+
+    def test_prompt_too_large_is_a_closed_http_error(self):
+        request = self.valid_request(message="a" * 32_768)
+        request["request_id"] = "req-http-big"
+        failure = bridge.ModelProcessError(413, "prompt_too_large")
+        with mock.patch.object(bridge, "run_gpt", side_effect=failure):
+            status, body = self.request("/compile", request, request_id="req-http-big")
+        self.assertEqual(413, status)
+        self.assertEqual({"error": "prompt_too_large"}, body)
 
     @staticmethod
     def valid_request(message="dopo le 23 metti dnd"):

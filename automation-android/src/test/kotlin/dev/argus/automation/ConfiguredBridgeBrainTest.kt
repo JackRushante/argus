@@ -54,6 +54,36 @@ class ConfiguredBridgeBrainTest {
     }
 
     @Test
+    fun `configured needs a key only when the selected provider requires one`() = runTest {
+        val configuration = FakeBridgeConfiguration()
+        val brain = ConfiguredBridgeBrain(configuration, privacyAccepted = { true })
+
+        // Custom anonimo (es. llama-server locale): pronto senza chiave.
+        configuration.selected = ProviderId.CUSTOM_OPENAI_COMPAT
+        assertTrue(brain.configured())
+
+        // OpenAI senza chiave: non pronto; con la chiave sì.
+        configuration.selected = ProviderId.OPENAI
+        assertFalse(brain.configured())
+        configuration.token = "sk-test-0123456789abcdef"
+        assertTrue(brain.configured())
+    }
+
+    @Test
+    fun `selectedConfig exposes the selected provider config for the compile timeout`() = runTest {
+        val configuration = FakeBridgeConfiguration().apply {
+            selected = ProviderId.CUSTOM_OPENAI_COMPAT
+            url = "http://192.168.1.20:11434/v1"
+        }
+        val brain = ConfiguredBridgeBrain(configuration, privacyAccepted = { true })
+
+        val config = brain.selectedConfig()
+
+        assertEquals(ProviderId.CUSTOM_OPENAI_COMPAT, config.providerId)
+        assertEquals("http://192.168.1.20:11434/v1", config.baseUrl)
+    }
+
+    @Test
     fun `compile is blocked before privacy consent without touching the network`() = runTest {
         val configuration = FakeBridgeConfiguration().apply {
             token = "a-valid-bridge-token"

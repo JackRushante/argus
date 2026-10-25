@@ -16,7 +16,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -46,7 +48,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -97,7 +101,10 @@ fun ChatScreen(
     modifier: Modifier = Modifier,
 ) {
     val brainDown = state.brainReachable == false
-    val inputEnabled = !state.sending && !brainDown
+    // B42: la chat non si blocca mai. Il campo e l'invio sono disabilitati SOLO durante l'invio:
+    // nessun probe di connessione automatico (zero rete all'avvio/entrando in Chat), quindi un
+    // "irraggiungibile" vecchio non può impedire di riprovare; si toglie al prossimo invio riuscito.
+    val inputEnabled = !state.sending
 
     Surface(color = MaterialTheme.colorScheme.background, modifier = modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
@@ -111,12 +118,19 @@ fun ChatScreen(
                 if (state.items.isEmpty() && !state.sending) {
                     ChatEmptyState(callbacks)
                 } else {
+                    val listState = rememberLazyListState()
+                    AutoScrollToNewItems(listState, itemCount = state.items.size)
                     LazyColumn(
+                        state = listState,
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        items(state.items) { item -> ChatItemRow(item, callbacks) }
+                        // Chiavi stabili (B44): le card per draftId, il resto per posizione.
+                        itemsIndexed(
+                            state.items,
+                            key = { index, item -> chatItemKey(index, item) },
+                        ) { _, item -> ChatItemRow(item, callbacks) }
                     }
                 }
             }
@@ -128,7 +142,8 @@ fun ChatScreen(
             ) {
                 when {
                     brainDown -> BrainDownBanner(callbacks::onRetry)
-                    state.error != null && !state.sending -> ChatErrorBanner(state.error, callbacks::onRetry)
+                    state.error != null && !state.sending ->
+                        ChatErrorBanner(state.error, callbacks::onRetry, callbacks::onOpenSystem)
                 }
                 // §4: attesa one-shot, nessuno streaming. elapsed onesto e visibile.
                 if (state.sending) {
@@ -148,6 +163,28 @@ fun ChatScreen(
                 onSend = callbacks::onSend,
             )
         }
+    }
+}
+
+/** Chiave stabile di una voce della conversazione: draftId per le card, indice per il resto. */
+internal fun chatItemKey(index: Int, item: ChatItem): String =
+    if (item is ChatItem.DraftCard) "draft:${item.draftId}" else "item:$index"
+
+/**
+ * Scroll automatico (B44): quando arriva una voce nuova e l'utente era già in fondo (l'ultima voce
+ * della lista PRECEDENTE era visibile), scorre sull'ultima. Chi ha scorso in alto per rileggere non
+ * viene riportato giù.
+ */
+@Composable
+private fun AutoScrollToNewItems(listState: LazyListState, itemCount: Int) {
+    var previousCount by remember { mutableIntStateOf(itemCount) }
+    LaunchedEffect(itemCount) {
+        if (itemCount > previousCount) {
+            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            val wasAtBottom = previousCount == 0 || lastVisible >= previousCount - 1
+            if (wasAtBottom) listState.animateScrollToItem(itemCount - 1)
+        }
+        previousCount = itemCount
     }
 }
 
@@ -373,16 +410,30 @@ private fun BrainDownBanner(onRetry: () -> Unit) {
     }
 }
 
-/** §9: errori chat resi senza allarmismo, sempre con CTA "riprova". */
+/**
+ * §9: errori chat resi senza allarmismo e SPIEGATI col loro rimedio (B11). Ogni variante ha il suo
+ * testo; Auth, Budget e NotConfigured portano a Sistema; il dettaglio tecnico mostra il codice.
+ */
 @Composable
-private fun ChatErrorBanner(error: ChatError, onRetry: () -> Unit) {
+private fun ChatErrorBanner(error: ChatError, onRetry: () -> Unit, onOpenSystem: () -> Unit) {
     val semantic = LocalArgusSemantic.current
     var expanded by remember { mutableStateOf(false) }
     val text = when (error) {
         ChatError.Timeout -> stringResource(R.string.chat_error_timeout)
         ChatError.BridgeUnreachable -> stringResource(R.string.chat_error_unreachable)
         is ChatError.MalformedReply -> stringResource(R.string.chat_error_malformed)
+        ChatError.Auth -> stringResource(R.string.chat_error_auth)
+        ChatError.Budget -> stringResource(R.string.chat_error_budget)
+        ChatError.RateLimit -> stringResource(R.string.chat_error_rate_limit)
+        ChatError.OutputTruncated -> stringResource(R.string.chat_error_output_truncated)
+        ChatError.ContextTruncated -> stringResource(R.string.chat_error_context_truncated)
+        is ChatError.ServerRejected -> stringResource(R.string.chat_error_server_rejected, error.status)
+        is ChatError.ServiceUnavailable -> stringResource(R.string.chat_error_service_unavailable, error.status)
+        is ChatError.TooLong -> stringResource(R.string.chat_error_too_long, error.chars, error.max)
+        ChatError.NotConfigured -> stringResource(R.string.chat_error_not_configured)
     }
+    val detail = chatErrorDetail(error)
+    val opensSystem = error == ChatError.Auth || error == ChatError.Budget || error == ChatError.NotConfigured
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -396,24 +447,48 @@ private fun ChatErrorBanner(error: ChatError, onRetry: () -> Unit) {
             Icon(Icons.Rounded.Error, contentDescription = null, tint = semantic.error.fg, modifier = Modifier.size(18.dp))
             Text(text, color = semantic.error.fg, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
         }
-        if (error is ChatError.MalformedReply) {
-            // Dettaglio tecnico espandibile: atteso (l'LLM sbaglia il JSON), tono calmo.
+        if (detail != null) {
+            // Dettaglio tecnico espandibile con il codice: atteso (l'LLM sbaglia il JSON), tono calmo.
             TextButton(onClick = { expanded = !expanded }, modifier = Modifier.heightIn(min = 48.dp)) {
                 Text(if (expanded) stringResource(R.string.chat_error_detail_hide) else stringResource(R.string.chat_error_detail_show))
             }
             if (expanded) {
                 Text(
-                    error.detail,
+                    detail,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodyMedium,
                     fontFamily = FontFamily.Monospace,
                 )
             }
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            TextButton(onClick = onRetry, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.chat_retry)) }
+        // TooLong: si risolve accorciando il testo, "riprova" non servirebbe a nulla.
+        if (error !is ChatError.TooLong) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                if (opensSystem) {
+                    TextButton(onClick = onOpenSystem, modifier = Modifier.heightIn(min = 48.dp)) {
+                        Text(stringResource(R.string.chat_open_system))
+                    }
+                }
+                TextButton(onClick = onRetry, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.chat_retry)) }
+            }
         }
     }
+}
+
+/** Codice tecnico mostrato nel dettaglio espandibile (non localizzato: serve a segnalare il problema). */
+internal fun chatErrorDetail(error: ChatError): String? = when (error) {
+    ChatError.Timeout -> "timeout"
+    ChatError.BridgeUnreachable -> "network"
+    is ChatError.MalformedReply -> error.detail
+    ChatError.Auth -> "auth"
+    ChatError.Budget -> "budget"
+    ChatError.RateLimit -> "rate_limit"
+    ChatError.OutputTruncated -> "output_truncated"
+    ChatError.ContextTruncated -> "context_truncated"
+    is ChatError.ServerRejected -> "HTTP ${error.status}"
+    is ChatError.ServiceUnavailable -> "HTTP ${error.status}"
+    is ChatError.TooLong -> null
+    ChatError.NotConfigured -> "not_configured"
 }
 
 // -----------------------------------------------------------------------------
@@ -575,6 +650,7 @@ private object NoopChatCallbacks : ChatCallbacks {
     override fun onRetry() {}
     override fun onClearConversation() {}
     override fun onCheckConnection() {}
+    override fun onOpenSystem() {}
 }
 
 @Preview(name = "Chat · conversazione + DraftCard", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)

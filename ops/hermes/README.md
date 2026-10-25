@@ -51,6 +51,25 @@ chmod 600 "$HOME/argus-bridge/argus-bridge.env"
 
 Edit `ARGUS_MODEL` if its value differs from the model selected in Hermes. Keep
 `ARGUS_BRIDGE_BIND=127.0.0.1`: the bridge intentionally refuses non-loopback binds.
+`ARGUS_MODEL_TIMEOUT_SECONDS=125` matches the Android client timeout; a `/act` with web search
+can take longer than the 90 s default.
+
+### Hardening the bridge account
+
+- **Toolset for `/act` with web search.** When a rule allows `web.search`, the bridge runs Hermes
+  with `-t clarify,web`. Keep the Hermes profile used by the bridge limited to search: do not
+  enable terminal, file, browser-automation or code-execution toolsets there. A search-only
+  toolset means a hostile web page can at worst influence the generated text, which the phone
+  still treats as untrusted data. Without web search the bridge runs `-t clarify` only.
+- **The prompt travels in `argv`.** The bridge starts `hermes -z <prompt>`, so the full prompt
+  (your request, the sanitized device state, contact display names) is visible to every local
+  account through `/proc/<pid>/cmdline` unless `/proc` is mounted with `hidepid=2`.
+  `ProtectProc=invisible` and `ProcSubset=pid` in the unit limit what the bridge sees of the host;
+  they do not hide the bridge's own command line from other users. Run the bridge on a
+  single-user host or a dedicated account. Prompts larger than 100,000 bytes are refused with the
+  closed error `prompt_too_large` (HTTP 413) instead of failing at `exec` with `E2BIG`.
+- The unit deliberately does not set `ProtectSystem=strict`: Hermes writes under `~/.hermes` and
+  `/tmp`, and a strict filesystem needs a verified `ReadWritePaths` list for your install first.
 
 ## 3. Start the user service
 

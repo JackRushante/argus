@@ -123,9 +123,10 @@ class OpenAICompatTransport internal constructor(
         val cleanMessage = AgentMessageSupport.requireMessage(message)
         val token = resolveApiKey()
         val model = resolveModel()
+        val messages = compileMessages(cleanMessage, manifest, state)
         val request = ChatRequest(
             model = model,
-            messages = compileMessages(cleanMessage, manifest, state),
+            messages = messages,
             maxTokens = if (spec.quirks.outputCapParam == OutputCapParam.MAX_TOKENS) COMPILE_MAX_TOKENS else null,
             maxCompletionTokens = if (spec.quirks.outputCapParam == OutputCapParam.MAX_COMPLETION_TOKENS) COMPILE_MAX_TOKENS else null,
             reasoningEffort = config.reasoningEffort.wireValue,
@@ -133,18 +134,27 @@ class OpenAICompatTransport internal constructor(
         val payload = json.encodeToString(request)
         val response = parseChatResponse(execute(buildRequest(token, payload)))
         val usage = response.toTurnUsage(fallbackModel = model)
-        val text = response.choices.firstOrNull()?.message?.content?.trim()
-        if (text.isNullOrEmpty()) return CompileResult("", null, "empty_response", usage)
-        val parsed = compileParser.parseCompile(text)
-        // "nessun sentinel": il parser restituisce reply-only senza metaError; qui diventa un
-        // codice tipizzato coerente col wire Hermes ("draft_missing"), così il chiamante distingue
-        // sempre un draft assente da un successo.
-        val normalized = if (parsed.draft == null && parsed.metaError == null) {
-            parsed.copy(metaError = "draft_missing")
+        val choice = response.choices.firstOrNull()
+        val text = choice?.message?.content?.trim()
+        val parsed = if (text.isNullOrEmpty()) {
+            null
         } else {
-            parsed
+            val raw = compileParser.parseCompile(text)
+            // "nessun sentinel": il parser restituisce reply-only senza metaError; qui diventa un
+            // codice tipizzato coerente col wire Hermes ("draft_missing"), così il chiamante
+            // distingue sempre un draft assente da un successo.
+            if (raw.draft == null && raw.metaError == null) raw.copy(metaError = "draft_missing") else raw
         }
-        return normalized.copy(usage = usage)
+        if (parsed?.draft != null) return parsed.copy(usage = usage)
+        // B6: senza una bozza valida, distingui un output tagliato o istruzioni tagliate dal server
+        // da un semplice "il modello non ha prodotto la regola".
+        AgentMessageSupport.compileTruncationCode(
+            outputLimitHit = choice?.finishReason == "length",
+            reportedPromptTokens = response.usage?.promptTokens,
+            promptChars = messages.sumOf { it.content.length },
+        )?.let { code -> return CompileResult(parsed?.reply.orEmpty(), null, code, usage) }
+        if (parsed == null) return CompileResult("", null, "empty_response", usage)
+        return parsed.copy(usage = usage)
     }
 
     private fun compileMessages(
@@ -304,7 +314,11 @@ class OpenAICompatTransport internal constructor(
                 add(
                     ChatMessage(
                         "system",
-                        if (useReplyTool) AgentMessageSupport.actSystemText(goal) else AgentMessageSupport.actSystemTextNotification(goal),
+                        if (useReplyTool) {
+                            AgentMessageSupport.actSystemText(goal)
+                        } else {
+                            AgentMessageSupport.actSystemTextNotification(goal, webAllowed = applyWeb)
+                        },
                     ),
                 )
                 add(ChatMessage("user", userMessageFor(notification, stateLines)))
@@ -326,9 +340,14 @@ class OpenAICompatTransport internal constructor(
         val payload = json.encodeToString(request)
         val response = parseChatResponse(execute(buildRequest(token, payload)))
         val usage = response.toTurnUsage(fallbackModel = baseModel)
-        val text = response.replyText()
-            ?: return ActResult(text = null, metaError = "empty_response", usage = usage)
-        return ActResult(text = text, metaError = null, usage = usage)
+        return when (val reply = response.replyText(useReplyTool)) {
+            is AgentMessageSupport.ReplyExtraction.Text ->
+                ActResult(text = reply.value, metaError = null, usage = usage)
+            AgentMessageSupport.ReplyExtraction.ToolMissing ->
+                ActResult(text = null, metaError = REPLY_TOOL_MISSING, usage = usage)
+            AgentMessageSupport.ReplyExtraction.Empty ->
+                ActResult(text = null, metaError = "empty_response", usage = usage)
+        }
     }
 
     /**
@@ -356,7 +375,7 @@ class OpenAICompatTransport internal constructor(
                     ResponsesInputMessage(
                         "system",
                         if (notification != null) AgentMessageSupport.actSystemTextPlain(goal)
-                        else AgentMessageSupport.actSystemTextNotification(goal),
+                        else AgentMessageSupport.actSystemTextNotification(goal, webAllowed = true),
                     ),
                 )
                 add(ResponsesInputMessage("user", userMessageFor(notification, stateLines)))
@@ -364,6 +383,11 @@ class OpenAICompatTransport internal constructor(
                 AgentMessageSupport.actRuntimeDataText(runtimeData)?.let { add(ResponsesInputMessage("user", it)) }
             },
             tools = listOf(WEB_SEARCH_TOOL),
+            // S6: tetti espliciti sul percorso web (il loop di ricerca è interno e a pagamento) e
+            // nessuna conservazione lato OpenAI della conversazione.
+            maxOutputTokens = RESPONSES_MAX_OUTPUT_TOKENS,
+            maxToolCalls = RESPONSES_MAX_TOOL_CALLS,
+            store = false,
         )
         val payload = json.encodeToString(request)
         val httpRequest = buildBearerRequest(responsesUrl, token, payload)
@@ -409,11 +433,16 @@ class OpenAICompatTransport internal constructor(
                 parts = listOf(
                     GeminiPart(
                         if (notification != null) AgentMessageSupport.actSystemTextPlain(goal)
-                        else AgentMessageSupport.actSystemTextNotification(goal),
+                        else AgentMessageSupport.actSystemTextNotification(goal, webAllowed = true),
                     ),
                 ),
             ),
             tools = listOf(GOOGLE_SEARCH_TOOL),
+            // S6: tetto di output e di "pensiero" espliciti sul percorso web nativo.
+            generationConfig = GeminiGenerationConfig(
+                maxOutputTokens = GEMINI_MAX_OUTPUT_TOKENS,
+                thinkingConfig = GeminiThinkingConfig(thinkingBudget = GEMINI_THINKING_BUDGET),
+            ),
         )
         val payload = json.encodeToString(request)
         val httpRequest = buildGoogleApiKeyRequest(geminiNativeUrl(baseModel), token, payload)
@@ -505,8 +534,9 @@ class OpenAICompatTransport internal constructor(
         }
     }
 
-    private fun ChatResponse.replyText(): String? {
-        val message = choices.firstOrNull()?.message ?: return null
+    private fun ChatResponse.replyText(useReplyTool: Boolean): AgentMessageSupport.ReplyExtraction {
+        val choice = choices.firstOrNull() ?: return AgentMessageSupport.ReplyExtraction.Empty
+        val message = choice.message ?: return AgentMessageSupport.ReplyExtraction.Empty
         val fromTool = message.toolCalls
             ?.firstOrNull { it.function?.name == AgentMessageSupport.REPLY_TOOL }
             ?.function?.arguments
@@ -514,8 +544,12 @@ class OpenAICompatTransport internal constructor(
                 runCatching { json.parseToJsonElement(args).jsonObject["text"]?.jsonPrimitive?.contentOrNull }
                     .getOrNull()
             }
-        val raw = fromTool ?: message.content
-        return AgentMessageSupport.cleanReply(raw)
+        return AgentMessageSupport.extractReply(
+            toolText = fromTool,
+            content = message.content,
+            useReplyTool = useReplyTool,
+            finishedNormally = choice.finishReason == "stop",
+        )
     }
 
     private fun ChatResponse.toTurnUsage(fallbackModel: String): TurnUsage? {
@@ -556,7 +590,7 @@ class OpenAICompatTransport internal constructor(
             .mapNotNull { it.text }
             .joinToString(separator = "")
             .takeIf { it.isNotEmpty() }
-        return AgentMessageSupport.cleanReply(raw)
+        return plainReply(raw)
     }
 
     private fun ResponsesResponse.toTurnUsage(fallbackModel: String): TurnUsage? {
@@ -569,6 +603,7 @@ class OpenAICompatTransport internal constructor(
                 inputTokens = input,
                 outputTokens = output,
                 model = model?.takeIf { it.isNotBlank() } ?: fallbackModel,
+                webSearches = this.output.count { it.type == "web_search_call" }.takeIf { it > 0 },
             )
         }.getOrNull()
     }
@@ -580,18 +615,27 @@ class OpenAICompatTransport internal constructor(
             .mapNotNull { it.text }
             .joinToString(separator = "")
             .takeIf { it.isNotEmpty() }
-        return AgentMessageSupport.cleanReply(raw)
+        return plainReply(raw)
     }
+
+    /** Testo dei percorsi senza reply tool: senza `<think>`, e mai un ragionamento rimasto aperto. */
+    private fun plainReply(raw: String?): String? =
+        (AgentMessageSupport.extractReply(null, raw, useReplyTool = false, finishedNormally = true)
+            as? AgentMessageSupport.ReplyExtraction.Text)?.value
 
     private fun GeminiNativeResponse.toTurnUsage(fallbackModel: String): TurnUsage? {
         val u = usageMetadata ?: return null
         val input = u.promptTokenCount ?: return null
-        val output = u.candidatesTokenCount ?: return null
-        if (input < 0 || output < 0) return null
+        val candidates = u.candidatesTokenCount ?: return null
+        if (input < 0 || candidates < 0) return null
+        // I token di "pensiero" sono FATTURATI come output ma `candidatesTokenCount` non li include:
+        // sommarli qui tiene allineati costo stimato e token contati.
+        val thoughts = u.thoughtsTokenCount?.takeIf { it > 0 } ?: 0L
         return runCatching {
             TurnUsage(
                 inputTokens = input,
-                outputTokens = output,
+                outputTokens = candidates + thoughts,
+                reasoningTokens = thoughts.takeIf { it > 0 },
                 model = modelVersion?.takeIf { it.isNotBlank() } ?: fallbackModel,
             )
         }.getOrNull()
@@ -689,6 +733,9 @@ class OpenAICompatTransport internal constructor(
         val model: String,
         val input: List<ResponsesInputMessage>,
         val tools: List<JsonObject>,
+        @SerialName("max_output_tokens") val maxOutputTokens: Int,
+        @SerialName("max_tool_calls") val maxToolCalls: Int,
+        val store: Boolean,
     )
 
     @Serializable
@@ -726,7 +773,17 @@ class OpenAICompatTransport internal constructor(
         val contents: List<GeminiContent>,
         val systemInstruction: GeminiSystemInstruction? = null,
         val tools: List<JsonObject>,
+        val generationConfig: GeminiGenerationConfig,
     )
+
+    @Serializable
+    private data class GeminiGenerationConfig(
+        val maxOutputTokens: Int,
+        val thinkingConfig: GeminiThinkingConfig,
+    )
+
+    @Serializable
+    private data class GeminiThinkingConfig(val thinkingBudget: Int)
 
     @Serializable
     private data class GeminiContent(val role: String, val parts: List<GeminiPart>)
@@ -757,6 +814,7 @@ class OpenAICompatTransport internal constructor(
     private data class GeminiUsageMetadata(
         val promptTokenCount: Long? = null,
         val candidatesTokenCount: Long? = null,
+        val thoughtsTokenCount: Long? = null,
     )
 
     @Serializable
@@ -816,8 +874,13 @@ class OpenAICompatTransport internal constructor(
         const val GOOG_API_KEY_HEADER = "x-goog-api-key"
         const val HEALTH_PING = "ping"
         const val HEALTH_MAX_TOKENS = 1
-        const val MAX_OUTPUT_TOKENS = 1_024
-        const val COMPILE_MAX_TOKENS = 4_096
+        const val MAX_OUTPUT_TOKENS = 2_048
+        const val COMPILE_MAX_TOKENS = 8_192
+        const val RESPONSES_MAX_OUTPUT_TOKENS = 2_048
+        const val RESPONSES_MAX_TOOL_CALLS = 3
+        const val GEMINI_MAX_OUTPUT_TOKENS = 2_048
+        const val GEMINI_THINKING_BUDGET = 1_024
+        const val REPLY_TOOL_MISSING = "reply_tool_missing"
         const val MAX_RESPONSE_BYTES = 512L * 1024L
         val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
         val FORCED_REPLY_CHOICE: JsonElement = buildJsonObject {

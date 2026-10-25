@@ -69,7 +69,7 @@ class TransportBackedBrainHermesTest {
 
         assertNull(result.draft)
         assertEquals("bridge_auth", result.metaError)
-        assertEquals("Non riesco a contattare l'assistente adesso. Riprova tra poco.", result.reply)
+        assertEquals("", result.reply)
     }
 
     @Test fun `act returns text only and maps transport failures to a stable typed error`(): Unit = runBlocking {
@@ -107,7 +107,7 @@ class TransportBackedBrainHermesTest {
             listOf("whatsapp_reply"),
         )
         assertNull(failure.text)
-        assertEquals("bridge_http", failure.metaError)
+        assertEquals("bridge_http_503", failure.metaError)
     }
 
     private fun jsonResponse(body: String) = MockResponse()

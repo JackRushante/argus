@@ -39,4 +39,15 @@ internal object ProviderPrefsSchema {
      */
     fun validApiKey(value: String): Boolean =
         value.length in 16..4_096 && value.all { it.code in 0x21..0x7e }
+
+    /**
+     * Per il provider Custom (OpenAI-compat) basta 1 carattere: gli endpoint self-hosted usano
+     * spesso token corti (es. `local`). Resta ASCII stampabile, senza spazi né controlli.
+     */
+    fun validApiKey(id: ProviderId, value: String): Boolean =
+        if (id == ProviderId.CUSTOM_OPENAI_COMPAT) {
+            value.length in 1..4_096 && value.all { it.code in 0x21..0x7e }
+        } else {
+            validApiKey(value)
+        }
 }

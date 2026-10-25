@@ -20,7 +20,7 @@ import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
@@ -49,6 +49,10 @@ PORT = int(os.environ.get("ARGUS_BRIDGE_PORT", "8092"))
 TOKEN = os.environ.get("ARGUS_BRIDGE_TOKEN", "")
 MODEL_TIMEOUT_SECONDS = int(os.environ.get("ARGUS_MODEL_TIMEOUT_SECONDS", "90"))
 MAX_REQUEST_BYTES = 256 * 1024
+# Messaggio utente di /compile: allineato ad AgentMessageSupport.MAX_MESSAGE_CHARS (app Android).
+MAX_MESSAGE_CHARS = 32_768
+# Il prompt viaggia in argv a Hermes: oltre ~128 KiB (MAX_ARG_STRLEN) l'exec fallisce con E2BIG.
+MAX_PROMPT_BYTES = 100_000
 MAX_REPLY_CHARS = 32_768
 MAX_ACT_REPLY_CHARS = 4_096
 MAX_MODEL_OUTPUT_CHARS = 256 * 1024
@@ -74,6 +78,9 @@ HERMES_PATH = ":".join(
 
 REQUEST_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 ERROR_CODE_RE = re.compile(r"[a-z][a-z0-9_]{0,63}\Z")
+# Alias stabili dei contatti in whitelist (`contact_<n>`): l'app non invia mai l'id reale.
+CONTACT_ALIAS_RE = re.compile(r"contact_[1-9][0-9]{0,3}\Z")
+WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 PACKAGE_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)+\Z")
 STATE_VALUE_RE = re.compile(r"[A-Za-z0-9._:+-]{1,64}\Z")
 ACT_CONTEXT_SOURCES = frozenset({"notification", "state"})
@@ -473,7 +480,7 @@ def validate_request(data: Any, idempotency_key: str | None) -> dict[str, Any]:
         raise RequestError(400, "invalid_request_id")
     if idempotency_key != request_id:
         raise RequestError(400, "idempotency_key_mismatch")
-    if not _string(data["message"], 8_192):
+    if not _string(data["message"], MAX_MESSAGE_CHARS):
         raise RequestError(400, "invalid_message")
     validate_manifest(data["manifest"], data["schema_version"])
     validate_state(data["state"], set(data["manifest"]["state_keys"]))
@@ -757,9 +764,20 @@ def validate_manifest(value: Any, schema_version: int) -> None:
     if not isinstance(contacts, list) or len(contacts) > 128:
         raise RequestError(400, "invalid_manifest")
     for contact in contacts:
-        if not isinstance(contact, dict) or not _exact_keys(contact, {"display_name", "id"}) or not (
-            _string(contact["display_name"], 256) and _string(contact["id"], 512)
-        ):
+        if not isinstance(contact, dict):
+            raise RequestError(400, "invalid_manifest")
+        if _exact_keys(contact, {"alias", "display_name"}):
+            valid = (
+                isinstance(contact["alias"], str)
+                and CONTACT_ALIAS_RE.fullmatch(contact["alias"]) is not None
+                and _string(contact["display_name"], 256)
+            )
+        elif _exact_keys(contact, {"display_name", "id"}):
+            # Forma legacy (app precedenti alla 0.3.5): l'id reale viaggia nel manifest.
+            valid = _string(contact["display_name"], 256) and _string(contact["id"], 512)
+        else:
+            valid = False
+        if not valid:
             raise RequestError(400, "invalid_manifest")
     if schema_version == COMPILE_SCHEMA_VERSION:
         validate_state_readers(value["state_readers"])
@@ -820,9 +838,28 @@ def validate_device_time_zone(value: Any) -> str:
     return value
 
 
+def _local_now(zone: str) -> datetime:
+    return datetime.now(ZoneInfo(zone))
+
+
+def local_time_line(zone: str) -> str:
+    """Ora locale con giorno della settimana e data di domani (stesso formato dell'app Android)."""
+    now = _local_now(zone)
+    tomorrow: date = now.date() + timedelta(days=1)
+    return (
+        f"local_time: {now:%Y-%m-%dT%H:%M} ({WEEKDAYS[now.weekday()]}); "
+        f"tomorrow: {tomorrow.isoformat()} ({WEEKDAYS[tomorrow.weekday()]}); timezone: {zone}"
+    )
+
+
+def _contact_key(contact: dict[str, Any]) -> str:
+    """Chiave con cui il modello identifica il contatto: l'alias (0.3.5+) o l'id legacy."""
+    return contact["alias"] if "alias" in contact else contact["id"]
+
+
 def build_prompt(data: dict[str, Any]) -> str:
     device_time_zone = data.get("_device_time_zone", DEFAULT_DEVICE_TIME_ZONE)
-    now = datetime.now(ZoneInfo(device_time_zone)).isoformat(timespec="minutes")
+    time_line = local_time_line(device_time_zone)
     compile_v2 = data["schema_version"] == COMPILE_SCHEMA_VERSION
     draft_schema = DRAFT_SCHEMA_TEXT + (f"\n\n{STATE_QUERY_SCHEMA_TEXT}" if compile_v2 else "")
     state_query_rules = """\
@@ -842,7 +879,9 @@ AutomationDraft, but do not execute actions and do not invent capabilities.
 BINDING RULES:
 1. Use only action types present in manifest.available_tools.
 2. Use only keys present in manifest.state_keys in state_equals conditions.
-3. Contacts can only be identified by the whitelist ids.
+3. Contacts can only be identified by the whitelist entries of manifest.whitelisted_contacts: use
+   the entry's alias (for example "contact_1") as the notification trigger's conversationId, or its
+   id when the entry has no alias. Never invent one and never use a phone number or a display name.
 4. For "here" use a geofence with resolveCurrentLocation=true and do not invent coordinates.
 5. If a required piece of data is missing or the request is ambiguous, ask a short question and return draft null.
    BUT if a requested value EXCEEDS a schema limit (e.g. while maxIterations>1000, wait or
@@ -857,10 +896,11 @@ BINDING RULES:
    {SENTINEL} {{"draft":<object-or-null>,"error_code":<string-or-null>}}
    Always write the user-facing reply (and any generated user-facing text, e.g. notification
    titles) in the USER'S language — the language of their message.
+   Describe the PROPOSED rule; never claim it is already set or active.
 8. If draft is not null, error_code must be null. If draft is null use
    "clarification_required" or a short snake_case code.
 9. WhatsApp replies (whatsapp_reply, invoke_llm or invoke_llm_v2 with replyTargetSender): the trigger
-   must be notification with a WhatsApp pkg, conversationId taken from the whitelist and an EXPLICIT
+   must be notification with a WhatsApp pkg, conversationId = a whitelist alias (or id) and an EXPLICIT
    isGroup=false (never null: replies are only valid on verified 1:1 chats). For a GENERATED
    reply without state use invoke_llm with contextSources ["notification"]. If state is needed use
    ONLY invoke_llm_v2 and put in stateContext every exact query with its type, policy and
@@ -886,6 +926,9 @@ BINDING RULES:
     1:1 WhatsApp chat (isGroup=false) whose conversationId is whitelisted: a verified contact can
     trigger an already-approved template. Never with phone_state (SMS sender and caller ID are
     spoofable); this trigger gate remains even for a P4 template.
+    External values (trigger payloads and captured outputs, i.e. TAINTED) interpolated into
+    run_shell.cmd are always inserted by Argus as ONE single-quoted shell argument: write
+    ${{var}} bare and never add your own quotes around it.
     run_shell is a LAST RESORT: if a typed action exists (set_flashlight, set_wifi, set_bluetooth,
     set_mobile_data, set_dnd, set_ringer, set_dark_mode, set_alarm, set_timer, write_setting, ...)
     ALWAYS use it instead — never reimplement a typed action via shell. Only emit shell commands
@@ -930,9 +973,9 @@ BINDING RULES:
     user for an exact package name. Never invent a package outside those candidates.
 {state_query_rules}
 
-Device local time ({device_time_zone}): {now}
-
 {draft_schema}
+
+{time_line}
 
 ===== UNTRUSTED STRUCTURED CONTEXT =====
 {context}
@@ -1045,6 +1088,10 @@ def _read_usage(path: str) -> dict[str, Any] | None:
 
 def run_gpt(prompt: str, tools: str = "clarify") -> tuple[str, dict[str, Any] | None]:
     """Esegue hermes one-shot; ritorna (output, usage-report-raw-o-None)."""
+    # Il prompt passa in argv (`-z <prompt>`): oltre il limite il kernel risponde E2BIG. Si rifiuta
+    # PRIMA dell'exec con un errore chiuso, senza toccare file temporanei né Hermes.
+    if len(prompt.encode("utf-8")) > MAX_PROMPT_BYTES:
+        raise ModelProcessError(413, "prompt_too_large")
     fd, usage_path = tempfile.mkstemp(prefix="argus-usage-", suffix=".json")
     os.close(fd)
     command = [
@@ -2298,6 +2345,13 @@ class IdempotencyCache:
                 entry.result = (502, {"error": "model_failure"})
             finally:
                 entry.ready.set()
+            if entry.result is not None and entry.result[0] == 429:
+                # "model_busy" è transitorio: la stessa richiesta (stessa Idempotency-Key) deve poter
+                # essere ritentata subito, non rimbalzare per 15 minuti sulla risposta in cache. Chi
+                # già attendeva questo entry riceve comunque il 429.
+                with self._lock:
+                    if self._entries.get(key) is entry:
+                        del self._entries[key]
         elif not entry.ready.wait(MODEL_TIMEOUT_SECONDS + 15):
             return 504, {"error": "idempotency_wait_timeout"}, True
         assert entry.result is not None
@@ -2319,7 +2373,7 @@ def compile_request(data: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         output,
         set(data["manifest"]["available_tools"]),
         set(data["manifest"]["state_keys"]),
-        {contact["id"] for contact in data["manifest"]["whitelisted_contacts"]},
+        {_contact_key(contact) for contact in data["manifest"]["whitelisted_contacts"]},
         (
             set(data["manifest"]["available_triggers"])
             if "available_triggers" in data["manifest"]

@@ -25,12 +25,18 @@ class TransportBackedBrain(
 ) : Brain {
     override suspend fun compile(nl: String, manifest: CapabilityManifest, state: DeviceState): CompileResult =
         try {
-            // Un solo tentativo: l'eventuale retry di draft_invalid appartiene al decorator
+            // Un solo tentativo: l'eventuale retry degli errori di formato appartiene al decorator
             // MeteredBrain, che può registrare l'usage del primo turno e ricontrollare il budget
             // HARD prima di contattare nuovamente il provider.
-            transport.compile(message = nl, manifest = manifest, state = state)
+            // D4: la bozza torna con gli alias dei contatti; qui diventano gli id reali, prima
+            // della validazione locale.
+            ContactAliasMapper.restore(
+                transport.compile(message = nl, manifest = manifest, state = state),
+                manifest,
+            )
         } catch (e: TransportException) {
-            CompileResult(reply = UNREACHABLE_REPLY, draft = null, metaError = e.toMetaError())
+            // Nessun testo utente per gli errori di trasporto: lo dà la UI localizzata dal metaError.
+            CompileResult(reply = "", draft = null, metaError = metaErrorOf(e))
         }
 
     override suspend fun act(
@@ -41,13 +47,13 @@ class TransportBackedBrain(
     ): ActResult = try {
         transport.act(context, goal, contextSources, allowedTools)
     } catch (e: TransportException) {
-        ActResult(text = null, metaError = e.toMetaError())
+        ActResult(text = null, metaError = metaErrorOf(e))
     }
 
     override suspend fun actV2(context: FireContext, action: Action.InvokeLlmV2): ActResult = try {
         transport.actV2(context, action)
     } catch (e: TransportException) {
-        ActResult(text = null, metaError = e.toMetaError())
+        ActResult(text = null, metaError = metaErrorOf(e))
     }
 
     override suspend fun actResolved(
@@ -59,12 +65,18 @@ class TransportBackedBrain(
     ): ActResult = try {
         transport.actResolved(context, goal, contextSources, allowedTools, runtimeData)
     } catch (e: TransportException) {
-        ActResult(text = null, metaError = e.toMetaError())
+        ActResult(text = null, metaError = metaErrorOf(e))
     }
 
-    private fun TransportException.toMetaError(): String = "bridge_${kind.name.lowercase()}"
-
     companion object {
-        const val UNREACHABLE_REPLY = "Non riesco a contattare l'assistente adesso. Riprova tra poco."
+        /** Prefisso stabile verso UI e journal degli errori HTTP: `bridge_http_<status>`. */
+        const val HTTP_PREFIX = "bridge_http"
+
+        /** Codice meta di un errore di trasporto; HTTP porta lo status (`bridge_http_503`). */
+        fun metaErrorOf(error: TransportException): String {
+            if (error.kind != TransportErrorKind.HTTP) return "bridge_${error.kind.name.lowercase()}"
+            val status = error.statusCode?.takeIf { it in 100..599 } ?: return HTTP_PREFIX
+            return "${HTTP_PREFIX}_$status"
+        }
     }
 }

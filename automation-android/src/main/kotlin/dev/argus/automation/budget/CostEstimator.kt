@@ -1,6 +1,7 @@
 package dev.argus.automation.budget
 
 import dev.argus.brain.ProviderCatalog
+import dev.argus.brain.ModelPrice
 import dev.argus.brain.ProviderId
 import dev.argus.engine.brain.TurnUsage
 
@@ -23,7 +24,15 @@ object CostEstimator {
         if (!spec.costTracked) return null
         if (usage == null || model == null) return null
         val price = spec.prices[model] ?: return null
+        return priceTurn(price, usage)
+    }
 
+    /**
+     * Prezzo di un turno dato il listino del modello. Le ricerche web si addebitano SOLO se il
+     * listino ha un prezzo per ricerca ([ModelPrice.webSearchMicrosPerCall]); per ora nessun
+     * modello ce l'ha, quindi vengono solo contate.
+     */
+    internal fun priceTurn(price: ModelPrice, usage: TurnUsage): Long {
         val cached = usage.cachedInputTokens ?: 0L
         val cachedRate = price.cachedInputMicrosPerMTok
         val (fullInputTokens, cachedTokens) = if (cachedRate != null) {
@@ -32,10 +41,12 @@ object CostEstimator {
             usage.inputTokens to 0L
         }
 
-        val sum = fullInputTokens * price.inputMicrosPerMTok +
+        val tokenSum = fullInputTokens * price.inputMicrosPerMTok +
             cachedTokens * (cachedRate ?: 0L) +
             usage.outputTokens * price.outputMicrosPerMTok
+        val tokenMicros = (tokenSum + 500_000L) / 1_000_000L
 
-        return (sum + 500_000L) / 1_000_000L
+        val searchMicros = (usage.webSearches ?: 0) * (price.webSearchMicrosPerCall ?: 0L)
+        return tokenMicros + searchMicros
     }
 }

@@ -74,6 +74,24 @@ class ProviderPrefsSchemaTest {
     }
 
     @Test
+    fun `custom endpoints accept a one character key, other providers keep the 16 character floor`() {
+        val custom = ProviderId.CUSTOM_OPENAI_COMPAT
+        assertTrue(ProviderPrefsSchema.validApiKey(custom, "x"))
+        assertTrue(ProviderPrefsSchema.validApiKey(custom, "local"))
+        assertTrue(ProviderPrefsSchema.validApiKey(custom, "A".repeat(4_096)))
+        // sempre ASCII stampabile, senza spazi né controlli, e dentro il tetto
+        assertFalse(ProviderPrefsSchema.validApiKey(custom, ""))
+        assertFalse(ProviderPrefsSchema.validApiKey(custom, "con spazio"))
+        assertFalse(ProviderPrefsSchema.validApiKey(custom, "tab	qui"))
+        assertFalse(ProviderPrefsSchema.validApiKey(custom, "chiave-è"))
+        assertFalse(ProviderPrefsSchema.validApiKey(custom, "A".repeat(4_097)))
+        for (id in ProviderId.entries.filter { it != custom }) {
+            assertFalse(ProviderPrefsSchema.validApiKey(id, "short"), id.name)
+            assertTrue(ProviderPrefsSchema.validApiKey(id, "nonprefixed-0123456789abcdef"), id.name)
+        }
+    }
+
+    @Test
     fun `prefs key naming is stable per provider`() {
         assertEquals("provider.openai.base_url", ProviderPrefsSchema.baseUrlKey(ProviderId.OPENAI))
         assertEquals("provider.openai.model", ProviderPrefsSchema.modelKey(ProviderId.OPENAI))
