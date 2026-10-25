@@ -171,13 +171,64 @@ class OnboardingViewModelTest {
     }
 
     @Test
-    fun `verifica fallita - la configurazione salvata basta a concludere ma resta non verificata`() =
-        runTest(dispatcher) {
-            val store = OnbFakeProviderStore()
+    fun `authentication failure keeps brain required and wizard blocked`() = runTest(dispatcher) {
+        val store = OnbFakeProviderStore()
+        val vm = onboardingViewModel(
+            store = store,
+            index = 1,
+            factory = OnbFakeTransportFactory(healthError = BridgeErrorKind.AUTH),
+            language = RenderLanguage.EN,
+        )
+        observe(vm)
+        val events = collectEvents(vm)
+        advanceUntilIdle()
+
+        vm.selectProvider("openai")
+        advanceUntilIdle()
+        vm.saveProviderConfig("openai", baseUrl = null, model = "gpt-5-mini", apiKey = "sk-invalid-1234567890")
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertNotEquals(StepStatus.DONE, state.steps.first { it.kind == StepKind.BRAIN_CONFIG }.status)
+        assertEquals(1, state.currentIndex)
+        assertFalse(state.canFinish)
+        assertTrue(
+            events.filterIsInstance<OnboardingEvent.Message>().last().text.contains("verification failed (auth)"),
+        )
+    }
+
+    @Test
+    fun `chiave rifiutata resta bloccata anche dopo un refresh`() = runTest(dispatcher) {
+        val vm = onboardingViewModel(
+            store = OnbFakeProviderStore(),
+            index = 1,
+            factory = OnbFakeTransportFactory(healthError = BridgeErrorKind.AUTH),
+        )
+        observe(vm)
+        advanceUntilIdle()
+        vm.selectProvider("openai")
+        advanceUntilIdle()
+        vm.saveProviderConfig("openai", baseUrl = null, model = "gpt-5-mini", apiKey = "sk-invalid-1234567890")
+        advanceUntilIdle()
+
+        vm.refresh()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        val brain = state.steps.first { it.kind == StepKind.BRAIN_CONFIG }
+        assertNotEquals(StepStatus.DONE, brain.status)
+        assertFalse(state.canFinish)
+        assertFalse(state.brainUnverified, "la chiave rifiutata non è «solo non verificata»")
+        assertNotNull(brain.ctaLabel, "la CTA resta per correggere la chiave")
+    }
+
+    @Test
+    fun `server irraggiungibile - si conclude con l'avviso non verificato`() = runTest(dispatcher) {
+        for (kind in listOf(BridgeErrorKind.NETWORK, BridgeErrorKind.TIMEOUT)) {
             val vm = onboardingViewModel(
-                store = store,
+                store = OnbFakeProviderStore(),
                 index = 1,
-                factory = OnbFakeTransportFactory(healthError = BridgeErrorKind.AUTH),
+                factory = OnbFakeTransportFactory(healthError = kind),
                 language = RenderLanguage.EN,
             )
             observe(vm)
@@ -186,21 +237,23 @@ class OnboardingViewModelTest {
 
             vm.selectProvider("openai")
             advanceUntilIdle()
-            vm.saveProviderConfig("openai", baseUrl = null, model = "gpt-5-mini", apiKey = "sk-invalid-1234567890")
+            vm.saveProviderConfig("openai", baseUrl = null, model = "gpt-5-mini", apiKey = "sk-test-1234567890ab")
             advanceUntilIdle()
 
             val state = vm.state.value
             val brain = state.steps.first { it.kind == StepKind.BRAIN_CONFIG }
-            assertEquals(StepStatus.DONE, brain.status)
-            assertTrue(state.canFinish, "privacy accettata + provider configurato: la verifica non serve")
-            assertTrue(state.brainUnverified, "senza verifica riuscita lo step Brain lo dichiara")
+            assertEquals(StepStatus.DONE, brain.status, "$kind")
+            assertTrue(state.canFinish, "$kind: la verifica non riuscita per rete/timeout non blocca")
+            assertTrue(state.brainUnverified, "$kind")
             // Nessun avanzamento automatico e la CTA resta, per correggere le credenziali.
-            assertEquals(1, state.currentIndex)
-            assertEquals("Configure the brain", brain.ctaLabel)
+            assertEquals(1, state.currentIndex, "$kind")
+            assertNotNull(brain.ctaLabel, "$kind")
             assertTrue(
-                events.filterIsInstance<OnboardingEvent.Message>().last().text.contains("verification failed (auth)"),
+                events.filterIsInstance<OnboardingEvent.Message>().last().text
+                    .contains("verification failed (${kind.name.lowercase()})"),
             )
         }
+    }
 
     @Test
     fun `verifica riuscita - niente avviso non verificato e CTA del cervello tolta`() = runTest(dispatcher) {

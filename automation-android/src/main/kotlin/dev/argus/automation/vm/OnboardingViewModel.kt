@@ -10,6 +10,7 @@ import dev.argus.automation.AppPreferences
 import dev.argus.automation.AppPreferencesStore
 import dev.argus.automation.BridgeHealthResult
 import dev.argus.automation.ConfiguredBridgeBrain
+import dev.argus.brain.BridgeErrorKind
 import dev.argus.brain.ProviderCatalog
 import dev.argus.brain.ProviderConfigStore
 import dev.argus.brain.ProviderId
@@ -57,12 +58,14 @@ private data class OnboardingSources(
 
 /**
  * [configured] = credenziali del provider selezionato presenti (chiave solo se richiesta);
- * [verified] = ultimo controllo di raggiungibilità riuscito. Il setup si conclude con la sola
- * configurazione: la verifica non è più un requisito, solo uno stato mostrato (D9).
+ * [verified] = ultimo controllo di raggiungibilità riuscito; [authRejected] = l'ultimo controllo è
+ * fallito perché il server ha RIFIUTATO le credenziali (AUTH). Server irraggiungibile, timeout o
+ * nessun controllo non bloccano il setup (solo avviso «non verificato»); una chiave rifiutata sì (D9).
  */
 private data class BrainSetupState(
     val configured: Boolean = false,
     val verified: Boolean = false,
+    val authRejected: Boolean = false,
 )
 
 @HiltViewModel
@@ -81,7 +84,10 @@ class OnboardingViewModel @Inject constructor(
     private val skipped = savedStateHandle.getStateFlow(SKIPPED_KEY, arrayListOf<String>())
     private val refreshSignal = MutableStateFlow(0L)
     private val brainSetup = MutableStateFlow(
-        BrainSetupState(verified = savedStateHandle[BRAIN_VERIFIED_KEY] ?: false),
+        BrainSetupState(
+            verified = savedStateHandle[BRAIN_VERIFIED_KEY] ?: false,
+            authRejected = savedStateHandle[BRAIN_AUTH_REJECTED_KEY] ?: false,
+        ),
     )
     private var shizukuRationaleShown = false
     private val mutableEvents = MutableSharedFlow<OnboardingEvent>(extraBufferCapacity = 4)
@@ -173,6 +179,11 @@ class OnboardingViewModel @Inject constructor(
                         advance()
                     }
                     is BridgeHealthResult.Unreachable -> {
+                        markBrainVerification(
+                            configured = true,
+                            verified = false,
+                            authRejected = health.kind == BridgeErrorKind.AUTH,
+                        )
                         message(unreachableAfterSave("Hermes", health.kind.name.lowercase(Locale.ROOT)))
                     }
                 }
@@ -257,6 +268,11 @@ class OnboardingViewModel @Inject constructor(
                         advance()
                     }
                     is BridgeHealthResult.Unreachable -> {
+                        markBrainVerification(
+                            configured = configured,
+                            verified = false,
+                            authRejected = health.kind == BridgeErrorKind.AUTH,
+                        )
                         val label = ProviderCatalog.spec(id).displayName
                         message(unreachableAfterSave(label, health.kind.name.lowercase(Locale.ROOT)))
                     }
@@ -317,6 +333,7 @@ class OnboardingViewModel @Inject constructor(
             brainSetup.value = brainSetup.value.copy(
                 configured = configured,
                 verified = configured && brainSetup.value.verified,
+                authRejected = configured && brainSetup.value.authRejected,
             )
         }
     }
@@ -399,11 +416,13 @@ class OnboardingViewModel @Inject constructor(
         val brainConfigured = setup.configured &&
             configuration.providerConfig(configuration.selectedProviderId()).baseUrl.isNotBlank()
         val brainVerified = brainConfigured && setup.verified
+        // Chiave salvata ma RIFIUTATA dal server (v0.3.2, review F-Droid): non avanza e non conclude.
+        val brainAuthRejected = brainConfigured && setup.authRejected
         val health = readAndroidUiHealth(context)
         val uiShizuku = sources.shizuku.toUiStatus(degradedAfterReboot = false)
         val done = mapOf(
             StepKind.WELCOME_PRIVACY to sources.preferences.privacyAccepted,
-            StepKind.BRAIN_CONFIG to brainConfigured,
+            StepKind.BRAIN_CONFIG to (brainConfigured && !brainAuthRejected),
             StepKind.SHIZUKU to (sources.shizuku == ShizukuGatewayStatus.AUTHORIZED),
             // Lo step notifiche è "fatto" solo con pubblicazione E lettura: le CTA arrivano in
             // quest'ordine e restano skippabili (le regole WhatsApp resteranno non armabili).
@@ -433,8 +452,8 @@ class OnboardingViewModel @Inject constructor(
         return OnboardingState(
             steps = steps,
             currentIndex = index,
-            canFinish = sources.preferences.privacyAccepted && brainConfigured,
-            brainUnverified = brainConfigured && !brainVerified,
+            canFinish = sources.preferences.privacyAccepted && brainConfigured && !brainAuthRejected,
+            brainUnverified = brainConfigured && !brainVerified && !brainAuthRejected,
             bridgeUrl = configuration.baseUrl(),
             bridgeTokenConfigured = setup.configured,
             providerChoices = providerChoices(),
@@ -489,9 +508,18 @@ class OnboardingViewModel @Inject constructor(
         return !ProviderCatalog.spec(id).apiKeyRequired || configuration.hasApiKey(id)
     }
 
-    private fun markBrainVerification(configured: Boolean, verified: Boolean) {
-        brainSetup.value = BrainSetupState(configured = configured, verified = verified)
+    private fun markBrainVerification(
+        configured: Boolean,
+        verified: Boolean,
+        authRejected: Boolean = false,
+    ) {
+        brainSetup.value = BrainSetupState(
+            configured = configured,
+            verified = verified,
+            authRejected = authRejected,
+        )
         savedStateHandle[BRAIN_VERIFIED_KEY] = verified
+        savedStateHandle[BRAIN_AUTH_REJECTED_KEY] = authRejected
         // L'endpoint salvato fa parte di "configurato" ma non del BrainSetupState: forza il ricalcolo.
         refreshSignal.value = System.nanoTime()
     }
@@ -620,6 +648,7 @@ class OnboardingViewModel @Inject constructor(
         const val CURRENT_INDEX_KEY = "currentIndex"
         const val SKIPPED_KEY = "skippedSteps"
         const val BRAIN_VERIFIED_KEY = "brainVerified"
+        const val BRAIN_AUTH_REJECTED_KEY = "brainAuthRejected"
         val STEP_ORDER = listOf(
             StepKind.WELCOME_PRIVACY,
             StepKind.BRAIN_CONFIG,

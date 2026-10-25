@@ -22,8 +22,8 @@ still reproduces on the latest version before reporting.
 In scope is anything that breaks the guarantees described in the threat model in the
 [Security & privacy](README.md#security--privacy) section of the README, for example:
 
-- external content (SMS, notifications, web pages, model output) gaining authority over a command,
-  a recipient, a target or the automations themselves;
+- external content (SMS, notifications, web pages, model output) escaping its quoting in a shell
+  command, changing the recipient of a reply, or modifying the automations themselves;
 - a rule executing something other than what was shown and approved;
 - leaking API keys, bearer tokens or message content from the device;
 - bypassing the approval, whitelist or fail-closed checks.
