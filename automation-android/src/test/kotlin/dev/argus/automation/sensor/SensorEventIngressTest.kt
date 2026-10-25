@@ -6,7 +6,11 @@ import dev.argus.engine.model.SensorKind
 import dev.argus.engine.runtime.TriggerEnvelope
 import dev.argus.engine.runtime.TriggerEvent
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -41,6 +45,87 @@ class SensorEventIngressTest {
 
         assertEquals(listOf(kind), rearmer.consumed)
         assertEquals(1, rearmer.rearmCalls)
+    }
+
+    @Test
+    fun `the sensor is re-armed before the dispatch starts`() = runTest {
+        val rearmer = RecordingRearmer()
+        var rearmsSeenByDispatch = -1
+        val ingress = ingress(
+            RecordingDispatcher { rearmsSeenByDispatch = rearmer.rearmCalls },
+            listOf(rule("a")),
+            rearmer,
+        )
+
+        ingress.onSensorTriggered(kind)
+
+        assertEquals(1, rearmsSeenByDispatch)
+        assertEquals(1, rearmer.rearmCalls)
+    }
+
+    @Test
+    fun `a long dispatch neither blocks the re-arm nor recovery, and a second trigger queues in order`() =
+        runTest {
+            val rearmer = RecordingRearmer()
+            val store = MemorySensorDetectionStore()
+            val delivered = mutableListOf<TriggerEnvelope>()
+            val entered = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            var first = true
+            val ingress = ingress(
+                RecordingDispatcher { envelope ->
+                    delivered += envelope
+                    if (first) {
+                        first = false
+                        entered.complete(Unit)
+                        release.await()
+                    }
+                },
+                listOf(rule("a")),
+                rearmer,
+                store,
+            )
+
+            val firstTrigger = async { ingress.onSensorTriggered(kind) }
+            entered.await()
+
+            // Il sensore è già riarmato mentre il programma gira, e il recovery non lo riconsegna.
+            assertEquals(1, rearmer.rearmCalls)
+            assertEquals(
+                emptyList(),
+                withTimeout(1_000) { ingress.recoverPending(setOf(AutomationId("a"))) },
+            )
+            assertEquals(1, delivered.size)
+
+            // Un secondo scatto riarma subito ma consegna solo dopo il primo, con un id nuovo.
+            val secondTrigger = async { ingress.onSensorTriggered(kind) }
+            runCurrent()
+            assertEquals(2, rearmer.rearmCalls)
+            assertEquals(1, delivered.size)
+
+            release.complete(Unit)
+            firstTrigger.await()
+            secondTrigger.await()
+            assertEquals(2, delivered.size)
+            assertNotEquals(delivered[0].id, delivered[1].id)
+            assertEquals(null, store.pending(AutomationId("a"), rule("a").fingerprint))
+        }
+
+    @Test
+    fun `a failing rule does not stop the other rules of the same trigger`() = runTest {
+        val delivered = mutableListOf<AutomationId>()
+        val ingress = ingress(
+            RecordingDispatcher { envelope ->
+                val id = (envelope.event as TriggerEvent.SensorChanged).automationId
+                if (id == AutomationId("a")) error("rule a unavailable")
+                delivered += id
+            },
+            listOf(rule("a"), rule("b")),
+        )
+
+        assertFailsWith<IllegalStateException> { ingress.onSensorTriggered(kind) }
+
+        assertEquals(listOf(AutomationId("b")), delivered)
     }
 
     @Test

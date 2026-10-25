@@ -756,7 +756,8 @@ class TimeAlarmCoordinatorTest {
         val slow = automation(Trigger.Time(cron = "1 20 * * *", tz = "UTC"), "slow")
         val other = automation(Trigger.Time(cron = "5 20 * * *", tz = "UTC"), "other")
         val dueAt = Instant.parse("2026-07-13T20:00:00Z").toEpochMilli()
-        val state = FakeTimeAlarmStateStore(record(slow, dueAt), record(other, dueAt))
+        val otherAt = Instant.parse("2026-07-13T20:05:00Z").toEpochMilli()
+        val state = FakeTimeAlarmStateStore(record(slow, dueAt), record(other, otherAt))
         val gate = DispatchGate(blockedAutomation = slow.id)
         val coordinator = gatedCoordinator(FakeAutomationStore(slow, other), state, gate)
 
@@ -764,7 +765,7 @@ class TimeAlarmCoordinatorTest {
         gate.entered.await()
 
         assertIs<AlarmDeliveryResult.Delivered>(
-            withTimeout(1_000) { coordinator.onAlarm(other.id, fingerprint(other), dueAt) },
+            withTimeout(1_000) { coordinator.onAlarm(other.id, fingerprint(other), otherAt) },
         )
         assertEquals(dueAt, state.get(slow.id)?.eventAtMillis)
 

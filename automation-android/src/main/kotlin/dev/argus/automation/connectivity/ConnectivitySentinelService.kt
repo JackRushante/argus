@@ -61,6 +61,13 @@ class ConnectivitySentinelService : Service() {
     private var lastWifiName: String? = null
     private var startupFailed = false
 
+    /**
+     * `true` solo se il monitor precedente era attivo in continuo e non è stato fermato dalla
+     * domanda (kill, update): allora un cambio rispetto allo stato salvato è una transizione
+     * persa da recuperare. Altrimenti la prima osservazione è solo un riferimento (D11).
+     */
+    private var recoverMissed = false
+
     private val powerReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             val state = when (intent.action) {
@@ -80,12 +87,15 @@ class ConnectivitySentinelService : Service() {
         )
         ingress = entry.connectivityEventIngress()
         status = entry.connectivitySentinelStatus()
+        val monitorMarker = PrefsConnectivityMonitorMarker(applicationContext)
+        recoverMissed = monitorMarker.wasActive()
 
         try {
             startAsForegroundService()
             registerPowerMonitoring()
             registerWifiMonitoring()
             status.setActive(true)
+            monitorMarker.setActive(true)
             Log.i(TAG, "sentinella attiva")
         } catch (error: SecurityException) {
             failStartup(error)
@@ -333,6 +343,7 @@ class ConnectivitySentinelService : Service() {
                     sourceIdentity = sourceIdentity,
                     atMillis = System.currentTimeMillis(),
                     initial = initial,
+                    recoverMissed = recoverMissed,
                 )
             } catch (error: CancellationException) {
                 throw error

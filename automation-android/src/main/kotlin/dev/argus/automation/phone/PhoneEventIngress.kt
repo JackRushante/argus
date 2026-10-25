@@ -1,10 +1,9 @@
 package dev.argus.automation.phone
 
+import dev.argus.automation.SequentialLanes
 import dev.argus.engine.model.PhoneEvent
 import dev.argus.engine.phone.PhoneEventParser
 import dev.argus.engine.runtime.TriggerEnvelope
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 
 /** Frammento di SMS come arriva dal framework: i multipart vanno ricomposti per mittente. */
 data class SmsPart(val sender: String?, val body: String?, val atMillis: Long)
@@ -38,7 +37,14 @@ class PhoneEventIngress(
     private val callState: CallStateStore,
     private val dispatcher: PhoneEventDispatcher,
 ) {
-    private val callMutex = Mutex()
+
+    /**
+     * Coda sequenziale delle transizioni chiamata (B3): la consegna esegue l'intero programma della
+     * regola, quindi le transizioni successive aspettano in ordine il completamento della
+     * precedente (il pending è uno slot solo), ma `recoverPending` non si blocca dietro a un
+     * dispatch lungo né lo riconsegna.
+     */
+    private val lanes = SequentialLanes<String>()
 
     suspend fun onSms(parts: List<SmsPart>) {
         parts
@@ -53,8 +59,8 @@ class PhoneEventIngress(
     }
 
     suspend fun onCallStateChanged(state: String, number: String?, atMillis: Long) {
-        callMutex.withLock {
-            if (state !in VALID_STATES) return@withLock
+        lanes.run(CALL_LANE) {
+            if (state !in VALID_STATES) return@run
             val pending = callState.pending()
             if (pending != null) deliverCall(pending)
             val safeAtMillis = atMillis.coerceAtLeast(0)
@@ -80,7 +86,7 @@ class PhoneEventIngress(
                     callState.record(enriched, envelope)
                     envelope?.let { deliverCall(it) }
                 }
-                return@withLock
+                return@run
             }
 
             val retainedNumber = number ?: previous?.number
@@ -110,11 +116,12 @@ class PhoneEventIngress(
         }
     }
 
-    suspend fun recoverPending(): Boolean = callMutex.withLock {
-        val pending = callState.pending() ?: return@withLock false
+    /** Salta se una consegna è già in corso o accodata: chi occupa la corsia la recapita già. */
+    suspend fun recoverPending(): Boolean = lanes.runIfIdle(CALL_LANE) {
+        val pending = callState.pending() ?: return@runIfIdle false
         deliverCall(pending)
         true
-    }
+    } ?: false
 
     private suspend fun deliverCall(envelope: TriggerEnvelope) {
         dispatcher.dispatch(envelope)
@@ -122,6 +129,7 @@ class PhoneEventIngress(
     }
 
     private companion object {
+        const val CALL_LANE = "call"
         const val STATE_RINGING = "RINGING"
         const val STATE_OFFHOOK = "OFFHOOK"
         const val STATE_IDLE = "IDLE"
