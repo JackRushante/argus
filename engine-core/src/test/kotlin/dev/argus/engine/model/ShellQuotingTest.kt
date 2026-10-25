@@ -180,15 +180,28 @@ class ShellQuotingTest {
     fun `a hostile value never changes how many commands run`() {
         assumeTrue(shellAvailable(), "serve /bin/sh")
         val marker = File.createTempFile("argus-shell-quoting", ".marker").also { it.delete() }
+        val path = marker.absolutePath
         try {
-            val payload = "'; touch ${marker.absolutePath}; echo '"
-            for (template in listOf("echo \${x}", "echo \"\${x}\"", "echo '\${x}'")) {
-                runShell(resolvedCommand(template, tainted(payload)))
-                assertTrue(!marker.exists(), "il valore esterno ha eseguito un comando con $template")
+            val payloads = listOf(
+                "'; touch $path; echo '",
+                "\"; touch $path; echo \"",
+                "; touch $path",
+                "\$(touch $path)",
+                "`touch $path`",
+                "\n touch $path \n",
+                "x && touch $path",
+            )
+            val templates = listOf("echo \${x}", "echo \"\${x}\"", "echo '\${x}'", "echo pre\${x}post")
+            for (template in templates) {
+                for (payload in payloads) {
+                    runShell(resolvedCommand(template, tainted(payload)))
+                    assertTrue(!marker.exists(), "il valore esterno ha eseguito un comando: $template con «$payload»")
+                }
             }
-            // Controllo del test: lo stesso payload GREZZO (valore CLEAN) funziona come iniezione.
+            // Controllo del test: lo stesso payload GREZZO (valore CLEAN) e' davvero un'iniezione.
             val clean = VarValue(
-                payload, VarType.TEXT, IntegrityLabel.CLEAN, ConfidentialityLabel.PUBLIC, setOf(ValueProvenance.LITERAL),
+                "; touch $path", VarType.TEXT, IntegrityLabel.CLEAN, ConfidentialityLabel.PUBLIC,
+                setOf(ValueProvenance.LITERAL),
             )
             runShell(resolvedCommand("echo \${x}", clean))
             assertTrue(marker.exists(), "il payload di controllo deve essere davvero eseguibile")
