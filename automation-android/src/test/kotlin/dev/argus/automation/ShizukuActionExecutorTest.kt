@@ -728,6 +728,90 @@ class ShizukuActionExecutorTest {
     }
 
     @Test
+    fun `dnd the normal api did not change is retried through the privileged shell when shizuku is ready`() = runTest {
+        val surface = RecordingBaseSurface(ignoresDnd = true).apply { currentDnd = DndMode.TOTAL }
+        val tools = RecordingDeviceController(onDnd = { surface.currentDnd = it })
+        val exec = executor(
+            tools = tools,
+            baseActions = AndroidBaseActionExecutor(surface),
+            shizukuReady = { true },
+        )
+
+        assertEquals(ActionResult.Success, exec.execute(Action.SetDnd(DndMode.OFF), context))
+
+        assertEquals(listOf(DndMode.OFF), surface.dndModes)
+        assertEquals(listOf("dnd:OFF"), tools.calls)
+        assertEquals(listOf(context.priority), tools.priorities)
+    }
+
+    @Test
+    fun `dnd that stays unchanged without shizuku is a failure and never a success`() = runTest {
+        val surface = RecordingBaseSurface(ignoresDnd = true).apply { currentDnd = DndMode.TOTAL }
+        val tools = RecordingDeviceController()
+        val exec = executor(
+            tools = tools,
+            baseActions = AndroidBaseActionExecutor(surface),
+            shizukuReady = { false },
+        )
+
+        assertEquals(
+            ActionResult.Failure("dnd_change_not_applied"),
+            exec.execute(Action.SetDnd(DndMode.OFF), context),
+        )
+        assertEquals(emptyList(), tools.calls)
+    }
+
+    @Test
+    fun `dnd that the privileged command also leaves unchanged is dnd_change_not_applied`() = runTest {
+        val surface = RecordingBaseSurface(ignoresDnd = true).apply { currentDnd = DndMode.TOTAL }
+        val tools = RecordingDeviceController()
+        val exec = executor(
+            tools = tools,
+            baseActions = AndroidBaseActionExecutor(surface),
+            shizukuReady = { true },
+        )
+
+        assertEquals(
+            ActionResult.Failure("dnd_change_not_applied"),
+            exec.execute(Action.SetDnd(DndMode.OFF), context),
+        )
+        assertEquals(listOf("dnd:OFF"), tools.calls)
+    }
+
+    @Test
+    fun `a failing privileged dnd retry keeps its typed code`() = runTest {
+        val surface = RecordingBaseSurface(ignoresDnd = true).apply { currentDnd = DndMode.TOTAL }
+        listOf(
+            DeviceToolException("set_dnd_exit_1"),
+            ShizukuShellException(ShizukuShellException.TIMEOUT),
+        ).forEach { failure ->
+            val code = (failure as? DeviceToolException)?.code
+                ?: (failure as ShizukuShellException).code
+            val exec = executor(
+                tools = ThrowingDeviceController(failure),
+                baseActions = AndroidBaseActionExecutor(surface),
+                shizukuReady = { true },
+            )
+
+            assertEquals(ActionResult.Failure(code), exec.execute(Action.SetDnd(DndMode.OFF), context))
+        }
+    }
+
+    @Test
+    fun `dnd the normal api applied never touches the privileged shell`() = runTest {
+        val surface = RecordingBaseSurface()
+        val tools = RecordingDeviceController()
+        val exec = executor(
+            tools = tools,
+            baseActions = AndroidBaseActionExecutor(surface),
+            shizukuReady = { true },
+        )
+
+        assertEquals(ActionResult.Success, exec.execute(Action.SetDnd(DndMode.TOTAL), context))
+        assertEquals(emptyList(), tools.calls)
+    }
+
+    @Test
     fun `write setting dispatches through the privileged shell with literal namespace key and value`() = runTest {
         val tools = RecordingDeviceController()
         val exec = executor(tools = tools)
@@ -876,7 +960,10 @@ class ShizukuActionExecutorTest {
     }
 }
 
-private class RecordingDeviceController : DeviceController {
+private class RecordingDeviceController(
+    /** Effetto del comando di sistema sul telefono finto (es. il Non disturbare cambia davvero). */
+    private val onDnd: (DndMode) -> Unit = {},
+) : DeviceController {
     val calls = mutableListOf<String>()
     val executionIds = mutableListOf<ExecutionId>()
     val priorities = mutableListOf<Int>()
@@ -893,8 +980,10 @@ private class RecordingDeviceController : DeviceController {
         record(executionId, priority, "bluetooth:$on")
     override suspend fun setMobileData(on: Boolean, executionId: ExecutionId, priority: Int) =
         record(executionId, priority, "mobile_data:$on")
-    override suspend fun setDnd(mode: DndMode, executionId: ExecutionId, priority: Int) =
+    override suspend fun setDnd(mode: DndMode, executionId: ExecutionId, priority: Int) {
         record(executionId, priority, "dnd:$mode")
+        onDnd(mode)
+    }
     override suspend fun setDarkMode(
         mode: dev.argus.engine.model.NightMode,
         executionId: ExecutionId,
@@ -999,7 +1088,12 @@ private class ThrowingDeviceController(private val failure: RuntimeException) : 
     ) = fail()
 }
 
-private class RecordingBaseSurface(private val dndGranted: Boolean = true) : BaseActionSurface {
+private class RecordingBaseSurface(
+    private val dndGranted: Boolean = true,
+    /** Vero: l'API normale ritorna senza errori ma non cambia il filtro (Android 15+, modalita' manuale). */
+    private val ignoresDnd: Boolean = false,
+) : BaseActionSurface {
+    var currentDnd: DndMode? = DndMode.OFF
     val dndModes = mutableListOf<DndMode>()
     val ringerModes = mutableListOf<RingerMode>()
     val launched = mutableListOf<String>()
@@ -1011,7 +1105,11 @@ private class RecordingBaseSurface(private val dndGranted: Boolean = true) : Bas
     val settingsScreens = mutableListOf<String>()
     val vibrations = mutableListOf<Int>()
     override fun isDndPolicyGranted(): Boolean = dndGranted
-    override fun setInterruptionFilter(mode: DndMode) { dndModes += mode }
+    override fun setInterruptionFilter(mode: DndMode) {
+        dndModes += mode
+        if (!ignoresDnd) currentDnd = mode
+    }
+    override fun currentDndMode(): DndMode? = currentDnd
     override fun setRingerMode(mode: RingerMode) { ringerModes += mode }
     override fun launchPackage(pkg: String): Boolean { launched += pkg; return true }
     override fun openHttpUrl(url: String) { opened += url }

@@ -1,5 +1,6 @@
 package dev.argus.automation.base
 
+import android.app.NotificationManager
 import dev.argus.device.RingerMode
 import dev.argus.engine.model.DndMode
 import dev.argus.engine.model.SettingsScreen
@@ -31,7 +32,14 @@ class AndroidBaseActionExecutorTest {
         var streamMax: Int = 15,
         var throwOn: String? = null,
         var blockedOn: String? = null,
+        /** Falso: l'API normale non cambia il filtro (Android 15+: tocca solo la modalita' creata da Argus). */
+        var dndAppliesChange: Boolean = true,
+        /** Quante letture dello stato passano prima che il cambio sia visibile (latenza di NMS). */
+        var dndReadsBeforeVisible: Int = 0,
+        var currentDnd: DndMode? = DndMode.OFF,
     ) : BaseActionSurface {
+        private var pendingDnd: DndMode? = null
+        private var remainingReads = 0
         val dndModes = mutableListOf<DndMode>()
         val ringerModes = mutableListOf<RingerMode>()
         val launched = mutableListOf<String>()
@@ -47,6 +55,21 @@ class AndroidBaseActionExecutorTest {
         override fun setInterruptionFilter(mode: DndMode) {
             if (throwOn == "dnd") error("boom")
             dndModes += mode
+            if (dndAppliesChange) {
+                pendingDnd = mode
+                remainingReads = dndReadsBeforeVisible
+            }
+        }
+        override fun currentDndMode(): DndMode? {
+            pendingDnd?.let { pending ->
+                if (remainingReads <= 0) {
+                    currentDnd = pending
+                    pendingDnd = null
+                } else {
+                    remainingReads -= 1
+                }
+            }
+            return currentDnd
         }
         override fun setRingerMode(mode: RingerMode) {
             if (throwOn == "ringer") error("boom")
@@ -115,6 +138,99 @@ class AndroidBaseActionExecutorTest {
         val result = AndroidBaseActionExecutor(surface).setDnd(DndMode.TOTAL)
         assertEquals(ActionResult.Failure("dnd_policy_unavailable"), result)
         assertTrue(surface.dndModes.isEmpty())
+    }
+
+    @Test
+    fun `set dnd never reports success when the system did not apply the change`() = runTest {
+        // Android 15+: spegnere il Non disturbare da app tocca solo la modalita' creata dall'app,
+        // non quella attivata a mano. La chiamata ritorna senza errori ma lo stato non cambia.
+        val surface = FakeSurface(dndAppliesChange = false, currentDnd = DndMode.TOTAL)
+
+        val result = AndroidBaseActionExecutor(surface).setDnd(DndMode.OFF)
+
+        assertEquals(ActionResult.Failure("dnd_change_not_applied"), result)
+        assertEquals(listOf(DndMode.OFF), surface.dndModes)
+    }
+
+    @Test
+    fun `set dnd waits a moment for the change to become visible`() = runTest {
+        val surface = FakeSurface(dndReadsBeforeVisible = 1)
+
+        val result = AndroidBaseActionExecutor(surface).setDnd(DndMode.PRIORITY)
+
+        assertEquals(ActionResult.Success, result)
+    }
+
+    @Test
+    fun `set dnd retries through the privileged command when the change was not applied`() = runTest {
+        val surface = FakeSurface(dndAppliesChange = false, currentDnd = DndMode.TOTAL)
+        var retries = 0
+
+        val result = AndroidBaseActionExecutor(surface).setDnd(DndMode.OFF) {
+            retries += 1
+            surface.currentDnd = DndMode.OFF // il comando di sistema ha funzionato
+            ActionResult.Success
+        }
+
+        assertEquals(ActionResult.Success, result)
+        assertEquals(1, retries)
+    }
+
+    @Test
+    fun `set dnd is a failure when even the privileged command leaves the state unchanged`() = runTest {
+        val surface = FakeSurface(dndAppliesChange = false, currentDnd = DndMode.TOTAL)
+        var retries = 0
+
+        val result = AndroidBaseActionExecutor(surface).setDnd(DndMode.OFF) {
+            retries += 1
+            ActionResult.Success
+        }
+
+        assertEquals(ActionResult.Failure("dnd_change_not_applied"), result)
+        assertEquals(1, retries)
+    }
+
+    @Test
+    fun `set dnd keeps the typed failure of the privileged retry`() = runTest {
+        val surface = FakeSurface(dndAppliesChange = false, currentDnd = DndMode.TOTAL)
+
+        val result = AndroidBaseActionExecutor(surface).setDnd(DndMode.OFF) {
+            ActionResult.Failure("shizuku_timeout")
+        }
+
+        assertEquals(ActionResult.Failure("shizuku_timeout"), result)
+    }
+
+    @Test
+    fun `set dnd does not retry when the first call already worked`() = runTest {
+        val surface = FakeSurface(currentDnd = DndMode.OFF)
+        var retries = 0
+
+        val result = AndroidBaseActionExecutor(surface).setDnd(DndMode.TOTAL) {
+            retries += 1
+            ActionResult.Success
+        }
+
+        assertEquals(ActionResult.Success, result)
+        assertEquals(0, retries)
+    }
+
+    @Test
+    fun `set dnd fails closed when the current state cannot be read`() = runTest {
+        val surface = FakeSurface(currentDnd = null, dndAppliesChange = false)
+
+        val result = AndroidBaseActionExecutor(surface).setDnd(DndMode.OFF)
+
+        assertEquals(ActionResult.Failure("dnd_change_not_applied"), result)
+    }
+
+    @Test
+    fun `interruption filters map to the dnd modes and the others are unknown`() {
+        assertEquals(DndMode.OFF, dndModeOf(NotificationManager.INTERRUPTION_FILTER_ALL))
+        assertEquals(DndMode.PRIORITY, dndModeOf(NotificationManager.INTERRUPTION_FILTER_PRIORITY))
+        assertEquals(DndMode.TOTAL, dndModeOf(NotificationManager.INTERRUPTION_FILTER_NONE))
+        assertEquals(null, dndModeOf(NotificationManager.INTERRUPTION_FILTER_ALARMS))
+        assertEquals(null, dndModeOf(NotificationManager.INTERRUPTION_FILTER_UNKNOWN))
     }
 
     @Test

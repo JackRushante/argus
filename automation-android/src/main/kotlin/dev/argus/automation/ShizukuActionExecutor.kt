@@ -9,6 +9,7 @@ import dev.argus.device.DeviceToolException
 import dev.argus.device.RingerMode
 import dev.argus.engine.brain.ActResult
 import dev.argus.engine.model.Action
+import dev.argus.engine.model.DndMode
 import dev.argus.engine.model.GenerativeAction
 import dev.argus.engine.runtime.ActionExecutor
 import dev.argus.engine.runtime.ActionResult
@@ -143,8 +144,7 @@ class ShizukuActionExecutor(
                     ctx.priority,
                 )
             }
-            is Action.SetDnd -> baseActions?.setDnd(action.mode)
-                ?: success { tools.setDnd(action.mode, ctx.executionId, ctx.priority) }
+            is Action.SetDnd -> setDnd(action.mode, ctx)
             is Action.SetRinger -> {
                 val mode = RingerMode.fromEngineValue(action.mode)
                     ?: return ActionResult.Failure("ringer_mode_invalid")
@@ -253,6 +253,30 @@ class ShizukuActionExecutor(
         ActionResult.Failure("action_invalid")
     } catch (_: Exception) {
         ActionResult.Failure("action_failed")
+    }
+
+    /**
+     * Non disturbare: API normali con verifica dello stato (su Android 15+ spegnere da app puo'
+     * non toccare la modalita' attivata a mano). Se non e' cambiato e Shizuku e' pronto, ritenta
+     * con `cmd notification set_dnd` via shell privilegiata; se resta invariato l'esito e'
+     * `dnd_change_not_applied`. Senza tier base resta il solo comando privilegiato.
+     */
+    private suspend fun setDnd(mode: DndMode, ctx: FireContext): ActionResult {
+        val base = baseActions ?: return success { tools.setDnd(mode, ctx.executionId, ctx.priority) }
+        val retry: (suspend () -> ActionResult)? = if (shizukuReady()) {
+            {
+                try {
+                    success { tools.setDnd(mode, ctx.executionId, ctx.priority) }
+                } catch (error: DeviceToolException) {
+                    ActionResult.Failure(error.code)
+                } catch (error: ShizukuShellException) {
+                    ActionResult.Failure(error.code)
+                }
+            }
+        } else {
+            null
+        }
+        return base.setDnd(mode, retry)
     }
 
     /**

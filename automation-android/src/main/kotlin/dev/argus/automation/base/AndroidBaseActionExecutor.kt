@@ -6,6 +6,7 @@ import dev.argus.engine.model.SettingsScreen
 import dev.argus.engine.model.VolumeStream
 import dev.argus.engine.runtime.ActionResult
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import java.net.URI
 
 /**
@@ -25,6 +26,12 @@ interface BaseActionSurface {
     /** Grant `ACCESS_NOTIFICATION_POLICY`: necessario per toccare DND e per silenziare il ringer. */
     fun isDndPolicyGranted(): Boolean
     fun setInterruptionFilter(mode: DndMode)
+    /**
+     * Modalita' Non disturbare in vigore adesso (`NotificationManager.getCurrentInterruptionFilter()`),
+     * `null` se non e' una delle tre note (solo sveglie, sconosciuto). Serve a verificare che
+     * [setInterruptionFilter] abbia cambiato davvero lo stato.
+     */
+    fun currentDndMode(): DndMode?
     fun setRingerMode(mode: RingerMode)
     /** Avvia il launcher del package; false se non esiste una entry avviabile. */
     fun launchPackage(pkg: String): Boolean
@@ -59,10 +66,38 @@ interface BaseActionSurface {
  */
 class AndroidBaseActionExecutor(private val surface: BaseActionSurface) {
 
-    suspend fun setDnd(mode: DndMode): ActionResult = guarded {
+    /**
+     * Non disturbare con l'API normale, poi verifica. Su Android 15+ un'app puo' spegnere solo la
+     * modalita' creata da lei, non quella attivata a mano: la chiamata ritorna senza errori ma lo
+     * stato non cambia. Per questo si rilegge `getCurrentInterruptionFilter()` e, se non e'
+     * cambiato, si riprova con [privilegedRetry] (il comando di sistema via shell privilegiata,
+     * passato solo se Shizuku e' pronto). Se resta invariato l'esito e' `dnd_change_not_applied`,
+     * mai un successo; un fallimento tipizzato del retry (`shizuku_timeout`, ...) viene restituito
+     * cosi' com'e'.
+     */
+    suspend fun setDnd(
+        mode: DndMode,
+        privilegedRetry: (suspend () -> ActionResult)? = null,
+    ): ActionResult = guarded {
         if (!surface.isDndPolicyGranted()) return ActionResult.Failure("dnd_policy_unavailable")
         surface.setInterruptionFilter(mode)
-        ActionResult.Success
+        if (dndApplied(mode)) return ActionResult.Success
+        if (privilegedRetry == null) return ActionResult.Failure("dnd_change_not_applied")
+        val retried = privilegedRetry()
+        if (retried is ActionResult.Failure) return retried
+        if (dndApplied(mode)) ActionResult.Success else ActionResult.Failure("dnd_change_not_applied")
+    }
+
+    /**
+     * Il cambio puo' diventare visibile con qualche istante di ritardo: poche riletture brevi,
+     * solo se la prima non e' gia' quella attesa. Stato illeggibile = non applicato (fail-closed).
+     */
+    private suspend fun dndApplied(mode: DndMode): Boolean {
+        repeat(DND_VERIFY_ATTEMPTS) { attempt ->
+            if (attempt > 0) delay(DND_VERIFY_DELAY_MILLIS)
+            if (surface.currentDndMode() == mode) return true
+        }
+        return false
     }
 
     suspend fun setRinger(mode: RingerMode): ActionResult = guarded {
@@ -156,6 +191,8 @@ class AndroidBaseActionExecutor(private val surface: BaseActionSurface) {
     }.getOrDefault(false)
 
     private companion object {
+        const val DND_VERIFY_ATTEMPTS = 3
+        const val DND_VERIFY_DELAY_MILLIS = 100L
         const val MAX_URL_CHARS = 8_192
         const val MAX_TIMER_SECONDS = 86_400
         const val MAX_VIBRATE_MS = 10_000
