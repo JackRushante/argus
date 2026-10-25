@@ -141,7 +141,7 @@ data class AutomationListState(
     val filter: StatusFilter,               // ALL | ARMED | PENDING | DISABLED | NEEDS_REVIEW (chips)
     val banner: EngineBanner,
     val loading: Boolean,
-    val pendingCount: Int = rows.count { it.status == StatusBadge.PENDING_APPROVAL },
+    val pendingCount: Int = rows.count { it.status == StatusBadge.PENDING_APPROVAL || it.pendingEditDraftId != null },
     val needsReviewCount: Int = rows.count { it.status == StatusBadge.NEEDS_REVIEW },
 )
 
@@ -156,6 +156,12 @@ data class AutomationRow(
     val hasWarnings: Boolean,               // pallino warning (conflitti/validator)
     val lastFiredLabel: String?,            // "2 h fa" / null = mai
     val nextFireLabel: String?,             // solo trigger Time: "stasera 23:00"
+    /**
+     * D5: id della bozza di modifica in attesa su questa regola armata/disattivata (null = nessuna).
+     * La regola resta attiva finché la modifica non viene armata: la riga mostra un badge
+     * «modifica in attesa» e il tocco sul badge apre la bozza.
+     */
+    val pendingEditDraftId: String? = null,
 )
 
 enum class StatusFilter { ALL, ARMED, PENDING, DISABLED, NEEDS_REVIEW }
@@ -185,6 +191,11 @@ data class AutomationDetailState(
     val runNowBlockedReason: String? = null,
     /** Probe positivi redatti: solo famiglia/tipo, mai il valore campione. */
     val verifiedStateReaders: List<String> = emptyList(),
+    /**
+     * B26: un'azione del footer (arma, rifiuta, elimina) è in corso. Il footer resta disabilitato
+     * finché è vero, così un secondo tocco non può né duplicare l'azione né emettere un secondo Close.
+     */
+    val actionInProgress: Boolean = false,
 )
 
 interface AutomationDetailCallbacks {
