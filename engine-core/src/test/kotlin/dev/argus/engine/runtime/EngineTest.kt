@@ -192,6 +192,47 @@ class EngineTest {
     }
 
     @Test
+    fun `P4 long loop keeps the journal small while the execution outcome counts every leaf`() = runTest {
+        val automation = armed(
+            id = "p4-long-loop",
+            t = Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+            acts = listOf(
+                Action.While(
+                    Condition.BooleanLiteral(true),
+                    body = listOf(Action.SetFlashlight(true), Action.SetFlashlight(false), Action.SetWifi(true)),
+                    maxIterations = 1_000,
+                ),
+            ),
+        )
+        val journal = FakeExecutionJournal()
+        val audit = FakeAuditSink()
+
+        engine(
+            FakeAutomationStore(listOf(automation)),
+            ActionExecutor { _, context ->
+                if (context.actionPath == "1.while[900].2") ActionResult.Failure("boom_code") else ActionResult.Success
+            },
+            "2026-07-18T10:00:00Z",
+            audit = audit,
+            journal = journal,
+        ).onTrigger(envelope("alarm:p4-long-loop", timeEvent(automation))) { DeviceState() }
+
+        // 100 scritte + la fallita all'iterazione 900 + il riepilogo.
+        assertEquals(102, journal.actions.size)
+        assertTrue(journal.actions.any { it.actionPath == "1.while[900].2" && it.outcome == ActionJournalOutcome.FAILED })
+        // Gli indici delle righe sono tutti distinti (la riga di riepilogo non ne sovrascrive un'altra).
+        assertEquals(journal.actions.size, journal.actions.map { it.actionIndex }.toSet().size)
+        val summary = journal.actions.single { it.actionType == OmittedSteps.ACTION_TYPE }
+        assertEquals(2_899, OmittedSteps.countFrom(summary.errorCode))
+        // I contatori e lo stato dell'esecuzione contano ogni foglia, non solo quelle scritte.
+        val completion = journal.completions.single()
+        assertEquals(ExecutionStatus.PARTIAL, completion.status)
+        assertEquals(2_999, completion.succeededCount)
+        assertEquals(1, completion.failedCount)
+        assertEquals(1, audit.events.count { it.kind == AuditKind.FIRED })
+    }
+
+    @Test
     fun `P4 while iteration count driven by a NUMBER variable runs that many times`() = runTest {
         val automation = armed(
             id = "p4-var-loop",
