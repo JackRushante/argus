@@ -134,7 +134,16 @@ internal object LogReasonLabels {
 
     /** Etichetta nella lingua richiesta, o null se il codice non è noto. */
     fun label(code: String, l: RenderLanguage): String? =
-        labels[code]?.let { l.pick(it.en, it.it) }
+        labels[code]?.let { l.pick(it.en, it.it) } ?: commandExitLabel(code, l)
+
+    /**
+     * Comandi della shell privilegiata finiti con un codice d'uscita (`<operazione>_exit_<n>`, es.
+     * `set_wifi_exit_1`): l'operazione è un nome interno, il codice d'uscita è l'informazione utile.
+     */
+    private fun commandExitLabel(code: String, l: RenderLanguage): String? {
+        val exit = COMMAND_EXIT.matchEntire(code)?.groupValues?.get(1) ?: return null
+        return l.pick("the system command ended with code $exit", "il comando di sistema è terminato con codice $exit")
+    }
 
     /** Etichetta se nota, altrimenti il codice stesso (ripulito) come dettaglio tecnico. */
     fun text(code: String, l: RenderLanguage): String =
@@ -147,4 +156,5 @@ internal object LogReasonLabels {
         .ifBlank { "unknown" }
 
     private const val MAX_CODE_CHARS = 64
+    private val COMMAND_EXIT = Regex("^[a-z][a-z0-9_]*_exit_([0-9]{1,3})$")
 }

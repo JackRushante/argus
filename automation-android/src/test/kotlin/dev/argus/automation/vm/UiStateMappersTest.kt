@@ -691,6 +691,19 @@ class UiStateMappersTest {
     }
 
     @Test
+    fun `a privileged command exit code gets a readable label in both languages`() {
+        assertEquals(
+            "il comando di sistema è terminato con codice 1",
+            LogReasonLabels.label("set_wifi_exit_1", RenderLanguage.IT),
+        )
+        assertEquals(
+            "the system command ended with code 255",
+            LogReasonLabels.label("set_dnd_exit_255", RenderLanguage.EN),
+        )
+        assertNull(LogReasonLabels.label("set_wifi_exit_", RenderLanguage.EN))
+    }
+
+    @Test
     fun `every known reason code has both languages and a label different from the code`() {
         assertTrue(LogReasonLabels.knownCodes.size >= 40, "codici noti: ${LogReasonLabels.knownCodes.size}")
         for (code in LogReasonLabels.knownCodes) {
