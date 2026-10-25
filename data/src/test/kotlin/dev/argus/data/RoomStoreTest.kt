@@ -335,6 +335,29 @@ class RoomStoreTest {
         )
     }
 
+    @Test
+    fun `a lastFiredAt in the future after the clock moved back counts as an expired cooldown`() = runTest {
+        val automation = baseArmed("claim-clock-back")
+        persistForTest(automation)
+        store.recordFired(automation.id, 9_000_000)
+
+        assertEquals(
+            FireClaimResult.Claimed,
+            store.claimFire(claim(automation.id, "event-1", atMillis = 1_000, cooldownMs = 5_000)),
+        )
+        assertEquals(1_000, store.lastFiredAt(automation.id))
+
+        // Poi il cooldown torna a proteggere la regola in modo normale.
+        assertEquals(
+            FireClaimResult.Cooldown(6_000),
+            store.claimFire(claim(automation.id, "event-2", atMillis = 2_000, cooldownMs = 5_000)),
+        )
+        assertEquals(
+            FireClaimResult.Claimed,
+            store.claimFire(claim(automation.id, "event-3", atMillis = 6_000, cooldownMs = 5_000)),
+        )
+    }
+
     // --- decode-fail / schemaVersion → NEEDS_REVIEW (spec E8) ----------------
 
     @Test
