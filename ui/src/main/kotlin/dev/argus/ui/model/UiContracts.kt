@@ -109,9 +109,29 @@ enum class DraftCardStatus { PROPOSED, APPROVED, REJECTED, SUPERSEDED }
 enum class NoticeKind { INFO, ERROR }
 
 sealed interface ChatError {
-    data object Timeout : ChatError                    // Il servizio AI non ha risposto entro 65 s.
-    data object BridgeUnreachable : ChatError
+    data object Timeout : ChatError                    // Il servizio AI non ha risposto in tempo.
+    data object BridgeUnreachable : ChatError          // SOLO rete assente/irraggiungibile.
     data class MalformedReply(val detail: String) : ChatError  // metaError dal parser: mostrare "risposta senza regola valida" + dettaglio espandibile
+
+    // 0.3.5 (B11): errori spiegati col loro rimedio; ognuno ha testo EN/IT e un'azione utile.
+    /** Chiave API rifiutata (401/403). Azione: apri Sistema. */
+    data object Auth : ChatError
+    /** Limite di spesa dell'app o credito del provider esaurito. Azione: apri Sistema. */
+    data object Budget : ChatError
+    /** Provider sovraccarico (429). */
+    data object RateLimit : ChatError
+    /** Risposta del modello tagliata dal limite di lunghezza. */
+    data object OutputTruncated : ChatError
+    /** Il server ha tagliato le istruzioni (contesto troppo piccolo, tipico di Ollama). */
+    data object ContextTruncated : ChatError
+    /** 4xx diverso da 401/402/403/429: spesso il contesto del modello è troppo piccolo. */
+    data class ServerRejected(val status: Int) : ChatError
+    /** 5xx: servizio non disponibile. */
+    data class ServiceUnavailable(val status: Int) : ChatError
+    /** Prompt composto oltre il tetto: errore locale, nessuna chiamata di rete. */
+    data class TooLong(val chars: Int, val max: Int) : ChatError
+    /** Provider/chiave/informativa privacy non configurati: NON è un servizio irraggiungibile. Azione: apri Sistema. */
+    data object NotConfigured : ChatError
 }
 
 interface ChatCallbacks {
@@ -121,6 +141,8 @@ interface ChatCallbacks {
     // Menu overflow dell'header (prima era solo decorativo: feedback Lorenzo 2026-07-14).
     fun onClearConversation()
     fun onCheckConnection()
+    /** Azione degli errori Auth/Budget/NotConfigured: porta alla scheda Sistema. Default no-op per i vecchi host. */
+    fun onOpenSystem() {}
 }
 
 // --- 6.2 Automazioni · lista ---
