@@ -19,6 +19,7 @@ import dev.argus.automation.AppPreferencesStore
 import dev.argus.automation.ApprovalFlow
 import dev.argus.automation.ArmedAutomationRegistrar
 import dev.argus.automation.ImmediateReArm
+import dev.argus.automation.RecoveryLauncher
 import dev.argus.automation.ArgusRuntimeController
 import dev.argus.automation.AutomationNotifier
 import dev.argus.automation.ConfiguredBridgeBrain
@@ -887,6 +888,7 @@ object ArgusModule {
         dispatcher: TimeEventDispatcher,
         audit: AuditSink,
         oneShotConsumptions: OneShotConsumptionRegistry,
+        launcher: ReceiverWorkLauncher,
     ): TimeAlarmCoordinator =
         TimeAlarmCoordinator(
             store,
@@ -896,6 +898,9 @@ object ArgusModule {
             Instant::now,
             audit,
             oneShotConsumptions,
+            // I recuperi dovuti partono in background e tengono la lease del servizio in primo
+            // piano per tutta la loro durata: il reconcile non aspetta un programma lungo (B3).
+            recoveryLauncher = RecoveryLauncher { block -> launcher.launch("time_recovery", block) },
         )
 
     @Provides
@@ -994,6 +999,8 @@ object ArgusModule {
         phoneIngress: PhoneEventIngress,
         sensor: SensorTriggerRuntime,
         sensorIngress: SensorEventIngress,
+        store: AutomationStore,
+        audit: AuditSink,
     ): ArgusRuntimeController = ArgusRuntimeController(
         scope,
         scheduler,
@@ -1008,5 +1015,7 @@ object ArgusModule {
         phoneIngress,
         sensor,
         sensorIngress,
+        store = store,
+        audit = audit,
     )
 }

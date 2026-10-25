@@ -77,6 +77,14 @@ fun interface TimeEventDispatcher {
     suspend fun dispatch(envelope: TriggerEnvelope)
 }
 
+/**
+ * Avvia in background un recupero all'avvio (B3). In produzione tiene anche la lease del servizio
+ * in primo piano per la durata del lavoro; nei test lancia semplicemente una coroutine.
+ */
+fun interface RecoveryLauncher {
+    fun launch(block: suspend () -> Unit)
+}
+
 enum class ReconcileReason(
     val recoverDueAlarm: Boolean,
     val recreateOsRegistration: Boolean = false,
@@ -171,8 +179,18 @@ class TimeAlarmCoordinator(
     private val now: () -> Instant,
     private val audit: AuditSink = NoopAuditSink,
     private val oneShotConsumptions: OneShotConsumptionRegistry = NoopOneShotConsumptionRegistry,
+    /**
+     * Se presente, i recuperi dovuti partono in background e `reconcile` NON ne attende la fine
+     * (B3): un programma lungo (attese fino a un'ora) non deve ritardare geofence e sensori né
+     * mettere in coda ogni altro reconcile. Il report non elenca allora i recuperi (`recovered`
+     * resta vuoto). Senza launcher (test, caller non Android) i recuperi sono sincroni.
+     */
+    private val recoveryLauncher: RecoveryLauncher? = null,
 ) {
     private val mutex = Mutex()
+
+    /** Coda sequenziale dei recuperi in background: l'ordine per sorgente (id) si preserva. */
+    private val recoveryLane = Mutex()
 
     /**
      * Regole con un dispatch in corso fuori dal lock. Si legge e si scrive SOLO sotto [mutex].
@@ -252,11 +270,33 @@ class TimeAlarmCoordinator(
 
         // Fuori dal lock: ogni recupero ripassa da prepare/dispatch/complete, quindi una regola nel
         // frattempo consegnata da un onAlarm (o già in volo) viene ignorata, mai consegnata due volte.
-        dueRecoveries.forEach { (automationId, eventAtMillis) ->
-            when (deliver(automationId, eventAtMillis, deliveredFingerprint = null)) {
-                AlarmDeliveryResult.Delivered -> recovered += automationId
-                AlarmDeliveryResult.Ignored -> Unit
-                is AlarmDeliveryResult.Failed -> failed += automationId
+        val launcher = recoveryLauncher
+        if (launcher != null) {
+            if (dueRecoveries.isNotEmpty()) {
+                val queued = dueRecoveries.toList()
+                launcher.launch {
+                    // Una coda sola: un secondo reconcile non fa partire un secondo giro in
+                    // parallelo, aspetta il precedente e trova gli stessi record già consegnati.
+                    recoveryLane.withLock {
+                        queued.forEach { (automationId, eventAtMillis) ->
+                            try {
+                                deliver(automationId, eventAtMillis, deliveredFingerprint = null)
+                            } catch (error: CancellationException) {
+                                throw error
+                            } catch (_: Exception) {
+                                // Il record resta dovuto: il prossimo APP_START/BOOT lo ritenta.
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            dueRecoveries.forEach { (automationId, eventAtMillis) ->
+                when (deliver(automationId, eventAtMillis, deliveredFingerprint = null)) {
+                    AlarmDeliveryResult.Delivered -> recovered += automationId
+                    AlarmDeliveryResult.Ignored -> Unit
+                    is AlarmDeliveryResult.Failed -> failed += automationId
+                }
             }
         }
         return ReconcileReport(scheduled, cancelled, recovered, failed)
