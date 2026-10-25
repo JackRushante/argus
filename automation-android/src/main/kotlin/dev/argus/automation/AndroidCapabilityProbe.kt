@@ -222,9 +222,9 @@ class AndroidCapabilityProbe internal constructor(
         val launchBase = baseTierActive
         val dndBase = baseTierActive && state.dndPolicyGranted
         val listenerGranted = state.notificationListenerGranted
-        // Requisiti runtime della lane generativa oltre al canale notification/reply.
-        val generativeReady = generative.bridgeConfigured && generative.privacyAccepted &&
-            state.batteryOptimizationExempt
+        // Requisiti runtime della lane generativa oltre al canale notification/reply: chiave del
+        // provider e consenso privacy. L'esenzione batteria NON è un requisito (D7).
+        val generativeReady = generative.bridgeConfigured && generative.privacyAccepted
 
         val available = buildSet {
             add(CapabilityIds.TRIGGER_TIME)
@@ -333,8 +333,8 @@ class AndroidCapabilityProbe internal constructor(
             }
         }
         if (!state.notificationsGranted) {
-            unavailableTools[ActionTypeIds.SHOW_NOTIFICATION] = "permesso notifiche mancante"
-            unavailableTools[TOOL_NOTIFY_SHOW] = "permesso notifiche mancante"
+            unavailableTools[ActionTypeIds.SHOW_NOTIFICATION] = "notification permission missing"
+            unavailableTools[TOOL_NOTIFY_SHOW] = "notification permission missing"
         }
         if (!listenerGranted) {
             unavailableTools[GenerativeContract.TOOL_WHATSAPP_REPLY] = REASON_NOTIFICATION_LISTENER
@@ -372,11 +372,11 @@ class AndroidCapabilityProbe internal constructor(
     }
 
     private fun shizukuReason(status: ShizukuGatewayStatus): String = when (status) {
-        ShizukuGatewayStatus.NOT_INSTALLED -> "Shizuku non installato"
-        ShizukuGatewayStatus.INSTALLED_NOT_RUNNING -> "Shizuku non in esecuzione"
-        ShizukuGatewayStatus.RUNNING_NOT_AUTHORIZED -> "autorizzazione Shizuku mancante"
-        ShizukuGatewayStatus.UNSUPPORTED -> "versione Shizuku non supportata"
-        ShizukuGatewayStatus.AUTHORIZED -> "Shizuku non disponibile"
+        ShizukuGatewayStatus.NOT_INSTALLED -> "Shizuku not installed"
+        ShizukuGatewayStatus.INSTALLED_NOT_RUNNING -> "Shizuku not running"
+        ShizukuGatewayStatus.RUNNING_NOT_AUTHORIZED -> "Shizuku permission not granted"
+        ShizukuGatewayStatus.UNSUPPORTED -> "Shizuku version not supported"
+        ShizukuGatewayStatus.AUTHORIZED -> "Shizuku not available"
     }
 
     internal companion object {
@@ -386,9 +386,9 @@ class AndroidCapabilityProbe internal constructor(
          * altri kind restano fuori finché non hanno un backend proprio (P3-2C).
          */
         val IMPLEMENTED_SENSOR_KINDS: Set<SensorKind> = setOf(SensorKind.SIGNIFICANT_MOTION)
-        const val REASON_NOTIFICATION_LISTENER = "accesso alle notifiche non concesso"
+        const val REASON_NOTIFICATION_LISTENER = "notification access not granted"
         const val REASON_GENERATIVE_RUNTIME =
-            "runtime generativo non pronto (bearer, privacy o esenzione batteria mancanti)"
+            "generative runtime not ready (provider key or privacy consent missing)"
         const val TOOL_STATE_READ = "state.read"
         const val TOOL_SCREEN_CAPTURE = "screen.capture"
         const val TOOL_SCREEN_DUMP_UI = "screen.dump_ui"
@@ -406,7 +406,7 @@ class AndroidCapabilityProbe internal constructor(
             TOOL_TOGGLE_SET,
             TOOL_APP_LAUNCH,
         )
-        const val REASON_DND_POLICY = "accesso «Non disturbare» non concesso"
+        const val REASON_DND_POLICY = "Do Not Disturb access not granted"
 
         /** Azioni che richiedono davvero lo shell Shizuku: toggle radio, shell e write_setting. */
         val PRIVILEGED_ACTION_TYPES = setOf(
@@ -437,16 +437,16 @@ class AndroidCapabilityProbe internal constructor(
         val SHIZUKU_ACTION_TYPES =
             PRIVILEGED_ACTION_TYPES + BASE_DND_ACTION_TYPES + BASE_LAUNCH_ACTION_TYPES
         val PHASE_UNAVAILABLE_TOOLS = linkedMapOf(
-            TOOL_SCREEN_CAPTURE to "ciclo computer-use tipato non implementato",
-            TOOL_SCREEN_DUMP_UI to "ciclo computer-use tipato non implementato",
-            TOOL_TOGGLE_SET to "alias raw sostituito dalle azioni toggle tipate",
-            TOOL_APP_LAUNCH to "alias raw sostituito da launch_app",
-            "screen.tap" to "azione UI non disponibile in questa fase",
-            "screen.swipe" to "azione UI non disponibile in questa fase",
-            "screen.type" to "azione UI non disponibile in questa fase",
-            "app.install" to "installazione app non implementata",
-            "shell.run" to "conferma live non implementata",
-            "vision.analyze" to "provider multimodale non configurato",
+            TOOL_SCREEN_CAPTURE to "typed computer-use loop not implemented",
+            TOOL_SCREEN_DUMP_UI to "typed computer-use loop not implemented",
+            TOOL_TOGGLE_SET to "raw alias replaced by the typed toggle actions",
+            TOOL_APP_LAUNCH to "raw alias replaced by launch_app",
+            "screen.tap" to "UI action not available in this phase",
+            "screen.swipe" to "UI action not available in this phase",
+            "screen.type" to "UI action not available in this phase",
+            "app.install" to "app installation not implemented",
+            "shell.run" to "live confirmation not implemented",
+            "vision.analyze" to "multimodal provider not configured",
         )
         val KNOWN_TOOLS: Set<String> = UNIMPLEMENTED_RAW_TOOLS + TOOL_STATE_READ + TOOL_NOTIFY_SHOW +
             GenerativeContract.TOOL_WHATSAPP_REPLY + GenerativeContract.TOOL_WEB_SEARCH +
@@ -505,25 +505,25 @@ class CapabilityReconciler(
         val temporarilyBlocked = mutableListOf<AutomationId>()
         store.armed().forEach { automation ->
             val missing = automation.requiredCapabilities - snapshot.availableCapabilities
-            val structuralMissing = missing - snapshot.transientlyUnavailableCapabilities
             val validationFailed = validationFailed(automation, snapshot)
             val requirementsChanged = automation.requiredCapabilities != CapabilityRequirements.derive(
                 automation.trigger,
                 automation.actions,
                 automation.conditions,
+                automation.vars,
             )
-            if (structuralMissing.isNotEmpty() || validationFailed || requirementsChanged) {
+            // D6: solo un draft non più valido o requisiti non più coerenti mandano la regola «da
+            // rivedere». Una capability mancante (permesso revocato, Shizuku spento, runtime
+            // generativo non pronto) è un blocco temporaneo: la regola resta com'è e al fire-time
+            // FirePolicy blocca con `capability_unavailable`, auditato.
+            if (validationFailed || requirementsChanged) {
                 val fingerprint = automation.approvalFingerprint ?: return@forEach
                 if (store.markNeedsReviewIfApproved(automation.id, fingerprint)) {
                     needsReview += automation.id
                     // Lifecycle (task #31-B): il PERCHÉ è noto solo qui, reason chiuso per causa.
                     recordNeedsReview(
                         automation.id,
-                        reason = when {
-                            structuralMissing.isNotEmpty() -> "capability_lost"
-                            validationFailed -> "validation_failed"
-                            else -> "requirements_changed"
-                        },
+                        reason = if (validationFailed) "validation_failed" else "requirements_changed",
                     )
                 }
             } else if (missing.isNotEmpty()) {
@@ -558,6 +558,7 @@ class CapabilityReconciler(
             name = automation.name,
             trigger = automation.trigger,
             actions = automation.actions,
+            vars = automation.vars,
             conditions = automation.conditions,
             cooldownMs = automation.cooldownMs,
         ),

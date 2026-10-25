@@ -267,13 +267,15 @@ class AndroidCapabilityProbeTest {
             assertFalse(CapabilityIds.ACTION_INVOKE_LLM in snapshot.transientlyUnavailableCapabilities)
         }
 
+        // D7: l'esenzione dall'ottimizzazione batteria NON è più un requisito della lane generativa.
         val withoutBattery = probe(
             state().copy(
                 notificationListenerGranted = true,
                 batteryOptimizationExempt = false,
             ),
         ).current()
-        assertFalse(CapabilityIds.ACTION_INVOKE_LLM in withoutBattery.availableCapabilities)
+        assertTrue(CapabilityIds.ACTION_INVOKE_LLM in withoutBattery.availableCapabilities)
+        assertTrue(GenerativeContract.TOOL_WEB_SEARCH in withoutBattery.availableCapabilities)
     }
 
     @Test
@@ -314,8 +316,9 @@ class AndroidCapabilityProbeTest {
             state().copy(
                 notificationsGranted = true,
                 notificationListenerGranted = true,
-                batteryOptimizationExempt = false,
+                batteryOptimizationExempt = true,
             ),
+            readiness = GenerativeReadiness(bridgeConfigured = true, privacyAccepted = false),
         ).probe(DeviceState())
 
         assertFalse(ActionTypeIds.INVOKE_LLM in manifest.availableTools)
@@ -334,6 +337,88 @@ class AndroidCapabilityProbeTest {
             AndroidCapabilityProbe.REASON_GENERATIVE_RUNTIME,
             manifest.unavailableTools[GenerativeContract.TOOL_WEB_SEARCH],
         )
+    }
+
+    @Test
+    fun `battery optimization does not gate generative actions and the reason is english`() = runTest {
+        val probe = probe(
+            state().copy(
+                notificationsGranted = true,
+                notificationListenerGranted = true,
+                batteryOptimizationExempt = false,
+            ),
+        )
+        val manifest = probe.probe(DeviceState())
+
+        assertTrue(ActionTypeIds.INVOKE_LLM in manifest.availableTools)
+        assertTrue(ActionTypeIds.INVOKE_LLM_V2 in manifest.availableTools)
+        assertTrue(GenerativeContract.TOOL_WEB_SEARCH in manifest.availableTools)
+        assertTrue(CapabilityIds.ACTION_INVOKE_LLM in probe.current().availableCapabilities)
+        assertEquals(
+            "generative runtime not ready (provider key or privacy consent missing)",
+            AndroidCapabilityProbe.REASON_GENERATIVE_RUNTIME,
+        )
+    }
+
+    @Test
+    fun `every unavailable tool reason is english because it reaches the model`() = runTest {
+        val shizukuReasons = mapOf(
+            ShizukuGatewayStatus.NOT_INSTALLED to "Shizuku not installed",
+            ShizukuGatewayStatus.INSTALLED_NOT_RUNNING to "Shizuku not running",
+            ShizukuGatewayStatus.RUNNING_NOT_AUTHORIZED to "Shizuku permission not granted",
+            ShizukuGatewayStatus.UNSUPPORTED to "Shizuku version not supported",
+        )
+        val reasons = mutableSetOf<String>()
+        shizukuReasons.forEach { (status, expected) ->
+            val manifest = probe(
+                state().copy(shizukuStatus = status, shizukuPermissionGranted = false),
+            ).probe(DeviceState())
+            assertEquals(expected, manifest.unavailableTools[ActionTypeIds.RUN_SHELL])
+            assertEquals(expected, manifest.unavailableTools[ActionTypeIds.LAUNCH_APP])
+            reasons += manifest.unavailableTools.values
+        }
+
+        val worstCase = probe(
+            state().copy(
+                shizukuStatus = ShizukuGatewayStatus.NOT_INSTALLED,
+                shizukuPermissionGranted = false,
+                notificationsGranted = false,
+                notificationListenerGranted = false,
+                dndPolicyGranted = false,
+            ),
+            readiness = GenerativeReadiness(bridgeConfigured = false, privacyAccepted = false),
+            baseTierActive = true,
+        ).probe(DeviceState())
+        reasons += worstCase.unavailableTools.values
+
+        assertEquals(
+            "notification permission missing",
+            worstCase.unavailableTools[ActionTypeIds.SHOW_NOTIFICATION],
+        )
+        assertEquals(
+            "notification access not granted",
+            worstCase.unavailableTools[GenerativeContract.TOOL_WHATSAPP_REPLY],
+        )
+        assertEquals(
+            "Do Not Disturb access not granted",
+            worstCase.unavailableTools[ActionTypeIds.SET_DND],
+        )
+        assertEquals(
+            AndroidCapabilityProbe.REASON_GENERATIVE_RUNTIME,
+            worstCase.unavailableTools[ActionTypeIds.INVOKE_LLM],
+        )
+        // Nessun motivo può contenere caratteri non ASCII (accenti, «») né parole italiane note.
+        val italianMarkers = listOf(
+            " non ", "mancant", "permesso", "accesso", "azione", "installazione", "conferma",
+            "ciclo", "sostituito", "disponibile", "concesso", "supportata", "esecuzione",
+        )
+        reasons.forEach { reason ->
+            assertTrue(reason.all { it.code < 128 }, "motivo non ASCII: $reason")
+            italianMarkers.forEach { marker ->
+                assertFalse(marker in " ${reason.lowercase()} ", "motivo non inglese: $reason")
+            }
+        }
+        assertTrue(reasons.size >= 10, "attesi tutti i motivi del probe, trovati ${reasons.size}")
     }
 
     @Test
@@ -556,7 +641,7 @@ class AndroidCapabilityProbeTest {
     }
 
     @Test
-    fun `reconciler quarantines generative rule on privacy or listener revocation`() = runTest {
+    fun `reconciler only blocks a generative rule temporarily on privacy or listener revocation`() = runTest {
         val rule = generativeRule("generative")
         val contacts = listOf(WhitelistedContact("Moglie", CONVERSATION_ID))
         val readyState = state().copy(
@@ -567,9 +652,13 @@ class AndroidCapabilityProbeTest {
         val healthyStore = ReconcileAutomationStore(rule)
         val healthy = CapabilityReconciler(healthyStore, probe(readyState, contacts)).reconcile()
         assertEquals(emptyList(), healthy.needsReview)
+        assertEquals(emptyList(), healthy.temporarilyBlocked)
         assertEquals(AutomationStatus.ARMED, healthyStore.get(rule.id)?.status)
 
+        // D6: una capability mancante (privacy revocata, accesso notifiche perso) è un blocco
+        // TEMPORANEO: lo stato della regola non cambia, al fire-time FirePolicy blocca e audita.
         val privacyRevokedStore = ReconcileAutomationStore(rule)
+        val privacyRevokedAudit = ReconcilerAuditRecorder()
         val privacyRevoked = CapabilityReconciler(
             privacyRevokedStore,
             probe(
@@ -577,20 +666,26 @@ class AndroidCapabilityProbeTest {
                 contacts,
                 readiness = GenerativeReadiness(bridgeConfigured = true, privacyAccepted = false),
             ),
+            privacyRevokedAudit,
         ).reconcile()
-        assertEquals(listOf(rule.id), privacyRevoked.needsReview)
-        assertEquals(AutomationStatus.NEEDS_REVIEW, privacyRevokedStore.get(rule.id)?.status)
+        assertEquals(emptyList(), privacyRevoked.needsReview)
+        assertEquals(listOf(rule.id), privacyRevoked.temporarilyBlocked)
+        assertEquals(AutomationStatus.ARMED, privacyRevokedStore.get(rule.id)?.status)
+        assertTrue(privacyRevokedStore.get(rule.id)?.enabled == true)
+        assertTrue(privacyRevokedAudit.events.isEmpty())
 
         val listenerRevokedStore = ReconcileAutomationStore(rule)
         val listenerRevoked = CapabilityReconciler(
             listenerRevokedStore,
             probe(readyState.copy(notificationListenerGranted = false), contacts),
         ).reconcile()
-        assertEquals(listOf(rule.id), listenerRevoked.needsReview)
+        assertEquals(emptyList(), listenerRevoked.needsReview)
+        assertEquals(listOf(rule.id), listenerRevoked.temporarilyBlocked)
+        assertEquals(AutomationStatus.ARMED, listenerRevokedStore.get(rule.id)?.status)
     }
 
     @Test
-    fun `reconciler quarantines revocation but preserves temporary outage`() = runTest {
+    fun `reconciler blocks revoked and stopped Shizuku without touching the rule`() = runTest {
         val rule = signedRule("dnd")
         val revokedStore = ReconcileAutomationStore(rule)
         val revokedProbe = probe(
@@ -601,12 +696,10 @@ class AndroidCapabilityProbeTest {
         )
         val revokedAudit = ReconcilerAuditRecorder()
         val revoked = CapabilityReconciler(revokedStore, revokedProbe, revokedAudit).reconcile()
-        assertEquals(listOf(rule.id), revoked.needsReview)
-        assertEquals(AutomationStatus.NEEDS_REVIEW, revokedStore.get(rule.id)?.status)
-        // Lifecycle: la quarantena per capability revocata resta tracciata col reason chiuso.
-        val quarantined = revokedAudit.events.single { it.kind == AuditKind.RULE_NEEDS_REVIEW }
-        assertEquals("capability_lost", quarantined.detail)
-        assertEquals(rule.id, quarantined.automationId)
+        assertEquals(emptyList(), revoked.needsReview)
+        assertEquals(listOf(rule.id), revoked.temporarilyBlocked)
+        assertEquals(AutomationStatus.ARMED, revokedStore.get(rule.id)?.status)
+        assertTrue(revokedAudit.events.isEmpty(), "una revoca non è un evento lifecycle: audita il fire")
 
         val temporaryStore = ReconcileAutomationStore(rule)
         val temporaryProbe = probe(
@@ -620,6 +713,36 @@ class AndroidCapabilityProbeTest {
         assertEquals(listOf(rule.id), temporary.temporarilyBlocked)
         assertEquals(AutomationStatus.ARMED, temporaryStore.get(rule.id)?.status)
         assertTrue(temporaryAudit.events.isEmpty(), "un outage transiente non è un evento lifecycle")
+    }
+
+    @Test
+    fun `reconciler quarantines only on validation failure or changed requirements`() = runTest {
+        val invalid = sign(
+            signedRule("invalid").copy(
+                trigger = Trigger.Time(cron = "not a cron", tz = "Europe/Rome"),
+                approvalFingerprint = null,
+            ),
+        )
+        val validationStore = ReconcileAutomationStore(invalid)
+        val validationAudit = ReconcilerAuditRecorder()
+        val validation = CapabilityReconciler(validationStore, probe(state()), validationAudit).reconcile()
+        assertEquals(listOf(invalid.id), validation.needsReview)
+        assertEquals(AutomationStatus.NEEDS_REVIEW, validationStore.get(invalid.id)?.status)
+        assertEquals("validation_failed", validationAudit.events.single().detail)
+
+        val stale = sign(
+            signedRule("stale").copy(
+                requiredCapabilities = emptySet(),
+                approvalFingerprint = null,
+            ),
+        )
+        val staleStore = ReconcileAutomationStore(stale)
+        val staleAudit = ReconcilerAuditRecorder()
+        val changed = CapabilityReconciler(staleStore, probe(state()), staleAudit).reconcile()
+        assertEquals(listOf(stale.id), changed.needsReview)
+        assertEquals(AutomationStatus.NEEDS_REVIEW, staleStore.get(stale.id)?.status)
+        assertEquals("requirements_changed", staleAudit.events.single().detail)
+        assertEquals(AuditKind.RULE_NEEDS_REVIEW, staleAudit.events.single().kind)
     }
 
     @Test
@@ -659,19 +782,15 @@ class AndroidCapabilityProbeTest {
 
     @Test
     fun `reconciler cannot quarantine a newer approved revision`() = runTest {
-        val original = signedRule("race")
-        val revised = sign(original.copy(name = "nuova revisione", approvalFingerprint = null))
+        val original = sign(
+            signedRule("race").copy(requiredCapabilities = emptySet(), approvalFingerprint = null),
+        )
+        val revised = sign(signedRule("race").copy(name = "nuova revisione", approvalFingerprint = null))
         val store = ReconcileAutomationStore(original).apply {
             beforeConditionalMark = { replace(revised) }
         }
-        val revokedProbe = probe(
-            state().copy(
-                shizukuStatus = ShizukuGatewayStatus.RUNNING_NOT_AUTHORIZED,
-                shizukuPermissionGranted = false,
-            ),
-        )
 
-        assertEquals(emptyList(), CapabilityReconciler(store, revokedProbe).reconcile().needsReview)
+        assertEquals(emptyList(), CapabilityReconciler(store, probe(state())).reconcile().needsReview)
         assertEquals(revised, store.get(original.id))
     }
 
