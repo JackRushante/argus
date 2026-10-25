@@ -448,7 +448,7 @@ class RoomStoreTest {
     fun `audit sink redacts arbitrary details but keeps safe cooldown metadata`() = runTest {
         val id = AutomationId("redaction")
         sink.record(AuditEvent(id, AuditKind.ERROR, 100, detail = "john@example.org: token segreto"))
-        sink.record(AuditEvent(id, AuditKind.BLOCKED_POLICY, 200, detail = "jid_personale_42"))
+        sink.record(AuditEvent(id, AuditKind.BLOCKED_POLICY, 200, detail = "JID personale 42: +39 333"))
         sink.record(AuditEvent(id, AuditKind.SUPPRESSED_COOLDOWN, 300, detail = "retry_at=123456"))
         sink.record(AuditEvent(id, AuditKind.BLOCKED_POLICY, 400, detail = "shell_external_trigger"))
 
@@ -502,10 +502,10 @@ class RoomStoreTest {
         sink.record(AuditEvent(id, AuditKind.SCHEDULING_FAILED, 300, detail = "expired"))
         sink.record(AuditEvent(id, AuditKind.SCHEDULING_FAILED, 400, detail = "http://leak/x"))
         sink.record(AuditEvent(id, AuditKind.ENABLE_FAILED, 500, detail = "review_required"))
-        sink.record(AuditEvent(id, AuditKind.ENABLE_FAILED, 600, detail = "expired"))
+        sink.record(AuditEvent(id, AuditKind.ENABLE_FAILED, 600, detail = "Casa di Mario"))
 
         val rows = db.auditDao().forAutomation(id.value)
-        assertEquals("enable_failed", rows[0].detail)      // 600: "expired" non è un reason di enable
+        assertEquals("enable_failed", rows[0].detail)      // 600: testo libero -> generico
         assertEquals("review_required", rows[1].detail)    // 500
         assertEquals("scheduling_failed", rows[2].detail)  // 400: testo libero -> generico
         assertEquals("expired", rows[3].detail)            // 300
