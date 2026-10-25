@@ -61,12 +61,19 @@ class PrivilegedShellUserService() : IPrivilegedShellService.Stub() {
         val stderr = ByteArrayOutputStream()
         val stdoutTruncated = AtomicBoolean(false)
         val stderrTruncated = AtomicBoolean(false)
+        // S8: in un nuovo gruppo di processi (`setsid`), così al timeout muore l'intero albero e non
+        // solo `sh`. Se `setsid` manca o non parte si ripiega sul comportamento di prima.
+        var plan = ProcessTreeKiller.plan(command, ProcessTreeKiller.setsidExists())
         val process = try {
-            ProcessBuilder(command)
-                .directory(java.io.File("/"))
-                .start()
+            startProcess(plan.argv)
         } catch (_: Exception) {
-            return errorBundle("start_failed")
+            if (!plan.ownGroup) return errorBundle("start_failed")
+            plan = ProcessTreeKiller.plan(command, setsidExists = false)
+            try {
+                startProcess(plan.argv)
+            } catch (_: Exception) {
+                return errorBundle("start_failed")
+            }
         }
         runCatching { process.outputStream.close() }
 
@@ -92,7 +99,7 @@ class PrivilegedShellUserService() : IPrivilegedShellService.Stub() {
             false
         }
         if (!finished) {
-            process.destroyForcibly()
+            ProcessTreeKiller.terminate(process, plan)
             runCatching { process.waitFor(2, TimeUnit.SECONDS) }
         }
         stdoutThread.join(JOIN_MILLIS)
@@ -112,6 +119,11 @@ class PrivilegedShellUserService() : IPrivilegedShellService.Stub() {
             putBoolean(KEY_TRUNCATED, stdoutTruncated.get() || stderrTruncated.get())
         }
     }
+
+    private fun startProcess(argv: List<String>): Process =
+        ProcessBuilder(argv)
+            .directory(java.io.File("/"))
+            .start()
 
     private fun drain(
         input: java.io.InputStream,
