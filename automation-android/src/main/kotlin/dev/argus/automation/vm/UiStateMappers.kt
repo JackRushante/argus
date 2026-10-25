@@ -273,11 +273,12 @@ private fun actionDetail(action: ActionResultEntity, l: RenderLanguage): String 
         ActionJournalOutcome.DEFERRED -> l.pick("deferred", "differita")
         ActionJournalOutcome.FAILED -> l.pick("failed", "fallita")
     }
-    val error = when (action.errorCode) {
+    val code = action.errorCode
+    val error = when (code) {
         null -> ""
         // D8: messaggio accorpato nella risposta unica della raffica, nessuna seconda generazione.
         COALESCED_REPLY_CODE -> l.pick(" · merged into one reply", " · unito in un'unica risposta")
-        else -> " · ${action.errorCode.safeDiagnostic()}"
+        else -> " · ${code.safeDiagnostic()}"
     }
     val path = action.actionPath.ifBlank { (action.actionIndex + 1).toString() }
     return "$path. ${actionTypeLabel(action.actionType, l)} → $outcome$error"
