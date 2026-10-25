@@ -21,6 +21,7 @@ import dev.argus.automation.geofence.GeofenceEventDispatcher
 import dev.argus.automation.geofence.GeofenceTriggerRuntime
 import dev.argus.automation.geofence.NoopGeofenceTriggerRuntime
 import dev.argus.automation.foreground.ReceiverWorkLauncher
+import dev.argus.automation.power.ExecutionWakeLock
 import dev.argus.automation.sensor.NoopSensorTriggerRuntime
 import dev.argus.automation.sensor.SensorEventDispatcher
 import dev.argus.automation.sensor.SensorTriggerRuntime
@@ -122,12 +123,51 @@ class LazyDeviceStateProvider(
     }
 }
 
+/**
+ * Cornice comune di ogni dispatch verso l'Engine. Il dispatch esegue l'intero programma della
+ * regola, anche con attese di ore, quindi:
+ * - gira dentro [ExecutionWakeLock.holding] (B19): a schermo spento il processore non dorme finché
+ *   la regola lavora; le attese lunghe rilasciano la propria quota ([WakeAwarePause]);
+ * - conta i dispatch in corso, così la pulizia periodica non parte mentre un programma lungo è
+ *   ancora in esecuzione (la manutenzione marcherebbe come interrotta un'esecuzione viva);
+ * - a fine dispatch chiama [onDispatchEnd] (la pulizia periodica, B28), che non deve bloccarlo.
+ */
+class DispatchFrame(
+    private val wakeLock: ExecutionWakeLock = ExecutionWakeLock.NONE,
+    private val onDispatchEnd: () -> Unit = {},
+) {
+    private val inFlight = java.util.concurrent.atomic.AtomicInteger()
+
+    /** `true` se nessun dispatch è in corso nel processo. */
+    val idle: Boolean
+        get() = inFlight.get() == 0
+
+    suspend fun <T> run(block: suspend () -> T): T {
+        inFlight.incrementAndGet()
+        try {
+            return wakeLock.holding(block)
+        } finally {
+            inFlight.decrementAndGet()
+            try {
+                onDispatchEnd()
+            } catch (_: RuntimeException) {
+                // La pulizia periodica non deve mai cambiare l'esito di un dispatch.
+            }
+        }
+    }
+
+    companion object {
+        val NONE = DispatchFrame()
+    }
+}
+
 class EngineTimeEventDispatcher(
     private val engine: Engine,
     private val state: LazyDeviceStateProvider,
+    private val frame: DispatchFrame = DispatchFrame.NONE,
 ) : TimeEventDispatcher {
     override suspend fun dispatch(envelope: TriggerEnvelope) {
-        engine.onTrigger(envelope) { request -> state.current(request) }
+        frame.run { engine.onTrigger(envelope) { request -> state.current(request) } }
     }
 }
 
@@ -139,9 +179,10 @@ fun interface ImmediateEventDispatcher {
 class EngineImmediateEventDispatcher(
     private val engine: Engine,
     private val state: LazyDeviceStateProvider,
+    private val frame: DispatchFrame = DispatchFrame.NONE,
 ) : ImmediateEventDispatcher {
     override suspend fun dispatch(envelope: TriggerEnvelope) {
-        engine.onTrigger(envelope) { request -> state.current(request) }
+        frame.run { engine.onTrigger(envelope) { request -> state.current(request) } }
     }
 }
 
@@ -152,9 +193,10 @@ fun interface NotificationEventDispatcher {
 class EngineNotificationEventDispatcher(
     private val engine: Engine,
     private val state: DeviceStateSnapshotProvider,
+    private val frame: DispatchFrame = DispatchFrame.NONE,
 ) : NotificationEventDispatcher {
     override suspend fun dispatch(envelope: TriggerEnvelope) {
-        engine.onTrigger(envelope) { request -> state.current(request) }
+        frame.run { engine.onTrigger(envelope) { request -> state.current(request) } }
     }
 }
 
@@ -162,36 +204,40 @@ class EngineNotificationEventDispatcher(
 class EnginePhoneEventDispatcher(
     private val engine: Engine,
     private val state: DeviceStateSnapshotProvider,
+    private val frame: DispatchFrame = DispatchFrame.NONE,
 ) : dev.argus.automation.phone.PhoneEventDispatcher {
     override suspend fun dispatch(envelope: TriggerEnvelope) {
-        engine.onTrigger(envelope) { request -> state.current(request) }
+        frame.run { engine.onTrigger(envelope) { request -> state.current(request) } }
     }
 }
 
 class EngineConnectivityEventDispatcher(
     private val engine: Engine,
     private val state: DeviceStateSnapshotProvider,
+    private val frame: DispatchFrame = DispatchFrame.NONE,
 ) : ConnectivityEventDispatcher {
     override suspend fun dispatch(envelope: TriggerEnvelope) {
-        engine.onTrigger(envelope) { request -> state.current(request) }
+        frame.run { engine.onTrigger(envelope) { request -> state.current(request) } }
     }
 }
 
 class EngineGeofenceEventDispatcher(
     private val engine: Engine,
     private val state: DeviceStateSnapshotProvider,
+    private val frame: DispatchFrame = DispatchFrame.NONE,
 ) : GeofenceEventDispatcher {
     override suspend fun dispatch(envelope: TriggerEnvelope) {
-        engine.onTrigger(envelope) { request -> state.current(request) }
+        frame.run { engine.onTrigger(envelope) { request -> state.current(request) } }
     }
 }
 
 class EngineSensorEventDispatcher(
     private val engine: Engine,
     private val state: DeviceStateSnapshotProvider,
+    private val frame: DispatchFrame = DispatchFrame.NONE,
 ) : SensorEventDispatcher {
     override suspend fun dispatch(envelope: TriggerEnvelope) {
-        engine.onTrigger(envelope) { request -> state.current(request) }
+        frame.run { engine.onTrigger(envelope) { request -> state.current(request) } }
     }
 }
 
