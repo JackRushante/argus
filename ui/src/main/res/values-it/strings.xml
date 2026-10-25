@@ -56,8 +56,8 @@
     <string name="badge_cloud">esce verso il cloud</string>
 
     <!-- Banner salute -->
-    <string name="banner_shizuku_down">Shizuku non attivo — azioni shell in pausa</string>
-    <string name="banner_shizuku_degraded">Dopo il riavvio Shizuku è spento — le azioni shell sono in coda</string>
+    <string name="banner_shizuku_down">Shizuku non attivo: le azioni privilegiate vengono saltate e non recuperate dopo</string>
+    <string name="banner_shizuku_degraded">Shizuku spento dopo il riavvio: riavvialo; le azioni privilegiate nel frattempo vengono saltate</string>
     <string name="banner_battery_not_exempt">Ottimizzazione batteria attiva — le azioni in background possono fallire</string>
     <string name="banner_brain_unreachable">Servizio AI irraggiungibile — la chat non può proporre regole</string>
     <string name="latency_thinking">Argus sta pensando… (%1$d s)</string>
@@ -155,7 +155,7 @@
     <string name="settings_shizuku_not_installed">non installato</string>
     <string name="settings_shizuku_not_running">installato, non in esecuzione</string>
     <string name="settings_shizuku_not_authorized">attivo, Argus non autorizzato</string>
-    <string name="settings_shizuku_degraded">spento dopo il riavvio — azioni shell in coda</string>
+    <string name="settings_shizuku_degraded">spento dopo il riavvio: riavvialo; le azioni privilegiate nel frattempo vengono saltate</string>
     <string name="settings_battery_title">Ottimizzazione batteria</string>
     <string name="settings_battery_ok">esclusione Android concessa — gli eventuali controlli del produttore per attività in background/avvio automatico restano manuali</string>
     <string name="settings_battery_warn">attiva — concedi l\'esclusione e verifica anche gli eventuali controlli del produttore per attività in background/avvio automatico; altrimenti le azioni pianificate, e anche quelle AI, potrebbero arrivare in ritardo</string>

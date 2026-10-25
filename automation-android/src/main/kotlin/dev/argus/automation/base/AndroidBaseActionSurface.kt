@@ -15,6 +15,8 @@ import android.os.Vibrator
 import android.os.VibratorManager
 import android.provider.AlarmClock
 import android.provider.Settings
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ProcessLifecycleOwner
 import dev.argus.device.RingerMode
 import dev.argus.engine.model.DndMode
 import dev.argus.engine.model.SettingsScreen
@@ -25,7 +27,15 @@ import dev.argus.engine.model.VolumeStream
  * Shizuku (decision record §7.3). Volutamente sottile — nessuna logica di mapping/validazione, che
  * vive in [AndroidBaseActionExecutor] ed è host-testata. Verificato sul device.
  */
-class AndroidBaseActionSurface(context: Context) : BaseActionSurface {
+class AndroidBaseActionSurface(
+    context: Context,
+    /**
+     * Il processo è in primo piano? Senza Shizuku (`am start`) un'attività parte solo da un processo
+     * visibile: da background `startActivity` può «riuscire» senza aprire nulla (BAL), un falso
+     * riuscito. Iniettabile per i test; il default legge `ProcessLifecycleOwner` (almeno STARTED).
+     */
+    private val isProcessForeground: () -> Boolean = ::isProcessInForeground,
+) : BaseActionSurface {
     private val appContext = context.applicationContext
     private val notificationManager: NotificationManager
         get() = appContext.getSystemService(NotificationManager::class.java)
@@ -54,6 +64,7 @@ class AndroidBaseActionSurface(context: Context) : BaseActionSurface {
     }
 
     override fun launchPackage(pkg: String): Boolean {
+        requireForeground()
         // Non interrogare PackageManager: da Android 11 la package visibility può restituire un
         // falso negativo anche se startActivity è autorizzato. Il selector resta vincolato al
         // package validato dall'executor e Android risolve direttamente la sua launcher activity.
@@ -65,12 +76,14 @@ class AndroidBaseActionSurface(context: Context) : BaseActionSurface {
     }
 
     override fun openHttpUrl(url: String) {
+        requireForeground()
         startActivityGuarded(
             Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         )
     }
 
     override fun setAlarm(hour: Int, minute: Int, label: String?, skipUi: Boolean): Boolean {
+        requireForeground()
         val intent = Intent(AlarmClock.ACTION_SET_ALARM)
             .putExtra(AlarmClock.EXTRA_HOUR, hour)
             .putExtra(AlarmClock.EXTRA_MINUTES, minute)
@@ -81,6 +94,7 @@ class AndroidBaseActionSurface(context: Context) : BaseActionSurface {
     }
 
     override fun setTimer(seconds: Int, label: String?, skipUi: Boolean): Boolean {
+        requireForeground()
         val intent = Intent(AlarmClock.ACTION_SET_TIMER)
             .putExtra(AlarmClock.EXTRA_LENGTH, seconds)
             .putExtra(AlarmClock.EXTRA_SKIP_UI, skipUi)
@@ -111,6 +125,7 @@ class AndroidBaseActionSurface(context: Context) : BaseActionSurface {
     }
 
     override fun openSettingsScreen(screen: SettingsScreen, pkg: String?): Boolean {
+        requireForeground()
         val intent = settingsIntent(screen, pkg).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         return startIfAvailable(intent)
     }
@@ -153,6 +168,11 @@ class AndroidBaseActionSurface(context: Context) : BaseActionSurface {
             appContext.getSystemService(Vibrator::class.java)
         }
 
+    /** Da background non si chiama `startActivity`: lo dichiariamo bloccato (`activity_start_blocked`). */
+    private fun requireForeground() {
+        if (!isProcessForeground()) throw ActivityStartBlockedException()
+    }
+
     /** Prova direttamente l'Intent senza query preventive soggette a package visibility. */
     private fun startIfAvailable(intent: Intent): Boolean {
         return try {
@@ -176,3 +196,8 @@ class AndroidBaseActionSurface(context: Context) : BaseActionSurface {
         }
     }
 }
+
+/** Primo piano = `ProcessLifecycleOwner` almeno STARTED. Se il lifecycle non è leggibile non si blocca. */
+internal fun isProcessInForeground(): Boolean = runCatching {
+    ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+}.getOrDefault(true)

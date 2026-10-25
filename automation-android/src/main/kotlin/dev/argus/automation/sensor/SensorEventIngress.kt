@@ -1,5 +1,6 @@
 package dev.argus.automation.sensor
 
+import dev.argus.automation.SequentialLanes
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.SensorKind
@@ -44,10 +45,15 @@ fun interface SensorEventDispatcher {
  * Traduce il callback fisico one-shot in envelope per-regola e ri-arma il sensore.
  *
  * Una registrazione fisica è condivisa da tutte le regole del kind (handoff §7.3): il callback fa
- * fan-out verso ognuna. Il rearm avviene SEMPRE — anche se il dispatch fallisce o viene cancellato
- * — ma in `NonCancellable`, senza inghiottire la [CancellationException] originale: un one-shot non
- * riarmato è un sensore morto in silenzio. Non chiama mai azioni direttamente: passa dall'Engine
- * via [dispatcher].
+ * fan-out verso ognuna. Il rearm avviene PRIMA di ogni dispatch (B3): il dispatch esegue il
+ * programma della regola, anche per ore, e un one-shot non riarmato nel frattempo è un sensore
+ * morto in silenzio. Il rearm gira in `NonCancellable`; un suo errore non cancella le consegne e
+ * viene rilanciato alla fine. Non chiama mai azioni direttamente: passa dall'Engine via
+ * [dispatcher].
+ *
+ * Il pending per-regola si persiste e si conferma sotto [mutex] (sezioni brevi); la consegna
+ * avviene FUORI da quel lock in una coda sequenziale per kind ([lanes]): due scatti dello stesso
+ * sensore restano in ordine e non consegnano mai in parallelo lo stesso event id.
  */
 class SensorEventIngress(
     private val store: SensorDetectionStore,
@@ -56,33 +62,66 @@ class SensorEventIngress(
     private val eligibleRules: suspend (SensorKind) -> List<EligibleSensorRule>,
 ) {
     private val mutex = Mutex()
+    private val lanes = SequentialLanes<SensorKind>()
 
     suspend fun onSensorTriggered(kind: SensorKind) {
         // Il one-shot si è già disattivato da solo: registralo prima di qualunque altra cosa,
         // così un rearm concorrente non crede il sensore ancora vivo.
         rearmer.markConsumed(kind)
-        try {
-            mutex.withLock {
-                eligibleRules(kind).filter { it.kind == kind }.forEach { rule ->
-                    deliver(rule)
+        // Riarmo PRIMA del dispatch: il sensore torna vivo mentre il programma è in esecuzione.
+        val rearmFailure: Exception? = withContext(NonCancellable) {
+            try {
+                rearmer.rearm()
+                null
+            } catch (error: Exception) {
+                error
+            }
+        }
+        var deliveryFailure: Exception? = null
+        lanes.run(kind) {
+            val batch = mutex.withLock {
+                eligibleRules(kind).filter { it.kind == kind }.map { rule ->
+                    rule to (
+                        store.pending(rule.id, rule.fingerprint)
+                            ?: store.beginDetection(rule.id, rule.fingerprint, rule.kind)
+                        )
                 }
             }
-        } finally {
-            withContext(NonCancellable) { rearmer.rearm() }
+            // Una regola che fallisce non deve togliere la consegna alle altre dello stesso scatto:
+            // il suo pending resta dovuto per il recovery.
+            batch.forEach { (rule, pending) ->
+                try {
+                    dispatch(rule, pending)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    if (deliveryFailure == null) deliveryFailure = error
+                }
+            }
         }
+        (deliveryFailure ?: rearmFailure)?.let { throw it }
     }
 
-    /** Redelivery dopo process death: ripete i pending con lo stesso event id. */
-    suspend fun recoverPending(allowed: Set<AutomationId>): List<AutomationId> = mutex.withLock {
+    /**
+     * Redelivery dopo process death: ripete i pending con lo stesso event id. Un kind con una
+     * consegna già in corso (o accodata) viene saltato: chi occupa la corsia recapita già i suoi
+     * pending, e il recovery non deve bloccarsi dietro a un dispatch lungo.
+     */
+    suspend fun recoverPending(allowed: Set<AutomationId>): List<AutomationId> {
         val recovered = mutableListOf<AutomationId>()
         var firstFailure: Exception? = null
-        store.knownIds().sortedBy { it.value }.forEach { id ->
+        val known = mutex.withLock { store.knownIds() }
+        known.sortedBy { it.value }.forEach { id ->
             if (id !in allowed) return@forEach
             val rule = eligibleRules.snapshotFor(id) ?: return@forEach
-            val pending = store.pending(id, rule.fingerprint) ?: return@forEach
             try {
-                dispatch(rule, pending)
-                recovered += id
+                val done = lanes.runIfIdle(rule.kind) {
+                    val pending = mutex.withLock { store.pending(id, rule.fingerprint) }
+                        ?: return@runIfIdle false
+                    dispatch(rule, pending)
+                    true
+                }
+                if (done == true) recovered += id
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
@@ -90,15 +129,10 @@ class SensorEventIngress(
             }
         }
         firstFailure?.let { throw it }
-        recovered
+        return recovered
     }
 
-    private suspend fun deliver(rule: EligibleSensorRule) {
-        val pending = store.pending(rule.id, rule.fingerprint)
-            ?: store.beginDetection(rule.id, rule.fingerprint, rule.kind)
-        dispatch(rule, pending)
-    }
-
+    /** Fuori dal lock di stato: dispatch (può durare ore), poi conferma sotto lock. */
     private suspend fun dispatch(rule: EligibleSensorRule, pending: SensorDetection) {
         dispatcher.dispatch(
             TriggerEnvelope(
@@ -110,7 +144,7 @@ class SensorEventIngress(
                 ),
             ),
         )
-        store.completeDetection(rule.id, rule.fingerprint, pending.sequence)
+        mutex.withLock { store.completeDetection(rule.id, rule.fingerprint, pending.sequence) }
     }
 
     /** Cerca la revisione ARMED corrente per [id], di qualunque kind eleggibile. */

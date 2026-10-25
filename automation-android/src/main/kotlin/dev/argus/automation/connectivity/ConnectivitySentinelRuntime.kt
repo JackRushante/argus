@@ -28,6 +28,7 @@ class AndroidConnectivitySentinelBackend(
     context: Context,
     private val status: ConnectivitySentinelStatus,
     private val transitionTimeoutMillis: Long = TRANSITION_TIMEOUT_MILLIS,
+    private val monitorMarker: ConnectivityMonitorMarker = PrefsConnectivityMonitorMarker(context),
 ) : ConnectivitySentinelBackend {
     private val appContext = context.applicationContext
 
@@ -53,6 +54,9 @@ class AndroidConnectivitySentinelBackend(
     }
 
     override suspend fun stop(): Boolean = try {
+        // Stop esplicito (nessuna domanda residua): il prossimo avvio parte da zero e la sua prima
+        // osservazione sarà solo un riferimento, mai un recupero dello stato salvato (D11).
+        runCatching { monitorMarker.setActive(false) }
         appContext.stopService(Intent(appContext, ConnectivitySentinelService::class.java))
         if (!status.active.value) true else awaitActive(expected = false)
     } catch (error: CancellationException) {

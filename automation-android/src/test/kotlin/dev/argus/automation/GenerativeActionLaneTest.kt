@@ -2,6 +2,9 @@ package dev.argus.automation
 
 import dev.argus.automation.notification.NotificationReplyDelivery
 import dev.argus.automation.notification.NotificationReplyGateway
+import dev.argus.automation.notification.ReplyBurst
+import dev.argus.automation.notification.BurstMessage
+import dev.argus.automation.notification.ReplyBurstSource
 import dev.argus.engine.brain.ActResult
 import dev.argus.engine.brain.Brain
 import dev.argus.engine.brain.CapabilityManifest
@@ -49,7 +52,9 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.advanceTimeBy
@@ -79,6 +84,145 @@ class GenerativeActionLaneTest {
         assertTrue(fixture.lane.trySubmit(fixture.context, fixture.action))
         runCurrent()
         assertEquals(1, fixture.brain.calls, "una redelivery terminale non può reinviare")
+    }
+
+    @Test
+    fun `two messages five seconds apart produce one generation and one reply with both texts`() = runTest {
+        val bursts = FakeBurstSource().apply { post("notification:event-1", "ciao") }
+        val fixture = fixture(bursts = bursts)
+
+        assertTrue(fixture.lane.trySubmit(fixture.context, fixture.action))
+        fixture.journal.ready()
+        runCurrent()
+        assertEquals(0, fixture.brain.calls, "prima aspetta il silenzio")
+
+        advanceTimeBy(5_000)
+        bursts.post("notification:event-2", "sei li?")
+        runCurrent()
+        // 8 s di silenzio contati dall'ULTIMO messaggio, non dal primo.
+        advanceTimeBy(7_999)
+        runCurrent()
+        assertEquals(0, fixture.brain.calls)
+
+        advanceTimeBy(2)
+        runCurrent()
+
+        assertEquals(1, fixture.brain.calls, "una sola chiamata act")
+        assertEquals(1, fixture.gateway.calls, "una sola risposta")
+        val prompted = fixture.brain.lastContext!!.event as TriggerEvent.NotificationPosted
+        assertEquals("ciao\nsei li?", prompted.text)
+        assertEquals("Contatto", prompted.sender)
+        // La risposta parte dal PRIMO evento (journal, validazione, handle), con dentro gli altri.
+        assertEquals(TriggerEventId("notification:event-1"), fixture.brain.lastContext!!.eventId)
+        assertEquals(TriggerEventId("notification:event-1"), fixture.gateway.requests.single().eventId)
+        assertEquals(ActionJournalOutcome.SUCCEEDED, fixture.journal.completions.single().outcome)
+    }
+
+    @Test
+    fun `a continuous burst is cut at thirty seconds from the first message`() = runTest {
+        val bursts = FakeBurstSource().apply { post("notification:event-1", "uno") }
+        val fixture = fixture(bursts = bursts)
+
+        fixture.lane.trySubmit(fixture.context, fixture.action)
+        fixture.journal.ready()
+        runCurrent()
+        // Un messaggio ogni 5 s: il silenzio non arriva mai, decide il tetto dei 30 s.
+        for (i in 2..6) {
+            advanceTimeBy(5_000)
+            bursts.post("notification:event-$i", "msg$i")
+            runCurrent()
+        }
+        advanceTimeBy(4_999)
+        runCurrent()
+        assertEquals(0, fixture.brain.calls)
+
+        advanceTimeBy(2)
+        runCurrent()
+
+        assertEquals(1, fixture.brain.calls)
+        assertEquals(1, fixture.gateway.calls)
+        val prompted = fixture.brain.lastContext!!.event as TriggerEvent.NotificationPosted
+        assertEquals("uno\nmsg2\nmsg3\nmsg4\nmsg5\nmsg6", prompted.text)
+    }
+
+    @Test
+    fun `an event already absorbed into a burst reply is closed without a second reply`() = runTest {
+        val bursts = FakeBurstSource().apply {
+            post("notification:event-1", "uno")
+            post("notification:event-2", "due")
+        }
+        val fixture = fixture(bursts = bursts)
+        val second = fixture.context.copy(
+            eventId = TriggerEventId("notification:event-2"),
+            executionId = ExecutionId("execution-2"),
+        )
+
+        assertTrue(fixture.lane.trySubmit(fixture.context, fixture.action))
+        assertTrue(fixture.lane.trySubmit(second, fixture.action))
+        fixture.journal.ready("execution-1")
+        fixture.journal.ready("execution-2")
+        advanceTimeBy(8_001)
+        runCurrent()
+
+        // Cooldown assente: l'Engine ha sottoposto anche il secondo messaggio, ma il suo contenuto
+        // è già nella risposta alla raffica: niente seconda generazione né seconda reply.
+        assertEquals(1, fixture.brain.calls)
+        assertEquals(1, fixture.gateway.calls)
+        assertEquals(2, fixture.journal.completions.size)
+        assertEquals(ActionJournalOutcome.SUCCEEDED, fixture.journal.completions[0].outcome)
+        fixture.journal.completions[1].also { completion ->
+            assertEquals(ExecutionId("execution-2"), completion.executionId)
+            assertEquals(ActionJournalOutcome.SUCCEEDED, completion.outcome)
+            assertEquals("coalesced", completion.errorCode)
+        }
+    }
+
+    @Test
+    fun `a rule changed while waiting for the burst never reaches the model`() = runTest {
+        val bursts = FakeBurstSource().apply { post("notification:event-1", "ciao") }
+        val fixture = fixture(bursts = bursts)
+
+        fixture.lane.trySubmit(fixture.context, fixture.action)
+        fixture.journal.ready()
+        runCurrent()
+        fixture.store.current = null
+        advanceTimeBy(8_001)
+        runCurrent()
+
+        assertEquals(0, fixture.brain.calls)
+        assertEquals(0, fixture.gateway.calls)
+        fixture.journal.completions.single().also { completion ->
+            assertEquals(ActionJournalOutcome.FAILED, completion.outcome)
+            assertEquals("rule_missing", completion.errorCode)
+        }
+    }
+
+    @Test
+    fun `groups and non reply sinks never wait for a burst`() = runTest {
+        val bursts = FakeBurstSource().apply { post("notification:event-1", "ciao") }
+        val group = TriggerEvent.NotificationPosted(
+            pkg = "com.whatsapp",
+            conversationId = CONVERSATION_ID,
+            sender = "Contatto",
+            text = "messaggio",
+            isGroup = true,
+            notificationKey = "sbn:1",
+        )
+        val action = action()
+        val automation = approvedAutomation(action)
+        val fixture = fixture(
+            action = action,
+            automation = automation,
+            context = context(automation, action, event = group),
+            bursts = bursts,
+            // Un gruppo non supera la policy reale; qui conta solo che la lane non attenda.
+        )
+
+        fixture.lane.trySubmit(fixture.context, fixture.action)
+        fixture.journal.ready()
+        runCurrent()
+
+        assertEquals(1, fixture.brain.calls, "nessuna attesa per un evento non 1:1")
     }
 
     @Test
@@ -775,6 +919,7 @@ class GenerativeActionLaneTest {
         context: FireContext = context(automation, action),
         act: suspend () -> ActResult = { ActResult("risposta", null) },
         oneShotConsumptions: OneShotConsumptionRegistry = NoopOneShotConsumptionRegistry,
+        bursts: ReplyBurstSource? = null,
     ): Fixture {
         val store = MutableAutomationStore(automation)
         val journal = FakeSubmittedJournal()
@@ -794,6 +939,7 @@ class GenerativeActionLaneTest {
             capacity = capacity,
             submissionHandshakeTimeoutMillis = 5_000,
             nowMillis = { 2_000L },
+            replyBursts = bursts,
         )
         return Fixture(lane, action, context, store, journal, brain, gateway, policy, notifier)
     }
@@ -819,10 +965,21 @@ class GenerativeActionLaneTest {
         val state = MutableStateFlow<SubmittedActionState?>(
             SubmittedActionState(ExecutionStatus.RUNNING, null),
         )
+        private val others = mutableMapOf<String, MutableStateFlow<SubmittedActionState?>>()
         val completions = mutableListOf<SubmittedActionCompletion>()
 
-        fun ready() {
-            state.value = SubmittedActionState(
+        /** Lo stato dell'esecuzione: "execution-1" è `state`, le altre nascono RUNNING. */
+        private fun stateOf(executionId: String): MutableStateFlow<SubmittedActionState?> =
+            if (executionId == "execution-1") {
+                state
+            } else {
+                others.getOrPut(executionId) {
+                    MutableStateFlow(SubmittedActionState(ExecutionStatus.RUNNING, null))
+                }
+            }
+
+        fun ready(executionId: String = "execution-1") {
+            stateOf(executionId).value = SubmittedActionState(
                 ExecutionStatus.SUBMITTED,
                 ActionJournalOutcome.SUBMITTED,
             )
@@ -831,9 +988,10 @@ class GenerativeActionLaneTest {
         override fun observeSubmission(
             executionId: ExecutionId,
             actionIndex: Int,
-        ): Flow<SubmittedActionState?> = state
+        ): Flow<SubmittedActionState?> = stateOf(executionId.value)
 
         override suspend fun resolveSubmitted(completion: SubmittedActionCompletion): Boolean {
+            val state = stateOf(completion.executionId.value)
             if (state.value?.ready != true) return false
             completions += completion
             val status = when (completion.outcome) {
@@ -851,6 +1009,7 @@ class GenerativeActionLaneTest {
         private val actResult: suspend () -> ActResult,
     ) : Brain {
         var calls = 0
+        var lastContext: FireContext? = null
         var lastV2: Action.InvokeLlmV2? = null
         var resolvedCalls = 0
         var lastResolvedGoal: String? = null
@@ -869,6 +1028,7 @@ class GenerativeActionLaneTest {
             allowedTools: List<String>,
         ): ActResult {
             calls++
+            lastContext = context
             return actResult()
         }
 
@@ -877,6 +1037,7 @@ class GenerativeActionLaneTest {
             action: Action.InvokeLlmV2,
         ): ActResult {
             calls++
+            lastContext = context
             lastV2 = action
             return actResult()
         }
@@ -899,13 +1060,43 @@ class GenerativeActionLaneTest {
         private val delivery: NotificationReplyDelivery,
     ) : NotificationReplyGateway {
         var calls = 0
+        val requests = mutableListOf<dev.argus.automation.notification.NotificationReplyRequest>()
 
         override fun send(
             request: dev.argus.automation.notification.NotificationReplyRequest,
         ): NotificationReplyDelivery {
             calls++
+            requests += request
             return delivery
         }
+    }
+
+    /** Sorgente di raffica finta: il test pubblica i messaggi nei momenti voluti del tempo virtuale. */
+    private class FakeBurstSource : ReplyBurstSource {
+        private val messages = mutableListOf<BurstMessage>()
+        private val version = MutableStateFlow(0)
+
+        fun post(eventId: String, text: String) {
+            messages += BurstMessage(TriggerEventId(eventId), text)
+            version.value += 1
+        }
+
+        override fun burst(
+            notificationKey: String,
+            conversationId: String,
+            firstEventId: TriggerEventId,
+        ): ReplyBurst? {
+            val start = messages.indexOfFirst { it.eventId == firstEventId }
+            if (messages.isEmpty() || start < 0) return null
+            return ReplyBurst(messages.subList(start, messages.size).toList())
+        }
+
+        override suspend fun awaitNewMessage(
+            notificationKey: String,
+            conversationId: String,
+            seenEventId: TriggerEventId,
+        ): TriggerEventId = version.map { messages.lastOrNull()?.eventId }
+            .first { it != null && it != seenEventId }!!
     }
 
     private class MutableFirePolicy : FirePolicy {

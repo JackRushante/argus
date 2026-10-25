@@ -1,5 +1,6 @@
 package dev.argus.automation.connectivity
 
+import dev.argus.automation.SequentialLanes
 import dev.argus.engine.connectivity.ConnectivityEventParser
 import dev.argus.engine.model.ConnMedium
 import dev.argus.engine.model.ConnState
@@ -35,7 +36,13 @@ fun interface ConnectivityEventDispatcher {
 
 /**
  * Single-writer delle transizioni Connectivity. Lo stato persistito evita falsi fire al restart;
- * una transizione realmente persa mentre il processo era morto viene invece recuperata.
+ * una transizione realmente persa mentre il processo era morto viene invece recuperata, ma solo se
+ * il monitor era già attivo in continuo (vedi `recoverMissed` di [observe]).
+ *
+ * Il pending si persiste sotto [mutex] (sezioni brevi); la consegna, che può durare ore, avviene
+ * FUORI da quel lock in una coda sequenziale per sorgente ([lanes], B3): le transizioni della
+ * stessa sorgente restano in ordine e il record resta «dovuto» fino al completamento, mentre
+ * sorgenti diverse e i recovery non aspettano.
  */
 class ConnectivityEventIngress(
     private val parser: ConnectivityEventParser,
@@ -43,7 +50,15 @@ class ConnectivityEventIngress(
     private val dispatcher: ConnectivityEventDispatcher,
 ) {
     private val mutex = Mutex()
+    private val lanes = SequentialLanes<String>()
 
+    /**
+     * [initial] marca la prima osservazione di un monitor appena avviato: di norma diventa solo
+     * RIFERIMENTO (aggiorna lo stato salvato, nessun dispatch), perché lo stato salvato può
+     * risalire a quando il monitor era spento. Solo con [recoverMissed] (monitor già attivo in
+     * continuo, per esempio ripartito dopo un kill) un cambio rispetto allo stato salvato è una
+     * transizione realmente persa e viene recapitata.
+     */
     suspend fun observe(
         medium: ConnMedium,
         connectionState: ConnState,
@@ -51,7 +66,8 @@ class ConnectivityEventIngress(
         sourceIdentity: String,
         atMillis: Long,
         initial: Boolean = false,
-    ): Unit = mutex.withLock {
+        recoverMissed: Boolean = false,
+    ) {
         val currentAt = atMillis.coerceAtLeast(0)
         val candidate = parser.parse(
             medium,
@@ -59,10 +75,42 @@ class ConnectivityEventIngress(
             name,
             sourceIdentity,
             currentAt,
-        ) ?: return@withLock
+        ) ?: return
         val safeName = (candidate.event as TriggerEvent.ConnectivityChanged).name
         val sourceKey = storageKey(medium, sourceIdentity)
-        state.pending(sourceKey)?.let { deliver(sourceKey, it) }
+        val referenceOnly = initial && !recoverMissed
+        lanes.run(sourceKey) {
+            // Un pending lasciato indietro (dispatch fallito/processo morto) va prima di tutto.
+            mutex.withLock { state.pending(sourceKey) }?.let { deliver(sourceKey, it) }
+            val envelope = mutex.withLock {
+                recordTransition(
+                    medium,
+                    connectionState,
+                    sourceIdentity,
+                    sourceKey,
+                    currentAt,
+                    candidate,
+                    safeName,
+                    initial,
+                    referenceOnly,
+                )
+            }
+            envelope?.let { deliver(sourceKey, it) }
+        }
+    }
+
+    /** Sotto lock: decide la transizione e la persiste (pending incluso). Non consegna. */
+    private fun recordTransition(
+        medium: ConnMedium,
+        connectionState: ConnState,
+        sourceIdentity: String,
+        sourceKey: String,
+        currentAt: Long,
+        candidate: TriggerEnvelope,
+        safeName: String?,
+        initial: Boolean,
+        referenceOnly: Boolean,
+    ): TriggerEnvelope? {
         val previous = state.last(sourceKey)
         // DISCONNECTED non porta sempre l'identità; conserva quella dell'ultima connessione.
         // Un nuovo CONNECTED anonimo invece non deve ereditare un vecchio SSID/dispositivo.
@@ -78,9 +126,9 @@ class ConnectivityEventIngress(
             effectiveName,
             sourceIdentity,
             currentAt,
-        ) ?: return@withLock
+        ) ?: return null
 
-        val envelope = when {
+        return when {
             previous == null -> {
                 state.record(
                     sourceKey,
@@ -90,12 +138,13 @@ class ConnectivityEventIngress(
                 parsed.takeUnless { initial }
             }
             previous.state != connectionState -> {
+                val pending = parsed.takeUnless { referenceOnly }
                 state.record(
                     sourceKey,
                     ConnectivityStateSnapshot(connectionState, effectiveName, currentAt),
-                    parsed,
+                    pending,
                 )
-                parsed
+                pending
             }
             previous.name != effectiveName -> {
                 // Come per il doppio broadcast telefonia anonimo/numerato: stessa identità.
@@ -111,18 +160,26 @@ class ConnectivityEventIngress(
             }
             else -> null
         }
-        envelope?.let { deliver(sourceKey, it) }
-        Unit
     }
 
-    /** Ripete gli eventi persistiti con lo stesso id; il journal Engine evita doppie azioni. */
-    suspend fun recoverPending(): List<String> = mutex.withLock {
+    /**
+     * Ripete gli eventi persistiti con lo stesso id; il journal Engine evita doppie azioni.
+     * Una sorgente con una consegna già in corso (o accodata) viene saltata: chi occupa la corsia
+     * recapita già il suo pending, e il recovery non deve bloccarsi dietro a un dispatch lungo.
+     */
+    suspend fun recoverPending(): List<String> {
         val recovered = mutableListOf<String>()
         var firstFailure: Exception? = null
-        state.pending().sortedBy { it.first }.forEach { (sourceKey, envelope) ->
+        val sources = mutex.withLock { state.pending() }.map { it.first }.sorted()
+        sources.forEach { sourceKey ->
             try {
-                deliver(sourceKey, envelope)
-                recovered += sourceKey
+                val done = lanes.runIfIdle(sourceKey) {
+                    val envelope = mutex.withLock { state.pending(sourceKey) }
+                        ?: return@runIfIdle false
+                    deliver(sourceKey, envelope)
+                    true
+                }
+                if (done == true) recovered += sourceKey
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
@@ -130,12 +187,13 @@ class ConnectivityEventIngress(
             }
         }
         firstFailure?.let { throw it }
-        recovered
+        return recovered
     }
 
+    /** Fuori dal lock di stato: dispatch (può durare ore), poi conferma sotto lock. */
     private suspend fun deliver(sourceKey: String, envelope: TriggerEnvelope) {
         dispatcher.dispatch(envelope)
-        state.complete(sourceKey, envelope.id.value)
+        mutex.withLock { state.complete(sourceKey, envelope.id.value) }
     }
 
     private fun storageKey(medium: ConnMedium, sourceIdentity: String): String {

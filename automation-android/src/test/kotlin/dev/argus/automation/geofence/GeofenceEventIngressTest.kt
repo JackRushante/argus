@@ -5,7 +5,11 @@ import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.Transition
 import dev.argus.engine.runtime.TriggerEnvelope
 import dev.argus.engine.runtime.TriggerEvent
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -178,4 +182,90 @@ class GeofenceEventIngressTest {
             assertEquals(Transition.EXIT, state.pending(firstId, firstFingerprint)?.transition)
             assertNull(state.pending(secondId, secondFingerprint))
         }
+
+    @Test
+    fun `a dispatch in flight for one rule does not block another rule or recovery`() = runTest {
+        val slowId = AutomationId("a-slow")
+        val otherId = AutomationId("b-other")
+        val slowFingerprint = ApprovalFingerprint("1".repeat(64))
+        val otherFingerprint = ApprovalFingerprint("2".repeat(64))
+        val state = MemoryGeofenceStateStore().apply {
+            prepare(GeofenceRegistration(slowId, slowFingerprint, 45.0, 9.0, 150f))
+            activate(slowId, slowFingerprint)
+            prepare(GeofenceRegistration(otherId, otherFingerprint, 46.0, 10.0, 150f))
+            activate(otherId, otherFingerprint)
+        }
+        val delivered = mutableListOf<TriggerEnvelope>()
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val ingress = GeofenceEventIngress(
+            state,
+            GeofenceEventDispatcher { envelope ->
+                delivered += envelope
+                if ((envelope.event as TriggerEvent.GeofenceTransitioned).automationId == slowId) {
+                    entered.complete(Unit)
+                    release.await()
+                }
+            },
+        )
+
+        val slow = async { ingress.onTransition(slowId, slowFingerprint, Transition.EXIT) }
+        entered.await()
+
+        assertTrue(
+            withTimeout(1_000) { ingress.onTransition(otherId, otherFingerprint, Transition.ENTER) },
+        )
+        val recovered = withTimeout(1_000) { ingress.recoverPending(setOf(slowId, otherId)) }
+
+        // Il bordo della regola lenta resta dovuto e il recovery non lo riconsegna.
+        assertEquals(emptyList(), recovered)
+        assertEquals(Transition.EXIT, state.pending(slowId, slowFingerprint)?.transition)
+        assertEquals(2, delivered.size)
+
+        release.complete(Unit)
+        assertTrue(slow.await())
+        assertNull(state.pending(slowId, slowFingerprint))
+        assertEquals(Transition.EXIT, state.get(slowId)?.lastTransition)
+        assertEquals(2, delivered.size)
+    }
+
+    @Test
+    fun `edges of the same rule queue behind an in-flight dispatch in order`() = runTest {
+        val id = AutomationId("queue")
+        val fingerprint = ApprovalFingerprint("3".repeat(64))
+        val state = MemoryGeofenceStateStore().apply {
+            prepare(GeofenceRegistration(id, fingerprint, 45.0, 9.0, 150f))
+            activate(id, fingerprint)
+        }
+        val delivered = mutableListOf<String>()
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        var first = true
+        val ingress = GeofenceEventIngress(
+            state,
+            GeofenceEventDispatcher { envelope ->
+                delivered += envelope.id.value
+                if (first) {
+                    first = false
+                    entered.complete(Unit)
+                    release.await()
+                }
+            },
+        )
+
+        val exit = async { ingress.onTransition(id, fingerprint, Transition.EXIT) }
+        entered.await()
+        val enter = async { ingress.onTransition(id, fingerprint, Transition.ENTER) }
+        runCurrent()
+        assertEquals(1, delivered.size)
+
+        release.complete(Unit)
+        assertTrue(exit.await())
+        assertTrue(enter.await())
+        assertEquals(
+            listOf("geofence:${fingerprint.value}:1", "geofence:${fingerprint.value}:2"),
+            delivered,
+        )
+        assertNull(state.pending(id, fingerprint))
+    }
 }
