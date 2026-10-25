@@ -30,6 +30,9 @@ This release closes the high-severity findings and the security fixes from a ful
   invalid input is rejected instead of meaning "unlimited".
 - Editing an armed rule keeps the current version active until the new draft is armed; rejecting
   the draft leaves the rule untouched.
+- A plain notification rule for a contact outside the whitelist ("notify me when X writes") is
+  compiled with a sender-name match and the usual spoofing warning instead of being refused; a
+  model's explained refusal is shown as an answer, not as an error.
 - Editing a P4 rule in chat no longer drops its variables. Double taps on Arm/Reject/Delete are ignored.
 - Onboarding can always be finished from the last step; an unreachable server no longer blocks setup
   (a rejected key still does). "Copy and open WhatsApp" no longer marks a deferred reply as sent.
