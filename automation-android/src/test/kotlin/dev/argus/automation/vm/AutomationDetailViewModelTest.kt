@@ -24,7 +24,9 @@ import dev.argus.engine.model.ApprovalFingerprints
 import dev.argus.engine.model.ArgusJson
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
+import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.AutomationStatus
+import dev.argus.engine.model.CapabilityRequirements
 import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.AuditEvent
@@ -33,10 +35,18 @@ import dev.argus.engine.runtime.AuditSink
 import dev.argus.engine.runtime.FirePolicySnapshot
 import dev.argus.engine.runtime.FirePolicySnapshotProvider
 import dev.argus.engine.safety.ApprovalService
+import dev.argus.engine.safety.DraftArmResult
+import dev.argus.engine.safety.DraftId
+import dev.argus.engine.safety.DraftRepository
 import dev.argus.engine.safety.DraftValidator
+import dev.argus.engine.safety.DraftWriteResult
+import dev.argus.engine.safety.NewDraft
+import dev.argus.engine.safety.PendingDraft
+import dev.argus.ui.model.StatusBadge
 import dev.argus.ui.presentation.RenderLanguage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
@@ -55,6 +65,8 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -136,20 +148,274 @@ class AutomationDetailViewModelTest {
         )
     }
 
+    // --- S3: si arma la revisione mostrata ---------------------------------------------------------
+
+    @Test
+    fun `arm acts on the revision on screen while a newer slow review is pending`() = runTest {
+        val store = RoomAutomationStore(db.automationDao())
+        val spy = SpyDraftRepository(RoomDraftRepository(db))
+        val first = assertIs<DraftWriteResult.Saved>(spy.create(newDraft("s3", "prima"))).snapshot
+        val viewModel = viewModel("s3", store, DetailAuditRecorder(), RenderLanguage.EN, drafts = spy)
+        awaitUntil("revisione 1 mostrata") { viewModel.state.value.detail?.name == "prima" }
+        val events = collectEvents(viewModel)
+
+        // La revisione 2 arriva ma la sua review e' lenta: lo schermo mostra ancora la 1.
+        spy.slowNextGet()
+        val second = assertIs<DraftWriteResult.Saved>(
+            spy.revise(first.id, first.revision, first.draft.copy(name = "seconda"), first.priority, 2_000),
+        ).snapshot
+        awaitUntil("review della revisione 2 avviata") { spy.slowGetReached.isCompleted }
+        assertEquals("prima", viewModel.state.value.detail?.name)
+
+        viewModel.onArm()
+        awaitUntil("revisione cambiata") { events.any { it is DetailEvent.Message } }
+
+        assertEquals(
+            "The draft changed; review the new revision.",
+            (events.single { it is DetailEvent.Message } as DetailEvent.Message).text,
+        )
+        assertTrue(spy.armCalls.isEmpty(), "la revisione non vista non deve mai essere armata")
+        assertEquals(second.revision, spy.get(first.id)?.revision)
+
+        // Review completata: ora lo schermo mostra la 2 e armare agisce su quella.
+        spy.releaseSlowGet()
+        awaitUntil("revisione 2 mostrata") { viewModel.state.value.detail?.name == "seconda" }
+        viewModel.onArm()
+        awaitUntil("chiusura dopo arm") { events.any { it is DetailEvent.Close } }
+        assertEquals(listOf(second.revision), spy.armCalls.map { it.revision })
+    }
+
+    @Test
+    fun `reject also acts on the revision on screen not on a newer unseen one`() = runTest {
+        val store = RoomAutomationStore(db.automationDao())
+        val spy = SpyDraftRepository(RoomDraftRepository(db))
+        val first = assertIs<DraftWriteResult.Saved>(spy.create(newDraft("s3r", "prima"))).snapshot
+        val viewModel = viewModel("s3r", store, DetailAuditRecorder(), RenderLanguage.EN, drafts = spy)
+        awaitUntil("revisione 1 mostrata") { viewModel.state.value.detail?.name == "prima" }
+        val events = collectEvents(viewModel)
+
+        spy.slowNextGet()
+        assertIs<DraftWriteResult.Saved>(
+            spy.revise(first.id, first.revision, first.draft.copy(name = "seconda"), first.priority, 2_000),
+        )
+        awaitUntil("review della revisione 2 avviata") { spy.slowGetReached.isCompleted }
+
+        viewModel.onReject()
+        awaitUntil("revisione cambiata") { events.any { it is DetailEvent.Message } }
+
+        assertEquals(
+            "The draft changed; reopen it before rejecting it.",
+            (events.single { it is DetailEvent.Message } as DetailEvent.Message).text,
+        )
+        assertNotNull(spy.get(first.id), "la bozza piu' recente non va cancellata")
+        spy.releaseSlowGet()
+    }
+
+    // --- B26: doppio tocco ---------------------------------------------------------------------------
+
+    @Test
+    fun `two consecutive arm taps run one approval and emit one close`() = runTest {
+        val store = RoomAutomationStore(db.automationDao())
+        val spy = SpyDraftRepository(RoomDraftRepository(db))
+        assertIs<DraftWriteResult.Saved>(spy.create(newDraft("b26", "doppio")))
+        val viewModel = viewModel("b26", store, DetailAuditRecorder(), RenderLanguage.EN, drafts = spy)
+        awaitUntil("bozza mostrata") { viewModel.state.value.detail != null }
+        val events = collectEvents(viewModel)
+
+        viewModel.onArm()
+        viewModel.onArm()
+        awaitUntil("chiusura") { events.any { it is DetailEvent.Close } }
+        settle()
+
+        assertEquals(1, spy.armCalls.size, "una sola chiamata approvals.arm")
+        assertEquals(1, events.count { it is DetailEvent.Close }, "un solo Close")
+        assertEquals(0, events.count { it is DetailEvent.Message })
+    }
+
+    @Test
+    fun `the footer is disabled while arm runs and is enabled again when arm fails without closing`() = runTest {
+        val store = RoomAutomationStore(db.automationDao())
+        val spy = SpyDraftRepository(RoomDraftRepository(db))
+        assertIs<DraftWriteResult.Saved>(spy.create(newDraft("b26b", "in corso")))
+        val viewModel = viewModel("b26b", store, DetailAuditRecorder(), RenderLanguage.EN, drafts = spy)
+        awaitUntil("bozza mostrata") { viewModel.state.value.detail != null }
+        assertEquals(false, viewModel.state.value.detail?.actionInProgress)
+        val events = collectEvents(viewModel)
+
+        spy.holdNextArm(DraftArmResult.IntegrityFailure)
+        viewModel.onArm()
+        awaitUntil("arm avviato") { spy.armHeld.isCompleted }
+        assertEquals(true, viewModel.state.value.detail?.actionInProgress)
+        viewModel.onArm()
+        viewModel.onReject()
+        spy.releaseHeldArm()
+
+        awaitUntil("messaggio di errore") { events.any { it is DetailEvent.Message } }
+        awaitUntil("footer di nuovo attivo") { viewModel.state.value.detail?.actionInProgress == false }
+        settle()
+        assertEquals(1, spy.armCalls.size, "il secondo arm e il reject durante l'arm sono ignorati")
+        assertEquals(0, events.count { it is DetailEvent.Close })
+        assertNotNull(spy.get(DraftId("draft-b26b")), "il reject ignorato non ha cancellato la bozza")
+
+        // Dopo un fallimento senza chiusura l'utente puo' riprovare.
+        viewModel.onArm()
+        awaitUntil("secondo tentativo") { spy.armCalls.size == 2 }
+    }
+
+    @Test
+    fun `a double tap on delete deletes once and closes once`() = runTest {
+        seedArmedAutomation("b26d")
+        val store = RoomAutomationStore(db.automationDao())
+        val audit = DetailAuditRecorder()
+        val viewModel = viewModel("b26d", store, audit)
+        awaitUntil("dettaglio caricato") { viewModel.state.value.detail != null }
+        val events = collectEvents(viewModel)
+
+        viewModel.onDelete()
+        viewModel.onDelete()
+        awaitUntil("chiusura") { events.any { it is DetailEvent.Close } }
+        settle()
+
+        assertEquals(1, events.count { it is DetailEvent.Close })
+        assertEquals(1, audit.events.count { it.kind == AuditKind.RULE_DELETED })
+    }
+
+    @Test
+    fun `the state flag survives a recomputed state while an action is running`() = runTest {
+        val store = RoomAutomationStore(db.automationDao())
+        val spy = SpyDraftRepository(RoomDraftRepository(db))
+        val first = assertIs<DraftWriteResult.Saved>(spy.create(newDraft("b26c", "ricalcolo"))).snapshot
+        val viewModel = viewModel("b26c", store, DetailAuditRecorder(), RenderLanguage.EN, drafts = spy)
+        awaitUntil("bozza mostrata") { viewModel.state.value.detail != null }
+        collectEvents(viewModel)
+
+        spy.holdNextArm(DraftArmResult.IntegrityFailure)
+        viewModel.onArm()
+        awaitUntil("arm avviato") { spy.armHeld.isCompleted }
+        // Una nuova emissione dal DB ricalcola lo stato: il flag non deve sparire.
+        assertIs<DraftWriteResult.Saved>(
+            spy.revise(first.id, first.revision, first.draft.copy(name = "ricalcolata"), first.priority, 2_000),
+        )
+        awaitUntil("stato ricalcolato") { viewModel.state.value.detail?.name == "ricalcolata" }
+        assertEquals(true, viewModel.state.value.detail?.actionInProgress)
+        spy.releaseHeldArm()
+        awaitUntil("footer di nuovo attivo") { viewModel.state.value.detail?.actionInProgress == false }
+    }
+
+    // --- D5: la regola armata resta il suo dettaglio ---------------------------------------------------
+
+    @Test
+    fun `an armed rule with a pending edit opens as the armed rule and the draft opens by its own id`() = runTest {
+        val store = RoomAutomationStore(db.automationDao())
+        val repository = RoomDraftRepository(db)
+        val first = assertIs<DraftWriteResult.Saved>(repository.create(newDraft("d5", "originale"))).snapshot
+        val original = assertIs<DraftArmResult.Armed>(
+            repository.arm(first.id, first.revision, first.fingerprint),
+        ).automation
+        assertIs<DraftWriteResult.Saved>(
+            repository.create(
+                newDraft("d5", "modificata").copy(
+                    id = DraftId("edit-d5"),
+                    expectedAutomationFingerprint = original.approvalFingerprint,
+                ),
+            ),
+        )
+
+        val byRule = viewModel("d5", store, DetailAuditRecorder(), RenderLanguage.EN)
+        awaitUntil("regola mostrata") { byRule.state.value.detail != null }
+        assertEquals(StatusBadge.ARMED, byRule.state.value.detail?.status)
+        assertEquals("originale", byRule.state.value.detail?.name)
+        runBlocking { byRule.viewModelScope.coroutineContext[Job]?.cancelAndJoin() }
+
+        val byDraft = viewModel("edit-d5", store, DetailAuditRecorder(), RenderLanguage.EN)
+        awaitUntil("bozza mostrata") { byDraft.state.value.detail != null }
+        assertEquals(StatusBadge.PENDING_APPROVAL, byDraft.state.value.detail?.status)
+        assertEquals("modificata", byDraft.state.value.detail?.name)
+    }
+
+    // --- B13: la modifica dal dettaglio conserva le variabili -----------------------------------------
+
+    @Test
+    fun `ask edit of a p4 rule carries its variables in the base draft`() = runTest {
+        val unsigned = Automation(
+            id = AutomationId("p4"),
+            name = "p4",
+            createdBy = CreatedBy.USER,
+            status = AutomationStatus.ARMED,
+            trigger = Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+            actions = listOf(Action.ShowNotification("Argus", "\${n}")),
+            vars = listOf(dev.argus.engine.model.VarBinding.RandomInt("n", 6)),
+            enabled = true,
+            schemaVersion = dev.argus.engine.model.AUTOMATION_SCHEMA_VERSION_P4,
+        )
+        val signed = unsigned.copy(approvalFingerprint = ApprovalFingerprints.of(unsigned))
+        db.automationDao().upsertPreservingLastFired(
+            AutomationEntity(
+                id = signed.id.value,
+                name = signed.name,
+                status = signed.status,
+                enabled = signed.enabled,
+                priority = signed.priority,
+                cooldownMs = signed.cooldownMs,
+                schemaVersion = signed.schemaVersion,
+                json = ArgusJson.encodeToString(Automation.serializer(), signed),
+            ),
+        )
+        val viewModel = viewModel("p4", RoomAutomationStore(db.automationDao()), DetailAuditRecorder())
+        awaitUntil("dettaglio caricato") { viewModel.state.value.detail != null }
+        val events = collectEvents(viewModel)
+
+        viewModel.onAskEdit()
+        awaitUntil("chat aperta") { events.any { it is DetailEvent.OpenChat } }
+
+        val open = events.single { it is DetailEvent.OpenChat } as DetailEvent.OpenChat
+        assertEquals(signed.vars, open.baseDraft?.vars)
+        assertEquals(signed.approvalFingerprint, open.automationFingerprint)
+    }
+
     // --- helpers -------------------------------------------------------------
+
+    /** Eventi del ViewModel raccolti in una lista (nessun replay: va chiamato prima dell'azione). */
+    private fun kotlinx.coroutines.test.TestScope.collectEvents(
+        viewModel: AutomationDetailViewModel,
+    ): MutableList<DetailEvent> {
+        val events = mutableListOf<DetailEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.events.collect(events::add)
+        }
+        return events
+    }
+
+    /** Tempo reale per lasciar arrivare un eventuale evento duplicato prima di contare. */
+    private suspend fun settle() = withContext(Dispatchers.Default) { delay(400) }
+
+    private fun newDraft(id: String, name: String) = NewDraft(
+        id = DraftId("draft-$id"),
+        automationId = AutomationId(id),
+        draft = AutomationDraft(
+            name = name,
+            trigger = Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+            actions = listOf(Action.ShowNotification("Argus", "test")),
+        ),
+        atMillis = 1_000,
+    )
 
     private fun viewModel(
         routeId: String,
         store: RoomAutomationStore,
         audit: AuditSink,
         language: RenderLanguage = RenderLanguage.IT,
+        drafts: DraftRepository = RoomDraftRepository(db),
     ): AutomationDetailViewModel {
-        val drafts = RoomDraftRepository(db)
         val whitelist = RoomContactWhitelistStore(db.contactWhitelistDao())
         val snapshots = FirePolicySnapshotProvider {
             FirePolicySnapshot(
                 knownTools = emptySet(),
-                availableCapabilities = emptySet(),
+                // Le capacita' richieste dalla bozza di prova sono tutte disponibili: l'arm puo' riuscire.
+                availableCapabilities = CapabilityRequirements.derive(
+                    Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+                    listOf(Action.ShowNotification("Argus", "test")),
+                ),
                 whitelistedConversationIds = emptySet(),
             )
         }
@@ -237,4 +503,55 @@ private class NoopTimeAlarmRuntime : TimeAlarmRuntime {
 
     override suspend fun reconcile(reason: ReconcileReason): ReconcileReport =
         ReconcileReport(emptyList(), emptyList(), emptyList(), emptyList())
+}
+
+/**
+ * Decora un [DraftRepository] reale: conta gli arm e permette di rallentare la prossima `get`
+ * (review lenta) o di trattenere il prossimo `arm` per osservare il footer disabilitato.
+ */
+private class SpyDraftRepository(private val delegate: DraftRepository) : DraftRepository by delegate {
+    data class ArmCall(val id: DraftId, val revision: Long)
+
+    val armCalls = java.util.concurrent.CopyOnWriteArrayList<ArmCall>()
+
+    private val slowGet = java.util.concurrent.atomic.AtomicBoolean(false)
+    val slowGetReached = CompletableDeferred<Unit>()
+    private val slowGetRelease = CompletableDeferred<Unit>()
+
+    private var heldArmResult: DraftArmResult? = null
+    private val holdNextArm = java.util.concurrent.atomic.AtomicBoolean(false)
+    val armHeld = CompletableDeferred<Unit>()
+    private val armRelease = CompletableDeferred<Unit>()
+
+    fun slowNextGet() { slowGet.set(true) }
+    fun releaseSlowGet() { slowGetRelease.complete(Unit) }
+
+    fun holdNextArm(result: DraftArmResult) {
+        heldArmResult = result
+        holdNextArm.set(true)
+    }
+
+    fun releaseHeldArm() { armRelease.complete(Unit) }
+
+    override suspend fun get(id: DraftId): PendingDraft? {
+        if (slowGet.compareAndSet(true, false)) {
+            slowGetReached.complete(Unit)
+            slowGetRelease.await()
+        }
+        return delegate.get(id)
+    }
+
+    override suspend fun arm(
+        id: DraftId,
+        expectedRevision: Long,
+        expectedFingerprint: ApprovalFingerprint,
+    ): DraftArmResult {
+        armCalls += ArmCall(id, expectedRevision)
+        if (holdNextArm.compareAndSet(true, false)) {
+            armHeld.complete(Unit)
+            armRelease.await()
+            return requireNotNull(heldArmResult)
+        }
+        return delegate.arm(id, expectedRevision, expectedFingerprint)
+    }
 }

@@ -60,6 +60,17 @@ data class VarRow(
     val integrityLabel: String,       // "trusted" | "external" (CLEAN/TAINTED)
     val confidentialityLabel: String, // "public" | "private" | "secret"
     val provenanceLabel: String,      // "SMS" | "fixed value" | "device state" | ...
+    /**
+     * Valore integrale approvato: valorizzato SOLO per i letterali ([dev.argus.engine.model.VarBinding.Literal]),
+     * `null` per ogni altro binding (i valori runtime non compaiono mai in review). Si rende in
+     * monospace, a capo, mai troncato (§5.3).
+     */
+    val valueText: String? = null,
+    /**
+     * Da dove nasce il valore, reso dai tipi: campo del trigger (+ estrazione), query di stato col
+     * tipo, intervallo del numero casuale o "valore fisso". Vuoto solo per righe costruite a mano.
+     */
+    val sourceText: String = "",
 )
 
 data class ActionRow(
@@ -152,7 +163,7 @@ data class AutomationListState(
     val filter: StatusFilter,               // ALL | ARMED | PENDING | DISABLED | NEEDS_REVIEW (chips)
     val banner: EngineBanner,
     val loading: Boolean,
-    val pendingCount: Int = rows.count { it.status == StatusBadge.PENDING_APPROVAL },
+    val pendingCount: Int = rows.count { it.status == StatusBadge.PENDING_APPROVAL || it.pendingEditDraftId != null },
     val needsReviewCount: Int = rows.count { it.status == StatusBadge.NEEDS_REVIEW },
 )
 
@@ -167,6 +178,12 @@ data class AutomationRow(
     val hasWarnings: Boolean,               // pallino warning (conflitti/validator)
     val lastFiredLabel: String?,            // "2 h fa" / null = mai
     val nextFireLabel: String?,             // solo trigger Time: "stasera 23:00"
+    /**
+     * D5: id della bozza di modifica in attesa su questa regola armata/disattivata (null = nessuna).
+     * La regola resta attiva finché la modifica non viene armata: la riga mostra un badge
+     * «modifica in attesa» e il tocco sul badge apre la bozza.
+     */
+    val pendingEditDraftId: String? = null,
 )
 
 enum class StatusFilter { ALL, ARMED, PENDING, DISABLED, NEEDS_REVIEW }
@@ -196,6 +213,11 @@ data class AutomationDetailState(
     val runNowBlockedReason: String? = null,
     /** Probe positivi redatti: solo famiglia/tipo, mai il valore campione. */
     val verifiedStateReaders: List<String> = emptyList(),
+    /**
+     * B26: un'azione del footer (arma, rifiuta, elimina) è in corso. Il footer resta disabilitato
+     * finché è vero, così un secondo tocco non può né duplicare l'azione né emettere un secondo Close.
+     */
+    val actionInProgress: Boolean = false,
 )
 
 interface AutomationDetailCallbacks {

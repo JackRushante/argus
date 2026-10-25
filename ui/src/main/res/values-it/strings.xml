@@ -69,6 +69,7 @@
     <string name="rule_section_only_if">SOLO SE</string>
     <string name="rule_section_then">ALLORA</string>
     <string name="rule_section_variables">VARIABILI</string>
+    <string name="rule_var_value_label">valore</string>
 
     <!-- Chat -->
     <string name="chat_subtitle">chat · compilatore di regole</string>
@@ -116,6 +117,7 @@
     <string name="list_filter_armed">Armate</string>
     <string name="list_filter_disabled">Disattivate</string>
     <string name="list_filter_needs_review">Da rivedere</string>
+    <string name="list_pending_edit_badge">modifica in attesa</string>
     <string name="list_empty_title">Nessuna automazione</string>
     <string name="list_empty_body">Chiedila in chat: descrivi cosa vuoi che Argus faccia e proporrà una regola da rivedere e armare.</string>
     <string name="list_empty_cta">Vai in chat</string>

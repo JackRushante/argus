@@ -453,7 +453,7 @@ private fun DetailFooter(
                     StatusBadge.PENDING_APPROVAL -> PendingFooter(state, callbacks)
                     StatusBadge.ARMED, StatusBadge.DISABLED ->
                         ReviewableFooter(state, callbacks, onDelete, onRunNow)
-                    StatusBadge.NEEDS_REVIEW -> NeedsReviewFooter(callbacks, onDelete)
+                    StatusBadge.NEEDS_REVIEW -> NeedsReviewFooter(state, callbacks, onDelete)
                 }
             }
         }
@@ -478,12 +478,21 @@ private fun PendingFooter(state: AutomationDetailState, callbacks: AutomationDet
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedButton(onClick = callbacks::onReject, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.detail_reject)) }
-            OutlinedButton(onClick = callbacks::onAskEdit, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.detail_edit)) }
+            // B26: durante arma/rifiuta/elimina in corso il footer resta disabilitato.
+            OutlinedButton(
+                onClick = callbacks::onReject,
+                enabled = !state.actionInProgress,
+                modifier = Modifier.heightIn(min = 48.dp),
+            ) { Text(stringResource(R.string.detail_reject)) }
+            OutlinedButton(
+                onClick = callbacks::onAskEdit,
+                enabled = !state.actionInProgress,
+                modifier = Modifier.heightIn(min = 48.dp),
+            ) { Text(stringResource(R.string.detail_edit)) }
             // Arma = unica azione filled/accent; abilitata SOLO se canArm (invariante §5.2).
             Button(
                 onClick = callbacks::onArm,
-                enabled = state.canArm,
+                enabled = state.canArm && !state.actionInProgress,
                 modifier = Modifier.weight(1f).heightIn(min = 48.dp),
             ) {
                 Icon(Icons.Rounded.Shield, contentDescription = null, modifier = Modifier.size(19.dp))
@@ -510,6 +519,7 @@ private fun ReviewableFooter(
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedButton(
             onClick = { callbacks.onSetEnabled(state.status == StatusBadge.DISABLED) },
+            enabled = !state.actionInProgress,
             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
         ) {
             Text(
@@ -527,6 +537,7 @@ private fun ReviewableFooter(
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedButton(
                 onClick = onDelete,
+                enabled = !state.actionInProgress,
                 modifier = Modifier.size(48.dp),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = semantic.error.fg),
@@ -534,10 +545,14 @@ private fun ReviewableFooter(
             ) {
                 Icon(Icons.Rounded.Delete, contentDescription = stringResource(R.string.action_delete), modifier = Modifier.size(21.dp))
             }
-            OutlinedButton(onClick = callbacks::onAskEdit, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.detail_edit_in_chat)) }
+            OutlinedButton(
+                onClick = callbacks::onAskEdit,
+                enabled = !state.actionInProgress,
+                modifier = Modifier.heightIn(min = 48.dp),
+            ) { Text(stringResource(R.string.detail_edit_in_chat)) }
             OutlinedButton(
                 onClick = onRunNow,
-                enabled = state.canRunNow,
+                enabled = state.canRunNow && !state.actionInProgress,
                 modifier = Modifier.weight(1f).heightIn(min = 48.dp),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary),
             ) {
@@ -551,6 +566,7 @@ private fun ReviewableFooter(
 
 @Composable
 private fun NeedsReviewFooter(
+    state: AutomationDetailState,
     callbacks: AutomationDetailCallbacks,
     onDelete: () -> Unit,
 ) {
@@ -558,6 +574,7 @@ private fun NeedsReviewFooter(
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         OutlinedButton(
             onClick = onDelete,
+            enabled = !state.actionInProgress,
             modifier = Modifier.size(48.dp),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
             colors = ButtonDefaults.outlinedButtonColors(contentColor = semantic.error.fg),
@@ -574,6 +591,7 @@ private fun NeedsReviewFooter(
         }
         Button(
             onClick = callbacks::onAskEdit,
+            enabled = !state.actionInProgress,
             modifier = Modifier.weight(1f).heightIn(min = 48.dp),
         ) {
             Text(stringResource(R.string.detail_recreate_in_chat))

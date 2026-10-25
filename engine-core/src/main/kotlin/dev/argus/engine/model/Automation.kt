@@ -116,3 +116,18 @@ data class AutomationDraft(
     val rationale: String = "",
     val cooldownMs: Long = 0,
 )
+
+/**
+ * Bozza equivalente alla regola: l'UNICA copia tipata da [Automation] a [AutomationDraft]. Porta
+ * tutto ciò che entra nel fingerprint (nome, trigger, azioni, variabili P4, condizioni) più il
+ * cooldown; la prosa dell'LLM (`rationale`) non esiste sulla regola e resta vuota. Una copia
+ * locale che dimentica `vars` trasforma una regola P4 in una bozza invalida: usare sempre questa.
+ */
+fun Automation.toDraft(): AutomationDraft = AutomationDraft(
+    name = name,
+    trigger = trigger,
+    actions = actions,
+    vars = vars,
+    conditions = conditions,
+    cooldownMs = cooldownMs,
+)

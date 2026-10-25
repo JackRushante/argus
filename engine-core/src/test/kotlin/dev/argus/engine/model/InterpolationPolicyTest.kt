@@ -81,6 +81,38 @@ class InterpolationPolicyTest {
         )
     }
 
+    @Test fun `only the shell command field is shell quoted`() {
+        val actions = listOf(
+            Action.RunShell("id"),
+            Action.OpenUrl("https://x"),
+            Action.LaunchApp("com.x.y"),
+            Action.InputText("t"),
+            Action.SetRinger("normal"),
+            Action.WriteSetting(SettingNamespace.SYSTEM, "k", "v"),
+            Action.OpenSettingsScreen(SettingsScreen.APP_DETAILS, "com.x.y"),
+            Action.CopyToClipboard("(\\d+)"),
+            Action.ShowNotification("t", "x"),
+            Action.WhatsAppReply("y"),
+            Action.CopyText("z"),
+            Action.SetAlarm(8, 0, "l"),
+            Action.SetTimer(60, "l"),
+            Action.InvokeLlm("g", emptyList(), emptyList(), false, notificationTitle = "n"),
+        )
+        val quoted = actions.flatMap { action ->
+            InterpolationPolicy.textFields(action)
+                .filter { it.shellQuoted }
+                .map { "${action::class.simpleName}.${it.label}" }
+        }
+        assertEquals(listOf("RunShell.cmd"), quoted)
+    }
+
+    @Test fun `references expose names and ranges in order`() {
+        val template = "a \${x} b \${y_1}"
+        val refs = InterpolationPolicy.references(template)
+        assertEquals(listOf("x", "y_1"), refs.map { it.name })
+        assertEquals(listOf("\${x}", "\${y_1}"), refs.map { template.substring(it.range) })
+    }
+
     @Test fun `control flow containers expose no interpolatable fields`() {
         assertTrue(
             InterpolationPolicy.textFields(

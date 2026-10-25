@@ -20,13 +20,31 @@ class RuleRenderMapperTest {
     @Test fun `P4 vars render with type, integrity, confidentiality and provenance (IT)`() {
         val r = RuleRenderMapper.map(otpRule(), language = RenderLanguage.IT)
         assertEquals(2, r.vars.size)
-        assertEquals(VarRow("otp", "testo", "esterno", "segreto", "notifica"), r.vars[0])
-        assertEquals(VarRow("soglia", "numero", "attendibile", "pubblico", "valore fisso"), r.vars[1])
+        assertEquals(
+            VarRow("otp", "testo", "esterno", "segreto", "notifica", valueText = null, sourceText = "campo testo"),
+            r.vars[0],
+        )
+        assertEquals(
+            VarRow(
+                "soglia", "numero", "attendibile", "pubblico", "valore fisso",
+                valueText = "10", sourceText = "valore fisso",
+            ),
+            r.vars[1],
+        )
     }
     @Test fun `P4 vars render english labels by default`() {
         val r = RuleRenderMapper.map(otpRule(), language = RenderLanguage.EN)
-        assertEquals(VarRow("otp", "text", "external", "secret", "notification"), r.vars[0])
-        assertEquals(VarRow("soglia", "number", "trusted", "public", "fixed value"), r.vars[1])
+        assertEquals(
+            VarRow("otp", "text", "external", "secret", "notification", valueText = null, sourceText = "text field"),
+            r.vars[0],
+        )
+        assertEquals(
+            VarRow(
+                "soglia", "number", "trusted", "public", "fixed value",
+                valueText = "10", sourceText = "fixed value",
+            ),
+            r.vars[1],
+        )
     }
     @Test fun `flat v1 rule renders no vars`() {
         val a = Automation(
@@ -348,7 +366,7 @@ class RuleRenderMapperTest {
 
         assertTrue(render.isGenerative)
         assertEquals(
-            "The notification text and values from the listed state readers will be sent to the " +
+            "The notification text and values from the device state readers will be sent to the " +
                 "configured AI service to generate the reply.",
             render.privacyNote,
         )
@@ -579,7 +597,11 @@ class RuleRenderMapperTest {
             listOf(Action.InvokeLlm("reply in tone X", listOf("notification"), listOf("whatsapp_reply"), true)),
         )
         val r = RuleRenderMapper.map(a, language = RenderLanguage.EN)
-        assertEquals("When: WhatsApp notification from Wife (1:1 chat)", r.triggerLine)
+        // Con sender E id il matcher usa solo l'id: senza label fidata l'id reale resta visibile.
+        assertEquals(
+            "When: WhatsApp notification from Wife (1:1 chat) · conversation id jid:42",
+            r.triggerLine,
+        )
         assertEquals("Generate and reply with AI", r.actions.single().label)
         assertEquals(
             "The notification text will be sent to the configured AI service to generate the reply.",

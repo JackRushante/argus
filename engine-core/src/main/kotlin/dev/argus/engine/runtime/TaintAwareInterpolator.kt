@@ -6,6 +6,7 @@ import dev.argus.engine.model.IntegrityLabel
 import dev.argus.engine.model.InterpolationPolicy
 import dev.argus.engine.model.RemoteEgressPolicy
 import dev.argus.engine.model.SettingsScreen
+import dev.argus.engine.model.ShellQuoting
 import dev.argus.engine.model.TaintPolicy
 import dev.argus.engine.model.ValueProvenance
 import dev.argus.engine.model.VarValue
@@ -44,8 +45,14 @@ sealed interface ActionResolution {
 
 /**
  * Interpolatore P4 a enforcement dinamico. Nei sink locali inserisce il dato; nei campi di
- * autorità rifiuta qualunque TAINTED. Il goal LLM è speciale: il testo TAINTED diventa un marker
- * stabile e viaggia in [RuntimeDataBinding], così non finisce nelle istruzioni di sistema.
+ * autorità l'ammissione di un valore TAINTED è decisa da [TaintPolicy]. Il goal LLM è speciale: il
+ * testo TAINTED diventa un marker stabile e viaggia in [RuntimeDataBinding], così non finisce nelle
+ * istruzioni di sistema.
+ *
+ * Nel comando shell (`run_shell.cmd`, [InterpolationPolicy.TemplateField.shellQuoted]) un valore
+ * TAINTED non viene mai inserito grezzo: lo si rende inerte con [ShellQuoting] secondo il contesto
+ * del segnaposto nel template; se il contesto non è quotabile in sicurezza l'azione è bloccata con
+ * `shell_quote_context`. I valori CLEAN restano come sono.
  */
 class TaintAwareInterpolator {
     fun resolve(action: Action, scope: VarScope): ActionResolution {
@@ -148,9 +155,17 @@ class TaintAwareInterpolator {
             if (template.length > maxChars) throw ResolutionException("interpolation_too_long")
             if (parsed.refs.isEmpty()) return template
 
+            val shellContexts = if (policyField.shellQuoted) {
+                ShellQuoting.contexts(template, REFERENCE.findAll(template).map { it.range }.toList())
+            } else {
+                null
+            }
             val rendered = buildString {
                 var cursor = 0
+                var referenceIndex = 0
                 REFERENCE.findAll(template).forEach { match ->
+                    val shellContext = shellContexts?.get(referenceIndex)
+                    referenceIndex++
                     append(template, cursor, match.range.first)
                     val name = match.groupValues[1]
                     val value = scope[name] ?: throw ResolutionException("variable_unavailable")
@@ -170,6 +185,12 @@ class TaintAwareInterpolator {
                             RuntimeDataBinding(token, name, value)
                         }
                         append("{{").append(binding.token).append("}}")
+                    } else if (shellContext != null && value.integrity == IntegrityLabel.TAINTED) {
+                        // D1: un dato esterno entra nel comando solo come argomento inerte.
+                        append(
+                            ShellQuoting.render(value.text, shellContext)
+                                ?: throw ResolutionException("shell_quote_context"),
+                        )
                     } else {
                         append(value.text)
                     }

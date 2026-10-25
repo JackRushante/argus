@@ -1,9 +1,19 @@
 package dev.argus.engine.runtime
 
 import dev.argus.engine.model.Action
+import dev.argus.engine.model.ApprovalFingerprints
+import dev.argus.engine.model.ArgusJson
+import dev.argus.engine.model.Automation
+import dev.argus.engine.model.AutomationId
+import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.ConfidentialityLabel
+import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.IntegrityLabel
+import dev.argus.engine.model.InterpolationPolicy
+import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.TriggerField
 import dev.argus.engine.model.ValueProvenance
+import dev.argus.engine.model.VarBinding
 import dev.argus.engine.model.VarType
 import dev.argus.engine.model.VarValue
 import kotlin.test.Test
@@ -30,18 +40,112 @@ class TaintAwareInterpolatorTest {
     }
 
     @Test
-    fun `tainted values may fill execution authority in aggressive posture`() {
+    fun `tainted values may fill execution authority in aggressive posture but are shell quoted`() {
         // Posture AGGRESSIVO (TaintPolicy.allowTaintedInAuthority()): un valore TAINTED non viene
-        // piu bloccato in un campo AUTHORITY. La riservatezza e lo shell-gating restano altrove.
+        // piu bloccato in un campo AUTHORITY. D1: nel comando shell entra pero' solo quotato, cosi'
+        // resta un argomento e non diventa sintassi. La riservatezza e lo shell-gating restano altrove.
         val scope = scope("arg", tainted("\$(whoami)"))
 
         val resolved = assertIs<ActionResolution.Resolved>(
             interpolator.resolve(Action.RunShell("echo \${arg}"), scope),
         ).value
 
-        assertEquals("echo \$(whoami)", assertIs<Action.RunShell>(resolved.action).cmd)
+        assertEquals("echo '\$(whoami)'", assertIs<Action.RunShell>(resolved.action).cmd)
         // L'integrita del risultato resta TAINTED: rilassiamo il blocco, non le label.
         assertEquals(IntegrityLabel.TAINTED, resolved.inputIntegrity)
+    }
+
+    @Test
+    fun `tainted shell argument with a quote and a command separator stays one inert token`() {
+        val resolved = assertIs<ActionResolution.Resolved>(
+            interpolator.resolve(
+                Action.RunShell("echo \${arg}"),
+                scope("arg", tainted("a'b; rm -rf /")),
+            ),
+        ).value
+        assertEquals("echo 'a'\\''b; rm -rf /'", assertIs<Action.RunShell>(resolved.action).cmd)
+    }
+
+    @Test
+    fun `captured shell and model output is tainted and therefore quoted`() {
+        for (provenance in listOf(ValueProvenance.SHELL, ValueProvenance.MODEL)) {
+            val captured = VarValue(
+                text = "x'; reboot; '",
+                type = VarType.TEXT,
+                integrity = IntegrityLabel.TAINTED,
+                confidentiality = ConfidentialityLabel.SECRET,
+                provenance = setOf(provenance),
+            )
+            val resolved = assertIs<ActionResolution.Resolved>(
+                interpolator.resolve(Action.RunShell("log \${out}"), scope("out", captured)),
+            ).value
+            assertEquals(
+                "log 'x'\\''; reboot; '\\'''",
+                assertIs<Action.RunShell>(resolved.action).cmd,
+                "provenance $provenance",
+            )
+        }
+    }
+
+    @Test
+    fun `clean values in a shell command are inserted unchanged`() {
+        val resolved = assertIs<ActionResolution.Resolved>(
+            interpolator.resolve(
+                Action.RunShell("ls \${dir} | wc -l"),
+                scope("dir", clean("/sdcard/DCIM; echo 'a b'")),
+            ),
+        ).value
+        assertEquals("ls /sdcard/DCIM; echo 'a b' | wc -l", assertIs<Action.RunShell>(resolved.action).cmd)
+        assertEquals(IntegrityLabel.CLEAN, resolved.inputIntegrity)
+    }
+
+    @Test
+    fun `only the shell command is quoted not the other authority or sink fields`() {
+        val scope = scope("arg", tainted("o'k"))
+        val url = assertIs<ActionResolution.Resolved>(
+            interpolator.resolve(Action.OpenUrl("https://example.com/?q=\${arg}"), scope),
+        ).value
+        assertEquals("https://example.com/?q=o'k", assertIs<Action.OpenUrl>(url.action).url)
+        val notification = assertIs<ActionResolution.Resolved>(
+            interpolator.resolve(Action.ShowNotification("t", "\${arg}"), scope),
+        ).value
+        assertEquals("o'k", assertIs<Action.ShowNotification>(notification.action).text)
+    }
+
+    @Test
+    fun `quoting follows the quote context of the placeholder in the approved template`() {
+        val scope = scope("arg", tainted("a\"b\$c'd"))
+        fun cmd(template: String) = assertIs<Action.RunShell>(
+            assertIs<ActionResolution.Resolved>(interpolator.resolve(Action.RunShell(template), scope)).value.action,
+        ).cmd
+        assertEquals("echo 'a\"b\$c'\\''d'", cmd("echo \${arg}"))
+        assertEquals("echo \"a\\\"b\\\$c'd\"", cmd("echo \"\${arg}\""))
+        assertEquals("echo 'a\"b\$c'\\''d'", cmd("echo '\${arg}'"))
+    }
+
+    @Test
+    fun `the template and its approval fingerprint are untouched by quoting`() {
+        val action = Action.RunShell("echo \${arg}")
+        val automation = Automation(
+            id = AutomationId("shell-fp"),
+            name = "shell",
+            createdBy = CreatedBy.LLM,
+            status = AutomationStatus.PENDING_APPROVAL,
+            trigger = Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+            actions = listOf(action),
+            vars = listOf(VarBinding.TriggerPayload("arg", TriggerField.TEXT, null, ConfidentialityLabel.PRIVATE)),
+        )
+        val before = ApprovalFingerprints.of(automation)
+        val canonicalBefore = ArgusJson.encodeToString(Automation.serializer(), automation)
+
+        interpolator.resolve(action, scope("arg", tainted("a'b; rm -rf /")))
+
+        assertEquals(before, ApprovalFingerprints.of(automation))
+        assertEquals(canonicalBefore, ArgusJson.encodeToString(Automation.serializer(), automation))
+        assertEquals("echo \${arg}", action.cmd)
+        assertTrue("shellQuoted" !in canonicalBefore)
+        // Il flag di quoting vive solo nella policy, non nel materiale approvato.
+        assertTrue(InterpolationPolicy.textFields(action).single().shellQuoted)
     }
 
     @Test
@@ -49,7 +153,7 @@ class TaintAwareInterpolatorTest {
         val shell = assertIs<ActionResolution.Resolved>(
             interpolator.resolve(Action.RunShell("curl \${arg}"), scope("arg", tainted("http://evil.example"))),
         ).value
-        assertEquals("curl http://evil.example", assertIs<Action.RunShell>(shell.action).cmd)
+        assertEquals("curl 'http://evil.example'", assertIs<Action.RunShell>(shell.action).cmd)
         assertEquals(IntegrityLabel.TAINTED, shell.inputIntegrity)
 
         val url = assertIs<ActionResolution.Resolved>(
