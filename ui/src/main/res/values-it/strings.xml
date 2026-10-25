@@ -152,6 +152,14 @@
     <string name="log_copy_and_open">Copia e apri WhatsApp</string>
     <string name="log_mark_sent">Segna come inviata</string>
     <string name="log_open_automation">Apri automazione</string>
+    <string name="log_menu_open">Opzioni del log</string>
+    <string name="log_menu_retention_title">Conserva il log per</string>
+    <string name="log_menu_retention_option">%1$d giorni</string>
+    <string name="log_menu_clear">Svuota il log</string>
+    <string name="log_menu_export">Esporta (senza dati personali)</string>
+    <string name="log_clear_confirm">Svuotare il log? Non si può annullare.</string>
+    <string name="log_clear_confirm_action">Svuota</string>
+    <string name="log_clear_confirm_cancel">Annulla</string>
 
     <!-- Sistema (settings) -->
     <string name="settings_title">Sistema</string>
