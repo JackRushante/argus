@@ -31,6 +31,7 @@ import dev.argus.automation.PersistentDeferredReplySink
 import dev.argus.automation.PrivacyRevocationCoordinator
 import dev.argus.automation.DeviceStateSnapshotProvider
 import dev.argus.automation.AndroidClipboardCopier
+import dev.argus.automation.AppInstallInfo
 import dev.argus.automation.ClipboardCopier
 import dev.argus.automation.EngineNotificationEventDispatcher
 import dev.argus.automation.EnginePhoneEventDispatcher
@@ -174,6 +175,10 @@ object ArgusModule {
     @Provides
     @Singleton
     fun renderLanguageSource(): RenderLanguageSource = RenderLanguageSource()
+
+    @Provides
+    @Singleton
+    fun appInstallInfo(@ApplicationContext context: Context): AppInstallInfo = AppInstallInfo.read(context)
 
     @Provides
     @Singleton

@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dev.argus.automation.AndroidCapabilityProbe
+import dev.argus.automation.AppInstallInfo
 import dev.argus.automation.AppPreferences
 import dev.argus.automation.AppPreferencesStore
 import dev.argus.automation.BridgeHealthResult
@@ -13,6 +14,7 @@ import dev.argus.automation.ConfiguredBridgeBrain
 import dev.argus.automation.connectivity.ConnectivitySentinelStatus
 import dev.argus.automation.PrivacyRevocationCoordinator
 import dev.argus.automation.PrivacyRevocationResult
+import dev.argus.automation.RenderLanguageSource
 import dev.argus.automation.budget.BudgetLimits
 import dev.argus.automation.budget.BudgetSettings
 import dev.argus.automation.budget.BudgetSettingsStore
@@ -44,6 +46,7 @@ import dev.argus.ui.model.ProviderChoiceUi
 import dev.argus.ui.model.ProviderUsageUi
 import dev.argus.ui.model.SettingsState
 import dev.argus.ui.model.TransportUi
+import dev.argus.ui.presentation.ModelFieldHints
 import dev.argus.ui.presentation.RenderLanguage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -238,6 +241,18 @@ internal fun budgetUi(usage: BudgetUsageSnapshot, settings: BudgetSettings): Bud
 
 private val LOOPBACK_HOSTS = setOf("localhost", "127.0.0.1", "::1")
 
+private const val CHAT_COMPLETIONS_SUFFIX = "/chat/completions"
+
+/**
+ * URL base Custom senza il suffisso `/chat/completions` (con o senza slash finale), oppure null se non
+ * lo ha: Argus aggiunge da solo quel segmento, quindi lasciarlo darebbe un 404.
+ */
+internal fun withoutChatCompletions(baseUrl: String): String? {
+    val trimmed = baseUrl.trim().trimEnd('/')
+    if (!trimmed.endsWith(CHAT_COMPLETIONS_SUFFIX, ignoreCase = true)) return null
+    return trimmed.dropLast(CHAT_COMPLETIONS_SUFFIX.length)
+}
+
 /** true se l'host dell'URL è esattamente uno dei loopback ammessi per il cleartext del Custom. */
 internal fun isLoopbackBaseUrl(baseUrl: String): Boolean {
     val host = runCatching { URI(baseUrl.trim()).host }.getOrNull() ?: return false
@@ -259,8 +274,12 @@ class SettingsViewModel @Inject constructor(
     private val connectivitySentinelStatus: ConnectivitySentinelStatus,
     private val usage: UsageDao,
     private val budgetSettings: BudgetSettingsStore,
-    private val language: RenderLanguage = RenderLanguage.system(),
+    private val languageSource: RenderLanguageSource,
+    private val installInfo: AppInstallInfo,
 ) : ViewModel() {
+    /** Lingua corrente al momento in cui si produce un testo (messaggi, errori); segue il telefono. */
+    private val language: RenderLanguage get() = languageSource.current
+
     private val refreshSignal = MutableStateFlow(0L)
     private val budgetUsage = MutableStateFlow(BudgetUsageSnapshot())
     private val bridgeHealth = MutableStateFlow(BridgeUiHealth())
@@ -325,6 +344,8 @@ class SettingsViewModel @Inject constructor(
         budgetUsage,
         budgetSettings.observe(),
         mutableKeySaved,
+        // Al cambio di lingua del telefono lo stato si rigenera (etichette e testi prodotti qui).
+        languageSource.language,
     ) { values: Array<Any?> ->
         val settingsSources = values[0] as SettingsSources
         val bridge = values[1] as BridgeUiHealth
@@ -355,6 +376,8 @@ class SettingsViewModel @Inject constructor(
             budget = budgetUi(usageSnapshot, budgetConfig),
             privacyAccepted = settingsSources.privacyAccepted,
             appVersionLabel = appVersionLabel(),
+            notificationListenerRestrictedHint =
+                !health.notificationListenerGranted && installInfo.mayHaveRestrictedSettings,
         )
     }.stateIn(
         viewModelScope,
@@ -475,14 +498,31 @@ class SettingsViewModel @Inject constructor(
                     return
                 }
         }
+        // Custom: l'URL base non deve finire con /chat/completions (Argus lo aggiunge da solo).
+        val strippedBaseUrl = baseUrl?.takeIf { id == ProviderId.CUSTOM_OPENAI_COMPAT }
+            ?.let(::withoutChatCompletions)
+        val cleanBaseUrl = strippedBaseUrl ?: baseUrl
+        val strippedSuffix = strippedBaseUrl != null
         viewModelScope.launch {
             try {
                 if (!configuration.saveProviderConfig(
-                        id, baseUrl = baseUrl, model = model, apiKey = apiKey, reasoningEffort = effort,
+                        id, baseUrl = cleanBaseUrl, model = model, apiKey = apiKey, reasoningEffort = effort,
                     )
                 ) {
                     message(language.pick("Invalid configuration.", "Configurazione non valida."))
                     return@launch
+                }
+                if (strippedSuffix) {
+                    message(
+                        language.pick(
+                            "I removed /chat/completions from the address: Argus adds it by itself.",
+                            "Ho tolto /chat/completions dall'indirizzo: Argus lo aggiunge da solo.",
+                        ),
+                    )
+                }
+                // Preset OpenRouter scritto `@presets/…`: si avvisa, ma il valore non si corregge da solo.
+                if (id == ProviderId.OPENROUTER && ModelFieldHints.isMistypedPreset(model)) {
+                    message(language.pick("The format is @preset/<name>.", "Il formato è @preset/<nome>."))
                 }
                 bridgeHealth.value = BridgeUiHealth()
                 refresh()
@@ -708,18 +748,20 @@ class SettingsViewModel @Inject constructor(
             }
             is BridgeHealthResult.Unreachable -> {
                 bridgeHealth.value = BridgeUiHealth(reachable = false)
-                val suffix = result.kind.name.lowercase(Locale.ROOT)
+                // La causa (rete, chiave, credito, URL, modello…) va detta: il messaggio del provider,
+                // già ripulito, compare solo qui e non viene né registrato né salvato.
+                val reason = connectionFailureText(
+                    label = label,
+                    failure = result,
+                    baseUrl = runCatching { configuration.providerConfig(configuration.selectedProviderId()).baseUrl }
+                        .getOrNull(),
+                    language = language,
+                )
                 message(
                     if (savedMessage) {
-                        language.pick(
-                            "Configuration saved; $label is unreachable ($suffix).",
-                            "Configurazione salvata; $label non raggiungibile ($suffix).",
-                        )
+                        language.pick("Configuration saved; $reason", "Configurazione salvata; $reason")
                     } else {
-                        language.pick(
-                            "$label is unreachable ($suffix).",
-                            "$label non raggiungibile ($suffix).",
-                        )
+                        reason
                     },
                 )
             }
@@ -755,6 +797,7 @@ class SettingsViewModel @Inject constructor(
                 unauthenticatedLoopback = id == ProviderId.CUSTOM_OPENAI_COMPAT &&
                     keySaved == false &&
                     isLoopbackBaseUrl(config.baseUrl),
+                modelPresetHint = id == ProviderId.OPENROUTER,
             )
         }
     }
@@ -789,13 +832,14 @@ class SettingsViewModel @Inject constructor(
             budget = BudgetUi(),
             privacyAccepted = false,
             appVersionLabel = appVersionLabel(),
+            notificationListenerRestrictedHint =
+                !health.notificationListenerGranted && installInfo.mayHaveRestrictedSettings,
         )
     }
 
-    private fun appVersionLabel(): String = runCatching {
-        val info = context.packageManager.getPackageInfo(context.packageName, 0)
-        "Argus v${info.versionName ?: "?"} · sideload"
-    }.getOrDefault("Argus · sideload")
+    /** «Argus vX · F-Droid» se l'installer è un client F-Droid noto, altrimenti «Argus vX · APK». */
+    private fun appVersionLabel(): String =
+        "Argus v${installInfo.versionName ?: "?"} · ${installInfo.sourceLabel}"
 
     private fun latencyLabel(millis: Long): String = when {
         millis < 1_000 -> "$millis ms"
