@@ -29,6 +29,7 @@ import dev.argus.engine.runtime.TaintAwareInterpolator
 import dev.argus.engine.runtime.TriggerEvent
 import dev.argus.engine.runtime.TriggerEventId
 import dev.argus.engine.runtime.VarScope
+import dev.argus.shizuku.ShizukuShellException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -467,6 +468,58 @@ class ShizukuActionExecutorTest {
                 executor(replies = gateway).execute(Action.WhatsAppReply("ciao"), replyContext),
             )
         }
+    }
+
+    @Test
+    fun `typed shizuku failures of the privileged shell reach the journal with their own code`() = runTest {
+        listOf(
+            "shizuku_unavailable",
+            "shizuku_unsupported",
+            "shizuku_timeout",
+        ).forEach { code ->
+            // Difesa in profondità: anche se un controller lasciasse passare l'eccezione grezza.
+            val raw = executor(ThrowingDeviceController(ShizukuShellException(code)))
+            assertEquals(ActionResult.Failure(code), raw.execute(Action.SetWifi(true), context))
+
+            // Il percorso normale: il tool traduce la causa in DeviceToolException.
+            val wrapped = executor(ThrowingDeviceController(DeviceToolException(code)))
+            assertEquals(ActionResult.Failure(code), wrapped.execute(Action.SetWifi(true), context))
+
+            // Operazione con esito diverso dal toggle: stesso codice.
+            assertEquals(ActionResult.Failure(code), raw.execute(Action.SetBluetooth(false), context))
+        }
+    }
+
+    @Test
+    fun `shell transport failures keep the typed shizuku code on the flat and the resolved path`() = runTest {
+        val trusted = context.copy(
+            event = TriggerEvent.TimeFired(context.automationId, context.approvalFingerprint),
+        )
+        val resolved = (
+            TaintAwareInterpolator().resolve(
+                Action.RunShell("id", captureAs = "identity"),
+                VarScope(),
+            ) as ActionResolution.Resolved
+            ).value
+        val runner = object : StaticShellRunner {
+            override suspend fun run(command: String, context: FireContext): ActionResult =
+                throw ShizukuShellException(ShizukuShellException.TIMEOUT)
+
+            override suspend fun runCaptured(
+                command: String,
+                context: FireContext,
+            ): ProgramActionResult = throw ShizukuShellException(ShizukuShellException.UNAVAILABLE)
+        }
+        val exec = executor(staticShell = runner, shizukuReady = { true })
+
+        assertEquals(
+            ActionResult.Failure("shizuku_timeout"),
+            exec.execute(Action.RunShell("id"), trusted),
+        )
+        assertEquals(
+            ActionResult.Failure("shizuku_unavailable"),
+            exec.execute(resolved, trusted).result,
+        )
     }
 
     @Test

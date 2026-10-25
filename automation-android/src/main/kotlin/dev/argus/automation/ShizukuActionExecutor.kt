@@ -19,6 +19,7 @@ import dev.argus.engine.runtime.ResolvedProgramAction
 import dev.argus.engine.runtime.RuntimeDataBinding
 import dev.argus.engine.runtime.TriggerEvent
 import dev.argus.engine.safety.StaticShellSafety
+import dev.argus.shizuku.ShizukuShellException
 import kotlinx.coroutines.CancellationException
 
 /** Boundary Android per le notifiche prodotte da una regola. */
@@ -108,6 +109,8 @@ class ShizukuActionExecutor(
     } catch (error: CancellationException) {
         throw error
     } catch (error: DeviceToolException) {
+        ProgramActionResult(ActionResult.Failure(error.code))
+    } catch (error: ShizukuShellException) {
         ProgramActionResult(ActionResult.Failure(error.code))
     } catch (_: IllegalArgumentException) {
         ProgramActionResult(ActionResult.Failure("action_invalid"))
@@ -243,6 +246,8 @@ class ShizukuActionExecutor(
     } catch (error: CancellationException) {
         throw error
     } catch (error: DeviceToolException) {
+        ActionResult.Failure(error.code)
+    } catch (error: ShizukuShellException) {
         ActionResult.Failure(error.code)
     } catch (_: IllegalArgumentException) {
         ActionResult.Failure("action_invalid")

@@ -111,6 +111,37 @@ class PrioritizedPrivilegedShellTest {
     }
 
     @Test
+    fun `typed transport failures reach the caller with their stable code`() = runTest {
+        val shell = PrioritizedPrivilegedShell(
+            ShellTransport { throw ShizukuShellException(ShizukuShellException.TIMEOUT) },
+            this,
+        )
+
+        val error = assertFailsWith<ShizukuShellException> { shell.run(listOf("id")) }
+
+        assertEquals("shizuku_timeout", error.code)
+        shell.close()
+    }
+
+    @Test
+    fun `untyped transport failures become shizuku_unavailable`() = runTest {
+        val shell = PrioritizedPrivilegedShell(
+            ShellTransport { throw IllegalStateException("UserService Shizuku disconnesso") },
+            this,
+        )
+
+        val error = assertFailsWith<ShizukuShellException> { shell.run(listOf("id")) }
+
+        assertEquals("shizuku_unavailable", error.code)
+        // Il worker sopravvive al fallimento: la richiesta successiva viene servita.
+        assertEquals(
+            "shizuku_unavailable",
+            assertFailsWith<ShizukuShellException> { shell.run(listOf("id")) }.code,
+        )
+        shell.close()
+    }
+
+    @Test
     fun `close cancels running and queued commands and rejects new work`() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         val gate = CompletableDeferred<Unit>()
