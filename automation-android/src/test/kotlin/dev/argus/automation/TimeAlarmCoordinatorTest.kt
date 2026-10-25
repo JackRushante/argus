@@ -18,9 +18,14 @@ import dev.argus.engine.runtime.FireClaimResult
 import dev.argus.engine.runtime.TriggerEnvelope
 import dev.argus.engine.runtime.TriggerEvent
 import dev.argus.engine.runtime.TriggerEventId
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -688,6 +693,182 @@ class TimeAlarmCoordinatorTest {
         assertEquals(AutomationStatus.DISABLED, store.get(automation.id)?.status)
     }
 
+    // --- B3: il dispatch gira FUORI dal lock dello scheduler ---------------------------------
+
+    @Test
+    fun `dispatch in flight does not block reconcile or the alarm of another rule`() = runTest {
+        val slow = automation(Trigger.Time(cron = "1 20 * * *", tz = "UTC"), "slow")
+        val other = automation(Trigger.Time(cron = "5 20 * * *", tz = "UTC"), "other")
+        val dueAt = Instant.parse("2026-07-13T20:00:00Z").toEpochMilli()
+        val state = FakeTimeAlarmStateStore(record(slow, dueAt), record(other, dueAt))
+        val gate = DispatchGate(blockedAutomation = slow.id)
+        val coordinator = gatedCoordinator(FakeAutomationStore(slow, other), state, gate)
+
+        val running = async { coordinator.onAlarm(slow.id, fingerprint(slow), dueAt) }
+        gate.entered.await()
+
+        // Un'altra regola e una reconcile completano mentre `slow` sta ancora eseguendo.
+        assertIs<AlarmDeliveryResult.Delivered>(
+            withTimeout(1_000) { coordinator.onAlarm(other.id, fingerprint(other), dueAt) },
+        )
+        val report = withTimeout(1_000) { coordinator.reconcile(ReconcileReason.APP_START) }
+
+        // Il record resta DOVUTO (sicurezza in caso di crash) ma reconcile non lo recupera né lo
+        // riconsegna: nessuna doppia consegna.
+        assertEquals(dueAt, state.get(slow.id)?.eventAtMillis)
+        assertEquals(emptyList(), report.recovered)
+        assertEquals(emptyList(), report.cancelled)
+        assertEquals(emptyList(), report.failed)
+        assertEquals(1, gate.dispatchedFor(slow).size)
+
+        gate.release.complete(Unit)
+        assertIs<AlarmDeliveryResult.Delivered>(running.await())
+        assertEquals(
+            Instant.parse("2026-07-13T20:01:00Z").toEpochMilli(),
+            state.get(slow.id)?.eventAtMillis,
+        )
+        assertEquals(1, gate.dispatchedFor(slow).size, "una sola consegna per la regola lenta")
+    }
+
+    @Test
+    fun `a second alarm for a rule already in flight is ignored`() = runTest {
+        val slow = automation(Trigger.Time(cron = "1 20 * * *", tz = "UTC"), "slow")
+        val dueAt = Instant.parse("2026-07-13T20:00:00Z").toEpochMilli()
+        val state = FakeTimeAlarmStateStore(record(slow, dueAt))
+        val gate = DispatchGate(blockedAutomation = slow.id)
+        val coordinator = gatedCoordinator(FakeAutomationStore(slow), state, gate)
+
+        val running = async { coordinator.onAlarm(slow.id, fingerprint(slow), dueAt) }
+        gate.entered.await()
+        val duplicate = withTimeout(1_000) {
+            coordinator.onAlarm(slow.id, fingerprint(slow), dueAt)
+        }
+
+        assertIs<AlarmDeliveryResult.Ignored>(duplicate)
+        assertEquals(1, gate.dispatched.size)
+        gate.release.complete(Unit)
+        assertIs<AlarmDeliveryResult.Delivered>(running.await())
+        assertEquals(1, gate.dispatched.size)
+    }
+
+    @Test
+    fun `reconcile recovering a due record does not hold the lock during its dispatch`() = runTest {
+        val slow = automation(Trigger.Time(cron = "1 20 * * *", tz = "UTC"), "slow")
+        val other = automation(Trigger.Time(cron = "5 20 * * *", tz = "UTC"), "other")
+        val dueAt = Instant.parse("2026-07-13T20:00:00Z").toEpochMilli()
+        val state = FakeTimeAlarmStateStore(record(slow, dueAt), record(other, dueAt))
+        val gate = DispatchGate(blockedAutomation = slow.id)
+        val coordinator = gatedCoordinator(FakeAutomationStore(slow, other), state, gate)
+
+        val reconciling = async { coordinator.reconcile(ReconcileReason.APP_START) }
+        gate.entered.await()
+
+        assertIs<AlarmDeliveryResult.Delivered>(
+            withTimeout(1_000) { coordinator.onAlarm(other.id, fingerprint(other), dueAt) },
+        )
+        assertEquals(dueAt, state.get(slow.id)?.eventAtMillis)
+
+        gate.release.complete(Unit)
+        val report = reconciling.await()
+        assertTrue(slow.id in report.recovered)
+        assertEquals(
+            Instant.parse("2026-07-13T20:01:00Z").toEpochMilli(),
+            state.get(slow.id)?.eventAtMillis,
+        )
+    }
+
+    @Test
+    fun `rule disabled or deleted while dispatching is cancelled and forgotten at the end`() = runTest {
+        for (removal in listOf("disable", "delete")) {
+            val slow = automation(Trigger.Time(cron = "1 20 * * *", tz = "UTC"), "slow")
+            val dueAt = Instant.parse("2026-07-13T20:00:00Z").toEpochMilli()
+            val store = FakeAutomationStore(slow)
+            val state = FakeTimeAlarmStateStore(record(slow, dueAt))
+            val backend = FakeTimeAlarmBackend()
+            val gate = DispatchGate(blockedAutomation = slow.id)
+            val coordinator = gatedCoordinator(store, state, gate, backend)
+
+            val running = async { coordinator.onAlarm(slow.id, fingerprint(slow), dueAt) }
+            gate.entered.await()
+            if (removal == "disable") store.disable(slow.id) else store.delete(slow.id)
+
+            // Durante il dispatch la reconcile NON tocca il record in volo.
+            val report = withTimeout(1_000) { coordinator.reconcile(ReconcileReason.CAPABILITY_CHANGED) }
+            assertEquals(emptyList(), report.cancelled, removal)
+            assertEquals(dueAt, state.get(slow.id)?.eventAtMillis, removal)
+
+            gate.release.complete(Unit)
+            assertIs<AlarmDeliveryResult.Delivered>(running.await(), removal)
+            assertNull(state.get(slow.id), removal)
+            assertTrue(slow.id in backend.cancelled, removal)
+        }
+    }
+
+    @Test
+    fun `cancelled dispatch releases the in-flight marker and the record stays due for recovery`() = runTest {
+        val slow = automation(Trigger.Time(cron = "1 20 * * *", tz = "UTC"), "slow")
+        val dueAt = Instant.parse("2026-07-13T20:00:00Z").toEpochMilli()
+        val state = FakeTimeAlarmStateStore(record(slow, dueAt))
+        val gate = DispatchGate(blockedAutomation = slow.id, blockOnlyFirstCall = true)
+        val coordinator = gatedCoordinator(FakeAutomationStore(slow), state, gate)
+
+        val running = launch { coordinator.onAlarm(slow.id, fingerprint(slow), dueAt) }
+        gate.entered.await()
+        running.cancelAndJoin()
+
+        assertEquals(dueAt, state.get(slow.id)?.eventAtMillis)
+        val report = withTimeout(1_000) { coordinator.reconcile(ReconcileReason.APP_START) }
+        assertEquals(listOf(slow.id), report.recovered)
+        assertEquals(2, gate.dispatched.size)
+        assertEquals(gate.dispatched[0], gate.dispatched[1], "stesso event id alla ripetizione")
+    }
+
+    @Test
+    fun `failed dispatch releases the in-flight marker`() = runTest {
+        val slow = automation(Trigger.Time(cron = "1 20 * * *", tz = "UTC"), "slow")
+        val dueAt = Instant.parse("2026-07-13T20:00:00Z").toEpochMilli()
+        val state = FakeTimeAlarmStateStore(record(slow, dueAt))
+        var fail = true
+        val dispatched = mutableListOf<String>()
+        val coordinator = TimeAlarmCoordinator(
+            store = FakeAutomationStore(slow),
+            state = state,
+            backend = FakeTimeAlarmBackend(),
+            dispatcher = TimeEventDispatcher {
+                dispatched += it.id.value
+                if (fail) error("boom")
+            },
+            now = { now },
+        )
+
+        assertEquals(
+            AlarmDeliveryResult.Failed("dispatch_failed"),
+            coordinator.onAlarm(slow.id, fingerprint(slow), dueAt),
+        )
+        assertEquals(dueAt, state.get(slow.id)?.eventAtMillis)
+        fail = false
+        val report = coordinator.reconcile(ReconcileReason.APP_START)
+
+        assertEquals(listOf(slow.id), report.recovered)
+        assertEquals(2, dispatched.size)
+    }
+
+    private fun fingerprint(automation: Automation): ApprovalFingerprint =
+        requireNotNull(automation.approvalFingerprint)
+
+    private fun gatedCoordinator(
+        store: FakeAutomationStore,
+        state: FakeTimeAlarmStateStore,
+        gate: DispatchGate,
+        backend: FakeTimeAlarmBackend = FakeTimeAlarmBackend(),
+    ) = TimeAlarmCoordinator(
+        store = store,
+        state = state,
+        backend = backend,
+        dispatcher = TimeEventDispatcher { gate.dispatch(it) },
+        now = { now },
+    )
+
     private fun coordinator(
         store: FakeAutomationStore,
         state: FakeTimeAlarmStateStore,
@@ -700,9 +881,9 @@ class TimeAlarmCoordinatorTest {
         now = { now },
     )
 
-    private fun automation(trigger: Trigger.Time): Automation {
+    private fun automation(trigger: Trigger.Time, id: String = "a1"): Automation {
         val unsigned = Automation(
-            id = AutomationId("a1"),
+            id = AutomationId(id),
             name = "test",
             createdBy = CreatedBy.USER,
             status = AutomationStatus.ARMED,
@@ -722,6 +903,29 @@ class TimeAlarmCoordinatorTest {
         scheduledMode = ScheduledAlarmMode.INEXACT,
         updatedAtMillis = at,
     )
+}
+
+private class DispatchGate(
+    private val blockedAutomation: AutomationId,
+    private val blockOnlyFirstCall: Boolean = false,
+) {
+    val entered = CompletableDeferred<Unit>()
+    val release = CompletableDeferred<Unit>()
+    val dispatched = mutableListOf<String>()
+    private var blockedOnce = false
+
+    suspend fun dispatch(envelope: TriggerEnvelope) {
+        dispatched += envelope.id.value
+        val target = (envelope.event as TriggerEvent.TimeFired).automationId
+        if (target != blockedAutomation) return
+        if (blockOnlyFirstCall && blockedOnce) return
+        blockedOnce = true
+        entered.complete(Unit)
+        release.await()
+    }
+
+    fun dispatchedFor(automation: Automation): List<String> =
+        dispatched.filter { requireNotNull(automation.approvalFingerprint).value in it }
 }
 
 private class ScheduleAuditRecorder : AuditSink {
