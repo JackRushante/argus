@@ -1,8 +1,13 @@
 package dev.argus.automation.vm
 
+import dev.argus.shizuku.ShizukuGatewayStatus
 import dev.argus.ui.model.BgLocationState
+import dev.argus.ui.model.ShizukuStatus
+import dev.argus.ui.presentation.RenderLanguage
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
+import kotlin.test.assertNull
 
 /**
  * Stato UI della posizione in background. Bug segnalato da Lorenzo: concessa «sempre/precisa» ma
@@ -57,5 +62,36 @@ class AndroidUiHealthTest {
             BgLocationState.DENIED,
             health(bg = false, fg = false).backgroundLocationState(needed = true),
         )
+    }
+}
+
+class ShizukuStatusNoteTest {
+    @Test
+    fun `an outdated Shizuku says it is too old in both languages`() {
+        assertEquals(
+            "Shizuku troppo vecchio: aggiornalo",
+            ShizukuGatewayStatus.UNSUPPORTED.statusNote(RenderLanguage.IT),
+        )
+        assertEquals(
+            "Shizuku is too old: update it",
+            ShizukuGatewayStatus.UNSUPPORTED.statusNote(RenderLanguage.EN),
+        )
+    }
+
+    @Test
+    fun `every other status needs no extra note`() {
+        ShizukuGatewayStatus.entries
+            .filter { it != ShizukuGatewayStatus.UNSUPPORTED }
+            .forEach { status ->
+                assertNull(status.statusNote(RenderLanguage.IT), status.name)
+                assertNull(status.statusNote(RenderLanguage.EN), status.name)
+            }
+    }
+
+    @Test
+    fun `an outdated Shizuku never reads as authorized in the ui status`() {
+        val ui = ShizukuGatewayStatus.UNSUPPORTED.toUiStatus(degradedAfterReboot = false)
+        assertNotEquals(ShizukuStatus.AUTHORIZED, ui)
+        assertNotEquals(ShizukuStatus.RUNNING_NOT_AUTHORIZED, ui)
     }
 }
