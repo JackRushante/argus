@@ -9,6 +9,11 @@ package dev.argus.engine.model
  * [FieldClass] conserva la distinzione tra dato e autorità. L'ammissione di valori TAINTED nei
  * campi [FieldClass.AUTHORITY] è decisa centralmente da [TaintPolicy] (abilitata nella postura
  * Aggressive corrente), non da questa tabella.
+ *
+ * Il template di un campo è LETTERALE e fingerprintato; i valori interpolati no. Per il solo comando
+ * shell ([TemplateField.shellQuoted], `run_shell.cmd`) un valore TAINTED viene inserito già
+ * quotato ([ShellQuoting]): un messaggio esterno non può più aggiungere comandi, redirezioni o
+ * sostituzioni al comando approvato. I valori CLEAN restano testo grezzo, come scelto dall'utente.
  */
 object InterpolationPolicy {
 
@@ -21,8 +26,16 @@ object InterpolationPolicy {
         AUTHORITY,
     }
 
-    /** Un campo testuale di un'azione con il suo valore e la sua classe. */
-    data class TemplateField(val label: String, val value: String, val cls: FieldClass)
+    /**
+     * Un campo testuale di un'azione con il suo valore e la sua classe. [shellQuoted] è vero solo
+     * per `run_shell.cmd`: il runtime inserisce i valori TAINTED con [ShellQuoting] (D1).
+     */
+    data class TemplateField(
+        val label: String,
+        val value: String,
+        val cls: FieldClass,
+        val shellQuoted: Boolean = false,
+    )
 
     /** Riferimento `${nome}` valido: il nome rispetta [VarBinding.NAME_REGEX]. */
     // Escape both braces: Android's ICU regex engine rejects a bare closing brace even though
@@ -34,6 +47,13 @@ object InterpolationPolicy {
 
     /** Esito del parsing lineare di un template. */
     data class ParseResult(val refs: List<String>, val malformed: Boolean)
+
+    /** Un riferimento `${nome}` valido con la sua posizione nel template. */
+    data class Reference(val name: String, val range: IntRange)
+
+    /** Riferimenti validi nell'ordine di apparizione, con gli intervalli nel [template]. */
+    fun references(template: String): List<Reference> =
+        VALID_REF.findAll(template).map { Reference(it.groupValues[1], it.range) }.toList()
 
     /**
      * Estrae i nomi di variabile referenziati da `${nome}`. [malformed] è true se esiste un `${`
@@ -72,7 +92,9 @@ object InterpolationPolicy {
         is Action.InvokeLlmV2 -> listOf(TemplateField("goal", action.goal, FieldClass.SINK))
 
         // --- AUTHORITY: template fingerprintati; TAINTED dipende da TaintPolicy ---
-        is Action.RunShell -> listOf(TemplateField("cmd", action.cmd, FieldClass.AUTHORITY))
+        is Action.RunShell -> listOf(
+            TemplateField("cmd", action.cmd, FieldClass.AUTHORITY, shellQuoted = true),
+        )
         is Action.OpenUrl -> listOf(TemplateField("url", action.url, FieldClass.AUTHORITY))
         is Action.LaunchApp -> listOf(TemplateField("pkg", action.pkg, FieldClass.AUTHORITY))
         is Action.InputText -> listOf(TemplateField("text", action.text, FieldClass.AUTHORITY))

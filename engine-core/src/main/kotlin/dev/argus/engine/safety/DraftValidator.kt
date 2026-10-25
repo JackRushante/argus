@@ -612,6 +612,37 @@ class DraftValidator(
                     }
                 }
             }
+            // D1: a runtime un dato esterno entra nel comando solo quotato per contesto. Se il punto
+            // del template non è quotabile in sicurezza l'azione verrebbe bloccata: meglio dirlo ora.
+            if (field.shellQuoted && !parsed.malformed) {
+                val references = InterpolationPolicy.references(field.value)
+                val contexts = ShellQuoting.contexts(field.value, references.map { it.range })
+                val unquotable = references.indices.any { index ->
+                    val name = references[index].name
+                    contexts[index] == ShellQuoting.Context.UNSAFE && name in knownVars &&
+                        declaredIntegrity[name] != IntegrityLabel.CLEAN
+                }
+                if (unquotable) {
+                    warn(
+                        "interpolation_shell_context",
+                        "Un dato esterno è usato in un punto del comando shell che non si può quotare " +
+                            "in sicurezza (sostituzione di comando, backtick, here-doc o commento): " +
+                            "a runtime l'azione sarebbe bloccata",
+                    )
+                }
+            }
+        }
+        // D2: la scrittura di un'impostazione guidata da un dato esterno (messaggio o notifica).
+        if (action is Action.WriteSetting) {
+            val external = InterpolationPolicy.textFields(action)
+                .flatMap { InterpolationPolicy.parse(it.value).refs }
+                .any { declaredIntegrity[it] == IntegrityLabel.TAINTED }
+            if (external) {
+                warn(
+                    "write_setting_external_value",
+                    "Il valore scritto arriva da un dato esterno (messaggio o notifica).",
+                )
+            }
         }
     }
 
@@ -965,12 +996,19 @@ class DraftValidator(
                         "write_setting_value_invalid",
                         "Valore impostazione vuoto, troppo lungo o con caratteri di controllo",
                     )
-                // D2: la scrittura crea autorità e il valore è letterale/approvato, mai dal trigger.
+                // D2: la scrittura crea autorità; la review mostra namespace, chiave e valore integrali.
                 warn(
                     "write_setting_review",
                     "Scrittura impostazione approvata letteralmente: " +
                         "${action.namespace.name.lowercase()} ${action.key} = ${action.value}",
                 )
+                if (WriteSettingPolicy.isHighImpact(action.namespace, action.key)) {
+                    warn(
+                        "write_setting_high_impact",
+                        "Questa regola cambia un'impostazione di sicurezza del telefono (debug, " +
+                            "accessibilità, tastiera o verifica delle app). Armala solo se sai cosa fa.",
+                    )
+                }
             }
             is Action.InvokeLlm -> validateInvokeLlm(action, trigger, whitelist, err, warn)
             is Action.InvokeLlmV2 -> validateInvokeLlmV2(action, trigger, whitelist, err, warn)

@@ -35,6 +35,8 @@ import dev.argus.ui.presentation.RenderLanguage
 import dev.argus.ui.presentation.RuleRenderMapper
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.descriptors.elementDescriptors
+import kotlinx.serialization.descriptors.elementNames
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
