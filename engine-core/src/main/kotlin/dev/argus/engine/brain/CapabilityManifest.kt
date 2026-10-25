@@ -67,9 +67,10 @@ data class CapabilityManifest(
     /** Famiglie parametriche realmente disponibili; i parametri restano aperti ma bounded. */
     val stateReaders: StateReaderManifest = StateReaderManifest(),
 ) {
+    /** Solo diagnostica/test: il prompt reale lo costruisce `AgentMessageSupport` in brain-android. */
     fun render(): String = buildString {
         appendLine("DISPOSITIVO: $deviceModel, Android $androidVersion")
-        appendLine("SHIZUKU: ${if (shizukuAvailable) "attivo (privilegi shell)" else "NON attivo — azioni shell in coda"}")
+        appendLine("SHIZUKU: ${if (shizukuAvailable) "attivo (privilegi shell)" else "NON attivo — le azioni che richiedono privilegi shell non sono disponibili"}")
         appendLine("PERMESSI: ${grantedPermissions.joinToString().ifEmpty { "nessuno" }}")
         if (availableTriggers.isNotEmpty())
             appendLine("TRIGGER DISPONIBILI (usa SOLO questi): ${availableTriggers.joinToString()}")
