@@ -21,7 +21,15 @@ import dev.argus.engine.safety.PendingDraft
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
-/** Store delle bozze e unico writer Room del passaggio PENDING -> ARMED. */
+/**
+ * Store delle bozze e unico writer Room dell'approvazione (nuova regola o sostituzione).
+ *
+ * D5: modificare una regola già approvata NON la ferma. La bozza di modifica vive accanto alla
+ * regola, che resta ARMED (o DISABLED) e continua a scattare finché l'utente non arma la modifica;
+ * l'arm la sostituisce in modo atomico, solo se è ancora la regola su cui la bozza si basava. Le
+ * regole "legacy" già messe in PENDING_APPROVAL + disabilitate da versioni precedenti restano
+ * gestite come prima (rifiuto -> DISABLED, arm -> sostituzione).
+ */
 class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository {
     private val drafts = db.draftDao()
     private val automations = db.automationDao()
@@ -63,23 +71,10 @@ class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository {
             updatedAtMillis = newDraft.atMillis,
             baseAutomationFingerprint = newDraft.expectedAutomationFingerprint,
         )
+        // La regola esistente è stata appena verificata in sola lettura (integrità + impronta attesa)
+        // dentro questa stessa transazione: nessuna scrittura sulla regola, che resta com'è.
         if (drafts.insert(snapshot.toEntity()) != -1L) {
-            if (existing == null) return@withTransaction DraftWriteResult.Saved(snapshot)
-
-            val paused = automations.pauseForReviewIfUnchanged(
-                id = existing.id,
-                expectedStatus = existing.status,
-                expectedEnabled = existing.enabled,
-                expectedJson = existing.json,
-                expectedName = existing.name,
-                expectedPriority = existing.priority,
-                expectedCooldownMs = existing.cooldownMs,
-                expectedSchemaVersion = existing.schemaVersion,
-            )
-            if (paused == 1) return@withTransaction DraftWriteResult.Saved(snapshot)
-
-            drafts.delete(snapshot.id.value, snapshot.revision)
-            return@withTransaction DraftWriteResult.Rejected("automation_stale")
+            return@withTransaction DraftWriteResult.Saved(snapshot)
         }
 
         val current = drafts.getById(newDraft.id.value)
@@ -146,6 +141,9 @@ class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository {
             if (row.revision != expectedRevision)
                 return@withTransaction DraftDeleteResult.Stale(row.revision)
             if (drafts.delete(id.value, expectedRevision) == 1) {
+                // D5: la regola armata/disattivata non è stata toccata dalla bozza, quindi qui non
+                // c'è nulla da ripristinare. Solo una regola "legacy" già in PENDING_APPROVAL
+                // (disabilitata da una versione precedente) torna DISABLED: la query lo impone.
                 automations.cancelPendingReview(row.automationId)
                 DraftDeleteResult.Deleted
             } else DraftDeleteResult.Stale(drafts.getById(id.value)?.revision ?: row.revision)
@@ -172,8 +170,15 @@ class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository {
                 return@withTransaction DraftArmResult.AutomationConflict
         } else {
             if (existing == null) return@withTransaction DraftArmResult.AutomationConflict
-            if (existing.status != AutomationStatus.PENDING_APPROVAL || existing.enabled)
-                return@withTransaction DraftArmResult.AutomationConflict
+            // D5: sostituibile se è ancora una regola approvata e ferma o in esecuzione; la riga
+            // "legacy" PENDING_APPROVAL + disabilitata resta accettata. NEEDS_REVIEW, o uno stato
+            // incoerente (es. ARMED ma disabilitata), non si sovrascrive mai.
+            val replaceable = when (existing.status) {
+                AutomationStatus.ARMED -> existing.enabled
+                AutomationStatus.DISABLED, AutomationStatus.PENDING_APPROVAL -> !existing.enabled
+                AutomationStatus.NEEDS_REVIEW -> false
+            }
+            if (!replaceable) return@withTransaction DraftArmResult.AutomationConflict
             val approved = verifiedAutomation(existing)
             if (approved == null) {
                 automations.markNeedsReview(existing.id)

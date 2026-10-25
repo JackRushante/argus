@@ -1,5 +1,7 @@
 package dev.argus.automation.budget
 
+import dev.argus.brain.ModelPrice
+import dev.argus.brain.ProviderCatalog
 import dev.argus.brain.ProviderId
 import dev.argus.engine.brain.TurnUsage
 import kotlin.test.Test
@@ -16,6 +18,57 @@ class CostEstimatorTest {
         )
         // input 1M * $1.25/M = 1_250_000 ; output 100k * $10/M = 1_000_000
         assertEquals(2_250_000L, cost)
+    }
+
+    @Test
+    fun `le ricerche web si contano ma senza prezzo in catalogo non si addebitano`() {
+        val base = TurnUsage(inputTokens = 1_000_000, outputTokens = 100_000)
+        val searched = base.copy(webSearches = 5)
+
+        assertEquals(
+            CostEstimator.estimate(ProviderId.OPENAI, "gpt-5.5", base),
+            CostEstimator.estimate(ProviderId.OPENAI, "gpt-5.5", searched),
+        )
+        assertEquals(
+            CostEstimator.estimate(ProviderId.ANTHROPIC, "claude-opus-4-8", base),
+            CostEstimator.estimate(ProviderId.ANTHROPIC, "claude-opus-4-8", searched),
+        )
+    }
+
+    @Test
+    fun `con un prezzo per ricerca il costo delle ricerche si somma ai token`() {
+        val price = ModelPrice(
+            inputMicrosPerMTok = 1_250_000,
+            outputMicrosPerMTok = 10_000_000,
+            webSearchMicrosPerCall = 10_000,
+        )
+        val usage = TurnUsage(inputTokens = 1_000_000, outputTokens = 100_000, webSearches = 3)
+
+        // token: 2_250_000 ; ricerche: 3 * 10_000
+        assertEquals(2_280_000L, CostEstimator.priceTurn(price, usage))
+        assertEquals(2_250_000L, CostEstimator.priceTurn(price, usage.copy(webSearches = null)))
+        assertEquals(2_250_000L, CostEstimator.priceTurn(price.copy(webSearchMicrosPerCall = null), usage))
+    }
+
+    @Test
+    fun `il catalogo non inventa prezzi per le ricerche`() {
+        ProviderId.entries.forEach { id ->
+            ProviderCatalog.spec(id).prices.forEach { (model, price) ->
+                assertNull(price.webSearchMicrosPerCall, "$id/$model")
+            }
+        }
+    }
+
+    @Test
+    fun `i token di pensiero di Gemini sommati all output fanno parte del costo`() {
+        // Il transport somma thoughtsTokenCount all'output (300 pensiero + 100 risposta).
+        val withThoughts = CostEstimator.estimate(
+            ProviderId.GEMINI,
+            "gemini-2.5-flash",
+            TurnUsage(inputTokens = 1_000_000, outputTokens = 400_000, reasoningTokens = 300_000),
+        )
+        // input 1M * $0.30 + output 400k * $2.50 = 300_000 + 1_000_000
+        assertEquals(1_300_000L, withThoughts)
     }
 
     @Test

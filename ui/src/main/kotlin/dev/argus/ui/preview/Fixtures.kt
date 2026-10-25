@@ -369,7 +369,7 @@ object Fixtures {
             UiWarning(
                 Severity.WARNING,
                 "shell_requires_shizuku",
-                "Il comando shell richiede Shizuku attivo: se spento dopo un riavvio, il backup resta in coda.",
+                "Il comando shell richiede Shizuku attivo: se spento dopo un riavvio, il backup viene saltato.",
             ),
         ),
         canArm = true,

@@ -343,6 +343,7 @@ fun ArgusNavHost() {
                         override fun onRetry() = chatViewModel.onRetry()
                         override fun onClearConversation() = chatViewModel.onClearConversation()
                         override fun onCheckConnection() = chatViewModel.refreshHealth()
+                        override fun onOpenSystem() = switchTop(Routes.SETTINGS)
                     },
                     modifier = Modifier.testTag("screen_chat"),
                 )
@@ -393,6 +394,7 @@ fun ArgusNavHost() {
                             navController.navigate(Routes.detail(id))
                         }
                         override fun onSendNow(logId: String) = viewModel.onSendNow(logId)
+                        override fun onMarkSent(logId: String) = viewModel.onMarkSent(logId)
                     },
                     modifier = Modifier.testTag("screen_log"),
                 )
@@ -467,6 +469,19 @@ fun ArgusNavHost() {
                         }
                         override fun onBudgetMonthlyTokensChange(maxTokensPerMonth: Long) {
                             settingsViewModel.onBudgetMonthlyTokensChange(maxTokensPerMonth)
+                        }
+                        override fun onSaveBudgetLimits(
+                            maxPerHour: Int,
+                            maxPerDay: Int,
+                            maxCostMonthMicros: Long,
+                            maxTokensMonth: Long,
+                        ) {
+                            settingsViewModel.onSaveBudgetLimits(
+                                maxPerHour,
+                                maxPerDay,
+                                maxCostMonthMicros,
+                                maxTokensMonth,
+                            )
                         }
                         override fun onRevokePrivacy() = settingsViewModel.revokePrivacy()
                         override fun onRerunOnboarding() {

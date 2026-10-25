@@ -10,6 +10,12 @@ import dev.argus.automation.apps.EmptyInstalledAppResolver
 import dev.argus.automation.apps.InstalledAppCandidate
 import dev.argus.automation.apps.InstalledAppResolver
 import dev.argus.brain.AgentTransport
+import dev.argus.brain.BridgeErrorKind
+import dev.argus.brain.BridgeException
+import dev.argus.brain.TransportBackedBrain
+import dev.argus.engine.brain.CliBridgeParser
+import dev.argus.engine.model.Transition
+import dev.argus.ui.model.NoticeKind
 import dev.argus.brain.ProviderConfig
 import dev.argus.brain.ProviderConfigStore
 import dev.argus.brain.ProviderId
@@ -72,7 +78,9 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -374,6 +382,303 @@ class ChatViewModelTest {
         assertTrue(prompt.endsWith("spostala alle 22"))
     }
 
+    @Test
+    fun `edit prompt never carries the real conversation id and the placeholder is restored`() {
+        val realId = "shortcut:com.whatsapp:abc123def456"
+        val base = AutomationDraft(
+            name = "Rispondi a Moglie",
+            trigger = Trigger.Notification("com.whatsapp", conversationId = realId, isGroup = false),
+            actions = listOf(Action.ShowNotification("Argus", "Messaggio")),
+        )
+
+        val prompt = composeEditPrompt("solo la sera", base)
+
+        assertFalse(prompt.contains(realId))
+        assertTrue(prompt.contains(CURRENT_CONTACT_PLACEHOLDER))
+        val fromModel = redactConversationId(base).copy(name = "Rispondi a Moglie la sera")
+        assertEquals(realId, (restoreConversationId(fromModel, base).trigger as Trigger.Notification).conversationId)
+        val changedContact = base.copy(trigger = Trigger.Notification("com.whatsapp", conversationId = "other"))
+        assertEquals("other", (restoreConversationId(changedContact, base).trigger as Trigger.Notification).conversationId)
+    }
+
+    // --- B2: un provider diretto restituisce error_code nel meta ---
+
+    @Test
+    fun `a clarification from a direct provider starts the dialogue and the answer is compiled with its context`() =
+        runTest(dispatcher) {
+            val transport = ScriptedDirectTransport(
+                """Quale contatto devo avvisare?
+                |@@META@@ {"draft":null,"error_code":"clarification_required"}""".trimMargin(),
+                """Ok, regola pronta.
+                |@@META@@ {"draft":{"name":"DND sera","trigger":{"type":"time","cron":"0 23 * * *","tz":"Europe/Rome"},"actions":[{"type":"set_dnd","mode":"PRIORITY"}]}}""".trimMargin(),
+            )
+            val viewModel = chatViewModel(TransportBackedBrain(transport))
+            val original = "avvisami quando arrivo a casa"
+
+            viewModel.onInputChange(original)
+            viewModel.onSend()
+            advanceUntilIdle()
+
+            val clarified = viewModel.state.value
+            assertEquals(null, clarified.error)
+            assertEquals(true, clarified.brainReachable)
+            assertTrue(clarified.items.any { it is ChatItem.AssistantMessage && it.text == "Quale contatto devo avvisare?" })
+            assertFalse(clarified.items.any { it is ChatItem.SystemNotice }, "nessun avviso d'errore per un chiarimento")
+
+            viewModel.onInputChange("Moglie")
+            viewModel.onSend()
+            advanceUntilIdle()
+
+            val continuation = transport.messages[1]
+            assertTrue(continuation.contains(original), continuation)
+            assertTrue(continuation.contains("Quale contatto devo avvisare?"), continuation)
+            assertTrue(continuation.contains("Moglie"), continuation)
+            assertEquals(null, viewModel.state.value.error)
+            assertTrue(viewModel.state.value.items.any { it is ChatItem.DraftCard })
+        }
+
+    @Test
+    fun `unsupported capability and limit exceeded show the model prose and an info notice, no error banner`() =
+        runTest(dispatcher) {
+            for ((language, notice) in listOf(
+                RenderLanguage.IT to "Nessuna regola creata.",
+                RenderLanguage.EN to "No rule was created.",
+            )) {
+                for (code in listOf("unsupported_capability", "limit_exceeded", "contact_not_whitelisted")) {
+                    val brain = QueuedBrain()
+                    val viewModel = chatViewModel(brain, language = language)
+
+                    viewModel.onInputChange("fai una cosa impossibile")
+                    viewModel.onSend()
+                    runCurrent()
+                    brain.removeFirst().response.complete(CompileResult("Spiegazione del modello.", null, code))
+                    advanceUntilIdle()
+
+                    val state = viewModel.state.value
+                    assertEquals(null, state.error, code)
+                    assertEquals(true, state.brainReachable, code)
+                    assertFalse(state.sending)
+                    assertTrue(
+                        state.items.any { it is ChatItem.AssistantMessage && it.text == "Spiegazione del modello." },
+                        code,
+                    )
+                    val infos = state.items.filterIsInstance<ChatItem.SystemNotice>()
+                    assertEquals(listOf(notice), infos.map { it.text }, code)
+                    assertEquals(NoticeKind.INFO, infos.single().kind)
+                }
+            }
+        }
+
+    // --- B10: richieste lunghe e errori di configurazione ---
+
+    @Test
+    fun `the text field accepts at most 8000 characters`() = runTest(dispatcher) {
+        val viewModel = chatViewModel(QueuedBrain())
+
+        viewModel.onInputChange("a".repeat(9_000))
+
+        assertEquals(8_000, viewModel.state.value.input.length)
+    }
+
+    @Test
+    fun `a composed prompt over 32768 characters is refused locally without calling the brain`() =
+        runTest(dispatcher) {
+            val brain = QueuedBrain()
+            val viewModel = chatViewModel(brain)
+            val huge = AutomationDraft(
+                name = "x".repeat(40_000),
+                trigger = Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
+                actions = listOf(Action.SetDnd(DndMode.PRIORITY)),
+            )
+
+            viewModel.prefillEdit(text = "cambiala", baseDraft = huge)
+            viewModel.onSend()
+            advanceUntilIdle()
+
+            val state = viewModel.state.value
+            val error = assertIs<ChatError.TooLong>(state.error)
+            assertEquals(32_768, error.max)
+            assertTrue(error.chars > 32_768)
+            assertFalse(state.sending)
+            assertEquals(null, state.brainReachable, "un errore locale non dice nulla sulla raggiungibilità")
+            assertFailsWith<NoSuchElementException> { brain.removeFirst() }
+        }
+
+    @Test
+    fun `configuration errors are never shown as unreachable`() = runTest(dispatcher) {
+        val failures = listOf<suspend () -> CompileResult>(
+            { throw BridgeException(BridgeErrorKind.CONFIGURATION, "consenso privacy non accettato") },
+            { throw IllegalArgumentException("baseUrl non deve contenere credenziali") },
+            { CompileResult("", null, "bridge_configuration") },
+        )
+        for (failure in failures) {
+            val viewModel = chatViewModel(FailingBrain(failure))
+
+            viewModel.onInputChange("qualcosa")
+            viewModel.onSend()
+            advanceUntilIdle()
+
+            val state = viewModel.state.value
+            assertEquals(ChatError.NotConfigured, state.error)
+            assertEquals(null, state.brainReachable)
+            assertFalse(state.sending)
+        }
+    }
+
+    @Test
+    fun `brain reachable is false only for the network and the chat is never blocked`() = runTest(dispatcher) {
+        val expectations = mapOf(
+            "bridge_network" to false,
+            "bridge_auth" to null,
+            "bridge_timeout" to null,
+            "bridge_http_503" to true,
+            "bridge_http_422" to true,
+            "bridge_rate_limit" to true,
+            "bridge_budget" to true,
+            "output_truncated" to true,
+            "context_truncated" to true,
+            "meta_parse_error" to true,
+        )
+        for ((code, reachable) in expectations) {
+            val viewModel = chatViewModel(FailingBrain { CompileResult("", null, code) })
+
+            viewModel.onInputChange("qualcosa")
+            viewModel.onSend()
+            advanceUntilIdle()
+
+            assertEquals(reachable, viewModel.state.value.brainReachable, code)
+            assertFalse(viewModel.state.value.sending, code)
+        }
+    }
+
+    @Test
+    fun `meta codes map to their explained error variant`() {
+        val it = RenderLanguage.IT
+        assertEquals(ChatError.Timeout, chatErrorForCode("bridge_timeout", null, it))
+        assertEquals(ChatError.BridgeUnreachable, chatErrorForCode("bridge_network", null, it))
+        assertEquals(ChatError.Auth, chatErrorForCode("bridge_auth", null, it))
+        assertEquals(ChatError.Budget, chatErrorForCode("bridge_budget", null, it))
+        assertEquals(ChatError.Budget, chatErrorForCode("budget_exceeded", null, it))
+        assertEquals(ChatError.Budget, chatErrorForCode("budget_unpriced_model", null, it))
+        assertEquals(ChatError.RateLimit, chatErrorForCode("bridge_rate_limit", null, it))
+        assertEquals(ChatError.OutputTruncated, chatErrorForCode("output_truncated", null, it))
+        assertEquals(ChatError.ContextTruncated, chatErrorForCode("context_truncated", null, it))
+        assertEquals(ChatError.NotConfigured, chatErrorForCode("bridge_configuration", null, it))
+        assertEquals(ChatError.ServerRejected(400), chatErrorForCode("bridge_http_400", null, it))
+        assertEquals(ChatError.ServerRejected(413), chatErrorForCode("bridge_http_413", null, it))
+        assertEquals(ChatError.ServiceUnavailable(500), chatErrorForCode("bridge_http_500", null, it))
+        assertEquals(ChatError.ServiceUnavailable(503), chatErrorForCode("bridge_http_503", null, it))
+        // 401/402/403/429 arrivati come HTTP restano comunque le varianti dedicate.
+        assertEquals(ChatError.Auth, chatErrorForCode("bridge_http_401", null, it))
+        assertEquals(ChatError.Budget, chatErrorForCode("bridge_http_402", null, it))
+        assertEquals(ChatError.RateLimit, chatErrorForCode("bridge_http_429", null, it))
+        // Il resto è una risposta senza regola valida: il dettaglio del parser, se c'è, altrimenti il codice.
+        assertEquals(ChatError.MalformedReply("draft_missing"), chatErrorForCode("draft_missing", null, it))
+        assertEquals(
+            ChatError.MalformedReply("Field 'tz' is required at path: \$.draft.trigger"),
+            chatErrorForCode("meta_parse_error", "Field 'tz' is required at path: \$.draft.trigger", it),
+        )
+    }
+
+    @Test
+    fun `a transport failure shows only the banner, not the model-side notice`() = runTest(dispatcher) {
+        val viewModel = chatViewModel(FailingBrain { CompileResult("", null, "bridge_http_503") })
+
+        viewModel.onInputChange("qualcosa")
+        viewModel.onSend()
+        advanceUntilIdle()
+
+        val state = viewModel.state.value
+        assertEquals(ChatError.ServiceUnavailable(503), state.error)
+        assertFalse(state.items.any { it is ChatItem.SystemNotice })
+        assertFalse(state.items.any { it is ChatItem.AssistantMessage }, "il testo lo dà la UI localizzata")
+    }
+
+    @Test
+    fun `the parser detail is shown for a format failure`() = runTest(dispatcher) {
+        val viewModel = chatViewModel(
+            FailingBrain { CompileResult("boh", null, "meta_parse_error", detail = "Field 'actions' is required") },
+        )
+
+        viewModel.onInputChange("qualcosa")
+        viewModel.onSend()
+        advanceUntilIdle()
+
+        assertEquals(ChatError.MalformedReply("Field 'actions' is required"), viewModel.state.value.error)
+        assertTrue(viewModel.state.value.items.any { it is ChatItem.SystemNotice })
+    }
+
+    // --- B12: timeout del compile per provider ---
+
+    @Test
+    fun `a local custom endpoint waits 180 seconds for the compile`() = runTest(dispatcher) {
+        val brain = QueuedBrain()
+        val configuredBridge = ConfiguredBridgeBrain(
+            configuration = ViewModelBridgeConfiguration(ProviderId.CUSTOM_OPENAI_COMPAT, "http://192.168.1.20:11434/v1"),
+            privacyAccepted = { true },
+            elapsedRealtimeMillis = { 0L },
+        )
+        val viewModel = chatViewModel(brain, configuredBridge = configuredBridge)
+
+        viewModel.onInputChange("modello locale lento")
+        viewModel.onSend()
+        runCurrent()
+        brain.removeFirst()
+
+        advanceTimeBy(65_001L)
+        runCurrent()
+        assertTrue(viewModel.state.value.sending, "il modello locale ha ancora tempo")
+        assertEquals(null, viewModel.state.value.error)
+
+        advanceTimeBy(115_000L)
+        runCurrent()
+        assertEquals(ChatError.Timeout, viewModel.state.value.error)
+        assertFalse(viewModel.state.value.sending)
+    }
+
+    // --- S4: le coordinate non partono mai verso il modello ---
+
+    @Test
+    fun `an edit never sends the original coordinates and gets them back in the draft`() = runTest(dispatcher) {
+        val brain = QueuedBrain()
+        val viewModel = chatViewModel(brain)
+        val base = AutomationDraft(
+            name = "Casa",
+            trigger = Trigger.Geofence(
+                lat = 45.4642, lng = 9.1912, radiusM = 150.0, transition = Transition.EXIT,
+            ),
+            actions = listOf(Action.SetDnd(DndMode.PRIORITY)),
+        )
+
+        viewModel.prefillEdit(text = "metti non disturbare totale", baseDraft = base)
+        viewModel.onSend()
+        runCurrent()
+        val request = brain.removeFirst()
+
+        assertFalse("45.4642" in request.prompt, request.prompt)
+        assertFalse("9.1912" in request.prompt, request.prompt)
+        assertTrue(
+            "Coordinates were replaced with 0,0 for privacy: keep exactly 0,0 unless the user asks to change the place." in
+                request.prompt,
+        )
+
+        // Il modello restituisce 0,0 come richiesto: l'app rimette il luogo vero PRIMA dell'approvazione.
+        request.response.complete(
+            CompileResult(
+                "Fatto.",
+                base.copy(
+                    trigger = (base.trigger as Trigger.Geofence).copy(lat = 0.0, lng = 0.0),
+                    actions = listOf(Action.SetDnd(DndMode.TOTAL)),
+                ),
+                null,
+            ),
+        )
+        advanceUntilIdle()
+
+        val card = viewModel.state.value.items.filterIsInstance<ChatItem.DraftCard>().single()
+        assertTrue("45.4642,9.1912" in card.rule.triggerLine, card.rule.triggerLine)
+    }
+
     private fun chatViewModel(
         brain: Brain,
         whitelist: ContactWhitelistStore = ViewModelWhitelistStore(),
@@ -472,6 +777,48 @@ private class CountingHealthTransport : AgentTransport {
     }
 }
 
+/** Brain che usa il parser come un provider diretto: risposte testuali con la riga @@META@@. */
+private class ScriptedDirectTransport(vararg replies: String) : AgentTransport {
+    private val queue = ArrayDeque(replies.toList())
+    val messages = mutableListOf<String>()
+    override val providerId: ProviderId = ProviderId.OPENAI
+
+    override suspend fun compile(
+        message: String,
+        manifest: CapabilityManifest,
+        state: DeviceState,
+    ): CompileResult {
+        messages += message
+        val parsed = CliBridgeParser().parseCompile(queue.removeFirst())
+        // Come i transport diretti: nessun sentinel = draft_missing.
+        return if (parsed.draft == null && parsed.metaError == null) parsed.copy(metaError = "draft_missing") else parsed
+    }
+
+    override suspend fun act(
+        context: FireContext,
+        goal: String,
+        contextSources: List<String>,
+        allowedTools: List<String>,
+    ): ActResult = error("act non usato dai test chat")
+
+    override suspend fun actV2(context: FireContext, action: Action.InvokeLlmV2): ActResult =
+        error("actV2 non usato dai test chat")
+
+    override suspend fun health(): TransportHealth = error("health non usato dai test chat")
+}
+
+private class FailingBrain(private val compile: suspend () -> CompileResult) : Brain {
+    override suspend fun compile(nl: String, manifest: CapabilityManifest, state: DeviceState): CompileResult =
+        compile()
+
+    override suspend fun act(
+        context: FireContext,
+        goal: String,
+        contextSources: List<String>,
+        allowedTools: List<String>,
+    ): ActResult = error("act non usato dai test chat")
+}
+
 private class QueuedBrain : Brain {
     data class Request(
         val prompt: String,
@@ -513,11 +860,14 @@ private class ViewModelWhitelistStore(vararg contacts: WhitelistedContact) : Con
     }
 }
 
-private class ViewModelBridgeConfiguration : ProviderConfigStore {
-    override fun selectedProviderId(): ProviderId = ProviderId.HERMES
+private class ViewModelBridgeConfiguration(
+    private val selected: ProviderId = ProviderId.HERMES,
+    private val baseUrl: String = "https://bridge.invalid",
+) : ProviderConfigStore {
+    override fun selectedProviderId(): ProviderId = selected
     override suspend fun selectProvider(id: ProviderId): Boolean = false
     override fun providerConfig(id: ProviderId): ProviderConfig =
-        ProviderConfig(providerId = id, baseUrl = "https://bridge.invalid", model = null)
+        ProviderConfig(providerId = id, baseUrl = baseUrl, model = null)
     override suspend fun saveProviderConfig(
         id: ProviderId,
         baseUrl: String?,

@@ -54,6 +54,9 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.net.URI
 import java.time.ZoneId
 import java.util.Locale
 import javax.inject.Inject
@@ -233,6 +236,14 @@ internal fun budgetUi(usage: BudgetUsageSnapshot, settings: BudgetSettings): Bud
     )
 }
 
+private val LOOPBACK_HOSTS = setOf("localhost", "127.0.0.1", "::1")
+
+/** true se l'host dell'URL è esattamente uno dei loopback ammessi per il cleartext del Custom. */
+internal fun isLoopbackBaseUrl(baseUrl: String): Boolean {
+    val host = runCatching { URI(baseUrl.trim()).host }.getOrNull() ?: return false
+    return host.removeSurrounding("[", "]").lowercase(Locale.ROOT) in LOOPBACK_HOSTS
+}
+
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -254,8 +265,12 @@ class SettingsViewModel @Inject constructor(
     private val budgetUsage = MutableStateFlow(BudgetUsageSnapshot())
     private val bridgeHealth = MutableStateFlow(BridgeUiHealth())
     private val mutableTokenConfigured = MutableStateFlow(false)
+
+    /** Chiave realmente salvata per il provider selezionato; null = non ancora letta (niente avvisi). */
+    private val mutableKeySaved = MutableStateFlow<Boolean?>(null)
     val tokenConfigured: StateFlow<Boolean> = mutableTokenConfigured
     private var shizukuRationaleShown = false
+    private val budgetWriteMutex = Mutex()
     private val mutableMessages = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val messages = mutableMessages.asSharedFlow()
 
@@ -309,6 +324,7 @@ class SettingsViewModel @Inject constructor(
         connectivitySentinelStatus.active,
         budgetUsage,
         budgetSettings.observe(),
+        mutableKeySaved,
     ) { values: Array<Any?> ->
         val settingsSources = values[0] as SettingsSources
         val bridge = values[1] as BridgeUiHealth
@@ -317,9 +333,10 @@ class SettingsViewModel @Inject constructor(
         val sentinelActive = values[4] as Boolean
         val usageSnapshot = values[5] as BudgetUsageSnapshot
         val budgetConfig = values[6] as BudgetSettings
+        val keySaved = values[7] as Boolean?
         val health = readAndroidUiHealth(context)
         SettingsState(
-            transport = transportUi(bridge, hasToken),
+            transport = transportUi(bridge, hasToken, keySaved),
             providerChoices = providerChoices(),
             shizuku = settingsSources.shizukuStatus.toUiStatus(
                 degradedAfterReboot = settingsSources.shizukuNeeded &&
@@ -355,6 +372,11 @@ class SettingsViewModel @Inject constructor(
             mutableTokenConfigured.value = cancellationSafeOrNull {
                 selectedProviderAuthConfigured()
             } ?: false
+        }
+        viewModelScope.launch {
+            mutableKeySaved.value = cancellationSafeOrNull {
+                configuration.hasApiKey(configuration.selectedProviderId())
+            }
         }
         viewModelScope.launch {
             budgetUsage.value = cancellationSafeOrNull {
@@ -556,6 +578,31 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Salvataggio unico dei quattro tetti globali: UNA scrittura e UN messaggio. 0 = illimitato.
+     * Il dialog usa solo questo; i quattro metodi singoli restano per i chiamanti esistenti.
+     */
+    fun onSaveBudgetLimits(
+        maxPerHour: Int,
+        maxPerDay: Int,
+        maxCostMonthMicros: Long,
+        maxTokensMonth: Long,
+    ) {
+        // Un valore negativo non è «illimitato»: si rifiuta l'intero salvataggio senza toccare nulla.
+        if (maxPerHour < 0 || maxPerDay < 0 || maxCostMonthMicros < 0 || maxTokensMonth < 0) {
+            mutableMessages.tryEmit(language.pick("Invalid limit.", "Limite non valido."))
+            return
+        }
+        updateGlobalLimits {
+            BudgetLimits(
+                maxCallsPerHour = maxPerHour.takeIf { v -> v > 0 },
+                maxCallsPerDay = maxPerDay.takeIf { v -> v > 0 },
+                maxCostPerMonthMicros = maxCostMonthMicros.takeIf { v -> v > 0 },
+                maxTokensPerMonth = maxTokensMonth.takeIf { v -> v > 0 },
+            )
+        }
+    }
+
     fun onBudgetChange(maxPerHour: Int) =
         updateGlobalLimits { it.copy(maxCallsPerHour = maxPerHour.takeIf { v -> v > 0 }) }
 
@@ -568,11 +615,18 @@ class SettingsViewModel @Inject constructor(
     fun onBudgetMonthlyTokensChange(maxTokensPerMonth: Long) =
         updateGlobalLimits { it.copy(maxTokensPerMonth = maxTokensPerMonth.takeIf { v -> v > 0 }) }
 
+    /**
+     * Lettura dello snapshot e scrittura sotto lo stesso mutex: due aggiornamenti ravvicinati non
+     * partono più dallo stesso stato vecchio (l'ultimo non cancella più i precedenti).
+     */
     private fun updateGlobalLimits(mutate: (BudgetLimits) -> BudgetLimits) {
         viewModelScope.launch {
             try {
-                val current = budgetSettings.observe().value.global
-                if (budgetSettings.setGlobalLimits(mutate(current))) {
+                val saved = budgetWriteMutex.withLock {
+                    val current = budgetSettings.observe().value.global
+                    budgetSettings.setGlobalLimits(mutate(current))
+                }
+                if (saved) {
                     message(language.pick("Budget limits saved.", "Limiti budget salvati."))
                     refresh()
                 } else {
@@ -672,7 +726,7 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    private fun transportUi(bridge: BridgeUiHealth, hasToken: Boolean): TransportUi {
+    private fun transportUi(bridge: BridgeUiHealth, hasToken: Boolean, keySaved: Boolean? = null): TransportUi {
         val id = configuration.selectedProviderId()
         val config = configuration.providerConfig(id)
         return if (id == ProviderId.HERMES) {
@@ -698,6 +752,9 @@ class SettingsViewModel @Inject constructor(
                 apiKeyRequired = spec.apiKeyRequired,
                 reasoningEffort = config.reasoningEffort.name.lowercase(Locale.ROOT),
                 reasoningEffortEditable = id == ProviderId.CUSTOM_OPENAI_COMPAT,
+                unauthenticatedLoopback = id == ProviderId.CUSTOM_OPENAI_COMPAT &&
+                    keySaved == false &&
+                    isLoopbackBaseUrl(config.baseUrl),
             )
         }
     }

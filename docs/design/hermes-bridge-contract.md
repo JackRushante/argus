@@ -78,8 +78,21 @@ Idempotency-Key: <request_id>
 X-Argus-Device-Time-Zone: <IANA ZoneId del dispositivo>
 ```
 
-Il fuso viene validato dal bridge e inserito nel prompt insieme all'ora locale del dispositivo.
+Il fuso viene validato dal bridge e inserito nel prompt insieme all'ora locale del dispositivo, in
+una riga `local_time: 2026-10-25T18:30 (Sunday); tomorrow: 2026-10-26 (Monday); timezone: <IANA>`
+(giorno della settimana e data di domani servono a risolvere "domani" senza calcoli del modello).
 I client precedenti a `0.3.2`, che non inviano l'header, restano accettati con fallback `UTC`.
+
+Limiti del messaggio: `message` fino a **32.768 caratteri** (`MAX_MESSAGE_CHARS`, uguale
+all'app), `MAX_REQUEST_BYTES` 256 KiB per l'intera richiesta. Il prompt composto passa in `argv` a
+Hermes: oltre **100.000 byte** UTF-8 il bridge risponde `413 {"error":"prompt_too_large"}` senza
+eseguire il modello (evita `E2BIG`).
+
+`whitelisted_contacts` contiene alias, non id: `{"alias":"contact_1","display_name":"Moglie"}`.
+L'app non invia mai l'id reale della conversazione; il modello usa l'alias come `conversationId` e
+l'app lo rimappa sull'id reale prima della validazione locale. Il bridge accetta e valida gli alias
+inviati nella stessa richiesta (`contact_<n>`, n >= 1); la forma legacy `{"display_name","id"}`
+resta accettata per le app precedenti alla `0.3.5`.
 
 Request v2 corrente:
 
@@ -241,7 +254,8 @@ Il prompt di sistema in `bridge.py` vincola il modello, tra l'altro, a: usare SO
 `available_tools` (regola 1 — un tool assente equivale a non esistente, quindi il probe Android
 deve pubblicare `invoke_llm` e `invoke_llm_v2` quando il runtime generativo è pronto); e — **REGOLA 9, aggiunta
 il 2026-07-14 dopo la caratterizzazione reale** — per le reply WhatsApp il trigger deve avere
-`conversationId` scelto tra i `whitelisted_contacts` e `isGroup=false` ESPLICITO (mai null);
+`conversationId` = alias di un contatto in `whitelisted_contacts` (o il suo `id` per le app legacy) e
+`isGroup=false` ESPLICITO (mai null);
 le risposte generate senza stato usano il profilo `invoke_llm` P1 esatto; quelle che richiedono
 stato usano `invoke_llm_v2` con query, tipo, policy e classificazioni esplicite. `whatsapp_reply`
 statica è riservata a testi dettati letteralmente dall'utente. Il draft resta comunque soggetto al

@@ -21,6 +21,7 @@ import dev.argus.ui.model.StatusBadge
 import dev.argus.ui.model.UiWarning
 import dev.argus.ui.presentation.RenderLanguage
 import dev.argus.ui.presentation.RuleRenderMapper
+import dev.argus.ui.presentation.ValidationMessages
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -39,6 +40,8 @@ internal fun Automation.toAutomationRow(
     nowMillis: Long,
     conversationLabels: Map<String, String> = emptyMap(),
     language: RenderLanguage = RenderLanguage.system(),
+    /** D5: id della bozza di modifica in attesa su questa regola (la regola resta attiva). */
+    pendingEditDraftId: String? = null,
 ): AutomationRow {
     val render = RuleRenderMapper.map(this, conversationLabels, language)
     return AutomationRow(
@@ -52,6 +55,7 @@ internal fun Automation.toAutomationRow(
         hasWarnings = status == AutomationStatus.NEEDS_REVIEW || render.privacyNote != null,
         lastFiredLabel = lastFiredAt?.let { relativeTimeLabel(it, nowMillis, language) },
         nextFireLabel = nextFireLabel(this, nowMillis, language),
+        pendingEditDraftId = pendingEditDraftId,
     )
 }
 
@@ -87,28 +91,12 @@ internal fun reviewWarnings(
             add(UiWarning(Severity.WARNING, "privacy_generative", it))
         }
         review.draft.issues.forEach { issue ->
-            add(
-                UiWarning(
-                    issue.severity,
-                    issue.code,
-                    language.pick(
-                        "Validation issue: ${issue.code.safeDiagnostic()}",
-                        issue.message,
-                    ),
-                ),
-            )
+            // B9: un testo per codice nella lingua dell'utente, mai il messaggio diagnostico italiano.
+            add(UiWarning(issue.severity, issue.code, ValidationMessages.text(issue, language)))
         }
         review.conflicts.forEach { conflict ->
-            add(
-                UiWarning(
-                    Severity.WARNING,
-                    "conflict_${conflict.targetKey.safeCode()}",
-                    language.pick(
-                        "Conflict on ${conflict.targetKey.safeDiagnostic()}",
-                        conflict.message,
-                    ),
-                ),
-            )
+            val code = "conflict_${conflict.targetKey.safeCode()}"
+            add(UiWarning(Severity.WARNING, code, ValidationMessages.text(code, language)))
         }
     }.distinctBy { Triple(it.severity, it.code, it.text) }
 }
@@ -241,8 +229,8 @@ private fun auditSummary(record: AuditLogRecord, l: RenderLanguage): String = wh
         "errore di esecuzione (${record.detail.safeDiagnostic()})",
     )
     AuditKind.VALIDATION_REJECTED -> l.pick(
-        "Validation rejected: ${record.detail.safeCodeList(l)}",
-        "Validazione rifiutata: ${record.detail.safeCodeList(l)}",
+        "Validation rejected: ${record.detail.validationReasons(l)}",
+        "Validazione rifiutata: ${record.detail.validationReasons(l)}",
     )
     AuditKind.ARM_FAILED -> l.pick(
         "Activation failed: ${record.detail.safeDiagnostic()}",
@@ -275,6 +263,9 @@ private fun auditSummary(record: AuditLogRecord, l: RenderLanguage): String = wh
     )
 }
 
+/** Codice con cui la lane chiude un evento già accorpato in una raffica (D8). */
+private const val COALESCED_REPLY_CODE = "coalesced"
+
 private fun actionDetail(action: ActionResultEntity, l: RenderLanguage): String {
     val outcome = when (action.outcome) {
         ActionJournalOutcome.SUCCEEDED -> "ok"
@@ -282,7 +273,13 @@ private fun actionDetail(action: ActionResultEntity, l: RenderLanguage): String 
         ActionJournalOutcome.DEFERRED -> l.pick("deferred", "differita")
         ActionJournalOutcome.FAILED -> l.pick("failed", "fallita")
     }
-    val error = action.errorCode?.let { " · ${it.safeDiagnostic()}" }.orEmpty()
+    val code = action.errorCode
+    val error = when (code) {
+        null -> ""
+        // D8: messaggio accorpato nella risposta unica della raffica, nessuna seconda generazione.
+        COALESCED_REPLY_CODE -> l.pick(" · merged into one reply", " · unito in un'unica risposta")
+        else -> " · ${code.safeDiagnostic()}"
+    }
     val path = action.actionPath.ifBlank { (action.actionIndex + 1).toString() }
     return "$path. ${actionTypeLabel(action.actionType, l)} → $outcome$error"
 }
@@ -300,6 +297,8 @@ private fun actionTypeLabel(type: String, l: RenderLanguage): String = when (typ
     ActionTypeIds.WHATSAPP_REPLY -> l.pick("WhatsApp reply", "Risposta WhatsApp")
     ActionTypeIds.RUN_SHELL -> l.pick("Run shell command", "Esegui comando shell")
     ActionTypeIds.COPY_TO_CLIPBOARD -> l.pick("Copy to clipboard", "Copia negli appunti")
+    ActionTypeIds.COPY_TEXT -> l.pick("Copy text to clipboard", "Copia testo negli appunti")
+    ActionTypeIds.SET_MOBILE_DATA -> l.pick("Set mobile data", "Imposta dati mobili")
     ActionTypeIds.SET_ALARM -> l.pick("Set alarm", "Imposta sveglia")
     ActionTypeIds.SET_TIMER -> l.pick("Set timer", "Imposta timer")
     ActionTypeIds.SET_VOLUME -> l.pick("Set volume", "Imposta volume")
@@ -383,11 +382,10 @@ private fun String.safeCode(): String = lowercase(Locale.ROOT)
 
 private fun String.safeDiagnostic(): String = safeCode().replace('_', ' ')
 
-/** Lista di code (VALIDATION_REJECTED è join di più code); ognuno resta a vocabolario chiuso. */
-private fun String.safeCodeList(language: RenderLanguage): String = split(',')
-    .filter { it.isNotBlank() }
-    .joinToString(", ") { it.safeDiagnostic() }
-    .ifBlank { language.pick("unknown reason", "motivo sconosciuto") }
+/** VALIDATION_REJECTED è il join dei code: ognuno diventa il suo testo localizzato (B9). */
+private fun String.validationReasons(language: RenderLanguage): String =
+    ValidationMessages.textList(this, language)
+        .ifBlank { language.pick("unknown reason", "motivo sconosciuto") }
 
 private val TIME_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.ITALIAN)
 private val DAY_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM", Locale.ITALIAN)

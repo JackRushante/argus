@@ -21,6 +21,8 @@ import dev.argus.engine.runtime.TriggerEvent
 import dev.argus.engine.runtime.TriggerEventId
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.async
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Before
@@ -30,7 +32,10 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows
 import org.robolectric.annotation.Config
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import kotlin.test.assertNotNull
 import kotlin.test.assertNotEquals
 
@@ -71,11 +76,10 @@ class NotificationReplyGatewayTest {
         assertEquals("reply_channel_unavailable", assertIs<NotificationReplyDelivery.Failed>(wrongTarget).code)
         assertEquals(1, registry.size())
 
-        val staleEvent = gateway.send(request(eventId = TriggerEventId("notification:stale")))
-        assertEquals("reply_channel_unavailable", assertIs<NotificationReplyDelivery.Failed>(staleEvent).code)
-        assertEquals(1, registry.size())
-
-        assertIs<NotificationReplyDelivery.Sent>(gateway.send(request()))
+        // D8: l'event id non vincola più la reply, vale l'handle più recente della conversazione.
+        assertIs<NotificationReplyDelivery.Sent>(
+            gateway.send(request(eventId = TriggerEventId("notification:older"))),
+        )
         Shadows.shadowOf(Looper.getMainLooper()).idle()
         val result = RemoteInput.getResultsFromIntent(assertNotNull(receivedIntent))
         assertEquals("risposta sicura", result?.getCharSequence(RESULT_KEY)?.toString())
@@ -84,6 +88,145 @@ class NotificationReplyGatewayTest {
             "reply_channel_unavailable",
             assertIs<NotificationReplyDelivery.Failed>(gateway.send(request())).code,
         )
+    }
+
+    @Test
+    fun `reply uses the most recent handle of the same conversation but never another conversation or a group`() {
+        val registry = ActiveNotificationReplyRegistry()
+        val gateway = AndroidNotificationReplyGateway(context, registry)
+        registry.replace(handle(pendingIntent(), isGroup = false, eventId = TriggerEventId("notification:1")))
+        registry.replace(
+            handle(pendingIntent(requestCode = 2), isGroup = false, eventId = TriggerEventId("notification:2")),
+        )
+
+        // Sempre chat 1:1 e stessa conversazione: un'altra conversazione o un gruppo restano esclusi.
+        assertEquals(
+            "reply_channel_unavailable",
+            assertIs<NotificationReplyDelivery.Failed>(
+                gateway.send(request(conversationId = "shortcut:com.whatsapp:other")),
+            ).code,
+        )
+        registry.replace(
+            handle(pendingIntent(requestCode = 3), isGroup = true, eventId = TriggerEventId("notification:3")),
+        )
+        assertEquals(
+            "reply_channel_unavailable",
+            assertIs<NotificationReplyDelivery.Failed>(
+                gateway.send(request(eventId = TriggerEventId("notification:1"))),
+            ).code,
+        )
+        assertEquals(1, registry.size())
+    }
+
+    @Test
+    fun `registry keeps the burst of a conversation and closes it when the reply consumes the handle`() {
+        val registry = ActiveNotificationReplyRegistry()
+        val first = TriggerEventId("notification:1")
+        val second = TriggerEventId("notification:2")
+        val third = TriggerEventId("notification:3")
+        registry.replace(handle(pendingIntent(), false, eventId = first, messageText = "uno"))
+        registry.replace(handle(pendingIntent(requestCode = 2), false, eventId = second, messageText = "due"))
+        registry.replace(handle(pendingIntent(requestCode = 3), false, eventId = third, messageText = "tre"))
+
+        val burst = assertNotNull(registry.burst(NOTIFICATION_KEY, CONVERSATION_ID, first))
+        assertEquals(listOf("uno", "due", "tre"), burst.messages.map { it.text })
+        assertEquals(third, burst.latestEventId)
+        // Dal secondo evento in poi; un evento sconosciuto restituisce solo l'ultimo messaggio.
+        assertEquals(
+            listOf("due", "tre"),
+            assertNotNull(registry.burst(NOTIFICATION_KEY, CONVERSATION_ID, second)).messages.map { it.text },
+        )
+        assertEquals(
+            listOf("tre"),
+            assertNotNull(registry.burst(NOTIFICATION_KEY, CONVERSATION_ID, TriggerEventId("notification:x")))
+                .messages.map { it.text },
+        )
+        assertNull(registry.burst(NOTIFICATION_KEY, "shortcut:com.whatsapp:other", first))
+        assertFalse("uno" in burst.toString() || "uno" in burst.messages.first().toString())
+
+        // La reply consuma l'handle e chiude la raffica: i messaggi dopo ne aprono una nuova.
+        val gateway = AndroidNotificationReplyGateway(context, registry)
+        assertIs<NotificationReplyDelivery.Sent>(gateway.send(request(eventId = first)))
+        assertNull(registry.burst(NOTIFICATION_KEY, CONVERSATION_ID, first))
+    }
+
+    @Test
+    fun `burst log is bounded cleared on removal and reset when the conversation changes`() {
+        val registry = ActiveNotificationReplyRegistry()
+        repeat(12) { index ->
+            registry.replace(
+                handle(
+                    pendingIntent(requestCode = index + 1),
+                    false,
+                    eventId = TriggerEventId("notification:$index"),
+                    messageText = "m$index",
+                ),
+            )
+        }
+        val burst = assertNotNull(registry.burst(NOTIFICATION_KEY, CONVERSATION_ID, TriggerEventId("notification:4")))
+        assertEquals((4..11).map { "m$it" }, burst.messages.map { it.text })
+
+        registry.replace(
+            handle(
+                pendingIntent(requestCode = 20),
+                false,
+                eventId = TriggerEventId("notification:other"),
+                conversationId = "shortcut:com.whatsapp:other",
+                messageText = "altro",
+            ),
+        )
+        assertNull(registry.burst(NOTIFICATION_KEY, CONVERSATION_ID, TriggerEventId("notification:11")))
+
+        registry.remove(NOTIFICATION_KEY)
+        assertNull(registry.burst(NOTIFICATION_KEY, "shortcut:com.whatsapp:other", TriggerEventId("notification:other")))
+    }
+
+    @Test
+    fun `awaitNewMessage resumes only on a newer event of the same conversation`() = runTest {
+        val registry = ActiveNotificationReplyRegistry()
+        val first = TriggerEventId("notification:1")
+        registry.replace(handle(pendingIntent(), false, eventId = first, messageText = "uno"))
+
+        val waiting = async { registry.awaitNewMessage(NOTIFICATION_KEY, CONVERSATION_ID, first) }
+        runCurrent()
+        assertFalse(waiting.isCompleted)
+
+        // Stesso evento riregistrato (rehydrate): non è un nuovo messaggio.
+        registry.replace(handle(pendingIntent(requestCode = 2), false, eventId = first, messageText = "uno"))
+        runCurrent()
+        assertFalse(waiting.isCompleted)
+
+        val second = TriggerEventId("notification:2")
+        registry.replace(handle(pendingIntent(requestCode = 3), false, eventId = second, messageText = "due"))
+        runCurrent()
+        assertTrue(waiting.isCompleted)
+        assertEquals(second, waiting.await())
+    }
+
+    @Test
+    fun `ingress stores the message text in the handle so a burst can be merged`() = runTest {
+        val registry = ActiveNotificationReplyRegistry()
+        val ingress = NotificationIngress(
+            snapshotFactory = AndroidNotificationSnapshotFactory(),
+            parser = NotificationEventParser(),
+            handleFactory = NotificationReplyHandleFactory(),
+            registry = registry,
+            observedConversations = FakeObservedConversationStore(),
+            dispatcher = NotificationEventDispatcher { },
+            privacyAccepted = { true },
+        )
+        val first = assertNotNull(ingress.registerPosted(statusBarNotification(pendingIntent(), "ci sei?")))
+        val second = assertNotNull(
+            ingress.registerPosted(statusBarNotification(pendingIntent(requestCode = 2), "rispondi")),
+        )
+        val event = first.envelope.event as TriggerEvent.NotificationPosted
+
+        val burst = assertNotNull(
+            registry.burst(event.notificationKey.orEmpty(), event.conversationId.orEmpty(), first.envelope.id),
+        )
+
+        assertEquals(listOf("ci sei?", "rispondi"), burst.messages.map { it.text })
+        assertEquals(second.envelope.id, burst.latestEventId)
     }
 
     @Test
@@ -141,6 +284,19 @@ class NotificationReplyGatewayTest {
         assertNotEquals(parsed.envelope.id, updated.envelope.id)
         val updatedEvent = updated.envelope.event as TriggerEvent.NotificationPosted
         val gateway = AndroidNotificationReplyGateway(context, registry)
+        // D8: una reply nata dal PRIMO evento parte sull'handle più recente della conversazione.
+        assertIs<NotificationReplyDelivery.Sent>(
+            gateway.send(
+                NotificationReplyRequest(
+                    packageName = updatedEvent.pkg,
+                    notificationKey = updatedEvent.notificationKey.orEmpty(),
+                    conversationId = updatedEvent.conversationId.orEmpty(),
+                    eventId = parsed.envelope.id,
+                    text = "dal primo evento",
+                ),
+            ),
+        )
+        // L'handle si consuma una volta sola.
         assertEquals(
             "reply_channel_unavailable",
             assertIs<NotificationReplyDelivery.Failed>(
@@ -149,22 +305,11 @@ class NotificationReplyGatewayTest {
                         packageName = updatedEvent.pkg,
                         notificationKey = updatedEvent.notificationKey.orEmpty(),
                         conversationId = updatedEvent.conversationId.orEmpty(),
-                        eventId = parsed.envelope.id,
-                        text = "stale",
+                        eventId = updated.envelope.id,
+                        text = "gia consumato",
                     ),
                 ),
             ).code,
-        )
-        assertIs<NotificationReplyDelivery.Sent>(
-            gateway.send(
-                NotificationReplyRequest(
-                    packageName = updatedEvent.pkg,
-                    notificationKey = updatedEvent.notificationKey.orEmpty(),
-                    conversationId = updatedEvent.conversationId.orEmpty(),
-                    eventId = updated.envelope.id,
-                    text = "corrente",
-                ),
-            ),
         )
 
         ingress.rehydrate(listOf(notification))
@@ -306,14 +451,18 @@ class NotificationReplyGatewayTest {
     private fun handle(
         pendingIntent: PendingIntent,
         isGroup: Boolean?,
+        eventId: TriggerEventId = EVENT_ID,
+        conversationId: String = CONVERSATION_ID,
+        messageText: String? = null,
     ) = NotificationReplyHandle(
         packageName = "com.whatsapp",
         notificationKey = NOTIFICATION_KEY,
-        conversationId = CONVERSATION_ID,
-        eventId = EVENT_ID,
+        conversationId = conversationId,
+        eventId = eventId,
         isGroup = isGroup,
         remoteInput = remoteInput(),
         pendingIntent = pendingIntent,
+        messageText = messageText,
     )
 
     private fun request(

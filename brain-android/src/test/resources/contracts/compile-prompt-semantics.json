@@ -11,7 +11,12 @@
     "[\"whatsapp_reply\",\"web.search\"]",
     "\"CAPTURE_ONLY\"",
     "exactly ONE AutomationDraft",
-    "installed_app_candidates"
+    "installed_app_candidates",
+    "Describe the PROPOSED rule; never claim it is already set or active.",
+    "ONE single-quoted shell argument",
+    "never add your own quotes around it",
+    "(for example \"contact_1\") as the notification trigger's",
+    "match the sender by display name in \"sender\""
   ],
   "forbidden": [
     "\"confidentiality\":\"PUBLIC\"|\"PRIVATE\"|\"SECRET\" (optional, default PUBLIC)",
@@ -19,6 +24,13 @@
     "cmd is always literal",
     "STATIC command",
     "Never interpolate the value that was read",
-    "run_shell, invoke_llm and invoke_llm_v2"
+    "run_shell, invoke_llm and invoke_llm_v2",
+    "Contacts can only be identified by the whitelist ids.",
+    "Contacts can only be identified by the whitelist"
+  ],
+  "userRequired": [
+    "local_time: ",
+    "; tomorrow: ",
+    "; timezone: "
   ]
 }

@@ -4,6 +4,10 @@ import dev.argus.automation.ApprovalFlowReview
 import dev.argus.data.dao.AuditLogRecord
 import dev.argus.data.entities.ActionResultEntity
 import dev.argus.engine.model.Action
+import dev.argus.engine.model.ActionTypeIds
+import dev.argus.engine.safety.ConflictWarning
+import dev.argus.engine.safety.Severity
+import dev.argus.engine.safety.ValidationIssue
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.ApprovalFingerprints
 import dev.argus.engine.model.Automation
@@ -284,8 +288,9 @@ class UiStateMappersTest {
         val validation = record(AuditKind.VALIDATION_REJECTED, "tz_invalid,cron_invalid")
         assertEquals(dev.argus.ui.model.LogOutcome.FAILED, validation.outcome)
         assertTrue(validation.summary.contains("Validazione rifiutata"))
-        assertTrue(validation.summary.contains("tz invalid"))
-        assertTrue(validation.summary.contains("cron invalid"))
+        // B9: ogni codice diventa il suo testo leggibile, non piu' «tz invalid».
+        assertTrue(validation.summary.contains("fuso orario"), validation.summary)
+        assertTrue(validation.summary.contains("pianificazione"), validation.summary)
 
         val arm = record(AuditKind.ARM_FAILED, "registrar_failed")
         assertEquals(dev.argus.ui.model.LogOutcome.FAILED, arm.outcome)
@@ -386,5 +391,185 @@ class UiStateMappersTest {
         )
 
         assertTrue(warnings.any { it.code == "privacy_generative" })
+    }
+
+    // --- B9: motivi leggibili nella lingua dell'utente --------------------------------------------
+
+    private fun reviewOf(vararg issues: ValidationIssue, conflicts: List<ConflictWarning> = emptyList()): ApprovalFlowReview {
+        val draft = AutomationDraft(
+            name = "Regola",
+            trigger = Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
+            actions = listOf(Action.SetWifi(false)),
+        )
+        val unsigned = PendingDraft(
+            id = DraftId("draft-b9"),
+            automationId = AutomationId("automation-b9"),
+            revision = 1L,
+            fingerprint = ApprovalFingerprint("0".repeat(64)),
+            draft = draft,
+            createdBy = CreatedBy.LLM,
+            priority = 0,
+            schemaVersion = AUTOMATION_SCHEMA_VERSION_V1,
+            createdAtMillis = 1_000L,
+            updatedAtMillis = 1_000L,
+        )
+        val snapshot = unsigned.copy(fingerprint = ApprovalFingerprints.of(unsigned.pendingAutomation()))
+        return ApprovalFlowReview(DraftReview(snapshot, issues.toList()), conflicts)
+    }
+
+    @Test
+    fun `review warnings use the localized text for every code and never the italian diagnostic in english`() {
+        val issues = arrayOf(
+            ValidationIssue(Severity.ERROR, "tz_invalid", "Timezone 'x' non valida"),
+            ValidationIssue(Severity.WARNING, "write_setting_high_impact", "Messaggio diagnostico italiano"),
+            ValidationIssue(Severity.ERROR, "codice_futuro", "Qualcosa di non previsto"),
+        )
+        val review = reviewOf(*issues)
+
+        val en = reviewWarnings(review, RenderLanguage.EN).associateBy { it.code }
+        assertEquals("The time zone is not valid.", en.getValue("tz_invalid").text)
+        assertEquals(Severity.ERROR, en.getValue("tz_invalid").severity)
+        assertTrue(en.getValue("write_setting_high_impact").text.startsWith("This rule changes a phone security setting"))
+        assertEquals(
+            "Unrecognized validation problem (codice_futuro).",
+            en.getValue("codice_futuro").text,
+        )
+        assertTrue(en.values.none { it.text.contains("non valida") || it.text.contains("Messaggio diagnostico") })
+
+        val italian = reviewWarnings(review, RenderLanguage.IT).associateBy { it.code }
+        assertEquals("Il fuso orario non è valido.", italian.getValue("tz_invalid").text)
+        assertTrue(italian.getValue("write_setting_high_impact").text.contains("impostazione di sicurezza del telefono"))
+        assertEquals(
+            "Problema di validazione non riconosciuto (codice_futuro).",
+            italian.getValue("codice_futuro").text,
+        )
+    }
+
+    @Test
+    fun `review warnings keep the structured detail of capability and reader problems`() {
+        val review = reviewOf(
+            ValidationIssue(
+                Severity.ERROR,
+                "capability_unavailable",
+                "Capacità non disponibile in questa fase: action.run_shell",
+                detail = "action.run_shell",
+            ),
+        )
+        assertTrue(
+            reviewWarnings(review, RenderLanguage.EN).single { it.code == "capability_unavailable" }
+                .text.endsWith("(action.run_shell)"),
+        )
+    }
+
+    @Test
+    fun `conflicts are localized by the setting they touch`() {
+        val review = reviewOf(
+            conflicts = listOf(
+                ConflictWarning("wifi", listOf(AutomationId("a"), AutomationId("b")), "'A' e 'B' impostano 'wifi' a valori opposti"),
+                ConflictWarning("unknown target!", listOf(AutomationId("a")), "x"),
+            ),
+        )
+        val en = reviewWarnings(review, RenderLanguage.EN).associateBy { it.code }
+        assertEquals(
+            "Another active rule sets Wi-Fi to the opposite value on triggers that may overlap.",
+            en.getValue("conflict_wifi").text,
+        )
+        assertTrue(en.getValue("conflict_unknown_target").text.contains("(conflict_unknown_target)"))
+        assertTrue(reviewWarnings(review, RenderLanguage.IT).single { it.code == "conflict_wifi" }.text.startsWith("Un'altra regola attiva"))
+    }
+
+    @Test
+    fun `every action type id has a human label in the audit detail`() {
+        val ids = ActionTypeIds::class.java.declaredFields
+            .filter { java.lang.reflect.Modifier.isStatic(it.modifiers) && it.type == String::class.java }
+            .mapNotNull { runCatching { it.get(null) as? String }.getOrNull() }
+        assertTrue(ids.size >= 25, "ActionTypeIds letti: ${ids.size}")
+        for (language in listOf(RenderLanguage.EN, RenderLanguage.IT)) {
+            for (id in ids) {
+                val row = AuditLogRecord(
+                    id = 1L,
+                    automationId = "a",
+                    automationName = "n",
+                    kind = AuditKind.FIRED,
+                    atMillis = 1_000L,
+                    detail = "",
+                    executionId = "e",
+                    executionStatus = ExecutionStatus.SUCCEEDED,
+                    succeededCount = 1,
+                    failedCount = 0,
+                    submittedCount = 0,
+                ).toLogRow(
+                    listOf(
+                        ActionResultEntity(
+                            executionId = "e",
+                            actionIndex = 0,
+                            actionType = id,
+                            outcome = ActionJournalOutcome.SUCCEEDED,
+                            atMillis = 1_000L,
+                        ),
+                    ),
+                    language,
+                )
+                val detail = assertNotNull(row.expandedDetail).single()
+                // Il fallback grezzo («set mobile data») significa che manca l'etichetta del tipo.
+                assertTrue(
+                    !detail.contains(id.replace('_', ' ')),
+                    "tipo azione senza etichetta ($language): $id -> $detail",
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `mobile data and copy text have their own audit labels`() {
+        fun detail(type: String, language: RenderLanguage) = assertNotNull(
+            AuditLogRecord(
+                id = 1L, automationId = "a", automationName = "n", kind = AuditKind.FIRED, atMillis = 1_000L,
+                detail = "", executionId = "e", executionStatus = ExecutionStatus.SUCCEEDED,
+                succeededCount = 1, failedCount = 0, submittedCount = 0,
+            ).toLogRow(
+                listOf(
+                    ActionResultEntity(
+                        executionId = "e", actionIndex = 0, actionType = type,
+                        outcome = ActionJournalOutcome.SUCCEEDED, atMillis = 1_000L,
+                    ),
+                ),
+                language,
+            ).expandedDetail,
+        ).single()
+
+        assertEquals("1. Set mobile data → ok", detail(ActionTypeIds.SET_MOBILE_DATA, RenderLanguage.EN))
+        assertEquals("1. Copy text to clipboard → ok", detail(ActionTypeIds.COPY_TEXT, RenderLanguage.EN))
+        assertEquals("1. Imposta dati mobili → ok", detail(ActionTypeIds.SET_MOBILE_DATA, RenderLanguage.IT))
+        assertEquals("1. Copia testo negli appunti → ok", detail(ActionTypeIds.COPY_TEXT, RenderLanguage.IT))
+    }
+
+    @Test
+    fun `english audit rows for rejected validation read as sentences`() {
+        val row = AuditLogRecord(
+            id = 1L, automationId = "a", automationName = "n", kind = AuditKind.VALIDATION_REJECTED,
+            atMillis = 1_000L, detail = "tz_invalid,no_actions", executionId = null, executionStatus = null,
+            succeededCount = null, failedCount = null, submittedCount = null,
+        ).toLogRow(emptyList(), RenderLanguage.EN)
+        assertEquals(
+            "Validation rejected: The time zone is not valid. The rule has no actions.",
+            row.summary,
+        )
+    }
+
+    // --- D5: la riga della regola porta l'id della modifica in attesa -----------------------------------
+
+    @Test
+    fun `an automation row carries the pending edit draft id`() {
+        val automation = Automation(
+            AutomationId("d5"), "Regola", CreatedBy.USER, AutomationStatus.ARMED,
+            Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
+            listOf(Action.SetWifi(false)),
+        )
+        val plain = automation.toAutomationRow(null, 0L, language = RenderLanguage.EN)
+        assertNull(plain.pendingEditDraftId)
+        val withEdit = automation.toAutomationRow(null, 0L, language = RenderLanguage.EN, pendingEditDraftId = "draft-1")
+        assertEquals("draft-1", withEdit.pendingEditDraftId)
+        assertEquals(true, withEdit.enabled)
     }
 }

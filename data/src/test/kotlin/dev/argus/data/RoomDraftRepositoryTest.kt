@@ -10,6 +10,7 @@ import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.AUTOMATION_SCHEMA_VERSION_P4
 import dev.argus.engine.model.ApprovalFingerprint
+import dev.argus.engine.model.ApprovalFingerprints
 import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.ConfidentialityLabel
 import dev.argus.engine.model.Condition
@@ -20,10 +21,12 @@ import dev.argus.engine.safety.ApprovalResult
 import dev.argus.engine.safety.ApprovalService
 import dev.argus.engine.safety.ApprovalWhitelistProvider
 import dev.argus.engine.safety.DraftArmResult
+import dev.argus.engine.safety.DraftDeleteResult
 import dev.argus.engine.safety.DraftId
 import dev.argus.engine.safety.DraftWriteResult
 import dev.argus.engine.safety.DraftValidator
 import dev.argus.engine.safety.NewDraft
+import dev.argus.engine.safety.PendingDraft
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -99,7 +102,7 @@ class RoomDraftRepositoryTest {
     }
 
     @Test
-    fun `approved automation enters review and is replaced atomically without losing cooldown`() = runTest {
+    fun `approved automation stays armed during review and is replaced atomically without losing cooldown`() = runTest {
         val first = assertIs<DraftWriteResult.Saved>(repository.create(candidate("a1"))).snapshot
         val original = assertIs<DraftArmResult.Armed>(
             repository.arm(first.id, first.revision, first.fingerprint),
@@ -113,8 +116,10 @@ class RoomDraftRepositoryTest {
         )
         val pending = assertIs<DraftWriteResult.Saved>(repository.create(edit)).snapshot
 
-        assertEquals(AutomationStatus.PENDING_APPROVAL, store.get(original.id)?.status)
-        assertTrue(store.armed().isEmpty())
+        // D5: la regola resta armata e attiva mentre la modifica aspetta l'approvazione.
+        assertEquals(AutomationStatus.ARMED, store.get(original.id)?.status)
+        assertEquals(listOf(original.id), store.armed().map { it.id })
+        assertEquals(original, store.get(original.id))
 
         val replacement = assertIs<DraftArmResult.Armed>(
             repository.arm(pending.id, pending.revision, pending.fingerprint),
@@ -288,6 +293,200 @@ class RoomDraftRepositoryTest {
         assertEquals(AUTOMATION_SCHEMA_VERSION_P4, armed.schemaVersion)
         assertEquals(p4Draft.vars, store.get(armed.id)?.vars)
         assertEquals(saved.fingerprint, store.get(armed.id)?.approvalFingerprint)
+    }
+
+    // --- D5: la regola resta attiva finché non armi la modifica ---------------------------------------
+
+    private data class EditFixture(val original: Automation, val edit: PendingDraft)
+
+    private suspend fun armedWithEditDraft(id: String): EditFixture {
+        val first = assertIs<DraftWriteResult.Saved>(repository.create(candidate(id))).snapshot
+        val original = assertIs<DraftArmResult.Armed>(
+            repository.arm(first.id, first.revision, first.fingerprint),
+        ).automation
+        store.recordFired(original.id, 777)
+        val edit = assertIs<DraftWriteResult.Saved>(
+            repository.create(
+                candidate(id).copy(
+                    id = DraftId("edit-$id"),
+                    draft = draft().copy(name = "modificata", actions = listOf(Action.SetWifi(true))),
+                    expectedAutomationFingerprint = assertNotNull(original.approvalFingerprint),
+                ),
+            ),
+        ).snapshot
+        return EditFixture(original, edit)
+    }
+
+    @Test
+    fun `creating an edit draft does not write to the automation and it keeps firing`() = runTest {
+        val (original, _) = armedWithEditDraft("a1")
+
+        val row = assertNotNull(db.automationDao().getById(original.id.value))
+        assertEquals(AutomationStatus.ARMED, row.status)
+        assertTrue(row.enabled)
+        assertEquals(777L, row.lastFiredAt)
+        assertEquals(original, store.get(original.id))
+        assertEquals(listOf(original.id), store.armed().map { it.id })
+        // La regola e' ancora eleggibile allo scatto (stato armato e abilitato).
+        assertEquals(true, db.automationDao().runtimeState(original.id.value)?.enabled)
+    }
+
+    @Test
+    fun `a disabled automation with an edit draft stays disabled until the edit is armed`() = runTest {
+        val first = assertIs<DraftWriteResult.Saved>(repository.create(candidate("d1"))).snapshot
+        val original = assertIs<DraftArmResult.Armed>(
+            repository.arm(first.id, first.revision, first.fingerprint),
+        ).automation
+        store.disable(original.id)
+        val disabled = assertNotNull(store.get(original.id))
+        assertEquals(AutomationStatus.DISABLED, disabled.status)
+
+        val edit = assertIs<DraftWriteResult.Saved>(
+            repository.create(
+                candidate("d1").copy(
+                    id = DraftId("edit-d1"),
+                    expectedAutomationFingerprint = assertNotNull(disabled.approvalFingerprint),
+                ),
+            ),
+        ).snapshot
+
+        assertEquals(AutomationStatus.DISABLED, store.get(original.id)?.status)
+        assertTrue(store.armed().isEmpty())
+
+        val armed = assertIs<DraftArmResult.Armed>(
+            repository.arm(edit.id, edit.revision, edit.fingerprint),
+        ).automation
+        assertEquals(AutomationStatus.ARMED, armed.status)
+        assertEquals(listOf(armed.id), store.armed().map { it.id })
+    }
+
+    @Test
+    fun `rejecting the edit leaves the armed automation intact`() = runTest {
+        val (original, edit) = armedWithEditDraft("a1")
+
+        assertEquals(DraftDeleteResult.Deleted, repository.delete(edit.id, edit.revision))
+
+        assertNull(repository.get(edit.id))
+        assertEquals(original, store.get(original.id))
+        assertEquals(AutomationStatus.ARMED, store.get(original.id)?.status)
+        assertEquals(listOf(original.id), store.armed().map { it.id })
+        assertEquals(777L, store.lastFiredAt(original.id))
+    }
+
+    @Test
+    fun `a stale revision cannot reject the edit and the automation stays intact`() = runTest {
+        val (original, edit) = armedWithEditDraft("a1")
+        val revised = assertIs<DraftWriteResult.Saved>(
+            repository.revise(edit.id, edit.revision, edit.draft.copy(name = "v2"), edit.priority, 5_000),
+        ).snapshot
+
+        assertEquals(DraftDeleteResult.Stale(revised.revision), repository.delete(edit.id, edit.revision))
+
+        assertNotNull(repository.get(edit.id))
+        assertEquals(original, store.get(original.id))
+    }
+
+    @Test
+    fun `arming replaces the automation only if it is still the one the draft was based on`() = runTest {
+        val (original, edit) = armedWithEditDraft("a1")
+        // Nel frattempo la regola e' stata sostituita da un'altra versione approvata.
+        val changed = original.copy(name = "cambiata altrove")
+        val signed = changed.copy(approvalFingerprint = ApprovalFingerprints.of(changed))
+        db.automationDao().upsertPreservingLastFired(
+            AutomationEntity(
+                id = signed.id.value,
+                name = signed.name,
+                status = signed.status,
+                enabled = signed.enabled,
+                priority = signed.priority,
+                cooldownMs = signed.cooldownMs,
+                schemaVersion = signed.schemaVersion,
+                json = ArgusJson.encodeToString(Automation.serializer(), signed),
+            ),
+        )
+
+        assertEquals(
+            DraftArmResult.AutomationConflict,
+            repository.arm(edit.id, edit.revision, edit.fingerprint),
+        )
+
+        assertEquals("cambiata altrove", store.get(original.id)?.name)
+        assertNotNull(repository.get(edit.id), "la bozza resta per essere rifiutata o rifatta")
+    }
+
+    @Test
+    fun `arming over a quarantined or inconsistent automation row is a conflict`() = runTest {
+        val (original, edit) = armedWithEditDraft("a1")
+        db.openHelper.writableDatabase.execSQL(
+            "UPDATE automations SET status = 'NEEDS_REVIEW', enabled = 0 WHERE id = ?",
+            arrayOf(original.id.value),
+        )
+
+        assertEquals(
+            DraftArmResult.AutomationConflict,
+            repository.arm(edit.id, edit.revision, edit.fingerprint),
+        )
+        assertEquals(AutomationStatus.NEEDS_REVIEW, db.automationDao().getById(original.id.value)?.status)
+
+        // ARMED ma disabilitata e' uno stato incoerente: mai sovrascritto.
+        db.openHelper.writableDatabase.execSQL(
+            "UPDATE automations SET status = 'ARMED', enabled = 0 WHERE id = ?",
+            arrayOf(original.id.value),
+        )
+        assertEquals(
+            DraftArmResult.AutomationConflict,
+            repository.arm(edit.id, edit.revision, edit.fingerprint),
+        )
+    }
+
+    @Test
+    fun `a legacy paused automation is still replaced on arm`() = runTest {
+        val (original, edit) = armedWithEditDraft("a1")
+        // Stato lasciato da una versione precedente: regola in PENDING_APPROVAL e disabilitata.
+        db.openHelper.writableDatabase.execSQL(
+            "UPDATE automations SET status = 'PENDING_APPROVAL', enabled = 0 WHERE id = ?",
+            arrayOf(original.id.value),
+        )
+
+        val replacement = assertIs<DraftArmResult.Armed>(
+            repository.arm(edit.id, edit.revision, edit.fingerprint),
+        ).automation
+
+        assertEquals("modificata", replacement.name)
+        assertEquals(AutomationStatus.ARMED, store.get(original.id)?.status)
+        assertEquals(777L, store.lastFiredAt(original.id))
+        assertNull(repository.get(edit.id))
+    }
+
+    @Test
+    fun `rejecting the draft of a legacy paused automation disables it as before`() = runTest {
+        val (original, edit) = armedWithEditDraft("a1")
+        db.openHelper.writableDatabase.execSQL(
+            "UPDATE automations SET status = 'PENDING_APPROVAL', enabled = 0 WHERE id = ?",
+            arrayOf(original.id.value),
+        )
+
+        assertEquals(DraftDeleteResult.Deleted, repository.delete(edit.id, edit.revision))
+
+        val row = assertNotNull(db.automationDao().getById(original.id.value))
+        assertEquals(AutomationStatus.DISABLED, row.status)
+        assertTrue(!row.enabled)
+        assertTrue(store.armed().isEmpty())
+    }
+
+    @Test
+    fun `a second edit draft for the same automation conflicts without touching it`() = runTest {
+        val (original, edit) = armedWithEditDraft("a1")
+
+        val second = repository.create(
+            candidate("a1").copy(
+                id = DraftId("edit-a1-bis"),
+                expectedAutomationFingerprint = assertNotNull(original.approvalFingerprint),
+            ),
+        )
+
+        assertEquals(DraftWriteResult.Conflict(edit.revision), second)
+        assertEquals(original, store.get(original.id))
     }
 
     private fun candidate(id: String) = NewDraft(

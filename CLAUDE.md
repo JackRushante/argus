@@ -46,7 +46,7 @@ Motore di automazione Tasker-class always-on: l'LLM (via Hermes o altro Brain co
 4. La regola in approvazione si renderizza **dai tipi** (`RuleRender`), mai dalla parafrasi dell'LLM.
 5. Reply generative: solo chat 1:1 (`isGroup=false`), solo `conversationId` whitelistato, destinatario vincolato a `trigger.sender`.
 6. Comandi shell sempre in monospace, integrali, mai troncati.
-7. Il contenuto esterno può alimentare sink locali/vincolati ma non creare autorità: mai TAINTED → command, routing, target, path/package o mutazione automazioni (decision record §4).
+7. Il contenuto esterno (TAINTED) può alimentare sink locali/vincolati e, con la postura Aggressive, i campi dei template approvati (URL, package, impostazioni: mostrati integralmente in approvazione); nei comandi shell entra sempre come un unico argomento quotato e non diventa mai sintassi di comando; non può mai modificare le automazioni (decision record §4, decisione D1 del 2026-10-25).
 8. Missing state = UNKNOWN e fallisce chiuso anche sotto `Not`; mai sostituire un valore assente con stringa vuota.
 
 ## Fasi

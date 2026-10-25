@@ -336,7 +336,7 @@ object ArgusModule {
     @Provides
     @Singleton
     fun generativeRuntimeReadiness(
-        configuration: BridgeConfigurationStore,
+        configuration: ProviderConfigStore,
         preferences: AppPreferencesStore,
     ): GenerativeRuntimeReadiness = AndroidGenerativeRuntimeReadiness(configuration, preferences)
 
@@ -432,7 +432,10 @@ object ArgusModule {
         store: ProviderConfigStore,
         audit: AuditSink,
         alerts: BudgetAlerts,
-    ): Brain = MeteredBrain(brain, policy, usage, store::selectedProviderConfig, audit, alerts)
+        budgetSettings: BudgetSettingsStore,
+    ): Brain = MeteredBrain(
+        brain, policy, usage, store::selectedProviderConfig, audit, alerts, settings = budgetSettings,
+    )
 
     @Provides
     @Singleton
@@ -501,6 +504,7 @@ object ArgusModule {
         deferredReplies: DeferredReplySink,
         notifier: AutomationNotifier,
         oneShotConsumptions: OneShotConsumptionRegistry,
+        replyRegistry: ActiveNotificationReplyRegistry,
     ): AndroidGenerativeLane = AndroidGenerativeLane(
         scope,
         journal,
@@ -511,6 +515,7 @@ object ArgusModule {
         deferredReplies,
         notifier,
         oneShotConsumptions,
+        replyBursts = replyRegistry,
     )
 
     @Provides

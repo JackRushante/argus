@@ -25,6 +25,7 @@ import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.StateQueryFamily
 import dev.argus.engine.model.StateValueType
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.toDraft
 import dev.argus.engine.runtime.AuditEvent
 import dev.argus.engine.runtime.AuditKind
 import dev.argus.engine.runtime.AuditSink
@@ -39,6 +40,7 @@ import dev.argus.ui.model.StatusBadge
 import dev.argus.ui.model.UiWarning
 import dev.argus.ui.presentation.RuleRenderMapper
 import dev.argus.ui.presentation.RenderLanguage
+import dev.argus.ui.presentation.ValidationMessages
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -50,7 +52,9 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 
 data class DetailViewState(
@@ -113,10 +117,19 @@ class AutomationDetailViewModel @Inject constructor(
     private val mutableEvents = MutableSharedFlow<DetailEvent>(extraBufferCapacity = 4)
     val events = mutableEvents.asSharedFlow()
 
+    /**
+     * Bozza e regola che l'utente STA VEDENDO: si aggiornano solo insieme a [mutableState], dopo che
+     * lo stato è stato davvero costruito. Una revisione N+1 che arriva durante una review lenta non
+     * è ancora sullo schermo: arma/rifiuta/modifica devono agire sulla N mostrata (che risulterà
+     * Stale), mai su una revisione che l'utente non ha visto (S3).
+     */
     @Volatile
-    private var currentDraft: PendingDraft? = null
+    private var displayedDraft: PendingDraft? = null
     @Volatile
-    private var currentAutomation: Automation? = null
+    private var displayedAutomation: Automation? = null
+
+    /** B26: vero finché arma/rifiuta/elimina è in corso (e dopo un Close, fino alla chiusura). */
+    private val actionInFlight = AtomicBoolean(false)
 
     init {
         viewModelScope.launch {
@@ -125,9 +138,18 @@ class AutomationDetailViewModel @Inject constructor(
                 store.observeAll(),
                 whitelist.observeAll(),
             ) { pending, automations, contacts ->
+                val automationByRoute = automations.firstOrNull { it.id.value == routeId }
+                // D5: una regola armata/disattivata resta la verità del proprio dettaglio anche con una
+                // modifica in attesa (la regola continua a scattare); la bozza si apre dal suo id.
+                // Solo una regola in revisione "legacy" (PENDING_APPROVAL) apre direttamente la bozza.
                 val draft = pending.firstOrNull { it.id.value == routeId }
-                    ?: pending.firstOrNull { it.automationId.value == routeId }
-                val automation = automations.firstOrNull { it.id.value == routeId }
+                    ?: pending.firstOrNull { snapshot ->
+                        snapshot.automationId.value == routeId &&
+                            automationByRoute?.status.let {
+                                it != AutomationStatus.ARMED && it != AutomationStatus.DISABLED
+                            }
+                    }
+                val automation = automationByRoute
                     ?: draft?.let { snapshot ->
                         automations.firstOrNull { it.id == snapshot.automationId }
                     }
@@ -162,9 +184,7 @@ class AutomationDetailViewModel @Inject constructor(
                     )
                 }
             }.collectLatest { sources ->
-                currentDraft = sources.draft
-                currentAutomation = sources.automation
-                mutableState.value = when {
+                val next = when {
                     sources.draft != null -> draftState(
                         sources.draft,
                         sources.log,
@@ -179,99 +199,122 @@ class AutomationDetailViewModel @Inject constructor(
                     )
                     else -> DetailViewState(loading = false, missing = true)
                 }
+                // S3: se questo blocco viene annullato dentro draftState (nuova emissione) non si
+                // arriva qui, quindi displayedDraft resta quello che lo schermo mostra davvero.
+                displayedDraft = sources.draft
+                displayedAutomation = sources.automation
+                mutableState.value = next.withActionInProgress(actionInFlight.get())
             }
         }
     }
 
-    fun onArm() {
-        val snapshot = currentDraft ?: return
+    /**
+     * Esegue un'azione del footer in modo esclusivo (B26). Un secondo tocco mentre la prima è in corso
+     * è ignorato; [block] restituisce true se ha emesso un Close: in quel caso il flag resta vero
+     * (la schermata si sta chiudendo e la regola/bozza non esiste più come prima).
+     */
+    private fun runExclusive(block: suspend () -> Boolean) {
+        if (!actionInFlight.compareAndSet(false, true)) return
+        publishActionInProgress()
         viewModelScope.launch {
+            var closing = false
+            try {
+                closing = block()
+            } finally {
+                if (!closing) {
+                    actionInFlight.set(false)
+                    publishActionInProgress()
+                }
+            }
+        }
+    }
+
+    private fun publishActionInProgress() {
+        mutableState.update { it.withActionInProgress(actionInFlight.get()) }
+    }
+
+    fun onArm() {
+        val snapshot = displayedDraft ?: return
+        runExclusive {
             try {
                 when (
                     val result = approvals.arm(snapshot.id, snapshot.revision, snapshot.fingerprint)
                 ) {
-                    is FlowArmResult.Armed -> mutableEvents.emit(
-                        DetailEvent.Close(
-                            language.pick(
-                                "Rule armed: ${result.automation.name}",
-                                "Regola armata: ${result.automation.name}",
-                            ),
+                    is FlowArmResult.Armed -> closeWith(
+                        language.pick(
+                            "Rule armed: ${result.automation.name}",
+                            "Regola armata: ${result.automation.name}",
                         ),
                     )
-                    FlowArmResult.Missing -> mutableEvents.emit(
-                        DetailEvent.Close(
-                            language.pick("Draft no longer available.", "Bozza non più disponibile."),
-                        ),
+                    FlowArmResult.Missing -> closeWith(
+                        language.pick("Draft no longer available.", "Bozza non più disponibile."),
                     )
-                    is FlowArmResult.Stale -> message(
+                    is FlowArmResult.Stale -> stayWith(
                         language.pick(
                             "The draft changed; review the new revision.",
                             "La bozza è cambiata: controlla la nuova revisione.",
                         ),
                     )
-                    is FlowArmResult.ValidationFailed -> message(
+                    is FlowArmResult.ValidationFailed -> stayWith(
                         result.issues.firstOrNull { it.severity == Severity.ERROR }?.let { issue ->
+                            val reason = ValidationMessages.text(issue, language)
                             language.pick(
-                                "The rule failed local validation (${issue.code}).",
-                                issue.message,
+                                "The rule failed local validation: $reason",
+                                "La regola non supera i controlli di sicurezza: $reason",
                             )
                         } ?: language.pick(
                             "The rule failed local validation.",
                             "La regola non supera i controlli di sicurezza.",
                         ),
                     )
-                    FlowArmResult.PolicyUnavailable -> message(
+                    FlowArmResult.PolicyUnavailable -> stayWith(
                         language.pick(
                             "Device policy is unavailable.",
                             "Policy del dispositivo non disponibile.",
                         ),
                     )
-                    FlowArmResult.LocationUnavailable -> message(
+                    FlowArmResult.LocationUnavailable -> stayWith(
                         language.pick(
                             "Current location is unavailable.",
                             "Posizione attuale non disponibile.",
                         ),
                     )
-                    FlowArmResult.IntegrityFailure -> message(
+                    FlowArmResult.IntegrityFailure -> stayWith(
                         language.pick("Invalid draft integrity.", "Integrità della bozza non valida."),
                     )
-                    FlowArmResult.AutomationConflict -> message(
+                    FlowArmResult.AutomationConflict -> stayWith(
                         language.pick(
                             "The rule changed during approval.",
                             "La regola è cambiata durante l'approvazione.",
                         ),
                     )
-                    is FlowArmResult.RegistrationFailed -> mutableEvents.emit(
-                        DetailEvent.Close(
-                            language.pick(
-                                "Rule saved but disabled: scheduling failed.",
-                                "Regola salvata ma disattivata: pianificazione non riuscita.",
-                            ),
+                    is FlowArmResult.RegistrationFailed -> closeWith(
+                        language.pick(
+                            "Rule saved but disabled: scheduling failed.",
+                            "Regola salvata ma disattivata: pianificazione non riuscita.",
                         ),
                     )
                 }
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
-                message(language.pick("Unable to arm the rule.", "Impossibile armare la regola."))
+                stayWith(language.pick("Unable to arm the rule.", "Impossibile armare la regola."))
             }
         }
     }
 
     fun onReject() {
-        val snapshot = currentDraft ?: return
-        viewModelScope.launch {
+        val snapshot = displayedDraft ?: return
+        runExclusive {
             try {
-                when (val result = drafts.delete(snapshot.id, snapshot.revision)) {
-                    DraftDeleteResult.Deleted -> mutableEvents.emit(
-                        DetailEvent.Close(language.pick("Draft rejected.", "Bozza rifiutata.")),
+                when (drafts.delete(snapshot.id, snapshot.revision)) {
+                    DraftDeleteResult.Deleted -> closeWith(
+                        language.pick("Draft rejected.", "Bozza rifiutata."),
                     )
-                    DraftDeleteResult.Missing -> mutableEvents.emit(
-                        DetailEvent.Close(
-                            language.pick("Draft no longer available.", "Bozza non più disponibile."),
-                        ),
+                    DraftDeleteResult.Missing -> closeWith(
+                        language.pick("Draft no longer available.", "Bozza non più disponibile."),
                     )
-                    is DraftDeleteResult.Stale -> message(
+                    is DraftDeleteResult.Stale -> stayWith(
                         language.pick(
                             "The draft changed; reopen it before rejecting it.",
                             "La bozza è cambiata: riaprila prima di rifiutarla.",
@@ -281,13 +324,25 @@ class AutomationDetailViewModel @Inject constructor(
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
-                message(language.pick("Unable to reject the draft.", "Impossibile rifiutare la bozza."))
+                stayWith(language.pick("Unable to reject the draft.", "Impossibile rifiutare la bozza."))
             }
         }
     }
 
+    /** Emette l'unico Close dell'azione; true = la schermata si sta chiudendo. */
+    private suspend fun closeWith(message: String): Boolean {
+        mutableEvents.emit(DetailEvent.Close(message))
+        return true
+    }
+
+    /** Messaggio senza chiudere: l'utente può correggere e riprovare; false = footer di nuovo attivo. */
+    private suspend fun stayWith(text: String): Boolean {
+        message(text)
+        return false
+    }
+
     fun onSetEnabled(enabled: Boolean) {
-        val automation = currentAutomation ?: return
+        val automation = displayedAutomation ?: return
         viewModelScope.launch {
             try {
                 when (enablement.setEnabled(automation.id, enabled)) {
@@ -323,8 +378,8 @@ class AutomationDetailViewModel @Inject constructor(
     }
 
     fun onDelete() {
-        val automation = currentAutomation ?: return
-        viewModelScope.launch {
+        val automation = displayedAutomation ?: return
+        runExclusive {
             try {
                 store.delete(automation.id)
                 // Lifecycle (task #31-B): la cancellazione è sempre un'azione manuale dell'utente;
@@ -353,22 +408,20 @@ class AutomationDetailViewModel @Inject constructor(
                 if (cancellationSafeOrNull {
                     geofence.reconcile(recreateOsRegistrations = false)
                 } == null) reconciled = false
-                mutableEvents.emit(
-                    DetailEvent.Close(
-                        if (reconciled) {
-                            language.pick("Rule deleted.", "Regola eliminata.")
-                        } else {
-                            language.pick(
-                                "Rule deleted; runtime cleanup deferred.",
-                                "Regola eliminata; pulizia runtime rinviata.",
-                            )
-                        },
-                    ),
+                closeWith(
+                    if (reconciled) {
+                        language.pick("Rule deleted.", "Regola eliminata.")
+                    } else {
+                        language.pick(
+                            "Rule deleted; runtime cleanup deferred.",
+                            "Regola eliminata; pulizia runtime rinviata.",
+                        )
+                    },
                 )
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
-                message(language.pick("Unable to delete the rule.", "Impossibile eliminare la regola."))
+                stayWith(language.pick("Unable to delete the rule.", "Impossibile eliminare la regola."))
             }
         }
     }
@@ -385,8 +438,8 @@ class AutomationDetailViewModel @Inject constructor(
     }
 
     fun onAskEdit() {
-        val automation = currentAutomation
-        val draft = currentDraft
+        val automation = displayedAutomation
+        val draft = displayedDraft
         val name = draft?.draft?.name ?: automation?.name ?: return
         val recreating = draft == null && automation?.status == AutomationStatus.NEEDS_REVIEW
         mutableEvents.tryEmit(
@@ -428,10 +481,7 @@ class AutomationDetailViewModel @Inject constructor(
                 UiWarning(
                     Severity.ERROR,
                     "draft_review_unavailable",
-                    language.pick(
-                        "Unable to verify this revision. Reopen the details and try again.",
-                        "Impossibile verificare questa revisione. Riapri il dettaglio e riprova.",
-                    ),
+                    ValidationMessages.text("draft_review_unavailable", language),
                 ),
             )
         } else {
@@ -487,10 +537,7 @@ class AutomationDetailViewModel @Inject constructor(
                     UiWarning(
                         Severity.ERROR,
                         "schema_or_integrity_review",
-                        language.pick(
-                            "The rule can no longer be verified and must be recreated.",
-                            "La regola non è più verificabile e deve essere ricreata.",
-                        ),
+                        ValidationMessages.text("schema_or_integrity_review", language),
                     ),
                 )
             }
@@ -562,13 +609,12 @@ class AutomationDetailViewModel @Inject constructor(
         mutableEvents.emit(DetailEvent.Message(text))
     }
 
-    private fun Automation.toDraft() = AutomationDraft(
-        name = name,
-        trigger = trigger,
-        actions = actions,
-        conditions = conditions,
-        cooldownMs = cooldownMs,
-    )
+    private fun DetailViewState.withActionInProgress(value: Boolean): DetailViewState =
+        if (detail == null || detail.actionInProgress == value) {
+            this
+        } else {
+            copy(detail = detail.copy(actionInProgress = value))
+        }
 
     private companion object {
         const val RECENT_RUN_LIMIT = 5

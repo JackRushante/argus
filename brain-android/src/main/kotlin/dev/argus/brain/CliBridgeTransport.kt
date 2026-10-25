@@ -2,6 +2,7 @@ package dev.argus.brain
 
 import dev.argus.engine.brain.CapabilityManifest
 import dev.argus.engine.brain.ActResult
+import dev.argus.engine.brain.CompileMetaError
 import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.brain.TurnUsage
 import dev.argus.engine.model.ArgusJson
@@ -29,7 +30,10 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -96,10 +100,11 @@ private data class StateReaderLimitsEnvelope(
     @SerialName("max_scalar_chars") val maxScalarChars: Int,
 )
 
+/** D4: il bridge vede solo alias stabili (`contact_<n>`), mai l'id reale della conversazione. */
 @Serializable
 private data class ContactEnvelope(
+    val alias: String,
     @SerialName("display_name") val displayName: String,
-    val id: String,
 )
 
 @Serializable
@@ -320,7 +325,18 @@ class CliBridgeTransport internal constructor(
             .header(DEVICE_TIME_ZONE_HEADER, deviceTimeZone())
             .post(payload.toRequestBody(JSON_MEDIA))
             .build()
-        return parseCompileResponse(execute(request), expectedRequestId = requestId)
+        val body = try {
+            execute(request)
+        } catch (error: BridgeException) {
+            // Il modello dietro il bridge ha prodotto un output inutilizzabile (502 chiuso): per
+            // l'app è un errore di formato, ritentabile una volta dal decorator come per i provider
+            // diretti (B5). Il codice resta nel dettaglio tecnico.
+            if (error.statusCode == 502 && error.errorCode == MODEL_INVALID_OUTPUT) {
+                return CompileResult("", null, CompileMetaError.META_PARSE_ERROR, detail = MODEL_INVALID_OUTPUT)
+            }
+            throw error
+        }
+        return parseCompileResponse(body, expectedRequestId = requestId)
     }
 
     override suspend fun act(
@@ -637,12 +653,13 @@ class CliBridgeTransport internal constructor(
 
     private fun readSuccessfulJson(response: Response): String {
         if (!response.isSuccessful) {
-            val kind = if (response.code == 401 || response.code == 403) {
-                BridgeErrorKind.AUTH
-            } else {
-                BridgeErrorKind.HTTP
+            val kind = when (response.code) {
+                401, 403 -> BridgeErrorKind.AUTH
+                429 -> BridgeErrorKind.RATE_LIMIT
+                else -> BridgeErrorKind.HTTP
             }
-            throw BridgeException(kind, "Bridge HTTP ${response.code}", statusCode = response.code)
+            val errorCode = if (response.code in BRIDGE_ERROR_STATUSES) readBridgeErrorCode(response) else null
+            throw BridgeException(kind, "Bridge HTTP ${response.code}", statusCode = response.code, errorCode = errorCode)
         }
         val body = response.body
             ?: throw BridgeException(BridgeErrorKind.PROTOCOL, "risposta senza body")
@@ -660,6 +677,19 @@ class CliBridgeTransport internal constructor(
             throw BridgeException(BridgeErrorKind.PROTOCOL, "risposta troppo grande")
         }
         return source.readUtf8()
+    }
+
+    /**
+     * Il bridge risponde `{"error":"<codice>"}` sugli errori operativi (model_busy, model_timeout,
+     * model_invalid_output, provider_quota_exhausted, ...). Si legge SOLO quel campo e solo se è un
+     * codice chiuso: il body remoto non entra mai in messaggi o log.
+     */
+    private fun readBridgeErrorCode(response: Response): String? {
+        val raw = runCatching { response.peekBody(MAX_ERROR_BODY_BYTES).string() }.getOrNull() ?: return null
+        val code = runCatching {
+            (json.parseToJsonElement(raw) as? JsonObject)?.get("error")?.jsonPrimitive?.contentOrNull
+        }.getOrNull()
+        return code?.takeIf { ERROR_CODE.matches(it) }
     }
 
     private fun parseCompileResponse(body: String, expectedRequestId: String): CompileResult {
@@ -738,7 +768,9 @@ class CliBridgeTransport internal constructor(
         grantedPermissions = grantedPermissions,
         availableTools = availableTools,
         unavailableTools = unavailableTools,
-        whitelistedContacts = whitelistedContacts.map { ContactEnvelope(it.displayName, it.id) },
+        whitelistedContacts = whitelistedContacts.mapIndexed { index, contact ->
+            ContactEnvelope(alias = ContactAliasMapper.aliasFor(index), displayName = contact.displayName)
+        },
         stateKeys = stateKeys,
         availableTriggers = availableTriggers,
         stateReaders = StateReadersEnvelope(
@@ -837,7 +869,7 @@ class CliBridgeTransport internal constructor(
         const val HEALTH_SCHEMA_VERSION = 2
         const val MAX_REQUEST_BYTES = 256 * 1024
         const val MAX_RESPONSE_BYTES = 512 * 1024
-        private const val MAX_MESSAGE_CHARS = 8_192
+        private const val MAX_MESSAGE_CHARS = CompileLimits.MAX_MESSAGE_CHARS
         private const val MAX_GOAL_CHARS = 4_000
         private const val MAX_REPLY_CHARS = 32_768
         private const val MAX_ACT_REPLY_CHARS = 4_096
@@ -856,6 +888,9 @@ class CliBridgeTransport internal constructor(
         private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
         private val TEST_HTTP_HOSTS = setOf("localhost", "127.0.0.1", "::1")
         private val REQUEST_ID = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+        private const val MODEL_INVALID_OUTPUT = "model_invalid_output"
+        private const val MAX_ERROR_BODY_BYTES = 2_048L
+        private val BRIDGE_ERROR_STATUSES = setOf(429, 502, 503, 504)
         private val ERROR_CODE = Regex("[a-z][a-z0-9_]{0,63}")
         private val SAFE_STATE_VALUE = Regex("[A-Za-z0-9._:+-]{1,64}")
         private val PACKAGE_NAME = Regex("[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z0-9_]+)+")
@@ -876,7 +911,9 @@ class CliBridgeTransport internal constructor(
         // 125s > timeout azione massimo (120s, MAX_ACT_TIMEOUT_MILLIS): l'HTTP non deve tagliare
         // prima che scada il withTimeout della lane generativa, altrimenti una /act web lenta
         // (ricerca web variabile) fallirebbe con un errore di rete invece di rispettare il budget
-        // dell'azione. Il main loop del bridge alza già il MODEL_TIMEOUT lato server.
+        // dell'azione. Il timeout del modello lato server NON lo alza nessun codice: lo decide
+        // ARGUS_MODEL_TIMEOUT_SECONDS del bridge (default 90 s; 125 s nell'env di esempio), che per
+        // le /act web va impostato di conseguenza.
         fun defaultClient(timeoutSeconds: Long = 125): OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(timeoutSeconds, TimeUnit.SECONDS)
             .readTimeout(timeoutSeconds, TimeUnit.SECONDS)

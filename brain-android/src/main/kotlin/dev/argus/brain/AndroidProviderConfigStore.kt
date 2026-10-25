@@ -66,7 +66,7 @@ class AndroidProviderConfigStore(context: Context) : ProviderConfigStore {
         } else {
             null
         }
-        if (apiKey != null && !ProviderPrefsSchema.validApiKey(apiKey)) return@withContext false
+        if (apiKey != null && !ProviderPrefsSchema.validApiKey(id, apiKey)) return@withContext false
         synchronized(lock) {
             runCatching {
                 val editor = preferences.edit()
@@ -91,7 +91,7 @@ class AndroidProviderConfigStore(context: Context) : ProviderConfigStore {
                 ?: return@synchronized null
             runCatching { AesGcmTokenCodec.decrypt(encoded, BridgeKeystore.encryptionKey()) }
                 .getOrNull()
-                ?.takeIf(ProviderPrefsSchema::validApiKey)
+                ?.takeIf { ProviderPrefsSchema.validApiKey(id, it) }
         }
     }
 

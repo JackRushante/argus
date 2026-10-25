@@ -96,24 +96,10 @@ interface AutomationDao {
         expectedSchemaVersion: Int,
     ): Int
 
-    @Query(
-        "UPDATE automations SET status = 'PENDING_APPROVAL', enabled = 0 " +
-            "WHERE id = :id AND status = :expectedStatus AND enabled = :expectedEnabled " +
-            "AND json = :expectedJson AND name = :expectedName AND priority = :expectedPriority " +
-            "AND cooldownMs = :expectedCooldownMs AND schemaVersion = :expectedSchemaVersion",
-    )
-    suspend fun pauseForReviewIfUnchanged(
-        id: String,
-        expectedStatus: AutomationStatus,
-        expectedEnabled: Boolean,
-        expectedJson: String,
-        expectedName: String,
-        expectedPriority: Int,
-        expectedCooldownMs: Long,
-        expectedSchemaVersion: Int,
-    ): Int
-
-    /** Annullare un edit non ri-arma implicitamente la vecchia versione. */
+    /**
+     * Solo per le regole "legacy" lasciate in PENDING_APPROVAL da una versione precedente (D5: oggi
+     * la modifica non mette più in pausa la regola): rifiutare la bozza non le ri-arma implicitamente.
+     */
     @Query(
         "UPDATE automations SET status = 'DISABLED', enabled = 0 " +
             "WHERE id = :id AND status = 'PENDING_APPROVAL' AND enabled = 0",

@@ -3,6 +3,7 @@ import dev.argus.engine.model.StateKeys
 import dev.argus.engine.model.StateQueryFamily
 import kotlin.test.Test
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 class CapabilityManifestTest {
     @Test fun `render lists device, contacts with ids, state keys and disabled tools`() {
@@ -24,6 +25,20 @@ class CapabilityManifestTest {
         assertTrue(s.contains("Moglie") && s.contains("jid:42"))
         assertTrue(s.contains(StateKeys.RINGER) && s.contains("silent"))
         assertTrue(s.contains("setting") && s.contains("dumpsys_field"))
+    }
+
+    @Test fun `render does not claim shell actions are queued when shizuku is off`() {
+        val m = CapabilityManifest(
+            deviceModel = "Pixel", androidVersion = 16, androidApi = 36,
+            shizukuAvailable = false,
+            grantedPermissions = emptyList(),
+            availableTools = emptyList(),
+            unavailableTools = emptyMap(),
+            whitelistedContacts = emptyList(),
+        )
+        val s = m.render()
+        assertTrue(s.contains("NON attivo"))
+        assertFalse(s.contains("in coda"))
     }
 
     @Test fun `reader families must be unique and canonically ordered`() {

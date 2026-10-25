@@ -10,14 +10,18 @@ import dev.argus.engine.model.ConnMedium
 import dev.argus.engine.model.ConnState
 import dev.argus.engine.model.Condition
 import dev.argus.engine.model.DndMode
+import dev.argus.engine.model.GenerativeContract
 import dev.argus.engine.model.GenerativeDeliverMode
+import dev.argus.engine.model.InterpolationPolicy
 import dev.argus.engine.model.NightMode
 import dev.argus.engine.model.PhoneEvent
 import dev.argus.engine.model.SensorKind
 import dev.argus.engine.model.StateQuery
 import dev.argus.engine.model.StateValueType
+import dev.argus.engine.model.TimePrecision
 import dev.argus.engine.model.Transition
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.TriggerField
 import dev.argus.engine.model.VarBinding
 import dev.argus.engine.model.VarType
 import dev.argus.engine.model.IntegrityLabel
@@ -46,18 +50,103 @@ import dev.argus.ui.model.VarRow
  */
 object RuleRenderMapper {
 
-    /** Disclosure provider-neutral: il brain può essere Hermes oppure un provider diretto. */
-    private fun privacyNote(l: RenderLanguage): String = l.pick(
-        "The notification text will be sent to the configured AI service to generate the reply.",
-        "Il testo delle notifiche verrà inviato al servizio AI configurato per generare la risposta.",
-    )
+    // ---------------------------------------------------------------------------------------------
+    // Nota privacy (S2): composta da PARTI, ognuna presente solo se quel dato lascia davvero il
+    // telefono verso il servizio AI configurato (il brain può essere Hermes oppure un provider
+    // diretto). Con una sola parte "testo delle notifiche" il testo coincide verbatim con la nota
+    // storica di design §7.3.
+    // ---------------------------------------------------------------------------------------------
 
-    private fun statePrivacyNote(l: RenderLanguage): String = l.pick(
-        "The notification text and values from the listed state readers will be sent to the " +
-            "configured AI service to generate the reply.",
-        "Il testo delle notifiche e i valori prodotti dai reader di stato elencati verranno " +
-            "inviati al servizio AI configurato per generare la risposta.",
-    )
+    private enum class PrivacyPart { NOTIFICATION_TEXT, DEVICE_STATE, GOAL_VARIABLES }
+
+    private enum class PrivacyResult { REPLY, NOTIFICATION, VALUE }
+
+    /**
+     * Null se la regola non ha azioni generative (a qualunque profondità). Altrimenti elenca le
+     * parti: testo della notifica (trigger Notification + contesto `notification`), valori di stato
+     * (contesto `state` o invoke_llm_v2), valori delle variabili usate nell'obiettivo (`${…}`).
+     * invoke_llm_v2 risponde sempre a una notifica e ne riceve il testo come contesto implicito.
+     */
+    private fun privacyNote(trigger: Trigger, actions: List<Action>, l: RenderLanguage): String? {
+        val parts = java.util.EnumSet.noneOf(PrivacyPart::class.java)
+        val results = java.util.EnumSet.noneOf(PrivacyResult::class.java)
+        val pending = ArrayDeque<Action>()
+        actions.forEach(pending::addLast)
+        while (pending.isNotEmpty()) {
+            when (val action = pending.removeFirst()) {
+                is Action.InvokeLlm -> {
+                    if (trigger is Trigger.Notification &&
+                        GenerativeContract.CONTEXT_NOTIFICATION in action.contextSources
+                    ) parts += PrivacyPart.NOTIFICATION_TEXT
+                    if (GenerativeContract.CONTEXT_STATE in action.contextSources) {
+                        parts += PrivacyPart.DEVICE_STATE
+                    }
+                    if (InterpolationPolicy.containsInterpolation(action.goal)) {
+                        parts += PrivacyPart.GOAL_VARIABLES
+                    }
+                    results += when (action.deliver) {
+                        GenerativeDeliverMode.WHATSAPP_REPLY -> PrivacyResult.REPLY
+                        GenerativeDeliverMode.LOCAL_NOTIFICATION -> PrivacyResult.NOTIFICATION
+                        GenerativeDeliverMode.CAPTURE_ONLY -> PrivacyResult.VALUE
+                    }
+                }
+                is Action.InvokeLlmV2 -> {
+                    if (trigger is Trigger.Notification) parts += PrivacyPart.NOTIFICATION_TEXT
+                    parts += PrivacyPart.DEVICE_STATE
+                    if (InterpolationPolicy.containsInterpolation(action.goal)) {
+                        parts += PrivacyPart.GOAL_VARIABLES
+                    }
+                    results += PrivacyResult.REPLY
+                }
+                is Action.If -> {
+                    action.then.forEach(pending::addLast)
+                    action.orElse.forEach(pending::addLast)
+                }
+                is Action.While -> action.body.forEach(pending::addLast)
+                else -> Unit
+            }
+        }
+        if (results.isEmpty()) return null
+
+        val result = when (results.singleOrNull()) {
+            PrivacyResult.REPLY -> l.pick("the reply", "la risposta")
+            PrivacyResult.NOTIFICATION -> l.pick("the notification", "la notifica")
+            PrivacyResult.VALUE -> l.pick("the value", "il valore")
+            null -> l.pick("the result", "il risultato")
+        }
+        if (parts.isEmpty()) {
+            // Nessun dato dinamico: parte comunque l'obiettivo approvato, e lo si dice.
+            return l.pick(
+                "The goal of this rule will be sent to the configured AI service to generate $result.",
+                "L'obiettivo di questa regola verrà inviato al servizio AI configurato per generare $result.",
+            )
+        }
+        val items = parts.map { privacyPartText(it, l) }
+        val list = when (items.size) {
+            1 -> items[0]
+            else -> items.dropLast(1).joinToString(", ") + l.pick(" and ", " e ") + items.last()
+        }
+        val plural = parts.size > 1 || parts.single() != PrivacyPart.NOTIFICATION_TEXT
+        return l.pick(
+            "${list.replaceFirstChar(Char::uppercaseChar)} will be sent to the configured AI service " +
+                "to generate $result.",
+            "${list.replaceFirstChar(Char::uppercaseChar)} " +
+                "${if (plural) "verranno inviati" else "verrà inviato"} al servizio AI configurato " +
+                "per generare $result.",
+        )
+    }
+
+    private fun privacyPartText(part: PrivacyPart, l: RenderLanguage): String = when (part) {
+        PrivacyPart.NOTIFICATION_TEXT -> l.pick("the notification text", "il testo delle notifiche")
+        PrivacyPart.DEVICE_STATE -> l.pick(
+            "values from the device state readers",
+            "i valori dei reader di stato del dispositivo",
+        )
+        PrivacyPart.GOAL_VARIABLES -> l.pick(
+            "the values of the variables used in the goal",
+            "i valori delle variabili usate nell'obiettivo",
+        )
+    }
 
     /**
      * [conversationLabels] mappa conversationId → display name proveniente dallo store whitelist
@@ -92,11 +181,7 @@ object RuleRenderMapper {
             conditionLines = conditions?.let { flattenConditions(it, 0, l) } ?: emptyList(),
             actions = actions.map { actionRow(it, l) },
             isGenerative = isGenerative,
-            privacyNote = when {
-                containsInvokeLlmV2(actions) -> statePrivacyNote(l)
-                isGenerative -> privacyNote(l)
-                else -> null
-            },
+            privacyNote = if (isGenerative) privacyNote(trigger, actions, l) else null,
             vars = vars.map { varRow(it, trigger, l) },
             program = programNodes(actions, l),
         )
@@ -152,7 +237,30 @@ object RuleRenderMapper {
         integrityLabel = integrityLabel(v.integrity, l),
         confidentialityLabel = confidentialityLabel(v.confidentiality, l),
         provenanceLabel = v.provenance(trigger).joinToString(", ") { provenanceLabel(it, l) },
+        // S1: il letterale approvato si mostra INTEGRALE; per gli altri tipi mai un valore.
+        valueText = (v as? VarBinding.Literal)?.value,
+        sourceText = varSourceText(v, l),
     )
+
+    /** Da dove nasce il valore, reso dai tipi (nessun valore runtime, §5.1). */
+    private fun varSourceText(v: VarBinding, l: RenderLanguage): String = when (v) {
+        is VarBinding.TriggerPayload -> {
+            val field = when (v.field) {
+                TriggerField.TEXT -> l.pick("text field", "campo testo")
+                TriggerField.TITLE -> l.pick("title field", "campo titolo")
+                TriggerField.SENDER -> l.pick("sender field", "campo mittente")
+                TriggerField.NUMBER -> l.pick("number field", "campo numero")
+            }
+            // La regex è il criterio reale di estrazione: resta visibile integrale (§5).
+            field + (v.extractionRegex?.let { l.pick(" · extraction: $it", " · estrazione: $it") } ?: "")
+        }
+        is VarBinding.State -> "${queryLabel(v.query, l)} [${valueTypeLabel(v.valueType, l)}]"
+        is VarBinding.RandomInt -> l.pick(
+            "random number from 0 to ${v.max - 1}",
+            "numero casuale da 0 a ${v.max - 1}",
+        )
+        is VarBinding.Literal -> l.pick("fixed value", "valore fisso")
+    }
 
     private fun varTypeLabel(t: VarType, l: RenderLanguage): String = when (t) {
         VarType.TEXT -> l.pick("text", "testo")
@@ -234,9 +342,16 @@ object RuleRenderMapper {
             )
         } else {
             val who = t.sender ?: t.conversationId ?: l.pick("anyone", "chiunque")
+            // Con sender E conversationId il matcher usa SOLO l'id (precedenza esclusiva): senza
+            // label fidata l'id reale va mostrato integrale accanto al nome proposto (S1).
+            val id = if (t.sender != null) {
+                t.conversationId?.let { l.pick(" · conversation id $it", " · id conversazione $it") } ?: ""
+            } else {
+                ""
+            }
             l.pick(
-                "$prefix$app notification from $who ($chat)",
-                "${prefix}notifica $app da $who ($chat)",
+                "$prefix$app notification from $who ($chat)$id",
+                "${prefix}notifica $app da $who ($chat)$id",
             )
         }
         // Non nascondere i filtri che restringono quando la regola scatta (§5: non "softare" nulla).
@@ -249,7 +364,7 @@ object RuleRenderMapper {
         val cron = t.cron
         val at = t.at
         val afterMs = t.afterMs
-        return when {
+        val line = when {
             cron != null -> humanizeCron(cron, t.tz, l)
             at != null -> l.pick(
                 "Once on ${at.replace("T", " at ")} (${t.tz})",
@@ -262,6 +377,12 @@ object RuleRenderMapper {
                 "Una volta, tra ${humanizeDelay(afterMs, l)}",
             )
             else -> l.pick("Time not specified (${t.tz})", "Orario non specificato (${t.tz})")
+        }
+        // S1: la puntualità richiesta (allarme esatto) cambia l'esecuzione e va dichiarata.
+        return if (t.precision == TimePrecision.EXACT) {
+            line + l.pick(" · exact time", " · orario esatto")
+        } else {
+            line
         }
     }
 
@@ -512,7 +633,15 @@ object RuleRenderMapper {
         is Action.ShowNotification -> row(
             iconKey = "notify",
             label = l.pick("Show notification", "Mostra notifica"),
-            detail = a.text,
+            // S1: titolo E testo, integrali (il titolo prima non compariva in review).
+            detail = if (a.text.isEmpty()) {
+                l.pick("Title: ${a.title}", "Titolo: ${a.title}")
+            } else {
+                l.pick(
+                    "Title: ${a.title} · Text: ${a.text}",
+                    "Titolo: ${a.title} · Testo: ${a.text}",
+                )
+            },
         )
         is Action.Tap -> row(
             iconKey = "tap",
@@ -556,13 +685,15 @@ object RuleRenderMapper {
             iconKey = "alarm",
             label = l.pick("Set alarm", "Imposta sveglia"),
             detail = "%02d:%02d".format(a.hour, a.minute) +
-                (a.label?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""),
+                (a.label?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: "") +
+                clockUiSuffix(a.skipUi, l),
         )
         is Action.SetTimer -> row(
             iconKey = "timer",
             label = l.pick("Start timer", "Avvia timer"),
             detail = "${a.seconds}s" +
-                (a.label?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""),
+                (a.label?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: "") +
+                clockUiSuffix(a.skipUi, l),
         )
         is Action.SetVolume -> row(
             iconKey = "volume",
@@ -634,7 +765,8 @@ object RuleRenderMapper {
                     "Internal value · Goal: ${a.goal} · tools: ${a.allowedTools.joinToString(", ")}",
                     "Valore interno · Obiettivo: ${a.goal} · tool: ${a.allowedTools.joinToString(", ")}",
                 )
-            } + captureSuffix(a.captureAs, l),
+            } + contextSuffix(a.contextSources, l) + replyBindingSuffix(a.replyTargetSender, l) +
+                captureSuffix(a.captureAs, l),
             isGenerative = true,
         )
         is Action.InvokeLlmV2 -> row(
@@ -652,6 +784,7 @@ object RuleRenderMapper {
                 )
                 append(l.pick(" · tools: ", " · tool: "))
                 append(a.allowedTools.joinToString(", "))
+                append(replyBindingSuffix(a.replyTargetSender, l))
                 append(captureSuffix(a.captureAs, l))
             },
             isGenerative = true,
@@ -705,10 +838,27 @@ object RuleRenderMapper {
         requiresLiveConfirm = requiresLiveConfirm,
     )
 
+    /** `skipUi=false` apre l'app Orologio in primo piano: cambia l'esecuzione, quindi si dichiara. */
+    private fun clockUiSuffix(skipUi: Boolean, l: RenderLanguage): String =
+        if (skipUi) "" else l.pick(" · opens the clock app", " · apre l'app Orologio")
+
     // captureAs: dove l'azione salva il proprio output (P4). Il produttore è l'azione stessa.
     /** Standalone (RunShell, che non ha altro detail). Null se non cattura. */
     private fun captureLabel(captureAs: String?, l: RenderLanguage): String? =
         captureAs?.let { l.pick("captured as $it", "catturato come $it") }
+
+    /** S1/S2: le fonti di contesto che l'azione generativa invia al servizio AI («contesto: …»). */
+    private fun contextSuffix(contextSources: List<String>, l: RenderLanguage): String =
+        if (contextSources.isEmpty()) {
+            ""
+        } else {
+            val joined = contextSources.joinToString(", ")
+            l.pick(" · context: $joined", " · contesto: $joined")
+        }
+
+    /** S1: la risposta è vincolata al mittente del trigger (non a un destinatario libero). */
+    private fun replyBindingSuffix(replyTargetSender: Boolean, l: RenderLanguage): String =
+        if (replyTargetSender) l.pick(" · reply bound to the sender", " · risposta vincolata al mittente") else ""
 
     /** Suffisso per le azioni che hanno già un detail (invoke_llm). Vuoto se non cattura. */
     private fun captureSuffix(captureAs: String?, l: RenderLanguage): String =
@@ -794,22 +944,4 @@ object RuleRenderMapper {
         StateValueType.NUMBER -> l.pick("number", "numero")
         StateValueType.BOOLEAN -> l.pick("boolean", "booleano")
     }
-}
-
-/** Iterative because approval rendering may receive an unvalidated hostile tree. */
-private fun containsInvokeLlmV2(actions: List<Action>): Boolean {
-    val pending = ArrayDeque<Action>()
-    actions.forEach(pending::addLast)
-    while (pending.isNotEmpty()) {
-        when (val action = pending.removeFirst()) {
-            is Action.InvokeLlmV2 -> return true
-            is Action.If -> {
-                action.then.forEach(pending::addLast)
-                action.orElse.forEach(pending::addLast)
-            }
-            is Action.While -> action.body.forEach(pending::addLast)
-            else -> Unit
-        }
-    }
-    return false
 }

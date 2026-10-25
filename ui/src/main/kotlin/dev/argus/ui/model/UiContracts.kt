@@ -60,6 +60,17 @@ data class VarRow(
     val integrityLabel: String,       // "trusted" | "external" (CLEAN/TAINTED)
     val confidentialityLabel: String, // "public" | "private" | "secret"
     val provenanceLabel: String,      // "SMS" | "fixed value" | "device state" | ...
+    /**
+     * Valore integrale approvato: valorizzato SOLO per i letterali ([dev.argus.engine.model.VarBinding.Literal]),
+     * `null` per ogni altro binding (i valori runtime non compaiono mai in review). Si rende in
+     * monospace, a capo, mai troncato (§5.3).
+     */
+    val valueText: String? = null,
+    /**
+     * Da dove nasce il valore, reso dai tipi: campo del trigger (+ estrazione), query di stato col
+     * tipo, intervallo del numero casuale o "valore fisso". Vuoto solo per righe costruite a mano.
+     */
+    val sourceText: String = "",
 )
 
 data class ActionRow(
@@ -109,9 +120,29 @@ enum class DraftCardStatus { PROPOSED, APPROVED, REJECTED, SUPERSEDED }
 enum class NoticeKind { INFO, ERROR }
 
 sealed interface ChatError {
-    data object Timeout : ChatError                    // Il servizio AI non ha risposto entro 65 s.
-    data object BridgeUnreachable : ChatError
+    data object Timeout : ChatError                    // Il servizio AI non ha risposto in tempo.
+    data object BridgeUnreachable : ChatError          // SOLO rete assente/irraggiungibile.
     data class MalformedReply(val detail: String) : ChatError  // metaError dal parser: mostrare "risposta senza regola valida" + dettaglio espandibile
+
+    // 0.3.5 (B11): errori spiegati col loro rimedio; ognuno ha testo EN/IT e un'azione utile.
+    /** Chiave API rifiutata (401/403). Azione: apri Sistema. */
+    data object Auth : ChatError
+    /** Limite di spesa dell'app o credito del provider esaurito. Azione: apri Sistema. */
+    data object Budget : ChatError
+    /** Provider sovraccarico (429). */
+    data object RateLimit : ChatError
+    /** Risposta del modello tagliata dal limite di lunghezza. */
+    data object OutputTruncated : ChatError
+    /** Il server ha tagliato le istruzioni (contesto troppo piccolo, tipico di Ollama). */
+    data object ContextTruncated : ChatError
+    /** 4xx diverso da 401/402/403/429: spesso il contesto del modello è troppo piccolo. */
+    data class ServerRejected(val status: Int) : ChatError
+    /** 5xx: servizio non disponibile. */
+    data class ServiceUnavailable(val status: Int) : ChatError
+    /** Prompt composto oltre il tetto: errore locale, nessuna chiamata di rete. */
+    data class TooLong(val chars: Int, val max: Int) : ChatError
+    /** Provider/chiave/informativa privacy non configurati: NON è un servizio irraggiungibile. Azione: apri Sistema. */
+    data object NotConfigured : ChatError
 }
 
 interface ChatCallbacks {
@@ -121,6 +152,8 @@ interface ChatCallbacks {
     // Menu overflow dell'header (prima era solo decorativo: feedback Lorenzo 2026-07-14).
     fun onClearConversation()
     fun onCheckConnection()
+    /** Azione degli errori Auth/Budget/NotConfigured: porta alla scheda Sistema. Default no-op per i vecchi host. */
+    fun onOpenSystem() {}
 }
 
 // --- 6.2 Automazioni · lista ---
@@ -130,7 +163,7 @@ data class AutomationListState(
     val filter: StatusFilter,               // ALL | ARMED | PENDING | DISABLED | NEEDS_REVIEW (chips)
     val banner: EngineBanner,
     val loading: Boolean,
-    val pendingCount: Int = rows.count { it.status == StatusBadge.PENDING_APPROVAL },
+    val pendingCount: Int = rows.count { it.status == StatusBadge.PENDING_APPROVAL || it.pendingEditDraftId != null },
     val needsReviewCount: Int = rows.count { it.status == StatusBadge.NEEDS_REVIEW },
 )
 
@@ -145,6 +178,12 @@ data class AutomationRow(
     val hasWarnings: Boolean,               // pallino warning (conflitti/validator)
     val lastFiredLabel: String?,            // "2 h fa" / null = mai
     val nextFireLabel: String?,             // solo trigger Time: "stasera 23:00"
+    /**
+     * D5: id della bozza di modifica in attesa su questa regola armata/disattivata (null = nessuna).
+     * La regola resta attiva finché la modifica non viene armata: la riga mostra un badge
+     * «modifica in attesa» e il tocco sul badge apre la bozza.
+     */
+    val pendingEditDraftId: String? = null,
 )
 
 enum class StatusFilter { ALL, ARMED, PENDING, DISABLED, NEEDS_REVIEW }
@@ -174,6 +213,11 @@ data class AutomationDetailState(
     val runNowBlockedReason: String? = null,
     /** Probe positivi redatti: solo famiglia/tipo, mai il valore campione. */
     val verifiedStateReaders: List<String> = emptyList(),
+    /**
+     * B26: un'azione del footer (arma, rifiuta, elimina) è in corso. Il footer resta disabilitato
+     * finché è vero, così un secondo tocco non può né duplicare l'azione né emettere un secondo Close.
+     */
+    val actionInProgress: Boolean = false,
 )
 
 interface AutomationDetailCallbacks {
@@ -212,9 +256,14 @@ enum class LogOutcome { SUCCESS, PARTIAL, FAILED, SUBMITTED, DEFERRED }
 
 interface ExecutionLogCallbacks {
     fun onExpand(id: String); fun onClearFilter(); fun onOpenAutomation(id: String)
-    // E13: "Invia ora" su una riga DEFERRED. Riceve l'id della RIGA di log (non un id
+    // E13: «Copia e apri WhatsApp» su una riga DEFERRED (non consuma la risposta: v. onMarkSent). Riceve l'id della RIGA di log (non un id
     // automazione): P0-B risolve la reply differita dalla entry, NON naviga. Default no-op.
     fun onSendNow(logId: String) {}
+    /**
+     * «Segna come inviata» su una riga DEFERRED: l'utente conferma di aver inviato il messaggio
+     * (il copia-e-apri non lo segna in anticipo). Riceve l'id della riga di log. Default no-op.
+     */
+    fun onMarkSent(logId: String) {}
 }
 
 // --- 6.5 Sistema (settings) ---
@@ -269,6 +318,11 @@ sealed interface TransportUi {
         /** Nome enum UI: default/none/low/medium/high. */
         val reasoningEffort: String = "default",
         val reasoningEffortEditable: Boolean = false,
+        /**
+         * Custom verso un host loopback (localhost, 127.0.0.1, ::1) senza alcuna chiave salvata: un'altra
+         * app sul telefono potrebbe ascoltare su quella porta e fingersi il modello. Solo avviso.
+         */
+        val unauthenticatedLoopback: Boolean = false,
     ) : TransportUi
 }
 enum class AuthState { OK, EXPIRED, NOT_CONFIGURED }
@@ -343,6 +397,16 @@ interface SettingsCallbacks {
     fun onBudgetMonthlyCostChange(maxCostMonthMicros: Long) {}
     /** Tetto TOKEN mensile globale (provider token-only). 0 = illimitato. Default no-op. */
     fun onBudgetMonthlyTokensChange(maxTokensPerMonth: Long) {}
+    /**
+     * Salva insieme i quattro tetti globali (0 = illimitato): una sola scrittura, un solo messaggio.
+     * È l'unica callback che il dialog dei limiti invoca.
+     */
+    fun onSaveBudgetLimits(
+        maxPerHour: Int,
+        maxPerDay: Int,
+        maxCostMonthMicros: Long,
+        maxTokensMonth: Long,
+    ) {}
     fun onRevokePrivacy()
     fun onRerunOnboarding()
     /** Selettore provider: id = ProviderId.wireName. Id sconosciuti = no-op lato VM. */
@@ -373,6 +437,11 @@ data class OnboardingState(
      * cosa NON potrà fare senza concederlo (task #54). Statica, derivata da ActionPrivileges.
      */
     val shizukuCapabilities: List<ShizukuCapabilityRow> = emptyList(),
+    /**
+     * Cervello configurato ma con connessione non (ancora) verificata. Non blocca il setup: lo step
+     * Brain mostra solo l'avviso e la verifica si rifà da Sistema.
+     */
+    val brainUnverified: Boolean = false,
 )
 
 /**

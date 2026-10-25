@@ -64,18 +64,31 @@ class AutomationListViewModel @Inject constructor(
     ) { (automations, conversationLabels), pending, activeFilter, shizukuStatus, metadata ->
         val now = System.currentTimeMillis()
         val lastFiredById = metadata.associate { it.id to it.lastFiredAt }
-        val pendingAutomationIds = pending.mapTo(hashSetOf()) { it.automationId }
+        // D5: una bozza di modifica su una regola armata/disattivata NON sostituisce la riga della
+        // regola (che continua a scattare): diventa il badge «modifica in attesa» sulla sua riga.
+        // Solo la bozza di una regola "legacy" in PENDING_APPROVAL, o di una regola assente, resta
+        // una riga a sé; per la legacy nasconde la riga della regola in pausa, come prima.
+        val statusById = automations.associate { it.id to it.status }
+        val editDrafts = pending.filter { snapshot ->
+            statusById[snapshot.automationId].let {
+                it == AutomationStatus.ARMED || it == AutomationStatus.DISABLED
+            }
+        }
+        val editDraftIdByAutomation = editDrafts.associate { it.automationId to it.id.value }
+        val replacedByDraftRow = pending.filterNot { it in editDrafts }
+            .mapTo(hashSetOf()) { it.automationId }
         val automationRows = automations
-            .filterNot { it.id in pendingAutomationIds }
+            .filterNot { it.id in replacedByDraftRow }
             .map { automation ->
                 automation.toAutomationRow(
                     lastFiredById[automation.id.value],
                     now,
                     conversationLabels,
                     language,
+                    pendingEditDraftId = editDraftIdByAutomation[automation.id],
                 )
             }
-        val pendingRows = pending.map { snapshot ->
+        val pendingRows = pending.filterNot { it in editDrafts }.map { snapshot ->
             val review = cancellationSafeOrNull { approvals.review(snapshot.id) }
             snapshot.toAutomationRow(review, conversationLabels, language)
         }
@@ -99,7 +112,7 @@ class AutomationListViewModel @Inject constructor(
             filter = activeFilter,
             banner = engineBanner(shizukuStatus, usesShizuku),
             loading = false,
-            pendingCount = allRows.count { it.status == StatusBadge.PENDING_APPROVAL },
+            pendingCount = allRows.count { it.isPendingApproval() },
             needsReviewCount = allRows.count { it.status == StatusBadge.NEEDS_REVIEW },
         )
     }.stateIn(
@@ -172,7 +185,11 @@ class AutomationListViewModel @Inject constructor(
 private fun AutomationRow.matches(filter: StatusFilter): Boolean = when (filter) {
     StatusFilter.ALL -> true
     StatusFilter.ARMED -> status == StatusBadge.ARMED
-    StatusFilter.PENDING -> status == StatusBadge.PENDING_APPROVAL
+    StatusFilter.PENDING -> isPendingApproval()
     StatusFilter.DISABLED -> status == StatusBadge.DISABLED
     StatusFilter.NEEDS_REVIEW -> status == StatusBadge.NEEDS_REVIEW
 }
+
+/** In attesa di approvazione: una bozza (nuova o legacy) oppure una regola attiva con modifica in attesa. */
+private fun AutomationRow.isPendingApproval(): Boolean =
+    status == StatusBadge.PENDING_APPROVAL || pendingEditDraftId != null

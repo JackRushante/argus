@@ -4,10 +4,11 @@ import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.TriggerEvent
 
 /**
- * Confine unico per la shell autonoma approvata. Il comando è sempre letterale nel fingerprint:
- * l'injection resta impossibile per costruzione, perché il contenuto del messaggio non sceglie
- * mai il comando — al massimo fa da interruttore. La domanda qui è dunque una sola: **di chi ci
- * fidiamo per premere l'interruttore?**
+ * Confine unico per la shell autonoma approvata. Il template del comando è letterale nel
+ * fingerprint: il contenuto del messaggio non sceglie il comando — al massimo fa da interruttore e,
+ * se la regola interpola una variabile esterna, fornisce un ARGOMENTO già quotato
+ * ([dev.argus.engine.model.ShellQuoting]), mai sintassi della shell. La domanda qui è dunque una
+ * sola: **di chi ci fidiamo per premere l'interruttore?**
  *
  * Decisione di Lorenzo (2026-07-15), che revoca il proprio divieto precedente: un contatto
  * whitelistato può innescare un comando che lui stesso ha approvato alla lettera.

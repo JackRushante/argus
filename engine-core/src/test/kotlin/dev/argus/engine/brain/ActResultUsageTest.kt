@@ -52,6 +52,13 @@ class ActResultUsageTest {
         assertFailsWith<IllegalArgumentException> { TurnUsage(0, 5, reasoningTokens = 6) }
     }
 
+    @Test fun `web searches are an optional bounded count`() {
+        assertEquals(null, TurnUsage(1, 2).webSearches)
+        assertEquals(3, TurnUsage(1, 2, webSearches = 3).webSearches)
+        assertFailsWith<IllegalArgumentException> { TurnUsage(1, 2, webSearches = -1) }
+        assertFailsWith<IllegalArgumentException> { TurnUsage(1, 2, webSearches = TurnUsage.MAX_WEB_SEARCHES + 1) }
+    }
+
     @Test fun `turn usage rejects impossible remote accounting values`() {
         assertFailsWith<IllegalArgumentException> {
             TurnUsage(TurnUsage.MAX_TOKENS_PER_TURN + 1, 0)

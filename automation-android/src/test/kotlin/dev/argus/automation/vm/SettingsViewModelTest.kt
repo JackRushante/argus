@@ -67,6 +67,7 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.junit.After
 import org.junit.Before
@@ -450,6 +451,137 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun `onSaveBudgetLimits salva ora giorno costo e token con una sola scrittura`() = runTest(dispatcher) {
+        val settings = SlowBudgetSettingsStore()
+        val vm = settingsViewModel(FakeProviderStore(), budgetSettings = settings)
+        observe(vm)
+        val messages = collectMessages(vm)
+        advanceUntilIdle()
+
+        vm.onSaveBudgetLimits(
+            maxPerHour = 12,
+            maxPerDay = 90,
+            maxCostMonthMicros = 4_500_000L,
+            maxTokensMonth = 2_000_000L,
+        )
+        advanceUntilIdle()
+
+        val global = settings.observe().value.global
+        assertEquals(12, global.maxCallsPerHour)
+        assertEquals(90, global.maxCallsPerDay)
+        assertEquals(4_500_000L, global.maxCostPerMonthMicros)
+        assertEquals(2_000_000L, global.maxTokensPerMonth)
+        assertEquals(1, settings.setGlobalCalls)
+        assertEquals(listOf("Limiti budget salvati."), messages.toList())
+    }
+
+    @Test
+    fun `onSaveBudgetLimits con zero azzera il limite e con un valore negativo non tocca nulla`() =
+        runTest(dispatcher) {
+            val settings = SlowBudgetSettingsStore(
+                BudgetSettings(global = BudgetLimits(5, 50, 1_000_000L, 9_000L)),
+            )
+            val vm = settingsViewModel(FakeProviderStore(), budgetSettings = settings)
+            observe(vm)
+            val messages = collectMessages(vm)
+            advanceUntilIdle()
+
+            vm.onSaveBudgetLimits(0, 50, 0L, 9_000L)
+            advanceUntilIdle()
+            assertEquals(BudgetLimits(null, 50, null, 9_000L), settings.observe().value.global)
+
+            vm.onSaveBudgetLimits(-1, 1, 1L, 1L)
+            advanceUntilIdle()
+            assertEquals(BudgetLimits(null, 50, null, 9_000L), settings.observe().value.global)
+            assertEquals(listOf("Limiti budget salvati.", "Limite non valido."), messages.toList())
+        }
+
+    @Test
+    fun `i quattro metodi singoli in fila non si sovrascrivono a vicenda`() = runTest(dispatcher) {
+        val settings = SlowBudgetSettingsStore()
+        val vm = settingsViewModel(FakeProviderStore(), budgetSettings = settings)
+        observe(vm)
+        advanceUntilIdle()
+
+        vm.onBudgetChange(7)
+        vm.onBudgetDayChange(70)
+        vm.onBudgetMonthlyCostChange(3_000_000L)
+        vm.onBudgetMonthlyTokensChange(800_000L)
+        advanceUntilIdle()
+
+        assertEquals(
+            BudgetLimits(7, 70, 3_000_000L, 800_000L),
+            settings.observe().value.global,
+        )
+    }
+
+    // ------------------------------------------------------------------ D3: server locale senza chiave
+
+    private fun TestScope.customTransport(
+        baseUrl: String,
+        key: String? = null,
+        provider: ProviderId = ProviderId.CUSTOM_OPENAI_COMPAT,
+    ): TransportUi.DirectProvider {
+        val store = FakeProviderStore().apply {
+            seed(provider, baseUrl = baseUrl, key = key)
+            select(provider)
+        }
+        val vm = settingsViewModel(store)
+        observe(vm)
+        vm.refresh()
+        advanceUntilIdle()
+        val transport = vm.state.value.transport
+        assertTrue(transport is TransportUi.DirectProvider, "atteso DirectProvider, era $transport")
+        return transport as TransportUi.DirectProvider
+    }
+
+    @Test
+    fun `custom su host loopback senza chiave segnala il server locale non autenticato`() =
+        runTest(dispatcher) {
+            for (url in listOf("http://127.0.0.1:8080/v1", "http://localhost:11434/v1", "http://[::1]:8080/v1")) {
+                assertTrue(customTransport(url).unauthenticatedLoopback, "atteso avviso per $url")
+            }
+        }
+
+    @Test
+    fun `custom loopback con una chiave salvata non segnala nulla`() = runTest(dispatcher) {
+        assertFalse(customTransport("http://127.0.0.1:8080/v1", key = "local-key-0123456789").unauthenticatedLoopback)
+    }
+
+    @Test
+    fun `custom su host non loopback non segnala il server locale`() = runTest(dispatcher) {
+        for (url in listOf(
+            "https://llm.example.com/v1",
+            "http://localhost.evil.example/v1",
+            "https://127.0.0.1.nip.io/v1",
+            "http://192.168.1.10:8080/v1",
+        )) {
+            assertFalse(customTransport(url).unauthenticatedLoopback, "nessun avviso atteso per $url")
+        }
+    }
+
+    @Test
+    fun `un provider diverso da custom non segnala il server locale anche senza chiave`() =
+        runTest(dispatcher) {
+            val transport = customTransport(
+                baseUrl = "http://127.0.0.1:8080/v1",
+                provider = ProviderId.OPENROUTER,
+            )
+            assertFalse(transport.unauthenticatedLoopback)
+        }
+
+    @Test
+    fun `isLoopbackBaseUrl accetta solo gli host loopback esatti`() {
+        assertTrue(isLoopbackBaseUrl("http://localhost/v1"))
+        assertTrue(isLoopbackBaseUrl("http://127.0.0.1:1/v1"))
+        assertTrue(isLoopbackBaseUrl("http://[::1]/v1"))
+        assertFalse(isLoopbackBaseUrl("http://127.0.0.2/v1"))
+        assertFalse(isLoopbackBaseUrl("http://localhost.evil.example/v1"))
+        assertFalse(isLoopbackBaseUrl("not a url"))
+        assertFalse(isLoopbackBaseUrl(""))
+    }
+
+    @Test
     fun `budget espone token per provider e nessun dollaro per i token-only`() = runTest(dispatcher) {
         val usage = FakeUsageDao(
             all = listOf(
@@ -570,6 +702,43 @@ private class FakeBudgetSettingsStore(
         maxCostPerMonthMicros = l.maxCostPerMonthMicros?.takeIf { it > 0L },
         maxTokensPerMonth = l.maxTokensPerMonth?.takeIf { it > 0L },
     )
+}
+
+/**
+ * Store con scrittura sospesa (come il commit() su Dispatchers.IO del vero store): lo snapshot letto
+ * prima di scrivere diventa stantio se due scritture si accavallano.
+ */
+private class SlowBudgetSettingsStore(
+    initial: BudgetSettings = BudgetSettings(),
+) : BudgetSettingsStore {
+    private val flow = MutableStateFlow(initial)
+    var setGlobalCalls = 0
+        private set
+
+    override fun observe(): StateFlow<BudgetSettings> = flow.asStateFlow()
+
+    override suspend fun setGlobalLimits(limits: BudgetLimits): Boolean {
+        setGlobalCalls++
+        delay(10)
+        if ((limits.maxCallsPerHour ?: 0) < 0 || (limits.maxCallsPerDay ?: 0) < 0 ||
+            (limits.maxCostPerMonthMicros ?: 0L) < 0L || (limits.maxTokensPerMonth ?: 0L) < 0L
+        ) {
+            return false
+        }
+        flow.value = flow.value.copy(
+            global = BudgetLimits(
+                maxCallsPerHour = limits.maxCallsPerHour?.takeIf { it > 0 },
+                maxCallsPerDay = limits.maxCallsPerDay?.takeIf { it > 0 },
+                maxCostPerMonthMicros = limits.maxCostPerMonthMicros?.takeIf { it > 0L },
+                maxTokensPerMonth = limits.maxTokensPerMonth?.takeIf { it > 0L },
+            ),
+        )
+        return true
+    }
+
+    override suspend fun setProviderLimits(id: ProviderId, limits: BudgetLimits): Boolean = false
+
+    override suspend fun setSoftThresholdPct(pct: Int): Boolean = false
 }
 
 // ----------------------------------------------------------------------- fakes

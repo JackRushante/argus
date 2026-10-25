@@ -56,8 +56,8 @@
     <string name="badge_cloud">esce verso il cloud</string>
 
     <!-- Banner salute -->
-    <string name="banner_shizuku_down">Shizuku non attivo — azioni shell in pausa</string>
-    <string name="banner_shizuku_degraded">Dopo il riavvio Shizuku è spento — le azioni shell sono in coda</string>
+    <string name="banner_shizuku_down">Shizuku non attivo: le azioni privilegiate vengono saltate e non recuperate dopo</string>
+    <string name="banner_shizuku_degraded">Shizuku spento dopo il riavvio: riavvialo; le azioni privilegiate nel frattempo vengono saltate</string>
     <string name="banner_battery_not_exempt">Ottimizzazione batteria attiva — le azioni in background possono fallire</string>
     <string name="banner_brain_unreachable">Servizio AI irraggiungibile — la chat non può proporre regole</string>
     <string name="latency_thinking">Argus sta pensando… (%1$d s)</string>
@@ -69,6 +69,7 @@
     <string name="rule_section_only_if">SOLO SE</string>
     <string name="rule_section_then">ALLORA</string>
     <string name="rule_section_variables">VARIABILI</string>
+    <string name="rule_var_value_label">valore</string>
 
     <!-- Chat -->
     <string name="chat_subtitle">chat · compilatore di regole</string>
@@ -84,9 +85,19 @@
     <string name="chat_review_cta">Rivedi e approva</string>
     <string name="chat_brain_down">Servizio AI irraggiungibile</string>
     <string name="chat_retry">Riprova</string>
-    <string name="chat_error_timeout">Il servizio AI non risponde (timeout 65 s). Potrebbe essere occupato — riprova.</string>
+    <string name="chat_error_timeout">Il servizio AI non ha risposto in tempo. Potrebbe essere occupato — riprova.</string>
     <string name="chat_error_unreachable">Servizio AI irraggiungibile. Controlla la rete e la configurazione del provider, poi riprova.</string>
     <string name="chat_error_malformed">La risposta non conteneva una regola valida. Riprova o riformula.</string>
+    <string name="chat_error_auth">Chiave API rifiutata dal servizio: controllala in Sistema.</string>
+    <string name="chat_error_budget">Limite di spesa raggiunto: modificalo in Sistema.</string>
+    <string name="chat_error_rate_limit">Il servizio è sovraccarico (troppe richieste): riprova tra poco.</string>
+    <string name="chat_error_output_truncated">La risposta del modello è stata tagliata (limite di lunghezza). Riprova o usa un modello con più spazio.</string>
+    <string name="chat_error_context_truncated">Il server ha tagliato le istruzioni: il contesto del modello è troppo piccolo. Servono almeno circa 12.000 token (per Ollama: OLLAMA_CONTEXT_LENGTH).</string>
+    <string name="chat_error_server_rejected">Il server ha rifiutato la richiesta (HTTP %1$d). Spesso il contesto del modello è troppo piccolo.</string>
+    <string name="chat_error_service_unavailable">Il servizio non è disponibile in questo momento (HTTP %1$d). Riprova più tardi.</string>
+    <string name="chat_error_too_long">Richiesta troppo lunga (%1$d caratteri, massimo %2$d). Accorciala.</string>
+    <string name="chat_error_not_configured">Il servizio AI non è configurato. Controlla provider, chiave API e informativa privacy in Sistema.</string>
+    <string name="chat_open_system">Apri Sistema</string>
     <string name="chat_error_detail_show">Dettaglio tecnico</string>
     <string name="chat_error_detail_hide">Nascondi dettaglio tecnico</string>
     <string name="chat_empty_title">Chiedi la tua prima regola</string>
@@ -106,6 +117,7 @@
     <string name="list_filter_armed">Armate</string>
     <string name="list_filter_disabled">Disattivate</string>
     <string name="list_filter_needs_review">Da rivedere</string>
+    <string name="list_pending_edit_badge">modifica in attesa</string>
     <string name="list_empty_title">Nessuna automazione</string>
     <string name="list_empty_body">Chiedila in chat: descrivi cosa vuoi che Argus faccia e proporrà una regola da rivedere e armare.</string>
     <string name="list_empty_cta">Vai in chat</string>
@@ -137,7 +149,8 @@
     <string name="log_filter_remove">Rimuovi filtro</string>
     <string name="log_expand">Espandi</string>
     <string name="log_collapse">Comprimi</string>
-    <string name="log_send_now">Invia ora</string>
+    <string name="log_copy_and_open">Copia e apri WhatsApp</string>
+    <string name="log_mark_sent">Segna come inviata</string>
     <string name="log_open_automation">Apri automazione</string>
 
     <!-- Sistema (settings) -->
@@ -154,10 +167,11 @@
     <string name="settings_shizuku_not_installed">non installato</string>
     <string name="settings_shizuku_not_running">installato, non in esecuzione</string>
     <string name="settings_shizuku_not_authorized">attivo, Argus non autorizzato</string>
-    <string name="settings_shizuku_degraded">spento dopo il riavvio — azioni shell in coda</string>
+    <string name="settings_shizuku_degraded">spento dopo il riavvio: riavvialo; le azioni privilegiate nel frattempo vengono saltate</string>
     <string name="settings_battery_title">Ottimizzazione batteria</string>
     <string name="settings_battery_ok">esclusione Android concessa — gli eventuali controlli del produttore per attività in background/avvio automatico restano manuali</string>
-    <string name="settings_battery_warn">attiva — concedi l\'esclusione e verifica anche gli eventuali controlli del produttore per attività in background/avvio automatico</string>
+    <string name="settings_battery_warn">attiva — concedi l\'esclusione e verifica anche gli eventuali controlli del produttore per attività in background/avvio automatico; altrimenti le azioni pianificate, e anche quelle AI, potrebbero arrivare in ritardo</string>
+    <string name="settings_unauthenticated_loopback">Server locale senza chiave: un\'altra app sul telefono potrebbe fingersi il modello. Imposta una chiave anche sul server locale.</string>
     <string name="settings_notifications_title">Notifiche Argus</string>
     <string name="settings_notifications_ok">consentite</string>
     <string name="settings_notifications_warn">non consentite — esiti e avvisi non saranno visibili</string>
@@ -221,6 +235,8 @@
     <string name="budget_cost_label">Costo / mese (USD)</string>
     <string name="budget_tokens_label">Token / mese</string>
     <string name="budget_unlimited_hint">0 o vuoto = illimitato</string>
+    <string name="budget_error_integer">Solo cifre. 0 o vuoto = illimitato</string>
+    <string name="budget_error_cost">Inserisci un importo come 2,50: cifre e al massimo una virgola o un punto</string>
     <string name="budget_cost_hint">Provider a listino (OpenAI/Anthropic/Gemini) · 0 o vuoto = illimitato</string>
     <string name="budget_tokens_hint">Provider token-only (Hermes/OpenRouter/Custom) · 0 o vuoto = illimitato</string>
 
@@ -247,5 +263,6 @@
     <string name="onboarding_shizuku_required_sub">Senza autorizzazione, queste azioni non sono disponibili.</string>
     <string name="onboarding_shizuku_recommended_sub">Funzionano anche senza, ma solo con Argus aperto in primo piano.</string>
     <string name="onboarding_shizuku_not_required_sub">Sempre disponibili, con o senza Shizuku.</string>
+    <string name="onboarding_brain_unverified">Connessione non ancora verificata: potrai controllarla da Sistema.</string>
     <string name="onboarding_battery_consequence">Senza l\'esclusione, Android o la gestione energetica del produttore può ritardare il lavoro in background. Gli allarmi restano event-driven e non usano un servizio persistente.</string>
 </resources>

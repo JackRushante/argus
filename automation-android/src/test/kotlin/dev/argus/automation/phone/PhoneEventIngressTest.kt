@@ -4,7 +4,11 @@ import dev.argus.engine.model.PhoneEvent
 import dev.argus.engine.phone.PhoneEventParser
 import dev.argus.engine.runtime.TriggerEnvelope
 import dev.argus.engine.runtime.TriggerEvent
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -126,6 +130,43 @@ class PhoneEventIngressTest {
         ingress.onSms(listOf(SmsPart(sender = "+39001", body = "   ", atMillis = 1L)))
         assertTrue(dispatched.isEmpty())
     }
+
+    @Test
+    fun `a call dispatch in flight does not block recovery and later transitions stay in order`() =
+        runTest {
+            val entered = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            var first = true
+            val seen = mutableListOf<PhoneEvent>()
+            val gated = PhoneEventIngress(PhoneEventParser(), callState) { envelope ->
+                seen += (envelope.event as TriggerEvent.PhoneStateChanged).event
+                if (first) {
+                    first = false
+                    entered.complete(Unit)
+                    release.await()
+                }
+            }
+
+            val ringing = async { gated.onCallStateChanged("RINGING", "3932077480", 1_000L) }
+            entered.await()
+
+            // Il recovery non si blocca dietro al dispatch lungo e non riconsegna lo stesso evento:
+            // il pending resta dovuto finché la consegna non è finita.
+            assertEquals(false, withTimeout(1_000) { gated.recoverPending() })
+            assertEquals(listOf(PhoneEvent.INCOMING_CALL), seen)
+            assertTrue(callState.pending() != null)
+
+            // La fine chiamata aspetta in coda e viene consegnata dopo, nello stesso ordine.
+            val idle = async { gated.onCallStateChanged("IDLE", null, 2_000L) }
+            runCurrent()
+            assertEquals(listOf(PhoneEvent.INCOMING_CALL), seen)
+
+            release.complete(Unit)
+            ringing.await()
+            idle.await()
+            assertEquals(listOf(PhoneEvent.INCOMING_CALL, PhoneEvent.CALL_ENDED), seen)
+            assertNull(callState.pending())
+        }
 
     @Test
     fun `failed call dispatch survives process death with the exact same event id`() = runTest {

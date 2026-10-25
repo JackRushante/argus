@@ -14,6 +14,9 @@ package dev.argus.engine.model
  * Restano INVARIATI e **indipendenti** da questa policy — sono i denti che teniamo:
  *  - lo shell-gating sui mittenti ([dev.argus.engine.safety.StaticShellSafety]): chi può
  *    innescare una shell approvata resta ristretto ai contatti WhatsApp 1:1 whitelistati;
+ *  - il quoting automatico dei dati esterni nei comandi shell ([ShellQuoting], D1): un valore
+ *    TAINTED nel template di `run_shell.cmd` entra come argomento inerte (apici, escape per
+ *    contesto), mai come sintassi della shell; l'impronta non cambia perché il template non cambia;
  *  - il floor di confidenzialità SECRET sulle capture (asse CONFIDENTIALITY): l'output
  *    shell/model resta TAINTED + SECRET;
  *  - la separazione SYSTEM/DATA dei dati runtime verso il Brain (marker runtime_data).

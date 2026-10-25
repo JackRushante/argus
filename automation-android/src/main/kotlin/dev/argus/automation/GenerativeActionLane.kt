@@ -4,6 +4,7 @@ import dev.argus.automation.budget.BudgetMeta
 import dev.argus.automation.notification.NotificationReplyDelivery
 import dev.argus.automation.notification.NotificationReplyGateway
 import dev.argus.automation.notification.NotificationReplyRequest
+import dev.argus.automation.notification.ReplyBurstSource
 import dev.argus.engine.brain.ActResult
 import dev.argus.engine.brain.Brain
 import dev.argus.engine.model.Action
@@ -29,6 +30,7 @@ import dev.argus.engine.runtime.RuntimeDataBinding
 import dev.argus.engine.runtime.SubmittedActionCompletion
 import dev.argus.engine.runtime.SubmittedActionJournal
 import dev.argus.engine.runtime.TriggerEvent
+import dev.argus.engine.runtime.TriggerEventId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -63,8 +65,23 @@ class AndroidGenerativeLane(
     capacity: Int = DEFAULT_CAPACITY,
     private val submissionHandshakeTimeoutMillis: Long = DEFAULT_HANDSHAKE_TIMEOUT_MILLIS,
     private val nowMillis: () -> Long = System::currentTimeMillis,
+    /**
+     * Raffiche di messaggi (D8): se presente, una reply WhatsApp 1:1 aspetta [burstSilenceMillis] di
+     * silenzio (al massimo [burstMaxMillis] dal primo messaggio) e genera UNA sola risposta sul testo
+     * di tutta la raffica. Senza sorgente la lane risponde subito, come prima.
+     */
+    private val replyBursts: ReplyBurstSource? = null,
+    private val burstSilenceMillis: Long = DEFAULT_BURST_SILENCE_MILLIS,
+    private val burstMaxMillis: Long = DEFAULT_BURST_MAX_MILLIS,
 ) : GenerativeLane {
     private val queue: Channel<QueuedAction>
+
+    /**
+     * Event id già accorpati nella risposta a un evento precedente della stessa raffica: se l'Engine
+     * li sottopone comunque (cooldown assente o breve) si chiudono senza una seconda generazione.
+     * Toccato solo dal consumer unico della lane.
+     */
+    private val absorbedEventIds = LinkedHashSet<TriggerEventId>()
 
     init {
         require(capacity > 0) { "La capacità generativa deve essere positiva" }
@@ -300,21 +317,38 @@ class AndroidGenerativeLane(
 
     private suspend fun process(queued: QueuedAction) {
         if (!awaitSubmitted(queued)) return
+        if (queued.context.eventId in absorbedEventIds) {
+            // Messaggio già incluso nella risposta generata per la raffica: nessuna seconda reply.
+            complete(queued, ActionJournalOutcome.SUCCEEDED, "coalesced")
+            return
+        }
         validate(queued)?.let { code ->
             complete(queued, ActionJournalOutcome.FAILED, code)
             return
         }
 
+        // D8: la reply 1:1 attende la fine della raffica. Il contesto per il modello porta il testo
+        // di tutti i messaggi; validazione e journal restano sul contesto del PRIMO evento.
+        val brainContext = replyBurstTarget(queued)?.let { target ->
+            val merged = awaitReplyBurst(queued, target)
+            // La regola può essere cambiata durante l'attesa: nessuna chiamata al modello a vuoto.
+            validate(queued)?.let { code ->
+                complete(queued, ActionJournalOutcome.FAILED, code)
+                return
+            }
+            merged
+        } ?: queued.context
+
         val act = try {
             withTimeout(timeoutMs(queued.action)) {
                 when (val action = queued.action) {
                     is Action.InvokeLlm -> brain.act(
-                        context = queued.context,
+                        context = brainContext,
                         goal = action.goal,
                         contextSources = action.contextSources,
                         allowedTools = action.allowedTools,
                     )
-                    is Action.InvokeLlmV2 -> brain.actV2(queued.context, action)
+                    is Action.InvokeLlmV2 -> brain.actV2(brainContext, action)
                 }
             }
         } catch (_: TimeoutCancellationException) {
@@ -378,6 +412,77 @@ class AndroidGenerativeLane(
             }
         }
     }
+
+    /** Conversazione di una reply 1:1 da accorpare (D8), oppure null se la reply parte subito. */
+    private fun replyBurstTarget(queued: QueuedAction): BurstTarget? {
+        if (replyBursts == null) return null
+        val isReply = when (val action = queued.action) {
+            is Action.InvokeLlm -> action.deliver == GenerativeDeliverMode.WHATSAPP_REPLY
+            is Action.InvokeLlmV2 -> true
+        }
+        if (!isReply) return null
+        val event = queued.context.event as? TriggerEvent.NotificationPosted ?: return null
+        if (event.isGroup != false) return null
+        val key = event.notificationKey?.takeIf(String::isNotBlank) ?: return null
+        val conversationId = event.conversationId?.takeIf(String::isNotBlank) ?: return null
+        return BurstTarget(event, key, conversationId)
+    }
+
+    /**
+     * Aspetta [burstSilenceMillis] senza nuovi messaggi della conversazione, ma al massimo
+     * [burstMaxMillis] dal primo, poi restituisce il contesto per il modello: stesso primo evento,
+     * con il testo di tutta la raffica (l'ultimo messaggio per ultimo). Gli event id degli altri
+     * messaggi si ricordano come accorpati, così un loro eventuale fire separato non risponde due volte.
+     */
+    private suspend fun awaitReplyBurst(queued: QueuedAction, target: BurstTarget): FireContext {
+        val source = requireNotNull(replyBursts)
+        val firstEventId = queued.context.eventId
+        var seen = source.burst(target.key, target.conversationId, firstEventId)?.latestEventId
+            ?: firstEventId
+        withTimeoutOrNull(burstMaxMillis) {
+            while (true) {
+                seen = withTimeoutOrNull(burstSilenceMillis) {
+                    source.awaitNewMessage(target.key, target.conversationId, seen)
+                } ?: break
+            }
+        }
+        val burst = source.burst(target.key, target.conversationId, firstEventId)
+            ?: return queued.context
+        burst.messages.forEach { message ->
+            if (message.eventId != firstEventId) rememberAbsorbed(message.eventId)
+        }
+        if (burst.messages.size < 2) return queued.context
+        val merged = mergeBurstTexts(burst.messages.map { it.text }) ?: return queued.context
+        return queued.context.copy(event = target.event.copy(text = merged))
+    }
+
+    private fun rememberAbsorbed(eventId: TriggerEventId) {
+        absorbedEventIds.add(eventId)
+        while (absorbedEventIds.size > MAX_ABSORBED_EVENT_IDS) {
+            val oldest = absorbedEventIds.iterator()
+            oldest.next()
+            oldest.remove()
+        }
+    }
+
+    /** Messaggi in ordine cronologico separati da newline; se eccedono il tetto restano i più recenti. */
+    private fun mergeBurstTexts(texts: List<String>): String? {
+        val kept = ArrayDeque<String>()
+        var total = 0
+        for (text in texts.map(String::trim).filter(String::isNotEmpty).asReversed()) {
+            val cost = text.length + if (kept.isEmpty()) 0 else 1
+            if (kept.isNotEmpty() && total + cost > MAX_MERGED_BURST_CHARS) break
+            kept.addFirst(text)
+            total += cost
+        }
+        return kept.takeIf { it.isNotEmpty() }?.joinToString("\n")
+    }
+
+    private class BurstTarget(
+        val event: TriggerEvent.NotificationPosted,
+        val key: String,
+        val conversationId: String,
+    )
 
     /**
      * Sink NOTIFICA (#59): il testo generato diventa una notifica locale, senza alcun requisito
@@ -575,6 +680,13 @@ class AndroidGenerativeLane(
     private companion object {
         const val DEFAULT_CAPACITY = 8
         const val DEFAULT_HANDSHAKE_TIMEOUT_MILLIS = 5_000L
+
+        /** D8: silenzio che chiude una raffica e tetto massimo dal primo messaggio. */
+        const val DEFAULT_BURST_SILENCE_MILLIS = 8_000L
+        const val DEFAULT_BURST_MAX_MILLIS = 30_000L
+        const val MAX_ABSORBED_EVENT_IDS = 64
+        /** Sotto il tetto di 4096 caratteri che il brain applica al testo notifica. */
+        const val MAX_MERGED_BURST_CHARS = 3_500
         const val MIN_TIMEOUT_MILLIS = 1_000L
         const val MAX_TIMEOUT_MILLIS = 120_000L
         // Allineato a DraftValidator.MAX_NAME_LENGTH: il titolo del sink notifica è letterale.

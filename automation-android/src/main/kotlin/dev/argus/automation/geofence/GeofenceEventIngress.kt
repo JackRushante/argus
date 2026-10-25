@@ -1,5 +1,6 @@
 package dev.argus.automation.geofence
 
+import dev.argus.automation.SequentialLanes
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.Transition
@@ -31,6 +32,11 @@ fun interface GeofenceTransitionVerifier {
 /**
  * Dedup persistente dei callback framework. La sequenza sopravvive alle ri-registrazioni della
  * stessa revisione, quindi anche l'ENTER iniziale ripetuto dopo process death resta idempotente.
+ *
+ * Il pending si persiste e si conferma sotto [mutex] (sezioni brevi); la consegna, che esegue il
+ * programma della regola, avviene FUORI da quel lock in una coda sequenziale per regola
+ * ([lanes], B3): i bordi della stessa regola restano in ordine, regole diverse e i recovery non
+ * si aspettano.
  */
 class GeofenceEventIngress(
     private val state: GeofenceStateStore,
@@ -38,53 +44,62 @@ class GeofenceEventIngress(
     private val verifier: GeofenceTransitionVerifier = GeofenceTransitionVerifier { _, _ -> true },
 ) {
     private val mutex = Mutex()
+    private val lanes = SequentialLanes<AutomationId>()
 
     suspend fun onTransition(
         automationId: AutomationId,
         approvalFingerprint: ApprovalFingerprint,
         transition: Transition,
-    ): Boolean = mutex.withLock {
-        val previousPending = state.pending(automationId, approvalFingerprint)
+    ): Boolean = lanes.run(automationId) {
+        val previousPending = mutex.withLock { state.pending(automationId, approvalFingerprint) }
         if (previousPending != null) {
             // Ritentativo di un bordo già accettato: non va ri-verificato, va solo consegnato.
             deliver(automationId, approvalFingerprint, previousPending)
-            if (previousPending.transition == transition) return@withLock true
+            if (previousPending.transition == transition) return@run true
         }
         // Verifica prima di toccare lo stato: un bordo smentito dalla posizione non deve
         // avanzare la sequenza, altrimenti il dedup lo tratterebbe come realmente avvenuto.
-        if (!verifier.accepts(automationId, transition)) return@withLock previousPending != null
-        val pending = state.beginTransition(
-            automationId,
-            approvalFingerprint,
-            transition,
-        ) ?: return@withLock previousPending != null
+        if (!verifier.accepts(automationId, transition)) return@run previousPending != null
+        val pending = mutex.withLock {
+            state.beginTransition(automationId, approvalFingerprint, transition)
+        } ?: return@run previousPending != null
         deliver(automationId, approvalFingerprint, pending)
         true
     }
 
-    /** Ripete lo stesso event-id dopo un crash; l'ExecutionJournal dell'Engine lo deduplica. */
-    suspend fun recoverPending(allowedIds: Set<AutomationId>): List<AutomationId> =
-        mutex.withLock {
-            val recovered = mutableListOf<AutomationId>()
-            var firstFailure: Exception? = null
-            state.knownIds().sortedBy { it.value }.forEach { id ->
-                if (id !in allowedIds) return@forEach
-                val registration = state.get(id) ?: return@forEach
-                val pending = state.pending(id, registration.approvalFingerprint)
-                    ?: return@forEach
-                try {
+    /**
+     * Ripete lo stesso event-id dopo un crash; l'ExecutionJournal dell'Engine lo deduplica. Una
+     * regola con una consegna già in corso (o accodata) viene saltata: chi occupa la corsia
+     * recapita già il suo pending, e il recovery non deve bloccarsi dietro a un dispatch lungo.
+     */
+    suspend fun recoverPending(allowedIds: Set<AutomationId>): List<AutomationId> {
+        val recovered = mutableListOf<AutomationId>()
+        var firstFailure: Exception? = null
+        val known = mutex.withLock { state.knownIds() }
+        known.sortedBy { it.value }.forEach { id ->
+            if (id !in allowedIds) return@forEach
+            try {
+                val done = lanes.runIfIdle(id) {
+                    val registration = mutex.withLock { state.get(id) }
+                        ?: return@runIfIdle false
+                    val pending = mutex.withLock {
+                        state.pending(id, registration.approvalFingerprint)
+                    } ?: return@runIfIdle false
                     deliver(id, registration.approvalFingerprint, pending)
-                    recovered += id
-                } catch (error: CancellationException) {
-                    throw error
-                } catch (error: Exception) {
-                    if (firstFailure == null) firstFailure = error
+                    true
                 }
+                if (done == true) recovered += id
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (firstFailure == null) firstFailure = error
             }
-            firstFailure?.let { throw it }
-            recovered
         }
+        firstFailure?.let { throw it }
+        return recovered
+    }
 
+    /** Fuori dal lock di stato: dispatch (può durare ore), poi conferma sotto lock. */
     private suspend fun deliver(
         automationId: AutomationId,
         approvalFingerprint: ApprovalFingerprint,
@@ -102,6 +117,8 @@ class GeofenceEventIngress(
                 ),
             ),
         )
-        state.completeTransition(automationId, approvalFingerprint, pending.sequence)
+        mutex.withLock {
+            state.completeTransition(automationId, approvalFingerprint, pending.sequence)
+        }
     }
 }

@@ -3,6 +3,7 @@ package dev.argus.brain
 import dev.argus.engine.brain.ActResult
 import dev.argus.engine.brain.CapabilityManifest
 import dev.argus.engine.brain.CliBridgeParser
+import dev.argus.engine.brain.CompileMetaError
 import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.GenerativeContract
@@ -112,14 +113,23 @@ class AnthropicMessagesTransport internal constructor(
             messages = listOf(InputMessage("user", AgentMessageSupport.compileUserText(cleanMessage, manifest, state))),
         )
         val response = parseResponse(execute(buildRequest(token, json.encodeToString(request))))
+        // B15: l'usage viaggia su TUTTI i rami (anche errori di formato e troncamenti): il turno è costato.
+        val usage = response.toTurnUsage(fallbackModel = model)
         val text = response.textContent().trim()
-        if (text.isEmpty()) return CompileResult("", null, "empty_response")
-        val parsed = compileParser.parseCompile(text)
-        return if (parsed.draft == null && parsed.metaError == null) {
-            parsed.copy(metaError = "draft_missing")
+        val parsed = if (text.isEmpty()) {
+            null
         } else {
-            parsed
+            val raw = compileParser.parseCompile(text)
+            if (raw.draft == null && raw.metaError == null) raw.copy(metaError = "draft_missing") else raw
         }
+        if (parsed?.draft != null) return parsed.copy(usage = usage)
+        // B6: `max_tokens` = tetto di output esaurito. Anthropic non taglia il contesto in silenzio
+        // (rifiuta le richieste troppo lunghe): niente controllo `context_truncated`.
+        if (response.stopReason == "max_tokens") {
+            return CompileResult(parsed?.reply.orEmpty(), null, CompileMetaError.OUTPUT_TRUNCATED, usage)
+        }
+        if (parsed == null) return CompileResult("", null, "empty_response", usage)
+        return parsed.copy(usage = usage)
     }
 
     override suspend fun act(
@@ -237,7 +247,11 @@ class AnthropicMessagesTransport internal constructor(
         val request = MessagesRequest(
             model = model,
             maxTokens = MAX_OUTPUT_TOKENS,
-            system = if (useReplyTool) AgentMessageSupport.actSystemText(goal) else AgentMessageSupport.actSystemTextNotification(goal),
+            system = if (useReplyTool) {
+                AgentMessageSupport.actSystemText(goal)
+            } else {
+                AgentMessageSupport.actSystemTextNotification(goal, webAllowed = applyWeb)
+            },
             messages = buildList {
                 add(
                     InputMessage(
@@ -261,9 +275,14 @@ class AnthropicMessagesTransport internal constructor(
         )
         val response = parseResponse(execute(buildRequest(token, json.encodeToString(request))))
         val usage = response.toTurnUsage(fallbackModel = model)
-        val text = response.replyText()
-            ?: return ActResult(text = null, metaError = "empty_response", usage = usage)
-        return ActResult(text = text, metaError = null, usage = usage)
+        return when (val reply = response.replyText(useReplyTool)) {
+            is AgentMessageSupport.ReplyExtraction.Text ->
+                ActResult(text = reply.value, metaError = null, usage = usage)
+            AgentMessageSupport.ReplyExtraction.ToolMissing ->
+                ActResult(text = null, metaError = REPLY_TOOL_MISSING, usage = usage)
+            AgentMessageSupport.ReplyExtraction.Empty ->
+                ActResult(text = null, metaError = "empty_response", usage = usage)
+        }
     }
 
     private fun buildRequest(token: String, payload: String): Request {
@@ -309,22 +328,40 @@ class AnthropicMessagesTransport internal constructor(
     private fun webSearchToolDef(): JsonObject = buildJsonObject {
         put("type", "web_search_20250305")
         put("name", "web_search")
+        // S6: tetto di ricerche per richiesta (ognuna è a pagamento).
+        put("max_uses", WEB_SEARCH_MAX_USES)
     }
 
-    private fun MessagesResponse.replyText(): String? {
+    private fun MessagesResponse.replyText(useReplyTool: Boolean): AgentMessageSupport.ReplyExtraction {
         val fromTool = content
             .firstOrNull { it.type == "tool_use" && it.name == AgentMessageSupport.REPLY_TOOL }
             ?.input?.let { (it["text"] as? JsonPrimitive)?.contentOrNull }
-        val raw = fromTool ?: textContent().takeIf { it.isNotEmpty() }
-        return AgentMessageSupport.cleanReply(raw)
+        return AgentMessageSupport.extractReply(
+            toolText = fromTool,
+            // S5: con il web, il testo vero è quello DOPO l'ultimo risultato di ricerca; i blocchi
+            // prima sono il preambolo ("cerco...") del modello.
+            content = textAfterLastSearchResult().takeIf { it.isNotEmpty() },
+            useReplyTool = useReplyTool,
+            finishedNormally = stopReason == "end_turn",
+        )
     }
 
-    /** Concatena tutti i blocchi `text` della risposta: la strada testuale (compile e fallback act). */
+    /** Concatena tutti i blocchi `text` della risposta: la strada testuale del compile. */
     private fun MessagesResponse.textContent(): String =
         content.asSequence()
             .filter { it.type == "text" }
             .mapNotNull { it.text }
             .joinToString(separator = "")
+
+    /** Blocchi `text` successivi all'ultimo `web_search_tool_result` (tutti, se non ce n'è). */
+    private fun MessagesResponse.textAfterLastSearchResult(): String {
+        val lastResult = content.indexOfLast { it.type == "web_search_tool_result" }
+        return content.asSequence()
+            .drop(lastResult + 1)
+            .filter { it.type == "text" }
+            .mapNotNull { it.text }
+            .joinToString(separator = "")
+    }
 
     private fun MessagesResponse.toTurnUsage(fallbackModel: String): TurnUsage? {
         val u = usage ?: return null
@@ -337,6 +374,10 @@ class AnthropicMessagesTransport internal constructor(
                 outputTokens = output,
                 cachedInputTokens = u.cacheReadInputTokens?.takeIf { it >= 0 },
                 model = model?.takeIf { it.isNotBlank() } ?: fallbackModel,
+                finishReason = stopReason?.takeIf(FINISH_REASON::matches),
+                webSearches = u.serverToolUse?.webSearchRequests
+                    ?.takeIf { it in 1..TurnUsage.MAX_WEB_SEARCHES }
+                    ?.toInt(),
             )
         }.getOrNull()
     }
@@ -474,6 +515,12 @@ class AnthropicMessagesTransport internal constructor(
         @SerialName("input_tokens") val inputTokens: Long? = null,
         @SerialName("output_tokens") val outputTokens: Long? = null,
         @SerialName("cache_read_input_tokens") val cacheReadInputTokens: Long? = null,
+        @SerialName("server_tool_use") val serverToolUse: ServerToolUse? = null,
+    )
+
+    @Serializable
+    private data class ServerToolUse(
+        @SerialName("web_search_requests") val webSearchRequests: Long? = null,
     )
 
     @Serializable
@@ -487,8 +534,11 @@ class AnthropicMessagesTransport internal constructor(
         const val MESSAGES_SEGMENT = "messages"
         const val HEALTH_PING = "ping"
         const val HEALTH_MAX_TOKENS = 1
-        const val MAX_OUTPUT_TOKENS = 1_024
-        const val COMPILE_MAX_TOKENS = 4_096
+        const val MAX_OUTPUT_TOKENS = 2_048
+        const val COMPILE_MAX_TOKENS = 8_192
+        const val WEB_SEARCH_MAX_USES = 3
+        const val REPLY_TOOL_MISSING = "reply_tool_missing"
+        val FINISH_REASON = Regex("^[A-Za-z0-9_.:-]{1,64}$")
         const val MAX_RESPONSE_BYTES = 512L * 1024L
         val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
         val TEST_HTTP_HOSTS = setOf("localhost", "127.0.0.1", "::1")
