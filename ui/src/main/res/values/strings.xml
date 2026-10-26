@@ -200,7 +200,7 @@
     <string name="settings_battery_warn">active — grant the exemption and also check any manufacturer-specific background activity/auto-start controls; otherwise scheduled actions, and AI actions too, may arrive late</string>
     <string name="settings_exact_alarms_title">Exact alarms</string>
     <string name="settings_exact_alarms_ok">granted: time rules and long waits start on time</string>
-    <string name="settings_exact_alarms_warn">not granted: time rules may start 30-40 minutes late and long waits may slip</string>
+    <string name="settings_exact_alarms_warn">not granted: rules with an exact time may start up to an hour late and long waits may slip</string>
     <string name="settings_unauthenticated_loopback">Local server without a key: another app on this phone could impersonate the model. Set a key on the local server as well.</string>
     <string name="settings_notifications_title">Argus notifications</string>
     <string name="settings_notifications_ok">allowed</string>

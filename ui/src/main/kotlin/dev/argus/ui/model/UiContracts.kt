@@ -338,7 +338,7 @@ data class SettingsState(
     /**
      * 0.3.6: Android concede ad Argus le sveglie esatte (`SCHEDULE_EXACT_ALARM`). Da Android 14 e' negato
      * di default e solo l'utente lo concede, da «Sveglie e promemoria»: senza, le regole a orario
-     * possono partire con anche 30-40 minuti di ritardo e le attese lunghe a schermo spento slittare.
+     * possono partire fino a un'ora in ritardo e le attese lunghe a schermo spento slittare.
      * Default `true`: il permesso non esiste sotto Android 12 e un fixture non deve avvisare per caso.
      */
     val exactAlarmsGranted: Boolean = true,

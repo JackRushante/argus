@@ -199,7 +199,7 @@
     <string name="settings_battery_warn">attiva — concedi l\'esclusione e verifica anche gli eventuali controlli del produttore per attività in background/avvio automatico; altrimenti le azioni pianificate, e anche quelle AI, potrebbero arrivare in ritardo</string>
     <string name="settings_exact_alarms_title">Sveglie esatte</string>
     <string name="settings_exact_alarms_ok">concesse: le regole a orario e le attese lunghe partono puntuali</string>
-    <string name="settings_exact_alarms_warn">non concesse: le regole a orario possono partire anche 30-40 minuti in ritardo e le attese lunghe slittare</string>
+    <string name="settings_exact_alarms_warn">non concesse: le regole con orario esatto possono partire fino a un\'ora in ritardo e le attese lunghe slittare</string>
     <string name="settings_unauthenticated_loopback">Server locale senza chiave: un\'altra app sul telefono potrebbe fingersi il modello. Imposta una chiave anche sul server locale.</string>
     <string name="settings_notifications_title">Notifiche Argus</string>
     <string name="settings_notifications_ok">consentite</string>

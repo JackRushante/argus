@@ -26,11 +26,12 @@ class ExactAlarmsCopyTest {
             string(italian, "settings_exact_alarms_ok"),
         )
         assertEquals(
-            "not granted: time rules may start 30-40 minutes late and long waits may slip",
+            "not granted: rules with an exact time may start up to an hour late and long waits may slip",
             string(english, "settings_exact_alarms_warn"),
         )
         assertEquals(
-            "non concesse: le regole a orario possono partire anche 30-40 minuti in ritardo e le attese lunghe slittare",
+            // XML grezzo: l'apostrofo resta escapato come nel file delle risorse.
+            "non concesse: le regole con orario esatto possono partire fino a un\\'ora in ritardo e le attese lunghe slittare",
             string(italian, "settings_exact_alarms_warn"),
         )
     }

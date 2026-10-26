@@ -437,7 +437,7 @@ object Fixtures {
                 DiagnosisRow(DiagnosisLevel.OK, "La regola è attiva"),
                 DiagnosisRow(DiagnosisLevel.WARN, "Shizuku non è in esecuzione: avvialo", DiagnosisFix.OPEN_SYSTEM),
                 DiagnosisRow(DiagnosisLevel.OK, "Prossima sveglia: domani 07:30"),
-                DiagnosisRow(DiagnosisLevel.INFO, "Sveglia non esatta: Android può ritardarla di qualche minuto"),
+                DiagnosisRow(DiagnosisLevel.INFO, "Orario flessibile: per risparmiare batteria Android può spostarla fino a un'ora; se serve puntuale, chiedi l'orario esatto in chat"),
                 DiagnosisRow(DiagnosisLevel.WARN, "Ultimo tentativo 2 h fa: bloccata dalla policy (capacità non disponibile)"),
             ),
             checkedAtLabel = "Controllato alle 09:41",

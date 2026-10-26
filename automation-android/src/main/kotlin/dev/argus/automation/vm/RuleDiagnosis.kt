@@ -242,8 +242,8 @@ private fun alarmRows(
         DiagnosisRow(
             DiagnosisLevel.WARN,
             language.pick(
-                "Android does not grant Argus exact alarms: it may delay it",
-                "Android non concede ad Argus le sveglie esatte: può ritardarla",
+                "Android does not grant Argus exact alarms: it may delay it by up to an hour",
+                "Android non concede ad Argus le sveglie esatte: può ritardarla fino a un'ora",
             ),
             DiagnosisFix.OPEN_SYSTEM,
         )
@@ -251,8 +251,10 @@ private fun alarmRows(
         DiagnosisRow(
             DiagnosisLevel.INFO,
             language.pick(
-                "The alarm is not exact: Android may delay it by a few minutes",
-                "Sveglia non esatta: Android può ritardarla di qualche minuto",
+                "Flexible time: to save battery Android may move it by up to an hour; " +
+                    "for a precise time, ask for the exact time in chat",
+                "Orario flessibile: per risparmiare batteria Android può spostarla fino a un'ora; " +
+                    "se serve puntuale, chiedi l'orario esatto in chat",
             ),
         )
     }

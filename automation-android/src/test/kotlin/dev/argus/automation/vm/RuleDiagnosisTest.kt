@@ -212,7 +212,7 @@ class RuleDiagnosisTest {
         assertEquals(
             DiagnosisRow(
                 DiagnosisLevel.WARN,
-                "Android non concede ad Argus le sveglie esatte: può ritardarla",
+                "Android non concede ad Argus le sveglie esatte: può ritardarla fino a un'ora",
                 DiagnosisFix.OPEN_SYSTEM,
             ),
             warned.single { it.level == DiagnosisLevel.WARN },
@@ -226,9 +226,10 @@ class RuleDiagnosisTest {
         assertEquals(
             DiagnosisRow(
                 DiagnosisLevel.INFO,
-                "Sveglia non esatta: Android può ritardarla di qualche minuto",
+                "Orario flessibile: per risparmiare batteria Android può spostarla fino a un'ora; " +
+                    "se serve puntuale, chiedi l'orario esatto in chat",
             ),
-            informed.single { it.text.startsWith("Sveglia non esatta") },
+            informed.single { it.text.startsWith("Orario flessibile") },
         )
         assertTrue(informed.none { it.level == DiagnosisLevel.WARN })
         // Una regola flessibile non ha bisogno delle sveglie esatte: nessuna scorciatoia.
@@ -520,7 +521,7 @@ class RuleDiagnosisTest {
                 "La regola è attiva",
                 "Shizuku non ha ancora autorizzato Argus",
                 "Prossima sveglia: domani 09:00",
-                "Android non concede ad Argus le sveglie esatte: può ritardarla",
+                "Android non concede ad Argus le sveglie esatte: può ritardarla fino a un'ora",
                 "Non è ancora mai scattata",
             ),
             italian.rows.map { it.text },
@@ -530,7 +531,7 @@ class RuleDiagnosisTest {
                 "The rule is active",
                 "Shizuku has not authorized Argus yet",
                 "Next alarm: tomorrow 09:00",
-                "Android does not grant Argus exact alarms: it may delay it",
+                "Android does not grant Argus exact alarms: it may delay it by up to an hour",
                 "It has never run yet",
             ),
             english.rows.map { it.text },

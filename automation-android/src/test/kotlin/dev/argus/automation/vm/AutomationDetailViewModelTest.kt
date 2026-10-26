@@ -749,7 +749,8 @@ class AutomationDetailViewModelTest {
         assertEquals(dev.argus.ui.model.DiagnosisFix.OPEN_SYSTEM, rows[1].fix)
         assertTrue(rows[2].text.startsWith("Next alarm: "), rows[2].text)
         assertEquals(
-            "The alarm is not exact: Android may delay it by a few minutes",
+            "Flexible time: to save battery Android may move it by up to an hour; " +
+                "for a precise time, ask for the exact time in chat",
             rows[3].text,
         )
     }
