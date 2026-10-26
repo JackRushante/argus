@@ -6,6 +6,7 @@
     <string name="nav_log">Log</string>
     <string name="nav_system">Sistema</string>
     <string name="system_setting_unavailable">Impostazione di sistema non disponibile.</string>
+    <string name="permission_enable_in_app_settings">Abilita il permesso dalle impostazioni dell\'app.</string>
     <string name="whitelist_add_title">Aggiungi alla whitelist</string>
     <string name="whitelist_empty">Nessuna conversazione 1:1 osservata finora. Ricevi un messaggio WhatsApp dal contatto (con lettura notifiche attiva) e riprova, oppure usa l\'inserimento manuale.</string>
     <string name="whitelist_recent">Conversazioni 1:1 osservate di recente:</string>
