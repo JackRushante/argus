@@ -117,8 +117,12 @@ class PauseTileService : TileService() {
 
     override fun onClick() {
         super.onClick()
-        manualEntryPoint().tiles().onPauseTileClick()
-        render()
+        // Come per l'esecuzione: a telefono bloccato l'interruttore aspetta lo sblocco, così chi ha in
+        // mano un telefono chiuso non può spegnere le automazioni.
+        unlockAndRun {
+            manualEntryPoint().tiles().onPauseTileClick()
+            render()
+        }
     }
 
     private fun render() {
