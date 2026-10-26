@@ -263,7 +263,7 @@ class AnthropicMessagesTransport internal constructor(
                     InputMessage(
                         "user",
                         if (notification != null) AgentMessageSupport.actUserText(notification, stateLines)
-                        else AgentMessageSupport.actUserTextNotification(stateLines),
+                        else AgentMessageSupport.actUserTextNotification(goal, stateLines),
                     ),
                 )
                 // Dato runtime TAINTED: messaggio DATA separato, MAI nel campo top-level `system`.
