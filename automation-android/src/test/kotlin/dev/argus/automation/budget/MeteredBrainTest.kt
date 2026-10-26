@@ -568,7 +568,7 @@ class MeteredBrainTest {
         }
         // Un errore vero resta un errore.
         val dao = RecordingUsageDao()
-        val brain = metered(FakeBrain(compileResult = { CompileResult("", null, "draft_missing") }), FakePolicy(), dao, config = openai)
+        val brain = metered(FakeBrain(compileResult = { CompileResult("", null, "output_truncated") }), FakePolicy(), dao, config = openai)
         brain.compile("crea", TEST_MANIFEST, DeviceState())
         assertEquals(UsageEventOutcome.ERROR, dao.events.single().outcome)
     }
@@ -600,7 +600,7 @@ class MeteredBrainTest {
 
     @Test
     fun `other outcomes are never retried`() = runTest {
-        for (code in listOf("draft_missing", "output_truncated", "context_truncated", "empty_response", "bridge_http_500")) {
+        for (code in listOf("output_truncated", "context_truncated", "empty_response", "bridge_http_500")) {
             val delegate = FakeBrain(compileResult = { CompileResult("x", null, code) })
             val brain = metered(delegate, FakePolicy(), RecordingUsageDao(), config = openai)
 
@@ -754,18 +754,20 @@ class MeteredBrainTest {
     }
 
     @Test
-    fun `draft_missing is not retried for a conversational reply`() = runTest {
+    fun `draft_missing is retried with the correction note even without a draft in the raw reply`() = runTest {
         listOf(
             null,
             "Quale orario preferisci?",
-            "Ti preparo la bozza (draft) appena mi dici l'orario.",
-            "{'draft': 'solo apici singoli'}",
+            // Risposta vera vista sul telefono: una frase e la sola azione, senza @@META@@.
+            "Propongo una regola immediata che disattiva Non disturbare (modalità OFF) appena la attivi.\n\n" +
+                "{\"type\":\"set_dark_mode\",\"mode\":\"off\"}",
         ).forEach { raw ->
-            val delegate = FakeBrain(compileResult = { CompileResult("Quale orario?", null, "draft_missing", raw = raw) })
+            val delegate = failingOnceThenOk(CompileResult("Quale orario?", null, "draft_missing", raw = raw))
             val brain = metered(delegate, FakePolicy(), RecordingUsageDao(), config = openai)
 
-            assertEquals("draft_missing", brain.compile("crea", TEST_MANIFEST, DeviceState()).metaError, raw)
-            assertEquals(1, delegate.calls, "nessun retry per $raw")
+            assertEquals("ok", brain.compile("crea", TEST_MANIFEST, DeviceState()).reply, raw)
+            assertEquals(2, delegate.calls, "un retry per $raw")
+            assertEquals("crea\n\n" + expectedNote("draft_missing"), delegate.compileTexts.last(), raw)
         }
     }
 

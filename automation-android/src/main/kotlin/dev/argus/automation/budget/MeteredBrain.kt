@@ -58,7 +58,6 @@ object BudgetMeta {
     )
 }
 
-private const val DRAFT_KEY = "\"draft\""
 private const val NOTE_MAX_CHARS = 400
 private const val NOTE_PREFIX = "(Argus: your previous reply could not be used: "
 private const val NOTE_SUFFIX = ". Reply again with one short sentence, then the final line @@META@@ " +
@@ -140,13 +139,13 @@ class MeteredBrain(
         val config = selectedConfig()
         val first = meteredCompile(config) { delegate.compile(nl, manifest, state) }
         // Retry-once degli errori di FORMATO del modello (draft_invalid, meta_parse_error,
-        // meta_json_missing) e di una bozza tentata nel formato sbagliato (draft_missing con una chiave
-        // "draft" nella risposta grezza), provider-agnostico ma VISIBILE al choke-point: il primo evento
-        // appena persistito partecipa al nuovo check e un HARD impedisce il secondo contatto. Se l'utente
-        // cambia provider/modello durante il primo turno, non ritentare su una destinazione diversa
-        // da quella appena contabilizzata: un retry manuale ripartirà col nuovo config.
+        // meta_json_missing) e di una risposta senza la riga @@META@@ (draft_missing: il protocollo la
+        // chiede sempre, anche per un chiarimento), provider-agnostico ma VISIBILE al choke-point: il primo
+        // evento appena persistito partecipa al nuovo check e un HARD impedisce il secondo contatto. Se
+        // l'utente cambia provider/modello durante il primo turno, non ritentare su una destinazione
+        // diversa da quella appena contabilizzata: un retry manuale ripartirà col nuovo config.
         val code = first.metaError ?: return first
-        if (!isRetryable(code, first.raw)) return first
+        if (!isRetryable(code)) return first
         if (selectedConfig() != config) return first
         // Con temperatura bassa rifare la stessa richiesta ripete lo stesso errore: il secondo tentativo
         // porta in coda al testo utente una nota di correzione, SOLO per questa chiamata (non entra in
@@ -156,13 +155,13 @@ class MeteredBrain(
     }
 
     /**
-     * Errori di formato: sempre. `draft_missing` solo se la risposta grezza contiene `"draft"` (con le
-     * virgolette): è il segno di una bozza tentata nel formato sbagliato; una risposta solo
-     * conversazionale non si ritenta.
+     * Errori di formato e `draft_missing`. Sul telefono un modello piccolo ha risposto a «spegni subito il
+     * non disturbare» con una frase e la sola azione in JSON, senza `@@META@@`: anche quella è una bozza
+     * persa, e la nota di correzione la recupera. Un chiarimento ben formato (clarification_required) non
+     * passa di qui.
      */
-    private fun isRetryable(code: String, raw: String?): Boolean =
-        code in CompileMetaError.FORMAT_ERRORS ||
-            (code == CompileMetaError.DRAFT_MISSING && raw?.contains(DRAFT_KEY) == true)
+    private fun isRetryable(code: String): Boolean =
+        code in CompileMetaError.FORMAT_ERRORS || code == CompileMetaError.DRAFT_MISSING
 
     private fun withCorrectionNote(nl: String, code: String, detail: String?): String {
         val text = nl + "\n\n" + correctionNote(code, detail)
