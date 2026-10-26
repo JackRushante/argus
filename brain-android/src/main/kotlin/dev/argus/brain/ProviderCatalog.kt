@@ -22,7 +22,9 @@ enum class ReasoningEffort(val wireValue: String?) {
  * testo finale in UNA chiamata — l'architettura single-turn dei transport resta invariata.
  * - [NONE]: web non attivabile da questo path (default; degradazione graziosa se richiesto).
  * - [ANTHROPIC_TOOL]: server tool `{"type":"web_search_20250305","name":"web_search"}` nei `tools`.
- * - [OPENROUTER_ONLINE]: slug modello con suffisso `:online`.
+ * - [OPENROUTER_WEB_PLUGIN]: plugin `"plugins":[{"id":"web"}]` nel body Chat Completions, `model` intatto.
+ *   Il suffisso `:online` è equivalente ma rompe i preset (`@preset/...:online` dà 404). Entrambi sono
+ *   deprecati da OpenRouter a favore del tool lato server `openrouter:web_search` (lavoro futuro).
  * - [OPENAI_RESPONSES]: tool `{"type":"web_search"}` sulla Responses API (`POST {base}/responses`,
  *   endpoint diverso da /chat/completions). Il modello gpt-5.x fa il loop web internamente e ritorna il
  *   testo negli item `output→message→output_text`. Validato live 2026-07-17.
@@ -31,7 +33,7 @@ enum class ReasoningEffort(val wireValue: String?) {
  *   OpenAI-compat (che rifiuta il grounding con 400). Testo = `candidates[0].content.parts[].text`.
  *   Validato live 2026-07-17.
  */
-enum class WebSearchMechanism { NONE, ANTHROPIC_TOOL, OPENROUTER_ONLINE, OPENAI_RESPONSES, GEMINI_NATIVE }
+enum class WebSearchMechanism { NONE, ANTHROPIC_TOOL, OPENROUTER_WEB_PLUGIN, OPENAI_RESPONSES, GEMINI_NATIVE }
 
 /** Flag di comportamento per-provider: MAI `if (provider == ...)` dentro un transport. */
 data class ProviderQuirks(
@@ -184,9 +186,10 @@ object ProviderCatalog {
             defaultBaseUrl = "https://openrouter.ai/api/v1",
             authStyle = AuthStyle.BEARER,
             defaultModels = listOf("openai/gpt-5.5", "anthropic/claude-sonnet-4-5"),
-            // Web attivato dallo slug modello `<model>:online` (loop di ricerca interno lato OpenRouter).
+            // Web attivato dal plugin `{"id":"web"}` (loop di ricerca interno lato OpenRouter); non dal
+            // suffisso `:online`, che rompe i preset `@preset/...`.
             quirks = ProviderQuirks(
-                webSearch = WebSearchMechanism.OPENROUTER_ONLINE,
+                webSearch = WebSearchMechanism.OPENROUTER_WEB_PLUGIN,
                 compileTemperature = COMPILE_TEMPERATURE,
             ),
             // TOKEN-ONLY: il listino statico copriva 2 modelli su centinaia e non leggiamo il

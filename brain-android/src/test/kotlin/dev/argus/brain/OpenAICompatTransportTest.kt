@@ -223,9 +223,10 @@ class OpenAICompatTransportTest {
 
     // --- #52 F3: web search server-side sui provider diretti ---
 
-    @Test fun `openrouter web search appends online suffix and forces tool_choice auto`(): Unit = runBlocking {
-        // Con web richiesto, OpenRouter attiva il loop server-side via slug `<model>:online`; il reply
-        // NON va forzato (impedirebbe la ricerca) e il testo finale post-web arriva come content.
+    @Test fun `openrouter web search sends the web plugin keeps the model and forces tool_choice auto`(): Unit = runBlocking {
+        // Con web richiesto, OpenRouter attiva il loop server-side via plugin `{"id":"web"}` (il campo
+        // `model` resta invariato: il suffisso `:online` rompe i preset); il reply NON va forzato
+        // (impedirebbe la ricerca) e il testo finale post-web arriva come content.
         server.enqueue(jsonResponse(
             """
             {"model":"openai/gpt-5.5",
@@ -244,7 +245,8 @@ class OpenAICompatTransportTest {
         val root = Json.parseToJsonElement(
             assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
         ).jsonObject
-        assertEquals("openai/gpt-5.5:online", root.getValue("model").jsonPrimitive.content)
+        assertEquals("openai/gpt-5.5", root.getValue("model").jsonPrimitive.content)
+        assertEquals(WEB_PLUGIN, root.getValue("plugins"))
         assertEquals("auto", root.getValue("tool_choice").jsonPrimitive.content)
         // il reply tool resta dichiarato accanto al web server-side.
         val tool = root.getValue("tools").jsonArray.single().jsonObject.getValue("function").jsonObject
@@ -269,8 +271,53 @@ class OpenAICompatTransportTest {
             assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
         ).jsonObject
         assertEquals("openai/gpt-5.5", root.getValue("model").jsonPrimitive.content)
+        assertFalse("plugins" in root, "senza web non compare alcun plugin")
         val toolChoice = root.getValue("tool_choice").jsonObject
         assertEquals("whatsapp_reply", toolChoice.getValue("function").jsonObject.getValue("name").jsonPrimitive.content)
+    }
+
+    @Test fun `openrouter web search with a preset model keeps the preset slug and sends the web plugin`(): Unit = runBlocking {
+        // Il suffisso `:online` su `@preset/...` e' un 404 di OpenRouter: il modello deve restare
+        // esatto e il web passa dal plugin, per entrambi i sink (reply WhatsApp e notifica).
+        val reply = """
+            {"model":"openai/gpt-5.5",
+             "choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"BTC a 100000."}}],
+             "usage":{"prompt_tokens":50,"completion_tokens":10}}
+        """.trimIndent()
+        server.enqueue(jsonResponse(reply))
+        server.enqueue(jsonResponse(reply))
+        val t = transport(ProviderId.OPENROUTER, model = "@preset/argus")
+
+        t.act(fireContext(), "dimmi il prezzo BTC", listOf("notification"), listOf("whatsapp_reply", "web.search"))
+        t.act(timerContext(), "dimmi il prezzo BTC", emptyList(), listOf("web.search"))
+
+        repeat(2) {
+            val root = Json.parseToJsonElement(
+                assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
+            ).jsonObject
+            assertEquals("@preset/argus", root.getValue("model").jsonPrimitive.content)
+            assertEquals(WEB_PLUGIN, root.getValue("plugins"))
+        }
+    }
+
+    @Test fun `custom openai-compat with web requested sends no plugins and keeps the model`(): Unit = runBlocking {
+        // Custom non ha un meccanismo web (NONE): il web si degrada e il plugin e' solo di OpenRouter.
+        server.enqueue(jsonResponse(
+            """
+            {"model":"m",
+             "choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"Ciao."}}],
+             "usage":{"prompt_tokens":5,"completion_tokens":1}}
+            """.trimIndent(),
+        ))
+        val t = transport(ProviderId.CUSTOM_OPENAI_COMPAT, model = "m")
+
+        t.act(timerContext(), "dimmi il prezzo BTC", emptyList(), listOf("web.search"))
+
+        val root = Json.parseToJsonElement(
+            assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
+        ).jsonObject
+        assertEquals("m", root.getValue("model").jsonPrimitive.content)
+        assertFalse("plugins" in root)
     }
 
     @Test fun `gemini web search uses native generateContent with google_search`(): Unit = runBlocking {
@@ -316,6 +363,7 @@ class OpenAICompatTransportTest {
         assertTrue(userParts.first().jsonObject.getValue("text").jsonPrimitive.content.isNotEmpty())
         // niente Chat Completions
         assertFalse("messages" in root)
+        assertFalse("plugins" in root)
     }
 
     @Test fun `openai web search uses the responses endpoint and web_search tool`(): Unit = runBlocking {
@@ -362,6 +410,7 @@ class OpenAICompatTransportTest {
         assertEquals("user", input.last().jsonObject.getValue("role").jsonPrimitive.content)
         assertFalse("messages" in root)
         assertFalse("tool_choice" in root)
+        assertFalse("plugins" in root)
     }
 
     // --- #59 Ondata 4a: sink NOTIFICA (deliver=LOCAL_NOTIFICATION, da timer) → testo plain,
@@ -389,8 +438,9 @@ class OpenAICompatTransportTest {
         ).jsonObject
         assertFalse("tools" in root, "il sink notifica non dichiara il reply tool")
         assertFalse("tool_choice" in root, "il sink notifica non forza alcun tool")
-        // niente web richiesto: modello plain, nessuno slug :online.
+        // niente web richiesto: modello plain, nessun plugin.
         assertEquals("openai/gpt-5.5", root.getValue("model").jsonPrimitive.content)
+        assertFalse("plugins" in root)
         val messages = root.getValue("messages").jsonArray
         val system = messages.first().jsonObject.getValue("content").jsonPrimitive.content
         val user = messages.last().jsonObject.getValue("content").jsonPrimitive.content
@@ -433,9 +483,9 @@ class OpenAICompatTransportTest {
         assertNull(server.takeRequest(200, TimeUnit.MILLISECONDS))
     }
 
-    @Test fun `notification sink with web on openrouter keeps online model and no reply tool`(): Unit = runBlocking {
-        // Sink notifica + web su OpenRouter: resta su Chat Completions con slug `:online`, ma senza
-        // reply tool né tool_choice; il testo finale post-web arriva dal content.
+    @Test fun `notification sink with web on openrouter sends the web plugin and no reply tool`(): Unit = runBlocking {
+        // Sink notifica + web su OpenRouter: resta su Chat Completions con il plugin web (modello
+        // invariato), ma senza reply tool né tool_choice; il testo finale post-web arriva dal content.
         server.enqueue(jsonResponse(
             """
             {"model":"openai/gpt-5.5",
@@ -451,7 +501,8 @@ class OpenAICompatTransportTest {
         val root = Json.parseToJsonElement(
             assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
         ).jsonObject
-        assertEquals("openai/gpt-5.5:online", root.getValue("model").jsonPrimitive.content)
+        assertEquals("openai/gpt-5.5", root.getValue("model").jsonPrimitive.content)
+        assertEquals(WEB_PLUGIN, root.getValue("plugins"))
         assertFalse("tools" in root)
         assertFalse("tool_choice" in root)
     }
@@ -991,5 +1042,8 @@ class OpenAICompatTransportTest {
 
     private companion object {
         const val API_KEY = "sk-test-secret-key-do-not-leak-0123456789"
+
+        /** Plugin web di OpenRouter come deve comparire nel body: `"plugins":[{"id":"web"}]`. */
+        val WEB_PLUGIN = Json.parseToJsonElement("""[{"id":"web"}]""")
     }
 }
