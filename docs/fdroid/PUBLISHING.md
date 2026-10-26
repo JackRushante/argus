@@ -30,13 +30,13 @@ URL cannot be built yet.
 |---|---|
 | applicationId | `dev.argus` |
 | metadata file | `metadata/dev.argus.yml` |
-| version | `0.3.5` / base versionCode `12` (ABI split → 1201/1202/1203/1204) |
-| tag (v-prefixed) | `v0.3.5` |
-| build commit (full hash) | `5cfd0a243ceafba1682aeb6831765ca72067d8ba` |
+| version | `0.3.6` / base versionCode `13` (ABI split → 1301/1302/1303/1304) |
+| tag (v-prefixed) | `v0.3.6` |
+| build commit (full hash) | `e23575279de1c75ddd0f40941ab82190cef439b0` |
 | signing cert SHA-256 | `4c09633e64cf9876b0da682f5f259383af8d22742aadd93ef273b9f2c73cca6b` |
-| F-Droid release assets | `argus-1201.apk` … `argus-1204.apk` (pattern `argus-%c.apk`) |
-| artifact SHA-256 | `1201`: `012db3a64aeeeae39cf4a66fb0d168e4fe9710de4258942e2716b161505bb1d8`; `1202`: `d7311a03415895cda024fb2ba3424ede78f586603c05323206c5cf77f0f791a2`; `1203`: `0d78ed9d8c11d81d224b79578c9b37d3c910f22493cc689b2c8eb4d18e4abce1`; `1204`: `cce4741344d4f251efa540d28468e8c37c64d55a981b23531d37e4e1b2076774` |
-| direct-download asset | none for v0.3.5; use the matching per-ABI APK (`argus-1202.apk` for arm64-v8a) |
+| F-Droid release assets | `argus-1301.apk` … `argus-1304.apk` (pattern `argus-%c.apk`) |
+| artifact SHA-256 | `1301`: `3279e643926e93816d9a18ae75f859d4c55a0c8bf8417f046244819ed1f1af7a`; `1302`: `8ad40d2a2a836bf32bfd9858b850f05d9426d3e24ab0250c910f8667446089c5`; `1303`: `c4820cf57504f87d5e2ac089028103e01b0c822ec7b9ac6646f73b3a27bada5d`; `1304`: `2c3c38c1dff4bb54273a8235f7563e0248c1ef0643b733c1a7455079bd311c75` |
+| direct-download asset | none for v0.3.6; use the matching per-ABI APK (`argus-1302.apk` for arm64-v8a) |
 | License (SPDX) | `GPL-3.0-only` |
 
 ### Reproducibility: baseline profile dropped (v0.2.4)
