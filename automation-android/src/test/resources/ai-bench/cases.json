@@ -1785,7 +1785,7 @@
   "id": "act41.media.it.01",
   "category": "action",
   "lang": "it",
-  "text": "Quando mi collego al Bluetooth Auto premi play sul lettore multimediale",
+  "text": "Quando mi collego al dispositivo Bluetooth «Auto» premi play sul lettore multimediale",
   "expect": {
    "outcome": "draft",
    "trigger": {"type": "connectivity", "medium": "BT", "state": "CONNECTED", "match": {"contains": "Auto"}},

@@ -635,6 +635,8 @@ Trigger, discriminated by "type":
    "samplingPeriodUs":null, "maxReportLatencyUs":null}
   minimumEventCount must be 1 for the three motion kinds and 1..100000 for the step kinds. The
   draft's cooldown must be 60000..604800000 ms. Raw sensors and high-rate sampling are not allowed.
+  Use a kind ONLY if "sensor.<kind>" is in available_triggers (often only significant_motion): a
+  step goal ("when I reach 10000 steps") without "sensor.step_counter" is unsupported.
 - {"type":"screen", "event":"ON"|"OFF"|"UNLOCKED"}
 - {"type":"battery", "below":integer|null, "above":integer|null}  // EXACTLY one of the two, 1..99:
   fires once each time the level crosses that threshold ("below 20%" -> below=20)

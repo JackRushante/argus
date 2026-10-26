@@ -237,6 +237,8 @@ Trigger, discriminated by "type":
    "samplingPeriodUs":null, "maxReportLatencyUs":null}
   minimumEventCount must be 1 for the three motion kinds and 1..100000 for the step kinds. The
   draft's cooldown must be 60000..604800000 ms. Raw sensors and high-rate sampling are not allowed.
+  Use a kind ONLY if "sensor.<kind>" is in available_triggers (often only significant_motion): a
+  step goal ("when I reach 10000 steps") without "sensor.step_counter" is unsupported.
 
 Condition, discriminated by "type":
 - {"type":"time_window", "startLocal":"HH:mm", "endLocal":"HH:mm", "tz":string}
