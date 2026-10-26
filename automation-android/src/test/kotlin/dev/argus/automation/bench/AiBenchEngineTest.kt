@@ -4,6 +4,7 @@ import dev.argus.brain.OpenAICompatTransport
 import dev.argus.brain.ProviderCatalog
 import dev.argus.brain.ProviderConfig
 import dev.argus.brain.ProviderId
+import dev.argus.brain.ReasoningEffort
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.ArgusJson
 import dev.argus.engine.model.AutomationDraft
@@ -262,6 +263,7 @@ class AiBenchEngineTest {
         assertEquals(1, defaults.repeat)
         assertEquals(4, defaults.parallel)
         assertNull(defaults.filter)
+        assertEquals(ReasoningEffort.DEFAULT, defaults.reasoning)
 
         val env = mapOf(
             "ARGUS_BENCH_MODEL" to "deepseek/deepseek-v4",
@@ -276,6 +278,8 @@ class AiBenchEngineTest {
         assertFailsWith<BenchException> { BenchOptions.fromEnv { if (it == "ARGUS_BENCH_REPEAT") "tre" else null } }
         assertFailsWith<BenchException> { BenchOptions.fromEnv { if (it == "ARGUS_BENCH_PARALLEL") "0" else null } }
         assertEquals("@preset/argus", BenchOptions.fromEnv { if (it == "ARGUS_BENCH_MODEL") "  " else null }.model)
+        assertEquals(ReasoningEffort.NONE, BenchOptions.fromEnv { if (it == "ARGUS_BENCH_REASONING") "None" else null }.reasoning)
+        assertFailsWith<BenchException> { BenchOptions.fromEnv { if (it == "ARGUS_BENCH_REASONING") "off" else null } }
     }
 
     @Test
@@ -297,6 +301,7 @@ class AiBenchEngineTest {
         val meta = BenchMeta("m", "u", 2, 1, null, "s", "f", 2, 0)
         val summary = BenchReport.toMarkdown(meta, results)
         assertTrue("**Successo totale: 3/4 (75.0%)**" in summary, summary)
+        assertTrue("Ragionamento: `default`" in summary, summary)
         assertTrue("- `a`: 1/2 riuscite" in summary, summary)
         assertTrue("b`: " !in summary.substringAfter("## Casi instabili").substringBefore("## Fallimenti"))
         // Il testo grezzo nel JSON e' sempre troncato anche se il chiamante dimentica di farlo.

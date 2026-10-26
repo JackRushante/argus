@@ -20,7 +20,8 @@ import kotlin.test.fail
  *
  * Variabili: `ARGUS_BENCH_KEY` (chiave OpenRouter), `ARGUS_BENCH_MODEL` (default `@preset/argus`),
  * `ARGUS_BENCH_BASE_URL` (default `https://openrouter.ai/api/v1`), `ARGUS_BENCH_REPEAT` (default 1),
- * `ARGUS_BENCH_FILTER` (prefisso degli id dei casi), `ARGUS_BENCH_PARALLEL` (default 4).
+ * `ARGUS_BENCH_FILTER` (prefisso degli id dei casi), `ARGUS_BENCH_PARALLEL` (default 4),
+ * `ARGUS_BENCH_REASONING` (`none`, `low`, `medium` o `high`; assente = campo omesso).
  *
  * Il rapporto esce in `build/reports/ai-bench/` (`report.json`, `summary.md`). Il test NON fallisce
  * per una percentuale bassa: misura e basta. Fallisce solo per errori del banco stesso (caso
@@ -49,7 +50,7 @@ class AiBenchTest {
             val startedAt = Instant.now().toString()
             val results = runBlocking {
                 val world = BenchWorld.create()
-                val config = ProviderConfig(ProviderId.OPENROUTER, options.baseUrl, options.model)
+                val config = ProviderConfig(ProviderId.OPENROUTER, options.baseUrl, options.model, options.reasoning)
                 val transport = OpenAICompatTransport(
                     providerId = ProviderId.OPENROUTER,
                     spec = ProviderCatalog.spec(ProviderId.OPENROUTER),
@@ -69,6 +70,7 @@ class AiBenchTest {
                 finishedAt = Instant.now().toString(),
                 compileCases = selectedCompile.size,
                 actCases = selectedAct.size,
+                reasoning = options.reasoning.wireValue ?: "default",
             )
             val reportDir = File(REPORT_DIR)
             BenchReport.write(reportDir, meta, results)

@@ -23,6 +23,8 @@ internal data class BenchMeta(
     val finishedAt: String,
     val compileCases: Int,
     val actCases: Int,
+    /** Valore di `reasoning_effort` inviato, o `default` se omesso. */
+    val reasoning: String = "default",
 )
 
 internal data class Rate(val passed: Int, val total: Int) {
@@ -84,6 +86,7 @@ internal object BenchReport {
     fun toJson(meta: BenchMeta, results: List<RunResult>): JsonObject = buildJsonObject {
         putJsonObject("meta") {
             put("model", meta.model)
+            put("reasoning", meta.reasoning)
             put("baseUrl", meta.baseUrl)
             put("repeat", meta.repeat)
             put("parallel", meta.parallel)
@@ -165,7 +168,7 @@ internal object BenchReport {
         val all = total(results)
         appendLine("# Banco di prova AI di Argus")
         appendLine()
-        appendLine("- Modello: `${meta.model}`")
+        appendLine("- Modello: `${meta.model}` · Ragionamento: `${meta.reasoning}`")
         appendLine("- Endpoint: `${meta.baseUrl}`")
         appendLine("- Casi: ${meta.compileCases} di compile + ${meta.actCases} generativi")
         appendLine(

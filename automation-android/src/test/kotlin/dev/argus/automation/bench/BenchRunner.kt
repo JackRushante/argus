@@ -10,6 +10,7 @@ import dev.argus.brain.AgentTransport
 import dev.argus.brain.CompileTimeoutPolicy
 import dev.argus.brain.ProviderConfig
 import dev.argus.brain.ProviderId
+import dev.argus.brain.ReasoningEffort
 import dev.argus.brain.TransportBackedBrain
 import dev.argus.data.dao.ProviderTokensAggregate
 import dev.argus.data.dao.ProviderUsageAggregate
@@ -50,6 +51,8 @@ internal data class BenchOptions(
     val repeat: Int,
     val filter: String?,
     val parallel: Int,
+    /** Ragionamento chiesto al modello; [ReasoningEffort.DEFAULT] omette il campo (default del provider). */
+    val reasoning: ReasoningEffort = ReasoningEffort.DEFAULT,
 ) {
     companion object {
         const val DEFAULT_MODEL = "@preset/argus"
@@ -74,6 +77,10 @@ internal data class BenchOptions(
                 repeat = int("ARGUS_BENCH_REPEAT", DEFAULT_REPEAT, 1..MAX_REPEAT),
                 filter = value("ARGUS_BENCH_FILTER"),
                 parallel = int("ARGUS_BENCH_PARALLEL", DEFAULT_PARALLEL, 1..MAX_PARALLEL),
+                reasoning = value("ARGUS_BENCH_REASONING")?.let { raw ->
+                    ReasoningEffort.entries.firstOrNull { it.wireValue == raw.lowercase() }
+                        ?: throw BenchException("ARGUS_BENCH_REASONING: '$raw' non e' none, low, medium o high")
+                } ?: ReasoningEffort.DEFAULT,
             )
         }
     }
