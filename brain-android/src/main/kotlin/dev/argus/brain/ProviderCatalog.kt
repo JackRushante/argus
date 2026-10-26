@@ -86,7 +86,7 @@ data class ModelPrice(
     fun effectiveAt(atMillis: Long): ModelPrice {
         if (changes.isEmpty()) return this
         val day = Instant.ofEpochMilli(atMillis).atZone(ZoneOffset.UTC).toLocalDate()
-        return changes.lastOrNull { !it.effectiveFrom.isAfter(day) }?.price ?: this
+        return changes.lastOrNull { !it.effectiveFrom.isAfter(day) }?.price ?: copy(changes = emptyList())
     }
 }
 
