@@ -21,6 +21,7 @@ import dev.argus.brain.LocationRedaction
 import dev.argus.brain.ProviderCatalog
 import dev.argus.brain.TransportBackedBrain
 import dev.argus.engine.brain.Brain
+import dev.argus.engine.brain.CapabilityManifest
 import dev.argus.engine.brain.CapabilityProbe
 import dev.argus.engine.brain.CompileMetaError
 import dev.argus.engine.brain.CompileResult
@@ -332,7 +333,9 @@ class ChatViewModel @Inject constructor(
                     try {
                         withTimeout(timeoutMillis) {
                             val snapshot = deviceState.current()
+                            // La lingua dei testi per l'utente la decide l'app: quella dell'interfaccia.
                             val manifest = capabilityProbe.probe(snapshot)
+                                .copy(replyLanguage = language.replyLanguageCode())
                             val clarifiedPrompt = clarification?.let { context ->
                                 composeClarificationPrompt(context, prompt)
                             } ?: prompt
@@ -832,6 +835,12 @@ private fun composeClarificationPrompt(
         appendLine(dialogueJson)
         append("Return a rule draft, or ask one more specific clarification if still required.")
     }
+}
+
+/** Lingua che il modello deve usare nei testi per l'utente: `it` o `en`, come l'interfaccia. */
+internal fun RenderLanguage.replyLanguageCode(): String = when (this) {
+    RenderLanguage.IT -> CapabilityManifest.REPLY_LANGUAGE_IT
+    RenderLanguage.EN -> CapabilityManifest.REPLY_LANGUAGE_EN
 }
 
 internal fun composeInstalledAppCandidatesPrompt(

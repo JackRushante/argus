@@ -1100,6 +1100,43 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun `the manifest sent to the brain carries the interface language, not the probe default`() = runTest(dispatcher) {
+        var system = RenderLanguage.EN
+        val source = RenderLanguageSource { system }
+        val brain = QueuedBrain()
+        // La sonda lascia una lingua diversa: e' il ViewModel a imporre quella dell'interfaccia.
+        val viewModel = chatViewModel(
+            brain,
+            languageSource = source,
+            probedManifest = TEST_MANIFEST.copy(replyLanguage = "it"),
+        )
+
+        viewModel.onInputChange("When I get home turn on the Wi-Fi")
+        viewModel.onSend()
+        runCurrent()
+        assertEquals("en", brain.removeFirst().manifest?.replyLanguage)
+        viewModel.onCancelPending()
+
+        system = RenderLanguage.IT
+        source.refresh()
+        viewModel.onInputChange("Accendi il Wi-Fi quando torno a casa")
+        viewModel.onSend()
+        runCurrent()
+        // Stessa richiesta del primo giro, lingua diversa dell'interfaccia: cambia solo il manifest.
+        assertEquals("it", brain.removeFirst().manifest?.replyLanguage)
+        viewModel.onCancelPending()
+
+        // La lingua non dipende dalla lingua della richiesta: richiesta italiana con interfaccia inglese.
+        system = RenderLanguage.EN
+        source.refresh()
+        viewModel.onInputChange("Accendi il Wi-Fi quando torno a casa")
+        viewModel.onSend()
+        runCurrent()
+        assertEquals("en", brain.removeFirst().manifest?.replyLanguage)
+        viewModel.onCancelPending()
+    }
+
+    @Test
     fun `draft cards are regenerated when the phone language changes`() = runTest(dispatcher) {
         var system = RenderLanguage.IT
         val source = RenderLanguageSource { system }
@@ -1129,6 +1166,7 @@ class ChatViewModelTest {
         languageSource: RenderLanguageSource = RenderLanguageSource { language },
         clipboard: RecordingClipboard = RecordingClipboard(),
         installInfo: AppInstallInfo = AppInstallInfo(versionName = "0.3.6", installerPackage = null, sdkInt = 34),
+        probedManifest: CapabilityManifest = TEST_MANIFEST,
     ): ChatViewModel {
         val policy = FirePolicySnapshot(
             knownTools = AndroidCapabilityProbe.KNOWN_TOOLS,
@@ -1165,7 +1203,7 @@ class ChatViewModelTest {
             ),
             capabilityProbe = object : CapabilityProbe {
                 override suspend fun probe(currentState: DeviceState): CapabilityManifest =
-                    TEST_MANIFEST
+                    probedManifest
             },
             deviceState = DeviceStateSnapshotProvider { DeviceState() },
             approvalFlow = flow,
@@ -1268,6 +1306,7 @@ private class QueuedBrain : Brain {
     data class Request(
         val prompt: String,
         val response: CompletableDeferred<CompileResult>,
+        val manifest: CapabilityManifest? = null,
     )
 
     private val requests = ArrayDeque<Request>()
@@ -1277,7 +1316,7 @@ private class QueuedBrain : Brain {
         manifest: CapabilityManifest,
         state: DeviceState,
     ): CompileResult {
-        val request = Request(nl, CompletableDeferred())
+        val request = Request(nl, CompletableDeferred(), manifest)
         requests.addLast(request)
         return request.response.await()
     }
