@@ -299,6 +299,64 @@ class SettingsViewModelTest {
         assertEquals(ReasoningEffort.LOW, store.saveCalls.last().reasoningEffort)
     }
 
+    // ------------------------------------------------------------------ 0.4.0: ragionamento anche per OpenRouter
+
+    @Test
+    fun `openrouter espone il reasoning configurabile e salva la scelta`() = runTest(dispatcher) {
+        val store = FakeProviderStore().apply { select(ProviderId.OPENROUTER) }
+        val vm = settingsViewModel(store)
+        observe(vm)
+        vm.refresh()
+        advanceUntilIdle()
+
+        val before = vm.state.value.transport as TransportUi.DirectProvider
+        assertTrue(before.reasoningEffortEditable)
+        assertEquals("default", before.reasoningEffort, "senza scelta resta sul default del server")
+
+        vm.saveProviderConfig(
+            "openrouter",
+            baseUrl = null,
+            model = "~deepseek/deepseek-flash-latest",
+            apiKey = "sk-or-test-1234567890",
+            reasoningEffort = "none",
+        )
+        advanceUntilIdle()
+
+        assertEquals(ReasoningEffort.NONE, store.saveCalls.last().reasoningEffort)
+        assertEquals(ReasoningEffort.NONE, store.providerConfig(ProviderId.OPENROUTER).reasoningEffort)
+        val after = vm.state.value.transport as TransportUi.DirectProvider
+        assertEquals("none", after.reasoningEffort)
+    }
+
+    @Test
+    fun `un utente openrouter che non sceglie il reasoning resta su default`() = runTest(dispatcher) {
+        val store = FakeProviderStore().apply { select(ProviderId.OPENROUTER) }
+        val vm = settingsViewModel(store)
+        observe(vm)
+        advanceUntilIdle()
+
+        // L'app non passa nessuno sforzo (es. salvataggio della sola chiave): il valore non si tocca.
+        vm.saveProviderConfig("openrouter", baseUrl = null, model = null, apiKey = "sk-or-test-1234567890")
+        advanceUntilIdle()
+
+        assertNull(store.saveCalls.last().reasoningEffort)
+        assertEquals(ReasoningEffort.DEFAULT, store.providerConfig(ProviderId.OPENROUTER).reasoningEffort)
+    }
+
+    @Test
+    fun `i provider a listino ufficiale non espongono la scelta del reasoning`() = runTest(dispatcher) {
+        for (provider in listOf(ProviderId.OPENAI, ProviderId.ANTHROPIC, ProviderId.GEMINI)) {
+            val store = FakeProviderStore().apply { select(provider) }
+            val vm = settingsViewModel(store)
+            observe(vm)
+            vm.refresh()
+            advanceUntilIdle()
+
+            val transport = vm.state.value.transport as TransportUi.DirectProvider
+            assertFalse(transport.reasoningEffortEditable, provider.name)
+        }
+    }
+
 
     // ------------------------------------------------------------------ 0.3.6 F: Shizuku nell'interfaccia
 

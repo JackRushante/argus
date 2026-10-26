@@ -115,6 +115,12 @@ data class ProviderSpec(
     val costTracked: Boolean = false,
     /** false solo per endpoint Custom che accettano richieste anonime (es. llama-server locale). */
     val apiKeyRequired: Boolean = true,
+    /**
+     * true se l'utente può scegliere lo sforzo di ragionamento ([ReasoningEffort]): Custom (llama.cpp & co.)
+     * e OpenRouter, che accetta `reasoning_effort` e lo normalizza tra i fornitori. Per gli altri la scelta
+     * non si offre: `DEFAULT` omette il campo e il provider usa il suo comportamento.
+     */
+    val reasoningEffortEditable: Boolean = false,
 )
 
 /**
@@ -259,6 +265,9 @@ object ProviderCatalog {
             // costo reale dal wire — niente stime in dollari, si contano solo i token.
             prices = emptyMap(),
             apiKeyPrefixHint = "sk-or-",
+            // `none` spegne il ragionamento su DeepSeek, Luna e Kimi (verificato il 2026-10-26); Gemini, GLM e
+            // MiniMax Flash lo rifiutano e il transport ritenta una volta a `low`.
+            reasoningEffortEditable = true,
         ),
         ProviderSpec(
             id = ProviderId.CUSTOM_OPENAI_COMPAT,
@@ -270,6 +279,7 @@ object ProviderCatalog {
             quirks = ProviderQuirks(compileTemperature = COMPILE_TEMPERATURE),
             prices = emptyMap(),
             apiKeyRequired = false,
+            reasoningEffortEditable = true,
         ),
     ).associateBy { it.id }
 

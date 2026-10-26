@@ -45,6 +45,22 @@ class ProviderCatalogTest {
         }
     }
 
+    @Test fun `la scelta del reasoning e' offerta solo per openrouter e custom`() {
+        for (id in ProviderId.entries) {
+            val expected = id == ProviderId.OPENROUTER || id == ProviderId.CUSTOM_OPENAI_COMPAT
+            assertEquals(expected, ProviderCatalog.spec(id).reasoningEffortEditable, "reasoningEffortEditable per $id")
+        }
+    }
+
+    @Test fun `ogni sforzo di reasoning sopravvive al valore salvato e default resta senza valore`() {
+        for (effort in ReasoningEffort.entries) {
+            assertEquals(effort, ReasoningEffort.fromWireValue(effort.wireValue), effort.name)
+        }
+        assertNull(ReasoningEffort.DEFAULT.wireValue, "DEFAULT omette il campo")
+        assertEquals(ReasoningEffort.DEFAULT, ReasoningEffort.fromWireValue(null))
+        assertEquals(ReasoningEffort.DEFAULT, ReasoningEffort.fromWireValue("sconosciuto"))
+    }
+
     @Test fun `costTracked solo per i provider a prezzo noto`() {
         val tracked = setOf(ProviderId.OPENAI, ProviderId.ANTHROPIC, ProviderId.GEMINI)
         for (id in ProviderId.entries) {

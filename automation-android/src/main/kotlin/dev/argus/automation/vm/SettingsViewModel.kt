@@ -825,7 +825,7 @@ class SettingsViewModel @Inject constructor(
                 apiKeyPrefixHint = spec.apiKeyPrefixHint,
                 apiKeyRequired = spec.apiKeyRequired,
                 reasoningEffort = config.reasoningEffort.name.lowercase(Locale.ROOT),
-                reasoningEffortEditable = id == ProviderId.CUSTOM_OPENAI_COMPAT,
+                reasoningEffortEditable = spec.reasoningEffortEditable,
                 unauthenticatedLoopback = id == ProviderId.CUSTOM_OPENAI_COMPAT &&
                     keySaved == false &&
                     isLoopbackBaseUrl(config.baseUrl),

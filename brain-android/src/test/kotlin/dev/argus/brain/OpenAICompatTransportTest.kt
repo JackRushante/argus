@@ -820,6 +820,54 @@ class OpenAICompatTransportTest {
         assertEquals(3, server.requestCount)
     }
 
+    // --- 0.4.0: lo sforzo di ragionamento scelto dall'utente per OpenRouter arriva nella richiesta ---
+
+    private fun reasoningReply() = jsonResponse(
+        """
+        {"model":"x","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"Ciao!"}}],
+         "usage":{"prompt_tokens":5,"completion_tokens":2}}
+        """.trimIndent(),
+    )
+
+    private fun clarificationReply() = jsonResponse(
+        chatContent(
+            "Serve un chiarimento.\n@@META@@ {\"draft\":null,\"error_code\":\"clarification_required\"}",
+        ),
+    )
+
+    @Test fun `openrouter sends the chosen reasoning effort on compile act and health`(): Unit = runBlocking {
+        listOf(ReasoningEffort.NONE, ReasoningEffort.LOW, ReasoningEffort.MEDIUM, ReasoningEffort.HIGH)
+            .forEach { effort ->
+                server.enqueue(clarificationReply())
+                server.enqueue(reasoningReply())
+                server.enqueue(reasoningReply())
+                val t = transport(ProviderId.OPENROUTER, model = "x/flash", reasoning = effort)
+
+                t.compile("crea", manifest(), deviceState())
+                t.act(timerContext(), "scrivi", emptyList(), emptyList())
+                t.health()
+
+                val efforts = List(3) { reasoningEffortOf(assertNotNull(server.takeRequest(2, TimeUnit.SECONDS))) }
+                assertEquals(List(3) { effort.wireValue }, efforts, effort.name)
+            }
+    }
+
+    @Test fun `openrouter without a reasoning choice omits the field everywhere`(): Unit = runBlocking {
+        server.enqueue(clarificationReply())
+        server.enqueue(reasoningReply())
+        server.enqueue(reasoningReply())
+        val t = transport(ProviderId.OPENROUTER, model = "x/flash")
+
+        t.compile("crea", manifest(), deviceState())
+        t.act(timerContext(), "scrivi", emptyList(), emptyList())
+        t.health()
+
+        repeat(3) {
+            val body = assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8()
+            assertFalse("reasoning_effort" in body, body)
+        }
+    }
+
     // --- 0.3.7 voce 3a: il messaggio del provider arriva anche in chat ---
 
     @Test fun `compile and act carry the cleaned provider message on a 4xx`(): Unit = runBlocking {
