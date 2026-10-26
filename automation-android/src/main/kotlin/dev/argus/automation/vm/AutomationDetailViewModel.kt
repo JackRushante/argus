@@ -517,7 +517,7 @@ class AutomationDetailViewModel @Inject constructor(
         diagnosisJob?.cancel()
         diagnosisJob = viewModelScope.launch {
             try {
-                val (causes, geofence) = withContext(Dispatchers.IO) {
+                val (causes, registration) = withContext(Dispatchers.IO) {
                     probe.blockCauses(automation.requiredCapabilities) to
                         geofenceState.get(automation.id)
                 }
@@ -527,7 +527,7 @@ class AutomationDetailViewModel @Inject constructor(
                     fingerprint = automation.approvalFingerprint,
                     blockCauses = causes,
                     alarm = alarm,
-                    geofence = geofence,
+                    geofence = registration,
                     checkedAtMillis = System.currentTimeMillis(),
                 )
             } catch (error: CancellationException) {
