@@ -359,6 +359,23 @@ class BridgeTest(unittest.TestCase):
                 prompt,
             )
 
+    def test_prompt_mirrors_the_0_4_0_defaults_and_here_rules(self):
+        # Regole 4 e 5 dell'app 0.4.0: predefiniti per esattamente tre dettagli e «qui» sempre risolto
+        # sul telefono, con lo stesso testo; vale per compile v1 e v2.
+        for request in (self.request(), self.request_v2()):
+            prompt = bridge.build_prompt(request)
+            self.assertIn(
+                'Set\n   resolveCurrentLocation=true even when state.location_available is false: Argus resolves'
+                ' the position\n   on the phone at arming.',
+                prompt,
+            )
+            self.assertIn(
+                'Exception, for exactly these three details: do not ask, use the default (vibrate durationMs 1000,\n'
+                '   set_dnd mode "PRIORITY", geofence radiusM 150). Any other missing value (a level, a time, a'
+                ' person,\n   an app, a place, a text) still needs a short question.',
+                prompt,
+            )
+
     def test_prompt_does_not_carry_the_reply_language_line_the_envelope_has_no_such_field(self):
         # La riga reply_language dell'app NON va nel bridge: la busta non la porta e resta la
         # regola attuale di rispecchiare la lingua dell'utente.

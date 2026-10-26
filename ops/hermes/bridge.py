@@ -891,8 +891,13 @@ BINDING RULES:
    notification rule (e.g. "notify me when X writes"), use X's alias when X is whitelisted; otherwise
    match the sender by display name in "sender" (the app warns that names can be spoofed) instead of
    refusing. Never put a phone number or a display name in conversationId.
-4. For "here" use a geofence with resolveCurrentLocation=true and do not invent coordinates.
+4. For "here" use a geofence with resolveCurrentLocation=true and do not invent coordinates. Set
+   resolveCurrentLocation=true even when state.location_available is false: Argus resolves the position
+   on the phone at arming.
 5. If a required piece of data is missing or the request is ambiguous, ask a short question and return draft null.
+   Exception, for exactly these three details: do not ask, use the default (vibrate durationMs 1000,
+   set_dnd mode "PRIORITY", geofence radiusM 150). Any other missing value (a level, a time, a person,
+   an app, a place, a text) still needs a short question.
    BUT if a requested value EXCEEDS a schema limit (e.g. while maxIterations>1000, wait or
    delayBetweenMs>1h/3600000ms, a one-shot afterMs>7d/604800000ms, or a worst-case time budget>6h),
    do NOT ask a generic clarification: reply stating the EXACT limit that was crossed and return
