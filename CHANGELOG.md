@@ -2,6 +2,83 @@
 
 Release and engineering notes, newest first.
 
+## v0.3.6 (2026-10-26) — Reliability on real phones: alarms, screen-off waits, Shizuku, diagnostics
+
+This release closes the reliability and diagnostics findings of the code audit.
+
+### Added
+
+- "Why didn't it run?" in the rule detail: the registered alarm (time, exact or not), the geofence
+  state, missing permissions or services with a shortcut to System, the Shizuku state and the last
+  blocked attempt, in the words the Log uses.
+- "Exact alarms" row in System. Android 14+ often denies them by default and Argus never asked,
+  so rules with an exact time fell back to alarms Android may move by up to an hour; Fix opens
+  "Alarms & reminders", and once granted, alarms are re-registered as exact. The diagnosis also
+  says when a flexible rule may be moved by up to an hour to save battery.
+- Log retention (7, 30 or 90 days, default 30), clear log and a privacy-filtered export to share
+  (no rule names, message texts, contacts or AI answers).
+- Readable reasons in the Log instead of codes, including the exit code of privileged commands.
+- System shows when Shizuku runs as root, and rule cards say whether commands run as root, with
+  shell privileges (UID 2000), or with Shizuku privileges when the identity is not known yet.
+- Chat shows the raw model reply of a failed compile, with copy. System tells F-Droid and APK
+  installs apart and explains Android's "restricted settings" block on notification access.
+
+### Fixed
+
+- Time rules ring again after a force stop or a vendor "cleanup": alarms are re-registered at
+  every app start.
+- A network time correction right after boot, or a timezone change, recovers the occurrences
+  missed while the phone was off instead of dropping them.
+- Long waits and AI actions work with the screen off: Argus holds a partial wakelock while a rule
+  runs (at most 70 minutes) and waits longer than 60 s wake the phone with an alarm (exact when
+  granted), so "wait 30 minutes" no longer lasts hours. AI actions keep the foreground service
+  alive.
+- If Android refuses to start the foreground service, the Log records `foreground_service_denied`
+  and Wi-Fi/power rules show a notification asking to open Argus instead of stopping silently.
+- Startup recoveries run in the background: a long program no longer delays geofence and sensor
+  registration. Old log data is cleaned every 24 h, not only at app start.
+- Two notifications of the same rule no longer overwrite each other.
+- An immediate rule interrupted by an app kill is disarmed (`execution_interrupted`) instead of
+  staying armed; re-enabling a one-time rule whose time has passed says so; deleting a sensor rule
+  stops the sensor and its notification.
+- Shizuku failures are precise in the Log (not running or not authorized, too old, timeout,
+  command exit code) instead of `action_failed`; when Shizuku does not answer, requests fail fast
+  for 60 s instead of waiting 15 s each. "Shizuku too old" is shown as such with a link to update
+  it, and a late answer to the Shizuku permission dialog updates the screen by itself.
+- "Turn off Do Not Disturb" on Android 15+ checks the result and falls back to the system command;
+  if DND stays on, the Log says `dnd_change_not_applied` instead of success.
+- With location services off, geofence and Wi-Fi-name rules are reported as temporarily
+  unavailable instead of never firing. After a reboot without a location fix the geofence state
+  becomes unknown, so the next enter or exit is delivered instead of being taken for a duplicate.
+- Notifications from apps that no rule listens to no longer wake Argus.
+- Foreground-app detection works in split screen; long `dumpsys` outputs keep values found before
+  the size limit.
+- Notification text matching ignores case, phone numbers match with or without the country prefix,
+  a time window with the same start and end means "always", and a cooldown race that could fire a
+  rule twice is closed.
+- Very long executions keep their last 100 journal steps plus a summary of the omitted ones.
+- AI actions with web search failed with HTTP 404 on OpenRouter presets (`@preset/...`): Argus
+  appended `:online` to the preset. It now sends the equivalent `web` plugin and leaves the model
+  untouched.
+- Provider errors are shown, with keys masked, in the connection check. Custom endpoints accept a
+  base URL without `/chat/completions`, and OpenRouter and Custom compile at temperature 0.2.
+- "Allow" on a permission denied for good opens the app settings with an explanation instead of
+  doing nothing.
+- The rule list no longer re-reads device state at every firing and shows the real next run of
+  "in 2 hours" rules. The detail no longer flashes "rule unavailable" after Arm, arming completes
+  even if you leave the screen, and "Run now" is hidden until it is available.
+- Every screen follows a phone language change without restarting the app; the Log tab always
+  opens the full log.
+
+### Verification
+
+- Full JVM/Robolectric suites, Android lint and debug assembly on the Unraid builder (JDK 21, as
+  on the F-Droid buildserver); release APKs rebuilt twice from clean trees with byte-identical
+  output.
+- On a OnePlus 15 with Android 16: System health (Shizuku as root, exact alarms), the rule detail
+  and its diagnosis, and a daily time rule firing on time and rescheduling itself. That same run
+  exposed the OpenRouter preset bug fixed above.
+
 ## v0.3.5 (2026-10-25) — Audit fixes: reliability, approval transparency, AI translation
 
 This release closes the high-severity findings and the security fixes from a full code audit.

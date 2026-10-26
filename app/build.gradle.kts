@@ -22,8 +22,8 @@ android {
         applicationId = "dev.argus"
         minSdk = 30
         targetSdk = 36
-        versionCode = 12
-        versionName = "0.3.5"
+        versionCode = 13
+        versionName = "0.3.6"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
