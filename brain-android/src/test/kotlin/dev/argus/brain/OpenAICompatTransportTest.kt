@@ -207,7 +207,7 @@ class OpenAICompatTransportTest {
     @Test fun `openrouter default model is resolved from catalog`(): Unit = runBlocking {
         server.enqueue(jsonResponse(
             """
-            {"model":"openai/gpt-5.5",
+            {"model":"provider/resolved-model",
              "choices":[{"index":0,"message":{"role":"assistant",
                "tool_calls":[{"id":"c1","type":"function","function":{"name":"whatsapp_reply","arguments":"{\"text\":\"Ok!\"}"}}]}}],
              "usage":{"prompt_tokens":10,"completion_tokens":2}}
@@ -221,7 +221,8 @@ class OpenAICompatTransportTest {
         val root = Json.parseToJsonElement(
             assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
         ).jsonObject
-        assertEquals("openai/gpt-5.5", root.getValue("model").jsonPrimitive.content)
+        // Il primo alias del catalogo: OpenRouter lo risolve da solo sull'ultima versione della famiglia.
+        assertEquals("~deepseek/deepseek-flash-latest", root.getValue("model").jsonPrimitive.content)
     }
 
     // --- #52 F3: web search server-side sui provider diretti ---

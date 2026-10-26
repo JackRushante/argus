@@ -127,13 +127,61 @@ class ProviderCatalogTest {
         }
     }
 
-    @Test fun `priced models are listed among default models`() {
+    @Test fun `every suggested model of a cost tracked provider has a price`() {
+        // Le voci dei modelli non più suggeriti restano nel listino (stima per chi li ha già configurati),
+        // ma ogni modello che l'app suggerisce, o usa a campo vuoto, deve avere il suo prezzo.
         for (id in ProviderId.entries) {
             val spec = ProviderCatalog.spec(id)
-            for (model in spec.prices.keys) {
-                assertTrue(model in spec.defaultModels, "modello prezzato non a catalogo: $id/$model")
+            if (!spec.costTracked) continue
+            for (model in spec.defaultModels) {
+                assertTrue(model in spec.prices, "modello suggerito senza prezzo: $id/$model")
             }
         }
+    }
+
+    @Test fun `the first suggestion is the cheap base model the app uses when the field is empty`() {
+        assertEquals(listOf("gpt-6-luna"), ProviderCatalog.spec(ProviderId.OPENAI).defaultModels)
+        assertEquals(listOf("claude-haiku-5-5"), ProviderCatalog.spec(ProviderId.ANTHROPIC).defaultModels)
+        assertEquals(listOf("gemini-3.8-flash"), ProviderCatalog.spec(ProviderId.GEMINI).defaultModels)
+        assertTrue(ProviderCatalog.spec(ProviderId.HERMES).defaultModels.isEmpty())
+        assertTrue(ProviderCatalog.spec(ProviderId.CUSTOM_OPENAI_COMPAT).defaultModels.isEmpty())
+    }
+
+    @Test fun `openrouter suggests moving latest aliases and the first one is the default`() {
+        val models = ProviderCatalog.spec(ProviderId.OPENROUTER).defaultModels
+        assertEquals(
+            listOf(
+                "~deepseek/deepseek-flash-latest",
+                "~google/gemini-flash-latest",
+                "~moonshotai/kimi-latest",
+                "~anthropic/claude-haiku-latest",
+            ),
+            models,
+        )
+        assertTrue(models.all { it.startsWith("~") && it.endsWith("-latest") }, models.toString())
+    }
+
+    @Test fun `new base models are priced from the official lists and old ones keep their estimate`() {
+        val openai = ProviderCatalog.spec(ProviderId.OPENAI).prices
+        assertEquals(ModelPrice(100_000, 500_000, cachedInputMicrosPerMTok = 10_000), openai["gpt-6-luna"])
+        assertTrue("gpt-5.5" in openai && "gpt-5-mini" in openai)
+
+        val anthropic = ProviderCatalog.spec(ProviderId.ANTHROPIC).prices
+        assertEquals(ModelPrice(100_000, 500_000, cachedInputMicrosPerMTok = 10_000), anthropic["claude-haiku-5-5"])
+        // Opus: il listino attuale e' $5/$25 (prima $15/$75).
+        assertEquals(
+            ModelPrice(5_000_000, 25_000_000, cachedInputMicrosPerMTok = 500_000),
+            anthropic["claude-opus-4-8"],
+        )
+        assertTrue("claude-sonnet-4-5" in anthropic)
+
+        val gemini = ProviderCatalog.spec(ProviderId.GEMINI).prices
+        assertEquals(ModelPrice(750_000, 3_750_000, cachedInputMicrosPerMTok = 75_000), gemini["gemini-3.8-flash"])
+        assertTrue("gemini-2.5-pro" in gemini && "gemini-2.5-flash" in gemini)
+    }
+
+    @Test fun `pricing version is the october 2026 list`() {
+        assertEquals("2026-10", ProviderCatalog.PRICING_VERSION)
     }
 
     @Test fun `wire names round trip`() {

@@ -252,7 +252,7 @@ class AnthropicMessagesTransportTest {
     @Test fun `default model is resolved from catalog`(): Unit = runBlocking {
         server.enqueue(jsonResponse(
             """
-            {"id":"msg_3","type":"message","role":"assistant","model":"claude-opus-4-8",
+            {"id":"msg_3","type":"message","role":"assistant","model":"claude-haiku-5-5",
              "content":[{"type":"tool_use","id":"toolu_1","name":"whatsapp_reply","input":{"text":"Ok!"}}],
              "stop_reason":"tool_use","usage":{"input_tokens":10,"output_tokens":2}}
             """.trimIndent(),
@@ -265,7 +265,7 @@ class AnthropicMessagesTransportTest {
         val root = Json.parseToJsonElement(
             assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
         ).jsonObject
-        assertEquals("claude-opus-4-8", root.getValue("model").jsonPrimitive.content)
+        assertEquals("claude-haiku-5-5", root.getValue("model").jsonPrimitive.content)
     }
 
     @Test fun `actV2 sends the classified state value in the prompt`(): Unit = runBlocking {
