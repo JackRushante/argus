@@ -1035,7 +1035,7 @@
   "id": "p4.while.en.01",
   "category": "p4",
   "lang": "en",
-  "text": "Vibrate every 5 seconds while Wi-Fi is off, at most 10 times",
+  "text": "Starting now, vibrate every 5 seconds while Wi-Fi is off, at most 10 times",
   "expect": {
    "outcome": "draft",
    "trigger": {"type": "immediate"},
