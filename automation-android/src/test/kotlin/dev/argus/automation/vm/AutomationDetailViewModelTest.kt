@@ -18,6 +18,7 @@ import dev.argus.automation.sensor.NoopSensorTriggerRuntime
 import dev.argus.automation.sensor.SensorReconcileReport
 import dev.argus.automation.sensor.SensorTriggerRuntime
 import dev.argus.data.ArgusDatabase
+import dev.argus.data.RoomAuditSink
 import dev.argus.data.RoomAutomationStore
 import dev.argus.data.RoomContactWhitelistStore
 import dev.argus.data.RoomDraftRepository
@@ -38,6 +39,7 @@ import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.AuditEvent
 import dev.argus.engine.runtime.AuditKind
 import dev.argus.engine.runtime.AuditSink
+import dev.argus.engine.runtime.NoopAuditSink
 import dev.argus.engine.runtime.FirePolicySnapshot
 import dev.argus.engine.runtime.FirePolicySnapshotProvider
 import dev.argus.engine.safety.ApprovalService
@@ -390,11 +392,10 @@ class AutomationDetailViewModelTest {
     @Test
     fun `re-enabling a one shot rule whose time has passed explains what to do`() = runTest {
         val store = RoomAutomationStore(db.automationDao())
-        val rule = seedArmedAutomation("b31c")
-        store.disable(rule.id)
+        seedDisabledOneShotInPast("b31c")
         val viewModel = viewModel(
             "b31c", store, DetailAuditRecorder(), RenderLanguage.EN,
-            scheduler = EnableFailingScheduler(db, "b31c", ONE_SHOT_IN_PAST),
+            enablementAudit = RoomAuditSink(db.auditDao()),
         )
         awaitUntil("regola disattivata mostrata") { viewModel.state.value.detail?.status == StatusBadge.DISABLED }
         val events = collectEvents(viewModel)
@@ -413,12 +414,8 @@ class AutomationDetailViewModelTest {
     @Test
     fun `the one shot in the past message is italian when the phone is italian`() = runTest {
         val store = RoomAutomationStore(db.automationDao())
-        val rule = seedArmedAutomation("b31i")
-        store.disable(rule.id)
-        val viewModel = viewModel(
-            "b31i", store, DetailAuditRecorder(), RenderLanguage.IT,
-            scheduler = EnableFailingScheduler(db, "b31i", ONE_SHOT_IN_PAST),
-        )
+        seedDisabledOneShotInPast("b31i")
+        val viewModel = viewModel("b31i", store, DetailAuditRecorder(), RenderLanguage.IT)
         awaitUntil("regola disattivata mostrata") { viewModel.state.value.detail?.status == StatusBadge.DISABLED }
         val events = collectEvents(viewModel)
 
@@ -742,6 +739,7 @@ class AutomationDetailViewModelTest {
         registrar: ArmedAutomationRegistrar = ArmedAutomationRegistrar { true },
         scheduler: TimeAlarmRuntime = NoopTimeAlarmRuntime(),
         sensor: SensorTriggerRuntime = NoopSensorTriggerRuntime,
+        enablementAudit: AuditSink = NoopAuditSink,
     ): AutomationDetailViewModel {
         val whitelist = RoomContactWhitelistStore(db.contactWhitelistDao())
         val snapshots = FirePolicySnapshotProvider {
@@ -775,7 +773,7 @@ class AutomationDetailViewModelTest {
             store = store,
             drafts = drafts,
             approvals = approvals,
-            enablement = AutomationEnablementCoordinator(store, scheduler),
+            enablement = AutomationEnablementCoordinator(store, scheduler, audit = enablementAudit),
             scheduler = scheduler,
             database = db,
             whitelist = whitelist,
@@ -798,6 +796,33 @@ class AutomationDetailViewModelTest {
             trigger = Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
             actions = listOf(Action.ShowNotification("Argus", "test")),
             enabled = true,
+        )
+        val signed = unsigned.copy(approvalFingerprint = ApprovalFingerprints.of(unsigned))
+        db.automationDao().upsertPreservingLastFired(
+            AutomationEntity(
+                id = signed.id.value,
+                name = signed.name,
+                status = signed.status,
+                enabled = signed.enabled,
+                priority = signed.priority,
+                cooldownMs = signed.cooldownMs,
+                schemaVersion = signed.schemaVersion,
+                json = ArgusJson.encodeToString(Automation.serializer(), signed),
+            ),
+        )
+        return signed
+    }
+
+    /** Regola una tantum gia' disattivata il cui orario e' passato: il coordinator reale la rifiuta. */
+    private suspend fun seedDisabledOneShotInPast(id: String): Automation {
+        val unsigned = Automation(
+            id = AutomationId(id),
+            name = "auto-$id",
+            createdBy = CreatedBy.USER,
+            status = AutomationStatus.DISABLED,
+            trigger = Trigger.Time(at = "2020-01-01T09:00", tz = "UTC"),
+            actions = listOf(Action.ShowNotification("Argus", "test")),
+            enabled = false,
         )
         val signed = unsigned.copy(approvalFingerprint = ApprovalFingerprints.of(unsigned))
         db.automationDao().upsertPreservingLastFired(

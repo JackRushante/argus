@@ -22,7 +22,6 @@ import dev.argus.data.entities.ActionResultEntity
 import dev.argus.engine.model.ActionTier
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationDraft
-import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.StateQueryFamily
@@ -388,25 +387,24 @@ class AutomationDetailViewModel @Inject constructor(
         val automation = displayedAutomation ?: return
         viewModelScope.launch {
             try {
-                val startedAt = System.currentTimeMillis()
                 when (enablement.setEnabled(automation.id, enabled)) {
                     EnablementResult.Updated -> Unit
                     EnablementResult.ReviewRequired ->
                         message(
-                            failedEnableMessage(automation.id, enabled, startedAt)
-                                ?: language.pick(
-                                    "The rule must be reviewed before it can be re-enabled.",
-                                    "La regola deve essere rivista prima di essere riattivata.",
-                                ),
+                            language.pick(
+                                "The rule must be reviewed before it can be re-enabled.",
+                                "La regola deve essere rivista prima di essere riattivata.",
+                            ),
                         )
                     EnablementResult.SchedulingFailed ->
                         message(
-                            failedEnableMessage(automation.id, enabled, startedAt)
-                                ?: language.pick(
-                                    "Scheduling failed: the rule remains disabled.",
-                                    "Pianificazione non riuscita: la regola è rimasta disattivata.",
-                                ),
+                            language.pick(
+                                "Scheduling failed: the rule remains disabled.",
+                                "Pianificazione non riuscita: la regola è rimasta disattivata.",
+                            ),
                         )
+                    // B31: l'orario e' passato, non e' un guasto: dice cosa fare.
+                    EnablementResult.OneShotInPast -> message(oneShotInPastText(language))
                     EnablementResult.DisableCleanupDeferred ->
                         message(
                             language.pick(
@@ -422,16 +420,6 @@ class AutomationDetailViewModel @Inject constructor(
             }
         }
     }
-
-    /**
-     * B31: una riattivazione fallita per un motivo noto (oggi: una tantum con l'orario già passato)
-     * dice cosa fare invece del messaggio generico. Solo la riattivazione può avere un motivo.
-     */
-    private suspend fun failedEnableMessage(
-        id: AutomationId,
-        enabled: Boolean,
-        startedAt: Long,
-    ): String? = if (enabled) enableFailureMessage(database, id, startedAt, language) else null
 
     fun onDelete() {
         val automation = displayedAutomation ?: return

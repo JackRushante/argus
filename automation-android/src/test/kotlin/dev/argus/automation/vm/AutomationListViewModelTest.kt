@@ -14,10 +14,15 @@ import dev.argus.automation.RenderLanguageSource
 import dev.argus.automation.TimeAlarmRuntime
 import dev.argus.data.ArgusDatabase
 import dev.argus.data.RoomAutomationStore
+import dev.argus.data.entities.AutomationEntity
 import dev.argus.data.RoomContactWhitelistStore
 import dev.argus.data.RoomDraftRepository
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.ApprovalFingerprint
+import dev.argus.engine.model.ApprovalFingerprints
+import dev.argus.engine.model.ArgusJson
+import dev.argus.engine.model.Automation
+import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
@@ -266,9 +271,8 @@ class AutomationListViewModelTest {
 
     @Test
     fun `re-enabling a one shot rule whose time has passed says what to do`() = runTest {
-        val rule = armedRule("os1")
-        store.disable(rule.id)
-        val viewModel = viewModel(scheduler = EnableFailingScheduler(db, "os1", ONE_SHOT_IN_PAST))
+        seedDisabledOneShotInPast("os1")
+        val viewModel = viewModel()
         val messages = mutableListOf<String>()
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.messages.collect(messages::add)
@@ -283,7 +287,50 @@ class AutomationListViewModelTest {
         )
     }
 
+    @Test
+    fun `a failed re-enable for another reason keeps the generic message`() = runTest {
+        val rule = armedRule("os2")
+        store.disable(rule.id)
+        val viewModel = viewModel(scheduler = EnableFailingScheduler(db, "os2", "scheduling_failed"))
+        val messages = mutableListOf<String>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.messages.collect(messages::add)
+        }
+
+        viewModel.onToggleEnabled("os2", true)
+        awaitUntil("messaggio") { messages.isNotEmpty() }
+
+        assertEquals(listOf("Scheduling failed: the rule remains disabled."), messages)
+    }
+
     // --- helpers -------------------------------------------------------------------------------------
+
+    /** Regola una tantum gia' disattivata il cui orario e' passato: il coordinator reale la rifiuta. */
+    private suspend fun seedDisabledOneShotInPast(id: String): Automation {
+        val unsigned = Automation(
+            id = AutomationId(id),
+            name = "auto-$id",
+            createdBy = CreatedBy.USER,
+            status = AutomationStatus.DISABLED,
+            trigger = Trigger.Time(at = "2020-01-01T09:00", tz = "UTC"),
+            actions = listOf(Action.ShowNotification("Argus", "test")),
+            enabled = false,
+        )
+        val signed = unsigned.copy(approvalFingerprint = ApprovalFingerprints.of(unsigned))
+        db.automationDao().upsertPreservingLastFired(
+            AutomationEntity(
+                id = signed.id.value,
+                name = signed.name,
+                status = signed.status,
+                enabled = signed.enabled,
+                priority = signed.priority,
+                cooldownMs = signed.cooldownMs,
+                schemaVersion = signed.schemaVersion,
+                json = ArgusJson.encodeToString(Automation.serializer(), signed),
+            ),
+        )
+        return signed
+    }
 
     private fun newDraft(id: String) = NewDraft(
         id = DraftId("draft-$id"),
