@@ -84,36 +84,36 @@ Builds:
     gradleprops:
       - argusAbi=x86_64
 
-  - versionName: 0.4.0
-    versionCode: 1501
-    commit: 7e352f92ad49c54ed5d0cdc4a09641598f3a24a7
+  - versionName: 0.4.2
+    versionCode: 1701
+    commit: 5948d013bce32893e7bc05d3c13edcd52ce57e8f
     subdir: app
     gradle:
       - yes
     gradleprops:
       - argusAbi=armeabi-v7a
 
-  - versionName: 0.4.0
-    versionCode: 1502
-    commit: 7e352f92ad49c54ed5d0cdc4a09641598f3a24a7
+  - versionName: 0.4.2
+    versionCode: 1702
+    commit: 5948d013bce32893e7bc05d3c13edcd52ce57e8f
     subdir: app
     gradle:
       - yes
     gradleprops:
       - argusAbi=arm64-v8a
 
-  - versionName: 0.4.0
-    versionCode: 1503
-    commit: 7e352f92ad49c54ed5d0cdc4a09641598f3a24a7
+  - versionName: 0.4.2
+    versionCode: 1703
+    commit: 5948d013bce32893e7bc05d3c13edcd52ce57e8f
     subdir: app
     gradle:
       - yes
     gradleprops:
       - argusAbi=x86
 
-  - versionName: 0.4.0
-    versionCode: 1504
-    commit: 7e352f92ad49c54ed5d0cdc4a09641598f3a24a7
+  - versionName: 0.4.2
+    versionCode: 1704
+    commit: 5948d013bce32893e7bc05d3c13edcd52ce57e8f
     subdir: app
     gradle:
       - yes
@@ -129,5 +129,5 @@ VercodeOperation:
   - 100 * %c + 2
   - 100 * %c + 3
   - 100 * %c + 4
-CurrentVersion: 0.4.0
-CurrentVersionCode: 1504
+CurrentVersion: 0.4.2
+CurrentVersionCode: 1704
