@@ -72,6 +72,14 @@ internal data class AndroidCapabilityState(
 
     /** Geofence e SSID funzionano: permessi concessi e servizi di localizzazione accesi. */
     val locationUsable: Boolean get() = locationGranted && locationEnabled
+
+    /**
+     * Il Bluetooth si legge con le API pubbliche solo da Android 12 col permesso `BLUETOOTH_CONNECT`
+     * concesso (prima servirebbe il permesso legacy `BLUETOOTH`, che l'app non dichiara). Senza,
+     * la chiave `bluetooth` resta a Shizuku.
+     */
+    val publicBluetoothStateReadable: Boolean
+        get() = androidApi >= Build.VERSION_CODES.S && bluetoothConnectGranted
 }
 
 internal fun interface AndroidCapabilityStateSource {
@@ -209,9 +217,10 @@ class AndroidCapabilityProbe internal constructor(
             availableTools = resolved.availableTools,
             unavailableTools = resolved.unavailableTools,
             whitelistedContacts = resolved.contacts,
-            // Solo le chiavi con una capacita' `state.<chiave>` armabile ORA (oggi: Shizuku autorizzato):
-            // altrimenti il modello propone `state_equals` che l'app non puo' armare. Il manifest serve
-            // solo al compile: le regole gia' armate non cambiano.
+            // Solo le chiavi con una capacita' `state.<chiave>` armabile ORA (API pubbliche, o Shizuku
+            // autorizzato per il Bluetooth senza permesso): altrimenti il modello propone `state_equals`
+            // che l'app non puo' armare. Il manifest serve solo al compile: le regole gia' armate non
+            // cambiano.
             stateKeys = StateKeys.ALL.filterKeys { CapabilityIds.state(it) in resolved.available },
             availableTriggers = availableTriggers(resolved.state, resolved.armableSensorKinds),
             stateReaders = StateReaderManifest(
@@ -268,6 +277,11 @@ class AndroidCapabilityProbe internal constructor(
     }
 
     private fun causeOf(capability: String, state: AndroidCapabilityState): BlockCause = when {
+        // Il Bluetooth e' l'unica chiave di stato pubblica che puo' mancare senza Shizuku: dipende dal
+        // permesso (Android 12+). Le altre sette sono sempre leggibili e non risultano mai bloccate.
+        capability == CapabilityIds.state(StateKeys.BLUETOOTH) ->
+            if (state.androidApi >= Build.VERSION_CODES.S) BlockCause.BLUETOOTH_PERMISSION
+            else shizukuCause(state.shizukuStatus)
         capability in PRIVILEGED_CAPABILITIES || capability == TOOL_STATE_READ ->
             shizukuCause(state.shizukuStatus)
         capability in BASE_DND_CAPABILITIES ->
@@ -343,6 +357,11 @@ class AndroidCapabilityProbe internal constructor(
             if (state.locationUsable) add(CapabilityIds.TRIGGER_CONNECTIVITY_WIFI_IDENTITY)
             // Fire-time location conditions use framework LocationManager, not Shizuku.
             if (state.locationGranted) add(CapabilityIds.STATE_LOCATION)
+            // Le chiavi di stato (batteria, carica, schermo, suoneria, DND, aereo, Wi-Fi, Bluetooth) si
+            // leggono con le API pubbliche di Android: armabili anche senza Shizuku, fermo o non
+            // autorizzato. Il Bluetooth solo col permesso; con Shizuku autorizzato resta leggibile
+            // comunque (lo shell e' il ripiego), come prima.
+            addAll(publicStateCapabilities(state))
             // Clipboard locale: nessun permesso OS richiesto (scrittura verificata su device).
             add(ActionCapabilities.COPY_TO_CLIPBOARD)
             // copy_text (clipboard letterale): stesso regime BASE, sempre disponibile.
@@ -388,7 +407,9 @@ class AndroidCapabilityProbe internal constructor(
             armableSensorKinds.forEach { add(CapabilityIds.triggerSensor(it)) }
         }
         val transient = if (shizukuTransient) {
-            SHIZUKU_CAPABILITIES + TOOL_STATE_READ
+            // Anche le chiavi di stato: se il Bluetooth non e' leggibile in pubblico, con Shizuku
+            // fermo ma autorizzato e' un outage recuperabile, come prima della lettura pubblica.
+            PRIVILEGED_CAPABILITIES + BASE_DND_CAPABILITIES + BASE_LAUNCH_CAPABILITIES + TOOL_STATE_READ
         } else {
             emptySet()
         }
@@ -482,6 +503,12 @@ class AndroidCapabilityProbe internal constructor(
         if (state.bluetoothConnectGranted) add("bluetooth_connect")
         if (state.activityRecognitionGranted) add("activity_recognition")
     }
+
+    /** Capability `state.<chiave>` leggibili ORA senza Shizuku (tutte, tranne il Bluetooth senza permesso). */
+    private fun publicStateCapabilities(state: AndroidCapabilityState): Set<String> =
+        StateKeys.ALL.keys
+            .filter { key -> key != StateKeys.BLUETOOTH || state.publicBluetoothStateReadable }
+            .mapTo(linkedSetOf(), CapabilityIds::state)
 
     private fun shizukuReason(status: ShizukuGatewayStatus): String = when (status) {
         ShizukuGatewayStatus.NOT_INSTALLED -> "Shizuku not installed"
@@ -609,9 +636,14 @@ class AndroidCapabilityProbe internal constructor(
             add(CapabilityIds.STATE_READER_DUMPSYS_FIELD)
             StateKeys.ALL.keys.forEach { add(CapabilityIds.state(it)) }
         }
-        // Unione legacy: usata per il set transiente (Shizuku fermo ma autorizzato).
+        /** Le otto `state.<chiave>`: si leggono con le API pubbliche, Shizuku e' solo il ripiego. */
+        val PUBLIC_STATE_CAPABILITIES: Set<String> =
+            StateKeys.ALL.keys.mapTo(linkedSetOf(), CapabilityIds::state)
+        // Capability che dipendono da Shizuku (banner «serve Shizuku»): le chiavi di stato pubbliche non
+        // ne fanno piu' parte, una regola che usa solo quelle funziona anche senza.
         val SHIZUKU_CAPABILITIES: Set<String> =
-            PRIVILEGED_CAPABILITIES + BASE_DND_CAPABILITIES + BASE_LAUNCH_CAPABILITIES
+            (PRIVILEGED_CAPABILITIES - PUBLIC_STATE_CAPABILITIES) + BASE_DND_CAPABILITIES +
+                BASE_LAUNCH_CAPABILITIES
     }
 }
 

@@ -1,5 +1,6 @@
 package dev.argus.automation.vm
 
+import android.content.Context
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import androidx.test.core.app.ApplicationProvider
@@ -12,6 +13,7 @@ import dev.argus.automation.AutomationEnablementCoordinator
 import dev.argus.automation.CurrentLocationProvider
 import dev.argus.automation.GenerativeReadiness
 import dev.argus.automation.GenerativeRuntimeReadiness
+import dev.argus.automation.LogRetentionStore
 import dev.argus.automation.AlarmDeliveryResult
 import dev.argus.automation.ReconcileReason
 import dev.argus.automation.ReconcileReport
@@ -30,6 +32,7 @@ import dev.argus.data.RoomAuditSink
 import dev.argus.data.RoomAutomationStore
 import dev.argus.data.RoomContactWhitelistStore
 import dev.argus.data.RoomDraftRepository
+import dev.argus.data.RoomExecutionJournal
 import dev.argus.data.entities.AuditEntity
 import dev.argus.data.entities.AutomationEntity
 import dev.argus.data.entities.ScheduledTimeAlarmEntity
@@ -48,6 +51,11 @@ import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.AuditEvent
 import dev.argus.engine.runtime.AuditKind
 import dev.argus.engine.runtime.AuditSink
+import dev.argus.engine.runtime.ExecutionCompletion
+import dev.argus.engine.runtime.ExecutionId
+import dev.argus.engine.runtime.ExecutionStatus
+import dev.argus.engine.runtime.FireClaimRequest
+import dev.argus.engine.runtime.TriggerEventId
 import dev.argus.engine.runtime.NoopAuditSink
 import dev.argus.engine.runtime.FirePolicySnapshot
 import dev.argus.engine.runtime.FirePolicySnapshotProvider
@@ -60,6 +68,7 @@ import dev.argus.engine.safety.DraftWriteResult
 import dev.argus.engine.safety.NewDraft
 import dev.argus.engine.safety.PendingDraft
 import dev.argus.shizuku.ShizukuGatewayStatus
+import dev.argus.ui.model.RuleStatsWindow
 import dev.argus.ui.model.StatusBadge
 import dev.argus.ui.presentation.RenderLanguage
 import kotlinx.coroutines.CoroutineScope
@@ -98,6 +107,7 @@ class AutomationDetailViewModelTest {
     private lateinit var db: ArgusDatabase
     private lateinit var lastViewModel: AutomationDetailViewModel
     private val applicationScopes = mutableListOf<CoroutineScope>()
+    private var executionSequence = 0
 
     @Before
     fun setUp() {
@@ -168,6 +178,92 @@ class AutomationDetailViewModelTest {
             "Run now is not available yet.",
             (events.single() as DetailEvent.Message).text,
         )
+    }
+
+    // --- F10: statistiche per regola (ultimi 7 e 30 giorni) ---------------------------------------
+
+    @Test
+    fun `an armed rule shows its firings for the last 7 and 30 days`() = runTest {
+        val automation = seedArmedAutomation("stats")
+        val now = System.currentTimeMillis()
+        recordFire(automation.id, now - 1 * DAY_MS, ExecutionStatus.SUCCEEDED)
+        recordFire(automation.id, now - 2 * DAY_MS, ExecutionStatus.SUCCEEDED)
+        recordFire(automation.id, now - 10 * DAY_MS, ExecutionStatus.FAILED)
+        // Una soppressione non e' uno scatto; uno vecchio di 40 giorni sta fuori da entrambe le finestre.
+        recordFire(automation.id, now - 1 * DAY_MS + 5, ExecutionStatus.SUPPRESSED_COOLDOWN)
+        recordFire(automation.id, now - 40 * DAY_MS, ExecutionStatus.SUCCEEDED)
+        val viewModel = viewModel("stats", RoomAutomationStore(db.automationDao()), DetailAuditRecorder())
+
+        awaitUntil("dettaglio con statistiche") { viewModel.state.value.detail?.stats != null }
+
+        val stats = viewModel.state.value.detail?.stats
+        assertNotNull(stats)
+        assertEquals(RuleStatsWindow(fires = 2, succeeded = 2, failed = 0), stats.last7Days)
+        assertEquals(RuleStatsWindow(fires = 3, succeeded = 2, failed = 1), stats.last30Days)
+        assertEquals(30, stats.longWindowDays)
+        assertTrue(!stats.isEmpty)
+    }
+
+    @Test
+    fun `a rule that never fired reports an empty 30 day window`() = runTest {
+        seedArmedAutomation("quiet")
+        val viewModel = viewModel("quiet", RoomAutomationStore(db.automationDao()), DetailAuditRecorder())
+
+        awaitUntil("dettaglio con statistiche") { viewModel.state.value.detail?.stats != null }
+
+        val stats = viewModel.state.value.detail?.stats
+        assertNotNull(stats)
+        assertEquals(RuleStatsWindow(0, 0, 0), stats.last30Days)
+        assertTrue(stats.isEmpty)
+    }
+
+    @Test
+    fun `a new firing updates the stats while the detail is open`() = runTest {
+        val automation = seedArmedAutomation("live")
+        val viewModel = viewModel("live", RoomAutomationStore(db.automationDao()), DetailAuditRecorder())
+        awaitUntil("dettaglio con statistiche") { viewModel.state.value.detail?.stats != null }
+        assertTrue(viewModel.state.value.detail?.stats?.isEmpty == true)
+
+        recordFire(automation.id, System.currentTimeMillis(), ExecutionStatus.SUCCEEDED)
+
+        awaitUntil("conteggio aggiornato") { viewModel.state.value.detail?.stats?.last7Days?.fires == 1 }
+        assertEquals(RuleStatsWindow(1, 1, 0), viewModel.state.value.detail?.stats?.last30Days)
+    }
+
+    @Test
+    fun `a draft has no stats`() = runTest {
+        val repository = RoomDraftRepository(db)
+        assertIs<DraftWriteResult.Saved>(repository.create(newDraft("d-stats", "bozza")))
+        val viewModel = viewModel("draft-d-stats", RoomAutomationStore(db.automationDao()), DetailAuditRecorder())
+
+        awaitUntil("bozza caricata") { viewModel.state.value.detail != null }
+
+        assertNull(viewModel.state.value.detail?.stats)
+    }
+
+    @Test
+    fun `a short log retention narrows the long stats window instead of showing a false zero`() = runTest {
+        val automation = seedArmedAutomation("short")
+        val now = System.currentTimeMillis()
+        recordFire(automation.id, now - 1 * DAY_MS, ExecutionStatus.SUCCEEDED)
+        // Rimasta prima della prossima manutenzione: oltre la conservazione scelta, non va contata.
+        recordFire(automation.id, now - 20 * DAY_MS, ExecutionStatus.SUCCEEDED)
+        val retention = LogRetentionStore(ApplicationProvider.getApplicationContext<Context>())
+        assertTrue(retention.setDays(7))
+        val viewModel = viewModel(
+            "short",
+            RoomAutomationStore(db.automationDao()),
+            DetailAuditRecorder(),
+            retention = retention,
+        )
+
+        awaitUntil("dettaglio con statistiche") { viewModel.state.value.detail?.stats != null }
+
+        val stats = viewModel.state.value.detail?.stats
+        assertNotNull(stats)
+        assertEquals(7, stats.longWindowDays)
+        assertEquals(RuleStatsWindow(1, 1, 0), stats.last7Days)
+        assertEquals(stats.last7Days, stats.last30Days)
     }
 
     // --- B35: niente gergo da sviluppatore --------------------------------------------------------
@@ -983,6 +1079,7 @@ class AutomationDetailViewModelTest {
         enablementAudit: AuditSink = NoopAuditSink,
         probe: AndroidCapabilityProbe = probeFor(capabilityState()),
         geofenceState: GeofenceStateStore = MemoryGeofenceStateStore(),
+        retention: LogRetentionStore = LogRetentionStore(ApplicationProvider.getApplicationContext<Context>()),
     ): AutomationDetailViewModel {
         val whitelist = RoomContactWhitelistStore(db.contactWhitelistDao())
         val snapshots = FirePolicySnapshotProvider {
@@ -1027,6 +1124,7 @@ class AutomationDetailViewModelTest {
             geofenceState = geofenceState,
             audit = audit,
             languageSource = languageSource,
+            retention = retention,
             applicationScope = applicationScope,
         ).also { lastViewModel = it }
     }
@@ -1085,6 +1183,17 @@ class AutomationDetailViewModelTest {
         return signed
     }
 
+    /** Un'esecuzione conclusa con [status], reclamata a [atMillis], nel journal reale. */
+    private suspend fun recordFire(id: AutomationId, atMillis: Long, status: ExecutionStatus) {
+        val executionId = ExecutionId("exec-${executionSequence++}")
+        RoomAutomationStore(db.automationDao()).claimFire(
+            FireClaimRequest(id, TriggerEventId("event-${executionSequence++}"), executionId, atMillis, 0),
+        )
+        RoomExecutionJournal(db.executionJournalDao()).finish(
+            ExecutionCompletion(executionId, status, atMillis, 0, 0, 0),
+        )
+    }
+
     /** Il lavoro attraversa executor Room reali: attesa in tempo reale, non virtuale. */
     private suspend fun awaitUntil(label: String, condition: () -> Boolean) {
         try {
@@ -1098,6 +1207,8 @@ class AutomationDetailViewModelTest {
         }
     }
 }
+
+private const val DAY_MS = 24L * 60 * 60 * 1_000
 
 private class DetailAuditRecorder : AuditSink {
     val events = mutableListOf<AuditEvent>()

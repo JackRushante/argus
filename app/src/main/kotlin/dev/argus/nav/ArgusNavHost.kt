@@ -88,6 +88,7 @@ import dev.argus.automation.vm.ExecutionLogViewModel
 import dev.argus.automation.vm.OnboardingEvent
 import dev.argus.automation.vm.OnboardingViewModel
 import dev.argus.automation.vm.SettingsViewModel
+import dev.argus.data.backup.RulesBackupFormat
 import dev.argus.shizuku.ShizukuGatewayStatus
 import dev.argus.ui.components.LocalShellPrivilege
 import dev.argus.ui.components.shellPrivilegeOf
@@ -109,6 +110,7 @@ import dev.argus.ui.screens.OnboardingScreen
 import dev.argus.ui.screens.SettingsScreen
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
+import java.time.LocalDate
 
 private object Routes {
     const val CHAT = "chat"
@@ -143,6 +145,7 @@ private val TopLevelRoutes = TopDestinations.mapTo(hashSetOf()) { it.route }
 fun ArgusNavHost() {
     val context = LocalContext.current
     val systemSettingUnavailable = stringResource(R.string.system_setting_unavailable)
+    val backupPickerUnavailable = stringResource(R.string.backup_picker_unavailable)
     val navController = rememberNavController()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -289,6 +292,15 @@ fun ArgusNavHost() {
             )
         }
     }
+    // Backup delle regole (0.4.0, F1): il file lo sceglie l'utente con il Storage Access Framework,
+    // senza alcun permesso. L'opzione «togli posizioni e contatti» viaggia da «Esporta» al risultato.
+    var backupStripPersonalData by rememberSaveable { mutableStateOf(false) }
+    val exportRulesFile = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument(RulesBackupFormat.MIME_TYPE),
+    ) { uri -> settingsViewModel.exportRules(uri, backupStripPersonalData) }
+    val importRulesFile = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri -> settingsViewModel.importRules(uri) }
     val openShizukuDownload = {
         openIntent(Intent(Intent.ACTION_VIEW, Uri.parse(SHIZUKU_DOWNLOAD_URL)))
     }
@@ -538,6 +550,24 @@ fun ArgusNavHost() {
                                     maxCostMonthMicros,
                                     maxTokensMonth,
                                 )
+                            }
+                            override fun onExportRules(stripPersonalData: Boolean) {
+                                backupStripPersonalData = stripPersonalData
+                                runCatching {
+                                    exportRulesFile.launch(RulesBackupFormat.defaultFileName(LocalDate.now()))
+                                }.onFailure { showMessage(backupPickerUnavailable) }
+                            }
+                            override fun onImportRules() {
+                                runCatching {
+                                    importRulesFile.launch(
+                                        arrayOf(RulesBackupFormat.MIME_TYPE, "text/plain", "application/octet-stream"),
+                                    )
+                                }.onFailure { showMessage(backupPickerUnavailable) }
+                            }
+                            override fun onDismissBackupResult() = settingsViewModel.dismissBackupResult()
+                            override fun onOpenImportedRules() {
+                                settingsViewModel.dismissBackupResult()
+                                switchTop(Routes.LIST)
                             }
                             override fun onRevokePrivacy() = settingsViewModel.revokePrivacy()
                             override fun onRerunOnboarding() {

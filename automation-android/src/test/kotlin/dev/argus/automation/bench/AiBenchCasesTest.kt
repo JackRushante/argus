@@ -235,7 +235,9 @@ class AiBenchCasesTest {
         // Il resto del manifest e' quello del probe vero, senza altre differenze.
         assertEquals(world.manifest(ManifestKind.FULL), world.manifest(ManifestKind.FULL, "en"))
         assertEquals(StateKeys.ALL, world.manifest(ManifestKind.FULL).stateKeys)
-        assertEquals(emptyMap(), world.manifest(ManifestKind.NO_SHIZUKU).stateKeys)
+        // 0.4.0 (F19): senza Shizuku le chiavi di stato si leggono con le API pubbliche (il telefono
+        // di prova ha anche il permesso Bluetooth), quindi il manifest le pubblica tutte.
+        assertEquals(StateKeys.ALL, world.manifest(ManifestKind.NO_SHIZUKU).stateKeys)
         assertFailsWith<BenchException> { world.manifest(ManifestKind.FULL, "fr") }
     }
 

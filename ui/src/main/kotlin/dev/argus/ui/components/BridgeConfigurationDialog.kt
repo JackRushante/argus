@@ -19,8 +19,16 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import dev.argus.ui.R
+import dev.argus.ui.presentation.ConnectionFormValidation
 
-/** Editor locale: il bearer non viene mai letto, precompilato o rimesso nello stato di schermata. */
+/**
+ * Editor locale: il bearer non viene mai letto, precompilato o rimesso nello stato di schermata.
+ *
+ * «Salva e verifica» controlla i dati PRIMA di chiudersi (B48): con un indirizzo o un token non validi
+ * il dialogo resta aperto, il testo scritto resta com'è e l'errore compare sotto il campo. Si chiude
+ * solo quando i dati passano il controllo (le stesse regole del salvataggio, vedi
+ * [ConnectionFormValidation]).
+ */
 @Composable
 fun BridgeConfigurationDialog(
     initialUrl: String,
@@ -31,9 +39,13 @@ fun BridgeConfigurationDialog(
     var url by rememberSaveable(initialUrl) { mutableStateOf(initialUrl) }
     // Non serializzare mai il bearer in SavedState/process-death storage.
     var token by remember { mutableStateOf("") }
+    // Gli errori compaiono dal primo tentativo di salvare, non mentre si scrive.
+    var attempted by rememberSaveable { mutableStateOf(false) }
     val cleanUrl = url.trim()
     val cleanToken = token.trim()
-    val canSave = cleanUrl.isNotEmpty() && (tokenConfigured || cleanToken.isNotEmpty())
+    val problems = ConnectionFormValidation.bridgeForm(url, token, tokenConfigured)
+    val urlProblem = problems.url.takeIf { attempted }
+    val tokenProblem = problems.token.takeIf { attempted }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -45,21 +57,33 @@ fun BridgeConfigurationDialog(
                     onValueChange = { url = it },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
+                    isError = urlProblem != null,
                     label = { Text(stringResource(R.string.bridge_url_label)) },
+                    supportingText = urlProblem?.let { problem -> { Text(urlProblemText(problem)) } },
+                )
+                val tokenHint = stringResource(
+                    if (tokenConfigured) R.string.bridge_token_keep_hint
+                    else R.string.bridge_token_required_hint,
                 )
                 OutlinedTextField(
                     value = token,
                     onValueChange = { token = it },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
+                    isError = tokenProblem != null,
                     visualTransformation = PasswordVisualTransformation(),
                     label = { Text(stringResource(R.string.bridge_token_label)) },
                     supportingText = {
                         Text(
-                            stringResource(
-                                if (tokenConfigured) R.string.bridge_token_keep_hint
-                                else R.string.bridge_token_required_hint,
-                            ),
+                            if (tokenProblem != null) {
+                                secretProblemText(
+                                    tokenProblem,
+                                    ConnectionFormValidation.MIN_SECRET_LENGTH,
+                                    tokenHint,
+                                )
+                            } else {
+                                tokenHint
+                            },
                         )
                     },
                 )
@@ -70,11 +94,13 @@ fun BridgeConfigurationDialog(
         },
         confirmButton = {
             Button(
-                enabled = canSave,
                 onClick = {
-                    onSave(cleanUrl, cleanToken.takeIf(String::isNotEmpty))
-                    token = ""
-                    onDismiss()
+                    attempted = true
+                    if (problems.accepted) {
+                        onSave(cleanUrl, cleanToken.takeIf(String::isNotEmpty))
+                        token = ""
+                        onDismiss()
+                    }
                 },
             ) { Text(stringResource(R.string.action_save_and_test)) }
         },

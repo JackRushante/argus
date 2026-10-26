@@ -45,8 +45,14 @@ class AndroidCapabilityProbeInstrumentedTest {
             assertEquals(Build.MODEL, manifest.deviceModel)
             assertEquals(expectedAndroid, manifest.androidVersion)
             assertEquals(Build.VERSION.SDK_INT, manifest.androidApi)
-            // Le chiavi di stato si pubblicano solo con Shizuku autorizzato (capability `state.<chiave>`).
-            assertEquals(if (manifest.shizukuAvailable) StateKeys.ALL else emptyMap(), manifest.stateKeys)
+            // Le chiavi di stato si leggono con le API pubbliche (0.4.0): tutte, ma il Bluetooth solo con
+            // Shizuku autorizzato oppure col permesso BLUETOOTH_CONNECT su Android 12+.
+            val publicBluetooth = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                "bluetooth_connect" in manifest.grantedPermissions
+            assertEquals(
+                if (manifest.shizukuAvailable || publicBluetooth) StateKeys.ALL else StateKeys.ALL - StateKeys.BLUETOOTH,
+                manifest.stateKeys,
+            )
             assertEquals(listOf(contact), manifest.whitelistedContacts)
             assertEquals(
                 gateway.status() == ShizukuGatewayStatus.AUTHORIZED,

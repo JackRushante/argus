@@ -72,13 +72,17 @@ import dev.argus.ui.model.ShizukuStatus
 import dev.argus.ui.model.TransportUi
 import dev.argus.ui.components.BridgeConfigurationDialog
 import dev.argus.ui.components.BudgetLimitsDialog
+import dev.argus.ui.components.ConfirmationState
+import dev.argus.ui.components.DestructiveConfirmDialog
 import dev.argus.ui.components.ProviderConfigurationDialog
+import dev.argus.ui.components.RulesBackupSection
 import dev.argus.ui.components.WarningBanner
 import dev.argus.engine.safety.Severity
 import dev.argus.ui.model.UiWarning
 import dev.argus.ui.model.ProviderUsageUi
 import dev.argus.ui.preview.Fixtures
 import dev.argus.ui.presentation.BudgetFormat
+import dev.argus.ui.presentation.secondaryText
 import dev.argus.ui.R
 import dev.argus.ui.theme.ArgusTheme
 import dev.argus.ui.theme.LocalArgusSemantic
@@ -126,6 +130,13 @@ fun SettingsScreen(
                 PrivacySection(state.privacyAccepted) { confirmPrivacyRevoke = true }
                 WhitelistSection(state.whitelist, callbacks)
                 BudgetSection(state.budget, callbacks)
+                RulesBackupSection(
+                    state.backup,
+                    callbacks::onExportRules,
+                    callbacks::onImportRules,
+                    callbacks::onDismissBackupResult,
+                    callbacks::onOpenImportedRules,
+                )
                 RerunRow(callbacks::onRerunOnboarding)
                 VersionFooter(state.appVersionLabel)
                 Spacer(Modifier.size(8.dp))
@@ -152,23 +163,16 @@ fun SettingsScreen(
         }
     }
     if (confirmPrivacyRevoke) {
-        AlertDialog(
-            onDismissRequest = { confirmPrivacyRevoke = false },
-            title = { Text(stringResource(R.string.privacy_revoke_title)) },
-            text = { Text(stringResource(R.string.privacy_revoke_body)) },
-            dismissButton = {
-                TextButton(onClick = { confirmPrivacyRevoke = false }) {
-                    Text(stringResource(R.string.action_cancel))
-                }
+        // B48: revocare il consenso blocca subito l'AI; il pulsante usa il colore di errore del tema.
+        DestructiveConfirmDialog(
+            title = stringResource(R.string.privacy_revoke_title),
+            body = stringResource(R.string.privacy_revoke_body),
+            confirmLabel = stringResource(R.string.privacy_revoke_confirm),
+            onConfirm = {
+                confirmPrivacyRevoke = false
+                callbacks.onRevokePrivacy()
             },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        confirmPrivacyRevoke = false
-                        callbacks.onRevokePrivacy()
-                    },
-                ) { Text(stringResource(R.string.privacy_revoke_confirm)) }
-            },
+            onDismiss = { confirmPrivacyRevoke = false },
         )
     }
 }
@@ -319,12 +323,13 @@ private fun HealthSection(state: SettingsState, callbacks: SettingsCallbacks) {
                 actionLabel = if (state.bluetoothTriggerGranted) null else stringResource(R.string.settings_enable_action),
             )
             if (state.connectivitySentinelActive) {
+                // B50: solo informativa, non c'è una schermata da aprire: niente affordance cliccabile.
                 HealthRow(
                     Icons.Rounded.Hub,
                     stringResource(R.string.settings_sentinel_title),
                     stringResource(R.string.settings_sentinel_active),
                     HealthLevel.OK,
-                    onFix = {},
+                    onFix = null,
                 )
             }
         }
@@ -337,7 +342,8 @@ private fun HealthRow(
     title: String,
     subtitle: String,
     level: HealthLevel,
-    onFix: () -> Unit,
+    /** Azione della riga. `null` = riga solo informativa: né tocco né pulsante (B50). */
+    onFix: (() -> Unit)?,
     /** Azione esplicita per le righe opt-in (es. "Attiva"): senza, NEUTRAL/OK non sono
      *  cliccabili e onFix vive solo nel "Correggi" dello stato WARN. */
     actionLabel: String? = null,
@@ -351,8 +357,9 @@ private fun HealthRow(
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             // Tutta la riga è tappabile, in QUALSIASI stato: apre il pannello/permesso
-            // relativo (feedback Lorenzo: le righe verdi/grigie erano mute al tocco).
-            .clickable { onFix() }
+            // relativo (feedback Lorenzo: le righe verdi/grigie erano mute al tocco). Le righe
+            // solo informative (onFix == null) non sembrano tappabili e non lo sono (B50).
+            .then(if (onFix != null) Modifier.clickable { onFix() } else Modifier)
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .background(tintBg)
             .border(1.dp, borderColor, RoundedCornerShape(12.dp))
@@ -371,12 +378,13 @@ private fun HealthRow(
             Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
         }
         when {
-            level == HealthLevel.WARN ->
+            onFix != null && level == HealthLevel.WARN ->
                 OutlinedButton(onClick = onFix, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.settings_fix)) }
-            actionLabel != null ->
+            onFix != null && actionLabel != null ->
                 OutlinedButton(onClick = onFix, modifier = Modifier.heightIn(min = 48.dp)) { Text(actionLabel) }
+            // B50: la descrizione per TalkBack è una stringa tradotta, non più «ok» in inglese.
             level == HealthLevel.OK ->
-                Icon(Icons.Rounded.CheckCircle, contentDescription = "ok", tint = semantic.armed.fg, modifier = Modifier.size(22.dp))
+                Icon(Icons.Rounded.CheckCircle, contentDescription = stringResource(R.string.ui40_health_ok_cd), tint = semantic.armed.fg, modifier = Modifier.size(22.dp))
             else ->
                 Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp))
         }
@@ -608,6 +616,19 @@ private fun PrivacySection(accepted: Boolean, onRevoke: () -> Unit) {
 
 @Composable
 private fun WhitelistSection(contacts: List<ContactRow>, callbacks: SettingsCallbacks) {
+    // B48: rimuovere un contatto toglie il permesso di risposta automatica; prima si chiede conferma.
+    var confirmRemove by remember { mutableStateOf(ConfirmationState<ContactRow>()) }
+    confirmRemove.pending?.let { contact ->
+        DestructiveConfirmDialog(
+            title = stringResource(R.string.ui40_contact_remove_title),
+            body = stringResource(R.string.ui40_contact_remove_body, contact.displayName),
+            confirmLabel = stringResource(R.string.ui40_contact_remove_confirm),
+            onConfirm = {
+                confirmRemove = confirmRemove.confirm { callbacks.onRemoveContact(it.conversationId) }
+            },
+            onDismiss = { confirmRemove = confirmRemove.cancel() },
+        )
+    }
     SettingsSection(stringResource(R.string.settings_section_whitelist)) {
         SectionCard {
             // Nota VERBATIM (§6.5): il match è per conversationId, spoofabile.
@@ -616,7 +637,9 @@ private fun WhitelistSection(contacts: List<ContactRow>, callbacks: SettingsCall
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodyMedium,
             )
-            contacts.forEach { ContactRowItem(it, onRemove = { callbacks.onRemoveContact(it.conversationId) }) }
+            contacts.forEach { contact ->
+                ContactRowItem(contact, onRemove = { confirmRemove = confirmRemove.ask(contact) })
+            }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -741,7 +764,7 @@ private fun BudgetSection(budget: BudgetUi, callbacks: SettingsCallbacks) {
                         )
                         provider.reasoningTokensMonth?.let { reasoningTokens ->
                             Text(
-                                stringResource(R.string.settings_budget_provider_reasoning, reasoningTokens),
+                                stringResource(R.string.settings_budget_provider_reasoning, BudgetFormat.grouped(reasoningTokens)),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 style = MaterialTheme.typography.bodyMedium,
                             )
@@ -903,7 +926,7 @@ private fun RerunRow(onRerun: () -> Unit) {
 private fun VersionFooter(version: String) {
     Text(
         version,
-        color = MaterialTheme.colorScheme.outline,
+        color = MaterialTheme.colorScheme.secondaryText(),
         style = MaterialTheme.typography.labelSmall,
         textAlign = TextAlign.Center,
         modifier = Modifier.fillMaxWidth().padding(top = 4.dp),

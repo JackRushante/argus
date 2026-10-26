@@ -200,7 +200,7 @@ The "Brain" is pluggable: the app always owns the loop, the LLM is a reasoning s
 - **BYOK**: hosted direct providers require **your own** API key, entered in-app and stored encrypted on the device. A Custom endpoint may omit authentication. No Argus account, no project backend.
 - **Budget**: per-turn usage tracking (tokens and, where the price list is known, micro-USD), configurable limits; a generative rule that exceeds its budget is suppressed and audited (`SUPPRESSED_BUDGET`).
 - **On-device models**: Custom accepts unauthenticated OpenAI-compatible servers and cleartext HTTP only on the exact loopback hosts `localhost`, `127.0.0.1`, and `::1`. Every LAN or remote endpoint still requires HTTPS.
-- **Reasoning diagnostics**: Custom can omit reasoning control or send `none`, `low`, `medium`, or `high` per request. When the server reports them, Settings shows reasoning-token usage and the latest `finish_reason`.
+- **Reasoning diagnostics**: Custom and OpenRouter can omit reasoning control or send `none`, `low`, `medium`, or `high` per request. When the server reports them, Settings shows reasoning-token usage and the latest `finish_reason`.
 
 ### Choosing a model
 
@@ -221,12 +221,12 @@ Measured with Argus's AI test bench in October 2026, all through OpenRouter. The
 | DeepSeek V4.1 Flash, through an OpenRouter preset | off | 98% | 0.7 s |
 | MiniMax M3.1 Flash (`minimax/minimax-m3.1-flash`) | default (can't be turned off) | 96% | 2.3 s |
 | Qwen 3.8 27B (`qwen/qwen3.8-27b`), standing in for a self-hosted model | off | 90% | 1.0 s |
-| GPT-6 Luna (`~openai/gpt-luna-latest`) | default | 85% | 4.2 s |
+| GPT-6 Luna (`~openai/gpt-luna-latest`) | default | 90% | 3.4 s |
 | MiMo V2.6 Flash (`xiaomi/mimo-v2.6-flash`) | default | 85% | 1.2 s |
 
-"Typical wait" is the median time to compile one rule, and it depends on the provider's load. All the models wrote the 12 generative answers correctly, except GPT-6 Luna (7) and Qwen 3.8 Flash (10). GPT-6 Luna mostly asks for clarifications nobody needs; MiMo often answers in the wrong language.
+"Typical wait" is the median time to compile one rule, and it depends on the provider's load. All the models wrote the 12 generative answers correctly, except Qwen 3.8 Flash (10). GPT-6 Luna still asks more questions than the others; MiMo often answers in the wrong language. GPT-6 Luna's row is from Argus 0.4.0, which gives the AI defaults for small details and removes the citation links from answers; the other rows are from 0.3.7.
 
-- **Reasoning.** "Default" leaves the choice to the provider. In Argus you pick the reasoning level in the Custom provider's dialog; OpenRouter and the direct providers use the provider's default, and on OpenRouter a preset can turn reasoning off. Off (`none`) works for most models and is the fastest. Some models can't turn it off (on OpenRouter: Gemini Flash, GLM Flash, MiniMax Flash); with `none` Argus then retries once at `low`. High reasoning rarely pays off: on the hardest programs DeepSeek Flash at `high` stays at 2–7 s, while Claude Haiku goes up to 15 s and gets worse.
+- **Reasoning.** "Default" leaves the choice to the provider. In Argus you pick the reasoning level in the provider dialog for Custom and OpenRouter; the direct providers use their default. Off (`none`) works for most models and is the fastest. Some models can't turn it off (on OpenRouter: Gemini Flash, GLM Flash, MiniMax Flash); with `none` Argus then retries once at `low`. High reasoning rarely pays off: on the hardest programs DeepSeek Flash at `high` stays at 2–7 s, while Claude Haiku goes up to 15 s and gets worse.
 - **Self-hosted.** A model in the class of Qwen 3.8 27B is a reasonable floor for a local server (llama.cpp, Ollama, LM Studio and similar). Give it at least about 12,000 tokens of context.
 - **Run the bench yourself:** `ARGUS_BENCH_KEY=<OpenRouter key> ./gradlew :automation-android:testDebugUnitTest --tests "dev.argus.automation.bench.AiBenchTest"`. Optional variables: `ARGUS_BENCH_MODEL`, `ARGUS_BENCH_REASONING`, `ARGUS_BENCH_FILTER` (comma-separated case prefixes), `ARGUS_BENCH_REPEAT`, `ARGUS_BENCH_PARALLEL`, `ARGUS_BENCH_BASE_URL`. The report is written to `automation-android/build/reports/ai-bench/`. Without the key, the bench is skipped, so regular test runs never touch the network.
 
@@ -278,7 +278,7 @@ Argus degrades explicitly: the onboarding shows an honest list of what depends o
 
 | Tier | What it covers |
 |---|---|
-| **Base (no Shizuku)** | volume, ringer, DND, flashlight, vibration, notifications, clipboard/OTP, real alarms and timers, WhatsApp replies, generative actions, all triggers |
+| **Base (no Shizuku)** | volume, ringer, DND, flashlight, vibration, notifications, clipboard/OTP, real alarms and timers, WhatsApp replies, generative actions, all triggers, state conditions (battery, charging, screen, ringer, DND, Wi-Fi, airplane mode; Bluetooth with the Bluetooth permission on Android 12+) |
 | **Degraded without Shizuku** | `launch_app`, `open_url`, `open_settings_screen`, alarm/timer **from a rule in the background** (Android restricts activity starts from the background: with Shizuku they go through `am start`, without it they only start while the app is in the foreground) |
 | **Shizuku only** | Wi-Fi/Bluetooth/mobile-data toggles, dark mode, `run_shell`, `write_setting`, privileged state readers (`setting`, `system_property`, `sysfs`, `dumpsys_field`, foreground app) |
 

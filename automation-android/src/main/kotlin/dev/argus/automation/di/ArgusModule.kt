@@ -113,12 +113,17 @@ import dev.argus.data.RoomAuditSink
 import dev.argus.data.RoomAutomationStore
 import dev.argus.data.RoomContactWhitelistStore
 import dev.argus.data.RoomDraftRepository
+import dev.argus.data.backup.ContentResolverDocumentIo
+import dev.argus.data.backup.RulesBackup
+import dev.argus.data.backup.RulesBackupService
 import dev.argus.data.RoomExecutionJournal
 import dev.argus.data.RoomJournalMaintenance
 import dev.argus.data.RoomObservedConversationStore
+import dev.argus.device.AndroidPublicStateSource
 import dev.argus.device.DeviceController
 import dev.argus.device.DeviceTools
 import dev.argus.device.ParametricStateReader
+import dev.argus.device.PublicStateReader
 import dev.argus.device.StateReader
 import dev.argus.engine.brain.Brain
 import dev.argus.engine.brain.CapabilityProbe
@@ -220,6 +225,20 @@ object ArgusModule {
 
     @Provides
     fun draftRepositoryBoundary(repository: RoomDraftRepository): DraftRepository = repository
+
+    @Provides
+    @Singleton
+    fun rulesBackup(
+        @ApplicationContext context: Context,
+        store: AutomationStore,
+        repository: RoomDraftRepository,
+        installInfo: AppInstallInfo,
+    ): RulesBackup = RulesBackupService(
+        automations = store,
+        drafts = repository,
+        documents = ContentResolverDocumentIo(context),
+        appVersion = { installInfo.versionName },
+    )
 
     @Provides
     @Singleton
@@ -342,6 +361,12 @@ object ArgusModule {
     fun parametricStateReader(shell: PrivilegedShell): ParametricStateReader =
         ParametricStateReader(shell)
 
+    /** Lettura delle chiavi di stato con le API pubbliche di Android, senza Shizuku (0.4.0). */
+    @Provides
+    @Singleton
+    fun publicStateReader(@ApplicationContext context: Context): PublicStateReader =
+        PublicStateReader(AndroidPublicStateSource(context))
+
     @Provides
     @Singleton
     fun stateQueryProbe(
@@ -354,6 +379,7 @@ object ArgusModule {
     fun lazyDeviceState(
         reader: StateReader,
         parametricReader: ParametricStateReader,
+        publicReader: PublicStateReader,
         gateway: ShizukuGateway,
         location: CurrentLocationProvider,
     ): LazyDeviceStateProvider = LazyDeviceStateProvider(
@@ -361,6 +387,7 @@ object ArgusModule {
         gateway,
         location,
         parametricReader,
+        publicReader,
     )
 
     @Provides

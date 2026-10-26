@@ -19,12 +19,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.FilterAltOff
 import androidx.compose.material.icons.rounded.Pending
+import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -57,6 +58,7 @@ import dev.argus.ui.model.EngineBanner
 import dev.argus.ui.model.StatusBadge
 import dev.argus.ui.model.StatusFilter
 import dev.argus.ui.model.iconFor
+import dev.argus.ui.presentation.secondaryText
 import dev.argus.ui.theme.ArgusTheme
 import dev.argus.ui.theme.LocalArgusSemantic
 
@@ -92,6 +94,24 @@ private val FilterOrder: List<StatusFilter> = listOf(
     StatusFilter.NEEDS_REVIEW,
 )
 
+/** Che cosa mostrare quando la lista non ha righe (B49). */
+internal enum class ListEmptyKind {
+    /** Ci sono righe: nessun vuoto. */
+    NONE,
+
+    /** Nessuna regola e nessun filtro: invito a chiederne una in chat. */
+    NO_RULES,
+
+    /** Un filtro è attivo e nessuna riga lo soddisfa: non è «tutto sparito», basta togliere il filtro. */
+    NO_MATCH_FOR_FILTER,
+}
+
+internal fun listEmptyKind(rowCount: Int, filter: StatusFilter): ListEmptyKind = when {
+    rowCount > 0 -> ListEmptyKind.NONE
+    filter == StatusFilter.ALL -> ListEmptyKind.NO_RULES
+    else -> ListEmptyKind.NO_MATCH_FOR_FILTER
+}
+
 @Composable
 fun AutomationListScreen(
     state: AutomationListState,
@@ -125,15 +145,25 @@ fun AutomationListScreen(
                     CircularProgressIndicator()
                 }
             } else if (rows.isEmpty()) {
-                // Empty (§6.2): la CTA cambia tab → Chat; la navigazione è host-owned
-                // (NavHost, Task 12) via onEmptyCta, come le altre affordance di nav.
-                EmptyState(
-                    icon = Icons.Rounded.Bolt,
-                    title = stringResource(R.string.list_empty_title),
-                    body = stringResource(R.string.list_empty_body),
-                    ctaLabel = stringResource(R.string.list_empty_cta),
-                    onCta = callbacks::onEmptyCta,
-                )
+                when (listEmptyKind(rows.size, state.filter)) {
+                    // Filtro attivo senza risultati (B49): messaggio distinto + azione per toglierlo.
+                    ListEmptyKind.NO_MATCH_FOR_FILTER -> EmptyState(
+                        icon = Icons.Rounded.FilterAltOff,
+                        title = stringResource(R.string.ui40_list_filter_empty_title),
+                        body = stringResource(R.string.ui40_list_filter_empty_body),
+                        ctaLabel = stringResource(R.string.ui40_list_filter_clear),
+                        onCta = { callbacks.onFilter(StatusFilter.ALL) },
+                    )
+                    // Empty (§6.2): la CTA cambia tab → Chat; la navigazione è host-owned
+                    // (NavHost, Task 12) via onEmptyCta, come le altre affordance di nav.
+                    else -> EmptyState(
+                        icon = Icons.Rounded.Bolt,
+                        title = stringResource(R.string.list_empty_title),
+                        body = stringResource(R.string.list_empty_body),
+                        ctaLabel = stringResource(R.string.list_empty_cta),
+                        onCta = callbacks::onEmptyCta,
+                    )
+                }
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
@@ -259,8 +289,15 @@ private fun AutomationCard(
                         style = MaterialTheme.typography.labelLarge,
                     )
                     if (row.hasWarnings) {
-                        // Pallino ambra: la regola ha warning (conflitti/validator) — §7.2.
-                        Box(Modifier.size(8.dp).clip(CircleShape).background(semantic.pending.fg))
+                        // Avvisi della regola (conflitti/validator, §7.2). B50: non solo colore. Il
+                        // triangolo con il punto esclamativo ha una forma propria e una descrizione
+                        // per TalkBack («ha avvisi»).
+                        Icon(
+                            Icons.Rounded.WarningAmber,
+                            contentDescription = stringResource(R.string.ui40_list_has_warnings),
+                            tint = semantic.pending.fg,
+                            modifier = Modifier.size(16.dp),
+                        )
                     }
                 }
                 Text(
@@ -311,7 +348,7 @@ private fun AutomationCard(
                         Text(it, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
                     }
                     row.lastFiredLabel?.let {
-                        Text(it, color = MaterialTheme.colorScheme.outline, style = MaterialTheme.typography.labelSmall)
+                        Text(it, color = MaterialTheme.colorScheme.secondaryText(), style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }
@@ -406,6 +443,17 @@ private fun ListBannerPreview() {
     ArgusTheme {
         AutomationListScreen(
             AutomationListState(rows = previewRows, filter = StatusFilter.PENDING, banner = EngineBanner.SHIZUKU_DOWN, loading = false),
+            NoopListCallbacks,
+        )
+    }
+}
+
+@Preview(name = "Lista · filtro senza risultati", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)
+@Composable
+private fun ListFilterEmptyPreview() {
+    ArgusTheme {
+        AutomationListScreen(
+            AutomationListState(rows = emptyList(), filter = StatusFilter.NEEDS_REVIEW, banner = EngineBanner.NONE, loading = false),
             NoopListCallbacks,
         )
     }

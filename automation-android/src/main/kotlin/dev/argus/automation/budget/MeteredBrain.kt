@@ -393,7 +393,8 @@ class MeteredBrain(
         val pricingModel = sequenceOf(usage?.model, config.model)
             .filterNotNull()
             .firstOrNull(prices::containsKey)
-        val cost = CostEstimator.estimate(config.providerId, pricingModel, usage)
+        // Il prezzo è quello valido all'istante dell'evento (listini con data di validità).
+        val cost = CostEstimator.estimate(config.providerId, pricingModel, usage, now)
         tryInsert(
             UsageEventEntity(
                 timestampMs = now,

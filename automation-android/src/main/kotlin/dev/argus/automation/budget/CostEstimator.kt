@@ -18,12 +18,22 @@ object CostEstimator {
      * I token cached, se il listino espone `cachedInputMicrosPerMTok`, vengono scorporati dall'input
      * e prezzati alla tariffa cached; altrimenti restano prezzati come input pieno.
      * Arrotondamento half-up: `(somma + 500_000) / 1_000_000`.
+     *
+     * [atMillis] è l'istante dell'evento d'uso (epoch ms): il prezzo applicato è quello valido a quella
+     * data ([ModelPrice.effectiveAt]), quindi un evento del 2026 ricalcolato nel 2027 costa come nel 2026.
+     * Chi registra un evento appena avvenuto può omettere il parametro (orologio di sistema); i test e i
+     * ricalcoli passano sempre il timestamp dell'evento.
      */
-    fun estimate(providerId: ProviderId, model: String?, usage: TurnUsage?): Long? {
+    fun estimate(
+        providerId: ProviderId,
+        model: String?,
+        usage: TurnUsage?,
+        atMillis: Long = System.currentTimeMillis(),
+    ): Long? {
         val spec = ProviderCatalog.spec(providerId)
         if (!spec.costTracked) return null
         if (usage == null || model == null) return null
-        val price = spec.prices[model] ?: return null
+        val price = spec.prices[model]?.effectiveAt(atMillis) ?: return null
         return priceTurn(price, usage)
     }
 

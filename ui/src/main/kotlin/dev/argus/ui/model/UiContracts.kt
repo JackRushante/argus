@@ -252,7 +252,33 @@ data class AutomationDetailState(
     val diagnosis: RuleDiagnosisUi? = null,
     /** Vero solo per una regola salvata: una bozza non ha nulla da diagnosticare. */
     val diagnosisAvailable: Boolean = false,
+    /**
+     * 0.4.0 (F10): scatti, riuscite e fallite negli ultimi 7 e 30 giorni, dal journal delle esecuzioni.
+     * Solo per una regola salvata (armata o disattivata); null per una bozza o finché non è letto.
+     */
+    val stats: RuleStatsUi? = null,
 )
+
+/**
+ * Statistiche di una regola. [longWindowDays] è la finestra lunga REALMENTE coperta: 30, oppure meno se
+ * l'utente ha scelto di conservare il Log per meno giorni (il journal non ricorda oltre). La UI lo dice
+ * invece di mostrare uno zero che non sarebbe vero.
+ */
+data class RuleStatsUi(
+    val last7Days: RuleStatsWindow,
+    val last30Days: RuleStatsWindow,
+    val longWindowDays: Int = 30,
+) {
+    /** Nessuno scatto in tutta la finestra lunga: si mostra la frase sola, senza tabella di zeri. */
+    val isEmpty: Boolean get() = last30Days.fires == 0
+}
+
+/**
+ * Esecuzioni di una finestra: [fires] = scatti che hanno davvero eseguito (le soppressioni da cooldown,
+ * budget o regola non idonea non contano), [succeeded] = chiuse con successo, [failed] = fallite o
+ * parziali o interrotte. Le esecuzioni ancora in corso o da consegnare a mano contano solo in [fires].
+ */
+data class RuleStatsWindow(val fires: Int, val succeeded: Int, val failed: Int)
 
 /** Esito di una diagnosi una tantum: righe in ordine di lettura e ora del controllo. */
 data class RuleDiagnosisUi(val rows: List<DiagnosisRow>, val checkedAtLabel: String)
@@ -307,6 +333,11 @@ data class LogRow(
     val automationId: String? = null,
     /** La riga appartiene a un'esecuzione con almeno un'azione generativa/cloud. */
     val isGenerative: Boolean = false,
+    /**
+     * Istante dell'evento (epoch ms). Il Log raggruppa per giorno locale da qui, non dal testo di
+     * [timeLabel]. Null solo per righe costruite a mano (anteprime, fixture): ricadono sul testo.
+     */
+    val atMillis: Long? = null,
 )
 
 enum class LogOutcome { SUCCESS, PARTIAL, FAILED, SUBMITTED, DEFERRED }
@@ -375,6 +406,35 @@ data class SettingsState(
      * `null` = non noto: il servizio privilegiato non è ancora collegato.
      */
     val shizukuRunsAsRoot: Boolean? = null,
+    /** 0.4.0 (F1): backup delle regole su file (esporta/importa). */
+    val backup: RulesBackupUi = RulesBackupUi(),
+)
+
+/** Operazione del backup delle regole. */
+enum class RulesBackupKind { EXPORT, IMPORT }
+
+/** Stato dell'ultima operazione di backup. I testi sono già nella lingua dell'utente (li scrive il VM). */
+sealed interface RulesBackupStatus {
+    data object Idle : RulesBackupStatus
+
+    /** In corso: i due pulsanti sono disabilitati. */
+    data class Working(val kind: RulesBackupKind) : RulesBackupStatus
+
+    /** Riuscito, con il riepilogo («N regole importate da approvare; M scartate (motivo)»). */
+    data class Done(
+        val kind: RulesBackupKind,
+        val summary: String,
+        /** Bozze create dall'import: se > 0 la sezione offre di andare a vederle. */
+        val importedCount: Int = 0,
+    ) : RulesBackupStatus
+
+    data class Failed(val kind: RulesBackupKind, val message: String) : RulesBackupStatus
+}
+
+data class RulesBackupUi(
+    val status: RulesBackupStatus = RulesBackupStatus.Idle,
+    /** Regole che finirebbero nel file: con 0 «Esporta» è disabilitato. */
+    val exportableRules: Int = 0,
 )
 
 sealed interface TransportUi {
@@ -507,6 +567,21 @@ interface SettingsCallbacks {
         apiKey: String?,
         reasoningEffort: String? = null,
     ) {}
+
+    /**
+     * Backup (0.4.0): «Esporta». [stripPersonalData] = opzione «Togli posizioni e contatti (per
+     * condividere)». Il file lo sceglie il chiamante con il selettore di documenti. Default no-op.
+     */
+    fun onExportRules(stripPersonalData: Boolean) {}
+
+    /** Backup (0.4.0): «Importa». Il file lo sceglie il chiamante con il selettore di documenti. Default no-op. */
+    fun onImportRules() {}
+
+    /** Chiude il riepilogo (o l'errore) dell'ultima operazione di backup. Default no-op. */
+    fun onDismissBackupResult() {}
+
+    /** Dopo un import: porta all'elenco delle automazioni, dove le bozze aspettano l'approvazione. Default no-op. */
+    fun onOpenImportedRules() {}
 }
 
 // --- 6.6 Onboarding / permessi ---
