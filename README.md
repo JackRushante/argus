@@ -202,6 +202,34 @@ The "Brain" is pluggable: the app always owns the loop, the LLM is a reasoning s
 - **On-device models**: Custom accepts unauthenticated OpenAI-compatible servers and cleartext HTTP only on the exact loopback hosts `localhost`, `127.0.0.1`, and `::1`. Every LAN or remote endpoint still requires HTTPS.
 - **Reasoning diagnostics**: Custom can omit reasoning control or send `none`, `low`, `medium`, or `high` per request. When the server reports them, Settings shows reasoning-token usage and the latest `finish_reason`.
 
+### Choosing a model
+
+Argus needs a capable model: at least the **base model of a major provider**, or a **self-hosted model with about 27B parameters or more**. Smaller models can't write valid rules. In our tests, 3–4B models (Gemma 3 4B, Llama 3.2 3B) got 2–19% of the requests right.
+
+Model names change over time, so Argus suggests concrete models only as one-tap chips in the provider dialog, and updates them with each release. On OpenRouter the chips use the `~provider/model-latest` aliases, which OpenRouter moves to the newest version of each family by itself.
+
+Measured with Argus's AI test bench in October 2026, all through OpenRouter. The bench sends 125 rule requests in English and Italian, plus 12 generative answers, through the app's real prompt, transport and validator.
+
+| Model | Reasoning | Rules right | Typical wait |
+|---|---|---|---|
+| Gemini 3.8 Flash (`~google/gemini-flash-latest`) | default (can't be turned off) | 99% | 6.3 s |
+| Claude Haiku 5.5 (`~anthropic/claude-haiku-latest`) | default | 99% | 3.0 s |
+| Qwen 3.8 Flash (`qwen/qwen3.8-flash`) | default | 99% | 12.5 s |
+| DeepSeek V4.1 Flash (`~deepseek/deepseek-flash-latest`) | default | 98% | 1.2 s |
+| GLM 5.3 Flash (`z-ai/glm-5.3-flash`) | default (can't be turned off) | 98% | 2.4 s |
+| Kimi K3 (`~moonshotai/kimi-latest`) | off | 98% | 2.5 s |
+| DeepSeek V4.1 Flash, through an OpenRouter preset | off | 98% | 0.7 s |
+| MiniMax M3.1 Flash (`minimax/minimax-m3.1-flash`) | default (can't be turned off) | 96% | 2.3 s |
+| Qwen 3.8 27B (`qwen/qwen3.8-27b`), standing in for a self-hosted model | off | 90% | 1.0 s |
+| GPT-6 Luna (`~openai/gpt-luna-latest`) | default | 85% | 4.2 s |
+| MiMo V2.6 Flash (`xiaomi/mimo-v2.6-flash`) | default | 85% | 1.2 s |
+
+"Typical wait" is the median time to compile one rule, and it depends on the provider's load. All the models wrote the 12 generative answers correctly, except GPT-6 Luna (7) and Qwen 3.8 Flash (10). GPT-6 Luna mostly asks for clarifications nobody needs; MiMo often answers in the wrong language.
+
+- **Reasoning.** "Default" leaves the choice to the provider. Off (`none`) works for most models and is the fastest. Some models can't turn it off (on OpenRouter: Gemini Flash, GLM Flash, MiniMax Flash); with `none` Argus then retries once at `low`. High reasoning rarely pays off: on the hardest programs DeepSeek Flash at `high` stays at 2–7 s, while Claude Haiku goes up to 15 s and gets worse.
+- **Self-hosted.** A model in the class of Qwen 3.8 27B is a reasonable floor for a local server (llama.cpp, Ollama, LM Studio and similar). Give it at least about 12,000 tokens of context.
+- **Run the bench yourself:** `ARGUS_BENCH_KEY=<OpenRouter key> ./gradlew :automation-android:testDebugUnitTest --tests "dev.argus.automation.bench.AiBenchTest"`. Optional variables: `ARGUS_BENCH_MODEL`, `ARGUS_BENCH_REASONING`, `ARGUS_BENCH_FILTER` (comma-separated case prefixes), `ARGUS_BENCH_REPEAT`, `ARGUS_BENCH_PARALLEL`, `ARGUS_BENCH_BASE_URL`. The report is written to `automation-android/build/reports/ai-bench/`. Without the key, the bench is skipped, so regular test runs never touch the network.
+
 ### Hermes bridge (optional, self-hosted)
 
 `ops/hermes/bridge.py` is a one-shot service meant for people who already run a self-hosted LLM agent on their own server: it exposes `POST /compile` (NL → rule draft) and strict versioned `POST /act` lanes, with bearer token, idempotent request-ids, body/output limits and fail-closed parsing. `/act` v1/v2 cover legacy and state-aware delivery; v3 carries P4 resolved runtime values in a strictly validated DATA envelope. Android requires v3 in `/health/v2`, so a stale bridge fails visibly before execution. The service binds to loopback only and should be published over HTTPS on a private network (e.g. a mesh VPN / Tailscale Serve). Follow the [step-by-step installation guide](ops/hermes/README.md); the systemd unit and `.env` template are included beside it.
