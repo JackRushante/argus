@@ -665,7 +665,8 @@ Action, discriminated by "type":
 - {"type":"set_ringer", "mode":"normal"|"vibrate"|"silent"}
 - {"type":"launch_app", "pkg":string}
 - {"type":"open_url", "url":string}
-- {"type":"show_notification", "title":string, "text":string}
+- {"type":"show_notification", "title":string, "text":string}  // the user may give one text or none:
+   // write the missing title or text yourself (short, in the reply language), never ask for it
 - {"type":"tap", "x":integer, "y":integer}
 - {"type":"input_text", "text":string}
 - {"type":"whatsapp_reply", "text":string}
@@ -709,9 +710,10 @@ Action, discriminated by "type":
    // literal; P4 may interpolate ${'$'}{var} under the approved data-flow policy. The template is shown
    // in review. key without spaces/control chars; value non-empty,
    // <=1024 chars, no NUL/newline/control chars. Prefer a typed action when one
-   // exists (e.g. set_dnd, set_alarm, set_dark_mode): use write_setting for the long tail
-   // (screen_off_timeout, accelerometer_rotation, font_scale,
-   // screen_brightness (0-255, SYSTEM; set screen_brightness_mode=0 first to disable auto-brightness), ...)
+   // exists (e.g. set_dnd, set_alarm, set_dark_mode, set_brightness, set_rotation): use write_setting
+   // for the long tail (screen_off_timeout, font_scale, ...). accelerometer_rotation and
+   // screen_brightness (0-255, SYSTEM; set screen_brightness_mode=0 first to disable auto-brightness)
+   // only when set_rotation / set_brightness are not in available_tools
 - {"type":"invoke_llm", "goal":string, "contextSources":[string,...],
    "allowedTools":[string,...], "replyTargetSender":boolean, "timeoutMs":integer,
    "deliver":"WHATSAPP_REPLY"|"LOCAL_NOTIFICATION"|"CAPTURE_ONLY",

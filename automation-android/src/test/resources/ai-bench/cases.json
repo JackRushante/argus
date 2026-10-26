@@ -1927,12 +1927,12 @@
   "lang": "en",
   "text": "Every hour call http://example.org/status with a GET",
   "expect": {
-   "outcome": ["draft", "clarification"],
+   "outcome": ["draft", "clarification", "refusal"],
    "trigger": {"type": "time", "cron": {"present": true}, "at": {"present": false}, "afterMs": {"present": false}},
    "actions_include": ["http_request"],
    "params": {"http_request.url": {"regex": "^https://"}}
   },
-  "note": "Solo https (http solo per localhost): o passa a https o chiede, mai http verso un host pubblico"
+  "note": "Solo https (http solo per localhost): passa a https, chiede o rifiuta spiegando; mai http verso un host pubblico"
  },
  {
   "id": "clar.http.it.01",
