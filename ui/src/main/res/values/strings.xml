@@ -303,7 +303,7 @@
 
     <!-- Rules backup (0.4.0, F1) -->
     <string name="backup_section">RULES BACKUP</string>
-    <string name="backup_body">Save your rules to a file, or bring them to another phone. Android's own backup stays off, for your privacy.</string>
+    <string name="backup_body">Save your rules to a file, or bring them to another phone. Android\'s own backup stays off, for your privacy.</string>
     <string name="backup_strip_label">Remove locations and contacts (for sharing)</string>
     <string name="backup_strip_hint">Coordinates, conversation IDs, sender names and phone numbers are taken out, and geofences ask for the current location when armed. Text filters stay: read the file before sharing it.</string>
     <string name="backup_export">Export</string>
