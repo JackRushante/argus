@@ -375,6 +375,35 @@ data class SettingsState(
      * `null` = non noto: il servizio privilegiato non è ancora collegato.
      */
     val shizukuRunsAsRoot: Boolean? = null,
+    /** 0.4.0 (F1): backup delle regole su file (esporta/importa). */
+    val backup: RulesBackupUi = RulesBackupUi(),
+)
+
+/** Operazione del backup delle regole. */
+enum class RulesBackupKind { EXPORT, IMPORT }
+
+/** Stato dell'ultima operazione di backup. I testi sono già nella lingua dell'utente (li scrive il VM). */
+sealed interface RulesBackupStatus {
+    data object Idle : RulesBackupStatus
+
+    /** In corso: i due pulsanti sono disabilitati. */
+    data class Working(val kind: RulesBackupKind) : RulesBackupStatus
+
+    /** Riuscito, con il riepilogo («N regole importate da approvare; M scartate (motivo)»). */
+    data class Done(
+        val kind: RulesBackupKind,
+        val summary: String,
+        /** Bozze create dall'import: se > 0 la sezione offre di andare a vederle. */
+        val importedCount: Int = 0,
+    ) : RulesBackupStatus
+
+    data class Failed(val kind: RulesBackupKind, val message: String) : RulesBackupStatus
+}
+
+data class RulesBackupUi(
+    val status: RulesBackupStatus = RulesBackupStatus.Idle,
+    /** Regole che finirebbero nel file: con 0 «Esporta» è disabilitato. */
+    val exportableRules: Int = 0,
 )
 
 sealed interface TransportUi {
@@ -507,6 +536,21 @@ interface SettingsCallbacks {
         apiKey: String?,
         reasoningEffort: String? = null,
     ) {}
+
+    /**
+     * Backup (0.4.0): «Esporta». [stripPersonalData] = opzione «Togli posizioni e contatti (per
+     * condividere)». Il file lo sceglie il chiamante con il selettore di documenti. Default no-op.
+     */
+    fun onExportRules(stripPersonalData: Boolean) {}
+
+    /** Backup (0.4.0): «Importa». Il file lo sceglie il chiamante con il selettore di documenti. Default no-op. */
+    fun onImportRules() {}
+
+    /** Chiude il riepilogo (o l'errore) dell'ultima operazione di backup. Default no-op. */
+    fun onDismissBackupResult() {}
+
+    /** Dopo un import: porta all'elenco delle automazioni, dove le bozze aspettano l'approvazione. Default no-op. */
+    fun onOpenImportedRules() {}
 }
 
 // --- 6.6 Onboarding / permessi ---

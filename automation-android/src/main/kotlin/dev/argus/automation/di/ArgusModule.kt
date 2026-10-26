@@ -113,6 +113,9 @@ import dev.argus.data.RoomAuditSink
 import dev.argus.data.RoomAutomationStore
 import dev.argus.data.RoomContactWhitelistStore
 import dev.argus.data.RoomDraftRepository
+import dev.argus.data.backup.ContentResolverDocumentIo
+import dev.argus.data.backup.RulesBackup
+import dev.argus.data.backup.RulesBackupService
 import dev.argus.data.RoomExecutionJournal
 import dev.argus.data.RoomJournalMaintenance
 import dev.argus.data.RoomObservedConversationStore
@@ -222,6 +225,20 @@ object ArgusModule {
 
     @Provides
     fun draftRepositoryBoundary(repository: RoomDraftRepository): DraftRepository = repository
+
+    @Provides
+    @Singleton
+    fun rulesBackup(
+        @ApplicationContext context: Context,
+        store: AutomationStore,
+        repository: RoomDraftRepository,
+        installInfo: AppInstallInfo,
+    ): RulesBackup = RulesBackupService(
+        automations = store,
+        drafts = repository,
+        documents = ContentResolverDocumentIo(context),
+        appVersion = { installInfo.versionName },
+    )
 
     @Provides
     @Singleton
