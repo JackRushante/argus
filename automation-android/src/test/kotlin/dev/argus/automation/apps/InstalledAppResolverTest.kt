@@ -36,6 +36,24 @@ class InstalledAppResolverTest {
     }
 
     @Test
+    fun `a verb sharing a prefix with an app name does not expose that app`() {
+        val withSettings = apps + InstalledAppCandidate("Impostazioni", "com.android.settings")
+
+        assertTrue(matchInstalledApps("Imposta la sveglia alle 7", withSettings).isEmpty())
+        assertEquals(
+            listOf("com.android.settings"),
+            matchInstalledApps("apri le impostazioni", withSettings).map { it.packageName },
+        )
+    }
+
+    @Test
+    fun `an abbreviated app name still matches`() {
+        val result = matchInstalledApps("apri instagr", apps)
+
+        assertEquals(listOf("com.instagram.android"), result.map { it.packageName })
+    }
+
+    @Test
     fun `generic app language does not expose the installed inventory`() {
         val result = matchInstalledApps("cerca il pacchetto tra le app installate", apps)
 
