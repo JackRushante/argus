@@ -84,6 +84,34 @@ class AndroidCapabilityProbeTest {
     }
 
     @Test
+    fun `state keys are published only when their state capability is armable`() = runTest {
+        // Con Shizuku autorizzato le chiavi sono tutte, e ognuna ha la sua capacita' `state.<chiave>`.
+        val authorized = probe(state())
+        val full = authorized.probe(DeviceState())
+        assertEquals(StateKeys.ALL, full.stateKeys)
+        assertTrue(full.stateKeys.keys.all { CapabilityIds.state(it) in authorized.current().availableCapabilities })
+
+        // Senza Shizuku nessuna `state.<chiave>` e' armabile: il modello non deve vedere chiavi inutilizzabili
+        // (altrimenti propone `state_equals` che non si puo' armare).
+        listOf(
+            ShizukuGatewayStatus.NOT_INSTALLED to false,
+            ShizukuGatewayStatus.RUNNING_NOT_AUTHORIZED to false,
+            ShizukuGatewayStatus.INSTALLED_NOT_RUNNING to true,
+        ).forEach { (status, granted) ->
+            val without = probe(
+                state().copy(shizukuStatus = status, shizukuPermissionGranted = granted),
+                baseTierActive = true,
+            )
+            val manifest = without.probe(DeviceState())
+            assertEquals(emptyMap(), manifest.stateKeys, status.name)
+            assertTrue(
+                manifest.stateKeys.keys.all { CapabilityIds.state(it) in without.current().availableCapabilities },
+                status.name,
+            )
+        }
+    }
+
+    @Test
     fun `stopped but still granted Shizuku is transient while revoked permission is structural`() = runTest {
         val stopped = probe(
             state().copy(
