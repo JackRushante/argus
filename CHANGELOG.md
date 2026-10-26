@@ -60,6 +60,11 @@ This release closes the reliability and diagnostics findings of the code audit.
 - AI actions with web search failed with HTTP 404 on OpenRouter presets (`@preset/...`): Argus
   appended `:online` to the preset. It now sends the equivalent `web` plugin and leaves the model
   untouched.
+- AI notifications of time rules searched the web for a fixed placeholder sentence instead of the
+  rule's goal, so results could be off-topic; the goal is now the search text, and OpenRouter web
+  results come back as plain text without links.
+- A compile reply that breaks the output format (a misnamed or missing `@@META@@` line, a schema
+  error) is retried once with a note telling the model what to fix, instead of ending as "no rule".
 - Provider errors are shown, with keys masked, in the connection check. Custom endpoints accept a
   base URL without `/chat/completions`, and OpenRouter and Custom compile at temperature 0.2.
 - "Allow" on a permission denied for good opens the app settings with an explanation instead of
@@ -76,8 +81,9 @@ This release closes the reliability and diagnostics findings of the code audit.
   on the F-Droid buildserver); release APKs rebuilt twice from clean trees with byte-identical
   output.
 - On a OnePlus 15 with Android 16: System health (Shizuku as root, exact alarms), the rule detail
-  and its diagnosis, and a daily time rule firing on time and rescheduling itself. That same run
-  exposed the OpenRouter preset bug fixed above.
+  and its diagnosis, a daily time rule firing on time and rescheduling itself, an AI notification
+  with live web data through an OpenRouter preset, and "turn off Do Not Disturb now" switching off
+  a Do Not Disturb enabled by hand.
 
 ## v0.3.5 (2026-10-25) — Audit fixes: reliability, approval transparency, AI translation
 
