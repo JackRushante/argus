@@ -31,6 +31,9 @@ object StaticShellSafety {
         // 0.4.1: eventi di sistema che solo l'utente o l'hardware locale provocano. `media` NO:
         // qualunque app o pagina web può far partire una riproduzione, quindi non è un'identità.
         is Trigger.Screen, is Trigger.Battery, is Trigger.AudioOutput, is Trigger.ModeChanged,
+        // 0.4.1: l'avvio manuale è un gesto dell'utente sulla propria regola approvata (con token per
+        // regola sulle scorciatoie e sui widget): nessun attore esterno preme l'interruttore.
+        is Trigger.Manual,
         -> true
         is Trigger.Media -> false
         is Trigger.Notification -> verifiedContact(
@@ -53,6 +56,7 @@ object StaticShellSafety {
         is TriggerEvent.BatteryLevelChanged,
         is TriggerEvent.AudioOutputChanged,
         is TriggerEvent.DeviceModeChanged,
+        is TriggerEvent.ManualFired,
         -> true
         is TriggerEvent.MediaPlaybackChanged -> false
         is TriggerEvent.NotificationPosted -> verifiedContact(
@@ -80,6 +84,7 @@ object StaticShellSafety {
         return when {
             trigger is Trigger.Time && event is TriggerEvent.TimeFired -> true
             trigger is Trigger.Immediate && event is TriggerEvent.ImmediateFired -> true
+            trigger is Trigger.Manual && event is TriggerEvent.ManualFired -> true
             trigger is Trigger.Geofence && event is TriggerEvent.GeofenceTransitioned ->
                 trigger.transition == event.transition
             trigger is Trigger.Connectivity && event is TriggerEvent.ConnectivityChanged ->
