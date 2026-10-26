@@ -303,7 +303,9 @@ fun ArgusNavHost() {
         navController.navigate(route) {
             popUpTo(navController.graph.findStartDestination().id) { saveState = true }
             launchSingleTop = true
-            restoreState = '?' !in route
+            // Il Log aperto dalla barra mostra sempre il log completo: lo stato salvato potrebbe
+            // essere quello filtrato su una regola, arrivato dal Dettaglio.
+            restoreState = '?' !in route && route != Routes.LOG
         }
     }
 
