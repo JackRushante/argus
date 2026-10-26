@@ -180,4 +180,98 @@ class CliBridgeParserTest {
         assertTrue(detail.length <= 200)
         assertFalse("segreto-123" in detail)
     }
+
+    // --- I3: sentinel con il nome sbagliato ---
+
+    private val wrongSentinelProse =
+        "Imposto un'automazione immediata che disattiva la modalit\u00e0 Non disturbare non appena la attivi."
+    private val wrongSentinelReply = wrongSentinelProse + "\n\n" +
+        """@@AUTOMATION_DRAFT@@ {"draft":{"name":"Disattiva Non disturbare subito","trigger":{"type":"time","instant":true},""" +
+        """"actions":[{"type":"set_dnd","mode":"OFF"}]},"error_code":null}"""
+
+    @Test fun `a wrongly named sentinel with a draft is read as meta and reports the schema error`() {
+        val r = p.parseCompile(wrongSentinelReply)
+        assertNull(r.draft)
+        assertEquals("meta_parse_error", r.metaError)
+        assertEquals(wrongSentinelProse, r.reply)
+        val detail = assertNotNull(r.detail)
+        assertTrue("tz" in detail, detail)
+        assertTrue("draft.trigger" in detail, detail)
+        assertTrue(detail.length <= 200)
+        // niente frammenti dell'input (nome della regola, tipo di azione)
+        assertFalse("Disattiva" in detail, detail)
+        assertFalse("set_dnd" in detail, detail)
+    }
+
+    @Test fun `a wrongly named sentinel with a valid draft yields the draft`() {
+        val r = p.parseCompile("""Fatto. @@AUTOMATION_DRAFT@@ {"draft":$goodDraft}}""")
+        assertNull(r.metaError)
+        assertEquals("x", assertNotNull(r.draft).name)
+        assertEquals("Fatto.", r.reply)
+    }
+
+    @Test fun `a wrongly named sentinel with an error_code yields the code`() {
+        val r = p.parseCompile("""Non posso. @@RESULT@@ {"draft":null,"error_code":"unsupported_capability"}""")
+        assertNull(r.draft)
+        assertEquals("unsupported_capability", r.metaError)
+        assertEquals("Non posso.", r.reply)
+    }
+
+    @Test fun `a wrongly named sentinel whose object has neither draft nor error_code stays prose`() {
+        val raw = """Ecco. @@FOO@@ {"x":1}"""
+        val r = p.parseCompile(raw)
+        assertNull(r.draft)
+        assertNull(r.metaError)
+        assertEquals(raw, r.reply)
+    }
+
+    @Test fun `the correct sentinel wins over a differently named one`() {
+        val after = p.parseCompile("""ok @@META@@ {"draft":$goodDraft}} poi @@FOO@@ {"draft":null,"error_code":"fake_code"}""")
+        assertNull(after.metaError)
+        assertNotNull(after.draft)
+        val before = p.parseCompile("""ok @@FOO@@ {"draft":null,"error_code":"fake_code"} poi @@META@@ {"draft":$goodDraft}}""")
+        assertNull(before.metaError)
+        assertNotNull(before.draft)
+    }
+
+    @Test fun `the json fence still wins over a differently named sentinel`() {
+        val raw = """Ecco.
+@@FOO@@ {"draft":null,"error_code":"fake_code"}
+```json
+{"draft":$goodDraft}}
+```"""
+        val r = p.parseCompile(raw)
+        assertNull(r.metaError)
+        assertNotNull(r.draft)
+    }
+
+    @Test fun `the last differently named sentinel followed by an object is the one that counts`() {
+        val r = p.parseCompile(
+            """a @@ONE_X@@ {"draft":null,"error_code":"first_code"} b @@TWO_X@@ {"draft":null,"error_code":"second_code"}""",
+        )
+        assertEquals("second_code", r.metaError)
+        val notMeta = p.parseCompile("""a @@ONE_X@@ {"draft":null,"error_code":"first_code"} b @@TWO_X@@ {"x":1}""")
+        assertNull(notMeta.draft)
+        assertNull(notMeta.metaError)
+    }
+
+    @Test fun `markers that are not well formed or not followed by an object are not sentinels`() {
+        listOf(
+            """@@x@@ {"draft":null,"error_code":"fake_code"}""",
+            """@@A@@ {"draft":null,"error_code":"fake_code"}""",
+            """@@A_B_@ {"draft":null,"error_code":"fake_code"}""",
+            """@@FOO@@ senza oggetto""",
+            """@@FOO@@ testo {"draft":null,"error_code":"fake_code"}""",
+        ).forEach { raw ->
+            val r = p.parseCompile(raw)
+            assertNull(r.draft, raw)
+            assertNull(r.metaError, raw)
+        }
+    }
+
+    @Test fun `a differently named sentinel inside a think block is ignored`() {
+        val r = p.parseCompile("""<think>@@FOO@@ {"draft":null,"error_code":"fake_code"}</think>Solo testo.""")
+        assertNull(r.metaError)
+        assertEquals("Solo testo.", r.reply)
+    }
 }
