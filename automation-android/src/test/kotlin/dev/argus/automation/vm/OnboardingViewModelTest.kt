@@ -6,6 +6,7 @@ import androidx.test.core.app.ApplicationProvider
 import dev.argus.automation.AppPreferences
 import dev.argus.automation.AppPreferencesStore
 import dev.argus.automation.ConfiguredBridgeBrain
+import dev.argus.automation.RenderLanguageSource
 import dev.argus.brain.AgentTransport
 import dev.argus.brain.BridgeErrorKind
 import dev.argus.brain.BridgeException
@@ -448,6 +449,30 @@ class OnboardingViewModelTest {
     }
 
     @Test
+    fun `the steps regenerate their texts when the language source goes from english to italian`() =
+        runTest(dispatcher) {
+            var system = RenderLanguage.EN
+            val source = RenderLanguageSource { system }
+            val vm = onboardingViewModel(OnbFakeProviderStore(), languageSource = source)
+            observe(vm)
+            val events = collectEvents(vm)
+            advanceUntilIdle()
+            assertEquals("Privacy and consent", vm.state.value.steps.first().title)
+            assertEquals("Choose the brain", vm.state.value.steps[1].title)
+
+            system = RenderLanguage.IT
+            source.refresh()
+            advanceUntilIdle()
+
+            assertEquals("Privacy e consenso", vm.state.value.steps.first().title)
+            assertEquals("Scegli il cervello", vm.state.value.steps[1].title)
+            // I messaggi prodotti al momento seguono la lingua corrente.
+            vm.selectProvider("skynet")
+            advanceUntilIdle()
+            assertEquals("Provider sconosciuto.", (events.last() as OnboardingEvent.Message).text)
+        }
+
+    @Test
     fun `la chiave API non compare mai nello stato onboarding`() = runTest(dispatcher) {
         val store = OnbFakeProviderStore()
         val vm = onboardingViewModel(store, index = 1)
@@ -531,6 +556,7 @@ class OnboardingViewModelTest {
         language: RenderLanguage = RenderLanguage.IT,
         factory: TransportFactory = OnbFakeTransportFactory(),
         automations: AutomationStore = OnbFakeAutomationStore(),
+        languageSource: RenderLanguageSource = RenderLanguageSource { language },
     ): OnboardingViewModel {
         val brain = ConfiguredBridgeBrain(store, privacyAccepted = { true }, factory = factory)
         val handle = SavedStateHandle(mapOf("currentIndex" to index))
@@ -543,7 +569,7 @@ class OnboardingViewModelTest {
             shizuku = ShizukuGateway(context),
             automations = automations,
             drafts = OnbFakeDraftRepository(),
-            language = language,
+            languageSource = languageSource,
         )
     }
 

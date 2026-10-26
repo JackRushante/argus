@@ -190,26 +190,37 @@ fun ArgusNavHost() {
         }.onFailure { showMessage(systemSettingUnavailable) }
     }
     var permissionRefresh by remember { mutableIntStateOf(0) }
-    val notificationPermission = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) {
+    val openAppDetailsSettings = {
+        openIntent(
+            Intent(
+                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.parse("package:${context.packageName}"),
+            ),
+        )
+    }
+    val afterPermissionResult = {
         permissionRefresh += 1
         settingsViewModel.refresh()
     }
+    // B33: dopo due rifiuti Android non mostra più la richiesta; i richiedenti sotto portano
+    // allora alle impostazioni dell'app con un messaggio, invece di restare muti.
+    val requestNotificationPermission = rememberPermissionRequester(
+        onResult = afterPermissionResult,
+        openAppSettings = openAppDetailsSettings,
+        showMessage = showMessage,
+    )
     // Telefonia (P2-2): chiamate chiede anche READ_CALL_LOG, senza cui il broadcast
     // PHONE_STATE non porta il numero e le regole "chiamata da X" non possono matchare.
-    val telephonyPermissions = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions(),
-    ) {
-        permissionRefresh += 1
-        settingsViewModel.refresh()
-    }
-    val bluetoothPermission = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) {
-        permissionRefresh += 1
-        settingsViewModel.refresh()
-    }
+    val requestTelephonyPermissions = rememberPermissionRequester(
+        onResult = afterPermissionResult,
+        openAppSettings = openAppDetailsSettings,
+        showMessage = showMessage,
+    )
+    val requestBluetoothPermission = rememberPermissionRequester(
+        onResult = afterPermissionResult,
+        openAppSettings = openAppDetailsSettings,
+        showMessage = showMessage,
+    )
     val requestNotificationAccess = {
         val runtimePermissionMissing = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(
@@ -217,7 +228,7 @@ fun ArgusNavHost() {
                 Manifest.permission.POST_NOTIFICATIONS,
             ) != PackageManager.PERMISSION_GRANTED
         if (runtimePermissionMissing) {
-            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+            requestNotificationPermission(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
         } else if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {
             openIntent(
                 Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
@@ -248,14 +259,7 @@ fun ArgusNavHost() {
     val openNotificationListenerSettings = {
         openIntent(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
     }
-    val openLocationSettings = {
-        openIntent(
-            Intent(
-                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                Uri.parse("package:${context.packageName}"),
-            ),
-        )
-    }
+    val openLocationSettings = openAppDetailsSettings
     val locationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) {
@@ -449,10 +453,10 @@ fun ArgusNavHost() {
                         }
                         override fun onOpenLocationFix() = requestLocationAccess()
                         override fun onRequestSmsPermission() {
-                            telephonyPermissions.launch(arrayOf(Manifest.permission.RECEIVE_SMS))
+                            requestTelephonyPermissions(arrayOf(Manifest.permission.RECEIVE_SMS))
                         }
                         override fun onRequestCallPermissions() {
-                            telephonyPermissions.launch(
+                            requestTelephonyPermissions(
                                 arrayOf(
                                     Manifest.permission.READ_PHONE_STATE,
                                     Manifest.permission.READ_CALL_LOG,
@@ -461,7 +465,7 @@ fun ArgusNavHost() {
                         }
                         override fun onRequestBluetoothPermission() {
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                bluetoothPermission.launch(Manifest.permission.BLUETOOTH_CONNECT)
+                                requestBluetoothPermission(arrayOf(Manifest.permission.BLUETOOTH_CONNECT))
                             } else {
                                 permissionRefresh += 1
                                 settingsViewModel.refresh()

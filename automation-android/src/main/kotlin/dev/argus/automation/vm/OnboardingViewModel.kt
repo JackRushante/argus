@@ -10,6 +10,7 @@ import dev.argus.automation.AppPreferences
 import dev.argus.automation.AppPreferencesStore
 import dev.argus.automation.BridgeHealthResult
 import dev.argus.automation.ConfiguredBridgeBrain
+import dev.argus.automation.RenderLanguageSource
 import dev.argus.brain.BridgeErrorKind
 import dev.argus.brain.ProviderCatalog
 import dev.argus.brain.ProviderConfigStore
@@ -54,6 +55,7 @@ private data class OnboardingSources(
     val preferences: AppPreferences,
     val shizuku: ShizukuGatewayStatus,
     val geofenceNeeded: Boolean,
+    val language: RenderLanguage,
 )
 
 /**
@@ -78,8 +80,11 @@ class OnboardingViewModel @Inject constructor(
     private val shizuku: ShizukuGateway,
     automations: AutomationStore,
     drafts: DraftRepository,
-    private val language: RenderLanguage = RenderLanguage.system(),
+    private val languageSource: RenderLanguageSource,
 ) : ViewModel() {
+    /** Lingua al momento (messaggi); i passi dello stato la ricevono dal flow e si rigenerano. */
+    private val language: RenderLanguage get() = languageSource.current
+
     private val currentIndex = savedStateHandle.getStateFlow(CURRENT_INDEX_KEY, 0)
     private val skipped = savedStateHandle.getStateFlow(SKIPPED_KEY, arrayListOf<String>())
     private val refreshSignal = MutableStateFlow(0L)
@@ -101,13 +106,15 @@ class OnboardingViewModel @Inject constructor(
         shizuku.observeStatus(),
         automations.observeAll(),
         drafts.observeAll(),
-    ) { appPreferences, shizukuStatus, rules, pending ->
+        languageSource.language,
+    ) { appPreferences, shizukuStatus, rules, pending, renderLanguage ->
         latestPreferences = appPreferences
         OnboardingSources(
             preferences = appPreferences,
             shizuku = shizukuStatus,
             geofenceNeeded = rules.any { it.trigger is Trigger.Geofence } ||
                 pending.any { it.draft.trigger is Trigger.Geofence },
+            language = renderLanguage,
         )
     }
 
@@ -127,6 +134,7 @@ class OnboardingViewModel @Inject constructor(
                 latestPreferences,
                 shizuku.status(),
                 geofenceNeeded = false,
+                language = languageSource.current,
             ),
             currentIndex.value,
             skipped.value.toSet(),
@@ -411,6 +419,7 @@ class OnboardingViewModel @Inject constructor(
         skipped: Set<String>,
         setup: BrainSetupState,
     ): OnboardingState {
+        val language = sources.language
         // Configurato = provider scelto con configurazione valida salvata: chiave se richiesta
         // (setup.configured) ed endpoint non vuoto (Hermes e Custom non hanno un default).
         val brainConfigured = setup.configured &&
@@ -435,7 +444,7 @@ class OnboardingViewModel @Inject constructor(
         )
         val index = requestedIndex.coerceIn(0, STEP_ORDER.lastIndex)
         val steps = STEP_ORDER.mapIndexed { stepIndex, kind ->
-            step(kind, uiShizuku, sources.geofenceNeeded, health).copy(
+            step(kind, uiShizuku, sources.geofenceNeeded, health, language).copy(
                 status = when {
                     done.getValue(kind) -> StepStatus.DONE
                     kind.name in skipped -> StepStatus.SKIPPED
@@ -443,7 +452,7 @@ class OnboardingViewModel @Inject constructor(
                     else -> StepStatus.TODO
                 },
                 // Il cervello configurato ma non verificato tiene la CTA: si possono correggere le credenziali.
-                ctaLabel = step(kind, uiShizuku, sources.geofenceNeeded, health).ctaLabel
+                ctaLabel = step(kind, uiShizuku, sources.geofenceNeeded, health, language).ctaLabel
                     .takeUnless {
                         done.getValue(kind) && !(kind == StepKind.BRAIN_CONFIG && !brainVerified)
                     },
@@ -534,6 +543,7 @@ class OnboardingViewModel @Inject constructor(
         shizukuStatus: ShizukuStatus,
         geofenceNeeded: Boolean,
         health: AndroidUiHealth,
+        language: RenderLanguage,
     ): OnboardingStepState {
         val (shizukuBody, shizukuCta) = shizukuOnboardingCopy(shizukuStatus, language)
         return when (kind) {
