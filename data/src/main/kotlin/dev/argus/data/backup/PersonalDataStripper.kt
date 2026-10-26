@@ -17,6 +17,8 @@ import dev.argus.engine.model.Trigger
  *    regola più ampia di quella condivisa.
  *  - [Trigger.Notification]: `conversationId` e `sender`. Resta il package (e i filtri sul testo).
  *  - [Trigger.PhoneState]: il `number`. Restano evento e filtro sul testo.
+ *  - [Trigger.Time] con `solar`: la posizione congelata all'arm. Chi importa la regola la arma con
+ *    la posizione del proprio telefono, letta di nuovo all'arm.
  *  - [Action.HttpRequest]: i VALORI delle intestazioni (token, chiavi API, cookie): restano i nomi.
  *    Un valore vuoto non passa la validazione (`http_header_invalid`), quindi la regola importata non
  *    si arma finché non si rifà con le proprie credenziali. URL e body non si toccano: chi condivide
@@ -45,7 +47,7 @@ object PersonalDataStripper {
         is Trigger.Geofence -> trigger.copy(lat = 0.0, lng = 0.0, resolveCurrentLocation = true)
         is Trigger.Notification -> trigger.copy(conversationId = null, sender = null)
         is Trigger.PhoneState -> trigger.copy(number = null)
-        is Trigger.Time,
+        is Trigger.Time -> trigger.solar?.let { trigger.copy(solar = it.copy(lat = null, lng = null)) } ?: trigger
         Trigger.Immediate,
         is Trigger.Connectivity,
         is Trigger.Sensor,

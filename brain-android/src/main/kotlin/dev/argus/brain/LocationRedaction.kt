@@ -11,6 +11,9 @@ import dev.argus.engine.model.Trigger
  * coordinate originali dove il modello ha lasciato `0.0, 0.0` sullo stesso percorso; un luogo che
  * l'utente ha chiesto di cambiare (il modello restituisce coordinate diverse da 0,0) resta quello nuovo.
  *
+ * La posizione di un trigger solare (`time.solar`, 0.4.1) si toglie del tutto e non si ripristina:
+ * l'app la rilegge dal telefono all'arm e scarta comunque quella del modello.
+ *
  * Il "percorso" identifica un nodo della bozza: `trigger`, `conditions`, `conditions.all[1]`,
  * `actions[2].condition`, `actions[0].then[1].condition.cond`, ... Stabile finché il modello non
  * riordina le azioni; in caso contrario le coordinate restano `0.0, 0.0` e la review le mostra.
@@ -33,7 +36,14 @@ object LocationRedaction {
                 place.copy(lat = 0.0, lng = 0.0)
             },
         )
-        return Redacted(walker.rewrite(draft), originals)
+        return Redacted(walker.rewrite(draft).withoutSolarLocation(), originals)
+    }
+
+    private fun AutomationDraft.withoutSolarLocation(): AutomationDraft {
+        val time = trigger as? Trigger.Time ?: return this
+        val solar = time.solar ?: return this
+        if (solar.lat == null && solar.lng == null) return this
+        return copy(trigger = time.copy(solar = solar.copy(lat = null, lng = null)))
     }
 
     /** Rimette le coordinate originali dove [fromModel] ha lasciato 0,0 sullo stesso percorso. */
