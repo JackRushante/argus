@@ -14,6 +14,9 @@ import dev.argus.automation.RenderLanguageSource
 import dev.argus.automation.TimeAlarmRuntime
 import dev.argus.automation.connectivity.NoopConnectivityTriggerRuntime
 import dev.argus.automation.geofence.NoopGeofenceTriggerRuntime
+import dev.argus.automation.sensor.NoopSensorTriggerRuntime
+import dev.argus.automation.sensor.SensorReconcileReport
+import dev.argus.automation.sensor.SensorTriggerRuntime
 import dev.argus.data.ArgusDatabase
 import dev.argus.data.RoomAutomationStore
 import dev.argus.data.RoomContactWhitelistStore
@@ -548,6 +551,47 @@ class AutomationDetailViewModelTest {
         assertEquals(1, audit.events.count { it.kind == AuditKind.RULE_DELETED })
     }
 
+    // --- 0.3.6: l'eliminazione pulisce anche i sensori -----------------------------------------------
+
+    @Test
+    fun `deleting a rule also reconciles the sensors after the rule is gone`() = runTest {
+        val automation = seedArmedAutomation("e3a")
+        val store = RoomAutomationStore(db.automationDao())
+        val reconciledWhilePresent = java.util.concurrent.CopyOnWriteArrayList<Boolean>()
+        val sensor = SensorTriggerRuntime {
+            reconciledWhilePresent += store.get(automation.id) != null
+            SensorReconcileReport(emptyList(), emptySet())
+        }
+        val viewModel = viewModel("e3a", store, DetailAuditRecorder(), RenderLanguage.EN, sensor = sensor)
+        awaitUntil("dettaglio caricato") { viewModel.state.value.detail != null }
+        val events = collectEvents(viewModel)
+
+        viewModel.onDelete()
+        awaitUntil("chiusura") { events.any { it is DetailEvent.Close } }
+
+        assertEquals(listOf(false), reconciledWhilePresent.toList(), "una chiamata, a regola gia' rimossa")
+        assertEquals("Rule deleted.", (events.single { it is DetailEvent.Close } as DetailEvent.Close).message)
+    }
+
+    @Test
+    fun `a failing sensor reconcile on delete reports the deferred cleanup and still deletes`() = runTest {
+        val automation = seedArmedAutomation("e3b")
+        val store = RoomAutomationStore(db.automationDao())
+        val sensor = SensorTriggerRuntime { error("sensor backend unavailable") }
+        val viewModel = viewModel("e3b", store, DetailAuditRecorder(), RenderLanguage.EN, sensor = sensor)
+        awaitUntil("dettaglio caricato") { viewModel.state.value.detail != null }
+        val events = collectEvents(viewModel)
+
+        viewModel.onDelete()
+        awaitUntil("chiusura") { events.any { it is DetailEvent.Close } }
+
+        assertNull(store.get(automation.id), "la regola e' stata eliminata comunque")
+        assertEquals(
+            "Rule deleted; runtime cleanup deferred.",
+            (events.single { it is DetailEvent.Close } as DetailEvent.Close).message,
+        )
+    }
+
     @Test
     fun `the state flag survives a recomputed state while an action is running`() = runTest {
         val store = RoomAutomationStore(db.automationDao())
@@ -697,6 +741,7 @@ class AutomationDetailViewModelTest {
         languageSource: RenderLanguageSource = RenderLanguageSource { language },
         registrar: ArmedAutomationRegistrar = ArmedAutomationRegistrar { true },
         scheduler: TimeAlarmRuntime = NoopTimeAlarmRuntime(),
+        sensor: SensorTriggerRuntime = NoopSensorTriggerRuntime,
     ): AutomationDetailViewModel {
         val whitelist = RoomContactWhitelistStore(db.contactWhitelistDao())
         val snapshots = FirePolicySnapshotProvider {
@@ -736,6 +781,7 @@ class AutomationDetailViewModelTest {
             whitelist = whitelist,
             connectivity = NoopConnectivityTriggerRuntime,
             geofence = NoopGeofenceTriggerRuntime,
+            sensor = sensor,
             audit = audit,
             languageSource = languageSource,
             applicationScope = applicationScope,

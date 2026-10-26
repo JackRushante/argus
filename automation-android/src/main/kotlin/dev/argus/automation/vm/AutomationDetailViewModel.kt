@@ -14,6 +14,7 @@ import dev.argus.automation.TimeAlarmRuntime
 import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
 import dev.argus.automation.di.ApplicationScope
 import dev.argus.automation.geofence.GeofenceTriggerRuntime
+import dev.argus.automation.sensor.SensorTriggerRuntime
 import dev.argus.data.ArgusDatabase
 import dev.argus.data.dao.AuditLogRecord
 import dev.argus.engine.brain.ContactWhitelistStore
@@ -112,6 +113,7 @@ class AutomationDetailViewModel @Inject constructor(
     private val whitelist: ContactWhitelistStore,
     private val connectivity: ConnectivityTriggerRuntime,
     private val geofence: GeofenceTriggerRuntime,
+    private val sensor: SensorTriggerRuntime,
     private val audit: AuditSink,
     private val languageSource: RenderLanguageSource,
     /**
@@ -462,6 +464,9 @@ class AutomationDetailViewModel @Inject constructor(
                 if (cancellationSafeOrNull {
                     geofence.reconcile(recreateOsRegistrations = false)
                 } == null) reconciled = false
+                // I sensori hanno la loro registrazione fisica: senza questo giro una regola
+                // sensore eliminata terrebbe il sensore registrato fino al prossimo bootstrap.
+                if (cancellationSafeOrNull { sensor.reconcile() } == null) reconciled = false
                 closeWith(
                     if (reconciled) {
                         language.pick("Rule deleted.", "Regola eliminata.")
