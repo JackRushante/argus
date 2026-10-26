@@ -40,12 +40,26 @@ class TriggerMatcher {
         return true
     }
 
-    /** Confronto numeri robusto ai formati (+39 / spazi / trattini): solo cifre, match per suffisso (min 7). */
+    /**
+     * Confronto numeri robusto ai formati (+39 / spazi / trattini): solo cifre. Cifre identiche
+     * combaciano sempre; il match per suffisso vale solo con prefisso internazionale plausibile,
+     * cioe' il numero corto ha almeno [MIN_SUFFIX_DIGITS] cifre e quello lungo ne ha in piu'
+     * al massimo [MAX_PREFIX_DIGITS] davanti (es. `39`, `0039`). Un numero corto non combacia
+     * piu' con qualunque numero lungo che finisce con le sue cifre.
+     */
     private fun numbersMatch(spec: String, actual: String?): Boolean {
         if (actual == null) return false
         val a = spec.filter(Char::isDigit); val b = actual.filter(Char::isDigit)
         if (a.isEmpty() || b.isEmpty()) return false
-        if (a.length < 7 || b.length < 7) return a == b
-        return a.endsWith(b) || b.endsWith(a)
+        if (a == b) return true
+        val (shorter, longer) = if (a.length <= b.length) a to b else b to a
+        if (shorter.length < MIN_SUFFIX_DIGITS) return false
+        if (longer.length - shorter.length > MAX_PREFIX_DIGITS) return false
+        return longer.endsWith(shorter)
+    }
+
+    private companion object {
+        const val MIN_SUFFIX_DIGITS = 9
+        const val MAX_PREFIX_DIGITS = 4
     }
 }

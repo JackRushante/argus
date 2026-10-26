@@ -77,17 +77,42 @@ fun interface TimeEventDispatcher {
     suspend fun dispatch(envelope: TriggerEnvelope)
 }
 
+/**
+ * Avvia in background un recupero all'avvio (B3). In produzione tiene anche la lease del servizio
+ * in primo piano per la durata del lavoro; nei test lancia semplicemente una coroutine.
+ */
+fun interface RecoveryLauncher {
+    fun launch(block: suspend () -> Unit)
+}
+
 enum class ReconcileReason(
     val recoverDueAlarm: Boolean,
     val recreateOsRegistration: Boolean = false,
 ) {
-    APP_START(true),
+    /**
+     * Un arresto forzato (a mano o dalla «pulizia» del produttore) cancella le sveglie ma lascia
+     * lo stato persistito «registrato» (B17): all'avvio le sveglie armate si ri-registrano sempre.
+     * Registrare di nuovo un PendingIntent identico costa poco.
+     */
+    APP_START(true, recreateOsRegistration = true),
     BOOT(true, recreateOsRegistration = true),
     PACKAGE_REPLACED(true, recreateOsRegistration = true),
     EXACT_ALARM_PERMISSION_CHANGED(true),
     CAPABILITY_CHANGED(true),
-    TIME_CHANGED(false),
-    TIMEZONE_CHANGED(false),
+
+    /**
+     * Se l'orario di rete corregge l'ora subito dopo l'accensione, un'occorrenza scaduta mentre il
+     * telefono era spento è «dovuta» e va recuperata come ad APP_START/BOOT (B37), con lo stesso
+     * event id: il journal deduplica. Cancellarla e dimenticarla la perderebbe.
+     */
+    TIME_CHANGED(true),
+
+    /**
+     * Gli istanti persistiti sono assoluti: un'occorrenza già scaduta al cambio di fuso (anche
+     * quello impostato dalla rete subito dopo il boot) è stata davvero persa e si recupera come
+     * per TIME_CHANGED.
+     */
+    TIMEZONE_CHANGED(true),
 }
 
 data class ReconcileReport(
@@ -160,8 +185,18 @@ class TimeAlarmCoordinator(
     private val now: () -> Instant,
     private val audit: AuditSink = NoopAuditSink,
     private val oneShotConsumptions: OneShotConsumptionRegistry = NoopOneShotConsumptionRegistry,
+    /**
+     * Se presente, i recuperi dovuti partono in background e `reconcile` NON ne attende la fine
+     * (B3): un programma lungo (attese fino a un'ora) non deve ritardare geofence e sensori né
+     * mettere in coda ogni altro reconcile. Il report non elenca allora i recuperi (`recovered`
+     * resta vuoto). Senza launcher (test, caller non Android) i recuperi sono sincroni.
+     */
+    private val recoveryLauncher: RecoveryLauncher? = null,
 ) {
     private val mutex = Mutex()
+
+    /** Coda sequenziale dei recuperi in background: l'ordine per sorgente (id) si preserva. */
+    private val recoveryLane = Mutex()
 
     /**
      * Regole con un dispatch in corso fuori dal lock. Si legge e si scrive SOLO sotto [mutex].
@@ -241,11 +276,33 @@ class TimeAlarmCoordinator(
 
         // Fuori dal lock: ogni recupero ripassa da prepare/dispatch/complete, quindi una regola nel
         // frattempo consegnata da un onAlarm (o già in volo) viene ignorata, mai consegnata due volte.
-        dueRecoveries.forEach { (automationId, eventAtMillis) ->
-            when (deliver(automationId, eventAtMillis, deliveredFingerprint = null)) {
-                AlarmDeliveryResult.Delivered -> recovered += automationId
-                AlarmDeliveryResult.Ignored -> Unit
-                is AlarmDeliveryResult.Failed -> failed += automationId
+        val launcher = recoveryLauncher
+        if (launcher != null) {
+            if (dueRecoveries.isNotEmpty()) {
+                val queued = dueRecoveries.toList()
+                launcher.launch {
+                    // Una coda sola: un secondo reconcile non fa partire un secondo giro in
+                    // parallelo, aspetta il precedente e trova gli stessi record già consegnati.
+                    recoveryLane.withLock {
+                        queued.forEach { (automationId, eventAtMillis) ->
+                            try {
+                                deliver(automationId, eventAtMillis, deliveredFingerprint = null)
+                            } catch (error: CancellationException) {
+                                throw error
+                            } catch (_: Exception) {
+                                // Il record resta dovuto: il prossimo APP_START/BOOT lo ritenta.
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            dueRecoveries.forEach { (automationId, eventAtMillis) ->
+                when (deliver(automationId, eventAtMillis, deliveredFingerprint = null)) {
+                    AlarmDeliveryResult.Delivered -> recovered += automationId
+                    AlarmDeliveryResult.Ignored -> Unit
+                    is AlarmDeliveryResult.Failed -> failed += automationId
+                }
             }
         }
         return ReconcileReport(scheduled, cancelled, recovered, failed)

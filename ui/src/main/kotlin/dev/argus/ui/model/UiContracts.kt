@@ -90,7 +90,16 @@ enum class StatusBadge { ARMED, PENDING_APPROVAL, DISABLED, NEEDS_REVIEW }
 /** Salute del sistema, mostrata come banner in Lista e Sistema. */
 enum class EngineBanner { NONE, SHIZUKU_DOWN, SHIZUKU_DEGRADED_AFTER_REBOOT, BATTERY_NOT_EXEMPT, BRAIN_UNREACHABLE }
 
-enum class ShizukuStatus { NOT_INSTALLED, INSTALLED_NOT_RUNNING, RUNNING_NOT_AUTHORIZED, AUTHORIZED, DEGRADED_AFTER_REBOOT }
+enum class ShizukuStatus {
+    NOT_INSTALLED,
+    INSTALLED_NOT_RUNNING,
+    RUNNING_NOT_AUTHORIZED,
+    AUTHORIZED,
+    DEGRADED_AFTER_REBOOT,
+
+    /** Shizuku in esecuzione ma troppo vecchio per Argus: va aggiornato, non riavviato. */
+    UNSUPPORTED,
+}
 
 // --- 6.1 Chat ---
 
@@ -101,6 +110,12 @@ data class ChatState(
     val sendingElapsedSec: Int?,      // per "Argus sta pensando… (12 s)"
     val brainReachable: Boolean?,     // null = mai verificato; false = banner "Hermes irraggiungibile" + retry
     val error: ChatError?,
+    /**
+     * 0.3.6 (F5): testo grezzo restituito dal modello nell'ULTIMO turno (max 16 000 caratteri), per le
+     * segnalazioni. Solo in memoria: si azzera con nuovo invio, nuova conversazione o uscita dalla
+     * modifica; mai nel DB, nei log, nell'audit o nella bozza. null = niente da mostrare.
+     */
+    val rawResponse: String? = null,
 )
 
 sealed interface ChatItem {
@@ -143,6 +158,11 @@ sealed interface ChatError {
     data class TooLong(val chars: Int, val max: Int) : ChatError
     /** Provider/chiave/informativa privacy non configurati: NON è un servizio irraggiungibile. Azione: apri Sistema. */
     data object NotConfigured : ChatError
+    /**
+     * 0.3.6 (B34b): errore LOCALE dell'app (eccezione imprevista), non del modello né della rete.
+     * [code] è il nome semplice della classe d'eccezione in snake_case, mai il suo messaggio.
+     */
+    data class Internal(val code: String) : ChatError
 }
 
 interface ChatCallbacks {
@@ -154,6 +174,12 @@ interface ChatCallbacks {
     fun onCheckConnection()
     /** Azione degli errori Auth/Budget/NotConfigured: porta alla scheda Sistema. Default no-op per i vecchi host. */
     fun onOpenSystem() {}
+    /**
+     * «Copia per la segnalazione» nel dialogo «Risposta grezza»: la copia (versione, provider, modello,
+     * codice d'errore e testo grezzo) la compone il ViewModel e la scrive il copiatore appunti esistente.
+     * Default no-op per i vecchi host: il NavHost deve cablarla su `ChatViewModel.onCopyRawResponse()`.
+     */
+    fun onCopyRawResponse() {}
 }
 
 // --- 6.2 Automazioni · lista ---
@@ -218,7 +244,25 @@ data class AutomationDetailState(
      * finché è vero, così un secondo tocco non può né duplicare l'azione né emettere un secondo Close.
      */
     val actionInProgress: Boolean = false,
+    /** 0.3.6 (F2): «Perché non è scattata?». Null finché la sezione non la chiede. */
+    val diagnosis: RuleDiagnosisUi? = null,
+    /** Vero solo per una regola salvata: una bozza non ha nulla da diagnosticare. */
+    val diagnosisAvailable: Boolean = false,
 )
+
+/** Esito di una diagnosi una tantum: righe in ordine di lettura e ora del controllo. */
+data class RuleDiagnosisUi(val rows: List<DiagnosisRow>, val checkedAtLabel: String)
+
+data class DiagnosisRow(
+    val level: DiagnosisLevel,
+    val text: String,
+    /** Azione offerta accanto alla riga (oggi solo «Apri Sistema»). */
+    val fix: DiagnosisFix? = null,
+)
+
+enum class DiagnosisLevel { OK, WARN, INFO }
+
+enum class DiagnosisFix { OPEN_SYSTEM }
 
 interface AutomationDetailCallbacks {
     fun onArm(); fun onReject()             // footer in stato PENDING
@@ -226,6 +270,8 @@ interface AutomationDetailCallbacks {
     fun onAskEdit()                          // torna in chat con contesto ("modifica questa regola…")
     fun onRunNow()                           // test manuale: esegue le azioni ORA saltando trigger/condizioni (conferma prima)
     fun onOpenFullLog()
+    fun onDiagnose() {}                      // apre «Perché non è scattata?»: calcola la diagnosi una volta
+    fun onOpenSystem() {}                    // porta alla scheda Sistema, come la barra in basso
     fun onBack() {}                          // affordance back nell'header; default no-op, la nav reale è dell'host (NavHost)
 }
 
@@ -235,7 +281,15 @@ data class ExecutionLogState(
     val entries: List<LogRow>,
     val filterAutomationName: String?,      // null = tutte; settato quando si arriva dal dettaglio
     val loading: Boolean,
+    /** Giorni di conservazione del Log (7, 30 o 90), scelti dal menu in alto. */
+    val retentionDays: Int = LogRetentionOptions.DEFAULT_DAYS,
 )
+
+/** Opzioni di conservazione del Log mostrate nel menu: 7, 30 o 90 giorni. */
+object LogRetentionOptions {
+    val DAYS: List<Int> = listOf(7, 30, 90)
+    const val DEFAULT_DAYS: Int = 30
+}
 
 data class LogRow(
     val id: String,
@@ -264,6 +318,15 @@ interface ExecutionLogCallbacks {
      * (il copia-e-apri non lo segna in anticipo). Riceve l'id della riga di log. Default no-op.
      */
     fun onMarkSent(logId: String) {}
+
+    /** Menu in alto: sceglie la conservazione del Log (uno dei valori di [LogRetentionOptions.DAYS]). Default no-op. */
+    fun onSetRetention(days: Int) {}
+
+    /** Menu in alto: «Svuota il log». Arriva solo dopo la conferma dentro la schermata. Default no-op. */
+    fun onClearLog() {}
+
+    /** Menu in alto: «Esporta (senza dati personali)». Default no-op. */
+    fun onExport() {}
 }
 
 // --- 6.5 Sistema (settings) ---
@@ -272,6 +335,13 @@ data class SettingsState(
     val transport: TransportUi,
     val shizuku: ShizukuStatus,
     val batteryExempt: Boolean,
+    /**
+     * 0.3.6: Android concede ad Argus le sveglie esatte (`SCHEDULE_EXACT_ALARM`). Da Android 14 e' negato
+     * di default e solo l'utente lo concede, da «Sveglie e promemoria»: senza, le regole a orario
+     * possono partire fino a un'ora in ritardo e le attese lunghe a schermo spento slittare.
+     * Default `true`: il permesso non esiste sotto Android 12 e un fixture non deve avvisare per caso.
+     */
+    val exactAlarmsGranted: Boolean = true,
     /** Permesso di PUBBLICARE notifiche (esiti/avvisi Argus). */
     val notificationsGranted: Boolean,
     /** Accesso notification listener: lettura notifiche WhatsApp e canale di reply (P1). */
@@ -291,6 +361,16 @@ data class SettingsState(
     val privacyAccepted: Boolean,
     val appVersionLabel: String,
     val providerChoices: List<ProviderChoiceUi> = emptyList(),
+    /**
+     * 0.3.6 (F11): true quando l'accesso alle notifiche NON è concesso e l'app è installata da APK su
+     * Android 13+ (Android può bloccarlo con «Impostazione con restrizioni»): la riga mostra la guida.
+     */
+    val notificationListenerRestrictedHint: Boolean = false,
+    /**
+     * 0.3.6 (D10): Shizuku gira come root (uid 0), quindi i comandi delle regole girano come root.
+     * `null` = non noto: il servizio privilegiato non è ancora collegato.
+     */
+    val shizukuRunsAsRoot: Boolean? = null,
 )
 
 sealed interface TransportUi {
@@ -323,6 +403,8 @@ sealed interface TransportUi {
          * app sul telefono potrebbe ascoltare su quella porta e fingersi il modello. Solo avviso.
          */
         val unauthenticatedLoopback: Boolean = false,
+        /** true per OpenRouter: il campo modello mostra il suggerimento sui preset `@preset/<nome>`. */
+        val modelPresetHint: Boolean = false,
     ) : TransportUi
 }
 enum class AuthState { OK, EXPIRED, NOT_CONFIGURED }
@@ -381,6 +463,8 @@ interface SettingsCallbacks {
     fun onSaveBridge(url: String, bearerToken: String?) { onEditBridgeUrl(url) }
     fun onOpenShizukuFix()      // deep-link allo step onboarding giusto per lo stato corrente
     fun onOpenBatteryFix(); fun onOpenNotificationAccessFix(); fun onOpenLocationFix()
+    /** Apre «Sveglie e promemoria» per concedere le sveglie esatte (0.3.6). Default no-op. */
+    fun onOpenExactAlarmFix() {}
     /** Apre le impostazioni di sistema per l'accesso notification listener (lettura, P1). */
     fun onOpenNotificationListenerFix() {}
     /** Richieste runtime dei trigger telefonia (P2-2): RECEIVE_SMS e READ_PHONE_STATE(+CALL_LOG). */

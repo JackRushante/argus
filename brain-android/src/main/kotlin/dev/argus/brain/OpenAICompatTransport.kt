@@ -39,6 +39,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.IOException
 import java.io.InterruptedIOException
+import java.time.LocalDate
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -66,6 +67,8 @@ class OpenAICompatTransport internal constructor(
     private val apiKey: suspend () -> String?,
     private val client: OkHttpClient,
     private val allowCleartextForTests: Boolean,
+    /** Giorno corrente per il prompt di ricerca web di OpenRouter; iniettabile per i test. */
+    private val clock: () -> LocalDate = { LocalDate.now() },
 ) : AgentTransport {
 
     constructor(
@@ -130,12 +133,16 @@ class OpenAICompatTransport internal constructor(
             maxTokens = if (spec.quirks.outputCapParam == OutputCapParam.MAX_TOKENS) COMPILE_MAX_TOKENS else null,
             maxCompletionTokens = if (spec.quirks.outputCapParam == OutputCapParam.MAX_COMPLETION_TOKENS) COMPILE_MAX_TOKENS else null,
             reasoningEffort = config.reasoningEffort.wireValue,
+            // Solo il compile (e solo dove il catalogo lo prevede): risposte più costanti. Act e health no.
+            temperature = spec.quirks.compileTemperature,
         )
         val payload = json.encodeToString(request)
         val response = parseChatResponse(execute(buildRequest(token, payload)))
         val usage = response.toTurnUsage(fallbackModel = model)
         val choice = response.choices.firstOrNull()
         val text = choice?.message?.content?.trim()
+        // F5: la risposta grezza resta in memoria per le segnalazioni (mai nei log né nel DB).
+        val rawText = CompileResult.capRaw(choice?.message?.content)
         val parsed = if (text.isNullOrEmpty()) {
             null
         } else {
@@ -145,16 +152,16 @@ class OpenAICompatTransport internal constructor(
             // distingue sempre un draft assente da un successo.
             if (raw.draft == null && raw.metaError == null) raw.copy(metaError = "draft_missing") else raw
         }
-        if (parsed?.draft != null) return parsed.copy(usage = usage)
+        if (parsed?.draft != null) return parsed.copy(usage = usage, raw = rawText)
         // B6: senza una bozza valida, distingui un output tagliato o istruzioni tagliate dal server
         // da un semplice "il modello non ha prodotto la regola".
         AgentMessageSupport.compileTruncationCode(
             outputLimitHit = choice?.finishReason == "length",
             reportedPromptTokens = response.usage?.promptTokens,
             promptChars = messages.sumOf { it.content.length },
-        )?.let { code -> return CompileResult(parsed?.reply.orEmpty(), null, code, usage) }
+        )?.let { code -> return CompileResult(parsed?.reply.orEmpty(), null, code, usage, raw = rawText) }
         if (parsed == null) return CompileResult("", null, "empty_response", usage)
-        return parsed.copy(usage = usage)
+        return parsed.copy(usage = usage, raw = rawText)
     }
 
     private fun compileMessages(
@@ -255,20 +262,27 @@ class OpenAICompatTransport internal constructor(
                 reasoningEffort = config.reasoningEffort.wireValue,
             ),
         )
-        val response = parseChatResponse(execute(buildRequest(token, body)))
+        // Solo il test di connessione chiede il messaggio del provider (e maschera la chiave configurata).
+        val response = parseChatResponse(execute(buildRequest(token, body), ErrorDiagnostics(listOf(token))))
         return OpenAiCompatHealth(model = response.model?.takeIf { it.isNotBlank() } ?: model)
     }
 
     /**
-     * User message del turno: framing "Messaggio ricevuto…" quando c'è una notifica (reply); testo
-     * neutro del sink NOTIFICA #59 (nessuna notifica) quando [notification] è null.
+     * User message del turno: framing "Messaggio ricevuto…" quando c'è una notifica (reply); obiettivo
+     * (+ state lines) del sink NOTIFICA #59 (nessuna notifica) quando [notification] è null.
      */
     private fun userMessageFor(
+        goal: String,
         notification: TriggerEvent.NotificationPosted?,
         stateLines: List<String>,
     ): String =
         if (notification != null) AgentMessageSupport.actUserText(notification, stateLines)
-        else AgentMessageSupport.actUserTextNotification(stateLines)
+        else AgentMessageSupport.actUserTextNotification(goal, stateLines)
+
+    /** Prompt dei risultati web di OpenRouter: dati correnti in testo semplice, senza link né citazioni. */
+    private fun openRouterSearchPrompt(): String =
+        "Web search results from ${clock()}. Use them for current facts. " +
+            "Answer in plain text: no links, no markdown, no citations."
 
     private suspend fun generate(
         goal: String,
@@ -296,20 +310,25 @@ class OpenAICompatTransport internal constructor(
                     return generateViaGeminiNative(
                         goal, notification, stateLines, requireNotNull(token), baseModel, runtimeData,
                     )
-                else -> Unit // OPENROUTER_ONLINE resta su Chat Completions (slug `:online`).
+                else -> Unit // OPENROUTER_WEB_PLUGIN resta su Chat Completions (plugin `web` nel body).
             }
         }
-        // OpenRouter attiva il loop web con lo slug `<model>:online`; gli altri lasciano il modello com'è.
-        val model = if (applyWeb && spec.quirks.webSearch == WebSearchMechanism.OPENROUTER_ONLINE) {
-            "$baseModel:online"
+        // OpenRouter attiva il loop web con il plugin `{"id":"web"}` e lascia `model` intatto (anche per
+        // i preset `@preset/...`: il suffisso `:online` li rompe con un 404; plugin e suffisso sono
+        // equivalenti). Il prompt predefinito del plugin chiede link markdown con le fonti, che in una
+        // notifica o in una reply non vogliamo: `search_prompt` lo sostituisce con testo semplice.
+        // Gli altri provider non inviano alcun plugin.
+        val plugins = if (applyWeb && spec.quirks.webSearch == WebSearchMechanism.OPENROUTER_WEB_PLUGIN) {
+            listOf(ChatPlugin(OPENROUTER_WEB_PLUGIN_ID, openRouterSearchPrompt()))
         } else {
-            baseModel
+            null
         }
         // Sink NOTIFICA #59 (useReplyTool=false): NIENTE reply tool, NESSUN tool_choice, system della
-        // NOTIFICA (nessun framing WhatsApp). Il modello (con o senza web OpenRouter `:online`) produce
-        // testo semplice preso dal `content`. Reply (useReplyTool=true): invariato (reply tool + actSystemText).
+        // NOTIFICA (nessun framing WhatsApp). Il modello (con o senza web OpenRouter) produce testo
+        // semplice preso dal `content`. Reply (useReplyTool=true): invariato (reply tool + actSystemText).
         val request = ChatRequest(
-            model = model,
+            model = baseModel,
+            plugins = plugins,
             messages = buildList {
                 add(
                     ChatMessage(
@@ -321,7 +340,7 @@ class OpenAICompatTransport internal constructor(
                         },
                     ),
                 )
-                add(ChatMessage("user", userMessageFor(notification, stateLines)))
+                add(ChatMessage("user", userMessageFor(goal, notification, stateLines)))
                 // Dato runtime TAINTED: messaggio DATA separato, MAI concatenato al system.
                 AgentMessageSupport.actRuntimeDataText(runtimeData)?.let { add(ChatMessage("user", it)) }
             },
@@ -378,7 +397,7 @@ class OpenAICompatTransport internal constructor(
                         else AgentMessageSupport.actSystemTextNotification(goal, webAllowed = true),
                     ),
                 )
-                add(ResponsesInputMessage("user", userMessageFor(notification, stateLines)))
+                add(ResponsesInputMessage("user", userMessageFor(goal, notification, stateLines)))
                 // Dato runtime TAINTED: input DATA separato, MAI nel system.
                 AgentMessageSupport.actRuntimeDataText(runtimeData)?.let { add(ResponsesInputMessage("user", it)) }
             },
@@ -421,7 +440,7 @@ class OpenAICompatTransport internal constructor(
                 add(
                     GeminiContent(
                         role = "user",
-                        parts = listOf(GeminiPart(userMessageFor(notification, stateLines))),
+                        parts = listOf(GeminiPart(userMessageFor(goal, notification, stateLines))),
                     ),
                 )
                 // Dato runtime TAINTED: content DATA separato, MAI nella systemInstruction.
@@ -641,7 +660,11 @@ class OpenAICompatTransport internal constructor(
         }.getOrNull()
     }
 
-    private suspend fun execute(request: Request): String {
+    /**
+     * Esegue la chiamata. Con [diagnostics] (solo `health()`) un errore HTTP porta anche il messaggio
+     * ripulito del provider in [TransportException.providerMessage]; senza, il body d'errore non si legge.
+     */
+    private suspend fun execute(request: Request, diagnostics: ErrorDiagnostics? = null): String {
         val call = client.newCall(request)
         return suspendCancellableCoroutine { continuation ->
             continuation.invokeOnCancellation { call.cancel() }
@@ -658,7 +681,7 @@ class OpenAICompatTransport internal constructor(
                 }
 
                 override fun onResponse(call: Call, response: Response) {
-                    val result = runCatching { response.use(::readSuccessfulJson) }
+                    val result = runCatching { response.use { readSuccessfulJson(it, diagnostics) } }
                     result.fold(
                         onSuccess = { continuation.resume(it) },
                         onFailure = { error ->
@@ -682,7 +705,7 @@ class OpenAICompatTransport internal constructor(
         }
     }
 
-    private fun readSuccessfulJson(response: Response): String {
+    private fun readSuccessfulJson(response: Response, diagnostics: ErrorDiagnostics?): String {
         if (!response.isSuccessful) {
             val kind = when (response.code) {
                 401, 403 -> TransportErrorKind.AUTH
@@ -690,7 +713,16 @@ class OpenAICompatTransport internal constructor(
                 429 -> TransportErrorKind.RATE_LIMIT
                 else -> TransportErrorKind.HTTP
             }
-            throw TransportException(kind, "Provider HTTP ${response.code}", statusCode = response.code)
+            val providerMessage = diagnostics?.let {
+                val body = runCatching { response.peekBody(MAX_ERROR_BODY_BYTES).string() }.getOrNull()
+                ProviderErrorMessage.extract(body, it.secrets)
+            }
+            throw TransportException(
+                kind,
+                "Provider HTTP ${response.code}",
+                statusCode = response.code,
+                providerMessage = providerMessage,
+            )
         }
         val body = response.body
             ?: throw TransportException(TransportErrorKind.PROTOCOL, "risposta senza body")
@@ -712,6 +744,9 @@ class OpenAICompatTransport internal constructor(
 
     private fun config(message: String) = TransportException(TransportErrorKind.CONFIGURATION, message)
 
+    /** Richiesta di diagnostica dell'errore HTTP: [secrets] sono i valori da mascherare nel messaggio. */
+    private class ErrorDiagnostics(val secrets: List<String?>)
+
     @Serializable
     private data class ChatRequest(
         val model: String,
@@ -721,6 +756,16 @@ class OpenAICompatTransport internal constructor(
         @SerialName("max_tokens") val maxTokens: Int? = null,
         @SerialName("max_completion_tokens") val maxCompletionTokens: Int? = null,
         @SerialName("reasoning_effort") val reasoningEffort: String? = null,
+        val temperature: Double? = null,
+        /** Solo OpenRouter con web richiesto: `[{"id":"web","search_prompt":"..."}]`. Assente (null) in ogni altro caso. */
+        val plugins: List<ChatPlugin>? = null,
+    )
+
+    @Serializable
+    private data class ChatPlugin(
+        val id: String,
+        /** Prompt che precede i risultati web (solo OpenRouter): sostituisce quello predefinito con le citazioni. */
+        @SerialName("search_prompt") val searchPrompt: String? = null,
     )
 
     @Serializable
@@ -881,7 +926,11 @@ class OpenAICompatTransport internal constructor(
         const val GEMINI_MAX_OUTPUT_TOKENS = 2_048
         const val GEMINI_THINKING_BUDGET = 1_024
         const val REPLY_TOOL_MISSING = "reply_tool_missing"
+
+        /** Id del plugin web di OpenRouter (`"plugins":[{"id":"web"}]`). */
+        const val OPENROUTER_WEB_PLUGIN_ID = "web"
         const val MAX_RESPONSE_BYTES = 512L * 1024L
+        const val MAX_ERROR_BODY_BYTES = 16L * 1024L
         val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
         val FORCED_REPLY_CHOICE: JsonElement = buildJsonObject {
             put("type", "function")

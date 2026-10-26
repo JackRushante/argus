@@ -309,15 +309,16 @@ BINDING RULES:
     }
 
     /**
-     * User message del sink NOTIFICA #59: NON referenzia alcuna notifica in arrivo (non esiste).
-     * Porta solo le state lines quando "state" è tra le sorgenti; altrimenti una riga neutra di
-     * innesco.
+     * User message del sink NOTIFICA #59: NON referenzia alcuna notifica in arrivo (non esiste). La
+     * prima riga è l'obiettivo approvato: i provider con ricerca web server-side (plugin web di
+     * OpenRouter) cercano sul messaggio utente, non sul system. L'obiettivo è testo approvato
+     * dall'utente, non dato esterno (quello sta nel messaggio DATA separato). Seguono le state lines
+     * quando "state" è tra le sorgenti.
      */
-    fun actUserTextNotification(stateLines: List<String>): String = buildString {
-        if (stateLines.isEmpty()) {
-            append("Generate the requested content now.")
-        } else {
-            append("Device state:")
+    fun actUserTextNotification(goal: String, stateLines: List<String>): String = buildString {
+        append("Goal: ").append(goal)
+        if (stateLines.isNotEmpty()) {
+            append("\nDevice state:")
             stateLines.forEach { append("\n- ").append(it) }
         }
     }

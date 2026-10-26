@@ -12,6 +12,7 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
@@ -28,6 +29,8 @@ class Engine(
     private val journal: ExecutionJournal = NoopExecutionJournal,
     private val executionIds: ExecutionIdFactory = StableExecutionIdFactory,
     private val resolvedExecutor: ResolvedActionExecutor? = null,
+    /** Attesa dei programmi P4 (`wait`): Android inietta una pausa che sveglia il dispositivo (B19). */
+    private val pause: suspend (Long) -> Unit = { delay(it) },
     private val now: () -> Long,
 ) {
     companion object {
@@ -278,6 +281,7 @@ class Engine(
                         },
                         stateProvider = stateProvider,
                         conditionEvaluator = evaluator,
+                        pause = pause,
                         journal = ProgramExecutionJournal { entry ->
                             recordJournalAction(
                                 ActionJournalEntry(

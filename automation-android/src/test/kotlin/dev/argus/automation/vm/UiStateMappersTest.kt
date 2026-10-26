@@ -3,6 +3,7 @@ package dev.argus.automation.vm
 import dev.argus.automation.ApprovalFlowReview
 import dev.argus.data.dao.AuditLogRecord
 import dev.argus.data.entities.ActionResultEntity
+import dev.argus.data.entities.ScheduledTimeAlarmEntity
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.ActionTypeIds
 import dev.argus.engine.safety.ConflictWarning
@@ -20,6 +21,7 @@ import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.ActionJournalOutcome
 import dev.argus.engine.runtime.AuditKind
 import dev.argus.engine.runtime.ExecutionStatus
+import dev.argus.engine.runtime.OmittedSteps
 import dev.argus.engine.safety.DraftId
 import dev.argus.engine.safety.DraftReview
 import dev.argus.engine.safety.PendingDraft
@@ -81,7 +83,7 @@ class UiStateMappersTest {
         assertEquals("Deleted automation", row.automationName)
         assertEquals("Rule disabled: one-shot consumed", row.summary)
         assertEquals(
-            "1. AI generation → failed · backend failed",
+            "1. AI generation → failed · backend_failed",
             assertNotNull(row.expandedDetail).single(),
         )
         assertTrue(row.isGenerative)
@@ -295,17 +297,17 @@ class UiStateMappersTest {
         val arm = record(AuditKind.ARM_FAILED, "registrar_failed")
         assertEquals(dev.argus.ui.model.LogOutcome.FAILED, arm.outcome)
         assertTrue(arm.summary.contains("Attivazione fallita"))
-        assertTrue(arm.summary.contains("registrar failed"))
+        assertTrue(arm.summary.contains("la regola non si è potuta registrare"), arm.summary)
 
         val scheduling = record(AuditKind.SCHEDULING_FAILED, "expired")
         assertEquals(dev.argus.ui.model.LogOutcome.FAILED, scheduling.outcome)
         assertTrue(scheduling.summary.contains("Pianificazione non riuscita"))
-        assertTrue(scheduling.summary.contains("expired"))
+        assertTrue(scheduling.summary.contains("l'orario è già passato"), scheduling.summary)
 
         val enable = record(AuditKind.ENABLE_FAILED, "review_required")
         assertEquals(dev.argus.ui.model.LogOutcome.FAILED, enable.outcome)
         assertTrue(enable.summary.contains("Abilitazione non riuscita"))
-        assertTrue(enable.summary.contains("review required"))
+        assertTrue(enable.summary.contains("la regola va prima rivista"), enable.summary)
     }
 
     @Test
@@ -571,5 +573,299 @@ class UiStateMappersTest {
         val withEdit = automation.toAutomationRow(null, 0L, language = RenderLanguage.EN, pendingEditDraftId = "draft-1")
         assertEquals("draft-1", withEdit.pendingEditDraftId)
         assertEquals(true, withEdit.enabled)
+    }
+
+    // --- B27: riga di riepilogo dei cicli lunghi ---------------------------------------------
+
+    private fun omittedRow(count: Int, language: RenderLanguage) = AuditLogRecord(
+        id = 1L,
+        automationId = "loop",
+        automationName = "Loop",
+        kind = AuditKind.FIRED,
+        atMillis = 1_000L,
+        detail = "",
+        executionId = "e-loop",
+        executionStatus = ExecutionStatus.SUCCEEDED,
+        succeededCount = 3_000,
+        failedCount = 0,
+        submittedCount = 0,
+    ).toLogRow(
+        listOf(
+            ActionResultEntity(
+                executionId = "e-loop",
+                actionIndex = 33,
+                actionType = OmittedSteps.ACTION_TYPE,
+                outcome = ActionJournalOutcome.SUCCEEDED,
+                atMillis = 1_000L,
+                errorCode = OmittedSteps.code(count),
+                actionPath = "1.while[34].2",
+            ),
+        ),
+        language,
+    )
+
+    @Test
+    fun `omitted loop steps summary row reads as repeated steps not recorded`() {
+        assertEquals(
+            "2900 repeated steps not recorded",
+            assertNotNull(omittedRow(2_900, RenderLanguage.EN).expandedDetail).single(),
+        )
+        assertEquals(
+            "2900 passaggi ripetuti non registrati",
+            assertNotNull(omittedRow(2_900, RenderLanguage.IT).expandedDetail).single(),
+        )
+        assertEquals(
+            "1 repeated step not recorded",
+            assertNotNull(omittedRow(1, RenderLanguage.EN).expandedDetail).single(),
+        )
+        assertEquals(
+            "1 passaggio ripetuto non registrato",
+            assertNotNull(omittedRow(1, RenderLanguage.IT).expandedDetail).single(),
+        )
+    }
+
+    // --- B14: il Log mostra il vero motivo ---------------------------------------------------
+
+    private fun failureRow(kind: AuditKind, detail: String, language: RenderLanguage) = AuditLogRecord(
+        id = 1L,
+        automationId = "a",
+        automationName = "Regola",
+        kind = kind,
+        atMillis = 1_000L,
+        detail = detail,
+        executionId = null,
+        executionStatus = null,
+        succeededCount = null,
+        failedCount = null,
+        submittedCount = null,
+    ).toLogRow(emptyList(), language)
+
+    @Test
+    fun `new reason codes have an english and an italian label on every failure kind`() {
+        val expected = mapOf(
+            "foreground_service_denied" to ("Android did not allow the foreground service" to
+                "Android non ha permesso il servizio in primo piano"),
+            "location_disabled" to ("location is turned off" to "la localizzazione è spenta"),
+            "shizuku_unavailable" to ("Shizuku is not running" to "Shizuku non è attivo"),
+            "shizuku_timeout" to ("Shizuku did not respond in time" to "Shizuku non ha risposto in tempo"),
+            "shizuku_unsupported" to ("Shizuku version is too old" to "la versione di Shizuku è troppo vecchia"),
+            "dnd_change_not_applied" to ("Android did not apply the Do Not Disturb change" to
+                "Android non ha applicato il cambio di Non disturbare"),
+            "one_shot_in_past" to ("the one-time rule's time has already passed" to
+                "l'orario della regola una tantum è già passato"),
+            "execution_interrupted" to ("execution interrupted, the app was closed" to
+                "esecuzione interrotta, l'app è stata chiusa"),
+        )
+        val kinds = listOf(
+            AuditKind.ERROR,
+            AuditKind.BLOCKED_POLICY,
+            AuditKind.ARM_FAILED,
+            AuditKind.SCHEDULING_FAILED,
+            AuditKind.ENABLE_FAILED,
+        )
+        for ((code, labels) in expected) {
+            for (kind in kinds) {
+                val en = failureRow(kind, code, RenderLanguage.EN)
+                val ita = failureRow(kind, code, RenderLanguage.IT)
+                assertTrue(en.summary.contains(labels.first), "EN $kind $code: ${en.summary}")
+                assertTrue(ita.summary.contains(labels.second), "IT $kind $code: ${ita.summary}")
+                assertEquals(dev.argus.ui.model.LogOutcome.FAILED, en.outcome)
+            }
+        }
+    }
+
+    @Test
+    fun `an unknown reason code is shown as the code itself`() {
+        assertEquals(
+            "execution error (flux_capacitor_overheated)",
+            failureRow(AuditKind.ERROR, "flux_capacitor_overheated", RenderLanguage.EN).summary,
+        )
+        assertEquals(
+            "bloccata dalla policy (flux_capacitor_overheated)",
+            failureRow(AuditKind.BLOCKED_POLICY, "flux_capacitor_overheated", RenderLanguage.IT).summary,
+        )
+        assertTrue(
+            failureRow(AuditKind.SCHEDULING_FAILED, "flux_capacitor_overheated", RenderLanguage.EN)
+                .summary.endsWith("flux_capacitor_overheated"),
+        )
+    }
+
+    @Test
+    fun `a privileged command exit code gets a readable label in both languages`() {
+        assertEquals(
+            "il comando di sistema è terminato con codice 1",
+            LogReasonLabels.label("set_wifi_exit_1", RenderLanguage.IT),
+        )
+        assertEquals(
+            "the system command ended with code 255",
+            LogReasonLabels.label("set_dnd_exit_255", RenderLanguage.EN),
+        )
+        assertNull(LogReasonLabels.label("set_wifi_exit_", RenderLanguage.EN))
+    }
+
+    @Test
+    fun `every known reason code has both languages and a label different from the code`() {
+        assertTrue(LogReasonLabels.knownCodes.size >= 40, "codici noti: ${LogReasonLabels.knownCodes.size}")
+        for (code in LogReasonLabels.knownCodes) {
+            val en = assertNotNull(LogReasonLabels.label(code, RenderLanguage.EN), code)
+            val it = assertNotNull(LogReasonLabels.label(code, RenderLanguage.IT), code)
+            assertTrue(en.isNotBlank() && it.isNotBlank(), code)
+            assertTrue(en != code && it != code, code)
+        }
+    }
+
+    @Test
+    fun `action error codes use the same labels and fall back to the raw code`() {
+        fun detail(code: String, language: RenderLanguage) = assertNotNull(
+            AuditLogRecord(
+                id = 1L, automationId = "a", automationName = "n", kind = AuditKind.FIRED, atMillis = 1_000L,
+                detail = "", executionId = "e", executionStatus = ExecutionStatus.FAILED,
+                succeededCount = 0, failedCount = 1, submittedCount = 0,
+            ).toLogRow(
+                listOf(
+                    ActionResultEntity(
+                        executionId = "e", actionIndex = 0, actionType = ActionTypeIds.SET_DND,
+                        outcome = ActionJournalOutcome.FAILED, atMillis = 1_000L, errorCode = code,
+                    ),
+                ),
+                language,
+            ).expandedDetail,
+        ).single()
+
+        assertEquals(
+            "1. Set Do Not Disturb → failed · Android did not apply the Do Not Disturb change",
+            detail("dnd_change_not_applied", RenderLanguage.EN),
+        )
+        assertEquals(
+            "1. Imposta Non disturbare → fallita · Shizuku non è attivo",
+            detail("shizuku_unavailable", RenderLanguage.IT),
+        )
+        assertEquals("1. Set Do Not Disturb → failed · mystery_code", detail("mystery_code", RenderLanguage.EN))
+    }
+
+    // --- B32: budget come avviso, prossimo scatto vero ---------------------------------------
+
+    @Test
+    fun `an ai reply blocked by the budget is a warning and not a green success`() {
+        val row = AuditLogRecord(
+            id = 5L,
+            automationId = "ai-rule",
+            automationName = "AI rule",
+            kind = AuditKind.FIRED,
+            atMillis = 1_000L,
+            detail = "",
+            executionId = "execution-5",
+            executionStatus = ExecutionStatus.SUPPRESSED_BUDGET,
+            succeededCount = 0,
+            failedCount = 1,
+            submittedCount = 0,
+        ).toLogRow(emptyList(), RenderLanguage.IT)
+
+        assertEquals(dev.argus.ui.model.LogOutcome.PARTIAL, row.outcome)
+        assertEquals("bloccata dal budget LLM", row.summary)
+    }
+
+    private fun relativeRule(): Automation {
+        val unsigned = Automation(
+            AutomationId("relative"),
+            "Tra tre ore",
+            CreatedBy.USER,
+            AutomationStatus.ARMED,
+            Trigger.Time(afterMs = 10 * 3_600_000L, tz = "UTC"),
+            listOf(Action.ShowNotification("Argus", "ciao")),
+            enabled = true,
+        )
+        return unsigned.copy(approvalFingerprint = ApprovalFingerprints.of(unsigned))
+    }
+
+    private fun alarmFor(rule: Automation, eventAtMillis: Long) = ScheduledTimeAlarmEntity(
+        automationId = rule.id.value,
+        approvalFingerprint = rule.approvalFingerprint!!.value,
+        eventAtMillis = eventAtMillis,
+        wakeAtMillis = eventAtMillis,
+        requestedPrecision = "EXACT",
+        scheduledMode = "EXACT",
+        updatedAtMillis = 0L,
+    )
+
+    private inline fun <T> inUtc(block: () -> T): T {
+        val previous = java.util.TimeZone.getDefault()
+        java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("UTC"))
+        try {
+            return block()
+        } finally {
+            java.util.TimeZone.setDefault(previous)
+        }
+    }
+
+    @Test
+    fun `next fire of an after-N-hours rule comes from the persisted alarm and not from now plus N`() = inUtc {
+        val rule = relativeRule()
+        val now = java.time.Instant.parse("2026-07-20T10:00:00Z").toEpochMilli()
+        // Armata alle 08:00 con ritardo di 4 ore reali: scatta alle 12:30 (ancora congelata all'arm).
+        val scheduled = java.time.Instant.parse("2026-07-20T12:30:00Z").toEpochMilli()
+
+        val row = rule.toAutomationRow(
+            lastFiredAt = null,
+            nowMillis = now,
+            language = RenderLanguage.IT,
+            scheduledAlarm = alarmFor(rule, scheduled),
+        )
+        assertEquals("oggi 12:30", row.nextFireLabel)
+        assertEquals(
+            "today 12:30",
+            rule.toAutomationRow(null, now, language = RenderLanguage.EN, scheduledAlarm = alarmFor(rule, scheduled))
+                .nextFireLabel,
+        )
+    }
+
+    @Test
+    fun `next fire of an after-N-hours rule is absent without a trustworthy persisted alarm`() = inUtc {
+        val rule = relativeRule()
+        val now = java.time.Instant.parse("2026-07-20T10:00:00Z").toEpochMilli()
+        val future = now + 3_600_000L
+
+        // Nessuno stato persistito: niente etichetta, mai now + N.
+        assertNull(rule.toAutomationRow(null, now, language = RenderLanguage.IT).nextFireLabel)
+        // Sveglia di un'altra revisione della regola: non si usa.
+        val stale = alarmFor(rule, future).copy(approvalFingerprint = "f".repeat(64))
+        assertNull(rule.toAutomationRow(null, now, language = RenderLanguage.IT, scheduledAlarm = stale).nextFireLabel)
+        // Istante gia' passato: lo scatto e' dovuto o avvenuto.
+        assertNull(
+            rule.toAutomationRow(null, now, language = RenderLanguage.IT, scheduledAlarm = alarmFor(rule, now - 1))
+                .nextFireLabel,
+        )
+        // Regola disabilitata: nessun prossimo scatto.
+        val disabled = rule.copy(status = AutomationStatus.DISABLED, enabled = false)
+        assertNull(
+            disabled.toAutomationRow(null, now, language = RenderLanguage.IT, scheduledAlarm = alarmFor(rule, future))
+                .nextFireLabel,
+        )
+    }
+
+    @Test
+    fun `next fire of a one-shot rule is its absolute instant and cron keeps working`() = inUtc {
+        val now = java.time.Instant.parse("2026-07-20T10:00:00Z").toEpochMilli()
+        fun rule(trigger: Trigger.Time): Automation {
+            val unsigned = Automation(
+                AutomationId("t"), "t", CreatedBy.USER, AutomationStatus.ARMED, trigger,
+                listOf(Action.ShowNotification("Argus", "ciao")), enabled = true,
+            )
+            return unsigned.copy(approvalFingerprint = ApprovalFingerprints.of(unsigned))
+        }
+        assertEquals(
+            "domani 08:00",
+            rule(Trigger.Time(at = "2026-07-21T08:00", tz = "UTC"))
+                .toAutomationRow(null, now, language = RenderLanguage.IT).nextFireLabel,
+        )
+        assertNull(
+            rule(Trigger.Time(at = "2026-07-19T08:00", tz = "UTC"))
+                .toAutomationRow(null, now, language = RenderLanguage.IT).nextFireLabel,
+        )
+        assertEquals(
+            "oggi 23:00",
+            rule(Trigger.Time(cron = "0 23 * * *", tz = "UTC"))
+                .toAutomationRow(null, now, language = RenderLanguage.IT).nextFireLabel,
+        )
     }
 }

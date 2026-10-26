@@ -130,4 +130,58 @@ class ConditionEvaluatorTest {
         assertTrue(ev.eval(condition, DeviceState(queryValues = mapOf(query.canonicalId to "1"))))
         assertFalse(ev.eval(Condition.Not(condition), DeviceState()))
     }
+
+    @Test fun `contains is case insensitive in state equals while eq and neq stay exact`() {
+        val ev = ConditionEvaluator(clockAt("2026-07-12T10:00:00Z"))
+        val st = DeviceState(values = mapOf("ringer" to "Normal"))
+        assertTrue(ev.eval(Condition.StateEquals("ringer", CmpOp.CONTAINS, "NORM"), st))
+        assertTrue(ev.eval(Condition.StateEquals("ringer", CmpOp.CONTAINS, "ormA"), st))
+        assertFalse(ev.eval(Condition.StateEquals("ringer", CmpOp.CONTAINS, "silent"), st))
+        assertFalse(ev.eval(Condition.StateEquals("ringer", CmpOp.EQ, "normal"), st))
+        assertTrue(ev.eval(Condition.StateEquals("ringer", CmpOp.NEQ, "normal"), st))
+    }
+
+    @Test fun `contains is case insensitive in typed text state compare while eq and neq stay exact`() {
+        val ev = ConditionEvaluator(clockAt("2026-07-12T10:00:00Z"))
+        val query = StateQuery.Setting(SettingNamespace.GLOBAL, "device_name")
+        val st = DeviceState(queryValues = mapOf(query.canonicalId to "Pixel Casa"))
+        fun cmp(op: CmpOp, expected: String) =
+            Condition.StateCompare(query, StateValueType.TEXT, op, expected)
+        assertTrue(ev.eval(cmp(CmpOp.CONTAINS, "pixel"), st))
+        assertTrue(ev.eval(cmp(CmpOp.CONTAINS, "CASA"), st))
+        assertFalse(ev.eval(cmp(CmpOp.CONTAINS, "ufficio"), st))
+        assertFalse(ev.eval(cmp(CmpOp.EQ, "pixel casa"), st))
+        assertTrue(ev.eval(cmp(CmpOp.NEQ, "pixel casa"), st))
+    }
+
+    @Test fun `contains is case insensitive in text variable comparisons while eq and neq stay exact`() {
+        val ev = ConditionEvaluator(clockAt("2026-07-12T10:00:00Z"))
+        val values = mapOf(
+            "reply" to VarValue(
+                "Ciao Mondo", VarType.TEXT, IntegrityLabel.CLEAN, ConfidentialityLabel.PUBLIC,
+                setOf(ValueProvenance.LITERAL),
+            ),
+        )
+        fun result(op: CmpOp, expected: String) = ev.flowResult(
+            Condition.VarCompare("reply", op, expected = expected), DeviceState(), values::get,
+        )
+        assertEquals(ConditionEvaluator.Result.MET, result(CmpOp.CONTAINS, "mondo"))
+        assertEquals(ConditionEvaluator.Result.MET, result(CmpOp.CONTAINS, "CIAO"))
+        assertEquals(ConditionEvaluator.Result.NOT_MET, result(CmpOp.CONTAINS, "arrivederci"))
+        assertEquals(ConditionEvaluator.Result.NOT_MET, result(CmpOp.EQ, "ciao mondo"))
+        assertEquals(ConditionEvaluator.Result.MET, result(CmpOp.NEQ, "ciao mondo"))
+    }
+
+    @Test fun `time window with start equal to end covers the whole day`() {
+        val st = DeviceState()
+        val window = Condition.TimeWindow("08:00", "08:00", "Europe/Rome")
+        listOf(
+            "2026-07-12T05:59:00Z", // 07:59
+            "2026-07-12T06:00:00Z", // 08:00 esatto
+            "2026-07-12T10:00:00Z", // 12:00
+            "2026-07-12T21:59:00Z", // 23:59
+        ).forEach { iso ->
+            assertTrue(ConditionEvaluator(clockAt(iso)).eval(window, st), iso)
+        }
+    }
 }

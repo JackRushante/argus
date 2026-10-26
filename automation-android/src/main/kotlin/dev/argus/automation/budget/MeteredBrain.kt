@@ -1,5 +1,6 @@
 package dev.argus.automation.budget
 
+import dev.argus.brain.CompileLimits
 import dev.argus.brain.ProviderCatalog
 import dev.argus.brain.ProviderConfig
 import dev.argus.brain.ProviderId
@@ -57,6 +58,33 @@ object BudgetMeta {
     )
 }
 
+private const val NOTE_MAX_CHARS = 400
+private const val NOTE_PREFIX = "(Argus: your previous reply could not be used: "
+private const val NOTE_SUFFIX = ". Reply again with one short sentence, then the final line @@META@@ " +
+    "{\"draft\":<object-or-null>,\"error_code\":<string-or-null>}, using only the trigger and action " +
+    "shapes listed in the rules; for \"now\" use {\"type\":\"immediate\"}.)"
+private val WHITESPACE = Regex("\\s+")
+
+/** Pacchetto che precede un nome di classe (`dev.argus.engine.model.Trigger.Time`): spazio sprecato nella nota. */
+private val PACKAGE_PREFIX = Regex("\\b(?:[a-z][a-z0-9]*\\.)+(?=[A-Z])")
+
+/**
+ * Nota di correzione del secondo tentativo di compile: codice e, se c'è, il dettaglio del parser (già
+ * privo di frammenti di input; i nomi di classe perdono il pacchetto). Tutta la nota sta in
+ * [NOTE_MAX_CHARS]: se serve si accorcia il dettaglio, mai le istruzioni.
+ */
+internal fun correctionNote(code: String, detail: String?): String {
+    val reason = buildString {
+        append(code)
+        val clean = detail?.replace(PACKAGE_PREFIX, "")?.replace(WHITESPACE, " ")?.trim().orEmpty()
+        if (clean.isNotEmpty()) append(": ").append(clean)
+    }
+    val room = (NOTE_MAX_CHARS - NOTE_PREFIX.length - NOTE_SUFFIX.length).coerceAtLeast(code.length)
+    var cut = reason.take(room)
+    if (cut.isNotEmpty() && Character.isHighSurrogate(cut.last())) cut = cut.dropLast(1)
+    return NOTE_PREFIX + cut + NOTE_SUFFIX
+}
+
 /** Canale notifiche budget, separato da AutomationNotifier (che richiede FireContext). */
 fun interface BudgetAlerts {
     suspend fun notify(title: String, text: String)
@@ -111,13 +139,34 @@ class MeteredBrain(
         val config = selectedConfig()
         val first = meteredCompile(config) { delegate.compile(nl, manifest, state) }
         // Retry-once degli errori di FORMATO del modello (draft_invalid, meta_parse_error,
-        // meta_json_missing), provider-agnostico ma VISIBILE al choke-point: il primo evento appena
-        // persistito partecipa al nuovo check e un HARD impedisce il secondo contatto. Se l'utente
-        // cambia provider/modello durante il primo turno, non ritentare su una destinazione diversa
-        // da quella appena contabilizzata: un retry manuale ripartirà col nuovo config.
-        if (first.metaError !in CompileMetaError.FORMAT_ERRORS) return first
+        // meta_json_missing) e di una risposta senza la riga @@META@@ (draft_missing: il protocollo la
+        // chiede sempre, anche per un chiarimento), provider-agnostico ma VISIBILE al choke-point: il primo
+        // evento appena persistito partecipa al nuovo check e un HARD impedisce il secondo contatto. Se
+        // l'utente cambia provider/modello durante il primo turno, non ritentare su una destinazione
+        // diversa da quella appena contabilizzata: un retry manuale ripartirà col nuovo config.
+        val code = first.metaError ?: return first
+        if (!isRetryable(code)) return first
         if (selectedConfig() != config) return first
-        return meteredCompile(config) { delegate.compile(nl, manifest, state) }
+        // Con temperatura bassa rifare la stessa richiesta ripete lo stesso errore: il secondo tentativo
+        // porta in coda al testo utente una nota di correzione, SOLO per questa chiamata (non entra in
+        // chat né nel DB: il chiamante conserva il proprio `nl`).
+        val retryText = withCorrectionNote(nl, code, first.detail)
+        return meteredCompile(config) { delegate.compile(retryText, manifest, state) }
+    }
+
+    /**
+     * Errori di formato e `draft_missing`. Sul telefono un modello piccolo ha risposto a «spegni subito il
+     * non disturbare» con una frase e la sola azione in JSON, senza `@@META@@`: anche quella è una bozza
+     * persa, e la nota di correzione la recupera. Un chiarimento ben formato (clarification_required) non
+     * passa di qui.
+     */
+    private fun isRetryable(code: String): Boolean =
+        code in CompileMetaError.FORMAT_ERRORS || code == CompileMetaError.DRAFT_MISSING
+
+    private fun withCorrectionNote(nl: String, code: String, detail: String?): String {
+        val text = nl + "\n\n" + correctionNote(code, detail)
+        // Il transport rifiuta un prompt oltre il tetto: in quel caso il ritentativo resta identico.
+        return if (text.length <= CompileLimits.MAX_MESSAGE_CHARS) text else nl
     }
 
     private suspend fun meteredCompile(

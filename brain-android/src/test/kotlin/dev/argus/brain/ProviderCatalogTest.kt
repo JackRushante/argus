@@ -35,6 +35,13 @@ class ProviderCatalogTest {
         assertTrue(ProviderCatalog.spec(ProviderId.CUSTOM_OPENAI_COMPAT).prices.isEmpty())
     }
 
+    @Test fun `la temperatura del compile e' prevista solo per openrouter e custom`() {
+        for (id in ProviderId.entries) {
+            val expected = if (id == ProviderId.OPENROUTER || id == ProviderId.CUSTOM_OPENAI_COMPAT) 0.2 else null
+            assertEquals(expected, ProviderCatalog.spec(id).quirks.compileTemperature, "compileTemperature per $id")
+        }
+    }
+
     @Test fun `costTracked solo per i provider a prezzo noto`() {
         val tracked = setOf(ProviderId.OPENAI, ProviderId.ANTHROPIC, ProviderId.GEMINI)
         for (id in ProviderId.entries) {
@@ -75,8 +82,8 @@ class ProviderCatalogTest {
     @Test fun `web search mechanism follows the verified per-provider table`() {
         // Anthropic: server tool web_search_20250305 nell'array tools (loop interno lato Anthropic).
         assertEquals(WebSearchMechanism.ANTHROPIC_TOOL, ProviderCatalog.spec(ProviderId.ANTHROPIC).quirks.webSearch)
-        // OpenRouter: slug modello con suffisso `:online`.
-        assertEquals(WebSearchMechanism.OPENROUTER_ONLINE, ProviderCatalog.spec(ProviderId.OPENROUTER).quirks.webSearch)
+        // OpenRouter: plugin `{"id":"web"}` nel body (il suffisso `:online` rompe i preset `@preset/...`).
+        assertEquals(WebSearchMechanism.OPENROUTER_WEB_PLUGIN, ProviderCatalog.spec(ProviderId.OPENROUTER).quirks.webSearch)
         // Gemini: GEMINI_NATIVE — grounding `google_search` via API nativa generateContent (validato
         // live 2026-07-17). Non passa dallo shim OpenAI-compat /chat/completions.
         assertEquals(WebSearchMechanism.GEMINI_NATIVE, ProviderCatalog.spec(ProviderId.GEMINI).quirks.webSearch)

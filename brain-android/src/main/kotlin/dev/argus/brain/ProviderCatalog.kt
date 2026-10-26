@@ -22,7 +22,9 @@ enum class ReasoningEffort(val wireValue: String?) {
  * testo finale in UNA chiamata — l'architettura single-turn dei transport resta invariata.
  * - [NONE]: web non attivabile da questo path (default; degradazione graziosa se richiesto).
  * - [ANTHROPIC_TOOL]: server tool `{"type":"web_search_20250305","name":"web_search"}` nei `tools`.
- * - [OPENROUTER_ONLINE]: slug modello con suffisso `:online`.
+ * - [OPENROUTER_WEB_PLUGIN]: plugin `"plugins":[{"id":"web"}]` nel body Chat Completions, `model` intatto.
+ *   Il suffisso `:online` è equivalente ma rompe i preset (`@preset/...:online` dà 404). Entrambi sono
+ *   deprecati da OpenRouter a favore del tool lato server `openrouter:web_search` (lavoro futuro).
  * - [OPENAI_RESPONSES]: tool `{"type":"web_search"}` sulla Responses API (`POST {base}/responses`,
  *   endpoint diverso da /chat/completions). Il modello gpt-5.x fa il loop web internamente e ritorna il
  *   testo negli item `output→message→output_text`. Validato live 2026-07-17.
@@ -31,7 +33,7 @@ enum class ReasoningEffort(val wireValue: String?) {
  *   OpenAI-compat (che rifiuta il grounding con 400). Testo = `candidates[0].content.parts[].text`.
  *   Validato live 2026-07-17.
  */
-enum class WebSearchMechanism { NONE, ANTHROPIC_TOOL, OPENROUTER_ONLINE, OPENAI_RESPONSES, GEMINI_NATIVE }
+enum class WebSearchMechanism { NONE, ANTHROPIC_TOOL, OPENROUTER_WEB_PLUGIN, OPENAI_RESPONSES, GEMINI_NATIVE }
 
 /** Flag di comportamento per-provider: MAI `if (provider == ...)` dentro un transport. */
 data class ProviderQuirks(
@@ -42,6 +44,17 @@ data class ProviderQuirks(
     val extraHeaders: Map<String, String> = emptyMap(),
     /** Come il transport attiva il web search server-side (o [WebSearchMechanism.NONE]). */
     val webSearch: WebSearchMechanism = WebSearchMechanism.NONE,
+    /**
+     * Temperatura inviata SOLO nelle richieste di compile (null = campo omesso, default del provider):
+     * una temperatura bassa rende costante la compilazione della stessa richiesta (stessa regola, non una
+     * volta una regola e una volta una domanda di chiarimento). Act e health non la inviano mai.
+     *
+     * Solo OpenRouter e Custom (OpenAI-compatibile). NON per gli altri, di proposito:
+     * - OpenAI: con i modelli di ragionamento una temperatura diversa da 1 dà errore 400;
+     * - Anthropic: con il thinking attivo la temperatura non è accettata;
+     * - Gemini 3: abbassarla degrada le risposte.
+     */
+    val compileTemperature: Double? = null,
 )
 
 /** Prezzi in micro-USD per 1M token (es. $2.50/MTok = 2_500_000). Interi: niente float sui soldi. */
@@ -87,6 +100,9 @@ data class ProviderSpec(
  */
 object ProviderCatalog {
     const val PRICING_VERSION: String = "2026-07"
+
+    /** Temperatura del compile per i provider OpenAI-compatibili «aperti» (vedi [ProviderQuirks.compileTemperature]). */
+    private const val COMPILE_TEMPERATURE = 0.2
 
     val specs: Map<ProviderId, ProviderSpec> = listOf(
         ProviderSpec(
@@ -170,8 +186,12 @@ object ProviderCatalog {
             defaultBaseUrl = "https://openrouter.ai/api/v1",
             authStyle = AuthStyle.BEARER,
             defaultModels = listOf("openai/gpt-5.5", "anthropic/claude-sonnet-4-5"),
-            // Web attivato dallo slug modello `<model>:online` (loop di ricerca interno lato OpenRouter).
-            quirks = ProviderQuirks(webSearch = WebSearchMechanism.OPENROUTER_ONLINE),
+            // Web attivato dal plugin `{"id":"web"}` (loop di ricerca interno lato OpenRouter); non dal
+            // suffisso `:online`, che rompe i preset `@preset/...`.
+            quirks = ProviderQuirks(
+                webSearch = WebSearchMechanism.OPENROUTER_WEB_PLUGIN,
+                compileTemperature = COMPILE_TEMPERATURE,
+            ),
             // TOKEN-ONLY: il listino statico copriva 2 modelli su centinaia e non leggiamo il
             // costo reale dal wire — niente stime in dollari, si contano solo i token.
             prices = emptyMap(),
@@ -184,6 +204,7 @@ object ProviderCatalog {
             authStyle = AuthStyle.BEARER,
             defaultModels = emptyList(),
             // Endpoint e listino sconosciuti a priori: costo "n/d".
+            quirks = ProviderQuirks(compileTemperature = COMPILE_TEMPERATURE),
             prices = emptyMap(),
             apiKeyRequired = false,
         ),

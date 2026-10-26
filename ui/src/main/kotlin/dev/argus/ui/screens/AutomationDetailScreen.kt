@@ -29,12 +29,16 @@ import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Error
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.FilterAltOff
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Insights
 import androidx.compose.material.icons.rounded.Place
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.SyncProblem
+import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.AlertDialog
@@ -49,6 +53,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,6 +62,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -71,11 +77,16 @@ import dev.argus.ui.R
 import dev.argus.ui.model.ActionRow
 import dev.argus.ui.model.AutomationDetailCallbacks
 import dev.argus.ui.model.AutomationDetailState
+import dev.argus.ui.model.DiagnosisFix
+import dev.argus.ui.model.DiagnosisLevel
+import dev.argus.ui.model.DiagnosisRow
 import dev.argus.ui.model.LogOutcome
 import dev.argus.ui.model.LogRow
+import dev.argus.ui.model.RuleDiagnosisUi
 import dev.argus.ui.model.RuleRender
 import dev.argus.ui.model.StatusBadge
 import dev.argus.ui.model.UiWarning
+import dev.argus.ui.preview.Fixtures
 import dev.argus.ui.theme.ArgusTheme
 import dev.argus.ui.theme.LocalArgusSemantic
 
@@ -143,6 +154,15 @@ fun AutomationDetailScreen(
 
                 if (state.recentRuns.isNotEmpty()) {
                     RecentRunsSection(state.recentRuns, callbacks::onOpenFullLog)
+                }
+
+                // F2: solo per una regola salvata; chiusa di default, calcola alla prima apertura.
+                if (state.diagnosisAvailable) {
+                    DiagnosisSection(
+                        diagnosis = state.diagnosis,
+                        onDiagnose = callbacks::onDiagnose,
+                        onOpenSystem = callbacks::onOpenSystem,
+                    )
                 }
 
                 Spacer(Modifier.height(4.dp))
@@ -435,6 +455,128 @@ private fun runVisual(row: LogRow): Pair<ImageVector, Color> {
 }
 
 // -----------------------------------------------------------------------------
+// «Perché non è scattata?» (0.3.6, F2): sezione chiusa di default
+// -----------------------------------------------------------------------------
+
+/**
+ * Card con titolo e chevron. Al tocco si apre e chiede la diagnosi (una tantum); «Ricontrolla» la
+ * rifà. Le righe arrivano già scritte nella lingua giusta: qui si disegnano soltanto.
+ */
+@Composable
+internal fun DiagnosisSection(
+    diagnosis: RuleDiagnosisUi?,
+    onDiagnose: () -> Unit,
+    onOpenSystem: () -> Unit,
+    initiallyOpen: Boolean = false,
+) {
+    var open by rememberSaveable { mutableStateOf(initiallyOpen) }
+    val shape = RoundedCornerShape(12.dp)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp)
+                .clickable(
+                    onClickLabel = stringResource(
+                        if (open) R.string.detail_diag_hide else R.string.detail_diag_show,
+                    ),
+                    role = Role.Button,
+                ) {
+                    if (!open) onDiagnose()
+                    open = !open
+                }
+                .padding(horizontal = 13.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(9.dp),
+        ) {
+            Text(
+                stringResource(R.string.detail_diag_title),
+                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(
+                if (open) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(22.dp),
+            )
+        }
+        if (open) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(start = 13.dp, end = 13.dp, bottom = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                diagnosis?.rows?.forEach { DiagnosisRowView(it, onOpenSystem) }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    TextButton(onClick = onDiagnose, modifier = Modifier.heightIn(min = 48.dp)) {
+                        Text(stringResource(R.string.detail_diag_recheck))
+                    }
+                    diagnosis?.let {
+                        Text(
+                            it.checkedAtLabel,
+                            color = MaterialTheme.colorScheme.outline,
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DiagnosisRowView(row: DiagnosisRow, onOpenSystem: () -> Unit) {
+    val semantic = LocalArgusSemantic.current
+    val (icon, tint, description) = when (row.level) {
+        DiagnosisLevel.OK -> Triple(
+            Icons.Rounded.CheckCircle,
+            semantic.armed.fg,
+            stringResource(R.string.detail_diag_level_ok),
+        )
+        DiagnosisLevel.WARN -> Triple(
+            Icons.Rounded.WarningAmber,
+            semantic.pending.fg,
+            stringResource(R.string.detail_diag_level_warn),
+        )
+        DiagnosisLevel.INFO -> Triple(
+            Icons.Rounded.Info,
+            MaterialTheme.colorScheme.primary,
+            stringResource(R.string.detail_diag_level_info),
+        )
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        Icon(icon, contentDescription = description, tint = tint, modifier = Modifier.size(19.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                row.text,
+                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            if (row.fix == DiagnosisFix.OPEN_SYSTEM) {
+                TextButton(onClick = onOpenSystem, modifier = Modifier.heightIn(min = 48.dp)) {
+                    Text(stringResource(R.string.detail_diag_open_system))
+                }
+            }
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
 // Footer per stato (design §7.3)
 // -----------------------------------------------------------------------------
 
@@ -504,7 +646,16 @@ private fun PendingFooter(state: AutomationDetailState, callbacks: AutomationDet
 }
 
 /**
- * ARMED/DISABLED: [elimina] [Modifica in chat] [Esegui ora]. §5.6: né elimina né
+ * «Esegui ora» compare solo quando può davvero girare (B35): finché è sempre disattivato non
+ * occupa il posto di un pulsante e non si spiega con un controllo morto. Vale solo per il footer
+ * ARMED/DISABLED, l'unico che lo ospita.
+ */
+internal fun showRunNowAction(state: AutomationDetailState): Boolean =
+    state.canRunNow && (state.status == StatusBadge.ARMED || state.status == StatusBadge.DISABLED)
+
+/**
+ * ARMED/DISABLED: [Disattiva/Riattiva] (azione principale, a tutta larghezza), poi sulla riga
+ * secondaria [elimina] [Modifica in chat] e, solo se disponibile, [Esegui ora]. §5.6: né elimina né
  * esegui-ora sono pre-focusati/filled — restano outline, così nessuna azione
  * irreversibile è l'azione di default.
  */
@@ -527,13 +678,6 @@ private fun ReviewableFooter(
                 else stringResource(R.string.detail_enable),
             )
         }
-        if (!state.canRunNow && state.runNowBlockedReason != null) {
-            Text(
-                state.runNowBlockedReason,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedButton(
                 onClick = onDelete,
@@ -548,17 +692,19 @@ private fun ReviewableFooter(
             OutlinedButton(
                 onClick = callbacks::onAskEdit,
                 enabled = !state.actionInProgress,
-                modifier = Modifier.heightIn(min = 48.dp),
-            ) { Text(stringResource(R.string.detail_edit_in_chat)) }
-            OutlinedButton(
-                onClick = onRunNow,
-                enabled = state.canRunNow && !state.actionInProgress,
                 modifier = Modifier.weight(1f).heightIn(min = 48.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary),
-            ) {
-                Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(19.dp))
-                Spacer(Modifier.width(6.dp))
-                Text(stringResource(R.string.action_run_now))
+            ) { Text(stringResource(R.string.detail_edit_in_chat)) }
+            if (showRunNowAction(state)) {
+                OutlinedButton(
+                    onClick = onRunNow,
+                    enabled = !state.actionInProgress,
+                    modifier = Modifier.heightIn(min = 48.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary),
+                ) {
+                    Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(19.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(R.string.action_run_now))
+                }
             }
         }
     }
@@ -759,6 +905,8 @@ private object NoopDetailCallbacks : AutomationDetailCallbacks {
     override fun onAskEdit() {}
     override fun onRunNow() {}
     override fun onOpenFullLog() {}
+    override fun onDiagnose() {}
+    override fun onOpenSystem() {}
 }
 
 @Preview(name = "Detail · PENDING pulita (canArm)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 900)
@@ -783,4 +931,44 @@ private fun DetailArmedPreview() {
 @Composable
 private fun DetailNeedsReviewPreview() {
     ArgusTheme { AutomationDetailScreen(previewNeedsReviewDetail, NoopDetailCallbacks) }
+}
+
+@Preview(name = "Detail · ARMED a orario (sezione chiusa)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 900)
+@Composable
+private fun DetailDiagnosisClosedPreview() {
+    ArgusTheme { AutomationDetailScreen(Fixtures.detailTimeShizukuOff, NoopDetailCallbacks) }
+}
+
+@Preview(name = "Perché non è scattata? · orario, Shizuku spento", showBackground = true, backgroundColor = 0xFF0E1216)
+@Composable
+private fun DiagnosisShizukuOffPreview() {
+    ArgusTheme {
+        Surface(color = MaterialTheme.colorScheme.background) {
+            Box(Modifier.padding(16.dp)) {
+                DiagnosisSection(
+                    diagnosis = Fixtures.detailTimeShizukuOff.diagnosis,
+                    onDiagnose = {},
+                    onOpenSystem = {},
+                    initiallyOpen = true,
+                )
+            }
+        }
+    }
+}
+
+@Preview(name = "Perché non è scattata? · geofence, posizione sconosciuta", showBackground = true, backgroundColor = 0xFF0E1216)
+@Composable
+private fun DiagnosisGeofenceUnknownPreview() {
+    ArgusTheme {
+        Surface(color = MaterialTheme.colorScheme.background) {
+            Box(Modifier.padding(16.dp)) {
+                DiagnosisSection(
+                    diagnosis = Fixtures.detailGeofenceUnknown.diagnosis,
+                    onDiagnose = {},
+                    onOpenSystem = {},
+                    initiallyOpen = true,
+                )
+            }
+        }
+    }
 }

@@ -46,6 +46,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -87,6 +88,9 @@ import dev.argus.automation.vm.ExecutionLogViewModel
 import dev.argus.automation.vm.OnboardingEvent
 import dev.argus.automation.vm.OnboardingViewModel
 import dev.argus.automation.vm.SettingsViewModel
+import dev.argus.shizuku.ShizukuGatewayStatus
+import dev.argus.ui.components.LocalShellPrivilege
+import dev.argus.ui.components.shellPrivilegeOf
 import dev.argus.ui.model.AutomationDetailCallbacks
 import dev.argus.ui.model.AutomationListCallbacks
 import dev.argus.ui.model.ChatCallbacks
@@ -190,26 +194,37 @@ fun ArgusNavHost() {
         }.onFailure { showMessage(systemSettingUnavailable) }
     }
     var permissionRefresh by remember { mutableIntStateOf(0) }
-    val notificationPermission = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) {
+    val openAppDetailsSettings = {
+        openIntent(
+            Intent(
+                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.parse("package:${context.packageName}"),
+            ),
+        )
+    }
+    val afterPermissionResult = {
         permissionRefresh += 1
         settingsViewModel.refresh()
     }
+    // B33: dopo due rifiuti Android non mostra più la richiesta; i richiedenti sotto portano
+    // allora alle impostazioni dell'app con un messaggio, invece di restare muti.
+    val requestNotificationPermission = rememberPermissionRequester(
+        onResult = afterPermissionResult,
+        openAppSettings = openAppDetailsSettings,
+        showMessage = showMessage,
+    )
     // Telefonia (P2-2): chiamate chiede anche READ_CALL_LOG, senza cui il broadcast
     // PHONE_STATE non porta il numero e le regole "chiamata da X" non possono matchare.
-    val telephonyPermissions = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions(),
-    ) {
-        permissionRefresh += 1
-        settingsViewModel.refresh()
-    }
-    val bluetoothPermission = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) {
-        permissionRefresh += 1
-        settingsViewModel.refresh()
-    }
+    val requestTelephonyPermissions = rememberPermissionRequester(
+        onResult = afterPermissionResult,
+        openAppSettings = openAppDetailsSettings,
+        showMessage = showMessage,
+    )
+    val requestBluetoothPermission = rememberPermissionRequester(
+        onResult = afterPermissionResult,
+        openAppSettings = openAppDetailsSettings,
+        showMessage = showMessage,
+    )
     val requestNotificationAccess = {
         val runtimePermissionMissing = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(
@@ -217,7 +232,7 @@ fun ArgusNavHost() {
                 Manifest.permission.POST_NOTIFICATIONS,
             ) != PackageManager.PERMISSION_GRANTED
         if (runtimePermissionMissing) {
-            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+            requestNotificationPermission(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
         } else if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {
             openIntent(
                 Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
@@ -248,14 +263,7 @@ fun ArgusNavHost() {
     val openNotificationListenerSettings = {
         openIntent(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
     }
-    val openLocationSettings = {
-        openIntent(
-            Intent(
-                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                Uri.parse("package:${context.packageName}"),
-            ),
-        )
-    }
+    val openLocationSettings = openAppDetailsSettings
     val locationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) {
@@ -281,6 +289,9 @@ fun ArgusNavHost() {
             )
         }
     }
+    val openShizukuDownload = {
+        openIntent(Intent(Intent.ACTION_VIEW, Uri.parse(SHIZUKU_DOWNLOAD_URL)))
+    }
     val openShizukuManager = {
         // Evita getLaunchIntentForPackage(): la package visibility di Android 11+ può nascondere
         // Shizuku pur essendo installato. Proviamo direttamente un selector limitato al package.
@@ -289,9 +300,7 @@ fun ArgusNavHost() {
             .setPackage(SHIZUKU_PACKAGE)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         val opened = runCatching { context.startActivity(launch) }.isSuccess
-        if (!opened) {
-            openIntent(Intent(Intent.ACTION_VIEW, Uri.parse(SHIZUKU_DOWNLOAD_URL)))
-        }
+        if (!opened) openShizukuDownload()
     }
 
     fun switchTop(route: String) {
@@ -299,7 +308,9 @@ fun ArgusNavHost() {
         navController.navigate(route) {
             popUpTo(navController.graph.findStartDestination().id) { saveState = true }
             launchSingleTop = true
-            restoreState = '?' !in route
+            // Il Log aperto dalla barra mostra sempre il log completo: lo stato salvato potrebbe
+            // essere quello filtrato su una regola, arrivato dal Dettaglio.
+            restoreState = '?' !in route && route != Routes.LOG
         }
     }
 
@@ -320,325 +331,375 @@ fun ArgusNavHost() {
             }
         },
     ) { innerPadding ->
-        NavHost(
-            navController = navController,
-            startDestination = if (onboardingCompleted) Routes.CHAT else Routes.ONBOARDING,
-            // consumeWindowInsets evita il doppio conteggio bottom-bar+IME: a tastiera aperta
-            // il contenuto (campo chat incluso) si solleva esattamente dell'altezza dell'IME.
-            modifier = Modifier
-                .padding(innerPadding)
-                .consumeWindowInsets(innerPadding)
-                .imePadding(),
+        // Con quali privilegi girano i comandi shell (Shizuku come root o come shell): lo leggono
+        // i blocchi comando di Chat, Approvazione e Dettaglio.
+        CompositionLocalProvider(
+            LocalShellPrivilege provides shellPrivilegeOf(settingsState.shizukuRunsAsRoot),
         ) {
-            composable(Routes.CHAT) {
-                ChatScreen(
-                    state = chatState,
-                    callbacks = object : ChatCallbacks {
-                        override fun onInputChange(text: String) = chatViewModel.onInputChange(text)
-                        override fun onSend() = chatViewModel.onSend()
-                        override fun onCancelPending() = chatViewModel.onCancelPending()
-                        override fun onOpenDraft(draftId: String) {
-                            navController.navigate(Routes.detail(draftId))
-                        }
-                        override fun onRetry() = chatViewModel.onRetry()
-                        override fun onClearConversation() = chatViewModel.onClearConversation()
-                        override fun onCheckConnection() = chatViewModel.refreshHealth()
-                        override fun onOpenSystem() = switchTop(Routes.SETTINGS)
-                    },
-                    modifier = Modifier.testTag("screen_chat"),
-                )
-            }
-
-            composable(Routes.LIST) {
-                AutomationListScreen(
-                    state = listState,
-                    callbacks = object : AutomationListCallbacks {
-                        override fun onOpen(id: String) {
-                            navController.navigate(Routes.detail(id))
-                        }
-                        override fun onToggleEnabled(id: String, enabled: Boolean) {
-                            listViewModel.onToggleEnabled(id, enabled)
-                        }
-                        override fun onFilter(f: StatusFilter) = listViewModel.onFilter(f)
-                        override fun onEmptyCta() = switchTop(Routes.CHAT)
-                        override fun onBannerTap() = switchTop(Routes.SETTINGS)
-                    },
-                    modifier = Modifier.testTag("screen_list"),
-                )
-            }
-
-            composable(
-                route = Routes.LOG_PATTERN,
-                arguments = listOf(
-                    navArgument("automationId") {
-                        type = NavType.StringType
-                        nullable = true
-                        defaultValue = null
-                    },
-                    navArgument("automationName") {
-                        type = NavType.StringType
-                        nullable = true
-                        defaultValue = null
-                    },
-                ),
+            NavHost(
+                navController = navController,
+                startDestination = if (onboardingCompleted) Routes.CHAT else Routes.ONBOARDING,
+                // consumeWindowInsets evita il doppio conteggio bottom-bar+IME: a tastiera aperta
+                // il contenuto (campo chat incluso) si solleva esattamente dell'altezza dell'IME.
+                modifier = Modifier
+                    .padding(innerPadding)
+                    .consumeWindowInsets(innerPadding)
+                    .imePadding(),
             ) {
-                val viewModel: ExecutionLogViewModel = hiltViewModel()
-                val state by viewModel.state.collectAsStateWithLifecycle()
-                MessageEffect(viewModel.messages, snackbarHostState)
-                ExecutionLogScreen(
-                    state = state,
-                    callbacks = object : ExecutionLogCallbacks {
-                        override fun onExpand(id: String) = viewModel.onExpand(id)
-                        override fun onClearFilter() = viewModel.onClearFilter()
-                        override fun onOpenAutomation(id: String) {
-                            navController.navigate(Routes.detail(id))
-                        }
-                        override fun onSendNow(logId: String) = viewModel.onSendNow(logId)
-                        override fun onMarkSent(logId: String) = viewModel.onMarkSent(logId)
-                    },
-                    modifier = Modifier.testTag("screen_log"),
-                )
-            }
+                composable(Routes.CHAT) {
+                    ChatScreen(
+                        state = chatState,
+                        callbacks = object : ChatCallbacks {
+                            override fun onInputChange(text: String) = chatViewModel.onInputChange(text)
+                            override fun onSend() = chatViewModel.onSend()
+                            override fun onCancelPending() = chatViewModel.onCancelPending()
+                            override fun onOpenDraft(draftId: String) {
+                                navController.navigate(Routes.detail(draftId))
+                            }
+                            override fun onRetry() = chatViewModel.onRetry()
+                            override fun onClearConversation() = chatViewModel.onClearConversation()
+                            override fun onCheckConnection() = chatViewModel.refreshHealth()
+                            override fun onOpenSystem() = switchTop(Routes.SETTINGS)
+                            override fun onCopyRawResponse() = chatViewModel.onCopyRawResponse()
+                        },
+                        modifier = Modifier.testTag("screen_chat"),
+                    )
+                }
 
-            composable(Routes.SETTINGS) {
-                RefreshOnResume(settingsViewModel::refresh)
-                LaunchedEffect(permissionRefresh) { settingsViewModel.refresh() }
-                SettingsScreen(
-                    state = settingsState,
-                    callbacks = object : SettingsCallbacks {
-                        override fun onEditBridgeUrl(url: String) = Unit
-                        override fun onSaveBridge(url: String, bearerToken: String?) {
-                            settingsViewModel.saveBridge(url, bearerToken)
-                        }
-                        override fun onTestConnection() = settingsViewModel.testConnection()
-                        override fun onOpenShizukuFix() {
-                            if (settingsState.shizuku == ShizukuStatus.RUNNING_NOT_AUTHORIZED) {
-                                settingsViewModel.requestShizukuPermission()
-                            } else {
-                                openShizukuManager()
+                composable(Routes.LIST) {
+                    AutomationListScreen(
+                        state = listState,
+                        callbacks = object : AutomationListCallbacks {
+                            override fun onOpen(id: String) {
+                                navController.navigate(Routes.detail(id))
                             }
-                        }
-                        override fun onOpenBatteryFix() {
-                            openBatterySettings()
-                        }
-                        override fun onOpenNotificationAccessFix() = requestNotificationAccess()
-                        override fun onOpenNotificationListenerFix() {
-                            openNotificationListenerSettings()
-                        }
-                        override fun onOpenLocationFix() = requestLocationAccess()
-                        override fun onRequestSmsPermission() {
-                            telephonyPermissions.launch(arrayOf(Manifest.permission.RECEIVE_SMS))
-                        }
-                        override fun onRequestCallPermissions() {
-                            telephonyPermissions.launch(
-                                arrayOf(
-                                    Manifest.permission.READ_PHONE_STATE,
-                                    Manifest.permission.READ_CALL_LOG,
-                                ),
-                            )
-                        }
-                        override fun onRequestBluetoothPermission() {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                bluetoothPermission.launch(Manifest.permission.BLUETOOTH_CONNECT)
-                            } else {
-                                permissionRefresh += 1
-                                settingsViewModel.refresh()
+                            override fun onToggleEnabled(id: String, enabled: Boolean) {
+                                listViewModel.onToggleEnabled(id, enabled)
                             }
-                        }
-                        override fun onRemoveContact(conversationId: String) {
-                            settingsViewModel.removeContact(conversationId)
-                        }
-                        override fun onAddContact() {
-                            showContactPicker = true
-                        }
-                        override fun onAddObservedContact(contact: ContactRow) {
-                            settingsViewModel.addContact(
-                                contact.displayName,
-                                contact.conversationId,
-                            )
-                            showContactPicker = false
-                        }
-                        override fun onBudgetChange(maxPerHour: Int) {
-                            settingsViewModel.onBudgetChange(maxPerHour)
-                        }
-                        override fun onBudgetDayChange(maxPerDay: Int) {
-                            settingsViewModel.onBudgetDayChange(maxPerDay)
-                        }
-                        override fun onBudgetMonthlyCostChange(maxCostMonthMicros: Long) {
-                            settingsViewModel.onBudgetMonthlyCostChange(maxCostMonthMicros)
-                        }
-                        override fun onBudgetMonthlyTokensChange(maxTokensPerMonth: Long) {
-                            settingsViewModel.onBudgetMonthlyTokensChange(maxTokensPerMonth)
-                        }
-                        override fun onSaveBudgetLimits(
-                            maxPerHour: Int,
-                            maxPerDay: Int,
-                            maxCostMonthMicros: Long,
-                            maxTokensMonth: Long,
-                        ) {
-                            settingsViewModel.onSaveBudgetLimits(
-                                maxPerHour,
-                                maxPerDay,
-                                maxCostMonthMicros,
-                                maxTokensMonth,
-                            )
-                        }
-                        override fun onRevokePrivacy() = settingsViewModel.revokePrivacy()
-                        override fun onRerunOnboarding() {
-                            navController.navigate(Routes.ONBOARDING)
-                        }
-                        override fun onSelectProvider(providerId: String) =
-                            settingsViewModel.selectProvider(providerId)
-                        override fun onSaveProviderConfig(
-                            providerId: String,
-                            baseUrl: String?,
-                            model: String?,
-                            apiKey: String?,
-                            reasoningEffort: String?,
-                        ) = settingsViewModel.saveProviderConfig(
-                            providerId, baseUrl, model, apiKey, reasoningEffort,
-                        )
-                    },
-                    modifier = Modifier.testTag("screen_settings"),
-                )
-            }
+                            override fun onFilter(f: StatusFilter) = listViewModel.onFilter(f)
+                            override fun onEmptyCta() = switchTop(Routes.CHAT)
+                            override fun onBannerTap() = switchTop(Routes.SETTINGS)
+                        },
+                        modifier = Modifier.testTag("screen_list"),
+                    )
+                }
 
-            composable(
-                route = Routes.DETAIL,
-                arguments = listOf(navArgument("id") { type = NavType.StringType }),
-            ) {
-                val viewModel: AutomationDetailViewModel = hiltViewModel()
-                val state by viewModel.state.collectAsStateWithLifecycle()
-                LaunchedEffect(viewModel) {
-                    viewModel.events.collect { event ->
-                        when (event) {
-                            is DetailEvent.Close -> {
-                                navController.popBackStack()
-                                showMessage(event.message)
+                composable(
+                    route = Routes.LOG_PATTERN,
+                    arguments = listOf(
+                        navArgument("automationId") {
+                            type = NavType.StringType
+                            nullable = true
+                            defaultValue = null
+                        },
+                        navArgument("automationName") {
+                            type = NavType.StringType
+                            nullable = true
+                            defaultValue = null
+                        },
+                    ),
+                ) { logEntry ->
+                    val viewModel: ExecutionLogViewModel = hiltViewModel()
+                    val state by viewModel.state.collectAsStateWithLifecycle()
+                    MessageEffect(viewModel.messages, snackbarHostState)
+                    // Il filtro su una regola esiste solo se la destinazione lo porta negli argomenti
+                    // (si arriva dal Dettaglio): riaprire il Log da qui con argomenti vuoti lo toglie.
+                    val routeAutomationId = logEntry.arguments?.getString("automationId")
+                    val routeAutomationName = logEntry.arguments?.getString("automationName")
+                    LaunchedEffect(routeAutomationId, routeAutomationName) {
+                        viewModel.onRouteArguments(routeAutomationId, routeAutomationName)
+                    }
+                    // Esporta: il testo (senza dati personali) si condivide con il foglio di Android.
+                    LaunchedEffect(viewModel) {
+                        viewModel.exports.collect { text ->
+                            val send = Intent(Intent.ACTION_SEND)
+                                .setType("text/plain")
+                                .putExtra(Intent.EXTRA_TEXT, text)
+                            val chooser = Intent.createChooser(send, null)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            runCatching { context.startActivity(chooser) }
+                        }
+                    }
+                    ExecutionLogScreen(
+                        state = state,
+                        callbacks = object : ExecutionLogCallbacks {
+                            override fun onExpand(id: String) = viewModel.onExpand(id)
+                            override fun onClearFilter() = viewModel.onClearFilter()
+                            override fun onOpenAutomation(id: String) {
+                                navController.navigate(Routes.detail(id))
                             }
-                            is DetailEvent.Message -> showMessage(event.text)
-                            is DetailEvent.OpenChat -> {
-                                chatViewModel.prefillEdit(
-                                    text = event.prompt,
-                                    automationId = event.automationId,
-                                    automationFingerprint = event.automationFingerprint,
-                                    draftId = event.draftId,
-                                    draftRevision = event.draftRevision,
-                                    baseDraft = event.baseDraft,
+                            override fun onSendNow(logId: String) = viewModel.onSendNow(logId)
+                            override fun onMarkSent(logId: String) = viewModel.onMarkSent(logId)
+                            override fun onSetRetention(days: Int) = viewModel.onSetRetention(days)
+                            override fun onClearLog() = viewModel.onClearLog()
+                            override fun onExport() = viewModel.onExport()
+                        },
+                        modifier = Modifier.testTag("screen_log"),
+                    )
+                }
+
+                composable(Routes.SETTINGS) {
+                    RefreshOnResume(settingsViewModel::refresh)
+                    // Schermata di sistema visibile: con Shizuku autorizzato e identità ignota la sonda
+                    // collega il servizio una volta per sapere se gira come root.
+                    RefreshOnResume(settingsViewModel::onSystemVisible)
+                    LaunchedEffect(permissionRefresh) { settingsViewModel.refresh() }
+                    SettingsScreen(
+                        state = settingsState,
+                        callbacks = object : SettingsCallbacks {
+                            override fun onEditBridgeUrl(url: String) = Unit
+                            override fun onSaveBridge(url: String, bearerToken: String?) {
+                                settingsViewModel.saveBridge(url, bearerToken)
+                            }
+                            override fun onTestConnection() = settingsViewModel.testConnection()
+                            override fun onOpenShizukuFix() {
+                                when (shizukuFixFor(settingsState.shizuku)) {
+                                    ShizukuFix.REQUEST_PERMISSION ->
+                                        settingsViewModel.requestShizukuPermission()
+                                    ShizukuFix.OPEN_DOWNLOAD -> openShizukuDownload()
+                                    ShizukuFix.OPEN_MANAGER -> openShizukuManager()
+                                }
+                            }
+                            override fun onOpenBatteryFix() {
+                                openBatterySettings()
+                            }
+                            override fun onOpenExactAlarmFix() {
+                                // «Sveglie e promemoria» è la sola via per concedere le sveglie esatte (Android 12+);
+                                // se la schermata non si apre si ripiega sulle impostazioni dell'app.
+                                val opened = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                                    runCatching {
+                                        context.startActivity(
+                                            Intent(
+                                                Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                                                Uri.parse("package:${context.packageName}"),
+                                            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                                        )
+                                    }.isSuccess
+                                if (!opened) openAppDetailsSettings()
+                            }
+                            override fun onOpenNotificationAccessFix() = requestNotificationAccess()
+                            override fun onOpenNotificationListenerFix() {
+                                openNotificationListenerSettings()
+                            }
+                            override fun onOpenLocationFix() = requestLocationAccess()
+                            override fun onRequestSmsPermission() {
+                                requestTelephonyPermissions(arrayOf(Manifest.permission.RECEIVE_SMS))
+                            }
+                            override fun onRequestCallPermissions() {
+                                requestTelephonyPermissions(
+                                    arrayOf(
+                                        Manifest.permission.READ_PHONE_STATE,
+                                        Manifest.permission.READ_CALL_LOG,
+                                    ),
                                 )
-                                switchTop(Routes.CHAT)
                             }
-                        }
-                    }
+                            override fun onRequestBluetoothPermission() {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                    requestBluetoothPermission(arrayOf(Manifest.permission.BLUETOOTH_CONNECT))
+                                } else {
+                                    permissionRefresh += 1
+                                    settingsViewModel.refresh()
+                                }
+                            }
+                            override fun onRemoveContact(conversationId: String) {
+                                settingsViewModel.removeContact(conversationId)
+                            }
+                            override fun onAddContact() {
+                                showContactPicker = true
+                            }
+                            override fun onAddObservedContact(contact: ContactRow) {
+                                settingsViewModel.addContact(
+                                    contact.displayName,
+                                    contact.conversationId,
+                                )
+                                showContactPicker = false
+                            }
+                            override fun onBudgetChange(maxPerHour: Int) {
+                                settingsViewModel.onBudgetChange(maxPerHour)
+                            }
+                            override fun onBudgetDayChange(maxPerDay: Int) {
+                                settingsViewModel.onBudgetDayChange(maxPerDay)
+                            }
+                            override fun onBudgetMonthlyCostChange(maxCostMonthMicros: Long) {
+                                settingsViewModel.onBudgetMonthlyCostChange(maxCostMonthMicros)
+                            }
+                            override fun onBudgetMonthlyTokensChange(maxTokensPerMonth: Long) {
+                                settingsViewModel.onBudgetMonthlyTokensChange(maxTokensPerMonth)
+                            }
+                            override fun onSaveBudgetLimits(
+                                maxPerHour: Int,
+                                maxPerDay: Int,
+                                maxCostMonthMicros: Long,
+                                maxTokensMonth: Long,
+                            ) {
+                                settingsViewModel.onSaveBudgetLimits(
+                                    maxPerHour,
+                                    maxPerDay,
+                                    maxCostMonthMicros,
+                                    maxTokensMonth,
+                                )
+                            }
+                            override fun onRevokePrivacy() = settingsViewModel.revokePrivacy()
+                            override fun onRerunOnboarding() {
+                                navController.navigate(Routes.ONBOARDING)
+                            }
+                            override fun onSelectProvider(providerId: String) =
+                                settingsViewModel.selectProvider(providerId)
+                            override fun onSaveProviderConfig(
+                                providerId: String,
+                                baseUrl: String?,
+                                model: String?,
+                                apiKey: String?,
+                                reasoningEffort: String?,
+                            ) = settingsViewModel.saveProviderConfig(
+                                providerId, baseUrl, model, apiKey, reasoningEffort,
+                            )
+                        },
+                        modifier = Modifier.testTag("screen_settings"),
+                    )
                 }
-                when {
-                    state.loading -> LoadingScreen()
-                    state.missing || state.detail == null -> MissingDetailScreen {
-                        navController.popBackStack()
-                    }
-                    else -> {
-                        val detail = requireNotNull(state.detail)
-                        AutomationDetailScreen(
-                            state = detail,
-                            callbacks = object : AutomationDetailCallbacks {
-                                override fun onArm() = viewModel.onArm()
-                                override fun onReject() = viewModel.onReject()
-                                override fun onSetEnabled(enabled: Boolean) {
-                                    viewModel.onSetEnabled(enabled)
-                                }
-                                override fun onDelete() = viewModel.onDelete()
-                                override fun onAskEdit() = viewModel.onAskEdit()
-                                override fun onRunNow() = viewModel.onRunNow()
-                                override fun onOpenFullLog() {
-                                    state.automationId?.let {
-                                        switchTop(Routes.log(it, detail.name))
-                                    }
-                                }
-                                override fun onBack() {
-                                    navController.popBackStack()
-                                }
-                            },
-                            modifier = Modifier.testTag("screen_detail"),
-                        )
-                    }
-                }
-            }
 
-            composable(Routes.ONBOARDING) {
-                val viewModel: OnboardingViewModel = hiltViewModel()
-                val state by viewModel.state.collectAsStateWithLifecycle()
-                RefreshOnResume(viewModel::refresh)
-                LaunchedEffect(permissionRefresh) { viewModel.refresh() }
-                BackHandler { viewModel.onBack() }
-                LaunchedEffect(viewModel) {
-                    viewModel.events.collect { event ->
-                        when (event) {
-                            is OnboardingEvent.Message -> showMessage(event.text)
-                            OnboardingEvent.Close, OnboardingEvent.Complete -> {
-                                if (!navController.popBackStack()) {
-                                    navController.navigate(Routes.CHAT) {
-                                        popUpTo(Routes.ONBOARDING) { inclusive = true }
+                composable(
+                    route = Routes.DETAIL,
+                    arguments = listOf(navArgument("id") { type = NavType.StringType }),
+                ) {
+                    val viewModel: AutomationDetailViewModel = hiltViewModel()
+                    val state by viewModel.state.collectAsStateWithLifecycle()
+                    LaunchedEffect(viewModel) {
+                        viewModel.events.collect { event ->
+                            when (event) {
+                                is DetailEvent.Close -> {
+                                    navController.popBackStack()
+                                    showMessage(event.message)
+                                }
+                                is DetailEvent.Message -> showMessage(event.text)
+                                is DetailEvent.OpenChat -> {
+                                    chatViewModel.prefillEdit(
+                                        text = event.prompt,
+                                        automationId = event.automationId,
+                                        automationFingerprint = event.automationFingerprint,
+                                        draftId = event.draftId,
+                                        draftRevision = event.draftRevision,
+                                        baseDraft = event.baseDraft,
+                                    )
+                                    switchTop(Routes.CHAT)
+                                }
+                            }
+                        }
+                    }
+                    when {
+                        state.loading -> LoadingScreen()
+                        state.missing || state.detail == null -> MissingDetailScreen {
+                            navController.popBackStack()
+                        }
+                        else -> {
+                            val detail = requireNotNull(state.detail)
+                            AutomationDetailScreen(
+                                state = detail,
+                                callbacks = object : AutomationDetailCallbacks {
+                                    override fun onArm() = viewModel.onArm()
+                                    override fun onReject() = viewModel.onReject()
+                                    override fun onSetEnabled(enabled: Boolean) {
+                                        viewModel.onSetEnabled(enabled)
+                                    }
+                                    override fun onDelete() = viewModel.onDelete()
+                                    override fun onAskEdit() = viewModel.onAskEdit()
+                                    override fun onRunNow() = viewModel.onRunNow()
+                                    override fun onDiagnose() = viewModel.onDiagnose()
+                                    // Come la barra in basso: cambia scheda, conservando lo stato salvato.
+                                    override fun onOpenSystem() = switchTop(Routes.SETTINGS)
+                                    override fun onOpenFullLog() {
+                                        state.automationId?.let {
+                                            switchTop(Routes.log(it, detail.name))
+                                        }
+                                    }
+                                    override fun onBack() {
+                                        navController.popBackStack()
+                                    }
+                                },
+                                modifier = Modifier.testTag("screen_detail"),
+                            )
+                        }
+                    }
+                }
+
+                composable(Routes.ONBOARDING) {
+                    val viewModel: OnboardingViewModel = hiltViewModel()
+                    val state by viewModel.state.collectAsStateWithLifecycle()
+                    RefreshOnResume(viewModel::refresh)
+                    LaunchedEffect(permissionRefresh) { viewModel.refresh() }
+                    BackHandler { viewModel.onBack() }
+                    LaunchedEffect(viewModel) {
+                        viewModel.events.collect { event ->
+                            when (event) {
+                                is OnboardingEvent.Message -> showMessage(event.text)
+                                OnboardingEvent.Close, OnboardingEvent.Complete -> {
+                                    if (!navController.popBackStack()) {
+                                        navController.navigate(Routes.CHAT) {
+                                            popUpTo(Routes.ONBOARDING) { inclusive = true }
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                }
-                OnboardingScreen(
-                    state = state,
-                    callbacks = object : OnboardingCallbacks {
-                        override fun onStepCta(kind: StepKind) {
-                            when (kind) {
-                                StepKind.WELCOME_PRIVACY -> viewModel.acceptPrivacy()
-                                StepKind.BRAIN_CONFIG -> Unit // Il dialog è gestito dallo schermo.
-                                StepKind.SHIZUKU -> {
-                                    when (viewModel.currentShizukuStatus()) {
-                                        dev.argus.shizuku.ShizukuGatewayStatus.RUNNING_NOT_AUTHORIZED ->
-                                            viewModel.requestShizukuPermission()
-                                        else -> openShizukuManager()
+                    OnboardingScreen(
+                        state = state,
+                        callbacks = object : OnboardingCallbacks {
+                            override fun onStepCta(kind: StepKind) {
+                                when (kind) {
+                                    StepKind.WELCOME_PRIVACY -> viewModel.acceptPrivacy()
+                                    StepKind.BRAIN_CONFIG -> Unit // Il dialog è gestito dallo schermo.
+                                    StepKind.SHIZUKU -> {
+                                        when (shizukuFixFor(viewModel.currentShizukuStatus())) {
+                                            ShizukuFix.REQUEST_PERMISSION ->
+                                                viewModel.requestShizukuPermission()
+                                            ShizukuFix.OPEN_DOWNLOAD -> openShizukuDownload()
+                                            ShizukuFix.OPEN_MANAGER -> openShizukuManager()
+                                        }
                                     }
-                                }
-                                StepKind.NOTIFICATION_ACCESS -> {
-                                    // Ordine delle CTA: prima il permesso di pubblicazione,
-                                    // poi l'accesso listener per lettura/reply WhatsApp.
-                                    val canPost = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-                                        ContextCompat.checkSelfPermission(
-                                            context,
-                                            Manifest.permission.POST_NOTIFICATIONS,
-                                        ) == PackageManager.PERMISSION_GRANTED
-                                    if (!canPost ||
-                                        !NotificationManagerCompat.from(context).areNotificationsEnabled()
-                                    ) {
-                                        requestNotificationAccess()
-                                    } else {
-                                        openNotificationListenerSettings()
+                                    StepKind.NOTIFICATION_ACCESS -> {
+                                        // Ordine delle CTA: prima il permesso di pubblicazione,
+                                        // poi l'accesso listener per lettura/reply WhatsApp.
+                                        val canPost = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                                            ContextCompat.checkSelfPermission(
+                                                context,
+                                                Manifest.permission.POST_NOTIFICATIONS,
+                                            ) == PackageManager.PERMISSION_GRANTED
+                                        if (!canPost ||
+                                            !NotificationManagerCompat.from(context).areNotificationsEnabled()
+                                        ) {
+                                            requestNotificationAccess()
+                                        } else {
+                                            openNotificationListenerSettings()
+                                        }
                                     }
+                                    StepKind.BATTERY_OEM -> openBatterySettings()
+                                    StepKind.BACKGROUND_LOCATION -> requestLocationAccess()
                                 }
-                                StepKind.BATTERY_OEM -> openBatterySettings()
-                                StepKind.BACKGROUND_LOCATION -> requestLocationAccess()
                             }
-                        }
-                        override fun onSaveBridge(url: String, bearerToken: String?) {
-                            viewModel.saveBridge(url, bearerToken)
-                        }
-                        override fun onSelectProvider(providerId: String) =
-                            viewModel.selectProvider(providerId)
-                        override fun onSaveProviderConfig(
-                            providerId: String,
-                            baseUrl: String?,
-                            model: String?,
-                            apiKey: String?,
-                            reasoningEffort: String?,
-                        ) = viewModel.saveProviderConfig(
-                            providerId, baseUrl, model, apiKey, reasoningEffort,
-                        )
-                        override fun onSkip(kind: StepKind) = viewModel.onSkip(kind)
-                        override fun onNext() = viewModel.onNext()
-                        override fun onBack() = viewModel.onBack()
-                        override fun onFinish() = viewModel.onFinish()
-                    },
-                    modifier = Modifier.testTag("screen_onboarding"),
-                )
+                            override fun onSaveBridge(url: String, bearerToken: String?) {
+                                viewModel.saveBridge(url, bearerToken)
+                            }
+                            override fun onSelectProvider(providerId: String) =
+                                viewModel.selectProvider(providerId)
+                            override fun onSaveProviderConfig(
+                                providerId: String,
+                                baseUrl: String?,
+                                model: String?,
+                                apiKey: String?,
+                                reasoningEffort: String?,
+                            ) = viewModel.saveProviderConfig(
+                                providerId, baseUrl, model, apiKey, reasoningEffort,
+                            )
+                            override fun onSkip(kind: StepKind) = viewModel.onSkip(kind)
+                            override fun onNext() = viewModel.onNext()
+                            override fun onBack() = viewModel.onBack()
+                            override fun onFinish() = viewModel.onFinish()
+                        },
+                        modifier = Modifier.testTag("screen_onboarding"),
+                    )
+                }
             }
         }
     }
@@ -863,3 +924,30 @@ private fun ArgusBottomBar(
 
 private const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
 internal const val SHIZUKU_DOWNLOAD_URL = "https://shizuku.rikka.app/download/"
+
+/** Cosa fa «Correggi» sulla riga/step Shizuku per lo stato corrente. */
+internal enum class ShizukuFix { REQUEST_PERMISSION, OPEN_MANAGER, OPEN_DOWNLOAD }
+
+/**
+ * In esecuzione ma senza permesso: si chiede il permesso. Troppo vecchio: si apre direttamente la
+ * pagina di download (l'app va aggiornata, aprirla non serve). Altrimenti si apre l'app Shizuku.
+ */
+internal fun shizukuFixFor(status: ShizukuStatus): ShizukuFix = when (status) {
+    ShizukuStatus.RUNNING_NOT_AUTHORIZED -> ShizukuFix.REQUEST_PERMISSION
+    ShizukuStatus.UNSUPPORTED -> ShizukuFix.OPEN_DOWNLOAD
+    ShizukuStatus.NOT_INSTALLED,
+    ShizukuStatus.INSTALLED_NOT_RUNNING,
+    ShizukuStatus.AUTHORIZED,
+    ShizukuStatus.DEGRADED_AFTER_REBOOT,
+    -> ShizukuFix.OPEN_MANAGER
+}
+
+/** Come sopra, per l'onboarding che legge lo stato del gateway. */
+internal fun shizukuFixFor(status: ShizukuGatewayStatus): ShizukuFix = when (status) {
+    ShizukuGatewayStatus.RUNNING_NOT_AUTHORIZED -> ShizukuFix.REQUEST_PERMISSION
+    ShizukuGatewayStatus.UNSUPPORTED -> ShizukuFix.OPEN_DOWNLOAD
+    ShizukuGatewayStatus.NOT_INSTALLED,
+    ShizukuGatewayStatus.INSTALLED_NOT_RUNNING,
+    ShizukuGatewayStatus.AUTHORIZED,
+    -> ShizukuFix.OPEN_MANAGER
+}

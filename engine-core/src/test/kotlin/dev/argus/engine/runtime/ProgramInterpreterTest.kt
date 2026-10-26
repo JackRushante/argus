@@ -718,6 +718,163 @@ class ProgramInterpreterTest {
         )
     }
 
+    // --- B27: i cicli non gonfiano il journal ---------------------------------------------
+
+    private fun threeLeafLoop(iterations: Int) = Action.While(
+        Condition.BooleanLiteral(true),
+        body = listOf(Action.SetFlashlight(true), Action.SetFlashlight(false), Action.SetWifi(true)),
+        maxIterations = iterations,
+    )
+
+    private suspend fun runLoop(
+        iterations: Int,
+        runner: ProgramActionRunner = ProgramActionRunner { _, _ -> ProgramActionResult(ActionResult.Success) },
+    ): Pair<ProgramExecutionResult, List<ProgramJournalEntry>> {
+        val journal = mutableListOf<ProgramJournalEntry>()
+        val result = interpreter(runner, ProgramExecutionJournal(journal::add)).execute(
+            Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+            timeEvent(),
+            emptyList(),
+            listOf(threeLeafLoop(iterations)),
+        )
+        return result to journal
+    }
+
+    @Test
+    fun `a thousand iterations of three leaves write at most 101 journal entries`() = runTest {
+        val (result, journal) = runLoop(1_000)
+
+        assertTrue(result.completed)
+        // Lo stato in memoria resta completo: l'esito dell'esecuzione non dipende dal journal.
+        assertEquals(3_000, result.steps.size)
+        assertEquals(101, journal.size)
+        // Le prime 100 voci sono i primi 100 passaggi, in ordine.
+        assertEquals("1.while[1].1", journal.first().path.value)
+        assertEquals("1.while[34].1", journal[99].path.value)
+        val summary = journal.last()
+        assertEquals(OmittedSteps.ACTION_TYPE, summary.actionType)
+        assertEquals(ActionJournalOutcome.SUCCEEDED, summary.outcome)
+        assertEquals(2_900, OmittedSteps.countFrom(summary.errorCode))
+        // La voce di riepilogo ha un path valido: quello del primo passaggio omesso.
+        assertEquals("1.while[34].2", summary.path.value)
+    }
+
+    @Test
+    fun `a failure after the limit is still journaled`() = runTest {
+        val (result, journal) = runLoop(1_000) { _, path ->
+            if (path.value == "1.while[900].2") {
+                ProgramActionResult(ActionResult.Failure("boom_code"))
+            } else {
+                ProgramActionResult(ActionResult.Success)
+            }
+        }
+
+        assertTrue(result.completed)
+        val failed = journal.filter { it.outcome == ActionJournalOutcome.FAILED }
+        assertEquals(listOf("1.while[900].2"), failed.map { it.path.value })
+        assertEquals("boom_code", failed.single().errorCode)
+        // 100 scritte + 1 fallita + riepilogo; il fallito non conta come omesso.
+        assertEquals(102, journal.size)
+        assertEquals(2_899, OmittedSteps.countFrom(journal.last().errorCode))
+    }
+
+    @Test
+    fun `a submitted leaf after the limit is still journaled because async resolution needs its row`() = runTest {
+        val (_, journal) = runLoop(200) { _, path ->
+            if (path.value == "1.while[150].3") {
+                ProgramActionResult(ActionResult.Submitted)
+            } else {
+                ProgramActionResult(ActionResult.Success)
+            }
+        }
+
+        assertEquals(
+            listOf("1.while[150].3"),
+            journal.filter { it.outcome == ActionJournalOutcome.SUBMITTED }.map { it.path.value },
+        )
+    }
+
+    @Test
+    fun `a program within the limit journals every leaf and no summary`() = runTest {
+        val (result, journal) = runLoop(33) // 99 foglie
+        assertEquals(99, result.steps.size)
+        assertEquals(99, journal.size)
+        assertTrue(journal.none { it.actionType == OmittedSteps.ACTION_TYPE })
+
+        val (_, over) = runLoop(34) // 102 foglie: 100 scritte + 2 omesse
+        assertEquals(101, over.size)
+        assertEquals(2, OmittedSteps.countFrom(over.last().errorCode))
+    }
+
+    @Test
+    fun `exactly one hundred leaves write no summary`() = runTest {
+        val journal = mutableListOf<ProgramJournalEntry>()
+        val result = interpreter(
+            ProgramActionRunner { _, _ -> ProgramActionResult(ActionResult.Success) },
+            ProgramExecutionJournal(journal::add),
+        ).execute(
+            Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+            timeEvent(),
+            emptyList(),
+            listOf(
+                Action.While(
+                    Condition.BooleanLiteral(true),
+                    body = listOf(Action.SetFlashlight(true)),
+                    maxIterations = 100,
+                ),
+            ),
+        )
+        assertEquals(100, result.steps.size)
+        assertEquals(100, journal.size)
+        assertTrue(journal.none { it.actionType == OmittedSteps.ACTION_TYPE })
+    }
+
+    @Test
+    fun `the summary is written even when the program stops mid loop`() = runTest {
+        val battery = StateQuery.DumpsysField("battery", "level")
+        var reads = 0
+        val journal = mutableListOf<ProgramJournalEntry>()
+        val interpreter = ProgramInterpreter(
+            runner = ProgramActionRunner { _, _ -> ProgramActionResult(ActionResult.Success) },
+            // Dopo 50 letture lo stato non e' piu' disponibile: il ciclo si ferma.
+            stateProvider = {
+                reads += 1
+                if (reads <= 50) DeviceState(queryValues = mapOf(battery.canonicalId to "1")) else DeviceState()
+            },
+            conditionEvaluator = evaluator,
+            journal = ProgramExecutionJournal(journal::add),
+            pause = {},
+        )
+
+        val result = interpreter.execute(
+            Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+            timeEvent(),
+            emptyList(),
+            listOf(
+                Action.While(
+                    Condition.StateCompare(battery, StateValueType.NUMBER, CmpOp.LT, "3"),
+                    body = listOf(Action.SetFlashlight(true), Action.SetFlashlight(false), Action.SetWifi(true)),
+                    maxIterations = 1_000,
+                ),
+            ),
+        )
+
+        assertEquals("condition_state_unavailable", result.stopCode)
+        assertEquals(150, result.steps.size)
+        assertEquals(101, journal.size)
+        assertEquals(50, OmittedSteps.countFrom(journal.last().errorCode))
+    }
+
+    @Test
+    fun `omitted steps code round trips and rejects foreign codes`() {
+        assertEquals(7, OmittedSteps.countFrom(OmittedSteps.code(7)))
+        assertNull(OmittedSteps.countFrom(null))
+        assertNull(OmittedSteps.countFrom("action_failed"))
+        assertNull(OmittedSteps.countFrom("omitted_"))
+        assertNull(OmittedSteps.countFrom("omitted_x9"))
+        assertNull(OmittedSteps.countFrom("omitted_99999999999999999999"))
+    }
+
     private fun interpreter(
         runner: ProgramActionRunner,
         journal: ProgramExecutionJournal = NoopProgramExecutionJournal,

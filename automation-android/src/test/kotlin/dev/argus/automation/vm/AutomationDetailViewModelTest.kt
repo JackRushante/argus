@@ -3,21 +3,36 @@ package dev.argus.automation.vm
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import androidx.test.core.app.ApplicationProvider
+import dev.argus.automation.AndroidCapabilityProbe
+import dev.argus.automation.AndroidCapabilityState
+import dev.argus.automation.AndroidCapabilityStateSource
 import dev.argus.automation.ApprovalFlow
 import dev.argus.automation.ArmedAutomationRegistrar
 import dev.argus.automation.AutomationEnablementCoordinator
 import dev.argus.automation.CurrentLocationProvider
+import dev.argus.automation.GenerativeReadiness
+import dev.argus.automation.GenerativeRuntimeReadiness
 import dev.argus.automation.AlarmDeliveryResult
 import dev.argus.automation.ReconcileReason
 import dev.argus.automation.ReconcileReport
+import dev.argus.automation.RenderLanguageSource
 import dev.argus.automation.TimeAlarmRuntime
 import dev.argus.automation.connectivity.NoopConnectivityTriggerRuntime
+import dev.argus.automation.geofence.GeofenceRegistration
+import dev.argus.automation.geofence.GeofenceStateStore
+import dev.argus.automation.geofence.MemoryGeofenceStateStore
 import dev.argus.automation.geofence.NoopGeofenceTriggerRuntime
+import dev.argus.automation.sensor.NoopSensorTriggerRuntime
+import dev.argus.automation.sensor.SensorReconcileReport
+import dev.argus.automation.sensor.SensorTriggerRuntime
 import dev.argus.data.ArgusDatabase
+import dev.argus.data.RoomAuditSink
 import dev.argus.data.RoomAutomationStore
 import dev.argus.data.RoomContactWhitelistStore
 import dev.argus.data.RoomDraftRepository
+import dev.argus.data.entities.AuditEntity
 import dev.argus.data.entities.AutomationEntity
+import dev.argus.data.entities.ScheduledTimeAlarmEntity
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.ApprovalFingerprints
@@ -28,10 +43,12 @@ import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.CapabilityRequirements
 import dev.argus.engine.model.CreatedBy
+import dev.argus.engine.model.GenerativeDeliverMode
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.AuditEvent
 import dev.argus.engine.runtime.AuditKind
 import dev.argus.engine.runtime.AuditSink
+import dev.argus.engine.runtime.NoopAuditSink
 import dev.argus.engine.runtime.FirePolicySnapshot
 import dev.argus.engine.runtime.FirePolicySnapshotProvider
 import dev.argus.engine.safety.ApprovalService
@@ -42,12 +59,15 @@ import dev.argus.engine.safety.DraftValidator
 import dev.argus.engine.safety.DraftWriteResult
 import dev.argus.engine.safety.NewDraft
 import dev.argus.engine.safety.PendingDraft
+import dev.argus.shizuku.ShizukuGatewayStatus
 import dev.argus.ui.model.StatusBadge
 import dev.argus.ui.presentation.RenderLanguage
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -77,6 +97,7 @@ class AutomationDetailViewModelTest {
     private val dispatcher = UnconfinedTestDispatcher()
     private lateinit var db: ArgusDatabase
     private lateinit var lastViewModel: AutomationDetailViewModel
+    private val applicationScopes = mutableListOf<CoroutineScope>()
 
     @Before
     fun setUp() {
@@ -91,6 +112,7 @@ class AutomationDetailViewModelTest {
                 lastViewModel.viewModelScope.coroutineContext[Job]?.cancelAndJoin()
             }
         }
+        runBlocking { applicationScopes.forEach { it.coroutineContext[Job]?.cancelAndJoin() } }
         db.close()
         Dispatchers.resetMain()
     }
@@ -131,7 +153,7 @@ class AutomationDetailViewModelTest {
         )
         awaitUntil("english detail loaded") { viewModel.state.value.detail != null }
         assertEquals(
-            "Manual execution is not available at this stage.",
+            "Run now is not available yet.",
             viewModel.state.value.detail?.runNowBlockedReason,
         )
         val events = mutableListOf<DetailEvent>()
@@ -143,9 +165,93 @@ class AutomationDetailViewModelTest {
         awaitUntil("english run-now feedback") { events.isNotEmpty() }
 
         assertEquals(
-            "Run now requires live confirmation and is disabled in P0-B.",
+            "Run now is not available yet.",
             (events.single() as DetailEvent.Message).text,
         )
+    }
+
+    // --- B35: niente gergo da sviluppatore --------------------------------------------------------
+
+    @Test
+    fun `generative estimate and run-now texts are plain language in both languages`() = runTest {
+        val repository = RoomDraftRepository(db)
+        assertIs<DraftWriteResult.Saved>(repository.create(generativeDraft("gen")))
+        var system = RenderLanguage.EN
+        val source = RenderLanguageSource { system }
+        val viewModel = viewModel(
+            "draft-gen",
+            RoomAutomationStore(db.automationDao()),
+            DetailAuditRecorder(),
+            languageSource = source,
+        )
+        awaitUntil("english draft loaded") { viewModel.state.value.detail != null }
+        val events = collectEvents(viewModel)
+
+        assertEquals(
+            "Minimum cooldown 60 s between two AI replies",
+            viewModel.state.value.detail?.estimatedLlmCallsPerDay,
+        )
+        viewModel.onRunNow()
+        awaitUntil("english run-now message") { events.size == 1 }
+        assertEquals("Run now is not available yet.", (events.last() as DetailEvent.Message).text)
+        assertNoInternalPhaseNames(
+            viewModel.state.value.detail?.estimatedLlmCallsPerDay.orEmpty(),
+            viewModel.state.value.detail?.runNowBlockedReason.orEmpty(),
+            (events.last() as DetailEvent.Message).text,
+        )
+
+        system = RenderLanguage.IT
+        source.refresh()
+        awaitUntil("italian estimate") {
+            viewModel.state.value.detail?.estimatedLlmCallsPerDay == "Cooldown minimo 60 s tra due risposte AI"
+        }
+        viewModel.onRunNow()
+        awaitUntil("italian run-now message") { events.size == 2 }
+        assertEquals("Esegui ora non è ancora disponibile.", (events.last() as DetailEvent.Message).text)
+        assertNoInternalPhaseNames(
+            viewModel.state.value.detail?.estimatedLlmCallsPerDay.orEmpty(),
+            viewModel.state.value.detail?.runNowBlockedReason.orEmpty(),
+            (events.last() as DetailEvent.Message).text,
+        )
+    }
+
+    private fun assertNoInternalPhaseNames(vararg texts: String) {
+        val jargon = Regex("""\bP[0-9](-[A-Z])?\b|\bMVP\b|sideload""", RegexOption.IGNORE_CASE)
+        texts.forEach { text ->
+            assertNull(jargon.find(text)?.value, "gergo interno nel testo visibile: $text")
+        }
+    }
+
+    // --- B34: lingua che segue il telefono --------------------------------------------------------
+
+    @Test
+    fun `the detail regenerates its texts when the language source goes from english to italian`() = runTest {
+        seedArmedAutomation("lang")
+        var system = RenderLanguage.EN
+        val source = RenderLanguageSource { system }
+        val viewModel = viewModel(
+            "lang",
+            RoomAutomationStore(db.automationDao()),
+            DetailAuditRecorder(),
+            languageSource = source,
+        )
+        awaitUntil("english detail loaded") { viewModel.state.value.detail != null }
+        assertTrue(
+            viewModel.state.value.detail!!.rule.triggerLine.startsWith("Every day"),
+            viewModel.state.value.detail!!.rule.triggerLine,
+        )
+
+        system = RenderLanguage.IT
+        source.refresh()
+
+        awaitUntil("italian detail") {
+            viewModel.state.value.detail?.rule?.triggerLine?.startsWith("Ogni giorno") == true
+        }
+        // Anche i messaggi prodotti al momento seguono la lingua corrente.
+        val events = collectEvents(viewModel)
+        viewModel.onRunNow()
+        awaitUntil("messaggio italiano") { events.isNotEmpty() }
+        assertTrue((events.single() as DetailEvent.Message).text.startsWith("Esegui ora"))
     }
 
     // --- S3: si arma la revisione mostrata ---------------------------------------------------------
@@ -209,6 +315,178 @@ class AutomationDetailViewModelTest {
         )
         assertNotNull(spy.get(first.id), "la bozza piu' recente non va cancellata")
         spy.releaseSlowGet()
+    }
+
+    // --- B31: ciclo di vita visto dalla UI ----------------------------------------------------------
+
+    @Test
+    fun `the detail never shows rule unavailable while the draft turns into an armed rule`() = runTest {
+        val store = RoomAutomationStore(db.automationDao())
+        val repository = RoomDraftRepository(db)
+        assertIs<DraftWriteResult.Saved>(repository.create(newDraft("b31a", "da armare")))
+        val registering = CompletableDeferred<Unit>()
+        val releaseRegistration = CompletableDeferred<Unit>()
+        val registrar = ArmedAutomationRegistrar {
+            registering.complete(Unit)
+            releaseRegistration.await()
+            true
+        }
+        val viewModel = viewModel(
+            "draft-b31a", store, DetailAuditRecorder(), RenderLanguage.EN,
+            drafts = repository, registrar = registrar,
+        )
+        awaitUntil("bozza mostrata") { viewModel.state.value.detail != null }
+        val states = mutableListOf<DetailViewState>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.state.collect(states::add)
+        }
+        val events = collectEvents(viewModel)
+
+        viewModel.onArm()
+        awaitUntil("registrazione avviata") { registering.isCompleted }
+        // L'arm e' gia' committato: la bozza non c'e' piu' e la regola armata ha un altro id.
+        awaitUntil("regola armata nel DB") { runBlocking { store.get(AutomationId("b31a")) } != null }
+        settle()
+
+        assertEquals(false, viewModel.state.value.missing, "nessun «regola non disponibile» durante l'arm")
+        assertNotNull(viewModel.state.value.detail, "l'ultimo stato valido resta sullo schermo")
+        assertEquals(true, viewModel.state.value.detail?.actionInProgress)
+
+        releaseRegistration.complete(Unit)
+        awaitUntil("chiusura") { events.any { it is DetailEvent.Close } }
+        settle()
+        assertTrue(states.none { it.missing }, "in nessun momento lo stato e' stato «non disponibile»")
+    }
+
+    @Test
+    fun `the detail still reports a rule that really disappeared when no action is running`() = runTest {
+        val store = RoomAutomationStore(db.automationDao())
+        val automation = seedArmedAutomation("b31m")
+        val viewModel = viewModel("b31m", store, DetailAuditRecorder(), RenderLanguage.EN)
+        awaitUntil("regola mostrata") { viewModel.state.value.detail != null }
+
+        store.delete(automation.id)
+
+        awaitUntil("regola non disponibile") { viewModel.state.value.missing }
+        assertNull(viewModel.state.value.detail)
+    }
+
+    @Test
+    fun `leaving the screen during arm does not cancel the arm or its registration`() = runTest {
+        val store = RoomAutomationStore(db.automationDao())
+        val spy = SpyDraftRepository(RoomDraftRepository(db))
+        assertIs<DraftWriteResult.Saved>(spy.create(newDraft("b31b", "uscita")))
+        val registered = java.util.concurrent.CopyOnWriteArrayList<Automation>()
+        val registrar = ArmedAutomationRegistrar { automation ->
+            registered += automation
+            true
+        }
+        val viewModel = viewModel(
+            "draft-b31b", store, DetailAuditRecorder(), RenderLanguage.EN,
+            drafts = spy, registrar = registrar,
+        )
+        awaitUntil("bozza mostrata") { viewModel.state.value.detail != null }
+
+        spy.gateNextArm()
+        viewModel.onArm()
+        awaitUntil("arm avviato") { spy.armGateReached.isCompleted }
+        // L'utente torna indietro: la schermata si chiude e viewModelScope viene cancellato.
+        viewModel.viewModelScope.coroutineContext[Job]?.cancelAndJoin()
+        spy.releaseArmGate()
+
+        awaitUntil("registrazione dell'arm") { registered.isNotEmpty() }
+        assertEquals(AutomationId("b31b"), registered.single().id)
+        assertEquals(AutomationStatus.ARMED, store.get(AutomationId("b31b"))?.status)
+    }
+
+    @Test
+    fun `re-enabling a one shot rule whose time has passed explains what to do`() = runTest {
+        val store = RoomAutomationStore(db.automationDao())
+        seedDisabledOneShotInPast("b31c")
+        val viewModel = viewModel(
+            "b31c", store, DetailAuditRecorder(), RenderLanguage.EN,
+            enablementAudit = RoomAuditSink(db.auditDao()),
+        )
+        awaitUntil("regola disattivata mostrata") { viewModel.state.value.detail?.status == StatusBadge.DISABLED }
+        val events = collectEvents(viewModel)
+
+        viewModel.onSetEnabled(true)
+        awaitUntil("messaggio") { events.any { it is DetailEvent.Message } }
+
+        val expected = "This rule's time has already passed: edit it to choose a new time."
+        assertEquals(expected, (events.single { it is DetailEvent.Message } as DetailEvent.Message).text)
+        // Lo stesso motivo compare nelle ultime esecuzioni, al posto di un codice.
+        awaitUntil("riga nelle ultime esecuzioni") {
+            viewModel.state.value.detail?.recentRuns?.any { it.summary == expected } == true
+        }
+    }
+
+    @Test
+    fun `the one shot in the past message is italian when the phone is italian`() = runTest {
+        val store = RoomAutomationStore(db.automationDao())
+        seedDisabledOneShotInPast("b31i")
+        val viewModel = viewModel("b31i", store, DetailAuditRecorder(), RenderLanguage.IT)
+        awaitUntil("regola disattivata mostrata") { viewModel.state.value.detail?.status == StatusBadge.DISABLED }
+        val events = collectEvents(viewModel)
+
+        viewModel.onSetEnabled(true)
+        awaitUntil("messaggio") { events.any { it is DetailEvent.Message } }
+
+        assertEquals(
+            "L'orario di questa regola è già passato: modificala per scegliere un nuovo orario.",
+            (events.single { it is DetailEvent.Message } as DetailEvent.Message).text,
+        )
+    }
+
+    @Test
+    fun `a failed re-enable for another reason keeps the generic message`() = runTest {
+        val store = RoomAutomationStore(db.automationDao())
+        val rule = seedArmedAutomation("b31g")
+        store.disable(rule.id)
+        val viewModel = viewModel(
+            "b31g", store, DetailAuditRecorder(), RenderLanguage.EN,
+            scheduler = EnableFailingScheduler(db, "b31g", "scheduling_failed"),
+        )
+        awaitUntil("regola disattivata mostrata") { viewModel.state.value.detail?.status == StatusBadge.DISABLED }
+        val events = collectEvents(viewModel)
+
+        viewModel.onSetEnabled(true)
+        awaitUntil("messaggio") { events.any { it is DetailEvent.Message } }
+
+        assertEquals(
+            "Scheduling failed: the rule remains disabled.",
+            (events.single { it is DetailEvent.Message } as DetailEvent.Message).text,
+        )
+    }
+
+    @Test
+    fun `an older one shot failure is not blamed for a new failed attempt`() = runTest {
+        val store = RoomAutomationStore(db.automationDao())
+        val rule = seedArmedAutomation("b31o")
+        store.disable(rule.id)
+        // Un fallimento di molto tempo fa: non riguarda questo tentativo.
+        db.auditDao().insert(
+            AuditEntity(
+                automationId = "b31o",
+                kind = AuditKind.ENABLE_FAILED,
+                atMillis = 1_000,
+                detail = ONE_SHOT_IN_PAST,
+            ),
+        )
+        val viewModel = viewModel(
+            "b31o", store, DetailAuditRecorder(), RenderLanguage.EN,
+            scheduler = EnableFailingScheduler(db, "b31o", detail = null),
+        )
+        awaitUntil("regola disattivata mostrata") { viewModel.state.value.detail?.status == StatusBadge.DISABLED }
+        val events = collectEvents(viewModel)
+
+        viewModel.onSetEnabled(true)
+        awaitUntil("messaggio") { events.any { it is DetailEvent.Message } }
+
+        assertEquals(
+            "Scheduling failed: the rule remains disabled.",
+            (events.single { it is DetailEvent.Message } as DetailEvent.Message).text,
+        )
     }
 
     // --- B26: doppio tocco ---------------------------------------------------------------------------
@@ -278,6 +556,47 @@ class AutomationDetailViewModelTest {
 
         assertEquals(1, events.count { it is DetailEvent.Close })
         assertEquals(1, audit.events.count { it.kind == AuditKind.RULE_DELETED })
+    }
+
+    // --- 0.3.6: l'eliminazione pulisce anche i sensori -----------------------------------------------
+
+    @Test
+    fun `deleting a rule also reconciles the sensors after the rule is gone`() = runTest {
+        val automation = seedArmedAutomation("e3a")
+        val store = RoomAutomationStore(db.automationDao())
+        val reconciledWhilePresent = java.util.concurrent.CopyOnWriteArrayList<Boolean>()
+        val sensor = SensorTriggerRuntime {
+            reconciledWhilePresent += store.get(automation.id) != null
+            SensorReconcileReport(emptyList(), emptySet())
+        }
+        val viewModel = viewModel("e3a", store, DetailAuditRecorder(), RenderLanguage.EN, sensor = sensor)
+        awaitUntil("dettaglio caricato") { viewModel.state.value.detail != null }
+        val events = collectEvents(viewModel)
+
+        viewModel.onDelete()
+        awaitUntil("chiusura") { events.any { it is DetailEvent.Close } }
+
+        assertEquals(listOf(false), reconciledWhilePresent.toList(), "una chiamata, a regola gia' rimossa")
+        assertEquals("Rule deleted.", (events.single { it is DetailEvent.Close } as DetailEvent.Close).message)
+    }
+
+    @Test
+    fun `a failing sensor reconcile on delete reports the deferred cleanup and still deletes`() = runTest {
+        val automation = seedArmedAutomation("e3b")
+        val store = RoomAutomationStore(db.automationDao())
+        val sensor = SensorTriggerRuntime { error("sensor backend unavailable") }
+        val viewModel = viewModel("e3b", store, DetailAuditRecorder(), RenderLanguage.EN, sensor = sensor)
+        awaitUntil("dettaglio caricato") { viewModel.state.value.detail != null }
+        val events = collectEvents(viewModel)
+
+        viewModel.onDelete()
+        awaitUntil("chiusura") { events.any { it is DetailEvent.Close } }
+
+        assertNull(store.get(automation.id), "la regola e' stata eliminata comunque")
+        assertEquals(
+            "Rule deleted; runtime cleanup deferred.",
+            (events.single { it is DetailEvent.Close } as DetailEvent.Close).message,
+        )
     }
 
     @Test
@@ -373,7 +692,238 @@ class AutomationDetailViewModelTest {
         assertEquals(signed.approvalFingerprint, open.automationFingerprint)
     }
 
+    // --- 0.3.6 (F2): «Perché non è scattata?» ---------------------------------------------------------
+
+    @Test
+    fun `a saved rule offers the diagnosis and onDiagnose fills it`() = runTest {
+        seedArmedAutomation("f2a")
+        val viewModel = viewModel(
+            "f2a", RoomAutomationStore(db.automationDao()), DetailAuditRecorder(), RenderLanguage.EN,
+        )
+        awaitUntil("dettaglio caricato") { viewModel.state.value.detail != null }
+        assertEquals(true, viewModel.state.value.detail?.diagnosisAvailable)
+        assertNull(viewModel.state.value.detail?.diagnosis, "non si calcola finche non viene chiesta")
+
+        viewModel.onDiagnose()
+        awaitUntil("diagnosi") { viewModel.state.value.detail?.diagnosis != null }
+
+        val diagnosis = assertNotNull(viewModel.state.value.detail?.diagnosis)
+        assertEquals(
+            listOf(
+                "The rule is active",
+                "Required permissions and services: all ready",
+                "No alarm is registered for this rule",
+                "It has never run yet",
+            ),
+            diagnosis.rows.map { it.text },
+        )
+        assertTrue(diagnosis.checkedAtLabel.startsWith("Checked at "))
+    }
+
+    @Test
+    fun `the diagnosis reads the block causes the persisted alarm and the geofence registration`() = runTest {
+        val rule = seedArmedAutomation("f2b")
+        db.scheduledTimeAlarmDao().upsert(
+            ScheduledTimeAlarmEntity(
+                automationId = "f2b",
+                approvalFingerprint = requireNotNull(rule.approvalFingerprint).value,
+                eventAtMillis = System.currentTimeMillis() + 3_600_000,
+                wakeAtMillis = System.currentTimeMillis() + 3_600_000,
+                requestedPrecision = "FLEXIBLE",
+                scheduledMode = "INEXACT",
+                updatedAtMillis = System.currentTimeMillis(),
+            ),
+        )
+        // Notifiche non concesse: la regola le mostra, quindi manca un requisito.
+        val viewModel = viewModel(
+            "f2b", RoomAutomationStore(db.automationDao()), DetailAuditRecorder(), RenderLanguage.EN,
+            probe = probeFor(capabilityState(notifications = false)),
+        )
+        awaitUntil("dettaglio caricato") { viewModel.state.value.detail != null }
+
+        viewModel.onDiagnose()
+        awaitUntil("diagnosi") { viewModel.state.value.detail?.diagnosis != null }
+
+        val rows = assertNotNull(viewModel.state.value.detail?.diagnosis).rows
+        assertEquals("Argus is not allowed to show notifications", rows[1].text)
+        assertEquals(dev.argus.ui.model.DiagnosisFix.OPEN_SYSTEM, rows[1].fix)
+        assertTrue(rows[2].text.startsWith("Next alarm: "), rows[2].text)
+        assertEquals(
+            "Flexible time: to save battery Android may move it by up to an hour; " +
+                "for a precise time, ask for the exact time in chat",
+            rows[3].text,
+        )
+    }
+
+    @Test
+    fun `the diagnosis of a geofence rule reads the registration from the store`() = runTest {
+        val unsigned = Automation(
+            id = AutomationId("f2g"),
+            name = "casa",
+            createdBy = CreatedBy.USER,
+            status = AutomationStatus.ARMED,
+            trigger = Trigger.Geofence(
+                lat = 45.0,
+                lng = 9.0,
+                radiusM = 150.0,
+                transition = dev.argus.engine.model.Transition.EXIT,
+            ),
+            actions = listOf(Action.ShowNotification("Argus", "test")),
+            enabled = true,
+        )
+        val rule = persist(unsigned)
+        val geofenceState = MemoryGeofenceStateStore()
+        val fingerprint = requireNotNull(rule.approvalFingerprint)
+        geofenceState.prepare(GeofenceRegistration(rule.id, fingerprint, 45.0, 9.0, 150f))
+        geofenceState.activate(rule.id, fingerprint)
+        val viewModel = viewModel(
+            "f2g", RoomAutomationStore(db.automationDao()), DetailAuditRecorder(), RenderLanguage.EN,
+            geofenceState = geofenceState,
+        )
+        awaitUntil("dettaglio caricato") { viewModel.state.value.detail != null }
+
+        viewModel.onDiagnose()
+        awaitUntil("diagnosi") { viewModel.state.value.detail?.diagnosis != null }
+
+        assertTrue(
+            assertNotNull(viewModel.state.value.detail?.diagnosis).rows.any {
+                it.text == "Position relative to the area: unknown (updates on your next move)"
+            },
+        )
+    }
+
+    @Test
+    fun `a language change rebuilds the diagnosis text`() = runTest {
+        seedArmedAutomation("f2l")
+        var system = RenderLanguage.EN
+        val source = RenderLanguageSource { system }
+        val viewModel = viewModel(
+            "f2l", RoomAutomationStore(db.automationDao()), DetailAuditRecorder(),
+            languageSource = source,
+        )
+        awaitUntil("dettaglio caricato") { viewModel.state.value.detail != null }
+        viewModel.onDiagnose()
+        awaitUntil("diagnosi inglese") {
+            viewModel.state.value.detail?.diagnosis?.rows?.firstOrNull()?.text == "The rule is active"
+        }
+
+        system = RenderLanguage.IT
+        source.refresh()
+
+        awaitUntil("diagnosi italiana") {
+            viewModel.state.value.detail?.diagnosis?.rows?.firstOrNull()?.text == "La regola è attiva"
+        }
+        val diagnosis = assertNotNull(viewModel.state.value.detail?.diagnosis)
+        assertTrue(diagnosis.checkedAtLabel.startsWith("Controllato alle "))
+        assertEquals("Non è ancora mai scattata", diagnosis.rows.last().text)
+    }
+
+    @Test
+    fun `a draft has no diagnosis and onDiagnose does nothing`() = runTest {
+        val spy = SpyDraftRepository(RoomDraftRepository(db))
+        assertIs<DraftWriteResult.Saved>(spy.create(newDraft("f2d", "bozza")))
+        val viewModel = viewModel(
+            "f2d", RoomAutomationStore(db.automationDao()), DetailAuditRecorder(), RenderLanguage.EN,
+            drafts = spy,
+        )
+        awaitUntil("bozza mostrata") { viewModel.state.value.detail != null }
+
+        viewModel.onDiagnose()
+        settle()
+
+        assertEquals(StatusBadge.PENDING_APPROVAL, viewModel.state.value.detail?.status)
+        assertEquals(false, viewModel.state.value.detail?.diagnosisAvailable)
+        assertNull(viewModel.state.value.detail?.diagnosis)
+    }
+
+    @Test
+    fun `the old diagnosis is dropped when the rule changes revision`() = runTest {
+        val first = seedArmedAutomation("f2r")
+        val viewModel = viewModel(
+            "f2r", RoomAutomationStore(db.automationDao()), DetailAuditRecorder(), RenderLanguage.EN,
+        )
+        awaitUntil("dettaglio caricato") { viewModel.state.value.detail != null }
+        viewModel.onDiagnose()
+        awaitUntil("diagnosi") { viewModel.state.value.detail?.diagnosis != null }
+
+        // Una nuova revisione approvata della stessa regola: diversa impronta.
+        persist(first.copy(actions = listOf(Action.ShowNotification("Argus", "altro testo")), approvalFingerprint = null))
+
+        awaitUntil("diagnosi azzerata") { viewModel.state.value.detail?.diagnosis == null }
+        assertEquals(true, viewModel.state.value.detail?.diagnosisAvailable)
+        // L'utente puo' ricontrollare: la nuova diagnosi vale per la nuova revisione.
+        viewModel.onDiagnose()
+        awaitUntil("nuova diagnosi") { viewModel.state.value.detail?.diagnosis != null }
+    }
+
+    @Test
+    fun `a failing check reports a message and leaves the diagnosis empty`() = runTest {
+        seedArmedAutomation("f2e")
+        val broken = AndroidCapabilityProbe(
+            AndroidCapabilityStateSource { error("state unavailable") },
+            RoomContactWhitelistStore(db.contactWhitelistDao()),
+            GenerativeRuntimeReadiness { GenerativeReadiness(bridgeConfigured = true, privacyAccepted = true) },
+        )
+        val viewModel = viewModel(
+            "f2e", RoomAutomationStore(db.automationDao()), DetailAuditRecorder(), RenderLanguage.EN,
+            probe = broken,
+        )
+        awaitUntil("dettaglio caricato") { viewModel.state.value.detail != null }
+        val events = collectEvents(viewModel)
+
+        viewModel.onDiagnose()
+        awaitUntil("messaggio") { events.any { it is DetailEvent.Message } }
+
+        assertEquals(
+            "Unable to run the check.",
+            (events.single { it is DetailEvent.Message } as DetailEvent.Message).text,
+        )
+        assertNull(viewModel.state.value.detail?.diagnosis)
+    }
+
     // --- helpers -------------------------------------------------------------
+
+    private fun capabilityState(
+        shizuku: ShizukuGatewayStatus = ShizukuGatewayStatus.AUTHORIZED,
+        notifications: Boolean = true,
+    ) = AndroidCapabilityState(
+        deviceModel = "test",
+        androidVersion = 16,
+        androidApi = 36,
+        shizukuStatus = shizuku,
+        shizukuPermissionGranted = shizuku == ShizukuGatewayStatus.AUTHORIZED,
+        notificationsGranted = notifications,
+        notificationListenerGranted = false,
+        foregroundLocationGranted = false,
+        backgroundLocationGranted = false,
+        exactAlarmsGranted = true,
+        batteryOptimizationExempt = true,
+    )
+
+    private fun probeFor(state: AndroidCapabilityState) = AndroidCapabilityProbe(
+        AndroidCapabilityStateSource { state },
+        RoomContactWhitelistStore(db.contactWhitelistDao()),
+        GenerativeRuntimeReadiness { GenerativeReadiness(bridgeConfigured = true, privacyAccepted = true) },
+    )
+
+    /** Firma e salva una regola come farebbe l'arm: serve a simulare una nuova revisione approvata. */
+    private suspend fun persist(unsigned: Automation): Automation {
+        val signed = unsigned.copy(approvalFingerprint = ApprovalFingerprints.of(unsigned))
+        db.automationDao().upsertPreservingLastFired(
+            AutomationEntity(
+                id = signed.id.value,
+                name = signed.name,
+                status = signed.status,
+                enabled = signed.enabled,
+                priority = signed.priority,
+                cooldownMs = signed.cooldownMs,
+                schemaVersion = signed.schemaVersion,
+                json = ArgusJson.encodeToString(Automation.serializer(), signed),
+            ),
+        )
+        return signed
+    }
+
 
     /** Eventi del ViewModel raccolti in una lista (nessun replay: va chiamato prima dell'azione). */
     private fun kotlinx.coroutines.test.TestScope.collectEvents(
@@ -388,6 +938,26 @@ class AutomationDetailViewModelTest {
 
     /** Tempo reale per lasciar arrivare un eventuale evento duplicato prima di contare. */
     private suspend fun settle() = withContext(Dispatchers.Default) { delay(400) }
+
+    private fun generativeDraft(id: String) = NewDraft(
+        id = DraftId("draft-$id"),
+        automationId = AutomationId(id),
+        draft = AutomationDraft(
+            name = "generativa $id",
+            trigger = Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+            actions = listOf(
+                Action.InvokeLlm(
+                    goal = "say hello",
+                    contextSources = emptyList(),
+                    allowedTools = emptyList(),
+                    replyTargetSender = false,
+                    deliver = GenerativeDeliverMode.LOCAL_NOTIFICATION,
+                    notificationTitle = "Argus",
+                ),
+            ),
+        ),
+        atMillis = 1_000,
+    )
 
     private fun newDraft(id: String, name: String) = NewDraft(
         id = DraftId("draft-$id"),
@@ -406,6 +976,13 @@ class AutomationDetailViewModelTest {
         audit: AuditSink,
         language: RenderLanguage = RenderLanguage.IT,
         drafts: DraftRepository = RoomDraftRepository(db),
+        languageSource: RenderLanguageSource = RenderLanguageSource { language },
+        registrar: ArmedAutomationRegistrar = ArmedAutomationRegistrar { true },
+        scheduler: TimeAlarmRuntime = NoopTimeAlarmRuntime(),
+        sensor: SensorTriggerRuntime = NoopSensorTriggerRuntime,
+        enablementAudit: AuditSink = NoopAuditSink,
+        probe: AndroidCapabilityProbe = probeFor(capabilityState()),
+        geofenceState: GeofenceStateStore = MemoryGeofenceStateStore(),
     ): AutomationDetailViewModel {
         val whitelist = RoomContactWhitelistStore(db.contactWhitelistDao())
         val snapshots = FirePolicySnapshotProvider {
@@ -429,22 +1006,28 @@ class AutomationDetailViewModelTest {
             automations = store,
             capabilities = snapshots,
             location = CurrentLocationProvider { null },
-            registrar = ArmedAutomationRegistrar { true },
+            registrar = registrar,
         )
-        val scheduler = NoopTimeAlarmRuntime()
+        // Scope applicativo di prova: sopravvive al viewModelScope come in produzione.
+        val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        applicationScopes += applicationScope
         return AutomationDetailViewModel(
             savedStateHandle = SavedStateHandle(mapOf("id" to routeId)),
             store = store,
             drafts = drafts,
             approvals = approvals,
-            enablement = AutomationEnablementCoordinator(store, scheduler),
+            enablement = AutomationEnablementCoordinator(store, scheduler, audit = enablementAudit),
             scheduler = scheduler,
             database = db,
             whitelist = whitelist,
             connectivity = NoopConnectivityTriggerRuntime,
             geofence = NoopGeofenceTriggerRuntime,
+            sensor = sensor,
+            probe = probe,
+            geofenceState = geofenceState,
             audit = audit,
-            language = language,
+            languageSource = languageSource,
+            applicationScope = applicationScope,
         ).also { lastViewModel = it }
     }
 
@@ -458,6 +1041,33 @@ class AutomationDetailViewModelTest {
             trigger = Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
             actions = listOf(Action.ShowNotification("Argus", "test")),
             enabled = true,
+        )
+        val signed = unsigned.copy(approvalFingerprint = ApprovalFingerprints.of(unsigned))
+        db.automationDao().upsertPreservingLastFired(
+            AutomationEntity(
+                id = signed.id.value,
+                name = signed.name,
+                status = signed.status,
+                enabled = signed.enabled,
+                priority = signed.priority,
+                cooldownMs = signed.cooldownMs,
+                schemaVersion = signed.schemaVersion,
+                json = ArgusJson.encodeToString(Automation.serializer(), signed),
+            ),
+        )
+        return signed
+    }
+
+    /** Regola una tantum gia' disattivata il cui orario e' passato: il coordinator reale la rifiuta. */
+    private suspend fun seedDisabledOneShotInPast(id: String): Automation {
+        val unsigned = Automation(
+            id = AutomationId(id),
+            name = "auto-$id",
+            createdBy = CreatedBy.USER,
+            status = AutomationStatus.DISABLED,
+            trigger = Trigger.Time(at = "2020-01-01T09:00", tz = "UTC"),
+            actions = listOf(Action.ShowNotification("Argus", "test")),
+            enabled = false,
         )
         val signed = unsigned.copy(approvalFingerprint = ApprovalFingerprints.of(unsigned))
         db.automationDao().upsertPreservingLastFired(
@@ -533,6 +1143,14 @@ private class SpyDraftRepository(private val delegate: DraftRepository) : DraftR
 
     fun releaseHeldArm() { armRelease.complete(Unit) }
 
+    /** Ferma il prossimo `arm` PRIMA di eseguirlo davvero: al rilascio prosegue sul repository reale. */
+    private val gateArm = java.util.concurrent.atomic.AtomicBoolean(false)
+    val armGateReached = CompletableDeferred<Unit>()
+    private val armGateRelease = CompletableDeferred<Unit>()
+
+    fun gateNextArm() { gateArm.set(true) }
+    fun releaseArmGate() { armGateRelease.complete(Unit) }
+
     override suspend fun get(id: DraftId): PendingDraft? {
         if (slowGet.compareAndSet(true, false)) {
             slowGetReached.complete(Unit)
@@ -547,11 +1165,46 @@ private class SpyDraftRepository(private val delegate: DraftRepository) : DraftR
         expectedFingerprint: ApprovalFingerprint,
     ): DraftArmResult {
         armCalls += ArmCall(id, expectedRevision)
+        if (gateArm.compareAndSet(true, false)) {
+            armGateReached.complete(Unit)
+            armGateRelease.await()
+        }
         if (holdNextArm.compareAndSet(true, false)) {
             armHeld.complete(Unit)
             armRelease.await()
             return requireNotNull(heldArmResult)
         }
         return delegate.arm(id, expectedRevision, expectedFingerprint)
+    }
+}
+
+/**
+ * Finto lato runtime di una riattivazione che fallisce: il reconcile segnala la regola come
+ * fallita (il coordinator reale risponde SchedulingFailed e la rimette disattivata) e, se
+ * [detail] c'e', scrive il `ENABLE_FAILED` col codice che il blocco runtime produrra' davvero.
+ */
+internal class EnableFailingScheduler(
+    private val db: ArgusDatabase,
+    private val automationId: String,
+    private val detail: String?,
+) : TimeAlarmRuntime {
+    override suspend fun onAlarm(
+        automationId: AutomationId,
+        approvalFingerprint: ApprovalFingerprint,
+        eventAtMillis: Long,
+    ): AlarmDeliveryResult = AlarmDeliveryResult.Ignored
+
+    override suspend fun reconcile(reason: ReconcileReason): ReconcileReport {
+        detail?.let {
+            db.auditDao().insert(
+                AuditEntity(
+                    automationId = automationId,
+                    kind = AuditKind.ENABLE_FAILED,
+                    atMillis = System.currentTimeMillis(),
+                    detail = it,
+                ),
+            )
+        }
+        return ReconcileReport(emptyList(), emptyList(), emptyList(), listOf(AutomationId(automationId)))
     }
 }

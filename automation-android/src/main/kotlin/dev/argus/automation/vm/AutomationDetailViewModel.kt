@@ -4,18 +4,26 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dev.argus.automation.AndroidCapabilityProbe
 import dev.argus.automation.ApprovalFlow
 import dev.argus.automation.AutomationEnablementCoordinator
+import dev.argus.automation.BlockCause
 import dev.argus.automation.EnablementResult
 import dev.argus.automation.FlowArmResult
 import dev.argus.automation.ReconcileReason
+import dev.argus.automation.RenderLanguageSource
 import dev.argus.automation.TimeAlarmRuntime
 import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
+import dev.argus.automation.di.ApplicationScope
+import dev.argus.automation.geofence.GeofenceStateStore
 import dev.argus.automation.geofence.GeofenceTriggerRuntime
+import dev.argus.automation.geofence.PersistedGeofenceRegistration
+import dev.argus.automation.sensor.SensorTriggerRuntime
 import dev.argus.data.ArgusDatabase
 import dev.argus.data.dao.AuditLogRecord
 import dev.argus.engine.brain.ContactWhitelistStore
 import dev.argus.data.entities.ActionResultEntity
+import dev.argus.data.entities.ScheduledTimeAlarmEntity
 import dev.argus.engine.model.ActionTier
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationDraft
@@ -36,13 +44,18 @@ import dev.argus.engine.safety.DraftRepository
 import dev.argus.engine.safety.PendingDraft
 import dev.argus.engine.safety.Severity
 import dev.argus.ui.model.AutomationDetailState
+import dev.argus.ui.model.RuleDiagnosisUi
 import dev.argus.ui.model.StatusBadge
 import dev.argus.ui.model.UiWarning
 import dev.argus.ui.presentation.RuleRenderMapper
 import dev.argus.ui.presentation.RenderLanguage
 import dev.argus.ui.presentation.ValidationMessages
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -54,6 +67,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 
@@ -83,12 +97,29 @@ private data class DetailSources(
     val log: List<AuditLogRecord>,
     val actionsByExecution: Map<String, List<ActionResultEntity>>,
     val conversationLabels: Map<String, String>,
+    val language: RenderLanguage,
+    val diagnosis: DiagnosisSnapshot? = null,
+)
+
+/**
+ * Ciò che «Perché non è scattata?» ha letto dal dispositivo, una volta, quando l'utente ha aperto la
+ * sezione. Si tengono solo gli input: il testo si costruisce nel flow dello stato insieme alla
+ * lingua, così segue il cambio di lingua. Vale per la revisione ([fingerprint]) che ha letto.
+ */
+private data class DiagnosisSnapshot(
+    val automationId: AutomationId,
+    val fingerprint: ApprovalFingerprint?,
+    val blockCauses: Map<String, BlockCause>,
+    val alarm: ScheduledTimeAlarmEntity?,
+    val geofence: PersistedGeofenceRegistration?,
+    val checkedAtMillis: Long,
 )
 
 private data class DetailTarget(
     val draft: PendingDraft?,
     val automation: Automation?,
     val conversationLabels: Map<String, String>,
+    val language: RenderLanguage,
 ) {
     val automationId: String? = (automation?.id ?: draft?.automationId)?.value
 }
@@ -106,8 +137,16 @@ class AutomationDetailViewModel @Inject constructor(
     private val whitelist: ContactWhitelistStore,
     private val connectivity: ConnectivityTriggerRuntime,
     private val geofence: GeofenceTriggerRuntime,
+    private val sensor: SensorTriggerRuntime,
+    private val probe: AndroidCapabilityProbe,
+    private val geofenceState: GeofenceStateStore,
     private val audit: AuditSink,
-    private val language: RenderLanguage = RenderLanguage.system(),
+    private val languageSource: RenderLanguageSource,
+    /**
+     * B31: scope dei lavori che devono finire anche se l'utente esce dalla schermata (l'arm lo
+     * usa); nel ViewModel resta solo l'attesa del risultato.
+     */
+    @ApplicationScope private val applicationScope: CoroutineScope,
 ) : ViewModel() {
     private val routeId = requireNotNull(savedStateHandle.get<String>("id")) {
         "Dettaglio senza id"
@@ -116,6 +155,13 @@ class AutomationDetailViewModel @Inject constructor(
     val state: StateFlow<DetailViewState> = mutableState.asStateFlow()
     private val mutableEvents = MutableSharedFlow<DetailEvent>(extraBufferCapacity = 4)
     val events = mutableEvents.asSharedFlow()
+
+    /**
+     * Lingua al momento (messaggi ed errori prodotti dalle azioni). Lo stato dello schermo non la
+     * legge da qui: la riceve dal flow ([RenderLanguageSource.language]) così si rigenera al
+     * cambio di lingua del telefono.
+     */
+    private val language: RenderLanguage get() = languageSource.current
 
     /**
      * Bozza e regola che l'utente STA VEDENDO: si aggiornano solo insieme a [mutableState], dopo che
@@ -131,13 +177,18 @@ class AutomationDetailViewModel @Inject constructor(
     /** B26: vero finché arma/rifiuta/elimina è in corso (e dopo un Close, fino alla chiusura). */
     private val actionInFlight = AtomicBoolean(false)
 
+    /** Ultima diagnosi chiesta («Perché non è scattata?»); null finché l'utente non la apre. */
+    private val diagnosisInputs = MutableStateFlow<DiagnosisSnapshot?>(null)
+    private var diagnosisJob: Job? = null
+
     init {
         viewModelScope.launch {
             combine(
                 drafts.observeAll(),
                 store.observeAll(),
                 whitelist.observeAll(),
-            ) { pending, automations, contacts ->
+                languageSource.language,
+            ) { pending, automations, contacts, renderLanguage ->
                 val automationByRoute = automations.firstOrNull { it.id.value == routeId }
                 // D5: una regola armata/disattivata resta la verità del proprio dettaglio anche con una
                 // modifica in attesa (la regola continua a scattare); la bozza si apre dal suo id.
@@ -153,7 +204,12 @@ class AutomationDetailViewModel @Inject constructor(
                     ?: draft?.let { snapshot ->
                         automations.firstOrNull { it.id == snapshot.automationId }
                     }
-                DetailTarget(draft, automation, contacts.associate { it.id to it.displayName })
+                DetailTarget(
+                    draft,
+                    automation,
+                    contacts.associate { it.id to it.displayName },
+                    renderLanguage,
+                )
             }.flatMapLatest { target ->
                 val automationId = target.automationId
                     ?: return@flatMapLatest flowOf(
@@ -163,6 +219,7 @@ class AutomationDetailViewModel @Inject constructor(
                             emptyList(),
                             emptyMap(),
                             target.conversationLabels,
+                            target.language,
                         ),
                     )
                 combine(
@@ -174,13 +231,16 @@ class AutomationDetailViewModel @Inject constructor(
                         automationId,
                         RECENT_LOG_SCAN_LIMIT,
                     ),
-                ) { log, actions ->
+                    diagnosisInputs,
+                ) { log, actions, diagnosis ->
                     DetailSources(
                         target.draft,
                         target.automation,
                         log,
                         actions.groupBy { it.executionId },
                         target.conversationLabels,
+                        target.language,
+                        diagnosis,
                     )
                 }
             }.collectLatest { sources ->
@@ -190,14 +250,25 @@ class AutomationDetailViewModel @Inject constructor(
                         sources.log,
                         sources.actionsByExecution,
                         sources.conversationLabels,
+                        sources.language,
                     )
                     sources.automation != null -> automationState(
                         sources.automation,
                         sources.log,
                         sources.actionsByExecution,
                         sources.conversationLabels,
+                        sources.language,
+                        sources.diagnosis,
                     )
-                    else -> DetailViewState(loading = false, missing = true)
+                    // B31: mentre arma/rifiuta/elimina è in corso la bozza o la regola scompare dalle
+                    // tabelle PRIMA che l'azione chiuda la schermata. Quel vuoto non è «regola non
+                    // disponibile»: si tiene l'ultimo stato valido (col footer disabilitato) fino al
+                    // Close. Senza un'azione in corso il vuoto è reale (bozza sostituita o rimossa).
+                    else -> if (actionInFlight.get() && mutableState.value.detail != null) {
+                        return@collectLatest
+                    } else {
+                        DetailViewState(loading = false, missing = true)
+                    }
                 }
                 // S3: se questo blocco viene annullato dentro draftState (nuova emissione) non si
                 // arriva qui, quindi displayedDraft resta quello che lo schermo mostra davvero.
@@ -237,9 +308,14 @@ class AutomationDetailViewModel @Inject constructor(
         val snapshot = displayedDraft ?: return
         runExclusive {
             try {
-                when (
-                    val result = approvals.arm(snapshot.id, snapshot.revision, snapshot.fingerprint)
-                ) {
+                // B31: l'arm (commit + registrazione degli allarmi/geofence) non deve essere
+                // interrotto dall'uscita dalla schermata, che cancella viewModelScope: girerebbe a
+                // metà e la regola resterebbe armata ma non registrata. Lo esegue lo scope
+                // applicativo; qui si aspetta soltanto il risultato.
+                val outcome = applicationScope.async {
+                    approvals.arm(snapshot.id, snapshot.revision, snapshot.fingerprint)
+                }.await()
+                when (val result = outcome) {
                     is FlowArmResult.Armed -> closeWith(
                         language.pick(
                             "Rule armed: ${result.automation.name}",
@@ -361,6 +437,8 @@ class AutomationDetailViewModel @Inject constructor(
                                 "Pianificazione non riuscita: la regola è rimasta disattivata.",
                             ),
                         )
+                    // B31: l'orario e' passato, non e' un guasto: dice cosa fare.
+                    EnablementResult.OneShotInPast -> message(oneShotInPastText(language))
                     EnablementResult.DisableCleanupDeferred ->
                         message(
                             language.pick(
@@ -408,6 +486,9 @@ class AutomationDetailViewModel @Inject constructor(
                 if (cancellationSafeOrNull {
                     geofence.reconcile(recreateOsRegistrations = false)
                 } == null) reconciled = false
+                // I sensori hanno la loro registrazione fisica: senza questo giro una regola
+                // sensore eliminata terrebbe il sensore registrato fino al prossimo bootstrap.
+                if (cancellationSafeOrNull { sensor.reconcile() } == null) reconciled = false
                 closeWith(
                     if (reconciled) {
                         language.pick("Rule deleted.", "Regola eliminata.")
@@ -426,15 +507,39 @@ class AutomationDetailViewModel @Inject constructor(
         }
     }
 
+    /**
+     * «Perché non è scattata?»: legge una volta capability, sveglia e geofence della regola
+     * mostrata. Una nuova richiesta (Ricontrolla) sostituisce quella in corso. Mai per una bozza.
+     */
+    fun onDiagnose() {
+        val automation = displayedAutomation ?: return
+        if (displayedDraft != null) return
+        diagnosisJob?.cancel()
+        diagnosisJob = viewModelScope.launch {
+            try {
+                val (causes, registration) = withContext(Dispatchers.IO) {
+                    probe.blockCauses(automation.requiredCapabilities) to
+                        geofenceState.get(automation.id)
+                }
+                val alarm = database.scheduledTimeAlarmDao().get(automation.id.value)
+                diagnosisInputs.value = DiagnosisSnapshot(
+                    automationId = automation.id,
+                    fingerprint = automation.approvalFingerprint,
+                    blockCauses = causes,
+                    alarm = alarm,
+                    geofence = registration,
+                    checkedAtMillis = System.currentTimeMillis(),
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                message(language.pick("Unable to run the check.", "Impossibile eseguire il controllo."))
+            }
+        }
+    }
+
     fun onRunNow() {
-        mutableEvents.tryEmit(
-            DetailEvent.Message(
-                language.pick(
-                    "Run now requires live confirmation and is disabled in P0-B.",
-                    "Esegui ora richiede conferma live ed è disabilitato in P0-B.",
-                ),
-            ),
-        )
+        mutableEvents.tryEmit(DetailEvent.Message(runNowUnavailable(language)))
     }
 
     fun onAskEdit() {
@@ -473,6 +578,7 @@ class AutomationDetailViewModel @Inject constructor(
         records: List<AuditLogRecord>,
         actionsByExecution: Map<String, List<ActionResultEntity>>,
         conversationLabels: Map<String, String>,
+        language: RenderLanguage,
     ): DetailViewState {
         val review = cancellationSafeOrNull { approvals.review(snapshot.id) }
         val rule = RuleRenderMapper.mapDraft(snapshot.draft, conversationLabels, language)
@@ -488,7 +594,7 @@ class AutomationDetailViewModel @Inject constructor(
             reviewWarnings(review, language)
         }
         val canArm = review?.canArm == true && warnings.none { it.severity == Severity.ERROR }
-        val recent = recentRuns(snapshot.automationId.value, records, actionsByExecution)
+        val recent = recentRuns(snapshot.automationId.value, records, actionsByExecution, language)
         return DetailViewState(
             detail = AutomationDetailState(
                 id = snapshot.id.value,
@@ -499,9 +605,10 @@ class AutomationDetailViewModel @Inject constructor(
                 warnings = warnings,
                 canArm = canArm,
                 armBlockedReason = warnings.firstOrNull { it.severity == Severity.ERROR }?.text,
-                estimatedLlmCallsPerDay = generativeEstimate(snapshot.draft.actions.any {
-                    it.tier == ActionTier.GENERATIVE
-                }),
+                estimatedLlmCallsPerDay = generativeEstimate(
+                    snapshot.draft.actions.any { it.tier == ActionTier.GENERATIVE },
+                    language,
+                ),
                 recentRuns = recent,
                 geofencePreviewLabel = (snapshot.draft.trigger as? Trigger.Geofence)
                     ?.takeIf { it.resolveCurrentLocation }
@@ -511,9 +618,9 @@ class AutomationDetailViewModel @Inject constructor(
                             "Posizione: quella attuale al momento dell'attivazione",
                         )
                     },
-                runNowBlockedReason = runNowBlockedReason(),
+                runNowBlockedReason = runNowBlockedReason(language),
                 verifiedStateReaders = review?.verifiedStateQueries.orEmpty().map { evidence ->
-                    readerProbeLabel(evidence.family, evidence.valueType)
+                    readerProbeLabel(evidence.family, evidence.valueType, language)
                 },
             ),
             automationId = snapshot.automationId.value,
@@ -526,6 +633,8 @@ class AutomationDetailViewModel @Inject constructor(
         records: List<AuditLogRecord>,
         actionsByExecution: Map<String, List<ActionResultEntity>>,
         conversationLabels: Map<String, String>,
+        language: RenderLanguage,
+        snapshot: DiagnosisSnapshot?,
     ): DetailViewState {
         val rule = RuleRenderMapper.map(automation, conversationLabels, language)
         val warnings = buildList {
@@ -552,44 +661,83 @@ class AutomationDetailViewModel @Inject constructor(
                 warnings = warnings,
                 canArm = false,
                 armBlockedReason = warnings.firstOrNull { it.severity == Severity.ERROR }?.text,
-                estimatedLlmCallsPerDay = generativeEstimate(rule.isGenerative),
-                recentRuns = recentRuns(automation.id.value, records, actionsByExecution),
+                estimatedLlmCallsPerDay = generativeEstimate(rule.isGenerative, language),
+                recentRuns = recentRuns(automation.id.value, records, actionsByExecution, language),
                 geofencePreviewLabel = null,
-                runNowBlockedReason = runNowBlockedReason(),
+                runNowBlockedReason = runNowBlockedReason(language),
+                diagnosis = diagnosisOf(automation, records, snapshot, language),
+                diagnosisAvailable = true,
             ),
             automationId = automation.id.value,
             loading = false,
         )
     }
 
-    private fun runNowBlockedReason(): String = language.pick(
-        "Manual execution is not available at this stage.",
-        "Esecuzione manuale non disponibile in questa fase.",
+    /**
+     * La diagnosi si ricostruisce a ogni emissione dagli input letti una volta (lingua e log
+     * compresi). Se la regola ha cambiato revisione da quando è stata chiesta, quegli input non
+     * la riguardano più: si azzera e l'utente può ricontrollare.
+     */
+    private fun diagnosisOf(
+        automation: Automation,
+        records: List<AuditLogRecord>,
+        snapshot: DiagnosisSnapshot?,
+        language: RenderLanguage,
+    ): RuleDiagnosisUi? {
+        if (snapshot == null ||
+            snapshot.automationId != automation.id ||
+            snapshot.fingerprint != automation.approvalFingerprint
+        ) {
+            return null
+        }
+        return buildRuleDiagnosis(
+            DiagnosisInputs(automation, snapshot.blockCauses, snapshot.alarm, snapshot.geofence, records),
+            snapshot.checkedAtMillis,
+            language,
+        )
+    }
+
+    private fun runNowBlockedReason(language: RenderLanguage): String = runNowUnavailable(language)
+
+    private fun runNowUnavailable(language: RenderLanguage): String = language.pick(
+        "Run now is not available yet.",
+        "Esegui ora non è ancora disponibile.",
     )
 
     private fun recentRuns(
         automationId: String,
         records: List<AuditLogRecord>,
         actionsByExecution: Map<String, List<ActionResultEntity>>,
+        language: RenderLanguage,
     ) = records
         .filter { it.automationId == automationId }
         .take(RECENT_RUN_LIMIT)
         .map { record ->
             val actions = record.executionId?.let(actionsByExecution::get).orEmpty()
-            record.toLogRow(actions, language)
+            val row = record.toLogRow(actions, language)
+            // B31: nel Dettaglio il motivo dice cosa fare, non solo che è fallito.
+            if (record.kind == AuditKind.ENABLE_FAILED && record.detail == ONE_SHOT_IN_PAST) {
+                row.copy(summary = oneShotInPastText(language))
+            } else {
+                row
+            }
         }
         .toList()
 
-    private fun generativeEstimate(generative: Boolean): String? = if (generative) {
+    private fun generativeEstimate(generative: Boolean, language: RenderLanguage): String? = if (generative) {
         language.pick(
-            "Available since P1 · minimum cooldown 60 s",
-            "Disponibile da P1 · cooldown minimo 60 s",
+            "Minimum cooldown 60 s between two AI replies",
+            "Cooldown minimo 60 s tra due risposte AI",
         )
     } else {
         null
     }
 
-    private fun readerProbeLabel(family: StateQueryFamily, type: StateValueType): String {
+    private fun readerProbeLabel(
+        family: StateQueryFamily,
+        type: StateValueType,
+        language: RenderLanguage,
+    ): String {
         val reader = when (family) {
             StateQueryFamily.BUILTIN -> language.pick("built-in state", "stato integrato")
             StateQueryFamily.SETTING -> language.pick("Android setting", "impostazione Android")

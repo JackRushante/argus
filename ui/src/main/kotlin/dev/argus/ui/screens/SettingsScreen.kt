@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Alarm
 import androidx.compose.material.icons.rounded.BatterySaver
 import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.CheckCircle
@@ -76,6 +77,7 @@ import dev.argus.ui.components.WarningBanner
 import dev.argus.engine.safety.Severity
 import dev.argus.ui.model.UiWarning
 import dev.argus.ui.model.ProviderUsageUi
+import dev.argus.ui.preview.Fixtures
 import dev.argus.ui.presentation.BudgetFormat
 import dev.argus.ui.R
 import dev.argus.ui.theme.ArgusTheme
@@ -206,11 +208,16 @@ private enum class HealthLevel { OK, WARN, NEUTRAL }
 @Composable
 private fun HealthSection(state: SettingsState, callbacks: SettingsCallbacks) {
     val shizukuSub = when (state.shizuku) {
-        ShizukuStatus.AUTHORIZED -> stringResource(R.string.settings_shizuku_ok)
+        ShizukuStatus.AUTHORIZED -> if (state.shizukuRunsAsRoot == true) {
+            stringResource(R.string.settings_shizuku_ok_root)
+        } else {
+            stringResource(R.string.settings_shizuku_ok)
+        }
         ShizukuStatus.NOT_INSTALLED -> stringResource(R.string.settings_shizuku_not_installed)
         ShizukuStatus.INSTALLED_NOT_RUNNING -> stringResource(R.string.settings_shizuku_not_running)
         ShizukuStatus.RUNNING_NOT_AUTHORIZED -> stringResource(R.string.settings_shizuku_not_authorized)
         ShizukuStatus.DEGRADED_AFTER_REBOOT -> stringResource(R.string.settings_shizuku_degraded)
+        ShizukuStatus.UNSUPPORTED -> stringResource(R.string.settings_shizuku_unsupported)
     }
     val (locLevel, locSub) = when (state.backgroundLocation) {
         BgLocationState.GRANTED -> HealthLevel.OK to stringResource(R.string.settings_location_granted)
@@ -237,6 +244,16 @@ private fun HealthSection(state: SettingsState, callbacks: SettingsCallbacks) {
                 onFix = callbacks::onOpenBatteryFix,
             )
             HealthRow(
+                Icons.Rounded.Alarm, stringResource(R.string.settings_exact_alarms_title),
+                if (state.exactAlarmsGranted) {
+                    stringResource(R.string.settings_exact_alarms_ok)
+                } else {
+                    stringResource(R.string.settings_exact_alarms_warn)
+                },
+                if (state.exactAlarmsGranted) HealthLevel.OK else HealthLevel.WARN,
+                onFix = callbacks::onOpenExactAlarmFix,
+            )
+            HealthRow(
                 Icons.Rounded.Notifications, stringResource(R.string.settings_notifications_title),
                 if (state.notificationsGranted) stringResource(R.string.settings_notifications_ok) else stringResource(R.string.settings_notifications_warn),
                 if (state.notificationsGranted) HealthLevel.OK else HealthLevel.WARN,
@@ -252,6 +269,16 @@ private fun HealthSection(state: SettingsState, callbacks: SettingsCallbacks) {
                 if (state.notificationListenerGranted) HealthLevel.OK else HealthLevel.WARN,
                 onFix = callbacks::onOpenNotificationListenerFix,
             )
+            // Android 13+ con installazione da APK: l'accesso può essere bloccato da «Impostazione con
+            // restrizioni»; la guida compare solo se l'accesso non è concesso.
+            if (state.notificationListenerRestrictedHint) {
+                Text(
+                    stringResource(R.string.settings_listener_restricted_hint),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(horizontal = 14.dp),
+                )
+            }
             HealthRow(
                 Icons.Rounded.MyLocation, stringResource(R.string.settings_location_title), locSub, locLevel,
                 onFix = callbacks::onOpenLocationFix,
@@ -896,6 +923,7 @@ private object NoopSettingsCallbacks : SettingsCallbacks {
     override fun onTestConnection() {}
     override fun onOpenShizukuFix() {}
     override fun onOpenBatteryFix() {}
+    override fun onOpenExactAlarmFix() {}
     override fun onOpenNotificationAccessFix() {}
     override fun onOpenLocationFix() {}
     override fun onRemoveContact(conversationId: String) {}
@@ -949,7 +977,7 @@ private val previewAllGreen = SettingsState(
         softWarningActive = false,
     ),
     privacyAccepted = true,
-    appVersionLabel = "Argus v0.1.0 · MVP (sideload)",
+    appVersionLabel = "Argus v0.3.6 · F-Droid",
     providerChoices = previewProviderChoices,
 )
 
@@ -994,7 +1022,7 @@ private val previewDegraded = SettingsState(
         softWarningActive = true,
     ),
     privacyAccepted = true,
-    appVersionLabel = "Argus v0.1.0 · MVP (sideload)",
+    appVersionLabel = "Argus v0.3.6 · APK",
 )
 
 @Preview(name = "Sistema · tutto verde + 1 contatto", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 1100)
@@ -1009,8 +1037,32 @@ private fun SettingsDegradedPreview() {
     ArgusTheme { SettingsScreen(previewDegraded, NoopSettingsCallbacks) }
 }
 
+@Preview(name = "Sistema · Shizuku gira come root", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 1100)
+@Composable
+private fun SettingsShizukuRootPreview() {
+    ArgusTheme { SettingsScreen(Fixtures.settingsShizukuRoot, NoopSettingsCallbacks) }
+}
+
+@Preview(name = "Sistema · Shizuku troppo vecchio", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 1100)
+@Composable
+private fun SettingsShizukuUnsupportedPreview() {
+    ArgusTheme { SettingsScreen(Fixtures.settingsShizukuUnsupported, NoopSettingsCallbacks) }
+}
+
 @Preview(name = "Sistema · provider diretto (OpenAI)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 1100)
 @Composable
 private fun SettingsDirectProviderPreview() {
     ArgusTheme { SettingsScreen(previewDirectProvider, NoopSettingsCallbacks) }
+}
+
+@Preview(name = "Sistema · guida impostazioni con restrizioni (APK, Android 13+)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 1100)
+@Composable
+private fun SettingsRestrictedHintPreview() {
+    ArgusTheme { SettingsScreen(Fixtures.settingsRestrictedHint, NoopSettingsCallbacks) }
+}
+
+@Preview(name = "Sistema · sveglie esatte non concesse (CTA)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 1100)
+@Composable
+private fun SettingsExactAlarmsDeniedPreview() {
+    ArgusTheme { SettingsScreen(Fixtures.settingsExactAlarmsDenied, NoopSettingsCallbacks) }
 }

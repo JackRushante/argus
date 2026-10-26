@@ -10,12 +10,14 @@ import dev.argus.engine.runtime.AuditKind
 import dev.argus.engine.runtime.AuditSink
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.runtime.NoopAuditSink
+import dev.argus.engine.runtime.TimeSpecs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
+import java.time.Instant
 import javax.inject.Singleton
 import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
 import dev.argus.automation.connectivity.NoopConnectivityTriggerRuntime
@@ -28,6 +30,12 @@ sealed interface EnablementResult {
     data object Updated : EnablementResult
     data object ReviewRequired : EnablementResult
     data object SchedulingFailed : EnablementResult
+
+    /**
+     * Riattivazione di una regola una tantum il cui orario e' gia' passato: non puo' ripartire finche'
+     * l'utente non sceglie un nuovo orario. Esito proprio, distinto da un fallimento di pianificazione.
+     */
+    data object OneShotInPast : EnablementResult
     data object DisableCleanupDeferred : EnablementResult
 }
 
@@ -61,6 +69,11 @@ class AutomationEnablementCoordinator @Inject constructor(
     private val audit: AuditSink = NoopAuditSink,
     private val immediateReArm: ImmediateReArm = NoopImmediateReArm,
 ) {
+    private companion object {
+        /** Motivo dell'ENABLE_FAILED: l'orario della regola una tantum è già passato. */
+        const val ONE_SHOT_IN_PAST = "one_shot_in_past"
+    }
+
     private val mutex = Mutex()
 
     suspend fun setEnabled(id: AutomationId, enabled: Boolean): EnablementResult = mutex.withLock {
@@ -90,6 +103,12 @@ class AutomationEnablementCoordinator @Inject constructor(
 
         if (current.status == AutomationStatus.ARMED && current.enabled) {
             return@withLock EnablementResult.Updated
+        }
+        // Una regola una tantum con l'orario già passato non può ripartire: il coordinator degli allarmi la
+        // disabiliterebbe subito come scaduta, e l'utente vedrebbe «riattivata» su una regola spenta.
+        if (current.status == AutomationStatus.DISABLED && isOneShotInPast(current)) {
+            recordEnableFailed(id, ONE_SHOT_IN_PAST)
+            return@withLock EnablementResult.OneShotInPast
         }
         if (!store.enableIfApproved(id, fingerprint)) {
             recordEnableFailed(id, "review_required")
@@ -142,6 +161,18 @@ class AutomationEnablementCoordinator @Inject constructor(
             throw error
         } catch (_: Exception) {
             // L'enable è già durevole in Room; non rieseguire né rollbackare per un fire mancato.
+        }
+    }
+
+    /** Solo `at` assoluto può essere passato: cron e ritardo relativo hanno sempre un prossimo scatto. */
+    private fun isOneShotInPast(automation: Automation): Boolean {
+        val trigger = automation.trigger as? Trigger.Time ?: return false
+        if (trigger.at == null) return false
+        return try {
+            TimeSpecs.nextFire(trigger, Instant.now()) == null
+        } catch (_: Exception) {
+            // Spec malformato: decide il percorso normale (il planner lo mette in quarantena).
+            false
         }
     }
 

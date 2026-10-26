@@ -9,6 +9,7 @@ import dev.argus.engine.model.WriteSettingPolicy
 import dev.argus.engine.runtime.ExecutionId
 import dev.argus.shizuku.PrivilegedShell
 import dev.argus.shizuku.ShellResult
+import dev.argus.shizuku.ShizukuShellException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -361,15 +362,32 @@ class DeviceTools(
         executionId: ExecutionId? = null,
         priority: Int = 0,
     ): ShellResult {
-        val result = shell.run(
-            command = command,
-            priority = priority,
-            executionId = executionId?.value,
-        )
+        val result = try {
+            shell.run(
+                command = command,
+                priority = priority,
+                executionId = executionId?.value,
+            )
+        } catch (error: ShizukuShellException) {
+            throw DeviceToolException(error.code, error)
+        }
         if (!result.successful || result.truncated) {
-            throw DeviceToolException("${operation}_failed")
+            throw DeviceToolException(failureCode(operation, result))
         }
         return result
+    }
+
+    /**
+     * Codice stabile e privo di contenuti del fallimento di una shell privilegiata:
+     * `shizuku_timeout` se il comando non ha risposto in tempo, `<operazione>_exit_<n>` per
+     * un'uscita non zero (n nel range 1..255 di una shell), altrimenti `<operazione>_failed`
+     * (errore del servizio, output troncato).
+     */
+    private fun failureCode(operation: String, result: ShellResult): String = when {
+        result.timedOut -> ShizukuShellException.TIMEOUT
+        result.errorCode != null -> "${operation}_failed"
+        result.exitCode in 1..MAX_SHELL_EXIT_CODE -> "${operation}_exit_${result.exitCode}"
+        else -> "${operation}_failed"
     }
 
     private suspend fun runToBytes(
@@ -385,12 +403,19 @@ class DeviceTools(
             throw DeviceToolException("temporary_file_failed", error)
         }
         try {
-            val result = shell.runToFile(
-                command = command,
-                destination = destination,
-                maxOutputBytes = maxOutputBytes,
-            )
-            if (!result.successful || result.truncated || destination.length() !in 1..maxOutputBytes.toLong()) {
+            val result = try {
+                shell.runToFile(
+                    command = command,
+                    destination = destination,
+                    maxOutputBytes = maxOutputBytes,
+                )
+            } catch (error: ShizukuShellException) {
+                throw DeviceToolException(error.code, error)
+            }
+            if (!result.successful || result.truncated) {
+                throw DeviceToolException(failureCode(operation, result))
+            }
+            if (destination.length() !in 1..maxOutputBytes.toLong()) {
                 throw DeviceToolException("${operation}_failed")
             }
             return destination.readBytes()
@@ -437,6 +462,7 @@ class DeviceTools(
         const val MAX_UI_DUMP_BYTES = 4 * 1024 * 1024
         const val CLEANUP_TIMEOUT_MILLIS = 5_000L
         const val CLEANUP_OUTPUT_BYTES = 4 * 1024
+        const val MAX_SHELL_EXIT_CODE = 255
         val COORDINATE_RANGE = 0..10_000
         val HTTP_SCHEMES = setOf("http", "https")
         val PACKAGE_NAME = Regex("^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+$")

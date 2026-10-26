@@ -189,6 +189,7 @@ class AnthropicMessagesTransportTest {
         val user = root.getValue("messages").jsonArray.single().jsonObject
             .getValue("content").jsonPrimitive.content
         assertFalse("Message received" in user, "il sink non referenzia alcuna notifica in arrivo")
+        assertEquals("Goal: genera un promemoria", user, "il user message del sink porta l'obiettivo")
     }
 
     @Test fun `notification sink with web adds only the web tool and no reply`(): Unit = runBlocking {
@@ -335,6 +336,24 @@ class AnthropicMessagesTransportTest {
         assertFalse(error.message.orEmpty().contains(API_KEY))
     }
 
+    @Test fun `health carries the masked provider message while act never does`(): Unit = runBlocking {
+        val body = """{"type":"error","error":{"type":"not_found_error","message":"model: claude-x ($API_KEY)"}}"""
+        server.enqueue(jsonResponse(body).setResponseCode(404))
+        server.enqueue(jsonResponse(body).setResponseCode(404))
+        val t = transport(model = "claude-x")
+
+        val health = assertFailsWith<TransportException> { t.health() }
+        val act = assertFailsWith<TransportException> {
+            t.act(fireContext(), "rispondi", listOf("notification"), listOf("whatsapp_reply"))
+        }
+
+        assertEquals(404, health.statusCode)
+        val providerMessage = assertNotNull(health.providerMessage)
+        assertTrue(providerMessage.startsWith("model: claude-x"), providerMessage)
+        assertFalse(API_KEY in providerMessage, providerMessage)
+        assertNull(act.providerMessage)
+    }
+
     @Test fun `payment required and rate limit and server and generic errors are typed`(): Unit = runBlocking {
         val cases = mapOf(
             402 to TransportErrorKind.BUDGET,
@@ -368,6 +387,38 @@ class AnthropicMessagesTransportTest {
     }
 
     // --- compile: prompt Hermes + sentinel @@META@@ (nessun tool) ---
+
+    @Test fun `compile never sends a temperature (thinking models reject it)`(): Unit = runBlocking {
+        server.enqueue(jsonResponse(textContent("Ciao! Come posso aiutarti oggi?")))
+
+        transport(model = "claude-opus-4-8").compile("ciao", manifest(), deviceState())
+
+        val body = assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8()
+        assertFalse("temperature" in body, body)
+    }
+
+    @Test fun `compile returns the raw model text capped at 16000 characters`(): Unit = runBlocking {
+        server.enqueue(jsonResponse(textContent("Ciao! " + "x".repeat(20_000))))
+        val t = transport(model = "claude-opus-4-8")
+
+        val result = t.compile("ciao", manifest(), deviceState())
+
+        val raw = assertNotNull(result.raw)
+        assertEquals(16_000, raw.length)
+        assertTrue(raw.startsWith("Ciao! "))
+    }
+
+    @Test fun `compile with a draft still carries the raw text with the sentinel line`(): Unit = runBlocking {
+        val content = "Fatto.\n@@META@@ {\"draft\": {\"name\":\"dnd sera\"," +
+            "\"trigger\":{\"type\":\"time\",\"cron\":\"0 23 * * *\",\"tz\":\"Europe/Rome\"}," +
+            "\"actions\":[{\"type\":\"set_dnd\",\"mode\":\"PRIORITY\"}]}}"
+        server.enqueue(jsonResponse(textContent(content)))
+
+        val result = transport(model = "claude-opus-4-8").compile("dnd alle 23", manifest(), deviceState())
+
+        assertNotNull(result.draft)
+        assertEquals(content, result.raw)
+    }
 
     @Test fun `compile parses the sentinel draft and posts to v1 messages without tools`(): Unit = runBlocking {
         val content = "Ho creato l'automazione per il silenzioso serale.\n" +

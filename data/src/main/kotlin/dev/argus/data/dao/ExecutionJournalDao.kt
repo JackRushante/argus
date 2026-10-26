@@ -173,4 +173,11 @@ interface ExecutionJournalDao {
             "SELECT executionId FROM fire_claims ORDER BY claimedAtMillis DESC, executionId DESC LIMIT :maxRows))",
     )
     suspend fun trim(olderThanMillis: Long, maxRows: Int): Int
+
+    /** Righe azione delle esecuzioni concluse; quelle aperte o recuperabili restano (vedi [AuditDao]). */
+    @Query(
+        "DELETE FROM action_results WHERE executionId IN (" +
+            "SELECT executionId FROM fire_claims WHERE status NOT IN ('RUNNING', 'SUBMITTED', 'DEFERRED'))",
+    )
+    suspend fun deleteActionsOfConcluded(): Int
 }

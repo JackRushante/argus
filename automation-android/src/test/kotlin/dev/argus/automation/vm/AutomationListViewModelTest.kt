@@ -10,13 +10,20 @@ import dev.argus.automation.AutomationEnablementCoordinator
 import dev.argus.automation.CurrentLocationProvider
 import dev.argus.automation.ReconcileReason
 import dev.argus.automation.ReconcileReport
+import dev.argus.automation.RenderLanguageSource
 import dev.argus.automation.TimeAlarmRuntime
 import dev.argus.data.ArgusDatabase
 import dev.argus.data.RoomAutomationStore
+import dev.argus.data.entities.AutomationEntity
+import dev.argus.data.entities.ScheduledTimeAlarmEntity
 import dev.argus.data.RoomContactWhitelistStore
 import dev.argus.data.RoomDraftRepository
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.ApprovalFingerprint
+import dev.argus.engine.model.ApprovalFingerprints
+import dev.argus.engine.model.ArgusJson
+import dev.argus.engine.model.Automation
+import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
@@ -50,6 +57,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import java.util.concurrent.atomic.AtomicInteger
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
@@ -200,7 +208,240 @@ class AutomationListViewModelTest {
         assertEquals(0, latest().pendingCount)
     }
 
+    @Test
+    fun `the rows regenerate their texts when the language source goes from english to italian`() = runTest {
+        armedRule("lang")
+        var system = RenderLanguage.EN
+        val source = RenderLanguageSource { system }
+        val latest = collectState(viewModel(source))
+        awaitUntil("riga inglese") { latest().rows.singleOrNull()?.triggerSummary?.startsWith("Every day") == true }
+
+        system = RenderLanguage.IT
+        source.refresh()
+
+        awaitUntil("riga italiana") {
+            latest().rows.singleOrNull()?.triggerSummary?.startsWith("Ogni giorno") == true
+        }
+    }
+
+    // --- B32: la lista non rilegge lo stato a ogni scatto ---------------------------------------------
+
+    @Test
+    fun `ten firings with the same drafts read the device state once`() = runTest {
+        val rule = armedRule("fire")
+        assertIs<DraftWriteResult.Saved>(repository.create(newDraft("pend")))
+        val reads = AtomicInteger(0)
+        val snapshots = FirePolicySnapshotProvider {
+            reads.incrementAndGet()
+            FirePolicySnapshot(
+                knownTools = emptySet(),
+                availableCapabilities = emptySet(),
+                whitelistedConversationIds = emptySet(),
+            )
+        }
+        val latest = collectState(viewModel(snapshots = snapshots))
+        awaitUntil("due righe") { latest().rows.size == 2 }
+        settle()
+        assertEquals(1, reads.get(), "una review per la bozza alla prima emissione")
+
+        // Ogni scatto aggiorna la regola e fa riemettere la lista.
+        repeat(10) { i -> store.recordFired(rule.id, 10_000L + i) }
+        awaitUntil("ultimo scatto visibile") {
+            latest().rows.firstOrNull { it.id == "fire" }?.lastFiredLabel != null
+        }
+        settle()
+        assertEquals(1, reads.get(), "dieci scatti non rileggono lo stato del dispositivo")
+
+        // Una bozza nuova si legge da sola; quelle note restano in cache.
+        assertIs<DraftWriteResult.Saved>(repository.create(newDraft("pend2")))
+        awaitUntil("tre righe") { latest().rows.size == 3 }
+        settle()
+        assertEquals(2, reads.get(), "solo la bozza nuova viene riletta")
+
+        // Cambia un input della review (le regole attive, che entrano nei conflitti): si rilegge tutto.
+        store.disable(rule.id)
+        awaitUntil("regola disattivata") {
+            latest().rows.firstOrNull { it.id == "fire" }?.status == StatusBadge.DISABLED
+        }
+        settle()
+        assertEquals(4, reads.get(), "le due bozze sono riviste dopo il cambio delle regole attive")
+    }
+
+    /** Tempo reale per lasciar arrivare eventuali emissioni ulteriori prima di contare. */
+    private suspend fun settle() = withContext(Dispatchers.Default) { delay(400) }
+
+    @Test
+    fun `re-enabling a one shot rule whose time has passed says what to do`() = runTest {
+        seedAutomation(
+            "os1",
+            Trigger.Time(at = "2020-01-01T09:00", tz = "UTC"),
+            AutomationStatus.DISABLED,
+            enabled = false,
+        )
+        val viewModel = viewModel()
+        val messages = mutableListOf<String>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.messages.collect(messages::add)
+        }
+
+        viewModel.onToggleEnabled("os1", true)
+        awaitUntil("messaggio") { messages.isNotEmpty() }
+
+        assertEquals(
+            listOf("This rule's time has already passed: edit it to choose a new time."),
+            messages,
+        )
+    }
+
+    @Test
+    fun `a failed re-enable for another reason keeps the generic message`() = runTest {
+        val rule = armedRule("os2")
+        store.disable(rule.id)
+        val viewModel = viewModel(scheduler = EnableFailingScheduler(db, "os2", "scheduling_failed"))
+        val messages = mutableListOf<String>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.messages.collect(messages::add)
+        }
+
+        viewModel.onToggleEnabled("os2", true)
+        awaitUntil("messaggio") { messages.isNotEmpty() }
+
+        assertEquals(listOf("Scheduling failed: the rule remains disabled."), messages)
+    }
+
+    // --- 0.3.6: prossimo scatto dei ritardi relativi -------------------------------------------------
+
+    private suspend fun relativeRule(id: String): Automation = seedAutomation(
+        id,
+        Trigger.Time(afterMs = 7_200_000, tz = "UTC"),
+        AutomationStatus.ARMED,
+        enabled = true,
+    )
+
+    private fun alarmOf(rule: Automation, eventAt: Long) = ScheduledTimeAlarmEntity(
+        automationId = rule.id.value,
+        approvalFingerprint = requireNotNull(rule.approvalFingerprint).value,
+        eventAtMillis = eventAt,
+        wakeAtMillis = eventAt,
+        requestedPrecision = "FLEXIBLE",
+        scheduledMode = "INEXACT",
+        updatedAtMillis = System.currentTimeMillis(),
+    )
+
+    private fun clock(atMillis: Long): String = java.time.Instant.ofEpochMilli(atMillis)
+        .atZone(java.time.ZoneId.systemDefault())
+        .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
+
+    @Test
+    fun `a relative delay rule with its persisted alarm shows the next fire and one without shows none`() = runTest {
+        val withAlarm = relativeRule("rel1")
+        relativeRule("rel2")
+        val eventAt = System.currentTimeMillis() + 2 * 3_600_000
+        db.scheduledTimeAlarmDao().upsert(alarmOf(withAlarm, eventAt))
+        val latest = collectState(viewModel())
+
+        awaitUntil("prossimo scatto") {
+            latest().rows.firstOrNull { it.id == "rel1" }?.nextFireLabel != null
+        }
+
+        val label = assertNotNull(latest().rows.first { it.id == "rel1" }.nextFireLabel)
+        assertTrue(label.endsWith(clock(eventAt)), label)
+        assertNull(latest().rows.first { it.id == "rel2" }.nextFireLabel)
+    }
+
+    @Test
+    fun `a rescheduled alarm updates the row`() = runTest {
+        val rule = relativeRule("rel3")
+        val first = System.currentTimeMillis() + 2 * 3_600_000
+        db.scheduledTimeAlarmDao().upsert(alarmOf(rule, first))
+        val latest = collectState(viewModel())
+        awaitUntil("primo scatto") {
+            latest().rows.firstOrNull()?.nextFireLabel?.endsWith(clock(first)) == true
+        }
+
+        val second = first + 90 * 60_000
+        db.scheduledTimeAlarmDao().upsert(alarmOf(rule, second))
+
+        awaitUntil("scatto aggiornato") {
+            latest().rows.firstOrNull()?.nextFireLabel?.endsWith(clock(second)) == true
+        }
+    }
+
+    @Test
+    fun `an alarm of an older revision of the rule is not shown`() = runTest {
+        val rule = relativeRule("rel4")
+        db.scheduledTimeAlarmDao().upsert(
+            alarmOf(rule, System.currentTimeMillis() + 3_600_000).copy(approvalFingerprint = "older"),
+        )
+        val latest = collectState(viewModel())
+
+        awaitUntil("riga") { latest().rows.isNotEmpty() }
+        settle()
+
+        assertNull(latest().rows.single().nextFireLabel)
+    }
+
+    @Test
+    fun `alarm changes do not make the list read the device state again`() = runTest {
+        val rule = relativeRule("rel5")
+        assertIs<DraftWriteResult.Saved>(repository.create(newDraft("pend")))
+        val reads = AtomicInteger(0)
+        val snapshots = FirePolicySnapshotProvider {
+            reads.incrementAndGet()
+            FirePolicySnapshot(
+                knownTools = emptySet(),
+                availableCapabilities = emptySet(),
+                whitelistedConversationIds = emptySet(),
+            )
+        }
+        val latest = collectState(viewModel(snapshots = snapshots))
+        awaitUntil("due righe") { latest().rows.size == 2 }
+        settle()
+        assertEquals(1, reads.get(), "una review per la bozza alla prima emissione")
+
+        val base = System.currentTimeMillis() + 3_600_000
+        repeat(5) { i -> db.scheduledTimeAlarmDao().upsert(alarmOf(rule, base + i * 60_000L)) }
+        awaitUntil("ultima sveglia visibile") {
+            latest().rows.firstOrNull { it.id == "rel5" }?.nextFireLabel?.endsWith(clock(base + 4 * 60_000L)) == true
+        }
+        settle()
+
+        assertEquals(1, reads.get(), "la sveglia non rifa le letture costose delle bozze")
+    }
+
     // --- helpers -------------------------------------------------------------------------------------
+
+    /** Salva una regola gia' firmata come farebbe l'arm (senza passare dalla bozza). */
+    private suspend fun seedAutomation(
+        id: String,
+        trigger: Trigger,
+        status: AutomationStatus,
+        enabled: Boolean,
+    ): Automation {
+        val unsigned = Automation(
+            id = AutomationId(id),
+            name = "auto-$id",
+            createdBy = CreatedBy.USER,
+            status = status,
+            trigger = trigger,
+            actions = listOf(Action.ShowNotification("Argus", "test")),
+            enabled = enabled,
+        )
+        val signed = unsigned.copy(approvalFingerprint = ApprovalFingerprints.of(unsigned))
+        db.automationDao().upsertPreservingLastFired(
+            AutomationEntity(
+                id = signed.id.value,
+                name = signed.name,
+                status = signed.status,
+                enabled = signed.enabled,
+                priority = signed.priority,
+                cooldownMs = signed.cooldownMs,
+                schemaVersion = signed.schemaVersion,
+                json = ArgusJson.encodeToString(Automation.serializer(), signed),
+            ),
+        )
+        return signed
+    }
 
     private fun newDraft(id: String) = NewDraft(
         id = DraftId("draft-$id"),
@@ -233,16 +474,19 @@ class AutomationListViewModelTest {
         return rule to edit.id.value
     }
 
-    private fun viewModel(): AutomationListViewModel {
-        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
-        val whitelist = RoomContactWhitelistStore(db.contactWhitelistDao())
-        val snapshots = FirePolicySnapshotProvider {
+    private fun viewModel(
+        languageSource: RenderLanguageSource = RenderLanguageSource { RenderLanguage.EN },
+        scheduler: TimeAlarmRuntime = ListNoopTimeAlarmRuntime(),
+        snapshots: FirePolicySnapshotProvider = FirePolicySnapshotProvider {
             FirePolicySnapshot(
                 knownTools = emptySet(),
                 availableCapabilities = emptySet(),
                 whitelistedConversationIds = emptySet(),
             )
-        }
+        },
+    ): AutomationListViewModel {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val whitelist = RoomContactWhitelistStore(db.contactWhitelistDao())
         val approvals = ApprovalFlow(
             drafts = repository,
             approvals = ApprovalService(repository, DraftValidator(emptySet()), whitelist),
@@ -255,13 +499,13 @@ class AutomationListViewModelTest {
             store = store,
             drafts = repository,
             approvals = approvals,
-            enablement = AutomationEnablementCoordinator(store, ListNoopTimeAlarmRuntime()),
+            enablement = AutomationEnablementCoordinator(store, scheduler),
             shizuku = ShizukuGateway(context),
             database = db,
             whitelist = whitelist,
             savedStateHandle = SavedStateHandle(),
             context = context,
-            language = RenderLanguage.EN,
+            languageSource = languageSource,
         ).also { lastViewModel = it }
     }
 

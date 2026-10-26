@@ -1,18 +1,26 @@
 package dev.argus.automation.vm
 
 import android.Manifest
+import android.app.AlarmManager
 import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.PowerManager
+import androidx.annotation.ChecksSdkIntAtLeast
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import dev.argus.shizuku.ShizukuGatewayStatus
 import dev.argus.ui.model.BgLocationState
 import dev.argus.ui.model.ShizukuStatus
+import dev.argus.ui.presentation.RenderLanguage
 
 internal data class AndroidUiHealth(
     val batteryExempt: Boolean,
+    /**
+     * `SCHEDULE_EXACT_ALARM` concesso (sempre true sotto Android 12). Da Android 14 e' negato di
+     * default: senza, le sveglie ripiegano su quelle inesatte e le regole a orario possono ritardare.
+     */
+    val exactAlarmsGranted: Boolean,
     val notificationListenerGranted: Boolean,
     val notificationsGranted: Boolean,
     val foregroundLocationGranted: Boolean,
@@ -33,6 +41,9 @@ internal fun readAndroidUiHealth(context: Context): AndroidUiHealth {
             app.getSystemService(PowerManager::class.java)
                 .isIgnoringBatteryOptimizations(app.packageName)
         }.getOrDefault(false),
+        exactAlarmsGranted = exactAlarmsGranted(android.os.Build.VERSION.SDK_INT) {
+            app.getSystemService(AlarmManager::class.java).canScheduleExactAlarms()
+        },
         notificationListenerGranted = runCatching {
             app.packageName in NotificationManagerCompat.getEnabledListenerPackages(app)
         }.getOrDefault(false),
@@ -52,6 +63,16 @@ internal fun readAndroidUiHealth(context: Context): AndroidUiHealth {
     )
 }
 
+/**
+ * Sotto Android 12 (S) il permesso non esiste e le sveglie esatte ci sono sempre. Da S in poi decide
+ * `AlarmManager.canScheduleExactAlarms()`; se la lettura fallisce vale «non concesse», cosi' la riga in
+ * Sistema avvisa invece di mostrare un falso verde. L'annotazione dice al lint (NewApi) che
+ * [canScheduleExact] gira solo da Android 12: chi chiama passa `Build.VERSION.SDK_INT`.
+ */
+@ChecksSdkIntAtLeast(api = android.os.Build.VERSION_CODES.S, lambda = 1)
+internal fun exactAlarmsGranted(sdkInt: Int, canScheduleExact: () -> Boolean): Boolean =
+    sdkInt < android.os.Build.VERSION_CODES.S || runCatching(canScheduleExact).getOrDefault(false)
+
 internal fun ShizukuGatewayStatus.toUiStatus(degradedAfterReboot: Boolean): ShizukuStatus = when (this) {
     ShizukuGatewayStatus.NOT_INSTALLED -> ShizukuStatus.NOT_INSTALLED
     ShizukuGatewayStatus.INSTALLED_NOT_RUNNING -> if (degradedAfterReboot) {
@@ -61,7 +82,9 @@ internal fun ShizukuGatewayStatus.toUiStatus(degradedAfterReboot: Boolean): Shiz
     }
     ShizukuGatewayStatus.RUNNING_NOT_AUTHORIZED -> ShizukuStatus.RUNNING_NOT_AUTHORIZED
     ShizukuGatewayStatus.AUTHORIZED -> ShizukuStatus.AUTHORIZED
-    ShizukuGatewayStatus.UNSUPPORTED -> ShizukuStatus.INSTALLED_NOT_RUNNING
+    // `Shizuku.isPreV11()`: in esecuzione ma troppo vecchio per il binder user service. Va
+    // aggiornato, non riavviato: ha il suo stato, con il suo testo e la sua azione.
+    ShizukuGatewayStatus.UNSUPPORTED -> ShizukuStatus.UNSUPPORTED
 }
 
 internal fun AndroidUiHealth.backgroundLocationState(needed: Boolean): BgLocationState = when {
@@ -72,3 +95,13 @@ internal fun AndroidUiHealth.backgroundLocationState(needed: Boolean): BgLocatio
     foregroundLocationGranted -> BgLocationState.WHILE_IN_USE
     else -> BgLocationState.DENIED
 }
+
+/**
+ * Messaggio per [dev.argus.shizuku.ShizukuPermissionOutcome.AWAITING_USER]: la richiesta di
+ * permesso e' scaduta senza risposta, ma la finestra di Shizuku puo' essere ancora aperta. Non e'
+ * «Shizuku non disponibile»: se l'utente risponde dopo, lo stato si aggiorna da solo.
+ */
+internal fun shizukuAwaitingAnswerNote(language: RenderLanguage): String = language.pick(
+    "Waiting for your answer in Shizuku",
+    "In attesa della tua risposta in Shizuku",
+)

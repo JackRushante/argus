@@ -32,6 +32,13 @@ open class TransportException(
      * Solo diagnostica: la UI lo mostra nel dettaglio tecnico.
      */
     val errorCode: String? = null,
+    /**
+     * Messaggio d'errore del PROVIDER (già ripulito: max 160 caratteri, niente controlli, chiave
+     * mascherata), valorizzato SOLO dal test di connessione (`health()`) per spiegare all'utente cosa
+     * correggere. Mai in `message`/`toString`, mai nei log, mai persistito: compare solo nel messaggio
+     * di Sistema. compile e act non lo leggono (restano a «soli metadati sicuri»).
+     */
+    val providerMessage: String? = null,
 ) : IOException(message, cause)
 
 /**

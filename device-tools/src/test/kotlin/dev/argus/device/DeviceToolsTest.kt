@@ -7,6 +7,7 @@ import dev.argus.engine.model.SettingsScreen
 import dev.argus.engine.runtime.ExecutionId
 import dev.argus.shizuku.PrivilegedShell
 import dev.argus.shizuku.ShellResult
+import dev.argus.shizuku.ShizukuShellException
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
@@ -225,14 +226,105 @@ class DeviceToolsTest {
     }
 
     @Test
-    fun `tool failures expose a stable code and not privileged stderr`() = runTest {
+    fun `non zero exit exposes the operation and the exit code but not privileged stderr`() = runTest {
         val shell = RecordingShell(result = ShellResult(1, stderr = "sensitive".toByteArray()))
         val tools = DeviceTools(shell, temporaryDirectory.toFile())
 
         val error = assertFailsWith<DeviceToolException> { tools.setWifi(true, EXECUTION_ID) }
 
-        assertEquals("set_wifi_failed", error.code)
+        assertEquals("set_wifi_exit_1", error.code)
         assertFalse(error.message.orEmpty().contains("sensitive"))
+        assertEquals(
+            "set_bluetooth_exit_1",
+            assertFailsWith<DeviceToolException> { tools.setBluetooth(true, EXECUTION_ID) }.code,
+        )
+    }
+
+    @Test
+    fun `exit codes outside the shell range fall back to the generic operation failure`() = runTest {
+        val negative = DeviceTools(
+            RecordingShell(result = ShellResult(-5)),
+            temporaryDirectory.toFile(),
+        )
+        val huge = DeviceTools(
+            RecordingShell(result = ShellResult(4096)),
+            temporaryDirectory.toFile(),
+        )
+
+        assertEquals(
+            "set_wifi_failed",
+            assertFailsWith<DeviceToolException> { negative.setWifi(true, EXECUTION_ID) }.code,
+        )
+        assertEquals(
+            "set_wifi_failed",
+            assertFailsWith<DeviceToolException> { huge.setWifi(true, EXECUTION_ID) }.code,
+        )
+    }
+
+    @Test
+    fun `a command that outlives its timeout is reported as shizuku_timeout`() = runTest {
+        val shell = RecordingShell(result = ShellResult(-1, timedOut = true))
+        val tools = DeviceTools(shell, temporaryDirectory.toFile())
+
+        val error = assertFailsWith<DeviceToolException> { tools.setWifi(false, EXECUTION_ID) }
+
+        assertEquals("shizuku_timeout", error.code)
+    }
+
+    @Test
+    fun `service level errors and truncated output keep the generic operation failure`() = runTest {
+        val serviceError = DeviceTools(
+            RecordingShell(result = ShellResult(-127, errorCode = "start_failed")),
+            temporaryDirectory.toFile(),
+        )
+        val truncated = DeviceTools(
+            RecordingShell(result = ShellResult(0, truncated = true)),
+            temporaryDirectory.toFile(),
+        )
+
+        assertEquals(
+            "set_wifi_failed",
+            assertFailsWith<DeviceToolException> { serviceError.setWifi(true, EXECUTION_ID) }.code,
+        )
+        assertEquals(
+            "set_wifi_failed",
+            assertFailsWith<DeviceToolException> { truncated.setWifi(true, EXECUTION_ID) }.code,
+        )
+    }
+
+    @Test
+    fun `typed Shizuku failures of the shell become device tool errors with the same code`() = runTest {
+        listOf(
+            ShizukuShellException.UNAVAILABLE,
+            ShizukuShellException.UNSUPPORTED,
+            ShizukuShellException.TIMEOUT,
+        ).forEach { code ->
+            val tools = DeviceTools(
+                ThrowingShell(ShizukuShellException(code)),
+                temporaryDirectory.toFile(),
+            )
+
+            assertEquals(
+                code,
+                assertFailsWith<DeviceToolException> { tools.setWifi(true, EXECUTION_ID) }.code,
+            )
+            assertEquals(
+                code,
+                assertFailsWith<DeviceToolException> { tools.capture() }.code,
+            )
+        }
+    }
+
+    @Test
+    fun `file based reads report exit codes with their operation name`() = runTest {
+        val shell = RecordingShell(fileHandler = { _, _ -> ShellResult(2) })
+        val tools = DeviceTools(shell, temporaryDirectory.toFile())
+
+        assertEquals(
+            "screen_capture_exit_2",
+            assertFailsWith<DeviceToolException> { tools.capture() }.code,
+        )
+        assertEquals(emptyList(), temporaryDirectory.listDirectoryEntries())
     }
 
     @Test
@@ -325,4 +417,23 @@ private class CancellingDumpShell : PrivilegedShell {
         calls += command
         throw CancellationException("cancelled")
     }
+}
+
+private class ThrowingShell(private val error: ShizukuShellException) : PrivilegedShell {
+    override suspend fun run(
+        command: List<String>,
+        priority: Int,
+        timeoutMillis: Long,
+        maxOutputBytes: Int,
+        executionId: String?,
+    ): ShellResult = throw error
+
+    override suspend fun runToFile(
+        command: List<String>,
+        destination: File,
+        priority: Int,
+        timeoutMillis: Long,
+        maxOutputBytes: Int,
+        executionId: String?,
+    ): ShellResult = throw error
 }

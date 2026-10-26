@@ -1,6 +1,8 @@
 package dev.argus.automation
 
 import dev.argus.automation.budget.BudgetMeta
+import dev.argus.automation.foreground.SharedForegroundSentinel
+import dev.argus.automation.power.ExecutionWakeLock
 import dev.argus.automation.notification.NotificationReplyDelivery
 import dev.argus.automation.notification.NotificationReplyGateway
 import dev.argus.automation.notification.NotificationReplyRequest
@@ -73,6 +75,14 @@ class AndroidGenerativeLane(
     private val replyBursts: ReplyBurstSource? = null,
     private val burstSilenceMillis: Long = DEFAULT_BURST_SILENCE_MILLIS,
     private val burstMaxMillis: Long = DEFAULT_BURST_MAX_MILLIS,
+    /**
+     * Wakelock e domanda sul servizio in primo piano per ogni elaborazione (B19, B18): una regola
+     * tipo «ogni mattina mandami il prezzo» lancia la chiamata AI senza altro che tenga vivo il
+     * processo, e Android può congelare l'app prima che la notifica parta. Senza sentinel (test)
+     * la lane lavora come prima.
+     */
+    private val wakeLock: ExecutionWakeLock = ExecutionWakeLock.NONE,
+    private val sentinel: SharedForegroundSentinel? = null,
 ) : GenerativeLane {
     private val queue: Channel<QueuedAction>
 
@@ -164,13 +174,27 @@ class AndroidGenerativeLane(
 
     private suspend fun processResolvedSafely(queued: QueuedAction) {
         val request = queued.resolved ?: return
-        try {
-            request.deferred.complete(processResolved(queued, request))
-        } catch (error: CancellationException) {
-            request.deferred.cancel(error)
-            throw error
-        } catch (_: Exception) {
-            request.deferred.complete(ActResult(text = null, metaError = "lane_failed"))
+        guarded {
+            try {
+                request.deferred.complete(processResolved(queued, request))
+            } catch (error: CancellationException) {
+                request.deferred.cancel(error)
+                throw error
+            } catch (_: Exception) {
+                request.deferred.complete(ActResult(text = null, metaError = "lane_failed"))
+            }
+        }
+    }
+
+    /**
+     * Ogni elaborazione tiene il wakelock e una domanda `Execution` sul servizio in primo piano,
+     * rilasciati alla fine anche in caso di errore o cancellazione. Se la lease è negata si procede
+     * comunque (best-effort, come prima).
+     */
+    private suspend fun <T> guarded(block: suspend () -> T): T {
+        val foreground = sentinel
+        return wakeLock.holding {
+            if (foreground == null) block() else foreground.holdingExecution(block)
         }
     }
 
@@ -306,12 +330,14 @@ class AndroidGenerativeLane(
     }
 
     private suspend fun processSafely(queued: QueuedAction) {
-        try {
-            process(queued)
-        } catch (error: CancellationException) {
-            throw error
-        } catch (_: Exception) {
-            complete(queued, ActionJournalOutcome.FAILED, "lane_failed")
+        guarded {
+            try {
+                process(queued)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                complete(queued, ActionJournalOutcome.FAILED, "lane_failed")
+            }
         }
     }
 

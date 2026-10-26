@@ -90,7 +90,7 @@ class ConditionEvaluator(private val clock: Clock) {
             VarType.TEXT -> when (condition.op) {
                 CmpOp.EQ -> Truth.of(left.text == right.text)
                 CmpOp.NEQ -> Truth.of(left.text != right.text)
-                CmpOp.CONTAINS -> Truth.of(left.text.contains(right.text))
+                CmpOp.CONTAINS -> Truth.of(left.text.contains(right.text, ignoreCase = true))
                 // device-found: GT/LT su TEXT (es. un numero chiesto all'LLM e catturato come TEXT).
                 // Si prova a coercizzare numericamente ENTRAMBI i lati: se uno solo non è numerico il
                 // confronto è FALSE (fail-closed), mai UNKNOWN (che fermerebbe il programma) e mai una
@@ -138,7 +138,7 @@ class ConditionEvaluator(private val clock: Clock) {
         return when (op) {
             CmpOp.EQ -> Truth.of(actual == expected)
             CmpOp.NEQ -> Truth.of(actual != expected)
-            CmpOp.CONTAINS -> Truth.of(actual.contains(expected))
+            CmpOp.CONTAINS -> Truth.of(actual.contains(expected, ignoreCase = true))
             CmpOp.GT -> Truth.of(if (an != null && en != null) an > en else actual > expected)
             CmpOp.LT -> Truth.of(if (an != null && en != null) an < en else actual < expected)
             // Parità non applicabile a state_equals (il validator la esclude): irraggiungibile qui.
@@ -149,8 +149,11 @@ class ConditionEvaluator(private val clock: Clock) {
     private fun inWindow(c: Condition.TimeWindow): Boolean {
         val now = LocalTime.now(clock.withZone(ZoneId.of(c.tz)))
         val start = LocalTime.parse(c.startLocal); val end = LocalTime.parse(c.endLocal)
-        return if (start <= end) now >= start && now < end          // stessa giornata
-        else now >= start || now < end                               // attraversa mezzanotte
+        return when {
+            start == end -> true                                     // inizio = fine: tutto il giorno
+            start < end -> now >= start && now < end                 // stessa giornata
+            else -> now >= start || now < end                        // attraversa mezzanotte
+        }
     }
 
     private fun haversineM(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
@@ -171,7 +174,7 @@ class ConditionEvaluator(private val clock: Clock) {
             StateValueType.TEXT -> when (op) {
                 CmpOp.EQ -> Truth.of(actual == expected)
                 CmpOp.NEQ -> Truth.of(actual != expected)
-                CmpOp.CONTAINS -> Truth.of(actual.contains(expected))
+                CmpOp.CONTAINS -> Truth.of(actual.contains(expected, ignoreCase = true))
                 // Parità esclusa da state_compare dal validator: non applicabile qui.
                 CmpOp.GT, CmpOp.LT, CmpOp.IS_EVEN, CmpOp.IS_ODD -> Truth.UNKNOWN
             }

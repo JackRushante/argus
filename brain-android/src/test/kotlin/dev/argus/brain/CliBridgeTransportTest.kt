@@ -733,6 +733,25 @@ class CliBridgeTransportTest {
         )
     }
 
+    @Test fun `compile keeps the bridge envelope as the in-memory raw response`(): Unit = runBlocking {
+        val envelope = """{"schema_version":2,"request_id":"$REQUEST_ID","reply":"Quale contatto?",""" +
+            """"meta":{"draft":null,"error_code":"clarification_required"}}"""
+        server.enqueue(jsonResponse(envelope))
+
+        val result = transport().compile("avvisa quando arrivo", manifest, DeviceState())
+
+        assertEquals("clarification_required", result.metaError)
+        assertEquals(envelope, result.raw)
+        // toString non deve riportarlo (un log accidentale non porta la risposta del bridge).
+        assertFalse("Quale contatto" in result.copy(reply = "").toString())
+    }
+
+    @Test fun `a bridge failure before any envelope leaves the raw response null`(): Unit = runBlocking {
+        server.enqueue(jsonResponse("""{"error":"model_invalid_output"}""").setResponseCode(502))
+
+        assertNull(transport().compile("x", manifest, DeviceState()).raw)
+    }
+
     @Test fun `responses without usage keep a null TurnUsage`(): Unit = runBlocking {
         // Retro-compat: il campo è opzionale, un bridge vecchio (o run senza report) non lo manda.
         server.enqueue(validNoDraftResponse())

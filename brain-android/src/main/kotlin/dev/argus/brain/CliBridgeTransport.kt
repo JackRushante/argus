@@ -336,7 +336,8 @@ class CliBridgeTransport internal constructor(
             }
             throw error
         }
-        return parseCompileResponse(body, expectedRequestId = requestId)
+        // F5: del bridge si conserva in memoria l'envelope restituito (reply + meta), per le segnalazioni.
+        return parseCompileResponse(body, expectedRequestId = requestId).copy(raw = CompileResult.capRaw(body))
     }
 
     override suspend fun act(

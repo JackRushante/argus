@@ -64,6 +64,7 @@ class EngineTest {
         policy: FirePolicy = allowAll,
         now: () -> Long = { 1_000 },
         resolvedExecutor: ResolvedActionExecutor? = null,
+        pause: suspend (Long) -> Unit = { kotlinx.coroutines.delay(it) },
     ) = Engine(
         store = store,
         executor = ex,
@@ -73,6 +74,7 @@ class EngineTest {
         audit = audit,
         journal = journal,
         resolvedExecutor = resolvedExecutor,
+        pause = pause,
         now = now,
     )
 
@@ -125,6 +127,30 @@ class EngineTest {
     }
 
     @Test
+    fun `P4 wait goes through the injected pause`() = runTest {
+        val automation = armed(
+            id = "p4-pause",
+            t = Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+            acts = listOf(Action.Wait(1_500), Action.SetFlashlight(true)),
+        )
+        val pauses = mutableListOf<Long>()
+        val seen = mutableListOf<Action>()
+
+        engine(
+            FakeAutomationStore(listOf(automation)),
+            ActionExecutor { action, _ ->
+                seen += action
+                ActionResult.Success
+            },
+            "2026-07-18T10:00:00Z",
+            pause = { pauses += it },
+        ).onTrigger(envelope("alarm:p4-pause", timeEvent(automation))) { DeviceState() }
+
+        assertEquals(listOf(1_500L), pauses)
+        assertEquals(listOf<Action>(Action.SetFlashlight(true)), seen)
+    }
+
+    @Test
     fun `P4 loop gives every executed leaf a unique ordinal and readable path`() = runTest {
         val automation = armed(
             id = "p4-loop",
@@ -163,6 +189,47 @@ class EngineTest {
             journal.actions.map { it.actionPath },
         )
         assertEquals((0..5).toList(), journal.actions.map { it.actionIndex })
+    }
+
+    @Test
+    fun `P4 long loop keeps the journal small while the execution outcome counts every leaf`() = runTest {
+        val automation = armed(
+            id = "p4-long-loop",
+            t = Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+            acts = listOf(
+                Action.While(
+                    Condition.BooleanLiteral(true),
+                    body = listOf(Action.SetFlashlight(true), Action.SetFlashlight(false), Action.SetWifi(true)),
+                    maxIterations = 1_000,
+                ),
+            ),
+        )
+        val journal = FakeExecutionJournal()
+        val audit = FakeAuditSink()
+
+        engine(
+            FakeAutomationStore(listOf(automation)),
+            ActionExecutor { _, context ->
+                if (context.actionPath == "1.while[900].2") ActionResult.Failure("boom_code") else ActionResult.Success
+            },
+            "2026-07-18T10:00:00Z",
+            audit = audit,
+            journal = journal,
+        ).onTrigger(envelope("alarm:p4-long-loop", timeEvent(automation))) { DeviceState() }
+
+        // 100 scritte + la fallita all'iterazione 900 + il riepilogo.
+        assertEquals(102, journal.actions.size)
+        assertTrue(journal.actions.any { it.actionPath == "1.while[900].2" && it.outcome == ActionJournalOutcome.FAILED })
+        // Gli indici delle righe sono tutti distinti (la riga di riepilogo non ne sovrascrive un'altra).
+        assertEquals(journal.actions.size, journal.actions.map { it.actionIndex }.toSet().size)
+        val summary = journal.actions.single { it.actionType == OmittedSteps.ACTION_TYPE }
+        assertEquals(2_899, OmittedSteps.countFrom(summary.errorCode))
+        // I contatori e lo stato dell'esecuzione contano ogni foglia, non solo quelle scritte.
+        val completion = journal.completions.single()
+        assertEquals(ExecutionStatus.PARTIAL, completion.status)
+        assertEquals(2_999, completion.succeededCount)
+        assertEquals(1, completion.failedCount)
+        assertEquals(1, audit.events.count { it.kind == AuditKind.FIRED })
     }
 
     @Test
@@ -580,6 +647,31 @@ class EngineTest {
             listOf(ExecutionStatus.SUCCEEDED, ExecutionStatus.SUPPRESSED_COOLDOWN),
             journal.completions.map { it.status },
         )
+    }
+
+    @Test
+    fun `clock moved backwards does not freeze a rule on a future lastFiredAt`() = runTest {
+        val a = armed("a1", Trigger.Notification("com.whatsapp"), listOf(Action.SetWifi(false)), cooldown = 5_000)
+        val ex = FakeActionExecutor()
+        val store = FakeAutomationStore(listOf(a))
+        val audit = FakeAuditSink()
+        // L'ultimo scatto e' "nel futuro" rispetto all'orologio attuale: l'orologio e' tornato indietro.
+        store.recordFired(a.id, 9_000_000L)
+        var now = 1_000L
+        val engine = engine(store, ex, "2026-07-12T10:00:00Z", audit, now = { now })
+
+        engine.onTrigger(envelope("sbn:wa:1", TriggerEvent.NotificationPosted("com.whatsapp"))) { DeviceState() }
+        assertEquals(1, ex.executed.size)
+        assertEquals(1_000L, store.lastFiredAt(a.id))
+
+        // Dopo lo scatto il cooldown torna a funzionare normalmente.
+        now = 2_000L
+        engine.onTrigger(envelope("sbn:wa:2", TriggerEvent.NotificationPosted("com.whatsapp"))) { DeviceState() }
+        assertEquals(1, ex.executed.size)
+        assertEquals(1, audit.events.count { it.kind == AuditKind.SUPPRESSED_COOLDOWN })
+        now = 7_000L
+        engine.onTrigger(envelope("sbn:wa:3", TriggerEvent.NotificationPosted("com.whatsapp"))) { DeviceState() }
+        assertEquals(2, ex.executed.size)
     }
 
     @Test

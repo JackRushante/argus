@@ -16,7 +16,31 @@ data class CompileResult(
      * di input), solo per la UI: non entra mai in audit o prompt.
      */
     val detail: String? = null,
-)
+    /**
+     * Testo che il modello ha restituito, troncato a [MAX_RAW_CHARS] (per le segnalazioni: «Risposta
+     * grezza»). Resta SOLO in memoria: mai nel DB, nei log, nell'audit, nella bozza né in `toString()`.
+     * Può contenere dati personali.
+     */
+    val raw: String? = null,
+) {
+    // `raw` non esce mai da qui: un log accidentale del risultato non deve portare la risposta del modello.
+    override fun toString(): String =
+        "CompileResult(reply=$reply, draft=$draft, metaError=$metaError, usage=$usage, detail=$detail, " +
+            "raw=${raw?.let { "<${it.length} chars>" }})"
+
+    companion object {
+        const val MAX_RAW_CHARS = 16_000
+
+        /** [text] come `raw`: null se assente o vuoto, altrimenti troncato a [MAX_RAW_CHARS] senza spezzare una coppia surrogata. */
+        fun capRaw(text: String?): String? {
+            if (text.isNullOrBlank()) return null
+            if (text.length <= MAX_RAW_CHARS) return text
+            var end = MAX_RAW_CHARS
+            if (Character.isHighSurrogate(text[end - 1])) end -= 1
+            return text.substring(0, end)
+        }
+    }
+}
 
 /** Codici compile condivisi tra transport e decorator: evitano retry basati su stringhe duplicate. */
 object CompileMetaError {

@@ -393,14 +393,18 @@ class AgentMessageSupportTest {
         assertFalse("WhatsApp" in system, "il sink non parla di messaggi WhatsApp")
         assertFalse("messaggio" in system.lowercase(), "il sink non parla di un messaggio ricevuto")
 
-        // User message: neutro senza stato, con le sole state lines quando presenti.
-        assertEquals(
-            "Generate the requested content now.",
-            AgentMessageSupport.actUserTextNotification(emptyList()),
+        // User message: la prima riga e' l'obiettivo (e' il testo su cui cerca il plugin web),
+        // seguono le state lines quando presenti.
+        val noState = AgentMessageSupport.actUserTextNotification("promemoria acqua", emptyList())
+        assertEquals("Goal: promemoria acqua", noState)
+        assertFalse("Generate the requested content" in noState)
+        val withState = AgentMessageSupport.actUserTextNotification(
+            "promemoria acqua", listOf("ringer=normal", "battery=80"),
         )
-        val withState = AgentMessageSupport.actUserTextNotification(listOf("ringer=normal", "battery=80"))
-        assertTrue("ringer=normal" in withState)
-        assertTrue("battery=80" in withState)
+        assertEquals(
+            "Goal: promemoria acqua\nDevice state:\n- ringer=normal\n- battery=80",
+            withState,
+        )
         assertFalse("Message received" in withState)
     }
 }

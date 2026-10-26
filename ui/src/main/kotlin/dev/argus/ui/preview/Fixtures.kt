@@ -9,8 +9,12 @@ import dev.argus.ui.model.AutomationRow
 import dev.argus.ui.model.BgLocationState
 import dev.argus.ui.model.BudgetUi
 import dev.argus.ui.model.ChatItem
+import dev.argus.ui.model.ChatError
 import dev.argus.ui.model.ChatState
 import dev.argus.ui.model.ContactRow
+import dev.argus.ui.model.DiagnosisFix
+import dev.argus.ui.model.DiagnosisLevel
+import dev.argus.ui.model.DiagnosisRow
 import dev.argus.ui.model.DraftCardStatus
 import dev.argus.ui.model.EngineBanner
 import dev.argus.ui.model.ExecutionLogState
@@ -21,6 +25,7 @@ import dev.argus.ui.model.OnboardingState
 import dev.argus.ui.model.OnboardingStepState
 import dev.argus.ui.model.ProviderChoiceUi
 import dev.argus.ui.model.ProviderUsageUi
+import dev.argus.ui.model.RuleDiagnosisUi
 import dev.argus.ui.model.RuleRender
 import dev.argus.ui.model.ShizukuCapabilityCatalog
 import dev.argus.ui.model.SettingsState
@@ -111,6 +116,18 @@ object Fixtures {
         conditionLines = emptyList(),
         actions = listOf(
             ActionRow("ringer", "Imposta suoneria (vibrazione)", null, false, null, false, false),
+        ),
+        isGenerative = false,
+        privacyNote = null,
+    )
+
+    /** a8 · ogni mattina alle 07:30 spegne il Wi-Fi (privilegiata: serve Shizuku). */
+    val morningWifiRule = RuleRender(
+        triggerLine = "Ogni giorno alle 07:30 (Europe/Rome)",
+        triggerIconKey = "time",
+        conditionLines = emptyList(),
+        actions = listOf(
+            ActionRow("wifi_off", "Disattiva Wi-Fi", null, false, null, false, false),
         ),
         isGenerative = false,
         privacyNote = null,
@@ -225,6 +242,23 @@ object Fixtures {
         brainReachable = true,
         error = null,
     )
+
+    /** Ultimo turno senza regola valida: errore + «Risposta grezza» per la segnalazione (0.3.6). */
+    val chatRawResponse = ChatState(
+        items = listOf(
+            ChatItem.UserMessage("Quando esco di casa spegni il Wi-Fi.", "13:10"),
+            ChatItem.AssistantMessage("Ho capito, ma non riesco a preparare la regola.", "13:10"),
+        ),
+        input = "",
+        sending = false,
+        sendingElapsedSec = null,
+        brainReachable = true,
+        error = ChatError.MalformedReply("draft_missing"),
+        rawResponse = "Ho capito, ma non riesco a preparare la regola.\n@@META@@ {\"draft\": null}",
+    )
+
+    /** Errore locale dell'app: non dipende dal provider (0.3.6). */
+    val chatInternalError = chatEmpty.copy(error = ChatError.Internal("illegal_state_exception"))
 
     // -------------------------------------------------------------------------
     // Automazioni · lista (§6.2) — volutamente in ordine "sbagliato": lo schermo
@@ -382,6 +416,59 @@ object Fixtures {
         geofencePreviewLabel = null,
     )
 
+    /** a8 · regola a orario con Shizuku spento: «Perché non è scattata?» spiega il blocco. */
+    val detailTimeShizukuOff = AutomationDetailState(
+        id = "a8",
+        name = "Wi-Fi spento al mattino",
+        status = StatusBadge.ARMED,
+        rule = morningWifiRule,
+        rationale = null,
+        warnings = emptyList(),
+        canArm = false,
+        armBlockedReason = null,
+        estimatedLlmCallsPerDay = null,
+        recentRuns = listOf(
+            LogRow("r7", "oggi 07:30", "Wi-Fi spento al mattino", AuditKind.BLOCKED_POLICY, LogOutcome.FAILED, "bloccata dalla policy (capacità non disponibile)", null),
+        ),
+        geofencePreviewLabel = null,
+        diagnosisAvailable = true,
+        diagnosis = RuleDiagnosisUi(
+            rows = listOf(
+                DiagnosisRow(DiagnosisLevel.OK, "La regola è attiva"),
+                DiagnosisRow(DiagnosisLevel.WARN, "Shizuku non è in esecuzione: avvialo", DiagnosisFix.OPEN_SYSTEM),
+                DiagnosisRow(DiagnosisLevel.OK, "Prossima sveglia: domani 07:30"),
+                DiagnosisRow(DiagnosisLevel.INFO, "Orario flessibile: per risparmiare batteria Android può spostarla fino a un'ora; se serve puntuale, chiedi l'orario esatto in chat"),
+                DiagnosisRow(DiagnosisLevel.WARN, "Ultimo tentativo 2 h fa: bloccata dalla policy (capacità non disponibile)"),
+            ),
+            checkedAtLabel = "Controllato alle 09:41",
+        ),
+    )
+
+    /** a9 · geofence d'ingresso con posizione ancora sconosciuta (nessuno spostamento dall'arm). */
+    val detailGeofenceUnknown = AutomationDetailState(
+        id = "a9",
+        name = "Ufficio · silenzia entrando",
+        status = StatusBadge.ARMED,
+        rule = officeEnterRule,
+        rationale = null,
+        warnings = emptyList(),
+        canArm = false,
+        armBlockedReason = null,
+        estimatedLlmCallsPerDay = null,
+        recentRuns = emptyList(),
+        geofencePreviewLabel = null,
+        diagnosisAvailable = true,
+        diagnosis = RuleDiagnosisUi(
+            rows = listOf(
+                DiagnosisRow(DiagnosisLevel.OK, "La regola è attiva"),
+                DiagnosisRow(DiagnosisLevel.OK, "Permessi e servizi necessari: tutto pronto"),
+                DiagnosisRow(DiagnosisLevel.INFO, "Posizione rispetto all'area: sconosciuta (si aggiorna al prossimo spostamento)"),
+                DiagnosisRow(DiagnosisLevel.INFO, "Non è ancora mai scattata"),
+            ),
+            checkedAtLabel = "Controllato alle 09:41",
+        ),
+    )
+
     val detailNeedsReview = AutomationDetailState(
         id = "a6",
         name = "Promemoria farmaci",
@@ -431,6 +518,8 @@ object Fixtures {
         detailBackupShell,
         detailNeedsReview,
         detailForbiddenBlocked,
+        detailTimeShizukuOff,
+        detailGeofenceUnknown,
     ).associateBy { it.id }
 
     // -------------------------------------------------------------------------
@@ -538,7 +627,7 @@ object Fixtures {
             softWarningActive = false,
         ),
         privacyAccepted = true,
-        appVersionLabel = "Argus v0.1.0 · MVP (sideload)",
+        appVersionLabel = "Argus v0.3.6 · F-Droid",
         providerChoices = providerChoices,
     )
 
@@ -569,9 +658,12 @@ object Fixtures {
             softWarningActive = true,
         ),
         privacyAccepted = true,
-        appVersionLabel = "Argus v0.1.0 · MVP (sideload)",
+        appVersionLabel = "Argus v0.3.6 · APK",
         providerChoices = providerChoices,
     )
+
+    /** Tutto verde tranne le sveglie esatte (Android 14+: negate di default): riga in avviso con «Correggi». */
+    val settingsExactAlarmsDenied = settingsAllGreen.copy(exactAlarmsGranted = false)
 
     /** Provider diretto selezionato (OpenAI) con chiave configurata. */
     val settingsDirectProvider = settingsAllGreen.copy(
@@ -587,6 +679,33 @@ object Fixtures {
         ),
         providerChoices = providerChoices.map { it.copy(selected = it.id == "openai") },
     )
+
+    /**
+     * OpenRouter con suggerimento sui preset, installazione da APK e accesso notifiche non concesso:
+     * la riga mostra la guida «Impostazione con restrizioni» (0.3.6).
+     */
+    val settingsRestrictedHint = settingsDegraded.copy(
+        notificationListenerGranted = false,
+        notificationListenerRestrictedHint = true,
+        transport = TransportUi.DirectProvider(
+            providerId = "openrouter",
+            providerLabel = "OpenRouter",
+            baseUrl = "https://openrouter.ai/api/v1",
+            model = "@preset/mio",
+            authState = AuthState.OK,
+            reachable = null,
+            lastLatencyLabel = null,
+            defaultModels = listOf("openai/gpt-5.5"),
+            modelPresetHint = true,
+        ),
+        providerChoices = providerChoices.map { it.copy(selected = it.id == "openrouter") },
+    )
+
+    /** Shizuku avviato con root (uid 0): la riga dice che i comandi delle regole girano come root. */
+    val settingsShizukuRoot = settingsAllGreen.copy(shizukuRunsAsRoot = true)
+
+    /** Shizuku in esecuzione ma troppo vecchio: «aggiornalo», non «riavvialo». */
+    val settingsShizukuUnsupported = settingsAllGreen.copy(shizuku = ShizukuStatus.UNSUPPORTED)
 
     // -------------------------------------------------------------------------
     // Onboarding / permessi (§6.6) — copy Shizuku VERBATIM da §9.

@@ -93,6 +93,13 @@ interface GeofenceStateStore {
         approvalFingerprint: ApprovalFingerprint,
         sequence: Long,
     )
+
+    /**
+     * Dimentica l'ultimo stato noto (`lastTransition` torna null = SCONOSCIUTO): un ENTER o un EXIT
+     * da sconosciuto viene sempre consegnato, non e' mai un doppione. Sequenza e transizione
+     * pendente restano intatte. Non fa nulla se la registrazione non c'e' o e' di un'altra revisione.
+     */
+    fun markUnknown(automationId: AutomationId, approvalFingerprint: ApprovalFingerprint)
     fun delete(automationId: AutomationId)
 }
 
@@ -184,6 +191,16 @@ class MemoryGeofenceStateStore : GeofenceStateStore {
         )
     }
 
+    override fun markUnknown(
+        automationId: AutomationId,
+        approvalFingerprint: ApprovalFingerprint,
+    ) = synchronized(lock) {
+        val current = values[automationId]
+            ?.takeIf { it.approvalFingerprint == approvalFingerprint }
+            ?: return@synchronized
+        values[automationId] = current.copy(lastTransition = null)
+    }
+
     override fun delete(automationId: AutomationId) {
         synchronized(lock) { values.remove(automationId) }
     }
@@ -201,6 +218,8 @@ data class GeofenceReconcileReport(
     val failed: List<AutomationId> = emptyList(),
     val cleanupFailed: List<AutomationId> = emptyList(),
     val recovered: List<AutomationId> = emptyList(),
+    /** Regole il cui ultimo stato noto e' stato dimenticato perche' al riavvio la posizione era ignota. */
+    val markedUnknown: List<AutomationId> = emptyList(),
 ) {
     val cleanupSucceeded: Boolean get() = cleanupFailed.isEmpty()
 }
@@ -289,9 +308,8 @@ class GeofenceCoordinator(
         val recoveryCandidates = desired.values.filter { automation ->
             automation.id !in failed && state.get(automation.id)?.lastTransition != null
         }
-        if (recreateOsRegistrations && recoveryCandidates.isNotEmpty() &&
-            currentLocation != null && ingress != null
-        ) {
+        val markedUnknown = mutableListOf<AutomationId>()
+        if (recreateOsRegistrations && recoveryCandidates.isNotEmpty() && currentLocation != null) {
             val location = try {
                 currentLocation.current()
             } catch (error: CancellationException) {
@@ -299,15 +317,32 @@ class GeofenceCoordinator(
             } catch (_: Exception) {
                 null
             }
-            if (location?.valid == true) {
+            val usable = location?.takeIf { it.valid }
+            if (usable == null) {
+                // Posizione ignota al riavvio (al chiuso, senza GPS): l'uscita avvenuta mentre il
+                // processo non c'era non si puo' rilevare, e l'ultimo stato noto non e' piu'
+                // affidabile. Se restasse «dentro», il rientro a casa verrebbe poi scambiato per un
+                // doppione e scartato. Da SCONOSCIUTO un ENTER o un EXIT viene sempre consegnato.
+                recoveryCandidates.sortedBy { it.id.value }.forEach { automation ->
+                    val persisted = state.get(automation.id) ?: return@forEach
+                    try {
+                        state.markUnknown(automation.id, persisted.approvalFingerprint)
+                        markedUnknown += automation.id
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: Exception) {
+                        // Stato non aggiornato: resta com'e', il prossimo riavvio ritenta.
+                    }
+                }
+            } else if (ingress != null) {
                 recoveryCandidates.sortedBy { it.id.value }.forEach { automation ->
                     val trigger = automation.trigger as Trigger.Geofence
                     val persisted = state.get(automation.id) ?: return@forEach
                     val distance = distanceMeters(
                         trigger.lat,
                         trigger.lng,
-                        location.latitude,
-                        location.longitude,
+                        usable.latitude,
+                        usable.longitude,
                     )
                     // Il fix one-shot può essere meno accurato del motore geofence. Non creare
                     // un bordo artificiale vicino alla circonferenza: lì aspettiamo il framework.
@@ -341,6 +376,7 @@ class GeofenceCoordinator(
             failed = failed.distinct(),
             cleanupFailed = cleanupFailed,
             recovered = recovered.distinct(),
+            markedUnknown = markedUnknown,
         )
     }
 

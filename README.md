@@ -194,7 +194,7 @@ The "Brain" is pluggable: the app always owns the loop, the LLM is a reasoning s
 | **OpenAI** | Responses API (server-side `web_search`) | yes | $ estimate from price list |
 | **Anthropic** | Messages API (`web_search` server tool) | yes | $ estimate from price list |
 | **Google Gemini** | OpenAI-compat shim + native API for grounding (`google_search`) | yes | $ estimate from price list |
-| **OpenRouter** | OpenAI-compat (web via the `:online` slug) | yes | tokens only |
+| **OpenRouter** | OpenAI-compat (web via the `web` plugin, presets supported) | yes | tokens only |
 | **Custom (OpenAI-compat)** | endpoint of your choice (llama.cpp, Ollama, LiteLLM, etc.) | no | n/a |
 
 - **BYOK**: hosted direct providers require **your own** API key, entered in-app and stored encrypted on the device. A Custom endpoint may omit authentication. No Argus account, no project backend.

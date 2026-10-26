@@ -1,5 +1,6 @@
 package dev.argus.automation.budget
 
+import dev.argus.brain.CompileLimits
 import dev.argus.brain.ProviderConfig
 import dev.argus.brain.ProviderId
 import dev.argus.data.UsageWindows
@@ -567,7 +568,7 @@ class MeteredBrainTest {
         }
         // Un errore vero resta un errore.
         val dao = RecordingUsageDao()
-        val brain = metered(FakeBrain(compileResult = { CompileResult("", null, "draft_missing") }), FakePolicy(), dao, config = openai)
+        val brain = metered(FakeBrain(compileResult = { CompileResult("", null, "output_truncated") }), FakePolicy(), dao, config = openai)
         brain.compile("crea", TEST_MANIFEST, DeviceState())
         assertEquals(UsageEventOutcome.ERROR, dao.events.single().outcome)
     }
@@ -599,7 +600,7 @@ class MeteredBrainTest {
 
     @Test
     fun `other outcomes are never retried`() = runTest {
-        for (code in listOf("draft_missing", "output_truncated", "context_truncated", "empty_response", "bridge_http_500")) {
+        for (code in listOf("output_truncated", "context_truncated", "empty_response", "bridge_http_500")) {
             val delegate = FakeBrain(compileResult = { CompileResult("x", null, code) })
             val brain = metered(delegate, FakePolicy(), RecordingUsageDao(), config = openai)
 
@@ -613,6 +614,179 @@ class MeteredBrainTest {
         val dao = AggregatingUsageDao()
         val settings = FixedSettings(BudgetSettings(global = BudgetLimits(maxCallsPerHour = 1)))
         val delegate = FakeBrain(compileResult = { CompileResult("rotto", null, "meta_parse_error") })
+        val brain = metered(delegate, BudgetPolicy(dao, settings), dao, config = openai, settings = settings)
+
+        val result = brain.compile("crea", TEST_MANIFEST, DeviceState())
+
+        assertEquals(1, delegate.calls)
+        assertEquals(BudgetMeta.BUDGET_EXCEEDED, result.metaError)
+        assertEquals(
+            listOf(UsageEventOutcome.ERROR, UsageEventOutcome.BLOCKED_BUDGET),
+            dao.events.map { it.outcome },
+        )
+    }
+
+    // --- I4: ritentativo con istruzioni di correzione --------------------------
+
+    /** Il dettaglio che il parser produce per il Difetto 2 (trigger `time` senza `tz`). */
+    private val tzDetail =
+        "Field 'tz' is required for type with serial name 'time', but it was missing at path: \$.draft.trigger"
+
+    /** Nota di correzione come la vede il modello (scritta per intero: e' il contratto del ritentativo). */
+    private fun expectedNote(reason: String): String =
+        "(Argus: your previous reply could not be used: $reason. Reply again with one short sentence, " +
+            "then the final line @@META@@ {\"draft\":<object-or-null>,\"error_code\":<string-or-null>}, " +
+            "using only the trigger and action shapes listed in the rules; " +
+            "for \"now\" use {\"type\":\"immediate\"}.)"
+
+    /** Delegate che fallisce il primo tentativo con [first] e riesce al secondo. */
+    private fun failingOnceThenOk(first: CompileResult): FakeBrain {
+        var attempt = 0
+        return FakeBrain(
+            compileResult = {
+                attempt++
+                if (attempt == 1) first else CompileResult("ok", null, null)
+            },
+        )
+    }
+
+    @Test
+    fun `the retry of a format error adds a correction note to the user text for that call only`() = runTest {
+        val delegate = failingOnceThenOk(CompileResult("rotto", null, "meta_parse_error", detail = tzDetail))
+        val brain = metered(delegate, FakePolicy(), RecordingUsageDao(), config = openai)
+
+        val result = brain.compile("spegni subito il non disturbare", TEST_MANIFEST, DeviceState())
+
+        assertEquals("ok", result.reply)
+        assertEquals(
+            listOf(
+                "spegni subito il non disturbare",
+                "spegni subito il non disturbare\n\n" + expectedNote("meta_parse_error: $tzDetail"),
+            ),
+            delegate.compileTexts,
+        )
+        assertTrue(expectedNote("meta_parse_error: $tzDetail").length <= 400)
+    }
+
+    @Test
+    fun `class names in the detail lose their package so that the note stays within 400 chars`() = runTest {
+        val detail = "Field 'tz' is required for type with serial name 'dev.argus.engine.model.Trigger.Time', " +
+            "but it was missing at path: \$.draft.trigger"
+        val delegate = failingOnceThenOk(CompileResult("rotto", null, "meta_parse_error", detail = detail))
+        val brain = metered(delegate, FakePolicy(), RecordingUsageDao(), config = openai)
+
+        brain.compile("crea", TEST_MANIFEST, DeviceState())
+
+        val note = delegate.compileTexts.last().removePrefix("crea\n\n")
+        assertEquals(
+            expectedNote(
+                "meta_parse_error: Field 'tz' is required for type with serial name 'Trigger.Time', " +
+                    "but it was missing at path: \$.draft.trigger",
+            ),
+            note,
+        )
+        assertTrue(note.length <= 400)
+    }
+
+    @Test
+    fun `the correction note names only the code when the parser gave no detail`() = runTest {
+        for (code in listOf("meta_json_missing", "draft_invalid")) {
+            val delegate = failingOnceThenOk(CompileResult("rotto", null, code))
+            val brain = metered(delegate, FakePolicy(), RecordingUsageDao(), config = openai)
+
+            brain.compile("crea", TEST_MANIFEST, DeviceState())
+
+            assertEquals("crea\n\n" + expectedNote(code), delegate.compileTexts.last(), code)
+        }
+    }
+
+    @Test
+    fun `a long detail is cut so that the whole note stays within 400 chars and keeps its instructions`() = runTest {
+        val delegate = failingOnceThenOk(CompileResult("rotto", null, "meta_parse_error", detail = "x".repeat(300)))
+        val brain = metered(delegate, FakePolicy(), RecordingUsageDao(), config = openai)
+
+        brain.compile("crea", TEST_MANIFEST, DeviceState())
+
+        val note = delegate.compileTexts.last().removePrefix("crea\n\n")
+        assertTrue(note.length <= 400, "nota di ${note.length} caratteri")
+        assertTrue(note.startsWith("(Argus: your previous reply could not be used: meta_parse_error: xxx"))
+        assertTrue(note.endsWith("for \"now\" use {\"type\":\"immediate\"}.)"), note)
+        assertTrue(note.contains("@@META@@"))
+    }
+
+    @Test
+    fun `the correction note is dropped when it would push the prompt over the compile limit`() = runTest {
+        val text = "a".repeat(CompileLimits.MAX_MESSAGE_CHARS - 10)
+        val delegate = failingOnceThenOk(CompileResult("rotto", null, "meta_parse_error", detail = tzDetail))
+        val brain = metered(delegate, FakePolicy(), RecordingUsageDao(), config = openai)
+
+        brain.compile(text, TEST_MANIFEST, DeviceState())
+
+        assertEquals(listOf(text, text), delegate.compileTexts)
+    }
+
+    @Test
+    fun `there is a single retry even when the second attempt fails again`() = runTest {
+        val delegate = FakeBrain(compileResult = { CompileResult("rotto", null, "meta_parse_error", detail = tzDetail) })
+        val brain = metered(delegate, FakePolicy(), RecordingUsageDao(), config = openai)
+
+        val result = brain.compile("crea", TEST_MANIFEST, DeviceState())
+
+        assertEquals("meta_parse_error", result.metaError)
+        assertEquals(2, delegate.compileTexts.size)
+    }
+
+    private val draftRaw =
+        "Imposto un'automazione.\n\n@@AUTOMATION_DRAFT@@ {\"draft\":{\"name\":\"x\"},\"error_code\":null}"
+
+    @Test
+    fun `draft_missing is retried when the raw reply holds a quoted draft key`() = runTest {
+        val delegate = failingOnceThenOk(CompileResult("Imposto un'automazione.", null, "draft_missing", raw = draftRaw))
+        val dao = RecordingUsageDao()
+        val brain = metered(delegate, FakePolicy(), dao, config = openai)
+
+        val result = brain.compile("crea", TEST_MANIFEST, DeviceState())
+
+        assertEquals("ok", result.reply)
+        assertEquals(2, delegate.calls)
+        assertEquals("crea\n\n" + expectedNote("draft_missing"), delegate.compileTexts.last())
+        assertEquals(listOf(UsageEventOutcome.ERROR, UsageEventOutcome.OK), dao.events.map { it.outcome })
+    }
+
+    @Test
+    fun `draft_missing is retried with the correction note even without a draft in the raw reply`() = runTest {
+        listOf(
+            null,
+            "Quale orario preferisci?",
+            // Risposta vera vista sul telefono: una frase e la sola azione, senza @@META@@.
+            "Propongo una regola immediata che disattiva Non disturbare (modalità OFF) appena la attivi.\n\n" +
+                "{\"type\":\"set_dark_mode\",\"mode\":\"off\"}",
+        ).forEach { raw ->
+            val delegate = failingOnceThenOk(CompileResult("Quale orario?", null, "draft_missing", raw = raw))
+            val brain = metered(delegate, FakePolicy(), RecordingUsageDao(), config = openai)
+
+            assertEquals("ok", brain.compile("crea", TEST_MANIFEST, DeviceState()).reply, raw)
+            assertEquals(2, delegate.calls, "un retry per $raw")
+            assertEquals("crea\n\n" + expectedNote("draft_missing"), delegate.compileTexts.last(), raw)
+        }
+    }
+
+    @Test
+    fun `outcomes that are not format errors are not retried even when the raw reply mentions a draft`() = runTest {
+        for (code in listOf("output_truncated", "context_truncated", "empty_response", "bridge_http_500", "clarification_required")) {
+            val delegate = FakeBrain(compileResult = { CompileResult("x", null, code, raw = draftRaw) })
+            val brain = metered(delegate, FakePolicy(), RecordingUsageDao(), config = openai)
+
+            assertEquals(code, brain.compile("crea", TEST_MANIFEST, DeviceState()).metaError)
+            assertEquals(1, delegate.calls, "nessun retry per $code")
+        }
+    }
+
+    @Test
+    fun `the retry of a misformatted draft is blocked when the first attempt consumed the last slot`() = runTest {
+        val dao = AggregatingUsageDao()
+        val settings = FixedSettings(BudgetSettings(global = BudgetLimits(maxCallsPerHour = 1)))
+        val delegate = FakeBrain(compileResult = { CompileResult("x", null, "draft_missing", raw = draftRaw) })
         val brain = metered(delegate, BudgetPolicy(dao, settings), dao, config = openai, settings = settings)
 
         val result = brain.compile("crea", TEST_MANIFEST, DeviceState())
@@ -669,12 +843,16 @@ class MeteredBrainTest {
         private val compileResult: suspend () -> CompileResult = { CompileResult("ok", null, null) },
     ) : Brain {
         var calls = 0
+
+        /** Testo utente ricevuto da ogni chiamata a [compile], nell'ordine. */
+        val compileTexts = mutableListOf<String>()
         override suspend fun compile(
             nl: String,
             manifest: CapabilityManifest,
             state: DeviceState,
         ): CompileResult {
             calls++
+            compileTexts += nl
             return compileResult()
         }
 

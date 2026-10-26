@@ -26,6 +26,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -50,8 +51,9 @@ import dev.argus.ui.theme.LocalArgusSemantic
 
 /**
  * Blocco comando shell — invariante di sicurezza §5.3/§7.3.
- * Superficie scura recessa, label UID-2000 in ambra, comando in monospace
- * `codeText` con scroll orizzontale: MAI a capo, MAI troncato (nessun maxLines).
+ * Superficie scura recessa, label dei privilegi in ambra (UID 2000, root o non noto, da
+ * [LocalShellPrivilege]), comando in monospace `codeText` con scroll orizzontale: MAI a capo,
+ * MAI troncato (nessun maxLines).
  */
 @Composable
 fun ShellCommandBlock(cmd: String, modifier: Modifier = Modifier) {
@@ -71,7 +73,13 @@ fun ShellCommandBlock(cmd: String, modifier: Modifier = Modifier) {
         ) {
             Icon(Icons.Rounded.Terminal, contentDescription = null, tint = semantic.cloud.fg, modifier = Modifier.size(16.dp))
             Text(
-                stringResource(R.string.rule_shell_privileges_label),
+                stringResource(
+                    when (LocalShellPrivilege.current) {
+                        ShellPrivilege.SHELL -> R.string.rule_shell_privileges_label
+                        ShellPrivilege.ROOT -> R.string.rule_shell_privileges_root_label
+                        ShellPrivilege.UNKNOWN -> R.string.rule_shell_privileges_unknown_label
+                    },
+                ),
                 color = semantic.cloud.fg,
                 style = MaterialTheme.typography.labelSmall,
             )
@@ -470,8 +478,12 @@ private fun RuleCardExtendedPreview() {
 private fun ShellCommandBlockPreview() {
     ArgusTheme {
         Surface(color = MaterialTheme.colorScheme.background) {
-            Box(Modifier.padding(16.dp)) {
-                ShellCommandBlock("pm uninstall --user 0 com.supercell.clashofclans && echo done")
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                ShellPrivilege.entries.forEach { privilege ->
+                    CompositionLocalProvider(LocalShellPrivilege provides privilege) {
+                        ShellCommandBlock("pm uninstall --user 0 com.supercell.clashofclans && echo done")
+                    }
+                }
             }
         }
     }

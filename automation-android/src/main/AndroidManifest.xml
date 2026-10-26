@@ -4,6 +4,9 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Wakelock parziale solo mentre una regola sta eseguendo (attese e chiamate AI a schermo
+         spento): permesso normal, auto-concesso. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
@@ -57,6 +60,12 @@
 
         <receiver
             android:name=".TimeAlarmReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
+        <!-- Sveglia interna di ripresa per le attese lunghe (B19); l'intent è esplicito. -->
+        <receiver
+            android:name="dev.argus.automation.power.WaitWakeReceiver"
             android:enabled="true"
             android:exported="false" />
 

@@ -23,6 +23,8 @@
     <string name="provider_dialog_title">Configure %1$s</string>
     <string name="provider_endpoint_label">Endpoint</string>
     <string name="provider_model_label">Model</string>
+    <string name="provider_model_hint_openrouter">Model (e.g. deepseek/deepseek-v4.1-flash) or preset: @preset/&lt;name&gt;</string>
+    <string name="provider_model_preset_format">The format is @preset/&lt;name&gt;</string>
     <string name="provider_key_label">API key</string>
     <string name="provider_key_keep_hint">Leave blank to keep the current key.</string>
     <string name="provider_key_required_hint">Required.</string>
@@ -71,6 +73,8 @@
     <string name="rule_section_then">THEN</string>
     <string name="rule_section_variables">VARIABLES</string>
     <string name="rule_var_value_label">value</string>
+    <string name="rule_shell_privileges_root_label">runs commands as root (Shizuku runs as root)</string>
+    <string name="rule_shell_privileges_unknown_label">runs commands with Shizuku privileges</string>
 
     <!-- Chat -->
     <string name="chat_subtitle">chat · rule compiler</string>
@@ -98,6 +102,12 @@
     <string name="chat_error_service_unavailable">The service is not available right now (HTTP %1$d). Try again later.</string>
     <string name="chat_error_too_long">This request is too long (%1$d characters, max %2$d). Shorten it.</string>
     <string name="chat_error_not_configured">The AI service is not set up. Check the provider, the API key and the privacy notice in System.</string>
+    <string name="chat_error_internal">Argus internal error (%1$s): it does not depend on the provider. If it happens again, open an issue.</string>
+    <string name="chat_raw_action">Raw response</string>
+    <string name="chat_raw_title">Raw response</string>
+    <string name="chat_raw_warning">It may contain personal data (names, messages, locations): check it before sharing it</string>
+    <string name="chat_raw_copy">Copy for the report</string>
+    <string name="chat_raw_close">Close</string>
     <string name="chat_open_system">Open System</string>
     <string name="chat_error_detail_show">Technical detail</string>
     <string name="chat_error_detail_hide">Hide technical detail</string>
@@ -141,6 +151,14 @@
     <string name="detail_enable">Re-enable automation</string>
     <string name="detail_edit_in_chat">Edit in chat</string>
     <string name="detail_recreate_in_chat">Recreate in chat</string>
+    <string name="detail_diag_title">Why didn\'t it run?</string>
+    <string name="detail_diag_recheck">Check again</string>
+    <string name="detail_diag_open_system">Open System</string>
+    <string name="detail_diag_show">Show the check</string>
+    <string name="detail_diag_hide">Hide the check</string>
+    <string name="detail_diag_level_ok">OK</string>
+    <string name="detail_diag_level_warn">Warning</string>
+    <string name="detail_diag_level_info">Information</string>
 
     <!-- Log esecuzioni -->
     <string name="log_title">Execution log</string>
@@ -153,6 +171,14 @@
     <string name="log_copy_and_open">Copy and open WhatsApp</string>
     <string name="log_mark_sent">Mark as sent</string>
     <string name="log_open_automation">Open automation</string>
+    <string name="log_menu_open">Log options</string>
+    <string name="log_menu_retention_title">Keep the log for</string>
+    <string name="log_menu_retention_option">%1$d days</string>
+    <string name="log_menu_clear">Clear the log</string>
+    <string name="log_menu_export">Export (no personal data)</string>
+    <string name="log_clear_confirm">Clear the log? This cannot be undone.</string>
+    <string name="log_clear_confirm_action">Clear</string>
+    <string name="log_clear_confirm_cancel">Cancel</string>
 
     <!-- Sistema (settings) -->
     <string name="settings_title">System</string>
@@ -172,6 +198,9 @@
     <string name="settings_battery_title">Battery optimization</string>
     <string name="settings_battery_ok">Android exemption granted — any manufacturer-specific background activity/auto-start controls remain manual</string>
     <string name="settings_battery_warn">active — grant the exemption and also check any manufacturer-specific background activity/auto-start controls; otherwise scheduled actions, and AI actions too, may arrive late</string>
+    <string name="settings_exact_alarms_title">Exact alarms</string>
+    <string name="settings_exact_alarms_ok">granted: time rules and long waits start on time</string>
+    <string name="settings_exact_alarms_warn">not granted: rules with an exact time may start up to an hour late and long waits may slip</string>
     <string name="settings_unauthenticated_loopback">Local server without a key: another app on this phone could impersonate the model. Set a key on the local server as well.</string>
     <string name="settings_notifications_title">Argus notifications</string>
     <string name="settings_notifications_ok">allowed</string>
@@ -179,6 +208,7 @@
     <string name="settings_listener_title">Notification access</string>
     <string name="settings_listener_ok">active — WhatsApp triggers and replies available</string>
     <string name="settings_listener_warn">not active — WhatsApp triggers and replies not armable</string>
+    <string name="settings_listener_restricted_hint">If Android says \"Restricted setting\": Settings › Apps › Argus › ⋮ › Allow restricted settings, then try again.</string>
     <string name="settings_location_title">Background location</string>
     <string name="settings_location_granted">always — geofences are reliable</string>
     <string name="settings_location_while_in_use">only while in use — «Allow all the time» is needed for geofences</string>
@@ -228,6 +258,8 @@
     <string name="settings_budget_footnote">Dollar costs estimated from the public price list only for priced providers (indicative estimate, not an invoice) · EUR at fixed rate ≈ · Hermes/OpenRouter/Custom: tokens only</string>
     <string name="settings_budget_edit_limits">Edit limits</string>
     <string name="settings_rerun">Repeat setup</string>
+    <string name="settings_shizuku_unsupported">Shizuku is too old: update it</string>
+    <string name="settings_shizuku_ok_root">Running as root: rule commands run as root</string>
 
     <!-- Dialog limiti budget -->
     <string name="budget_dialog_title">LLM budget limits</string>

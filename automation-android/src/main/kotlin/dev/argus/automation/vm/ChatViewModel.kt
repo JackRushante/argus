@@ -3,11 +3,14 @@ package dev.argus.automation.vm
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dev.argus.automation.AppInstallInfo
 import dev.argus.automation.ApprovalFlow
 import dev.argus.automation.BridgeHealthResult
+import dev.argus.automation.ClipboardCopier
 import dev.argus.automation.ConfiguredBridgeBrain
 import dev.argus.automation.DeviceStateSnapshotProvider
 import dev.argus.automation.DraftSubmissionResult
+import dev.argus.automation.RenderLanguageSource
 import dev.argus.automation.apps.InstalledAppCandidate
 import dev.argus.automation.apps.InstalledAppResolver
 import dev.argus.brain.BridgeErrorKind
@@ -15,6 +18,7 @@ import dev.argus.brain.BridgeException
 import dev.argus.brain.CompileLimits
 import dev.argus.brain.CompileTimeoutPolicy
 import dev.argus.brain.LocationRedaction
+import dev.argus.brain.ProviderCatalog
 import dev.argus.brain.TransportBackedBrain
 import dev.argus.engine.brain.Brain
 import dev.argus.engine.brain.CapabilityProbe
@@ -28,6 +32,9 @@ import dev.argus.engine.model.ArgusJson
 import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.toDraft
+import dev.argus.engine.runtime.ActionResult
+import dev.argus.engine.runtime.AutomationStore
 import dev.argus.ui.model.ChatError
 import dev.argus.ui.model.ChatItem
 import dev.argus.ui.model.ChatState
@@ -45,6 +52,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
@@ -66,10 +74,16 @@ class ChatViewModel @Inject constructor(
     private val deviceState: DeviceStateSnapshotProvider,
     private val approvalFlow: ApprovalFlow,
     private val installedApps: InstalledAppResolver,
-    drafts: DraftRepository,
+    private val drafts: DraftRepository,
+    private val automations: AutomationStore,
     whitelist: ContactWhitelistStore,
-    private val language: RenderLanguage = RenderLanguage.system(),
+    private val languageSource: RenderLanguageSource,
+    private val clipboard: ClipboardCopier,
+    private val installInfo: AppInstallInfo,
 ) : ViewModel() {
+    /** Lingua corrente al momento in cui si produce un testo (errori, avvisi); segue il telefono. */
+    private val language: RenderLanguage get() = languageSource.current
+
     /** conversationId → nome fidato dallo store whitelist: le card mostrano nomi, non hash. */
     private val conversationLabels = MutableStateFlow<Map<String, String>>(emptyMap())
     private val mutableState = MutableStateFlow(
@@ -92,6 +106,12 @@ class ChatViewModel @Inject constructor(
     private var editContext: EditContext? = null
     private var clarificationContext: ClarificationContext? = null
 
+    /**
+     * Codice d'errore dell'ULTIMO turno (nessuno se è riuscito): finisce nella copia «per la segnalazione»
+     * accanto alla risposta grezza. Solo un codice chiuso, mai testo del modello.
+     */
+    private var turnErrorCode: String? = null
+
     init {
         viewModelScope.launch {
             whitelist.observeAll().collect { contacts ->
@@ -99,10 +119,10 @@ class ChatViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
-            // combine con le label: se la whitelist cambia mentre una card è visibile,
-            // il nome fidato si aggiorna senza dover rigenerare la bozza.
-            combine(drafts.observeAll(), conversationLabels, ::Pair)
-                .collectLatest { (pending, labels) ->
+            // combine con le label e con la lingua: se la whitelist o la lingua del telefono cambiano
+            // mentre una card è visibile, il testo si rigenera senza dover rigenerare la bozza.
+            combine(drafts.observeAll(), conversationLabels, languageSource.language, ::Triple)
+                .collectLatest { (pending, labels, cardLanguage) ->
                     val pendingIds = pending.mapTo(hashSetOf()) { it.id.value }
                     mutableState.update { current ->
                         current.copy(
@@ -115,8 +135,8 @@ class ChatViewModel @Inject constructor(
                         val review = approvalFlow.review(snapshot.id) ?: return@forEach
                         val card = ChatItem.DraftCard(
                             draftId = snapshot.id.value,
-                            rule = RuleRenderMapper.mapDraft(snapshot.draft, labels, language),
-                            issues = reviewWarnings(review, language),
+                            rule = RuleRenderMapper.mapDraft(snapshot.draft, labels, cardLanguage),
+                            issues = reviewWarnings(review, cardLanguage),
                             status = DraftCardStatus.PROPOSED,
                         )
                         upsertDraftCard(card)
@@ -127,8 +147,12 @@ class ChatViewModel @Inject constructor(
 
     fun onInputChange(text: String) {
         val value = text.take(CompileLimits.MAX_INPUT_CHARS)
+        // Uscita dalla modifica (campo svuotato): la risposta grezza dell'ultimo turno non vale più.
+        val leavesEdit = value.isBlank() && editContext != null
         if (value.isBlank()) editContext = null
-        mutableState.update { it.copy(input = value) }
+        mutableState.update {
+            if (leavesEdit) it.copy(input = value, rawResponse = null) else it.copy(input = value)
+        }
     }
 
     fun prefill(text: String) {
@@ -152,9 +176,11 @@ class ChatViewModel @Inject constructor(
             draftRevision = draftRevision,
             baseDraft = baseDraft,
         )
+        turnErrorCode = null
         mutableState.update { current ->
             current.copy(
                 input = text.take(CompileLimits.MAX_INPUT_CHARS),
+                rawResponse = null,
                 items = if (baseDraft == null) {
                     current.items
                 } else {
@@ -194,10 +220,12 @@ class ChatViewModel @Inject constructor(
         lastPrompt = null
         clarificationContext = null
         editContext = null
+        turnErrorCode = null
         mutableState.update { current ->
             current.copy(
                 items = current.items.filterIsInstance<ChatItem.DraftCard>(),
                 error = null,
+                rawResponse = null,
             )
         }
     }
@@ -208,14 +236,56 @@ class ChatViewModel @Inject constructor(
         sendJob?.cancel()
         sendJob = null
         editContext = null
+        turnErrorCode = null
         mutableState.update {
             it.copy(
                 sending = false,
                 sendingElapsedSec = null,
+                rawResponse = null,
                 items = it.items + ChatItem.SystemNotice(
                     language.pick("Request cancelled.", "Richiesta annullata."),
                     NoticeKind.INFO,
                 ),
+            )
+        }
+    }
+
+    /**
+     * «Copia per la segnalazione» del dialogo «Risposta grezza»: scrive negli appunti, col copiatore
+     * esistente, versione dell'app, provider, modello, codice d'errore del turno (se c'è) e testo grezzo
+     * in un blocco recintato. Senza risposta grezza dell'ultimo turno non fa niente.
+     */
+    fun onCopyRawResponse() {
+        val raw = state.value.rawResponse ?: return
+        val config = runCatching { configuredBridge.selectedConfig() }.getOrNull()
+        val report = rawResponseReport(
+            appVersion = installInfo.versionName,
+            installSource = installInfo.sourceLabel,
+            provider = config?.providerId?.wireName ?: "-",
+            model = config?.let { it.model ?: ProviderCatalog.spec(it.providerId).defaultModels.firstOrNull() },
+            errorCode = turnErrorCode,
+            raw = raw,
+        )
+        val copied = clipboard.copyLiteral(report) is ActionResult.Success
+        mutableState.update { current ->
+            current.copy(
+                items = current.items + if (copied) {
+                    ChatItem.SystemNotice(
+                        language.pick(
+                            "Raw response copied for the report.",
+                            "Risposta grezza copiata per la segnalazione.",
+                        ),
+                        NoticeKind.INFO,
+                    )
+                } else {
+                    ChatItem.SystemNotice(
+                        language.pick(
+                            "Unable to copy the raw response.",
+                            "Impossibile copiare la risposta grezza.",
+                        ),
+                        NoticeKind.ERROR,
+                    )
+                },
             )
         }
     }
@@ -228,6 +298,8 @@ class ChatViewModel @Inject constructor(
         val edit = editContext
         val clarification = clarificationContext
         lastPrompt = prompt
+        // Nuovo invio: la risposta grezza e il codice d'errore dell'ultimo turno non valgono più.
+        turnErrorCode = null
         mutableState.update { current ->
             current.copy(
                 items = if (appendUserMessage) {
@@ -240,6 +312,7 @@ class ChatViewModel @Inject constructor(
                 sendingElapsedSec = 0,
                 brainReachable = null,
                 error = null,
+                rawResponse = null,
             )
         }
         val timeoutMillis = compileTimeoutMillis()
@@ -279,8 +352,11 @@ class ChatViewModel @Inject constructor(
                             val modelReply = brain.compile(compilePrompt, manifest, snapshot)
                             // S4: le coordinate non sono mai partite verso il modello (0,0 nel prompt):
                             // qui tornano nella bozza, dove il modello ha lasciato 0,0 sullo stesso percorso.
-                            val compile = edit?.baseDraft?.let { base -> restoreLocations(modelReply, base) }
-                                ?: modelReply
+                            // F5: la risposta grezza non entra mai nel flusso di approvazione (DB, audit, bozza).
+                            val compile = (
+                                edit?.baseDraft?.let { base -> restoreLocations(modelReply, base) }
+                                    ?: modelReply
+                                ).copy(raw = null)
                             val submission = when {
                                 edit?.draftId != null && edit.draftRevision != null ->
                                     approvalFlow.submitRevision(
@@ -300,17 +376,20 @@ class ChatViewModel @Inject constructor(
                                     DraftSubmissionResult.Rejected("edit_context_invalid")
                                 else -> approvalFlow.submit(compile)
                             }
-                            CompiledTurn(submission, modelReply.detail)
+                            CompiledTurn(submission, modelReply.detail, modelReply.raw)
                         }
                     } finally {
                         timer.cancel()
                     }
                 }
                 if (generation == requestGeneration) {
-                    applySubmission(compiled.submission, prompt, clarification, compiled.detail)
+                    // F5: la risposta grezza vive solo qui, in memoria, fino al prossimo invio.
+                    mutableState.update { it.copy(rawResponse = compiled.raw) }
+                    applySubmission(compiled.submission, prompt, clarification, compiled.detail, edit)
                 }
             } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
                 if (generation == requestGeneration) {
+                    turnErrorCode = "timeout"
                     mutableState.update {
                         it.copy(brainReachable = null, error = ChatError.Timeout)
                     }
@@ -319,6 +398,7 @@ class ChatViewModel @Inject constructor(
                 throw error
             } catch (error: PromptTooLongException) {
                 if (generation == requestGeneration) {
+                    turnErrorCode = "prompt_too_long"
                     mutableState.update {
                         it.copy(
                             brainReachable = null,
@@ -328,14 +408,16 @@ class ChatViewModel @Inject constructor(
                 }
             } catch (error: BridgeException) {
                 if (generation == requestGeneration) applyFailureCode(TransportBackedBrain.metaErrorOf(error), null)
-            } catch (_: IllegalArgumentException) {
-                // Configurazione che il transport rifiuta alla costruzione (URL con credenziali, http non
-                // loopback, ...): è un problema di configurazione, NON un servizio irraggiungibile.
-                if (generation == requestGeneration) applyFailureCode("bridge_configuration", null)
-            } catch (_: Exception) {
+            } catch (error: Exception) {
+                // Errore LOCALE dell'app (non del modello né della rete): mostrarlo come «risposta senza
+                // regola valida» farebbe cercare il guasto nel posto sbagliato. Il codice è il nome della
+                // classe d'eccezione, mai il suo messaggio. (La configurazione che il transport rifiuta
+                // alla costruzione arriva già come BridgeException di tipo CONFIGURATION.)
                 if (generation == requestGeneration) {
+                    val code = internalErrorCode(error)
+                    turnErrorCode = code
                     mutableState.update {
-                        it.copy(brainReachable = null, error = ChatError.MalformedReply("unexpected_error"))
+                        it.copy(brainReachable = null, error = ChatError.Internal(code))
                     }
                 }
             } finally {
@@ -365,11 +447,12 @@ class ChatViewModel @Inject constructor(
         return result.copy(draft = restoreConversationId(LocationRedaction.restore(draft, originals), base))
     }
 
-    private fun applySubmission(
+    private suspend fun applySubmission(
         result: DraftSubmissionResult,
         prompt: String,
         clarification: ClarificationContext?,
         compileDetail: String?,
+        edit: EditContext?,
     ) {
         when (result) {
             is DraftSubmissionResult.Ready -> {
@@ -405,6 +488,7 @@ class ChatViewModel @Inject constructor(
                 }
             }
             is DraftSubmissionResult.NoDraft -> {
+                turnErrorCode = result.code
                 if (result.code == CLARIFICATION_REQUIRED && result.reply.isNotBlank()) {
                     clarificationContext = clarification.next(prompt, result.reply)
                     mutableState.update { current ->
@@ -446,19 +530,96 @@ class ChatViewModel @Inject constructor(
                 }
                 applyFailureCode(result.code, compileDetail, reply = result.reply)
             }
-            is DraftSubmissionResult.Rejected -> appendFailure(
-                language.pick(
-                    "Draft rejected by local validation (${result.code.safeUiCode()}).",
-                    "Bozza rifiutata dal controllo locale (${result.code.safeUiCode()}).",
+            is DraftSubmissionResult.Rejected -> {
+                turnErrorCode = result.code.safeUiCode()
+                // La regola in modifica è cambiata o sparita nel frattempo: senza ripartire dalla versione
+                // corrente ogni nuovo invio verrebbe rifiutato allo stesso modo.
+                val stillEditing = result.code !in STALE_EDIT_CODES || recoverEditContext(edit)
+                if (stillEditing) {
+                    appendFailure(
+                        language.pick(
+                            "Draft rejected by local validation (${result.code.safeUiCode()}).",
+                            "Bozza rifiutata dal controllo locale (${result.code.safeUiCode()}).",
+                        ),
+                    )
+                }
+            }
+            is DraftSubmissionResult.Conflict -> {
+                turnErrorCode = "draft_conflict"
+                // La revisione dell'editContext è vecchia: si rilegge quella corrente, così il prossimo
+                // invio parte dalla versione corrente invece di fallire di nuovo.
+                if (recoverEditContext(edit)) {
+                    appendFailure(
+                        language.pick(
+                            "The draft changed while it was being saved. Try again.",
+                            "La bozza è cambiata durante il salvataggio. Riprova.",
+                        ),
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Dopo un conflitto (o una regola cambiata) riallinea l'[editContext] alla versione CORRENTE: la
+     * revisione della bozza, oppure l'impronta della regola in modifica. Se la bozza o la regola non
+     * esistono più si esce dalla modalità modifica con un avviso (e si torna `false`). Non tocca nulla
+     * se l'utente è già uscito dalla modifica nel frattempo.
+     *
+     * @return `true` se si può riprovare (contesto riallineato o niente da riallineare), `false` se la
+     *   modalità modifica è stata chiusa e l'avviso è già in chat.
+     */
+    private suspend fun recoverEditContext(edit: EditContext?): Boolean {
+        if (edit == null || editContext != edit) return true
+        val refreshed = try {
+            refreshedEditContext(edit)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            // Non si riesce a rileggere: meglio uscire dalla modifica che riprovare con dati vecchi.
+            null
+        }
+        editContext = refreshed
+        if (refreshed != null) return true
+        mutableState.update { current ->
+            current.copy(
+                items = current.items + ChatItem.SystemNotice(
+                    language.pick(
+                        "The draft or rule you were editing no longer exists: edit mode was closed. Describe the change again to start over.",
+                        "La bozza o la regola che stavi modificando non esiste più: ho chiuso la modalità modifica. Descrivi di nuovo la modifica per ripartire.",
+                    ),
+                    NoticeKind.ERROR,
                 ),
-            )
-            is DraftSubmissionResult.Conflict -> appendFailure(
-                language.pick(
-                    "The draft changed while it was being saved. Try again.",
-                    "La bozza è cambiata durante il salvataggio. Riprova.",
-                ),
+                brainReachable = true,
+                error = null,
+                rawResponse = null,
             )
         }
+        return false
+    }
+
+    /** Il contesto di modifica riletto dallo stato corrente, o null se la bozza o la regola non esistono più. */
+    private suspend fun refreshedEditContext(edit: EditContext): EditContext? {
+        edit.draftId?.let { id ->
+            val current = drafts.get(DraftId(id)) ?: return null
+            return edit.copy(draftRevision = current.revision, baseDraft = current.draft)
+        }
+        val automationId = edit.automationId ?: return edit
+        // Un conflitto sulla modifica di una regola significa che per lei esiste già una bozza in
+        // attesa: da qui si prosegue su quella, come fa il Dettaglio.
+        val pending = drafts.observeAll().first().firstOrNull { it.automationId.value == automationId }
+        if (pending != null) {
+            return EditContext(
+                automationId = null,
+                automationFingerprint = null,
+                draftId = pending.id.value,
+                draftRevision = pending.revision,
+                baseDraft = pending.draft,
+            )
+        }
+        val current = automations.get(AutomationId(automationId)) ?: return null
+        val fingerprint = current.approvalFingerprint ?: return null
+        return edit.copy(automationFingerprint = fingerprint, baseDraft = current.toDraft())
     }
 
     /**
@@ -468,6 +629,7 @@ class ChatViewModel @Inject constructor(
      * regola approvabile", basta il banner.
      */
     private fun applyFailureCode(code: String, detail: String?, reply: String = "") {
+        turnErrorCode = code
         val error = chatErrorForCode(code, detail, language)
         mutableState.update { current ->
             current.copy(
@@ -554,12 +716,24 @@ class ChatViewModel @Inject constructor(
     private companion object {
         const val CLARIFICATION_REQUIRED = CompileMetaError.CLARIFICATION_REQUIRED
         val NO_RULE_CODES = setOf(CompileMetaError.UNSUPPORTED_CAPABILITY, CompileMetaError.LIMIT_EXCEEDED)
+
+        /** Rifiuti di `submitEdit` che dicono «la regola in modifica non è più quella»: si riallinea il contesto. */
+        val STALE_EDIT_CODES = setOf("automation_stale", "automation_missing")
         val TIME_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.ITALIAN)
         fun timeLabel(): String = LocalTime.now().format(TIME_FORMAT)
     }
 
-    /** Esito di un turno di compile: l'esito della sottomissione e il dettaglio tecnico del parser. */
-    private data class CompiledTurn(val submission: DraftSubmissionResult, val detail: String?)
+    /**
+     * Esito di un turno di compile: l'esito della sottomissione, il dettaglio tecnico del parser e la
+     * risposta grezza del modello (solo memoria, per le segnalazioni).
+     */
+    private data class CompiledTurn(
+        val submission: DraftSubmissionResult,
+        val detail: String?,
+        val raw: String?,
+    ) {
+        override fun toString(): String = "CompiledTurn(submission=$submission, detail=$detail)"
+    }
 
     /** Prompt composto oltre [CompileLimits.MAX_MESSAGE_CHARS]: interrompe PRIMA di chiamare la rete. */
     private class PromptTooLongException(val chars: Int) : RuntimeException("prompt troppo lungo")

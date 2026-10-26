@@ -1,6 +1,7 @@
 package dev.argus.automation.di
 
 import android.content.Context
+import android.os.SystemClock
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -18,7 +19,15 @@ import dev.argus.automation.AndroidTimeAlarmBackend
 import dev.argus.automation.AppPreferencesStore
 import dev.argus.automation.ApprovalFlow
 import dev.argus.automation.ArmedAutomationRegistrar
+import dev.argus.automation.DispatchFrame
 import dev.argus.automation.ImmediateReArm
+import dev.argus.automation.power.AndroidPowerLock
+import dev.argus.automation.power.AndroidWakeAlarmBackend
+import dev.argus.automation.power.ExecutionWakeLock
+import dev.argus.automation.power.WaitWakeSignals
+import dev.argus.automation.power.WakeAlarmBackend
+import dev.argus.automation.power.WakeAwarePause
+import dev.argus.automation.RecoveryLauncher
 import dev.argus.automation.ArgusRuntimeController
 import dev.argus.automation.AutomationNotifier
 import dev.argus.automation.ConfiguredBridgeBrain
@@ -31,6 +40,7 @@ import dev.argus.automation.PersistentDeferredReplySink
 import dev.argus.automation.PrivacyRevocationCoordinator
 import dev.argus.automation.DeviceStateSnapshotProvider
 import dev.argus.automation.AndroidClipboardCopier
+import dev.argus.automation.AppInstallInfo
 import dev.argus.automation.ClipboardCopier
 import dev.argus.automation.EngineNotificationEventDispatcher
 import dev.argus.automation.EnginePhoneEventDispatcher
@@ -46,6 +56,8 @@ import dev.argus.automation.NotificationEventDispatcher
 import dev.argus.automation.OneShotConsumptionRegistry
 import dev.argus.automation.ProcessOneShotConsumptionRegistry
 import dev.argus.automation.EngineSensorEventDispatcher
+import dev.argus.automation.LogRetentionStore
+import dev.argus.automation.RenderLanguageSource
 import dev.argus.automation.RoomTimeAlarmStateStore
 import dev.argus.automation.ShizukuActionExecutor
 import dev.argus.automation.apps.AndroidInstalledAppResolver
@@ -53,7 +65,9 @@ import dev.argus.automation.apps.InstalledAppResolver
 import dev.argus.automation.base.AndroidBaseActionExecutor
 import dev.argus.automation.base.AndroidBaseActionSurface
 import dev.argus.automation.base.BaseActionSurface
+import dev.argus.automation.foreground.AndroidForegroundDeniedNotice
 import dev.argus.automation.foreground.SharedForegroundSentinel
+import dev.argus.automation.connectivity.ForegroundDeniedNotice
 import dev.argus.automation.foreground.ReceiverWorkLauncher
 import dev.argus.automation.foreground.SentinelDemand
 import dev.argus.automation.sensor.AndroidSignificantMotionBackend
@@ -77,6 +91,7 @@ import dev.argus.automation.notification.ActiveNotificationReplyRegistry
 import dev.argus.automation.notification.AndroidNotificationReplyGateway
 import dev.argus.automation.notification.AndroidNotificationSnapshotFactory
 import dev.argus.automation.notification.NotificationIngress
+import dev.argus.automation.notification.NotificationTriggerDemand
 import dev.argus.automation.notification.NotificationReplyGateway
 import dev.argus.automation.notification.NotificationReplyHandleFactory
 import dev.argus.automation.budget.AndroidBudgetAlerts
@@ -148,9 +163,10 @@ import dev.argus.engine.safety.ApprovalWhitelistProvider
 import dev.argus.engine.safety.DraftRepository
 import dev.argus.engine.safety.DraftValidator
 import dev.argus.shizuku.PrivilegedShell
+import dev.argus.shizuku.ShizukuAccess
 import dev.argus.shizuku.ShizukuGateway
+import dev.argus.shizuku.ShizukuIdentityProbe
 import dev.argus.shizuku.ShizukuPrivilegedShell
-import dev.argus.ui.presentation.RenderLanguage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -168,7 +184,12 @@ annotation class ApplicationScope
 @InstallIn(SingletonComponent::class)
 object ArgusModule {
     @Provides
-    fun renderLanguage(): RenderLanguage = RenderLanguage.system()
+    @Singleton
+    fun renderLanguageSource(): RenderLanguageSource = RenderLanguageSource()
+
+    @Provides
+    @Singleton
+    fun appInstallInfo(@ApplicationContext context: Context): AppInstallInfo = AppInstallInfo.read(context)
 
     @Provides
     @Singleton
@@ -220,8 +241,16 @@ object ArgusModule {
 
     @Provides
     @Singleton
-    fun journalMaintenance(database: ArgusDatabase): RoomJournalMaintenance =
-        RoomJournalMaintenance(database)
+    fun journalMaintenance(
+        database: ArgusDatabase,
+        logRetention: LogRetentionStore,
+    ): RoomJournalMaintenance =
+        RoomJournalMaintenance(database, logRetentionDays = logRetention::currentDays)
+
+    @Provides
+    @Singleton
+    fun logRetentionStore(@ApplicationContext context: Context): LogRetentionStore =
+        LogRetentionStore(context)
 
     @Provides
     @Singleton
@@ -280,12 +309,18 @@ object ArgusModule {
     fun shizukuGateway(@ApplicationContext context: Context): ShizukuGateway = ShizukuGateway(context)
 
     @Provides
+    fun shizukuAccessBoundary(gateway: ShizukuGateway): ShizukuAccess = gateway
+
+    @Provides
     @Singleton
     fun privilegedShell(
         @ApplicationContext context: Context,
         gateway: ShizukuGateway,
         @ApplicationScope scope: CoroutineScope,
     ): ShizukuPrivilegedShell = ShizukuPrivilegedShell(context, gateway, scope)
+
+    @Provides
+    fun shizukuIdentityProbe(shell: ShizukuPrivilegedShell): ShizukuIdentityProbe = shell
 
     @Provides
     fun privilegedShellBoundary(shell: ShizukuPrivilegedShell): PrivilegedShell = shell
@@ -505,6 +540,8 @@ object ArgusModule {
         notifier: AutomationNotifier,
         oneShotConsumptions: OneShotConsumptionRegistry,
         replyRegistry: ActiveNotificationReplyRegistry,
+        wakeLock: ExecutionWakeLock,
+        sentinel: SharedForegroundSentinel,
     ): AndroidGenerativeLane = AndroidGenerativeLane(
         scope,
         journal,
@@ -516,6 +553,8 @@ object ArgusModule {
         notifier,
         oneShotConsumptions,
         replyBursts = replyRegistry,
+        wakeLock = wakeLock,
+        sentinel = sentinel,
     )
 
     @Provides
@@ -578,6 +617,44 @@ object ArgusModule {
     @Provides
     fun resolvedActionExecutorBoundary(executor: ShizukuActionExecutor): ResolvedActionExecutor = executor
 
+    /** Wakelock parziale «argus:execution» con contatore (B19). */
+    @Provides
+    @Singleton
+    fun executionWakeLock(@ApplicationContext context: Context): ExecutionWakeLock =
+        ExecutionWakeLock(AndroidPowerLock(context, AndroidPowerLock.EXECUTION_TAG))
+
+    /** Registro delle attese lunghe + wakelock breve «argus:wait-wakeup» del receiver di ripresa. */
+    @Provides
+    @Singleton
+    fun waitWakeSignals(@ApplicationContext context: Context): WaitWakeSignals =
+        WaitWakeSignals(AndroidPowerLock(context, AndroidPowerLock.WAIT_WAKEUP_TAG))
+
+    @Provides
+    @Singleton
+    fun wakeAlarmBackend(@ApplicationContext context: Context): WakeAlarmBackend =
+        AndroidWakeAlarmBackend(context)
+
+    /** Attese che sopravvivono al deep sleep, iniettate come `Engine(pause = …)`. */
+    @Provides
+    @Singleton
+    fun wakeAwarePause(
+        wakeLock: ExecutionWakeLock,
+        alarms: WakeAlarmBackend,
+        signals: WaitWakeSignals,
+    ): WakeAwarePause = WakeAwarePause(wakeLock, alarms, signals, SystemClock::elapsedRealtime)
+
+    /**
+     * Cornice di ogni dispatch verso l'Engine: wakelock, conteggio dei dispatch in corso e pulizia
+     * periodica a fine dispatch. Il controller si risolve in modo pigro (Provider) perché dipende
+     * a sua volta dagli ingress, che dipendono dai dispatcher.
+     */
+    @Provides
+    @Singleton
+    fun dispatchFrame(
+        wakeLock: ExecutionWakeLock,
+        controller: Provider<ArgusRuntimeController>,
+    ): DispatchFrame = DispatchFrame(wakeLock) { controller.get().maintenanceIfDue() }
+
     @Provides
     @Singleton
     fun engine(
@@ -587,6 +664,7 @@ object ArgusModule {
         audit: AuditSink,
         journal: ExecutionJournal,
         resolvedExecutor: ResolvedActionExecutor,
+        wakeAwarePause: WakeAwarePause,
     ): Engine = Engine(
         store = store,
         executor = executor,
@@ -596,13 +674,14 @@ object ArgusModule {
         audit = audit,
         journal = journal,
         resolvedExecutor = resolvedExecutor,
+        pause = { millis -> wakeAwarePause.pause(millis) },
         now = System::currentTimeMillis,
     )
 
     @Provides
     @Singleton
-    fun timeEventDispatcher(engine: Engine, state: LazyDeviceStateProvider): EngineTimeEventDispatcher =
-        EngineTimeEventDispatcher(engine, state)
+    fun timeEventDispatcher(engine: Engine, state: LazyDeviceStateProvider, frame: DispatchFrame): EngineTimeEventDispatcher =
+        EngineTimeEventDispatcher(engine, state, frame)
 
     @Provides
     fun timeEventDispatcherBoundary(dispatcher: EngineTimeEventDispatcher): TimeEventDispatcher =
@@ -613,7 +692,8 @@ object ArgusModule {
     fun immediateEventDispatcher(
         engine: Engine,
         state: LazyDeviceStateProvider,
-    ): EngineImmediateEventDispatcher = EngineImmediateEventDispatcher(engine, state)
+        frame: DispatchFrame,
+    ): EngineImmediateEventDispatcher = EngineImmediateEventDispatcher(engine, state, frame)
 
     @Provides
     fun immediateEventDispatcherBoundary(
@@ -625,7 +705,8 @@ object ArgusModule {
     fun notificationEventDispatcher(
         engine: Engine,
         state: DeviceStateSnapshotProvider,
-    ): EngineNotificationEventDispatcher = EngineNotificationEventDispatcher(engine, state)
+        frame: DispatchFrame,
+    ): EngineNotificationEventDispatcher = EngineNotificationEventDispatcher(engine, state, frame)
 
     @Provides
     fun notificationEventDispatcherBoundary(
@@ -652,16 +733,25 @@ object ArgusModule {
         privacyAccepted = { preferences.observe().value.privacyAccepted },
     )
 
+    /** Quali package interessano alle regole armate con trigger notifica (solo lettura delle regole). */
+    @Provides
+    @Singleton
+    fun notificationTriggerDemand(
+        store: AutomationStore,
+        @ApplicationScope scope: CoroutineScope,
+    ): NotificationTriggerDemand = NotificationTriggerDemand(store.observeAll(), scope)
+
     @Provides
     @Singleton
     fun phoneEventIngress(
         engine: Engine,
         state: DeviceStateSnapshotProvider,
         @ApplicationContext context: Context,
+        frame: DispatchFrame,
     ): PhoneEventIngress = PhoneEventIngress(
         parser = PhoneEventParser(),
         callState = PrefsCallStateStore(context),
-        dispatcher = EnginePhoneEventDispatcher(engine, state),
+        dispatcher = EnginePhoneEventDispatcher(engine, state, frame),
     )
 
     @Provides
@@ -669,7 +759,8 @@ object ArgusModule {
     fun connectivityEventDispatcher(
         engine: Engine,
         state: DeviceStateSnapshotProvider,
-    ): EngineConnectivityEventDispatcher = EngineConnectivityEventDispatcher(engine, state)
+        frame: DispatchFrame,
+    ): EngineConnectivityEventDispatcher = EngineConnectivityEventDispatcher(engine, state, frame)
 
     @Provides
     fun connectivityEventDispatcherBoundary(
@@ -715,15 +806,28 @@ object ArgusModule {
     fun receiverWorkLauncher(
         @ApplicationScope scope: CoroutineScope,
         sentinel: SharedForegroundSentinel,
-    ): ReceiverWorkLauncher = ReceiverWorkLauncher(scope, sentinel)
+        audit: AuditSink,
+    ): ReceiverWorkLauncher = ReceiverWorkLauncher(scope, sentinel, audit)
 
     @Provides
     @Singleton
     fun connectivitySentinelCoordinator(
         store: AutomationStore,
         sentinel: SharedForegroundSentinel,
+        audit: AuditSink,
+        notice: ForegroundDeniedNotice,
     ): ConnectivitySentinelCoordinator =
-        ConnectivitySentinelCoordinator(store, sentinel.demandBackend(SentinelDemand.Connectivity))
+        ConnectivitySentinelCoordinator(
+            store,
+            sentinel.demandBackend(SentinelDemand.Connectivity),
+            audit,
+            notice,
+        )
+
+    @Provides
+    @Singleton
+    fun foregroundDeniedNotice(@ApplicationContext context: Context): ForegroundDeniedNotice =
+        AndroidForegroundDeniedNotice(context)
 
     @Provides
     fun connectivityTriggerRuntime(
@@ -774,7 +878,8 @@ object ArgusModule {
     fun sensorEventDispatcher(
         engine: Engine,
         state: DeviceStateSnapshotProvider,
-    ): EngineSensorEventDispatcher = EngineSensorEventDispatcher(engine, state)
+        frame: DispatchFrame,
+    ): EngineSensorEventDispatcher = EngineSensorEventDispatcher(engine, state, frame)
 
     @Provides
     fun sensorEventDispatcherBoundary(
@@ -823,7 +928,8 @@ object ArgusModule {
     fun geofenceEventDispatcher(
         engine: Engine,
         state: DeviceStateSnapshotProvider,
-    ): EngineGeofenceEventDispatcher = EngineGeofenceEventDispatcher(engine, state)
+        frame: DispatchFrame,
+    ): EngineGeofenceEventDispatcher = EngineGeofenceEventDispatcher(engine, state, frame)
 
     @Provides
     fun geofenceEventDispatcherBoundary(
@@ -882,6 +988,7 @@ object ArgusModule {
         dispatcher: TimeEventDispatcher,
         audit: AuditSink,
         oneShotConsumptions: OneShotConsumptionRegistry,
+        launcher: ReceiverWorkLauncher,
     ): TimeAlarmCoordinator =
         TimeAlarmCoordinator(
             store,
@@ -891,6 +998,9 @@ object ArgusModule {
             Instant::now,
             audit,
             oneShotConsumptions,
+            // I recuperi dovuti partono in background e tengono la lease del servizio in primo
+            // piano per tutta la loro durata: il reconcile non aspetta un programma lungo (B3).
+            recoveryLauncher = RecoveryLauncher { block -> launcher.launch("time_recovery", block) },
         )
 
     @Provides
@@ -989,6 +1099,9 @@ object ArgusModule {
         phoneIngress: PhoneEventIngress,
         sensor: SensorTriggerRuntime,
         sensorIngress: SensorEventIngress,
+        store: AutomationStore,
+        audit: AuditSink,
+        frame: DispatchFrame,
     ): ArgusRuntimeController = ArgusRuntimeController(
         scope,
         scheduler,
@@ -1003,5 +1116,8 @@ object ArgusModule {
         phoneIngress,
         sensor,
         sensorIngress,
+        store = store,
+        audit = audit,
+        dispatchesIdle = { frame.idle },
     )
 }

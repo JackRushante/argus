@@ -10,6 +10,7 @@ import dev.argus.automation.AppPreferences
 import dev.argus.automation.AppPreferencesStore
 import dev.argus.automation.BridgeHealthResult
 import dev.argus.automation.ConfiguredBridgeBrain
+import dev.argus.automation.RenderLanguageSource
 import dev.argus.brain.BridgeErrorKind
 import dev.argus.brain.ProviderCatalog
 import dev.argus.brain.ProviderConfigStore
@@ -18,9 +19,9 @@ import dev.argus.brain.ReasoningEffort
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.safety.DraftRepository
-import dev.argus.shizuku.ShizukuGateway
+import dev.argus.shizuku.ShizukuAccess
 import dev.argus.shizuku.ShizukuGatewayStatus
-import dev.argus.shizuku.ShizukuPermissionResult
+import dev.argus.shizuku.ShizukuPermissionOutcome
 import dev.argus.ui.model.AuthState
 import dev.argus.ui.model.OnboardingState
 import dev.argus.ui.model.OnboardingStepState
@@ -54,6 +55,7 @@ private data class OnboardingSources(
     val preferences: AppPreferences,
     val shizuku: ShizukuGatewayStatus,
     val geofenceNeeded: Boolean,
+    val language: RenderLanguage,
 )
 
 /**
@@ -75,11 +77,14 @@ class OnboardingViewModel @Inject constructor(
     private val preferences: AppPreferencesStore,
     private val configuration: ProviderConfigStore,
     private val brain: ConfiguredBridgeBrain,
-    private val shizuku: ShizukuGateway,
+    private val shizuku: ShizukuAccess,
     automations: AutomationStore,
     drafts: DraftRepository,
-    private val language: RenderLanguage = RenderLanguage.system(),
+    private val languageSource: RenderLanguageSource,
 ) : ViewModel() {
+    /** Lingua al momento (messaggi); i passi dello stato la ricevono dal flow e si rigenerano. */
+    private val language: RenderLanguage get() = languageSource.current
+
     private val currentIndex = savedStateHandle.getStateFlow(CURRENT_INDEX_KEY, 0)
     private val skipped = savedStateHandle.getStateFlow(SKIPPED_KEY, arrayListOf<String>())
     private val refreshSignal = MutableStateFlow(0L)
@@ -101,13 +106,15 @@ class OnboardingViewModel @Inject constructor(
         shizuku.observeStatus(),
         automations.observeAll(),
         drafts.observeAll(),
-    ) { appPreferences, shizukuStatus, rules, pending ->
+        languageSource.language,
+    ) { appPreferences, shizukuStatus, rules, pending, renderLanguage ->
         latestPreferences = appPreferences
         OnboardingSources(
             preferences = appPreferences,
             shizuku = shizukuStatus,
             geofenceNeeded = rules.any { it.trigger is Trigger.Geofence } ||
                 pending.any { it.draft.trigger is Trigger.Geofence },
+            language = renderLanguage,
         )
     }
 
@@ -127,6 +134,7 @@ class OnboardingViewModel @Inject constructor(
                 latestPreferences,
                 shizuku.status(),
                 geofenceNeeded = false,
+                language = languageSource.current,
             ),
             currentIndex.value,
             skipped.value.toSet(),
@@ -292,35 +300,38 @@ class OnboardingViewModel @Inject constructor(
 
     fun requestShizukuPermission() {
         viewModelScope.launch {
-            val result = shizuku.requestPermission(rationaleShown = shizukuRationaleShown)
+            val outcome = shizuku.requestPermissionOutcome(rationaleShown = shizukuRationaleShown)
             message(
-                when (result) {
-                    ShizukuPermissionResult.GRANTED -> {
+                when (outcome) {
+                    ShizukuPermissionOutcome.GRANTED -> {
                         shizukuRationaleShown = false
                         language.pick(
                             "Shizuku authorization granted.",
                             "Autorizzazione Shizuku concessa.",
                         )
                     }
-                    ShizukuPermissionResult.DENIED -> language.pick(
+                    ShizukuPermissionOutcome.DENIED -> language.pick(
                         "Shizuku authorization denied.",
                         "Autorizzazione Shizuku negata.",
                     )
-                    ShizukuPermissionResult.RATIONALE_REQUIRED -> {
+                    ShizukuPermissionOutcome.RATIONALE_REQUIRED -> {
                         shizukuRationaleShown = true
                         language.pick(
                             "Tap the button again to confirm the Shizuku request.",
                             "Premi di nuovo il pulsante per confermare la richiesta Shizuku.",
                         )
                     }
-                    ShizukuPermissionResult.UNAVAILABLE -> language.pick(
+                    ShizukuPermissionOutcome.UNAVAILABLE -> language.pick(
                         "Shizuku is unavailable.",
                         "Shizuku non è disponibile.",
                     )
+                    // La finestra di Shizuku può essere ancora aperta: se l'utente risponde dopo, lo
+                    // step passa da solo a "fatto" perché lo stato arriva da observeStatus().
+                    ShizukuPermissionOutcome.AWAITING_USER -> shizukuAwaitingAnswerNote(language)
                 },
             )
             refresh()
-            if (result == ShizukuPermissionResult.GRANTED) advance()
+            if (outcome == ShizukuPermissionOutcome.GRANTED) advance()
         }
     }
 
@@ -411,6 +422,7 @@ class OnboardingViewModel @Inject constructor(
         skipped: Set<String>,
         setup: BrainSetupState,
     ): OnboardingState {
+        val language = sources.language
         // Configurato = provider scelto con configurazione valida salvata: chiave se richiesta
         // (setup.configured) ed endpoint non vuoto (Hermes e Custom non hanno un default).
         val brainConfigured = setup.configured &&
@@ -435,7 +447,7 @@ class OnboardingViewModel @Inject constructor(
         )
         val index = requestedIndex.coerceIn(0, STEP_ORDER.lastIndex)
         val steps = STEP_ORDER.mapIndexed { stepIndex, kind ->
-            step(kind, uiShizuku, sources.geofenceNeeded, health).copy(
+            step(kind, uiShizuku, sources.geofenceNeeded, health, language).copy(
                 status = when {
                     done.getValue(kind) -> StepStatus.DONE
                     kind.name in skipped -> StepStatus.SKIPPED
@@ -443,7 +455,7 @@ class OnboardingViewModel @Inject constructor(
                     else -> StepStatus.TODO
                 },
                 // Il cervello configurato ma non verificato tiene la CTA: si possono correggere le credenziali.
-                ctaLabel = step(kind, uiShizuku, sources.geofenceNeeded, health).ctaLabel
+                ctaLabel = step(kind, uiShizuku, sources.geofenceNeeded, health, language).ctaLabel
                     .takeUnless {
                         done.getValue(kind) && !(kind == StepKind.BRAIN_CONFIG && !brainVerified)
                     },
@@ -534,6 +546,7 @@ class OnboardingViewModel @Inject constructor(
         shizukuStatus: ShizukuStatus,
         geofenceNeeded: Boolean,
         health: AndroidUiHealth,
+        language: RenderLanguage,
     ): OnboardingStepState {
         val (shizukuBody, shizukuCta) = shizukuOnboardingCopy(shizukuStatus, language)
         return when (kind) {

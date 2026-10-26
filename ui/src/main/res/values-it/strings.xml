@@ -22,6 +22,8 @@
     <string name="provider_dialog_title">Configura %1$s</string>
     <string name="provider_endpoint_label">Endpoint</string>
     <string name="provider_model_label">Modello</string>
+    <string name="provider_model_hint_openrouter">Modello (es. deepseek/deepseek-v4.1-flash) o preset: @preset/&lt;nome&gt;</string>
+    <string name="provider_model_preset_format">Il formato è @preset/&lt;nome&gt;</string>
     <string name="provider_key_label">Chiave API</string>
     <string name="provider_key_keep_hint">Lascia vuoto per conservare la chiave attuale.</string>
     <string name="provider_key_required_hint">Obbligatoria.</string>
@@ -70,6 +72,8 @@
     <string name="rule_section_then">ALLORA</string>
     <string name="rule_section_variables">VARIABILI</string>
     <string name="rule_var_value_label">valore</string>
+    <string name="rule_shell_privileges_root_label">esegue comandi come root (Shizuku gira come root)</string>
+    <string name="rule_shell_privileges_unknown_label">esegue comandi con i privilegi di Shizuku</string>
 
     <!-- Chat -->
     <string name="chat_subtitle">chat · compilatore di regole</string>
@@ -97,6 +101,12 @@
     <string name="chat_error_service_unavailable">Il servizio non è disponibile in questo momento (HTTP %1$d). Riprova più tardi.</string>
     <string name="chat_error_too_long">Richiesta troppo lunga (%1$d caratteri, massimo %2$d). Accorciala.</string>
     <string name="chat_error_not_configured">Il servizio AI non è configurato. Controlla provider, chiave API e informativa privacy in Sistema.</string>
+    <string name="chat_error_internal">Errore interno di Argus (%1$s): non dipende dal provider. Se si ripete, apri una segnalazione.</string>
+    <string name="chat_raw_action">Risposta grezza</string>
+    <string name="chat_raw_title">Risposta grezza</string>
+    <string name="chat_raw_warning">Può contenere dati personali (nomi, messaggi, posizioni): controllala prima di condividerla</string>
+    <string name="chat_raw_copy">Copia per la segnalazione</string>
+    <string name="chat_raw_close">Chiudi</string>
     <string name="chat_open_system">Apri Sistema</string>
     <string name="chat_error_detail_show">Dettaglio tecnico</string>
     <string name="chat_error_detail_hide">Nascondi dettaglio tecnico</string>
@@ -140,6 +150,14 @@
     <string name="detail_enable">Riattiva automazione</string>
     <string name="detail_edit_in_chat">Modifica in chat</string>
     <string name="detail_recreate_in_chat">Ricrea in chat</string>
+    <string name="detail_diag_title">Perché non è scattata?</string>
+    <string name="detail_diag_recheck">Ricontrolla</string>
+    <string name="detail_diag_open_system">Apri Sistema</string>
+    <string name="detail_diag_show">Mostra il controllo</string>
+    <string name="detail_diag_hide">Nascondi il controllo</string>
+    <string name="detail_diag_level_ok">OK</string>
+    <string name="detail_diag_level_warn">Attenzione</string>
+    <string name="detail_diag_level_info">Informazione</string>
 
     <!-- Log esecuzioni -->
     <string name="log_title">Log esecuzioni</string>
@@ -152,6 +170,14 @@
     <string name="log_copy_and_open">Copia e apri WhatsApp</string>
     <string name="log_mark_sent">Segna come inviata</string>
     <string name="log_open_automation">Apri automazione</string>
+    <string name="log_menu_open">Opzioni del log</string>
+    <string name="log_menu_retention_title">Conserva il log per</string>
+    <string name="log_menu_retention_option">%1$d giorni</string>
+    <string name="log_menu_clear">Svuota il log</string>
+    <string name="log_menu_export">Esporta (senza dati personali)</string>
+    <string name="log_clear_confirm">Svuotare il log? Non si può annullare.</string>
+    <string name="log_clear_confirm_action">Svuota</string>
+    <string name="log_clear_confirm_cancel">Annulla</string>
 
     <!-- Sistema (settings) -->
     <string name="settings_title">Sistema</string>
@@ -171,6 +197,9 @@
     <string name="settings_battery_title">Ottimizzazione batteria</string>
     <string name="settings_battery_ok">esclusione Android concessa — gli eventuali controlli del produttore per attività in background/avvio automatico restano manuali</string>
     <string name="settings_battery_warn">attiva — concedi l\'esclusione e verifica anche gli eventuali controlli del produttore per attività in background/avvio automatico; altrimenti le azioni pianificate, e anche quelle AI, potrebbero arrivare in ritardo</string>
+    <string name="settings_exact_alarms_title">Sveglie esatte</string>
+    <string name="settings_exact_alarms_ok">concesse: le regole a orario e le attese lunghe partono puntuali</string>
+    <string name="settings_exact_alarms_warn">non concesse: le regole con orario esatto possono partire fino a un\'ora in ritardo e le attese lunghe slittare</string>
     <string name="settings_unauthenticated_loopback">Server locale senza chiave: un\'altra app sul telefono potrebbe fingersi il modello. Imposta una chiave anche sul server locale.</string>
     <string name="settings_notifications_title">Notifiche Argus</string>
     <string name="settings_notifications_ok">consentite</string>
@@ -178,6 +207,7 @@
     <string name="settings_listener_title">Lettura notifiche</string>
     <string name="settings_listener_ok">attiva — trigger WhatsApp e risposte disponibili</string>
     <string name="settings_listener_warn">non attiva — trigger WhatsApp e risposte non armabili</string>
+    <string name="settings_listener_restricted_hint">Se Android dice \"Impostazione con restrizioni\": Impostazioni › App › Argus › ⋮ › Consenti impostazioni con restrizioni, poi riprova.</string>
     <string name="settings_location_title">Posizione in background</string>
     <string name="settings_location_granted">sempre — i geofence sono affidabili</string>
     <string name="settings_location_while_in_use">solo mentre in uso — serve «Consenti sempre» per i geofence</string>
@@ -227,6 +257,8 @@
     <string name="settings_budget_footnote">Costi in dollari stimati dal listino pubblico solo per i provider a prezzo noto (stima indicativa, non fattura) · EUR a tasso fisso ≈ · Hermes/OpenRouter/Custom: solo token</string>
     <string name="settings_budget_edit_limits">Modifica limiti</string>
     <string name="settings_rerun">Ripeti configurazione</string>
+    <string name="settings_shizuku_unsupported">Shizuku troppo vecchio: aggiornalo</string>
+    <string name="settings_shizuku_ok_root">Attivo come root: i comandi delle regole girano come root</string>
 
     <!-- Dialog limiti budget -->
     <string name="budget_dialog_title">Limiti budget LLM</string>

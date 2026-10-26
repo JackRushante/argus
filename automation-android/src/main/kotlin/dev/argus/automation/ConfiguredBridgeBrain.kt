@@ -23,7 +23,16 @@ import kotlinx.coroutines.CancellationException
 
 sealed interface BridgeHealthResult {
     data class Reachable(val health: TransportHealth, val latencyMillis: Long) : BridgeHealthResult
-    data class Unreachable(val kind: BridgeErrorKind) : BridgeHealthResult
+    /**
+     * [statusCode] e [providerMessage] spiegano la causa all'utente nel test di connessione (404 = URL
+     * sbagliato, 400 = modello o opzioni rifiutati, ...). Il messaggio è già ripulito dal transport e
+     * non va mai né nei log né persistito.
+     */
+    data class Unreachable(
+        val kind: BridgeErrorKind,
+        val statusCode: Int? = null,
+        val providerMessage: String? = null,
+    ) : BridgeHealthResult
 }
 
 /**
@@ -90,7 +99,7 @@ class ConfiguredBridgeBrain(
         } catch (error: CancellationException) {
             throw error
         } catch (error: BridgeException) {
-            BridgeHealthResult.Unreachable(error.kind)
+            BridgeHealthResult.Unreachable(error.kind, error.statusCode, error.providerMessage)
         } catch (_: IllegalArgumentException) {
             BridgeHealthResult.Unreachable(BridgeErrorKind.CONFIGURATION)
         }
@@ -117,9 +126,26 @@ class ConfiguredBridgeBrain(
         cached?.takeIf { it.first == config }?.second?.let { return it }
         return synchronized(this) {
             cached?.takeIf { it.first == config }?.second
-                ?: factory.create(config).also { cached = config to it }
+                ?: createTransport(config).also { cached = config to it }
         }
     }
+
+    /**
+     * Una configurazione che il transport rifiuta alla costruzione (URL con credenziali, http non
+     * loopback, ...) è un problema di CONFIGURAZIONE: esce come errore di trasporto tipizzato, sullo
+     * stesso canale del blocco privacy. Così un [IllegalArgumentException] che arriva ai chiamanti è
+     * sempre un errore interno dell'app, mai una configurazione sbagliata.
+     */
+    private fun createTransport(config: ProviderConfig): AgentTransport =
+        try {
+            factory.create(config)
+        } catch (error: IllegalArgumentException) {
+            throw BridgeException(
+                BridgeErrorKind.CONFIGURATION,
+                "configurazione provider non valida",
+                cause = error,
+            )
+        }
 
     private fun requirePrivacyConsent() {
         if (!privacyAccepted()) {

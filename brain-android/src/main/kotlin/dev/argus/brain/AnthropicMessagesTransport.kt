@@ -115,21 +115,24 @@ class AnthropicMessagesTransport internal constructor(
         val response = parseResponse(execute(buildRequest(token, json.encodeToString(request))))
         // B15: l'usage viaggia su TUTTI i rami (anche errori di formato e troncamenti): il turno è costato.
         val usage = response.toTurnUsage(fallbackModel = model)
-        val text = response.textContent().trim()
+        val fullText = response.textContent()
+        val text = fullText.trim()
+        // F5: la risposta grezza resta in memoria per le segnalazioni (mai nei log né nel DB).
+        val rawText = CompileResult.capRaw(fullText)
         val parsed = if (text.isEmpty()) {
             null
         } else {
             val raw = compileParser.parseCompile(text)
             if (raw.draft == null && raw.metaError == null) raw.copy(metaError = "draft_missing") else raw
         }
-        if (parsed?.draft != null) return parsed.copy(usage = usage)
+        if (parsed?.draft != null) return parsed.copy(usage = usage, raw = rawText)
         // B6: `max_tokens` = tetto di output esaurito. Anthropic non taglia il contesto in silenzio
         // (rifiuta le richieste troppo lunghe): niente controllo `context_truncated`.
         if (response.stopReason == "max_tokens") {
-            return CompileResult(parsed?.reply.orEmpty(), null, CompileMetaError.OUTPUT_TRUNCATED, usage)
+            return CompileResult(parsed?.reply.orEmpty(), null, CompileMetaError.OUTPUT_TRUNCATED, usage, raw = rawText)
         }
         if (parsed == null) return CompileResult("", null, "empty_response", usage)
-        return parsed.copy(usage = usage)
+        return parsed.copy(usage = usage, raw = rawText)
     }
 
     override suspend fun act(
@@ -217,7 +220,10 @@ class AnthropicMessagesTransport internal constructor(
             maxTokens = HEALTH_MAX_TOKENS,
             messages = listOf(InputMessage("user", HEALTH_PING)),
         )
-        val response = parseResponse(execute(buildRequest(token, json.encodeToString(request))))
+        // Solo il test di connessione chiede il messaggio del provider (e maschera la chiave configurata).
+        val response = parseResponse(
+            execute(buildRequest(token, json.encodeToString(request)), ErrorDiagnostics(listOf(token))),
+        )
         return AnthropicMessagesHealth(model = response.model?.takeIf { it.isNotBlank() } ?: model)
     }
 
@@ -257,7 +263,7 @@ class AnthropicMessagesTransport internal constructor(
                     InputMessage(
                         "user",
                         if (notification != null) AgentMessageSupport.actUserText(notification, stateLines)
-                        else AgentMessageSupport.actUserTextNotification(stateLines),
+                        else AgentMessageSupport.actUserTextNotification(goal, stateLines),
                     ),
                 )
                 // Dato runtime TAINTED: messaggio DATA separato, MAI nel campo top-level `system`.
@@ -391,7 +397,8 @@ class AnthropicMessagesTransport internal constructor(
             throw TransportException(TransportErrorKind.PROTOCOL, "risposta provider non valida", cause = error)
         }
 
-    private suspend fun execute(request: Request): String {
+    /** Con [diagnostics] (solo `health()`) un errore HTTP porta anche il messaggio ripulito del provider. */
+    private suspend fun execute(request: Request, diagnostics: ErrorDiagnostics? = null): String {
         val call = client.newCall(request)
         return suspendCancellableCoroutine { continuation ->
             continuation.invokeOnCancellation { call.cancel() }
@@ -408,7 +415,7 @@ class AnthropicMessagesTransport internal constructor(
                 }
 
                 override fun onResponse(call: Call, response: Response) {
-                    val result = runCatching { response.use(::readSuccessfulJson) }
+                    val result = runCatching { response.use { readSuccessfulJson(it, diagnostics) } }
                     result.fold(
                         onSuccess = { continuation.resume(it) },
                         onFailure = { error ->
@@ -432,8 +439,8 @@ class AnthropicMessagesTransport internal constructor(
         }
     }
 
-    private fun readSuccessfulJson(response: Response): String {
-        if (!response.isSuccessful) throw mapHttpError(response)
+    private fun readSuccessfulJson(response: Response, diagnostics: ErrorDiagnostics?): String {
+        if (!response.isSuccessful) throw mapHttpError(response, diagnostics)
         val body = response.body
             ?: throw TransportException(TransportErrorKind.PROTOCOL, "risposta senza body")
         val mediaType = body.contentType()
@@ -455,9 +462,11 @@ class AnthropicMessagesTransport internal constructor(
     /**
      * Mappa gli status Anthropic senza mai ripubblicare il body remoto: 401/403->AUTH, 402->BUDGET,
      * 400 con saldo insufficiente->BUDGET (altrimenti HTTP), 429->RATE_LIMIT, resto->HTTP. Il body
-     * dell'errore viene letto SOLO per classificare il 400 di credito e non finisce nel messaggio.
+     * dell'errore viene letto per classificare il 400 di credito e non finisce nel messaggio; solo con
+     * [diagnostics] (test di connessione) il suo messaggio ripulito va nel campo dedicato
+     * [TransportException.providerMessage].
      */
-    private fun mapHttpError(response: Response): TransportException {
+    private fun mapHttpError(response: Response, diagnostics: ErrorDiagnostics?): TransportException {
         val code = response.code
         val kind = when (code) {
             401, 403 -> TransportErrorKind.AUTH
@@ -466,8 +475,15 @@ class AnthropicMessagesTransport internal constructor(
             400 -> if (indicatesInsufficientCredit(response)) TransportErrorKind.BUDGET else TransportErrorKind.HTTP
             else -> TransportErrorKind.HTTP
         }
-        return TransportException(kind, "Provider HTTP $code", statusCode = code)
+        val providerMessage = diagnostics?.let {
+            val body = runCatching { response.peekBody(MAX_ERROR_BODY_BYTES).string() }.getOrNull()
+            ProviderErrorMessage.extract(body, it.secrets)
+        }
+        return TransportException(kind, "Provider HTTP $code", statusCode = code, providerMessage = providerMessage)
     }
+
+    /** Richiesta di diagnostica dell'errore HTTP: [secrets] sono i valori da mascherare nel messaggio. */
+    private class ErrorDiagnostics(val secrets: List<String?>)
 
     private fun indicatesInsufficientCredit(response: Response): Boolean {
         val body = runCatching { response.peekBody(MAX_RESPONSE_BYTES).string() }.getOrNull() ?: return false
@@ -540,6 +556,7 @@ class AnthropicMessagesTransport internal constructor(
         const val REPLY_TOOL_MISSING = "reply_tool_missing"
         val FINISH_REASON = Regex("^[A-Za-z0-9_.:-]{1,64}$")
         const val MAX_RESPONSE_BYTES = 512L * 1024L
+        const val MAX_ERROR_BODY_BYTES = 16L * 1024L
         val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
         val TEST_HTTP_HOSTS = setOf("localhost", "127.0.0.1", "::1")
         val CREDIT_HINTS = listOf("credit", "billing", "insufficient")

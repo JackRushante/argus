@@ -20,6 +20,7 @@ import dev.argus.engine.model.SensorKind
 import dev.argus.engine.model.VarBinding
 import dev.argus.engine.model.StateKeys
 import dev.argus.engine.model.StateQueryFamily
+import dev.argus.engine.model.Transition
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.ActionCapabilities
 import dev.argus.engine.runtime.AuditEvent
@@ -516,6 +517,76 @@ class AndroidCapabilityProbeTest {
     }
 
     @Test
+    fun `location services off make geofence and wifi identity unavailable with a reason for the model`() = runTest {
+        val ready = state().copy(foregroundLocationGranted = true, backgroundLocationGranted = true)
+        val on = probe(ready)
+        assertTrue(CapabilityIds.TRIGGER_GEOFENCE in on.current().availableCapabilities)
+        assertTrue("geofence" in on.probe(DeviceState()).availableTriggers)
+        assertFalse(CapabilityIds.TRIGGER_GEOFENCE in on.probe(DeviceState()).unavailableTools)
+
+        val off = probe(ready.copy(locationEnabled = false))
+        val snapshot = off.current()
+        assertFalse(CapabilityIds.TRIGGER_GEOFENCE in snapshot.availableCapabilities)
+        assertFalse(CapabilityIds.TRIGGER_CONNECTIVITY_WIFI_IDENTITY in snapshot.availableCapabilities)
+        val manifest = off.probe(DeviceState())
+        assertFalse("geofence" in manifest.availableTriggers)
+        assertFalse("connectivity.wifi.identity" in manifest.availableTriggers)
+        assertEquals(
+            "location services are off",
+            manifest.unavailableTools[CapabilityIds.TRIGGER_GEOFENCE],
+        )
+        assertEquals(
+            "location services are off",
+            manifest.unavailableTools[CapabilityIds.TRIGGER_CONNECTIVITY_WIFI_IDENTITY],
+        )
+        // Il resto non cambia: il Wi-Fi senza identita' e gli altri trigger restano disponibili.
+        assertTrue("connectivity.wifi" in manifest.availableTriggers)
+        assertTrue(CapabilityIds.TRIGGER_CONNECTIVITY_WIFI in snapshot.availableCapabilities)
+        assertTrue("time" in manifest.availableTriggers)
+        // Come un permesso revocato: non e' un outage "transitorio" per l'armo.
+        assertFalse(CapabilityIds.TRIGGER_GEOFENCE in snapshot.transientlyUnavailableCapabilities)
+    }
+
+    @Test
+    fun `location services off are exposed as the location_disabled detail only while they block something`() = runTest {
+        val ready = state().copy(foregroundLocationGranted = true, backgroundLocationGranted = true)
+
+        assertEquals(emptyMap(), probe(ready).capabilityBlockDetails())
+        assertEquals(
+            mapOf(
+                CapabilityIds.TRIGGER_GEOFENCE to "location_disabled",
+                CapabilityIds.TRIGGER_CONNECTIVITY_WIFI_IDENTITY to "location_disabled",
+            ),
+            probe(ready.copy(locationEnabled = false)).capabilityBlockDetails(),
+        )
+    }
+
+    @Test
+    fun `reconciler blocks a geofence rule temporarily when location is switched off and never sends it to review`() = runTest {
+        val rule = geofenceRule("home")
+        val ready = state().copy(foregroundLocationGranted = true, backgroundLocationGranted = true)
+
+        val healthy = CapabilityReconciler(ReconcileAutomationStore(rule), probe(ready)).reconcile()
+        assertEquals(emptyList(), healthy.needsReview)
+        assertEquals(emptyList(), healthy.temporarilyBlocked)
+
+        val store = ReconcileAutomationStore(rule)
+        val audit = ReconcilerAuditRecorder()
+        val off = CapabilityReconciler(store, probe(ready.copy(locationEnabled = false)), audit)
+            .reconcile()
+
+        assertEquals(emptyList(), off.needsReview)
+        assertEquals(listOf(rule.id), off.temporarilyBlocked)
+        assertEquals(AutomationStatus.ARMED, store.get(rule.id)?.status)
+        assertTrue(store.get(rule.id)?.enabled == true)
+        assertTrue(audit.events.isEmpty())
+
+        // Riaccesa la posizione la regola e' di nuovo a posto, senza interventi.
+        val back = CapabilityReconciler(store, probe(ready)).reconcile()
+        assertEquals(emptyList(), back.temporarilyBlocked)
+    }
+
+    @Test
     fun `manifest lists armable triggers so hermes never proposes a dead one`() = runTest {
         val manifest = probe(
             state().copy(notificationListenerGranted = true, receiveSmsGranted = true),
@@ -794,6 +865,181 @@ class AndroidCapabilityProbeTest {
         assertEquals(revised, store.get(original.id))
     }
 
+    // --- 0.3.6 (F2): perche una regola non puo scattare ------------------------------------------------
+
+    @Test
+    fun `block causes are empty when everything the rule needs is available`() = runTest {
+        val probe = probe(state().copy(notificationsGranted = true))
+
+        assertEquals(
+            emptyMap(),
+            probe.blockCauses(
+                setOf(
+                    CapabilityIds.TRIGGER_TIME,
+                    ActionCapabilities.SHOW_NOTIFICATION,
+                    ActionCapabilities.SET_WIFI,
+                ),
+            ),
+        )
+        assertEquals(emptyMap(), probe.blockCauses(emptySet()))
+    }
+
+    @Test
+    fun `a stopped Shizuku blocks privileged actions with the not running cause`() = runTest {
+        val probe = probe(
+            state().copy(
+                shizukuStatus = ShizukuGatewayStatus.INSTALLED_NOT_RUNNING,
+                shizukuPermissionGranted = true,
+            ),
+        )
+
+        assertEquals(
+            mapOf(ActionCapabilities.SET_WIFI to BlockCause.SHIZUKU_NOT_RUNNING),
+            probe.blockCauses(setOf(CapabilityIds.TRIGGER_TIME, ActionCapabilities.SET_WIFI)),
+        )
+    }
+
+    @Test
+    fun `every Shizuku status maps to its own cause`() = runTest {
+        val required = setOf(ActionCapabilities.RUN_SHELL, CapabilityIds.state(StateKeys.RINGER))
+
+        suspend fun causes(status: ShizukuGatewayStatus) =
+            probe(state().copy(shizukuStatus = status, shizukuPermissionGranted = false))
+                .blockCauses(required)
+
+        assertEquals(
+            BlockCause.SHIZUKU_NOT_INSTALLED,
+            causes(ShizukuGatewayStatus.NOT_INSTALLED)[ActionCapabilities.RUN_SHELL],
+        )
+        assertEquals(
+            BlockCause.SHIZUKU_NOT_RUNNING,
+            causes(ShizukuGatewayStatus.INSTALLED_NOT_RUNNING)[ActionCapabilities.RUN_SHELL],
+        )
+        assertEquals(
+            BlockCause.SHIZUKU_NOT_AUTHORIZED,
+            causes(ShizukuGatewayStatus.RUNNING_NOT_AUTHORIZED)[ActionCapabilities.RUN_SHELL],
+        )
+        assertEquals(
+            BlockCause.SHIZUKU_TOO_OLD,
+            causes(ShizukuGatewayStatus.UNSUPPORTED)[ActionCapabilities.RUN_SHELL],
+        )
+        // Anche i lettori di stato privilegiati dipendono da Shizuku.
+        assertEquals(
+            BlockCause.SHIZUKU_NOT_INSTALLED,
+            causes(ShizukuGatewayStatus.NOT_INSTALLED)[CapabilityIds.state(StateKeys.RINGER)],
+        )
+    }
+
+    @Test
+    fun `location services off with the permissions granted block geofence with the location off cause`() = runTest {
+        val ready = state().copy(foregroundLocationGranted = true, backgroundLocationGranted = true)
+
+        assertEquals(
+            mapOf(
+                CapabilityIds.TRIGGER_GEOFENCE to BlockCause.LOCATION_OFF,
+                CapabilityIds.TRIGGER_CONNECTIVITY_WIFI_IDENTITY to BlockCause.LOCATION_OFF,
+            ),
+            probe(ready.copy(locationEnabled = false)).blockCauses(
+                setOf(CapabilityIds.TRIGGER_GEOFENCE, CapabilityIds.TRIGGER_CONNECTIVITY_WIFI_IDENTITY),
+            ),
+        )
+        // Senza i permessi la causa e il permesso, anche se la posizione e accesa.
+        assertEquals(
+            mapOf(
+                CapabilityIds.TRIGGER_GEOFENCE to BlockCause.LOCATION_PERMISSION,
+                CapabilityIds.STATE_LOCATION to BlockCause.LOCATION_PERMISSION,
+            ),
+            probe(state()).blockCauses(
+                setOf(CapabilityIds.TRIGGER_GEOFENCE, CapabilityIds.STATE_LOCATION),
+            ),
+        )
+    }
+
+    @Test
+    fun `a missing notification access blocks the notification trigger and the whatsapp reply`() = runTest {
+        val probe = probe(state().copy(notificationListenerGranted = false))
+
+        assertEquals(
+            mapOf(
+                CapabilityIds.TRIGGER_NOTIFICATION to BlockCause.NOTIFICATION_ACCESS,
+                ActionCapabilities.WHATSAPP_REPLY to BlockCause.NOTIFICATION_ACCESS,
+            ),
+            probe.blockCauses(
+                setOf(CapabilityIds.TRIGGER_NOTIFICATION, ActionCapabilities.WHATSAPP_REPLY),
+            ),
+        )
+    }
+
+    @Test
+    fun `runtime grants and the generative readiness each have their own cause`() = runTest {
+        val probe = probe(
+            state(),
+            readiness = GenerativeReadiness(bridgeConfigured = false, privacyAccepted = true),
+        )
+        val required = linkedSetOf(
+            ActionCapabilities.SHOW_NOTIFICATION,
+            CapabilityIds.TRIGGER_PHONE_SMS,
+            CapabilityIds.TRIGGER_PHONE_CALL,
+            CapabilityIds.TRIGGER_CONNECTIVITY_BT,
+            ActionCapabilities.INVOKE_LLM,
+            GenerativeContract.TOOL_WEB_SEARCH,
+            "trigger.sensor.significant_motion",
+            "something.unknown",
+        )
+
+        assertEquals(
+            mapOf(
+                ActionCapabilities.SHOW_NOTIFICATION to BlockCause.NOTIFICATIONS_PERMISSION,
+                CapabilityIds.TRIGGER_PHONE_SMS to BlockCause.SMS_PERMISSION,
+                CapabilityIds.TRIGGER_PHONE_CALL to BlockCause.CALL_PERMISSION,
+                CapabilityIds.TRIGGER_CONNECTIVITY_BT to BlockCause.BLUETOOTH_PERMISSION,
+                ActionCapabilities.INVOKE_LLM to BlockCause.AI_NOT_READY,
+                GenerativeContract.TOOL_WEB_SEARCH to BlockCause.AI_NOT_READY,
+                "trigger.sensor.significant_motion" to BlockCause.SENSOR_UNAVAILABLE,
+                "something.unknown" to BlockCause.OTHER,
+            ),
+            probe.blockCauses(required),
+        )
+    }
+
+    @Test
+    fun `do not disturb with the base tier active and no policy access is blocked by the access`() = runTest {
+        val withoutAccess = probe(
+            state().copy(shizukuStatus = ShizukuGatewayStatus.NOT_INSTALLED, dndPolicyGranted = false),
+            baseTierActive = true,
+        )
+        val required = setOf(ActionCapabilities.SET_DND, ActionCapabilities.LAUNCH_APP)
+
+        // LaunchApp e libera col tier base: solo il DND resta bloccato, per il solo accesso.
+        assertEquals(
+            mapOf(ActionCapabilities.SET_DND to BlockCause.DND_ACCESS),
+            withoutAccess.blockCauses(required),
+        )
+        // Col tier base spento il DND dipende da Shizuku come ogni altra privilegiata.
+        assertEquals(
+            BlockCause.SHIZUKU_NOT_INSTALLED,
+            probe(
+                state().copy(shizukuStatus = ShizukuGatewayStatus.NOT_INSTALLED),
+                baseTierActive = false,
+            ).blockCauses(required)[ActionCapabilities.SET_DND],
+        )
+    }
+
+    @Test
+    fun `a base tier capability that works with Shizuku stopped is not reported as blocked`() = runTest {
+        val probe = probe(
+            state().copy(
+                shizukuStatus = ShizukuGatewayStatus.INSTALLED_NOT_RUNNING,
+                shizukuPermissionGranted = true,
+                dndPolicyGranted = true,
+            ),
+            baseTierActive = true,
+        )
+
+        // E sia disponibile (tier base) sia nel set transitorio di Shizuku: al fire-time passa.
+        assertEquals(emptyMap(), probe.blockCauses(setOf(ActionCapabilities.SET_DND)))
+    }
+
     private fun probe(
         state: AndroidCapabilityState,
         contacts: List<WhitelistedContact> = emptyList(),
@@ -953,6 +1199,17 @@ class AndroidCapabilityProbeTest {
             status = AutomationStatus.ARMED,
             trigger = Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
             actions = listOf(Action.SetDnd(DndMode.PRIORITY)),
+        ),
+    )
+
+    private fun geofenceRule(id: String): Automation = sign(
+        Automation(
+            id = AutomationId(id),
+            name = id,
+            createdBy = CreatedBy.USER,
+            status = AutomationStatus.ARMED,
+            trigger = Trigger.Geofence(45.0, 9.0, 150.0, Transition.EXIT),
+            actions = listOf(Action.SetWifi(false)),
         ),
     )
 

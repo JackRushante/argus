@@ -173,6 +173,49 @@ class ConfiguredBridgeBrainTest {
     }
 
     @Test
+    fun `a configuration the transport rejects at construction is a typed configuration error`() = runTest {
+        // Un transport che rifiuta la configurazione (URL con credenziali, http non loopback, ...) lancia
+        // IllegalArgumentException alla costruzione: per i chiamanti è un errore di CONFIGURAZIONE
+        // tipizzato, così un IllegalArgumentException che arriva alla chat è sempre un errore interno.
+        val configuration = FakeBridgeConfiguration().apply { token = "a-valid-bridge-token" }
+        val factory = TransportFactory { throw IllegalArgumentException("baseUrl non deve contenere credenziali") }
+        val brain = ConfiguredBridgeBrain(configuration, privacyAccepted = { true }, factory = factory)
+
+        val error = assertFailsWith<BridgeException> {
+            brain.compile("una regola", TEST_MANIFEST, DeviceState())
+        }
+
+        assertEquals(BridgeErrorKind.CONFIGURATION, error.kind)
+        assertFalse("credenziali" in error.message.orEmpty(), "il messaggio della causa non entra nel nostro")
+        assertEquals(
+            BridgeHealthResult.Unreachable(BridgeErrorKind.CONFIGURATION),
+            brain.health(),
+        )
+    }
+
+    @Test
+    fun `an http failure of the health check carries the status and the provider message`() = runTest {
+        val configuration = FakeBridgeConfiguration().apply { token = "a-valid-bridge-token" }
+        val failure = TransportException(
+            TransportErrorKind.HTTP,
+            "Provider HTTP 400",
+            statusCode = 400,
+            providerMessage = "unknown model",
+        )
+        val factory = TransportFactory {
+            object : AgentTransport by FakeAgentTransport(ProviderId.HERMES) {
+                override suspend fun health(): TransportHealth = throw failure
+            }
+        }
+        val brain = ConfiguredBridgeBrain(configuration, privacyAccepted = { true }, factory = factory)
+
+        assertEquals(
+            BridgeHealthResult.Unreachable(BridgeErrorKind.HTTP, statusCode = 400, providerMessage = "unknown model"),
+            brain.health(),
+        )
+    }
+
+    @Test
     fun `health flows through the factory transport`() = runTest {
         val configuration = FakeBridgeConfiguration().apply { token = "a-valid-bridge-token" }
         val factory = FakeTransportFactory()

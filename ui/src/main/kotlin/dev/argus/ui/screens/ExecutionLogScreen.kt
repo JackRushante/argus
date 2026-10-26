@@ -26,16 +26,20 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ScheduleSend
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.Block
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.FilterAltOff
 import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.SyncProblem
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -44,7 +48,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -64,6 +70,7 @@ import dev.argus.ui.components.GenerativeTag
 import dev.argus.ui.model.ExecutionLogCallbacks
 import dev.argus.ui.model.ExecutionLogState
 import dev.argus.ui.model.LogOutcome
+import dev.argus.ui.model.LogRetentionOptions
 import dev.argus.ui.model.LogRow
 import dev.argus.ui.theme.ArgusTheme
 import dev.argus.ui.theme.LocalArgusSemantic
@@ -92,15 +99,29 @@ fun ExecutionLogScreen(
 ) {
     // Espansione locale per id (effimera): il contratto non porta gli id aperti.
     val expandedIds = remember { mutableStateMapOf<String, Boolean>() }
+    // Menu aperto e conferma di «Svuota il log»: stato effimero della sola schermata.
+    var menuOpen by remember { mutableStateOf(false) }
+    var confirmingClear by remember { mutableStateOf(false) }
 
     Surface(color = MaterialTheme.colorScheme.background, modifier = modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            Text(
-                stringResource(R.string.log_title),
-                color = MaterialTheme.colorScheme.onSurface,
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.padding(start = 18.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
+            LogHeader(
+                retentionDays = state.retentionDays,
+                menuOpen = menuOpen,
+                onMenuOpenChange = { menuOpen = it },
+                onSetRetention = callbacks::onSetRetention,
+                onAskClear = { confirmingClear = true },
+                onExport = callbacks::onExport,
             )
+            if (confirmingClear) {
+                ClearConfirmation(
+                    onCancel = { confirmingClear = false },
+                    onConfirm = {
+                        confirmingClear = false
+                        callbacks.onClearLog()
+                    },
+                )
+            }
 
             state.filterAutomationName?.let { name ->
                 FilterHeader(name, callbacks::onClearFilter)
@@ -148,6 +169,115 @@ fun ExecutionLogScreen(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Titolo + menu in alto (conservazione, svuota, esporta) + conferma inline
+// -----------------------------------------------------------------------------
+
+@Composable
+private fun LogHeader(
+    retentionDays: Int,
+    menuOpen: Boolean,
+    onMenuOpenChange: (Boolean) -> Unit,
+    onSetRetention: (Int) -> Unit,
+    onAskClear: () -> Unit,
+    onExport: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 18.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            stringResource(R.string.log_title),
+            color = MaterialTheme.colorScheme.onSurface,
+            style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.weight(1f),
+        )
+        Box {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .clickable { onMenuOpenChange(true) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Rounded.MoreVert,
+                    contentDescription = stringResource(R.string.log_menu_open),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { onMenuOpenChange(false) }) {
+                Text(
+                    stringResource(R.string.log_menu_retention_title),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                )
+                LogRetentionOptions.DAYS.forEach { days ->
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.log_menu_retention_option, days)) },
+                        trailingIcon = if (days == retentionDays) {
+                            { Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                        } else {
+                            null
+                        },
+                        onClick = {
+                            onMenuOpenChange(false)
+                            onSetRetention(days)
+                        },
+                    )
+                }
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.log_menu_clear)) },
+                    onClick = {
+                        onMenuOpenChange(false)
+                        onAskClear()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.log_menu_export)) },
+                    onClick = {
+                        onMenuOpenChange(false)
+                        onExport()
+                    },
+                )
+            }
+        }
+    }
+}
+
+/** Conferma dentro la schermata (non un dialog di sistema): lo svuotamento non si puo' annullare. */
+@Composable
+private fun ClearConfirmation(onCancel: () -> Unit, onConfirm: () -> Unit) {
+    val semantic = LocalArgusSemantic.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(start = 14.dp, end = 6.dp, top = 12.dp, bottom = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            stringResource(R.string.log_clear_confirm),
+            color = MaterialTheme.colorScheme.onSurface,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+            TextButton(onClick = onCancel, modifier = Modifier.heightIn(min = 48.dp)) {
+                Text(stringResource(R.string.log_clear_confirm_cancel))
+            }
+            TextButton(onClick = onConfirm, modifier = Modifier.heightIn(min = 48.dp)) {
+                Text(stringResource(R.string.log_clear_confirm_action), color = semantic.error.fg)
             }
         }
     }
