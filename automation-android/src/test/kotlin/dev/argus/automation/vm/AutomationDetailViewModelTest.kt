@@ -29,6 +29,7 @@ import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.CapabilityRequirements
 import dev.argus.engine.model.CreatedBy
+import dev.argus.engine.model.GenerativeDeliverMode
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.AuditEvent
 import dev.argus.engine.runtime.AuditKind
@@ -132,7 +133,7 @@ class AutomationDetailViewModelTest {
         )
         awaitUntil("english detail loaded") { viewModel.state.value.detail != null }
         assertEquals(
-            "Manual execution is not available at this stage.",
+            "Run now is not available yet.",
             viewModel.state.value.detail?.runNowBlockedReason,
         )
         val events = mutableListOf<DetailEvent>()
@@ -144,9 +145,61 @@ class AutomationDetailViewModelTest {
         awaitUntil("english run-now feedback") { events.isNotEmpty() }
 
         assertEquals(
-            "Run now requires live confirmation and is disabled in P0-B.",
+            "Run now is not available yet.",
             (events.single() as DetailEvent.Message).text,
         )
+    }
+
+    // --- B35: niente gergo da sviluppatore --------------------------------------------------------
+
+    @Test
+    fun `generative estimate and run-now texts are plain language in both languages`() = runTest {
+        val repository = RoomDraftRepository(db)
+        assertIs<DraftWriteResult.Saved>(repository.create(generativeDraft("gen")))
+        var system = RenderLanguage.EN
+        val source = RenderLanguageSource { system }
+        val viewModel = viewModel(
+            "draft-gen",
+            RoomAutomationStore(db.automationDao()),
+            DetailAuditRecorder(),
+            languageSource = source,
+        )
+        awaitUntil("english draft loaded") { viewModel.state.value.detail != null }
+        val events = collectEvents(viewModel)
+
+        assertEquals(
+            "Minimum cooldown 60 s between two AI replies",
+            viewModel.state.value.detail?.estimatedLlmCallsPerDay,
+        )
+        viewModel.onRunNow()
+        awaitUntil("english run-now message") { events.size == 1 }
+        assertEquals("Run now is not available yet.", (events.last() as DetailEvent.Message).text)
+        assertNoInternalPhaseNames(
+            viewModel.state.value.detail?.estimatedLlmCallsPerDay.orEmpty(),
+            viewModel.state.value.detail?.runNowBlockedReason.orEmpty(),
+            (events.last() as DetailEvent.Message).text,
+        )
+
+        system = RenderLanguage.IT
+        source.refresh()
+        awaitUntil("italian estimate") {
+            viewModel.state.value.detail?.estimatedLlmCallsPerDay == "Cooldown minimo 60 s tra due risposte AI"
+        }
+        viewModel.onRunNow()
+        awaitUntil("italian run-now message") { events.size == 2 }
+        assertEquals("Esegui ora non è ancora disponibile.", (events.last() as DetailEvent.Message).text)
+        assertNoInternalPhaseNames(
+            viewModel.state.value.detail?.estimatedLlmCallsPerDay.orEmpty(),
+            viewModel.state.value.detail?.runNowBlockedReason.orEmpty(),
+            (events.last() as DetailEvent.Message).text,
+        )
+    }
+
+    private fun assertNoInternalPhaseNames(vararg texts: String) {
+        val jargon = Regex("""\bP[0-9](-[A-Z])?\b|\bMVP\b|sideload""", RegexOption.IGNORE_CASE)
+        texts.forEach { text ->
+            assertNull(jargon.find(text)?.value, "gergo interno nel testo visibile: $text")
+        }
     }
 
     // --- B34: lingua che segue il telefono --------------------------------------------------------
@@ -421,6 +474,26 @@ class AutomationDetailViewModelTest {
 
     /** Tempo reale per lasciar arrivare un eventuale evento duplicato prima di contare. */
     private suspend fun settle() = withContext(Dispatchers.Default) { delay(400) }
+
+    private fun generativeDraft(id: String) = NewDraft(
+        id = DraftId("draft-$id"),
+        automationId = AutomationId(id),
+        draft = AutomationDraft(
+            name = "generativa $id",
+            trigger = Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+            actions = listOf(
+                Action.InvokeLlm(
+                    goal = "say hello",
+                    contextSources = emptyList(),
+                    allowedTools = emptyList(),
+                    replyTargetSender = false,
+                    deliver = GenerativeDeliverMode.LOCAL_NOTIFICATION,
+                    notificationTitle = "Argus",
+                ),
+            ),
+        ),
+        atMillis = 1_000,
+    )
 
     private fun newDraft(id: String, name: String) = NewDraft(
         id = DraftId("draft-$id"),

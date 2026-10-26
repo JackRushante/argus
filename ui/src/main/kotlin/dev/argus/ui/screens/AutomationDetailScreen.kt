@@ -504,7 +504,16 @@ private fun PendingFooter(state: AutomationDetailState, callbacks: AutomationDet
 }
 
 /**
- * ARMED/DISABLED: [elimina] [Modifica in chat] [Esegui ora]. §5.6: né elimina né
+ * «Esegui ora» compare solo quando può davvero girare (B35): finché è sempre disattivato non
+ * occupa il posto di un pulsante e non si spiega con un controllo morto. Vale solo per il footer
+ * ARMED/DISABLED, l'unico che lo ospita.
+ */
+internal fun showRunNowAction(state: AutomationDetailState): Boolean =
+    state.canRunNow && (state.status == StatusBadge.ARMED || state.status == StatusBadge.DISABLED)
+
+/**
+ * ARMED/DISABLED: [Disattiva/Riattiva] (azione principale, a tutta larghezza), poi sulla riga
+ * secondaria [elimina] [Modifica in chat] e, solo se disponibile, [Esegui ora]. §5.6: né elimina né
  * esegui-ora sono pre-focusati/filled — restano outline, così nessuna azione
  * irreversibile è l'azione di default.
  */
@@ -527,13 +536,6 @@ private fun ReviewableFooter(
                 else stringResource(R.string.detail_enable),
             )
         }
-        if (!state.canRunNow && state.runNowBlockedReason != null) {
-            Text(
-                state.runNowBlockedReason,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedButton(
                 onClick = onDelete,
@@ -548,17 +550,19 @@ private fun ReviewableFooter(
             OutlinedButton(
                 onClick = callbacks::onAskEdit,
                 enabled = !state.actionInProgress,
-                modifier = Modifier.heightIn(min = 48.dp),
-            ) { Text(stringResource(R.string.detail_edit_in_chat)) }
-            OutlinedButton(
-                onClick = onRunNow,
-                enabled = state.canRunNow && !state.actionInProgress,
                 modifier = Modifier.weight(1f).heightIn(min = 48.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary),
-            ) {
-                Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(19.dp))
-                Spacer(Modifier.width(6.dp))
-                Text(stringResource(R.string.action_run_now))
+            ) { Text(stringResource(R.string.detail_edit_in_chat)) }
+            if (showRunNowAction(state)) {
+                OutlinedButton(
+                    onClick = onRunNow,
+                    enabled = !state.actionInProgress,
+                    modifier = Modifier.heightIn(min = 48.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary),
+                ) {
+                    Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(19.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(R.string.action_run_now))
+                }
             }
         }
     }

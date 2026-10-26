@@ -447,14 +447,7 @@ class AutomationDetailViewModel @Inject constructor(
     }
 
     fun onRunNow() {
-        mutableEvents.tryEmit(
-            DetailEvent.Message(
-                language.pick(
-                    "Run now requires live confirmation and is disabled in P0-B.",
-                    "Esegui ora richiede conferma live ed è disabilitato in P0-B.",
-                ),
-            ),
-        )
+        mutableEvents.tryEmit(DetailEvent.Message(runNowUnavailable(language)))
     }
 
     fun onAskEdit() {
@@ -585,9 +578,11 @@ class AutomationDetailViewModel @Inject constructor(
         )
     }
 
-    private fun runNowBlockedReason(language: RenderLanguage): String = language.pick(
-        "Manual execution is not available at this stage.",
-        "Esecuzione manuale non disponibile in questa fase.",
+    private fun runNowBlockedReason(language: RenderLanguage): String = runNowUnavailable(language)
+
+    private fun runNowUnavailable(language: RenderLanguage): String = language.pick(
+        "Run now is not available yet.",
+        "Esegui ora non è ancora disponibile.",
     )
 
     private fun recentRuns(
@@ -606,8 +601,8 @@ class AutomationDetailViewModel @Inject constructor(
 
     private fun generativeEstimate(generative: Boolean, language: RenderLanguage): String? = if (generative) {
         language.pick(
-            "Available since P1 · minimum cooldown 60 s",
-            "Disponibile da P1 · cooldown minimo 60 s",
+            "Minimum cooldown 60 s between two AI replies",
+            "Cooldown minimo 60 s tra due risposte AI",
         )
     } else {
         null
