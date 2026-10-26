@@ -1,6 +1,7 @@
 package dev.argus.automation.vm
 
 import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -23,6 +24,11 @@ import dev.argus.brain.ProviderConfigStore
 import dev.argus.brain.ProviderId
 import dev.argus.brain.ReasoningEffort
 import dev.argus.data.UsageWindows
+import dev.argus.data.backup.ExportOutcome
+import dev.argus.data.backup.BackupFailure
+import dev.argus.data.backup.ImportOutcome
+import dev.argus.data.backup.RulesBackup
+import dev.argus.data.backup.isBackupExportable
 import dev.argus.data.dao.ProviderUsageAggregate
 import dev.argus.data.dao.UsageDao
 import dev.argus.engine.brain.ContactWhitelistStore
@@ -46,6 +52,9 @@ import dev.argus.ui.model.BudgetUi
 import dev.argus.ui.model.ContactRow
 import dev.argus.ui.model.ProviderChoiceUi
 import dev.argus.ui.model.ProviderUsageUi
+import dev.argus.ui.model.RulesBackupKind
+import dev.argus.ui.model.RulesBackupStatus
+import dev.argus.ui.model.RulesBackupUi
 import dev.argus.ui.model.SettingsState
 import dev.argus.ui.model.TransportUi
 import dev.argus.ui.presentation.ModelFieldHints
@@ -65,6 +74,7 @@ import kotlinx.coroutines.sync.withLock
 import java.net.URI
 import java.time.ZoneId
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import kotlin.math.ceil
 
@@ -81,6 +91,8 @@ private data class SettingsSources(
     val shizukuStatus: ShizukuGatewayStatus,
     val shizukuIdentity: ShizukuIdentity?,
     val observedCandidates: List<ContactRow>,
+    /** Regole che finirebbero nel file di backup (0.4.0, F1). */
+    val exportableRules: Int = 0,
 )
 
 /**
@@ -281,6 +293,7 @@ class SettingsViewModel @Inject constructor(
     private val budgetSettings: BudgetSettingsStore,
     private val languageSource: RenderLanguageSource,
     private val installInfo: AppInstallInfo,
+    private val rulesBackup: RulesBackup,
 ) : ViewModel() {
     /** Lingua corrente al momento in cui si produce un testo (messaggi, errori); segue il telefono. */
     private val language: RenderLanguage get() = languageSource.current
@@ -298,6 +311,10 @@ class SettingsViewModel @Inject constructor(
     private val budgetWriteMutex = Mutex()
     private val mutableMessages = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val messages = mutableMessages.asSharedFlow()
+
+    /** Ultima operazione del backup delle regole (0.4.0, F1): a riposo, in corso, riuscita, fallita. */
+    private val mutableBackupStatus = MutableStateFlow<RulesBackupStatus>(RulesBackupStatus.Idle)
+    private val backupBusy = AtomicBoolean(false)
 
     private val sources = combine(
         whitelist.observeAll(),
@@ -341,6 +358,7 @@ class SettingsViewModel @Inject constructor(
             shizukuStatus = shizukuStatus,
             shizukuIdentity = shizukuIdentity,
             observedCandidates = observedWhitelistCandidates(observed, contacts),
+            exportableRules = rules.count(Automation::isBackupExportable),
         )
     }
 
@@ -355,6 +373,7 @@ class SettingsViewModel @Inject constructor(
         mutableKeySaved,
         // Al cambio di lingua del telefono lo stato si rigenera (etichette e testi prodotti qui).
         languageSource.language,
+        mutableBackupStatus,
     ) { values: Array<Any?> ->
         val settingsSources = values[0] as SettingsSources
         val bridge = values[1] as BridgeUiHealth
@@ -364,6 +383,8 @@ class SettingsViewModel @Inject constructor(
         val usageSnapshot = values[5] as BudgetUsageSnapshot
         val budgetConfig = values[6] as BudgetSettings
         val keySaved = values[7] as Boolean?
+        // values[8] = lingua, usata solo come trigger di ricarica.
+        val backupStatus = values[9] as RulesBackupStatus
         val health = readAndroidUiHealth(context)
         SettingsState(
             transport = transportUi(bridge, hasToken, keySaved),
@@ -389,6 +410,7 @@ class SettingsViewModel @Inject constructor(
             appVersionLabel = appVersionLabel(),
             notificationListenerRestrictedHint =
                 !health.notificationListenerGranted && installInfo.mayHaveRestrictedSettings,
+            backup = RulesBackupUi(status = backupStatus, exportableRules = settingsSources.exportableRules),
         )
     }.stateIn(
         viewModelScope,
@@ -713,6 +735,80 @@ class SettingsViewModel @Inject constructor(
                         "Impossibile salvare i limiti budget.",
                     ),
                 )
+            }
+        }
+    }
+
+    /**
+     * Esporta le regole nel documento scelto dall'utente (SAF `CreateDocument`). [destination] null =
+     * selettore annullato: non succede nulla. Un'operazione alla volta.
+     */
+    fun exportRules(destination: Uri?, stripPersonalData: Boolean) {
+        if (destination == null) return
+        runBackup(RulesBackupKind.EXPORT) {
+            when (val outcome = rulesBackup.export(destination, stripPersonalData)) {
+                is ExportOutcome.Done -> RulesBackupStatus.Done(
+                    RulesBackupKind.EXPORT,
+                    RulesBackupText.exportDone(outcome, language),
+                )
+                is ExportOutcome.Failed -> RulesBackupStatus.Failed(
+                    RulesBackupKind.EXPORT,
+                    RulesBackupText.failure(outcome.failure, language),
+                )
+            }
+        }
+    }
+
+    /**
+     * Importa le regole dal documento scelto (SAF `OpenDocument`): ogni regola valida diventa una bozza
+     * da approvare, mai una regola armata. [source] null = selettore annullato.
+     */
+    fun importRules(source: Uri?) {
+        if (source == null) return
+        runBackup(RulesBackupKind.IMPORT) {
+            when (val outcome = rulesBackup.import(source)) {
+                is ImportOutcome.Done -> {
+                    val text = RulesBackupText.importSummary(outcome.summary, language)
+                    // Nessuna bozza creata = l'import non ha prodotto nulla: si mostra come errore.
+                    if (outcome.summary.imported > 0) {
+                        RulesBackupStatus.Done(RulesBackupKind.IMPORT, text, outcome.summary.imported)
+                    } else {
+                        RulesBackupStatus.Failed(RulesBackupKind.IMPORT, text)
+                    }
+                }
+                is ImportOutcome.Failed -> RulesBackupStatus.Failed(
+                    RulesBackupKind.IMPORT,
+                    RulesBackupText.failure(outcome.failure, language),
+                )
+            }
+        }
+    }
+
+    /** Chiude il riepilogo o l'errore dell'ultima operazione (non interrompe una in corso). */
+    fun dismissBackupResult() {
+        if (backupBusy.get()) return
+        mutableBackupStatus.value = RulesBackupStatus.Idle
+    }
+
+    private fun runBackup(kind: RulesBackupKind, operation: suspend () -> RulesBackupStatus) {
+        if (!backupBusy.compareAndSet(false, true)) return
+        mutableBackupStatus.value = RulesBackupStatus.Working(kind)
+        viewModelScope.launch {
+            try {
+                mutableBackupStatus.value = try {
+                    operation()
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (_: Exception) {
+                    val failure = if (kind == RulesBackupKind.EXPORT) {
+                        BackupFailure.WRITE_FAILED
+                    } else {
+                        BackupFailure.READ_FAILED
+                    }
+                    RulesBackupStatus.Failed(kind, RulesBackupText.failure(failure, language))
+                }
+            } finally {
+                backupBusy.set(false)
             }
         }
     }

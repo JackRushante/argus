@@ -1,6 +1,7 @@
 package dev.argus.automation.vm
 
 import android.content.Context
+import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
 import dev.argus.automation.AppInstallInfo
 import dev.argus.automation.AppPreferences
@@ -25,6 +26,12 @@ import dev.argus.brain.TransportFactory
 import dev.argus.brain.TransportHealth
 import dev.argus.data.DeferredReplyStore
 import dev.argus.data.UsageWindows
+import dev.argus.data.backup.BackupFailure
+import dev.argus.data.backup.ExportOutcome
+import dev.argus.data.backup.ImportOutcome
+import dev.argus.data.backup.ImportSummary
+import dev.argus.data.backup.RuleDiscardReason
+import dev.argus.data.backup.RulesBackup
 import dev.argus.data.dao.ProviderTokensAggregate
 import dev.argus.data.dao.ProviderUsageAggregate
 import dev.argus.data.dao.UsageDao
@@ -39,6 +46,9 @@ import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.AutomationId
+import dev.argus.engine.model.AutomationStatus
+import dev.argus.engine.model.CreatedBy
+import dev.argus.engine.model.Trigger
 import dev.argus.engine.notification.ObservedConversation
 import dev.argus.engine.notification.ObservedConversationStore
 import dev.argus.engine.runtime.AutomationStore
@@ -60,6 +70,8 @@ import dev.argus.shizuku.ShizukuIdentity
 import dev.argus.shizuku.ShizukuIdentityProbe
 import dev.argus.shizuku.ShizukuPermissionOutcome
 import dev.argus.ui.model.AuthState
+import dev.argus.ui.model.RulesBackupKind
+import dev.argus.ui.model.RulesBackupStatus
 import dev.argus.ui.model.ShizukuStatus
 import dev.argus.ui.model.TransportUi
 import dev.argus.ui.presentation.RenderLanguage
@@ -75,6 +87,7 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.Dispatchers
@@ -524,6 +537,255 @@ class SettingsViewModelTest {
         assertEquals(1, probe.calls)
     }
 
+    // ------------------------------------------------------------------ 0.4.0 F1: backup delle regole
+
+    private val backupFile: Uri = Uri.parse("content://argus.test/rules.json")
+
+    private fun storedRule(
+        id: String,
+        status: AutomationStatus,
+        actions: List<Action> = listOf(Action.SetWifi(true)),
+    ) = Automation(
+        id = AutomationId(id),
+        name = id,
+        createdBy = CreatedBy.USER,
+        status = status,
+        trigger = Trigger.Immediate,
+        actions = actions,
+        enabled = status == AutomationStatus.ARMED,
+    )
+
+    private fun backupVm(
+        backup: FakeRulesBackup,
+        language: RenderLanguage = RenderLanguage.IT,
+        automations: AutomationStore = FakeAutomationStore(),
+    ) = settingsViewModel(FakeProviderStore(), language = language, automations = automations, rulesBackup = backup)
+
+    @Test
+    fun `backup starts idle and counts the rules a file would hold`() = runTest(dispatcher) {
+        val vm = backupVm(
+            FakeRulesBackup(),
+            automations = FakeAutomationStore(
+                listOf(
+                    storedRule("armed", AutomationStatus.ARMED),
+                    storedRule("off", AutomationStatus.DISABLED),
+                    storedRule("review", AutomationStatus.NEEDS_REVIEW),
+                    // segnaposto illeggibile (nessuna azione) e riga legacy in attesa: non si esportano
+                    storedRule("broken", AutomationStatus.NEEDS_REVIEW, actions = emptyList()),
+                    storedRule("legacy", AutomationStatus.PENDING_APPROVAL),
+                ),
+            ),
+        )
+        observe(vm)
+        advanceUntilIdle()
+
+        assertEquals(RulesBackupStatus.Idle, vm.state.value.backup.status)
+        assertEquals(3, vm.state.value.backup.exportableRules)
+    }
+
+    @Test
+    fun `backup with no rules reports zero exportable`() = runTest(dispatcher) {
+        val vm = backupVm(FakeRulesBackup())
+        observe(vm)
+        advanceUntilIdle()
+
+        assertEquals(0, vm.state.value.backup.exportableRules)
+    }
+
+    @Test
+    fun `export goes from working to done with its summary and passes the option`() = runTest(dispatcher) {
+        val backup = FakeRulesBackup().apply { gate = CompletableDeferred() }
+        val vm = backupVm(backup)
+        observe(vm)
+        advanceUntilIdle()
+
+        vm.exportRules(backupFile, stripPersonalData = true)
+        runCurrent()
+        assertEquals(RulesBackupStatus.Working(RulesBackupKind.EXPORT), vm.state.value.backup.status)
+
+        backup.gate?.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(
+            RulesBackupStatus.Done(RulesBackupKind.EXPORT, "3 regole esportate."),
+            vm.state.value.backup.status,
+        )
+        assertEquals(listOf(backupFile to true), backup.exports)
+    }
+
+    @Test
+    fun `export failure is shown as an error with a clear text`() = runTest(dispatcher) {
+        val backup = FakeRulesBackup().apply {
+            exportOutcome = ExportOutcome.Failed(BackupFailure.WRITE_FAILED)
+        }
+        val vm = backupVm(backup)
+        observe(vm)
+
+        vm.exportRules(backupFile, stripPersonalData = false)
+        advanceUntilIdle()
+
+        assertEquals(
+            RulesBackupStatus.Failed(RulesBackupKind.EXPORT, "Impossibile scrivere il file."),
+            vm.state.value.backup.status,
+        )
+    }
+
+    @Test
+    fun `import goes from working to done with the summary and the number of drafts`() = runTest(dispatcher) {
+        val backup = FakeRulesBackup().apply {
+            gate = CompletableDeferred()
+            importOutcome = ImportOutcome.Done(
+                ImportSummary(imported = 4, discarded = mapOf(RuleDiscardReason.INVALID_RULE to 1)),
+            )
+        }
+        val vm = backupVm(backup)
+        observe(vm)
+        advanceUntilIdle()
+
+        vm.importRules(backupFile)
+        runCurrent()
+        assertEquals(RulesBackupStatus.Working(RulesBackupKind.IMPORT), vm.state.value.backup.status)
+
+        backup.gate?.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(
+            RulesBackupStatus.Done(
+                RulesBackupKind.IMPORT,
+                "4 regole importate da approvare; 1 scartata (regola non valida).",
+                importedCount = 4,
+            ),
+            vm.state.value.backup.status,
+        )
+        assertEquals(listOf(backupFile), backup.imports)
+    }
+
+    @Test
+    fun `an import that creates nothing is an error, not a success`() = runTest(dispatcher) {
+        val backup = FakeRulesBackup().apply {
+            importOutcome = ImportOutcome.Done(
+                ImportSummary(imported = 0, discarded = mapOf(RuleDiscardReason.MALFORMED_ENTRY to 2)),
+            )
+        }
+        val vm = backupVm(backup)
+        observe(vm)
+
+        vm.importRules(backupFile)
+        advanceUntilIdle()
+
+        assertEquals(
+            RulesBackupStatus.Failed(
+                RulesBackupKind.IMPORT,
+                "Nessuna regola importata; 2 scartate (voce malformata).",
+            ),
+            vm.state.value.backup.status,
+        )
+    }
+
+    @Test
+    fun `a refused file is shown as an error with its reason`() = runTest(dispatcher) {
+        val backup = FakeRulesBackup().apply {
+            importOutcome = ImportOutcome.Failed(BackupFailure.WRONG_FORMAT)
+        }
+        val vm = backupVm(backup)
+        observe(vm)
+
+        vm.importRules(backupFile)
+        advanceUntilIdle()
+
+        assertEquals(
+            RulesBackupStatus.Failed(RulesBackupKind.IMPORT, "Non è un'esportazione di regole Argus."),
+            vm.state.value.backup.status,
+        )
+    }
+
+    @Test
+    fun `an unexpected exception becomes an error state and the next request still works`() = runTest(dispatcher) {
+        val backup = FakeRulesBackup().apply { failure = IllegalStateException("boom") }
+        val vm = backupVm(backup)
+        observe(vm)
+
+        vm.importRules(backupFile)
+        advanceUntilIdle()
+        assertEquals(
+            RulesBackupStatus.Failed(RulesBackupKind.IMPORT, "Impossibile leggere il file."),
+            vm.state.value.backup.status,
+        )
+
+        backup.failure = null
+        vm.importRules(backupFile)
+        advanceUntilIdle()
+        assertTrue(vm.state.value.backup.status is RulesBackupStatus.Done)
+    }
+
+    @Test
+    fun `a second request while one is running is ignored`() = runTest(dispatcher) {
+        val backup = FakeRulesBackup().apply { gate = CompletableDeferred() }
+        val vm = backupVm(backup)
+        observe(vm)
+        advanceUntilIdle()
+
+        vm.importRules(backupFile)
+        runCurrent()
+        vm.importRules(backupFile)
+        vm.exportRules(backupFile, stripPersonalData = false)
+        runCurrent()
+        backup.gate?.complete(Unit)
+        advanceUntilIdle()
+
+        assertEquals(1, backup.imports.size)
+        assertEquals(0, backup.exports.size)
+    }
+
+    @Test
+    fun `a cancelled file picker does nothing`() = runTest(dispatcher) {
+        val backup = FakeRulesBackup()
+        val vm = backupVm(backup)
+        observe(vm)
+        advanceUntilIdle()
+
+        vm.exportRules(null, stripPersonalData = false)
+        vm.importRules(null)
+        advanceUntilIdle()
+
+        assertEquals(RulesBackupStatus.Idle, vm.state.value.backup.status)
+        assertTrue(backup.exports.isEmpty() && backup.imports.isEmpty())
+    }
+
+    @Test
+    fun `dismissing clears the result but never a running operation`() = runTest(dispatcher) {
+        val backup = FakeRulesBackup().apply { gate = CompletableDeferred() }
+        val vm = backupVm(backup)
+        observe(vm)
+        advanceUntilIdle()
+
+        vm.exportRules(backupFile, stripPersonalData = false)
+        runCurrent()
+        vm.dismissBackupResult()
+        runCurrent()
+        assertEquals(RulesBackupStatus.Working(RulesBackupKind.EXPORT), vm.state.value.backup.status)
+
+        backup.gate?.complete(Unit)
+        advanceUntilIdle()
+        assertTrue(vm.state.value.backup.status is RulesBackupStatus.Done)
+        vm.dismissBackupResult()
+        advanceUntilIdle()
+        assertEquals(RulesBackupStatus.Idle, vm.state.value.backup.status)
+    }
+
+    @Test
+    fun `backup texts are in english with the english language`() = runTest(dispatcher) {
+        val backup = FakeRulesBackup()
+        val vm = backupVm(backup, language = RenderLanguage.EN)
+        observe(vm)
+
+        vm.importRules(backupFile)
+        advanceUntilIdle()
+
+        assertEquals(
+            RulesBackupStatus.Done(RulesBackupKind.IMPORT, "2 rules imported, to approve.", importedCount = 2),
+            vm.state.value.backup.status,
+        )
+    }
+
     // ------------------------------------------------------------------ helper
 
     private fun TestScope.observe(vm: SettingsViewModel) {
@@ -547,6 +809,8 @@ class SettingsViewModelTest {
         languageSource: RenderLanguageSource = RenderLanguageSource { language },
         shizuku: ShizukuAccess = ShizukuGateway(context),
         identityProbe: ShizukuIdentityProbe = FakeShizukuIdentityProbe(),
+        automations: AutomationStore = FakeAutomationStore(),
+        rulesBackup: RulesBackup = FakeRulesBackup(),
     ): SettingsViewModel {
         val brain = ConfiguredBridgeBrain(store, privacyAccepted = { true }, factory = transportFactory)
         val preferences = FakePreferences(privacyAccepted = true)
@@ -565,7 +829,7 @@ class SettingsViewModelTest {
             preferences = preferences,
             privacyRevocation = privacy,
             observedConversations = observed,
-            automations = FakeAutomationStore(),
+            automations = automations,
             drafts = FakeDraftRepository(),
             shizuku = shizuku,
             shizukuIdentityProbe = identityProbe,
@@ -574,6 +838,7 @@ class SettingsViewModelTest {
             budgetSettings = budgetSettings,
             languageSource = languageSource,
             installInfo = installInfo,
+            rulesBackup = rulesBackup,
         )
     }
 
@@ -1573,8 +1838,8 @@ private class FakeObservedConversationStore : ObservedConversationStore {
     }
 }
 
-private class FakeAutomationStore : AutomationStore {
-    private val state = MutableStateFlow<List<Automation>>(emptyList())
+private class FakeAutomationStore(initial: List<Automation> = emptyList()) : AutomationStore {
+    private val state = MutableStateFlow(initial)
     override suspend fun get(id: AutomationId): Automation? = null
     override suspend fun all(): List<Automation> = state.value
     override fun observeAll(): Flow<List<Automation>> = state.asStateFlow()
@@ -1617,6 +1882,30 @@ private class FakeDraftRepository : DraftRepository {
         expectedRevision: Long,
         expectedFingerprint: ApprovalFingerprint,
     ): DraftArmResult = error("non usato")
+}
+
+/** Backup finto: registra le chiamate e puo' trattenerle (gate) o farle fallire. */
+private class FakeRulesBackup : RulesBackup {
+    val exports = mutableListOf<Pair<Uri, Boolean>>()
+    val imports = mutableListOf<Uri>()
+    var exportOutcome: ExportOutcome = ExportOutcome.Done(exported = 3, skipped = 0)
+    var importOutcome: ImportOutcome = ImportOutcome.Done(ImportSummary(imported = 2, discarded = emptyMap()))
+    var gate: CompletableDeferred<Unit>? = null
+    var failure: Exception? = null
+
+    override suspend fun export(destination: Uri, stripPersonalData: Boolean): ExportOutcome {
+        exports += destination to stripPersonalData
+        gate?.await()
+        failure?.let { throw it }
+        return exportOutcome
+    }
+
+    override suspend fun import(source: Uri): ImportOutcome {
+        imports += source
+        gate?.await()
+        failure?.let { throw it }
+        return importOutcome
+    }
 }
 
 private class FakeDeferredReplyStore : DeferredReplyStore {

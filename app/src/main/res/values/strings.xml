@@ -20,4 +20,5 @@
     <string name="conversation_id_label">Conversation ID</string>
     <string name="cancel">Cancel</string>
     <string name="add">Add</string>
+    <string name="backup_picker_unavailable">No file picker is available on this phone.</string>
 </resources>
