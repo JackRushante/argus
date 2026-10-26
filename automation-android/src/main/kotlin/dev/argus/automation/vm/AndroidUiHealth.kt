@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.PowerManager
+import androidx.annotation.ChecksSdkIntAtLeast
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import dev.argus.shizuku.ShizukuGatewayStatus
@@ -65,8 +66,10 @@ internal fun readAndroidUiHealth(context: Context): AndroidUiHealth {
 /**
  * Sotto Android 12 (S) il permesso non esiste e le sveglie esatte ci sono sempre. Da S in poi decide
  * `AlarmManager.canScheduleExactAlarms()`; se la lettura fallisce vale «non concesse», cosi' la riga in
- * Sistema avvisa invece di mostrare un falso verde.
+ * Sistema avvisa invece di mostrare un falso verde. L'annotazione dice al lint (NewApi) che
+ * [canScheduleExact] gira solo da Android 12: chi chiama passa `Build.VERSION.SDK_INT`.
  */
+@ChecksSdkIntAtLeast(api = android.os.Build.VERSION_CODES.S, lambda = 1)
 internal fun exactAlarmsGranted(sdkInt: Int, canScheduleExact: () -> Boolean): Boolean =
     sdkInt < android.os.Build.VERSION_CODES.S || runCatching(canScheduleExact).getOrDefault(false)
 
