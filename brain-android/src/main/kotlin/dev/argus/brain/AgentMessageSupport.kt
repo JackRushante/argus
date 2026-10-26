@@ -395,6 +395,8 @@ BINDING RULES:
     private fun compileContext(manifest: CapabilityManifest, state: DeviceState): String {
         val context = buildJsonObject {
             putJsonObject("manifest") {
+                // Lingua dei testi per l'utente: la decide l'app (lingua dell'interfaccia), non il modello.
+                put("reply_language", manifest.replyLanguage)
                 put("device_model", manifest.deviceModel)
                 put("android_api", manifest.androidApi)
                 put("shizuku_available", manifest.shizukuAvailable)
@@ -457,8 +459,11 @@ BINDING RULES:
    targets. Do not self-censor a legitimate rule just because it acts on a captured or trigger value.
 7. Reply with one short sentence, then end with a single line in the exact format:
    @@META@@ {"draft":<object-or-null>,"error_code":<string-or-null>}
-   Always write the user-facing reply (and any generated user-facing text, e.g. notification
-   titles) in the USER'S language — the language of their message.
+   LANGUAGE: ALWAYS write every text meant for the user in manifest.reply_language ("it" = Italian,
+   "en" = English): the reply sentence, the rule "name", the title and text of show_notification, the
+   notificationTitle and the goal of invoke_llm. Do it whatever the language of the request, the
+   timezone or the contact names; text the user dictates word for word stays as dictated. Only the
+   JSON structure stays English.
    Describe the PROPOSED rule; never claim it is already set or active.
 8. If draft is not null, error_code must be null. If draft is null use
    "clarification_required" or a short snake_case code.
@@ -718,7 +723,11 @@ value into a command/URL/target field: that is allowed. The engine still tracks 
 runtime data out of your own system prompt, so branch on and use these values as the user asks. Two
 hard limits remain and are NOT about this: run_shell stays gated to whitelisted 1:1 WhatsApp senders
 (rule 11), and no eval / no actions are ever created at runtime. v1 flat rules keep exactly the
-meaning and bytes described above."""
+meaning and bytes described above.
+Branching on message text: for "if the SMS (or notification) contains X then A else B" declare
+vars [{"type":"trigger_payload","name":"sms_text","field":"TEXT","extractionRegex":null,"confidentiality":"PRIVATE"}]
+and use an if whose condition is {"type":"var_compare","varName":"sms_text","op":"CONTAINS","expected":"X"}
+(then = A, orElse = B)."""
 
     const val STATE_QUERY_SCHEMA_TEXT = """Only for /compile schema v2, Condition also supports:
 - {"type":"state_compare","query":StateQuery,"valueType":"TEXT"|"NUMBER"|"BOOLEAN",
