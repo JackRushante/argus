@@ -306,6 +306,7 @@ object RuleRenderMapper {
         is Trigger.Screen, is Trigger.Battery, is Trigger.AudioOutput, is Trigger.ModeChanged,
         is Trigger.Media,
         -> DeviceTriggerRender.iconKey(t)
+        is Trigger.Manual -> "manual"
     }
 
     private fun triggerLine(t: Trigger, conversationLabels: Map<String, String>, l: RenderLanguage): String = when (t) {
@@ -319,6 +320,10 @@ object RuleRenderMapper {
         is Trigger.Screen, is Trigger.Battery, is Trigger.AudioOutput, is Trigger.ModeChanged,
         is Trigger.Media,
         -> DeviceTriggerRender.line(t, l)
+        is Trigger.Manual -> whenPrefix(l) + l.pick(
+            "you run it by hand (Run now, a Home-screen shortcut, a quick-settings tile or the widget)",
+            "la lanci tu a mano (Esegui ora, una scorciatoia sulla Home, un riquadro rapido o il widget)",
+        )
     }
 
     /** Prefisso "Quando: "/"When: " condiviso con chi deriva il sommario lista (UiStateMappers). */

@@ -522,6 +522,7 @@ BINDING RULES:
     "sensor.<kind>" and must be used only if that exact kind appears in the list.
     "screen", "battery", "audio_output", "mode_changed" and "media" are usable only if listed;
     "phone_state.call" also covers MISSED_CALL; the SIM filter needs "phone_state.sim".
+    "manual" (user-started: button, widget, shortcut, tile) is always listed.
     A requested trigger that is not in the list must NOT be compiled: briefly point out the
     missing grant or mechanism in Settings and return draft null with error_code
     "unsupported_capability".
@@ -637,6 +638,8 @@ Trigger, discriminated by "type":
 - {"type":"mode_changed", "what":"DND"|"RINGER", "to":string|null}  // to: DND off|priority|total,
   RINGER normal|vibrate|silent; null = any change
 - {"type":"media", "state":"PLAYING"|"STOPPED"}  // music/video playback started / finished
+- {"type":"manual"}  // runs ONLY when the user starts it by hand: a button, a widget, a Home-screen
+  shortcut, a quick-settings tile or "Run now". Use it when the user asks for one of those or to launch it by hand.
 
 Condition, discriminated by "type":
 - {"type":"time_window", "startLocal":"HH:mm", "endLocal":"HH:mm", "tz":string}

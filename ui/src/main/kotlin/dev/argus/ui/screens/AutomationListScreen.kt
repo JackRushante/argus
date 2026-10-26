@@ -50,6 +50,7 @@ import dev.argus.ui.R
 import dev.argus.ui.components.EmptyState
 import dev.argus.ui.components.EngineBannerBar
 import dev.argus.ui.components.GenerativeTag
+import dev.argus.ui.components.PauseBanner
 import dev.argus.ui.components.StatusBadgeChip
 import dev.argus.ui.model.AutomationListCallbacks
 import dev.argus.ui.model.AutomationListState
@@ -133,6 +134,14 @@ fun AutomationListScreen(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
                 onClick = callbacks::onBannerTap,
             )
+
+            // F21: «Pausa automazioni» attiva. Il banner resta finché non si riprende.
+            if (state.paused) {
+                PauseBanner(
+                    onResume = callbacks::onResumeAutomations,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
+                )
+            }
 
             FilterChipsRow(state.filter, callbacks::onFilter)
 
