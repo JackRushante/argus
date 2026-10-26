@@ -207,11 +207,16 @@ private enum class HealthLevel { OK, WARN, NEUTRAL }
 @Composable
 private fun HealthSection(state: SettingsState, callbacks: SettingsCallbacks) {
     val shizukuSub = when (state.shizuku) {
-        ShizukuStatus.AUTHORIZED -> stringResource(R.string.settings_shizuku_ok)
+        ShizukuStatus.AUTHORIZED -> if (state.shizukuRunsAsRoot == true) {
+            stringResource(R.string.settings_shizuku_ok_root)
+        } else {
+            stringResource(R.string.settings_shizuku_ok)
+        }
         ShizukuStatus.NOT_INSTALLED -> stringResource(R.string.settings_shizuku_not_installed)
         ShizukuStatus.INSTALLED_NOT_RUNNING -> stringResource(R.string.settings_shizuku_not_running)
         ShizukuStatus.RUNNING_NOT_AUTHORIZED -> stringResource(R.string.settings_shizuku_not_authorized)
         ShizukuStatus.DEGRADED_AFTER_REBOOT -> stringResource(R.string.settings_shizuku_degraded)
+        ShizukuStatus.UNSUPPORTED -> stringResource(R.string.settings_shizuku_unsupported)
     }
     val (locLevel, locSub) = when (state.backgroundLocation) {
         BgLocationState.GRANTED -> HealthLevel.OK to stringResource(R.string.settings_location_granted)
@@ -1018,6 +1023,18 @@ private fun SettingsAllGreenPreview() {
 @Composable
 private fun SettingsDegradedPreview() {
     ArgusTheme { SettingsScreen(previewDegraded, NoopSettingsCallbacks) }
+}
+
+@Preview(name = "Sistema · Shizuku gira come root", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 1100)
+@Composable
+private fun SettingsShizukuRootPreview() {
+    ArgusTheme { SettingsScreen(Fixtures.settingsShizukuRoot, NoopSettingsCallbacks) }
+}
+
+@Preview(name = "Sistema · Shizuku troppo vecchio", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 1100)
+@Composable
+private fun SettingsShizukuUnsupportedPreview() {
+    ArgusTheme { SettingsScreen(Fixtures.settingsShizukuUnsupported, NoopSettingsCallbacks) }
 }
 
 @Preview(name = "Sistema · provider diretto (OpenAI)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 1100)

@@ -122,6 +122,11 @@ fun shizukuOnboardingCopy(
             "After the reboot Shizuku is off. Privileged actions are skipped until you re-enable it; everything else works.",
             "Dopo il riavvio Shizuku è spento. Le azioni privilegiate vengono saltate finché non lo riattivi; il resto funziona.",
         ) to language.pick("Re-enable", "Riattiva")
+    ShizukuStatus.UNSUPPORTED ->
+        language.pick(
+            "This Shizuku version is too old for Argus: update it and come back",
+            "Questa versione di Shizuku è troppo vecchia per Argus: aggiornala e torna qui",
+        ) to language.pick("Update Shizuku", "Aggiorna Shizuku")
 }
 
 private fun isMandatory(kind: StepKind): Boolean =
@@ -675,6 +680,12 @@ private fun OnboardingPrivacyPreview() {
 @Composable
 private fun OnboardingShizukuPreview() {
     PreviewFor(StepKind.SHIZUKU, ShizukuStatus.RUNNING_NOT_AUTHORIZED)
+}
+
+@Preview(name = "Onboarding · Shizuku UNSUPPORTED (troppo vecchio)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)
+@Composable
+private fun OnboardingShizukuUnsupportedPreview() {
+    PreviewFor(StepKind.SHIZUKU, ShizukuStatus.UNSUPPORTED)
 }
 
 @Preview(name = "Onboarding · Scegli il cervello (selettore provider)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)

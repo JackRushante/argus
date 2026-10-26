@@ -90,7 +90,16 @@ enum class StatusBadge { ARMED, PENDING_APPROVAL, DISABLED, NEEDS_REVIEW }
 /** Salute del sistema, mostrata come banner in Lista e Sistema. */
 enum class EngineBanner { NONE, SHIZUKU_DOWN, SHIZUKU_DEGRADED_AFTER_REBOOT, BATTERY_NOT_EXEMPT, BRAIN_UNREACHABLE }
 
-enum class ShizukuStatus { NOT_INSTALLED, INSTALLED_NOT_RUNNING, RUNNING_NOT_AUTHORIZED, AUTHORIZED, DEGRADED_AFTER_REBOOT }
+enum class ShizukuStatus {
+    NOT_INSTALLED,
+    INSTALLED_NOT_RUNNING,
+    RUNNING_NOT_AUTHORIZED,
+    AUTHORIZED,
+    DEGRADED_AFTER_REBOOT,
+
+    /** Shizuku in esecuzione ma troppo vecchio per Argus: va aggiornato, non riavviato. */
+    UNSUPPORTED,
+}
 
 // --- 6.1 Chat ---
 
@@ -330,6 +339,11 @@ data class SettingsState(
      * Android 13+ (Android può bloccarlo con «Impostazione con restrizioni»): la riga mostra la guida.
      */
     val notificationListenerRestrictedHint: Boolean = false,
+    /**
+     * 0.3.6 (D10): Shizuku gira come root (uid 0), quindi i comandi delle regole girano come root.
+     * `null` = non noto: il servizio privilegiato non è ancora collegato.
+     */
+    val shizukuRunsAsRoot: Boolean? = null,
 )
 
 sealed interface TransportUi {
