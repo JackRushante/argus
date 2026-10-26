@@ -95,7 +95,7 @@ class PauseIntegrationTest {
             trigger = Trigger.Time(cron = "0 8 * * *", tz = "UTC", precision = TimePrecision.FLEXIBLE),
         )
         val store = MapStore(rule)
-        val harness = Harness(store, FakePauseStore(paused = true), clock)
+        val harness = Harness(store, FakePauseStore(true), clock)
         var now = Instant.parse("2026-10-26T07:00:00Z")
         val state = MemoryAlarmState()
         val backend = RecordingBackend()

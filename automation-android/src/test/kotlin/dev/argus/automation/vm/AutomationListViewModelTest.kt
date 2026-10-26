@@ -104,7 +104,7 @@ class AutomationListViewModelTest {
 
     @Test
     fun `the list carries the pause and resume turns it off`() = runTest {
-        val pause = FakePauseStore(paused = true)
+        val pause = FakePauseStore(true)
         val viewModel = viewModel(pause = pause)
         val latest = collectState(viewModel)
 

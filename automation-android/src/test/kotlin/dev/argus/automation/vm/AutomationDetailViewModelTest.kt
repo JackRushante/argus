@@ -84,7 +84,6 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -1161,12 +1160,6 @@ class AutomationDetailViewModelTest {
             ),
         )
         return signed
-    }
-
-    private fun TestScope.collectEvents(viewModel: AutomationDetailViewModel): MutableList<DetailEvent> {
-        val events = mutableListOf<DetailEvent>()
-        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.events.collect(events::add) }
-        return events
     }
 
     @Test
