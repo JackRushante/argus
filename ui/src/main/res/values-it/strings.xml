@@ -22,7 +22,8 @@
     <string name="provider_dialog_title">Configura %1$s</string>
     <string name="provider_endpoint_label">Endpoint</string>
     <string name="provider_model_label">Modello</string>
-    <string name="provider_model_hint_openrouter">Modello (es. deepseek/deepseek-v4.1-flash) o preset: @preset/&lt;nome&gt;</string>
+    <string name="provider_model_hint_openrouter">Modello (es. ~deepseek/deepseek-flash-latest) o preset: @preset/&lt;nome&gt;</string>
+    <string name="provider_model_advice">Argus ha bisogno di un modello capace: almeno il modello base di un grande fornitore, oppure in locale un modello da circa 27 miliardi di parametri in su. I modelli più piccoli non riescono a scrivere regole valide.</string>
     <string name="provider_model_preset_format">Il formato è @preset/&lt;nome&gt;</string>
     <string name="provider_key_label">Chiave API</string>
     <string name="provider_key_keep_hint">Lascia vuoto per conservare la chiave attuale.</string>

@@ -9,6 +9,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -108,6 +109,12 @@ fun ProviderConfigurationDialog(
                         }
                     }
                 }
+                // Consiglio generico (nessun nome di modello: i nomi cambiano e stanno solo nei suggerimenti).
+                Text(
+                    text = stringResource(R.string.provider_model_advice),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 if (provider.reasoningEffortEditable) {
                     Text(stringResource(R.string.provider_reasoning_label))
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
