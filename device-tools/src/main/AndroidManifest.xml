@@ -1,2 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest />
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Stato Wi-Fi senza Shizuku (WifiManager.isWifiEnabled): permesso normal, auto-concesso
+         all'installazione, non è un grant runtime e non dà accesso alla posizione. -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+</manifest>
