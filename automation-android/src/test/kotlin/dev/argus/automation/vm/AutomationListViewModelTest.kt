@@ -51,6 +51,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import java.util.concurrent.atomic.AtomicInteger
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
@@ -217,6 +218,52 @@ class AutomationListViewModelTest {
         }
     }
 
+    // --- B32: la lista non rilegge lo stato a ogni scatto ---------------------------------------------
+
+    @Test
+    fun `ten firings with the same drafts read the device state once`() = runTest {
+        val rule = armedRule("fire")
+        assertIs<DraftWriteResult.Saved>(repository.create(newDraft("pend")))
+        val reads = AtomicInteger(0)
+        val snapshots = FirePolicySnapshotProvider {
+            reads.incrementAndGet()
+            FirePolicySnapshot(
+                knownTools = emptySet(),
+                availableCapabilities = emptySet(),
+                whitelistedConversationIds = emptySet(),
+            )
+        }
+        val latest = collectState(viewModel(snapshots = snapshots))
+        awaitUntil("due righe") { latest().rows.size == 2 }
+        settle()
+        assertEquals(1, reads.get(), "una review per la bozza alla prima emissione")
+
+        // Ogni scatto aggiorna la regola e fa riemettere la lista.
+        repeat(10) { i -> store.recordFired(rule.id, 10_000L + i) }
+        awaitUntil("ultimo scatto visibile") {
+            latest().rows.firstOrNull { it.id == "fire" }?.lastFiredLabel != null
+        }
+        settle()
+        assertEquals(1, reads.get(), "dieci scatti non rileggono lo stato del dispositivo")
+
+        // Una bozza nuova si legge da sola; quelle note restano in cache.
+        assertIs<DraftWriteResult.Saved>(repository.create(newDraft("pend2")))
+        awaitUntil("tre righe") { latest().rows.size == 3 }
+        settle()
+        assertEquals(2, reads.get(), "solo la bozza nuova viene riletta")
+
+        // Cambia un input della review (le regole attive, che entrano nei conflitti): si rilegge tutto.
+        store.disable(rule.id)
+        awaitUntil("regola disattivata") {
+            latest().rows.firstOrNull { it.id == "fire" }?.status == StatusBadge.DISABLED
+        }
+        settle()
+        assertEquals(4, reads.get(), "le due bozze sono riviste dopo il cambio delle regole attive")
+    }
+
+    /** Tempo reale per lasciar arrivare eventuali emissioni ulteriori prima di contare. */
+    private suspend fun settle() = withContext(Dispatchers.Default) { delay(400) }
+
     @Test
     fun `re-enabling a one shot rule whose time has passed says what to do`() = runTest {
         val rule = armedRule("os1")
@@ -272,16 +319,16 @@ class AutomationListViewModelTest {
     private fun viewModel(
         languageSource: RenderLanguageSource = RenderLanguageSource { RenderLanguage.EN },
         scheduler: TimeAlarmRuntime = ListNoopTimeAlarmRuntime(),
-    ): AutomationListViewModel {
-        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
-        val whitelist = RoomContactWhitelistStore(db.contactWhitelistDao())
-        val snapshots = FirePolicySnapshotProvider {
+        snapshots: FirePolicySnapshotProvider = FirePolicySnapshotProvider {
             FirePolicySnapshot(
                 knownTools = emptySet(),
                 availableCapabilities = emptySet(),
                 whitelistedConversationIds = emptySet(),
             )
-        }
+        },
+    ): AutomationListViewModel {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val whitelist = RoomContactWhitelistStore(db.contactWhitelistDao())
         val approvals = ApprovalFlow(
             drafts = repository,
             approvals = ApprovalService(repository, DraftValidator(emptySet()), whitelist),
