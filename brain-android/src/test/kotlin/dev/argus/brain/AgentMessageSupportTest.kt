@@ -556,13 +556,13 @@ class AgentMessageSupportTest {
     fun `compile rules give defaults instead of asking and accept here without a location`() {
         val system = AgentMessageSupport.compileSystemText().lines().joinToString(" ") { it.trim() }
 
-        // GPT-6 Luna chiedeva la durata della vibrazione, la modalita' del Non disturbare e il raggio.
-        // L'eccezione vale SOLO per questi tre: con una regola generica DeepSeek metteva da solo la
-        // luminosita' al 50% invece di chiedere il livello.
+        // GPT-6 Luna chiedeva la durata della vibrazione, la modalita' del Non disturbare, il raggio e
+        // (0.4.1) l'intervallo minimo dei sensori. L'eccezione vale SOLO per questi quattro: con una
+        // regola generica DeepSeek metteva da solo la luminosita' al 50% invece di chiedere il livello.
         assertTrue(
-            "Exception, for exactly these three details: do not ask, use the default (vibrate durationMs 1000, " +
-                "set_dnd mode \"PRIORITY\", geofence radiusM 150). Any other missing value (a level, a time, a person, " +
-                "an app, a place, a text) still needs a short question." in system,
+            "Exception, for exactly these four details: do not ask, use the default (vibrate durationMs 1000, " +
+                "set_dnd mode \"PRIORITY\", geofence radiusM 150, sensor cooldownMs 60000). Any other missing value " +
+                "(a level, a time, a person, an app, a place, a text) still needs a short question." in system,
         )
         // E rifiutava «qui» perche' il contesto dice location_available=false.
         assertTrue(

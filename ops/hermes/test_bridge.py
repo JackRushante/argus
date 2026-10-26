@@ -370,9 +370,9 @@ class BridgeTest(unittest.TestCase):
                 prompt,
             )
             self.assertIn(
-                'Exception, for exactly these three details: do not ask, use the default (vibrate durationMs 1000,\n'
-                '   set_dnd mode "PRIORITY", geofence radiusM 150). Any other missing value (a level, a time, a'
-                ' person,\n   an app, a place, a text) still needs a short question.',
+                'Exception, for exactly these four details: do not ask, use the default (vibrate durationMs 1000,\n'
+                '   set_dnd mode "PRIORITY", geofence radiusM 150, sensor cooldownMs 60000). Any other missing value\n'
+                '   (a level, a time, a person, an app, a place, a text) still needs a short question.',
                 prompt,
             )
 
