@@ -489,6 +489,19 @@ fun ArgusNavHost() {
                                     }.isSuccess
                                 if (!opened) openAppDetailsSettings()
                             }
+                            override fun onOpenWriteSettingsFix() {
+                                // «Modifica impostazioni di sistema» (0.4.1): permesso speciale che si concede solo
+                                // da questa schermata; se non si apre si ripiega sulle impostazioni dell'app.
+                                val opened = runCatching {
+                                    context.startActivity(
+                                        Intent(
+                                            Settings.ACTION_MANAGE_WRITE_SETTINGS,
+                                            Uri.parse("package:${context.packageName}"),
+                                        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                                    )
+                                }.isSuccess
+                                if (!opened) openAppDetailsSettings()
+                            }
                             override fun onOpenNotificationAccessFix() = requestNotificationAccess()
                             override fun onOpenNotificationListenerFix() {
                                 openNotificationListenerSettings()

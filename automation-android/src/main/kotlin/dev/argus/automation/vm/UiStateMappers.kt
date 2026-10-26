@@ -329,6 +329,11 @@ private fun actionTypeLabel(type: String, l: RenderLanguage): String = when (typ
     -> l.pick("AI generation", "Generazione AI")
     ActionTypeIds.IF -> l.pick("Conditional block", "Blocco condizionale")
     ActionTypeIds.WHILE -> l.pick("Repeat block", "Blocco ripetuto")
+    ActionTypeIds.SPEAK -> l.pick("Speak aloud", "Leggi ad alta voce")
+    ActionTypeIds.MEDIA_CONTROL -> l.pick("Media key", "Tasto multimediale")
+    ActionTypeIds.SET_BRIGHTNESS -> l.pick("Set screen brightness", "Imposta luminosità schermo")
+    ActionTypeIds.SET_ROTATION -> l.pick("Set auto-rotate", "Imposta rotazione automatica")
+    ActionTypeIds.HTTP_REQUEST -> l.pick("HTTP request", "Richiesta HTTP")
     else -> type.replace('_', ' ')
 }
 

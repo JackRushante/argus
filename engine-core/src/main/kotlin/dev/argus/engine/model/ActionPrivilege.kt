@@ -53,6 +53,12 @@ object ActionPrivileges {
         is Action.OpenSettingsScreen,
         is Action.Vibrate,
         is Action.Wait,
+        // 0.4.1: TextToSpeech, tasti multimediali, Settings.System (WRITE_SETTINGS) e HTTP: nessuno Shizuku.
+        is Action.Speak,
+        is Action.MediaControl,
+        is Action.SetBrightness,
+        is Action.SetRotation,
+        is Action.HttpRequest,
         is Action.InvokeLlm,
         is Action.InvokeLlmV2,
         -> ActionPrivilege.BASE

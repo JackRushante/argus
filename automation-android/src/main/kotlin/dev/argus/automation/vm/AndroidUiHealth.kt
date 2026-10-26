@@ -29,6 +29,8 @@ internal data class AndroidUiHealth(
     val readPhoneStateGranted: Boolean = false,
     val readCallLogGranted: Boolean = false,
     val bluetoothConnectGranted: Boolean = false,
+    /** 0.4.1: «Modifica impostazioni di sistema» concesso (`Settings.System.canWrite`). */
+    val writeSettingsGranted: Boolean = true,
 )
 
 internal fun readAndroidUiHealth(context: Context): AndroidUiHealth {
@@ -60,6 +62,8 @@ internal fun readAndroidUiHealth(context: Context): AndroidUiHealth {
         readCallLogGranted = granted(Manifest.permission.READ_CALL_LOG),
         bluetoothConnectGranted = android.os.Build.VERSION.SDK_INT <
             android.os.Build.VERSION_CODES.S || granted(Manifest.permission.BLUETOOTH_CONNECT),
+        // Se la lettura fallisce vale «non concesso»: la riga in Sistema avvisa invece di mostrare un falso verde.
+        writeSettingsGranted = runCatching { android.provider.Settings.System.canWrite(app) }.getOrDefault(false),
     )
 }
 

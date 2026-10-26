@@ -61,6 +61,11 @@ object CapabilityIds {
     const val ACTION_VIBRATE = "action.vibrate"
     const val ACTION_WRITE_SETTING = "action.write_setting"
     const val ACTION_INVOKE_LLM = "action.invoke_llm"
+    const val ACTION_SPEAK = "action.speak"
+    const val ACTION_MEDIA_CONTROL = "action.media_control"
+    const val ACTION_SET_BRIGHTNESS = "action.set_brightness"
+    const val ACTION_SET_ROTATION = "action.set_rotation"
+    const val ACTION_HTTP_REQUEST = "action.http_request"
 
     fun state(key: String): String = "state.$key"
 }
@@ -159,6 +164,13 @@ object CapabilityRequirements {
         is Action.SetDarkMode -> setOf(CapabilityIds.ACTION_SET_DARK_MODE)
         is Action.OpenSettingsScreen -> setOf(CapabilityIds.ACTION_OPEN_SETTINGS_SCREEN)
         is Action.Vibrate -> setOf(CapabilityIds.ACTION_VIBRATE)
+        is Action.Speak -> setOf(CapabilityIds.ACTION_SPEAK)
+        is Action.MediaControl -> setOf(CapabilityIds.ACTION_MEDIA_CONTROL)
+        // Luminosità e rotazione richiedono il permesso speciale «Modifica impostazioni di sistema»:
+        // il probe le pubblica solo se concesso.
+        is Action.SetBrightness -> setOf(CapabilityIds.ACTION_SET_BRIGHTNESS)
+        is Action.SetRotation -> setOf(CapabilityIds.ACTION_SET_ROTATION)
+        is Action.HttpRequest -> setOf(CapabilityIds.ACTION_HTTP_REQUEST)
         // Pausa cooperativa interna all'interprete: nessuna capability OS.
         is Action.Wait -> emptySet()
         // Come i reader parametrici (che gatano sulla famiglia, non sul singolo canonicalId):

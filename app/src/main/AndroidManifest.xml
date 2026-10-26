@@ -9,6 +9,18 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <!-- 0.4.1: «Modifica impostazioni di sistema» (permesso speciale, si concede solo dalle impostazioni
+         di sistema): serve alle azioni luminosità e rotazione dello schermo. -->
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
+
+    <!-- 0.4.1: package visibility per i motori di sintesi vocale (azione «leggi ad alta voce»);
+         senza, da Android 11 TextToSpeech non vede nessun motore. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
+
     <application
         android:name=".ArgusApplication"
         android:allowBackup="false"

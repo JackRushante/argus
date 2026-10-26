@@ -64,6 +64,16 @@ import dev.argus.automation.apps.AndroidInstalledAppResolver
 import dev.argus.automation.apps.InstalledAppResolver
 import dev.argus.automation.base.AndroidBaseActionExecutor
 import dev.argus.automation.base.AndroidBaseActionSurface
+import dev.argus.automation.base.AndroidDeferredOpenNotifier
+import dev.argus.automation.base.AndroidMediaKeySurface
+import dev.argus.automation.base.AndroidSpeechEngine
+import dev.argus.automation.base.AndroidSystemActionExecutor
+import dev.argus.automation.base.AndroidSystemSettingsSurface
+import dev.argus.automation.base.DeferredOpenNotifier
+import dev.argus.automation.base.MediaKeySurface
+import dev.argus.automation.base.SpeechEngine
+import dev.argus.automation.base.SystemSettingsSurface
+import dev.argus.automation.http.HttpRequestExecutor
 import dev.argus.automation.base.BaseActionSurface
 import dev.argus.automation.foreground.AndroidForegroundDeniedNotice
 import dev.argus.automation.foreground.SharedForegroundSentinel
@@ -609,10 +619,50 @@ object ArgusModule {
     fun baseActionSurface(@ApplicationContext context: Context): BaseActionSurface =
         AndroidBaseActionSurface(context)
 
+    /** 0.4.1 (B4): notifica «Tocca per aprire …» quando Android blocca un avvio dal background. */
     @Provides
     @Singleton
-    fun baseActionExecutor(surface: BaseActionSurface): AndroidBaseActionExecutor =
-        AndroidBaseActionExecutor(surface)
+    fun deferredOpenNotifier(@ApplicationContext context: Context): DeferredOpenNotifier =
+        AndroidDeferredOpenNotifier(context)
+
+    @Provides
+    @Singleton
+    fun baseActionExecutor(
+        surface: BaseActionSurface,
+        deferredOpen: DeferredOpenNotifier,
+    ): AndroidBaseActionExecutor = AndroidBaseActionExecutor(surface, deferredOpen)
+
+    /** 0.4.1: lettura ad alta voce nella lingua dell'app (inglese o italiano). */
+    @Provides
+    @Singleton
+    fun speechEngine(
+        @ApplicationContext context: Context,
+        language: RenderLanguageSource,
+    ): SpeechEngine = AndroidSpeechEngine(context) {
+        if (language.current == dev.argus.ui.presentation.RenderLanguage.IT) "it" else "en"
+    }
+
+    @Provides
+    @Singleton
+    fun mediaKeySurface(@ApplicationContext context: Context): MediaKeySurface =
+        AndroidMediaKeySurface(context)
+
+    @Provides
+    @Singleton
+    fun systemSettingsSurface(@ApplicationContext context: Context): SystemSettingsSurface =
+        AndroidSystemSettingsSurface(context)
+
+    @Provides
+    @Singleton
+    fun systemActionExecutor(
+        speech: SpeechEngine,
+        media: MediaKeySurface,
+        settings: SystemSettingsSurface,
+    ): AndroidSystemActionExecutor = AndroidSystemActionExecutor(speech, media, settings)
+
+    @Provides
+    @Singleton
+    fun httpRequestExecutor(): HttpRequestExecutor = HttpRequestExecutor()
 
     @Provides
     @Singleton
@@ -626,6 +676,8 @@ object ArgusModule {
         whitelist: ContactWhitelistStore,
         baseActions: AndroidBaseActionExecutor,
         gateway: ShizukuGateway,
+        systemActions: AndroidSystemActionExecutor,
+        httpRequests: HttpRequestExecutor,
     ): ShizukuActionExecutor =
         ShizukuActionExecutor(
             tools,
@@ -643,6 +695,9 @@ object ArgusModule {
             // sono affidabili solo via `am start` privilegiato. Riletto a ogni scatto: se l'utente revoca
             // Shizuku si ricade sul percorso BASE senza riavvio.
             shizukuReady = { gateway.status() == dev.argus.shizuku.ShizukuGatewayStatus.AUTHORIZED },
+            // 0.4.1: parlato, tasti multimediali, luminosità/rotazione e chiamate HTTP, senza Shizuku.
+            systemActions = systemActions,
+            httpRequests = httpRequests,
         )
 
     @Provides

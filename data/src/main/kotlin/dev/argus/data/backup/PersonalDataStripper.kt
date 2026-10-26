@@ -17,6 +17,10 @@ import dev.argus.engine.model.Trigger
  *    regola più ampia di quella condivisa.
  *  - [Trigger.Notification]: `conversationId` e `sender`. Resta il package (e i filtri sul testo).
  *  - [Trigger.PhoneState]: il `number`. Restano evento e filtro sul testo.
+ *  - [Action.HttpRequest]: i VALORI delle intestazioni (token, chiavi API, cookie): restano i nomi.
+ *    Un valore vuoto non passa la validazione (`http_header_invalid`), quindi la regola importata non
+ *    si arma finché non si rifà con le proprie credenziali. URL e body non si toccano: chi condivide
+ *    deve rileggerli.
  *
  * Nessuna azione porta oggi un contatto o una posizione tipati; le azioni sono comunque attraversate
  * (if/while contengono condizioni e azioni annidate) e il `when` esaustivo fa fallire la compilazione
@@ -27,6 +31,9 @@ object PersonalDataStripper {
     /** Latitudine/longitudine fuori intervallo che marcano una `location_in` svuotata. */
     const val REMOVED_LATITUDE = 91.0
     const val REMOVED_LONGITUDE = 181.0
+
+    /** Valore con cui si svuota un'intestazione HTTP: vuoto, quindi non valido finché non si rifà. */
+    const val REMOVED_HEADER_VALUE = ""
 
     fun strip(draft: AutomationDraft): AutomationDraft = draft.copy(
         trigger = stripTrigger(draft.trigger),
@@ -76,6 +83,9 @@ object PersonalDataStripper {
             condition = stripCondition(action.condition),
             body = action.body.map(::stripAction),
         )
+        is Action.HttpRequest -> action.copy(
+            headers = action.headers?.mapValues { REMOVED_HEADER_VALUE },
+        )
         is Action.SetWifi,
         is Action.SetBluetooth,
         is Action.SetMobileData,
@@ -99,6 +109,10 @@ object PersonalDataStripper {
         is Action.Vibrate,
         is Action.WriteSetting,
         is Action.Wait,
+        is Action.Speak,
+        is Action.MediaControl,
+        is Action.SetBrightness,
+        is Action.SetRotation,
         is Action.InvokeLlm,
         is Action.InvokeLlmV2,
         -> action

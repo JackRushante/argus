@@ -347,4 +347,8 @@
     <string name="ui40_secret_error_long">Troppo lungo (al massimo %1$d caratteri)</string>
     <string name="ui40_secret_error_chars">Solo caratteri visibili, senza spazi</string>
     <string name="ui40_model_error_empty">Inserisci il nome del modello</string>
+    <!-- 0.4.1 (azioni): permesso speciale per luminosità e rotazione. -->
+    <string name="act41_settings_write_title">Modifica impostazioni di sistema</string>
+    <string name="act41_settings_write_ok">concesso: le regole possono cambiare luminosità e rotazione dello schermo</string>
+    <string name="act41_settings_write_warn">non concesso: le regole che impostano luminosità o rotazione non possono partire</string>
 </resources>

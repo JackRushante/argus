@@ -56,6 +56,13 @@ class DraftValidator(
         private const val MAX_TIMER_SECONDS = 86_400
         private const val MAX_VOLUME_LEVEL = 100
         private const val MAX_VIBRATE_MS = 10_000
+        private const val MAX_SPEAK_LENGTH = 1_000
+        private const val MAX_BRIGHTNESS_LEVEL = 100
+
+        // Stime worst-case 0.4.1 per il budget tempo: la richiesta HTTP ha il suo timeout (15 s), la
+        // lettura ad alta voce aspetta la fine del parlato fino a 60 s.
+        private const val HTTP_ACTION_BUDGET_MS = HttpRequestPolicy.TIMEOUT_MS
+        private const val SPEAK_ACTION_BUDGET_MS = 60_000L
 
         // --- Bound P4 §2.5 (chiusi, non negoziabili) ---
         private const val MAX_VARS = 16
@@ -619,6 +626,14 @@ class DraftValidator(
                                 "La variabile SECRET '$name' sarà inviata al Brain configurato",
                             )
                         }
+                        if (action is Action.HttpRequest &&
+                            declaredConfidentiality[name] == ConfidentialityLabel.SECRET
+                        ) {
+                            warn(
+                                "http_body_secret_disclosure",
+                                "La variabile SECRET '$name' sarà inviata all'indirizzo della richiesta HTTP",
+                            )
+                        }
                     }
                 }
             }
@@ -637,6 +652,27 @@ class DraftValidator(
                         "interpolation_shell_context",
                         "Un dato esterno è usato in un punto del comando shell che non si può quotare " +
                             "in sicurezza (sostituzione di comando, backtick, here-doc o commento): " +
+                            "a runtime l'azione sarebbe bloccata",
+                    )
+                }
+            }
+        }
+        // Body JSON di http_request: a runtime un dato esterno entra solo dentro una stringa JSON (con
+        // escape); fuori da una stringa l'azione verrebbe bloccata. Meglio dirlo ora.
+        if (action is Action.HttpRequest) {
+            for (field in InterpolationPolicy.textFields(action)) {
+                if (field.encoding != InterpolationPolicy.ValueEncoding.JSON_STRING) continue
+                if (InterpolationPolicy.parse(field.value).malformed) continue
+                val references = InterpolationPolicy.references(field.value)
+                val inString = HttpRequestPolicy.jsonStringContexts(field.value, references.map { it.range })
+                val unquotable = references.indices.any { index ->
+                    val name = references[index].name
+                    !inString[index] && name in knownVars && declaredIntegrity[name] != IntegrityLabel.CLEAN
+                }
+                if (unquotable) {
+                    warn(
+                        "interpolation_json_context",
+                        "Un dato esterno è nel body JSON fuori da una stringa tra virgolette: " +
                             "a runtime l'azione sarebbe bloccata",
                     )
                 }
@@ -664,6 +700,8 @@ class DraftValidator(
         is Action.InvokeLlm -> action.timeoutMs.coerceAtLeast(0)
         is Action.InvokeLlmV2 -> action.timeoutMs.coerceAtLeast(0)
         is Action.RunShell -> SHELL_ACTION_BUDGET_MS
+        is Action.HttpRequest -> HTTP_ACTION_BUDGET_MS
+        is Action.Speak -> SPEAK_ACTION_BUDGET_MS
         is Action.Wait -> action.durationMs.coerceAtLeast(0)
         is Action.If -> maxOf(worstCaseBudgetMs(action.then), worstCaseBudgetMs(action.orElse))
         // Con maxIterationsVar il conteggio è ignoto a compile-time: worst-case = MAX_WHILE_ITERATIONS
@@ -1054,11 +1092,88 @@ class DraftValidator(
                     )
                 }
             }
+            is Action.Speak ->
+                validateRequiredText(action.text, MAX_SPEAK_LENGTH, "speak_text_invalid", err)
+            is Action.MediaControl -> Unit // MediaCommand è un enum chiuso: nulla da validare
+            is Action.SetBrightness -> {
+                // ESATTAMENTE UNO tra level (0..100) e auto.
+                if ((action.level == null) == (action.auto == null)) {
+                    err("brightness_spec", "set_brightness richiede esattamente uno tra level e auto")
+                } else if (action.level != null && action.level !in 0..MAX_BRIGHTNESS_LEVEL) {
+                    err("brightness_level_invalid", "Luminosità fuori intervallo: 0..$MAX_BRIGHTNESS_LEVEL")
+                }
+            }
+            is Action.SetRotation -> Unit // solo booleano, nulla da validare
+            is Action.HttpRequest -> validateHttpRequest(action, err)
             is Action.InvokeLlm -> validateInvokeLlm(action, trigger, whitelist, err, warn)
             is Action.InvokeLlmV2 -> validateInvokeLlmV2(action, trigger, whitelist, err, warn)
             // Contenitori control-flow: bound (while), rami non vuoti, condizione di flusso e
             // ricorsione sono gestiti da walkActions (che ha lo scope var). Qui nessun campo foglia.
             is Action.If, is Action.While -> Unit
+        }
+    }
+
+    /**
+     * `http_request` (0.4.1). URL e intestazioni sono LETTERALI: un segnaposto lì è un errore, perché i
+     * dati esterni possono entrare solo nel body. https obbligatorio (http solo verso loopback),
+     * nessun userinfo; al massimo 10 intestazioni con nomi validi, senza `Host`, `Content-Length`,
+     * `Transfer-Encoding`, `Connection`; body fino a 16 KB. Le stesse regole valgono a runtime
+     * ([HttpRequestPolicy.isResolvedShapeValid]).
+     */
+    private fun validateHttpRequest(action: Action.HttpRequest, err: (String, String) -> Unit) {
+        if (InterpolationPolicy.containsInterpolation(action.url)) {
+            err("http_url_interpolated", "L'URL della richiesta HTTP è letterale: niente \${…}")
+        } else if (!HttpRequestPolicy.isUrlAllowed(action.url)) {
+            err(
+                "http_url_invalid",
+                "URL non valido: serve https:// (http:// solo per localhost), senza utente:password",
+            )
+        }
+
+        val headers = action.headers.orEmpty()
+        if (headers.size > HttpRequestPolicy.MAX_HEADERS) {
+            err("http_headers_too_many", "Massimo ${HttpRequestPolicy.MAX_HEADERS} intestazioni")
+        }
+        val interpolated = headers.any { (name, value) ->
+            InterpolationPolicy.containsInterpolation(name) || InterpolationPolicy.containsInterpolation(value)
+        }
+        if (interpolated) {
+            err("http_header_interpolated", "Le intestazioni sono letterali: niente \${…}")
+        } else {
+            val lowerNames = headers.keys.map { it.lowercase(java.util.Locale.ROOT) }
+            val invalid = headers.any { (name, value) ->
+                !HttpRequestPolicy.isHeaderNameValid(name) ||
+                    HttpRequestPolicy.isHeaderNameForbidden(name) ||
+                    !HttpRequestPolicy.isHeaderValueValid(value)
+            }
+            if (invalid || lowerNames.size != lowerNames.toSet().size) {
+                err(
+                    "http_header_invalid",
+                    "Intestazione non valida (nome, valore vuoto o con caratteri di controllo, " +
+                        "duplicata, o vietata: Host, Content-Length, Transfer-Encoding, Connection)",
+                )
+            }
+        }
+
+        action.contentType?.let { contentType ->
+            if (InterpolationPolicy.containsInterpolation(contentType) ||
+                !HttpRequestPolicy.isContentTypeValid(contentType)
+            ) {
+                err("http_content_type_invalid", "Content type non valido")
+            }
+        }
+        if (HttpRequestPolicy.contentTypeConflicts(action)) {
+            err("http_content_type_invalid", "Il content type e l'intestazione Content-Type sono diversi")
+        }
+
+        val body = action.body
+        if (body != null) {
+            if (action.method == HttpMethod.GET) {
+                err("http_body_not_allowed", "Una richiesta GET non ha body")
+            }
+            if (HttpRequestPolicy.bodyBytes(body) > HttpRequestPolicy.MAX_BODY_BYTES) {
+                err("http_body_too_large", "Body oltre ${HttpRequestPolicy.MAX_BODY_BYTES} byte")
+            }
         }
     }
 

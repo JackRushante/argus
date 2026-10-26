@@ -35,6 +35,7 @@ import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Sms
 import androidx.compose.material.icons.rounded.PrivacyTip
 import androidx.compose.material.icons.rounded.RestartAlt
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -256,6 +257,17 @@ private fun HealthSection(state: SettingsState, callbacks: SettingsCallbacks) {
                 },
                 if (state.exactAlarmsGranted) HealthLevel.OK else HealthLevel.WARN,
                 onFix = callbacks::onOpenExactAlarmFix,
+            )
+            // 0.4.1: permesso speciale per le azioni luminosità e rotazione (Android lo concede solo da qui).
+            HealthRow(
+                Icons.Rounded.Settings, stringResource(R.string.act41_settings_write_title),
+                if (state.writeSettingsGranted) {
+                    stringResource(R.string.act41_settings_write_ok)
+                } else {
+                    stringResource(R.string.act41_settings_write_warn)
+                },
+                if (state.writeSettingsGranted) HealthLevel.OK else HealthLevel.WARN,
+                onFix = callbacks::onOpenWriteSettingsFix,
             )
             HealthRow(
                 Icons.Rounded.Notifications, stringResource(R.string.settings_notifications_title),
@@ -1088,4 +1100,10 @@ private fun SettingsRestrictedHintPreview() {
 @Composable
 private fun SettingsExactAlarmsDeniedPreview() {
     ArgusTheme { SettingsScreen(Fixtures.settingsExactAlarmsDenied, NoopSettingsCallbacks) }
+}
+
+@Preview(name = "Sistema · modifica impostazioni di sistema non concessa (CTA)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 1100)
+@Composable
+private fun SettingsWriteSettingsDeniedPreview() {
+    ArgusTheme { SettingsScreen(Fixtures.settingsWriteSettingsDenied, NoopSettingsCallbacks) }
 }

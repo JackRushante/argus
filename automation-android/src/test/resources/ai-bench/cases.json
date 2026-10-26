@@ -1752,5 +1752,196 @@
    "conditions_text": ["battery", "\\b25\\b"]
   },
   "note": "0.4.0: senza Shizuku la batteria si legge con le API pubbliche; la soglia va con state_equals LT, non con state_compare (solo Shizuku)"
+ },
+ {
+  "id": "act41.speak.it.01",
+  "category": "action",
+  "lang": "it",
+  "text": "Quando ricevo un SMS leggimelo ad alta voce",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "phone_state", "event": "SMS_RECEIVED"},
+   "actions_include": ["speak"],
+   "vars": ["trigger_payload"],
+   "actions_text": ["\\$\\{[a-z][a-z0-9_]*\\}"]
+  },
+  "note": "Il testo letto è il messaggio: serve la variabile del payload, non un testo fisso"
+ },
+ {
+  "id": "act41.speak.en.01",
+  "category": "action",
+  "lang": "en",
+  "text": "Every day at 7:30 AM read aloud: good morning, time to get up",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "time", "cron": {"present": true}, "at": {"present": false}, "afterMs": {"present": false}},
+   "cron_fires": ["2026-11-02T07:30", "2026-11-05T07:30"],
+   "cron_silent": ["2026-11-02T19:30", "2026-11-02T07:00"],
+   "actions_include": ["speak"],
+   "params": {"speak.text": {"contains": "good morning"}}
+  }
+ },
+ {
+  "id": "act41.media.it.01",
+  "category": "action",
+  "lang": "it",
+  "text": "Quando mi collego al Bluetooth Auto premi play sul lettore multimediale",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "connectivity", "medium": "BT", "state": "CONNECTED", "match": {"contains": "Auto"}},
+   "actions_include": ["media_control"],
+   "params": {"media_control.command": ["PLAY", "PLAY_PAUSE"]}
+  }
+ },
+ {
+  "id": "act41.media.en.01",
+  "category": "action",
+  "lang": "en",
+  "text": "Right now skip to the next track",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "immediate"},
+   "actions_include": ["media_control"],
+   "params": {"media_control.command": "NEXT"}
+  }
+ },
+ {
+  "id": "act41.media.en.02",
+  "category": "action",
+  "lang": "en",
+  "text": "Every night at 11 PM pause the music",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "time", "cron": {"present": true}, "at": {"present": false}, "afterMs": {"present": false}},
+   "cron_fires": ["2026-11-02T23:00", "2026-11-06T23:00"],
+   "cron_silent": ["2026-11-02T11:00"],
+   "actions_include": ["media_control"],
+   "params": {"media_control.command": ["PAUSE", "PLAY_PAUSE"]}
+  },
+  "note": "PM: 23:00, non 11:00"
+ },
+ {
+  "id": "act41.brightness.it.01",
+  "category": "action",
+  "lang": "it",
+  "text": "Metti subito la luminosità dello schermo al 30%",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "immediate"},
+   "actions_include": ["set_brightness"],
+   "params": {"set_brightness.level": 30}
+  },
+  "note": "La luminosità è la percentuale 0-100 di set_brightness, non write_setting"
+ },
+ {
+  "id": "act41.brightness.en.01",
+  "category": "action",
+  "lang": "en",
+  "text": "Every day at 8 PM turn on automatic brightness",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "time", "cron": {"present": true}, "at": {"present": false}, "afterMs": {"present": false}},
+   "cron_fires": ["2026-11-02T20:00", "2026-11-04T20:00"],
+   "cron_silent": ["2026-11-02T08:00"],
+   "actions_include": ["set_brightness"],
+   "params": {"set_brightness.auto": true}
+  }
+ },
+ {
+  "id": "act41.rotation.it.01",
+  "category": "action",
+  "lang": "it",
+  "text": "Disattiva subito la rotazione automatica dello schermo",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "immediate"},
+   "actions_include": ["set_rotation"],
+   "params": {"set_rotation.auto": false}
+  }
+ },
+ {
+  "id": "act41.rotation.en.01",
+  "category": "action",
+  "lang": "en",
+  "text": "When I connect to the Wi-Fi Home, turn on the screen auto-rotate",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "connectivity", "medium": "WIFI", "state": "CONNECTED", "match": {"contains": "Home"}},
+   "actions_include": ["set_rotation"],
+   "params": {"set_rotation.auto": true}
+  }
+ },
+ {
+  "id": "act41.http.it.01",
+  "category": "action",
+  "lang": "it",
+  "text": "Ogni giorno alle 9 fai una richiesta GET a https://example.org/api/ping",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "time", "cron": {"present": true}, "at": {"present": false}, "afterMs": {"present": false}},
+   "cron_fires": ["2026-11-02T09:00", "2026-11-06T09:00"],
+   "cron_silent": ["2026-11-02T21:00"],
+   "actions_include": ["http_request"],
+   "params": {"http_request.method": "GET", "http_request.url": {"contains": "example.org/api/ping"}}
+  }
+ },
+ {
+  "id": "act41.http.en.01",
+  "category": "action",
+  "lang": "en",
+  "text": "When I get an SMS, POST its text as JSON to https://example.org/hook",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "phone_state", "event": "SMS_RECEIVED"},
+   "actions_include": ["http_request"],
+   "vars": ["trigger_payload"],
+   "params": {
+    "http_request.method": "POST",
+    "http_request.url": {"contains": "example.org/hook"},
+    "http_request.body": {"regex": "\\$\\{[a-z][a-z0-9_]*\\}"}
+   }
+  },
+  "note": "La variabile va solo nel body, dentro una stringa JSON tra virgolette; l'URL resta fisso"
+ },
+ {
+  "id": "act41.http.it.02",
+  "category": "action",
+  "lang": "it",
+  "text": "Adesso manda una POST a https://example.org/webhook con l'intestazione Authorization: Bearer abc123token e corpo {\"ok\":true}",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "immediate"},
+   "actions_include": ["http_request"],
+   "params": {
+    "http_request.method": "POST",
+    "http_request.url": {"contains": "example.org/webhook"},
+    "http_request.headers": {"contains": "abc123token"},
+    "http_request.body": {"contains": "ok"}
+   }
+  },
+  "note": "Il token dettato va nell'intestazione così com'è"
+ },
+ {
+  "id": "act41.http.en.02",
+  "category": "action",
+  "lang": "en",
+  "text": "Every hour call http://example.org/status with a GET",
+  "expect": {
+   "outcome": ["draft", "clarification"],
+   "trigger": {"type": "time", "cron": {"present": true}, "at": {"present": false}, "afterMs": {"present": false}},
+   "actions_include": ["http_request"],
+   "params": {"http_request.url": {"regex": "^https://"}}
+  },
+  "note": "Solo https (http solo per localhost): o passa a https o chiede, mai http verso un host pubblico"
+ },
+ {
+  "id": "clar.http.it.01",
+  "category": "clarification",
+  "lang": "it",
+  "text": "Quando esco di casa manda una richiesta HTTP al mio server",
+  "expect": {
+   "outcome": "clarification"
+  },
+  "note": "Manca l'indirizzo: il modello non deve inventare un URL"
  }
 ]

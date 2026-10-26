@@ -348,4 +348,8 @@
     <string name="ui40_secret_error_long">Too long (at most %1$d characters)</string>
     <string name="ui40_secret_error_chars">Only visible characters, no spaces</string>
     <string name="ui40_model_error_empty">Enter the model name</string>
+    <!-- 0.4.1 (azioni): permesso speciale per luminosità e rotazione. -->
+    <string name="act41_settings_write_title">Modify system settings</string>
+    <string name="act41_settings_write_ok">granted: rules can change the screen brightness and rotation</string>
+    <string name="act41_settings_write_warn">not granted: rules that set the brightness or the rotation cannot run</string>
 </resources>

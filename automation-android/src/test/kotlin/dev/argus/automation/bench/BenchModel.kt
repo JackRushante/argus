@@ -83,6 +83,11 @@ internal object BenchVocab {
         ActionTypeIds.WAIT,
         ActionTypeIds.IF,
         ActionTypeIds.WHILE,
+        ActionTypeIds.SPEAK,
+        ActionTypeIds.MEDIA_CONTROL,
+        ActionTypeIds.SET_BRIGHTNESS,
+        ActionTypeIds.SET_ROTATION,
+        ActionTypeIds.HTTP_REQUEST,
     )
 
     val CONDITION_TYPES: Set<String> = setOf(

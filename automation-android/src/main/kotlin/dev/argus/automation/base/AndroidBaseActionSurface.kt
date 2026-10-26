@@ -149,20 +149,6 @@ class AndroidBaseActionSurface(
         VolumeStream.NOTIFICATION -> AudioManager.STREAM_NOTIFICATION
     }
 
-    /** Enum CHIUSO → Intent Settings.ACTION_* fisso: nessuna action-string arbitraria (no routing-sink). */
-    private fun settingsIntent(screen: SettingsScreen, pkg: String?): Intent = when (screen) {
-        SettingsScreen.WIFI -> Intent(Settings.ACTION_WIFI_SETTINGS)
-        SettingsScreen.BLUETOOTH -> Intent(Settings.ACTION_BLUETOOTH_SETTINGS)
-        SettingsScreen.DISPLAY -> Intent(Settings.ACTION_DISPLAY_SETTINGS)
-        SettingsScreen.SOUND -> Intent(Settings.ACTION_SOUND_SETTINGS)
-        SettingsScreen.LOCATION -> Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
-        SettingsScreen.BATTERY -> Intent(Intent.ACTION_POWER_USAGE_SUMMARY)
-        SettingsScreen.DATE -> Intent(Settings.ACTION_DATE_SETTINGS)
-        SettingsScreen.APP_DETAILS -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-            .setData(Uri.fromParts("package", pkg.orEmpty(), null))
-        SettingsScreen.SETTINGS -> Intent(Settings.ACTION_SETTINGS)
-    }
-
     private fun vibrator(): Vibrator? =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             appContext.getSystemService(VibratorManager::class.java)?.defaultVibrator
@@ -198,6 +184,20 @@ class AndroidBaseActionSurface(
             throw ActivityStartBlockedException(error)
         }
     }
+}
+
+/** Enum CHIUSO → Intent Settings.ACTION_* fisso: nessuna action-string arbitraria (no routing-sink). */
+internal fun settingsIntent(screen: SettingsScreen, pkg: String?): Intent = when (screen) {
+    SettingsScreen.WIFI -> Intent(Settings.ACTION_WIFI_SETTINGS)
+    SettingsScreen.BLUETOOTH -> Intent(Settings.ACTION_BLUETOOTH_SETTINGS)
+    SettingsScreen.DISPLAY -> Intent(Settings.ACTION_DISPLAY_SETTINGS)
+    SettingsScreen.SOUND -> Intent(Settings.ACTION_SOUND_SETTINGS)
+    SettingsScreen.LOCATION -> Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+    SettingsScreen.BATTERY -> Intent(Intent.ACTION_POWER_USAGE_SUMMARY)
+    SettingsScreen.DATE -> Intent(Settings.ACTION_DATE_SETTINGS)
+    SettingsScreen.APP_DETAILS -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+        .setData(Uri.fromParts("package", pkg.orEmpty(), null))
+    SettingsScreen.SETTINGS -> Intent(Settings.ACTION_SETTINGS)
 }
 
 /** Filtro di interruzione di Android → modalita' Non disturbare; solo-sveglie e sconosciuto = `null`. */

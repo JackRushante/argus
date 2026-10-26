@@ -377,6 +377,12 @@ data class SettingsState(
      * Default `true`: il permesso non esiste sotto Android 12 e un fixture non deve avvisare per caso.
      */
     val exactAlarmsGranted: Boolean = true,
+    /**
+     * 0.4.1: Android concede ad Argus «Modifica impostazioni di sistema» (`WRITE_SETTINGS`), il permesso
+     * speciale che serve alle azioni luminosità e rotazione dello schermo. Si concede solo dalle
+     * impostazioni di sistema. Default `true`: un fixture non deve avvisare per caso.
+     */
+    val writeSettingsGranted: Boolean = true,
     /** Permesso di PUBBLICARE notifiche (esiti/avvisi Argus). */
     val notificationsGranted: Boolean,
     /** Accesso notification listener: lettura notifiche WhatsApp e canale di reply (P1). */
@@ -529,6 +535,8 @@ interface SettingsCallbacks {
     fun onOpenBatteryFix(); fun onOpenNotificationAccessFix(); fun onOpenLocationFix()
     /** Apre «Sveglie e promemoria» per concedere le sveglie esatte (0.3.6). Default no-op. */
     fun onOpenExactAlarmFix() {}
+    /** Apre «Modifica impostazioni di sistema» per Argus (0.4.1: luminosità e rotazione). Default no-op. */
+    fun onOpenWriteSettingsFix() {}
     /** Apre le impostazioni di sistema per l'accesso notification listener (lettura, P1). */
     fun onOpenNotificationListenerFix() {}
     /** Richieste runtime dei trigger telefonia (P2-2): RECEIVE_SMS e READ_PHONE_STATE(+CALL_LOG). */
