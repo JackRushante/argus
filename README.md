@@ -127,11 +127,16 @@ The names below are the model's real wire discriminators (`engine-core`).
 
 | Trigger | Main parameters | Notes |
 |---|---|---|
-| `time` | exactly one of `cron` (recurring), `at` (local ISO datetime, one-shot) and `afterMs` (relative delay, one-shot); `tz`; `precision` `FLEXIBLE\|EXACT` | Cron with DST handling in engine-core. `afterMs` ("in 2 minutes…") schedules exact by default. |
+| `time` | exactly one of `cron` (recurring), `at` (local ISO datetime, one-shot), `afterMs` (relative delay, one-shot) and `solar` (`event` `SUNRISE\|SUNSET`, `offsetMinutes` −720…720); `tz`; `precision` `FLEXIBLE\|EXACT` | Cron with DST handling in engine-core. `afterMs` ("in 2 minutes…") schedules exact by default. Sunrise and sunset are computed on the phone, without network, for the phone's position: Argus reads it when you arm the rule and rounds it to 0.1° (about 11 km), and it never goes through the LLM. |
 | `immediate` | — | Fires once when the rule is armed. Used for "right now" one-shots without racing the clock. |
 | `notification` | `pkg`, `conversationId` (stable key, preferred), `sender` (spoofable fallback ⇒ WARNING), `isGroup`, `titleMatch`, `textMatch` | Used for WhatsApp; generative replies require 1:1 chats (`isGroup=false`) and `conversationId`. |
-| `phone_state` | `event` `INCOMING_CALL\|CALL_ENDED\|SMS_RECEIVED`, `number`, `textMatch` (SMS only) | Sender/caller ID are considered **spoofable**: never allowed to trigger shell. |
+| `phone_state` | `event` `INCOMING_CALL\|CALL_ENDED\|MISSED_CALL\|SMS_RECEIVED`, `number`, `textMatch` (SMS only), `sim` `1\|2` (dual-SIM phones only) | Sender/caller ID are considered **spoofable**: never allowed to trigger shell. |
 | `connectivity` | `medium` `WIFI\|BT\|POWER`, `state` `CONNECTED\|DISCONNECTED`, `match` (e.g. SSID/device name) | POWER = power supply connected/disconnected. |
+| `screen` | `event` `ON\|OFF\|UNLOCKED` | No permission. |
+| `battery` | exactly one of `below` and `above` (1–99 %) | Fires when the level crosses the threshold, once per crossing. A battery level as a *condition* is `state_equals` on `battery`. |
+| `audio_output` | `kind` `WIRED\|BLUETOOTH\|ANY`, `state` `CONNECTED\|DISCONNECTED` | Headphones and speakers. No permission. |
+| `mode_changed` | `what` `DND\|RINGER`, `to` (`off\|priority\|total` or `normal\|vibrate\|silent`; empty = any change) | No permission. |
+| `media` | `state` `PLAYING\|STOPPED` | Any app or web page can start playback, so it never triggers shell. |
 | `geofence` | `lat`/`lng`/`radiusM`, `transition` `ENTER\|EXIT`, `resolveCurrentLocation` | `DWELL`/loitering are represented by the model for compatibility but rejected by the current runtime. With `resolveCurrentLocation=true`, coordinates are resolved locally at arm time and never pass through the LLM. |
 | `sensor` | `kind` `significant_motion\|stationary_detect\|motion_detect\|step_detector\|step_counter`, `minimumEventCount` | The domain reserves these low-rate families, but the production backend currently arms only `significant_motion` when the device supports it. Other kinds remain unavailable until they have dedicated backends. Minimum cooldown 60 s. |
 
@@ -167,12 +172,16 @@ program tree and fingerprint do not.
 | `set_dnd` | DND `off\|priority\|total` | Base ("Do Not Disturb" access) |
 | `set_ringer` | Ringer normal/vibrate/silent | Base |
 | `set_volume` | Per-stream volume (`MEDIA\|RING\|ALARM\|NOTIFICATION`), percentage 0–100 | Base |
-| `launch_app` / `open_url` | Launches an app / opens a URL | Base (reliable from the background only with Shizuku) |
-| `open_settings_screen` | Opens a Settings screen from a **closed enum** (never arbitrary action strings) | Base |
+| `launch_app` / `open_url` | Launches an app / opens a URL | Base (from the background reliable only with Shizuku; without it Argus posts a "Tap to open" notification) |
+| `open_settings_screen` | Opens a Settings screen from a **closed enum** (never arbitrary action strings) | Base (same background rule) |
 | `show_notification` | Local Argus notification | Base |
 | `set_alarm` / `set_timer` | **Real** clock-app alarm/timer via the `AlarmClock` Intent | Base |
 | `copy_to_clipboard` / `copy_text` | Copies the trigger payload (optionally through a linear regex) or resolved literal/variable text. The OTP path is local; Argus schedules compare-and-clear of its unchanged clip after 60 seconds (process-local) | Base |
 | `set_flashlight` / `vibrate` | Flashlight on/off, one-shot vibration | Base |
+| `speak` | Reads a text aloud with the phone's text-to-speech engine (up to 1000 characters; P4 `${var}` allowed) | Base |
+| `media_control` | Media key `PLAY\|PAUSE\|PLAY_PAUSE\|NEXT\|PREVIOUS` for the app that is playing | Base |
+| `set_brightness` / `set_rotation` | Screen brightness `level` 0–100 (switches to manual) or `auto`; auto-rotate on/off | Base ("Modify system settings" access) |
+| `http_request` | `GET\|POST\|PUT\|DELETE` to a fixed https URL with fixed headers. External data enters only the body, escaped (inside JSON strings, or form-encoded); redirects only to the same host; 15 s timeout. Approval shows method and URL in full and masks secret headers; the Log keeps only the status code | Base |
 | `set_dark_mode` | Light/dark/automatic system theme; accepts the lowercase compiler wire and legacy persisted uppercase values | Shizuku |
 | `whatsapp_reply` | WhatsApp reply via the notification's RemoteInput | Base (notification listener) |
 | `run_shell` | Shell command template, shown in full at approval; external data enters only as one quoted argument | Shizuku |
@@ -272,14 +281,15 @@ Argus degrades explicitly: the onboarding shows an honest list of what depends o
 | SMS / phone state / call log | `phone_state` trigger | telephony rules (separate opt-in) |
 | Nearby Bluetooth (`BLUETOOTH_CONNECT`) | BT connectivity trigger | BT rules |
 | "Do Not Disturb" access | `set_dnd`, muting via volume | DND rules |
+| "Modify system settings" (`WRITE_SETTINGS`) | `set_brightness`, `set_rotation` | brightness and rotation rules ("Fix" in System) |
 | Battery optimization exemption | reliability on aggressive OEMs | recommended |
 
 ### With and without Shizuku
 
 | Tier | What it covers |
 |---|---|
-| **Base (no Shizuku)** | volume, ringer, DND, flashlight, vibration, notifications, clipboard/OTP, real alarms and timers, WhatsApp replies, generative actions, all triggers, state conditions (battery, charging, screen, ringer, DND, Wi-Fi, airplane mode; Bluetooth with the Bluetooth permission on Android 12+) |
-| **Degraded without Shizuku** | `launch_app`, `open_url`, `open_settings_screen`, alarm/timer **from a rule in the background** (Android restricts activity starts from the background: with Shizuku they go through `am start`, without it they only start while the app is in the foreground) |
+| **Base (no Shizuku)** | volume, ringer, DND, flashlight, vibration, notifications, clipboard/OTP, real alarms and timers, WhatsApp replies, generative actions, speech, media keys, HTTP requests, brightness and rotation (with "Modify system settings" access), all triggers, state conditions (battery, charging, screen, ringer, DND, Wi-Fi, airplane mode; Bluetooth with the Bluetooth permission on Android 12+) |
+| **Degraded without Shizuku** | `launch_app`, `open_url`, `open_settings_screen`, alarm/timer **from a rule in the background** (Android restricts activity starts from the background: with Shizuku they go through `am start`; without it they start while the app is in the foreground, and an app, link or Settings screen otherwise becomes a "Tap to open" notification) |
 | **Shizuku only** | Wi-Fi/Bluetooth/mobile-data toggles, dark mode, `run_shell`, `write_setting`, privileged state readers (`setting`, `system_property`, `sysfs`, `dumpsys_field`, foreground app) |
 
 Note: on non-rooted devices Shizuku must be started via ADB and **does not survive a reboot**; Argus detects this and degrades fail-closed (the privileged action is never executed late), guiding you through recovery.
