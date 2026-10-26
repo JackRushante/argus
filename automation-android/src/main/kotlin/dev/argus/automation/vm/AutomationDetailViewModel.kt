@@ -12,6 +12,7 @@ import dev.argus.automation.ReconcileReason
 import dev.argus.automation.RenderLanguageSource
 import dev.argus.automation.TimeAlarmRuntime
 import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
+import dev.argus.automation.di.ApplicationScope
 import dev.argus.automation.geofence.GeofenceTriggerRuntime
 import dev.argus.data.ArgusDatabase
 import dev.argus.data.dao.AuditLogRecord
@@ -43,7 +44,9 @@ import dev.argus.ui.presentation.RuleRenderMapper
 import dev.argus.ui.presentation.RenderLanguage
 import dev.argus.ui.presentation.ValidationMessages
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -111,6 +114,11 @@ class AutomationDetailViewModel @Inject constructor(
     private val geofence: GeofenceTriggerRuntime,
     private val audit: AuditSink,
     private val languageSource: RenderLanguageSource,
+    /**
+     * B31: scope dei lavori che devono finire anche se l'utente esce dalla schermata (l'arm lo
+     * usa); nel ViewModel resta solo l'attesa del risultato.
+     */
+    @ApplicationScope private val applicationScope: CoroutineScope,
 ) : ViewModel() {
     private val routeId = requireNotNull(savedStateHandle.get<String>("id")) {
         "Dettaglio senza id"
@@ -217,7 +225,15 @@ class AutomationDetailViewModel @Inject constructor(
                         sources.conversationLabels,
                         sources.language,
                     )
-                    else -> DetailViewState(loading = false, missing = true)
+                    // B31: mentre arma/rifiuta/elimina è in corso la bozza o la regola scompare dalle
+                    // tabelle PRIMA che l'azione chiuda la schermata. Quel vuoto non è «regola non
+                    // disponibile»: si tiene l'ultimo stato valido (col footer disabilitato) fino al
+                    // Close. Senza un'azione in corso il vuoto è reale (bozza sostituita o rimossa).
+                    else -> if (actionInFlight.get() && mutableState.value.detail != null) {
+                        return@collectLatest
+                    } else {
+                        DetailViewState(loading = false, missing = true)
+                    }
                 }
                 // S3: se questo blocco viene annullato dentro draftState (nuova emissione) non si
                 // arriva qui, quindi displayedDraft resta quello che lo schermo mostra davvero.
@@ -257,9 +273,14 @@ class AutomationDetailViewModel @Inject constructor(
         val snapshot = displayedDraft ?: return
         runExclusive {
             try {
-                when (
-                    val result = approvals.arm(snapshot.id, snapshot.revision, snapshot.fingerprint)
-                ) {
+                // B31: l'arm (commit + registrazione degli allarmi/geofence) non deve essere
+                // interrotto dall'uscita dalla schermata, che cancella viewModelScope: girerebbe a
+                // metà e la regola resterebbe armata ma non registrata. Lo esegue lo scope
+                // applicativo; qui si aspetta soltanto il risultato.
+                val outcome = applicationScope.async {
+                    approvals.arm(snapshot.id, snapshot.revision, snapshot.fingerprint)
+                }.await()
+                when (val result = outcome) {
                     is FlowArmResult.Armed -> closeWith(
                         language.pick(
                             "Rule armed: ${result.automation.name}",
@@ -365,21 +386,24 @@ class AutomationDetailViewModel @Inject constructor(
         val automation = displayedAutomation ?: return
         viewModelScope.launch {
             try {
+                val startedAt = System.currentTimeMillis()
                 when (enablement.setEnabled(automation.id, enabled)) {
                     EnablementResult.Updated -> Unit
                     EnablementResult.ReviewRequired ->
                         message(
-                            language.pick(
-                                "The rule must be reviewed before it can be re-enabled.",
-                                "La regola deve essere rivista prima di essere riattivata.",
-                            ),
+                            failedEnableMessage(automation.id, enabled, startedAt)
+                                ?: language.pick(
+                                    "The rule must be reviewed before it can be re-enabled.",
+                                    "La regola deve essere rivista prima di essere riattivata.",
+                                ),
                         )
                     EnablementResult.SchedulingFailed ->
                         message(
-                            language.pick(
-                                "Scheduling failed: the rule remains disabled.",
-                                "Pianificazione non riuscita: la regola è rimasta disattivata.",
-                            ),
+                            failedEnableMessage(automation.id, enabled, startedAt)
+                                ?: language.pick(
+                                    "Scheduling failed: the rule remains disabled.",
+                                    "Pianificazione non riuscita: la regola è rimasta disattivata.",
+                                ),
                         )
                     EnablementResult.DisableCleanupDeferred ->
                         message(
@@ -396,6 +420,16 @@ class AutomationDetailViewModel @Inject constructor(
             }
         }
     }
+
+    /**
+     * B31: una riattivazione fallita per un motivo noto (oggi: una tantum con l'orario già passato)
+     * dice cosa fare invece del messaggio generico. Solo la riattivazione può avere un motivo.
+     */
+    private suspend fun failedEnableMessage(
+        id: AutomationId,
+        enabled: Boolean,
+        startedAt: Long,
+    ): String? = if (enabled) enableFailureMessage(database, id, startedAt, language) else null
 
     fun onDelete() {
         val automation = displayedAutomation ?: return
@@ -595,7 +629,13 @@ class AutomationDetailViewModel @Inject constructor(
         .take(RECENT_RUN_LIMIT)
         .map { record ->
             val actions = record.executionId?.let(actionsByExecution::get).orEmpty()
-            record.toLogRow(actions, language)
+            val row = record.toLogRow(actions, language)
+            // B31: nel Dettaglio il motivo dice cosa fare, non solo che è fallito.
+            if (record.kind == AuditKind.ENABLE_FAILED && record.detail == ONE_SHOT_IN_PAST) {
+                row.copy(summary = oneShotInPastText(language))
+            } else {
+                row
+            }
         }
         .toList()
 

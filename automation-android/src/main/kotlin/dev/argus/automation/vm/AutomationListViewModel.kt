@@ -50,7 +50,7 @@ class AutomationListViewModel @Inject constructor(
     private val approvals: ApprovalFlow,
     private val enablement: AutomationEnablementCoordinator,
     shizuku: ShizukuGateway,
-    database: ArgusDatabase,
+    private val database: ArgusDatabase,
     whitelist: ContactWhitelistStore,
     private val savedStateHandle: SavedStateHandle,
     @ApplicationContext private val context: Context,
@@ -149,19 +149,22 @@ class AutomationListViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val automationId = AutomationId(id)
+                val startedAt = System.currentTimeMillis()
                 when (enablement.setEnabled(automationId, enabled)) {
                     EnablementResult.Updated -> Unit
                     EnablementResult.ReviewRequired -> mutableMessages.emit(
-                        language.pick(
-                            "The rule changed and must be reviewed before re-enabling it.",
-                            "La regola è cambiata e va rivista prima di riattivarla.",
-                        ),
+                        failedEnableMessage(automationId, enabled, startedAt)
+                            ?: language.pick(
+                                "The rule changed and must be reviewed before re-enabling it.",
+                                "La regola è cambiata e va rivista prima di riattivarla.",
+                            ),
                     )
                     EnablementResult.SchedulingFailed -> mutableMessages.emit(
-                        language.pick(
-                            "Scheduling failed: the rule remains disabled.",
-                            "Pianificazione non riuscita: la regola è rimasta disattivata.",
-                        ),
+                        failedEnableMessage(automationId, enabled, startedAt)
+                            ?: language.pick(
+                                "Scheduling failed: the rule remains disabled.",
+                                "Pianificazione non riuscita: la regola è rimasta disattivata.",
+                            ),
                     )
                     EnablementResult.DisableCleanupDeferred -> mutableMessages.emit(
                         language.pick(
@@ -179,6 +182,13 @@ class AutomationListViewModel @Inject constructor(
             }
         }
     }
+
+    /** B31: una riattivazione fallita per un motivo noto dice cosa fare invece del messaggio generico. */
+    private suspend fun failedEnableMessage(
+        id: AutomationId,
+        enabled: Boolean,
+        startedAt: Long,
+    ): String? = if (enabled) enableFailureMessage(database, id, startedAt, language) else null
 
     private fun engineBanner(
         shizukuStatus: ShizukuGatewayStatus,

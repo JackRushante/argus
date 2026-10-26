@@ -217,6 +217,25 @@ class AutomationListViewModelTest {
         }
     }
 
+    @Test
+    fun `re-enabling a one shot rule whose time has passed says what to do`() = runTest {
+        val rule = armedRule("os1")
+        store.disable(rule.id)
+        val viewModel = viewModel(scheduler = EnableFailingScheduler(db, "os1", ONE_SHOT_IN_PAST))
+        val messages = mutableListOf<String>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.messages.collect(messages::add)
+        }
+
+        viewModel.onToggleEnabled("os1", true)
+        awaitUntil("messaggio") { messages.isNotEmpty() }
+
+        assertEquals(
+            listOf("This rule's time has already passed: edit it to choose a new time."),
+            messages,
+        )
+    }
+
     // --- helpers -------------------------------------------------------------------------------------
 
     private fun newDraft(id: String) = NewDraft(
@@ -252,6 +271,7 @@ class AutomationListViewModelTest {
 
     private fun viewModel(
         languageSource: RenderLanguageSource = RenderLanguageSource { RenderLanguage.EN },
+        scheduler: TimeAlarmRuntime = ListNoopTimeAlarmRuntime(),
     ): AutomationListViewModel {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val whitelist = RoomContactWhitelistStore(db.contactWhitelistDao())
@@ -274,7 +294,7 @@ class AutomationListViewModelTest {
             store = store,
             drafts = repository,
             approvals = approvals,
-            enablement = AutomationEnablementCoordinator(store, ListNoopTimeAlarmRuntime()),
+            enablement = AutomationEnablementCoordinator(store, scheduler),
             shizuku = ShizukuGateway(context),
             database = db,
             whitelist = whitelist,
