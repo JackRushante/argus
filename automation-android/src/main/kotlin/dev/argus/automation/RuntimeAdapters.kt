@@ -14,6 +14,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import dev.argus.device.StateReader
 import dev.argus.device.ParametricStateReader
+import dev.argus.device.PublicStateReader
 import dev.argus.automation.connectivity.ConnectivityEventDispatcher
 import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
 import dev.argus.automation.connectivity.NoopConnectivityTriggerRuntime
@@ -63,30 +64,44 @@ fun interface DeviceStateSnapshotProvider {
     suspend fun current(request: StateReadRequest): DeviceState = request.project(current())
 }
 
+/**
+ * Compone lo stato del device per l'Engine, leggendo solo ciò che la richiesta chiede.
+ *
+ * Le 8 chiavi di [dev.argus.engine.model.StateKeys] si leggono prima con le API pubbliche di Android
+ * ([PublicStateReader]: nessun processo, nessun privilegio), con o senza Shizuku. Lo shell Shizuku
+ * resta per ciò che le API pubbliche non danno: l'app in primo piano, i lettori parametrici e le
+ * chiavi che il lettore pubblico non ha saputo leggere (per esempio il Bluetooth senza il permesso
+ * `BLUETOOTH_CONNECT`). Una chiave che nessuno dei due legge resta assente: mai un valore inventato.
+ */
 class LazyDeviceStateProvider(
     private val reader: StateReader,
     private val shizukuStatus: () -> ShizukuGatewayStatus,
     private val location: CurrentLocationProvider,
     private val parametricReader: ParametricStateReader? = null,
+    private val publicReader: PublicStateReader? = null,
 ) : DeviceStateSnapshotProvider {
     constructor(
         reader: StateReader,
         shizuku: ShizukuGateway,
         location: CurrentLocationProvider,
         parametricReader: ParametricStateReader,
-    ) : this(reader, shizuku::status, location, parametricReader)
+        publicReader: PublicStateReader? = null,
+    ) : this(reader, shizuku::status, location, parametricReader, publicReader)
 
     override suspend fun current(): DeviceState = current(StateReadRequest.LEGACY_GENERATIVE)
 
     override suspend fun current(request: StateReadRequest): DeviceState {
         if (request.isEmpty) return DeviceState()
-        val needsPrivilegedState = request.keys.isNotEmpty() || request.includeForegroundApp ||
+        val publicValues = readPublic(request.keys)
+        // Solo ciò che le API pubbliche non hanno dato passa dallo shell, e solo con Shizuku autorizzato.
+        val privilegedKeys = request.keys - publicValues.keys
+        val needsPrivilegedState = privilegedKeys.isNotEmpty() || request.includeForegroundApp ||
             request.queries.isNotEmpty()
         val authorized = needsPrivilegedState &&
             runCatching { shizukuStatus() == ShizukuGatewayStatus.AUTHORIZED }.getOrDefault(false)
-        val privileged = if (authorized && (request.keys.isNotEmpty() || request.includeForegroundApp)) {
+        val privileged = if (authorized && (privilegedKeys.isNotEmpty() || request.includeForegroundApp)) {
             try {
-                reader.read(request.keys, request.includeForegroundApp)
+                reader.read(privilegedKeys, request.includeForegroundApp)
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
@@ -119,7 +134,24 @@ class LazyDeviceStateProvider(
         } else {
             null
         }
-        return request.project(privileged.copy(location = point, queryValues = queryValues))
+        return request.project(
+            privileged.copy(
+                values = publicValues + privileged.values,
+                location = point,
+                queryValues = queryValues,
+            ),
+        )
+    }
+
+    /** Lettura pubblica delle sole chiavi richieste; qualunque errore equivale a «non leggibile». */
+    private fun readPublic(keys: Set<String>): Map<String, String> {
+        val publicReader = publicReader ?: return emptyMap()
+        if (keys.isEmpty()) return emptyMap()
+        return try {
+            publicReader.read(keys)
+        } catch (_: Exception) {
+            emptyMap()
+        }
     }
 }
 

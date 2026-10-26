@@ -28,6 +28,9 @@ import dev.argus.engine.runtime.AuditKind
 import dev.argus.engine.runtime.AuditSink
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.runtime.DeviceState
+import dev.argus.engine.runtime.FirePolicyDecision
+import dev.argus.engine.runtime.RevalidatingFirePolicy
+import dev.argus.engine.runtime.TriggerEvent
 import dev.argus.engine.runtime.FireClaimRequest
 import dev.argus.engine.runtime.FireClaimResult
 import dev.argus.shizuku.ShizukuGatewayStatus
@@ -85,30 +88,115 @@ class AndroidCapabilityProbeTest {
 
     @Test
     fun `state keys are published only when their state capability is armable`() = runTest {
-        // Con Shizuku autorizzato le chiavi sono tutte, e ognuna ha la sua capacita' `state.<chiave>`.
+        // Con Shizuku autorizzato le chiavi sono tutte, e ognuna ha la sua capacita' `state.<chiave>`,
+        // anche il Bluetooth senza il permesso (lo shell e' il ripiego): invariato rispetto a prima.
         val authorized = probe(state())
         val full = authorized.probe(DeviceState())
         assertEquals(StateKeys.ALL, full.stateKeys)
         assertTrue(full.stateKeys.keys.all { CapabilityIds.state(it) in authorized.current().availableCapabilities })
 
-        // Senza Shizuku nessuna `state.<chiave>` e' armabile: il modello non deve vedere chiavi inutilizzabili
-        // (altrimenti propone `state_equals` che non si puo' armare).
+        // Senza Shizuku (mai installato, non autorizzato, fermo, versione vecchia) le chiavi si leggono
+        // con le API pubbliche: tutte e 8 col permesso Bluetooth, 7 senza. Ogni chiave pubblicata ha la
+        // sua capacita' armabile, quindi il modello non propone mai uno `state_equals` inarmabile.
         listOf(
             ShizukuGatewayStatus.NOT_INSTALLED to false,
             ShizukuGatewayStatus.RUNNING_NOT_AUTHORIZED to false,
             ShizukuGatewayStatus.INSTALLED_NOT_RUNNING to true,
+            ShizukuGatewayStatus.UNSUPPORTED to false,
         ).forEach { (status, granted) ->
-            val without = probe(
+            val withoutBluetooth = probe(
                 state().copy(shizukuStatus = status, shizukuPermissionGranted = granted),
-                baseTierActive = true,
             )
-            val manifest = without.probe(DeviceState())
-            assertEquals(emptyMap(), manifest.stateKeys, status.name)
+            val manifest = withoutBluetooth.probe(DeviceState())
+            assertEquals(StateKeys.ALL - StateKeys.BLUETOOTH, manifest.stateKeys, status.name)
             assertTrue(
-                manifest.stateKeys.keys.all { CapabilityIds.state(it) in without.current().availableCapabilities },
+                manifest.stateKeys.keys.all {
+                    CapabilityIds.state(it) in withoutBluetooth.current().availableCapabilities
+                },
                 status.name,
             )
+            assertFalse(
+                CapabilityIds.state(StateKeys.BLUETOOTH) in withoutBluetooth.current().availableCapabilities,
+                status.name,
+            )
+
+            val withBluetooth = probe(
+                state().copy(
+                    shizukuStatus = status,
+                    shizukuPermissionGranted = granted,
+                    bluetoothConnectGranted = true,
+                ),
+            )
+            assertEquals(StateKeys.ALL, withBluetooth.probe(DeviceState()).stateKeys, status.name)
         }
+    }
+
+    @Test
+    fun `public state does not publish anything else that needs Shizuku`() = runTest {
+        val snapshot = probe(
+            state().copy(
+                shizukuStatus = ShizukuGatewayStatus.NOT_INSTALLED,
+                shizukuPermissionGranted = false,
+                bluetoothConnectGranted = true,
+            ),
+        ).current()
+
+        // Le capacita' che restano solo Shizuku non cambiano.
+        listOf(
+            CapabilityIds.STATE_FOREGROUND_APP,
+            CapabilityIds.STATE_READER_BUILTIN,
+            CapabilityIds.STATE_READER_SETTING,
+            CapabilityIds.STATE_READER_SYSTEM_PROPERTY,
+            CapabilityIds.STATE_READER_SYSFS,
+            CapabilityIds.STATE_READER_DUMPSYS_FIELD,
+            ActionCapabilities.RUN_SHELL,
+            ActionCapabilities.SET_WIFI,
+            AndroidCapabilityProbe.TOOL_STATE_READ,
+        ).forEach { assertFalse(it in snapshot.availableCapabilities, it) }
+        assertTrue(AndroidCapabilityProbe.PUBLIC_STATE_CAPABILITIES.all { it in snapshot.availableCapabilities })
+        // E il banner «serve Shizuku» non scatta piu' per una regola che usa solo chiavi di stato.
+        assertTrue(
+            AndroidCapabilityProbe.SHIZUKU_CAPABILITIES.none {
+                it in AndroidCapabilityProbe.PUBLIC_STATE_CAPABILITIES
+            },
+        )
+        assertTrue(CapabilityIds.STATE_FOREGROUND_APP in AndroidCapabilityProbe.SHIZUKU_CAPABILITIES)
+    }
+
+    @Test
+    fun `the bluetooth state needs the connect permission on Android 12 and stays with Shizuku before`() = runTest {
+        val bluetooth = CapabilityIds.state(StateKeys.BLUETOOTH)
+        val noShizuku = state().copy(
+            shizukuStatus = ShizukuGatewayStatus.NOT_INSTALLED,
+            shizukuPermissionGranted = false,
+        )
+
+        // Android 12+: col permesso si legge in pubblico, senza no.
+        assertTrue(bluetooth in probe(noShizuku.copy(bluetoothConnectGranted = true)).current().availableCapabilities)
+        assertFalse(bluetooth in probe(noShizuku.copy(bluetoothConnectGranted = false)).current().availableCapabilities)
+        // Android 11: il permesso risulta «concesso» per costruzione, ma servirebbe BLUETOOTH (non
+        // dichiarato): la chiave non si pubblica in pubblico.
+        assertFalse(
+            bluetooth in probe(noShizuku.copy(androidApi = 30, bluetoothConnectGranted = true))
+                .current().availableCapabilities,
+        )
+        // Con Shizuku autorizzato resta armabile in ogni caso (come prima).
+        assertTrue(bluetooth in probe(state().copy(androidApi = 30)).current().availableCapabilities)
+        assertTrue(bluetooth in probe(state().copy(bluetoothConnectGranted = false)).current().availableCapabilities)
+    }
+
+    @Test
+    fun `a stopped Shizuku keeps the bluetooth state transient without the permission as before`() = runTest {
+        val stopped = probe(
+            state().copy(
+                shizukuStatus = ShizukuGatewayStatus.INSTALLED_NOT_RUNNING,
+                shizukuPermissionGranted = true,
+            ),
+        ).current()
+
+        val bluetooth = CapabilityIds.state(StateKeys.BLUETOOTH)
+        assertFalse(bluetooth in stopped.availableCapabilities)
+        assertTrue(bluetooth in stopped.transientlyUnavailableCapabilities)
     }
 
     @Test
@@ -951,11 +1039,129 @@ class AndroidCapabilityProbeTest {
             BlockCause.SHIZUKU_TOO_OLD,
             causes(ShizukuGatewayStatus.UNSUPPORTED)[ActionCapabilities.RUN_SHELL],
         )
-        // Anche i lettori di stato privilegiati dipendono da Shizuku.
+        // Anche i lettori di stato privilegiati dipendono da Shizuku...
         assertEquals(
             BlockCause.SHIZUKU_NOT_INSTALLED,
-            causes(ShizukuGatewayStatus.NOT_INSTALLED)[CapabilityIds.state(StateKeys.RINGER)],
+            causes(ShizukuGatewayStatus.NOT_INSTALLED)[CapabilityIds.STATE_FOREGROUND_APP],
         )
+        // ...ma le chiavi di stato (suoneria, batteria...) si leggono in pubblico: nessun blocco.
+        assertEquals(null, causes(ShizukuGatewayStatus.NOT_INSTALLED)[CapabilityIds.state(StateKeys.RINGER)])
+    }
+
+    @Test
+    fun `only the bluetooth state can be blocked without Shizuku and its cause is the permission`() = runTest {
+        val keys = StateKeys.ALL.keys.mapTo(linkedSetOf(), CapabilityIds::state)
+        val noShizuku = state().copy(
+            shizukuStatus = ShizukuGatewayStatus.NOT_INSTALLED,
+            shizukuPermissionGranted = false,
+        )
+
+        assertEquals(
+            mapOf(CapabilityIds.state(StateKeys.BLUETOOTH) to BlockCause.BLUETOOTH_PERMISSION),
+            probe(noShizuku).blockCauses(keys),
+        )
+        assertEquals(emptyMap(), probe(noShizuku.copy(bluetoothConnectGranted = true)).blockCauses(keys))
+        // Prima di Android 12 il permesso non c'entra: resta una questione di Shizuku.
+        assertEquals(
+            mapOf(CapabilityIds.state(StateKeys.BLUETOOTH) to BlockCause.SHIZUKU_NOT_INSTALLED),
+            probe(noShizuku.copy(androidApi = 30)).blockCauses(keys),
+        )
+    }
+
+    // --- 0.4.0 (F19): le regole con condizioni di stato non dipendono piu' da Shizuku -------------------
+
+    @Test
+    fun `an armed rule that only reads public state is neither reviewed nor blocked without Shizuku`() = runTest {
+        val rule = stateRule("charging-only", StateKeys.CHARGING, "true")
+        assertEquals(
+            setOf(
+                CapabilityIds.TRIGGER_TIME,
+                CapabilityIds.state(StateKeys.CHARGING),
+                ActionCapabilities.VIBRATE,
+            ),
+            rule.requiredCapabilities,
+        )
+
+        // Shizuku mai installato, non autorizzato, fermo ma autorizzato: nessun blocco temporaneo.
+        listOf(
+            ShizukuGatewayStatus.NOT_INSTALLED to false,
+            ShizukuGatewayStatus.RUNNING_NOT_AUTHORIZED to false,
+            ShizukuGatewayStatus.INSTALLED_NOT_RUNNING to true,
+        ).forEach { (status, granted) ->
+            val store = ReconcileAutomationStore(rule)
+            val audit = ReconcilerAuditRecorder()
+            val report = CapabilityReconciler(
+                store,
+                probe(state().copy(shizukuStatus = status, shizukuPermissionGranted = granted)),
+                audit,
+            ).reconcile()
+
+            assertEquals(emptyList(), report.needsReview, status.name)
+            assertEquals(emptyList(), report.temporarilyBlocked, status.name)
+            // Impronta e stato invariati: la regola e' esattamente quella approvata.
+            assertEquals(rule, store.get(rule.id), status.name)
+            assertEquals(AutomationStatus.ARMED, store.get(rule.id)?.status, status.name)
+            assertEquals(rule.approvalFingerprint, ApprovalFingerprints.of(requireNotNull(store.get(rule.id))))
+            assertTrue(audit.events.isEmpty(), status.name)
+        }
+    }
+
+    @Test
+    fun `the fire policy lets a state only rule through without Shizuku and blocks bluetooth without its permission`() = runTest {
+        val noShizuku = state().copy(
+            shizukuStatus = ShizukuGatewayStatus.INSTALLED_NOT_RUNNING,
+            shizukuPermissionGranted = true,
+        )
+        val charging = stateRule("charging", StateKeys.CHARGING, "true")
+        val chargingEvent = TriggerEvent.TimeFired(charging.id, requireNotNull(charging.approvalFingerprint))
+
+        assertEquals(
+            FirePolicyDecision.Allow,
+            RevalidatingFirePolicy(probe(noShizuku)).evaluate(charging, chargingEvent),
+        )
+
+        // Il Bluetooth senza permesso resta un blocco temporaneo (mai «da rivedere»)...
+        val bluetooth = stateRule("bluetooth", StateKeys.BLUETOOTH, "on")
+        val bluetoothEvent = TriggerEvent.TimeFired(bluetooth.id, requireNotNull(bluetooth.approvalFingerprint))
+        assertEquals(
+            FirePolicyDecision.Block("capability_unavailable", needsReview = false),
+            RevalidatingFirePolicy(probe(noShizuku)).evaluate(bluetooth, bluetoothEvent),
+        )
+        val store = ReconcileAutomationStore(bluetooth)
+        val report = CapabilityReconciler(store, probe(noShizuku)).reconcile()
+        assertEquals(emptyList(), report.needsReview)
+        assertEquals(listOf(bluetooth.id), report.temporarilyBlocked)
+        assertEquals(AutomationStatus.ARMED, store.get(bluetooth.id)?.status)
+
+        // ...e col permesso passa.
+        assertEquals(
+            FirePolicyDecision.Allow,
+            RevalidatingFirePolicy(probe(noShizuku.copy(bluetoothConnectGranted = true)))
+                .evaluate(bluetooth, bluetoothEvent),
+        )
+    }
+
+    @Test
+    fun `a rule that also reads a Shizuku only state is still blocked temporarily without Shizuku`() = runTest {
+        val rule = conditionRule(
+            "foreground",
+            Condition.And(
+                listOf(
+                    Condition.StateEquals(StateKeys.CHARGING, CmpOp.EQ, "true"),
+                    Condition.AppInForeground("com.example"),
+                ),
+            ),
+        )
+        val noShizuku = state().copy(
+            shizukuStatus = ShizukuGatewayStatus.INSTALLED_NOT_RUNNING,
+            shizukuPermissionGranted = true,
+        )
+        val store = ReconcileAutomationStore(rule)
+
+        val report = CapabilityReconciler(store, probe(noShizuku)).reconcile()
+
+        assertEquals(emptyList(), report.needsReview)
+        assertEquals(listOf(rule.id), report.temporarilyBlocked)
     }
 
     @Test
@@ -1227,6 +1433,22 @@ class AndroidCapabilityProbeTest {
             status = AutomationStatus.ARMED,
             trigger = Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
             actions = listOf(Action.SetDnd(DndMode.PRIORITY)),
+        ),
+    )
+
+    /** Regola con la sola condizione `state_equals` su [key] e un'azione base (nessuno Shizuku). */
+    private fun stateRule(id: String, key: String, value: String): Automation =
+        conditionRule(id, Condition.StateEquals(key, CmpOp.EQ, value))
+
+    private fun conditionRule(id: String, condition: Condition): Automation = sign(
+        Automation(
+            id = AutomationId(id),
+            name = id,
+            createdBy = CreatedBy.USER,
+            status = AutomationStatus.ARMED,
+            trigger = Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"),
+            conditions = condition,
+            actions = listOf(Action.Vibrate(200)),
         ),
     )
 
