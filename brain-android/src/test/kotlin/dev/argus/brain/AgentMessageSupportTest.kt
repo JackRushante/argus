@@ -123,7 +123,8 @@ class AgentMessageSupportTest {
     @Test
     fun `rule 7 makes the manifest decide the language of every text for the user`() {
         val rules = AgentMessageSupport.COMPILE_RULES
-        val rule7 = rules.substringAfter("\n7. ").substringBefore("\n8. ")
+        // La regola va a capo in mezzo alle frasi: si confronta il testo con gli spazi normalizzati.
+        val rule7 = rules.substringAfter("\n7. ").substringBefore("\n8. ").replace(Regex("\\s+"), " ")
 
         assertTrue("manifest.reply_language" in rule7, rule7)
         assertTrue("\"it\" = Italian" in rule7 && "\"en\" = English" in rule7, rule7)
