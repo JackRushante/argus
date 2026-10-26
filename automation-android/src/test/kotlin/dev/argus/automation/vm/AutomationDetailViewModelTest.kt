@@ -222,7 +222,7 @@ class AutomationDetailViewModelTest {
         )
         awaitUntil("english detail loaded") { viewModel.state.value.detail != null }
         assertTrue(
-            viewModel.state.value.detail!!.rule.triggerLine.startsWith("When: "),
+            viewModel.state.value.detail!!.rule.triggerLine.startsWith("Every day"),
             viewModel.state.value.detail!!.rule.triggerLine,
         )
 
@@ -230,7 +230,7 @@ class AutomationDetailViewModelTest {
         source.refresh()
 
         awaitUntil("italian detail") {
-            viewModel.state.value.detail?.rule?.triggerLine?.startsWith("Quando: ") == true
+            viewModel.state.value.detail?.rule?.triggerLine?.startsWith("Ogni giorno") == true
         }
         // Anche i messaggi prodotti al momento seguono la lingua corrente.
         val events = collectEvents(viewModel)

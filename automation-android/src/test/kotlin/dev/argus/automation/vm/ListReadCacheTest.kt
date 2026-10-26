@@ -37,11 +37,14 @@ class ListReadCacheTest {
         },
     )
 
+    /** Un fingerprint valido (64 esadecimali minuscoli) e diverso per ogni bozza e revisione. */
+    private fun hexOf(seed: String): String = seed.hashCode().toUInt().toString(16).padStart(64, '0')
+
     private fun draft(id: String, revision: Long = 1) = PendingDraft(
         id = DraftId(id),
         automationId = AutomationId("auto-$id"),
         revision = revision,
-        fingerprint = ApprovalFingerprint("fp-$id-$revision"),
+        fingerprint = ApprovalFingerprint(hexOf("$id-$revision")),
         draft = AutomationDraft(
             name = "regola $id",
             trigger = Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
