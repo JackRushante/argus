@@ -1235,10 +1235,13 @@
   "lang": "it",
   "text": "Ogni mattina alle 8 tocca lo schermo alle coordinate 540, 1200",
   "expect": {
-   "outcome": "unsupported"
+   "outcome": ["unsupported", "draft"],
+   "trigger": {"type": "time", "cron": {"present": true}},
+   "actions_include": ["run_shell"],
+   "actions_text": ["input tap 540 1200"]
   },
   "covers": ["tap"],
-  "note": "tap non e' pubblicato dal probe (esecutore: unsupported_phase)"
+  "note": "tap non e' pubblicato dal probe (esecutore: unsupported_phase), ma con Shizuku il comando shell `input tap` tocca davvero lo schermo: run_shell va bene quanto il rifiuto"
  },
  {
   "id": "unsup.tap.en.01",
