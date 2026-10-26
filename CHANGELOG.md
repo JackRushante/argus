@@ -2,6 +2,22 @@
 
 Release and engineering notes, newest first.
 
+## v0.4.2 (2026-10-26) — The unlock trigger fires
+
+### Fixed
+
+- The "phone unlocked" trigger never fired. Android's system UI sends the unlock event, and
+  Android delivers it only to receivers open to broadcasts from outside the app. Argus now
+  registers its screen receiver that way, which is safe: only the system can send the screen
+  on, screen off and unlock events. "Screen on" and "screen off" were not affected.
+
+### Verified on the Android 16 emulator
+
+- Manual rules from "Run now" and from the Quick Settings tile; pause and resume from the tile,
+  with the skipped firing in the Log.
+- Screen on and phone unlocked, the battery crossing a level, brightness with "Modify system
+  settings", read aloud and an HTTP GET.
+
 ## v0.4.1 (2026-10-26) — New triggers and actions, sunrise and sunset, manual rules and pause
 
 ### Added
