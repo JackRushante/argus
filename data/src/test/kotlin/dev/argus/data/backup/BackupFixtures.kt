@@ -148,7 +148,7 @@ internal object BackupFixtures {
     )
 
     val notificationReply = AutomationDraft(
-        name = "Rispondi a Moglie",
+        name = "Rispondi in chat",
         trigger = notification,
         actions = listOf(
             Action.InvokeLlm(

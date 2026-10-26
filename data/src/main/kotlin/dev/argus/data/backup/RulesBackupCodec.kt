@@ -5,11 +5,13 @@ import dev.argus.engine.model.AutomationDraft
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.put
 
@@ -66,6 +68,11 @@ object RulesBackupCodec {
         } catch (_: Exception) {
             return DecodedBackup.Rejected(BackupFailure.NOT_JSON)
         }
+        // Il parser accetta una parola nuda come letterale: se non è un numero, un booleano o null
+        // («ciao») non è JSON, e va detto come tale.
+        if (root is JsonPrimitive && !root.isString && root !is JsonNull &&
+            root.booleanOrNull == null && root.doubleOrNull == null
+        ) return DecodedBackup.Rejected(BackupFailure.NOT_JSON)
         val obj = root as? JsonObject ?: return DecodedBackup.Rejected(BackupFailure.WRONG_FORMAT)
 
         val format = (obj["format"] as? JsonPrimitive)?.takeIf { it.isString }?.content

@@ -98,12 +98,17 @@ class RulesBackupCodecTest {
     fun `text that is not JSON is rejected`() {
         assertEquals(BackupFailure.NOT_JSON, rejected("questo non è json"))
         assertEquals(BackupFailure.NOT_JSON, rejected(""))
+        // Una parola nuda non è JSON, anche se il parser la leggerebbe come letterale.
+        assertEquals(BackupFailure.NOT_JSON, rejected("ciao"))
         assertEquals(BackupFailure.NOT_JSON, rejected("""{"format":"argus-rules","version":1,"rules":["""))
     }
 
     @Test
     fun `JSON that is not an Argus export is rejected as the wrong format`() {
         assertEquals(BackupFailure.WRONG_FORMAT, rejected("[1,2,3]"))
+        assertEquals(BackupFailure.WRONG_FORMAT, rejected("42"))
+        assertEquals(BackupFailure.WRONG_FORMAT, rejected("true"))
+        assertEquals(BackupFailure.WRONG_FORMAT, rejected("null"))
         assertEquals(BackupFailure.WRONG_FORMAT, rejected("\"argus-rules\""))
         assertEquals(BackupFailure.WRONG_FORMAT, rejected("{}"))
         assertEquals(BackupFailure.WRONG_FORMAT, rejected(file(goodRule, format = "\"other\"")))
