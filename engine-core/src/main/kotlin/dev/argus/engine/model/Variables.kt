@@ -160,7 +160,8 @@ fun VarBinding.provenance(trigger: Trigger): Set<ValueProvenance> = when (this) 
         is Trigger.Notification -> setOf(ValueProvenance.NOTIFICATION)
         is Trigger.PhoneState -> when (trigger.event) {
             PhoneEvent.SMS_RECEIVED -> setOf(ValueProvenance.SMS)
-            PhoneEvent.INCOMING_CALL, PhoneEvent.CALL_ENDED -> setOf(ValueProvenance.PHONE)
+            PhoneEvent.INCOMING_CALL, PhoneEvent.CALL_ENDED, PhoneEvent.MISSED_CALL ->
+                setOf(ValueProvenance.PHONE)
         }
         else -> emptySet() // DraftValidator impedisce questa combinazione.
     }

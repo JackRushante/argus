@@ -26,6 +26,14 @@ class ConflictDetector {
             t1.lat == t2.lat && t1.lng == t2.lng && t1.transition != t2.transition
         t1 is Trigger.Connectivity && t2 is Trigger.Connectivity ->
             t1.medium == t2.medium && t1.match == t2.match && t1.state != t2.state
+        // 0.4.1: coppie che non si sovrappongono mai (acceso/spento, collegato/scollegato, avvio/fine).
+        t1 is Trigger.Screen && t2 is Trigger.Screen ->
+            t1.event != t2.event && (t1.event == ScreenEvent.OFF || t2.event == ScreenEvent.OFF)
+        t1 is Trigger.AudioOutput && t2 is Trigger.AudioOutput ->
+            t1.kind == t2.kind && t1.state != t2.state
+        t1 is Trigger.Media && t2 is Trigger.Media -> t1.state != t2.state
+        t1 is Trigger.ModeChanged && t2 is Trigger.ModeChanged ->
+            t1.what == t2.what && t1.to != null && t2.to != null && t1.to != t2.to
         else -> false
     }
 

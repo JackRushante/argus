@@ -261,7 +261,7 @@ class DraftValidator(
         is Trigger.Notification -> setOf(TriggerField.TEXT, TriggerField.TITLE, TriggerField.SENDER)
         is Trigger.PhoneState -> when (trigger.event) {
             PhoneEvent.SMS_RECEIVED -> setOf(TriggerField.TEXT, TriggerField.NUMBER)
-            PhoneEvent.INCOMING_CALL, PhoneEvent.CALL_ENDED -> setOf(TriggerField.NUMBER)
+            PhoneEvent.INCOMING_CALL, PhoneEvent.CALL_ENDED, PhoneEvent.MISSED_CALL -> setOf(TriggerField.NUMBER)
         }
         else -> emptySet()
     }
@@ -759,6 +759,13 @@ class DraftValidator(
                 validateOptionalText(trigger.textMatch, "sms_text_match_invalid", err)
                 if (trigger.textMatch != null && trigger.event != PhoneEvent.SMS_RECEIVED)
                     err("sms_text_match_invalid", "Il filtro sul testo vale solo per gli SMS in arrivo")
+                trigger.sim?.let { sim ->
+                    if (!SimSlotPolicy.validSlot(sim))
+                        err(
+                            "sim_invalid",
+                            "Il filtro SIM ammette solo lo slot ${SimSlotPolicy.MIN_SLOT} o ${SimSlotPolicy.MAX_SLOT}",
+                        )
+                }
             }
             is Trigger.Connectivity -> validateOptionalText(trigger.match, "match_invalid", err)
             is Trigger.Sensor -> {
@@ -778,6 +785,33 @@ class DraftValidator(
                     )
                 }
             }
+            // --- 0.4.1: trigger senza Shizuku ---
+            is Trigger.Screen -> Unit
+            is Trigger.Battery -> {
+                val below = trigger.below
+                val above = trigger.above
+                if ((below == null) == (above == null))
+                    err("battery_spec", "Batteria richiede esattamente uno tra below e above")
+                listOfNotNull(below, above).forEach { threshold ->
+                    if (!BatteryTriggerPolicy.validThreshold(threshold))
+                        err(
+                            "battery_threshold_invalid",
+                            "La soglia batteria ammette ${BatteryTriggerPolicy.MIN_THRESHOLD}.." +
+                                "${BatteryTriggerPolicy.MAX_THRESHOLD}",
+                        )
+                }
+            }
+            is Trigger.AudioOutput -> Unit
+            is Trigger.ModeChanged -> trigger.to?.let { target ->
+                val allowed = trigger.what.allowedValues
+                if (target !in allowed)
+                    err(
+                        "mode_to_invalid",
+                        "Valore '${target.take(32)}' non valido per ${trigger.what.name}; " +
+                            "ammessi: ${allowed.joinToString("|")}",
+                    )
+            }
+            is Trigger.Media -> Unit
         }
     }
 

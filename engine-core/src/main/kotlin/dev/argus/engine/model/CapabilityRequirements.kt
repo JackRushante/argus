@@ -19,6 +19,17 @@ object CapabilityIds {
 
     fun triggerSensor(kind: SensorKind): String = "trigger.sensor.${kind.wireName}"
 
+    // 0.4.1: trigger senza Shizuku. Receiver dinamici della sentinella in primo piano; nessun
+    // permesso runtime dedicato, quindi li pubblica il probe e li richiede la regola (come il Wi-Fi).
+    const val TRIGGER_SCREEN = "trigger.screen"
+    const val TRIGGER_BATTERY = "trigger.battery"
+    const val TRIGGER_AUDIO_OUTPUT = "trigger.audio_output"
+    const val TRIGGER_MODE_CHANGED = "trigger.mode_changed"
+    const val TRIGGER_MEDIA = "trigger.media"
+
+    // Filtro SIM di phone_state: ha senso solo su un telefono con più di uno slot.
+    const val TRIGGER_PHONE_SIM = "trigger.phone_state.sim"
+
     const val STATE_FOREGROUND_APP = "state.foreground_app"
     const val STATE_LOCATION = "state.location"
     const val STATE_READER_BUILTIN = "state.reader.builtin"
@@ -87,9 +98,14 @@ object CapabilityRequirements {
         // solo a una Condition.LocationIn, derivata separatamente qui sotto.
         is Trigger.Geofence -> setOf(CapabilityIds.TRIGGER_GEOFENCE)
         is Trigger.Notification -> setOf(CapabilityIds.TRIGGER_NOTIFICATION)
-        is Trigger.PhoneState -> when (trigger.event) {
-            PhoneEvent.SMS_RECEIVED -> setOf(CapabilityIds.TRIGGER_PHONE_SMS)
-            PhoneEvent.INCOMING_CALL, PhoneEvent.CALL_ENDED -> setOf(CapabilityIds.TRIGGER_PHONE_CALL)
+        is Trigger.PhoneState -> buildSet {
+            when (trigger.event) {
+                PhoneEvent.SMS_RECEIVED -> add(CapabilityIds.TRIGGER_PHONE_SMS)
+                PhoneEvent.INCOMING_CALL, PhoneEvent.CALL_ENDED, PhoneEvent.MISSED_CALL ->
+                    add(CapabilityIds.TRIGGER_PHONE_CALL)
+            }
+            // Solo con il filtro: una regola senza `sim` mantiene i requisiti di prima.
+            if (trigger.sim != null) add(CapabilityIds.TRIGGER_PHONE_SIM)
         }
         is Trigger.Connectivity -> when (trigger.medium) {
             ConnMedium.WIFI -> buildSet {
@@ -100,6 +116,11 @@ object CapabilityRequirements {
             ConnMedium.POWER -> setOf(CapabilityIds.TRIGGER_CONNECTIVITY_POWER)
         }
         is Trigger.Sensor -> setOf(CapabilityIds.triggerSensor(trigger.kind))
+        is Trigger.Screen -> setOf(CapabilityIds.TRIGGER_SCREEN)
+        is Trigger.Battery -> setOf(CapabilityIds.TRIGGER_BATTERY)
+        is Trigger.AudioOutput -> setOf(CapabilityIds.TRIGGER_AUDIO_OUTPUT)
+        is Trigger.ModeChanged -> setOf(CapabilityIds.TRIGGER_MODE_CHANGED)
+        is Trigger.Media -> setOf(CapabilityIds.TRIGGER_MEDIA)
     }
 
     private fun forCondition(condition: Condition): Set<String> = when (condition) {

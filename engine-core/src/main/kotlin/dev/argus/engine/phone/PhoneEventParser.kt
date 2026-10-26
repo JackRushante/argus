@@ -1,6 +1,7 @@
 package dev.argus.engine.phone
 
 import dev.argus.engine.model.PhoneEvent
+import dev.argus.engine.model.SimSlotPolicy
 import dev.argus.engine.runtime.TriggerEnvelope
 import dev.argus.engine.runtime.TriggerEvent
 import dev.argus.engine.runtime.TriggerEventId
@@ -19,6 +20,8 @@ class PhoneEventParser {
         number: String?,
         smsText: String?,
         atMillis: Long,
+        /** Slot SIM 1|2 se determinabile (0.4.1); un valore fuori da 1..2 diventa "ignoto". */
+        sim: Int? = null,
     ): TriggerEnvelope? {
         val safeNumber = number
             ?.filterNot(Char::isISOControl)
@@ -40,7 +43,7 @@ class PhoneEventParser {
             )
             // PHONE_STATE può consegnare la stessa transizione due volte, prima anonima e poi
             // col numero. Il numero è payload per il matcher, non identità della chiamata.
-            PhoneEvent.INCOMING_CALL, PhoneEvent.CALL_ENDED -> arrayOf(
+            PhoneEvent.INCOMING_CALL, PhoneEvent.CALL_ENDED, PhoneEvent.MISSED_CALL -> arrayOf(
                 event.name,
                 atMillis.coerceAtLeast(0).toString(),
             )
@@ -48,7 +51,13 @@ class PhoneEventParser {
         val id = TriggerEventId("phone:" + digest(*identityFields))
         return TriggerEnvelope(
             id,
-            TriggerEvent.PhoneStateChanged(event = event, number = safeNumber, smsText = safeText),
+            TriggerEvent.PhoneStateChanged(
+                event = event,
+                number = safeNumber,
+                smsText = safeText,
+                // Lo slot non entra nell'identità: nessun cambio per gli id esistenti.
+                sim = sim?.takeIf(SimSlotPolicy::validSlot),
+            ),
         )
     }
 
