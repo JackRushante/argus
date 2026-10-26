@@ -2,6 +2,57 @@
 
 Release and engineering notes, newest first.
 
+## v0.4.0 (2026-10-26) — Backup, conditions without Shizuku, examples and statistics
+
+### Added
+
+- Export and import rules (Settings → Rules backup).
+  - Rules are saved to a JSON file you choose. Imported rules come back as drafts to review and
+    arm one by one: nothing is armed by itself and no contact is whitelisted.
+  - An option removes locations, conversation IDs, sender names and phone numbers before you
+    share a file.
+  - Android's own backup stays off, for privacy.
+- Conditions on battery, charging, screen, ringer, Do Not Disturb, Wi-Fi and airplane mode work
+  without Shizuku: Argus reads them with Android's normal APIs. Bluetooth needs the Bluetooth
+  permission on Android 12+. Shizuku stays for the other state readers and the foreground app.
+- "More examples" in the chat: 12 ready-made requests in 6 groups, which fill the message box
+  without sending. The ones that need Shizuku are marked.
+- Firing statistics in the rule detail: firings, successes and failures in the last 7 and 30
+  days. When the log keeps less than 30 days, the detail says so instead of showing a false zero.
+- Reasoning level for OpenRouter in the provider dialog (before, only Custom had it).
+
+### Changed
+
+- The AI no longer asks about the three details that have an obvious default: vibration length,
+  Do Not Disturb mode and geofence radius. It also uses the current location for "here" even
+  when the location is not known yet. Every other missing value still gets a question. On the AI
+  bench, GPT-6 Luna went from 85% to 90% of the rule requests right, and the preset DeepSeek
+  V4.1 Flash with reasoning off reached 98%.
+- AI answers drop the markdown citations and bold markers some models add (OpenAI with web
+  search), because notifications don't render markdown. GPT-6 Luna's generative answers went
+  from 7 to 12 right out of 12.
+- A price can change on a date: Gemini 3.8 Flash doubles from 2027-01-01, and Argus applies the
+  new price to usage from that day.
+- The Hermes bridge prompt carries the same schema fixes as the app.
+
+### Fixed
+
+- Dates, last firing, version and dimmed log rows had a 1.6:1 contrast and were hard to read
+  outdoors; they now use a text color above 4.5:1.
+- "Arm" and "Run now" no longer get squeezed letter by letter with large fonts or narrow screens.
+- The connection dialogs check the data before closing, so an invalid address no longer throws
+  away what you typed.
+- "Clear conversation", "remove contact" and "revoke consent" ask for confirmation, and
+  destructive confirmations use the error color.
+- A filter with no results says so and offers "Show all", instead of "No automations".
+- Token counts use thousands separators. The log groups days by date instead of by the time text.
+- TalkBack reads the System status in the app's language, the warning dot in the list is an icon
+  with a description, and an informational System row no longer looks tappable.
+
+### Permissions
+
+- `ACCESS_WIFI_STATE` (normal, granted at install), to read whether Wi-Fi is on.
+
 ## v0.3.7 (2026-10-26) — AI test bench, model guidance, the app's language
 
 The AI side is now measured instead of guessed. On the first run of the new test bench, DeepSeek
