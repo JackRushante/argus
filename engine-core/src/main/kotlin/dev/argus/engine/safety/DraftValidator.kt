@@ -728,10 +728,10 @@ class DraftValidator(
             // Immediate non ha campi propri (nessun cron/at/tz): è valido di per sé, fira all'arm.
             is Trigger.Immediate -> Unit
             is Trigger.Time -> {
-                // Esattamente uno tra {cron, at, afterMs}: conta i non-null.
-                val specCount = listOfNotNull(trigger.cron, trigger.at, trigger.afterMs).size
+                // Esattamente uno tra {cron, at, afterMs, solar}: conta i non-null.
+                val specCount = listOfNotNull(trigger.cron, trigger.at, trigger.afterMs, trigger.solar).size
                 if (specCount != 1)
-                    err("time_spec", "Time richiede esattamente uno tra cron, at e afterMs")
+                    err("time_spec", "Time richiede esattamente uno tra cron, at, afterMs e solar")
                 runCatching { ZoneId.of(trigger.tz) }
                     .onFailure { err("tz_invalid", "Timezone '${trigger.tz}' non valida") }
                 trigger.cron?.let { cron ->
@@ -745,6 +745,22 @@ class DraftValidator(
                 trigger.afterMs?.let { afterMs ->
                     if (afterMs !in MIN_DELAY_MS..MAX_DELAY_MS)
                         err("after_ms_invalid", "Ritardo relativo fuori intervallo (1s..7g)")
+                }
+                trigger.solar?.let { solar ->
+                    if (!SolarTriggerPolicy.validOffset(solar.offsetMinutes))
+                        err(
+                            "solar_offset_invalid",
+                            "Lo spostamento da alba/tramonto ammette " +
+                                "${SolarTriggerPolicy.MIN_OFFSET_MINUTES}..${SolarTriggerPolicy.MAX_OFFSET_MINUTES} minuti",
+                        )
+                    // La posizione la scrive l'app all'arm: in bozza mancano entrambe, mai una sola.
+                    val lat = solar.lat
+                    val lng = solar.lng
+                    val locationOk = (lat == null && lng == null) ||
+                        (lat != null && lng != null &&
+                            SolarTriggerPolicy.validLatitude(lat) && SolarTriggerPolicy.validLongitude(lng))
+                    if (!locationOk)
+                        err("solar_location_invalid", "Posizione di alba/tramonto non valida")
                 }
             }
 

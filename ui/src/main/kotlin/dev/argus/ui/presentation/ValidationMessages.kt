@@ -76,8 +76,8 @@ object ValidationMessages {
 
         // --- Trigger --------------------------------------------------------------------------
         "time_spec" to t(
-            "A time trigger needs exactly one of: a schedule, a date and time, or a delay.",
-            "Un trigger a tempo richiede esattamente uno tra pianificazione, data e ora, o ritardo.",
+            "A time trigger needs exactly one of: a schedule, a date and time, a delay, or sunrise/sunset.",
+            "Un trigger a tempo richiede esattamente uno tra pianificazione, data e ora, ritardo, o alba/tramonto.",
         ),
         "tz_invalid" to t("The time zone is not valid.", "Il fuso orario non è valido."),
         "cron_invalid" to t("The schedule expression is not valid.", "L'espressione di pianificazione non è valida."),
@@ -85,6 +85,14 @@ object ValidationMessages {
         "after_ms_invalid" to t(
             "The delay must be between 1 second and 7 days.",
             "Il ritardo deve essere tra 1 secondo e 7 giorni.",
+        ),
+        "solar_offset_invalid" to t(
+            "The shift from sunrise or sunset must be between 12 hours before and 12 hours after.",
+            "Lo spostamento da alba o tramonto deve essere tra 12 ore prima e 12 ore dopo.",
+        ),
+        "solar_location_invalid" to t(
+            "The position for sunrise and sunset is not valid: the phone reads it when the rule is activated.",
+            "La posizione per alba e tramonto non è valida: la legge il telefono quando la regola viene attivata.",
         ),
         "radius_invalid" to t(
             "The location radius is not valid (up to 100 km).",

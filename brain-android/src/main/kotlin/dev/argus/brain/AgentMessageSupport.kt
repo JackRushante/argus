@@ -563,6 +563,8 @@ BINDING RULES:
       already in the past.
     - "time" with "cron" for RECURRING: "every N hours/days", "every hour", "every day/week/Monday
       at HH:MM" -> the matching cron. The rule re-fires and (if generative) re-generates every time.
+    - "time" with "solar" for EVERY DAY at sunrise/sunset ("30 minutes before sunset" -> event SUNSET,
+      offsetMinutes -30; "at sunrise" -> SUNRISE, 0). Not for a one-off day: use "at" for that.
     For real alarms/timers the time goes in the set_alarm/set_timer ACTION, not in the trigger. Examples:
     "notify me the exchange rate in 2 minutes" -> time afterMs=120000 (NOT immediate, NOT at);
     "alert me at 14:30" -> time at=2026-07-17T14:30; "send me the BTC price every 24 hours" ->
@@ -609,6 +611,10 @@ Trigger, discriminated by "type":
   re-armable ("in 2 minutes" -> afterMs=120000). Omit afterMs when you use cron or at, and vice versa.
   Omit precision or use FLEXIBLE normally; EXACT only if the user explicitly
   asks for exact punctuality.
+  solar = {"event":"SUNRISE"|"SUNSET", "offsetMinutes":integer -720..720 (negative = before)} replaces
+  cron, at and afterMs (still exactly one of the four; tz still required): every day at sunrise/sunset
+  plus the offset, computed on the phone. Never write coordinates: Argus reads the phone's position when
+  the rule is activated.
 - {"type":"immediate"}  // runs the actions ONCE when the rule is activated, with no clock.
   For "set an alarm/a timer right now" use this trigger and put the time in the
   set_alarm/set_timer action, never a time trigger at an instant already past.

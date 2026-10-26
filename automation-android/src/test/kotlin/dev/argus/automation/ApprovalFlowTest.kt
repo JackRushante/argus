@@ -15,6 +15,8 @@ import dev.argus.engine.model.DndMode
 import dev.argus.engine.model.CmpOp
 import dev.argus.engine.model.ConfidentialityLabel
 import dev.argus.engine.model.Condition
+import dev.argus.engine.model.SolarEvent
+import dev.argus.engine.model.SolarSpec
 import dev.argus.engine.model.StateQuery
 import dev.argus.engine.model.StateQueryFamily
 import dev.argus.engine.model.StateQueryPolicy
@@ -156,6 +158,130 @@ class ApprovalFlowTest {
         assertFalse(trigger.resolveCurrentLocation)
         assertEquals(armed, registered)
         assertEquals(armed.approvalFingerprint, ApprovalFingerprints.of(armed))
+    }
+
+    @Test
+    fun `sunset position resolves at arm as a coarse frozen position and the registrar sees the signed rule`() = runTest {
+        var registered: Automation? = null
+        val fixture = fixture(
+            available = setOf(CapabilityIds.TRIGGER_TIME, ActionCapabilities.SET_WIFI),
+            location = DeviceLocation(45.4642, 9.1900),
+            registrar = ArmedAutomationRegistrar { registered = it; true },
+        )
+        val ready = assertIs<DraftSubmissionResult.Ready>(
+            fixture.flow.submit(CompileResult("ok", solarDraft(), null)),
+        ).review
+        // In bozza la posizione non c'e': la leggera l'app all'arm, il modello non la scrive.
+        val drafted = assertIs<Trigger.Time>(ready.draft.snapshot.draft.trigger)
+        assertEquals(SolarSpec(SolarEvent.SUNSET, -30), drafted.solar)
+        assertTrue(ready.canArm)
+
+        val armed = assertIs<FlowArmResult.Armed>(
+            fixture.flow.arm(
+                ready.draft.snapshot.id,
+                ready.draft.snapshot.revision,
+                ready.draft.snapshot.fingerprint,
+            ),
+        ).automation
+
+        val solar = assertIs<Trigger.Time>(armed.trigger).solar
+        assertEquals(SolarSpec(SolarEvent.SUNSET, -30, lat = 45.5, lng = 9.2), solar)
+        assertEquals(armed, registered)
+        assertEquals(armed.approvalFingerprint, ApprovalFingerprints.of(armed))
+        assertTrue(armed.approvalFingerprint != ready.draft.snapshot.fingerprint)
+    }
+
+    @Test
+    fun `coordinates written by the model never reach the draft and the arm uses the phone position`() = runTest {
+        val fixture = fixture(
+            available = setOf(CapabilityIds.TRIGGER_TIME, ActionCapabilities.SET_WIFI),
+            location = DeviceLocation(45.4642, 9.1900),
+        )
+        // Il modello ha inventato Roma: la bozza salvata non la porta.
+        val invented = solarDraft(SolarSpec(SolarEvent.SUNSET, -30, lat = 41.9, lng = 12.5))
+        val ready = assertIs<DraftSubmissionResult.Ready>(
+            fixture.flow.submit(CompileResult("ok", invented, null)),
+        ).review
+        assertEquals(
+            SolarSpec(SolarEvent.SUNSET, -30),
+            assertIs<Trigger.Time>(ready.draft.snapshot.draft.trigger).solar,
+        )
+
+        // Stessa regola per una revisione della bozza.
+        val revised = assertIs<DraftSubmissionResult.Ready>(
+            fixture.flow.submitRevision(
+                CompileResult("ok", invented.copy(name = "Luci alle sei"), null),
+                ready.draft.snapshot.id,
+                ready.draft.snapshot.revision,
+            ),
+        ).review
+        assertEquals(
+            SolarSpec(SolarEvent.SUNSET, -30),
+            assertIs<Trigger.Time>(revised.draft.snapshot.draft.trigger).solar,
+        )
+
+        val armed = assertIs<FlowArmResult.Armed>(
+            fixture.flow.arm(
+                revised.draft.snapshot.id,
+                revised.draft.snapshot.revision,
+                revised.draft.snapshot.fingerprint,
+            ),
+        ).automation
+        assertEquals(
+            SolarSpec(SolarEvent.SUNSET, -30, lat = 45.5, lng = 9.2),
+            assertIs<Trigger.Time>(armed.trigger).solar,
+        )
+    }
+
+    @Test
+    fun `without a position the arm of a sunset rule explains it and arms nothing`() = runTest {
+        val fixture = fixture(
+            available = setOf(CapabilityIds.TRIGGER_TIME, ActionCapabilities.SET_WIFI),
+            location = null,
+        )
+        val ready = assertIs<DraftSubmissionResult.Ready>(
+            fixture.flow.submit(CompileResult("ok", solarDraft(), null)),
+        ).review
+
+        val result = fixture.flow.arm(
+            ready.draft.snapshot.id,
+            ready.draft.snapshot.revision,
+            ready.draft.snapshot.fingerprint,
+        )
+
+        assertIs<FlowArmResult.LocationUnavailable>(result)
+        assertEquals(emptyList(), fixture.store.all().filter { it.status == AutomationStatus.ARMED })
+    }
+
+    @Test
+    fun `a rule that already has its frozen position keeps it and does not read the phone again`() = runTest {
+        val fixture = fixture(
+            available = setOf(CapabilityIds.TRIGGER_TIME, ActionCapabilities.SET_WIFI),
+            location = null,
+        )
+        val located = solarDraft(SolarSpec(SolarEvent.SUNRISE, 15, lat = 41.9, lng = 12.5))
+        // Un draft gia' completo (per esempio dopo un tentativo di arm fallito a registrare) non passa dal modello.
+        val repo = fixture.repository
+        val created = repo.create(
+            NewDraft(
+                id = DraftId("direct"),
+                automationId = AutomationId("direct-rule"),
+                draft = located,
+                createdBy = CreatedBy.LLM,
+                priority = 0,
+                atMillis = 1_000L,
+            ),
+        )
+        val snapshot = assertIs<DraftWriteResult.Saved>(created).snapshot
+
+        val armed = assertIs<FlowArmResult.Armed>(
+            fixture.flow.arm(snapshot.id, snapshot.revision, snapshot.fingerprint),
+        ).automation
+
+        assertEquals(
+            SolarSpec(SolarEvent.SUNRISE, 15, lat = 41.9, lng = 12.5),
+            assertIs<Trigger.Time>(armed.trigger).solar,
+        )
     }
 
     @Test
@@ -522,6 +648,12 @@ class ApprovalFlowTest {
         assertEquals(StateValueType.NUMBER, probed?.valueType)
         assertEquals(query.canonicalId, review.verifiedStateQueries.single().queryId)
     }
+
+    private fun solarDraft(spec: SolarSpec = SolarSpec(SolarEvent.SUNSET, -30)) = AutomationDraft(
+        name = "Luci al tramonto",
+        trigger = Trigger.Time(tz = "Europe/Rome", solar = spec),
+        actions = listOf(Action.SetWifi(false)),
+    )
 
     private fun fixture(
         available: Set<String>,

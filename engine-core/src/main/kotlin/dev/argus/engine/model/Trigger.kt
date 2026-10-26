@@ -98,6 +98,12 @@ sealed interface Trigger {
         val tz: String,
         /** EXACT solo se l'utente richiede esplicitamente puntualità; altrimenti allarme inexact. */
         val precision: TimePrecision = TimePrecision.FLEXIBLE,
+        /**
+         * Alba o tramonto di ogni giorno (0.4.1), al posto di cron/at/afterMs. @EncodeDefault(NEVER):
+         * quando null è OMESSO dal wire, così i Time esistenti restano byte-for-byte identici e le
+         * impronte non cambiano. [tz] decide solo a quale giorno civile appartiene l'evento.
+         */
+        @EncodeDefault(EncodeDefault.Mode.NEVER) val solar: SolarSpec? = null,
     ) : Trigger
 
     /**

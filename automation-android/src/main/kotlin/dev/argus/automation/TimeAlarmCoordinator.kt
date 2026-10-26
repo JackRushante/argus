@@ -12,6 +12,7 @@ import dev.argus.engine.runtime.AuditKind
 import dev.argus.engine.runtime.AuditSink
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.runtime.NoopAuditSink
+import dev.argus.engine.runtime.SolarSchedule
 import dev.argus.engine.runtime.TimeSpecs
 import dev.argus.engine.runtime.TriggerEnvelope
 import dev.argus.engine.runtime.TriggerEvent
@@ -149,7 +150,9 @@ object TimeAlarmPlanner {
             "Automazione ARMED priva di fingerprint"
         }
         val afterMs = trigger.afterMs
-        val eventAt = if (afterMs != null) {
+        val eventAt = if (trigger.solar != null) {
+            solarEventAt(trigger, after, existing?.takeIf { it.approvalFingerprint == approvalFingerprint })
+        } else if (afterMs != null) {
             // Ritardo relativo: l'ancora si calcola UNA volta all'arm e poi si congela sul record
             // persistito. Senza questo freeze ogni reconcile ricalcolerebbe now+afterMs, slittando.
             existing?.let { Instant.ofEpochMilli(it.eventAtMillis) } ?: after.plusMillis(afterMs)
@@ -163,6 +166,21 @@ object TimeAlarmPlanner {
             requestedPrecision = effectivePrecision(trigger),
         )
     }
+
+    /**
+     * Alba/tramonto (0.4.1): il prossimo scatto vero, oppure, in notte/giorno polare, un RICONTROLLO
+     * fra 24 ore (la sveglia suona, il coordinatore non consegna nulla alle azioni e ricalcola; vedi
+     * [SolarSchedule.isFireInstant]). Un ricontrollo già programmato per la stessa revisione non
+     * slitta a ogni reconcile: si tiene quello esistente finché non scade.
+     */
+    private fun solarEventAt(trigger: Trigger.Time, after: Instant, existing: ScheduledTimeAlarm?): Instant =
+        when (val next = SolarSchedule.next(trigger, after)) {
+            is SolarSchedule.Next.Fire -> next.at
+            is SolarSchedule.Next.Recheck -> existing?.eventAtMillis
+                ?.takeIf { it > after.toEpochMilli() && it <= next.at.toEpochMilli() }
+                ?.let(Instant::ofEpochMilli)
+                ?: next.at
+        }
 }
 
 /**
@@ -385,6 +403,20 @@ class TimeAlarmCoordinator(
             return Preparation.Done(AlarmDeliveryResult.Ignored)
         }
         if (automation.approvalFingerprint != eventFingerprint) {
+            return Preparation.Done(
+                when (scheduleLocked(automation, currentNow, existing = persisted)) {
+                    ScheduleResult.FAILED -> deliveryFailed(automationId, "reschedule_failed")
+                    else -> AlarmDeliveryResult.Ignored
+                },
+            )
+        }
+
+        // Alba/tramonto: se l'istante non è un vero scatto è un ricontrollo di notte/giorno polare.
+        // Niente da consegnare: si ricalcola da adesso (un nuovo evento o un altro ricontrollo).
+        // Un guasto del calcolo conta come «non è uno scatto», e il planner mette la regola in quarantena.
+        if (trigger.solar != null &&
+            !runCatching { SolarSchedule.isFireInstant(trigger, eventAtMillis) }.getOrDefault(false)
+        ) {
             return Preparation.Done(
                 when (scheduleLocked(automation, currentNow, existing = persisted)) {
                     ScheduleResult.FAILED -> deliveryFailed(automationId, "reschedule_failed")
