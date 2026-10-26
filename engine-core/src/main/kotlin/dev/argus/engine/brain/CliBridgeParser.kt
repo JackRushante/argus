@@ -50,7 +50,10 @@ class CliBridgeParser(private val json: Json = lenient()) {
             // `null` al posto di un campo con default (es. `"rationale": null`) vale come campo
             // assente. Volutamente NON `coerceInputValues`: coercerebbe anche un valore enum
             // sconosciuto al default (es. un sink scritto male → WHATSAPP_REPLY) in silenzio.
-            json.decodeFromJsonElement(MetaEnvelope.serializer(), stripNulls(json.parseToJsonElement(obj)))
+            // Si decodifica dal testo (non dall'albero JSON): solo il decoder in streaming aggiunge
+            // all'errore il percorso (`at path: $.draft.trigger`), che il ritentativo passa al modello.
+            val cleanObject = stripNulls(json.parseToJsonElement(obj))
+            json.decodeFromString(MetaEnvelope.serializer(), cleanObject.toString())
         } catch (error: Exception) {
             return CompileResult(prose, null, "meta_parse_error", detail = safeDetail(error))
         }

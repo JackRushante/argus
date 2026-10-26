@@ -628,14 +628,9 @@ class MeteredBrainTest {
 
     // --- I4: ritentativo con istruzioni di correzione --------------------------
 
+    /** Il dettaglio che il parser produce per il Difetto 2 (trigger `time` senza `tz`). */
     private val tzDetail =
-        "Field 'tz' is required for type with serial name 'dev.argus.engine.model.Trigger.Time', " +
-            "but it was missing at path: \$.draft.trigger"
-
-    /** Lo stesso dettaglio come finisce nella nota: il nome di classe senza pacchetto, per starci nei 400 caratteri. */
-    private val tzDetailInNote =
-        "Field 'tz' is required for type with serial name 'Trigger.Time', " +
-            "but it was missing at path: \$.draft.trigger"
+        "Field 'tz' is required for type with serial name 'time', but it was missing at path: \$.draft.trigger"
 
     /** Nota di correzione come la vede il modello (scritta per intero: e' il contratto del ritentativo). */
     private fun expectedNote(reason: String): String =
@@ -666,11 +661,31 @@ class MeteredBrainTest {
         assertEquals(
             listOf(
                 "spegni subito il non disturbare",
-                "spegni subito il non disturbare\n\n" + expectedNote("meta_parse_error: $tzDetailInNote"),
+                "spegni subito il non disturbare\n\n" + expectedNote("meta_parse_error: $tzDetail"),
             ),
             delegate.compileTexts,
         )
-        assertTrue(expectedNote("meta_parse_error: $tzDetailInNote").length <= 400)
+        assertTrue(expectedNote("meta_parse_error: $tzDetail").length <= 400)
+    }
+
+    @Test
+    fun `class names in the detail lose their package so that the note stays within 400 chars`() = runTest {
+        val detail = "Field 'tz' is required for type with serial name 'dev.argus.engine.model.Trigger.Time', " +
+            "but it was missing at path: \$.draft.trigger"
+        val delegate = failingOnceThenOk(CompileResult("rotto", null, "meta_parse_error", detail = detail))
+        val brain = metered(delegate, FakePolicy(), RecordingUsageDao(), config = openai)
+
+        brain.compile("crea", TEST_MANIFEST, DeviceState())
+
+        val note = delegate.compileTexts.last().removePrefix("crea\n\n")
+        assertEquals(
+            expectedNote(
+                "meta_parse_error: Field 'tz' is required for type with serial name 'Trigger.Time', " +
+                    "but it was missing at path: \$.draft.trigger",
+            ),
+            note,
+        )
+        assertTrue(note.length <= 400)
     }
 
     @Test
