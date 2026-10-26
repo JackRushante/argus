@@ -1,4 +1,5 @@
 package dev.argus.engine.brain
+import dev.argus.engine.model.Action
 import dev.argus.engine.model.ArgusJson
 import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.Trigger
@@ -12,6 +13,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
+import java.util.Locale
 
 private const val SENTINEL = "@@META@@"
 private const val MAX_DETAIL_CHARS = 200
@@ -68,7 +70,7 @@ class CliBridgeParser(private val json: Json = lenient()) {
             return CompileResult(prose, null, "meta_parse_error", detail = "draft e error_code non possono coesistere")
         }
         if (draft == null) return CompileResult(prose, null, code ?: "draft_missing")
-        return CompileResult(prose, draft.withStandardCron(), null)
+        return CompileResult(prose, draft.withStandardCron().withStandardRingerModes(), null)
     }
 
     /**
@@ -81,6 +83,37 @@ class CliBridgeParser(private val json: Json = lenient()) {
         val cron = time.cron ?: return this
         val standard = CronSchedule.dropLeadingZeroSeconds(cron)
         return if (standard == cron) this else copy(trigger = time.copy(cron = standard))
+    }
+
+    /**
+     * Otto modelli su undici scrivono la suoneria in maiuscolo (`"VIBRATE"`, come i valori di `set_dnd`), che
+     * il validatore rifiuta con `ringer_mode_invalid`. Qui, PRIMA della validazione, una modalità che in
+     * minuscolo è valida diventa minuscola, anche dentro if/while. Interpolazioni e valori sconosciuti
+     * restano come sono: decide il validatore.
+     */
+    private fun AutomationDraft.withStandardRingerModes(): AutomationDraft {
+        val standard = standardRingerModes(actions, depth = 0)
+        return if (standard == actions) this else copy(actions = standard)
+    }
+
+    private fun standardRingerModes(actions: List<Action>, depth: Int): List<Action> {
+        // Oltre questa profondità il validatore rifiuta comunque la bozza (`flow_too_deep`): la visita si
+        // ferma lì, così un albero non ancora validato non fa crescere la ricorsione.
+        if (depth > MAX_NORMALIZE_DEPTH) return actions
+        return actions.map { action ->
+            when (action) {
+                is Action.SetRinger -> {
+                    val mode = action.mode.trim().lowercase(Locale.ROOT)
+                    if (mode != action.mode && mode in RINGER_MODES) action.copy(mode = mode) else action
+                }
+                is Action.If -> action.copy(
+                    then = standardRingerModes(action.then, depth + 1),
+                    orElse = standardRingerModes(action.orElse, depth + 1),
+                )
+                is Action.While -> action.copy(body = standardRingerModes(action.body, depth + 1))
+                else -> action
+            }
+        }
     }
 
     /** Senza sentinel: l'ultimo blocco ```json il cui oggetto ha la chiave `draft`. */
@@ -178,6 +211,12 @@ class CliBridgeParser(private val json: Json = lenient()) {
         val ERROR_CODE = Regex("^[a-z][a-z0-9_]{0,63}$")
         val FENCE = Regex("```[A-Za-z]*\\s*\\n?(.*?)```", RegexOption.DOT_MATCHES_ALL)
         val MISNAMED_SENTINEL = Regex("@@[A-Z][A-Z0-9_]{1,40}@@")
+
+        /** Le modalità che il validatore accetta per `set_ringer`. */
+        val RINGER_MODES = setOf("normal", "vibrate", "silent")
+
+        /** Più profondo del limite if/while del validatore: ogni bozza armabile è normalizzata tutta. */
+        const val MAX_NORMALIZE_DEPTH = 8
 
         @OptIn(ExperimentalSerializationApi::class)
         fun lenient() = Json(ArgusJson) {

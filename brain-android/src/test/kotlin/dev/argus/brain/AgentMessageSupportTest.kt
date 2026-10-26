@@ -159,6 +159,19 @@ class AgentMessageSupportTest {
     }
 
     @Test
+    fun `compile rules list the ringer modes and say what the connectivity match compares`() {
+        val system = AgentMessageSupport.compileSystemText().lines().joinToString(" ") { it.trim() }
+
+        // Senza valori i modelli scrivevano "VIBRATE" (come set_dnd), che il validatore rifiuta.
+        assertTrue("{\"type\":\"set_ringer\", \"mode\":\"normal\"|\"vibrate\"|\"silent\"}" in system)
+        // Il match vale anche per il Bluetooth ed è un confronto esatto (TriggerMatcher).
+        assertTrue(
+            "\"match\":string|null (the EXACT Wi-Fi network name or Bluetooth device name the user mentions; " +
+                "null = any network or device)" in system,
+        )
+    }
+
+    @Test
     fun `rule 7 makes the manifest decide the language of every text for the user`() {
         val rules = AgentMessageSupport.COMPILE_RULES
         // La regola va a capo in mezzo alle frasi: si confronta il testo con gli spazi normalizzati.

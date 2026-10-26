@@ -594,7 +594,8 @@ Trigger, discriminated by "type":
    "number":string|null, "textMatch":string|null (case-insensitive contains on the SMS
    text; ONLY with event SMS_RECEIVED)}
 - {"type":"connectivity", "medium":"WIFI"|"BT"|"POWER",
-   "state":"CONNECTED"|"DISCONNECTED", "match":string|null}
+   "state":"CONNECTED"|"DISCONNECTED", "match":string|null (the EXACT Wi-Fi network name or
+   Bluetooth device name the user mentions; null = any network or device)}
 - {"type":"sensor", "kind":"significant_motion"|"stationary_detect"|"motion_detect"|
    "step_detector"|"step_counter", "minimumEventCount":integer,
    "samplingPeriodUs":null, "maxReportLatencyUs":null}
@@ -617,7 +618,7 @@ Action, discriminated by "type":
 - {"type":"set_mobile_data", "on":boolean}  // toggles mobile data; requires Shizuku (appears in
   available_tools only when available), like set_wifi/set_bluetooth
 - {"type":"set_dnd", "mode":"OFF"|"PRIORITY"|"TOTAL"}
-- {"type":"set_ringer", "mode":string}
+- {"type":"set_ringer", "mode":"normal"|"vibrate"|"silent"}
 - {"type":"launch_app", "pkg":string}
 - {"type":"open_url", "url":string}
 - {"type":"show_notification", "title":string, "text":string}

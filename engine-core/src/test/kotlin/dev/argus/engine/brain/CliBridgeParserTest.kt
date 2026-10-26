@@ -323,4 +323,46 @@ class CliBridgeParserTest {
         assertNull(r.metaError)
         assertEquals("Solo testo.", r.reply)
     }
+
+    // --- 0.3.7: la suoneria scritta in maiuscolo diventa la forma minuscola PRIMA della validazione ---
+
+    private fun parsedActions(actionsJson: String): List<Action> {
+        val r = p.parseCompile("""ok @@META@@ {"draft":{"name":"x","trigger":{"type":"immediate"},"actions":$actionsJson}}""")
+        assertNull(r.metaError, actionsJson)
+        return assertNotNull(r.draft, actionsJson).actions
+    }
+
+    @Test fun `a ringer mode written in capitals becomes the lowercase mode the validator accepts`() {
+        assertEquals(listOf(Action.SetRinger("vibrate")), parsedActions("""[{"type":"set_ringer","mode":"VIBRATE"}]"""))
+        assertEquals(listOf(Action.SetRinger("silent")), parsedActions("""[{"type":"set_ringer","mode":" Silent "}]"""))
+        assertEquals(listOf(Action.SetRinger("normal")), parsedActions("""[{"type":"set_ringer","mode":"normal"}]"""))
+    }
+
+    @Test fun `ringer modes inside if and while are normalized too`() {
+        val always = """{"type":"boolean_literal","value":true}"""
+        val actions = parsedActions(
+            """[{"type":"if","condition":$always,"then":[{"type":"set_ringer","mode":"VIBRATE"}],""" +
+                """"orElse":[{"type":"while","condition":$always,"body":[{"type":"set_ringer","mode":"SILENT"}],"maxIterations":2}]}]""",
+        )
+        val branch = actions.single() as Action.If
+        assertEquals(listOf(Action.SetRinger("vibrate")), branch.then)
+        assertEquals(listOf(Action.SetRinger("silent")), (branch.orElse.single() as Action.While).body)
+    }
+
+    @Test fun `unknown ringer modes and interpolations stay as the model wrote them`() {
+        assertEquals(listOf(Action.SetRinger("LOUD")), parsedActions("""[{"type":"set_ringer","mode":"LOUD"}]"""))
+        assertEquals(
+            listOf(Action.SetRinger("${'$'}{Mode}")),
+            parsedActions("""[{"type":"set_ringer","mode":"${'$'}{Mode}"}]"""),
+        )
+    }
+
+    @Test fun `the validator accepts a ringer mode the model wrote in capitals`() {
+        val validator = dev.argus.engine.safety.DraftValidator(knownTools = emptySet())
+        val draft = assertNotNull(
+            p.parseCompile("""@@META@@ {"draft":{"name":"x","trigger":{"type":"immediate"},"actions":[{"type":"set_ringer","mode":"VIBRATE"}]}}""").draft,
+        )
+        val codes = validator.validate(draft, emptySet()).map { it.code }
+        assertFalse("ringer_mode_invalid" in codes, codes.toString())
+    }
 }
