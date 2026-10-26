@@ -84,6 +84,8 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import android.content.Context
+import dev.argus.automation.LogRetentionStore
 
 /**
  * Backup delle regole (0.4.0, F1): le bozze create dall'import devono comparire nella lista come
@@ -362,6 +364,7 @@ class ImportedRulesFlowTest {
             audit = NoopAuditSink,
             languageSource = RenderLanguageSource { RenderLanguage.EN },
             applicationScope = applicationScope,
+            retention = LogRetentionStore(ApplicationProvider.getApplicationContext<Context>()),
         ).also { viewModels += it }
     }
 
