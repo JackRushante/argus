@@ -26,12 +26,17 @@ import androidx.compose.ui.unit.dp
 import dev.argus.ui.R
 import dev.argus.ui.model.AuthState
 import dev.argus.ui.model.TransportUi
+import dev.argus.ui.presentation.ConnectionFormValidation
 import dev.argus.ui.presentation.ModelFieldHints
 
 /**
  * Editor di un provider diretto BYOK. Stessa disciplina di [BridgeConfigurationDialog]: la chiave
  * vive in `remember` (MAI `rememberSaveable` — niente segreti nel SavedState) e non viene mai
  * precompilata. `apiKey == null` in [onSave] conserva la chiave esistente.
+ *
+ * «Salva e verifica» controlla i dati PRIMA di chiudersi (B48): con dati non validi il dialogo resta
+ * aperto, il testo scritto resta com'è e l'errore compare sotto il campo; si chiude solo quando i dati
+ * passano il controllo ([ConnectionFormValidation], le stesse regole del salvataggio).
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -47,14 +52,33 @@ fun ProviderConfigurationDialog(
     }
     // Non serializzare mai la chiave in SavedState/process-death storage.
     var key by remember { mutableStateOf("") }
+    // Gli errori compaiono dal primo tentativo di salvare, non mentre si scrive.
+    var attempted by rememberSaveable { mutableStateOf(false) }
     val cleanBaseUrl = baseUrl.trim()
     val cleanModel = model.trim()
     val cleanKey = key.trim()
     val keyConfigured = provider.authState == AuthState.OK
     val presetMistyped = provider.modelPresetHint && ModelFieldHints.isMistypedPreset(model)
-    val canSave = cleanModel.isNotEmpty() &&
-        (!provider.apiKeyRequired || keyConfigured || cleanKey.isNotEmpty()) &&
-        (!provider.baseUrlEditable || cleanBaseUrl.isNotEmpty())
+    // L'indirizzo si modifica solo per il provider Custom: è anche l'unico che ammette http verso
+    // localhost e chiavi corte (endpoint locali).
+    val minKeyLength = if (provider.baseUrlEditable) {
+        ConnectionFormValidation.MIN_CUSTOM_SECRET_LENGTH
+    } else {
+        ConnectionFormValidation.MIN_SECRET_LENGTH
+    }
+    val problems = ConnectionFormValidation.providerForm(
+        baseUrl = baseUrl,
+        model = model,
+        apiKey = key,
+        baseUrlEditable = provider.baseUrlEditable,
+        cleartextLoopbackAllowed = provider.baseUrlEditable,
+        keyRequired = provider.apiKeyRequired,
+        keyConfigured = keyConfigured,
+        minKeyLength = minKeyLength,
+    )
+    val urlProblem = problems.url.takeIf { attempted }
+    val keyProblem = problems.key.takeIf { attempted }
+    val modelMissing = problems.modelMissing && attempted
     val reasoningOptions = listOf(
         "default" to stringResource(R.string.provider_reasoning_default),
         "none" to stringResource(R.string.provider_reasoning_none),
@@ -74,18 +98,22 @@ fun ProviderConfigurationDialog(
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     enabled = provider.baseUrlEditable,
+                    isError = urlProblem != null,
                     label = { Text(stringResource(R.string.provider_endpoint_label)) },
+                    supportingText = urlProblem?.let { problem -> { Text(urlProblemText(problem)) } },
                 )
                 OutlinedTextField(
                     value = model,
                     onValueChange = { model = it },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
-                    isError = presetMistyped,
+                    isError = presetMistyped || modelMissing,
                     label = { Text(stringResource(R.string.provider_model_label)) },
                     // OpenRouter: suggerisce i preset `@preset/<nome>`; se si scrive `@presets/…` avvisa
                     // del formato giusto senza correggere il valore e senza bloccare il salvataggio.
-                    supportingText = if (provider.modelPresetHint) {
+                    supportingText = if (modelMissing) {
+                        { Text(stringResource(R.string.ui40_model_error_empty)) }
+                    } else if (provider.modelPresetHint) {
                         {
                             Text(
                                 if (presetMistyped) {
@@ -132,15 +160,21 @@ fun ProviderConfigurationDialog(
                     onValueChange = { key = it },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
+                    isError = keyProblem != null,
                     visualTransformation = PasswordVisualTransformation(),
                     label = { Text(stringResource(R.string.provider_key_label)) },
                     placeholder = provider.apiKeyPrefixHint?.let { { Text(it) } },
                     supportingText = {
+                        val keyHint = when {
+                            keyConfigured -> stringResource(R.string.provider_key_keep_hint)
+                            provider.apiKeyRequired -> stringResource(R.string.provider_key_required_hint)
+                            else -> stringResource(R.string.provider_key_optional_hint)
+                        }
                         Text(
-                            when {
-                                keyConfigured -> stringResource(R.string.provider_key_keep_hint)
-                                provider.apiKeyRequired -> stringResource(R.string.provider_key_required_hint)
-                                else -> stringResource(R.string.provider_key_optional_hint)
+                            if (keyProblem != null) {
+                                secretProblemText(keyProblem, minKeyLength, keyHint)
+                            } else {
+                                keyHint
                             },
                         )
                     },
@@ -152,16 +186,18 @@ fun ProviderConfigurationDialog(
         },
         confirmButton = {
             Button(
-                enabled = canSave,
                 onClick = {
-                    onSave(
-                        cleanBaseUrl.takeIf { provider.baseUrlEditable },
-                        cleanModel,
-                        cleanKey.takeIf(String::isNotEmpty),
-                        reasoningEffort.takeIf { provider.reasoningEffortEditable },
-                    )
-                    key = ""
-                    onDismiss()
+                    attempted = true
+                    if (problems.accepted) {
+                        onSave(
+                            cleanBaseUrl.takeIf { provider.baseUrlEditable },
+                            cleanModel,
+                            cleanKey.takeIf(String::isNotEmpty),
+                            reasoningEffort.takeIf { provider.reasoningEffortEditable },
+                        )
+                        key = ""
+                        onDismiss()
+                    }
                 },
             ) { Text(stringResource(R.string.action_save_and_test)) }
         },

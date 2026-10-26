@@ -39,16 +39,19 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -63,11 +66,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import dev.argus.engine.safety.Severity
+import dev.argus.ui.components.ConfirmationState
+import dev.argus.ui.components.DestructiveConfirmDialog
 import dev.argus.ui.components.LatencyIndicator
 import dev.argus.ui.components.RuleCard
 import dev.argus.ui.model.ActionRow
@@ -80,6 +87,9 @@ import dev.argus.ui.model.NoticeKind
 import dev.argus.ui.model.RuleRender
 import dev.argus.ui.model.UiWarning
 import dev.argus.ui.preview.Fixtures
+import dev.argus.ui.presentation.ChatExampleGroup
+import dev.argus.ui.presentation.ChatExamples
+import dev.argus.ui.presentation.secondaryText
 import dev.argus.ui.R
 import dev.argus.ui.theme.ArgusTheme
 import dev.argus.ui.theme.LocalArgusSemantic
@@ -115,18 +125,28 @@ fun ChatScreen(
     LaunchedEffect(state.rawResponse != null) {
         if (state.rawResponse == null) showRawResponse = false
     }
+    // 0.4.0: galleria «Altri esempi» e conferma di «Svuota conversazione» (stato effimero della schermata).
+    var showExamples by remember { mutableStateOf(false) }
+    var confirmClear by remember { mutableStateOf(ConfirmationState<Unit>()) }
 
     Surface(color = MaterialTheme.colorScheme.background, modifier = modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             ChatHeader(
-                onClearConversation = callbacks::onClearConversation,
+                // B48: svuotare cancella messaggi e avvisi; se c'è qualcosa da perdere si chiede conferma.
+                onClearConversation = {
+                    if (hasClearableContent(state)) {
+                        confirmClear = confirmClear.ask(Unit)
+                    } else {
+                        callbacks.onClearConversation()
+                    }
+                },
                 onCheckConnection = callbacks::onCheckConnection,
             )
 
             // Zona messaggi (o empty state coi suggerimenti).
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 if (state.items.isEmpty() && !state.sending) {
-                    ChatEmptyState(callbacks)
+                    ChatEmptyState(callbacks, onMoreExamples = { showExamples = true })
                 } else {
                     val listState = rememberLazyListState()
                     AutoScrollToNewItems(listState, itemCount = state.items.size)
@@ -183,6 +203,26 @@ fun ChatScreen(
             )
         }
     }
+    if (confirmClear.isOpen) {
+        DestructiveConfirmDialog(
+            title = stringResource(R.string.ui40_chat_clear_title),
+            body = stringResource(R.string.ui40_chat_clear_body),
+            confirmLabel = stringResource(R.string.ui40_chat_clear_confirm),
+            onConfirm = { confirmClear = confirmClear.confirm { callbacks.onClearConversation() } },
+            onDismiss = { confirmClear = confirmClear.cancel() },
+        )
+    }
+    if (showExamples) {
+        ChatExamplesSheet(
+            groups = ChatExamples.groups(),
+            // Riempie il campo di testo, senza inviare: l'utente rilegge, adatta e poi invia.
+            onPick = { text ->
+                showExamples = false
+                callbacks.onInputChange(text)
+            },
+            onDismiss = { showExamples = false },
+        )
+    }
     val rawText = state.rawResponse
     if (showRawResponse && rawText != null) {
         RawResponseDialog(
@@ -195,6 +235,13 @@ fun ChatScreen(
         )
     }
 }
+
+/**
+ * Vero se «Svuota conversazione» ha qualcosa da perdere: messaggi e avvisi. Le proposte in attesa
+ * (DraftCard) restano comunque, perché sono il canale di approvazione.
+ */
+internal fun hasClearableContent(state: ChatState): Boolean =
+    state.items.any { it !is ChatItem.DraftCard }
 
 /** Chiave stabile di una voce della conversazione: draftId per le card, indice per il resto. */
 internal fun chatItemKey(index: Int, item: ChatItem): String =
@@ -307,7 +354,7 @@ private fun MessageBubble(text: String, timeLabel: String, fromUser: Boolean) {
             if (timeLabel.isNotBlank()) {
                 Text(
                     timeLabel,
-                    color = MaterialTheme.colorScheme.outline,
+                    color = MaterialTheme.colorScheme.secondaryText(),
                     style = MaterialTheme.typography.labelSmall,
                     modifier = Modifier.padding(horizontal = 4.dp, vertical = 3.dp),
                 )
@@ -599,7 +646,7 @@ private fun RawResponseDialog(raw: String, onCopy: () -> Unit, onDismiss: () -> 
 // -----------------------------------------------------------------------------
 
 @Composable
-private fun ChatEmptyState(callbacks: ChatCallbacks) {
+private fun ChatEmptyState(callbacks: ChatCallbacks, onMoreExamples: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -640,6 +687,13 @@ private fun ChatEmptyState(callbacks: ChatCallbacks) {
                     callbacks.onSend()
                 }
             }
+            // 0.4.0 (F10): galleria con altre idee, divise per argomento.
+            TextButton(
+                onClick = onMoreExamples,
+                modifier = Modifier.align(Alignment.CenterHorizontally).heightIn(min = 48.dp).testTag("chat_more_examples"),
+            ) {
+                Text(stringResource(R.string.ui40_chat_more_examples))
+            }
         }
         Spacer(Modifier.size(16.dp))
     }
@@ -659,6 +713,94 @@ private fun SuggestionChip(text: String, onTap: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(text, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+/** Galleria «Altri esempi» (F10): foglio dal basso con gli esempi per gruppo; toccarne uno lo passa a [onPick]. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ChatExamplesSheet(
+    groups: List<ChatExampleGroup>,
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = MaterialTheme.colorScheme.background,
+    ) {
+        ChatExamplesContent(groups, onPick)
+    }
+}
+
+@Composable
+internal fun ChatExamplesContent(groups: List<ChatExampleGroup>, onPick: (String) -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            stringResource(R.string.ui40_examples_title),
+            color = MaterialTheme.colorScheme.onSurface,
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Text(
+            stringResource(R.string.ui40_examples_hint),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        groups.forEach { group ->
+            Text(
+                group.title,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.padding(top = 10.dp),
+            )
+            group.examples.forEach { example ->
+                ExampleRow(example.text, example.requiresShizuku) { onPick(example.text) }
+            }
+        }
+        Spacer(Modifier.size(24.dp))
+    }
+}
+
+@Composable
+private fun ExampleRow(text: String, requiresShizuku: Boolean, onTap: () -> Unit) {
+    val shizukuCd = stringResource(R.string.ui40_example_shizuku_cd)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable { onTap() }
+            .heightIn(min = 48.dp)
+            .padding(horizontal = 13.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text,
+            color = MaterialTheme.colorScheme.onSurface,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.weight(1f),
+        )
+        if (requiresShizuku) {
+            // Etichetta testuale (non solo colore): l'esempio funziona solo con Shizuku attivo.
+            Text(
+                stringResource(R.string.ui40_example_shizuku_tag),
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(MaterialTheme.colorScheme.primaryContainer)
+                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                    .semantics { contentDescription = shizukuCd },
+            )
+        }
     }
 }
 
@@ -806,6 +948,16 @@ private fun ChatEmptyPreview() {
             ChatState(items = emptyList(), input = "", sending = false, sendingElapsedSec = null, brainReachable = null, error = null),
             NoopChatCallbacks,
         )
+    }
+}
+
+@Preview(name = "Chat · galleria esempi", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 900)
+@Composable
+private fun ChatExamplesPreview() {
+    ArgusTheme {
+        Surface(color = MaterialTheme.colorScheme.background) {
+            ChatExamplesContent(ChatExamples.groups(dev.argus.ui.presentation.RenderLanguage.IT), onPick = {})
+        }
     }
 }
 

@@ -89,7 +89,8 @@ class ExecutionLogViewModel @Inject constructor(
         val actionsByExecution = sources.actions.groupBy { it.executionId }
         val rows = sources.records.map { record ->
                 val executionActions = record.executionId?.let(actionsByExecution::get).orEmpty()
-                record.toLogRow(executionActions, language)
+                // 0.4.0 (B49): il Log raggruppa i giorni dal timestamp (giorno locale), non dal testo dell'orario.
+                record.toLogRow(executionActions, language).copy(atMillis = record.atMillis)
             }
         ExecutionLogState(
             entries = rows,

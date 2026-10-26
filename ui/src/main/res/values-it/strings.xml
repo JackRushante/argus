@@ -253,7 +253,7 @@
     <string name="settings_budget_limit">Limite: %1$s</string>
     <string name="settings_budget_provider_tokens">token · ora %1$s · oggi %2$s · mese %3$s</string>
     <string name="settings_budget_provider_calls">chiamate · ora %1$d · oggi %2$d</string>
-    <string name="settings_budget_provider_reasoning">token reasoning · mese %1$d</string>
+    <string name="settings_budget_provider_reasoning">token reasoning · mese %1$s</string>
     <string name="settings_budget_provider_finish">ultimo motivo di termine · %1$s</string>
     <string name="settings_budget_provider_cost">costo mese %1$s</string>
     <string name="settings_budget_footnote">Costi in dollari stimati dal listino pubblico solo per i provider a prezzo noto (stima indicativa, non fattura) · EUR a tasso fisso ≈ · Hermes/OpenRouter/Custom: solo token</string>
@@ -313,4 +313,38 @@
     <string name="backup_working_import">Importazione in corso…</string>
     <string name="backup_open_rules">Vedi le regole</string>
     <string name="backup_dismiss">Chiudi</string>
+
+    <!-- 0.4.0 blocco UI (prefisso ui40_) -->
+    <string name="ui40_chat_clear_title">Svuotare la conversazione?</string>
+    <string name="ui40_chat_clear_body">I messaggi e gli avvisi di questa chat verranno rimossi. Le proposte in attesa di approvazione restano.</string>
+    <string name="ui40_chat_clear_confirm">Svuota</string>
+    <string name="ui40_chat_more_examples">Altri esempi</string>
+    <string name="ui40_examples_title">Altri esempi</string>
+    <string name="ui40_examples_hint">Toccane uno per metterlo nel campo di testo. Modificalo come vuoi e poi invia.</string>
+    <string name="ui40_example_shizuku_tag">Shizuku</string>
+    <string name="ui40_example_shizuku_cd">Richiede Shizuku</string>
+    <string name="ui40_list_filter_empty_title">Nessuna regola con questo filtro</string>
+    <string name="ui40_list_filter_empty_body">Altre regole potrebbero essere nascoste. Togli il filtro per vederle tutte.</string>
+    <string name="ui40_list_filter_clear">Mostra tutte</string>
+    <string name="ui40_list_has_warnings">Ha avvisi</string>
+    <string name="ui40_health_ok_cd">Stato: a posto</string>
+    <string name="ui40_contact_remove_title">Rimuovere dalla whitelist?</string>
+    <string name="ui40_contact_remove_body">Argus non invierà più risposte automatiche a %1$s. Potrai riaggiungere il contatto in seguito.</string>
+    <string name="ui40_contact_remove_confirm">Rimuovi</string>
+    <string name="ui40_stats_title">Statistiche degli scatti</string>
+    <string name="ui40_stats_days">%1$d giorni</string>
+    <string name="ui40_stats_fires">Scatti</string>
+    <string name="ui40_stats_succeeded">Riuscite</string>
+    <string name="ui40_stats_failed">Fallite</string>
+    <string name="ui40_stats_none">Nessuno scatto negli ultimi %1$d giorni</string>
+    <string name="ui40_stats_retention_note">Il log conserva solo gli ultimi %1$d giorni: gli scatti più vecchi non sono contati.</string>
+    <string name="ui40_stats_cell_cd">%1$s negli ultimi %2$s</string>
+    <string name="ui40_url_error_empty">Inserisci l\'indirizzo</string>
+    <string name="ui40_url_error_not_https">L\'indirizzo deve iniziare con https://</string>
+    <string name="ui40_url_error_not_https_or_local">Usa https://, oppure http:// solo per localhost</string>
+    <string name="ui40_url_error_invalid">Indirizzo non valido: usa https://host oppure https://host:porta/percorso, senza nome utente, ? né #</string>
+    <string name="ui40_secret_error_short">Almeno %1$d caratteri</string>
+    <string name="ui40_secret_error_long">Troppo lungo (al massimo %1$d caratteri)</string>
+    <string name="ui40_secret_error_chars">Solo caratteri visibili, senza spazi</string>
+    <string name="ui40_model_error_empty">Inserisci il nome del modello</string>
 </resources>

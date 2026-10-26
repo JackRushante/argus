@@ -54,25 +54,57 @@ class BudgetFormatTest {
     }
 
     @Test fun `tokens label separa in e out e nd solo se entrambi mancano`() {
-        assertEquals("in 1500 · out 300", BudgetFormat.tokensLabel(1_500, 300, RenderLanguage.IT))
+        assertEquals("in 1.500 · out 300", BudgetFormat.tokensLabel(1_500, 300, RenderLanguage.IT))
         assertEquals("in 0 · out 0", BudgetFormat.tokensLabel(0, 0, RenderLanguage.IT))
-        assertEquals("in 1500 · out n/d", BudgetFormat.tokensLabel(1_500, null, RenderLanguage.IT))
+        assertEquals("in 1.500 · out n/d", BudgetFormat.tokensLabel(1_500, null, RenderLanguage.IT))
         assertEquals("in n/d · out 300", BudgetFormat.tokensLabel(null, 300, RenderLanguage.IT))
         assertEquals("n/d", BudgetFormat.tokensLabel(null, null, RenderLanguage.IT))
         // Default EN dell'app: "n/d" diventa "n/a".
-        assertEquals("in 1500 · out n/a", BudgetFormat.tokensLabel(1_500, null, RenderLanguage.EN))
+        assertEquals("in 1,500 · out n/a", BudgetFormat.tokensLabel(1_500, null, RenderLanguage.EN))
         assertEquals("n/a", BudgetFormat.tokensLabel(null, null, RenderLanguage.EN))
     }
 
     @Test fun `token cap label con e senza limite`() {
-        assertEquals("300 / 1000", BudgetFormat.tokensCapLabel(300, 1_000, RenderLanguage.IT))
+        assertEquals("300 / 1.000", BudgetFormat.tokensCapLabel(300, 1_000, RenderLanguage.IT))
         assertEquals("300 · illimitato", BudgetFormat.tokensCapLabel(300, null, RenderLanguage.IT))
         assertEquals("300 · illimitato", BudgetFormat.tokensCapLabel(300, 0, RenderLanguage.IT))
         assertEquals("n/d · illimitato", BudgetFormat.tokensCapLabel(null, null, RenderLanguage.IT))
-        assertEquals("n/d / 1000", BudgetFormat.tokensCapLabel(null, 1_000, RenderLanguage.IT))
+        assertEquals("n/d / 1.000", BudgetFormat.tokensCapLabel(null, 1_000, RenderLanguage.IT))
         // Default EN dell'app.
         assertEquals("300 · unlimited", BudgetFormat.tokensCapLabel(300, null, RenderLanguage.EN))
         assertEquals("n/a · unlimited", BudgetFormat.tokensCapLabel(null, null, RenderLanguage.EN))
+    }
+
+    // B49: i token a sei o sette cifre senza separatori non si leggono (1450000).
+    @Test fun `i numeri grandi usano il separatore delle migliaia della lingua`() {
+        assertEquals("1,450,000", BudgetFormat.grouped(1_450_000, RenderLanguage.EN))
+        assertEquals("1.450.000", BudgetFormat.grouped(1_450_000, RenderLanguage.IT))
+        assertEquals("12,345", BudgetFormat.grouped(12_345, RenderLanguage.EN))
+        assertEquals("1.000", BudgetFormat.grouped(1_000, RenderLanguage.IT))
+        assertEquals("999", BudgetFormat.grouped(999, RenderLanguage.IT))
+        assertEquals("0", BudgetFormat.grouped(0, RenderLanguage.EN))
+        assertEquals("-1,234", BudgetFormat.grouped(-1_234, RenderLanguage.EN))
+    }
+
+    @Test fun `le etichette dei token usano il separatore in entrambe le lingue`() {
+        assertEquals(
+            "in 1.450.000 · out 210.000",
+            BudgetFormat.tokensLabel(1_450_000, 210_000, RenderLanguage.IT),
+        )
+        assertEquals(
+            "in 1,450,000 · out 210,000",
+            BudgetFormat.tokensLabel(1_450_000, 210_000, RenderLanguage.EN),
+        )
+        assertEquals(
+            "1.450.000 / 5.000.000",
+            BudgetFormat.tokensCapLabel(1_450_000, 5_000_000, RenderLanguage.IT),
+        )
+        assertEquals(
+            "1,450,000 / 5,000,000",
+            BudgetFormat.tokensCapLabel(1_450_000, 5_000_000, RenderLanguage.EN),
+        )
+        assertEquals("1.200 · illimitato", BudgetFormat.callsLabel(1_200, null, RenderLanguage.IT))
+        assertEquals("1,200 / 5,000", BudgetFormat.callsLabel(1_200, 5_000, RenderLanguage.EN))
     }
 
     @Test fun `token ratio clampata e zero se illimitato o nd`() {

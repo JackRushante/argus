@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -63,11 +64,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import dev.argus.engine.runtime.AuditKind
 import dev.argus.engine.safety.Severity
+import dev.argus.ui.components.DestructiveConfirmDialog
 import dev.argus.ui.components.RuleCard
 import dev.argus.ui.components.StatusBadgeChip
 import dev.argus.ui.components.WarningBanner
@@ -84,9 +89,14 @@ import dev.argus.ui.model.LogOutcome
 import dev.argus.ui.model.LogRow
 import dev.argus.ui.model.RuleDiagnosisUi
 import dev.argus.ui.model.RuleRender
+import dev.argus.ui.model.RuleStatsUi
+import dev.argus.ui.model.RuleStatsWindow
 import dev.argus.ui.model.StatusBadge
 import dev.argus.ui.model.UiWarning
 import dev.argus.ui.preview.Fixtures
+import dev.argus.ui.presentation.ATTENUATED_ROW_ALPHA
+import dev.argus.ui.presentation.BudgetFormat
+import dev.argus.ui.presentation.secondaryText
 import dev.argus.ui.theme.ArgusTheme
 import dev.argus.ui.theme.LocalArgusSemantic
 
@@ -156,6 +166,9 @@ fun AutomationDetailScreen(
                     RecentRunsSection(state.recentRuns, callbacks::onOpenFullLog)
                 }
 
+                // F10: scatti, riuscite e fallite negli ultimi 7 e 30 giorni (solo regole salvate).
+                state.stats?.let { RuleStatsSection(it) }
+
                 // F2: solo per una regola salvata; chiusa di default, calcola alla prima apertura.
                 if (state.diagnosisAvailable) {
                     DiagnosisSection(
@@ -177,23 +190,16 @@ fun AutomationDetailScreen(
         }
     }
     if (confirmDelete) {
-        AlertDialog(
-            onDismissRequest = { confirmDelete = false },
-            title = { Text(stringResource(R.string.delete_dialog_title)) },
-            text = { Text(stringResource(R.string.delete_dialog_body)) },
-            dismissButton = {
-                TextButton(onClick = { confirmDelete = false }) {
-                    Text(stringResource(R.string.action_cancel))
-                }
+        // B48: il pulsante che conferma l'eliminazione usa il colore di errore del tema.
+        DestructiveConfirmDialog(
+            title = stringResource(R.string.delete_dialog_title),
+            body = stringResource(R.string.delete_dialog_body),
+            confirmLabel = stringResource(R.string.action_delete),
+            onConfirm = {
+                confirmDelete = false
+                callbacks.onDelete()
             },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        confirmDelete = false
-                        callbacks.onDelete()
-                    },
-                ) { Text(stringResource(R.string.action_delete)) }
-            },
+            onDismiss = { confirmDelete = false },
         )
     }
     if (confirmRunNow) {
@@ -406,7 +412,8 @@ private fun RunRow(row: LogRow) {
         modifier = Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surfaceVariant)
-            .alpha(if (attenuated) 0.6f else 1f)
+            // B45: 0.6 portava il testo sotto 4,5:1; ATTENUATED_ROW_ALPHA lo tiene sopra.
+            .alpha(if (attenuated) ATTENUATED_ROW_ALPHA else 1f)
             .padding(horizontal = 13.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -418,7 +425,7 @@ private fun RunRow(row: LogRow) {
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.weight(1f),
         )
-        Text(row.timeLabel, color = MaterialTheme.colorScheme.outline, style = MaterialTheme.typography.labelSmall)
+        Text(row.timeLabel, color = MaterialTheme.colorScheme.secondaryText(), style = MaterialTheme.typography.labelSmall)
     }
 }
 
@@ -450,6 +457,116 @@ private fun runVisual(row: LogRow): Pair<ImageVector, Color> {
             LogOutcome.FAILED -> Icons.Rounded.Error to s.error.fg
             LogOutcome.SUBMITTED -> Icons.AutoMirrored.Rounded.ScheduleSend to MaterialTheme.colorScheme.primary
             LogOutcome.DEFERRED -> Icons.AutoMirrored.Rounded.ScheduleSend to s.cloud.fg
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Statistiche della regola (0.4.0, F10): ultimi 7 e 30 giorni
+// -----------------------------------------------------------------------------
+
+/** Giorni della finestra breve: la lunga arriva dallo stato ([RuleStatsUi.longWindowDays]). */
+private const val SHORT_STATS_WINDOW_DAYS = 7
+
+/**
+ * Colonne da mostrare: la finestra breve e, se copre più giorni, quella lunga. Con il Log conservato
+ * solo 7 giorni le due coinciderebbero: si mostra una colonna sola.
+ */
+internal fun statsColumns(stats: RuleStatsUi): List<Pair<Int, RuleStatsWindow>> =
+    if (stats.longWindowDays > SHORT_STATS_WINDOW_DAYS) {
+        listOf(SHORT_STATS_WINDOW_DAYS to stats.last7Days, stats.longWindowDays to stats.last30Days)
+    } else {
+        listOf(SHORT_STATS_WINDOW_DAYS to stats.last7Days)
+    }
+
+@Composable
+internal fun RuleStatsSection(stats: RuleStatsUi) {
+    val shape = RoundedCornerShape(12.dp)
+    Column(verticalArrangement = Arrangement.spacedBy(SectionLabelSpacing)) {
+        Text(
+            stringResource(R.string.ui40_stats_title),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.labelSmall,
+        )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(shape)
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape)
+                .padding(horizontal = 13.dp, vertical = 11.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (stats.isEmpty) {
+                Text(
+                    stringResource(R.string.ui40_stats_none, stats.longWindowDays),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            } else {
+                val columns = statsColumns(stats)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Spacer(Modifier.weight(1f))
+                    columns.forEach { (days, _) ->
+                        Text(
+                            stringResource(R.string.ui40_stats_days, days),
+                            color = MaterialTheme.colorScheme.secondaryText(),
+                            style = MaterialTheme.typography.labelSmall,
+                            textAlign = TextAlign.End,
+                            modifier = Modifier.widthIn(min = 72.dp),
+                        )
+                    }
+                }
+                StatsRow(stringResource(R.string.ui40_stats_fires), columns) { it.fires }
+                StatsRow(stringResource(R.string.ui40_stats_succeeded), columns) { it.succeeded }
+                StatsRow(stringResource(R.string.ui40_stats_failed), columns) { it.failed }
+            }
+            if (stats.longWindowDays < 30) {
+                Text(
+                    stringResource(R.string.ui40_stats_retention_note, stats.longWindowDays),
+                    color = MaterialTheme.colorScheme.secondaryText(),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatsRow(
+    label: String,
+    columns: List<Pair<Int, RuleStatsWindow>>,
+    count: (RuleStatsWindow) -> Int,
+) {
+    // TalkBack legge una frase sola per riga («Scatti: 3 negli ultimi 7 giorni, 12 negli ultimi 30 giorni»).
+    // `map` e' inline, `joinToString` no: le stringResource stanno nel map.
+    val spoken = columns.map { (days, window) ->
+        stringResource(
+            R.string.ui40_stats_cell_cd,
+            BudgetFormat.grouped(count(window).toLong()),
+            stringResource(R.string.ui40_stats_days, days),
+        )
+    }.joinToString(", ")
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics(mergeDescendants = true) { contentDescription = "$label: $spoken" },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            color = MaterialTheme.colorScheme.onSurface,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.weight(1f),
+        )
+        columns.forEach { (_, window) ->
+            Text(
+                BudgetFormat.grouped(count(window).toLong()),
+                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.labelLarge,
+                textAlign = TextAlign.End,
+                modifier = Modifier.widthIn(min = 72.dp),
+            )
         }
     }
 }
@@ -525,7 +642,7 @@ internal fun DiagnosisSection(
                     diagnosis?.let {
                         Text(
                             it.checkedAtLabel,
-                            color = MaterialTheme.colorScheme.outline,
+                            color = MaterialTheme.colorScheme.secondaryText(),
                             style = MaterialTheme.typography.labelSmall,
                         )
                     }
@@ -602,8 +719,9 @@ private fun DetailFooter(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun PendingFooter(state: AutomationDetailState, callbacks: AutomationDetailCallbacks) {
+internal fun PendingFooter(state: AutomationDetailState, callbacks: AutomationDetailCallbacks) {
     val semantic = LocalArgusSemantic.current
     Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
         // §5.2: quando l'arm è bloccato il motivo è SEMPRE visibile accanto al bottone
@@ -619,8 +737,24 @@ private fun PendingFooter(state: AutomationDetailState, callbacks: AutomationDet
                 )
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            // B26: durante arma/rifiuta/elimina in corso il footer resta disabilitato.
+        // B46: l'azione principale ha una riga sua, a tutta larghezza: con caratteri grandi o
+        // schermi stretti «Arma» non si schiaccia più tra gli altri pulsanti. Arma = unica azione
+        // filled/accent; abilitata SOLO se canArm (invariante §5.2). B26: durante arma/rifiuta/
+        // elimina in corso il footer resta disabilitato.
+        Button(
+            onClick = callbacks::onArm,
+            enabled = state.canArm && !state.actionInProgress,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+        ) {
+            Icon(Icons.Rounded.Shield, contentDescription = null, modifier = Modifier.size(19.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(stringResource(R.string.detail_arm))
+        }
+        // Le azioni secondarie vanno a capo invece di comprimersi.
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             OutlinedButton(
                 onClick = callbacks::onReject,
                 enabled = !state.actionInProgress,
@@ -631,16 +765,6 @@ private fun PendingFooter(state: AutomationDetailState, callbacks: AutomationDet
                 enabled = !state.actionInProgress,
                 modifier = Modifier.heightIn(min = 48.dp),
             ) { Text(stringResource(R.string.detail_edit)) }
-            // Arma = unica azione filled/accent; abilitata SOLO se canArm (invariante §5.2).
-            Button(
-                onClick = callbacks::onArm,
-                enabled = state.canArm && !state.actionInProgress,
-                modifier = Modifier.weight(1f).heightIn(min = 48.dp),
-            ) {
-                Icon(Icons.Rounded.Shield, contentDescription = null, modifier = Modifier.size(19.dp))
-                Spacer(Modifier.width(6.dp))
-                Text(stringResource(R.string.detail_arm))
-            }
         }
     }
 }
@@ -654,13 +778,14 @@ internal fun showRunNowAction(state: AutomationDetailState): Boolean =
     state.canRunNow && (state.status == StatusBadge.ARMED || state.status == StatusBadge.DISABLED)
 
 /**
- * ARMED/DISABLED: [Disattiva/Riattiva] (azione principale, a tutta larghezza), poi sulla riga
- * secondaria [elimina] [Modifica in chat] e, solo se disponibile, [Esegui ora]. §5.6: né elimina né
- * esegui-ora sono pre-focusati/filled — restano outline, così nessuna azione
+ * ARMED/DISABLED: [Disattiva/Riattiva] (azione principale, a tutta larghezza), poi le secondarie in
+ * un [FlowRow] che va a capo (B46): [elimina] [Modifica in chat] e, solo se disponibile, [Esegui ora].
+ * §5.6: né elimina né esegui-ora sono pre-focusati/filled — restano outline, così nessuna azione
  * irreversibile è l'azione di default.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ReviewableFooter(
+internal fun ReviewableFooter(
     state: AutomationDetailState,
     callbacks: AutomationDetailCallbacks,
     onDelete: () -> Unit,
@@ -678,7 +803,10 @@ private fun ReviewableFooter(
                 else stringResource(R.string.detail_enable),
             )
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             OutlinedButton(
                 onClick = onDelete,
                 enabled = !state.actionInProgress,
@@ -692,7 +820,7 @@ private fun ReviewableFooter(
             OutlinedButton(
                 onClick = callbacks::onAskEdit,
                 enabled = !state.actionInProgress,
-                modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                modifier = Modifier.heightIn(min = 48.dp),
             ) { Text(stringResource(R.string.detail_edit_in_chat)) }
             if (showRunNowAction(state)) {
                 OutlinedButton(
@@ -967,6 +1095,80 @@ private fun DiagnosisGeofenceUnknownPreview() {
                     onDiagnose = {},
                     onOpenSystem = {},
                     initiallyOpen = true,
+                )
+            }
+        }
+    }
+}
+
+// B46: i pulsanti non devono schiacciarsi con caratteri grandi o schermi stretti. Le due anteprime
+// sotto riproducono il caso peggiore (320 dp di larghezza, carattere al 200%) per le due barre.
+@Preview(
+    name = "Detail · approvazione · 320 dp, carattere x2",
+    showBackground = true,
+    backgroundColor = 0xFF0E1216,
+    widthDp = 320,
+    heightDp = 900,
+    fontScale = 2f,
+)
+@Composable
+private fun DetailPendingLargeFontPreview() {
+    ArgusTheme { AutomationDetailScreen(previewReplyDetail, NoopDetailCallbacks) }
+}
+
+@Preview(
+    name = "Detail · regola armata · 320 dp, carattere x2",
+    showBackground = true,
+    backgroundColor = 0xFF0E1216,
+    widthDp = 320,
+    heightDp = 900,
+    fontScale = 2f,
+)
+@Composable
+private fun DetailArmedLargeFontPreview() {
+    ArgusTheme { AutomationDetailScreen(previewArmedDetail.copy(canRunNow = true), NoopDetailCallbacks) }
+}
+
+@Preview(name = "Detail · ARMED con statistiche", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 1000)
+@Composable
+private fun DetailArmedStatsPreview() {
+    ArgusTheme {
+        AutomationDetailScreen(
+            previewArmedDetail.copy(
+                stats = RuleStatsUi(
+                    last7Days = RuleStatsWindow(fires = 3, succeeded = 2, failed = 1),
+                    last30Days = RuleStatsWindow(fires = 12, succeeded = 10, failed = 2),
+                ),
+            ),
+            NoopDetailCallbacks,
+        )
+    }
+}
+
+@Preview(name = "Statistiche · nessuno scatto", showBackground = true, backgroundColor = 0xFF0E1216)
+@Composable
+private fun RuleStatsEmptyPreview() {
+    ArgusTheme {
+        Surface(color = MaterialTheme.colorScheme.background) {
+            Box(Modifier.padding(16.dp)) {
+                RuleStatsSection(RuleStatsUi(RuleStatsWindow(0, 0, 0), RuleStatsWindow(0, 0, 0)))
+            }
+        }
+    }
+}
+
+@Preview(name = "Statistiche · Log conservato 7 giorni", showBackground = true, backgroundColor = 0xFF0E1216)
+@Composable
+private fun RuleStatsShortRetentionPreview() {
+    ArgusTheme {
+        Surface(color = MaterialTheme.colorScheme.background) {
+            Box(Modifier.padding(16.dp)) {
+                RuleStatsSection(
+                    RuleStatsUi(
+                        last7Days = RuleStatsWindow(4, 4, 0),
+                        last30Days = RuleStatsWindow(4, 4, 0),
+                        longWindowDays = 7,
+                    ),
                 )
             }
         }

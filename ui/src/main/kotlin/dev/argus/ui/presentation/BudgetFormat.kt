@@ -26,10 +26,22 @@ object BudgetFormat {
         return "≈ ${usdLabel(micros)} · ≈ $eurLabel"
     }
 
+    /**
+     * Intero col separatore delle migliaia della lingua dell'app: EN `1,450,000`, IT `1.450.000`.
+     * Separatori fissi per lingua (non il locale della macchina) così il testo è deterministico e
+     * coerente col resto dell'interfaccia. I valori sotto 1000 restano invariati.
+     */
+    fun grouped(value: Long, language: RenderLanguage = RenderLanguage.system()): String {
+        val separator = language.pick(",", ".")
+        val digits = if (value < 0) value.toString().drop(1) else value.toString()
+        val grouped = digits.reversed().chunked(3).joinToString(separator).reversed()
+        return if (value < 0) "-$grouped" else grouped
+    }
+
     /** (3,20)->"3 / 20"; (3,null)->"3 · unlimited" (EN) / "3 · illimitato" (IT). */
     fun callsLabel(used: Long, limit: Int?, language: RenderLanguage = RenderLanguage.system()): String =
-        if (limit != null && limit > 0) "$used / $limit"
-        else "$used · " + language.pick("unlimited", "illimitato")
+        if (limit != null && limit > 0) "${grouped(used, language)} / ${grouped(limit.toLong(), language)}"
+        else "${grouped(used, language)} · " + language.pick("unlimited", "illimitato")
 
     /** 0f se limite null/<=0; altrimenti used/limit clampato in [0,1]. */
     fun ratio(used: Long, limit: Int?): Float {
@@ -53,7 +65,7 @@ object BudgetFormat {
 
     // --- TOKEN (metrica primaria dei provider token-only: Hermes/OpenRouter/Custom) ---
 
-    /** (1500,300)->"in 1500 · out 300"; un lato null->"n/a"/"n/d"; entrambi null->"n/a"/"n/d". */
+    /** (1500,300)->"in 1,500 · out 300" (EN) / "in 1.500 · out 300" (IT); un lato null->"n/a"/"n/d"; entrambi null->"n/a"/"n/d". */
     fun tokensLabel(
         tokensIn: Long?,
         tokensOut: Long?,
@@ -61,17 +73,17 @@ object BudgetFormat {
     ): String {
         val na = language.pick("n/a", "n/d")
         if (tokensIn == null && tokensOut == null) return na
-        return "in ${tokensIn?.toString() ?: na} · out ${tokensOut?.toString() ?: na}"
+        return "in ${tokensIn?.let { grouped(it, language) } ?: na} · out ${tokensOut?.let { grouped(it, language) } ?: na}"
     }
 
-    /** (300,1000)->"300 / 1000"; limite null/<=0->"300 · unlimited"/"illimitato"; usato null->"n/a"/"n/d". */
+    /** (300,1000000)->"300 / 1,000,000" (EN) / "300 / 1.000.000" (IT); limite null/<=0->"300 · unlimited"/"illimitato"; usato null->"n/a"/"n/d". */
     fun tokensCapLabel(
         used: Long?,
         limit: Long?,
         language: RenderLanguage = RenderLanguage.system(),
     ): String {
-        val usedLabel = used?.toString() ?: language.pick("n/a", "n/d")
-        return if (limit != null && limit > 0) "$usedLabel / $limit"
+        val usedLabel = used?.let { grouped(it, language) } ?: language.pick("n/a", "n/d")
+        return if (limit != null && limit > 0) "$usedLabel / ${grouped(limit, language)}"
         else "$usedLabel · " + language.pick("unlimited", "illimitato")
     }
 

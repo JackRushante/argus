@@ -12,6 +12,26 @@ import dev.argus.engine.runtime.SubmittedActionCompletion
 import dev.argus.engine.runtime.SubmittedActionState
 import kotlinx.coroutines.flow.Flow
 
+/**
+ * Esecuzioni di UNA regola nelle ultime due finestre (0.4.0, F10). I campi `*7` contano dalla finestra
+ * breve, i `*30` da quella lunga (che include la breve). Una riga è sempre presente: senza dati vale
+ * zero ovunque.
+ *
+ * - `fires`: esecuzioni che hanno davvero girato. Le soppressioni (cooldown, budget, regola non
+ *   idonea) non sono scatti e non contano.
+ * - `succeeded`: chiuse con successo.
+ * - `failed`: fallite, parziali (almeno un'azione fallita), interrotte dal sistema o annullate.
+ * - Le esecuzioni in corso, accodate o da consegnare a mano contano solo in `fires`.
+ */
+data class RuleFireStats(
+    val fires7: Int,
+    val succeeded7: Int,
+    val failed7: Int,
+    val fires30: Int,
+    val succeeded30: Int,
+    val failed30: Int,
+)
+
 @Dao
 interface ExecutionJournalDao {
     @Upsert
@@ -154,6 +174,31 @@ interface ExecutionJournalDao {
         automationId: String,
         auditLimit: Int,
     ): Flow<List<ActionResultEntity>>
+
+    /**
+     * Scatti, riuscite e fallite di [automationId] dall'istante [since7Millis] (finestra breve) e da
+     * [since30Millis] (finestra lunga, `since30Millis <= since7Millis`). Una query sola, aggregata, che si
+     * riemette quando il journal cambia. Sola lettura: nessuno schema nuovo, usa gli indici esistenti.
+     */
+    @Query(
+        "SELECT " +
+            "COALESCE(SUM(CASE WHEN claimedAtMillis >= :since7Millis THEN 1 ELSE 0 END), 0) AS fires7, " +
+            "COALESCE(SUM(CASE WHEN claimedAtMillis >= :since7Millis AND status = 'SUCCEEDED' " +
+            "THEN 1 ELSE 0 END), 0) AS succeeded7, " +
+            "COALESCE(SUM(CASE WHEN claimedAtMillis >= :since7Millis AND " +
+            "status IN ('FAILED', 'PARTIAL', 'INTERRUPTED', 'CANCELLED') THEN 1 ELSE 0 END), 0) AS failed7, " +
+            "COUNT(*) AS fires30, " +
+            "COALESCE(SUM(CASE WHEN status = 'SUCCEEDED' THEN 1 ELSE 0 END), 0) AS succeeded30, " +
+            "COALESCE(SUM(CASE WHEN status IN ('FAILED', 'PARTIAL', 'INTERRUPTED', 'CANCELLED') " +
+            "THEN 1 ELSE 0 END), 0) AS failed30 " +
+            "FROM fire_claims WHERE automationId = :automationId AND claimedAtMillis >= :since30Millis " +
+            "AND status NOT IN ('SUPPRESSED_COOLDOWN', 'SUPPRESSED_BUDGET', 'SUPPRESSED_NOT_ELIGIBLE')",
+    )
+    fun observeRuleFireStats(
+        automationId: String,
+        since7Millis: Long,
+        since30Millis: Long,
+    ): Flow<RuleFireStats>
 
     @Query("SELECT COUNT(*) FROM fire_claims")
     suspend fun executionCount(): Int

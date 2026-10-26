@@ -10,6 +10,7 @@ import dev.argus.automation.AutomationEnablementCoordinator
 import dev.argus.automation.BlockCause
 import dev.argus.automation.EnablementResult
 import dev.argus.automation.FlowArmResult
+import dev.argus.automation.LogRetentionStore
 import dev.argus.automation.ReconcileReason
 import dev.argus.automation.RenderLanguageSource
 import dev.argus.automation.TimeAlarmRuntime
@@ -45,6 +46,7 @@ import dev.argus.engine.safety.PendingDraft
 import dev.argus.engine.safety.Severity
 import dev.argus.ui.model.AutomationDetailState
 import dev.argus.ui.model.RuleDiagnosisUi
+import dev.argus.ui.model.RuleStatsUi
 import dev.argus.ui.model.StatusBadge
 import dev.argus.ui.model.UiWarning
 import dev.argus.ui.presentation.RuleRenderMapper
@@ -99,6 +101,8 @@ private data class DetailSources(
     val conversationLabels: Map<String, String>,
     val language: RenderLanguage,
     val diagnosis: DiagnosisSnapshot? = null,
+    /** F10: statistiche di scatto della regola (7 e 30 giorni); null per le bozze. */
+    val stats: RuleStatsUi? = null,
 )
 
 /**
@@ -142,6 +146,8 @@ class AutomationDetailViewModel @Inject constructor(
     private val geofenceState: GeofenceStateStore,
     private val audit: AuditSink,
     private val languageSource: RenderLanguageSource,
+    /** F10: giorni di conservazione del Log; limitano la finestra lunga delle statistiche. */
+    private val retention: LogRetentionStore,
     /**
      * B31: scope dei lavori che devono finire anche se l'utente esce dalla schermata (l'arm lo
      * usa); nel ViewModel resta solo l'attesa del risultato.
@@ -222,6 +228,9 @@ class AutomationDetailViewModel @Inject constructor(
                             target.language,
                         ),
                     )
+                // F10: le finestre di 7 e 30 giorni partono da quando la sezione si apre; ogni nuovo scatto
+                // riemette il conteggio, senza ricalcolare le soglie.
+                val (since7, since30) = statsWindowStarts(System.currentTimeMillis())
                 combine(
                     database.auditDao().observeLogForAutomation(
                         automationId,
@@ -232,7 +241,9 @@ class AutomationDetailViewModel @Inject constructor(
                         RECENT_LOG_SCAN_LIMIT,
                     ),
                     diagnosisInputs,
-                ) { log, actions, diagnosis ->
+                    database.executionJournalDao().observeRuleFireStats(automationId, since7, since30),
+                    retention.days,
+                ) { log, actions, diagnosis, fireStats, retentionDays ->
                     DetailSources(
                         target.draft,
                         target.automation,
@@ -241,6 +252,7 @@ class AutomationDetailViewModel @Inject constructor(
                         target.conversationLabels,
                         target.language,
                         diagnosis,
+                        stats = fireStats.toRuleStatsUi(retentionDays),
                     )
                 }
             }.collectLatest { sources ->
@@ -259,6 +271,7 @@ class AutomationDetailViewModel @Inject constructor(
                         sources.conversationLabels,
                         sources.language,
                         sources.diagnosis,
+                        sources.stats,
                     )
                     // B31: mentre arma/rifiuta/elimina è in corso la bozza o la regola scompare dalle
                     // tabelle PRIMA che l'azione chiuda la schermata. Quel vuoto non è «regola non
@@ -635,6 +648,7 @@ class AutomationDetailViewModel @Inject constructor(
         conversationLabels: Map<String, String>,
         language: RenderLanguage,
         snapshot: DiagnosisSnapshot?,
+        stats: RuleStatsUi?,
     ): DetailViewState {
         val rule = RuleRenderMapper.map(automation, conversationLabels, language)
         val warnings = buildList {
@@ -667,6 +681,11 @@ class AutomationDetailViewModel @Inject constructor(
                 runNowBlockedReason = runNowBlockedReason(language),
                 diagnosis = diagnosisOf(automation, records, snapshot, language),
                 diagnosisAvailable = true,
+                // Le statistiche hanno senso per una regola salvata e attiva nel tempo (armata o
+                // disattivata); una da rivedere non scatta e il suo journal non è più significativo.
+                stats = stats.takeIf {
+                    automation.status == AutomationStatus.ARMED || automation.status == AutomationStatus.DISABLED
+                },
             ),
             automationId = automation.id.value,
             loading = false,

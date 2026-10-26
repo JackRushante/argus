@@ -254,7 +254,7 @@
     <string name="settings_budget_limit">Limit: %1$s</string>
     <string name="settings_budget_provider_tokens">tokens · hour %1$s · today %2$s · month %3$s</string>
     <string name="settings_budget_provider_calls">calls · hour %1$d · today %2$d</string>
-    <string name="settings_budget_provider_reasoning">reasoning tokens · month %1$d</string>
+    <string name="settings_budget_provider_reasoning">reasoning tokens · month %1$s</string>
     <string name="settings_budget_provider_finish">last finish reason · %1$s</string>
     <string name="settings_budget_provider_cost">monthly cost %1$s</string>
     <string name="settings_budget_footnote">Dollar costs estimated from the public price list only for priced providers (indicative estimate, not an invoice) · EUR at fixed rate ≈ · Hermes/OpenRouter/Custom: tokens only</string>
@@ -314,4 +314,38 @@
     <string name="backup_working_import">Importing…</string>
     <string name="backup_open_rules">See the rules</string>
     <string name="backup_dismiss">Close</string>
+
+    <!-- 0.4.0 blocco UI (prefisso ui40_) -->
+    <string name="ui40_chat_clear_title">Clear the conversation?</string>
+    <string name="ui40_chat_clear_body">Messages and notices in this chat will be removed. Proposals awaiting approval stay.</string>
+    <string name="ui40_chat_clear_confirm">Clear</string>
+    <string name="ui40_chat_more_examples">More examples</string>
+    <string name="ui40_examples_title">More examples</string>
+    <string name="ui40_examples_hint">Tap one to put it in the message box. Change it as you like, then send.</string>
+    <string name="ui40_example_shizuku_tag">Shizuku</string>
+    <string name="ui40_example_shizuku_cd">Requires Shizuku</string>
+    <string name="ui40_list_filter_empty_title">No rules with this filter</string>
+    <string name="ui40_list_filter_empty_body">Other rules may be hidden. Remove the filter to see them all.</string>
+    <string name="ui40_list_filter_clear">Show all</string>
+    <string name="ui40_list_has_warnings">Has warnings</string>
+    <string name="ui40_health_ok_cd">Status: OK</string>
+    <string name="ui40_contact_remove_title">Remove from the whitelist?</string>
+    <string name="ui40_contact_remove_body">Argus will no longer send automatic replies to %1$s. You can add the contact again later.</string>
+    <string name="ui40_contact_remove_confirm">Remove</string>
+    <string name="ui40_stats_title">Firing stats</string>
+    <string name="ui40_stats_days">%1$d days</string>
+    <string name="ui40_stats_fires">Firings</string>
+    <string name="ui40_stats_succeeded">Succeeded</string>
+    <string name="ui40_stats_failed">Failed</string>
+    <string name="ui40_stats_none">No firings in the last %1$d days</string>
+    <string name="ui40_stats_retention_note">The log keeps only the last %1$d days, so older firings are not counted.</string>
+    <string name="ui40_stats_cell_cd">%1$s in the last %2$s</string>
+    <string name="ui40_url_error_empty">Enter the address</string>
+    <string name="ui40_url_error_not_https">The address must start with https://</string>
+    <string name="ui40_url_error_not_https_or_local">Use https://, or http:// only for localhost</string>
+    <string name="ui40_url_error_invalid">Not a valid address: use https://host or https://host:port/path, without user name, ? or #</string>
+    <string name="ui40_secret_error_short">At least %1$d characters</string>
+    <string name="ui40_secret_error_long">Too long (at most %1$d characters)</string>
+    <string name="ui40_secret_error_chars">Only visible characters, no spaces</string>
+    <string name="ui40_model_error_empty">Enter the model name</string>
 </resources>
