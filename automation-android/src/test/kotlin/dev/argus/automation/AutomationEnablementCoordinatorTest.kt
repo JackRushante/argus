@@ -335,7 +335,7 @@ class AutomationEnablementCoordinatorTest {
     // --- B31b: una regola una tantum il cui orario è passato non si riattiva ------------------
 
     @Test
-    fun `reactivating a one shot whose time is already past fails with one_shot_in_past`() = runTest {
+    fun `reactivating a one shot whose time is already past returns OneShotInPast and audits one_shot_in_past`() = runTest {
         val store = ToggleStore(
             enableResult = true,
             trigger = Trigger.Time(at = "2020-01-01T09:00", tz = "UTC"),
@@ -345,7 +345,7 @@ class AutomationEnablementCoordinatorTest {
 
         val result = AutomationEnablementCoordinator(store, runtime, audit = audit).setEnabled(id, true)
 
-        assertEquals(EnablementResult.SchedulingFailed, result)
+        assertEquals(EnablementResult.OneShotInPast, result)
         assertEquals(AutomationStatus.DISABLED, store.currentStatus)
         assertEquals(0, runtime.reconcileCalls, "la regola non viene nemmeno armata")
         val event = audit.events.single()

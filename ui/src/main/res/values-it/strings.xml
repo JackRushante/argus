@@ -150,6 +150,14 @@
     <string name="detail_enable">Riattiva automazione</string>
     <string name="detail_edit_in_chat">Modifica in chat</string>
     <string name="detail_recreate_in_chat">Ricrea in chat</string>
+    <string name="detail_diag_title">Perché non è scattata?</string>
+    <string name="detail_diag_recheck">Ricontrolla</string>
+    <string name="detail_diag_open_system">Apri Sistema</string>
+    <string name="detail_diag_show">Mostra il controllo</string>
+    <string name="detail_diag_hide">Nascondi il controllo</string>
+    <string name="detail_diag_level_ok">OK</string>
+    <string name="detail_diag_level_warn">Attenzione</string>
+    <string name="detail_diag_level_info">Informazione</string>
 
     <!-- Log esecuzioni -->
     <string name="log_title">Log esecuzioni</string>

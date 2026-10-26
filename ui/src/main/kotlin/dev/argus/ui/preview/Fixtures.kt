@@ -12,6 +12,9 @@ import dev.argus.ui.model.ChatItem
 import dev.argus.ui.model.ChatError
 import dev.argus.ui.model.ChatState
 import dev.argus.ui.model.ContactRow
+import dev.argus.ui.model.DiagnosisFix
+import dev.argus.ui.model.DiagnosisLevel
+import dev.argus.ui.model.DiagnosisRow
 import dev.argus.ui.model.DraftCardStatus
 import dev.argus.ui.model.EngineBanner
 import dev.argus.ui.model.ExecutionLogState
@@ -22,6 +25,7 @@ import dev.argus.ui.model.OnboardingState
 import dev.argus.ui.model.OnboardingStepState
 import dev.argus.ui.model.ProviderChoiceUi
 import dev.argus.ui.model.ProviderUsageUi
+import dev.argus.ui.model.RuleDiagnosisUi
 import dev.argus.ui.model.RuleRender
 import dev.argus.ui.model.ShizukuCapabilityCatalog
 import dev.argus.ui.model.SettingsState
@@ -112,6 +116,18 @@ object Fixtures {
         conditionLines = emptyList(),
         actions = listOf(
             ActionRow("ringer", "Imposta suoneria (vibrazione)", null, false, null, false, false),
+        ),
+        isGenerative = false,
+        privacyNote = null,
+    )
+
+    /** a8 · ogni mattina alle 07:30 spegne il Wi-Fi (privilegiata: serve Shizuku). */
+    val morningWifiRule = RuleRender(
+        triggerLine = "Ogni giorno alle 07:30 (Europe/Rome)",
+        triggerIconKey = "time",
+        conditionLines = emptyList(),
+        actions = listOf(
+            ActionRow("wifi_off", "Disattiva Wi-Fi", null, false, null, false, false),
         ),
         isGenerative = false,
         privacyNote = null,
@@ -400,6 +416,59 @@ object Fixtures {
         geofencePreviewLabel = null,
     )
 
+    /** a8 · regola a orario con Shizuku spento: «Perché non è scattata?» spiega il blocco. */
+    val detailTimeShizukuOff = AutomationDetailState(
+        id = "a8",
+        name = "Wi-Fi spento al mattino",
+        status = StatusBadge.ARMED,
+        rule = morningWifiRule,
+        rationale = null,
+        warnings = emptyList(),
+        canArm = false,
+        armBlockedReason = null,
+        estimatedLlmCallsPerDay = null,
+        recentRuns = listOf(
+            LogRow("r7", "oggi 07:30", "Wi-Fi spento al mattino", AuditKind.BLOCKED_POLICY, LogOutcome.FAILED, "bloccata dalla policy (capacità non disponibile)", null),
+        ),
+        geofencePreviewLabel = null,
+        diagnosisAvailable = true,
+        diagnosis = RuleDiagnosisUi(
+            rows = listOf(
+                DiagnosisRow(DiagnosisLevel.OK, "La regola è attiva"),
+                DiagnosisRow(DiagnosisLevel.WARN, "Shizuku non è in esecuzione: avvialo", DiagnosisFix.OPEN_SYSTEM),
+                DiagnosisRow(DiagnosisLevel.OK, "Prossima sveglia: domani 07:30"),
+                DiagnosisRow(DiagnosisLevel.INFO, "Sveglia non esatta: Android può ritardarla di qualche minuto"),
+                DiagnosisRow(DiagnosisLevel.WARN, "Ultimo tentativo 2 h fa: bloccata dalla policy (capacità non disponibile)"),
+            ),
+            checkedAtLabel = "Controllato alle 09:41",
+        ),
+    )
+
+    /** a9 · geofence d'ingresso con posizione ancora sconosciuta (nessuno spostamento dall'arm). */
+    val detailGeofenceUnknown = AutomationDetailState(
+        id = "a9",
+        name = "Ufficio · silenzia entrando",
+        status = StatusBadge.ARMED,
+        rule = officeEnterRule,
+        rationale = null,
+        warnings = emptyList(),
+        canArm = false,
+        armBlockedReason = null,
+        estimatedLlmCallsPerDay = null,
+        recentRuns = emptyList(),
+        geofencePreviewLabel = null,
+        diagnosisAvailable = true,
+        diagnosis = RuleDiagnosisUi(
+            rows = listOf(
+                DiagnosisRow(DiagnosisLevel.OK, "La regola è attiva"),
+                DiagnosisRow(DiagnosisLevel.OK, "Permessi e servizi necessari: tutto pronto"),
+                DiagnosisRow(DiagnosisLevel.INFO, "Posizione rispetto all'area: sconosciuta (si aggiorna al prossimo spostamento)"),
+                DiagnosisRow(DiagnosisLevel.INFO, "Non è ancora mai scattata"),
+            ),
+            checkedAtLabel = "Controllato alle 09:41",
+        ),
+    )
+
     val detailNeedsReview = AutomationDetailState(
         id = "a6",
         name = "Promemoria farmaci",
@@ -449,6 +518,8 @@ object Fixtures {
         detailBackupShell,
         detailNeedsReview,
         detailForbiddenBlocked,
+        detailTimeShizukuOff,
+        detailGeofenceUnknown,
     ).associateBy { it.id }
 
     // -------------------------------------------------------------------------

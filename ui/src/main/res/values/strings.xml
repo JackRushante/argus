@@ -151,6 +151,14 @@
     <string name="detail_enable">Re-enable automation</string>
     <string name="detail_edit_in_chat">Edit in chat</string>
     <string name="detail_recreate_in_chat">Recreate in chat</string>
+    <string name="detail_diag_title">Why didn\'t it run?</string>
+    <string name="detail_diag_recheck">Check again</string>
+    <string name="detail_diag_open_system">Open System</string>
+    <string name="detail_diag_show">Show the check</string>
+    <string name="detail_diag_hide">Hide the check</string>
+    <string name="detail_diag_level_ok">OK</string>
+    <string name="detail_diag_level_warn">Warning</string>
+    <string name="detail_diag_level_info">Information</string>
 
     <!-- Log esecuzioni -->
     <string name="log_title">Execution log</string>

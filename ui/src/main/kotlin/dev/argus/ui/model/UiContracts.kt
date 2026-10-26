@@ -244,7 +244,25 @@ data class AutomationDetailState(
      * finché è vero, così un secondo tocco non può né duplicare l'azione né emettere un secondo Close.
      */
     val actionInProgress: Boolean = false,
+    /** 0.3.6 (F2): «Perché non è scattata?». Null finché la sezione non la chiede. */
+    val diagnosis: RuleDiagnosisUi? = null,
+    /** Vero solo per una regola salvata: una bozza non ha nulla da diagnosticare. */
+    val diagnosisAvailable: Boolean = false,
 )
+
+/** Esito di una diagnosi una tantum: righe in ordine di lettura e ora del controllo. */
+data class RuleDiagnosisUi(val rows: List<DiagnosisRow>, val checkedAtLabel: String)
+
+data class DiagnosisRow(
+    val level: DiagnosisLevel,
+    val text: String,
+    /** Azione offerta accanto alla riga (oggi solo «Apri Sistema»). */
+    val fix: DiagnosisFix? = null,
+)
+
+enum class DiagnosisLevel { OK, WARN, INFO }
+
+enum class DiagnosisFix { OPEN_SYSTEM }
 
 interface AutomationDetailCallbacks {
     fun onArm(); fun onReject()             // footer in stato PENDING
@@ -252,6 +270,8 @@ interface AutomationDetailCallbacks {
     fun onAskEdit()                          // torna in chat con contesto ("modifica questa regola…")
     fun onRunNow()                           // test manuale: esegue le azioni ORA saltando trigger/condizioni (conferma prima)
     fun onOpenFullLog()
+    fun onDiagnose() {}                      // apre «Perché non è scattata?»: calcola la diagnosi una volta
+    fun onOpenSystem() {}                    // porta alla scheda Sistema, come la barra in basso
     fun onBack() {}                          // affordance back nell'header; default no-op, la nav reale è dell'host (NavHost)
 }
 

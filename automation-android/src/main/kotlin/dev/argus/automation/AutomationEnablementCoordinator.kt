@@ -30,6 +30,12 @@ sealed interface EnablementResult {
     data object Updated : EnablementResult
     data object ReviewRequired : EnablementResult
     data object SchedulingFailed : EnablementResult
+
+    /**
+     * Riattivazione di una regola una tantum il cui orario e' gia' passato: non puo' ripartire finche'
+     * l'utente non sceglie un nuovo orario. Esito proprio, distinto da un fallimento di pianificazione.
+     */
+    data object OneShotInPast : EnablementResult
     data object DisableCleanupDeferred : EnablementResult
 }
 
@@ -102,7 +108,7 @@ class AutomationEnablementCoordinator @Inject constructor(
         // disabiliterebbe subito come scaduta, e l'utente vedrebbe «riattivata» su una regola spenta.
         if (current.status == AutomationStatus.DISABLED && isOneShotInPast(current)) {
             recordEnableFailed(id, ONE_SHOT_IN_PAST)
-            return@withLock EnablementResult.SchedulingFailed
+            return@withLock EnablementResult.OneShotInPast
         }
         if (!store.enableIfApproved(id, fingerprint)) {
             recordEnableFailed(id, "review_required")

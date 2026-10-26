@@ -135,6 +135,29 @@ internal class SystemAndroidCapabilityStateSource(
     }
 }
 
+/**
+ * Perche' una capability richiesta da una regola non e' utilizzabile ORA (diagnosi «Perche' non e'
+ * scattata?» del Dettaglio). Una causa per capability, derivata dagli stessi flag di stato che usa
+ * il probe per pubblicarla.
+ */
+enum class BlockCause {
+    SHIZUKU_NOT_INSTALLED,
+    SHIZUKU_NOT_RUNNING,
+    SHIZUKU_NOT_AUTHORIZED,
+    SHIZUKU_TOO_OLD,
+    LOCATION_OFF,
+    LOCATION_PERMISSION,
+    NOTIFICATION_ACCESS,
+    NOTIFICATIONS_PERMISSION,
+    SMS_PERMISSION,
+    CALL_PERMISSION,
+    BLUETOOTH_PERMISSION,
+    DND_ACCESS,
+    AI_NOT_READY,
+    SENSOR_UNAVAILABLE,
+    OTHER,
+}
+
 private data class ResolvedCapabilities(
     val state: AndroidCapabilityState,
     val contacts: List<WhitelistedContact>,
@@ -222,6 +245,58 @@ class AndroidCapabilityProbe internal constructor(
      * blocco al fire-time resta `capability_unavailable`; questo e' il dettaglio da auditare.
      */
     suspend fun capabilityBlockDetails(): Map<String, String> = resolve().blockDetails
+
+    /**
+     * Per ogni capability di [required] che oggi NON e' in `available` (cioe' che il fire-time
+     * bloccherebbe con `capability_unavailable`), la causa del blocco. Mappa vuota se e' tutto
+     * disponibile. Le capability che il tier base rende disponibili anche con Shizuku fermo (DND e
+     * avvio app) stanno sia in `available` sia nel set transitorio ma funzionano: non sono blocchi.
+     * Non cambia `resolve()` ne' cio' che il probe pubblica: legge lo stesso stato.
+     */
+    suspend fun blockCauses(required: Set<String>): Map<String, BlockCause> {
+        val resolved = resolve()
+        val causes = linkedMapOf<String, BlockCause>()
+        required.forEach { capability ->
+            if (capability !in resolved.available) {
+                causes[capability] = causeOf(capability, resolved.state)
+            }
+        }
+        return causes
+    }
+
+    private fun causeOf(capability: String, state: AndroidCapabilityState): BlockCause = when {
+        capability in PRIVILEGED_CAPABILITIES || capability == TOOL_STATE_READ ->
+            shizukuCause(state.shizukuStatus)
+        capability in BASE_DND_CAPABILITIES ->
+            if (baseTierActive && !state.dndPolicyGranted) BlockCause.DND_ACCESS
+            else shizukuCause(state.shizukuStatus)
+        capability in BASE_LAUNCH_CAPABILITIES -> shizukuCause(state.shizukuStatus)
+        capability == CapabilityIds.TRIGGER_GEOFENCE ||
+            capability == CapabilityIds.TRIGGER_CONNECTIVITY_WIFI_IDENTITY ->
+            if (state.locationGranted && !state.locationEnabled) BlockCause.LOCATION_OFF
+            else BlockCause.LOCATION_PERMISSION
+        capability == CapabilityIds.STATE_LOCATION -> BlockCause.LOCATION_PERMISSION
+        capability == CapabilityIds.TRIGGER_NOTIFICATION ||
+            capability == GenerativeContract.TOOL_WHATSAPP_REPLY ||
+            capability == ActionCapabilities.WHATSAPP_REPLY -> BlockCause.NOTIFICATION_ACCESS
+        capability == ActionCapabilities.SHOW_NOTIFICATION -> BlockCause.NOTIFICATIONS_PERMISSION
+        capability == CapabilityIds.TRIGGER_PHONE_SMS -> BlockCause.SMS_PERMISSION
+        capability == CapabilityIds.TRIGGER_PHONE_CALL -> BlockCause.CALL_PERMISSION
+        capability == CapabilityIds.TRIGGER_CONNECTIVITY_BT -> BlockCause.BLUETOOTH_PERMISSION
+        capability == CapabilityIds.ACTION_INVOKE_LLM ||
+            capability == GenerativeContract.TOOL_WEB_SEARCH -> BlockCause.AI_NOT_READY
+        capability.startsWith(SENSOR_TRIGGER_PREFIX) -> BlockCause.SENSOR_UNAVAILABLE
+        else -> BlockCause.OTHER
+    }
+
+    private fun shizukuCause(status: ShizukuGatewayStatus): BlockCause = when (status) {
+        ShizukuGatewayStatus.NOT_INSTALLED -> BlockCause.SHIZUKU_NOT_INSTALLED
+        ShizukuGatewayStatus.INSTALLED_NOT_RUNNING -> BlockCause.SHIZUKU_NOT_RUNNING
+        ShizukuGatewayStatus.RUNNING_NOT_AUTHORIZED -> BlockCause.SHIZUKU_NOT_AUTHORIZED
+        ShizukuGatewayStatus.UNSUPPORTED -> BlockCause.SHIZUKU_TOO_OLD
+        // Con Shizuku autorizzato le privilegiate sono tutte disponibili: non si arriva qui.
+        ShizukuGatewayStatus.AUTHORIZED -> BlockCause.OTHER
+    }
 
     override suspend fun current(): FirePolicySnapshot {
         val resolved = resolve()
@@ -421,6 +496,9 @@ class AndroidCapabilityProbe internal constructor(
          */
         val IMPLEMENTED_SENSOR_KINDS: Set<SensorKind> = setOf(SensorKind.SIGNIFICANT_MOTION)
         const val REASON_NOTIFICATION_LISTENER = "notification access not granted"
+
+        /** Prefisso delle capability dei trigger sensore (`trigger.sensor.<kind>`). */
+        private const val SENSOR_TRIGGER_PREFIX = "trigger.sensor."
 
         /** Motivo (in inglese, va al modello) per geofence e SSID con la posizione spenta. */
         const val REASON_LOCATION_OFF = "location services are off"
