@@ -441,7 +441,7 @@ fun ArgusNavHost() {
 
             composable(Routes.SETTINGS) {
                 RefreshOnResume(settingsViewModel::refresh)
-                // Sistema visibile: se Shizuku è autorizzato ma l'identità non è nota, la sonda
+                // Schermata di sistema visibile: con Shizuku autorizzato e identità ignota la sonda
                 // collega il servizio una volta per sapere se gira come root.
                 RefreshOnResume(settingsViewModel::onSystemVisible)
                 LaunchedEffect(permissionRefresh) { settingsViewModel.refresh() }
