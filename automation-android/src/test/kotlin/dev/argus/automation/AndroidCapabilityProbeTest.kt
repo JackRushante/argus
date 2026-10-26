@@ -1017,7 +1017,11 @@ class AndroidCapabilityProbeTest {
 
     @Test
     fun `every Shizuku status maps to its own cause`() = runTest {
-        val required = setOf(ActionCapabilities.RUN_SHELL, CapabilityIds.state(StateKeys.RINGER))
+        val required = setOf(
+            ActionCapabilities.RUN_SHELL,
+            CapabilityIds.STATE_FOREGROUND_APP,
+            CapabilityIds.state(StateKeys.RINGER),
+        )
 
         suspend fun causes(status: ShizukuGatewayStatus) =
             probe(state().copy(shizukuStatus = status, shizukuPermissionGranted = false))
