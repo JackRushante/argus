@@ -123,6 +123,51 @@ internal object LogReasonLabels {
         "registrar_failed" to Label("the rule could not be registered", "la regola non si è potuta registrare"),
         "review_required" to Label("the rule needs a review first", "la regola va prima rivista"),
         "immediate_dispatch_failed" to Label("the immediate run could not start", "l'esecuzione immediata non è partita"),
+        // --- 0.4.1: azioni senza Shizuku e richiesta HTTP ---
+        "deferred_to_notification" to Label(
+            "Android blocks opening it from the background: a notification asks you to tap",
+            "Android blocca l'apertura dal background: una notifica chiede di toccare",
+        ),
+        "activity_start_blocked" to Label(
+            "Android blocked opening it from the background",
+            "Android ha bloccato l'apertura dal background",
+        ),
+        "tts_unavailable" to Label(
+            "no text-to-speech engine is installed",
+            "nessun motore di sintesi vocale installato",
+        ),
+        "tts_failed" to Label(
+            "the text-to-speech engine reported an error",
+            "il motore di sintesi vocale ha dato un errore",
+        ),
+        "tts_timeout" to Label(
+            "the reading did not finish in time",
+            "la lettura non è finita in tempo",
+        ),
+        "write_settings_unavailable" to Label(
+            "the \"Modify system settings\" access is missing",
+            "manca l'accesso a \"Modifica impostazioni di sistema\"",
+        ),
+        "settings_write_failed" to Label(
+            "Android did not accept the setting",
+            "Android non ha accettato l'impostazione",
+        ),
+        "http_request_invalid" to Label(
+            "the request is not valid (address, headers or body)",
+            "la richiesta non è valida (indirizzo, intestazioni o body)",
+        ),
+        "http_timeout" to Label("the request took too long", "la richiesta ha impiegato troppo tempo"),
+        "http_network_error" to Label("the server could not be reached", "il server non è raggiungibile"),
+        "http_tls_error" to Label("the secure connection failed", "la connessione sicura non è riuscita"),
+        "http_redirect_blocked" to Label(
+            "the server redirected to a different address",
+            "il server ha rimandato a un altro indirizzo",
+        ),
+        "http_too_many_redirects" to Label("too many redirects", "troppi reindirizzamenti"),
+        "json_quote_context" to Label(
+            "external data in a JSON body must sit inside a quoted string",
+            "un dato esterno in un body JSON deve stare dentro una stringa tra virgolette",
+        ),
         // --- Codici generici (nessun motivo più preciso disponibile) ---
         "execution_error" to Label("unspecified error", "errore non specificato"),
         "policy_blocked" to Label("unspecified policy", "policy non specificata"),
@@ -134,7 +179,13 @@ internal object LogReasonLabels {
 
     /** Etichetta nella lingua richiesta, o null se il codice non è noto. */
     fun label(code: String, l: RenderLanguage): String? =
-        labels[code]?.let { l.pick(it.en, it.it) } ?: commandExitLabel(code, l)
+        labels[code]?.let { l.pick(it.en, it.it) } ?: commandExitLabel(code, l) ?: httpStatusLabel(code, l)
+
+    /** Chiamata HTTP finita con un codice non 2xx (`http_status_<n>`): conta il codice, mai il corpo. */
+    private fun httpStatusLabel(code: String, l: RenderLanguage): String? {
+        val status = HTTP_STATUS.matchEntire(code)?.groupValues?.get(1) ?: return null
+        return l.pick("the server answered with status $status", "il server ha risposto con stato $status")
+    }
 
     /**
      * Comandi della shell privilegiata finiti con un codice d'uscita (`<operazione>_exit_<n>`, es.
@@ -157,4 +208,5 @@ internal object LogReasonLabels {
 
     private const val MAX_CODE_CHARS = 64
     private val COMMAND_EXIT = Regex("^[a-z][a-z0-9_]*_exit_([0-9]{1,3})$")
+    private val HTTP_STATUS = Regex("^http_status_([1-5][0-9]{2})$")
 }

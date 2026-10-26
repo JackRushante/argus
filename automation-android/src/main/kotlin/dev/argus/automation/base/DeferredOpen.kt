@@ -51,11 +51,11 @@ class AndroidDeferredOpenNotifier(context: Context) : DeferredOpenNotifier {
     override fun publish(target: DeferredOpenTarget): Boolean {
         if (!canPost()) return false
         ensureChannel()
-        val id = notificationId(target)
+        val id = deferredOpenNotificationId(target)
         val pending = PendingIntent.getActivity(
             appContext,
             id,
-            openIntent(target).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            deferredOpenIntent(target).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val text = appContext.getString(R.string.act41_open_tap_text)
@@ -78,18 +78,9 @@ class AndroidDeferredOpenNotifier(context: Context) : DeferredOpenNotifier {
         }
     }
 
-    /** Lo stesso Intent che l'esecutore avrebbe lanciato da solo in primo piano. */
-    private fun openIntent(target: DeferredOpenTarget): Intent = when (target) {
-        is DeferredOpenTarget.App -> Intent(Intent.ACTION_MAIN)
-            .addCategory(Intent.CATEGORY_LAUNCHER)
-            .setPackage(target.pkg)
-        is DeferredOpenTarget.Url -> Intent(Intent.ACTION_VIEW, Uri.parse(target.url))
-        is DeferredOpenTarget.SettingsPage -> settingsIntent(target.screen, target.pkg)
-    }
-
     private fun destinationLabel(target: DeferredOpenTarget): String = when (target) {
         is DeferredOpenTarget.App -> appLabel(target.pkg)
-        is DeferredOpenTarget.Url -> shortened(target.url)
+        is DeferredOpenTarget.Url -> shortenedForLabel(target.url)
         is DeferredOpenTarget.SettingsPage -> when (target.screen) {
             SettingsScreen.WIFI -> appContext.getString(R.string.act41_open_dest_wifi)
             SettingsScreen.BLUETOOTH -> appContext.getString(R.string.act41_open_dest_bluetooth)
@@ -109,11 +100,6 @@ class AndroidDeferredOpenNotifier(context: Context) : DeferredOpenNotifier {
         val packages = appContext.packageManager
         packages.getApplicationLabel(packages.getApplicationInfo(pkg, 0)).toString()
     }.getOrNull()?.takeIf { it.isNotBlank() } ?: pkg
-
-    private fun shortened(url: String): String =
-        if (url.length <= MAX_URL_LABEL_CHARS) url else url.take(MAX_URL_LABEL_CHARS) + "…"
-
-    private fun notificationId(target: DeferredOpenTarget): Int = "deferred-open:$target".hashCode()
 
     private fun ensureChannel() {
         appContext.getSystemService(NotificationManager::class.java).createNotificationChannel(
@@ -138,6 +124,23 @@ class AndroidDeferredOpenNotifier(context: Context) : DeferredOpenNotifier {
     private companion object {
         /** Stesso canale delle notifiche delle regole (AndroidAutomationNotifier). */
         const val CHANNEL_ID = "argus_automations"
-        const val MAX_URL_LABEL_CHARS = 80
     }
 }
+
+/** Lo stesso Intent che l'esecutore avrebbe lanciato da solo in primo piano. */
+internal fun deferredOpenIntent(target: DeferredOpenTarget): Intent = when (target) {
+    is DeferredOpenTarget.App -> Intent(Intent.ACTION_MAIN)
+        .addCategory(Intent.CATEGORY_LAUNCHER)
+        .setPackage(target.pkg)
+    is DeferredOpenTarget.Url -> Intent(Intent.ACTION_VIEW, Uri.parse(target.url))
+    is DeferredOpenTarget.SettingsPage -> settingsIntent(target.screen, target.pkg)
+}
+
+/** Id stabile per destinazione: la stessa destinazione aggiorna la sua notifica, un'altra ne aggiunge una. */
+internal fun deferredOpenNotificationId(target: DeferredOpenTarget): Int = "deferred-open:$target".hashCode()
+
+private const val MAX_URL_LABEL_CHARS = 80
+
+/** Un URL lungo si accorcia nel titolo (l'Intent porta sempre quello intero). */
+internal fun shortenedForLabel(url: String): String =
+    if (url.length <= MAX_URL_LABEL_CHARS) url else url.take(MAX_URL_LABEL_CHARS) + "…"
