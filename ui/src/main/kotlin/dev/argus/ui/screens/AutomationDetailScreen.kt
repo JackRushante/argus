@@ -539,13 +539,14 @@ private fun StatsRow(
     count: (RuleStatsWindow) -> Int,
 ) {
     // TalkBack legge una frase sola per riga («Scatti: 3 negli ultimi 7 giorni, 12 negli ultimi 30 giorni»).
-    val spoken = columns.joinToString(", ") { (days, window) ->
+    // `map` e' inline, `joinToString` no: le stringResource stanno nel map.
+    val spoken = columns.map { (days, window) ->
         stringResource(
             R.string.ui40_stats_cell_cd,
             BudgetFormat.grouped(count(window).toLong()),
             stringResource(R.string.ui40_stats_days, days),
         )
-    }
+    }.joinToString(", ")
     Row(
         modifier = Modifier
             .fillMaxWidth()
