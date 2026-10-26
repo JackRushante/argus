@@ -11,6 +11,7 @@ import dev.argus.automation.CurrentLocationProvider
 import dev.argus.automation.ReconcileReason
 import dev.argus.automation.ReconcileReport
 import dev.argus.automation.RenderLanguageSource
+import dev.argus.automation.manual.FakePauseStore
 import dev.argus.automation.TimeAlarmRuntime
 import dev.argus.data.ArgusDatabase
 import dev.argus.data.RoomAutomationStore
@@ -99,6 +100,22 @@ class AutomationListViewModelTest {
         }
         db.close()
         Dispatchers.resetMain()
+    }
+
+    @Test
+    fun `the list carries the pause and resume turns it off`() = runTest {
+        val pause = FakePauseStore(paused = true)
+        val viewModel = viewModel(pause = pause)
+        val latest = collectState(viewModel)
+
+        awaitUntil("lista in pausa") { !latest().loading && latest().paused }
+
+        viewModel.onResumeAutomations()
+        awaitUntil("lista ripresa") { !latest().paused }
+        assertTrue(!pause.isPaused())
+
+        pause.setPaused(true)
+        awaitUntil("di nuovo in pausa") { latest().paused }
     }
 
     @Test
@@ -484,6 +501,7 @@ class AutomationListViewModelTest {
                 whitelistedConversationIds = emptySet(),
             )
         },
+        pause: FakePauseStore = FakePauseStore(),
     ): AutomationListViewModel {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val whitelist = RoomContactWhitelistStore(db.contactWhitelistDao())
@@ -506,6 +524,7 @@ class AutomationListViewModelTest {
             savedStateHandle = SavedStateHandle(),
             context = context,
             languageSource = languageSource,
+            pause = pause,
         ).also { lastViewModel = it }
     }
 

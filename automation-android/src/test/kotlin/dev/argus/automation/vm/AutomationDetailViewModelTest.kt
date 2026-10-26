@@ -24,6 +24,8 @@ import dev.argus.automation.geofence.GeofenceRegistration
 import dev.argus.automation.geofence.GeofenceStateStore
 import dev.argus.automation.geofence.MemoryGeofenceStateStore
 import dev.argus.automation.geofence.NoopGeofenceTriggerRuntime
+import dev.argus.automation.manual.ManualEntryService
+import dev.argus.automation.manual.ManualHarness
 import dev.argus.automation.sensor.NoopSensorTriggerRuntime
 import dev.argus.automation.sensor.SensorReconcileReport
 import dev.argus.automation.sensor.SensorTriggerRuntime
@@ -68,6 +70,7 @@ import dev.argus.engine.safety.DraftWriteResult
 import dev.argus.engine.safety.NewDraft
 import dev.argus.engine.safety.PendingDraft
 import dev.argus.shizuku.ShizukuGatewayStatus
+import dev.argus.ui.model.ManualEntryUi
 import dev.argus.ui.model.RuleStatsWindow
 import dev.argus.ui.model.StatusBadge
 import dev.argus.ui.presentation.RenderLanguage
@@ -81,6 +84,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -1080,6 +1084,7 @@ class AutomationDetailViewModelTest {
         probe: AndroidCapabilityProbe = probeFor(capabilityState()),
         geofenceState: GeofenceStateStore = MemoryGeofenceStateStore(),
         retention: LogRetentionStore = LogRetentionStore(ApplicationProvider.getApplicationContext<Context>()),
+        manual: ManualEntryService = ManualHarness(store).service,
     ): AutomationDetailViewModel {
         val whitelist = RoomContactWhitelistStore(db.contactWhitelistDao())
         val snapshots = FirePolicySnapshotProvider {
@@ -1125,8 +1130,203 @@ class AutomationDetailViewModelTest {
             audit = audit,
             languageSource = languageSource,
             retention = retention,
+            manual = manual,
             applicationScope = applicationScope,
         ).also { lastViewModel = it }
+    }
+
+    // --- F8/F21: avvio manuale e pausa nel Dettaglio ---------------------------------------------
+
+    private suspend fun seedArmedManual(id: String, name: String = "Apri il garage"): Automation {
+        val unsigned = Automation(
+            id = AutomationId(id),
+            name = name,
+            createdBy = CreatedBy.USER,
+            status = AutomationStatus.ARMED,
+            trigger = Trigger.Manual,
+            actions = listOf(Action.SetFlashlight(true)),
+            enabled = true,
+        )
+        val signed = unsigned.copy(approvalFingerprint = ApprovalFingerprints.of(unsigned))
+        db.automationDao().upsertPreservingLastFired(
+            AutomationEntity(
+                id = signed.id.value,
+                name = signed.name,
+                status = signed.status,
+                enabled = signed.enabled,
+                priority = signed.priority,
+                cooldownMs = signed.cooldownMs,
+                schemaVersion = signed.schemaVersion,
+                json = ArgusJson.encodeToString(Automation.serializer(), signed),
+            ),
+        )
+        return signed
+    }
+
+    private fun TestScope.collectEvents(viewModel: AutomationDetailViewModel): MutableList<DetailEvent> {
+        val events = mutableListOf<DetailEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.events.collect(events::add) }
+        return events
+    }
+
+    @Test
+    fun `an armed manual rule offers run now and the manual entry points`() = runTest {
+        seedArmedManual("m1")
+        val store = RoomAutomationStore(db.automationDao())
+        val harness = ManualHarness(store)
+        val viewModel = viewModel("m1", store, DetailAuditRecorder(), RenderLanguage.EN, manual = harness.service)
+        awaitUntil("manual detail loaded") { viewModel.state.value.detail != null }
+
+        val detail = requireNotNull(viewModel.state.value.detail)
+        assertTrue(detail.canRunNow)
+        assertNull(detail.runNowBlockedReason)
+        assertEquals(ManualEntryUi(canPinShortcut = true, isTileRule = false, paused = false), detail.manual)
+        assertEquals("manual", detail.rule.triggerIconKey)
+    }
+
+    @Test
+    fun `a rule that is not manual keeps run now disabled and has no manual entry points`() = runTest {
+        seedArmedAutomation("a1")
+        val store = RoomAutomationStore(db.automationDao())
+        val viewModel = viewModel("a1", store, DetailAuditRecorder(), RenderLanguage.EN)
+        awaitUntil("detail loaded") { viewModel.state.value.detail != null }
+
+        val detail = requireNotNull(viewModel.state.value.detail)
+        assertEquals(false, detail.canRunNow)
+        assertNull(detail.manual)
+    }
+
+    @Test
+    fun `a disabled manual rule cannot be run from the detail`() = runTest {
+        val rule = seedArmedManual("m1")
+        val store = RoomAutomationStore(db.automationDao())
+        store.disable(rule.id)
+        val viewModel = viewModel("m1", store, DetailAuditRecorder(), RenderLanguage.EN)
+        awaitUntil("disabled manual detail loaded") { viewModel.state.value.detail != null }
+
+        val detail = requireNotNull(viewModel.state.value.detail)
+        assertEquals(false, detail.canRunNow)
+        assertNull(detail.manual)
+    }
+
+    @Test
+    fun `run now on a manual rule hands the event to the engine and says it started`() = runTest {
+        val rule = seedArmedManual("m1")
+        val store = RoomAutomationStore(db.automationDao())
+        val harness = ManualHarness(store)
+        val viewModel = viewModel("m1", store, DetailAuditRecorder(), RenderLanguage.EN, manual = harness.service)
+        awaitUntil("manual detail loaded") { viewModel.state.value.detail != null }
+        val events = collectEvents(viewModel)
+
+        viewModel.onRunNow()
+        awaitUntil("run-now feedback") { events.isNotEmpty() }
+
+        assertEquals("Rule started.", (events.single() as DetailEvent.Message).text)
+        val delivered = harness.dispatcher.envelopes.single().event
+        assertIs<dev.argus.engine.runtime.TriggerEvent.ManualFired>(delivered)
+        assertEquals(rule.approvalFingerprint, delivered.approvalFingerprint)
+    }
+
+    @Test
+    fun `run now while paused tells the user the run was skipped`() = runTest {
+        seedArmedManual("m1")
+        val store = RoomAutomationStore(db.automationDao())
+        val harness = ManualHarness(store, paused = true)
+        val viewModel = viewModel("m1", store, DetailAuditRecorder(), RenderLanguage.IT, manual = harness.service)
+        awaitUntil("manual detail loaded") { viewModel.state.value.detail != null }
+        assertEquals(true, viewModel.state.value.detail?.manual?.paused)
+        val events = collectEvents(viewModel)
+
+        viewModel.onRunNow()
+        awaitUntil("run-now feedback") { events.isNotEmpty() }
+
+        assertTrue((events.single() as DetailEvent.Message).text.contains("in pausa"))
+    }
+
+    @Test
+    fun `the pause shown in the detail follows the switch`() = runTest {
+        seedArmedManual("m1")
+        val store = RoomAutomationStore(db.automationDao())
+        val harness = ManualHarness(store)
+        val viewModel = viewModel("m1", store, DetailAuditRecorder(), RenderLanguage.EN, manual = harness.service)
+        awaitUntil("manual detail loaded") { viewModel.state.value.detail != null }
+        assertEquals(false, viewModel.state.value.detail?.manual?.paused)
+
+        harness.pause.setPaused(true)
+        awaitUntil("pause shown") { viewModel.state.value.detail?.manual?.paused == true }
+        harness.pause.setPaused(false)
+        awaitUntil("pause cleared") { viewModel.state.value.detail?.manual?.paused == false }
+    }
+
+    @Test
+    fun `adding to the Home screen asks the launcher with the rule token`() = runTest {
+        seedArmedManual("m1", name = "Apri il garage")
+        val store = RoomAutomationStore(db.automationDao())
+        val harness = ManualHarness(store)
+        val viewModel = viewModel("m1", store, DetailAuditRecorder(), RenderLanguage.EN, manual = harness.service)
+        awaitUntil("manual detail loaded") { viewModel.state.value.detail != null }
+        val events = collectEvents(viewModel)
+
+        viewModel.onAddToHome()
+        awaitUntil("shortcut feedback") { events.isNotEmpty() }
+
+        val entry = harness.pinner.requested.single()
+        assertEquals("m1", entry.id)
+        assertEquals("Apri il garage", entry.name)
+        assertTrue(harness.tokens.isValid(AutomationId("m1"), entry.token))
+        assertTrue((events.single() as DetailEvent.Message).text.startsWith("Shortcut requested"))
+    }
+
+    @Test
+    fun `a launcher without pin support hides the shortcut button and explains if asked`() = runTest {
+        seedArmedManual("m1")
+        val store = RoomAutomationStore(db.automationDao())
+        val harness = ManualHarness(store, pinSupported = false)
+        val viewModel = viewModel("m1", store, DetailAuditRecorder(), RenderLanguage.EN, manual = harness.service)
+        awaitUntil("manual detail loaded") { viewModel.state.value.detail != null }
+        assertEquals(false, viewModel.state.value.detail?.manual?.canPinShortcut)
+        val events = collectEvents(viewModel)
+
+        viewModel.onAddToHome()
+        awaitUntil("shortcut feedback") { events.isNotEmpty() }
+
+        assertTrue(harness.pinner.requested.isEmpty())
+        assertTrue((events.single() as DetailEvent.Message).text.contains("does not support shortcuts"))
+    }
+
+    @Test
+    fun `choosing the tile rule marks this rule as the tile one`() = runTest {
+        seedArmedManual("m1")
+        val store = RoomAutomationStore(db.automationDao())
+        val harness = ManualHarness(store)
+        val viewModel = viewModel("m1", store, DetailAuditRecorder(), RenderLanguage.EN, manual = harness.service)
+        awaitUntil("manual detail loaded") { viewModel.state.value.detail != null }
+        assertEquals(false, viewModel.state.value.detail?.manual?.isTileRule)
+        val events = collectEvents(viewModel)
+
+        viewModel.onUseInTile()
+
+        assertEquals("m1", harness.tile.ruleId.value)
+        awaitUntil("tile rule shown") { viewModel.state.value.detail?.manual?.isTileRule == true }
+        assertTrue((events.single() as DetailEvent.Message).text.contains("Apri il garage"))
+    }
+
+    @Test
+    fun `deleting a manual rule forgets its token and its tile choice`() = runTest {
+        seedArmedManual("m1")
+        val store = RoomAutomationStore(db.automationDao())
+        val harness = ManualHarness(store)
+        val token = harness.tokens.tokenFor(AutomationId("m1"))
+        harness.tile.select("m1")
+        val viewModel = viewModel("m1", store, DetailAuditRecorder(), RenderLanguage.EN, manual = harness.service)
+        awaitUntil("manual detail loaded") { viewModel.state.value.detail != null }
+        val events = collectEvents(viewModel)
+
+        viewModel.onDelete()
+        awaitUntil("delete done") { events.any { it is DetailEvent.Close } }
+
+        assertEquals(false, harness.tokens.isValid(AutomationId("m1"), token))
+        assertNull(harness.tile.ruleId.value)
     }
 
     /** Seed confinato al test: il codice applicativo scrive solo via DraftRepository. */

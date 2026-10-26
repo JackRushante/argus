@@ -340,6 +340,8 @@ class RuleRenderCoverageTest {
                 Trigger.Media(MediaPlayState.STOPPED),
                 mapOf("state" to ms(m("media stops playing", "finisce la riproduzione multimediale"))),
             ),
+            // 0.4.1: avvio manuale, nessun campo da rendere.
+            "manual" to case(Trigger.Manual, emptyMap()),
         )
         check("Trigger", Trigger.serializer(), cases) { trigger -> automation(trigger = trigger) }
     }

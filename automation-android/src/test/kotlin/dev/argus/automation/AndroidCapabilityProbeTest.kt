@@ -712,6 +712,8 @@ class AndroidCapabilityProbeTest {
             listOf(
                 "time",
                 "immediate",
+                // 0.4.1: avvio manuale, sempre armabile.
+                "manual",
                 "notification",
                 "phone_state.sms",
                 "connectivity.wifi",

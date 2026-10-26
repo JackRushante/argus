@@ -259,6 +259,8 @@ class AndroidCapabilityProbe internal constructor(
         add("time")
         // Sempre armabile: fira on-arm, nessuna dipendenza OS o grant.
         add("immediate")
+        // 0.4.1: avvio manuale, sempre armabile (nessuna dipendenza OS o grant).
+        add("manual")
         if (state.notificationListenerGranted) add("notification")
         if (state.locationUsable) add("geofence")
         if (state.receiveSmsGranted) add("phone_state.sms")
@@ -379,6 +381,8 @@ class AndroidCapabilityProbe internal constructor(
             add(CapabilityIds.TRIGGER_TIME)
             // Trigger immediato: nessuna dipendenza OS, fira on-arm ⇒ sempre disponibile.
             add(CapabilityIds.TRIGGER_IMMEDIATE)
+            // 0.4.1: avvio manuale, stesso regime dell'immediato: nessun grant, parte da un gesto.
+            add(CapabilityIds.TRIGGER_MANUAL)
             // Geofence e SSID richiedono permessi E servizi di localizzazione accesi: con la
             // posizione spenta dalle impostazioni rapide non funzionano (blocco temporaneo, D6).
             if (state.locationUsable) add(CapabilityIds.TRIGGER_GEOFENCE)

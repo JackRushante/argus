@@ -308,6 +308,9 @@ class AndroidArmedAutomationRegistrar(
         is Trigger.Screen, is Trigger.Battery, is Trigger.AudioOutput, is Trigger.ModeChanged,
         is Trigger.Media,
         -> registerDeviceEvent(automation)
+        // 0.4.1: avvio manuale. Nessuna registrazione OS: parte solo da un gesto dell'utente. Basta che
+        // la capability sia pubblicata e che la regola sia davvero armata nello store.
+        is Trigger.Manual -> registerBroadcastBacked(automation)
     }
 
     private suspend fun registerTime(automation: Automation): Boolean = try {
