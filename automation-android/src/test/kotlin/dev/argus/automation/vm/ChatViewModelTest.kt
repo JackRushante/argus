@@ -600,6 +600,69 @@ class ChatViewModelTest {
         assertFalse(state.items.any { it is ChatItem.AssistantMessage }, "il testo lo dà la UI localizzata")
     }
 
+    // --- 0.3.7 · voce 3a: il messaggio del provider arriva alla chat ---
+
+    @Test
+    fun `a rejected request shows what the provider rejected`() = runTest(dispatcher) {
+        val viewModel = chatViewModel(
+            FailingBrain {
+                CompileResult("", null, "bridge_http_400", providerMessage = "x is not a valid model ID")
+            },
+        )
+
+        viewModel.onInputChange("qualcosa")
+        viewModel.onSend()
+        advanceUntilIdle()
+
+        val state = viewModel.state.value
+        assertEquals(ChatError.ServerRejected(400, "x is not a valid model ID"), state.error)
+        assertFalse(state.sending)
+        assertFalse(state.items.any { it is ChatItem.SystemNotice }, "solo il banner d'errore")
+    }
+
+    @Test
+    fun `a rejected request without a provider message keeps the generic error`() = runTest(dispatcher) {
+        val viewModel = chatViewModel(FailingBrain { CompileResult("", null, "bridge_http_400") })
+
+        viewModel.onInputChange("qualcosa")
+        viewModel.onSend()
+        advanceUntilIdle()
+
+        assertEquals(ChatError.ServerRejected(400, null), viewModel.state.value.error)
+        assertEquals(ChatError.ServerRejected(400), viewModel.state.value.error)
+    }
+
+    @Test
+    fun `a bridge exception carries the provider message to the chat error`() = runTest(dispatcher) {
+        val viewModel = chatViewModel(
+            FailingBrain {
+                throw BridgeException(
+                    BridgeErrorKind.HTTP, "Provider HTTP 422", statusCode = 422, providerMessage = "model not found",
+                )
+            },
+        )
+
+        viewModel.onInputChange("qualcosa")
+        viewModel.onSend()
+        advanceUntilIdle()
+
+        assertEquals(ChatError.ServerRejected(422, "model not found"), viewModel.state.value.error)
+    }
+
+    @Test
+    fun `the provider message only explains a client rejection`() {
+        val language = RenderLanguage.EN
+        val message = "x is not a valid model ID"
+        assertEquals(ChatError.ServerRejected(400, message), chatErrorForCode("bridge_http_400", null, language, message))
+        assertEquals(ChatError.ServerRejected(400, null), chatErrorForCode("bridge_http_400", null, language, "   "))
+        // Auth, credito, limite e 5xx hanno la loro variante dedicata: il messaggio non le cambia.
+        assertEquals(ChatError.Auth, chatErrorForCode("bridge_http_401", null, language, message))
+        assertEquals(ChatError.Budget, chatErrorForCode("bridge_http_402", null, language, message))
+        assertEquals(ChatError.RateLimit, chatErrorForCode("bridge_http_429", null, language, message))
+        assertEquals(ChatError.ServiceUnavailable(503), chatErrorForCode("bridge_http_503", null, language, message))
+        assertEquals(ChatError.MalformedReply("draft_missing"), chatErrorForCode("draft_missing", null, language, message))
+    }
+
     @Test
     fun `the parser detail is shown for a format failure`() = runTest(dispatcher) {
         val viewModel = chatViewModel(

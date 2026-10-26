@@ -356,10 +356,11 @@ class ChatViewModel @Inject constructor(
                             // S4: le coordinate non sono mai partite verso il modello (0,0 nel prompt):
                             // qui tornano nella bozza, dove il modello ha lasciato 0,0 sullo stesso percorso.
                             // F5: la risposta grezza non entra mai nel flusso di approvazione (DB, audit, bozza).
+                            // Lo stesso vale per il messaggio del provider sui 4xx: serve solo al banner d'errore.
                             val compile = (
                                 edit?.baseDraft?.let { base -> restoreLocations(modelReply, base) }
                                     ?: modelReply
-                                ).copy(raw = null)
+                                ).copy(raw = null, providerMessage = null)
                             val submission = when {
                                 edit?.draftId != null && edit.draftRevision != null ->
                                     approvalFlow.submitRevision(
@@ -379,7 +380,7 @@ class ChatViewModel @Inject constructor(
                                     DraftSubmissionResult.Rejected("edit_context_invalid")
                                 else -> approvalFlow.submit(compile)
                             }
-                            CompiledTurn(submission, modelReply.detail, modelReply.raw)
+                            CompiledTurn(submission, modelReply.detail, modelReply.raw, modelReply.providerMessage)
                         }
                     } finally {
                         timer.cancel()
@@ -388,7 +389,14 @@ class ChatViewModel @Inject constructor(
                 if (generation == requestGeneration) {
                     // F5: la risposta grezza vive solo qui, in memoria, fino al prossimo invio.
                     mutableState.update { it.copy(rawResponse = compiled.raw) }
-                    applySubmission(compiled.submission, prompt, clarification, compiled.detail, edit)
+                    applySubmission(
+                        compiled.submission,
+                        prompt,
+                        clarification,
+                        compiled.detail,
+                        edit,
+                        compiled.providerMessage,
+                    )
                 }
             } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
                 if (generation == requestGeneration) {
@@ -410,7 +418,13 @@ class ChatViewModel @Inject constructor(
                     }
                 }
             } catch (error: BridgeException) {
-                if (generation == requestGeneration) applyFailureCode(TransportBackedBrain.metaErrorOf(error), null)
+                if (generation == requestGeneration) {
+                    applyFailureCode(
+                        TransportBackedBrain.metaErrorOf(error),
+                        null,
+                        providerMessage = error.providerMessage,
+                    )
+                }
             } catch (error: Exception) {
                 // Errore LOCALE dell'app (non del modello né della rete): mostrarlo come «risposta senza
                 // regola valida» farebbe cercare il guasto nel posto sbagliato. Il codice è il nome della
@@ -456,6 +470,7 @@ class ChatViewModel @Inject constructor(
         clarification: ClarificationContext?,
         compileDetail: String?,
         edit: EditContext?,
+        providerMessage: String? = null,
     ) {
         when (result) {
             is DraftSubmissionResult.Ready -> {
@@ -531,7 +546,7 @@ class ChatViewModel @Inject constructor(
                     }
                     return
                 }
-                applyFailureCode(result.code, compileDetail, reply = result.reply)
+                applyFailureCode(result.code, compileDetail, reply = result.reply, providerMessage = providerMessage)
             }
             is DraftSubmissionResult.Rejected -> {
                 turnErrorCode = result.code.safeUiCode()
@@ -631,9 +646,9 @@ class ChatViewModel @Inject constructor(
      * Per gli errori di trasporto/policy il modello non ha prodotto nulla: niente avviso "nessuna
      * regola approvabile", basta il banner.
      */
-    private fun applyFailureCode(code: String, detail: String?, reply: String = "") {
+    private fun applyFailureCode(code: String, detail: String?, reply: String = "", providerMessage: String? = null) {
         turnErrorCode = code
-        val error = chatErrorForCode(code, detail, language)
+        val error = chatErrorForCode(code, detail, language, providerMessage)
         mutableState.update { current ->
             current.copy(
                 items = current.items + buildList {
@@ -734,6 +749,8 @@ class ChatViewModel @Inject constructor(
         val submission: DraftSubmissionResult,
         val detail: String?,
         val raw: String?,
+        /** Messaggio ripulito del provider su un 4xx (solo memoria, per il banner d'errore). */
+        val providerMessage: String?,
     ) {
         override fun toString(): String = "CompiledTurn(submission=$submission, detail=$detail)"
     }
@@ -893,14 +910,19 @@ private fun String.safeUiCode(language: RenderLanguage): String = lowercase(Loca
  * Variante d'errore (B11) per un codice meta. [detail] è il dettaglio tecnico sicuro del parser
  * (percorso e tipo dell'errore, mai frammenti di input) per i fallimenti di formato.
  */
-internal fun chatErrorForCode(code: String, detail: String?, language: RenderLanguage): ChatError {
+internal fun chatErrorForCode(
+    code: String,
+    detail: String?,
+    language: RenderLanguage,
+    providerMessage: String? = null,
+): ChatError {
     HTTP_META.matchEntire(code)?.let { match ->
         return when (val status = match.groupValues[1].toInt()) {
             401, 403 -> ChatError.Auth
             402 -> ChatError.Budget
             429 -> ChatError.RateLimit
             in 500..599 -> ChatError.ServiceUnavailable(status)
-            in 400..499 -> ChatError.ServerRejected(status)
+            in 400..499 -> ChatError.ServerRejected(status, providerMessage?.takeIf { it.isNotBlank() })
             else -> ChatError.MalformedReply(code)
         }
     }

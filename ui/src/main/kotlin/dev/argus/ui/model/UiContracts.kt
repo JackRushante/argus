@@ -150,8 +150,12 @@ sealed interface ChatError {
     data object OutputTruncated : ChatError
     /** Il server ha tagliato le istruzioni (contesto troppo piccolo, tipico di Ollama). */
     data object ContextTruncated : ChatError
-    /** 4xx diverso da 401/402/403/429: spesso il contesto del modello è troppo piccolo. */
-    data class ServerRejected(val status: Int) : ChatError
+    /**
+     * 4xx diverso da 401/402/403/429. Con [providerMessage] (0.3.7: messaggio del provider già ripulito,
+     * es. «x is not a valid model ID») la chat dice COSA ha rifiutato il server; senza, resta il consiglio
+     * generico («spesso il contesto del modello è troppo piccolo»). Solo in memoria: mai nel DB né nei log.
+     */
+    data class ServerRejected(val status: Int, val providerMessage: String? = null) : ChatError
     /** 5xx: servizio non disponibile. */
     data class ServiceUnavailable(val status: Int) : ChatError
     /** Prompt composto oltre il tetto: errore locale, nessuna chiamata di rete. */

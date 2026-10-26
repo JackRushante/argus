@@ -112,7 +112,9 @@ class AnthropicMessagesTransport internal constructor(
             system = AgentMessageSupport.compileSystemText(),
             messages = listOf(InputMessage("user", AgentMessageSupport.compileUserText(cleanMessage, manifest, state))),
         )
-        val response = parseResponse(execute(buildRequest(token, json.encodeToString(request))))
+        val response = parseResponse(
+            execute(buildRequest(token, json.encodeToString(request)), ErrorDiagnostics(listOf(token), clientErrorsOnly = true)),
+        )
         // B15: l'usage viaggia su TUTTI i rami (anche errori di formato e troncamenti): il turno è costato.
         val usage = response.toTurnUsage(fallbackModel = model)
         val fullText = response.textContent()
@@ -279,7 +281,9 @@ class AnthropicMessagesTransport internal constructor(
                 else -> FORCED_REPLY_CHOICE
             },
         )
-        val response = parseResponse(execute(buildRequest(token, json.encodeToString(request))))
+        val response = parseResponse(
+            execute(buildRequest(token, json.encodeToString(request)), ErrorDiagnostics(listOf(token), clientErrorsOnly = true)),
+        )
         val usage = response.toTurnUsage(fallbackModel = model)
         return when (val reply = response.replyText(useReplyTool)) {
             is AgentMessageSupport.ReplyExtraction.Text ->
@@ -397,7 +401,10 @@ class AnthropicMessagesTransport internal constructor(
             throw TransportException(TransportErrorKind.PROTOCOL, "risposta provider non valida", cause = error)
         }
 
-    /** Con [diagnostics] (solo `health()`) un errore HTTP porta anche il messaggio ripulito del provider. */
+    /**
+     * Con [diagnostics] un errore HTTP porta anche il messaggio ripulito del provider
+     * ([TransportException.providerMessage]): su ogni errore per `health()`, sui soli 4xx per compile e act.
+     */
     private suspend fun execute(request: Request, diagnostics: ErrorDiagnostics? = null): String {
         val call = client.newCall(request)
         return suspendCancellableCoroutine { continuation ->
@@ -463,8 +470,8 @@ class AnthropicMessagesTransport internal constructor(
      * Mappa gli status Anthropic senza mai ripubblicare il body remoto: 401/403->AUTH, 402->BUDGET,
      * 400 con saldo insufficiente->BUDGET (altrimenti HTTP), 429->RATE_LIMIT, resto->HTTP. Il body
      * dell'errore viene letto per classificare il 400 di credito e non finisce nel messaggio; solo con
-     * [diagnostics] (test di connessione) il suo messaggio ripulito va nel campo dedicato
-     * [TransportException.providerMessage].
+     * [diagnostics] (test di connessione, e 4xx di compile e act) il suo messaggio ripulito va nel campo
+     * dedicato [TransportException.providerMessage].
      */
     private fun mapHttpError(response: Response, diagnostics: ErrorDiagnostics?): TransportException {
         val code = response.code
@@ -475,15 +482,21 @@ class AnthropicMessagesTransport internal constructor(
             400 -> if (indicatesInsufficientCredit(response)) TransportErrorKind.BUDGET else TransportErrorKind.HTTP
             else -> TransportErrorKind.HTTP
         }
-        val providerMessage = diagnostics?.let {
+        val providerMessage = diagnostics?.takeIf { it.covers(code) }?.let {
             val body = runCatching { response.peekBody(MAX_ERROR_BODY_BYTES).string() }.getOrNull()
             ProviderErrorMessage.extract(body, it.secrets)
         }
         return TransportException(kind, "Provider HTTP $code", statusCode = code, providerMessage = providerMessage)
     }
 
-    /** Richiesta di diagnostica dell'errore HTTP: [secrets] sono i valori da mascherare nel messaggio. */
-    private class ErrorDiagnostics(val secrets: List<String?>)
+    /**
+     * Richiesta di diagnostica dell'errore HTTP: [secrets] sono i valori da mascherare nel messaggio.
+     * Con [clientErrorsOnly] (compile e act) il messaggio si legge solo sui 4xx: un 5xx è spesso una
+     * pagina del gateway, non un testo utile; il test di connessione lo legge su ogni errore.
+     */
+    private class ErrorDiagnostics(val secrets: List<String?>, val clientErrorsOnly: Boolean = false) {
+        fun covers(status: Int): Boolean = !clientErrorsOnly || status in 400..499
+    }
 
     private fun indicatesInsufficientCredit(response: Response): Boolean {
         val body = runCatching { response.peekBody(MAX_RESPONSE_BYTES).string() }.getOrNull() ?: return false

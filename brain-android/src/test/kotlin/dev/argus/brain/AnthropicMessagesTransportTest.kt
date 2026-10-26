@@ -336,21 +336,36 @@ class AnthropicMessagesTransportTest {
         assertFalse(error.message.orEmpty().contains(API_KEY))
     }
 
-    @Test fun `health carries the masked provider message while act never does`(): Unit = runBlocking {
+    @Test fun `health compile and act carry the masked provider message on a 4xx`(): Unit = runBlocking {
         val body = """{"type":"error","error":{"type":"not_found_error","message":"model: claude-x ($API_KEY)"}}"""
-        server.enqueue(jsonResponse(body).setResponseCode(404))
-        server.enqueue(jsonResponse(body).setResponseCode(404))
+        repeat(3) { server.enqueue(jsonResponse(body).setResponseCode(404)) }
         val t = transport(model = "claude-x")
 
         val health = assertFailsWith<TransportException> { t.health() }
+        val compile = assertFailsWith<TransportException> { t.compile("crea", manifest(), deviceState()) }
         val act = assertFailsWith<TransportException> {
             t.act(fireContext(), "rispondi", listOf("notification"), listOf("whatsapp_reply"))
         }
 
-        assertEquals(404, health.statusCode)
-        val providerMessage = assertNotNull(health.providerMessage)
-        assertTrue(providerMessage.startsWith("model: claude-x"), providerMessage)
-        assertFalse(API_KEY in providerMessage, providerMessage)
+        listOf(health, compile, act).forEach { error ->
+            assertEquals(404, error.statusCode)
+            val providerMessage = assertNotNull(error.providerMessage)
+            assertTrue(providerMessage.startsWith("model: claude-x"), providerMessage)
+            assertFalse(API_KEY in providerMessage, providerMessage)
+            assertFalse("claude-x" in error.message.orEmpty())
+        }
+    }
+
+    @Test fun `compile and act do not read the message of a 5xx`(): Unit = runBlocking {
+        repeat(2) { server.enqueue(jsonResponse("""{"error":{"message":"secret detail"}}""").setResponseCode(529)) }
+        val t = transport(model = "claude-x")
+
+        val compile = assertFailsWith<TransportException> { t.compile("crea", manifest(), deviceState()) }
+        val act = assertFailsWith<TransportException> {
+            t.act(fireContext(), "rispondi", listOf("notification"), listOf("whatsapp_reply"))
+        }
+
+        assertNull(compile.providerMessage)
         assertNull(act.providerMessage)
     }
 
