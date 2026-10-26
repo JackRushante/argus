@@ -21,4 +21,19 @@
     <string name="cancel">Annulla</string>
     <string name="add">Aggiungi</string>
     <string name="backup_picker_unavailable">Nessun selettore di file disponibile su questo telefono.</string>
+    <!-- 0.4.1 (manuale): avvio manuale (F8) e Pausa automazioni (F21). -->
+    <string name="manual_tile_label">Argus: esegui regola</string>
+    <string name="manual_tile_none">Scegli una regola nell\'app</string>
+    <string name="manual_widget_label">Regole manuali di Argus</string>
+    <string name="manual_widget_description">Un pulsante per ogni regola manuale armata.</string>
+    <string name="manual_widget_title">Argus</string>
+    <string name="manual_widget_empty">Nessuna regola manuale armata</string>
+    <string name="manual_widget_paused">Automazioni in pausa</string>
+    <string name="manual_toast_started">Avviata: %1$s</string>
+    <string name="manual_toast_paused">Automazioni in pausa: riprendile per far partire le regole.</string>
+    <string name="manual_toast_unavailable">Questa regola non è più disponibile.</string>
+    <string name="manual_toast_no_rule">Scegli la regola di questo riquadro nell\'app Argus.</string>
+    <string name="pause_tile_label">Pausa automazioni</string>
+    <string name="pause_tile_on">In pausa</string>
+    <string name="pause_tile_off">Attive</string>
 </resources>

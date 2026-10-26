@@ -43,6 +43,58 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 0.4.1 (F8): trampolino invisibile di scorciatoie Home e pulsanti del widget. NON esportato:
+             lo avvia solo il sistema per conto di Argus, e ogni avvio verifica il token della regola. -->
+        <activity
+            android:name=".manual.ManualRunActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.Argus.Trampoline" />
+
+        <!-- Riquadri delle impostazioni rapide: l'unico che puo' legarli e' il sistema (permesso di firma). -->
+        <service
+            android:name=".manual.ManualRuleTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_manual"
+            android:label="@string/manual_tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".manual.PauseTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_pause"
+            android:label="@string/pause_tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <!-- Widget: esportato solo perche' il sistema deve poterlo aggiornare. Non esegue regole: i
+             pulsanti aprono il trampolino non esportato con id e token. -->
+        <receiver
+            android:name=".manual.ManualWidgetProvider"
+            android:exported="true"
+            android:label="@string/manual_widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/manual_widget_info" />
+        </receiver>
+
+        <service
+            android:name=".manual.ManualWidgetService"
+            android:exported="false"
+            android:permission="android.permission.BIND_REMOTEVIEWS" />
     </application>
 
 </manifest>

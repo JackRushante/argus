@@ -391,6 +391,7 @@ fun ArgusNavHost() {
                             override fun onFilter(f: StatusFilter) = listViewModel.onFilter(f)
                             override fun onEmptyCta() = switchTop(Routes.CHAT)
                             override fun onBannerTap() = switchTop(Routes.SETTINGS)
+                            override fun onResumeAutomations() = listViewModel.onResumeAutomations()
                         },
                         modifier = Modifier.testTag("screen_list"),
                     )
@@ -582,6 +583,8 @@ fun ArgusNavHost() {
                                 settingsViewModel.dismissBackupResult()
                                 switchTop(Routes.LIST)
                             }
+                            override fun onSetAutomationsPaused(paused: Boolean) =
+                                settingsViewModel.setAutomationsPaused(paused)
                             override fun onRevokePrivacy() = settingsViewModel.revokePrivacy()
                             override fun onRerunOnboarding() {
                                 navController.navigate(Routes.ONBOARDING)
@@ -648,6 +651,8 @@ fun ArgusNavHost() {
                                     override fun onDelete() = viewModel.onDelete()
                                     override fun onAskEdit() = viewModel.onAskEdit()
                                     override fun onRunNow() = viewModel.onRunNow()
+                                    override fun onAddToHome() = viewModel.onAddToHome()
+                                    override fun onUseInTile() = viewModel.onUseInTile()
                                     override fun onDiagnose() = viewModel.onDiagnose()
                                     // Come la barra in basso: cambia scheda, conservando lo stato salvato.
                                     override fun onOpenSystem() = switchTop(Routes.SETTINGS)

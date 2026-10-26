@@ -10,6 +10,7 @@ import dev.argus.automation.ArgusRuntimeController
 import dev.argus.automation.RenderLanguageSource
 import dev.argus.automation.TimeAlarmRuntime
 import dev.argus.automation.TimeAlarmRuntimeRegistry
+import dev.argus.manual.ManualWidgetRefresher
 import javax.inject.Inject
 
 @HiltAndroidApp
@@ -17,12 +18,15 @@ class ArgusApplication : Application(), DefaultLifecycleObserver {
     @Inject lateinit var alarmRuntime: TimeAlarmRuntime
     @Inject lateinit var runtimeController: ArgusRuntimeController
     @Inject lateinit var renderLanguage: RenderLanguageSource
+    @Inject lateinit var manualWidgetRefresher: ManualWidgetRefresher
 
     override fun onCreate() {
         super<Application>.onCreate()
         TimeAlarmRuntimeRegistry.install(alarmRuntime)
         ProcessLifecycleOwner.get().lifecycle.addObserver(this)
         runtimeController.start()
+        // 0.4.1 (F8): il widget delle regole manuali segue le regole armate e la pausa.
+        manualWidgetRefresher.start()
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
