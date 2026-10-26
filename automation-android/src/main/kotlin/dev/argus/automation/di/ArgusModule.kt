@@ -80,6 +80,22 @@ import dev.argus.automation.foreground.SharedForegroundSentinel
 import dev.argus.automation.connectivity.ForegroundDeniedNotice
 import dev.argus.automation.foreground.ReceiverWorkLauncher
 import dev.argus.automation.foreground.SentinelDemand
+import dev.argus.automation.manual.AndroidManualShortcutPinner
+import dev.argus.automation.manual.AutomationPauseStore
+import dev.argus.automation.manual.EngineManualEventDispatcher
+import dev.argus.automation.manual.ManualEntryService
+import dev.argus.automation.manual.ManualEventDispatcher
+import dev.argus.automation.manual.ManualRuleCatalog
+import dev.argus.automation.manual.ManualRuleRunner
+import dev.argus.automation.manual.ManualShortcutPinner
+import dev.argus.automation.manual.ManualTileSelection
+import dev.argus.automation.manual.ManualTokenStore
+import dev.argus.automation.manual.ManualWorkLauncher
+import dev.argus.automation.manual.PrefsAutomationPauseStore
+import dev.argus.automation.manual.PrefsManualTileSelection
+import dev.argus.automation.manual.PrefsManualTokenStore
+import dev.argus.automation.manual.QuickTileController
+import dev.argus.automation.manual.ReceiverManualWorkLauncher
 import dev.argus.automation.phone.SimAuditingPhoneEventDispatcher
 import dev.argus.automation.triggers.DeviceEventDemand
 import dev.argus.automation.triggers.DeviceEventDispatcher
@@ -754,6 +770,7 @@ object ArgusModule {
         journal: ExecutionJournal,
         resolvedExecutor: ResolvedActionExecutor,
         wakeAwarePause: WakeAwarePause,
+        automationPause: AutomationPauseStore,
     ): Engine = Engine(
         store = store,
         executor = executor,
@@ -764,6 +781,8 @@ object ArgusModule {
         journal = journal,
         resolvedExecutor = resolvedExecutor,
         pause = { millis -> wakeAwarePause.pause(millis) },
+        // 0.4.1 (F21): «Pausa automazioni», letta dal motore a ogni scatto.
+        firingPause = automationPause,
         now = System::currentTimeMillis,
     )
 
@@ -1242,4 +1261,74 @@ object ArgusModule {
         audit = audit,
         dispatchesIdle = { frame.idle },
     )
+
+    // --- 0.4.1 (manuale): avvio manuale delle regole (F8) e «Pausa automazioni» (F21) ---
+
+    @Provides
+    @Singleton
+    fun automationPauseStore(@ApplicationContext context: Context): AutomationPauseStore =
+        PrefsAutomationPauseStore(context)
+
+    @Provides
+    @Singleton
+    fun manualTokenStore(@ApplicationContext context: Context): ManualTokenStore =
+        PrefsManualTokenStore(context)
+
+    @Provides
+    @Singleton
+    fun manualTileSelection(@ApplicationContext context: Context): ManualTileSelection =
+        PrefsManualTileSelection(context)
+
+    @Provides
+    @Singleton
+    fun manualShortcutPinner(@ApplicationContext context: Context): ManualShortcutPinner =
+        AndroidManualShortcutPinner(context)
+
+    @Provides
+    @Singleton
+    fun manualEventDispatcher(
+        engine: Engine,
+        state: DeviceStateSnapshotProvider,
+        frame: DispatchFrame,
+    ): ManualEventDispatcher = EngineManualEventDispatcher(engine, state, frame)
+
+    @Provides
+    @Singleton
+    fun manualWorkLauncher(launcher: ReceiverWorkLauncher): ManualWorkLauncher =
+        ReceiverManualWorkLauncher(launcher)
+
+    @Provides
+    @Singleton
+    fun manualRuleCatalog(store: AutomationStore, tokens: ManualTokenStore): ManualRuleCatalog =
+        ManualRuleCatalog(store, tokens)
+
+    @Provides
+    @Singleton
+    fun manualRuleRunner(
+        store: AutomationStore,
+        tokens: ManualTokenStore,
+        pause: AutomationPauseStore,
+        dispatcher: ManualEventDispatcher,
+        launcher: ManualWorkLauncher,
+    ): ManualRuleRunner = ManualRuleRunner(store, tokens, pause, dispatcher, launcher)
+
+    @Provides
+    @Singleton
+    fun manualEntryService(
+        catalog: ManualRuleCatalog,
+        tokens: ManualTokenStore,
+        runner: ManualRuleRunner,
+        pinner: ManualShortcutPinner,
+        tile: ManualTileSelection,
+        pause: AutomationPauseStore,
+    ): ManualEntryService = ManualEntryService(catalog, tokens, runner, pinner, tile, pause)
+
+    @Provides
+    @Singleton
+    fun quickTileController(
+        tile: ManualTileSelection,
+        catalog: ManualRuleCatalog,
+        runner: ManualRuleRunner,
+        pause: AutomationPauseStore,
+    ): QuickTileController = QuickTileController(tile, catalog, runner, pause)
 }

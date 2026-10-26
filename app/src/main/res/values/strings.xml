@@ -21,4 +21,19 @@
     <string name="cancel">Cancel</string>
     <string name="add">Add</string>
     <string name="backup_picker_unavailable">No file picker is available on this phone.</string>
+    <!-- 0.4.1 (manuale): avvio manuale (F8) e Pausa automazioni (F21). -->
+    <string name="manual_tile_label">Argus: run rule</string>
+    <string name="manual_tile_none">Choose a rule in the app</string>
+    <string name="manual_widget_label">Argus manual rules</string>
+    <string name="manual_widget_description">A button for each armed manual rule.</string>
+    <string name="manual_widget_title">Argus</string>
+    <string name="manual_widget_empty">No armed manual rules</string>
+    <string name="manual_widget_paused">Automations paused</string>
+    <string name="manual_toast_started">Started: %1$s</string>
+    <string name="manual_toast_paused">Automations are paused: resume them to run rules.</string>
+    <string name="manual_toast_unavailable">This rule is no longer available.</string>
+    <string name="manual_toast_no_rule">Choose the rule for this tile in the Argus app.</string>
+    <string name="pause_tile_label">Pause automations</string>
+    <string name="pause_tile_on">Paused</string>
+    <string name="pause_tile_off">Active</string>
 </resources>

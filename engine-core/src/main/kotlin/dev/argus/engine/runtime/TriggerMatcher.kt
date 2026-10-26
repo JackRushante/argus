@@ -31,6 +31,9 @@ class TriggerMatcher {
         spec is Trigger.ModeChanged && event is TriggerEvent.DeviceModeChanged ->
             spec.what == event.what && (spec.to == null || spec.to == event.to)
         spec is Trigger.Media && event is TriggerEvent.MediaPlaybackChanged -> spec.state == event.state
+        // Avvio manuale (0.4.1): id e impronta sono verificati a monte dall'Engine; un ManualFired su
+        // qualsiasi altro trigger non matcha, e un trigger manual non matcha nessun altro evento.
+        spec is Trigger.Manual && event is TriggerEvent.ManualFired -> true
         else -> false
     }
 

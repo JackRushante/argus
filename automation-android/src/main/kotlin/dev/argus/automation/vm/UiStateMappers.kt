@@ -13,6 +13,7 @@ import dev.argus.engine.runtime.ActionJournalOutcome
 import dev.argus.engine.runtime.AuditKind
 import dev.argus.engine.runtime.ExecutionStatus
 import dev.argus.engine.runtime.OmittedSteps
+import dev.argus.engine.runtime.PauseCodes
 import dev.argus.engine.runtime.TimeSpecs
 import dev.argus.engine.safety.PendingDraft
 import dev.argus.engine.safety.Severity
@@ -109,7 +110,12 @@ internal fun AuditLogRecord.toLogRow(
     actions: List<ActionResultEntity>,
     language: RenderLanguage = RenderLanguage.system(),
 ): LogRow {
-    val outcome = executionStatus.toLogOutcome(kind)
+    val outcome = if (kind == AuditKind.BLOCKED_POLICY && detail == PauseCodes.PAUSED) {
+        // F21: uno scatto saltato per la pausa non e' un guasto: ambra, non rosso.
+        LogOutcome.PARTIAL
+    } else {
+        executionStatus.toLogOutcome(kind)
+    }
     return LogRow(
         id = id.toString(),
         timeLabel = absoluteTimeLabel(atMillis, language = language),
@@ -224,6 +230,10 @@ private fun auditSummary(record: AuditLogRecord, l: RenderLanguage): String = wh
         "stale_trigger_registration" -> l.pick(
             "registration is no longer approved",
             "registrazione non più approvata",
+        )
+        PauseCodes.PAUSED -> l.pick(
+            "skipped: automations are paused",
+            "saltata: automazioni in pausa",
         )
         else -> l.pick(
             "blocked by policy (${LogReasonLabels.text(record.detail, l)})",

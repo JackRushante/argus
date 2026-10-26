@@ -12,6 +12,7 @@ import dev.argus.automation.ApprovalFlow
 import dev.argus.automation.AutomationEnablementCoordinator
 import dev.argus.automation.EnablementResult
 import dev.argus.automation.RenderLanguageSource
+import dev.argus.automation.manual.AutomationPauseStore
 import dev.argus.data.ArgusDatabase
 import dev.argus.data.dao.AutomationUiMetadata
 import dev.argus.data.entities.ScheduledTimeAlarmEntity
@@ -70,6 +71,8 @@ class AutomationListViewModel @Inject constructor(
     private val savedStateHandle: SavedStateHandle,
     @ApplicationContext private val context: Context,
     private val languageSource: RenderLanguageSource,
+    /** F21: "Pausa automazioni". Il banner della lista lo mostra e "Riprendi" lo spegne. */
+    private val pause: AutomationPauseStore,
 ) : ViewModel() {
     private val filter = savedStateHandle.getStateFlow(FILTER_KEY, StatusFilter.ALL)
     private val mutableMessages = MutableSharedFlow<String>(extraBufferCapacity = 4)
@@ -114,7 +117,7 @@ class AutomationListViewModel @Inject constructor(
                 )
             },
         )
-    }.stateIn(
+    }.combine(pause.paused) { current, paused -> current.copy(paused = paused) }.stateIn(
         viewModelScope,
         SharingStarted.WhileSubscribed(5_000),
         AutomationListState(
@@ -202,6 +205,9 @@ class AutomationListViewModel @Inject constructor(
             needsReviewCount = allRows.count { it.status == StatusBadge.NEEDS_REVIEW },
         )
     }
+
+    /** F21: "Riprendi" sul banner della pausa. */
+    fun onResumeAutomations() = pause.setPaused(false)
 
     fun onFilter(value: StatusFilter) {
         savedStateHandle[FILTER_KEY] = value

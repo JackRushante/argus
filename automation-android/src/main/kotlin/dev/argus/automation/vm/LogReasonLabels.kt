@@ -172,6 +172,11 @@ internal object LogReasonLabels {
             "external data in a JSON body must sit inside a quoted string",
             "un dato esterno in un body JSON deve stare dentro una stringa tra virgolette",
         ),
+        // --- 0.4.1: «Pausa automazioni» ---
+        "paused" to Label(
+            "automations are paused",
+            "le automazioni sono in pausa",
+        ),
         // --- Codici generici (nessun motivo più preciso disponibile) ---
         "execution_error" to Label("unspecified error", "errore non specificato"),
         "policy_blocked" to Label("unspecified policy", "policy non specificata"),

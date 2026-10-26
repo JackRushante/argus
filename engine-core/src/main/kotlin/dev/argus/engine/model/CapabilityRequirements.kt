@@ -30,6 +30,9 @@ object CapabilityIds {
     // Filtro SIM di phone_state: ha senso solo su un telefono con più di uno slot.
     const val TRIGGER_PHONE_SIM = "trigger.phone_state.sim"
 
+    // 0.4.1: avvio manuale. Nessuna dipendenza OS né grant: come l'immediato, sempre disponibile.
+    const val TRIGGER_MANUAL = "trigger.manual"
+
     const val STATE_FOREGROUND_APP = "state.foreground_app"
     const val STATE_LOCATION = "state.location"
     const val STATE_READER_BUILTIN = "state.reader.builtin"
@@ -126,6 +129,7 @@ object CapabilityRequirements {
         is Trigger.AudioOutput -> setOf(CapabilityIds.TRIGGER_AUDIO_OUTPUT)
         is Trigger.ModeChanged -> setOf(CapabilityIds.TRIGGER_MODE_CHANGED)
         is Trigger.Media -> setOf(CapabilityIds.TRIGGER_MEDIA)
+        is Trigger.Manual -> setOf(CapabilityIds.TRIGGER_MANUAL)
     }
 
     private fun forCondition(condition: Condition): Set<String> = when (condition) {

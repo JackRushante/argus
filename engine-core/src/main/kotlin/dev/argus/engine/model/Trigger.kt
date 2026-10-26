@@ -184,6 +184,15 @@ sealed interface Trigger {
     /** Riproduzione multimediale iniziata/finita (0.4.1), con antirimbalzo fra un brano e l'altro. */
     @Serializable @SerialName("media")
     data class Media(val state: MediaPlayState) : Trigger
+
+    /**
+     * Avvio manuale (0.4.1): nessun orario e nessun evento di sistema. La regola parte SOLO quando
+     * l'utente la invoca con un gesto: «Esegui ora» nel dettaglio, una scorciatoia sulla schermata
+     * Home, il riquadro delle impostazioni rapide o il widget. Nessun campo: chi la lancia e da dove
+     * non entra nell'impronta, che dipende solo dai dati eseguibili.
+     */
+    @Serializable @SerialName("manual")
+    data object Manual : Trigger
 }
 
 /** One-shot = fira una volta e si auto-consuma: `at` assoluto o `afterMs` relativo (mai cron ricorrente). */

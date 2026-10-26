@@ -866,6 +866,8 @@ class DraftValidator(
                     )
             }
             is Trigger.Media -> Unit
+            // Avvio manuale: nessun campo da validare, parte solo su invocazione dell'utente.
+            is Trigger.Manual -> Unit
         }
     }
 

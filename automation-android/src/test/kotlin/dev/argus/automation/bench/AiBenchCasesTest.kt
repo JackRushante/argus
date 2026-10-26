@@ -96,6 +96,7 @@ class AiBenchCasesTest {
             "audio output" to triggers { type(it) == "audio_output" },
             "mode changed" to triggers { type(it) == "mode_changed" },
             "media" to triggers { type(it) == "media" },
+            "manual" to triggers { type(it) == "manual" },
             "missed call" to triggers { type(it) == "phone_state" && text(it, "event") == "MISSED_CALL" },
             "sim filter" to triggers { type(it) == "phone_state" && it["sim"] != null },
             // 0.4.1: alba e tramonto, come variante del trigger time.
@@ -397,6 +398,7 @@ class AiBenchCasesTest {
         return when (str("type")) {
             "time", "immediate", "geofence", "notification" -> str("type")
             "screen", "battery", "audio_output", "mode_changed", "media" -> str("type")
+            "manual" -> "manual"
             // Il filtro SIM e' una capability a parte: un caso che lo chiede deve trovarla nel manifest.
             "phone_state" -> if (trigger["sim"] != null) "phone_state.sim" else when (str("event")) {
                 "SMS_RECEIVED" -> "phone_state.sms"

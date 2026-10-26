@@ -53,6 +53,8 @@ internal object BenchVocab {
     val TRIGGER_TYPES: Set<String> = setOf(
         "time", "immediate", "geofence", "notification", "phone_state", "connectivity", "sensor",
         "screen", "battery", "audio_output", "mode_changed", "media",
+        // 0.4.1: avvio manuale.
+        "manual",
     )
 
     val ACTION_TYPES: Set<String> = setOf(

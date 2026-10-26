@@ -41,5 +41,7 @@ fun iconFor(key: String): ImageVector = when (key) {
     "audio_output" -> Icons.Rounded.Headphones
     "mode_changed" -> Icons.Rounded.Tune
     "media" -> Icons.Rounded.MusicNote
+    // Avvio manuale (0.4.1): la regola parte solo quando la lancia l'utente.
+    "manual" -> Icons.Rounded.PlayCircle
     else -> Icons.Rounded.Bolt
 }

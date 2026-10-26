@@ -351,4 +351,18 @@
     <string name="act41_settings_write_title">Modifica impostazioni di sistema</string>
     <string name="act41_settings_write_ok">concesso: le regole possono cambiare luminosità e rotazione dello schermo</string>
     <string name="act41_settings_write_warn">non concesso: le regole che impostano luminosità o rotazione non possono partire</string>
+    <!-- 0.4.1 (manuale): avvio manuale delle regole (F8) e «Pausa automazioni» (F21). -->
+    <string name="manual_section_title">Avvio manuale</string>
+    <string name="manual_section_body">Questa regola parte solo quando la avvii tu: Esegui ora, una scorciatoia sulla schermata Home, un riquadro delle impostazioni rapide o il widget di Argus.</string>
+    <string name="manual_add_home">Aggiungi alla schermata Home</string>
+    <string name="manual_use_tile">Usa nel riquadro delle impostazioni rapide</string>
+    <string name="manual_tile_selected">Nel riquadro delle impostazioni rapide</string>
+    <string name="manual_tile_hint">Aggiungi il riquadro “Argus: esegui regola” dall\'editor delle impostazioni rapide. L\'etichetta diventa il nome di questa regola.</string>
+    <string name="manual_paused_note">Le automazioni sono in pausa: non parte niente finché non le riprendi.</string>
+    <string name="manual_run_now_body">La regola parte adesso, come se l\'avessi avviata a mano. Condizioni e cooldown valgono comunque.</string>
+    <string name="pause_banner_text">Automazioni in pausa</string>
+    <string name="pause_banner_resume">Riprendi</string>
+    <string name="pause_setting_title">Pausa automazioni</string>
+    <string name="pause_setting_on">Nessuna regola scatta, comprese quelle manuali. Le sveglie restano registrate; quello che viene saltato non si recupera alla ripresa.</string>
+    <string name="pause_setting_off">Le regole scattano normalmente.</string>
 </resources>

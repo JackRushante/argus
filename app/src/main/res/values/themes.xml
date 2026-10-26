@@ -11,4 +11,14 @@
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
+    <!--
+      Attivita trampolino dell'avvio manuale (0.4.1): trasparente, senza animazioni, mai visibile.
+    -->
+    <style name="Theme.Argus.Trampoline" parent="android:Theme.Translucent.NoTitleBar">
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowShowWallpaper">false</item>
+        <item name="android:backgroundDimEnabled">false</item>
+    </style>
 </resources>

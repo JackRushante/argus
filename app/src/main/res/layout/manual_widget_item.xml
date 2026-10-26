@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/manual_widget_item"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/manual_widget_button_bg"
+    android:ellipsize="end"
+    android:gravity="center_vertical"
+    android:maxLines="1"
+    android:minHeight="44dp"
+    android:paddingStart="14dp"
+    android:paddingEnd="14dp"
+    android:textColor="@color/argus_widget_button_text"
+    android:textSize="14sp" />

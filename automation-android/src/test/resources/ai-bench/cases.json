@@ -1992,5 +1992,54 @@
    "actions_include": ["set_dnd"],
    "params": {"set_dnd.mode": "PRIORITY"}
   }
+ },
+ {
+  "id": "manual.torch.it.01",
+  "category": "trigger.manual",
+  "lang": "it",
+  "text": "Fammi un pulsante sulla schermata Home che accende la torcia",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "manual"},
+   "actions_include": ["set_flashlight"],
+   "params": {"set_flashlight.on": true}
+  },
+  "note": "Un pulsante sulla Home e' l'avvio manuale: parte solo quando lo tocca l'utente"
+ },
+ {
+  "id": "manual.timer.en.01",
+  "category": "trigger.manual",
+  "lang": "en",
+  "text": "Add a quick settings tile that starts a 10 minute timer",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "manual"},
+   "actions_include": ["set_timer"],
+   "params": {"set_timer.seconds": 600}
+  }
+ },
+ {
+  "id": "manual.widget.it.02",
+  "category": "trigger.manual",
+  "lang": "it",
+  "text": "Voglio un widget con un tasto per mettere la suoneria in silenzioso",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "manual"},
+   "actions_include": ["set_ringer"],
+   "params": {"set_ringer.mode": "silent"}
+  }
+ },
+ {
+  "id": "manual.hand.en.02",
+  "category": "trigger.manual",
+  "lang": "en",
+  "text": "I want to run this by hand when I decide: turn off Do Not Disturb and set the ringer to normal",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "manual"},
+   "actions_include": ["set_dnd", "set_ringer"],
+   "params": {"set_dnd.mode": "OFF", "set_ringer.mode": "normal"}
+  }
  }
 ]

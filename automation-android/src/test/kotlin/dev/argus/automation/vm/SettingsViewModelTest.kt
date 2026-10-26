@@ -9,6 +9,7 @@ import dev.argus.automation.AppPreferencesStore
 import dev.argus.automation.ConfiguredBridgeBrain
 import dev.argus.automation.PrivacyRevocationCoordinator
 import dev.argus.automation.RenderLanguageSource
+import dev.argus.automation.manual.FakePauseStore
 import dev.argus.automation.budget.BudgetLimits
 import dev.argus.automation.budget.BudgetSettings
 import dev.argus.automation.budget.BudgetSettingsStore
@@ -201,6 +202,25 @@ class SettingsViewModelTest {
             assertEquals(ProviderId.HERMES, store.selectedProviderId())
             assertTrue(messages.isNotEmpty(), "atteso un messaggio d'errore per il provider sconosciuto")
         }
+
+    @Test
+    fun `settings carry the pause switch and flip it`() = runTest(dispatcher) {
+        val pause = FakePauseStore()
+        val vm = settingsViewModel(FakeProviderStore(), pause = pause)
+        observe(vm)
+        advanceUntilIdle()
+        assertFalse(vm.state.value.automationsPaused)
+
+        vm.setAutomationsPaused(true)
+        advanceUntilIdle()
+        assertTrue(pause.isPaused())
+        assertTrue(vm.state.value.automationsPaused)
+
+        // Anche un cambio che arriva da fuori (riquadro, banner della lista) si vede qui.
+        pause.setPaused(false)
+        advanceUntilIdle()
+        assertFalse(vm.state.value.automationsPaused)
+    }
 
     @Test
     fun `english settings emits english runtime feedback`() = runTest(dispatcher) {
@@ -869,6 +889,7 @@ class SettingsViewModelTest {
         identityProbe: ShizukuIdentityProbe = FakeShizukuIdentityProbe(),
         automations: AutomationStore = FakeAutomationStore(),
         rulesBackup: RulesBackup = FakeRulesBackup(),
+        pause: FakePauseStore = FakePauseStore(),
     ): SettingsViewModel {
         val brain = ConfiguredBridgeBrain(store, privacyAccepted = { true }, factory = transportFactory)
         val preferences = FakePreferences(privacyAccepted = true)
@@ -897,6 +918,7 @@ class SettingsViewModelTest {
             languageSource = languageSource,
             installInfo = installInfo,
             rulesBackup = rulesBackup,
+            pause = pause,
         )
     }
 

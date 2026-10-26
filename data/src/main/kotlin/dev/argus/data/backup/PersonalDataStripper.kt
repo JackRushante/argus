@@ -57,6 +57,8 @@ object PersonalDataStripper {
         is Trigger.AudioOutput,
         is Trigger.ModeChanged,
         is Trigger.Media,
+        // 0.4.1: l'avvio manuale non ha campi.
+        Trigger.Manual,
         -> trigger
     }
 

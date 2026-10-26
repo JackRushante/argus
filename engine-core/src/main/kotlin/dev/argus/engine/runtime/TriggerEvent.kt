@@ -85,4 +85,16 @@ sealed interface TriggerEvent {
     data class DeviceModeChanged(val what: ModeKind, val to: String, val from: String?) : TriggerEvent
 
     data class MediaPlaybackChanged(val state: MediaPlayState) : TriggerEvent
+
+    // --- 0.4.1: avvio manuale. ---
+
+    /**
+     * L'utente ha invocato la regola a mano. Come [TimeFired] porta id e impronta approvata, così il
+     * motore verifica che la regola esista, sia armata e sia ancora quella approvata; il matcher lo
+     * accetta SOLO su un trigger `manual`.
+     */
+    data class ManualFired(
+        override val automationId: AutomationId,
+        override val approvalFingerprint: ApprovalFingerprint,
+    ) : Registered
 }

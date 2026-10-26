@@ -195,6 +195,8 @@ data class AutomationListState(
     val loading: Boolean,
     val pendingCount: Int = rows.count { it.status == StatusBadge.PENDING_APPROVAL || it.pendingEditDraftId != null },
     val needsReviewCount: Int = rows.count { it.status == StatusBadge.NEEDS_REVIEW },
+    /** 0.4.1 (F21): «Pausa automazioni» attiva. Mostra il banner «Automazioni in pausa · Riprendi». */
+    val paused: Boolean = false,
 )
 
 data class AutomationRow(
@@ -222,6 +224,7 @@ interface AutomationListCallbacks {
     fun onOpen(id: String); fun onToggleEnabled(id: String, enabled: Boolean); fun onFilter(f: StatusFilter)
     fun onEmptyCta() {}     // CTA empty-state "Vai in chat"; default no-op, la nav reale è dell'host (NavHost)
     fun onBannerTap() {}    // tap sul banner salute → Sistema; default no-op, host-owned
+    fun onResumeAutomations() {}   // «Riprendi» sul banner della pausa (F21); default no-op
 }
 
 // --- 6.3 Automazione · dettaglio / approvazione ---
@@ -257,6 +260,21 @@ data class AutomationDetailState(
      * Solo per una regola salvata (armata o disattivata); null per una bozza o finché non è letto.
      */
     val stats: RuleStatsUi? = null,
+    /** 0.4.1 (F8): ingressi dell'avvio manuale. Non nullo solo per una regola `manual` armata. */
+    val manual: ManualEntryUi? = null,
+)
+
+/**
+ * 0.4.1 (F8): ciò che il Dettaglio offre per lanciare a mano una regola `manual` armata. «Esegui ora»
+ * è il pulsante del footer ([AutomationDetailState.canRunNow]); qui stanno le altre porte d'ingresso.
+ */
+data class ManualEntryUi(
+    /** Il launcher del telefono accetta le scorciatoie fissate: senza, «Aggiungi alla Home» sparisce. */
+    val canPinShortcut: Boolean = true,
+    /** Questa regola è quella scelta per il riquadro delle impostazioni rapide «Argus: esegui regola». */
+    val isTileRule: Boolean = false,
+    /** «Pausa automazioni» attiva: anche l'avvio manuale è saltato, e l'utente lo deve sapere. */
+    val paused: Boolean = false,
 )
 
 /**
@@ -303,6 +321,8 @@ interface AutomationDetailCallbacks {
     fun onDiagnose() {}                      // apre «Perché non è scattata?»: calcola la diagnosi una volta
     fun onOpenSystem() {}                    // porta alla scheda Sistema, come la barra in basso
     fun onBack() {}                          // affordance back nell'header; default no-op, la nav reale è dell'host (NavHost)
+    fun onAddToHome() {}                     // F8: propone al launcher la scorciatoia della regola manuale
+    fun onUseInTile() {}                     // F8: sceglie questa regola per il riquadro delle impostazioni rapide
 }
 
 // --- 6.4 Log esecuzioni ---
@@ -414,6 +434,8 @@ data class SettingsState(
     val shizukuRunsAsRoot: Boolean? = null,
     /** 0.4.0 (F1): backup delle regole su file (esporta/importa). */
     val backup: RulesBackupUi = RulesBackupUi(),
+    /** 0.4.1 (F21): interruttore globale «Pausa automazioni». */
+    val automationsPaused: Boolean = false,
 )
 
 /** Operazione del backup delle regole. */
@@ -565,6 +587,8 @@ interface SettingsCallbacks {
     ) {}
     fun onRevokePrivacy()
     fun onRerunOnboarding()
+    /** «Pausa automazioni» (F21): true = nessuna regola scatta finché non si riprende. Default no-op. */
+    fun onSetAutomationsPaused(paused: Boolean) {}
     /** Selettore provider: id = ProviderId.wireName. Id sconosciuti = no-op lato VM. */
     fun onSelectProvider(providerId: String) {}
     /** apiKey null = conserva la chiave esistente (pattern onSaveBridge). La chiave NON torna mai nello stato. */
