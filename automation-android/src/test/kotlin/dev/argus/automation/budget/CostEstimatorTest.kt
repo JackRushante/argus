@@ -88,6 +88,27 @@ class CostEstimatorTest {
     }
 
     @Test
+    fun `i modelli base suggeriti hanno il costo del listino ufficiale`() {
+        val usage = TurnUsage(inputTokens = 1_000_000, outputTokens = 100_000, cachedInputTokens = 400_000)
+        // (600_000 * 100_000 + 400_000 * 10_000 + 100_000 * 500_000) / 1M = 60_000 + 4_000 + 50_000
+        assertEquals(114_000L, CostEstimator.estimate(ProviderId.OPENAI, "gpt-6-luna", usage))
+        assertEquals(114_000L, CostEstimator.estimate(ProviderId.ANTHROPIC, "claude-haiku-5-5", usage))
+        // (600_000 * 750_000 + 400_000 * 75_000 + 100_000 * 3_750_000) / 1M = 450_000 + 30_000 + 375_000
+        assertEquals(855_000L, CostEstimator.estimate(ProviderId.GEMINI, "gemini-3.8-flash", usage))
+    }
+
+    @Test
+    fun `opus usa il listino attuale da 5 e 25 dollari`() {
+        val cost = CostEstimator.estimate(
+            ProviderId.ANTHROPIC,
+            "claude-opus-4-8",
+            TurnUsage(inputTokens = 1_000_000, outputTokens = 100_000),
+        )
+        // input 1M * $5/M + output 100k * $25/M = 5_000_000 + 2_500_000
+        assertEquals(7_500_000L, cost)
+    }
+
+    @Test
     fun `modello sconosciuto ritorna null senza lanciare`() {
         assertNull(
             CostEstimator.estimate(

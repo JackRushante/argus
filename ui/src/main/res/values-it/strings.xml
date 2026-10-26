@@ -22,7 +22,8 @@
     <string name="provider_dialog_title">Configura %1$s</string>
     <string name="provider_endpoint_label">Endpoint</string>
     <string name="provider_model_label">Modello</string>
-    <string name="provider_model_hint_openrouter">Modello (es. deepseek/deepseek-v4.1-flash) o preset: @preset/&lt;nome&gt;</string>
+    <string name="provider_model_hint_openrouter">Modello (es. ~deepseek/deepseek-flash-latest) o preset: @preset/&lt;nome&gt;</string>
+    <string name="provider_model_advice">Argus ha bisogno di un modello capace: almeno il modello base di un grande fornitore, oppure in locale un modello da circa 27 miliardi di parametri in su. I modelli più piccoli non riescono a scrivere regole valide.</string>
     <string name="provider_model_preset_format">Il formato è @preset/&lt;nome&gt;</string>
     <string name="provider_key_label">Chiave API</string>
     <string name="provider_key_keep_hint">Lascia vuoto per conservare la chiave attuale.</string>
@@ -98,6 +99,7 @@
     <string name="chat_error_output_truncated">La risposta del modello è stata tagliata (limite di lunghezza). Riprova o usa un modello con più spazio.</string>
     <string name="chat_error_context_truncated">Il server ha tagliato le istruzioni: il contesto del modello è troppo piccolo. Servono almeno circa 12.000 token (per Ollama: OLLAMA_CONTEXT_LENGTH).</string>
     <string name="chat_error_server_rejected">Il server ha rifiutato la richiesta (HTTP %1$d). Spesso il contesto del modello è troppo piccolo.</string>
+    <string name="chat_error_server_rejected_message">Il server ha rifiutato la richiesta (HTTP %1$d): %2$s</string>
     <string name="chat_error_service_unavailable">Il servizio non è disponibile in questo momento (HTTP %1$d). Riprova più tardi.</string>
     <string name="chat_error_too_long">Richiesta troppo lunga (%1$d caratteri, massimo %2$d). Accorciala.</string>
     <string name="chat_error_not_configured">Il servizio AI non è configurato. Controlla provider, chiave API e informativa privacy in Sistema.</string>

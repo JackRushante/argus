@@ -49,6 +49,19 @@ class CronSchedule private constructor(
     }
 
     companion object {
+        /**
+         * I modelli scrivono a volte il cron alla Quartz, con i secondi in testa (`0 30 22 * * *`). Un cron
+         * con ESATTAMENTE 6 campi, il primo `0` o `00`, e gli altri 5 che formano un cron valido, diventa
+         * quei 5 campi (`30 22 * * *`). In ogni altro caso torna [expr] invariata e decide il validatore:
+         * secondi diversi da zero, un cron a 5 campi, campi non validi non si toccano.
+         */
+        fun dropLeadingZeroSeconds(expr: String): String {
+            val fields = expr.trim().split(Regex("\\s+"))
+            if (fields.size != 6 || (fields[0] != "0" && fields[0] != "00")) return expr
+            val standard = fields.drop(1).joinToString(" ")
+            return if (runCatching { parse(standard) }.isSuccess) standard else expr
+        }
+
         fun parse(expr: String): CronSchedule {
             val f = expr.trim().split(Regex("\\s+"))
             require(f.size == 5) { "cron: servono 5 campi, trovati ${f.size} in '$expr'" }

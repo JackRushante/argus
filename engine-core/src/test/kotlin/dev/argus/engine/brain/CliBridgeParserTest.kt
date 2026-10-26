@@ -20,6 +20,55 @@ class CliBridgeParserTest {
         assertEquals("dnd sera", d.name)
         assertEquals(Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"), d.trigger)
     }
+
+    // --- 0.3.7 voce 4a: il cron alla Quartz diventa a 5 campi PRIMA della validazione ---
+
+    private fun parsedTrigger(cron: String): Trigger {
+        val raw = """ok @@META@@ {"draft":{"name":"x","trigger":{"type":"time","cron":"$cron","tz":"Europe/Rome"},"actions":[{"type":"set_wifi","on":true}]}}"""
+        val r = p.parseCompile(raw)
+        assertNull(r.metaError, cron)
+        return assertNotNull(r.draft, cron).trigger
+    }
+
+    @Test fun `a six field cron with zero seconds is shown to the user in the five field form`() {
+        assertEquals(Trigger.Time(cron = "30 22 * * *", tz = "Europe/Rome"), parsedTrigger("0 30 22 * * *"))
+        assertEquals(Trigger.Time(cron = "0 12 * * 1-5", tz = "Europe/Rome"), parsedTrigger("0 0 12 * * 1-5"))
+        assertEquals(Trigger.Time(cron = "30 22 * * *", tz = "Europe/Rome"), parsedTrigger("00 30 22 * * *"))
+    }
+
+    @Test fun `any other cron stays as the model wrote it`() {
+        // Secondi diversi da zero: resta e il validatore lo rifiuta.
+        assertEquals(Trigger.Time(cron = "15 30 22 * * *", tz = "Europe/Rome"), parsedTrigger("15 30 22 * * *"))
+        // Cinque campi: invariato.
+        assertEquals(Trigger.Time(cron = "30 22 * * *", tz = "Europe/Rome"), parsedTrigger("30 22 * * *"))
+        assertEquals(Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"), parsedTrigger("0 23 * * *"))
+        // Uno 0 in testa seguito da cinque campi non validi: invariato.
+        assertEquals(Trigger.Time(cron = "0 99 99 * * *", tz = "Europe/Rome"), parsedTrigger("0 99 99 * * *"))
+    }
+
+    @Test fun `only the cron of a time trigger is touched`() {
+        val at = p.parseCompile("""ok @@META@@ {"draft":{"name":"x","trigger":{"type":"time","at":"2026-10-27T08:00","tz":"Europe/Rome"},"actions":[{"type":"set_wifi","on":true}]}}""")
+        assertEquals(Trigger.Time(at = "2026-10-27T08:00", tz = "Europe/Rome"), assertNotNull(at.draft).trigger)
+        val immediate = p.parseCompile("""ok @@META@@ {"draft":{"name":"x","trigger":{"type":"immediate"},"actions":[{"type":"set_wifi","on":true}]}}""")
+        assertEquals(Trigger.Immediate, assertNotNull(immediate.draft).trigger)
+    }
+
+    @Test fun `the validator accepts the normalized cron and still rejects non zero seconds`() {
+        val validator = dev.argus.engine.safety.DraftValidator(knownTools = emptySet())
+        fun codes(cron: String): List<String> = validator.validate(
+            assertNotNull(
+                p.parseCompile(
+                    """@@META@@ {"draft":{"name":"x","trigger":{"type":"time","cron":"$cron","tz":"Europe/Rome"},"actions":[{"type":"set_wifi","on":true}]}}""",
+                ).draft,
+            ),
+            emptySet(),
+        ).map { it.code }
+
+        assertFalse("cron_invalid" in codes("0 30 22 * * *"))
+        assertTrue("cron_invalid" in codes("15 30 22 * * *"))
+        assertTrue("cron_invalid" in codes("0 99 99 * * *"))
+    }
+
     @Test fun `balanced extraction survives prose with braces after the meta`() {
         val raw = """ok @@META@@ {"draft":{"name":"x","trigger":{"type":"time","cron":"0 8 * * *","tz":"Europe/Rome"},"actions":[{"type":"set_wifi","on":true}]}} ricorda {questa} nota"""
         val r = p.parseCompile(raw)
@@ -273,5 +322,47 @@ class CliBridgeParserTest {
         val r = p.parseCompile("""<think>@@FOO@@ {"draft":null,"error_code":"fake_code"}</think>Solo testo.""")
         assertNull(r.metaError)
         assertEquals("Solo testo.", r.reply)
+    }
+
+    // --- 0.3.7: la suoneria scritta in maiuscolo diventa la forma minuscola PRIMA della validazione ---
+
+    private fun parsedActions(actionsJson: String): List<Action> {
+        val r = p.parseCompile("""ok @@META@@ {"draft":{"name":"x","trigger":{"type":"immediate"},"actions":$actionsJson}}""")
+        assertNull(r.metaError, actionsJson)
+        return assertNotNull(r.draft, actionsJson).actions
+    }
+
+    @Test fun `a ringer mode written in capitals becomes the lowercase mode the validator accepts`() {
+        assertEquals(listOf(Action.SetRinger("vibrate")), parsedActions("""[{"type":"set_ringer","mode":"VIBRATE"}]"""))
+        assertEquals(listOf(Action.SetRinger("silent")), parsedActions("""[{"type":"set_ringer","mode":" Silent "}]"""))
+        assertEquals(listOf(Action.SetRinger("normal")), parsedActions("""[{"type":"set_ringer","mode":"normal"}]"""))
+    }
+
+    @Test fun `ringer modes inside if and while are normalized too`() {
+        val always = """{"type":"boolean_literal","value":true}"""
+        val actions = parsedActions(
+            """[{"type":"if","condition":$always,"then":[{"type":"set_ringer","mode":"VIBRATE"}],""" +
+                """"orElse":[{"type":"while","condition":$always,"body":[{"type":"set_ringer","mode":"SILENT"}],"maxIterations":2}]}]""",
+        )
+        val branch = actions.single() as Action.If
+        assertEquals(listOf(Action.SetRinger("vibrate")), branch.then)
+        assertEquals(listOf(Action.SetRinger("silent")), (branch.orElse.single() as Action.While).body)
+    }
+
+    @Test fun `unknown ringer modes and interpolations stay as the model wrote them`() {
+        assertEquals(listOf(Action.SetRinger("LOUD")), parsedActions("""[{"type":"set_ringer","mode":"LOUD"}]"""))
+        assertEquals(
+            listOf(Action.SetRinger("${'$'}{Mode}")),
+            parsedActions("""[{"type":"set_ringer","mode":"${'$'}{Mode}"}]"""),
+        )
+    }
+
+    @Test fun `the validator accepts a ringer mode the model wrote in capitals`() {
+        val validator = dev.argus.engine.safety.DraftValidator(knownTools = emptySet())
+        val draft = assertNotNull(
+            p.parseCompile("""@@META@@ {"draft":{"name":"x","trigger":{"type":"immediate"},"actions":[{"type":"set_ringer","mode":"VIBRATE"}]}}""").draft,
+        )
+        val codes = validator.validate(draft, emptySet()).map { it.code }
+        assertFalse("ringer_mode_invalid" in codes, codes.toString())
     }
 }

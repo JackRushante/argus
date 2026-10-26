@@ -99,7 +99,7 @@ data class ProviderSpec(
  * prezzi pubblici correnti dei provider, da rivedere a ogni bump di PRICING_VERSION.
  */
 object ProviderCatalog {
-    const val PRICING_VERSION: String = "2026-07"
+    const val PRICING_VERSION: String = "2026-10"
 
     /** Temperatura del compile per i provider OpenAI-compatibili «aperti» (vedi [ProviderQuirks.compileTemperature]). */
     private const val COMPILE_TEMPERATURE = 0.2
@@ -119,7 +119,9 @@ object ProviderCatalog {
             displayName = "OpenAI",
             defaultBaseUrl = "https://api.openai.com/v1",
             authStyle = AuthStyle.BEARER,
-            defaultModels = listOf("gpt-5.5", "gpt-5-mini"),
+            // Il primo è il modello che l'app USA quando il campo è vuoto: il modello base economico
+            // misurato dal banco di prova. I nomi cambiano nel tempo e stanno solo qui, mai nei testi.
+            defaultModels = listOf("gpt-6-luna"),
             // Web via Responses API: tool `web_search` su `POST {base}/responses` (NON /chat/completions,
             // che vorrebbe un modello `-search-preview`). gpt-5.x fa il loop web internamente e ritorna il
             // testo in `output→message→output_text`. Validato live 2026-07-17.
@@ -128,7 +130,10 @@ object ProviderCatalog {
                 webSearch = WebSearchMechanism.OPENAI_RESPONSES,
             ),
             costTracked = true,
+            // Le voci dei modelli non più suggeriti restano: chi li ha già configurati conserva la stima del costo.
             prices = mapOf(
+                // gpt-6-luna: $0.10 in / $0.01 in cache / $0.50 out per 1M token (pagina ufficiale OpenAI).
+                "gpt-6-luna" to ModelPrice(100_000, 500_000, cachedInputMicrosPerMTok = 10_000),
                 // gpt-5.5: $1.25 in / $10 out per 1M token.
                 "gpt-5.5" to ModelPrice(1_250_000, 10_000_000, cachedInputMicrosPerMTok = 125_000),
                 // gpt-5-mini: $0.25 in / $2.00 out per 1M token.
@@ -141,16 +146,21 @@ object ProviderCatalog {
             displayName = "Anthropic",
             defaultBaseUrl = "https://api.anthropic.com",
             authStyle = AuthStyle.X_API_KEY,
-            defaultModels = listOf("claude-opus-4-8", "claude-sonnet-4-5"),
+            // Primo = modello usato a campo vuoto (modello base economico del banco di prova).
+            defaultModels = listOf("claude-haiku-5-5"),
             quirks = ProviderQuirks(
                 extraHeaders = mapOf("anthropic-version" to "2023-06-01"),
                 // Server tool web_search_20250305: loop di ricerca interno lato Anthropic, single-turn.
                 webSearch = WebSearchMechanism.ANTHROPIC_TOOL,
             ),
             costTracked = true,
+            // Le voci dei modelli non più suggeriti restano: chi li ha già configurati conserva la stima del costo.
             prices = mapOf(
-                // claude-opus: $15 in / $75 out per 1M token.
-                "claude-opus-4-8" to ModelPrice(15_000_000, 75_000_000, cachedInputMicrosPerMTok = 1_500_000),
+                // claude-haiku-5-5: $0.10 in / $0.50 out per 1M token fino a 100K token di prompt (Anthropic);
+                // la lettura dalla cache costa 0,1x l'ingresso.
+                "claude-haiku-5-5" to ModelPrice(100_000, 500_000, cachedInputMicrosPerMTok = 10_000),
+                // claude-opus: $5 in / $25 out per 1M token (listino attuale; prima $15/$75).
+                "claude-opus-4-8" to ModelPrice(5_000_000, 25_000_000, cachedInputMicrosPerMTok = 500_000),
                 // claude-sonnet: $3 in / $15 out per 1M token.
                 "claude-sonnet-4-5" to ModelPrice(3_000_000, 15_000_000, cachedInputMicrosPerMTok = 300_000),
             ),
@@ -162,7 +172,9 @@ object ProviderCatalog {
             // Shim OpenAI ufficiale, già normalizzato (senza slash finale).
             defaultBaseUrl = "https://generativelanguage.googleapis.com/v1beta/openai",
             authStyle = AuthStyle.BEARER,
-            defaultModels = listOf("gemini-2.5-pro", "gemini-2.5-flash"),
+            // Primo = modello usato a campo vuoto. gemini-2.5-pro non si suggerisce più: Google lo ha messo
+            // tra i modelli legacy riservati agli utenti esistenti.
+            defaultModels = listOf("gemini-3.8-flash"),
             // Web via API nativa: tool `{"google_search":{}}` su `POST {geminiHost}/v1beta/models/
             // {model}:generateContent` (header `x-goog-api-key`), NON sullo shim OpenAI-compat
             // /chat/completions (che rifiuta il grounding con 400 — smoke 2026-07-17). Il transport deriva
@@ -172,7 +184,11 @@ object ProviderCatalog {
                 webSearch = WebSearchMechanism.GEMINI_NATIVE,
             ),
             costTracked = true,
+            // Le voci dei modelli non più suggeriti restano: chi li ha già configurati conserva la stima del costo.
             prices = mapOf(
+                // gemini-3.8-flash: $0.75 in / $3.75 out / cache $0.075 per 1M token. Listino Google valido
+                // fino al 2026-12-31: dal 2027-01-01 raddoppia ($1.50 / $7.50 / cache $0.15) e va aggiornato.
+                "gemini-3.8-flash" to ModelPrice(750_000, 3_750_000, cachedInputMicrosPerMTok = 75_000),
                 // gemini-2.5-pro: $1.25 in / $10 out per 1M token (fascia <=200k).
                 "gemini-2.5-pro" to ModelPrice(1_250_000, 10_000_000),
                 // gemini-2.5-flash: $0.30 in / $2.50 out per 1M token.
@@ -185,7 +201,16 @@ object ProviderCatalog {
             displayName = "OpenRouter",
             defaultBaseUrl = "https://openrouter.ai/api/v1",
             authStyle = AuthStyle.BEARER,
-            defaultModels = listOf("openai/gpt-5.5", "anthropic/claude-sonnet-4-5"),
+            // Alias `~<fornitore>/<famiglia>-latest`: OpenRouter li sposta da solo sull'ultima versione della
+            // famiglia, così il suggerimento non invecchia a ogni uscita (verificati il 2026-10-26: puntano a
+            // DeepSeek V4.1 Flash, Gemini 3.8 Flash, Kimi K3 e Claude Haiku 5.5). Il primo è il modello usato
+            // a campo vuoto. Lista provvisoria: può aggiungersi `~openai/gpt-luna-latest` dopo un'altra misura.
+            defaultModels = listOf(
+                "~deepseek/deepseek-flash-latest",
+                "~google/gemini-flash-latest",
+                "~moonshotai/kimi-latest",
+                "~anthropic/claude-haiku-latest",
+            ),
             // Web attivato dal plugin `{"id":"web"}` (loop di ricerca interno lato OpenRouter); non dal
             // suffisso `:online`, che rompe i preset `@preset/...`.
             quirks = ProviderQuirks(

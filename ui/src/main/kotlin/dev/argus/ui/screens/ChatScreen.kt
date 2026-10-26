@@ -457,7 +457,7 @@ private fun ChatErrorBanner(error: ChatError, onRetry: () -> Unit, onOpenSystem:
         ChatError.RateLimit -> stringResource(R.string.chat_error_rate_limit)
         ChatError.OutputTruncated -> stringResource(R.string.chat_error_output_truncated)
         ChatError.ContextTruncated -> stringResource(R.string.chat_error_context_truncated)
-        is ChatError.ServerRejected -> stringResource(R.string.chat_error_server_rejected, error.status)
+        is ChatError.ServerRejected -> serverRejectedText(error)
         is ChatError.ServiceUnavailable -> stringResource(R.string.chat_error_service_unavailable, error.status)
         is ChatError.TooLong -> stringResource(R.string.chat_error_too_long, error.chars, error.max)
         ChatError.NotConfigured -> stringResource(R.string.chat_error_not_configured)
@@ -503,6 +503,20 @@ private fun ChatErrorBanner(error: ChatError, onRetry: () -> Unit, onOpenSystem:
                 TextButton(onClick = onRetry, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.chat_retry)) }
             }
         }
+    }
+}
+
+/**
+ * Rifiuto 4xx del server: col messaggio del provider (già ripulito) dice COSA è stato rifiutato; senza,
+ * resta il consiglio generico sul contesto del modello.
+ */
+@Composable
+private fun serverRejectedText(error: ChatError.ServerRejected): String {
+    val providerMessage = error.providerMessage?.takeIf { it.isNotBlank() }
+    return if (providerMessage != null) {
+        stringResource(R.string.chat_error_server_rejected_message, error.status, providerMessage)
+    } else {
+        stringResource(R.string.chat_error_server_rejected, error.status)
     }
 }
 

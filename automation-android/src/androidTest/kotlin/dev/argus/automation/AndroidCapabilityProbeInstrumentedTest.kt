@@ -45,7 +45,8 @@ class AndroidCapabilityProbeInstrumentedTest {
             assertEquals(Build.MODEL, manifest.deviceModel)
             assertEquals(expectedAndroid, manifest.androidVersion)
             assertEquals(Build.VERSION.SDK_INT, manifest.androidApi)
-            assertEquals(StateKeys.ALL, manifest.stateKeys)
+            // Le chiavi di stato si pubblicano solo con Shizuku autorizzato (capability `state.<chiave>`).
+            assertEquals(if (manifest.shizukuAvailable) StateKeys.ALL else emptyMap(), manifest.stateKeys)
             assertEquals(listOf(contact), manifest.whitelistedContacts)
             assertEquals(
                 gateway.status() == ShizukuGatewayStatus.AUTHORIZED,

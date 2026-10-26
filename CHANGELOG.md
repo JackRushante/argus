@@ -2,6 +2,52 @@
 
 Release and engineering notes, newest first.
 
+## v0.3.7 (2026-10-26) — AI test bench, model guidance, the app's language
+
+The AI side is now measured instead of guessed. On the first run of the new test bench, DeepSeek
+V4.1 Flash with reasoning off got 89% of the rule requests right; with the fixes below the same
+setup gets 98%. The base models of the major providers score 85–99% (README → "Choosing a
+model").
+
+### Added
+
+- AI test bench (`AiBenchTest`). It sends 125 rule requests in English and Italian, plus 12
+  generative answers, to a real provider through the app's real prompt, transport and validator.
+  It then reports what came out right by category, language and model. It runs only when
+  `ARGUS_BENCH_KEY` is set, so regular test runs never touch the network.
+- Model guidance in the provider dialog (onboarding and Settings): Argus needs at least the base
+  model of a major provider, or a self-hosted model of about 27B parameters or more.
+
+### Changed
+
+- Texts written for you follow the app's language: the reply, the rule name, notification titles
+  and texts, and the goal of AI actions. The model used to guess the language from the request,
+  and English requests often got Italian texts.
+- New suggested models, also used when the Model field is left empty. They are `gpt-6-luna`,
+  `claude-haiku-5-5` and `gemini-3.8-flash`; on OpenRouter, the `~…-latest` aliases of DeepSeek
+  Flash, Gemini Flash, Kimi and Claude Haiku, which follow the newest version by themselves. The
+  previous defaults (Opus 4.8, GPT-5.5, Gemini 2.5 Pro) were expensive, or no longer available
+  to new Gemini users.
+- Price list updated to 2026-10. The Claude Opus 4.8 price was wrong: it is $5/$25, not $15/$75.
+
+### Fixed
+
+- "Set the ringer to vibrate" failed with most models, because they wrote the mode in capitals.
+  The prompt now lists the modes, and Argus lowercases them.
+- Wi-Fi and Bluetooth rules keep the network or device name the user mentions, instead of
+  firing on any network or device.
+- A cron with a leading seconds field (`0 30 22 * * *`, Quartz style) is normalized to the
+  standard 5 fields instead of being rejected.
+- Models that can't turn reasoning off (Gemini Flash, GLM Flash, MiniMax Flash on OpenRouter):
+  with reasoning set to none, Argus retries at the minimum instead of failing.
+- When the provider rejects a request, the chat shows the provider's own message (for example
+  "not a valid model ID") instead of a generic hint about the context size.
+- Without Shizuku, the model no longer proposes state conditions that can't be armed, such as
+  "only if Do Not Disturb is off".
+- "If the SMS contains X, do A, otherwise B": the prompt now shows how to read the message text.
+- Requests starting with "Imposta…" no longer offer the Settings app as an installed-app
+  candidate.
+
 ## v0.3.6 (2026-10-26) — Reliability on real phones: alarms, screen-off waits, Shizuku, diagnostics
 
 This release closes the reliability and diagnostics findings of the code audit.

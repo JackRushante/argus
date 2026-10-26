@@ -22,11 +22,20 @@ data class CompileResult(
      * Può contenere dati personali.
      */
     val raw: String? = null,
+    /**
+     * Messaggio d'errore del PROVIDER su un rifiuto 4xx (già ripulito: max 160 caratteri, niente
+     * controlli, chiave mascherata), per spiegare alla chat COSA correggere (es. «x is not a valid model
+     * ID»). Come [raw] resta SOLO in memoria: mai nel DB, nell'audit, negli eventi d'uso, nei log, nella
+     * bozza né in `toString()`; il chiamante lo toglie prima del flusso di approvazione.
+     */
+    val providerMessage: String? = null,
 ) {
-    // `raw` non esce mai da qui: un log accidentale del risultato non deve portare la risposta del modello.
+    // `raw` e `providerMessage` non escono mai da qui: un log accidentale del risultato non deve portare
+    // la risposta del modello né il testo del provider.
     override fun toString(): String =
         "CompileResult(reply=$reply, draft=$draft, metaError=$metaError, usage=$usage, detail=$detail, " +
-            "raw=${raw?.let { "<${it.length} chars>" }})"
+            "raw=${raw?.let { "<${it.length} chars>" }}, " +
+            "providerMessage=${providerMessage?.let { "<${it.length} chars>" }})"
 
     companion object {
         const val MAX_RAW_CHARS = 16_000

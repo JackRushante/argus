@@ -36,7 +36,8 @@ class TransportBackedBrain(
             )
         } catch (e: TransportException) {
             // Nessun testo utente per gli errori di trasporto: lo dà la UI localizzata dal metaError.
-            CompileResult(reply = "", draft = null, metaError = metaErrorOf(e))
+            // Il messaggio ripulito del provider (4xx) viaggia a parte, solo in memoria, fino alla chat.
+            CompileResult(reply = "", draft = null, metaError = metaErrorOf(e), providerMessage = e.providerMessage)
         }
 
     override suspend fun act(

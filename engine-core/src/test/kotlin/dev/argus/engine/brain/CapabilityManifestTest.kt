@@ -2,6 +2,7 @@ package dev.argus.engine.brain
 import dev.argus.engine.model.StateKeys
 import dev.argus.engine.model.StateQueryFamily
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -39,6 +40,26 @@ class CapabilityManifestTest {
         val s = m.render()
         assertTrue(s.contains("NON attivo"))
         assertFalse(s.contains("in coda"))
+    }
+
+    @Test fun `reply language defaults to English and accepts only en or it`() {
+        fun manifest(language: String? = null): CapabilityManifest {
+            val base = CapabilityManifest(
+                deviceModel = "Pixel", androidVersion = 16, androidApi = 36,
+                shizukuAvailable = false,
+                grantedPermissions = emptyList(),
+                availableTools = emptyList(),
+                unavailableTools = emptyMap(),
+                whitelistedContacts = emptyList(),
+            )
+            return if (language == null) base else base.copy(replyLanguage = language)
+        }
+        assertEquals("en", manifest().replyLanguage)
+        assertEquals("it", manifest("it").replyLanguage)
+        assertEquals("en", manifest("en").replyLanguage)
+        assertFailsWith<IllegalArgumentException> { manifest("fr") }
+        assertFailsWith<IllegalArgumentException> { manifest("IT") }
+        assertFailsWith<IllegalArgumentException> { manifest("") }
     }
 
     @Test fun `reader families must be unique and canonically ordered`() {

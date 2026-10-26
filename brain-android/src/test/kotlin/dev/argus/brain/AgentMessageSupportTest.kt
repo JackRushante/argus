@@ -2,7 +2,14 @@ package dev.argus.brain
 
 import dev.argus.engine.brain.CapabilityManifest
 import dev.argus.engine.brain.WhitelistedContact
+import dev.argus.engine.model.ArgusJson
+import dev.argus.engine.model.CmpOp
+import dev.argus.engine.model.Condition
+import dev.argus.engine.model.ConfidentialityLabel
+import dev.argus.engine.model.TriggerField
+import dev.argus.engine.model.VarBinding
 import dev.argus.engine.runtime.DeviceState
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -88,6 +95,128 @@ class AgentMessageSupportTest {
         assertTrue("ONE single-quoted shell argument" in system)
         assertTrue("never add your own quotes around it" in system)
         assertFalse("Contacts can only be identified by the whitelist ids." in system)
+    }
+
+    @Test
+    fun `compile context carries the reply language chosen by the app inside the manifest`() {
+        fun context(user: String) = Json.parseToJsonElement(
+            user.substringAfter("===== UNTRUSTED STRUCTURED CONTEXT =====\n").substringBefore("\n===== END CONTEXT ====="),
+        ).jsonObject
+
+        val italian = AgentMessageSupport.compileUserText(
+            "turn on the wifi", emptyManifest.copy(replyLanguage = "it"), DeviceState(),
+        )
+        val english = AgentMessageSupport.compileUserText(
+            "accendi il wifi", emptyManifest.copy(replyLanguage = "en"), DeviceState(),
+        )
+        val default = AgentMessageSupport.compileUserText("accendi il wifi", emptyManifest, DeviceState())
+
+        assertTrue("\"reply_language\":\"it\"" in italian)
+        assertTrue("\"reply_language\":\"en\"" in english)
+        assertEquals("it", context(italian).getValue("manifest").jsonObject.getValue("reply_language").jsonPrimitive.content)
+        assertEquals("en", context(english).getValue("manifest").jsonObject.getValue("reply_language").jsonPrimitive.content)
+        assertEquals("en", context(default).getValue("manifest").jsonObject.getValue("reply_language").jsonPrimitive.content)
+        // La lingua sta nel contesto strutturato, non nel testo della richiesta.
+        assertFalse("reply_language" in italian.substringAfter("===== UNTRUSTED USER REQUEST ====="))
+    }
+
+    @Test
+    fun `the compile request writes the reply language in plain words right before the user message`() {
+        val italianLine = "Write every text meant for the user (reply, rule name, notification titles and texts, goal) in Italian."
+        val englishLine = "Write every text meant for the user (reply, rule name, notification titles and texts, goal) in English."
+        val italian = AgentMessageSupport.compileUserText(
+            "turn on the wifi", emptyManifest.copy(replyLanguage = "it"), DeviceState(),
+        )
+        val english = AgentMessageSupport.compileUserText(
+            "accendi il wifi", emptyManifest.copy(replyLanguage = "en"), DeviceState(),
+        )
+        val default = AgentMessageSupport.compileUserText("accendi il wifi", emptyManifest, DeviceState())
+
+        assertTrue(italianLine in italian)
+        assertFalse(englishLine in italian)
+        assertTrue(englishLine in english)
+        assertFalse(italianLine in english)
+        assertTrue(englishLine in default, "senza scelta vale l'inglese, come il default del manifest")
+        // UNA riga, subito prima della richiesta, fuori dal blocco non fidato.
+        assertTrue((italianLine + "\n\n===== UNTRUSTED USER REQUEST =====\nturn on the wifi") in italian, italian)
+        assertEquals(1, italian.split(italianLine).size - 1)
+        assertFalse(italianLine in italian.substringAfter("===== UNTRUSTED USER REQUEST ====="))
+        assertFalse(italianLine in italian.substringBefore("===== END CONTEXT ====="))
+        // Il campo del manifest resta.
+        assertTrue("\"reply_language\":\"it\"" in italian)
+        assertTrue("\"reply_language\":\"en\"" in english)
+    }
+
+    @Test
+    fun `compile rules ask for a standard five field cron without seconds`() {
+        val system = AgentMessageSupport.compileSystemText().lines().joinToString(" ") { it.trim() }
+        val sentence = "cron is a standard 5-field expression \"minute hour day-of-month month day-of-week\" " +
+            "(no seconds), e.g. \"30 22 * * *\"."
+
+        assertTrue(sentence in system)
+        // Subito dopo «Exactly one of cron, at and afterMs.» nello schema del trigger time.
+        assertTrue("Exactly one of cron, at and afterMs. $sentence" in system)
+    }
+
+    @Test
+    fun `compile rules list the ringer modes and say what the connectivity match compares`() {
+        val system = AgentMessageSupport.compileSystemText().lines().joinToString(" ") { it.trim() }
+
+        // Senza valori i modelli scrivevano "VIBRATE" (come set_dnd), che il validatore rifiuta.
+        assertTrue("{\"type\":\"set_ringer\", \"mode\":\"normal\"|\"vibrate\"|\"silent\"}" in system)
+        // Il match vale anche per il Bluetooth ed è un confronto esatto (TriggerMatcher).
+        assertTrue(
+            "\"match\":string|null (the EXACT Wi-Fi network name or Bluetooth device name the user mentions; " +
+                "null = any network or device)" in system,
+        )
+    }
+
+    @Test
+    fun `rule 7 makes the manifest decide the language of every text for the user`() {
+        val rules = AgentMessageSupport.COMPILE_RULES
+        // La regola va a capo in mezzo alle frasi: si confronta il testo con gli spazi normalizzati.
+        val rule7 = rules.substringAfter("\n7. ").substringBefore("\n8. ").replace(Regex("\\s+"), " ")
+
+        assertTrue("manifest.reply_language" in rule7, rule7)
+        assertTrue("\"it\" = Italian" in rule7 && "\"en\" = English" in rule7, rule7)
+        listOf(
+            "the reply sentence", "the rule \"name\"", "show_notification", "notificationTitle", "goal of invoke_llm",
+            "whatever the language of the request, the timezone or the contact names",
+        ).forEach { part -> assertTrue(part in rule7, "$part in $rule7") }
+        // Il resto della regola 7 resta: una frase breve, la riga @@META@@, mai dire che e' gia' attiva.
+        assertTrue("Reply with one short sentence" in rule7)
+        assertTrue("@@META@@ {\"draft\":<object-or-null>,\"error_code\":<string-or-null>}" in rule7)
+        assertTrue("Describe the PROPOSED rule; never claim it is already set or active." in rule7)
+        // Il vecchio criterio (la lingua del messaggio) non c'e' piu'.
+        assertFalse("USER'S language" in rules)
+        assertFalse("language of their message" in rules)
+    }
+
+    @Test
+    fun `the data-flow section shows how to branch on the text of an SMS or a notification`() {
+        val system = AgentMessageSupport.compileSystemText()
+        val vars = "[{\"type\":\"trigger_payload\",\"name\":\"sms_text\",\"field\":\"TEXT\"," +
+            "\"extractionRegex\":null,\"confidentiality\":\"PRIVATE\"}]"
+        val condition = "{\"type\":\"var_compare\",\"varName\":\"sms_text\",\"op\":\"CONTAINS\",\"expected\":\"X\"}"
+
+        assertTrue(vars in system, "manca la variabile trigger_payload dell'esempio")
+        assertTrue(condition in system, "manca la condizione var_compare dell'esempio")
+        // L'esempio sta in fondo al blocco P4 DATA-FLOW, dopo la frase di chiusura, e prima dello schema delle query.
+        val closing = system.indexOf("v1 flat rules keep exactly the\nmeaning and bytes described above.")
+        assertTrue(closing > 0)
+        assertTrue(system.indexOf(vars) > closing && system.indexOf(condition) > closing)
+        assertTrue(system.indexOf(condition) < system.indexOf("Only for /compile schema v2"))
+        assertEquals(1, Regex(Regex.escape(condition)).findAll(system).count(), "UN solo esempio")
+        // Le due parti dell'esempio sono JSON valido del dominio.
+        val binding = ArgusJson.decodeFromString(ListSerializer(VarBinding.serializer()), vars).single()
+        assertEquals(
+            VarBinding.TriggerPayload("sms_text", TriggerField.TEXT, null, ConfidentialityLabel.PRIVATE),
+            binding,
+        )
+        assertEquals(
+            Condition.VarCompare("sms_text", CmpOp.CONTAINS, expected = "X"),
+            ArgusJson.decodeFromString(Condition.serializer(), condition),
+        )
     }
 
     @Test

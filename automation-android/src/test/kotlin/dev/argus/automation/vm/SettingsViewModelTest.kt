@@ -152,7 +152,7 @@ class SettingsViewModelTest {
             assertEquals("OpenAI", transport.providerLabel)
             assertEquals(AuthState.OK, transport.authState)
             assertFalse(transport.baseUrlEditable)
-            assertEquals(listOf("gpt-5.5", "gpt-5-mini"), transport.defaultModels)
+            assertEquals(listOf("gpt-6-luna"), transport.defaultModels)
         }
 
     @Test

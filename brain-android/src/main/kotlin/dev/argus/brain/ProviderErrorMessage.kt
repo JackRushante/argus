@@ -8,8 +8,9 @@ import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * Estrae dal body d'errore di un provider il solo messaggio utile all'utente, per il test di
- * connessione (`health()`): è l'unico punto in cui un testo remoto entra in un'eccezione, e solo nel
- * campo dedicato [TransportException.providerMessage]. Il risultato è ripulito: niente caratteri di
+ * connessione (`health()`) e per i rifiuti 4xx di compile e act: è l'unico punto in cui un testo
+ * remoto entra in un'eccezione, e solo nel campo dedicato [TransportException.providerMessage].
+ * Il risultato è ripulito: niente caratteri di
  * controllo, chiave API configurata e token `sk-…` / `Bearer …` mascherati, al massimo
  * [MAX_CHARS] caratteri. Non va mai nei log né persistito.
  */
