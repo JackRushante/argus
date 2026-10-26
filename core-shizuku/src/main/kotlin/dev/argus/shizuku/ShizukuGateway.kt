@@ -142,9 +142,26 @@ internal class AndroidShizukuApi(context: Context) : ShizukuApi {
     }
 }
 
+/**
+ * Superficie di Shizuku che usano i ViewModel: stato, identità del servizio e richiesta del
+ * permesso. [ShizukuGateway] è l'unica implementazione di produzione; un'interfaccia permette di
+ * provare su JVM la risposta in attesa, il cambio di stato e l'identità senza un Shizuku vero.
+ */
+interface ShizukuAccess {
+    fun status(): ShizukuGatewayStatus
+
+    fun observeStatus(): StateFlow<ShizukuGatewayStatus>
+
+    fun observeIdentity(): StateFlow<ShizukuIdentity?>
+
+    suspend fun requestPermissionOutcome(
+        rationaleShown: Boolean = false,
+    ): ShizukuPermissionOutcome
+}
+
 class ShizukuGateway internal constructor(
     private val api: ShizukuApi,
-) : AutoCloseable {
+) : ShizukuAccess, AutoCloseable {
     constructor(context: Context) : this(AndroidShizukuApi(context))
 
     private val state = MutableStateFlow(resolveStatus())
@@ -163,7 +180,7 @@ class ShizukuGateway internal constructor(
         refresh()
     }
 
-    fun observeStatus(): StateFlow<ShizukuGatewayStatus> = state.asStateFlow()
+    override fun observeStatus(): StateFlow<ShizukuGatewayStatus> = state.asStateFlow()
 
     /**
      * Identità del servizio privilegiato collegato, `null` finché il servizio non è collegato
@@ -173,9 +190,9 @@ class ShizukuGateway internal constructor(
      * `identity.runsAsRoot` è vero quando Shizuku gira come root: i comandi delle regole girano
      * allora come root, non con i permessi shell (uid 2000).
      */
-    fun observeIdentity(): StateFlow<ShizukuIdentity?> = identityState.asStateFlow()
+    override fun observeIdentity(): StateFlow<ShizukuIdentity?> = identityState.asStateFlow()
 
-    fun status(): ShizukuGatewayStatus = resolveStatus().also { publish(it) }
+    override fun status(): ShizukuGatewayStatus = resolveStatus().also { publish(it) }
 
     /**
      * Contatore che avanza a ogni cambio di stato di Shizuku e a ogni evento del binder
@@ -198,8 +215,8 @@ class ShizukuGateway internal constructor(
      * da Shizuku non disponibile. Se l'utente risponde dopo il timeout lo stato si aggiorna da
      * solo: il listener globale dei risultati di permesso resta registrato.
      */
-    suspend fun requestPermissionOutcome(
-        rationaleShown: Boolean = false,
+    override suspend fun requestPermissionOutcome(
+        rationaleShown: Boolean,
     ): ShizukuPermissionOutcome = permissionRequestMutex.withLock {
         when (status()) {
             ShizukuGatewayStatus.AUTHORIZED -> return@withLock ShizukuPermissionOutcome.GRANTED
