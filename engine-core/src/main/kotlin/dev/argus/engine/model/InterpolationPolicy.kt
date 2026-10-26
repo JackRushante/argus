@@ -27,14 +27,27 @@ object InterpolationPolicy {
     }
 
     /**
+     * Come un valore interpolato entra in un campo (0.4.1). [RAW] = testo così com'è (o già quotato
+     * per la shell, v. [TemplateField.shellQuoted]); [JSON_STRING] = contenuto di una stringa JSON con
+     * escape (body `http_request` con content type JSON); [FORM] = percent-encoding (body
+     * `application/x-www-form-urlencoded`).
+     */
+    enum class ValueEncoding { RAW, JSON_STRING, FORM }
+
+    /**
      * Un campo testuale di un'azione con il suo valore e la sua classe. [shellQuoted] è vero solo
-     * per `run_shell.cmd`: il runtime inserisce i valori TAINTED con [ShellQuoting] (D1).
+     * per `run_shell.cmd`: il runtime inserisce i valori TAINTED con [ShellQuoting] (D1). [encoding] e
+     * [remoteEgress] riguardano il body di `http_request`: l'encoding dice come si inseriscono i
+     * valori, [remoteEgress] che il campo lascia il telefono verso un servizio remoto (un valore con
+     * provenienza di credenziale non può uscire, [RemoteEgressPolicy]).
      */
     data class TemplateField(
         val label: String,
         val value: String,
         val cls: FieldClass,
         val shellQuoted: Boolean = false,
+        val encoding: ValueEncoding = ValueEncoding.RAW,
+        val remoteEgress: Boolean = false,
     )
 
     /** Riferimento `${nome}` valido: il nome rispetta [VarBinding.NAME_REGEX]. */
@@ -90,6 +103,21 @@ object InterpolationPolicy {
             action.notificationTitle?.let { add(TemplateField("notificationTitle", it, FieldClass.SINK)) }
         }
         is Action.InvokeLlmV2 -> listOf(TemplateField("goal", action.goal, FieldClass.SINK))
+        // Lettura ad alta voce: uscita locale, come una notifica.
+        is Action.Speak -> listOf(TemplateField("text", action.text, FieldClass.SINK))
+        // Chiamata HTTP: URL e intestazioni sono letterali (mai interpolati); i dati esterni, anche
+        // TAINTED, entrano SOLO nel body, che esce verso l'host approvato. Codifica per content type.
+        is Action.HttpRequest -> listOfNotNull(
+            action.body?.let {
+                TemplateField(
+                    "body",
+                    it,
+                    FieldClass.SINK,
+                    encoding = HttpRequestPolicy.bodyEncoding(action),
+                    remoteEgress = true,
+                )
+            },
+        )
 
         // --- AUTHORITY: template fingerprintati; TAINTED dipende da TaintPolicy ---
         is Action.RunShell -> listOf(
@@ -127,6 +155,9 @@ object InterpolationPolicy {
         is Action.SetDarkMode,
         is Action.Vibrate,
         is Action.Wait,
+        is Action.MediaControl,
+        is Action.SetBrightness,
+        is Action.SetRotation,
         is Action.If,
         is Action.While,
         -> emptyList()

@@ -120,6 +120,11 @@ object StateReadPlanner {
         is Action.OpenSettingsScreen,
         is Action.Vibrate,
         is Action.Wait,
+        is Action.Speak,
+        is Action.MediaControl,
+        is Action.SetBrightness,
+        is Action.SetRotation,
+        is Action.HttpRequest,
         // write_setting non legge stato: namespace/key/value sono letterali approvati.
         is Action.WriteSetting,
         -> StateReadRequest.EMPTY

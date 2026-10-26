@@ -94,6 +94,12 @@ object ActionTypeIds {
     const val INVOKE_LLM = "invoke_llm"
     const val INVOKE_LLM_V2 = "invoke_llm_v2"
     const val WAIT = "wait"
+    // 0.4.1: azioni senza Shizuku (lettura ad alta voce, tasti multimediali, schermo) e chiamata HTTP.
+    const val SPEAK = "speak"
+    const val MEDIA_CONTROL = "media_control"
+    const val SET_BRIGHTNESS = "set_brightness"
+    const val SET_ROTATION = "set_rotation"
+    const val HTTP_REQUEST = "http_request"
     // Control-flow strutturato P4 §2.3: contenitori, non azioni foglia.
     const val IF = "if"
     const val WHILE = "while"
@@ -175,6 +181,11 @@ sealed interface Action {
             is Vibrate,
             is WriteSetting,
             is Wait,
+            is Speak,
+            is MediaControl,
+            is SetBrightness,
+            is SetRotation,
+            is HttpRequest,
             -> ActionTier.DETERMINISTIC
         }
 
@@ -370,6 +381,50 @@ sealed interface Action {
         @EncodeDefault(EncodeDefault.Mode.NEVER)
         val maxIterationsVar: String? = null,
         val delayBetweenMs: Long = 0,
+    ) : Action
+
+    /**
+     * Legge [text] ad alta voce con il motore di sintesi vocale del telefono (`TextToSpeech`). BASE,
+     * nessun permesso. Il testo è un template SINK (`${'$'}{var}` ammesso anche con dati esterni, come una
+     * notifica): resta sul telefono. Massimo 1000 caratteri nel template.
+     */
+    @Serializable @SerialName(ActionTypeIds.SPEAK)
+    data class Speak(val text: String) : Action
+
+    /** Tasto multimediale (riproduci, pausa, avanti, indietro) inviato al player attivo con
+     *  `AudioManager.dispatchMediaKeyEvent`. BASE, nessun permesso. */
+    @Serializable @SerialName(ActionTypeIds.MEDIA_CONTROL)
+    data class MediaControl(val command: MediaCommand) : Action
+
+    /**
+     * Luminosità dello schermo via `Settings.System` (permesso speciale «Modifica impostazioni di
+     * sistema», `WRITE_SETTINGS`). ESATTAMENTE UNO tra [level] (0..100, mappato su 0..255, passa alla
+     * luminosità manuale) e [auto] (luminosità automatica on/off).
+     */
+    @Serializable @SerialName(ActionTypeIds.SET_BRIGHTNESS)
+    data class SetBrightness(
+        val level: Int? = null,
+        val auto: Boolean? = null,
+    ) : Action
+
+    /** Rotazione automatica dello schermo on/off via `Settings.System.ACCELEROMETER_ROTATION`
+     *  (permesso speciale `WRITE_SETTINGS`). */
+    @Serializable @SerialName(ActionTypeIds.SET_ROTATION)
+    data class SetRotation(val auto: Boolean) : Action
+
+    /**
+     * Chiamata HTTP verso un URL letterale. [url] e [headers] sono LETTERALI (nessun `${'$'}{…}`); i dati
+     * esterni entrano solo nel [body], come contenuto di stringa JSON con escape se il content type è
+     * JSON. Regole e limiti in [HttpRequestPolicy]. [contentType] null = quello dell'intestazione
+     * `Content-Type` se c'è, altrimenti `text/plain`.
+     */
+    @Serializable @SerialName(ActionTypeIds.HTTP_REQUEST)
+    data class HttpRequest(
+        val method: HttpMethod,
+        val url: String,
+        val headers: Map<String, String>? = null,
+        val body: String? = null,
+        val contentType: String? = null,
     ) : Action
 }
 
