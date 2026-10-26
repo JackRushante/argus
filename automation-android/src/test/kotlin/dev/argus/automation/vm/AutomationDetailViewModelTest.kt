@@ -1,5 +1,6 @@
 package dev.argus.automation.vm
 
+import android.content.Context
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import androidx.test.core.app.ApplicationProvider
@@ -247,7 +248,7 @@ class AutomationDetailViewModelTest {
         recordFire(automation.id, now - 1 * DAY_MS, ExecutionStatus.SUCCEEDED)
         // Rimasta prima della prossima manutenzione: oltre la conservazione scelta, non va contata.
         recordFire(automation.id, now - 20 * DAY_MS, ExecutionStatus.SUCCEEDED)
-        val retention = LogRetentionStore(ApplicationProvider.getApplicationContext())
+        val retention = LogRetentionStore(ApplicationProvider.getApplicationContext<Context>())
         assertTrue(retention.setDays(7))
         val viewModel = viewModel(
             "short",
@@ -1078,7 +1079,7 @@ class AutomationDetailViewModelTest {
         enablementAudit: AuditSink = NoopAuditSink,
         probe: AndroidCapabilityProbe = probeFor(capabilityState()),
         geofenceState: GeofenceStateStore = MemoryGeofenceStateStore(),
-        retention: LogRetentionStore = LogRetentionStore(ApplicationProvider.getApplicationContext()),
+        retention: LogRetentionStore = LogRetentionStore(ApplicationProvider.getApplicationContext<Context>()),
     ): AutomationDetailViewModel {
         val whitelist = RoomContactWhitelistStore(db.contactWhitelistDao())
         val snapshots = FirePolicySnapshotProvider {
