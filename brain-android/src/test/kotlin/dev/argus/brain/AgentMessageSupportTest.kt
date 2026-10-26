@@ -386,6 +386,22 @@ class AgentMessageSupportTest {
         )
     }
 
+    @Test
+    fun `compile prompt teaches the solar variant of the time trigger without coordinates`() {
+        val prompt = AgentMessageSupport.compileSystemText()
+        val flat = prompt.lines().joinToString(" ") { it.trim() }
+
+        // Una voce nello schema del trigger time e una riga di guida nella regola 15.
+        assertTrue(
+            "solar = {\"event\":\"SUNRISE\"|\"SUNSET\", \"offsetMinutes\":integer -720..720 (negative = before)}" in flat,
+            "lo schema deve descrivere solar",
+        )
+        assertTrue("replaces cron, at and afterMs (still exactly one of the four" in flat)
+        assertTrue("offsetMinutes -30" in flat, "l'esempio '30 minuti prima del tramonto'")
+        // La posizione non passa mai dal modello: il prompt lo dice.
+        assertTrue("Never write coordinates" in flat)
+    }
+
     // --- P4-D: lo schema draft insegna la grammatica Tasker-class (schema v2) ---
 
     @Test

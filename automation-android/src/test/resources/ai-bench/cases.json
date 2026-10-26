@@ -1722,5 +1722,54 @@
    "trigger": {"type": "phone_state", "event": "SMS_RECEIVED", "sim": 2, "textMatch": {"contains": "codice"}},
    "actions_include": ["copy_to_clipboard"]
   }
+ },
+ {
+  "id": "time.solar.it.01",
+  "category": "trigger.time",
+  "lang": "it",
+  "text": "Ogni giorno 30 minuti prima del tramonto mostrami una notifica 'Tra poco tramonta il sole'",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "time", "solar": {"regex": "^[{]\"event\":\"SUNSET\",\"offsetMinutes\":-30[}]$"}, "cron": {"present": false}, "at": {"present": false}, "afterMs": {"present": false}},
+   "actions_include": ["show_notification"]
+  },
+  "note": "time.solar con event e offset soltanto: niente cron con un orario inventato, niente coordinate scritte dal modello"
+ },
+ {
+  "id": "time.solar.en.01",
+  "category": "trigger.time",
+  "lang": "en",
+  "text": "Every day at sunrise set the ringer to normal and show a notification saying Good morning",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "time", "solar": {"regex": "^[{]\"event\":\"SUNRISE\",\"offsetMinutes\":0[}]$"}, "cron": {"present": false}, "at": {"present": false}, "afterMs": {"present": false}},
+   "actions_include": ["set_ringer", "show_notification"],
+   "params": {"set_ringer.mode": "normal"},
+   "actions_text": ["good morning"]
+  }
+ },
+ {
+  "id": "time.solar.it.02",
+  "category": "trigger.time",
+  "lang": "it",
+  "text": "Ogni giorno un'ora dopo l'alba metti il volume multimediale al 40%",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "time", "solar": {"regex": "^[{]\"event\":\"SUNRISE\",\"offsetMinutes\":60[}]$"}, "cron": {"present": false}, "at": {"present": false}, "afterMs": {"present": false}},
+   "actions_include": ["set_volume"],
+   "params": {"set_volume.stream": "MEDIA", "set_volume.level": 40}
+  }
+ },
+ {
+  "id": "time.solar.en.02",
+  "category": "trigger.time",
+  "lang": "en",
+  "text": "Every evening, 45 minutes after sunset, turn on Do Not Disturb with priority only",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "time", "solar": {"regex": "^[{]\"event\":\"SUNSET\",\"offsetMinutes\":45[}]$"}, "cron": {"present": false}, "at": {"present": false}, "afterMs": {"present": false}},
+   "actions_include": ["set_dnd"],
+   "params": {"set_dnd.mode": "PRIORITY"}
+  }
  }
 ]

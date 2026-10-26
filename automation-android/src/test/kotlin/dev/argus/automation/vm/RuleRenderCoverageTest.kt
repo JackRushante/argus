@@ -23,6 +23,8 @@ import dev.argus.engine.model.ScreenEvent
 import dev.argus.engine.model.SensorKind
 import dev.argus.engine.model.SettingNamespace
 import dev.argus.engine.model.SettingsScreen
+import dev.argus.engine.model.SolarEvent
+import dev.argus.engine.model.SolarSpec
 import dev.argus.engine.model.StateQuery
 import dev.argus.engine.model.StateQueryPolicy
 import dev.argus.engine.model.StateValueType
@@ -252,6 +254,20 @@ class RuleRenderCoverageTest {
                 v(
                     Trigger.Time(afterMs = 7_200_000, tz = "UTC"),
                     "afterMs" to ms(m("2 hours", "2 ore")),
+                ),
+                v(
+                    Trigger.Time(tz = "UTC", solar = SolarSpec(SolarEvent.SUNSET, -45)),
+                    "solar" to ms(
+                        m("45 min before sunset", "45 min prima del tramonto"),
+                        m("at the phone's position", "alla posizione del telefono"),
+                    ),
+                ),
+                v(
+                    Trigger.Time(tz = "UTC", solar = SolarSpec(SolarEvent.SUNRISE, 90, lat = 41.9, lng = 12.5)),
+                    "solar" to ms(
+                        m("1 h 30 min after sunrise", "1 h 30 min dopo l'alba"),
+                        m("near 41.9, 12.5", "vicino a 41.9, 12.5"),
+                    ),
                 ),
             ),
             "immediate" to case(Trigger.Immediate, emptyMap()),

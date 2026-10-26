@@ -7,6 +7,8 @@ import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.CreatedBy
+import dev.argus.engine.model.SolarEvent
+import dev.argus.engine.model.SolarSpec
 import dev.argus.engine.model.TimePrecision
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.AuditEvent
@@ -15,6 +17,7 @@ import dev.argus.engine.runtime.AuditSink
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.runtime.FireClaimRequest
 import dev.argus.engine.runtime.FireClaimResult
+import dev.argus.engine.runtime.SolarSchedule
 import dev.argus.engine.runtime.TriggerEnvelope
 import dev.argus.engine.runtime.TriggerEvent
 import dev.argus.engine.runtime.TriggerEventId
@@ -26,7 +29,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
+import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -965,6 +971,225 @@ class TimeAlarmCoordinatorTest {
         dispatcher = TimeEventDispatcher { gate.dispatch(it) },
         now = { now },
     )
+
+    // --- Trigger.Time.solar: alba e tramonto (0.4.1) ---
+
+    private val romeSunset = Trigger.Time(
+        tz = "Europe/Rome",
+        solar = SolarSpec(SolarEvent.SUNSET, -30, lat = 41.9, lng = 12.5),
+    )
+    private val tromsoSunrise = Trigger.Time(
+        tz = "Europe/Oslo",
+        solar = SolarSpec(SolarEvent.SUNRISE, 0, lat = 69.6, lng = 19.0),
+    )
+
+    private fun coordinatorAt(
+        store: FakeAutomationStore,
+        state: FakeTimeAlarmStateStore,
+        backend: FakeTimeAlarmBackend = FakeTimeAlarmBackend(),
+        audit: AuditSink = ScheduleAuditRecorder(),
+        dispatcher: TimeEventDispatcher = TimeEventDispatcher { },
+        clock: () -> Instant,
+    ) = TimeAlarmCoordinator(
+        store = store,
+        state = state,
+        backend = backend,
+        dispatcher = dispatcher,
+        now = clock,
+        audit = audit,
+    )
+
+    @Test
+    fun `a solar rule is armed at the next sunset plus its offset with the requested precision`() = runTest {
+        val clock = Instant.parse("2026-07-13T12:00:00Z")
+        listOf(TimePrecision.EXACT to ScheduledAlarmMode.EXACT, TimePrecision.FLEXIBLE to ScheduledAlarmMode.INEXACT)
+            .forEach { (precision, mode) ->
+                val automation = automation(romeSunset.copy(precision = precision))
+                val state = FakeTimeAlarmStateStore()
+                val backend = FakeTimeAlarmBackend()
+
+                val report = coordinatorAt(FakeAutomationStore(automation), state, backend) { clock }
+                    .reconcile(ReconcileReason.APP_START)
+
+                assertEquals(listOf(automation.id), report.scheduled)
+                val expected = SolarSchedule.nextFire(automation.trigger as Trigger.Time, clock)!!
+                assertEquals(expected.toEpochMilli(), state.get(automation.id)?.eventAtMillis)
+                assertEquals(precision, state.get(automation.id)?.requestedPrecision)
+                assertEquals(mode, state.get(automation.id)?.scheduledMode)
+                // Roma, 13 luglio: tramonto verso le 20:40 locali, meno 30 minuti.
+                val local = expected.atZone(ZoneId.of("Europe/Rome"))
+                assertEquals(20, local.hour)
+                assertTrue(local.minute in 0..25, "orario locale $local")
+            }
+    }
+
+    @Test
+    fun `after the sunset fires the rule is rescheduled for the next day with a stable event id`() = runTest {
+        val automation = automation(romeSunset)
+        val trigger = automation.trigger as Trigger.Time
+        val eventAt = SolarSchedule.nextFire(trigger, Instant.parse("2026-07-13T12:00:00Z"))!!
+        val state = FakeTimeAlarmStateStore(record(automation, eventAt.toEpochMilli()))
+        val dispatched = mutableListOf<TriggerEnvelope>()
+        val coordinator = coordinatorAt(
+            FakeAutomationStore(automation),
+            state,
+            dispatcher = TimeEventDispatcher { dispatched += it },
+        ) { eventAt.plusSeconds(5) }
+
+        assertIs<AlarmDeliveryResult.Delivered>(
+            coordinator.onAlarm(automation.id, requireNotNull(automation.approvalFingerprint), eventAt.toEpochMilli()),
+        )
+
+        assertEquals(
+            "time:${requireNotNull(automation.approvalFingerprint).value}:${eventAt.toEpochMilli()}",
+            dispatched.single().id.value,
+        )
+        val next = Instant.ofEpochMilli(requireNotNull(state.get(automation.id)).eventAtMillis)
+        assertEquals(SolarSchedule.nextFire(trigger, eventAt), next)
+        val gap = Duration.between(eventAt, next)
+        assertTrue(gap >= Duration.ofHours(23) && gap <= Duration.ofHours(25), "dal tramonto al successivo: $gap")
+        // Un secondo allarme per lo stesso istante non consegna di nuovo.
+        assertIs<AlarmDeliveryResult.Ignored>(
+            coordinator.onAlarm(automation.id, requireNotNull(automation.approvalFingerprint), eventAt.toEpochMilli()),
+        )
+        assertEquals(1, dispatched.size)
+    }
+
+    @Test
+    fun `the change of the clock moves the wall time of the next sunset and not the chain`() = runTest {
+        val automation = automation(romeSunset.copy(solar = romeSunset.solar!!.copy(offsetMinutes = 0)))
+        val trigger = automation.trigger as Trigger.Time
+        val zone = ZoneId.of("Europe/Rome")
+        // 28 marzo 2026, ora solare: tramonto alle 18:31. La notte si passa all'ora legale.
+        val before = SolarSchedule.nextFire(trigger, Instant.parse("2026-03-28T12:00:00Z"))!!
+        assertEquals(18, before.atZone(zone).hour)
+        val state = FakeTimeAlarmStateStore(record(automation, before.toEpochMilli()))
+        val coordinator = coordinatorAt(FakeAutomationStore(automation), state) { before.plusSeconds(5) }
+
+        assertIs<AlarmDeliveryResult.Delivered>(
+            coordinator.onAlarm(automation.id, requireNotNull(automation.approvalFingerprint), before.toEpochMilli()),
+        )
+
+        val next = Instant.ofEpochMilli(requireNotNull(state.get(automation.id)).eventAtMillis)
+        val after = next.atZone(zone)
+        assertEquals(29, after.dayOfMonth)
+        assertEquals(19, after.hour)
+        assertTrue(after.minute in 30..34, "tramonto del 29 marzo: $after")
+        val gap = Duration.between(before, next)
+        assertTrue(gap >= Duration.ofHours(23) && gap <= Duration.ofHours(25), "tra i due tramonti: $gap")
+    }
+
+    @Test
+    fun `a polar night rechecks every 24 hours without delivering and without sliding`() = runTest {
+        val automation = automation(tromsoSunrise)
+        var clock = Instant.parse("2026-12-21T11:00:00Z")
+        val state = FakeTimeAlarmStateStore()
+        val dispatched = mutableListOf<TriggerEnvelope>()
+        val coordinator = coordinatorAt(
+            FakeAutomationStore(automation),
+            state,
+            dispatcher = TimeEventDispatcher { dispatched += it },
+        ) { clock }
+
+        val report = coordinator.reconcile(ReconcileReason.APP_START)
+
+        assertEquals(listOf(automation.id), report.scheduled)
+        val recheckAt = clock.plus(Duration.ofHours(24))
+        assertEquals(recheckAt.toEpochMilli(), state.get(automation.id)?.eventAtMillis)
+
+        // Un altro reconcile un'ora dopo non fa slittare il ricontrollo già programmato.
+        clock = clock.plusSeconds(3_600)
+        coordinator.reconcile(ReconcileReason.EXACT_ALARM_PERMISSION_CHANGED)
+        assertEquals(recheckAt.toEpochMilli(), state.get(automation.id)?.eventAtMillis)
+
+        // Il ricontrollo suona: niente alle azioni, e il giorno dopo si ricontrolla ancora.
+        clock = recheckAt.plusSeconds(5)
+        assertIs<AlarmDeliveryResult.Ignored>(
+            coordinator.onAlarm(automation.id, requireNotNull(automation.approvalFingerprint), recheckAt.toEpochMilli()),
+        )
+        assertEquals(emptyList(), dispatched)
+        assertEquals(clock.plus(Duration.ofHours(24)).toEpochMilli(), state.get(automation.id)?.eventAtMillis)
+    }
+
+    @Test
+    fun `a due recheck found at boot schedules the first sunrise instead of firing the rule`() = runTest {
+        val automation = automation(tromsoSunrise)
+        // Due giorni prima del primo sole dell'anno a Tromso: ora l'alba rientra nei due giorni cercati.
+        val zone = ZoneId.of("Europe/Oslo")
+        val solar = tromsoSunrise.solar!!
+        val firstDay = generateSequence(LocalDate.parse("2027-01-01")) { it.plusDays(1) }
+            .first { SolarSchedule.eventsOn(solar.event, solar.lat!!, solar.lng!!, zone, it).isNotEmpty() }
+        val clock = firstDay.minusDays(2).atTime(12, 0).atZone(zone).toInstant()
+        val staleRecheck = clock.minus(Duration.ofHours(25))
+        val state = FakeTimeAlarmStateStore(record(automation, staleRecheck.toEpochMilli()))
+        val dispatched = mutableListOf<TriggerEnvelope>()
+
+        val report = coordinatorAt(
+            FakeAutomationStore(automation),
+            state,
+            dispatcher = TimeEventDispatcher { dispatched += it },
+        ) { clock }.reconcile(ReconcileReason.BOOT)
+
+        assertEquals(emptyList(), dispatched)
+        assertEquals(emptyList(), report.recovered)
+        val first = SolarSchedule.nextFire(automation.trigger as Trigger.Time, clock)
+        assertTrue(first != null, "il sole torna entro due giorni")
+        assertEquals(first!!.toEpochMilli(), state.get(automation.id)?.eventAtMillis)
+        assertTrue(SolarSchedule.isFireInstant(automation.trigger as Trigger.Time, first.toEpochMilli()))
+    }
+
+    @Test
+    fun `a solar rule that missed its sunset while the phone was off is recovered once`() = runTest {
+        val automation = automation(romeSunset)
+        val trigger = automation.trigger as Trigger.Time
+        val missed = SolarSchedule.nextFire(trigger, Instant.parse("2026-07-13T12:00:00Z"))!!
+        val clock = missed.plusSeconds(600)
+        val state = FakeTimeAlarmStateStore(record(automation, missed.toEpochMilli()))
+        val dispatched = mutableListOf<TriggerEnvelope>()
+
+        val report = coordinatorAt(
+            FakeAutomationStore(automation),
+            state,
+            dispatcher = TimeEventDispatcher { dispatched += it },
+        ) { clock }.reconcile(ReconcileReason.BOOT)
+
+        assertEquals(listOf(automation.id), report.recovered)
+        assertEquals(
+            "time:${requireNotNull(automation.approvalFingerprint).value}:${missed.toEpochMilli()}",
+            dispatched.single().id.value,
+        )
+        assertEquals(SolarSchedule.nextFire(trigger, clock)!!.toEpochMilli(), state.get(automation.id)?.eventAtMillis)
+    }
+
+    @Test
+    fun `a solar rule without a frozen position is quarantined and never scheduled`() = runTest {
+        val automation = automation(
+            Trigger.Time(tz = "Europe/Rome", solar = SolarSpec(SolarEvent.SUNSET, -30)),
+        )
+        val store = FakeAutomationStore(automation)
+        val state = FakeTimeAlarmStateStore()
+        val backend = FakeTimeAlarmBackend()
+        val audit = ScheduleAuditRecorder()
+
+        val report = coordinatorAt(store, state, backend, audit) { now }.reconcile(ReconcileReason.APP_START)
+
+        assertEquals(listOf(automation.id), report.failed)
+        assertEquals(AutomationStatus.NEEDS_REVIEW, store.get(automation.id)?.status)
+        assertEquals(emptyList(), backend.scheduled)
+        assertNull(state.get(automation.id))
+        assertEquals("planner_failed", audit.events.single { it.kind == AuditKind.RULE_NEEDS_REVIEW }.detail)
+    }
+
+    @Test
+    fun `the planner treats a solar rule as recurring with the declared precision`() {
+        val automation = automation(romeSunset)
+        val clock = Instant.parse("2026-07-13T12:00:00Z")
+
+        val registration = requireNotNull(TimeAlarmPlanner.next(automation, clock))
+
+        assertEquals(TimePrecision.FLEXIBLE, registration.requestedPrecision)
+        assertEquals(SolarSchedule.nextFire(romeSunset, clock)!!.toEpochMilli(), registration.eventAtMillis)
+    }
 
     private fun coordinator(
         store: FakeAutomationStore,

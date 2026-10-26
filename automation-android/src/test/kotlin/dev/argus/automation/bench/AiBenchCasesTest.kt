@@ -98,6 +98,8 @@ class AiBenchCasesTest {
             "media" to triggers { type(it) == "media" },
             "missed call" to triggers { type(it) == "phone_state" && text(it, "event") == "MISSED_CALL" },
             "sim filter" to triggers { type(it) == "phone_state" && it["sim"] != null },
+            // 0.4.1: alba e tramonto, come variante del trigger time.
+            "time solar" to triggers { type(it) == "time" && it["solar"] != null && !it["solar"].isAbsentMatcher() },
         )
         required.forEach { (name, found) -> assertTrue(found >= 2, "trigger '$name' coperto $found volte, ne servono 2") }
         val contactCases = cases.count { it.draft.contact != null }

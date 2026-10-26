@@ -370,6 +370,7 @@ object RuleRenderMapper {
         val cron = t.cron
         val at = t.at
         val afterMs = t.afterMs
+        val solar = t.solar
         val line = when {
             cron != null -> humanizeCron(cron, t.tz, l)
             at != null -> l.pick(
@@ -382,6 +383,7 @@ object RuleRenderMapper {
                 "Once, in ${humanizeDelay(afterMs, l)}",
                 "Una volta, tra ${humanizeDelay(afterMs, l)}",
             )
+            solar != null -> SolarTriggerRender.line(solar, l)
             else -> l.pick("Time not specified (${t.tz})", "Orario non specificato (${t.tz})")
         }
         // S1: la puntualità richiesta (allarme esatto) cambia l'esecuzione e va dichiarata.

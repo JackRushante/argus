@@ -164,7 +164,7 @@ class ApprovalFlow(
     ): DraftSubmissionResult {
         val metaError = compile.metaError
         if (metaError != null) return DraftSubmissionResult.NoDraft(compile.reply, metaError)
-        val replacement = compile.draft
+        val replacement = compile.draft?.let(SolarTriggerLocation::withoutModelLocation)
             ?: return DraftSubmissionResult.NoDraft(compile.reply, "compile_without_draft")
         val current = drafts.get(id)
             ?: return DraftSubmissionResult.Conflict(currentRevision = null)
@@ -200,7 +200,7 @@ class ApprovalFlow(
         if (metaError != null) {
             return DraftSubmissionResult.NoDraft(compile.reply, metaError)
         }
-        val draft = compile.draft
+        val draft = compile.draft?.let(SolarTriggerLocation::withoutModelLocation)
             ?: return DraftSubmissionResult.NoDraft(compile.reply, "compile_without_draft")
         return when (
             val result = drafts.create(
@@ -270,16 +270,12 @@ class ApprovalFlow(
         }
 
         var snapshot = currentReview.draft.snapshot
-        val geofence = snapshot.draft.trigger as? Trigger.Geofence
-        if (geofence?.resolveCurrentLocation == true) {
+        // Geofence «qui» e alba/tramonto (0.4.1) si risolvono allo stesso modo: la posizione del
+        // telefono si legge ora, si scrive nella bozza e l'impronta approvata la include.
+        val locationTrigger = snapshot.draft.trigger
+        if (needsCurrentLocation(locationTrigger)) {
             val resolved = currentLocation() ?: return FlowArmResult.LocationUnavailable
-            val revisedDraft = snapshot.draft.copy(
-                trigger = geofence.copy(
-                    lat = resolved.latitude,
-                    lng = resolved.longitude,
-                    resolveCurrentLocation = false,
-                ),
-            )
+            val revisedDraft = snapshot.draft.copy(trigger = withCurrentLocation(locationTrigger, resolved))
             when (
                 val revised = drafts.revise(
                     id = snapshot.id,
@@ -409,6 +405,22 @@ class ApprovalFlow(
         } catch (_: Exception) {
             StateQueryProbeResult.UNAVAILABLE
         }
+
+    private fun needsCurrentLocation(trigger: Trigger): Boolean = when (trigger) {
+        is Trigger.Geofence -> trigger.resolveCurrentLocation
+        is Trigger.Time -> SolarTriggerLocation.pending(trigger)
+        else -> false
+    }
+
+    private fun withCurrentLocation(trigger: Trigger, resolved: DeviceLocation): Trigger = when (trigger) {
+        is Trigger.Geofence -> trigger.copy(
+            lat = resolved.latitude,
+            lng = resolved.longitude,
+            resolveCurrentLocation = false,
+        )
+        is Trigger.Time -> SolarTriggerLocation.freeze(trigger, resolved)
+        else -> trigger
+    }
 
     private suspend fun currentLocation(): DeviceLocation? = try {
         location.current()?.takeIf(DeviceLocation::valid)
