@@ -15,7 +15,8 @@ import dev.argus.automation.R
 import dev.argus.automation.connectivity.ForegroundDeniedNotice
 
 /**
- * «Regole Wi-Fi e alimentazione in pausa: apri Argus per riattivarle». Una sola notifica con id
+ * «Regole in background (Wi-Fi, alimentazione, schermo, batteria, audio, modalità) in pausa:
+ * apri Argus per riattivarle». Una sola notifica con id
  * fisso (ripubblicarla la aggiorna), tap = apre l'app, rimossa da [clear] quando la sentinella
  * riparte. Usa il canale delle notifiche delle regole, creato qui se manca (idempotente).
  */

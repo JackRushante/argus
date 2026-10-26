@@ -1313,14 +1313,16 @@
   "covers": ["tool:send_sms"]
  },
  {
-  "id": "unsup.screen.en.01",
-  "category": "unsupported",
+  "id": "screen.on.en.01",
+  "category": "trigger.screen",
   "lang": "en",
   "text": "When the screen turns on, vibrate the phone",
   "expect": {
-   "outcome": "unsupported"
+   "outcome": "draft",
+   "trigger": {"type": "screen", "event": "ON"},
+   "actions_include": ["vibrate"]
   },
-  "covers": ["trigger:screen"]
+  "note": "Fino alla 0.4.0 era un caso 'unsupported' (nessun trigger schermo): dalla 0.4.1 il trigger screen esiste"
  },
  {
   "id": "unsup.call.en.01",

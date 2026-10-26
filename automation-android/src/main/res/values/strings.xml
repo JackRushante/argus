@@ -11,5 +11,5 @@
     <string name="argus_budget_channel_name">LLM budget</string>
     <string name="argus_budget_channel_description">Alerts when the LLM call budget is almost or fully exhausted</string>
     <string name="argus_foreground_denied_title">Rules paused</string>
-    <string name="argus_foreground_denied_text">Wi-Fi and power rules paused: open Argus to turn them back on</string>
+    <string name="argus_foreground_denied_text">Background rules (Wi-Fi, power, screen, battery, audio, modes) paused: open Argus to turn them back on</string>
 </resources>
