@@ -233,7 +233,7 @@ class RuleDiagnosisTest {
         )
         assertTrue(informed.none { it.level == DiagnosisLevel.WARN })
         // Una regola flessibile non ha bisogno delle sveglie esatte: nessuna scorciatoia.
-        assertNull(informed.single { it.text.startsWith("Sveglia non esatta") }.fix)
+        assertNull(informed.single { it.text.startsWith("Orario flessibile") }.fix)
     }
 
     @Test
