@@ -799,6 +799,27 @@ class MeteredBrainTest {
         )
     }
 
+    @Test
+    fun `il messaggio del provider arriva al chiamante ma eventi d'uso e audit portano solo il codice`() = runTest {
+        val secret = "x is not a valid model ID (free text from the provider)"
+        val delegate = FakeBrain(
+            compileResult = { CompileResult("", null, "bridge_http_400", providerMessage = secret) },
+        )
+        val dao = RecordingUsageDao()
+        val audit = RecordingAuditSink()
+        val brain = metered(delegate, FakePolicy(), dao, config = openai, audit = audit)
+
+        val result = brain.compile("crea", TEST_MANIFEST, DeviceState())
+
+        assertEquals("bridge_http_400", result.metaError)
+        assertEquals(secret, result.providerMessage)
+        assertEquals(1, delegate.calls, "un 4xx non e' un errore di formato: nessun retry")
+        val event = dao.events.single()
+        assertEquals(UsageEventOutcome.ERROR, event.outcome)
+        assertFalse("free text" in event.toString() || "valid model" in event.toString(), event.toString())
+        assertTrue(audit.records.none { "free text" in it.toString() || "valid model" in it.toString() })
+    }
+
     // --- helpers -------------------------------------------------------------
 
     private fun metered(

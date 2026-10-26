@@ -52,6 +52,23 @@ class CronScheduleTest {
         assertFailsWith<IllegalArgumentException> { CronSchedule.parse("* * * *") }
         assertFailsWith<IllegalArgumentException> { CronSchedule.parse("x * * * *") }
     }
+    @Test fun `quartz seconds in front are dropped only when they are zero and the rest is a valid cron`() {
+        assertEquals("30 22 * * *", CronSchedule.dropLeadingZeroSeconds("0 30 22 * * *"))
+        assertEquals("0 12 * * 1-5", CronSchedule.dropLeadingZeroSeconds("0 0 12 * * 1-5"))
+        assertEquals("*/5 * * * *", CronSchedule.dropLeadingZeroSeconds("00 */5 * * * *"))
+        assertEquals("30 22 * * *", CronSchedule.dropLeadingZeroSeconds("  0   30 22 * * *  "))
+        // Secondi diversi da zero: resta com'e' e decide il validatore.
+        assertEquals("15 30 22 * * *", CronSchedule.dropLeadingZeroSeconds("15 30 22 * * *"))
+        assertEquals("*/10 30 22 * * *", CronSchedule.dropLeadingZeroSeconds("*/10 30 22 * * *"))
+        // Cinque campi: non cambia, anche se comincia per 0.
+        assertEquals("0 23 * * *", CronSchedule.dropLeadingZeroSeconds("0 23 * * *"))
+        // Uno zero in testa seguito da cinque campi non validi: resta com'e'.
+        assertEquals("0 99 99 * * *", CronSchedule.dropLeadingZeroSeconds("0 99 99 * * *"))
+        assertEquals("0 x 22 * * *", CronSchedule.dropLeadingZeroSeconds("0 x 22 * * *"))
+        // Sette campi o nessuno: non e' il caso dei sei campi.
+        assertEquals("0 0 30 22 * * *", CronSchedule.dropLeadingZeroSeconds("0 0 30 22 * * *"))
+        assertEquals("", CronSchedule.dropLeadingZeroSeconds(""))
+    }
     @Test fun `timespecs one-shot at`() {
         val t = Trigger.Time(at = "2026-07-15T08:00", tz = "Europe/Rome")
         assertEquals(Instant.parse("2026-07-15T06:00:00Z"), TimeSpecs.nextFire(t, Instant.parse("2026-07-12T00:00:00Z")))

@@ -209,7 +209,10 @@ class AndroidCapabilityProbe internal constructor(
             availableTools = resolved.availableTools,
             unavailableTools = resolved.unavailableTools,
             whitelistedContacts = resolved.contacts,
-            stateKeys = StateKeys.ALL,
+            // Solo le chiavi con una capacita' `state.<chiave>` armabile ORA (oggi: Shizuku autorizzato):
+            // altrimenti il modello propone `state_equals` che l'app non puo' armare. Il manifest serve
+            // solo al compile: le regole gia' armate non cambiano.
+            stateKeys = StateKeys.ALL.filterKeys { CapabilityIds.state(it) in resolved.available },
             availableTriggers = availableTriggers(resolved.state, resolved.armableSensorKinds),
             stateReaders = StateReaderManifest(
                 families = StateQueryFamily.entries.filter { family ->

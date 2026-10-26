@@ -66,7 +66,24 @@ data class CapabilityManifest(
     val availableTriggers: List<String> = emptyList(),
     /** Famiglie parametriche realmente disponibili; i parametri restano aperti ma bounded. */
     val stateReaders: StateReaderManifest = StateReaderManifest(),
+    /**
+     * Lingua dei testi che il compilatore scrive PER l'utente (risposta, nome regola, notifiche,
+     * goal): la decide l'app dalla lingua dell'interfaccia, non il modello dagli indizi del
+     * contesto. Solo `en` o `it`. Entra nel prompt di compile; la busta del bridge Hermes non la porta.
+     */
+    val replyLanguage: String = REPLY_LANGUAGE_EN,
 ) {
+    init {
+        require(replyLanguage == REPLY_LANGUAGE_EN || replyLanguage == REPLY_LANGUAGE_IT) {
+            "Lingua di risposta non valida"
+        }
+    }
+
+    companion object {
+        const val REPLY_LANGUAGE_EN = "en"
+        const val REPLY_LANGUAGE_IT = "it"
+    }
+
     /** Solo diagnostica/test: il prompt reale lo costruisce `AgentMessageSupport` in brain-android. */
     fun render(): String = buildString {
         appendLine("DISPOSITIVO: $deviceModel, Android $androidVersion")

@@ -34,9 +34,9 @@ open class TransportException(
     val errorCode: String? = null,
     /**
      * Messaggio d'errore del PROVIDER (già ripulito: max 160 caratteri, niente controlli, chiave
-     * mascherata), valorizzato SOLO dal test di connessione (`health()`) per spiegare all'utente cosa
-     * correggere. Mai in `message`/`toString`, mai nei log, mai persistito: compare solo nel messaggio
-     * di Sistema. compile e act non lo leggono (restano a «soli metadati sicuri»).
+     * mascherata), valorizzato dal test di connessione (`health()`, su ogni errore HTTP) e dai 4xx di
+     * compile e act, per spiegare all'utente cosa correggere. Mai in `message`/`toString`, mai nei log,
+     * mai persistito: compare solo nel messaggio di Sistema e nell'errore della chat, in memoria.
      */
     val providerMessage: String? = null,
 ) : IOException(message, cause)

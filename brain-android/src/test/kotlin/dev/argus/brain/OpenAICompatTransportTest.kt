@@ -54,12 +54,13 @@ class OpenAICompatTransportTest {
         client: OkHttpClient = CliBridgeTransport.defaultClient(),
         apiKey: String? = API_KEY,
         clock: () -> LocalDate = { SEARCH_DAY },
+        reasoning: ReasoningEffort = ReasoningEffort.DEFAULT,
     ): OpenAICompatTransport {
         val spec = ProviderCatalog.spec(providerId)
         return OpenAICompatTransport(
             providerId = providerId,
             spec = spec,
-            config = ProviderConfig(providerId, server.url("/").toString().trimEnd('/'), model),
+            config = ProviderConfig(providerId, server.url("/").toString().trimEnd('/'), model, reasoning),
             apiKey = { apiKey },
             client = client,
             allowCleartextForTests = true,
@@ -207,7 +208,7 @@ class OpenAICompatTransportTest {
     @Test fun `openrouter default model is resolved from catalog`(): Unit = runBlocking {
         server.enqueue(jsonResponse(
             """
-            {"model":"openai/gpt-5.5",
+            {"model":"provider/resolved-model",
              "choices":[{"index":0,"message":{"role":"assistant",
                "tool_calls":[{"id":"c1","type":"function","function":{"name":"whatsapp_reply","arguments":"{\"text\":\"Ok!\"}"}}]}}],
              "usage":{"prompt_tokens":10,"completion_tokens":2}}
@@ -221,7 +222,8 @@ class OpenAICompatTransportTest {
         val root = Json.parseToJsonElement(
             assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
         ).jsonObject
-        assertEquals("openai/gpt-5.5", root.getValue("model").jsonPrimitive.content)
+        // Il primo alias del catalogo: OpenRouter lo risolve da solo sull'ultima versione della famiglia.
+        assertEquals("~deepseek/deepseek-flash-latest", root.getValue("model").jsonPrimitive.content)
     }
 
     // --- #52 F3: web search server-side sui provider diretti ---
@@ -728,18 +730,172 @@ class OpenAICompatTransportTest {
         }
     }
 
-    @Test fun `compile and act never read the provider error message`(): Unit = runBlocking {
-        server.enqueue(jsonResponse("""{"error":{"message":"secret detail"}}""").setResponseCode(400))
-        server.enqueue(jsonResponse("""{"error":{"message":"secret detail"}}""").setResponseCode(400))
-        val t = transport(ProviderId.OPENROUTER, model = "deepseek/deepseek-v4.1-flash")
+    // --- 0.3.7 voce 3b: ragionamento obbligatorio, un solo ritentativo con `low` ---
+
+    private fun mandatoryReasoning(message: String = "Reasoning is mandatory for this endpoint and cannot be disabled.") =
+        jsonResponse("""{"error":{"message":"$message"}}""").setResponseCode(400)
+
+    private fun reasoningEffortOf(request: okhttp3.mockwebserver.RecordedRequest): String? =
+        Json.parseToJsonElement(request.body.readUtf8()).jsonObject["reasoning_effort"]?.jsonPrimitive?.content
+
+    @Test fun `compile retries once with low reasoning when the endpoint says reasoning is mandatory`(): Unit = runBlocking {
+        server.enqueue(mandatoryReasoning())
+        val content = "Serve un chiarimento.\n" +
+            "@@META@@ {\"draft\":null,\"error_code\":\"clarification_required\"}"
+        server.enqueue(jsonResponse(chatContent(content)))
+        val t = transport(ProviderId.OPENROUTER, model = "x/flash", reasoning = ReasoningEffort.NONE)
+
+        val result = t.compile("crea", manifest(), deviceState())
+
+        assertEquals("clarification_required", result.metaError)
+        assertEquals(2, server.requestCount)
+        val first = assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8()
+        val second = assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8()
+        assertTrue("\"reasoning_effort\":\"none\"" in first, first)
+        assertTrue("\"reasoning_effort\":\"low\"" in second, second)
+        // La stessa richiesta, salvo l'effort.
+        assertEquals(first.replace("\"reasoning_effort\":\"none\"", "\"reasoning_effort\":\"low\""), second)
+    }
+
+    @Test fun `act and health retry once with low reasoning too`(): Unit = runBlocking {
+        val reply = """
+            {"model":"x","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"Ciao!"}}],
+             "usage":{"prompt_tokens":5,"completion_tokens":2}}
+        """.trimIndent()
+        server.enqueue(mandatoryReasoning())
+        server.enqueue(jsonResponse(reply))
+        server.enqueue(mandatoryReasoning("The model requires THINKING to be enabled"))
+        server.enqueue(jsonResponse(reply))
+        val t = transport(ProviderId.OPENROUTER, model = "x/flash", reasoning = ReasoningEffort.NONE)
+
+        val acted = t.act(timerContext(), "scrivi", emptyList(), emptyList())
+        val health = t.health()
+
+        assertEquals("Ciao!", acted.text)
+        assertEquals("x", (health as OpenAiCompatHealth).model)
+        val efforts = List(4) { reasoningEffortOf(assertNotNull(server.takeRequest(2, TimeUnit.SECONDS))) }
+        assertEquals(listOf("none", "low", "none", "low"), efforts)
+    }
+
+    @Test fun `no retry with the default or low effort`(): Unit = runBlocking {
+        var expectedRequests = 0
+        listOf(ReasoningEffort.DEFAULT, ReasoningEffort.LOW, ReasoningEffort.HIGH).forEach { effort ->
+            server.enqueue(mandatoryReasoning())
+            val t = transport(ProviderId.OPENROUTER, model = "x/flash", reasoning = effort)
+
+            val error = assertFailsWith<TransportException> { t.compile("crea", manifest(), deviceState()) }
+
+            assertEquals(400, error.statusCode, effort.name)
+            // Una sola richiesta per ogni effort: nessun ritentativo.
+            expectedRequests += 1
+            assertEquals(expectedRequests, server.requestCount, effort.name)
+        }
+    }
+
+    @Test fun `a 400 that does not talk about reasoning is not retried`(): Unit = runBlocking {
+        server.enqueue(jsonResponse("""{"error":{"message":"x is not a valid model ID"}}""").setResponseCode(400))
+        val t = transport(ProviderId.OPENROUTER, model = "x", reasoning = ReasoningEffort.NONE)
+
+        val error = assertFailsWith<TransportException> { t.compile("crea", manifest(), deviceState()) }
+
+        assertEquals(400, error.statusCode)
+        assertEquals("x is not a valid model ID", error.providerMessage)
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test fun `only a 400 is retried and only once`(): Unit = runBlocking {
+        server.enqueue(mandatoryReasoning())
+        server.enqueue(mandatoryReasoning())
+        val t = transport(ProviderId.OPENROUTER, model = "x/flash", reasoning = ReasoningEffort.NONE)
+
+        val error = assertFailsWith<TransportException> { t.compile("crea", manifest(), deviceState()) }
+
+        // Il secondo rifiuto e' definitivo: nessun terzo tentativo e nessun ciclo.
+        assertEquals(400, error.statusCode)
+        assertEquals(2, server.requestCount)
+
+        server.enqueue(jsonResponse("""{"error":{"message":"reasoning backend overloaded"}}""").setResponseCode(503))
+        val unavailable = assertFailsWith<TransportException> { t.compile("crea", manifest(), deviceState()) }
+        assertEquals(503, unavailable.statusCode)
+        assertEquals(3, server.requestCount)
+    }
+
+    // --- 0.3.7 voce 3a: il messaggio del provider arriva anche in chat ---
+
+    @Test fun `compile and act carry the cleaned provider message on a 4xx`(): Unit = runBlocking {
+        // Il JSON porta un a-capo escapato (\n) e la chiave: il messaggio esce su una riga sola, senza chiave.
+        val body = """{"error":{"message":"x is not a valid model ID\n(key $API_KEY) ${"y".repeat(300)}"}}"""
+        server.enqueue(jsonResponse(body).setResponseCode(400))
+        server.enqueue(jsonResponse(body).setResponseCode(400))
+        val t = transport(ProviderId.OPENROUTER, model = "x")
 
         val compileError = assertFailsWith<TransportException> { t.compile("crea", manifest(), deviceState()) }
         val actError = assertFailsWith<TransportException> {
             t.act(timerContext(), "scrivi", emptyList(), emptyList())
         }
 
+        listOf(compileError, actError).forEach { error ->
+            assertEquals(400, error.statusCode)
+            val message = assertNotNull(error.providerMessage)
+            assertTrue(message.startsWith("x is not a valid model ID (key ***)"), message)
+            assertFalse(API_KEY in message, message)
+            assertTrue(message.none { it.isISOControl() }, message)
+            assertTrue(message.length <= 160, message.length.toString())
+            // Il testo del provider vive solo nel campo dedicato.
+            assertFalse("valid model" in error.message.orEmpty())
+            assertFalse("valid model" in error.toString())
+        }
+    }
+
+    @Test fun `compile and act do not read the message of a 5xx`(): Unit = runBlocking {
+        server.enqueue(jsonResponse("""{"error":{"message":"secret detail"}}""").setResponseCode(500))
+        server.enqueue(jsonResponse("""{"error":{"message":"secret detail"}}""").setResponseCode(503))
+        val t = transport(ProviderId.OPENROUTER, model = "x")
+
+        val compileError = assertFailsWith<TransportException> { t.compile("crea", manifest(), deviceState()) }
+        val actError = assertFailsWith<TransportException> {
+            t.act(timerContext(), "scrivi", emptyList(), emptyList())
+        }
+
+        assertEquals(500, compileError.statusCode)
         assertNull(compileError.providerMessage)
         assertNull(actError.providerMessage)
+    }
+
+    @Test fun `a rejected compile hands the cleaned provider message to the brain result`(): Unit = runBlocking {
+        server.enqueue(
+            jsonResponse("""{"error":{"message":"x is not a valid model ID"}}""").setResponseCode(400),
+        )
+        val brain = TransportBackedBrain(transport(ProviderId.OPENROUTER, model = "x"))
+
+        val result = brain.compile("crea", manifest(), deviceState())
+
+        assertEquals("bridge_http_400", result.metaError)
+        assertEquals("x is not a valid model ID", result.providerMessage)
+        assertFalse("valid model" in result.toString(), result.toString())
+    }
+
+    @Test fun `act result carries only the error code of a rejected request`(): Unit = runBlocking {
+        server.enqueue(
+            jsonResponse("""{"error":{"message":"x is not a valid model ID"}}""").setResponseCode(400),
+        )
+        val brain = TransportBackedBrain(transport(ProviderId.OPENROUTER, model = "x"))
+
+        val result = brain.act(timerContext(), "scrivi", emptyList(), emptyList())
+
+        assertEquals("bridge_http_400", result.metaError)
+        assertFalse("valid model" in result.toString(), result.toString())
+    }
+
+    @Test fun `the openai responses and gemini web paths carry the provider message too`(): Unit = runBlocking {
+        server.enqueue(jsonResponse("""{"error":{"message":"web rejected"}}""").setResponseCode(400))
+        val error = assertFailsWith<TransportException> {
+            transport(ProviderId.OPENAI, model = "gpt-6-luna").act(
+                timerContext(), "scrivi", emptyList(), listOf("web.search"),
+            )
+        }
+        assertEquals("/responses", server.takeRequest(2, TimeUnit.SECONDS)?.path)
+        assertEquals("web rejected", error.providerMessage)
     }
 
     @Test fun `timeout is typed`(): Unit = runBlocking {

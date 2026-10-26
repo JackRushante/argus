@@ -23,7 +23,8 @@
     <string name="provider_dialog_title">Configure %1$s</string>
     <string name="provider_endpoint_label">Endpoint</string>
     <string name="provider_model_label">Model</string>
-    <string name="provider_model_hint_openrouter">Model (e.g. deepseek/deepseek-v4.1-flash) or preset: @preset/&lt;name&gt;</string>
+    <string name="provider_model_hint_openrouter">Model (e.g. ~deepseek/deepseek-flash-latest) or preset: @preset/&lt;name&gt;</string>
+    <string name="provider_model_advice">Argus needs a capable model: at least the base model of a major provider, or a self-hosted model with about 27B parameters or more. Smaller models can\'t write valid rules.</string>
     <string name="provider_model_preset_format">The format is @preset/&lt;name&gt;</string>
     <string name="provider_key_label">API key</string>
     <string name="provider_key_keep_hint">Leave blank to keep the current key.</string>
@@ -99,6 +100,7 @@
     <string name="chat_error_output_truncated">The model\'s reply was cut off (length limit). Try again or use a model with more room.</string>
     <string name="chat_error_context_truncated">The server cut off the instructions: the model\'s context is too small. At least about 12,000 tokens are needed (for Ollama: OLLAMA_CONTEXT_LENGTH).</string>
     <string name="chat_error_server_rejected">The server rejected the request (HTTP %1$d). The model\'s context is often too small.</string>
+    <string name="chat_error_server_rejected_message">The server rejected the request (HTTP %1$d): %2$s</string>
     <string name="chat_error_service_unavailable">The service is not available right now (HTTP %1$d). Try again later.</string>
     <string name="chat_error_too_long">This request is too long (%1$d characters, max %2$d). Shorten it.</string>
     <string name="chat_error_not_configured">The AI service is not set up. Check the provider, the API key and the privacy notice in System.</string>

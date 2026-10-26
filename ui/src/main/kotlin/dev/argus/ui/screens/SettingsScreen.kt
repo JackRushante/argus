@@ -986,11 +986,11 @@ private val previewDirectProvider = previewAllGreen.copy(
         providerId = "openai",
         providerLabel = "OpenAI",
         baseUrl = "https://api.openai.com/v1",
-        model = "gpt-5.5",
+        model = "gpt-6-luna",
         authState = AuthState.OK,
         reachable = true,
         lastLatencyLabel = "2.1 s",
-        defaultModels = listOf("gpt-5.5", "gpt-5-mini"),
+        defaultModels = listOf("gpt-6-luna"),
     ),
     providerChoices = previewProviderChoices.map { it.copy(selected = it.id == "openai") },
 )

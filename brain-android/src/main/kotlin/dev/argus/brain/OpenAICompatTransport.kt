@@ -136,8 +136,7 @@ class OpenAICompatTransport internal constructor(
             // Solo il compile (e solo dove il catalogo lo prevede): risposte più costanti. Act e health no.
             temperature = spec.quirks.compileTemperature,
         )
-        val payload = json.encodeToString(request)
-        val response = parseChatResponse(execute(buildRequest(token, payload)))
+        val response = postChat(token, request, clientErrorsOnly = true)
         val usage = response.toTurnUsage(fallbackModel = model)
         val choice = response.choices.firstOrNull()
         val text = choice?.message?.content?.trim()
@@ -253,17 +252,15 @@ class OpenAICompatTransport internal constructor(
     override suspend fun health(): TransportHealth {
         val token = resolveApiKey()
         val model = resolveModel()
-        val body = json.encodeToString(
-            ChatRequest(
-                model = model,
-                messages = listOf(ChatMessage("user", HEALTH_PING)),
-                maxTokens = if (spec.quirks.outputCapParam == OutputCapParam.MAX_TOKENS) HEALTH_MAX_TOKENS else null,
-                maxCompletionTokens = if (spec.quirks.outputCapParam == OutputCapParam.MAX_COMPLETION_TOKENS) HEALTH_MAX_TOKENS else null,
-                reasoningEffort = config.reasoningEffort.wireValue,
-            ),
+        val request = ChatRequest(
+            model = model,
+            messages = listOf(ChatMessage("user", HEALTH_PING)),
+            maxTokens = if (spec.quirks.outputCapParam == OutputCapParam.MAX_TOKENS) HEALTH_MAX_TOKENS else null,
+            maxCompletionTokens = if (spec.quirks.outputCapParam == OutputCapParam.MAX_COMPLETION_TOKENS) HEALTH_MAX_TOKENS else null,
+            reasoningEffort = config.reasoningEffort.wireValue,
         )
-        // Solo il test di connessione chiede il messaggio del provider (e maschera la chiave configurata).
-        val response = parseChatResponse(execute(buildRequest(token, body), ErrorDiagnostics(listOf(token))))
+        // Il test di connessione porta il messaggio del provider su ogni errore (chiave configurata mascherata).
+        val response = postChat(token, request, clientErrorsOnly = false)
         return OpenAiCompatHealth(model = response.model?.takeIf { it.isNotBlank() } ?: model)
     }
 
@@ -356,8 +353,7 @@ class OpenAICompatTransport internal constructor(
             maxCompletionTokens = if (spec.quirks.outputCapParam == OutputCapParam.MAX_COMPLETION_TOKENS) MAX_OUTPUT_TOKENS else null,
             reasoningEffort = config.reasoningEffort.wireValue,
         )
-        val payload = json.encodeToString(request)
-        val response = parseChatResponse(execute(buildRequest(token, payload)))
+        val response = postChat(token, request, clientErrorsOnly = true)
         val usage = response.toTurnUsage(fallbackModel = baseModel)
         return when (val reply = response.replyText(useReplyTool)) {
             is AgentMessageSupport.ReplyExtraction.Text ->
@@ -410,7 +406,10 @@ class OpenAICompatTransport internal constructor(
         )
         val payload = json.encodeToString(request)
         val httpRequest = buildBearerRequest(responsesUrl, token, payload)
-        val response = parseJson(execute(httpRequest), ResponsesResponse.serializer())
+        val response = parseJson(
+            execute(httpRequest, ErrorDiagnostics(listOf(token), clientErrorsOnly = true)),
+            ResponsesResponse.serializer(),
+        )
         val usage = response.toTurnUsage(fallbackModel = baseModel)
         val text = response.replyText()
             ?: return ActResult(text = null, metaError = "empty_response", usage = usage)
@@ -465,7 +464,10 @@ class OpenAICompatTransport internal constructor(
         )
         val payload = json.encodeToString(request)
         val httpRequest = buildGoogleApiKeyRequest(geminiNativeUrl(baseModel), token, payload)
-        val response = parseJson(execute(httpRequest), GeminiNativeResponse.serializer())
+        val response = parseJson(
+            execute(httpRequest, ErrorDiagnostics(listOf(token), clientErrorsOnly = true)),
+            GeminiNativeResponse.serializer(),
+        )
         val usage = response.toTurnUsage(fallbackModel = baseModel)
         val text = response.replyText()
             ?: return ActResult(text = null, metaError = "empty_response", usage = usage)
@@ -487,6 +489,24 @@ class OpenAICompatTransport internal constructor(
             .addPathSegment(MODELS_SEGMENT)
             .addPathSegment("$model:$GENERATE_CONTENT_ACTION")
             .build()
+    }
+
+    /**
+     * POST su Chat Completions (compile, act, health). Con effort `none`, un 400 che parla di
+     * ragionamento obbligatorio (Gemini Flash, GLM Flash e MiniMax Flash su OpenRouter: «Reasoning is
+     * mandatory for this endpoint and cannot be disabled») si ripete UNA volta, identico, con effort
+     * `low`. Ogni altro errore, e ogni altro effort, passa senza ritentativi.
+     */
+    private suspend fun postChat(token: String?, request: ChatRequest, clientErrorsOnly: Boolean): ChatResponse {
+        val retryable = request.reasoningEffort == ReasoningEffort.NONE.wireValue
+        val firstTry = ErrorDiagnostics(listOf(token), clientErrorsOnly, detectMandatoryReasoning = retryable)
+        val body = try {
+            execute(buildRequest(token, json.encodeToString(request)), firstTry)
+        } catch (_: MandatoryReasoningRejected) {
+            val low = request.copy(reasoningEffort = ReasoningEffort.LOW.wireValue)
+            execute(buildRequest(token, json.encodeToString(low)), ErrorDiagnostics(listOf(token), clientErrorsOnly))
+        }
+        return parseChatResponse(body)
     }
 
     private fun buildRequest(token: String?, payload: String): Request {
@@ -661,8 +681,9 @@ class OpenAICompatTransport internal constructor(
     }
 
     /**
-     * Esegue la chiamata. Con [diagnostics] (solo `health()`) un errore HTTP porta anche il messaggio
-     * ripulito del provider in [TransportException.providerMessage]; senza, il body d'errore non si legge.
+     * Esegue la chiamata. Con [diagnostics] un errore HTTP porta anche il messaggio ripulito del provider
+     * in [TransportException.providerMessage] (su ogni errore per `health()`, sui soli 4xx per compile e
+     * act); senza, il body d'errore non si legge.
      */
     private suspend fun execute(request: Request, diagnostics: ErrorDiagnostics? = null): String {
         val call = client.newCall(request)
@@ -713,9 +734,16 @@ class OpenAICompatTransport internal constructor(
                 429 -> TransportErrorKind.RATE_LIMIT
                 else -> TransportErrorKind.HTTP
             }
-            val providerMessage = diagnostics?.let {
-                val body = runCatching { response.peekBody(MAX_ERROR_BODY_BYTES).string() }.getOrNull()
-                ProviderErrorMessage.extract(body, it.secrets)
+            val messageRequest = diagnostics?.takeIf { it.covers(response.code) }
+            val probesReasoning = diagnostics?.detectMandatoryReasoning == true && response.code == 400
+            val errorBody = if (messageRequest != null || probesReasoning) {
+                runCatching { response.peekBody(MAX_ERROR_BODY_BYTES).string() }.getOrNull()
+            } else {
+                null
+            }
+            val providerMessage = messageRequest?.let { ProviderErrorMessage.extract(errorBody, it.secrets) }
+            if (probesReasoning && errorBody != null && MANDATORY_REASONING.containsMatchIn(errorBody)) {
+                throw MandatoryReasoningRejected(providerMessage)
             }
             throw TransportException(
                 kind,
@@ -744,8 +772,27 @@ class OpenAICompatTransport internal constructor(
 
     private fun config(message: String) = TransportException(TransportErrorKind.CONFIGURATION, message)
 
-    /** Richiesta di diagnostica dell'errore HTTP: [secrets] sono i valori da mascherare nel messaggio. */
-    private class ErrorDiagnostics(val secrets: List<String?>)
+    /**
+     * Richiesta di diagnostica dell'errore HTTP: [secrets] sono i valori da mascherare nel messaggio.
+     * Con [clientErrorsOnly] (compile e act) il messaggio si legge solo sui 4xx: un 5xx è spesso una
+     * pagina del gateway, non un testo utile; il test di connessione lo legge su ogni errore.
+     * Con [detectMandatoryReasoning] un 400 che parla di ragionamento diventa [MandatoryReasoningRejected].
+     */
+    private class ErrorDiagnostics(
+        val secrets: List<String?>,
+        val clientErrorsOnly: Boolean = false,
+        val detectMandatoryReasoning: Boolean = false,
+    ) {
+        fun covers(status: Int): Boolean = !clientErrorsOnly || status in 400..499
+    }
+
+    /** 400 «il ragionamento è obbligatorio»: è un [TransportException] HTTP 400 a tutti gli effetti, [postChat] lo ritenta. */
+    private class MandatoryReasoningRejected(providerMessage: String?) : TransportException(
+        TransportErrorKind.HTTP,
+        "Provider HTTP 400",
+        statusCode = 400,
+        providerMessage = providerMessage,
+    )
 
     @Serializable
     private data class ChatRequest(
@@ -931,6 +978,9 @@ class OpenAICompatTransport internal constructor(
         const val OPENROUTER_WEB_PLUGIN_ID = "web"
         const val MAX_RESPONSE_BYTES = 512L * 1024L
         const val MAX_ERROR_BODY_BYTES = 16L * 1024L
+
+        /** Il 400 che rifiuta `reasoning_effort: "none"` nomina il ragionamento («reasoning» o «thinking»). */
+        val MANDATORY_REASONING = Regex("reasoning|thinking", RegexOption.IGNORE_CASE)
         val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
         val FORCED_REPLY_CHOICE: JsonElement = buildJsonObject {
             put("type", "function")

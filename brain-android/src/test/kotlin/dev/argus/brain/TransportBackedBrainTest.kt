@@ -24,6 +24,7 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -104,6 +105,43 @@ class TransportBackedBrainTest {
             FakeTransport(onCompile = { throw TransportException(TransportErrorKind.HTTP, "boom") }),
         )
         assertEquals("bridge_http", noStatus.compile("x", manifest, DeviceState()).metaError)
+    }
+
+    @Test fun `the provider message of a rejected compile travels beside the code and never inside it`(): Unit = runBlocking {
+        val brain = TransportBackedBrain(
+            FakeTransport(
+                onCompile = {
+                    throw TransportException(
+                        TransportErrorKind.HTTP, "Provider HTTP 400", statusCode = 400,
+                        providerMessage = "x is not a valid model ID",
+                    )
+                },
+                onAct = {
+                    throw TransportException(
+                        TransportErrorKind.HTTP, "Provider HTTP 400", statusCode = 400,
+                        providerMessage = "x is not a valid model ID",
+                    )
+                },
+            ),
+        )
+
+        val compiled = brain.compile("x", manifest, DeviceState())
+        val acted = brain.act(fireContext(), "g", listOf("notification"), listOf("whatsapp_reply"))
+
+        assertEquals("bridge_http_400", compiled.metaError)
+        assertEquals("x is not a valid model ID", compiled.providerMessage)
+        assertFalse("valid model" in compiled.toString(), compiled.toString())
+        // act non ha un campo per il testo libero: solo il codice.
+        assertEquals("bridge_http_400", acted.metaError)
+        assertFalse("valid model" in acted.toString(), acted.toString())
+    }
+
+    @Test fun `a transport failure without a provider message leaves the field empty`(): Unit = runBlocking {
+        val brain = TransportBackedBrain(
+            FakeTransport(onCompile = { throw TransportException(TransportErrorKind.NETWORK, "boom") }),
+        )
+
+        assertNull(brain.compile("x", manifest, DeviceState()).providerMessage)
     }
 
     @Test fun `the closed bridge error code never leaks into the meta error`(): Unit = runBlocking {

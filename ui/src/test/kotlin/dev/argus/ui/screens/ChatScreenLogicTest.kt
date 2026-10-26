@@ -61,6 +61,8 @@ class ChatScreenLogicTest {
         assertEquals("output_truncated", chatErrorDetail(ChatError.OutputTruncated))
         assertEquals("context_truncated", chatErrorDetail(ChatError.ContextTruncated))
         assertEquals("HTTP 422", chatErrorDetail(ChatError.ServerRejected(422)))
+        // Il messaggio del provider sta nel testo del banner, mai nel dettaglio tecnico da copiare.
+        assertEquals("HTTP 400", chatErrorDetail(ChatError.ServerRejected(400, "x is not a valid model ID")))
         assertEquals("HTTP 503", chatErrorDetail(ChatError.ServiceUnavailable(503)))
         assertEquals("not_configured", chatErrorDetail(ChatError.NotConfigured))
         assertEquals("illegal_state_exception", chatErrorDetail(ChatError.Internal("illegal_state_exception")))

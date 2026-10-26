@@ -70,7 +70,7 @@ internal fun matchInstalledApps(
                 total + ((labelTokens + packageTokens).maxOfOrNull { appToken ->
                     when {
                         queryToken == appToken -> 20
-                        commonPrefixLength(queryToken, appToken) >= MIN_PREFIX_LENGTH -> 12
+                        prefixMatches(queryToken, appToken) -> 12
                         else -> 0
                     }
                 } ?: 0)
@@ -98,6 +98,16 @@ private fun appTokens(value: String): Set<String> = TOKEN_REGEX.findAll(value)
     .map(MatchResult::value)
     .filter { it.length >= MIN_TOKEN_LENGTH && it !in GENERIC_TOKENS }
     .toSet()
+
+/**
+ * Nome dell'app abbreviato o declinato («instagr», «messages» per «messaging»): il prefisso comune deve
+ * essere lungo almeno [MIN_PREFIX_LENGTH] e coprire almeno due terzi della parola dell'app. Senza la
+ * seconda condizione il verbo «imposta» faceva comparire «Impostazioni» in quasi ogni richiesta.
+ */
+private fun prefixMatches(queryToken: String, appToken: String): Boolean {
+    val prefix = commonPrefixLength(queryToken, appToken)
+    return prefix >= MIN_PREFIX_LENGTH && prefix * 3 >= appToken.length * 2
+}
 
 private fun commonPrefixLength(left: String, right: String): Int {
     val limit = minOf(left.length, right.length)

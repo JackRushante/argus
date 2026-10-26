@@ -34,6 +34,15 @@ class CompileResultRawTest {
         assertEquals("a".repeat(15_999), capped)
     }
 
+    @Test fun `the provider message defaults to null and never reaches toString`() {
+        assertNull(CompileResult("r", null, null).providerMessage)
+        val result = CompileResult("", null, "bridge_http_400", providerMessage = "x is not a valid model ID")
+        assertEquals("x is not a valid model ID", result.providerMessage)
+        val text = result.toString()
+        assertFalse("valid model" in text, text)
+        assertTrue("providerMessage=<" in text, text)
+    }
+
     @Test fun `toString never prints the raw text`() {
         val result = CompileResult("ok", null, null, raw = "dato personale: Mario Rossi 333 1234567")
         val text = result.toString()
