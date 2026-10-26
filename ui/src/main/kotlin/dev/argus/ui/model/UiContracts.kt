@@ -252,7 +252,33 @@ data class AutomationDetailState(
     val diagnosis: RuleDiagnosisUi? = null,
     /** Vero solo per una regola salvata: una bozza non ha nulla da diagnosticare. */
     val diagnosisAvailable: Boolean = false,
+    /**
+     * 0.4.0 (F10): scatti, riuscite e fallite negli ultimi 7 e 30 giorni, dal journal delle esecuzioni.
+     * Solo per una regola salvata (armata o disattivata); null per una bozza o finché non è letto.
+     */
+    val stats: RuleStatsUi? = null,
 )
+
+/**
+ * Statistiche di una regola. [longWindowDays] è la finestra lunga REALMENTE coperta: 30, oppure meno se
+ * l'utente ha scelto di conservare il Log per meno giorni (il journal non ricorda oltre). La UI lo dice
+ * invece di mostrare uno zero che non sarebbe vero.
+ */
+data class RuleStatsUi(
+    val last7Days: RuleStatsWindow,
+    val last30Days: RuleStatsWindow,
+    val longWindowDays: Int = 30,
+) {
+    /** Nessuno scatto in tutta la finestra lunga: si mostra la frase sola, senza tabella di zeri. */
+    val isEmpty: Boolean get() = last30Days.fires == 0
+}
+
+/**
+ * Esecuzioni di una finestra: [fires] = scatti che hanno davvero eseguito (le soppressioni da cooldown,
+ * budget o regola non idonea non contano), [succeeded] = chiuse con successo, [failed] = fallite o
+ * parziali o interrotte. Le esecuzioni ancora in corso o da consegnare a mano contano solo in [fires].
+ */
+data class RuleStatsWindow(val fires: Int, val succeeded: Int, val failed: Int)
 
 /** Esito di una diagnosi una tantum: righe in ordine di lettura e ora del controllo. */
 data class RuleDiagnosisUi(val rows: List<DiagnosisRow>, val checkedAtLabel: String)
@@ -307,6 +333,11 @@ data class LogRow(
     val automationId: String? = null,
     /** La riga appartiene a un'esecuzione con almeno un'azione generativa/cloud. */
     val isGenerative: Boolean = false,
+    /**
+     * Istante dell'evento (epoch ms). Il Log raggruppa per giorno locale da qui, non dal testo di
+     * [timeLabel]. Null solo per righe costruite a mano (anteprime, fixture): ricadono sul testo.
+     */
+    val atMillis: Long? = null,
 )
 
 enum class LogOutcome { SUCCESS, PARTIAL, FAILED, SUBMITTED, DEFERRED }
