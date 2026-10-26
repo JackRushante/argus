@@ -237,7 +237,7 @@ private fun alarmRows(
         )
     }
     if (alarm.scheduledMode != ScheduledAlarmMode.INEXACT.name) return listOf(next)
-    // In Sistema oggi non c'è una riga per le sveglie esatte: niente «Apri Sistema» su questo avviso.
+    // Solo la regola esatta rimanda a Sistema: lì la riga «Sveglie esatte» porta alla concessione.
     val inexact = if (trigger.precision == TimePrecision.EXACT) {
         DiagnosisRow(
             DiagnosisLevel.WARN,
@@ -245,6 +245,7 @@ private fun alarmRows(
                 "Android does not grant Argus exact alarms: it may delay it",
                 "Android non concede ad Argus le sveglie esatte: può ritardarla",
             ),
+            DiagnosisFix.OPEN_SYSTEM,
         )
     } else {
         DiagnosisRow(
