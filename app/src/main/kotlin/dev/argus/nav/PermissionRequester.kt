@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.os.SystemClock
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
@@ -18,25 +19,27 @@ import androidx.core.content.ContextCompat
 import dev.argus.R
 
 /**
- * Registro «già chiesto» su SharedPreferences (B33): un booleano per permesso, nessun dato utente.
- * Il backup è escluso dal manifest, quindi un ripristino non può far credere negato un permesso
- * mai chiesto su un altro telefono.
+ * Stato di rifiuto per permesso su SharedPreferences (B33): il nome dello stato sotto la chiave del
+ * permesso, nessun dato utente; [PermissionState.NONE] non si scrive. Il backup è escluso dal
+ * manifest, quindi un ripristino non può far credere negato un permesso mai rifiutato su un altro
+ * telefono.
  */
-internal class SharedPreferencesPermissionAskStore(
+internal class SharedPreferencesPermissionStateStore(
     private val preferences: SharedPreferences,
-) : PermissionAskStore {
+) : PermissionStateStore {
     constructor(context: Context) : this(
         context.applicationContext.getSharedPreferences(FILE_NAME, Context.MODE_PRIVATE),
     )
 
-    override fun wasAsked(permission: String): Boolean = preferences.getBoolean(permission, false)
+    override fun state(permission: String): PermissionState =
+        runCatching { preferences.getString(permission, null) }.getOrNull()
+            ?.let { name -> PermissionState.entries.firstOrNull { it.name == name } }
+            ?: PermissionState.NONE
 
-    override fun markAsked(permission: String) {
-        preferences.edit().putBoolean(permission, true).apply()
-    }
-
-    override fun clearAsked(permission: String) {
-        preferences.edit().remove(permission).apply()
+    override fun setState(permission: String, state: PermissionState) {
+        preferences.edit().apply {
+            if (state == PermissionState.NONE) remove(permission) else putString(permission, state.name)
+        }.apply()
     }
 
     private companion object {
@@ -45,8 +48,12 @@ internal class SharedPreferencesPermissionAskStore(
 }
 
 /**
- * Richiesta di permessi runtime che non resta muta dopo due rifiuti (B33): se Android non mostra
- * più la richiesta («negato per sempre») apre le impostazioni dell'app con un messaggio.
+ * Richiesta di permessi runtime che non resta muta quando Android non mostra più il dialogo
+ * («negato per sempre», B33). La logica sta in [PermissionRequestCoordinator]: un tocco su
+ * «Concedi» apre le impostazioni dell'app (con un messaggio) solo se il permesso è già
+ * [PermissionState.PERMANENT]; un rifiuto che torna subito, senza dialogo, lo è già e porta alle
+ * impostazioni all'istante; il secondo «Non consentire» esplicito mostra solo il messaggio e le
+ * impostazioni si aprono al tocco dopo. Il primo rifiuto, o un dialogo chiuso toccando fuori, non è mai permanente.
  *
  * @param onResult chiamato quando la richiesta finisce (o non serviva): l'host rilegge lo stato.
  * @param openAppSettings apre `ACTION_APPLICATION_DETAILS_SETTINGS` dell'app.
@@ -74,7 +81,7 @@ internal fun rememberPermissionRequester(
     }
     val coordinator = remember(launcher) {
         PermissionRequestCoordinator(
-            store = SharedPreferencesPermissionAskStore(context),
+            store = SharedPreferencesPermissionStateStore(context),
             isGranted = { permission ->
                 ContextCompat.checkSelfPermission(context, permission) ==
                     PackageManager.PERMISSION_GRANTED
@@ -87,6 +94,7 @@ internal fun rememberPermissionRequester(
             launch = { permissions -> launcher.launch(permissions) },
             openAppSettings = { currentOpenAppSettings() },
             notifySettingsNeeded = { currentShowMessage(currentSettingsMessage) },
+            nowMillis = SystemClock::elapsedRealtime,
         ).also { coordinatorRef[0] = it }
     }
     return remember<(Array<String>) -> Unit>(coordinator) {
