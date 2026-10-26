@@ -418,6 +418,29 @@ class OnboardingViewModelTest {
     }
 
     @Test
+    fun `openrouter espone la scelta del reasoning, i provider a listino ufficiale no`() = runTest(dispatcher) {
+        val store = OnbFakeProviderStore()
+        val vm = onboardingViewModel(store)
+        observe(vm)
+        advanceUntilIdle()
+
+        for ((wireName, editable) in listOf(
+            "openrouter" to true,
+            "custom_openai_compat" to true,
+            "openai" to false,
+            "anthropic" to false,
+            "gemini" to false,
+        )) {
+            vm.selectProvider(wireName)
+            advanceUntilIdle()
+
+            val transport = vm.state.value.transport as TransportUi.DirectProvider
+            assertEquals(editable, transport.reasoningEffortEditable, wireName)
+            assertEquals("default", transport.reasoningEffort, wireName)
+        }
+    }
+
+    @Test
     fun `wire name sconosciuto non tocca selezione ne indice`() = runTest(dispatcher) {
         val store = OnbFakeProviderStore()
         val vm = onboardingViewModel(store, index = 1)

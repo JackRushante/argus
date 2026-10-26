@@ -332,6 +332,40 @@ class BridgeTest(unittest.TestCase):
         self.assertIn("screen_brightness (0-255, SYSTEM; set screen_brightness_mode=0 first to", prompt)
         self.assertIn("auto-brightness", prompt)
 
+    def test_prompt_mirrors_the_0_3_7_app_schema_wording(self):
+        # Le quattro correzioni del prompt dell'app 0.3.7 (AgentMessageSupport.kt) vanno anche
+        # nella copia del bridge, con lo stesso testo; vale per compile v1 e v2.
+        for request in (self.request(), self.request_v2()):
+            prompt = bridge.build_prompt(request)
+            self.assertIn(
+                'cron is a standard 5-field expression "minute hour day-of-month month day-of-week"'
+                ' (no seconds), e.g. "30 22 * * *".',
+                prompt,
+            )
+            self.assertIn('{"type":"set_ringer", "mode":"normal"|"vibrate"|"silent"}', prompt)
+            self.assertNotIn('{"type":"set_ringer", "mode":string}', prompt)
+            self.assertIn(
+                '"match":string|null (the EXACT Wi-Fi network name or\n'
+                '   Bluetooth device name the user mentions; null = any network or device)}',
+                prompt,
+            )
+            self.assertIn(
+                'Branching on message text: for "if the SMS (or notification) contains X then A else B" declare\n'
+                'vars [{"type":"trigger_payload","name":"sms_text","field":"TEXT",'
+                '"extractionRegex":null,"confidentiality":"PRIVATE"}]\n'
+                'and use an if whose condition is '
+                '{"type":"var_compare","varName":"sms_text","op":"CONTAINS","expected":"X"}\n'
+                '(then = A, orElse = B).',
+                prompt,
+            )
+
+    def test_prompt_does_not_carry_the_reply_language_line_the_envelope_has_no_such_field(self):
+        # La riga reply_language dell'app NON va nel bridge: la busta non la porta e resta la
+        # regola attuale di rispecchiare la lingua dell'utente.
+        prompt = bridge.build_prompt(self.request())
+        self.assertNotIn("reply_language", prompt)
+        self.assertIn("USER'S language", prompt)
+
     def test_prompt_uses_the_validated_device_timezone(self):
         request = self.request()
         request["_device_time_zone"] = "Europe/Berlin"
