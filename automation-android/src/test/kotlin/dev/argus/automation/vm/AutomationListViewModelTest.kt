@@ -15,6 +15,7 @@ import dev.argus.automation.TimeAlarmRuntime
 import dev.argus.data.ArgusDatabase
 import dev.argus.data.RoomAutomationStore
 import dev.argus.data.entities.AutomationEntity
+import dev.argus.data.entities.ScheduledTimeAlarmEntity
 import dev.argus.data.RoomContactWhitelistStore
 import dev.argus.data.RoomDraftRepository
 import dev.argus.engine.model.Action
@@ -271,7 +272,12 @@ class AutomationListViewModelTest {
 
     @Test
     fun `re-enabling a one shot rule whose time has passed says what to do`() = runTest {
-        seedDisabledOneShotInPast("os1")
+        seedAutomation(
+            "os1",
+            Trigger.Time(at = "2020-01-01T09:00", tz = "UTC"),
+            AutomationStatus.DISABLED,
+            enabled = false,
+        )
         val viewModel = viewModel()
         val messages = mutableListOf<String>()
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
@@ -303,18 +309,123 @@ class AutomationListViewModelTest {
         assertEquals(listOf("Scheduling failed: the rule remains disabled."), messages)
     }
 
+    // --- 0.3.6: prossimo scatto dei ritardi relativi -------------------------------------------------
+
+    private suspend fun relativeRule(id: String): Automation = seedAutomation(
+        id,
+        Trigger.Time(afterMs = 7_200_000, tz = "UTC"),
+        AutomationStatus.ARMED,
+        enabled = true,
+    )
+
+    private fun alarmOf(rule: Automation, eventAt: Long) = ScheduledTimeAlarmEntity(
+        automationId = rule.id.value,
+        approvalFingerprint = requireNotNull(rule.approvalFingerprint).value,
+        eventAtMillis = eventAt,
+        wakeAtMillis = eventAt,
+        requestedPrecision = "FLEXIBLE",
+        scheduledMode = "INEXACT",
+        updatedAtMillis = System.currentTimeMillis(),
+    )
+
+    private fun clock(atMillis: Long): String = java.time.Instant.ofEpochMilli(atMillis)
+        .atZone(java.time.ZoneId.systemDefault())
+        .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
+
+    @Test
+    fun `a relative delay rule with its persisted alarm shows the next fire and one without shows none`() = runTest {
+        val withAlarm = relativeRule("rel1")
+        relativeRule("rel2")
+        val eventAt = System.currentTimeMillis() + 2 * 3_600_000
+        db.scheduledTimeAlarmDao().upsert(alarmOf(withAlarm, eventAt))
+        val latest = collectState(viewModel())
+
+        awaitUntil("prossimo scatto") {
+            latest().rows.firstOrNull { it.id == "rel1" }?.nextFireLabel != null
+        }
+
+        val label = assertNotNull(latest().rows.first { it.id == "rel1" }.nextFireLabel)
+        assertTrue(label.endsWith(clock(eventAt)), label)
+        assertNull(latest().rows.first { it.id == "rel2" }.nextFireLabel)
+    }
+
+    @Test
+    fun `a rescheduled alarm updates the row`() = runTest {
+        val rule = relativeRule("rel3")
+        val first = System.currentTimeMillis() + 2 * 3_600_000
+        db.scheduledTimeAlarmDao().upsert(alarmOf(rule, first))
+        val latest = collectState(viewModel())
+        awaitUntil("primo scatto") {
+            latest().rows.firstOrNull()?.nextFireLabel?.endsWith(clock(first)) == true
+        }
+
+        val second = first + 90 * 60_000
+        db.scheduledTimeAlarmDao().upsert(alarmOf(rule, second))
+
+        awaitUntil("scatto aggiornato") {
+            latest().rows.firstOrNull()?.nextFireLabel?.endsWith(clock(second)) == true
+        }
+    }
+
+    @Test
+    fun `an alarm of an older revision of the rule is not shown`() = runTest {
+        val rule = relativeRule("rel4")
+        db.scheduledTimeAlarmDao().upsert(
+            alarmOf(rule, System.currentTimeMillis() + 3_600_000).copy(approvalFingerprint = "older"),
+        )
+        val latest = collectState(viewModel())
+
+        awaitUntil("riga") { latest().rows.isNotEmpty() }
+        settle()
+
+        assertNull(latest().rows.single().nextFireLabel)
+    }
+
+    @Test
+    fun `alarm changes do not make the list read the device state again`() = runTest {
+        val rule = relativeRule("rel5")
+        assertIs<DraftWriteResult.Saved>(repository.create(newDraft("pend")))
+        val reads = AtomicInteger(0)
+        val snapshots = FirePolicySnapshotProvider {
+            reads.incrementAndGet()
+            FirePolicySnapshot(
+                knownTools = emptySet(),
+                availableCapabilities = emptySet(),
+                whitelistedConversationIds = emptySet(),
+            )
+        }
+        val latest = collectState(viewModel(snapshots = snapshots))
+        awaitUntil("due righe") { latest().rows.size == 2 }
+        settle()
+        assertEquals(1, reads.get(), "una review per la bozza alla prima emissione")
+
+        val base = System.currentTimeMillis() + 3_600_000
+        repeat(5) { i -> db.scheduledTimeAlarmDao().upsert(alarmOf(rule, base + i * 60_000L)) }
+        awaitUntil("ultima sveglia visibile") {
+            latest().rows.firstOrNull { it.id == "rel5" }?.nextFireLabel?.endsWith(clock(base + 4 * 60_000L)) == true
+        }
+        settle()
+
+        assertEquals(1, reads.get(), "la sveglia non rifa le letture costose delle bozze")
+    }
+
     // --- helpers -------------------------------------------------------------------------------------
 
-    /** Regola una tantum gia' disattivata il cui orario e' passato: il coordinator reale la rifiuta. */
-    private suspend fun seedDisabledOneShotInPast(id: String): Automation {
+    /** Salva una regola gia' firmata come farebbe l'arm (senza passare dalla bozza). */
+    private suspend fun seedAutomation(
+        id: String,
+        trigger: Trigger,
+        status: AutomationStatus,
+        enabled: Boolean,
+    ): Automation {
         val unsigned = Automation(
             id = AutomationId(id),
             name = "auto-$id",
             createdBy = CreatedBy.USER,
-            status = AutomationStatus.DISABLED,
-            trigger = Trigger.Time(at = "2020-01-01T09:00", tz = "UTC"),
+            status = status,
+            trigger = trigger,
             actions = listOf(Action.ShowNotification("Argus", "test")),
-            enabled = false,
+            enabled = enabled,
         )
         val signed = unsigned.copy(approvalFingerprint = ApprovalFingerprints.of(unsigned))
         db.automationDao().upsertPreservingLastFired(

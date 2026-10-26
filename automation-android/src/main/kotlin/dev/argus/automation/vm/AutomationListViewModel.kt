@@ -14,6 +14,7 @@ import dev.argus.automation.EnablementResult
 import dev.argus.automation.RenderLanguageSource
 import dev.argus.data.ArgusDatabase
 import dev.argus.data.dao.AutomationUiMetadata
+import dev.argus.data.entities.ScheduledTimeAlarmEntity
 import dev.argus.engine.brain.ContactWhitelistStore
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
@@ -47,6 +48,8 @@ private data class ListInputs(
     val automations: List<Automation>,
     val conversationLabels: Map<String, String>,
     val language: RenderLanguage,
+    /** Sveglie persistite per regola: dai ritardi relativi («tra 2 ore») il prossimo scatto si legge da qui. */
+    val alarms: Map<String, ScheduledTimeAlarmEntity>,
 )
 
 /** Ciò che la review di una bozza legge oltre alla bozza stessa: capacità del dispositivo e regole attive. */
@@ -84,21 +87,29 @@ class AutomationListViewModel @Inject constructor(
         )
         emitAll(
             combine(
-                // Il combine tipizzato arriva a 5 flow: automazioni, nomi whitelist e lingua viaggiano insieme.
+                // Il combine tipizzato arriva a 5 flow: automazioni, nomi whitelist, lingua e sveglie
+                // persistite viaggiano insieme. La sveglia e' un input in piu' della sola riga: non
+                // entra nel contesto delle letture costose (review delle bozze, batteria).
                 combine(
                     store.observeAll(),
                     whitelist.observeAll(),
                     languageSource.language,
-                ) { automations, contacts, renderLanguage ->
-                    ListInputs(automations, contacts.associate { it.id to it.displayName }, renderLanguage)
+                    database.scheduledTimeAlarmDao().observeAll(),
+                ) { automations, contacts, renderLanguage, alarms ->
+                    ListInputs(
+                        automations,
+                        contacts.associate { it.id to it.displayName },
+                        renderLanguage,
+                        alarms.associateBy { it.automationId },
+                    )
                 },
                 drafts.observeAll(),
                 filter,
                 shizuku.observeStatus(),
                 database.automationDao().observeUiMetadata(),
-            ) { (automations, conversationLabels, language), pending, activeFilter, shizukuStatus, metadata ->
+            ) { (automations, conversationLabels, language, alarms), pending, activeFilter, shizukuStatus, metadata ->
                 listState(
-                    automations, conversationLabels, language, pending, activeFilter, shizukuStatus,
+                    automations, conversationLabels, language, alarms, pending, activeFilter, shizukuStatus,
                     metadata, reads,
                 )
             },
@@ -118,6 +129,7 @@ class AutomationListViewModel @Inject constructor(
         automations: List<Automation>,
         conversationLabels: Map<String, String>,
         language: RenderLanguage,
+        alarms: Map<String, ScheduledTimeAlarmEntity>,
         pending: List<PendingDraft>,
         activeFilter: StatusFilter,
         shizukuStatus: ShizukuGatewayStatus,
@@ -148,6 +160,7 @@ class AutomationListViewModel @Inject constructor(
                     conversationLabels,
                     language,
                     pendingEditDraftId = editDraftIdByAutomation[automation.id],
+                    scheduledAlarm = alarms[automation.id.value],
                 )
             }
         val standaloneDrafts = pending.filterNot { it in editDrafts }
