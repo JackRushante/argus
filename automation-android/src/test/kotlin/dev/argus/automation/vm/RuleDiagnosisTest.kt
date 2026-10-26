@@ -208,15 +208,15 @@ class RuleDiagnosisTest {
         val exact = timeRule(precision = TimePrecision.EXACT)
         val warned = diagnose(exact, alarm = alarmFor(exact, mode = "INEXACT")).rows
 
+        // La riga «Sveglie esatte» in Sistema esiste: l'avviso porta lì.
         assertEquals(
             DiagnosisRow(
                 DiagnosisLevel.WARN,
                 "Android non concede ad Argus le sveglie esatte: può ritardarla",
+                DiagnosisFix.OPEN_SYSTEM,
             ),
             warned.single { it.level == DiagnosisLevel.WARN },
         )
-        // Nessuna scorciatoia verso Sistema: lì non esiste una riga per le sveglie esatte.
-        assertNull(warned.single { it.level == DiagnosisLevel.WARN }.fix)
 
         val flexible = timeRule()
         val informed = diagnose(
@@ -231,6 +231,8 @@ class RuleDiagnosisTest {
             informed.single { it.text.startsWith("Sveglia non esatta") },
         )
         assertTrue(informed.none { it.level == DiagnosisLevel.WARN })
+        // Una regola flessibile non ha bisogno delle sveglie esatte: nessuna scorciatoia.
+        assertNull(informed.single { it.text.startsWith("Sveglia non esatta") }.fix)
     }
 
     @Test

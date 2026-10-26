@@ -463,6 +463,20 @@ fun ArgusNavHost() {
                             override fun onOpenBatteryFix() {
                                 openBatterySettings()
                             }
+                            override fun onOpenExactAlarmFix() {
+                                // «Sveglie e promemoria» è la sola via per concedere le sveglie esatte (Android 12+);
+                                // se la schermata non si apre si ripiega sulle impostazioni dell'app.
+                                val opened = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                                    runCatching {
+                                        context.startActivity(
+                                            Intent(
+                                                Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                                                Uri.parse("package:${context.packageName}"),
+                                            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                                        )
+                                    }.isSuccess
+                                if (!opened) openAppDetailsSettings()
+                            }
                             override fun onOpenNotificationAccessFix() = requestNotificationAccess()
                             override fun onOpenNotificationListenerFix() {
                                 openNotificationListenerSettings()

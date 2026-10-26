@@ -86,6 +86,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowAlarmManager
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
@@ -962,6 +963,36 @@ class SettingsViewModelTest {
             assertFalse(hint(installer = "com.android.vending", sdk = 34), "lo store di sistema non ha restrizioni")
             assertFalse(hint(installer = null, sdk = 32), "prima di Android 13 non esiste")
         }
+
+    // ------------------------------------------------------------------ 0.3.6 blocco G: sveglie esatte
+
+    @Test
+    fun `exact alarms denied by Android show in the state and the grant clears them on the next read`() =
+        runTest(dispatcher) {
+            ShadowAlarmManager.setCanScheduleExactAlarms(false)
+            val vm = settingsViewModel(FakeProviderStore())
+            observe(vm)
+            vm.refresh()
+            advanceUntilIdle()
+            assertFalse(vm.state.value.exactAlarmsGranted, "permesso negato: la riga deve avvisare")
+
+            // L'utente concede il permesso in «Sveglie e promemoria» e torna ad Argus: refresh() rilegge.
+            ShadowAlarmManager.setCanScheduleExactAlarms(true)
+            vm.refresh()
+            advanceUntilIdle()
+            assertTrue(vm.state.value.exactAlarmsGranted, "permesso concesso: la riga torna verde")
+        }
+
+    @Test
+    fun `exact alarms granted by Android read as granted`() = runTest(dispatcher) {
+        ShadowAlarmManager.setCanScheduleExactAlarms(true)
+        val vm = settingsViewModel(FakeProviderStore())
+        observe(vm)
+        vm.refresh()
+        advanceUntilIdle()
+
+        assertTrue(vm.state.value.exactAlarmsGranted)
+    }
 
     // ------------------------------------------------------------------ 0.3.6 voce 5c: lingua dinamica
 

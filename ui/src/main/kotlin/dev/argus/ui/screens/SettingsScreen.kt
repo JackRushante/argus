@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Alarm
 import androidx.compose.material.icons.rounded.BatterySaver
 import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.CheckCircle
@@ -241,6 +242,16 @@ private fun HealthSection(state: SettingsState, callbacks: SettingsCallbacks) {
                 },
                 if (state.batteryExempt) HealthLevel.OK else HealthLevel.WARN,
                 onFix = callbacks::onOpenBatteryFix,
+            )
+            HealthRow(
+                Icons.Rounded.Alarm, stringResource(R.string.settings_exact_alarms_title),
+                if (state.exactAlarmsGranted) {
+                    stringResource(R.string.settings_exact_alarms_ok)
+                } else {
+                    stringResource(R.string.settings_exact_alarms_warn)
+                },
+                if (state.exactAlarmsGranted) HealthLevel.OK else HealthLevel.WARN,
+                onFix = callbacks::onOpenExactAlarmFix,
             )
             HealthRow(
                 Icons.Rounded.Notifications, stringResource(R.string.settings_notifications_title),
@@ -912,6 +923,7 @@ private object NoopSettingsCallbacks : SettingsCallbacks {
     override fun onTestConnection() {}
     override fun onOpenShizukuFix() {}
     override fun onOpenBatteryFix() {}
+    override fun onOpenExactAlarmFix() {}
     override fun onOpenNotificationAccessFix() {}
     override fun onOpenLocationFix() {}
     override fun onRemoveContact(conversationId: String) {}
@@ -1047,4 +1059,10 @@ private fun SettingsDirectProviderPreview() {
 @Composable
 private fun SettingsRestrictedHintPreview() {
     ArgusTheme { SettingsScreen(Fixtures.settingsRestrictedHint, NoopSettingsCallbacks) }
+}
+
+@Preview(name = "Sistema · sveglie esatte non concesse (CTA)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 1100)
+@Composable
+private fun SettingsExactAlarmsDeniedPreview() {
+    ArgusTheme { SettingsScreen(Fixtures.settingsExactAlarmsDenied, NoopSettingsCallbacks) }
 }

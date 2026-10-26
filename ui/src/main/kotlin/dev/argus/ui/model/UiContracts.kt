@@ -335,6 +335,13 @@ data class SettingsState(
     val transport: TransportUi,
     val shizuku: ShizukuStatus,
     val batteryExempt: Boolean,
+    /**
+     * 0.3.6: Android concede ad Argus le sveglie esatte (`SCHEDULE_EXACT_ALARM`). Da Android 14 e' negato
+     * di default e solo l'utente lo concede, da «Sveglie e promemoria»: senza, le regole a orario
+     * possono partire con anche 30-40 minuti di ritardo e le attese lunghe a schermo spento slittare.
+     * Default `true`: il permesso non esiste sotto Android 12 e un fixture non deve avvisare per caso.
+     */
+    val exactAlarmsGranted: Boolean = true,
     /** Permesso di PUBBLICARE notifiche (esiti/avvisi Argus). */
     val notificationsGranted: Boolean,
     /** Accesso notification listener: lettura notifiche WhatsApp e canale di reply (P1). */
@@ -456,6 +463,8 @@ interface SettingsCallbacks {
     fun onSaveBridge(url: String, bearerToken: String?) { onEditBridgeUrl(url) }
     fun onOpenShizukuFix()      // deep-link allo step onboarding giusto per lo stato corrente
     fun onOpenBatteryFix(); fun onOpenNotificationAccessFix(); fun onOpenLocationFix()
+    /** Apre «Sveglie e promemoria» per concedere le sveglie esatte (0.3.6). Default no-op. */
+    fun onOpenExactAlarmFix() {}
     /** Apre le impostazioni di sistema per l'accesso notification listener (lettura, P1). */
     fun onOpenNotificationListenerFix() {}
     /** Richieste runtime dei trigger telefonia (P2-2): RECEIVE_SMS e READ_PHONE_STATE(+CALL_LOG). */
