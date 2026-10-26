@@ -174,10 +174,30 @@ internal object AgentMessageSupport {
     fun cleanReply(value: String?): String? {
         val clean = value
             ?.filter { !it.isISOControl() || it == '\n' || it == '\t' }
+            ?.let(::plainText)
             ?.trim()
             ?.take(MAX_ACT_REPLY_CHARS)
         return clean?.takeIf { it.isNotBlank() }
     }
+
+    /**
+     * Le risposte finiscono in notifiche e chat che non mostrano il markdown, ma i modelli OpenAI con la
+     * ricerca web aggiungono comunque citazioni `([fonte](url))` e grassetti `**…**`, nonostante il prompt.
+     * Le citazioni si tolgono, il grassetto diventa testo semplice, un link markdown rimasto diventa
+     * `testo (url)`: l'indirizzo resta leggibile. Gli asterischi singoli non si toccano.
+     */
+    internal fun plainText(text: String): String = text
+        .replace(MARKDOWN_CITATION, "")
+        .replace(BOLD_STARS, "$1")
+        .replace(BOLD_UNDERSCORES, "$1")
+        .replace(MARKDOWN_LINK, "$1 ($2)")
+        .replace(REPEATED_SPACES, " ")
+
+    private val MARKDOWN_CITATION = Regex("""[ \t]*\(\[[^\]\n]{1,120}]\(https?://[^\s)]+\)\)""")
+    private val BOLD_STARS = Regex("""\*\*(\S(?:[^\n]*?\S)?)\*\*""")
+    private val BOLD_UNDERSCORES = Regex("""__(\S(?:[^\n]*?\S)?)__""")
+    private val MARKDOWN_LINK = Regex("""\[([^\]\n]{1,200})]\((https?://[^\s)]+)\)""")
+    private val REPEATED_SPACES = Regex("""[ \t]{2,}""")
 
     /** Esito dell'estrazione del testo di una risposta act (S5). */
     sealed interface ReplyExtraction {
@@ -459,8 +479,12 @@ BINDING RULES:
    writes"), use X's alias when X is whitelisted; otherwise match the sender by display name in "sender"
    (the app warns that names can be spoofed) instead of refusing. Never put a phone number or a display
    name in conversationId.
-4. For "here" use a geofence with resolveCurrentLocation=true and do not invent coordinates.
+4. For "here" use a geofence with resolveCurrentLocation=true and do not invent coordinates. This works
+   even when state.location_available is false: Argus resolves the position on the phone at arming.
 5. If a required piece of data is missing or the request is ambiguous, ask a short question and return draft null.
+   Do NOT ask about details that have a sensible default; use them: vibrate durationMs 1000, set_dnd
+   mode "PRIORITY", geofence radiusM 150. Ask only for what cannot be defaulted (who, which app,
+   which place, when, which text).
    BUT if a requested value EXCEEDS a schema limit (e.g. while maxIterations>1000, wait or
    delayBetweenMs>1h/3600000ms, a one-shot afterMs>7d/604800000ms, or a worst-case time budget>6h),
    do NOT ask a generic clarification: reply stating the EXACT limit that was crossed and return
