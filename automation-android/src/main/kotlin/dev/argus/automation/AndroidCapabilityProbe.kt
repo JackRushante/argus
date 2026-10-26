@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.location.LocationManager
 import android.os.Build
 import android.os.PowerManager
+import android.provider.Settings
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.core.location.LocationManagerCompat
@@ -66,6 +67,11 @@ internal data class AndroidCapabilityState(
      * tutti i permessi concessi.
      */
     val locationEnabled: Boolean = true,
+    /**
+     * 0.4.1: permesso speciale «Modifica impostazioni di sistema» (`Settings.System.canWrite`). Abilita
+     * luminosità e rotazione dello schermo senza Shizuku.
+     */
+    val writeSettingsGranted: Boolean = false,
 ) {
     /** Permessi di posizione precisi, in primo piano e in background. */
     val locationGranted: Boolean get() = foregroundLocationGranted && backgroundLocationGranted
@@ -133,6 +139,7 @@ internal class SystemAndroidCapabilityStateSource(
             appContext.getSystemService(LocationManager::class.java)
                 ?.let(LocationManagerCompat::isLocationEnabled)
         }.getOrNull() ?: true,
+        writeSettingsGranted = runCatching { Settings.System.canWrite(appContext) }.getOrDefault(false),
     )
 
     private fun granted(permission: String): Boolean =
@@ -163,6 +170,9 @@ enum class BlockCause {
     DND_ACCESS,
     AI_NOT_READY,
     SENSOR_UNAVAILABLE,
+
+    /** 0.4.1: manca «Modifica impostazioni di sistema» (luminosità, rotazione). */
+    WRITE_SETTINGS_ACCESS,
     OTHER,
 }
 
@@ -288,6 +298,7 @@ class AndroidCapabilityProbe internal constructor(
             if (baseTierActive && !state.dndPolicyGranted) BlockCause.DND_ACCESS
             else shizukuCause(state.shizukuStatus)
         capability in BASE_LAUNCH_CAPABILITIES -> shizukuCause(state.shizukuStatus)
+        capability in WRITE_SETTINGS_CAPABILITIES -> BlockCause.WRITE_SETTINGS_ACCESS
         capability == CapabilityIds.TRIGGER_GEOFENCE ||
             capability == CapabilityIds.TRIGGER_CONNECTIVITY_WIFI_IDENTITY ->
             if (state.locationGranted && !state.locationEnabled) BlockCause.LOCATION_OFF
@@ -374,6 +385,11 @@ class AndroidCapabilityProbe internal constructor(
             // runtime pubblicabile. Sempre disponibili come la clipboard (la gate DND del volume a 0
             // è un fallimento tipizzato a runtime, non un gate di pubblicazione).
             addAll(BASE_MANAGER_CAPABILITIES)
+            // 0.4.1: lettura ad alta voce, tasti multimediali e chiamata HTTP: nessun permesso da
+            // concedere (TextToSpeech, AudioManager, rete). Luminosità e rotazione solo col permesso
+            // speciale «Modifica impostazioni di sistema».
+            addAll(BASE_ACTIONS_041_CAPABILITIES)
+            if (state.writeSettingsGranted) addAll(WRITE_SETTINGS_CAPABILITIES)
             if (state.notificationsGranted) add(ActionCapabilities.SHOW_NOTIFICATION)
             // CapabilityRequirements persiste anche i raw tool approvati: il set del fire-time
             // deve contenere gli stessi nomi wire, senza alias con le capability typed.
@@ -426,6 +442,8 @@ class AndroidCapabilityProbe internal constructor(
             add(ActionTypeIds.COPY_TEXT)
             addAll(BASE_ALARM_ACTION_TYPES)
             addAll(BASE_MANAGER_ACTION_TYPES)
+            addAll(BASE_ACTIONS_041_TYPES)
+            if (state.writeSettingsGranted) addAll(WRITE_SETTINGS_ACTION_TYPES)
             if (shizukuAvailable) {
                 addAll(PRIVILEGED_ACTION_TYPES)
             }
@@ -454,6 +472,9 @@ class AndroidCapabilityProbe internal constructor(
             if (!dndBase) BASE_DND_ACTION_TYPES.forEach {
                 unavailableTools[it] = if (baseTierActive) REASON_DND_POLICY else reason
             }
+        }
+        if (!state.writeSettingsGranted) {
+            WRITE_SETTINGS_ACTION_TYPES.forEach { unavailableTools[it] = REASON_WRITE_SETTINGS }
         }
         if (!state.notificationsGranted) {
             unavailableTools[ActionTypeIds.SHOW_NOTIFICATION] = "notification permission missing"
@@ -502,6 +523,7 @@ class AndroidCapabilityProbe internal constructor(
         if (state.readCallLogGranted) add("read_call_log")
         if (state.bluetoothConnectGranted) add("bluetooth_connect")
         if (state.activityRecognitionGranted) add("activity_recognition")
+        if (state.writeSettingsGranted) add("write_settings")
     }
 
     /** Capability `state.<chiave>` leggibili ORA senza Shizuku (tutte, tranne il Bluetooth senza permesso). */
@@ -561,6 +583,26 @@ class AndroidCapabilityProbe internal constructor(
             TOOL_APP_LAUNCH,
         )
         const val REASON_DND_POLICY = "Do Not Disturb access not granted"
+
+        /** Motivo (in inglese, va al modello) per luminosità e rotazione senza il permesso speciale. */
+        const val REASON_WRITE_SETTINGS = "modify system settings access not granted"
+
+        /** 0.4.1, sempre disponibili: parlato, tasti multimediali, HTTP (nessun grant da pubblicare). */
+        val BASE_ACTIONS_041_TYPES = setOf(
+            ActionTypeIds.SPEAK,
+            ActionTypeIds.MEDIA_CONTROL,
+            ActionTypeIds.HTTP_REQUEST,
+        )
+        val BASE_ACTIONS_041_CAPABILITIES = setOf(
+            ActionCapabilities.SPEAK,
+            ActionCapabilities.MEDIA_CONTROL,
+            ActionCapabilities.HTTP_REQUEST,
+        )
+
+        /** 0.4.1, solo col permesso «Modifica impostazioni di sistema» (`WRITE_SETTINGS`). */
+        val WRITE_SETTINGS_ACTION_TYPES = setOf(ActionTypeIds.SET_BRIGHTNESS, ActionTypeIds.SET_ROTATION)
+        val WRITE_SETTINGS_CAPABILITIES =
+            setOf(ActionCapabilities.SET_BRIGHTNESS, ActionCapabilities.SET_ROTATION)
 
         /** Azioni che richiedono davvero lo shell Shizuku: toggle radio, shell e write_setting. */
         val PRIVILEGED_ACTION_TYPES = setOf(

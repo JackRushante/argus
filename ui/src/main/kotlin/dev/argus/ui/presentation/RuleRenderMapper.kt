@@ -818,6 +818,12 @@ object RuleRenderMapper {
             ),
             isGenerative = a.tier == ActionTier.GENERATIVE,
         )
+        // 0.4.1 (azioni): resa in ActionRows041.
+        is Action.Speak -> ActionRows041.speak(a, l)
+        is Action.MediaControl -> ActionRows041.mediaControl(a, l)
+        is Action.SetBrightness -> ActionRows041.setBrightness(a, l)
+        is Action.SetRotation -> ActionRows041.setRotation(a, l)
+        is Action.HttpRequest -> ActionRows041.httpRequest(a, l)
     }
 
     private fun row(

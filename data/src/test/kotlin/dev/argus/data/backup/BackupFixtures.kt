@@ -9,7 +9,9 @@ import dev.argus.engine.model.ConfidentialityLabel
 import dev.argus.engine.model.ConnMedium
 import dev.argus.engine.model.ConnState
 import dev.argus.engine.model.DndMode
+import dev.argus.engine.model.HttpMethod
 import dev.argus.engine.model.IntegrityLabel
+import dev.argus.engine.model.MediaCommand
 import dev.argus.engine.model.NightMode
 import dev.argus.engine.model.PhoneEvent
 import dev.argus.engine.model.SensorKind
@@ -87,6 +89,14 @@ internal object BackupFixtures {
         Action.Vibrate(200),
         Action.WriteSetting(SettingNamespace.SYSTEM, "screen_brightness", "100"),
         Action.Wait(500),
+        // 0.4.1 (azioni). L'http_request SENZA intestazioni: con le intestazioni l'esportazione senza
+        // dati personali ne svuota i valori (v. PersonalDataStripperHttp041Test).
+        Action.Speak("ciao"),
+        Action.MediaControl(MediaCommand.PLAY_PAUSE),
+        Action.SetBrightness(level = 40),
+        Action.SetBrightness(auto = true),
+        Action.SetRotation(auto = false),
+        Action.HttpRequest(HttpMethod.POST, "https://example.org/hook", body = "{}", contentType = "application/json"),
         Action.InvokeLlm(
             goal = "rispondi",
             contextSources = listOf("notification"),

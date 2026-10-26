@@ -27,7 +27,7 @@ import java.time.ZoneId
  * [AndroidCapabilityProbe] (stesso codice dell'app) alimentato da uno stato Android fittizio, quindi
  * tool, trigger, capability e motivi di indisponibilita' sono quelli che l'app pubblica davvero.
  *
- * - `full`: Shizuku autorizzato, tutti i permessi, accesso notifiche e DND, posizione accesa; l'unico
+ * - `full`: Shizuku autorizzato, tutti i permessi, accesso notifiche, DND e impostazioni di sistema, posizione accesa; l'unico
  *   sensore armabile e' il movimento significativo, come sul telefono (e' l'unico con un backend).
  * - `no_shizuku`: stesso telefono senza Shizuku installato; restano le azioni del tier base.
  */
@@ -156,6 +156,7 @@ internal class BenchWorld private constructor(
             activityRecognitionGranted = true,
             dndPolicyGranted = true,
             locationEnabled = true,
+            writeSettingsGranted = true,
         )
 
         private val NO_SHIZUKU_STATE = FULL_STATE.copy(

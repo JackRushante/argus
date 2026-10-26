@@ -13,7 +13,9 @@ import dev.argus.engine.model.ConnState
 import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.DndMode
 import dev.argus.engine.model.GenerativeDeliverMode
+import dev.argus.engine.model.HttpMethod
 import dev.argus.engine.model.IntegrityLabel
+import dev.argus.engine.model.MediaCommand
 import dev.argus.engine.model.NightMode
 import dev.argus.engine.model.PhoneEvent
 import dev.argus.engine.model.SensorKind
@@ -677,6 +679,41 @@ class RuleRenderCoverageTest {
                         maxIterationsVar = "xyz_iter",
                     ),
                     "maxIterationsVar" to ms("xyz_iter"),
+                ),
+            ),
+            // --- 0.4.1 (azioni) ---
+            "speak" to case(Action.Speak("XYZ-speak"), mapOf("text" to ms("XYZ-speak"))),
+            "media_control" to case(
+                Action.MediaControl(MediaCommand.PREVIOUS),
+                mapOf("command" to ms(m("previous track", "traccia precedente"))),
+            ),
+            "set_brightness" to case(
+                v(Action.SetBrightness(level = 37), "level" to ms("37%"), "auto" to none),
+                v(
+                    Action.SetBrightness(auto = true),
+                    "level" to none,
+                    "auto" to ms(m("automatic", "automatica")),
+                ),
+            ),
+            "set_rotation" to case(
+                v(Action.SetRotation(true), "auto" to ms(m("on", "attiva"))),
+                v(Action.SetRotation(false), "auto" to ms(m("off", "disattivata"))),
+            ),
+            "http_request" to case(
+                Action.HttpRequest(
+                    method = HttpMethod.PUT,
+                    url = "https://xyz.example.org/XYZ-path?q=1",
+                    headers = mapOf("X-XYZ-Key" to "secret-value-XYZ-wxyz", "X-XYZ-Plain" to "XYZ-plain-value"),
+                    body = "XYZ-body",
+                    contentType = "application/xyz",
+                ),
+                mapOf(
+                    "method" to ms("PUT"),
+                    "url" to ms("https://xyz.example.org/XYZ-path?q=1"),
+                    // Il valore di un'intestazione segreta compare mascherato, mai per intero.
+                    "headers" to ms("X-XYZ-Key: ••••wxyz", "X-XYZ-Plain: XYZ-plain-value"),
+                    "body" to ms(m("Body: XYZ-body", "Corpo: XYZ-body")),
+                    "contentType" to ms("Content-Type: application/xyz"),
                 ),
             ),
         )

@@ -661,7 +661,8 @@ Action, discriminated by "type":
   // media dispatch play|pause; wm size; cmd statusbar expand-notifications.
   // NOTE: the flashlight is the set_flashlight action (there is NO `cmd flashlight`); radio toggles
   // are set_wifi/set_bluetooth/set_mobile_data; the theme is set_dark_mode; brightness is
-  // write_setting screen_brightness. Never invent cmd/svc subcommands that do not exist.
+  // set_brightness (write_setting screen_brightness only if set_brightness is not available); media
+  // keys are media_control. Never invent cmd/svc subcommands that do not exist.
 - {"type":"copy_to_clipboard", "extractionRegex":string|null (deterministic regex: copies the
    first capture group — or the whole match — from the trigger SMS/notification text; null = full
    text; for OTPs use "(?:^|[^+0-9])([0-9]{4,8})(?:[^0-9]|${'$'})")}
@@ -708,6 +709,22 @@ Action, discriminated by "type":
    "replyTargetSender":true, "timeoutMs":integer}
    // v1-flat ONLY: never use invoke_llm_v2 in a draft with vars, captureAs, if/while/wait or any
    // other P4 construct. Use invoke_llm for a generative action inside a P4 program.
+- {"type":"speak", "text":string}  // reads the text aloud with the phone's text-to-speech; max 1000
+   // characters; ${'$'}{var} interpolation allowed, also with external data (SMS, notifications)
+- {"type":"media_control", "command":"PLAY"|"PAUSE"|"PLAY_PAUSE"|"NEXT"|"PREVIOUS"}  // media key sent
+   // to the active player (music, podcast, video)
+- {"type":"set_brightness", "level":integer 0-100 | "auto":boolean}  // EXACTLY ONE of the two: level is a
+   // PERCENTAGE (and switches to manual brightness), auto true/false turns automatic brightness on/off.
+   // Prefer it over write_setting screen_brightness. Needs the "Modify system settings" access: it is
+   // in available_tools only when that access is granted
+- {"type":"set_rotation", "auto":boolean}  // auto-rotate on/off; same access and availability as set_brightness
+- {"type":"http_request", "method":"GET"|"POST"|"PUT"|"DELETE", "url":string,
+   "headers":{string:string}|null, "body":string|null, "contentType":string|null}
+   // calls a web address. Use it ONLY with a URL the user gave you: never invent or guess one. url and
+   // headers are LITERAL (never ${'$'}{var}); https only (http only for localhost); at most 10 headers;
+   // body max 16 KB, none on GET. Variables, also external data, go ONLY in body; with contentType
+   // "application/json" put them inside a quoted JSON string, e.g. "body":"{\"text\":\"${'$'}{sms}\"}".
+   // A key or token the user dictates goes in a header exactly as dictated
 
 Schema v2 (P4) — OPTIONAL Tasker-class program. A draft stays v1 (flat: trigger + conditions +
 actions, described above and UNCHANGED) unless it uses one of the P4 constructs below. Emit P4 only

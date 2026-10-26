@@ -26,7 +26,7 @@ enum class HttpMethod { GET, POST, PUT, DELETE }
 
 /** Serializer di un enum chiuso: scrive il nome, legge il nome senza badare alle maiuscole. */
 abstract class CaseInsensitiveEnumSerializer<E : Enum<E>>(
-    serialName: String,
+    private val serialName: String,
     private val values: Array<E>,
 ) : KSerializer<E> {
     override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor(serialName, PrimitiveKind.STRING)
@@ -39,7 +39,7 @@ abstract class CaseInsensitiveEnumSerializer<E : Enum<E>>(
         val raw = decoder.decodeString()
         val wanted = raw.trim().uppercase(Locale.ROOT)
         return values.firstOrNull { it.name == wanted }
-            ?: throw IllegalArgumentException("${descriptor.serialName} non valido: $raw")
+            ?: throw IllegalArgumentException("$serialName non valido: $raw")
     }
 }
 

@@ -576,6 +576,60 @@ object ValidationMessages {
             "Another active rule sets dark mode to a different value on triggers that may overlap.",
             "Un'altra regola attiva imposta la modalità scura su un valore diverso con trigger che possono sovrapporsi.",
         ),
+
+        // --- 0.4.1 · azioni senza Shizuku e richiesta HTTP --------------------------------------
+        "speak_text_invalid" to t(
+            "The text to read aloud is required and can have up to 1,000 characters.",
+            "Il testo da leggere ad alta voce è obbligatorio e lungo al massimo 1.000 caratteri.",
+        ),
+        "brightness_spec" to t(
+            "Brightness needs exactly one of: a level or automatic.",
+            "La luminosità richiede esattamente uno tra livello e automatica.",
+        ),
+        "brightness_level_invalid" to t(
+            "The brightness level must be between 0 and 100.",
+            "Il livello di luminosità deve essere tra 0 e 100.",
+        ),
+        "http_url_invalid" to t(
+            "The request address must start with https:// (http:// is allowed only for localhost) and cannot contain a user name or password.",
+            "L'indirizzo della richiesta deve iniziare con https:// (http:// è ammesso solo per localhost) e non può contenere nome utente o password.",
+        ),
+        "http_url_interpolated" to t(
+            "The request address is fixed: it cannot contain a \${variable}.",
+            "L'indirizzo della richiesta è fisso: non può contenere una \${variabile}.",
+        ),
+        "http_headers_too_many" to t(
+            "A request can have at most 10 headers.",
+            "Una richiesta può avere al massimo 10 intestazioni.",
+        ),
+        "http_header_interpolated" to t(
+            "Headers are fixed: they cannot contain a \${variable}.",
+            "Le intestazioni sono fisse: non possono contenere una \${variabile}.",
+        ),
+        "http_header_invalid" to t(
+            "A header is not valid: check its name and value (not empty, no line breaks, no duplicates; Host, Content-Length, Transfer-Encoding and Connection are not allowed).",
+            "Un'intestazione non è valida: controlla nome e valore (non vuoto, senza a capo, senza duplicati; Host, Content-Length, Transfer-Encoding e Connection non sono ammessi).",
+        ),
+        "http_content_type_invalid" to t(
+            "The content type is not valid or differs from the Content-Type header.",
+            "Il content type non è valido o è diverso dall'intestazione Content-Type.",
+        ),
+        "http_body_not_allowed" to t(
+            "A GET request cannot have a body.",
+            "Una richiesta GET non può avere un body.",
+        ),
+        "http_body_too_large" to t(
+            "The body is larger than 16 KB.",
+            "Il body supera i 16 KB.",
+        ),
+        "http_body_secret_disclosure" to t(
+            "A secret variable will be sent to the address of the HTTP request.",
+            "Una variabile segreta verrà inviata all'indirizzo della richiesta HTTP.",
+        ),
+        "interpolation_json_context" to t(
+            "External data sits in the JSON body outside a quoted string: the action would be blocked when it runs.",
+            "Un dato esterno è nel body JSON fuori da una stringa tra virgolette: l'azione verrebbe bloccata all'esecuzione.",
+        ),
     )
 
     /** Tutti i codici con testo dedicato (usato dal test di copertura). */
