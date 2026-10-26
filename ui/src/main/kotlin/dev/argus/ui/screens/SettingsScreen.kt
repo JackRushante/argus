@@ -73,6 +73,7 @@ import dev.argus.ui.model.TransportUi
 import dev.argus.ui.components.BridgeConfigurationDialog
 import dev.argus.ui.components.BudgetLimitsDialog
 import dev.argus.ui.components.ProviderConfigurationDialog
+import dev.argus.ui.components.RulesBackupSection
 import dev.argus.ui.components.WarningBanner
 import dev.argus.engine.safety.Severity
 import dev.argus.ui.model.UiWarning
@@ -126,6 +127,13 @@ fun SettingsScreen(
                 PrivacySection(state.privacyAccepted) { confirmPrivacyRevoke = true }
                 WhitelistSection(state.whitelist, callbacks)
                 BudgetSection(state.budget, callbacks)
+                RulesBackupSection(
+                    state.backup,
+                    callbacks::onExportRules,
+                    callbacks::onImportRules,
+                    callbacks::onDismissBackupResult,
+                    callbacks::onOpenImportedRules,
+                )
                 RerunRow(callbacks::onRerunOnboarding)
                 VersionFooter(state.appVersionLabel)
                 Spacer(Modifier.size(8.dp))

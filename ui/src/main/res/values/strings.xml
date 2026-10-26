@@ -300,4 +300,18 @@
     <string name="onboarding_shizuku_not_required_sub">Always available, with or without Shizuku.</string>
     <string name="onboarding_brain_unverified">Connection not verified yet: you can check it from System.</string>
     <string name="onboarding_battery_consequence">Without the exemption, Android or manufacturer power management may delay background work. Alarms stay event-driven and don\'t use a persistent service.</string>
+
+    <!-- Rules backup (0.4.0, F1) -->
+    <string name="backup_section">RULES BACKUP</string>
+    <string name="backup_body">Save your rules to a file, or bring them to another phone. Android's own backup stays off, for your privacy.</string>
+    <string name="backup_strip_label">Remove locations and contacts (for sharing)</string>
+    <string name="backup_strip_hint">Coordinates, conversation IDs, sender names and phone numbers are taken out, and geofences ask for the current location when armed. Text filters stay: read the file before sharing it.</string>
+    <string name="backup_export">Export</string>
+    <string name="backup_import">Import</string>
+    <string name="backup_import_hint">Imported rules arrive as drafts to approve: none is armed on its own.</string>
+    <string name="backup_export_none">No rules to export yet.</string>
+    <string name="backup_working_export">Exporting…</string>
+    <string name="backup_working_import">Importing…</string>
+    <string name="backup_open_rules">See the rules</string>
+    <string name="backup_dismiss">Close</string>
 </resources>

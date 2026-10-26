@@ -299,4 +299,18 @@
     <string name="onboarding_shizuku_not_required_sub">Sempre disponibili, con o senza Shizuku.</string>
     <string name="onboarding_brain_unverified">Connessione non ancora verificata: potrai controllarla da Sistema.</string>
     <string name="onboarding_battery_consequence">Senza l\'esclusione, Android o la gestione energetica del produttore può ritardare il lavoro in background. Gli allarmi restano event-driven e non usano un servizio persistente.</string>
+
+    <!-- Backup delle regole (0.4.0, F1) -->
+    <string name="backup_section">BACKUP DELLE REGOLE</string>
+    <string name="backup_body">Salva le regole in un file o portale su un altro telefono. Il backup di Android resta disattivato, per la tua privacy.</string>
+    <string name="backup_strip_label">Togli posizioni e contatti (per condividere)</string>
+    <string name="backup_strip_hint">Coordinate, ID delle conversazioni, nomi dei mittenti e numeri di telefono vengono tolti, e i geofence chiedono la posizione corrente quando li armi. I filtri sul testo restano: rileggi il file prima di condividerlo.</string>
+    <string name="backup_export">Esporta</string>
+    <string name="backup_import">Importa</string>
+    <string name="backup_import_hint">Le regole importate arrivano come bozze da approvare: nessuna si arma da sola.</string>
+    <string name="backup_export_none">Non ci sono ancora regole da esportare.</string>
+    <string name="backup_working_export">Esportazione in corso…</string>
+    <string name="backup_working_import">Importazione in corso…</string>
+    <string name="backup_open_rules">Vedi le regole</string>
+    <string name="backup_dismiss">Chiudi</string>
 </resources>
