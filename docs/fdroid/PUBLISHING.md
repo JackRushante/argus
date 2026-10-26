@@ -30,13 +30,13 @@ URL cannot be built yet.
 |---|---|
 | applicationId | `dev.argus` |
 | metadata file | `metadata/dev.argus.yml` |
-| version | `0.3.6` / base versionCode `13` (ABI split → 1301/1302/1303/1304) |
-| tag (v-prefixed) | `v0.3.6` |
-| build commit (full hash) | `e23575279de1c75ddd0f40941ab82190cef439b0` |
+| version | `0.3.7` / base versionCode `14` (ABI split → 1401/1402/1403/1404) |
+| tag (v-prefixed) | `v0.3.7` |
+| build commit (full hash) | `eccbf57d98eb9ea42366cb5515b1e98beedca0e9` |
 | signing cert SHA-256 | `4c09633e64cf9876b0da682f5f259383af8d22742aadd93ef273b9f2c73cca6b` |
-| F-Droid release assets | `argus-1301.apk` … `argus-1304.apk` (pattern `argus-%c.apk`) |
-| artifact SHA-256 | `1301`: `3279e643926e93816d9a18ae75f859d4c55a0c8bf8417f046244819ed1f1af7a`; `1302`: `8ad40d2a2a836bf32bfd9858b850f05d9426d3e24ab0250c910f8667446089c5`; `1303`: `c4820cf57504f87d5e2ac089028103e01b0c822ec7b9ac6646f73b3a27bada5d`; `1304`: `2c3c38c1dff4bb54273a8235f7563e0248c1ef0643b733c1a7455079bd311c75` |
-| direct-download asset | none for v0.3.6; use the matching per-ABI APK (`argus-1302.apk` for arm64-v8a) |
+| F-Droid release assets | `argus-1401.apk` … `argus-1404.apk` (pattern `argus-%c.apk`) |
+| artifact SHA-256 | `1401`: `7054268525894ed639efb82d83e02c5527fec117db2a4e4441e068c1e8fef185`; `1402`: `1457f836d4cd1d9d1bc02cb2290e23a298b5499a7bea202194a015c67509c438`; `1403`: `b39ea022772d68df47b8c15a98e989330919ea471f284448d784cf84a5cf31dd`; `1404`: `93a14e25d071be66cd1838fb26a47313e53b02ada9ed8d27f38becf032a34dfe` |
+| direct-download asset | none for v0.3.7; use the matching per-ABI APK (`argus-1402.apk` for arm64-v8a) |
 | License (SPDX) | `GPL-3.0-only` |
 
 ### Reproducibility: baseline profile dropped (v0.2.4)
@@ -66,7 +66,7 @@ ABI. Mechanics:
 
 - `app/build.gradle.kts`: `splits.abi { isUniversalApk = false; include(...) }`, and
   a per-output `versionCode = 100 * base + {armeabi-v7a:1, arm64-v8a:2, x86:3, x86_64:4}`
-  → for the current base code 12: 1201/1202/1203/1204. A `-PargusAbi=<abi>` property restricts the build
+  → for the current base code 14: 1401/1402/1403/1404. A `-PargusAbi=<abi>` property restricts the build
   to a single split so F-Droid can build each ABI as its own build block byte-for-byte.
 - Recipe: **one `Builds:` block per ABI** (for v0.3.5: versionCode 1201-1204, each with
   `gradleprops: [argusAbi=<abi>]`), plus top-level `VercodeOperation: [100*%c+n]` so
@@ -156,7 +156,12 @@ F-Droid — it does not go in the recipe.
    `fdroid lint dev.argus`; fix everything they report.
 4. Branch name: `dev.argus`. Push with the MR push-option to open the MR against
    `fdroid/fdroiddata`.
-5. **Clean up failed pipelines** — keep only the green run; leftover red pipelines
+5. **Rebasing without a local clone.** If upstream has moved on (for example the bot already published a
+   version the MR also adds), the MR branch can be rewritten in one GitLab API call:
+   `POST /projects/<fork id>/repository/commits` with `start_project=36528`, `start_sha=<upstream master>`,
+   `force=true` and an `update` action carrying the whole `metadata/dev.argus.yml`. The result is a single
+   commit on top of upstream `master`. It is a force-push of the MR branch: do it only when it is agreed.
+6. **Clean up failed pipelines** — keep only the green run; leftover red pipelines
    from force-pushes confuse the review.
 
 ### Pipeline jobs (what each one checks)
