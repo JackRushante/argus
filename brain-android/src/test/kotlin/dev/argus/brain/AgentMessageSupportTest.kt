@@ -536,4 +536,41 @@ class AgentMessageSupportTest {
         )
         assertFalse("Message received" in withState)
     }
+    @Test
+    fun `compile rules give defaults instead of asking and accept here without a location`() {
+        val system = AgentMessageSupport.compileSystemText().lines().joinToString(" ") { it.trim() }
+
+        // GPT-6 Luna chiedeva la durata della vibrazione, la modalita' del Non disturbare e il raggio.
+        // L'eccezione vale SOLO per questi tre: con una regola generica DeepSeek metteva da solo la
+        // luminosita' al 50% invece di chiedere il livello.
+        assertTrue(
+            "Exception, for exactly these three details: do not ask, use the default (vibrate durationMs 1000, " +
+                "set_dnd mode \"PRIORITY\", geofence radiusM 150). Any other missing value (a level, a time, a person, " +
+                "an app, a place, a text) still needs a short question." in system,
+        )
+        // E rifiutava «qui» perche' il contesto dice location_available=false.
+        assertTrue(
+            "Set resolveCurrentLocation=true even when state.location_available is false: Argus resolves the " +
+                "position on the phone at arming." in system,
+        )
+    }
+
+    @Test
+    fun `generated replies drop markdown citations and bold but keep plain text and addresses`() {
+        assertEquals(
+            "Un Bitcoin vale attualmente circa 71.700 euro.",
+            AgentMessageSupport.cleanReply(
+                "Un Bitcoin vale attualmente circa **71.700 euro**. " +
+                    "([google.com](https://www.google.com/finance/quote/BTC-EUR?utm_source=openai))",
+            ),
+        )
+        assertEquals(
+            "Read the guide (https://example.org/g) now",
+            AgentMessageSupport.cleanReply("Read [the guide](https://example.org/g) now"),
+        )
+        assertEquals("Gold is up today", AgentMessageSupport.cleanReply("Gold is __up__ today"))
+        // Testo semplice, asterischi singoli e indirizzi nudi restano come sono.
+        assertEquals("Battery at 73%: all good, a*b*c.", AgentMessageSupport.cleanReply("Battery at 73%: all good, a*b*c."))
+        assertEquals("See https://example.org", AgentMessageSupport.cleanReply("See https://example.org"))
+    }
 }
