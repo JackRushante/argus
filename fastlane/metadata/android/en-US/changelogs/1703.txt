@@ -1,0 +1,1 @@
+Fixes the "phone unlocked" trigger, which never fired. Also new since 0.4.0: triggers without Shizuku (screen, battery level, headphones, Do Not Disturb or ringer, media, missed calls), sunrise and sunset, read aloud, media keys, brightness and rotation, HTTP requests, manual rules from a button, shortcut, tile or widget, and a switch that pauses every rule.
