@@ -16,7 +16,7 @@ class ShizukuPrivilegedShell(
     context: Context,
     private val gateway: ShizukuGateway,
     scope: CoroutineScope,
-) : PrivilegedShell, AutoCloseable {
+) : PrivilegedShell, ShizukuIdentityProbe, AutoCloseable {
     private val transport = ShizukuUserServiceTransport(
         binder = AndroidUserServiceBinder(
             context.applicationContext,
@@ -49,6 +49,10 @@ class ShizukuPrivilegedShell(
         maxOutputBytes,
         executionId,
     )
+
+    override suspend fun probe(): ShizukuIdentity? = withContext(Dispatchers.IO) {
+        transport.probeIdentity()
+    }
 
     override fun close() {
         queue.close()
@@ -116,6 +120,24 @@ internal class ShizukuUserServiceTransport(
             truncated = bundle.getBoolean(PrivilegedShellUserService.KEY_TRUNCATED, false),
             errorCode = bundle.getString(PrivilegedShellUserService.KEY_ERROR_CODE),
         )
+    }
+
+    /**
+     * Collega il servizio se serve (stesso percorso dei comandi: [connectedService], circuito di
+     * blocco compreso) e restituisce l'identità con cui gira. Con Shizuku non autorizzato non
+     * tenta il collegamento. Qualsiasi fallimento, [ShizukuShellException] compresa, è `null`;
+     * solo la cancellazione passa.
+     */
+    internal suspend fun probeIdentity(): ShizukuIdentity? {
+        if (gateway.status() != ShizukuGatewayStatus.AUTHORIZED) return null
+        return try {
+            connectedService()
+            gateway.observeIdentity().value
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            null
+        }
     }
 
     internal suspend fun connectedService(): IPrivilegedShellService = connectMutex.withLock {

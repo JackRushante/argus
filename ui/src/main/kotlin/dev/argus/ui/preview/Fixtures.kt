@@ -627,6 +627,12 @@ object Fixtures {
         providerChoices = providerChoices.map { it.copy(selected = it.id == "openrouter") },
     )
 
+    /** Shizuku avviato con root (uid 0): la riga dice che i comandi delle regole girano come root. */
+    val settingsShizukuRoot = settingsAllGreen.copy(shizukuRunsAsRoot = true)
+
+    /** Shizuku in esecuzione ma troppo vecchio: «aggiornalo», non «riavvialo». */
+    val settingsShizukuUnsupported = settingsAllGreen.copy(shizuku = ShizukuStatus.UNSUPPORTED)
+
     // -------------------------------------------------------------------------
     // Onboarding / permessi (§6.6) — copy Shizuku VERBATIM da §9.
     // -------------------------------------------------------------------------

@@ -163,9 +163,10 @@ import dev.argus.engine.safety.ApprovalWhitelistProvider
 import dev.argus.engine.safety.DraftRepository
 import dev.argus.engine.safety.DraftValidator
 import dev.argus.shizuku.PrivilegedShell
+import dev.argus.shizuku.ShizukuAccess
 import dev.argus.shizuku.ShizukuGateway
+import dev.argus.shizuku.ShizukuIdentityProbe
 import dev.argus.shizuku.ShizukuPrivilegedShell
-import dev.argus.ui.presentation.RenderLanguage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -182,9 +183,6 @@ annotation class ApplicationScope
 @Module
 @InstallIn(SingletonComponent::class)
 object ArgusModule {
-    @Provides
-    fun renderLanguage(): RenderLanguage = RenderLanguage.system()
-
     @Provides
     @Singleton
     fun renderLanguageSource(): RenderLanguageSource = RenderLanguageSource()
@@ -311,12 +309,18 @@ object ArgusModule {
     fun shizukuGateway(@ApplicationContext context: Context): ShizukuGateway = ShizukuGateway(context)
 
     @Provides
+    fun shizukuAccessBoundary(gateway: ShizukuGateway): ShizukuAccess = gateway
+
+    @Provides
     @Singleton
     fun privilegedShell(
         @ApplicationContext context: Context,
         gateway: ShizukuGateway,
         @ApplicationScope scope: CoroutineScope,
     ): ShizukuPrivilegedShell = ShizukuPrivilegedShell(context, gateway, scope)
+
+    @Provides
+    fun shizukuIdentityProbe(shell: ShizukuPrivilegedShell): ShizukuIdentityProbe = shell
 
     @Provides
     fun privilegedShellBoundary(shell: ShizukuPrivilegedShell): PrivilegedShell = shell

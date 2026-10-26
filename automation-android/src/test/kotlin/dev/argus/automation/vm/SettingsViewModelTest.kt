@@ -53,10 +53,17 @@ import dev.argus.engine.safety.DraftWriteResult
 import dev.argus.engine.safety.DraftArmResult
 import dev.argus.engine.safety.NewDraft
 import dev.argus.engine.safety.PendingDraft
+import dev.argus.shizuku.ShizukuAccess
 import dev.argus.shizuku.ShizukuGateway
+import dev.argus.shizuku.ShizukuGatewayStatus
+import dev.argus.shizuku.ShizukuIdentity
+import dev.argus.shizuku.ShizukuIdentityProbe
+import dev.argus.shizuku.ShizukuPermissionOutcome
 import dev.argus.ui.model.AuthState
+import dev.argus.ui.model.ShizukuStatus
 import dev.argus.ui.model.TransportUi
 import dev.argus.ui.presentation.RenderLanguage
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -291,6 +298,231 @@ class SettingsViewModelTest {
         assertEquals(ReasoningEffort.LOW, store.saveCalls.last().reasoningEffort)
     }
 
+
+    // ------------------------------------------------------------------ 0.3.6 F: Shizuku nell'interfaccia
+
+    @Test
+    fun `an outdated Shizuku is shown as too old, not as stopped`() = runTest(dispatcher) {
+        val shizuku = FakeShizukuAccess(ShizukuGatewayStatus.UNSUPPORTED)
+        val vm = settingsViewModel(FakeProviderStore(), shizuku = shizuku)
+        observe(vm)
+        advanceUntilIdle()
+
+        assertEquals(ShizukuStatus.UNSUPPORTED, vm.state.value.shizuku)
+    }
+
+    @Test
+    fun `a permission request that times out says it is waiting, then the state follows the late answer`() =
+        runTest(dispatcher) {
+            val shizuku = FakeShizukuAccess(
+                ShizukuGatewayStatus.RUNNING_NOT_AUTHORIZED,
+                outcome = ShizukuPermissionOutcome.AWAITING_USER,
+            )
+            val vm = settingsViewModel(FakeProviderStore(), shizuku = shizuku)
+            observe(vm)
+            val messages = collectMessages(vm)
+            advanceUntilIdle()
+            assertEquals(ShizukuStatus.RUNNING_NOT_AUTHORIZED, vm.state.value.shizuku)
+
+            vm.requestShizukuPermission()
+            advanceUntilIdle()
+
+            assertEquals(listOf("In attesa della tua risposta in Shizuku"), messages)
+            assertEquals(ShizukuStatus.RUNNING_NOT_AUTHORIZED, vm.state.value.shizuku)
+
+            // L'utente risponde nella finestra di Shizuku dopo il timeout: nessun refresh() manuale.
+            shizuku.setStatus(ShizukuGatewayStatus.AUTHORIZED)
+            advanceUntilIdle()
+
+            assertEquals(ShizukuStatus.AUTHORIZED, vm.state.value.shizuku)
+        }
+
+    @Test
+    fun `the waiting message follows the language`() = runTest(dispatcher) {
+        val shizuku = FakeShizukuAccess(
+            ShizukuGatewayStatus.RUNNING_NOT_AUTHORIZED,
+            outcome = ShizukuPermissionOutcome.AWAITING_USER,
+        )
+        val vm = settingsViewModel(FakeProviderStore(), language = RenderLanguage.EN, shizuku = shizuku)
+        observe(vm)
+        val messages = collectMessages(vm)
+        advanceUntilIdle()
+
+        vm.requestShizukuPermission()
+        advanceUntilIdle()
+
+        assertEquals(listOf("Waiting for your answer in Shizuku"), messages)
+    }
+
+    @Test
+    fun `the other permission outcomes keep their messages`() = runTest(dispatcher) {
+        val expected = mapOf(
+            ShizukuPermissionOutcome.GRANTED to "Autorizzazione Shizuku concessa.",
+            ShizukuPermissionOutcome.DENIED to "Autorizzazione Shizuku negata.",
+            ShizukuPermissionOutcome.RATIONALE_REQUIRED to
+                "Premi di nuovo Correggi per confermare la richiesta Shizuku.",
+            ShizukuPermissionOutcome.UNAVAILABLE to "Shizuku non è disponibile.",
+        )
+        expected.forEach { (outcome, text) ->
+            val shizuku = FakeShizukuAccess(ShizukuGatewayStatus.RUNNING_NOT_AUTHORIZED, outcome = outcome)
+            val vm = settingsViewModel(FakeProviderStore(), shizuku = shizuku)
+            observe(vm)
+            val messages = collectMessages(vm)
+            advanceUntilIdle()
+
+            vm.requestShizukuPermission()
+            advanceUntilIdle()
+
+            assertEquals(listOf(text), messages, outcome.name)
+        }
+    }
+
+    @Test
+    fun `after a rationale the next request confirms it`() = runTest(dispatcher) {
+        val shizuku = FakeShizukuAccess(
+            ShizukuGatewayStatus.RUNNING_NOT_AUTHORIZED,
+            outcome = ShizukuPermissionOutcome.RATIONALE_REQUIRED,
+        )
+        val vm = settingsViewModel(FakeProviderStore(), shizuku = shizuku)
+        observe(vm)
+        advanceUntilIdle()
+
+        vm.requestShizukuPermission()
+        advanceUntilIdle()
+        vm.requestShizukuPermission()
+        advanceUntilIdle()
+
+        assertEquals(listOf(false, true), shizuku.rationaleRequests)
+    }
+
+    @Test
+    fun `the state says whether Shizuku runs as root once the identity is known`() = runTest(dispatcher) {
+        val shizuku = FakeShizukuAccess(ShizukuGatewayStatus.AUTHORIZED)
+        val vm = settingsViewModel(FakeProviderStore(), shizuku = shizuku)
+        observe(vm)
+        advanceUntilIdle()
+        assertNull(vm.state.value.shizukuRunsAsRoot)
+
+        shizuku.setIdentity(ShizukuIdentity(uid = 0))
+        advanceUntilIdle()
+        assertEquals(true, vm.state.value.shizukuRunsAsRoot)
+
+        shizuku.setIdentity(ShizukuIdentity(uid = 2000))
+        advanceUntilIdle()
+        assertEquals(false, vm.state.value.shizukuRunsAsRoot)
+
+        // Servizio scollegato: l'identità torna ignota, non resta l'ultima.
+        shizuku.setIdentity(null)
+        advanceUntilIdle()
+        assertNull(vm.state.value.shizukuRunsAsRoot)
+    }
+
+    @Test
+    fun `an authorized Shizuku with an unknown identity is probed exactly once`() = runTest(dispatcher) {
+        val shizuku = FakeShizukuAccess(ShizukuGatewayStatus.AUTHORIZED)
+        val probe = FakeShizukuIdentityProbe {
+            ShizukuIdentity(uid = 0).also { shizuku.setIdentity(it) }
+        }
+        val vm = settingsViewModel(FakeProviderStore(), shizuku = shizuku, identityProbe = probe)
+        observe(vm)
+        advanceUntilIdle()
+
+        vm.onSystemVisible()
+        advanceUntilIdle()
+
+        assertEquals(1, probe.calls)
+        assertEquals(true, vm.state.value.shizukuRunsAsRoot)
+
+        // Identità ormai nota: tornare su Sistema non ripete la sonda.
+        vm.onSystemVisible()
+        advanceUntilIdle()
+        assertEquals(1, probe.calls)
+    }
+
+    @Test
+    fun `a probe still running is not started a second time`() = runTest(dispatcher) {
+        val shizuku = FakeShizukuAccess(ShizukuGatewayStatus.AUTHORIZED)
+        val gate = CompletableDeferred<Unit>()
+        val probe = FakeShizukuIdentityProbe {
+            gate.await()
+            null
+        }
+        val vm = settingsViewModel(FakeProviderStore(), shizuku = shizuku, identityProbe = probe)
+        observe(vm)
+        advanceUntilIdle()
+
+        vm.onSystemVisible()
+        advanceUntilIdle()
+        vm.onSystemVisible()
+        vm.onSystemVisible()
+        advanceUntilIdle()
+        assertEquals(1, probe.calls)
+
+        gate.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(1, probe.calls)
+    }
+
+    @Test
+    fun `without authorization the identity is never probed`() = runTest(dispatcher) {
+        listOf(
+            ShizukuGatewayStatus.NOT_INSTALLED,
+            ShizukuGatewayStatus.INSTALLED_NOT_RUNNING,
+            ShizukuGatewayStatus.RUNNING_NOT_AUTHORIZED,
+            ShizukuGatewayStatus.UNSUPPORTED,
+        ).forEach { status ->
+            val probe = FakeShizukuIdentityProbe()
+            val vm = settingsViewModel(
+                FakeProviderStore(),
+                shizuku = FakeShizukuAccess(status),
+                identityProbe = probe,
+            )
+            observe(vm)
+            advanceUntilIdle()
+
+            vm.onSystemVisible()
+            advanceUntilIdle()
+
+            assertEquals(0, probe.calls, status.name)
+            assertNull(vm.state.value.shizukuRunsAsRoot, status.name)
+        }
+    }
+
+    @Test
+    fun `a probe that fails leaves the identity unknown without crashing`() = runTest(dispatcher) {
+        val probe = FakeShizukuIdentityProbe { throw IllegalStateException("remote") }
+        val vm = settingsViewModel(
+            FakeProviderStore(),
+            shizuku = FakeShizukuAccess(ShizukuGatewayStatus.AUTHORIZED),
+            identityProbe = probe,
+        )
+        observe(vm)
+        advanceUntilIdle()
+
+        vm.onSystemVisible()
+        advanceUntilIdle()
+
+        assertEquals(1, probe.calls)
+        assertNull(vm.state.value.shizukuRunsAsRoot)
+    }
+
+    @Test
+    fun `a granted request probes the identity right away`() = runTest(dispatcher) {
+        val shizuku = FakeShizukuAccess(
+            ShizukuGatewayStatus.AUTHORIZED,
+            outcome = ShizukuPermissionOutcome.GRANTED,
+        )
+        val probe = FakeShizukuIdentityProbe()
+        val vm = settingsViewModel(FakeProviderStore(), shizuku = shizuku, identityProbe = probe)
+        observe(vm)
+        advanceUntilIdle()
+
+        vm.requestShizukuPermission()
+        advanceUntilIdle()
+
+        assertEquals(1, probe.calls)
+    }
+
     // ------------------------------------------------------------------ helper
 
     private fun TestScope.observe(vm: SettingsViewModel) {
@@ -312,6 +544,8 @@ class SettingsViewModelTest {
         transportFactory: TransportFactory = FakeTransportFactory(),
         installInfo: AppInstallInfo = AppInstallInfo(versionName = "0.3.6", installerPackage = null, sdkInt = 34),
         languageSource: RenderLanguageSource = RenderLanguageSource { language },
+        shizuku: ShizukuAccess = ShizukuGateway(context),
+        identityProbe: ShizukuIdentityProbe = FakeShizukuIdentityProbe(),
     ): SettingsViewModel {
         val brain = ConfiguredBridgeBrain(store, privacyAccepted = { true }, factory = transportFactory)
         val preferences = FakePreferences(privacyAccepted = true)
@@ -332,7 +566,8 @@ class SettingsViewModelTest {
             observedConversations = observed,
             automations = FakeAutomationStore(),
             drafts = FakeDraftRepository(),
-            shizuku = ShizukuGateway(context),
+            shizuku = shizuku,
+            shizukuIdentityProbe = identityProbe,
             connectivitySentinelStatus = ConnectivitySentinelStatus(),
             usage = usage,
             budgetSettings = budgetSettings,

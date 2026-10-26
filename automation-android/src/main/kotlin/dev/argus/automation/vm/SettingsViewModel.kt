@@ -36,9 +36,11 @@ import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.safety.DraftRepository
 import dev.argus.engine.safety.DraftValidator
 import dev.argus.engine.safety.PendingDraft
-import dev.argus.shizuku.ShizukuGateway
+import dev.argus.shizuku.ShizukuAccess
 import dev.argus.shizuku.ShizukuGatewayStatus
-import dev.argus.shizuku.ShizukuPermissionResult
+import dev.argus.shizuku.ShizukuIdentity
+import dev.argus.shizuku.ShizukuIdentityProbe
+import dev.argus.shizuku.ShizukuPermissionOutcome
 import dev.argus.ui.model.AuthState
 import dev.argus.ui.model.BudgetUi
 import dev.argus.ui.model.ContactRow
@@ -49,6 +51,7 @@ import dev.argus.ui.model.TransportUi
 import dev.argus.ui.presentation.ModelFieldHints
 import dev.argus.ui.presentation.RenderLanguage
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -76,6 +79,7 @@ private data class SettingsSources(
     val geofenceNeeded: Boolean,
     val shizukuNeeded: Boolean,
     val shizukuStatus: ShizukuGatewayStatus,
+    val shizukuIdentity: ShizukuIdentity?,
     val observedCandidates: List<ContactRow>,
 )
 
@@ -270,7 +274,8 @@ class SettingsViewModel @Inject constructor(
     observedConversations: ObservedConversationStore,
     automations: AutomationStore,
     drafts: DraftRepository,
-    private val shizuku: ShizukuGateway,
+    private val shizuku: ShizukuAccess,
+    private val shizukuIdentityProbe: ShizukuIdentityProbe,
     private val connectivitySentinelStatus: ConnectivitySentinelStatus,
     private val usage: UsageDao,
     private val budgetSettings: BudgetSettingsStore,
@@ -289,6 +294,7 @@ class SettingsViewModel @Inject constructor(
     private val mutableKeySaved = MutableStateFlow<Boolean?>(null)
     val tokenConfigured: StateFlow<Boolean> = mutableTokenConfigured
     private var shizukuRationaleShown = false
+    private var identityProbeJob: Job? = null
     private val budgetWriteMutex = Mutex()
     private val mutableMessages = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val messages = mutableMessages.asSharedFlow()
@@ -300,6 +306,7 @@ class SettingsViewModel @Inject constructor(
         drafts.observeAll(),
         shizuku.observeStatus(),
         observedConversations.observeRecent(),
+        shizuku.observeIdentity(),
     ) { values ->
         @Suppress("UNCHECKED_CAST")
         val contacts = values[0] as List<WhitelistedContact>
@@ -314,6 +321,7 @@ class SettingsViewModel @Inject constructor(
 
         @Suppress("UNCHECKED_CAST")
         val observed = values[5] as List<ObservedConversation>
+        val shizukuIdentity = values[6] as ShizukuIdentity?
         val geofenceNeeded = rules.any { it.trigger is Trigger.Geofence } ||
             pending.any { it.draft.trigger is Trigger.Geofence }
         val shizukuNeeded = rules.any { rule ->
@@ -331,6 +339,7 @@ class SettingsViewModel @Inject constructor(
             geofenceNeeded = geofenceNeeded,
             shizukuNeeded = shizukuNeeded,
             shizukuStatus = shizukuStatus,
+            shizukuIdentity = shizukuIdentity,
             observedCandidates = observedWhitelistCandidates(observed, contacts),
         )
     }
@@ -363,6 +372,7 @@ class SettingsViewModel @Inject constructor(
                 degradedAfterReboot = settingsSources.shizukuNeeded &&
                     settingsSources.shizukuStatus == ShizukuGatewayStatus.INSTALLED_NOT_RUNNING,
             ),
+            shizukuRunsAsRoot = settingsSources.shizukuIdentity?.runsAsRoot,
             batteryExempt = health.batteryExempt,
             notificationsGranted = health.notificationsGranted,
             notificationListenerGranted = health.notificationListenerGranted,
@@ -542,32 +552,53 @@ class SettingsViewModel @Inject constructor(
 
     fun requestShizukuPermission() {
         viewModelScope.launch {
-            val text = when (shizuku.requestPermission(rationaleShown = shizukuRationaleShown)) {
-                ShizukuPermissionResult.GRANTED -> {
+            val outcome = shizuku.requestPermissionOutcome(rationaleShown = shizukuRationaleShown)
+            val text = when (outcome) {
+                ShizukuPermissionOutcome.GRANTED -> {
                     shizukuRationaleShown = false
                     language.pick(
                         "Shizuku authorization granted.",
                         "Autorizzazione Shizuku concessa.",
                     )
                 }
-                ShizukuPermissionResult.DENIED -> language.pick(
+                ShizukuPermissionOutcome.DENIED -> language.pick(
                     "Shizuku authorization denied.",
                     "Autorizzazione Shizuku negata.",
                 )
-                ShizukuPermissionResult.RATIONALE_REQUIRED -> {
+                ShizukuPermissionOutcome.RATIONALE_REQUIRED -> {
                     shizukuRationaleShown = true
                     language.pick(
                         "Tap Fix again to confirm the Shizuku request.",
                         "Premi di nuovo Correggi per confermare la richiesta Shizuku.",
                     )
                 }
-                ShizukuPermissionResult.UNAVAILABLE -> language.pick(
+                ShizukuPermissionOutcome.UNAVAILABLE -> language.pick(
                     "Shizuku is unavailable.",
                     "Shizuku non è disponibile.",
                 )
+                // La finestra di Shizuku può essere ancora aperta: se l'utente risponde dopo, lo
+                // stato arriva da solo da observeStatus(), senza un nuovo refresh().
+                ShizukuPermissionOutcome.AWAITING_USER -> shizukuAwaitingAnswerNote(language)
             }
             message(text)
             refresh()
+            // Appena autorizzato si può già dire con quali privilegi girano i comandi.
+            if (outcome == ShizukuPermissionOutcome.GRANTED) onSystemVisible()
+        }
+    }
+
+    /**
+     * Sistema è visibile. Con Shizuku autorizzato e identità non ancora nota il servizio
+     * privilegiato si collega solo al primo comando: la sonda lo collega ora, una volta, per poter
+     * dire «Shizuku gira come root» (D10). Nessun ciclo e nessun ritentativo: se la sonda non
+     * riesce l'identità resta ignota e le etichette restano quelle neutre.
+     */
+    fun onSystemVisible() {
+        if (identityProbeJob?.isActive == true) return
+        if (shizuku.status() != ShizukuGatewayStatus.AUTHORIZED) return
+        if (shizuku.observeIdentity().value != null) return
+        identityProbeJob = viewModelScope.launch {
+            cancellationSafeOrNull { shizukuIdentityProbe.probe() }
         }
     }
 
@@ -820,6 +851,7 @@ class SettingsViewModel @Inject constructor(
             transport = transportUi(BridgeUiHealth(), hasToken = false),
             providerChoices = providerChoices(),
             shizuku = shizuku.status().toUiStatus(false),
+            shizukuRunsAsRoot = shizuku.observeIdentity().value?.runsAsRoot,
             batteryExempt = health.batteryExempt,
             notificationsGranted = health.notificationsGranted,
             notificationListenerGranted = health.notificationListenerGranted,

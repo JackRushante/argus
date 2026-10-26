@@ -72,6 +72,8 @@
     <string name="rule_section_then">ALLORA</string>
     <string name="rule_section_variables">VARIABILI</string>
     <string name="rule_var_value_label">valore</string>
+    <string name="rule_shell_privileges_root_label">esegue comandi come root (Shizuku gira come root)</string>
+    <string name="rule_shell_privileges_unknown_label">esegue comandi con i privilegi di Shizuku</string>
 
     <!-- Chat -->
     <string name="chat_subtitle">chat · compilatore di regole</string>
@@ -244,6 +246,8 @@
     <string name="settings_budget_footnote">Costi in dollari stimati dal listino pubblico solo per i provider a prezzo noto (stima indicativa, non fattura) · EUR a tasso fisso ≈ · Hermes/OpenRouter/Custom: solo token</string>
     <string name="settings_budget_edit_limits">Modifica limiti</string>
     <string name="settings_rerun">Ripeti configurazione</string>
+    <string name="settings_shizuku_unsupported">Shizuku troppo vecchio: aggiornalo</string>
+    <string name="settings_shizuku_ok_root">Attivo come root: i comandi delle regole girano come root</string>
 
     <!-- Dialog limiti budget -->
     <string name="budget_dialog_title">Limiti budget LLM</string>

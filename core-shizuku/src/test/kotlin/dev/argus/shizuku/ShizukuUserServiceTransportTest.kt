@@ -3,6 +3,9 @@ package dev.argus.shizuku
 import android.os.Bundle
 import android.os.ParcelFileDescriptor
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -224,6 +227,129 @@ class ShizukuUserServiceTransportTest {
             gateway.status()
 
             assertNull(gateway.observeIdentity().value)
+        }
+    }
+
+    @Test
+    fun `probing an authorized Shizuku binds and returns the identity`() = runTest {
+        val service = FakeService(uid = 0)
+        val binder = FakeBinder { service }
+        ShizukuGateway(authorizedApi()).use { gateway ->
+            val transport = ShizukuUserServiceTransport(binder, gateway, clock = { now })
+
+            assertEquals(ShizukuIdentity(0), transport.probeIdentity())
+            assertEquals(true, gateway.observeIdentity().value?.runsAsRoot)
+            assertEquals(1, binder.bindCalls)
+
+            // Un secondo giro riusa il servizio vivo: nessun bind, nessuna seconda lettura.
+            assertEquals(ShizukuIdentity(0), transport.probeIdentity())
+            assertEquals(1, binder.bindCalls)
+            assertEquals(1, service.uidCalls)
+        }
+    }
+
+    @Test
+    fun `probing a shell uid reports it as not root`() = runTest {
+        val binder = FakeBinder { FakeService(uid = 2000) }
+        ShizukuGateway(authorizedApi()).use { gateway ->
+            val transport = ShizukuUserServiceTransport(binder, gateway, clock = { now })
+
+            assertEquals(false, transport.probeIdentity()?.runsAsRoot)
+        }
+    }
+
+    @Test
+    fun `probing without authorization returns null and never binds`() = runTest {
+        val api = FakeShizukuApi(installed = true, alive = true, granted = false)
+        val binder = FakeBinder()
+        ShizukuGateway(api).use { gateway ->
+            val transport = ShizukuUserServiceTransport(binder, gateway, clock = { now })
+
+            assertNull(transport.probeIdentity())
+            api.alive = false
+            assertNull(transport.probeIdentity())
+            api.installed = false
+            assertNull(transport.probeIdentity())
+            assertEquals(0, binder.bindCalls)
+        }
+    }
+
+    @Test
+    fun `probing a Shizuku too old for the user service returns null and never binds`() = runTest {
+        val api = FakeShizukuApi(installed = true, alive = true, old = true, granted = true)
+        val binder = FakeBinder()
+        ShizukuGateway(api).use { gateway ->
+            val transport = ShizukuUserServiceTransport(binder, gateway, clock = { now })
+
+            assertNull(transport.probeIdentity())
+            assertEquals(0, binder.bindCalls)
+        }
+    }
+
+    @Test
+    fun `a failed or timed out bind probes to null without throwing and opens the breaker`() = runTest {
+        var hang = false
+        val binder = FakeBinder {
+            if (hang) awaitCancellation() else throw IllegalStateException("Bind UserService fallito")
+        }
+        ShizukuGateway(authorizedApi()).use { gateway ->
+            val transport = ShizukuUserServiceTransport(binder, gateway, clock = { now })
+
+            assertNull(transport.probeIdentity())
+            assertEquals(1, binder.bindCalls)
+
+            // Il circuito è aperto: la sonda segue lo stesso percorso dei comandi e non ribinda.
+            assertNull(transport.probeIdentity())
+            assertEquals(1, binder.bindCalls)
+
+            // Scaduta la finestra, un bind che non risponde esaurisce il timeout e dà ancora null.
+            now += 60_000L
+            hang = true
+            assertNull(transport.probeIdentity())
+            assertEquals(2, binder.bindCalls)
+        }
+    }
+
+    @Test
+    fun `an unreadable identity probes to null`() = runTest {
+        val binder = FakeBinder { FakeService(uid = -1) }
+        ShizukuGateway(authorizedApi()).use { gateway ->
+            val transport = ShizukuUserServiceTransport(binder, gateway, clock = { now })
+
+            assertNull(transport.probeIdentity())
+        }
+    }
+
+    @Test
+    fun `probing a closed transport returns null`() = runTest {
+        val binder = FakeBinder()
+        ShizukuGateway(authorizedApi()).use { gateway ->
+            val transport = ShizukuUserServiceTransport(binder, gateway, clock = { now })
+            transport.close()
+
+            assertNull(transport.probeIdentity())
+            assertEquals(0, binder.bindCalls)
+        }
+    }
+
+    @Test
+    fun `cancelling a probe cancels it instead of swallowing the cancellation`() = runTest {
+        val binder = FakeBinder { awaitCancellation() }
+        ShizukuGateway(authorizedApi()).use { gateway ->
+            val transport = ShizukuUserServiceTransport(
+                binder,
+                gateway,
+                clock = { now },
+                bindTimeoutMillis = 10 * 60_000L,
+            )
+            var result: Any? = "not finished"
+            val job = launch { result = transport.probeIdentity() }
+            runCurrent()
+            assertEquals(1, binder.bindCalls)
+
+            job.cancelAndJoin()
+
+            assertEquals("not finished", result)
         }
     }
 }

@@ -19,9 +19,9 @@ import dev.argus.brain.ReasoningEffort
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.safety.DraftRepository
-import dev.argus.shizuku.ShizukuGateway
+import dev.argus.shizuku.ShizukuAccess
 import dev.argus.shizuku.ShizukuGatewayStatus
-import dev.argus.shizuku.ShizukuPermissionResult
+import dev.argus.shizuku.ShizukuPermissionOutcome
 import dev.argus.ui.model.AuthState
 import dev.argus.ui.model.OnboardingState
 import dev.argus.ui.model.OnboardingStepState
@@ -77,7 +77,7 @@ class OnboardingViewModel @Inject constructor(
     private val preferences: AppPreferencesStore,
     private val configuration: ProviderConfigStore,
     private val brain: ConfiguredBridgeBrain,
-    private val shizuku: ShizukuGateway,
+    private val shizuku: ShizukuAccess,
     automations: AutomationStore,
     drafts: DraftRepository,
     private val languageSource: RenderLanguageSource,
@@ -300,35 +300,38 @@ class OnboardingViewModel @Inject constructor(
 
     fun requestShizukuPermission() {
         viewModelScope.launch {
-            val result = shizuku.requestPermission(rationaleShown = shizukuRationaleShown)
+            val outcome = shizuku.requestPermissionOutcome(rationaleShown = shizukuRationaleShown)
             message(
-                when (result) {
-                    ShizukuPermissionResult.GRANTED -> {
+                when (outcome) {
+                    ShizukuPermissionOutcome.GRANTED -> {
                         shizukuRationaleShown = false
                         language.pick(
                             "Shizuku authorization granted.",
                             "Autorizzazione Shizuku concessa.",
                         )
                     }
-                    ShizukuPermissionResult.DENIED -> language.pick(
+                    ShizukuPermissionOutcome.DENIED -> language.pick(
                         "Shizuku authorization denied.",
                         "Autorizzazione Shizuku negata.",
                     )
-                    ShizukuPermissionResult.RATIONALE_REQUIRED -> {
+                    ShizukuPermissionOutcome.RATIONALE_REQUIRED -> {
                         shizukuRationaleShown = true
                         language.pick(
                             "Tap the button again to confirm the Shizuku request.",
                             "Premi di nuovo il pulsante per confermare la richiesta Shizuku.",
                         )
                     }
-                    ShizukuPermissionResult.UNAVAILABLE -> language.pick(
+                    ShizukuPermissionOutcome.UNAVAILABLE -> language.pick(
                         "Shizuku is unavailable.",
                         "Shizuku non è disponibile.",
                     )
+                    // La finestra di Shizuku può essere ancora aperta: se l'utente risponde dopo, lo
+                    // step passa da solo a "fatto" perché lo stato arriva da observeStatus().
+                    ShizukuPermissionOutcome.AWAITING_USER -> shizukuAwaitingAnswerNote(language)
                 },
             )
             refresh()
-            if (result == ShizukuPermissionResult.GRANTED) advance()
+            if (outcome == ShizukuPermissionOutcome.GRANTED) advance()
         }
     }
 

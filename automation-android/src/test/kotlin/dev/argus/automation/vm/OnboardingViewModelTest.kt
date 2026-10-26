@@ -41,7 +41,10 @@ import dev.argus.engine.safety.DraftRepository
 import dev.argus.engine.safety.DraftWriteResult
 import dev.argus.engine.safety.NewDraft
 import dev.argus.engine.safety.PendingDraft
+import dev.argus.shizuku.ShizukuAccess
 import dev.argus.shizuku.ShizukuGateway
+import dev.argus.shizuku.ShizukuGatewayStatus
+import dev.argus.shizuku.ShizukuPermissionOutcome
 import dev.argus.ui.model.AuthState
 import dev.argus.ui.model.ShizukuRequirement
 import dev.argus.ui.model.StepKind
@@ -524,6 +527,119 @@ class OnboardingViewModelTest {
         assertEquals(ShizukuRequirement.entries.toSet(), caps.map { it.requirement }.toSet())
     }
 
+
+    // ------------------------------------------------------------------ 0.3.6 F: Shizuku nell'interfaccia
+
+    @Test
+    fun `an outdated Shizuku step asks to update and come back, not to start it`() = runTest(dispatcher) {
+        val shizuku = FakeShizukuAccess(ShizukuGatewayStatus.UNSUPPORTED)
+        val vm = onboardingViewModel(OnbFakeProviderStore(), index = 2, shizuku = shizuku)
+        observe(vm)
+        advanceUntilIdle()
+
+        val step = vm.state.value.steps.first { it.kind == StepKind.SHIZUKU }
+        assertEquals(
+            "Questa versione di Shizuku è troppo vecchia per Argus: aggiornala e torna qui",
+            step.body,
+        )
+        assertEquals("Aggiorna Shizuku", step.ctaLabel)
+        assertNotEquals(StepStatus.DONE, step.status)
+    }
+
+    @Test
+    fun `the outdated Shizuku step follows the language`() = runTest(dispatcher) {
+        val shizuku = FakeShizukuAccess(ShizukuGatewayStatus.UNSUPPORTED)
+        val vm = onboardingViewModel(
+            OnbFakeProviderStore(),
+            index = 2,
+            language = RenderLanguage.EN,
+            shizuku = shizuku,
+        )
+        observe(vm)
+        advanceUntilIdle()
+
+        assertEquals(
+            "This Shizuku version is too old for Argus: update it and come back",
+            vm.state.value.steps.first { it.kind == StepKind.SHIZUKU }.body,
+        )
+    }
+
+    @Test
+    fun `a permission request that times out says it is waiting, then the step completes on its own`() =
+        runTest(dispatcher) {
+            val shizuku = FakeShizukuAccess(
+                ShizukuGatewayStatus.RUNNING_NOT_AUTHORIZED,
+                outcome = ShizukuPermissionOutcome.AWAITING_USER,
+            )
+            val vm = onboardingViewModel(OnbFakeProviderStore(), index = 2, shizuku = shizuku)
+            observe(vm)
+            val events = collectEvents(vm)
+            advanceUntilIdle()
+            fun shizukuStep() = vm.state.value.steps.first { it.kind == StepKind.SHIZUKU }
+            assertNotEquals(StepStatus.DONE, shizukuStep().status)
+
+            vm.requestShizukuPermission()
+            advanceUntilIdle()
+
+            assertEquals(
+                listOf<OnboardingEvent>(OnboardingEvent.Message("In attesa della tua risposta in Shizuku")),
+                events,
+            )
+            assertNotEquals(StepStatus.DONE, shizukuStep().status)
+            // Il timeout non e' una risposta: il wizard resta sullo step Shizuku.
+            assertEquals(2, vm.state.value.currentIndex)
+
+            // L'utente risponde nella finestra di Shizuku dopo il timeout: nessun refresh() manuale.
+            shizuku.setStatus(ShizukuGatewayStatus.AUTHORIZED)
+            advanceUntilIdle()
+
+            assertEquals(StepStatus.DONE, shizukuStep().status)
+        }
+
+    @Test
+    fun `a granted request still advances to the next step`() = runTest(dispatcher) {
+        val shizuku = FakeShizukuAccess(
+            ShizukuGatewayStatus.AUTHORIZED,
+            outcome = ShizukuPermissionOutcome.GRANTED,
+        )
+        val vm = onboardingViewModel(OnbFakeProviderStore(), index = 2, shizuku = shizuku)
+        observe(vm)
+        val events = collectEvents(vm)
+        advanceUntilIdle()
+
+        vm.requestShizukuPermission()
+        advanceUntilIdle()
+
+        assertEquals(
+            listOf<OnboardingEvent>(OnboardingEvent.Message("Autorizzazione Shizuku concessa.")),
+            events,
+        )
+        assertEquals(3, vm.state.value.currentIndex)
+    }
+
+    @Test
+    fun `the other permission outcomes keep their messages and do not advance`() = runTest(dispatcher) {
+        val expected = mapOf(
+            ShizukuPermissionOutcome.DENIED to "Autorizzazione Shizuku negata.",
+            ShizukuPermissionOutcome.RATIONALE_REQUIRED to
+                "Premi di nuovo il pulsante per confermare la richiesta Shizuku.",
+            ShizukuPermissionOutcome.UNAVAILABLE to "Shizuku non è disponibile.",
+        )
+        expected.forEach { (outcome, text) ->
+            val shizuku = FakeShizukuAccess(ShizukuGatewayStatus.RUNNING_NOT_AUTHORIZED, outcome = outcome)
+            val vm = onboardingViewModel(OnbFakeProviderStore(), index = 2, shizuku = shizuku)
+            observe(vm)
+            val events = collectEvents(vm)
+            advanceUntilIdle()
+
+            vm.requestShizukuPermission()
+            advanceUntilIdle()
+
+            assertEquals(listOf<OnboardingEvent>(OnboardingEvent.Message(text)), events, outcome.name)
+            assertEquals(2, vm.state.value.currentIndex, outcome.name)
+        }
+    }
+
     // ------------------------------------------------------------------ helper
 
     private fun TestScope.observe(vm: OnboardingViewModel) {
@@ -557,6 +673,7 @@ class OnboardingViewModelTest {
         factory: TransportFactory = OnbFakeTransportFactory(),
         automations: AutomationStore = OnbFakeAutomationStore(),
         languageSource: RenderLanguageSource = RenderLanguageSource { language },
+        shizuku: ShizukuAccess = ShizukuGateway(context),
     ): OnboardingViewModel {
         val brain = ConfiguredBridgeBrain(store, privacyAccepted = { true }, factory = factory)
         val handle = SavedStateHandle(mapOf("currentIndex" to index))
@@ -566,7 +683,7 @@ class OnboardingViewModelTest {
             preferences = OnbFakePreferences(privacyAccepted = true),
             configuration = store,
             brain = brain,
-            shizuku = ShizukuGateway(context),
+            shizuku = shizuku,
             automations = automations,
             drafts = OnbFakeDraftRepository(),
             languageSource = languageSource,

@@ -62,9 +62,9 @@ internal fun ShizukuGatewayStatus.toUiStatus(degradedAfterReboot: Boolean): Shiz
     }
     ShizukuGatewayStatus.RUNNING_NOT_AUTHORIZED -> ShizukuStatus.RUNNING_NOT_AUTHORIZED
     ShizukuGatewayStatus.AUTHORIZED -> ShizukuStatus.AUTHORIZED
-    // L'enum UI non ha un valore «troppo vecchio»: è la riga di stato più vicina. Il testo giusto
-    // («Shizuku troppo vecchio: aggiornalo») viene da [statusNote].
-    ShizukuGatewayStatus.UNSUPPORTED -> ShizukuStatus.INSTALLED_NOT_RUNNING
+    // `Shizuku.isPreV11()`: in esecuzione ma troppo vecchio per il binder user service. Va
+    // aggiornato, non riavviato: ha il suo stato, con il suo testo e la sua azione.
+    ShizukuGatewayStatus.UNSUPPORTED -> ShizukuStatus.UNSUPPORTED
 }
 
 internal fun AndroidUiHealth.backgroundLocationState(needed: Boolean): BgLocationState = when {
@@ -74,25 +74,6 @@ internal fun AndroidUiHealth.backgroundLocationState(needed: Boolean): BgLocatio
     !needed -> BgLocationState.NOT_NEEDED
     foregroundLocationGranted -> BgLocationState.WHILE_IN_USE
     else -> BgLocationState.DENIED
-}
-
-/**
- * Nota di stato di Shizuku quando l'enum UI [ShizukuStatus] non basta. Oggi solo UNSUPPORTED:
- * `Shizuku.isPreV11()` è vero per una versione troppo vecchia per il binder user service, e
- * mostrarla come «non in esecuzione» manda l'utente a riavviare un servizio che gira già. Chi
- * costruisce la schermata sostituisce con questo testo la riga di stato (è `null` per gli altri
- * stati). Il testo è prodotto con la lingua corrente, come ogni messaggio dei ViewModel.
- */
-internal fun ShizukuGatewayStatus.statusNote(language: RenderLanguage): String? = when (this) {
-    ShizukuGatewayStatus.UNSUPPORTED -> language.pick(
-        "Shizuku is too old: update it",
-        "Shizuku troppo vecchio: aggiornalo",
-    )
-    ShizukuGatewayStatus.NOT_INSTALLED,
-    ShizukuGatewayStatus.INSTALLED_NOT_RUNNING,
-    ShizukuGatewayStatus.RUNNING_NOT_AUTHORIZED,
-    ShizukuGatewayStatus.AUTHORIZED,
-    -> null
 }
 
 /**

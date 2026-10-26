@@ -6,8 +6,6 @@ import dev.argus.ui.model.ShizukuStatus
 import dev.argus.ui.presentation.RenderLanguage
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNotEquals
-import kotlin.test.assertNull
 
 /**
  * Stato UI della posizione in background. Bug segnalato da Lorenzo: concessa «sempre/precisa» ma
@@ -65,34 +63,41 @@ class AndroidUiHealthTest {
     }
 }
 
-class ShizukuStatusNoteTest {
+class ShizukuUiStatusTest {
     @Test
-    fun `an outdated Shizuku says it is too old in both languages`() {
+    fun `an outdated Shizuku is its own ui status, not a stopped one`() {
         assertEquals(
-            "Shizuku troppo vecchio: aggiornalo",
-            ShizukuGatewayStatus.UNSUPPORTED.statusNote(RenderLanguage.IT),
+            ShizukuStatus.UNSUPPORTED,
+            ShizukuGatewayStatus.UNSUPPORTED.toUiStatus(degradedAfterReboot = false),
         )
         assertEquals(
-            "Shizuku is too old: update it",
-            ShizukuGatewayStatus.UNSUPPORTED.statusNote(RenderLanguage.EN),
+            ShizukuStatus.UNSUPPORTED,
+            ShizukuGatewayStatus.UNSUPPORTED.toUiStatus(degradedAfterReboot = true),
         )
     }
 
     @Test
-    fun `every other status needs no extra note`() {
-        ShizukuGatewayStatus.entries
-            .filter { it != ShizukuGatewayStatus.UNSUPPORTED }
-            .forEach { status ->
-                assertNull(status.statusNote(RenderLanguage.IT), status.name)
-                assertNull(status.statusNote(RenderLanguage.EN), status.name)
-            }
-    }
-
-    @Test
-    fun `an outdated Shizuku never reads as authorized in the ui status`() {
-        val ui = ShizukuGatewayStatus.UNSUPPORTED.toUiStatus(degradedAfterReboot = false)
-        assertNotEquals(ShizukuStatus.AUTHORIZED, ui)
-        assertNotEquals(ShizukuStatus.RUNNING_NOT_AUTHORIZED, ui)
+    fun `every other gateway status keeps its own ui status`() {
+        assertEquals(
+            ShizukuStatus.NOT_INSTALLED,
+            ShizukuGatewayStatus.NOT_INSTALLED.toUiStatus(degradedAfterReboot = false),
+        )
+        assertEquals(
+            ShizukuStatus.INSTALLED_NOT_RUNNING,
+            ShizukuGatewayStatus.INSTALLED_NOT_RUNNING.toUiStatus(degradedAfterReboot = false),
+        )
+        assertEquals(
+            ShizukuStatus.DEGRADED_AFTER_REBOOT,
+            ShizukuGatewayStatus.INSTALLED_NOT_RUNNING.toUiStatus(degradedAfterReboot = true),
+        )
+        assertEquals(
+            ShizukuStatus.RUNNING_NOT_AUTHORIZED,
+            ShizukuGatewayStatus.RUNNING_NOT_AUTHORIZED.toUiStatus(degradedAfterReboot = false),
+        )
+        assertEquals(
+            ShizukuStatus.AUTHORIZED,
+            ShizukuGatewayStatus.AUTHORIZED.toUiStatus(degradedAfterReboot = false),
+        )
     }
 }
 
