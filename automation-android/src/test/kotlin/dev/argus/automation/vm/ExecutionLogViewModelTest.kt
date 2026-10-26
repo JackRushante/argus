@@ -370,6 +370,18 @@ class ExecutionLogViewModelTest {
     }
 
     @Test
+    fun `log rows carry the event instant so days are grouped by timestamp not by text`() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        seedAuditRow("rule-day", ExecutionId("exec-day"))
+        val viewModel = viewModel(context)
+        backgroundScope.launch { viewModel.state.collect { } }
+        awaitUntil("riga caricata") { viewModel.state.value.entries.isNotEmpty() }
+
+        // seedAuditRow registra l'evento a 2_000 ms: il Log raggruppa i giorni da questo istante.
+        assertEquals(2_000L, viewModel.state.value.entries.single().atMillis)
+    }
+
+    @Test
     fun `an unsupported retention value changes nothing`() = runTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val viewModel = viewModel(context)

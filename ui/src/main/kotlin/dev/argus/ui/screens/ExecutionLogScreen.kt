@@ -72,17 +72,23 @@ import dev.argus.ui.model.ExecutionLogState
 import dev.argus.ui.model.LogOutcome
 import dev.argus.ui.model.LogRetentionOptions
 import dev.argus.ui.model.LogRow
+import dev.argus.ui.components.destructiveButtonColors
+import dev.argus.ui.presentation.ATTENUATED_ROW_ALPHA
+import dev.argus.ui.presentation.LogDayGrouping
+import dev.argus.ui.presentation.RenderLanguage
+import dev.argus.ui.presentation.secondaryText
 import dev.argus.ui.theme.ArgusTheme
 import dev.argus.ui.theme.LocalArgusSemantic
+import java.time.ZoneId
 
 // =============================================================================
 // Schermo Log esecuzioni (handoff §6.4, design §7.4).
 // Comportamenti resi qui:
-//  - TIMELINE raggruppata per giorno: header "Oggi"/"Ieri"/… dal prefisso di
-//    `timeLabel` (§7.4).
+//  - TIMELINE raggruppata per giorno: header "Oggi"/"Ieri"/… calcolati dal timestamp della
+//    riga (giorno locale nel fuso del telefono, §7.4), non dal testo di `timeLabel`.
 //  - Icona esito per outcome/kind (verde/ambra/rosso/grigio) + summary colorato.
 //  - SUPPRESSED_COOLDOWN / CONDITIONS_NOT_MET = rumore utile → riga ATTENUATA
-//    (opacity ~.5), non evento (§6.4/§7.4).
+//    (ATTENUATED_ROW_ALPHA: leggera ma sopra 4,5:1), non evento (§6.4/§7.4).
 //  - Righe con dettaglio espandibili: chevron ruota 180°, mostra i passi per-azione.
 //  - Righe DEFERRED (E13): «Copia e apri WhatsApp» e «Segna come inviata» nel pannello espanso.
 //  - `filterAutomationName` → header "Solo: <nome>" con "×" (onClearFilter).
@@ -141,16 +147,23 @@ fun ExecutionLogScreen(
                     body = stringResource(R.string.log_empty_body),
                 )
             } else {
-                // groupBy preserva l'ordine di prima comparsa delle chiavi (host: più recenti in cima).
-                val grouped = state.entries.groupBy { dayKey(it.timeLabel) }
+                // Giorni dal timestamp (B49); l'ordine di prima comparsa resta quello dell'host (più recenti in cima).
+                val groups = remember(state.entries) {
+                    LogDayGrouping.group(
+                        state.entries,
+                        System.currentTimeMillis(),
+                        ZoneId.systemDefault(),
+                        RenderLanguage.system(),
+                    )
+                }
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    grouped.forEach { (day, rows) ->
-                        item(key = "hdr-$day") { DayHeader(day) }
-                        rows.forEach { row ->
+                    groups.forEach { group ->
+                        item(key = "hdr-${group.key}") { DayHeader(group.title) }
+                        group.rows.forEach { row ->
                             item(key = row.id) {
                                 LogRowItem(
                                     row = row,
@@ -257,7 +270,6 @@ private fun LogHeader(
 /** Conferma dentro la schermata (non un dialog di sistema): lo svuotamento non si puo' annullare. */
 @Composable
 private fun ClearConfirmation(onCancel: () -> Unit, onConfirm: () -> Unit) {
-    val semantic = LocalArgusSemantic.current
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -272,12 +284,21 @@ private fun ClearConfirmation(onCancel: () -> Unit, onConfirm: () -> Unit) {
             color = MaterialTheme.colorScheme.onSurface,
             style = MaterialTheme.typography.bodyMedium,
         )
-        Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().padding(end = 8.dp, bottom = 8.dp),
+        ) {
             TextButton(onClick = onCancel, modifier = Modifier.heightIn(min = 48.dp)) {
                 Text(stringResource(R.string.log_clear_confirm_cancel))
             }
-            TextButton(onClick = onConfirm, modifier = Modifier.heightIn(min = 48.dp)) {
-                Text(stringResource(R.string.log_clear_confirm_action), color = semantic.error.fg)
+            // B48: il pulsante che conferma un'eliminazione usa il colore di errore del tema.
+            Button(
+                onClick = onConfirm,
+                modifier = Modifier.heightIn(min = 48.dp),
+                colors = destructiveButtonColors(),
+            ) {
+                Text(stringResource(R.string.log_clear_confirm_action))
             }
         }
     }
@@ -345,6 +366,7 @@ private fun LogRowItem(
     onSendNow: () -> Unit,
     onOpenAutomation: () -> Unit,
     onMarkSent: () -> Unit = {},
+    timeText: String = LogDayGrouping.timeLabel(row, ZoneId.systemDefault()),
 ) {
     val (icon, color) = outcomeVisual(row)
     val isDeferred = row.kind == AuditKind.FIRED && row.outcome == LogOutcome.DEFERRED
@@ -363,7 +385,8 @@ private fun LogRowItem(
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .then(if (expandable) Modifier.clickable { onToggle() } else Modifier)
-            .alpha(if (attenuated) 0.5f else 1f)
+            // B45: 0.5 portava il testo sotto 3:1; ATTENUATED_ROW_ALPHA lo tiene sopra 4,5:1.
+            .alpha(if (attenuated) ATTENUATED_ROW_ALPHA else 1f)
             .padding(vertical = 10.dp, horizontal = 2.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -388,8 +411,8 @@ private fun LogRowItem(
                 Text(row.summary, color = color, style = MaterialTheme.typography.bodyMedium)
             }
             Text(
-                timePart(row.timeLabel),
-                color = MaterialTheme.colorScheme.outline,
+                timeText,
+                color = MaterialTheme.colorScheme.secondaryText(),
                 style = MaterialTheme.typography.labelSmall,
                 modifier = Modifier.padding(top = 1.dp),
             )
@@ -506,17 +529,6 @@ private fun outcomeVisual(row: LogRow): Pair<ImageVector, Color> {
             LogOutcome.DEFERRED -> Icons.AutoMirrored.Rounded.ScheduleSend to s.cloud.fg
         }
     }
-}
-
-// -----------------------------------------------------------------------------
-// Parsing giorno / ora dal timeLabel ("oggi 23:00" → "oggi" + "23:00")
-// -----------------------------------------------------------------------------
-
-private fun dayKey(timeLabel: String): String = timeLabel.substringBefore(' ', timeLabel).trim()
-
-private fun timePart(timeLabel: String): String {
-    val idx = timeLabel.indexOf(' ')
-    return if (idx >= 0) timeLabel.substring(idx + 1).trim() else timeLabel
 }
 
 // =============================================================================
