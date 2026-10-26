@@ -59,6 +59,22 @@ Why this separation matters:
 
 The project's current philosophy is **Tasker-class power with explicit, reviewable risk**: the program tree is immutable after approval, bounds and capability checks remain enforced, while the optional use of untrusted runtime data in the approved template fields (URLs, packages, settings) is permitted by the centralized Aggressive taint policy. In shell commands, external data is always quoted as a single argument.
 
+### What you can automate
+
+- **When** (triggers): a time, a date or a delay; sunrise and sunset; right now; a button, home-screen
+  shortcut, Quick Settings tile or widget you press; arriving at or leaving a place; Wi-Fi, Bluetooth or
+  the charger connecting; headphones; the screen turning on, off or being unlocked; the battery crossing
+  a level; Do Not Disturb or the ringer changing; music starting or stopping; notifications (for example
+  WhatsApp), SMS, calls and missed calls; motion.
+- **Only if** (conditions): a time window, battery, charging, screen, ringer, Do Not Disturb, Wi-Fi,
+  airplane mode, a place; with Shizuku also the app in the foreground and any Android setting or system
+  value.
+- **Then** (actions): notifications, volume, ringer, Do Not Disturb, flashlight, vibration, real alarms
+  and timers, opening apps, links and Settings screens, the clipboard, reading a text aloud, media keys,
+  brightness and auto-rotate, HTTP requests, WhatsApp replies (also written by the AI at fire time); with
+  Shizuku also Wi-Fi, Bluetooth and mobile data, dark mode, any setting and shell commands.
+- Rules can use variables, `if`, bounded `while` loops and waits, and one switch pauses every rule.
+
 ---
 
 ## Architecture
@@ -336,16 +352,23 @@ To sign your own release: create `keystore.properties` in the root (`storeFile`,
 
 Installation:
 
-1. **F-Droid (recommended).** Argus is available at
-   [f-droid.org/packages/dev.argus](https://f-droid.org/packages/dev.argus/); install it from the
-   F-Droid client and updates arrive through it.
-2. **GitHub release APKs.** Alternatively download the APK matching your device from the
-   [latest release](https://github.com/JackRushante/argus/releases/latest) and sideload it
-   (`adb install` or APK transfer). Each release ships one APK per ABI, named
-   `argus-<versionCode>.apk`; the last two digits of the version code select the ABI: `01`
-   `armeabi-v7a`, `02` `arm64-v8a`, `03` `x86`, `04` `x86_64`. For example, `argus-1102.apk` is the
-   `arm64-v8a` build of base version code 11. Most current Android phones are `arm64-v8a`; the
-   release notes map every filename to its ABI.
+1. **GitHub releases (newest version first).** Download the APK for your phone from the
+   [latest release](https://github.com/JackRushante/argus/releases/latest) and install it (open the
+   file on the phone, or `adb install`). Each release has one APK per processor type, named
+   `argus-<version code>.apk`; the last two digits tell which one it is:
+
+   | File name ends in | Processor (ABI) | Who needs it |
+   |---|---|---|
+   | `…02.apk` (in 0.4.2: `argus-1702.apk`) | arm64-v8a | **almost every phone from the last years: take this one if unsure** |
+   | `…01.apk` | armeabi-v7a | old or entry-level 32-bit phones |
+   | `…04.apk` | x86_64 | emulators, Intel or AMD Chromebooks and tablets |
+   | `…03.apk` | x86 | old 32-bit emulators |
+
+   If Android says the app is not compatible with your phone, try the `…01` file. The digits before
+   the last two are the version code (17 is 0.4.2).
+2. **F-Droid.** Argus is also at [f-droid.org/packages/dev.argus](https://f-droid.org/packages/dev.argus/):
+   the F-Droid client picks the right file by itself and keeps it updated. New versions arrive there
+   later than on GitHub, after F-Droid's review and build.
 
 There is no Play Store distribution. On first launch the onboarding walks you through the LLM
 provider and permissions.
@@ -363,6 +386,7 @@ Thanks for trying it. Useful things to know and to stress:
 - **Compilation**: ask for rules in chat, from trivial to ambiguous ("in 2 minutes send me a notification with the EUR/USD rate", "when I leave home turn off Wi-Fi", "if my wife writes on WhatsApp after 11 pm reply for me"). Check that the draft rendered on the approval screen matches what you meant — it is the real rule, not the paraphrase.
 - **Approval**: try to get "nasty" rules proposed (shell from SMS, disallowed tools, out-of-range values) and check that the validator blocks them with a clear reason.
 - **Execution**: arm `time` rules (cron and one-shot), `immediate`, connectivity, geofence, notifications. Test the hostile cases: reboot, timezone change, DST, app killed by the OEM, Shizuku turned off midway.
+- **New in 0.4**: manual rules (a button, a Quick Settings tile, a widget), "Pause automations", sunrise and sunset, the screen, unlock, battery, headphones and music triggers, reading aloud, brightness and HTTP requests.
 - **Degradation**: deny permissions and turn off Shizuku, and check that the app honestly says what it cannot do instead of failing silently.
 - **Budget** (generative rules): set a low limit and verify the audited suppression.
 
@@ -384,15 +408,15 @@ Open an [Issue](https://github.com/JackRushante/argus/issues) with: what you ask
 
 Short roadmap:
 
-- **State-aware P4 generation** — design a resolved `invoke_llm_v2` lane with the same strict
-  runtime-data framing as v3. Until that contract exists, the compiler and validator reject this
-  combination before approval.
-- **Broader device control** — complete and validate interactive screen→action execution, including a
-  conservative accessibility/vision fallback for UI surfaces that expose insufficient semantics.
-- **Cross-OEM hardening** — expand the real-device matrix beyond the current OnePlus/Android 16 test
-  device, especially background starts, Shizuku recovery and notification metadata.
+- **0.5.0, more power** — the current time (with a time zone) as a value a rule can use when it fires;
+  a repair round when the AI writes an invalid rule; presets for small self-hosted models; OpenRouter's
+  web search tool.
+- **0.6.0, end-to-end tests** — the main flows tested automatically on an Android emulator.
+- **0.7.0, redesign** — a new look for the app.
+- **Later** — state-aware P4 generation, interactive screen control, and testing on more phone brands
+  (background starts, Shizuku recovery, notification metadata).
 
-**Disclaimer**: this is a personal project, developed and tested mainly on a single device (OnePlus 15, Android 16, non-root). Expect rough edges on other OEMs — that is exactly the feedback we are looking for. No warranty: rules execute real actions on your phone, read what you approve.
+**Disclaimer**: this is a personal project, developed and tested mainly on a single device (OnePlus 15, Android 16) and on an Android 16 emulator. Expect rough edges on other OEMs — that is exactly the feedback we are looking for. No warranty: rules execute real actions on your phone, read what you approve.
 
 ---
 
