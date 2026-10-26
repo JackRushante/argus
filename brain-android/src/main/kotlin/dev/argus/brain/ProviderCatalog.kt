@@ -1,5 +1,9 @@
 package dev.argus.brain
 
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneOffset
+
 /** Stile di autenticazione HTTP del provider. Il transport monta l'header dallo store cifrato. */
 enum class AuthStyle { BEARER, X_API_KEY }
 
@@ -67,7 +71,30 @@ data class ModelPrice(
      * contate (`TurnUsage.webSearches`) ma NON addebitate (niente prezzi inventati).
      */
     val webSearchMicrosPerCall: Long? = null,
-)
+    /**
+     * Variazioni di listino già annunciate, in ordine di data crescente (stretta): da [PriceChange.effectiveFrom]
+     * vale [PriceChange.price]. Vuoto = il prezzo non cambia nel tempo. Il prezzo giusto per un istante si
+     * legge con [effectiveAt]; i campi qui sopra sono il prezzo valido prima della prima variazione.
+     */
+    val changes: List<PriceChange> = emptyList(),
+) {
+    /**
+     * Prezzo valido all'istante [atMillis] (epoch ms): quello dell'ultima variazione già iniziata, oppure
+     * questo stesso prezzo se nessuna è iniziata. Le date di inizio si leggono in UTC: una variazione
+     * «dal 2027-01-01» vale dalle 00:00 UTC. Il prezzo restituito non porta a sua volta variazioni da leggere.
+     */
+    fun effectiveAt(atMillis: Long): ModelPrice {
+        if (changes.isEmpty()) return this
+        val day = Instant.ofEpochMilli(atMillis).atZone(ZoneOffset.UTC).toLocalDate()
+        return changes.lastOrNull { !it.effectiveFrom.isAfter(day) }?.price ?: this
+    }
+}
+
+/**
+ * Un prezzo che subentra dal giorno [effectiveFrom] (UTC, incluso). [price] è un prezzo piatto: le sue
+ * [ModelPrice.changes] devono essere vuote (lo impone il test del catalogo).
+ */
+data class PriceChange(val effectiveFrom: LocalDate, val price: ModelPrice)
 
 /** Solo metadati pubblici: questo oggetto finisce nell'APK, un segreto qui è un bug di release. */
 data class ProviderSpec(
@@ -186,9 +213,20 @@ object ProviderCatalog {
             costTracked = true,
             // Le voci dei modelli non più suggeriti restano: chi li ha già configurati conserva la stima del costo.
             prices = mapOf(
-                // gemini-3.8-flash: $0.75 in / $3.75 out / cache $0.075 per 1M token. Listino Google valido
-                // fino al 2026-12-31: dal 2027-01-01 raddoppia ($1.50 / $7.50 / cache $0.15) e va aggiornato.
-                "gemini-3.8-flash" to ModelPrice(750_000, 3_750_000, cachedInputMicrosPerMTok = 75_000),
+                // gemini-3.8-flash: $0.75 in / $3.75 out / cache $0.075 per 1M token fino al 2026-12-31; dal
+                // 2027-01-01 il listino Google raddoppia: $1.50 / $7.50 / cache $0.15 (pagina prezzi ufficiale,
+                // verificata il 2026-10-26). Il costo di un evento usa il prezzo valido alla sua data.
+                "gemini-3.8-flash" to ModelPrice(
+                    inputMicrosPerMTok = 750_000,
+                    outputMicrosPerMTok = 3_750_000,
+                    cachedInputMicrosPerMTok = 75_000,
+                    changes = listOf(
+                        PriceChange(
+                            effectiveFrom = LocalDate.of(2027, 1, 1),
+                            price = ModelPrice(1_500_000, 7_500_000, cachedInputMicrosPerMTok = 150_000),
+                        ),
+                    ),
+                ),
                 // gemini-2.5-pro: $1.25 in / $10 out per 1M token (fascia <=200k).
                 "gemini-2.5-pro" to ModelPrice(1_250_000, 10_000_000),
                 // gemini-2.5-flash: $0.30 in / $2.50 out per 1M token.

@@ -4,6 +4,8 @@ import dev.argus.brain.ModelPrice
 import dev.argus.brain.ProviderCatalog
 import dev.argus.brain.ProviderId
 import dev.argus.engine.brain.TurnUsage
+import java.time.LocalDateTime
+import java.time.ZoneOffset
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -94,8 +96,63 @@ class CostEstimatorTest {
         assertEquals(114_000L, CostEstimator.estimate(ProviderId.OPENAI, "gpt-6-luna", usage))
         assertEquals(114_000L, CostEstimator.estimate(ProviderId.ANTHROPIC, "claude-haiku-5-5", usage))
         // (600_000 * 750_000 + 400_000 * 75_000 + 100_000 * 3_750_000) / 1M = 450_000 + 30_000 + 375_000
-        assertEquals(855_000L, CostEstimator.estimate(ProviderId.GEMINI, "gemini-3.8-flash", usage))
+        // La data e' esplicita: dal 2027-01-01 il listino di gemini-3.8-flash raddoppia.
+        assertEquals(
+            855_000L,
+            CostEstimator.estimate(ProviderId.GEMINI, "gemini-3.8-flash", usage, utc(2026, 10, 26)),
+        )
     }
+
+    private val flashUsage =
+        TurnUsage(inputTokens = 1_000_000, outputTokens = 100_000, cachedInputTokens = 400_000)
+
+    @Test
+    fun `gemini 3 8 flash usa il prezzo vecchio fino al 31 dicembre 2026 compreso`() {
+        // (600_000 * 750_000 + 400_000 * 75_000 + 100_000 * 3_750_000) / 1M
+        val old = 855_000L
+        assertEquals(old, flashCost(utc(2026, 1, 15)))
+        assertEquals(old, flashCost(utc(2026, 12, 31, 23, 59)))
+    }
+
+    @Test
+    fun `gemini 3 8 flash usa il prezzo nuovo dal primo gennaio 2027`() {
+        // (600_000 * 1_500_000 + 400_000 * 150_000 + 100_000 * 7_500_000) / 1M = 900_000 + 60_000 + 750_000
+        val new = 1_710_000L
+        assertEquals(new, flashCost(utc(2027, 1, 1)))
+        assertEquals(new, flashCost(utc(2027, 3, 9, 18, 30)))
+    }
+
+    @Test
+    fun `un evento del 2026 ricalcolato nel 2027 usa il prezzo della sua data`() {
+        // Il ricalcolo passa il timestamp dell'EVENTO, non l'orologio di oggi.
+        val eventAt = utc(2026, 11, 15, 10)
+        assertEquals(855_000L, flashCost(eventAt))
+        // Lo stesso modello e gli stessi token, per un evento di febbraio 2027, costano il doppio.
+        assertEquals(1_710_000L, flashCost(utc(2027, 2, 1)))
+    }
+
+    @Test
+    fun `i modelli senza variazioni non cambiano con la data`() {
+        val usage = flashUsage
+        for ((provider, model) in listOf(
+            ProviderId.OPENAI to "gpt-6-luna",
+            ProviderId.ANTHROPIC to "claude-haiku-5-5",
+            ProviderId.GEMINI to "gemini-2.5-flash",
+        )) {
+            assertEquals(
+                CostEstimator.estimate(provider, model, usage, utc(2026, 10, 26)),
+                CostEstimator.estimate(provider, model, usage, utc(2027, 6, 1)),
+                "$provider/$model",
+            )
+        }
+        assertEquals(114_000L, CostEstimator.estimate(ProviderId.OPENAI, "gpt-6-luna", usage, utc(2027, 6, 1)))
+    }
+
+    private fun flashCost(atMillis: Long): Long? =
+        CostEstimator.estimate(ProviderId.GEMINI, "gemini-3.8-flash", flashUsage, atMillis)
+
+    private fun utc(year: Int, month: Int, day: Int, hour: Int = 0, minute: Int = 0): Long =
+        LocalDateTime.of(year, month, day, hour, minute).toInstant(ZoneOffset.UTC).toEpochMilli()
 
     @Test
     fun `opus usa il listino attuale da 5 e 25 dollari`() {

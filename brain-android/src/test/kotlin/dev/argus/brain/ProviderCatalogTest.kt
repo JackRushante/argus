@@ -1,5 +1,8 @@
 package dev.argus.brain
 
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.ZoneOffset
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -176,9 +179,77 @@ class ProviderCatalogTest {
         assertTrue("claude-sonnet-4-5" in anthropic)
 
         val gemini = ProviderCatalog.spec(ProviderId.GEMINI).prices
-        assertEquals(ModelPrice(750_000, 3_750_000, cachedInputMicrosPerMTok = 75_000), gemini["gemini-3.8-flash"])
+        // Il listino di oggi; la variazione del 2027-01-01 e' coperta dal test dedicato.
+        assertEquals(
+            ModelPrice(750_000, 3_750_000, cachedInputMicrosPerMTok = 75_000),
+            gemini.getValue("gemini-3.8-flash").effectiveAt(utc(2026, 10, 26)),
+        )
         assertTrue("gemini-2.5-pro" in gemini && "gemini-2.5-flash" in gemini)
     }
+
+    @Test fun `gemini 3 8 flash doubles from 2027-01-01 and keeps the old list before`() {
+        val price = ProviderCatalog.spec(ProviderId.GEMINI).prices.getValue("gemini-3.8-flash")
+        val old = ModelPrice(750_000, 3_750_000, cachedInputMicrosPerMTok = 75_000)
+        val new = ModelPrice(1_500_000, 7_500_000, cachedInputMicrosPerMTok = 150_000)
+
+        assertEquals(old, price.effectiveAt(utc(2026, 10, 26)))
+        assertEquals(old, price.effectiveAt(utc(2026, 12, 31, 23, 59)))
+        assertEquals(new, price.effectiveAt(utc(2027, 1, 1)))
+        assertEquals(new, price.effectiveAt(utc(2027, 6, 1)))
+    }
+
+    @Test fun `a price without changes is the same at every date`() {
+        val flat = ModelPrice(100_000, 500_000, cachedInputMicrosPerMTok = 10_000)
+        assertTrue(flat.changes.isEmpty())
+        assertEquals(flat, flat.effectiveAt(utc(2020, 1, 1)))
+        assertEquals(flat, flat.effectiveAt(utc(2035, 1, 1)))
+    }
+
+    @Test fun `price changes start at midnight UTC of their day and chain in order`() {
+        val first = ModelPrice(200_000, 1_000_000)
+        val second = ModelPrice(300_000, 1_500_000, cachedInputMicrosPerMTok = 30_000)
+        val price = ModelPrice(
+            inputMicrosPerMTok = 100_000,
+            outputMicrosPerMTok = 500_000,
+            changes = listOf(
+                PriceChange(LocalDate.of(2027, 1, 1), first),
+                PriceChange(LocalDate.of(2027, 7, 1), second),
+            ),
+        )
+
+        assertEquals(100_000L, price.effectiveAt(utc(2026, 12, 31, 23, 59)).inputMicrosPerMTok)
+        assertEquals(first, price.effectiveAt(utc(2027, 1, 1)))
+        assertEquals(first, price.effectiveAt(utc(2027, 6, 30, 23, 59)))
+        assertEquals(second, price.effectiveAt(utc(2027, 7, 1)))
+        assertEquals(second, price.effectiveAt(utc(2030, 1, 1)))
+    }
+
+    @Test fun `every catalog price change is in strictly ascending date order and not nested`() {
+        for (id in ProviderId.entries) {
+            for ((model, price) in ProviderCatalog.spec(id).prices) {
+                val dates = price.changes.map { it.effectiveFrom }
+                assertEquals(dates.sorted().distinct(), dates, "variazioni non ordinate o duplicate: $id/$model")
+                for (change in price.changes) {
+                    assertTrue(change.price.changes.isEmpty(), "variazione annidata: $id/$model")
+                    assertTrue(change.price.inputMicrosPerMTok > 0, "input non positivo: $id/$model")
+                    assertTrue(change.price.outputMicrosPerMTok > 0, "output non positivo: $id/$model")
+                    change.price.cachedInputMicrosPerMTok?.let {
+                        assertTrue(it > 0, "cached non positivo: $id/$model")
+                    }
+                }
+            }
+        }
+    }
+
+    @Test fun `only gemini 3 8 flash has a scheduled price change`() {
+        val withChanges = ProviderId.entries.flatMap { id ->
+            ProviderCatalog.spec(id).prices.filterValues { it.changes.isNotEmpty() }.keys.map { "$id/$it" }
+        }
+        assertEquals(listOf("GEMINI/gemini-3.8-flash"), withChanges)
+    }
+
+    private fun utc(year: Int, month: Int, day: Int, hour: Int = 0, minute: Int = 0): Long =
+        LocalDateTime.of(year, month, day, hour, minute).toInstant(ZoneOffset.UTC).toEpochMilli()
 
     @Test fun `pricing version is the october 2026 list`() {
         assertEquals("2026-10", ProviderCatalog.PRICING_VERSION)
