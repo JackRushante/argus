@@ -646,8 +646,9 @@ Trigger, discriminated by "type":
 - {"type":"mode_changed", "what":"DND"|"RINGER", "to":string|null}  // to: DND off|priority|total,
   RINGER normal|vibrate|silent; null = any change
 - {"type":"media", "state":"PLAYING"|"STOPPED"}  // music/video playback started / finished
-- {"type":"manual"}  // runs ONLY when the user starts it by hand: a button, a widget, a Home-screen
-  shortcut, a quick-settings tile or "Run now". Use it when the user asks for one of those or to launch it by hand.
+- {"type":"manual"}  // runs ONLY when the user starts it by hand, any number of times: a button, a widget,
+  a Home-screen shortcut or a quick-settings tile. Use it ONLY when the user asks for one of those.
+  Doing something now, or a request with no trigger at all, is "immediate", never "manual".
 
 Condition, discriminated by "type":
 - {"type":"time_window", "startLocal":"HH:mm", "endLocal":"HH:mm", "tz":string}
