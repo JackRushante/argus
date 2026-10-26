@@ -575,6 +575,9 @@ fun ArgusNavHost() {
                                 override fun onDelete() = viewModel.onDelete()
                                 override fun onAskEdit() = viewModel.onAskEdit()
                                 override fun onRunNow() = viewModel.onRunNow()
+                                override fun onDiagnose() = viewModel.onDiagnose()
+                                // Come la barra in basso: cambia scheda, conservando lo stato salvato.
+                                override fun onOpenSystem() = switchTop(Routes.SETTINGS)
                                 override fun onOpenFullLog() {
                                     state.automationId?.let {
                                         switchTop(Routes.log(it, detail.name))
