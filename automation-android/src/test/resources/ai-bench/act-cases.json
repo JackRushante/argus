@@ -1,0 +1,86 @@
+[
+ {
+  "id": "act.price.it.01",
+  "lang": "it",
+  "goal": "Scrivi in una frase il prezzo attuale del bitcoin in euro",
+  "web": true,
+  "expect_number": true
+ },
+ {
+  "id": "act.price.en.01",
+  "lang": "en",
+  "goal": "Write one sentence with the current price of Bitcoin in US dollars",
+  "web": true,
+  "expect_number": true
+ },
+ {
+  "id": "act.price.it.02",
+  "lang": "it",
+  "goal": "Dimmi il cambio euro dollaro di oggi",
+  "web": true,
+  "expect_number": true
+ },
+ {
+  "id": "act.price.en.02",
+  "lang": "en",
+  "goal": "Tell me the current gold price per ounce in USD",
+  "web": true,
+  "expect_number": true
+ },
+ {
+  "id": "act.price.it.03",
+  "lang": "it",
+  "goal": "Quanto costa oggi in media un litro di benzina in Italia?",
+  "web": true,
+  "expect_number": true
+ },
+ {
+  "id": "act.weather.it.01",
+  "lang": "it",
+  "goal": "Dimmi che tempo fa oggi a Roma e la temperatura",
+  "web": true,
+  "expect_number": true
+ },
+ {
+  "id": "act.news.en.01",
+  "lang": "en",
+  "goal": "Give me the top news headline of today in one sentence",
+  "web": true
+ },
+ {
+  "id": "act.plain.it.01",
+  "lang": "it",
+  "goal": "Scrivi una breve frase motivazionale per iniziare la giornata",
+  "web": false
+ },
+ {
+  "id": "act.plain.en.01",
+  "lang": "en",
+  "goal": "Write a short friendly good-evening message",
+  "web": false
+ },
+ {
+  "id": "act.plain.it.02",
+  "lang": "it",
+  "goal": "Dimmi in una frase a che livello è la batteria del telefono",
+  "web": false,
+  "context_sources": ["state"],
+  "must_contain_any": ["73"],
+  "note": "Contesto state: batteria 73"
+ },
+ {
+  "id": "act.plain.en.02",
+  "lang": "en",
+  "goal": "Write a one-line reminder to drink some water",
+  "web": false
+ },
+ {
+  "id": "act.plain.en.03",
+  "lang": "en",
+  "goal": "Tell me in one sentence the battery level of the phone",
+  "web": false,
+  "context_sources": ["state"],
+  "must_contain_any": ["73"],
+  "note": "Contesto state: batteria 73"
+ }
+]
