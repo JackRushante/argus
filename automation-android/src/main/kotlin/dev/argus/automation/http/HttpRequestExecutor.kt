@@ -133,7 +133,7 @@ class HttpRequestExecutor(
     /** Legge e butta fino a 64 KB: basta a chiudere lo scambio. Un errore qui non cambia l'esito. */
     private fun discard(response: Response) {
         runCatching {
-            val source = response.body.source()
+            val source = response.body?.source() ?: return@runCatching
             val sink = Buffer()
             var left = HttpRequestPolicy.MAX_RESPONSE_BYTES.toLong()
             while (left > 0) {
