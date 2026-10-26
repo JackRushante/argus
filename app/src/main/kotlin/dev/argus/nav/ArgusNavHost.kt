@@ -46,6 +46,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -87,6 +88,9 @@ import dev.argus.automation.vm.ExecutionLogViewModel
 import dev.argus.automation.vm.OnboardingEvent
 import dev.argus.automation.vm.OnboardingViewModel
 import dev.argus.automation.vm.SettingsViewModel
+import dev.argus.shizuku.ShizukuGatewayStatus
+import dev.argus.ui.components.LocalShellPrivilege
+import dev.argus.ui.components.shellPrivilegeOf
 import dev.argus.ui.model.AutomationDetailCallbacks
 import dev.argus.ui.model.AutomationListCallbacks
 import dev.argus.ui.model.ChatCallbacks
@@ -285,6 +289,9 @@ fun ArgusNavHost() {
             )
         }
     }
+    val openShizukuDownload = {
+        openIntent(Intent(Intent.ACTION_VIEW, Uri.parse(SHIZUKU_DOWNLOAD_URL)))
+    }
     val openShizukuManager = {
         // Evita getLaunchIntentForPackage(): la package visibility di Android 11+ può nascondere
         // Shizuku pur essendo installato. Proviamo direttamente un selector limitato al package.
@@ -293,9 +300,7 @@ fun ArgusNavHost() {
             .setPackage(SHIZUKU_PACKAGE)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         val opened = runCatching { context.startActivity(launch) }.isSuccess
-        if (!opened) {
-            openIntent(Intent(Intent.ACTION_VIEW, Uri.parse(SHIZUKU_DOWNLOAD_URL)))
-        }
+        if (!opened) openShizukuDownload()
     }
 
     fun switchTop(route: String) {
@@ -326,6 +331,12 @@ fun ArgusNavHost() {
             }
         },
     ) { innerPadding ->
+        // Con quali privilegi girano i comandi shell (Shizuku come root o come shell): lo leggono
+        // i blocchi comando di Chat, Approvazione e Dettaglio. Il contenuto resta alla sua
+        // indentazione originale per non spostare ogni riga delle destinazioni.
+        CompositionLocalProvider(
+            LocalShellPrivilege provides shellPrivilegeOf(settingsState.shizukuRunsAsRoot),
+        ) {
         NavHost(
             navController = navController,
             startDestination = if (onboardingCompleted) Routes.CHAT else Routes.ONBOARDING,
@@ -430,6 +441,9 @@ fun ArgusNavHost() {
 
             composable(Routes.SETTINGS) {
                 RefreshOnResume(settingsViewModel::refresh)
+                // Sistema visibile: se Shizuku è autorizzato ma l'identità non è nota, la sonda
+                // collega il servizio una volta per sapere se gira come root.
+                RefreshOnResume(settingsViewModel::onSystemVisible)
                 LaunchedEffect(permissionRefresh) { settingsViewModel.refresh() }
                 SettingsScreen(
                     state = settingsState,
@@ -440,10 +454,11 @@ fun ArgusNavHost() {
                         }
                         override fun onTestConnection() = settingsViewModel.testConnection()
                         override fun onOpenShizukuFix() {
-                            if (settingsState.shizuku == ShizukuStatus.RUNNING_NOT_AUTHORIZED) {
-                                settingsViewModel.requestShizukuPermission()
-                            } else {
-                                openShizukuManager()
+                            when (shizukuFixFor(settingsState.shizuku)) {
+                                ShizukuFix.REQUEST_PERMISSION ->
+                                    settingsViewModel.requestShizukuPermission()
+                                ShizukuFix.OPEN_DOWNLOAD -> openShizukuDownload()
+                                ShizukuFix.OPEN_MANAGER -> openShizukuManager()
                             }
                         }
                         override fun onOpenBatteryFix() {
@@ -620,10 +635,11 @@ fun ArgusNavHost() {
                                 StepKind.WELCOME_PRIVACY -> viewModel.acceptPrivacy()
                                 StepKind.BRAIN_CONFIG -> Unit // Il dialog è gestito dallo schermo.
                                 StepKind.SHIZUKU -> {
-                                    when (viewModel.currentShizukuStatus()) {
-                                        dev.argus.shizuku.ShizukuGatewayStatus.RUNNING_NOT_AUTHORIZED ->
+                                    when (shizukuFixFor(viewModel.currentShizukuStatus())) {
+                                        ShizukuFix.REQUEST_PERMISSION ->
                                             viewModel.requestShizukuPermission()
-                                        else -> openShizukuManager()
+                                        ShizukuFix.OPEN_DOWNLOAD -> openShizukuDownload()
+                                        ShizukuFix.OPEN_MANAGER -> openShizukuManager()
                                     }
                                 }
                                 StepKind.NOTIFICATION_ACCESS -> {
@@ -668,6 +684,7 @@ fun ArgusNavHost() {
                     modifier = Modifier.testTag("screen_onboarding"),
                 )
             }
+        }
         }
     }
 
@@ -891,3 +908,30 @@ private fun ArgusBottomBar(
 
 private const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
 internal const val SHIZUKU_DOWNLOAD_URL = "https://shizuku.rikka.app/download/"
+
+/** Cosa fa «Correggi» sulla riga/step Shizuku per lo stato corrente. */
+internal enum class ShizukuFix { REQUEST_PERMISSION, OPEN_MANAGER, OPEN_DOWNLOAD }
+
+/**
+ * In esecuzione ma senza permesso: si chiede il permesso. Troppo vecchio: si apre direttamente la
+ * pagina di download (l'app va aggiornata, aprirla non serve). Altrimenti si apre l'app Shizuku.
+ */
+internal fun shizukuFixFor(status: ShizukuStatus): ShizukuFix = when (status) {
+    ShizukuStatus.RUNNING_NOT_AUTHORIZED -> ShizukuFix.REQUEST_PERMISSION
+    ShizukuStatus.UNSUPPORTED -> ShizukuFix.OPEN_DOWNLOAD
+    ShizukuStatus.NOT_INSTALLED,
+    ShizukuStatus.INSTALLED_NOT_RUNNING,
+    ShizukuStatus.AUTHORIZED,
+    ShizukuStatus.DEGRADED_AFTER_REBOOT,
+    -> ShizukuFix.OPEN_MANAGER
+}
+
+/** Come sopra, per l'onboarding che legge lo stato del gateway. */
+internal fun shizukuFixFor(status: ShizukuGatewayStatus): ShizukuFix = when (status) {
+    ShizukuGatewayStatus.RUNNING_NOT_AUTHORIZED -> ShizukuFix.REQUEST_PERMISSION
+    ShizukuGatewayStatus.UNSUPPORTED -> ShizukuFix.OPEN_DOWNLOAD
+    ShizukuGatewayStatus.NOT_INSTALLED,
+    ShizukuGatewayStatus.INSTALLED_NOT_RUNNING,
+    ShizukuGatewayStatus.AUTHORIZED,
+    -> ShizukuFix.OPEN_MANAGER
+}
