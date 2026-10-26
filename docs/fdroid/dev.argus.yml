@@ -84,108 +84,36 @@ Builds:
     gradleprops:
       - argusAbi=x86_64
 
-  - versionName: 0.3.5
-    versionCode: 1201
-    commit: 5cfd0a243ceafba1682aeb6831765ca72067d8ba
+  - versionName: 0.4.0
+    versionCode: 1501
+    commit: 7e352f92ad49c54ed5d0cdc4a09641598f3a24a7
     subdir: app
     gradle:
       - yes
     gradleprops:
       - argusAbi=armeabi-v7a
 
-  - versionName: 0.3.5
-    versionCode: 1202
-    commit: 5cfd0a243ceafba1682aeb6831765ca72067d8ba
+  - versionName: 0.4.0
+    versionCode: 1502
+    commit: 7e352f92ad49c54ed5d0cdc4a09641598f3a24a7
     subdir: app
     gradle:
       - yes
     gradleprops:
       - argusAbi=arm64-v8a
 
-  - versionName: 0.3.5
-    versionCode: 1203
-    commit: 5cfd0a243ceafba1682aeb6831765ca72067d8ba
+  - versionName: 0.4.0
+    versionCode: 1503
+    commit: 7e352f92ad49c54ed5d0cdc4a09641598f3a24a7
     subdir: app
     gradle:
       - yes
     gradleprops:
       - argusAbi=x86
 
-  - versionName: 0.3.5
-    versionCode: 1204
-    commit: 5cfd0a243ceafba1682aeb6831765ca72067d8ba
-    subdir: app
-    gradle:
-      - yes
-    gradleprops:
-      - argusAbi=x86_64
-
-  - versionName: 0.3.6
-    versionCode: 1301
-    commit: e23575279de1c75ddd0f40941ab82190cef439b0
-    subdir: app
-    gradle:
-      - yes
-    gradleprops:
-      - argusAbi=armeabi-v7a
-
-  - versionName: 0.3.6
-    versionCode: 1302
-    commit: e23575279de1c75ddd0f40941ab82190cef439b0
-    subdir: app
-    gradle:
-      - yes
-    gradleprops:
-      - argusAbi=arm64-v8a
-
-  - versionName: 0.3.6
-    versionCode: 1303
-    commit: e23575279de1c75ddd0f40941ab82190cef439b0
-    subdir: app
-    gradle:
-      - yes
-    gradleprops:
-      - argusAbi=x86
-
-  - versionName: 0.3.6
-    versionCode: 1304
-    commit: e23575279de1c75ddd0f40941ab82190cef439b0
-    subdir: app
-    gradle:
-      - yes
-    gradleprops:
-      - argusAbi=x86_64
-
-  - versionName: 0.3.7
-    versionCode: 1401
-    commit: eccbf57d98eb9ea42366cb5515b1e98beedca0e9
-    subdir: app
-    gradle:
-      - yes
-    gradleprops:
-      - argusAbi=armeabi-v7a
-
-  - versionName: 0.3.7
-    versionCode: 1402
-    commit: eccbf57d98eb9ea42366cb5515b1e98beedca0e9
-    subdir: app
-    gradle:
-      - yes
-    gradleprops:
-      - argusAbi=arm64-v8a
-
-  - versionName: 0.3.7
-    versionCode: 1403
-    commit: eccbf57d98eb9ea42366cb5515b1e98beedca0e9
-    subdir: app
-    gradle:
-      - yes
-    gradleprops:
-      - argusAbi=x86
-
-  - versionName: 0.3.7
-    versionCode: 1404
-    commit: eccbf57d98eb9ea42366cb5515b1e98beedca0e9
+  - versionName: 0.4.0
+    versionCode: 1504
+    commit: 7e352f92ad49c54ed5d0cdc4a09641598f3a24a7
     subdir: app
     gradle:
       - yes
@@ -201,5 +129,5 @@ VercodeOperation:
   - 100 * %c + 2
   - 100 * %c + 3
   - 100 * %c + 4
-CurrentVersion: 0.3.7
-CurrentVersionCode: 1404
+CurrentVersion: 0.4.0
+CurrentVersionCode: 1504
