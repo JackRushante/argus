@@ -127,7 +127,11 @@ class AndroidDeviceEventSources(
             addAction(Intent.ACTION_SCREEN_OFF)
             addAction(Intent.ACTION_USER_PRESENT)
         }
-        ContextCompat.registerReceiver(appContext, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+        // ESPORTATO di proposito: USER_PRESENT lo invia SystemUI (KeyguardViewMediator), che non ha
+        // l'uid di sistema, e Android non lo consegna a un receiver RECEIVER_NOT_EXPORTED (lo «sblocco»
+        // non scattava mai; schermo acceso/spento li invia system_server e arrivavano). Nessun rischio:
+        // le tre azioni sono broadcast protetti, che un'altra app non può inviare.
+        ContextCompat.registerReceiver(appContext, receiver, filter, ContextCompat.RECEIVER_EXPORTED)
         return Registration(unregister = { appContext.unregisterReceiver(receiver) })
     }
 
