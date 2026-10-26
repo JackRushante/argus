@@ -26,13 +26,20 @@ private data class MetaEnvelope(
  * Tollerante al rumore tipico dei modelli (B7): blocchi di ragionamento `<think>…</think>` rimossi
  * prima della ricerca, ULTIMO sentinel come meta (un sentinel finto nel ragionamento o citato nella
  * prosa non vince), JSON con virgola finale, commenti e `null` al posto di un default (rationale).
- * Ripiego: senza sentinel, un blocco ```json il cui oggetto ha la chiave `draft`.
+ * Ripiego 1: senza sentinel, un blocco ```json il cui oggetto ha la chiave `draft`.
+ * Ripiego 2: senza sentinel né blocco, l'ULTIMO marcatore `@@NOME@@` (il modello sbaglia il nome, es.
+ * `@@AUTOMATION_DRAFT@@`) seguito da un oggetto JSON con la chiave `draft` o `error_code`; la prosa è il
+ * testo prima del marcatore. Un marcatore il cui oggetto non ha quelle chiavi resta prosa.
  */
 class CliBridgeParser(private val json: Json = lenient()) {
     fun parseCompile(raw: String): CompileResult {
         val cleaned = ThinkBlocks.strip(raw)
         val idx = cleaned.lastIndexOf(SENTINEL)
-        if (idx < 0) return parseFencedFallback(cleaned) ?: CompileResult(cleaned.trim(), null, null)
+        if (idx < 0) {
+            return parseFencedFallback(cleaned)
+                ?: parseMisnamedSentinelFallback(cleaned)
+                ?: CompileResult(cleaned.trim(), null, null)
+        }
         return parseMeta(prose = cleaned.substring(0, idx).trim(), tail = cleaned.substring(idx + SENTINEL.length))
     }
 
@@ -43,7 +50,10 @@ class CliBridgeParser(private val json: Json = lenient()) {
             // `null` al posto di un campo con default (es. `"rationale": null`) vale come campo
             // assente. Volutamente NON `coerceInputValues`: coercerebbe anche un valore enum
             // sconosciuto al default (es. un sink scritto male → WHATSAPP_REPLY) in silenzio.
-            json.decodeFromJsonElement(MetaEnvelope.serializer(), stripNulls(json.parseToJsonElement(obj)))
+            // Si decodifica dal testo (non dall'albero JSON): solo il decoder in streaming aggiunge
+            // all'errore il percorso (`at path: $.draft.trigger`), che il ritentativo passa al modello.
+            val cleanObject = stripNulls(json.parseToJsonElement(obj))
+            json.decodeFromString(MetaEnvelope.serializer(), cleanObject.toString())
         } catch (error: Exception) {
             return CompileResult(prose, null, "meta_parse_error", detail = safeDetail(error))
         }
@@ -73,6 +83,30 @@ class CliBridgeParser(private val json: Json = lenient()) {
             return parseMeta(prose = text.substring(0, fence.range.first).trim(), tail = body)
         }
         return null
+    }
+
+    /**
+     * Senza `@@META@@` né blocco: l'ultimo marcatore `@@NOME@@` seguito da un oggetto JSON. È meta solo se
+     * l'oggetto ha `draft` o `error_code`; altrimenti (o se l'oggetto non è JSON) il testo resta prosa.
+     */
+    private fun parseMisnamedSentinelFallback(text: String): CompileResult? {
+        val marker = MISNAMED_SENTINEL.findAll(text)
+            .lastOrNull { text.startsWith("{", startIndex = firstNonBlank(text, it.range.last + 1)) }
+            ?: return null
+        val body = extractJsonObject(text.substring(marker.range.last + 1)) ?: return null
+        val parsed = try {
+            json.parseToJsonElement(body).jsonObject
+        } catch (_: Exception) {
+            return null
+        }
+        if (!hasDraftKey(parsed) && "error_code" !in parsed) return null
+        return parseMeta(prose = text.substring(0, marker.range.first).trim(), tail = body)
+    }
+
+    private fun firstNonBlank(text: String, from: Int): Int {
+        var i = from
+        while (i < text.length && text[i].isWhitespace()) i++
+        return i
     }
 
     private fun hasDraftKey(obj: JsonObject): Boolean = "draft" in obj
@@ -129,6 +163,7 @@ class CliBridgeParser(private val json: Json = lenient()) {
     private companion object {
         val ERROR_CODE = Regex("^[a-z][a-z0-9_]{0,63}$")
         val FENCE = Regex("```[A-Za-z]*\\s*\\n?(.*?)```", RegexOption.DOT_MATCHES_ALL)
+        val MISNAMED_SENTINEL = Regex("@@[A-Z][A-Z0-9_]{1,40}@@")
 
         @OptIn(ExperimentalSerializationApi::class)
         fun lenient() = Json(ArgusJson) {

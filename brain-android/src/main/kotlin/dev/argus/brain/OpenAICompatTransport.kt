@@ -39,6 +39,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.IOException
 import java.io.InterruptedIOException
+import java.time.LocalDate
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -66,6 +67,8 @@ class OpenAICompatTransport internal constructor(
     private val apiKey: suspend () -> String?,
     private val client: OkHttpClient,
     private val allowCleartextForTests: Boolean,
+    /** Giorno corrente per il prompt di ricerca web di OpenRouter; iniettabile per i test. */
+    private val clock: () -> LocalDate = { LocalDate.now() },
 ) : AgentTransport {
 
     constructor(
@@ -265,15 +268,21 @@ class OpenAICompatTransport internal constructor(
     }
 
     /**
-     * User message del turno: framing "Messaggio ricevuto…" quando c'è una notifica (reply); testo
-     * neutro del sink NOTIFICA #59 (nessuna notifica) quando [notification] è null.
+     * User message del turno: framing "Messaggio ricevuto…" quando c'è una notifica (reply); obiettivo
+     * (+ state lines) del sink NOTIFICA #59 (nessuna notifica) quando [notification] è null.
      */
     private fun userMessageFor(
+        goal: String,
         notification: TriggerEvent.NotificationPosted?,
         stateLines: List<String>,
     ): String =
         if (notification != null) AgentMessageSupport.actUserText(notification, stateLines)
-        else AgentMessageSupport.actUserTextNotification(stateLines)
+        else AgentMessageSupport.actUserTextNotification(goal, stateLines)
+
+    /** Prompt dei risultati web di OpenRouter: dati correnti in testo semplice, senza link né citazioni. */
+    private fun openRouterSearchPrompt(): String =
+        "Web search results from ${clock()}. Use them for current facts. " +
+            "Answer in plain text: no links, no markdown, no citations."
 
     private suspend fun generate(
         goal: String,
@@ -306,9 +315,11 @@ class OpenAICompatTransport internal constructor(
         }
         // OpenRouter attiva il loop web con il plugin `{"id":"web"}` e lascia `model` intatto (anche per
         // i preset `@preset/...`: il suffisso `:online` li rompe con un 404; plugin e suffisso sono
-        // equivalenti). Gli altri provider non inviano alcun plugin.
+        // equivalenti). Il prompt predefinito del plugin chiede link markdown con le fonti, che in una
+        // notifica o in una reply non vogliamo: `search_prompt` lo sostituisce con testo semplice.
+        // Gli altri provider non inviano alcun plugin.
         val plugins = if (applyWeb && spec.quirks.webSearch == WebSearchMechanism.OPENROUTER_WEB_PLUGIN) {
-            listOf(ChatPlugin(OPENROUTER_WEB_PLUGIN_ID))
+            listOf(ChatPlugin(OPENROUTER_WEB_PLUGIN_ID, openRouterSearchPrompt()))
         } else {
             null
         }
@@ -329,7 +340,7 @@ class OpenAICompatTransport internal constructor(
                         },
                     ),
                 )
-                add(ChatMessage("user", userMessageFor(notification, stateLines)))
+                add(ChatMessage("user", userMessageFor(goal, notification, stateLines)))
                 // Dato runtime TAINTED: messaggio DATA separato, MAI concatenato al system.
                 AgentMessageSupport.actRuntimeDataText(runtimeData)?.let { add(ChatMessage("user", it)) }
             },
@@ -386,7 +397,7 @@ class OpenAICompatTransport internal constructor(
                         else AgentMessageSupport.actSystemTextNotification(goal, webAllowed = true),
                     ),
                 )
-                add(ResponsesInputMessage("user", userMessageFor(notification, stateLines)))
+                add(ResponsesInputMessage("user", userMessageFor(goal, notification, stateLines)))
                 // Dato runtime TAINTED: input DATA separato, MAI nel system.
                 AgentMessageSupport.actRuntimeDataText(runtimeData)?.let { add(ResponsesInputMessage("user", it)) }
             },
@@ -429,7 +440,7 @@ class OpenAICompatTransport internal constructor(
                 add(
                     GeminiContent(
                         role = "user",
-                        parts = listOf(GeminiPart(userMessageFor(notification, stateLines))),
+                        parts = listOf(GeminiPart(userMessageFor(goal, notification, stateLines))),
                     ),
                 )
                 // Dato runtime TAINTED: content DATA separato, MAI nella systemInstruction.
@@ -746,12 +757,16 @@ class OpenAICompatTransport internal constructor(
         @SerialName("max_completion_tokens") val maxCompletionTokens: Int? = null,
         @SerialName("reasoning_effort") val reasoningEffort: String? = null,
         val temperature: Double? = null,
-        /** Solo OpenRouter con web richiesto: `[{"id":"web"}]`. Assente (null) in ogni altro caso. */
+        /** Solo OpenRouter con web richiesto: `[{"id":"web","search_prompt":"..."}]`. Assente (null) in ogni altro caso. */
         val plugins: List<ChatPlugin>? = null,
     )
 
     @Serializable
-    private data class ChatPlugin(val id: String)
+    private data class ChatPlugin(
+        val id: String,
+        /** Prompt che precede i risultati web (solo OpenRouter): sostituisce quello predefinito con le citazioni. */
+        @SerialName("search_prompt") val searchPrompt: String? = null,
+    )
 
     @Serializable
     private data class ChatMessage(val role: String, val content: String)

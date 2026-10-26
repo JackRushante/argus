@@ -189,6 +189,7 @@ class AnthropicMessagesTransportTest {
         val user = root.getValue("messages").jsonArray.single().jsonObject
             .getValue("content").jsonPrimitive.content
         assertFalse("Message received" in user, "il sink non referenzia alcuna notifica in arrivo")
+        assertEquals("Goal: genera un promemoria", user, "il user message del sink porta l'obiettivo")
     }
 
     @Test fun `notification sink with web adds only the web tool and no reply`(): Unit = runBlocking {

@@ -30,6 +30,7 @@ import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.SocketPolicy
+import java.time.LocalDate
 import java.util.concurrent.TimeUnit
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -52,6 +53,7 @@ class OpenAICompatTransportTest {
         model: String? = null,
         client: OkHttpClient = CliBridgeTransport.defaultClient(),
         apiKey: String? = API_KEY,
+        clock: () -> LocalDate = { SEARCH_DAY },
     ): OpenAICompatTransport {
         val spec = ProviderCatalog.spec(providerId)
         return OpenAICompatTransport(
@@ -61,6 +63,7 @@ class OpenAICompatTransportTest {
             apiKey = { apiKey },
             client = client,
             allowCleartextForTests = true,
+            clock = clock,
         )
     }
 
@@ -300,6 +303,47 @@ class OpenAICompatTransportTest {
         }
     }
 
+    @Test fun `openrouter web plugin carries a plain text search prompt with the date from the clock`(): Unit = runBlocking {
+        val reply = """
+            {"model":"openai/gpt-5.5",
+             "choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"BTC a 100000."}}],
+             "usage":{"prompt_tokens":50,"completion_tokens":10}}
+        """.trimIndent()
+        server.enqueue(jsonResponse(reply))
+        val t = transport(ProviderId.OPENROUTER, model = "@preset/argus", clock = { LocalDate.of(2027, 1, 5) })
+
+        t.act(timerContext(), "recupera il prezzo del Bitcoin", emptyList(), listOf("web.search"))
+
+        val root = Json.parseToJsonElement(
+            assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
+        ).jsonObject
+        val plugin = root.getValue("plugins").jsonArray.single().jsonObject
+        assertEquals(setOf("id", "search_prompt"), plugin.keys)
+        assertEquals("web", plugin.getValue("id").jsonPrimitive.content)
+        assertEquals(
+            "Web search results from 2027-01-05. Use them for current facts. " +
+                "Answer in plain text: no links, no markdown, no citations.",
+            plugin.getValue("search_prompt").jsonPrimitive.content,
+        )
+    }
+
+    @Test fun `openrouter without web sends no plugin and no search prompt on the notification sink`(): Unit = runBlocking {
+        server.enqueue(jsonResponse(
+            """
+            {"model":"openai/gpt-5.5",
+             "choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"Ok."}}],
+             "usage":{"prompt_tokens":5,"completion_tokens":1}}
+            """.trimIndent(),
+        ))
+        val t = transport(ProviderId.OPENROUTER, model = "openai/gpt-5.5")
+
+        t.act(timerContext(), "genera un promemoria", emptyList(), emptyList())
+
+        val body = assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8()
+        assertFalse("plugins" in Json.parseToJsonElement(body).jsonObject)
+        assertFalse("search_prompt" in body)
+    }
+
     @Test fun `custom openai-compat with web requested sends no plugins and keeps the model`(): Unit = runBlocking {
         // Custom non ha un meccanismo web (NONE): il web si degrada e il plugin e' solo di OpenRouter.
         server.enqueue(jsonResponse(
@@ -447,7 +491,8 @@ class OpenAICompatTransportTest {
         assertTrue("NOTIFICATION" in system, "il system del sink deve parlare della NOTIFICATION")
         assertFalse("WhatsApp" in system, "il system del sink NON deve parlare di WhatsApp")
         assertFalse("Message received" in user, "il sink non referenzia alcuna notifica in arrivo")
-        assertTrue("Generate the requested content" in user, "user neutro quando non c'è stato")
+        assertEquals("Goal: genera un promemoria", user, "il user message del sink porta l'obiettivo")
+        assertFalse("Generate the requested content" in user)
     }
 
     @Test fun `notification sink with state carries the state lines and no notification framing`(): Unit = runBlocking {
@@ -470,6 +515,8 @@ class OpenAICompatTransportTest {
         ).jsonObject.getValue("messages").jsonArray.last().jsonObject
             .getValue("content").jsonPrimitive.content
         assertTrue("ringer=normal" in user, "le state lines devono entrare nel prompt del sink")
+        assertTrue("Goal: riassumi lo stato" in user, "insieme all'obiettivo")
+        assertTrue(user.startsWith("Goal: riassumi lo stato\nDevice state:"))
         assertFalse("Message received" in user)
     }
 
@@ -505,6 +552,9 @@ class OpenAICompatTransportTest {
         assertEquals(WEB_PLUGIN, root.getValue("plugins"))
         assertFalse("tools" in root)
         assertFalse("tool_choice" in root)
+        // La ricerca del plugin usa il messaggio utente: deve contenere l'obiettivo, non una frase neutra.
+        val user = root.getValue("messages").jsonArray.last().jsonObject.getValue("content").jsonPrimitive.content
+        assertEquals("Goal: dimmi il cambio", user)
     }
 
     @Test fun `notification sink with web on openai routes to responses with the notification prompt`(): Unit = runBlocking {
@@ -531,6 +581,30 @@ class OpenAICompatTransportTest {
             .getValue("content").jsonPrimitive.content
         assertTrue("NOTIFICATION" in system)
         assertFalse("WhatsApp" in system)
+        val user = root.getValue("input").jsonArray.last().jsonObject.getValue("content").jsonPrimitive.content
+        assertEquals("Goal: dimmi il cambio", user)
+    }
+
+    @Test fun `notification sink with web on gemini carries the goal in the user content`(): Unit = runBlocking {
+        server.enqueue(jsonResponse(
+            """
+            {"candidates":[{"content":{"role":"model","parts":[{"text":"Cambio 1.09."}]}}],
+             "usageMetadata":{"promptTokenCount":45,"candidatesTokenCount":9},
+             "modelVersion":"gemini-2.5-flash"}
+            """.trimIndent(),
+        ))
+        val t = transport(ProviderId.GEMINI, model = "gemini-2.5-flash")
+
+        val result = t.act(timerContext(), "dimmi il cambio", listOf("state"), listOf("web.search"))
+
+        assertEquals("Cambio 1.09.", result.text)
+        val root = Json.parseToJsonElement(
+            assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
+        ).jsonObject
+        val user = root.getValue("contents").jsonArray.first().jsonObject
+            .getValue("parts").jsonArray.single().jsonObject.getValue("text").jsonPrimitive.content
+        assertTrue(user.startsWith("Goal: dimmi il cambio\nDevice state:"), user)
+        assertTrue("ringer=normal" in user)
     }
 
     @Test fun `actV2 sends the classified state value in the prompt`(): Unit = runBlocking {
@@ -1043,7 +1117,12 @@ class OpenAICompatTransportTest {
     private companion object {
         const val API_KEY = "sk-test-secret-key-do-not-leak-0123456789"
 
-        /** Plugin web di OpenRouter come deve comparire nel body: `"plugins":[{"id":"web"}]`. */
-        val WEB_PLUGIN = Json.parseToJsonElement("""[{"id":"web"}]""")
+        /** Giorno fisso dell'orologio iniettato nel transport dei test. */
+        val SEARCH_DAY: LocalDate = LocalDate.of(2026, 10, 26)
+
+        /** Plugin web di OpenRouter come deve comparire nel body, con il prompt di ricerca in testo semplice. */
+        val WEB_PLUGIN = Json.parseToJsonElement(
+            """[{"id":"web","search_prompt":"Web search results from 2026-10-26. Use them for current facts. Answer in plain text: no links, no markdown, no citations."}]""",
+        )
     }
 }
