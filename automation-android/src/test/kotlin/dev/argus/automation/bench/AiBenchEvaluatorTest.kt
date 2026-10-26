@@ -4,11 +4,17 @@ import dev.argus.engine.brain.ActResult
 import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.AutomationDraft
+import dev.argus.engine.model.ConfidentialityLabel
 import dev.argus.engine.model.ConnMedium
 import dev.argus.engine.model.ConnState
 import dev.argus.engine.model.Condition
 import dev.argus.engine.model.DndMode
+import dev.argus.engine.model.GenerativeDeliverMode
+import dev.argus.engine.model.Transition
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.VarBinding
+import dev.argus.engine.model.VarType
+import dev.argus.engine.model.VolumeStream
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
@@ -295,6 +301,246 @@ class AiBenchEvaluatorTest {
         assertEquals(listOf(FailureCategory.ACT_EMPTY), check(price, null, "empty_response").failures.map { it.category })
     }
 
+    // --- forme equivalenti (0.3.7 K) -------------------------------------------------------------
+
+    @Test
+    fun `a while with a zero delay and a wait in the body equals a delay between iterations`() {
+        val case = caseOf(
+            """{"id":"e.while","category":"c","lang":"en","text":"Vibrate every 10 seconds, at most 20 times",
+               "expect":{"outcome":"draft","trigger":{"type":"immediate"},"actions_include":["vibrate"],
+                         "params":{"while.maxIterations":20,"while.delayBetweenMs":10000},"control_flow":["while"]}}""",
+        )
+        fun loop(delay: Long, vararg body: Action) = draft(
+            Trigger.Immediate,
+            Action.While(Condition.BooleanLiteral(true), body.toList(), maxIterations = 20, delayBetweenMs = delay),
+        )
+
+        // La forma diretta e quella con la wait nel corpo (in coda o in testa) sono la stessa regola.
+        assertTrue(eval(case, loop(10_000, Action.Vibrate(500))).passed)
+        assertTrue(eval(case, loop(0, Action.Vibrate(500), Action.Wait(10_000))).passed)
+        assertTrue(eval(case, loop(0, Action.Wait(10_000), Action.Vibrate(500))).passed)
+        // Due pause che sommate fanno 10 secondi: stesso ritmo.
+        assertTrue(eval(case, loop(0, Action.Wait(4_000), Action.Vibrate(500), Action.Wait(6_000))).passed)
+
+        // Nessuna attesa, un'attesa diversa, o il ritardo scritto due volte (aspetterebbe 20 secondi) NON equivalgono.
+        listOf(
+            loop(0, Action.Vibrate(500)),
+            loop(0, Action.Vibrate(500), Action.Wait(5_000)),
+            loop(10_000, Action.Vibrate(500), Action.Wait(10_000)),
+        ).forEach { wrong ->
+            val evaluation = eval(case, wrong)
+            assertEquals(listOf(FailureCategory.WRONG_PARAM), evaluation.failures.map { it.category }, evaluation.failures.toString())
+            assertTrue(evaluation.failures.single().message.startsWith("while.delayBetweenMs"))
+        }
+        // Una wait annidata in un altro costrutto non conta come ritardo del ciclo.
+        val nested = loop(
+            0,
+            Action.Vibrate(500),
+            Action.If(Condition.BooleanLiteral(true), listOf(Action.Wait(10_000))),
+        )
+        assertEquals(listOf(FailureCategory.WRONG_PARAM), eval(case, nested).failures.map { it.category })
+    }
+
+    @Test
+    fun `a command held in a literal variable is compared by the value of the variable`() {
+        val case = caseOf(
+            """{"id":"e.shell","category":"c","lang":"en","text":"Right now run the shell command media dispatch pause",
+               "expect":{"outcome":"draft","trigger":{"type":"immediate"},"actions_include":["run_shell"],
+                         "actions_text":["media dispatch pause"],"params":{"run_shell.cmd":{"contains":"dispatch pause"}}}}""",
+        )
+
+        assertTrue(eval(case, draft(Trigger.Immediate, Action.RunShell("media dispatch pause"))).passed)
+        val viaLiteral = draft(
+            Trigger.Immediate,
+            Action.RunShell("\${cmd}"),
+            vars = listOf(literal("cmd", "media dispatch pause")),
+        )
+        assertTrue(eval(case, viaLiteral).passed, eval(case, viaLiteral).failures.toString())
+        // Il letterale puo' stare dentro un comando piu' lungo.
+        val inside = draft(
+            Trigger.Immediate,
+            Action.RunShell("\${prefix} pause"),
+            vars = listOf(literal("prefix", "media dispatch")),
+        )
+        assertTrue(eval(case, inside).passed, eval(case, inside).failures.toString())
+
+        // Un valore diverso, o una variabile che non e' un letterale, NON equivalgono al comando atteso.
+        val otherValue = draft(
+            Trigger.Immediate,
+            Action.RunShell("\${cmd}"),
+            vars = listOf(literal("cmd", "media dispatch play")),
+        )
+        assertTrue(eval(case, otherValue).failures.all { it.category == FailureCategory.WRONG_PARAM })
+        assertFalse(eval(case, otherValue).passed)
+        val notALiteral = draft(
+            Trigger.Immediate,
+            Action.RunShell("\${cmd}"),
+            vars = listOf(VarBinding.RandomInt("cmd", 10)),
+        )
+        assertTrue(eval(case, notALiteral).failures.any { it.category == FailureCategory.WRONG_PARAM })
+        // Un letterale non toglie il riferimento a una variabile catturata: il testo delle azioni resta cercabile.
+        val captured = caseOf(
+            """{"id":"e.cap","category":"c","lang":"en","text":"Run getprop ro.build.version.release and show it",
+               "expect":{"outcome":"draft","trigger":{"type":"immediate"},"actions_include":["run_shell","show_notification"],
+                         "actions_text":["getprop ro\\.build\\.version\\.release","\\$\\{[a-z][a-z0-9_]*\\}"],
+                         "params":{"run_shell.captureAs":{"present":true}}}}""",
+        )
+        val program = draft(
+            Trigger.Immediate,
+            Action.RunShell("\${cmd}", captureAs = "release"),
+            Action.ShowNotification("Android version", "\${release}"),
+            vars = listOf(literal("cmd", "getprop ro.build.version.release")),
+        )
+        assertTrue(eval(captured, program).passed, eval(captured, program).failures.toString())
+    }
+
+    @Test
+    fun `a place that cannot be resolved accepts a clarification or a geofence from the current position`() {
+        val office = BenchCases.loadCompile().first { it.id == "clar.place.en.01" }
+        val home = BenchCases.loadCompile().first { it.id == "clar.place.it.01" }
+        assertEquals(setOf(Outcome.CLARIFICATION, Outcome.DRAFT), office.outcomes)
+        assertEquals(setOf(Outcome.CLARIFICATION, Outcome.DRAFT), home.outcomes)
+
+        val ask = CompileResult("Where is your office?", null, "clarification_required")
+        assertTrue(eval(office, ask).passed, eval(office, ask).failures.toString())
+        val askHome = CompileResult("Dove si trova casa tua?", null, "clarification_required")
+        assertTrue(eval(home, askHome).passed, eval(home, askHome).failures.toString())
+
+        fun geofence(here: Boolean, vararg actions: Action) =
+            draft(Trigger.Geofence(radiusM = 150.0, transition = Transition.ENTER, resolveCurrentLocation = here), *actions)
+        assertTrue(eval(office, geofence(true, Action.SetRinger("silent"))).passed)
+        assertTrue(eval(office, geofence(true, Action.SetVolume(VolumeStream.MEDIA, 0))).passed)
+        assertTrue(eval(home, geofence(true, Action.SetWifi(true))).passed)
+
+        // Coordinate inventate (niente posizione attuale), un'azione sbagliata o un altro trigger restano errori.
+        assertFalse(eval(office, geofence(false, Action.SetRinger("silent"))).passed)
+        assertFalse(eval(office, geofence(true, Action.SetRinger("vibrate"))).passed)
+        assertFalse(eval(home, geofence(true, Action.SetWifi(false))).passed)
+        assertFalse(eval(home, draft(Trigger.Immediate, Action.SetWifi(true))).passed)
+        // Il rifiuto "non supportato" non era previsto per questo caso.
+        assertEquals(
+            listOf("unexpected_unsupported"),
+            eval(office, CompileResult("No.", null, "unsupported_capability")).failures.map { it.category },
+        )
+    }
+
+    // --- lingua dei testi per l'utente ----------------------------------------------------------
+
+    @Test
+    fun `texts for the user in the wrong language fail with wrong_language`() {
+        val english = caseOf(
+            """{"id":"e.lang.en","category":"c","lang":"en","text":"In 10 minutes show me a notification saying Merry Christmas",
+               "expect":{"outcome":"draft","trigger":{"type":"time","afterMs":600000},"actions_include":["show_notification"]}}""",
+        )
+        val trigger = Trigger.Time(afterMs = 600_000, tz = ZONE)
+        fun notification(title: String, text: String, name: String = "regola") =
+            draft(trigger, Action.ShowNotification(title, text), name = name)
+        fun categories(result: CompileResult) = eval(english, result).failures.map { it.category }
+
+        val goodReply = "I will show a notification in ten minutes."
+        val good = notification("Merry Christmas", "Merry Christmas to you and your family!", "Christmas greeting")
+        assertEquals(emptyList(), categories(CompileResult(goodReply, good, null)))
+
+        // Il caso visto sul telefono: richiesta inglese, risposta e notifica in italiano.
+        val italianReply = "Imposto una regola una tantum per il 24 dicembre che mostra una notifica."
+        assertEquals(listOf(FailureCategory.WRONG_LANGUAGE), categories(CompileResult(italianReply, good, null)))
+        // Ogni testo della bozza e' controllato da solo.
+        assertEquals(
+            listOf(FailureCategory.WRONG_LANGUAGE),
+            categories(CompileResult(goodReply, notification("Merry Christmas", "Buon Natale a tutti, che sia un giorno bellissimo"), null)),
+        )
+        assertEquals(
+            listOf(FailureCategory.WRONG_LANGUAGE),
+            categories(CompileResult(goodReply, notification("Un augurio per te e per la tua famiglia", "Merry Christmas to you and your family!"), null)),
+        )
+        assertEquals(
+            listOf(FailureCategory.WRONG_LANGUAGE),
+            categories(CompileResult(goodReply, notification("Merry Christmas", "Merry Christmas to you and your family!", "Notifica di Natale per la famiglia"), null)),
+        )
+        // Sotto le 3 parole non si giudica: «Buon Natale» da solo passa.
+        assertEquals(
+            emptyList(),
+            categories(CompileResult(goodReply, notification("Buon Natale", "Buon Natale!", "Natale"), null)),
+        )
+        // Lo stesso vale al contrario: interfaccia italiana, testi inglesi.
+        val italianCase = caseOf(
+            """{"id":"e.lang.it","category":"c","lang":"it","text":"Tra 10 minuti mostrami una notifica con scritto Buon Natale",
+               "expect":{"outcome":"draft","trigger":{"type":"time","afterMs":600000},"actions_include":["show_notification"]}}""",
+        )
+        val englishDraft = CompileResult("Here is the proposed rule that shows a notification.", notification("Buon Natale", "Buon Natale a tutti voi!"), null)
+        assertEquals(listOf(FailureCategory.WRONG_LANGUAGE), eval(italianCase, englishDraft).failures.map { it.category })
+        val italianDraft = CompileResult("Propongo una regola che mostra una notifica tra dieci minuti.", notification("Buon Natale", "Buon Natale a tutti voi!"), null)
+        assertTrue(eval(italianCase, italianDraft).passed, eval(italianCase, italianDraft).failures.toString())
+    }
+
+    @Test
+    fun `the language check covers the reply of a clarification and the goal of a generative action`() {
+        val clarification = caseOf(
+            """{"id":"e.lang.clar","category":"c","lang":"en","text":"Set an alarm","expect":{"outcome":"clarification"}}""",
+        )
+        assertTrue(eval(clarification, CompileResult("What time should the alarm ring?", null, "clarification_required")).passed)
+        assertEquals(
+            listOf(FailureCategory.WRONG_LANGUAGE),
+            eval(clarification, CompileResult("A che ora deve suonare la sveglia?", null, "clarification_required")).failures.map { it.category },
+        )
+        // Errori di formato e di trasporto non sono risposte da giudicare per lingua.
+        assertEquals(
+            listOf(FailureCategory.TRANSPORT),
+            eval(clarification, CompileResult("Impostazione non riuscita per colpa della rete", null, "bridge_network")).failures.map { it.category },
+        )
+
+        val v1 = Action.InvokeLlm(
+            goal = "Scrivi un breve augurio di Natale per la mia famiglia",
+            contextSources = emptyList(),
+            allowedTools = emptyList(),
+            replyTargetSender = false,
+            deliver = GenerativeDeliverMode.LOCAL_NOTIFICATION,
+            notificationTitle = "Un augurio per te",
+        )
+        val v2 = Action.InvokeLlmV2(
+            goal = "Rispondi dicendo a che livello e' la mia batteria",
+            stateContext = emptyList(),
+            allowedTools = listOf("whatsapp_reply"),
+            replyTargetSender = true,
+            timeoutMs = 60_000,
+        )
+        val texts = CompileEvaluator.userTexts(draft(Trigger.Immediate, v1, v2, Action.SetWifi(true), name = "Augurio"))
+        assertEquals(
+            listOf("nome", "goal", "titolo della notifica", "goal"),
+            texts.map { it.first },
+        )
+        assertEquals("Augurio", texts.first().second)
+        assertTrue(texts.any { it.second == v1.goal } && texts.any { it.second == v2.goal })
+        // Una bozza inattesa con goal italiano per un caso inglese: oltre all'esito sbagliato, la lingua.
+        val unexpected = eval(clarification, CompileResult("I will write a Christmas greeting for you.", draft(Trigger.Immediate, v1), null))
+        assertEquals(
+            listOf("unexpected_draft", FailureCategory.WRONG_LANGUAGE, FailureCategory.WRONG_LANGUAGE),
+            unexpected.failures.map { it.category },
+            unexpected.failures.toString(),
+        )
+    }
+
+    @Test
+    fun `the language heuristic counts function words and skips short or neutral texts`() {
+        fun judge(lang: String, text: String) = LanguageCheck.judge(lang, text)
+
+        assertEquals(null, judge("en", "Buon Natale"), "meno di 3 parole")
+        assertEquals(null, judge("it", "61.000 €"))
+        assertEquals(true, judge("en", "Remind me to drink water every two hours"))
+        assertEquals(false, judge("en", "Ricordami di bere acqua ogni due ore per favore"))
+        assertEquals(true, judge("it", "Ricordami di bere acqua ogni due ore per favore"))
+        assertEquals(false, judge("it", "Remind me to drink water every two hours"))
+        // Elisioni italiane e contrazioni inglesi.
+        assertEquals(true, judge("it", "Mostra una notifica quando è l'ora di bere"))
+        assertEquals(false, judge("en", "Mostra una notifica quando è l'ora di bere"))
+        assertEquals(true, judge("en", "Notify me when it's time to drink water"))
+        // Nomi propri e nomi di app non pesano.
+        assertEquals(true, judge("en", "Open Spotify when Mamma writes on WhatsApp"))
+        assertEquals(true, judge("it", "Apri Spotify quando Mamma scrive su WhatsApp"))
+        // Le parole che esistono in entrambe le lingue non decidono (in, a, no, come, me, do).
+        assertEquals(true, judge("en", "Do it as you come in, no problem"))
+    }
+
     // --- supporti -------------------------------------------------------------------------------
 
     private fun caseOf(json: String): BenchCase = BenchCases.parseCompile("[$json]").single()
@@ -303,7 +549,18 @@ class AiBenchEvaluatorTest {
         trigger: Trigger,
         vararg actions: Action,
         conditions: Condition? = null,
-    ) = AutomationDraft(name = "regola", trigger = trigger, actions = actions.toList(), conditions = conditions)
+        vars: List<VarBinding> = emptyList(),
+        name: String = "regola",
+    ) = AutomationDraft(
+        name = name,
+        trigger = trigger,
+        actions = actions.toList(),
+        vars = vars,
+        conditions = conditions,
+    )
+
+    private fun literal(name: String, value: String) =
+        VarBinding.Literal(name, value, VarType.TEXT, ConfidentialityLabel.PUBLIC)
 
     private fun eval(case: BenchCase, draft: AutomationDraft): Evaluation =
         eval(case, CompileResult("ok", draft, null))

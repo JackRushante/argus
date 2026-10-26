@@ -1159,9 +1159,12 @@
   "lang": "en",
   "text": "When I get to the office, turn the sound off",
   "expect": {
-   "outcome": "clarification"
+   "outcome": ["clarification", "draft"],
+   "trigger": {"type": "geofence", "transition": "ENTER", "resolveCurrentLocation": true},
+   "actions_include": ["set_ringer|set_volume"],
+   "params": {"set_ringer.mode": "silent", "set_volume.level": 0}
   },
-  "note": "Luogo non risolvibile: niente coordinate inventate (regola 4)"
+  "note": "Luogo non risolvibile senza coordinate: va bene chiedere dov'e' (regola 4) oppure una geofence che parte dalla posizione attuale (resolveCurrentLocation), mai coordinate inventate"
  },
  {
   "id": "clar.place.it.01",
@@ -1169,9 +1172,12 @@
   "lang": "it",
   "text": "Quando arrivo a casa accendi il Wi-Fi",
   "expect": {
-   "outcome": "clarification"
+   "outcome": ["clarification", "draft"],
+   "trigger": {"type": "geofence", "transition": "ENTER", "resolveCurrentLocation": true},
+   "actions_include": ["set_wifi"],
+   "params": {"set_wifi.on": true}
   },
-  "note": "'casa' non e' 'qui': servono le coordinate"
+  "note": "'casa' non e' 'qui': va bene chiedere dov'e' oppure una geofence che parte dalla posizione attuale (resolveCurrentLocation), mai coordinate inventate"
  },
  {
   "id": "clar.volume.en.01",
@@ -1549,6 +1555,6 @@
    "cron_silent": ["2026-11-02T09:00"],
    "actions_include": ["show_notification"]
   },
-  "note": "Senza Shizuku le chiavi di stato non sono leggibili ma il manifest le elenca lo stesso: una bozza con state_equals risulta 'capability' (incoerenza del manifest, non del modello)"
+  "note": "Senza Shizuku il manifest non pubblica chiavi di stato (state_keys vuoto): il modello non deve proporre state_equals; una bozza che lo usa comunque risulta 'capability'"
  }
 ]

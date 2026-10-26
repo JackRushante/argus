@@ -4,6 +4,7 @@ package dev.argus.automation.bench
 
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.Condition
+import dev.argus.engine.model.StateKeys
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.model.VarBinding
 import kotlinx.coroutines.runBlocking
@@ -166,6 +167,90 @@ class AiBenchCasesTest {
     }
 
     @Test
+    fun `the bench phone has about twenty common apps with real packages in both languages`() = runBlocking<Unit> {
+        val world = BenchWorld.create()
+        val english = world.installedApps("en")
+        val italian = world.installedApps("it")
+
+        assertTrue(english.size in 18..25, "app installate: ${english.size}")
+        assertEquals(english.map { it.packageName }, italian.map { it.packageName }, "stesse app, etichette nella lingua")
+        assertEquals(english.size, english.map { it.packageName }.toSet().size, "pacchetti duplicati")
+        val required = mapOf(
+            "Maps" to "com.google.android.apps.maps",
+            "WhatsApp" to "com.whatsapp",
+            "Telegram" to "org.telegram.messenger",
+            "Spotify" to "com.spotify.music",
+            "YouTube" to "com.google.android.youtube",
+            "Chrome" to "com.android.chrome",
+            "Gmail" to "com.google.android.gm",
+            "Calendar" to "com.google.android.calendar",
+            "Camera" to "com.google.android.GoogleCamera",
+            "Settings" to "com.android.settings",
+            "Instagram" to "com.instagram.android",
+            "Facebook" to "com.facebook.katana",
+            "Netflix" to "com.netflix.mediaclient",
+            "Amazon" to "com.amazon.mShop.android.shopping",
+        )
+        required.forEach { (label, pkg) ->
+            assertTrue(english.any { it.label == label && it.packageName == pkg }, "manca $label ($pkg)")
+        }
+        assertTrue(italian.any { it.label == "Calcolatrice" && it.packageName == "com.google.android.calculator" })
+        assertTrue(italian.any { it.label == "Impostazioni" && it.packageName == "com.android.settings" })
+        val shape = Regex("^[a-z][a-zA-Z0-9_]*(\\.[a-zA-Z][a-zA-Z0-9_]*)+$")
+        assertTrue(english.all { shape.matches(it.packageName) }, "pacchetto malformato")
+        assertFailsWith<BenchException> { world.installedApps("fr") }
+    }
+
+    @Test
+    fun `every case that names an app gets that app among the candidates the model sees`() = runBlocking<Unit> {
+        val world = BenchWorld.create()
+        var checked = 0
+        for (case in cases) {
+            val known = world.installedApps(case.lang).map { it.packageName }.toSet()
+            val expected = (
+                plainTexts(case.draft.params["launch_app.pkg"]) +
+                    plainTexts(case.draft.conditionsParams["app_in_foreground.pkg"]) +
+                    plainTexts(case.draft.trigger["pkg"])
+                ).filter { it in known }
+            if (expected.isEmpty()) continue
+            val prompt = world.compilePrompt(case.text, case.lang)
+            expected.forEach { pkg ->
+                assertTrue("\"package\":\"$pkg\"" in prompt, "${case.id}: il candidato $pkg non arriva al modello:\n$prompt")
+            }
+            assertTrue(prompt.endsWith(case.text), case.id)
+            checked++
+        }
+        assertTrue(checked >= 10, "casi con un'app attesa: $checked")
+        // Senza app nominate la richiesta arriva nuda, con quelle nominate no.
+        assertEquals("Turn off Wi-Fi in one minute", world.compilePrompt("Turn off Wi-Fi in one minute", "en"))
+        assertTrue("installed_app_candidates" in world.compilePrompt("Open Instagram", "en"))
+    }
+
+    @Test
+    fun `the manifest of a case speaks its language and publishes only the state keys that can be armed`() = runBlocking<Unit> {
+        val world = BenchWorld.create()
+
+        assertEquals("it", world.manifest(ManifestKind.FULL, "it").replyLanguage)
+        assertEquals("en", world.manifest(ManifestKind.NO_SHIZUKU, "en").replyLanguage)
+        // Il resto del manifest e' quello del probe vero, senza altre differenze.
+        assertEquals(world.manifest(ManifestKind.FULL), world.manifest(ManifestKind.FULL, "en"))
+        assertEquals(StateKeys.ALL, world.manifest(ManifestKind.FULL).stateKeys)
+        assertEquals(emptyMap(), world.manifest(ManifestKind.NO_SHIZUKU).stateKeys)
+        assertFailsWith<BenchException> { world.manifest(ManifestKind.FULL, "fr") }
+    }
+
+    @Test
+    fun `places that cannot be resolved accept a clarification or a geofence from the current position`() {
+        val places = cases.filter { it.id.startsWith("clar.place.") }
+        assertTrue(places.size >= 2)
+        places.forEach { case ->
+            assertEquals(setOf(Outcome.CLARIFICATION, Outcome.DRAFT), case.outcomes, case.id)
+            assertEquals(JsonPrimitive("geofence"), case.draft.trigger["type"], case.id)
+            assertEquals(JsonPrimitive(true), case.draft.trigger["resolveCurrentLocation"], case.id)
+        }
+    }
+
+    @Test
     fun `contacts named by the cases exist in the bench whitelist`() {
         cases.mapNotNull { it.draft.contact }.forEach { name ->
             assertTrue(name in BenchWorld.CONTACT_NAMES, "contatto sconosciuto: $name")
@@ -273,7 +358,8 @@ class AiBenchCasesTest {
     }
 
     /** Testi semplici di un matcher (primitivo o array di alternative): quelli confrontabili con un enum. */
-    private fun plainTexts(matcher: JsonElement): List<String> = when (matcher) {
+    private fun plainTexts(matcher: JsonElement?): List<String> = when (matcher) {
+        null -> emptyList()
         is JsonPrimitive -> if (matcher.isString) listOf(matcher.content) else emptyList()
         is JsonArray -> matcher.flatMap { plainTexts(it) }
         else -> emptyList()

@@ -8,7 +8,9 @@ import dev.argus.automation.AndroidSensorCapabilitySource
 import dev.argus.automation.GenerativeReadiness
 import dev.argus.automation.GenerativeRuntimeReadiness
 import dev.argus.automation.SensorReportingMode
+import dev.argus.automation.vm.composeInstalledAppCandidatesPrompt
 import dev.argus.automation.apps.InstalledAppCandidate
+import dev.argus.automation.apps.matchInstalledApps
 import dev.argus.engine.brain.CapabilityManifest
 import dev.argus.engine.brain.ContactWhitelistStore
 import dev.argus.engine.brain.WhitelistedContact
@@ -43,7 +45,28 @@ internal class BenchWorld private constructor(
     /** Gli id reali sono quelli che la validazione locale conosce (gli alias `contact_n` sono del modello). */
     val whitelistedIds: Set<String> = CONTACTS.mapTo(LinkedHashSet()) { it.id }
 
-    val installedApps: List<InstalledAppCandidate> = INSTALLED_APPS
+    /**
+     * App del telefono di prova, con le etichette nella lingua del telefono: come sull'app, la lingua
+     * dell'interfaccia e quella delle etichette dei lanciatori coincidono (`it` o `en`).
+     */
+    fun installedApps(lang: String): List<InstalledAppCandidate> = when (lang) {
+        "it" -> INSTALLED_APPS_IT
+        "en" -> INSTALLED_APPS_EN
+        else -> throw BenchException("lingua '$lang' non ammessa")
+    }
+
+    /**
+     * La richiesta come la manda ChatViewModel al compile: il testo piu' i candidati app che
+     * corrispondono (`installed_app_candidates`), cercati con le funzioni vere dell'app. Mai l'elenco intero.
+     */
+    fun compilePrompt(text: String, lang: String): String =
+        composeInstalledAppCandidatesPrompt(text, matchInstalledApps(text, installedApps(lang)))
+
+    /** Il manifest del caso, con la lingua dei testi per l'utente impostata come fa l'app (lingua dell'interfaccia). */
+    fun manifest(kind: ManifestKind, lang: String): CapabilityManifest {
+        if (lang !in REPLY_LANGUAGES) throw BenchException("lingua '$lang' non ammessa")
+        return manifest(kind).copy(replyLanguage = lang)
+    }
 
     val validator = DraftValidator(AndroidCapabilityProbe.KNOWN_TOOLS)
 
@@ -77,21 +100,42 @@ internal class BenchWorld private constructor(
 
         val CONTACT_NAMES: Set<String> = CONTACTS.mapTo(LinkedHashSet()) { it.displayName }
 
-        /**
-         * App del telefono di prova. Come nell'app, solo quelle che la richiesta nomina arrivano al
-         * modello (come `installed_app_candidates`), mai l'elenco intero.
-         */
-        val INSTALLED_APPS: List<InstalledAppCandidate> = listOf(
-            InstalledAppCandidate("Spotify", "com.spotify.music"),
-            InstalledAppCandidate("YouTube", "com.google.android.youtube"),
-            InstalledAppCandidate("Chrome", "com.android.chrome"),
-            InstalledAppCandidate("Maps", "com.google.android.apps.maps"),
-            InstalledAppCandidate("WhatsApp", "com.whatsapp"),
-            InstalledAppCandidate("Telegram", "org.telegram.messenger"),
-            InstalledAppCandidate("Gmail", "com.google.android.gm"),
-            InstalledAppCandidate("Calcolatrice", "com.google.android.calculator"),
-            InstalledAppCandidate("Fotocamera", "com.android.camera"),
+        private val REPLY_LANGUAGES = setOf("it", "en")
+
+        /** App comuni con pacchetto vero: (pacchetto, etichetta inglese, etichetta italiana). */
+        private val APP_TABLE: List<Triple<String, String, String>> = listOf(
+            Triple("com.google.android.apps.maps", "Maps", "Maps"),
+            Triple("com.whatsapp", "WhatsApp", "WhatsApp"),
+            Triple("org.telegram.messenger", "Telegram", "Telegram"),
+            Triple("com.spotify.music", "Spotify", "Spotify"),
+            Triple("com.google.android.youtube", "YouTube", "YouTube"),
+            Triple("com.android.chrome", "Chrome", "Chrome"),
+            Triple("com.google.android.gm", "Gmail", "Gmail"),
+            Triple("com.google.android.calendar", "Calendar", "Calendario"),
+            Triple("com.google.android.GoogleCamera", "Camera", "Fotocamera"),
+            Triple("com.android.settings", "Settings", "Impostazioni"),
+            Triple("com.instagram.android", "Instagram", "Instagram"),
+            Triple("com.facebook.katana", "Facebook", "Facebook"),
+            Triple("com.netflix.mediaclient", "Netflix", "Netflix"),
+            Triple("com.amazon.mShop.android.shopping", "Amazon", "Amazon"),
+            Triple("com.google.android.apps.photos", "Photos", "Foto"),
+            Triple("com.google.android.apps.docs", "Drive", "Drive"),
+            Triple("com.google.android.deskclock", "Clock", "Orologio"),
+            Triple("com.google.android.apps.messaging", "Messages", "Messaggi"),
+            Triple("com.zhiliaoapp.musically", "TikTok", "TikTok"),
+            Triple("com.android.vending", "Play Store", "Play Store"),
+            Triple("com.google.android.calculator", "Calculator", "Calcolatrice"),
         )
+
+        /**
+         * App del telefono di prova, elenco fisso. Come nell'app, solo quelle che la richiesta nomina
+         * arrivano al modello (come `installed_app_candidates`), mai l'elenco intero.
+         */
+        val INSTALLED_APPS_EN: List<InstalledAppCandidate> =
+            APP_TABLE.map { (pkg, en, _) -> InstalledAppCandidate(en, pkg) }
+
+        val INSTALLED_APPS_IT: List<InstalledAppCandidate> =
+            APP_TABLE.map { (pkg, _, italian) -> InstalledAppCandidate(italian, pkg) }
 
         private val FULL_STATE = AndroidCapabilityState(
             deviceModel = "CPH2747",

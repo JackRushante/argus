@@ -9,6 +9,7 @@ import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.CapabilityRequirements
 import dev.argus.engine.model.Condition
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.VarBinding
 import dev.argus.engine.runtime.CronSchedule
 import dev.argus.engine.safety.Severity
 import kotlinx.serialization.json.JsonArray
@@ -41,6 +42,7 @@ internal object FailureCategory {
     const val MISSING_FLOW = "missing_flow"
     const val VALIDATOR = "validator"
     const val CAPABILITY = "capability"
+    const val WRONG_LANGUAGE = "wrong_language"
     const val ACT_EMPTY = "act_empty"
     const val ACT_LANGUAGE = "act_language"
     const val ACT_LINK = "act_link"
@@ -101,6 +103,41 @@ internal object DraftTree {
 
     fun triggerJson(trigger: Trigger): JsonObject =
         ArgusJson.encodeToJsonElement(Trigger.serializer(), trigger).jsonObject
+
+    /**
+     * Vista di CONFRONTO di un'azione: l'azione come JSON, con le forme equivalenti ricondotte a quella
+     * che i casi si aspettano. Non cambia mai cio' che l'app esegue, solo come il banco lo legge:
+     * - un `while` con `delayBetweenMs = 0` e una `wait` di N ms nel corpo equivale a `delayBetweenMs = N`
+     *   (il ritardo effettivo e' `delayBetweenMs` piu' le `wait` dirette del corpo: se il modello mette
+     *   N in entrambi i posti aspetta 2N e NON equivale);
+     * - un `${var}` che nomina una variabile `literal` vale il valore della variabile (un letterale e'
+     *   CLEAN: il motore lo inserisce cosi' com'e', anche in `run_shell.cmd`).
+     */
+    fun actionView(action: Action, vars: List<VarBinding>): JsonObject {
+        var json = actionJson(action)
+        if (action is Action.While) {
+            val waits = action.body.filterIsInstance<Action.Wait>().sumOf { it.durationMs }
+            if (waits > 0) {
+                val effective = JsonPrimitive(action.delayBetweenMs + waits)
+                json = JsonObject(json.toMutableMap().apply { put("delayBetweenMs", effective) })
+            }
+        }
+        val literals = vars.filterIsInstance<VarBinding.Literal>().associate { it.name to it.value }
+        return if (literals.isEmpty()) json else substituteLiterals(json, literals) as JsonObject
+    }
+
+    private val VAR_REFERENCE = Regex("""\$\{([a-z][a-z0-9_]{0,31})\}""")
+
+    private fun substituteLiterals(element: JsonElement, literals: Map<String, String>): JsonElement = when (element) {
+        is JsonObject -> JsonObject(element.mapValues { substituteLiterals(it.value, literals) })
+        is JsonArray -> JsonArray(element.map { substituteLiterals(it, literals) })
+        is JsonNull -> element
+        is JsonPrimitive -> if (element.isString) {
+            JsonPrimitive(VAR_REFERENCE.replace(element.content) { match -> literals[match.groupValues[1]] ?: match.value })
+        } else {
+            element
+        }
+    }
 
     fun conditions(root: Condition?): List<Condition> {
         if (root == null) return emptyList()
@@ -183,6 +220,7 @@ internal object CompileEvaluator {
                 } else if (kind == ActualKind.DRAFT) {
                     checkDraft(case, requireNotNull(result.draft), world, today, failures)
                 }
+                checkLanguage(case, result, failures)
                 Evaluation(label, failures)
             }
         }
@@ -226,6 +264,47 @@ internal object CompileEvaluator {
         checkActions(expect, draft, failures)
         checkVarsAndFlow(expect, draft, failures)
         checkConditions(expect, draft, failures)
+    }
+
+    // --- lingua ----------------------------------------------------------------------------------
+
+    /**
+     * Ogni testo scritto PER l'utente deve essere nella lingua dell'interfaccia (`case.lang`, la stessa
+     * che il banco passa al modello in `manifest.reply_language`): la frase di risposta e, se c'e' una
+     * bozza, nome, titoli e testi delle notifiche, goal. I testi sotto [LanguageCheck.MIN_WORDS] parole
+     * non si giudicano.
+     */
+    private fun checkLanguage(case: BenchCase, result: CompileResult, failures: MutableList<Failure>) {
+        val texts = ArrayList<Pair<String, String>>()
+        texts += "risposta" to result.reply
+        result.draft?.let { texts += userTexts(it) }
+        for ((what, text) in texts) {
+            if (LanguageCheck.judge(case.lang, text) == false) {
+                failures += Failure(
+                    FailureCategory.WRONG_LANGUAGE,
+                    "$what non e' in ${case.lang}: \"${BenchText.clip(text.replace('\n', ' '), 80)}\"",
+                )
+            }
+        }
+    }
+
+    /** I testi della bozza che l'utente legge o che il modello genera per lui. */
+    fun userTexts(draft: AutomationDraft): List<Pair<String, String>> = buildList {
+        add("nome" to draft.name)
+        for (action in DraftTree.flatten(draft.actions)) {
+            when (action) {
+                is Action.ShowNotification -> {
+                    add("titolo della notifica" to action.title)
+                    add("testo della notifica" to action.text)
+                }
+                is Action.InvokeLlm -> {
+                    add("goal" to action.goal)
+                    action.notificationTitle?.let { add("titolo della notifica" to it) }
+                }
+                is Action.InvokeLlmV2 -> add("goal" to action.goal)
+                else -> Unit
+            }
+        }
     }
 
     // --- trigger ---------------------------------------------------------------------------------
@@ -351,6 +430,7 @@ internal object CompileEvaluator {
 
     private fun checkActions(expect: DraftExpectation, draft: AutomationDraft, failures: MutableList<Failure>) {
         val actions = DraftTree.flatten(draft.actions)
+        val views = actions.map { DraftTree.actionType(it) to DraftTree.actionView(it, draft.vars) }
         val types = actions.map(DraftTree::actionType)
         val typeSet = types.toSet()
         for (entry in expect.actionsInclude) {
@@ -370,20 +450,16 @@ internal object CompileEvaluator {
         for ((path, matcher) in expect.params) {
             val segments = path.split('.')
             val root = segments.first()
-            val candidates = actions.filter { DraftTree.actionType(it) == root }
+            val candidates = views.filter { it.first == root }.map { it.second }
             if (candidates.isEmpty()) {
                 if (root !in listed) {
                     failures += Failure(FailureCategory.WRONG_PARAM, "$path: nessuna azione $root")
                 }
                 continue
             }
-            val ok = candidates.any { action ->
-                JsonMatch.matches(DraftTree.resolve(DraftTree.actionJson(action), segments.drop(1)), matcher)
-            }
+            val ok = candidates.any { view -> JsonMatch.matches(DraftTree.resolve(view, segments.drop(1)), matcher) }
             if (!ok) {
-                val found = candidates.joinToString(" / ") {
-                    describe(DraftTree.resolve(DraftTree.actionJson(it), segments.drop(1)))
-                }
+                val found = candidates.joinToString(" / ") { describe(DraftTree.resolve(it, segments.drop(1))) }
                 failures += Failure(
                     FailureCategory.WRONG_PARAM,
                     "$path = $found, atteso ${describe(matcher)}",
@@ -391,7 +467,9 @@ internal object CompileEvaluator {
             }
         }
         if (expect.actionsText.isNotEmpty()) {
-            val text = JsonArray(actions.map(DraftTree::actionJson)).toString()
+            // Il testo delle azioni com'e' scritto e come risulta con i letterali al loro posto.
+            val text = JsonArray(actions.map(DraftTree::actionJson)).toString() + "\n" +
+                JsonArray(views.map { it.second }).toString()
             for (pattern in expect.actionsText) {
                 if (!Regex(pattern, RegexOption.IGNORE_CASE).containsMatchIn(text)) {
                     failures += Failure(FailureCategory.WRONG_PARAM, "nelle azioni manca /$pattern/")
@@ -527,28 +605,97 @@ internal object ActEvaluator {
 }
 
 /**
- * Euristica di lingua a parole funzionali: una risposta e' "nella lingua giusta" se le parole
- * dell'altra lingua non la dominano. Un testo corto senza parole funzionali (un prezzo) passa.
+ * Euristica di lingua a parole funzionali: un testo e' "nella lingua giusta" se le parole dell'altra
+ * lingua non lo dominano. Le liste contengono solo parole che esistono in UNA delle due lingue (niente
+ * `a`, `i`, `in`, `no`, `me`, `come`, `do`...) e le elisioni italiane (`l'ora`, `un'ora`, `dell'ufficio`)
+ * contano come parole italiane, le contrazioni inglesi (`it's`, `don't`) come inglesi. Un testo breve
+ * senza parole funzionali (un prezzo, un nome proprio) non e' giudicabile e passa.
  */
 internal object LanguageCheck {
+    /** Sotto questa soglia di parole un testo (un titolo, un nome) non si giudica. */
+    const val MIN_WORDS = 3
+
     private val ITALIAN = setOf(
-        "il", "lo", "la", "gli", "le", "un", "una", "uno", "di", "del", "della", "dei", "delle", "che", "è",
-        "sono", "per", "con", "non", "più", "nel", "nella", "sul", "alla", "al", "dal", "da", "ma", "anche",
-        "come", "oggi", "ora", "ha", "hanno", "ci", "ti", "mi", "tra", "fra", "questo", "questa", "molto",
-        "circa", "attualmente", "prezzo", "costa", "vale", "buongiorno", "buona", "ricorda", "ricordati",
+        "il", "lo", "la", "gli", "le", "un", "uno", "una", "di", "del", "dello", "della", "dei", "degli", "delle",
+        "che", "è", "sono", "per", "con", "non", "più", "nel", "nello", "nella", "nei", "negli", "nelle", "sul",
+        "sullo", "sulla", "sui", "sugli", "sulle", "alla", "alle", "allo", "al", "agli", "dal", "dalla",
+        "dalle", "dai", "da", "ma", "anche", "oggi", "ora", "ha", "hanno", "ho", "hai", "ci", "ti", "mi", "tra",
+        "fra", "questo", "questa", "questi", "queste", "molto", "circa", "attualmente", "prezzo", "costa", "vale",
+        "buongiorno", "buona", "ricorda", "ricordati", "quando", "se", "altrimenti", "quindi", "perché", "perche",
+        "già", "sempre", "ogni", "tutti", "tutto", "ecco", "regola", "notifica", "ricevo", "ricevi", "mostra",
+        "mostrami", "imposto", "propongo", "attiva", "mentre", "dopo", "prima", "sera", "mattina", "giorno",
+        "tuo", "tua", "tuoi", "mio", "mia", "suo", "sua", "viene", "vuoi", "voglio", "posso", "puoi", "può",
+        "fai", "fare", "sarà", "verrà", "scatta", "invece", "ancora", "poi", "così", "cosa", "chi",
     )
     private val ENGLISH = setOf(
         "the", "is", "are", "was", "were", "of", "and", "to", "for", "with", "you", "your", "it", "its",
         "this", "that", "at", "as", "on", "has", "have", "will", "today", "now", "currently", "current",
         "about", "from", "by", "be", "an", "or", "not", "but", "price", "right", "good", "remember",
+        "when", "if", "then", "else", "otherwise", "every", "each", "only", "also", "can", "should", "would",
+        "rule", "notification", "show", "set", "turn", "open", "here", "there", "they", "their", "what",
+        "which", "who", "how", "into", "after", "before", "while", "until", "once", "again", "just",
+        "propose", "proposed",
     )
     private val WORD = Regex("[\\p{L}']+")
+    private val ITALIAN_ELISION = setOf(
+        "l", "d", "un", "dell", "all", "nell", "sull", "dall", "quell", "quest", "c", "gl", "anch", "dov", "com",
+    )
+    private val ENGLISH_CLITIC = setOf("s", "t", "re", "ll", "m", "ve", "d")
 
-    fun looksLike(lang: String, text: String): Boolean {
-        val words = WORD.findAll(text.lowercase(Locale.ROOT)).map { it.value }.toList()
-        val italian = words.count { it in ITALIAN }
-        val english = words.count { it in ENGLISH }
-        val (own, other) = if (lang == "it") italian to english else english to italian
+    /** Parole totali e parole funzionali per lingua di un testo. */
+    data class Count(val words: Int, val italian: Int, val english: Int)
+
+    fun count(text: String): Count {
+        var words = 0
+        var italian = 0
+        var english = 0
+        fun plain(word: String) {
+            words++
+            when (word) {
+                in ITALIAN -> italian++
+                in ENGLISH -> english++
+            }
+        }
+        for (match in WORD.findAll(text.lowercase(Locale.ROOT).replace('’', '\''))) {
+            val token = match.value.trim('\'')
+            if (token.isEmpty()) continue
+            val cut = token.indexOf('\'')
+            if (cut < 0) {
+                plain(token)
+                continue
+            }
+            val head = token.substring(0, cut)
+            val tail = token.substring(cut + 1)
+            when {
+                // `l'ora`, `dell'ufficio`: l'elisione e' italiana, poi il resto e' una parola.
+                head in ITALIAN_ELISION && tail.isNotEmpty() -> {
+                    italian++
+                    plain(tail)
+                }
+                // `it's`, `don't`, `you're`: contrazione inglese.
+                tail in ENGLISH_CLITIC -> {
+                    words++
+                    english++
+                }
+                else -> {
+                    plain(head)
+                    if (tail.isNotEmpty()) plain(tail)
+                }
+            }
+        }
+        return Count(words, italian, english)
+    }
+
+    private fun looksLike(lang: String, count: Count): Boolean {
+        val (own, other) = if (lang == "it") count.italian to count.english else count.english to count.italian
         return !(other >= 2 && other > own)
+    }
+
+    fun looksLike(lang: String, text: String): Boolean = looksLike(lang, count(text))
+
+    /** `true`/`false` se il testo e' giudicabile (almeno [MIN_WORDS] parole), `null` se e' troppo corto. */
+    fun judge(lang: String, text: String): Boolean? {
+        val count = count(text)
+        return if (count.words < MIN_WORDS) null else looksLike(lang, count)
     }
 }

@@ -1,13 +1,11 @@
 package dev.argus.automation.bench
 
-import dev.argus.automation.apps.matchInstalledApps
 import dev.argus.automation.budget.BudgetAlerts
 import dev.argus.automation.budget.BudgetPolicy
 import dev.argus.automation.budget.BudgetSettings
 import dev.argus.automation.budget.BudgetSettingsStore
 import dev.argus.automation.budget.BudgetLimits
 import dev.argus.automation.budget.MeteredBrain
-import dev.argus.automation.vm.composeInstalledAppCandidatesPrompt
 import dev.argus.brain.AgentTransport
 import dev.argus.brain.CompileTimeoutPolicy
 import dev.argus.brain.ProviderConfig
@@ -135,9 +133,10 @@ internal class BenchRunner(
 
     private suspend fun runCompile(case: BenchCase, repetition: Int): RunResult {
         val stack = Stack(transport, config)
-        val manifest = world.manifest(case.manifest)
-        // Come ChatViewModel: i candidati app nominati nella richiesta arrivano al modello nel prompt.
-        val prompt = composeInstalledAppCandidatesPrompt(case.text, matchInstalledApps(case.text, world.installedApps))
+        // Come ChatViewModel: la lingua dei testi per l'utente e' quella dell'interfaccia (qui la `lang`
+        // del caso) e i candidati app nominati nella richiesta arrivano al modello nel prompt.
+        val manifest = world.manifest(case.manifest, case.lang)
+        val prompt = world.compilePrompt(case.text, case.lang)
         val expected = case.outcomes.joinToString("|") { it.wire }
         val started = System.nanoTime()
         fun elapsed() = (System.nanoTime() - started) / 1_000_000

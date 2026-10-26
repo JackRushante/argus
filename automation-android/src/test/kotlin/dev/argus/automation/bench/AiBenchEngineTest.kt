@@ -191,6 +191,70 @@ class AiBenchEngineTest {
     }
 
     @Test
+    fun `the request carries the case language and the installed apps it names, like the app sends it`() {
+        val cases = BenchCases.parseCompile(
+            """
+            [
+              {"id":"l.en","category":"x","lang":"en","text":"When I connect to the car Bluetooth BMW, open Google Maps",
+               "expect":{"outcome":"no_draft"}},
+              {"id":"l.it","category":"x","lang":"it","text":"Tra 5 minuti apri la Calcolatrice",
+               "expect":{"outcome":"no_draft"}},
+              {"id":"l.none","category":"x","lang":"en","text":"Turn off Wi-Fi in one minute",
+               "expect":{"outcome":"no_draft"}}
+            ]
+            """.trimIndent(),
+        )
+        FakeChatServer { _, _ ->
+            // Due parole: la lingua della risposta non si giudica (le tre lingue dei casi sono diverse).
+            ok("Which one?\n@@META@@ {\"draft\":null,\"error_code\":\"clarification_required\"}")
+        }.use { server ->
+            val world = runBlocking { BenchWorld.create() }
+            val config = ProviderConfig(ProviderId.CUSTOM_OPENAI_COMPAT, server.baseUrl, "mock-model")
+            val transport = OpenAICompatTransport(
+                providerId = ProviderId.CUSTOM_OPENAI_COMPAT,
+                spec = ProviderCatalog.spec(ProviderId.CUSTOM_OPENAI_COMPAT),
+                config = config,
+                apiKey = { "test-key" },
+                client = OkHttpClient(),
+            )
+            val options = BenchOptions("mock-model", server.baseUrl, repeat = 1, filter = null, parallel = 1)
+            val results = runBlocking {
+                BenchRunner(transport, config, world, options) { LocalDate.of(2026, 10, 26) }.run(cases, emptyList())
+            }
+            assertTrue(results.all { it.passed }, results.flatMap { it.failures }.toString())
+
+            val sent = server.requests.map { lastUserMessage(it) }
+            assertEquals(3, sent.size)
+            fun context(user: String) = Json.parseToJsonElement(
+                user.substringAfter("===== UNTRUSTED STRUCTURED CONTEXT =====\n").substringBefore("\n===== END CONTEXT ====="),
+            ).jsonObject.getValue("manifest").jsonObject
+            fun request(user: String) = user.substringAfter(REQUEST_START).substringBefore(REQUEST_END)
+            val english = sent.single { "BMW" in it }
+            val italian = sent.single { "Calcolatrice" in it }
+            val neutral = sent.single { "Wi-Fi" in it }
+
+            // La lingua dei testi per l'utente e' la `lang` del caso, come l'interfaccia dell'app.
+            assertEquals("en", context(english).getValue("reply_language").jsonPrimitive.content)
+            assertEquals("it", context(italian).getValue("reply_language").jsonPrimitive.content)
+            assertEquals("en", context(neutral).getValue("reply_language").jsonPrimitive.content)
+
+            // I candidati app sono quelli delle funzioni vere dell'app, con le etichette della lingua del caso.
+            assertTrue(
+                "installed_app_candidates=[{\"label\":\"Maps\",\"package\":\"com.google.android.apps.maps\"}]" in request(english),
+                request(english),
+            )
+            assertTrue(
+                "installed_app_candidates=[{\"label\":\"Calcolatrice\",\"package\":\"com.google.android.calculator\"}]" in request(italian),
+                request(italian),
+            )
+            assertTrue(request(english).endsWith("When I connect to the car Bluetooth BMW, open Google Maps"))
+            // Una richiesta che non nomina app arriva nuda: mai l'elenco intero.
+            assertEquals("Turn off Wi-Fi in one minute", request(neutral))
+            assertFalse("installed_app_candidates" in neutral)
+        }
+    }
+
+    @Test
     fun `options come from the environment with the documented defaults`() {
         val defaults = BenchOptions.fromEnv { null }
         assertEquals("@preset/argus", defaults.model)
@@ -247,7 +311,9 @@ class AiBenchEngineTest {
     private fun answer(body: String): FakeChatServer.Reply {
         val user = lastUserMessage(body)
         if (user.startsWith("Goal: ")) return generative(user)
-        val request = user.substringAfter(REQUEST_START).substringBefore(REQUEST_END)
+        // Se la richiesta nomina un'app (qui «Imposta» somiglia a «Impostazioni») l'app antepone i candidati:
+        // il testo dell'utente viene dopo «User request:».
+        val request = user.substringAfter(REQUEST_START).substringBefore(REQUEST_END).substringAfter("User request:\n")
         val retry = "(Argus: your previous reply could not be used" in request
         return when {
             request.startsWith("Spegni subito il non disturbare") ->
