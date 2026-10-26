@@ -1,5 +1,7 @@
 package dev.argus.automation.connectivity
 
+import dev.argus.automation.triggers.DeviceEventDemand
+import dev.argus.automation.triggers.deviceEventSource
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.ConnMedium
 import dev.argus.engine.model.Trigger
@@ -51,7 +53,9 @@ object NoopForegroundDeniedNotice : ForegroundDeniedNotice {
 internal const val FOREGROUND_SERVICE_DENIED_REASON = "foreground_service_denied"
 
 /**
- * Accende un'unica sentinella condivisa solo per i medium non manifest-safe: Wi-Fi e POWER.
+ * Accende un'unica sentinella condivisa solo per i medium non manifest-safe: Wi-Fi e POWER, e dalla
+ * 0.4.1 per i trigger di sistema senza Shizuku (schermo, batteria, uscita audio, modalità,
+ * riproduzione), la cui domanda viene pubblicata in [deviceEvents] a ogni reconcile.
  *
  * Se la sentinella non parte (`start()` falso) le regole restano spente: lo si dice in due modi,
  * UNA volta per episodio e non a ogni tentativo. Un audit `SCHEDULING_FAILED` per ogni regola
@@ -65,6 +69,7 @@ class ConnectivitySentinelCoordinator(
     private val audit: AuditSink = NoopAuditSink,
     private val notice: ForegroundDeniedNotice = NoopForegroundDeniedNotice,
     private val nowMillis: () -> Long = System::currentTimeMillis,
+    private val deviceEvents: DeviceEventDemand = DeviceEventDemand(),
 ) : ConnectivityTriggerRuntime {
     private val mutex = Mutex()
 
@@ -73,10 +78,14 @@ class ConnectivitySentinelCoordinator(
     private var noticeShown = false
 
     override suspend fun reconcile(): ConnectivityReconcileReport = mutex.withLock {
-        val required = store.armed()
+        val armed = store.armed()
+        // Prima di avviare il servizio: alla creazione legge già la domanda corrente.
+        deviceEvents.update(armed.mapNotNullTo(linkedSetOf()) { it.trigger.deviceEventSource() })
+        val required = armed
             .filter { automation ->
                 val medium = (automation.trigger as? Trigger.Connectivity)?.medium
-                medium == ConnMedium.WIFI || medium == ConnMedium.POWER
+                medium == ConnMedium.WIFI || medium == ConnMedium.POWER ||
+                    automation.trigger.deviceEventSource() != null
             }
             .map { it.id }
             .sortedBy { it.value }

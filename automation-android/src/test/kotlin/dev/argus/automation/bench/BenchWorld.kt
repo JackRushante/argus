@@ -156,6 +156,8 @@ internal class BenchWorld private constructor(
             activityRecognitionGranted = true,
             dndPolicyGranted = true,
             locationEnabled = true,
+            // 0.4.1: il telefono di prova ha due SIM, quindi il filtro SIM si pubblica.
+            multiSim = true,
         )
 
         private val NO_SHIZUKU_STATE = FULL_STATE.copy(

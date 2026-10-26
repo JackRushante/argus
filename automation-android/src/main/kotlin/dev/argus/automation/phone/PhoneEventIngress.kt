@@ -13,6 +13,8 @@ data class CallStateSnapshot(
     val state: String,
     val number: String?,
     val transitionAtMillis: Long,
+    /** SIM 1|2 della chiamata in corso (0.4.1), `null` se non nota. */
+    val sim: Int? = null,
 )
 
 interface CallStateStore {
@@ -46,19 +48,19 @@ class PhoneEventIngress(
      */
     private val lanes = SequentialLanes<String>()
 
-    suspend fun onSms(parts: List<SmsPart>) {
+    suspend fun onSms(parts: List<SmsPart>, sim: Int? = null) {
         parts
             .filter { !it.body.isNullOrBlank() }
             .groupBy { it.sender }
             .forEach { (sender, senderParts) ->
                 val text = senderParts.joinToString("") { it.body.orEmpty() }
                 val atMillis = senderParts.minOf { it.atMillis }
-                parser.parse(PhoneEvent.SMS_RECEIVED, sender, text, atMillis)
+                parser.parse(PhoneEvent.SMS_RECEIVED, sender, text, atMillis, sim)
                     ?.let { dispatcher.dispatch(it) }
             }
     }
 
-    suspend fun onCallStateChanged(state: String, number: String?, atMillis: Long) {
+    suspend fun onCallStateChanged(state: String, number: String?, atMillis: Long, sim: Int? = null) {
         lanes.run(CALL_LANE) {
             if (state !in VALID_STATES) return@run
             val pending = callState.pending()
@@ -75,13 +77,20 @@ class PhoneEventIngress(
                 // col numero. Riemettiamo l'envelope arricchito con la STESSA identità: le regole
                 // generiche restano idempotenti, quelle filtrate per numero possono finalmente
                 // fare match.
-                if (state == STATE_RINGING && previous.number == null && number != null) {
-                    val enriched = previous.copy(number = number)
+                // Lo stesso vale per lo slot SIM, quando il primo broadcast non lo portava.
+                if (state == STATE_RINGING &&
+                    ((previous.number == null && number != null) || (previous.sim == null && sim != null))
+                ) {
+                    val enriched = previous.copy(
+                        number = number ?: previous.number,
+                        sim = sim ?: previous.sim,
+                    )
                     val envelope = parser.parse(
                         PhoneEvent.INCOMING_CALL,
-                        number,
+                        enriched.number,
                         smsText = null,
                         atMillis = enriched.transitionAtMillis,
+                        sim = enriched.sim,
                     )
                     callState.record(enriched, envelope)
                     envelope?.let { deliverCall(it) }
@@ -90,10 +99,12 @@ class PhoneEventIngress(
             }
 
             val retainedNumber = number ?: previous?.number
+            val retainedSim = sim ?: previous?.sim
             val snapshot = CallStateSnapshot(
                 state = state,
                 number = retainedNumber.takeUnless { state == STATE_IDLE },
                 transitionAtMillis = safeAtMillis,
+                sim = retainedSim.takeUnless { state == STATE_IDLE },
             )
             val envelope = when {
                 state == STATE_RINGING -> parser.parse(
@@ -101,6 +112,7 @@ class PhoneEventIngress(
                     retainedNumber,
                     smsText = null,
                     atMillis = safeAtMillis,
+                    sim = retainedSim,
                 )
                 state == STATE_IDLE && previous?.state in setOf(STATE_RINGING, STATE_OFFHOOK) ->
                     parser.parse(
@@ -108,11 +120,28 @@ class PhoneEventIngress(
                         retainedNumber,
                         smsText = null,
                         atMillis = safeAtMillis,
+                        sim = retainedSim,
                     )
                 else -> null
             }
             callState.record(snapshot, envelope)
             envelope?.let { deliverCall(it) }
+            // Chiamata persa: squillo -> idle SENZA passare da OFFHOOK (nessuna risposta). Anche un
+            // rifiuto manuale finisce così: con le API pubbliche non si distinguono. Si recapita dopo
+            // CALL_ENDED, che resta invariato per le regole esistenti.
+            if (state == STATE_IDLE && previous?.state == STATE_RINGING) {
+                val missed = parser.parse(
+                    PhoneEvent.MISSED_CALL,
+                    retainedNumber,
+                    smsText = null,
+                    atMillis = safeAtMillis,
+                    sim = retainedSim,
+                )
+                if (missed != null) {
+                    callState.record(snapshot, missed)
+                    deliverCall(missed)
+                }
+            }
         }
     }
 

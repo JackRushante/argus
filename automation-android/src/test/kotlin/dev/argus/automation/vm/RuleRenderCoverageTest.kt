@@ -2,6 +2,7 @@ package dev.argus.automation.vm
 
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.ApprovedStateContext
+import dev.argus.engine.model.AudioOutputKind
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
@@ -14,8 +15,11 @@ import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.DndMode
 import dev.argus.engine.model.GenerativeDeliverMode
 import dev.argus.engine.model.IntegrityLabel
+import dev.argus.engine.model.MediaPlayState
+import dev.argus.engine.model.ModeKind
 import dev.argus.engine.model.NightMode
 import dev.argus.engine.model.PhoneEvent
+import dev.argus.engine.model.ScreenEvent
 import dev.argus.engine.model.SensorKind
 import dev.argus.engine.model.SettingNamespace
 import dev.argus.engine.model.SettingsScreen
@@ -270,11 +274,16 @@ class RuleRenderCoverageTest {
                 ),
             ),
             "phone_state" to case(
-                Trigger.PhoneState(PhoneEvent.SMS_RECEIVED, number = "+39XYZ", textMatch = "XYZ-sms"),
-                mapOf(
+                v(
+                    Trigger.PhoneState(PhoneEvent.SMS_RECEIVED, number = "+39XYZ", textMatch = "XYZ-sms"),
                     "event" to ms(m("SMS received", "SMS ricevuto")),
                     "number" to ms("+39XYZ"),
                     "textMatch" to ms("XYZ-sms"),
+                ),
+                v(
+                    Trigger.PhoneState(PhoneEvent.MISSED_CALL, sim = 2),
+                    "event" to ms(m("missed call", "chiamata persa")),
+                    "sim" to ms("SIM 2"),
                 ),
             ),
             "connectivity" to case(
@@ -295,6 +304,39 @@ class RuleRenderCoverageTest {
                     "samplingPeriodUs" to "il validator rifiuta ogni valore non nullo (sampling continuo non supportato)",
                     "maxReportLatencyUs" to "il validator rifiuta ogni valore non nullo (sampling batched non supportato)",
                 ),
+            ),
+            // --- 0.4.1: trigger di sistema senza Shizuku ---
+            "screen" to case(
+                Trigger.Screen(ScreenEvent.UNLOCKED),
+                mapOf("event" to ms(m("the phone is unlocked", "il telefono viene sbloccato"))),
+            ),
+            "battery" to case(
+                v(
+                    Trigger.Battery(below = 17),
+                    "below" to ms(m("drops below 17%", "scende sotto il 17%")),
+                ),
+                v(
+                    Trigger.Battery(above = 83),
+                    "above" to ms(m("rises above 83%", "sale sopra il 83%")),
+                ),
+            ),
+            "audio_output" to case(
+                Trigger.AudioOutput(AudioOutputKind.BLUETOOTH, ConnState.DISCONNECTED),
+                mapOf(
+                    "kind" to ms(m("Bluetooth audio output", "uscita audio Bluetooth")),
+                    "state" to ms(m("disconnected", "scollegata")),
+                ),
+            ),
+            "mode_changed" to case(
+                Trigger.ModeChanged(ModeKind.DND, "priority"),
+                mapOf(
+                    "what" to ms(m("Do Not Disturb", "Non disturbare")),
+                    "to" to ms(m("priority only", "solo priorità")),
+                ),
+            ),
+            "media" to case(
+                Trigger.Media(MediaPlayState.STOPPED),
+                mapOf("state" to ms(m("media stops playing", "finisce la riproduzione multimediale"))),
             ),
         )
         check("Trigger", Trigger.serializer(), cases) { trigger -> automation(trigger = trigger) }

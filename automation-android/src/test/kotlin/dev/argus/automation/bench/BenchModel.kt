@@ -52,6 +52,7 @@ internal enum class Outcome(val wire: String) {
 internal object BenchVocab {
     val TRIGGER_TYPES: Set<String> = setOf(
         "time", "immediate", "geofence", "notification", "phone_state", "connectivity", "sensor",
+        "screen", "battery", "audio_output", "mode_changed", "media",
     )
 
     val ACTION_TYPES: Set<String> = setOf(

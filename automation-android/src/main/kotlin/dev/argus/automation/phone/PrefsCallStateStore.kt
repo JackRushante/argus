@@ -2,6 +2,7 @@ package dev.argus.automation.phone
 
 import android.content.Context
 import dev.argus.engine.model.PhoneEvent
+import dev.argus.engine.model.SimSlotPolicy
 import dev.argus.engine.runtime.TriggerEnvelope
 import dev.argus.engine.runtime.TriggerEvent
 import dev.argus.engine.runtime.TriggerEventId
@@ -25,6 +26,7 @@ class PrefsCallStateStore(context: Context) : CallStateStore {
         CallStateSnapshot(
             state = state,
             number = number,
+            sim = readSim(KEY_SIM),
             // Le installazioni P2 precedenti non avevano timestamp: 0 le rende stale al primo
             // evento moderno, evitando un CALL_ENDED spurio dopo upgrade/reboot.
             transitionAtMillis = atMillis,
@@ -35,11 +37,14 @@ class PrefsCallStateStore(context: Context) : CallStateStore {
         val id = requireNotNull(prefs.getString(KEY_PENDING_ID, null))
         require(id.matches(EVENT_ID_PATTERN))
         val event = PhoneEvent.valueOf(requireNotNull(prefs.getString(KEY_PENDING_EVENT, null)))
-        require(event == PhoneEvent.INCOMING_CALL || event == PhoneEvent.CALL_ENDED)
+        require(
+            event == PhoneEvent.INCOMING_CALL || event == PhoneEvent.CALL_ENDED ||
+                event == PhoneEvent.MISSED_CALL,
+        )
         val number = readBoundedNumber(KEY_PENDING_NUMBER)
         TriggerEnvelope(
             TriggerEventId(id),
-            TriggerEvent.PhoneStateChanged(event, number, smsText = null),
+            TriggerEvent.PhoneStateChanged(event, number, smsText = null, sim = readSim(KEY_PENDING_SIM)),
         )
     }.getOrNull()
 
@@ -47,6 +52,7 @@ class PrefsCallStateStore(context: Context) : CallStateStore {
         require(snapshot.state in VALID_STATES) { "phone_state_invalid" }
         require(snapshot.transitionAtMillis >= 0) { "phone_transition_time_invalid" }
         require(snapshot.number.isBoundedNumber()) { "phone_number_invalid" }
+        require(snapshot.sim == null || SimSlotPolicy.validSlot(snapshot.sim)) { "phone_sim_invalid" }
         val pendingEvent = pending?.let {
             require(it.id.value.matches(EVENT_ID_PATTERN)) { "phone_pending_id_invalid" }
             requireNotNull(it.event as? TriggerEvent.PhoneStateChanged)
@@ -55,9 +61,15 @@ class PrefsCallStateStore(context: Context) : CallStateStore {
                         "phone_pending_event_invalid"
                     }
                     require(event.number.isBoundedNumber()) { "phone_pending_number_invalid" }
+                    require(event.sim == null || SimSlotPolicy.validSlot(event.sim)) {
+                        "phone_pending_sim_invalid"
+                    }
                     require(
                         (event.event == PhoneEvent.INCOMING_CALL && snapshot.state == "RINGING") ||
-                            (event.event == PhoneEvent.CALL_ENDED && snapshot.state == "IDLE"),
+                            (
+                                (event.event == PhoneEvent.CALL_ENDED || event.event == PhoneEvent.MISSED_CALL) &&
+                                    snapshot.state == "IDLE"
+                                ),
                     ) { "phone_pending_snapshot_mismatch" }
                 }
         }
@@ -66,6 +78,7 @@ class PrefsCallStateStore(context: Context) : CallStateStore {
             .putLong(KEY_TRANSITION_AT, snapshot.transitionAtMillis)
             .apply {
                 if (snapshot.number == null) remove(KEY_NUMBER) else putString(KEY_NUMBER, snapshot.number)
+                if (snapshot.sim == null) remove(KEY_SIM) else putInt(KEY_SIM, snapshot.sim)
                 if (pending == null || pendingEvent == null) {
                     removePending()
                 } else {
@@ -73,6 +86,8 @@ class PrefsCallStateStore(context: Context) : CallStateStore {
                     putString(KEY_PENDING_EVENT, pendingEvent.event.name)
                     if (pendingEvent.number == null) remove(KEY_PENDING_NUMBER)
                     else putString(KEY_PENDING_NUMBER, pendingEvent.number)
+                    if (pendingEvent.sim == null) remove(KEY_PENDING_SIM)
+                    else putInt(KEY_PENDING_SIM, pendingEvent.sim)
                 }
             }
             .commit()
@@ -88,6 +103,7 @@ class PrefsCallStateStore(context: Context) : CallStateStore {
         remove(KEY_PENDING_ID)
         remove(KEY_PENDING_EVENT)
         remove(KEY_PENDING_NUMBER)
+        remove(KEY_PENDING_SIM)
     }
 
     private fun readBoundedNumber(storageKey: String): String? {
@@ -95,6 +111,10 @@ class PrefsCallStateStore(context: Context) : CallStateStore {
         require(value.isBoundedNumber())
         return value
     }
+
+    /** Slot SIM salvato (1|2); assente o fuori intervallo = ignoto, mai un valore inventato. */
+    private fun readSim(storageKey: String): Int? =
+        prefs.getInt(storageKey, 0).takeIf(SimSlotPolicy::validSlot)
 
     private fun String?.isBoundedNumber(): Boolean =
         this == null || (length <= MAX_NUMBER_CHARS && none(Char::isISOControl))
@@ -107,6 +127,8 @@ class PrefsCallStateStore(context: Context) : CallStateStore {
         const val KEY_PENDING_ID = "pending_call_event_id"
         const val KEY_PENDING_EVENT = "pending_call_event"
         const val KEY_PENDING_NUMBER = "pending_call_number"
+        const val KEY_SIM = "last_call_sim"
+        const val KEY_PENDING_SIM = "pending_call_sim"
         val VALID_STATES = setOf("RINGING", "OFFHOOK", "IDLE")
         val EVENT_ID_PATTERN = Regex("^phone:[0-9a-f]{64}$")
         const val MAX_NUMBER_CHARS = 32

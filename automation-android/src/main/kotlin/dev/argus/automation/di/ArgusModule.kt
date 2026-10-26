@@ -70,6 +70,13 @@ import dev.argus.automation.foreground.SharedForegroundSentinel
 import dev.argus.automation.connectivity.ForegroundDeniedNotice
 import dev.argus.automation.foreground.ReceiverWorkLauncher
 import dev.argus.automation.foreground.SentinelDemand
+import dev.argus.automation.phone.SimAuditingPhoneEventDispatcher
+import dev.argus.automation.triggers.DeviceEventDemand
+import dev.argus.automation.triggers.DeviceEventDispatcher
+import dev.argus.automation.triggers.DeviceEventIngress
+import dev.argus.automation.triggers.EngineDeviceEventDispatcher
+import dev.argus.automation.triggers.PrefsBatteryLevelStore
+import dev.argus.engine.device.DeviceEventParser
 import dev.argus.automation.sensor.AndroidSignificantMotionBackend
 import dev.argus.automation.sensor.EligibleSensorRule
 import dev.argus.automation.sensor.PrefsSensorDetectionStore
@@ -775,10 +782,41 @@ object ArgusModule {
         state: DeviceStateSnapshotProvider,
         @ApplicationContext context: Context,
         frame: DispatchFrame,
+        store: AutomationStore,
+        audit: AuditSink,
     ): PhoneEventIngress = PhoneEventIngress(
         parser = PhoneEventParser(),
         callState = PrefsCallStateStore(context),
-        dispatcher = EnginePhoneEventDispatcher(engine, state, frame),
+        // 0.4.1: se lo slot SIM non è determinabile, le regole col filtro `sim` non scattano e il
+        // Log dice perché (`sim_unknown`).
+        dispatcher = SimAuditingPhoneEventDispatcher(
+            EnginePhoneEventDispatcher(engine, state, frame),
+            store,
+            audit,
+        ),
+    )
+
+    @Provides
+    @Singleton
+    fun deviceEventDemand(): DeviceEventDemand = DeviceEventDemand()
+
+    @Provides
+    @Singleton
+    fun deviceEventDispatcher(
+        engine: Engine,
+        state: DeviceStateSnapshotProvider,
+        frame: DispatchFrame,
+    ): DeviceEventDispatcher = EngineDeviceEventDispatcher(engine, state, frame)
+
+    @Provides
+    @Singleton
+    fun deviceEventIngress(
+        @ApplicationContext context: Context,
+        dispatcher: DeviceEventDispatcher,
+    ): DeviceEventIngress = DeviceEventIngress(
+        parser = DeviceEventParser(),
+        battery = PrefsBatteryLevelStore(context),
+        dispatcher = dispatcher,
     )
 
     @Provides
@@ -843,12 +881,14 @@ object ArgusModule {
         sentinel: SharedForegroundSentinel,
         audit: AuditSink,
         notice: ForegroundDeniedNotice,
+        deviceEvents: DeviceEventDemand,
     ): ConnectivitySentinelCoordinator =
         ConnectivitySentinelCoordinator(
             store,
             sentinel.demandBackend(SentinelDemand.Connectivity),
             audit,
             notice,
+            deviceEvents = deviceEvents,
         )
 
     @Provides

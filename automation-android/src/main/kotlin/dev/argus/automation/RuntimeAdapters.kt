@@ -304,6 +304,10 @@ class AndroidArmedAutomationRegistrar(
         is Trigger.Connectivity -> registerConnectivity(automation)
         is Trigger.Geofence -> registerGeofence(automation)
         is Trigger.Sensor -> registerSensor(automation)
+        // 0.4.1: eventi di sistema senza Shizuku, registrati dalla sentinella condivisa.
+        is Trigger.Screen, is Trigger.Battery, is Trigger.AudioOutput, is Trigger.ModeChanged,
+        is Trigger.Media,
+        -> registerDeviceEvent(automation)
     }
 
     private suspend fun registerTime(automation: Automation): Boolean = try {
@@ -402,6 +406,23 @@ class AndroidArmedAutomationRegistrar(
         if (!registerBroadcastBacked(automation)) return false
         val medium = (automation.trigger as Trigger.Connectivity).medium
         if (medium == ConnMedium.BT) return true
+        return try {
+            val report = connectivity.reconcile()
+            report.active && automation.id in report.requiredBy && automation.id !in report.failed
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Schermo, batteria, uscita audio, modalità, riproduzione: stessa strada del Wi-Fi. La capability
+     * del trigger deve essere pubblicata, poi il reconcile della sentinella accende il servizio e
+     * registra la sorgente. Armata solo se la sentinella è davvero attiva.
+     */
+    private suspend fun registerDeviceEvent(automation: Automation): Boolean {
+        if (!registerBroadcastBacked(automation)) return false
         return try {
             val report = connectivity.reconcile()
             report.active && automation.id in report.requiredBy && automation.id !in report.failed
