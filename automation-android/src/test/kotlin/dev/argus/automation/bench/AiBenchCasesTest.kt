@@ -7,8 +7,11 @@ import dev.argus.engine.model.Condition
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.model.VarBinding
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.descriptors.SerialKind
 import kotlinx.serialization.descriptors.elementNames
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -198,6 +201,49 @@ class AiBenchCasesTest {
     }
 
     @Test
+    fun `expected fields and enum values exist on the domain types`() {
+        val actionFields = fieldsOf(Action.serializer())
+        val triggerFields = fieldsOf(Trigger.serializer())
+        val conditionFields = fieldsOf(Condition.serializer())
+
+        fun checkField(
+            id: String,
+            fields: Map<String, SerialDescriptor>,
+            owner: String,
+            field: String,
+            matcher: JsonElement,
+        ) {
+            val known = fields[owner] ?: error("$id: tipo sconosciuto '$owner'")
+            val index = known.elementNames.indexOf(field)
+            assertTrue(index >= 0, "$id: '$owner' non ha il campo '$field' (campi: ${known.elementNames.toList()})")
+            val descriptor = known.getElementDescriptor(index)
+            if (descriptor.kind == SerialKind.ENUM) {
+                val allowed = descriptor.elementNames.map { it.lowercase() }.toSet()
+                plainTexts(matcher).forEach { value ->
+                    assertTrue(value.lowercase() in allowed, "$id: '$owner.$field' = '$value' non e' un valore valido ($allowed)")
+                }
+            }
+        }
+
+        for (case in cases) {
+            val triggerType = (case.draft.trigger["type"] as? JsonPrimitive)?.content
+            case.draft.trigger.forEach { (field, matcher) ->
+                if (field != "type" && triggerType != null) {
+                    checkField(case.id, triggerFields, triggerType, field, matcher)
+                }
+            }
+            case.draft.params.forEach { (path, matcher) ->
+                val segments = path.split('.')
+                checkField(case.id, actionFields, segments[0], segments[1], matcher)
+            }
+            case.draft.conditionsParams.forEach { (path, matcher) ->
+                val segments = path.split('.')
+                checkField(case.id, conditionFields, segments[0], segments[1], matcher)
+            }
+        }
+    }
+
+    @Test
     fun `a malformed case is reported as a bench error`() {
         fun parse(json: String) = BenchCases.parseCompile("[$json]")
         val ok = """{"id":"x.ok.it.01","category":"c","lang":"it","text":"Spegni subito il non disturbare",
@@ -216,6 +262,21 @@ class AiBenchCasesTest {
         assertFailsWith<BenchException>("bozza senza trigger") {
             parse(ok.replace("\"trigger\":{\"type\":\"immediate\"},", ""))
         }
+    }
+
+    /** Per ogni sottotipo sealed: nome serial -> descrittore (campi e loro tipi). */
+    private fun fieldsOf(serializer: KSerializer<*>): Map<String, SerialDescriptor> {
+        val container = serializer.descriptor.getElementDescriptor(1)
+        return (0 until container.elementsCount).associate { index ->
+            container.getElementName(index) to container.getElementDescriptor(index)
+        }
+    }
+
+    /** Testi semplici di un matcher (primitivo o array di alternative): quelli confrontabili con un enum. */
+    private fun plainTexts(matcher: JsonElement): List<String> = when (matcher) {
+        is JsonPrimitive -> if (matcher.isString) listOf(matcher.content) else emptyList()
+        is JsonArray -> matcher.flatMap { plainTexts(it) }
+        else -> emptyList()
     }
 
     private fun variants(descriptor: SerialDescriptor): Set<String> =
