@@ -301,20 +301,23 @@ class OpenAICompatTransport internal constructor(
                     return generateViaGeminiNative(
                         goal, notification, stateLines, requireNotNull(token), baseModel, runtimeData,
                     )
-                else -> Unit // OPENROUTER_ONLINE resta su Chat Completions (slug `:online`).
+                else -> Unit // OPENROUTER_WEB_PLUGIN resta su Chat Completions (plugin `web` nel body).
             }
         }
-        // OpenRouter attiva il loop web con lo slug `<model>:online`; gli altri lasciano il modello com'è.
-        val model = if (applyWeb && spec.quirks.webSearch == WebSearchMechanism.OPENROUTER_ONLINE) {
-            "$baseModel:online"
+        // OpenRouter attiva il loop web con il plugin `{"id":"web"}` e lascia `model` intatto (anche per
+        // i preset `@preset/...`: il suffisso `:online` li rompe con un 404; plugin e suffisso sono
+        // equivalenti). Gli altri provider non inviano alcun plugin.
+        val plugins = if (applyWeb && spec.quirks.webSearch == WebSearchMechanism.OPENROUTER_WEB_PLUGIN) {
+            listOf(ChatPlugin(OPENROUTER_WEB_PLUGIN_ID))
         } else {
-            baseModel
+            null
         }
         // Sink NOTIFICA #59 (useReplyTool=false): NIENTE reply tool, NESSUN tool_choice, system della
-        // NOTIFICA (nessun framing WhatsApp). Il modello (con o senza web OpenRouter `:online`) produce
-        // testo semplice preso dal `content`. Reply (useReplyTool=true): invariato (reply tool + actSystemText).
+        // NOTIFICA (nessun framing WhatsApp). Il modello (con o senza web OpenRouter) produce testo
+        // semplice preso dal `content`. Reply (useReplyTool=true): invariato (reply tool + actSystemText).
         val request = ChatRequest(
-            model = model,
+            model = baseModel,
+            plugins = plugins,
             messages = buildList {
                 add(
                     ChatMessage(
@@ -743,7 +746,12 @@ class OpenAICompatTransport internal constructor(
         @SerialName("max_completion_tokens") val maxCompletionTokens: Int? = null,
         @SerialName("reasoning_effort") val reasoningEffort: String? = null,
         val temperature: Double? = null,
+        /** Solo OpenRouter con web richiesto: `[{"id":"web"}]`. Assente (null) in ogni altro caso. */
+        val plugins: List<ChatPlugin>? = null,
     )
+
+    @Serializable
+    private data class ChatPlugin(val id: String)
 
     @Serializable
     private data class ChatMessage(val role: String, val content: String)
@@ -903,6 +911,9 @@ class OpenAICompatTransport internal constructor(
         const val GEMINI_MAX_OUTPUT_TOKENS = 2_048
         const val GEMINI_THINKING_BUDGET = 1_024
         const val REPLY_TOOL_MISSING = "reply_tool_missing"
+
+        /** Id del plugin web di OpenRouter (`"plugins":[{"id":"web"}]`). */
+        const val OPENROUTER_WEB_PLUGIN_ID = "web"
         const val MAX_RESPONSE_BYTES = 512L * 1024L
         const val MAX_ERROR_BODY_BYTES = 16L * 1024L
         val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
