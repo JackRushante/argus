@@ -4,8 +4,10 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dev.argus.automation.AndroidCapabilityProbe
 import dev.argus.automation.ApprovalFlow
 import dev.argus.automation.AutomationEnablementCoordinator
+import dev.argus.automation.BlockCause
 import dev.argus.automation.EnablementResult
 import dev.argus.automation.FlowArmResult
 import dev.argus.automation.ReconcileReason
@@ -13,15 +15,19 @@ import dev.argus.automation.RenderLanguageSource
 import dev.argus.automation.TimeAlarmRuntime
 import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
 import dev.argus.automation.di.ApplicationScope
+import dev.argus.automation.geofence.GeofenceStateStore
 import dev.argus.automation.geofence.GeofenceTriggerRuntime
+import dev.argus.automation.geofence.PersistedGeofenceRegistration
 import dev.argus.automation.sensor.SensorTriggerRuntime
 import dev.argus.data.ArgusDatabase
 import dev.argus.data.dao.AuditLogRecord
 import dev.argus.engine.brain.ContactWhitelistStore
 import dev.argus.data.entities.ActionResultEntity
+import dev.argus.data.entities.ScheduledTimeAlarmEntity
 import dev.argus.engine.model.ActionTier
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationDraft
+import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.StateQueryFamily
@@ -38,6 +44,7 @@ import dev.argus.engine.safety.DraftRepository
 import dev.argus.engine.safety.PendingDraft
 import dev.argus.engine.safety.Severity
 import dev.argus.ui.model.AutomationDetailState
+import dev.argus.ui.model.RuleDiagnosisUi
 import dev.argus.ui.model.StatusBadge
 import dev.argus.ui.model.UiWarning
 import dev.argus.ui.presentation.RuleRenderMapper
@@ -45,7 +52,9 @@ import dev.argus.ui.presentation.RenderLanguage
 import dev.argus.ui.presentation.ValidationMessages
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -58,6 +67,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 
@@ -88,6 +98,21 @@ private data class DetailSources(
     val actionsByExecution: Map<String, List<ActionResultEntity>>,
     val conversationLabels: Map<String, String>,
     val language: RenderLanguage,
+    val diagnosis: DiagnosisSnapshot? = null,
+)
+
+/**
+ * Ciò che «Perché non è scattata?» ha letto dal dispositivo, una volta, quando l'utente ha aperto la
+ * sezione. Si tengono solo gli input: il testo si costruisce nel flow dello stato insieme alla
+ * lingua, così segue il cambio di lingua. Vale per la revisione ([fingerprint]) che ha letto.
+ */
+private data class DiagnosisSnapshot(
+    val automationId: AutomationId,
+    val fingerprint: ApprovalFingerprint?,
+    val blockCauses: Map<String, BlockCause>,
+    val alarm: ScheduledTimeAlarmEntity?,
+    val geofence: PersistedGeofenceRegistration?,
+    val checkedAtMillis: Long,
 )
 
 private data class DetailTarget(
@@ -113,6 +138,8 @@ class AutomationDetailViewModel @Inject constructor(
     private val connectivity: ConnectivityTriggerRuntime,
     private val geofence: GeofenceTriggerRuntime,
     private val sensor: SensorTriggerRuntime,
+    private val probe: AndroidCapabilityProbe,
+    private val geofenceState: GeofenceStateStore,
     private val audit: AuditSink,
     private val languageSource: RenderLanguageSource,
     /**
@@ -149,6 +176,10 @@ class AutomationDetailViewModel @Inject constructor(
 
     /** B26: vero finché arma/rifiuta/elimina è in corso (e dopo un Close, fino alla chiusura). */
     private val actionInFlight = AtomicBoolean(false)
+
+    /** Ultima diagnosi chiesta («Perché non è scattata?»); null finché l'utente non la apre. */
+    private val diagnosisInputs = MutableStateFlow<DiagnosisSnapshot?>(null)
+    private var diagnosisJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -200,7 +231,8 @@ class AutomationDetailViewModel @Inject constructor(
                         automationId,
                         RECENT_LOG_SCAN_LIMIT,
                     ),
-                ) { log, actions ->
+                    diagnosisInputs,
+                ) { log, actions, diagnosis ->
                     DetailSources(
                         target.draft,
                         target.automation,
@@ -208,6 +240,7 @@ class AutomationDetailViewModel @Inject constructor(
                         actions.groupBy { it.executionId },
                         target.conversationLabels,
                         target.language,
+                        diagnosis,
                     )
                 }
             }.collectLatest { sources ->
@@ -225,6 +258,7 @@ class AutomationDetailViewModel @Inject constructor(
                         sources.actionsByExecution,
                         sources.conversationLabels,
                         sources.language,
+                        sources.diagnosis,
                     )
                     // B31: mentre arma/rifiuta/elimina è in corso la bozza o la regola scompare dalle
                     // tabelle PRIMA che l'azione chiuda la schermata. Quel vuoto non è «regola non
@@ -473,6 +507,37 @@ class AutomationDetailViewModel @Inject constructor(
         }
     }
 
+    /**
+     * «Perché non è scattata?»: legge una volta capability, sveglia e geofence della regola
+     * mostrata. Una nuova richiesta (Ricontrolla) sostituisce quella in corso. Mai per una bozza.
+     */
+    fun onDiagnose() {
+        val automation = displayedAutomation ?: return
+        if (displayedDraft != null) return
+        diagnosisJob?.cancel()
+        diagnosisJob = viewModelScope.launch {
+            try {
+                val (causes, geofence) = withContext(Dispatchers.IO) {
+                    probe.blockCauses(automation.requiredCapabilities) to
+                        geofenceState.get(automation.id)
+                }
+                val alarm = database.scheduledTimeAlarmDao().get(automation.id.value)
+                diagnosisInputs.value = DiagnosisSnapshot(
+                    automationId = automation.id,
+                    fingerprint = automation.approvalFingerprint,
+                    blockCauses = causes,
+                    alarm = alarm,
+                    geofence = geofence,
+                    checkedAtMillis = System.currentTimeMillis(),
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                message(language.pick("Unable to run the check.", "Impossibile eseguire il controllo."))
+            }
+        }
+    }
+
     fun onRunNow() {
         mutableEvents.tryEmit(DetailEvent.Message(runNowUnavailable(language)))
     }
@@ -569,6 +634,7 @@ class AutomationDetailViewModel @Inject constructor(
         actionsByExecution: Map<String, List<ActionResultEntity>>,
         conversationLabels: Map<String, String>,
         language: RenderLanguage,
+        snapshot: DiagnosisSnapshot?,
     ): DetailViewState {
         val rule = RuleRenderMapper.map(automation, conversationLabels, language)
         val warnings = buildList {
@@ -599,9 +665,35 @@ class AutomationDetailViewModel @Inject constructor(
                 recentRuns = recentRuns(automation.id.value, records, actionsByExecution, language),
                 geofencePreviewLabel = null,
                 runNowBlockedReason = runNowBlockedReason(language),
+                diagnosis = diagnosisOf(automation, records, snapshot, language),
+                diagnosisAvailable = true,
             ),
             automationId = automation.id.value,
             loading = false,
+        )
+    }
+
+    /**
+     * La diagnosi si ricostruisce a ogni emissione dagli input letti una volta (lingua e log
+     * compresi). Se la regola ha cambiato revisione da quando è stata chiesta, quegli input non
+     * la riguardano più: si azzera e l'utente può ricontrollare.
+     */
+    private fun diagnosisOf(
+        automation: Automation,
+        records: List<AuditLogRecord>,
+        snapshot: DiagnosisSnapshot?,
+        language: RenderLanguage,
+    ): RuleDiagnosisUi? {
+        if (snapshot == null ||
+            snapshot.automationId != automation.id ||
+            snapshot.fingerprint != automation.approvalFingerprint
+        ) {
+            return null
+        }
+        return buildRuleDiagnosis(
+            DiagnosisInputs(automation, snapshot.blockCauses, snapshot.alarm, snapshot.geofence, records),
+            snapshot.checkedAtMillis,
+            language,
         )
     }
 
