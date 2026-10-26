@@ -255,6 +255,41 @@ class RuleDiagnosisTest {
     }
 
     @Test
+    fun `an alarm whose time has passed is late, not the next one`() {
+        val rule = timeRule(precision = TimePrecision.EXACT)
+
+        fun first(eventAt: Long) =
+            diagnose(rule, alarm = alarmFor(rule, eventAt = eventAt)).rows[2]
+
+        assertEquals(
+            DiagnosisRow(DiagnosisLevel.WARN, "La sveglia era prevista oggi 09:00 e non è ancora arrivata"),
+            first(at(26, 9, 0)),
+        )
+        assertEquals(
+            DiagnosisRow(DiagnosisLevel.WARN, "La sveglia era prevista ieri 09:00 e non è ancora arrivata"),
+            first(at(25, 9, 0)),
+        )
+        // Entro un minuto non è ancora un ritardo.
+        assertEquals(ok("Prossima sveglia: oggi 14:31"), first(now - 30_000))
+    }
+
+    @Test
+    fun `an off rule has no alarm or area rows`() {
+        val off = timeRule(status = AutomationStatus.DISABLED, enabled = false)
+
+        assertEquals(
+            listOf(
+                DiagnosisRow(DiagnosisLevel.WARN, "La regola è spenta: riattivala per farla scattare"),
+                ok("Permessi e servizi necessari: tutto pronto"),
+                DiagnosisRow(DiagnosisLevel.INFO, "Non è ancora mai scattata"),
+            ),
+            diagnose(off, alarm = null).rows,
+        )
+        val offArea = geofenceRule().copy(enabled = false)
+        assertTrue(diagnose(offArea, geofence = null).rows.none { it.text.contains("area") })
+    }
+
+    @Test
     fun `an immediate rule has no alarm row`() {
         val rows = diagnose(immediateRule()).rows
 

@@ -391,11 +391,19 @@ private fun nextFireLabel(
         runCatching { TimeSpecs.nextFire(trigger, Instant.ofEpochMilli(nowMillis)) }.getOrNull()
             ?: return null
     }
+    return dayTimeLabel(next.toEpochMilli(), nowMillis, language)
+}
+
+/**
+ * «oggi 09:00», «domani 09:00», «ieri 09:00» o «27/10 09:00»: il formato del prossimo scatto nella
+ * lista, condiviso con la diagnosi del Dettaglio (che mostra anche una sveglia in ritardo).
+ */
+internal fun dayTimeLabel(atMillis: Long, nowMillis: Long, language: RenderLanguage): String {
     val zone = ZoneId.systemDefault()
-    val value = next.atZone(zone)
+    val value = Instant.ofEpochMilli(atMillis).atZone(zone)
     val today = Instant.ofEpochMilli(nowMillis).atZone(zone).toLocalDate()
-    val days = ChronoUnit.DAYS.between(today, value.toLocalDate())
-    val day = when (days) {
+    val day = when (ChronoUnit.DAYS.between(today, value.toLocalDate())) {
+        -1L -> language.pick("yesterday", "ieri")
         0L -> language.pick("today", "oggi")
         1L -> language.pick("tomorrow", "domani")
         else -> value.toLocalDate().format(DAY_FORMAT)

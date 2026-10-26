@@ -19,7 +19,6 @@ import dev.argus.ui.presentation.RenderLanguage
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.time.temporal.ChronoUnit
 import java.util.Locale
 
 /**
@@ -61,12 +60,16 @@ internal fun buildRuleDiagnosis(
     language: RenderLanguage,
 ): RuleDiagnosisUi {
     val automation = inputs.automation
+    // Sveglia e area esistono solo per una regola attiva: per una spenta la loro assenza è normale.
+    val active = automation.status == AutomationStatus.ARMED && automation.enabled
     val rows = buildList {
         add(statusRow(automation, language))
         addAll(requirementRows(inputs.blockCauses, language))
         when (val trigger = automation.trigger) {
-            is Trigger.Time -> addAll(alarmRows(automation, trigger, inputs.alarm, nowMillis, language))
-            is Trigger.Geofence -> add(areaRow(automation, inputs.geofence, language))
+            is Trigger.Time -> if (active) {
+                addAll(alarmRows(automation, trigger, inputs.alarm, nowMillis, language))
+            }
+            is Trigger.Geofence -> if (active) add(areaRow(automation, inputs.geofence, language))
             else -> Unit
         }
         add(lastEventRow(inputs.log, nowMillis, language))
@@ -216,13 +219,23 @@ private fun alarmRows(
             ),
         )
     }
-    val next = DiagnosisRow(
-        DiagnosisLevel.OK,
-        language.pick(
-            "Next alarm: ${upcomingLabel(alarm.eventAtMillis, nowMillis, language)}",
-            "Prossima sveglia: ${upcomingLabel(alarm.eventAtMillis, nowMillis, language)}",
-        ),
-    )
+    val due = dayTimeLabel(alarm.eventAtMillis, nowMillis, language)
+    // Una sveglia scattata viene subito riprogrammata: se l'orario registrato è passato da più di un
+    // minuto, Android non l'ha ancora consegnata (sveglia rinviata o persa).
+    val next = if (alarm.eventAtMillis < nowMillis - LATE_ALARM_GRACE_MILLIS) {
+        DiagnosisRow(
+            DiagnosisLevel.WARN,
+            language.pick(
+                "The alarm was due $due and has not arrived yet",
+                "La sveglia era prevista $due e non è ancora arrivata",
+            ),
+        )
+    } else {
+        DiagnosisRow(
+            DiagnosisLevel.OK,
+            language.pick("Next alarm: $due", "Prossima sveglia: $due"),
+        )
+    }
     if (alarm.scheduledMode != ScheduledAlarmMode.INEXACT.name) return listOf(next)
     // In Sistema oggi non c'è una riga per le sveglie esatte: niente «Apri Sistema» su questo avviso.
     val inexact = if (trigger.precision == TimePrecision.EXACT) {
@@ -327,24 +340,10 @@ private fun lastEventRow(
     )
 }
 
-// Stesso formato del «prossimo scatto» della lista (UiStateMappers.nextFireLabel): oggi, domani o
-// gg/MM, poi HH:mm. Un test fissa l'uguaglianza tra i due.
-private val DIAGNOSIS_TIME_FORMAT: DateTimeFormatter =
-    DateTimeFormatter.ofPattern("HH:mm", Locale.ITALIAN)
-private val DIAGNOSIS_DAY_FORMAT: DateTimeFormatter =
-    DateTimeFormatter.ofPattern("dd/MM", Locale.ITALIAN)
+/** Margine prima di dire che una sveglia è in ritardo. */
+private const val LATE_ALARM_GRACE_MILLIS = 60_000L
 
-private fun upcomingLabel(atMillis: Long, nowMillis: Long, language: RenderLanguage): String {
-    val zone = ZoneId.systemDefault()
-    val value = Instant.ofEpochMilli(atMillis).atZone(zone)
-    val today = Instant.ofEpochMilli(nowMillis).atZone(zone).toLocalDate()
-    val day = when (ChronoUnit.DAYS.between(today, value.toLocalDate())) {
-        0L -> language.pick("today", "oggi")
-        1L -> language.pick("tomorrow", "domani")
-        else -> value.toLocalDate().format(DIAGNOSIS_DAY_FORMAT)
-    }
-    return "$day ${value.format(DIAGNOSIS_TIME_FORMAT)}"
-}
+private val CHECKED_AT_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.ITALIAN)
 
 private fun clock(atMillis: Long): String =
-    Instant.ofEpochMilli(atMillis).atZone(ZoneId.systemDefault()).format(DIAGNOSIS_TIME_FORMAT)
+    Instant.ofEpochMilli(atMillis).atZone(ZoneId.systemDefault()).format(CHECKED_AT_FORMAT)
