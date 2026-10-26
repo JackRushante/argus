@@ -749,6 +749,27 @@ object ShizukuCapabilityCatalog {
         ),
         ShizukuCapabilityRow(
             title = language.pick(
+                "Read aloud, media keys and HTTP requests",
+                "Lettura ad alta voce, tasti multimediali e richieste HTTP",
+            ),
+            requirement = ShizukuRequirement.NOT_REQUIRED,
+            actionTypeIds = listOf(
+                ActionTypeIds.SPEAK,
+                ActionTypeIds.MEDIA_CONTROL,
+                ActionTypeIds.HTTP_REQUEST,
+            ),
+        ),
+        ShizukuCapabilityRow(
+            title = language.pick("Screen brightness and rotation", "Luminosità e rotazione dello schermo"),
+            requirement = ShizukuRequirement.NOT_REQUIRED,
+            note = language.pick(
+                "They need the \"Modify system settings\" access, which you allow in Android's settings.",
+                "Serve l'accesso «Modifica impostazioni di sistema», che concedi nelle impostazioni di Android.",
+            ),
+            actionTypeIds = listOf(ActionTypeIds.SET_BRIGHTNESS, ActionTypeIds.SET_ROTATION),
+        ),
+        ShizukuCapabilityRow(
+            title = language.pick(
                 "Argus notifications and clipboard copy",
                 "Notifiche di Argus e copia negli appunti",
             ),
