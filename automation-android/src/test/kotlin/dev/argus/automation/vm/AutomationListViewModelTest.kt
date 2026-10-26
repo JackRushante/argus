@@ -10,6 +10,7 @@ import dev.argus.automation.AutomationEnablementCoordinator
 import dev.argus.automation.CurrentLocationProvider
 import dev.argus.automation.ReconcileReason
 import dev.argus.automation.ReconcileReport
+import dev.argus.automation.RenderLanguageSource
 import dev.argus.automation.TimeAlarmRuntime
 import dev.argus.data.ArgusDatabase
 import dev.argus.data.RoomAutomationStore
@@ -200,6 +201,22 @@ class AutomationListViewModelTest {
         assertEquals(0, latest().pendingCount)
     }
 
+    @Test
+    fun `the rows regenerate their texts when the language source goes from english to italian`() = runTest {
+        armedRule("lang")
+        var system = RenderLanguage.EN
+        val source = RenderLanguageSource { system }
+        val latest = collectState(viewModel(source))
+        awaitUntil("riga inglese") { latest().rows.singleOrNull()?.triggerSummary?.startsWith("Every day") == true }
+
+        system = RenderLanguage.IT
+        source.refresh()
+
+        awaitUntil("riga italiana") {
+            latest().rows.singleOrNull()?.triggerSummary?.startsWith("Ogni giorno") == true
+        }
+    }
+
     // --- helpers -------------------------------------------------------------------------------------
 
     private fun newDraft(id: String) = NewDraft(
@@ -233,7 +250,9 @@ class AutomationListViewModelTest {
         return rule to edit.id.value
     }
 
-    private fun viewModel(): AutomationListViewModel {
+    private fun viewModel(
+        languageSource: RenderLanguageSource = RenderLanguageSource { RenderLanguage.EN },
+    ): AutomationListViewModel {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val whitelist = RoomContactWhitelistStore(db.contactWhitelistDao())
         val snapshots = FirePolicySnapshotProvider {
@@ -261,7 +280,7 @@ class AutomationListViewModelTest {
             whitelist = whitelist,
             savedStateHandle = SavedStateHandle(),
             context = context,
-            language = RenderLanguage.EN,
+            languageSource = languageSource,
         ).also { lastViewModel = it }
     }
 

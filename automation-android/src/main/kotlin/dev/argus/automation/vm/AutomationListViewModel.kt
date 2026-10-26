@@ -10,8 +10,10 @@ import dev.argus.automation.AndroidCapabilityProbe
 import dev.argus.automation.ApprovalFlow
 import dev.argus.automation.AutomationEnablementCoordinator
 import dev.argus.automation.EnablementResult
+import dev.argus.automation.RenderLanguageSource
 import dev.argus.data.ArgusDatabase
 import dev.argus.engine.brain.ContactWhitelistStore
+import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.CapabilityRequirements
@@ -35,6 +37,12 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+private data class ListInputs(
+    val automations: List<Automation>,
+    val conversationLabels: Map<String, String>,
+    val language: RenderLanguage,
+)
+
 @HiltViewModel
 class AutomationListViewModel @Inject constructor(
     private val store: AutomationStore,
@@ -46,22 +54,29 @@ class AutomationListViewModel @Inject constructor(
     whitelist: ContactWhitelistStore,
     private val savedStateHandle: SavedStateHandle,
     @ApplicationContext private val context: Context,
-    private val language: RenderLanguage = RenderLanguage.system(),
+    private val languageSource: RenderLanguageSource,
 ) : ViewModel() {
     private val filter = savedStateHandle.getStateFlow(FILTER_KEY, StatusFilter.ALL)
     private val mutableMessages = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val messages = mutableMessages.asSharedFlow()
 
+    /** Lingua al momento (messaggi); le righe la ricevono dal flow e si rigenerano al cambio lingua. */
+    private val language: RenderLanguage get() = languageSource.current
+
     val state: StateFlow<AutomationListState> = combine(
-        // Il combine tipizzato arriva a 5 flow: automazioni e nomi whitelist viaggiano in coppia.
-        store.observeAll().combine(whitelist.observeAll()) { automations, contacts ->
-            automations to contacts.associate { it.id to it.displayName }
+        // Il combine tipizzato arriva a 5 flow: automazioni, nomi whitelist e lingua viaggiano insieme.
+        combine(
+            store.observeAll(),
+            whitelist.observeAll(),
+            languageSource.language,
+        ) { automations, contacts, renderLanguage ->
+            ListInputs(automations, contacts.associate { it.id to it.displayName }, renderLanguage)
         },
         drafts.observeAll(),
         filter,
         shizuku.observeStatus(),
         database.automationDao().observeUiMetadata(),
-    ) { (automations, conversationLabels), pending, activeFilter, shizukuStatus, metadata ->
+    ) { (automations, conversationLabels, language), pending, activeFilter, shizukuStatus, metadata ->
         val now = System.currentTimeMillis()
         val lastFiredById = metadata.associate { it.id to it.lastFiredAt }
         // D5: una bozza di modifica su una regola armata/disattivata NON sostituisce la riga della

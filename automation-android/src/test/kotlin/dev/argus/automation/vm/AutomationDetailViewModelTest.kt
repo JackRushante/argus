@@ -10,6 +10,7 @@ import dev.argus.automation.CurrentLocationProvider
 import dev.argus.automation.AlarmDeliveryResult
 import dev.argus.automation.ReconcileReason
 import dev.argus.automation.ReconcileReport
+import dev.argus.automation.RenderLanguageSource
 import dev.argus.automation.TimeAlarmRuntime
 import dev.argus.automation.connectivity.NoopConnectivityTriggerRuntime
 import dev.argus.automation.geofence.NoopGeofenceTriggerRuntime
@@ -146,6 +147,38 @@ class AutomationDetailViewModelTest {
             "Run now requires live confirmation and is disabled in P0-B.",
             (events.single() as DetailEvent.Message).text,
         )
+    }
+
+    // --- B34: lingua che segue il telefono --------------------------------------------------------
+
+    @Test
+    fun `the detail regenerates its texts when the language source goes from english to italian`() = runTest {
+        seedArmedAutomation("lang")
+        var system = RenderLanguage.EN
+        val source = RenderLanguageSource { system }
+        val viewModel = viewModel(
+            "lang",
+            RoomAutomationStore(db.automationDao()),
+            DetailAuditRecorder(),
+            languageSource = source,
+        )
+        awaitUntil("english detail loaded") { viewModel.state.value.detail != null }
+        assertTrue(
+            viewModel.state.value.detail!!.rule.triggerLine.startsWith("When: "),
+            viewModel.state.value.detail!!.rule.triggerLine,
+        )
+
+        system = RenderLanguage.IT
+        source.refresh()
+
+        awaitUntil("italian detail") {
+            viewModel.state.value.detail?.rule?.triggerLine?.startsWith("Quando: ") == true
+        }
+        // Anche i messaggi prodotti al momento seguono la lingua corrente.
+        val events = collectEvents(viewModel)
+        viewModel.onRunNow()
+        awaitUntil("messaggio italiano") { events.isNotEmpty() }
+        assertTrue((events.single() as DetailEvent.Message).text.startsWith("Esegui ora"))
     }
 
     // --- S3: si arma la revisione mostrata ---------------------------------------------------------
@@ -406,6 +439,7 @@ class AutomationDetailViewModelTest {
         audit: AuditSink,
         language: RenderLanguage = RenderLanguage.IT,
         drafts: DraftRepository = RoomDraftRepository(db),
+        languageSource: RenderLanguageSource = RenderLanguageSource { language },
     ): AutomationDetailViewModel {
         val whitelist = RoomContactWhitelistStore(db.contactWhitelistDao())
         val snapshots = FirePolicySnapshotProvider {
@@ -444,7 +478,7 @@ class AutomationDetailViewModelTest {
             connectivity = NoopConnectivityTriggerRuntime,
             geofence = NoopGeofenceTriggerRuntime,
             audit = audit,
-            language = language,
+            languageSource = languageSource,
         ).also { lastViewModel = it }
     }
 

@@ -9,6 +9,7 @@ import dev.argus.automation.AutomationEnablementCoordinator
 import dev.argus.automation.EnablementResult
 import dev.argus.automation.FlowArmResult
 import dev.argus.automation.ReconcileReason
+import dev.argus.automation.RenderLanguageSource
 import dev.argus.automation.TimeAlarmRuntime
 import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
 import dev.argus.automation.geofence.GeofenceTriggerRuntime
@@ -83,12 +84,14 @@ private data class DetailSources(
     val log: List<AuditLogRecord>,
     val actionsByExecution: Map<String, List<ActionResultEntity>>,
     val conversationLabels: Map<String, String>,
+    val language: RenderLanguage,
 )
 
 private data class DetailTarget(
     val draft: PendingDraft?,
     val automation: Automation?,
     val conversationLabels: Map<String, String>,
+    val language: RenderLanguage,
 ) {
     val automationId: String? = (automation?.id ?: draft?.automationId)?.value
 }
@@ -107,7 +110,7 @@ class AutomationDetailViewModel @Inject constructor(
     private val connectivity: ConnectivityTriggerRuntime,
     private val geofence: GeofenceTriggerRuntime,
     private val audit: AuditSink,
-    private val language: RenderLanguage = RenderLanguage.system(),
+    private val languageSource: RenderLanguageSource,
 ) : ViewModel() {
     private val routeId = requireNotNull(savedStateHandle.get<String>("id")) {
         "Dettaglio senza id"
@@ -116,6 +119,13 @@ class AutomationDetailViewModel @Inject constructor(
     val state: StateFlow<DetailViewState> = mutableState.asStateFlow()
     private val mutableEvents = MutableSharedFlow<DetailEvent>(extraBufferCapacity = 4)
     val events = mutableEvents.asSharedFlow()
+
+    /**
+     * Lingua al momento (messaggi ed errori prodotti dalle azioni). Lo stato dello schermo non la
+     * legge da qui: la riceve dal flow ([RenderLanguageSource.language]) così si rigenera al
+     * cambio di lingua del telefono.
+     */
+    private val language: RenderLanguage get() = languageSource.current
 
     /**
      * Bozza e regola che l'utente STA VEDENDO: si aggiornano solo insieme a [mutableState], dopo che
@@ -137,7 +147,8 @@ class AutomationDetailViewModel @Inject constructor(
                 drafts.observeAll(),
                 store.observeAll(),
                 whitelist.observeAll(),
-            ) { pending, automations, contacts ->
+                languageSource.language,
+            ) { pending, automations, contacts, renderLanguage ->
                 val automationByRoute = automations.firstOrNull { it.id.value == routeId }
                 // D5: una regola armata/disattivata resta la verità del proprio dettaglio anche con una
                 // modifica in attesa (la regola continua a scattare); la bozza si apre dal suo id.
@@ -153,7 +164,12 @@ class AutomationDetailViewModel @Inject constructor(
                     ?: draft?.let { snapshot ->
                         automations.firstOrNull { it.id == snapshot.automationId }
                     }
-                DetailTarget(draft, automation, contacts.associate { it.id to it.displayName })
+                DetailTarget(
+                    draft,
+                    automation,
+                    contacts.associate { it.id to it.displayName },
+                    renderLanguage,
+                )
             }.flatMapLatest { target ->
                 val automationId = target.automationId
                     ?: return@flatMapLatest flowOf(
@@ -163,6 +179,7 @@ class AutomationDetailViewModel @Inject constructor(
                             emptyList(),
                             emptyMap(),
                             target.conversationLabels,
+                            target.language,
                         ),
                     )
                 combine(
@@ -181,6 +198,7 @@ class AutomationDetailViewModel @Inject constructor(
                         log,
                         actions.groupBy { it.executionId },
                         target.conversationLabels,
+                        target.language,
                     )
                 }
             }.collectLatest { sources ->
@@ -190,12 +208,14 @@ class AutomationDetailViewModel @Inject constructor(
                         sources.log,
                         sources.actionsByExecution,
                         sources.conversationLabels,
+                        sources.language,
                     )
                     sources.automation != null -> automationState(
                         sources.automation,
                         sources.log,
                         sources.actionsByExecution,
                         sources.conversationLabels,
+                        sources.language,
                     )
                     else -> DetailViewState(loading = false, missing = true)
                 }
@@ -473,6 +493,7 @@ class AutomationDetailViewModel @Inject constructor(
         records: List<AuditLogRecord>,
         actionsByExecution: Map<String, List<ActionResultEntity>>,
         conversationLabels: Map<String, String>,
+        language: RenderLanguage,
     ): DetailViewState {
         val review = cancellationSafeOrNull { approvals.review(snapshot.id) }
         val rule = RuleRenderMapper.mapDraft(snapshot.draft, conversationLabels, language)
@@ -488,7 +509,7 @@ class AutomationDetailViewModel @Inject constructor(
             reviewWarnings(review, language)
         }
         val canArm = review?.canArm == true && warnings.none { it.severity == Severity.ERROR }
-        val recent = recentRuns(snapshot.automationId.value, records, actionsByExecution)
+        val recent = recentRuns(snapshot.automationId.value, records, actionsByExecution, language)
         return DetailViewState(
             detail = AutomationDetailState(
                 id = snapshot.id.value,
@@ -499,9 +520,10 @@ class AutomationDetailViewModel @Inject constructor(
                 warnings = warnings,
                 canArm = canArm,
                 armBlockedReason = warnings.firstOrNull { it.severity == Severity.ERROR }?.text,
-                estimatedLlmCallsPerDay = generativeEstimate(snapshot.draft.actions.any {
-                    it.tier == ActionTier.GENERATIVE
-                }),
+                estimatedLlmCallsPerDay = generativeEstimate(
+                    snapshot.draft.actions.any { it.tier == ActionTier.GENERATIVE },
+                    language,
+                ),
                 recentRuns = recent,
                 geofencePreviewLabel = (snapshot.draft.trigger as? Trigger.Geofence)
                     ?.takeIf { it.resolveCurrentLocation }
@@ -511,9 +533,9 @@ class AutomationDetailViewModel @Inject constructor(
                             "Posizione: quella attuale al momento dell'attivazione",
                         )
                     },
-                runNowBlockedReason = runNowBlockedReason(),
+                runNowBlockedReason = runNowBlockedReason(language),
                 verifiedStateReaders = review?.verifiedStateQueries.orEmpty().map { evidence ->
-                    readerProbeLabel(evidence.family, evidence.valueType)
+                    readerProbeLabel(evidence.family, evidence.valueType, language)
                 },
             ),
             automationId = snapshot.automationId.value,
@@ -526,6 +548,7 @@ class AutomationDetailViewModel @Inject constructor(
         records: List<AuditLogRecord>,
         actionsByExecution: Map<String, List<ActionResultEntity>>,
         conversationLabels: Map<String, String>,
+        language: RenderLanguage,
     ): DetailViewState {
         val rule = RuleRenderMapper.map(automation, conversationLabels, language)
         val warnings = buildList {
@@ -552,17 +575,17 @@ class AutomationDetailViewModel @Inject constructor(
                 warnings = warnings,
                 canArm = false,
                 armBlockedReason = warnings.firstOrNull { it.severity == Severity.ERROR }?.text,
-                estimatedLlmCallsPerDay = generativeEstimate(rule.isGenerative),
-                recentRuns = recentRuns(automation.id.value, records, actionsByExecution),
+                estimatedLlmCallsPerDay = generativeEstimate(rule.isGenerative, language),
+                recentRuns = recentRuns(automation.id.value, records, actionsByExecution, language),
                 geofencePreviewLabel = null,
-                runNowBlockedReason = runNowBlockedReason(),
+                runNowBlockedReason = runNowBlockedReason(language),
             ),
             automationId = automation.id.value,
             loading = false,
         )
     }
 
-    private fun runNowBlockedReason(): String = language.pick(
+    private fun runNowBlockedReason(language: RenderLanguage): String = language.pick(
         "Manual execution is not available at this stage.",
         "Esecuzione manuale non disponibile in questa fase.",
     )
@@ -571,6 +594,7 @@ class AutomationDetailViewModel @Inject constructor(
         automationId: String,
         records: List<AuditLogRecord>,
         actionsByExecution: Map<String, List<ActionResultEntity>>,
+        language: RenderLanguage,
     ) = records
         .filter { it.automationId == automationId }
         .take(RECENT_RUN_LIMIT)
@@ -580,7 +604,7 @@ class AutomationDetailViewModel @Inject constructor(
         }
         .toList()
 
-    private fun generativeEstimate(generative: Boolean): String? = if (generative) {
+    private fun generativeEstimate(generative: Boolean, language: RenderLanguage): String? = if (generative) {
         language.pick(
             "Available since P1 · minimum cooldown 60 s",
             "Disponibile da P1 · cooldown minimo 60 s",
@@ -589,7 +613,11 @@ class AutomationDetailViewModel @Inject constructor(
         null
     }
 
-    private fun readerProbeLabel(family: StateQueryFamily, type: StateValueType): String {
+    private fun readerProbeLabel(
+        family: StateQueryFamily,
+        type: StateValueType,
+        language: RenderLanguage,
+    ): String {
         val reader = when (family) {
             StateQueryFamily.BUILTIN -> language.pick("built-in state", "stato integrato")
             StateQueryFamily.SETTING -> language.pick("Android setting", "impostazione Android")
