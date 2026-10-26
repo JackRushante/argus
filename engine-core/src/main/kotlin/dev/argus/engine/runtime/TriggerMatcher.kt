@@ -13,6 +13,8 @@ class TriggerMatcher {
         spec is Trigger.Notification && event is TriggerEvent.NotificationPosted -> matchesNotification(spec, event)
         spec is Trigger.PhoneState && event is TriggerEvent.PhoneStateChanged ->
             spec.event == event.event &&
+                // Filtro SIM (0.4.1): slot dell'evento ignoto => nessun match (fail-closed).
+                (spec.sim == null || spec.sim == event.sim) &&
                 (spec.number == null || numbersMatch(spec.number, event.number)) &&
                 (
                     spec.textMatch == null ||
@@ -22,7 +24,32 @@ class TriggerMatcher {
             spec.medium == event.medium && spec.state == event.state &&
                 (spec.match == null || spec.match == event.name)
         spec is Trigger.Sensor && event is TriggerEvent.SensorChanged -> spec.kind == event.kind
+        spec is Trigger.Screen && event is TriggerEvent.ScreenChanged -> spec.event == event.event
+        spec is Trigger.Battery && event is TriggerEvent.BatteryLevelChanged -> crossesThreshold(spec, event)
+        spec is Trigger.AudioOutput && event is TriggerEvent.AudioOutputChanged ->
+            spec.state == event.state && (spec.kind == AudioOutputKind.ANY || spec.kind == event.kind)
+        spec is Trigger.ModeChanged && event is TriggerEvent.DeviceModeChanged ->
+            spec.what == event.what && (spec.to == null || spec.to == event.to)
+        spec is Trigger.Media && event is TriggerEvent.MediaPlaybackChanged -> spec.state == event.state
+        // Avvio manuale (0.4.1): id e impronta sono verificati a monte dall'Engine; un ManualFired su
+        // qualsiasi altro trigger non matcha, e un trigger manual non matcha nessun altro evento.
+        spec is Trigger.Manual && event is TriggerEvent.ManualFired -> true
         else -> false
+    }
+
+    /**
+     * Una soglia scatta solo all'ATTRAVERSAMENTO: `below` N = prima >= N e ora < N; `above` N = prima
+     * <= N e ora > N. Un salto che scavalca il valore (21 -> 19 con soglia 20) conta. Uno spec con
+     * entrambe le soglie o con nessuna è malformato (il validatore lo rifiuta) e non scatta mai.
+     */
+    private fun crossesThreshold(spec: Trigger.Battery, event: TriggerEvent.BatteryLevelChanged): Boolean {
+        val below = spec.below
+        val above = spec.above
+        return when {
+            below != null && above == null -> event.previous >= below && event.current < below
+            above != null && below == null -> event.previous <= above && event.current > above
+            else -> false
+        }
     }
 
     private fun matchesNotification(spec: Trigger.Notification, e: TriggerEvent.NotificationPosted): Boolean {

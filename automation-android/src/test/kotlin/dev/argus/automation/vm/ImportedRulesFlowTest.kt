@@ -17,6 +17,8 @@ import dev.argus.automation.GenerativeRuntimeReadiness
 import dev.argus.automation.ReconcileReason
 import dev.argus.automation.ReconcileReport
 import dev.argus.automation.RenderLanguageSource
+import dev.argus.automation.manual.FakePauseStore
+import dev.argus.automation.manual.ManualHarness
 import dev.argus.automation.TimeAlarmRuntime
 import dev.argus.automation.connectivity.NoopConnectivityTriggerRuntime
 import dev.argus.automation.geofence.MemoryGeofenceStateStore
@@ -335,6 +337,7 @@ class ImportedRulesFlowTest {
             savedStateHandle = SavedStateHandle(),
             context = context,
             languageSource = RenderLanguageSource { RenderLanguage.EN },
+            pause = FakePauseStore(),
         ).also { viewModels += it }
     }
 
@@ -365,6 +368,7 @@ class ImportedRulesFlowTest {
             languageSource = RenderLanguageSource { RenderLanguage.EN },
             applicationScope = applicationScope,
             retention = LogRetentionStore(ApplicationProvider.getApplicationContext<Context>()),
+            manual = ManualHarness(store).service,
         ).also { viewModels += it }
     }
 

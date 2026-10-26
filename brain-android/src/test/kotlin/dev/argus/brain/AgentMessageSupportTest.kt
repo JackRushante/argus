@@ -386,6 +386,22 @@ class AgentMessageSupportTest {
         )
     }
 
+    @Test
+    fun `compile prompt teaches the solar variant of the time trigger without coordinates`() {
+        val prompt = AgentMessageSupport.compileSystemText()
+        val flat = prompt.lines().joinToString(" ") { it.trim() }
+
+        // Una voce nello schema del trigger time e una riga di guida nella regola 15.
+        assertTrue(
+            "solar = {\"event\":\"SUNRISE\"|\"SUNSET\", \"offsetMinutes\":integer -720..720 (negative = before)}" in flat,
+            "lo schema deve descrivere solar",
+        )
+        assertTrue("replaces cron, at and afterMs (still exactly one of the four" in flat)
+        assertTrue("offsetMinutes -30" in flat, "l'esempio '30 minuti prima del tramonto'")
+        // La posizione non passa mai dal modello: il prompt lo dice.
+        assertTrue("Never write coordinates" in flat)
+    }
+
     // --- P4-D: lo schema draft insegna la grammatica Tasker-class (schema v2) ---
 
     @Test
@@ -540,13 +556,13 @@ class AgentMessageSupportTest {
     fun `compile rules give defaults instead of asking and accept here without a location`() {
         val system = AgentMessageSupport.compileSystemText().lines().joinToString(" ") { it.trim() }
 
-        // GPT-6 Luna chiedeva la durata della vibrazione, la modalita' del Non disturbare e il raggio.
-        // L'eccezione vale SOLO per questi tre: con una regola generica DeepSeek metteva da solo la
-        // luminosita' al 50% invece di chiedere il livello.
+        // GPT-6 Luna chiedeva la durata della vibrazione, la modalita' del Non disturbare, il raggio e
+        // (0.4.1) l'intervallo minimo dei sensori. L'eccezione vale SOLO per questi quattro: con una
+        // regola generica DeepSeek metteva da solo la luminosita' al 50% invece di chiedere il livello.
         assertTrue(
-            "Exception, for exactly these three details: do not ask, use the default (vibrate durationMs 1000, " +
-                "set_dnd mode \"PRIORITY\", geofence radiusM 150). Any other missing value (a level, a time, a person, " +
-                "an app, a place, a text) still needs a short question." in system,
+            "Exception, for exactly these four details: do not ask, use the default (vibrate durationMs 1000, " +
+                "set_dnd mode \"PRIORITY\", geofence radiusM 150, sensor cooldownMs 60000). Any other missing value " +
+                "(a level, a time, a person, an app, a place, a text) still needs a short question." in system,
         )
         // E rifiutava «qui» perche' il contesto dice location_available=false.
         assertTrue(
@@ -572,5 +588,16 @@ class AgentMessageSupportTest {
         // Testo semplice, asterischi singoli e indirizzi nudi restano come sono.
         assertEquals("Battery at 73%: all good, a*b*c.", AgentMessageSupport.cleanReply("Battery at 73%: all good, a*b*c."))
         assertEquals("See https://example.org", AgentMessageSupport.cleanReply("See https://example.org"))
+    }
+    @Test
+    fun `battery thresholds are written as state_equals so they work without Shizuku`() {
+        val system = AgentMessageSupport.compileSystemText().lines().joinToString(" ") { it.trim() }
+
+        // Senza Shizuku il modello sceglieva state_compare (lettori, solo Shizuku) e rifiutava la regola.
+        assertTrue("Exception: a battery threshold always uses state_equals on \"battery\" (see the Condition schema)." in system)
+        assertTrue(
+            "A battery threshold (\"below 30%\", \"above 80%\") is state_equals with key \"battery\", op \"LT\" or " +
+                "\"GT\" and the bare number as value: it needs no state reader family." in system,
+        )
     }
 }

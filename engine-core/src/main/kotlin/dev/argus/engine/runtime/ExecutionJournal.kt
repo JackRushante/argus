@@ -161,6 +161,11 @@ internal fun Action.journalType(): String = when (this) {
     is Action.OpenSettingsScreen -> ActionTypeIds.OPEN_SETTINGS_SCREEN
     is Action.Vibrate -> ActionTypeIds.VIBRATE
     is Action.Wait -> ActionTypeIds.WAIT
+    is Action.Speak -> ActionTypeIds.SPEAK
+    is Action.MediaControl -> ActionTypeIds.MEDIA_CONTROL
+    is Action.SetBrightness -> ActionTypeIds.SET_BRIGHTNESS
+    is Action.SetRotation -> ActionTypeIds.SET_ROTATION
+    is Action.HttpRequest -> ActionTypeIds.HTTP_REQUEST
     is Action.WriteSetting -> ActionTypeIds.WRITE_SETTING
     is Action.InvokeLlm -> ActionTypeIds.INVOKE_LLM
     is Action.InvokeLlmV2 -> ActionTypeIds.INVOKE_LLM_V2

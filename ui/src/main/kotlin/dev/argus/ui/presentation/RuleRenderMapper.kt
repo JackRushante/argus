@@ -303,6 +303,10 @@ object RuleRenderMapper {
         is Trigger.PhoneState -> "phone"
         is Trigger.Connectivity -> "connectivity"
         is Trigger.Sensor -> "sensor"
+        is Trigger.Screen, is Trigger.Battery, is Trigger.AudioOutput, is Trigger.ModeChanged,
+        is Trigger.Media,
+        -> DeviceTriggerRender.iconKey(t)
+        is Trigger.Manual -> "manual"
     }
 
     private fun triggerLine(t: Trigger, conversationLabels: Map<String, String>, l: RenderLanguage): String = when (t) {
@@ -313,6 +317,13 @@ object RuleRenderMapper {
         is Trigger.PhoneState -> phoneStateLine(t, l)
         is Trigger.Connectivity -> connectivityLine(t, l)
         is Trigger.Sensor -> sensorLine(t, l)
+        is Trigger.Screen, is Trigger.Battery, is Trigger.AudioOutput, is Trigger.ModeChanged,
+        is Trigger.Media,
+        -> DeviceTriggerRender.line(t, l)
+        is Trigger.Manual -> whenPrefix(l) + l.pick(
+            "you run it by hand (Run now, a Home-screen shortcut, a quick-settings tile or the widget)",
+            "la lanci tu a mano (Esegui ora, una scorciatoia sulla Home, un riquadro rapido o il widget)",
+        )
     }
 
     /** Prefisso "Quando: "/"When: " condiviso con chi deriva il sommario lista (UiStateMappers). */
@@ -364,6 +375,7 @@ object RuleRenderMapper {
         val cron = t.cron
         val at = t.at
         val afterMs = t.afterMs
+        val solar = t.solar
         val line = when {
             cron != null -> humanizeCron(cron, t.tz, l)
             at != null -> l.pick(
@@ -376,6 +388,7 @@ object RuleRenderMapper {
                 "Once, in ${humanizeDelay(afterMs, l)}",
                 "Una volta, tra ${humanizeDelay(afterMs, l)}",
             )
+            solar != null -> SolarTriggerRender.line(solar, l)
             else -> l.pick("Time not specified (${t.tz})", "Orario non specificato (${t.tz})")
         }
         // S1: la puntualità richiesta (allarme esatto) cambia l'esecuzione e va dichiarata.
@@ -455,11 +468,13 @@ object RuleRenderMapper {
             PhoneEvent.INCOMING_CALL -> l.pick("incoming call", "chiamata in arrivo")
             PhoneEvent.CALL_ENDED -> l.pick("call ended", "chiamata terminata")
             PhoneEvent.SMS_RECEIVED -> l.pick("SMS received", "SMS ricevuto")
+            PhoneEvent.MISSED_CALL -> l.pick("missed call", "chiamata persa")
         }
         val from = t.number?.let { l.pick("from $it", "da $it") } ?: l.pick("from anyone", "da chiunque")
         // §5: i filtri che restringono il match restano visibili integrali in review.
         val text = t.textMatch?.let { l.pick(" · text \"$it\"", " · testo \"$it\"") } ?: ""
-        return "${whenPrefix(l)}$event $from$text"
+        val sim = t.sim?.let { " · SIM $it" } ?: ""
+        return "${whenPrefix(l)}$event $from$text$sim"
     }
 
     private fun connectivityLine(t: Trigger.Connectivity, l: RenderLanguage): String {
@@ -818,6 +833,12 @@ object RuleRenderMapper {
             ),
             isGenerative = a.tier == ActionTier.GENERATIVE,
         )
+        // 0.4.1 (azioni): resa in ActionRows041.
+        is Action.Speak -> ActionRows041.speak(a, l)
+        is Action.MediaControl -> ActionRows041.mediaControl(a, l)
+        is Action.SetBrightness -> ActionRows041.setBrightness(a, l)
+        is Action.SetRotation -> ActionRows041.setRotation(a, l)
+        is Action.HttpRequest -> ActionRows041.httpRequest(a, l)
     }
 
     private fun row(

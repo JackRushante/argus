@@ -65,6 +65,12 @@ class ShizukuCapabilityCatalogTest {
             ActionTypeIds.SHOW_NOTIFICATION,
             ActionTypeIds.COPY_TO_CLIPBOARD,
             ActionTypeIds.COPY_TEXT,
+            // 0.4.1: parlato, tasti multimediali, HTTP; luminosità e rotazione col permesso speciale.
+            ActionTypeIds.SPEAK,
+            ActionTypeIds.MEDIA_CONTROL,
+            ActionTypeIds.HTTP_REQUEST,
+            ActionTypeIds.SET_BRIGHTNESS,
+            ActionTypeIds.SET_ROTATION,
         ).forEach { id ->
             assertEquals(ShizukuRequirement.NOT_REQUIRED, requirementOf(id), "atteso NOT_REQUIRED per $id")
         }

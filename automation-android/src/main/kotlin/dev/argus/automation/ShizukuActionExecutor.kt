@@ -1,6 +1,8 @@
 package dev.argus.automation
 
 import dev.argus.automation.base.AndroidBaseActionExecutor
+import dev.argus.automation.base.AndroidSystemActionExecutor
+import dev.argus.automation.http.HttpRequestExecutor
 import dev.argus.automation.notification.NotificationReplyDelivery
 import dev.argus.automation.notification.NotificationReplyGateway
 import dev.argus.automation.notification.NotificationReplyRequest
@@ -77,6 +79,13 @@ class ShizukuActionExecutor(
      * da background. Default **false**: senza segnale si resta sul percorso BASE (foreground-only).
      */
     private val shizukuReady: () -> Boolean = { false },
+    /**
+     * 0.4.1: lettura ad alta voce, tasti multimediali, luminosità e rotazione (API Android normali,
+     * nessuno Shizuku). Default **null**: senza, falliscono pulite con `base_executor_unavailable`.
+     */
+    private val systemActions: AndroidSystemActionExecutor? = null,
+    /** 0.4.1: chiamate HTTP. Default **null**: senza, `base_executor_unavailable`. */
+    private val httpRequests: HttpRequestExecutor? = null,
 ) : ActionExecutor, ResolvedActionExecutor {
     override suspend fun execute(
         action: ResolvedProgramAction,
@@ -223,6 +232,18 @@ class ShizukuActionExecutor(
                     ?: ActionResult.Failure("base_executor_unavailable")
             }
             is Action.Vibrate -> baseActions?.vibrate(action.durationMs)
+                ?: ActionResult.Failure("base_executor_unavailable")
+
+            // 0.4.1: azioni senza Shizuku. Base-only: senza l'esecutore dedicato falliscono pulite.
+            is Action.Speak -> systemActions?.speak(action.text)
+                ?: ActionResult.Failure("base_executor_unavailable")
+            is Action.MediaControl -> systemActions?.mediaControl(action.command)
+                ?: ActionResult.Failure("base_executor_unavailable")
+            is Action.SetBrightness -> systemActions?.setBrightness(action.level, action.auto)
+                ?: ActionResult.Failure("base_executor_unavailable")
+            is Action.SetRotation -> systemActions?.setRotation(action.auto)
+                ?: ActionResult.Failure("base_executor_unavailable")
+            is Action.HttpRequest -> httpRequests?.execute(action)
                 ?: ActionResult.Failure("base_executor_unavailable")
 
             is Action.InvokeLlm -> if (generativeLane.trySubmit(ctx, action)) {

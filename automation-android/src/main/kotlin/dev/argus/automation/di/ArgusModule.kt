@@ -64,12 +64,45 @@ import dev.argus.automation.apps.AndroidInstalledAppResolver
 import dev.argus.automation.apps.InstalledAppResolver
 import dev.argus.automation.base.AndroidBaseActionExecutor
 import dev.argus.automation.base.AndroidBaseActionSurface
+import dev.argus.automation.base.AndroidDeferredOpenNotifier
+import dev.argus.automation.base.AndroidMediaKeySurface
+import dev.argus.automation.base.AndroidSpeechEngine
+import dev.argus.automation.base.AndroidSystemActionExecutor
+import dev.argus.automation.base.AndroidSystemSettingsSurface
+import dev.argus.automation.base.DeferredOpenNotifier
+import dev.argus.automation.base.MediaKeySurface
+import dev.argus.automation.base.SpeechEngine
+import dev.argus.automation.base.SystemSettingsSurface
+import dev.argus.automation.http.HttpRequestExecutor
 import dev.argus.automation.base.BaseActionSurface
 import dev.argus.automation.foreground.AndroidForegroundDeniedNotice
 import dev.argus.automation.foreground.SharedForegroundSentinel
 import dev.argus.automation.connectivity.ForegroundDeniedNotice
 import dev.argus.automation.foreground.ReceiverWorkLauncher
 import dev.argus.automation.foreground.SentinelDemand
+import dev.argus.automation.manual.AndroidManualShortcutPinner
+import dev.argus.automation.manual.AutomationPauseStore
+import dev.argus.automation.manual.EngineManualEventDispatcher
+import dev.argus.automation.manual.ManualEntryService
+import dev.argus.automation.manual.ManualEventDispatcher
+import dev.argus.automation.manual.ManualRuleCatalog
+import dev.argus.automation.manual.ManualRuleRunner
+import dev.argus.automation.manual.ManualShortcutPinner
+import dev.argus.automation.manual.ManualTileSelection
+import dev.argus.automation.manual.ManualTokenStore
+import dev.argus.automation.manual.ManualWorkLauncher
+import dev.argus.automation.manual.PrefsAutomationPauseStore
+import dev.argus.automation.manual.PrefsManualTileSelection
+import dev.argus.automation.manual.PrefsManualTokenStore
+import dev.argus.automation.manual.QuickTileController
+import dev.argus.automation.manual.ReceiverManualWorkLauncher
+import dev.argus.automation.phone.SimAuditingPhoneEventDispatcher
+import dev.argus.automation.triggers.DeviceEventDemand
+import dev.argus.automation.triggers.DeviceEventDispatcher
+import dev.argus.automation.triggers.DeviceEventIngress
+import dev.argus.automation.triggers.EngineDeviceEventDispatcher
+import dev.argus.automation.triggers.PrefsBatteryLevelStore
+import dev.argus.engine.device.DeviceEventParser
 import dev.argus.automation.sensor.AndroidSignificantMotionBackend
 import dev.argus.automation.sensor.EligibleSensorRule
 import dev.argus.automation.sensor.PrefsSensorDetectionStore
@@ -602,10 +635,50 @@ object ArgusModule {
     fun baseActionSurface(@ApplicationContext context: Context): BaseActionSurface =
         AndroidBaseActionSurface(context)
 
+    /** 0.4.1 (B4): notifica «Tocca per aprire …» quando Android blocca un avvio dal background. */
     @Provides
     @Singleton
-    fun baseActionExecutor(surface: BaseActionSurface): AndroidBaseActionExecutor =
-        AndroidBaseActionExecutor(surface)
+    fun deferredOpenNotifier(@ApplicationContext context: Context): DeferredOpenNotifier =
+        AndroidDeferredOpenNotifier(context)
+
+    @Provides
+    @Singleton
+    fun baseActionExecutor(
+        surface: BaseActionSurface,
+        deferredOpen: DeferredOpenNotifier,
+    ): AndroidBaseActionExecutor = AndroidBaseActionExecutor(surface, deferredOpen)
+
+    /** 0.4.1: lettura ad alta voce nella lingua dell'app (inglese o italiano). */
+    @Provides
+    @Singleton
+    fun speechEngine(
+        @ApplicationContext context: Context,
+        language: RenderLanguageSource,
+    ): SpeechEngine = AndroidSpeechEngine(context) {
+        if (language.current == dev.argus.ui.presentation.RenderLanguage.IT) "it" else "en"
+    }
+
+    @Provides
+    @Singleton
+    fun mediaKeySurface(@ApplicationContext context: Context): MediaKeySurface =
+        AndroidMediaKeySurface(context)
+
+    @Provides
+    @Singleton
+    fun systemSettingsSurface(@ApplicationContext context: Context): SystemSettingsSurface =
+        AndroidSystemSettingsSurface(context)
+
+    @Provides
+    @Singleton
+    fun systemActionExecutor(
+        speech: SpeechEngine,
+        media: MediaKeySurface,
+        settings: SystemSettingsSurface,
+    ): AndroidSystemActionExecutor = AndroidSystemActionExecutor(speech, media, settings)
+
+    @Provides
+    @Singleton
+    fun httpRequestExecutor(): HttpRequestExecutor = HttpRequestExecutor()
 
     @Provides
     @Singleton
@@ -619,6 +692,8 @@ object ArgusModule {
         whitelist: ContactWhitelistStore,
         baseActions: AndroidBaseActionExecutor,
         gateway: ShizukuGateway,
+        systemActions: AndroidSystemActionExecutor,
+        httpRequests: HttpRequestExecutor,
     ): ShizukuActionExecutor =
         ShizukuActionExecutor(
             tools,
@@ -636,6 +711,9 @@ object ArgusModule {
             // sono affidabili solo via `am start` privilegiato. Riletto a ogni scatto: se l'utente revoca
             // Shizuku si ricade sul percorso BASE senza riavvio.
             shizukuReady = { gateway.status() == dev.argus.shizuku.ShizukuGatewayStatus.AUTHORIZED },
+            // 0.4.1: parlato, tasti multimediali, luminosità/rotazione e chiamate HTTP, senza Shizuku.
+            systemActions = systemActions,
+            httpRequests = httpRequests,
         )
 
     @Provides
@@ -692,6 +770,7 @@ object ArgusModule {
         journal: ExecutionJournal,
         resolvedExecutor: ResolvedActionExecutor,
         wakeAwarePause: WakeAwarePause,
+        automationPause: AutomationPauseStore,
     ): Engine = Engine(
         store = store,
         executor = executor,
@@ -702,6 +781,8 @@ object ArgusModule {
         journal = journal,
         resolvedExecutor = resolvedExecutor,
         pause = { millis -> wakeAwarePause.pause(millis) },
+        // 0.4.1 (F21): «Pausa automazioni», letta dal motore a ogni scatto.
+        firingPause = automationPause,
         now = System::currentTimeMillis,
     )
 
@@ -775,10 +856,41 @@ object ArgusModule {
         state: DeviceStateSnapshotProvider,
         @ApplicationContext context: Context,
         frame: DispatchFrame,
+        store: AutomationStore,
+        audit: AuditSink,
     ): PhoneEventIngress = PhoneEventIngress(
         parser = PhoneEventParser(),
         callState = PrefsCallStateStore(context),
-        dispatcher = EnginePhoneEventDispatcher(engine, state, frame),
+        // 0.4.1: se lo slot SIM non è determinabile, le regole col filtro `sim` non scattano e il
+        // Log dice perché (`sim_unknown`).
+        dispatcher = SimAuditingPhoneEventDispatcher(
+            EnginePhoneEventDispatcher(engine, state, frame),
+            store,
+            audit,
+        ),
+    )
+
+    @Provides
+    @Singleton
+    fun deviceEventDemand(): DeviceEventDemand = DeviceEventDemand()
+
+    @Provides
+    @Singleton
+    fun deviceEventDispatcher(
+        engine: Engine,
+        state: DeviceStateSnapshotProvider,
+        frame: DispatchFrame,
+    ): DeviceEventDispatcher = EngineDeviceEventDispatcher(engine, state, frame)
+
+    @Provides
+    @Singleton
+    fun deviceEventIngress(
+        @ApplicationContext context: Context,
+        dispatcher: DeviceEventDispatcher,
+    ): DeviceEventIngress = DeviceEventIngress(
+        parser = DeviceEventParser(),
+        battery = PrefsBatteryLevelStore(context),
+        dispatcher = dispatcher,
     )
 
     @Provides
@@ -843,12 +955,14 @@ object ArgusModule {
         sentinel: SharedForegroundSentinel,
         audit: AuditSink,
         notice: ForegroundDeniedNotice,
+        deviceEvents: DeviceEventDemand,
     ): ConnectivitySentinelCoordinator =
         ConnectivitySentinelCoordinator(
             store,
             sentinel.demandBackend(SentinelDemand.Connectivity),
             audit,
             notice,
+            deviceEvents = deviceEvents,
         )
 
     @Provides
@@ -1147,4 +1261,74 @@ object ArgusModule {
         audit = audit,
         dispatchesIdle = { frame.idle },
     )
+
+    // --- 0.4.1 (manuale): avvio manuale delle regole (F8) e «Pausa automazioni» (F21) ---
+
+    @Provides
+    @Singleton
+    fun automationPauseStore(@ApplicationContext context: Context): AutomationPauseStore =
+        PrefsAutomationPauseStore(context)
+
+    @Provides
+    @Singleton
+    fun manualTokenStore(@ApplicationContext context: Context): ManualTokenStore =
+        PrefsManualTokenStore(context)
+
+    @Provides
+    @Singleton
+    fun manualTileSelection(@ApplicationContext context: Context): ManualTileSelection =
+        PrefsManualTileSelection(context)
+
+    @Provides
+    @Singleton
+    fun manualShortcutPinner(@ApplicationContext context: Context): ManualShortcutPinner =
+        AndroidManualShortcutPinner(context)
+
+    @Provides
+    @Singleton
+    fun manualEventDispatcher(
+        engine: Engine,
+        state: DeviceStateSnapshotProvider,
+        frame: DispatchFrame,
+    ): ManualEventDispatcher = EngineManualEventDispatcher(engine, state, frame)
+
+    @Provides
+    @Singleton
+    fun manualWorkLauncher(launcher: ReceiverWorkLauncher): ManualWorkLauncher =
+        ReceiverManualWorkLauncher(launcher)
+
+    @Provides
+    @Singleton
+    fun manualRuleCatalog(store: AutomationStore, tokens: ManualTokenStore): ManualRuleCatalog =
+        ManualRuleCatalog(store, tokens)
+
+    @Provides
+    @Singleton
+    fun manualRuleRunner(
+        store: AutomationStore,
+        tokens: ManualTokenStore,
+        pause: AutomationPauseStore,
+        dispatcher: ManualEventDispatcher,
+        launcher: ManualWorkLauncher,
+    ): ManualRuleRunner = ManualRuleRunner(store, tokens, pause, dispatcher, launcher)
+
+    @Provides
+    @Singleton
+    fun manualEntryService(
+        catalog: ManualRuleCatalog,
+        tokens: ManualTokenStore,
+        runner: ManualRuleRunner,
+        pinner: ManualShortcutPinner,
+        tile: ManualTileSelection,
+        pause: AutomationPauseStore,
+    ): ManualEntryService = ManualEntryService(catalog, tokens, runner, pinner, tile, pause)
+
+    @Provides
+    @Singleton
+    fun quickTileController(
+        tile: ManualTileSelection,
+        catalog: ManualRuleCatalog,
+        runner: ManualRuleRunner,
+        pause: AutomationPauseStore,
+    ): QuickTileController = QuickTileController(tile, catalog, runner, pause)
 }

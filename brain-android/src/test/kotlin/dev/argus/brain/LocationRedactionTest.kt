@@ -5,11 +5,15 @@ import dev.argus.engine.model.ArgusJson
 import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.Condition
 import dev.argus.engine.model.DndMode
+import dev.argus.engine.model.SolarEvent
+import dev.argus.engine.model.SolarSpec
 import dev.argus.engine.model.Trigger
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
@@ -128,6 +132,29 @@ class LocationRedactionTest {
         assertEquals(plain, redacted.draft)
         assertTrue(redacted.originals.isEmpty())
         assertSame(plain, LocationRedaction.restore(plain, redacted.originals))
+    }
+
+    @Test
+    fun `a sunset trigger never sends its frozen position and restore does not put it back`() {
+        val sunset = AutomationDraft(
+            name = "tramonto",
+            trigger = Trigger.Time(tz = "Europe/Rome", solar = SolarSpec(SolarEvent.SUNSET, -30, lat = 45.5, lng = 9.2)),
+            actions = listOf(Action.SetDnd(DndMode.PRIORITY)),
+        )
+
+        val redacted = LocationRedaction.redact(sunset)
+
+        val solar = assertNotNull((redacted.draft.trigger as Trigger.Time).solar)
+        assertNull(solar.lat)
+        assertNull(solar.lng)
+        assertEquals(SolarEvent.SUNSET, solar.event)
+        assertEquals(-30, solar.offsetMinutes)
+        val json = ArgusJson.encodeToString(AutomationDraft.serializer(), redacted.draft)
+        assertFalse("45.5" in json, json)
+        assertFalse("9.2" in json, json)
+        // Niente da ripristinare: all'arm l'app rilegge la posizione dal telefono.
+        assertTrue(redacted.originals.isEmpty())
+        assertEquals(redacted.draft, LocationRedaction.restore(redacted.draft, redacted.originals))
     }
 
     @Test

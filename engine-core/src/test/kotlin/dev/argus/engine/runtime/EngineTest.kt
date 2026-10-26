@@ -534,6 +534,20 @@ class EngineTest {
     }
 
     @Test
+    fun `a free text failure reason never reaches the journal of a flat rule`() = runTest {
+        val a = armed("a1", Trigger.Notification("com.whatsapp"), listOf(Action.SetWifi(false)))
+        val journal = FakeExecutionJournal()
+        val executor = object : ActionExecutor {
+            override suspend fun execute(action: Action, context: FireContext): ActionResult =
+                ActionResult.Failure("Wi-Fi radio busy for com.example.app")
+        }
+        engine(FakeAutomationStore(listOf(a)), executor, "2026-07-12T10:00:00Z", journal = journal)
+            .onTrigger(envelope("sbn:wa:1", TriggerEvent.NotificationPosted("com.whatsapp"))) { DeviceState() }
+
+        assertEquals("action_failed", journal.actions.single().errorCode)
+    }
+
+    @Test
     fun `journal correlates ordered action outcomes and redacts failure detail`() = runTest {
         val a = armed(
             "a1",
@@ -553,7 +567,8 @@ class EngineTest {
         assertTrue(journal.actions.all { it.executionId == executionId })
         assertEquals(listOf("set_wifi", "set_bluetooth"), journal.actions.map { it.actionType })
         assertEquals(ActionJournalOutcome.FAILED, journal.actions.first().outcome)
-        assertEquals("action_failed", journal.actions.first().errorCode)
+        // Un motivo che e' un codice chiuso passa (come nel percorso P4); il testo libero no.
+        assertEquals("forced", journal.actions.first().errorCode)
         val completion = journal.completions.single()
         assertEquals(ExecutionStatus.PARTIAL, completion.status)
         assertEquals(1, completion.failedCount)

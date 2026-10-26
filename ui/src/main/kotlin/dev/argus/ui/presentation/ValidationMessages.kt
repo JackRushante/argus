@@ -76,8 +76,8 @@ object ValidationMessages {
 
         // --- Trigger --------------------------------------------------------------------------
         "time_spec" to t(
-            "A time trigger needs exactly one of: a schedule, a date and time, or a delay.",
-            "Un trigger a tempo richiede esattamente uno tra pianificazione, data e ora, o ritardo.",
+            "A time trigger needs exactly one of: a schedule, a date and time, a delay, or sunrise/sunset.",
+            "Un trigger a tempo richiede esattamente uno tra pianificazione, data e ora, ritardo, o alba/tramonto.",
         ),
         "tz_invalid" to t("The time zone is not valid.", "Il fuso orario non è valido."),
         "cron_invalid" to t("The schedule expression is not valid.", "L'espressione di pianificazione non è valida."),
@@ -85,6 +85,14 @@ object ValidationMessages {
         "after_ms_invalid" to t(
             "The delay must be between 1 second and 7 days.",
             "Il ritardo deve essere tra 1 secondo e 7 giorni.",
+        ),
+        "solar_offset_invalid" to t(
+            "The shift from sunrise or sunset must be between 12 hours before and 12 hours after.",
+            "Lo spostamento da alba o tramonto deve essere tra 12 ore prima e 12 ore dopo.",
+        ),
+        "solar_location_invalid" to t(
+            "The position for sunrise and sunset is not valid: the phone reads it when the rule is activated.",
+            "La posizione per alba e tramonto non è valida: la legge il telefono quando la regola viene attivata.",
         ),
         "radius_invalid" to t(
             "The location radius is not valid (up to 100 km).",
@@ -131,6 +139,22 @@ object ValidationMessages {
         ),
         "number_invalid" to t("The number filter is empty or too long.", "Il filtro numero è vuoto o troppo lungo."),
         "match_invalid" to t("The device filter is empty or too long.", "Il filtro dispositivo è vuoto o troppo lungo."),
+        "sim_invalid" to t(
+            "The SIM filter must be SIM 1 or SIM 2.",
+            "Il filtro SIM deve essere SIM 1 o SIM 2.",
+        ),
+        "battery_spec" to t(
+            "A battery trigger needs exactly one threshold: below or above.",
+            "Un trigger batteria richiede esattamente una soglia: sotto oppure sopra.",
+        ),
+        "battery_threshold_invalid" to t(
+            "The battery threshold must be between 1% and 99%.",
+            "La soglia della batteria deve essere tra 1% e 99%.",
+        ),
+        "mode_to_invalid" to t(
+            "The mode is not valid: Do Not Disturb is off, priority or total; the ringer is normal, vibrate or silent.",
+            "La modalità non è valida: Non disturbare è off, priority o total; la suoneria è normal, vibrate o silent.",
+        ),
         "pkg_blank" to t("The app package is missing.", "Il package dell'app manca."),
         "package_invalid" to t("The app package name is not valid.", "Il nome del package dell'app non è valido."),
         "sensor_event_count_invalid" to t(
@@ -575,6 +599,60 @@ object ValidationMessages {
         "conflict_dark_mode" to t(
             "Another active rule sets dark mode to a different value on triggers that may overlap.",
             "Un'altra regola attiva imposta la modalità scura su un valore diverso con trigger che possono sovrapporsi.",
+        ),
+
+        // --- 0.4.1 · azioni senza Shizuku e richiesta HTTP --------------------------------------
+        "speak_text_invalid" to t(
+            "The text to read aloud is required and can have up to 1,000 characters.",
+            "Il testo da leggere ad alta voce è obbligatorio e lungo al massimo 1.000 caratteri.",
+        ),
+        "brightness_spec" to t(
+            "Brightness needs exactly one of: a level or automatic.",
+            "La luminosità richiede esattamente uno tra livello e automatica.",
+        ),
+        "brightness_level_invalid" to t(
+            "The brightness level must be between 0 and 100.",
+            "Il livello di luminosità deve essere tra 0 e 100.",
+        ),
+        "http_url_invalid" to t(
+            "The request address must start with https:// (http:// is allowed only for localhost) and cannot contain a user name or password.",
+            "L'indirizzo della richiesta deve iniziare con https:// (http:// è ammesso solo per localhost) e non può contenere nome utente o password.",
+        ),
+        "http_url_interpolated" to t(
+            "The request address is fixed: it cannot contain a \${variable}.",
+            "L'indirizzo della richiesta è fisso: non può contenere una \${variabile}.",
+        ),
+        "http_headers_too_many" to t(
+            "A request can have at most 10 headers.",
+            "Una richiesta può avere al massimo 10 intestazioni.",
+        ),
+        "http_header_interpolated" to t(
+            "Headers are fixed: they cannot contain a \${variable}.",
+            "Le intestazioni sono fisse: non possono contenere una \${variabile}.",
+        ),
+        "http_header_invalid" to t(
+            "A header is not valid: check its name and value (not empty, no line breaks, no duplicates; Host, Content-Length, Transfer-Encoding and Connection are not allowed).",
+            "Un'intestazione non è valida: controlla nome e valore (non vuoto, senza a capo, senza duplicati; Host, Content-Length, Transfer-Encoding e Connection non sono ammessi).",
+        ),
+        "http_content_type_invalid" to t(
+            "The content type is not valid or differs from the Content-Type header.",
+            "Il content type non è valido o è diverso dall'intestazione Content-Type.",
+        ),
+        "http_body_not_allowed" to t(
+            "A GET request cannot have a body.",
+            "Una richiesta GET non può avere un body.",
+        ),
+        "http_body_too_large" to t(
+            "The body is larger than 16 KB.",
+            "Il body supera i 16 KB.",
+        ),
+        "http_body_secret_disclosure" to t(
+            "A secret variable will be sent to the address of the HTTP request.",
+            "Una variabile segreta verrà inviata all'indirizzo della richiesta HTTP.",
+        ),
+        "interpolation_json_context" to t(
+            "External data sits in the JSON body outside a quoted string: the action would be blocked when it runs.",
+            "Un dato esterno è nel body JSON fuori da una stringa tra virgolette: l'azione verrebbe bloccata all'esecuzione.",
         ),
     )
 

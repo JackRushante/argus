@@ -16,6 +16,7 @@ import dev.argus.automation.connectivity.ConnectivitySentinelStatus
 import dev.argus.automation.PrivacyRevocationCoordinator
 import dev.argus.automation.PrivacyRevocationResult
 import dev.argus.automation.RenderLanguageSource
+import dev.argus.automation.manual.AutomationPauseStore
 import dev.argus.automation.budget.BudgetLimits
 import dev.argus.automation.budget.BudgetSettings
 import dev.argus.automation.budget.BudgetSettingsStore
@@ -294,6 +295,8 @@ class SettingsViewModel @Inject constructor(
     private val languageSource: RenderLanguageSource,
     private val installInfo: AppInstallInfo,
     private val rulesBackup: RulesBackup,
+    /** F21: interruttore globale «Pausa automazioni». */
+    private val pause: AutomationPauseStore,
 ) : ViewModel() {
     /** Lingua corrente al momento in cui si produce un testo (messaggi, errori); segue il telefono. */
     private val language: RenderLanguage get() = languageSource.current
@@ -374,6 +377,7 @@ class SettingsViewModel @Inject constructor(
         // Al cambio di lingua del telefono lo stato si rigenera (etichette e testi prodotti qui).
         languageSource.language,
         mutableBackupStatus,
+        pause.paused,
     ) { values: Array<Any?> ->
         val settingsSources = values[0] as SettingsSources
         val bridge = values[1] as BridgeUiHealth
@@ -385,6 +389,7 @@ class SettingsViewModel @Inject constructor(
         val keySaved = values[7] as Boolean?
         // values[8] = lingua, usata solo come trigger di ricarica.
         val backupStatus = values[9] as RulesBackupStatus
+        val automationsPaused = values[10] as Boolean
         val health = readAndroidUiHealth(context)
         SettingsState(
             transport = transportUi(bridge, hasToken, keySaved),
@@ -396,6 +401,7 @@ class SettingsViewModel @Inject constructor(
             shizukuRunsAsRoot = settingsSources.shizukuIdentity?.runsAsRoot,
             batteryExempt = health.batteryExempt,
             exactAlarmsGranted = health.exactAlarmsGranted,
+            writeSettingsGranted = health.writeSettingsGranted,
             notificationsGranted = health.notificationsGranted,
             notificationListenerGranted = health.notificationListenerGranted,
             backgroundLocation = health.backgroundLocationState(settingsSources.geofenceNeeded),
@@ -411,6 +417,7 @@ class SettingsViewModel @Inject constructor(
             notificationListenerRestrictedHint =
                 !health.notificationListenerGranted && installInfo.mayHaveRestrictedSettings,
             backup = RulesBackupUi(status = backupStatus, exportableRules = settingsSources.exportableRules),
+            automationsPaused = automationsPaused,
         )
     }.stateIn(
         viewModelScope,
@@ -813,6 +820,9 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    /** F21: accende o spegne "Pausa automazioni". */
+    fun setAutomationsPaused(paused: Boolean) = pause.setPaused(paused)
+
     fun revokePrivacy() {
         viewModelScope.launch {
             try {
@@ -951,6 +961,7 @@ class SettingsViewModel @Inject constructor(
             shizukuRunsAsRoot = shizuku.observeIdentity().value?.runsAsRoot,
             batteryExempt = health.batteryExempt,
             exactAlarmsGranted = health.exactAlarmsGranted,
+            writeSettingsGranted = health.writeSettingsGranted,
             notificationsGranted = health.notificationsGranted,
             notificationListenerGranted = health.notificationListenerGranted,
             backgroundLocation = health.backgroundLocationState(false),

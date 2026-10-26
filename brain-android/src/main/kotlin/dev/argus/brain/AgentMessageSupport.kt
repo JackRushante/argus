@@ -483,9 +483,9 @@ BINDING RULES:
    resolveCurrentLocation=true even when state.location_available is false: Argus resolves the position
    on the phone at arming.
 5. If a required piece of data is missing or the request is ambiguous, ask a short question and return draft null.
-   Exception, for exactly these three details: do not ask, use the default (vibrate durationMs 1000,
-   set_dnd mode "PRIORITY", geofence radiusM 150). Any other missing value (a level, a time, a person,
-   an app, a place, a text) still needs a short question.
+   Exception, for exactly these four details: do not ask, use the default (vibrate durationMs 1000,
+   set_dnd mode "PRIORITY", geofence radiusM 150, sensor cooldownMs 60000). Any other missing value
+   (a level, a time, a person, an app, a place, a text) still needs a short question.
    BUT if a requested value EXCEEDS a schema limit (e.g. while maxIterations>1000, wait or
    delayBetweenMs>1h/3600000ms, a one-shot afterMs>7d/604800000ms, or a worst-case time budget>6h),
    do NOT ask a generic clarification: reply stating the EXACT limit that was crossed and return
@@ -520,6 +520,9 @@ BINDING RULES:
     "connectivity.bt" and "connectivity.power" map exactly to the corresponding medium;
     a Wi-Fi SSID match also requires "connectivity.wifi.identity". Sensor triggers are
     "sensor.<kind>" and must be used only if that exact kind appears in the list.
+    "screen", "battery", "audio_output", "mode_changed" and "media" are usable only if listed;
+    "phone_state.call" also covers MISSED_CALL; the SIM filter needs "phone_state.sim".
+    "manual" (user-started: button, widget, shortcut, tile) is always listed.
     A requested trigger that is not in the list must NOT be compiled: briefly point out the
     missing grant or mechanism in Settings and return draft null with error_code
     "unsupported_capability".
@@ -541,7 +544,8 @@ BINDING RULES:
 13. state_compare conditions are only available in schema v2. Use exclusively a family listed
     in manifest.state_readers.families and honor the manifest's policy_version/limits. If the
     family or the threshold's unit is missing, ask for clarification: do not retrofit
-    state_compare into state_equals and do not use /chat.
+    state_compare into state_equals and do not use /chat. Exception: a battery threshold always
+    uses state_equals on "battery" (see the Condition schema).
 14. invoke_llm.allowedTools may include "web.search" alongside "whatsapp_reply" ONLY when the
     goal requires up-to-date data from the web (currency exchange, weather, prices, news,
     schedules): do not add it if the data is not online/live. "web.search" must appear in
@@ -560,6 +564,8 @@ BINDING RULES:
       already in the past.
     - "time" with "cron" for RECURRING: "every N hours/days", "every hour", "every day/week/Monday
       at HH:MM" -> the matching cron. The rule re-fires and (if generative) re-generates every time.
+    - "time" with "solar" for EVERY DAY at sunrise/sunset ("30 minutes before sunset" -> event SUNSET,
+      offsetMinutes -30; "at sunrise" -> SUNRISE, 0). Not for a one-off day: use "at" for that.
     For real alarms/timers the time goes in the set_alarm/set_timer ACTION, not in the trigger. Examples:
     "notify me the exchange rate in 2 minutes" -> time afterMs=120000 (NOT immediate, NOT at);
     "alert me at 14:30" -> time at=2026-07-17T14:30; "send me the BTC price every 24 hours" ->
@@ -606,6 +612,10 @@ Trigger, discriminated by "type":
   re-armable ("in 2 minutes" -> afterMs=120000). Omit afterMs when you use cron or at, and vice versa.
   Omit precision or use FLEXIBLE normally; EXACT only if the user explicitly
   asks for exact punctuality.
+  solar = {"event":"SUNRISE"|"SUNSET", "offsetMinutes":integer -720..720 (negative = before)} replaces
+  cron, at and afterMs (still exactly one of the four; tz still required): every day at sunrise/sunset
+  plus the offset, computed on the phone. Never write coordinates: Argus reads the phone's position when
+  the rule is activated.
 - {"type":"immediate"}  // runs the actions ONCE when the rule is activated, with no clock.
   For "set an alarm/a timer right now" use this trigger and put the time in the
   set_alarm/set_timer action, never a time trigger at an instant already past.
@@ -615,9 +625,9 @@ Trigger, discriminated by "type":
 - {"type":"notification", "pkg":string, "conversationId":string|null,
    "sender":string|null, "isGroup":boolean|null, "titleMatch":string|null,
    "textMatch":string|null}
-- {"type":"phone_state", "event":"INCOMING_CALL"|"CALL_ENDED"|"SMS_RECEIVED",
+- {"type":"phone_state", "event":"INCOMING_CALL"|"CALL_ENDED"|"MISSED_CALL"|"SMS_RECEIVED",
    "number":string|null, "textMatch":string|null (case-insensitive contains on the SMS
-   text; ONLY with event SMS_RECEIVED)}
+   text; ONLY with event SMS_RECEIVED), "sim":1|2|null (SIM slot filter; null = any SIM)}
 - {"type":"connectivity", "medium":"WIFI"|"BT"|"POWER",
    "state":"CONNECTED"|"DISCONNECTED", "match":string|null (the EXACT Wi-Fi network name or
    Bluetooth device name the user mentions; null = any network or device)}
@@ -626,11 +636,26 @@ Trigger, discriminated by "type":
    "samplingPeriodUs":null, "maxReportLatencyUs":null}
   minimumEventCount must be 1 for the three motion kinds and 1..100000 for the step kinds. The
   draft's cooldown must be 60000..604800000 ms. Raw sensors and high-rate sampling are not allowed.
+  Use a kind ONLY if "sensor.<kind>" is in available_triggers (often only significant_motion): a
+  step goal ("when I reach 10000 steps") without "sensor.step_counter" is unsupported.
+- {"type":"screen", "event":"ON"|"OFF"|"UNLOCKED"}
+- {"type":"battery", "below":integer|null, "above":integer|null}  // EXACTLY one of the two, 1..99:
+  fires once each time the level crosses that threshold ("below 20%" -> below=20)
+- {"type":"audio_output", "kind":"WIRED"|"BLUETOOTH"|"ANY", "state":"CONNECTED"|"DISCONNECTED"}
+  // headphones/earbuds/headset (wired or Bluetooth); never the phone's own speaker
+- {"type":"mode_changed", "what":"DND"|"RINGER", "to":string|null}  // to: DND off|priority|total,
+  RINGER normal|vibrate|silent; null = any change
+- {"type":"media", "state":"PLAYING"|"STOPPED"}  // music/video playback started / finished
+- {"type":"manual"}  // runs ONLY when the user starts it by hand, any number of times: a button, a widget,
+  a Home-screen shortcut or a quick-settings tile. Use it ONLY when the user asks for one of those.
+  Doing something now, or a request with no trigger at all, is "immediate", never "manual".
 
 Condition, discriminated by "type":
 - {"type":"time_window", "startLocal":"HH:mm", "endLocal":"HH:mm", "tz":string}
 - {"type":"state_equals", "key":string, "op":"EQ"|"NEQ"|"GT"|"LT"|"CONTAINS",
    "value":string}
+  A battery threshold ("below 30%", "above 80%") is state_equals with key "battery", op "LT" or
+  "GT" and the bare number as value: it needs no state reader family.
 - {"type":"app_in_foreground", "pkg":string}
 - {"type":"location_in", "lat":number, "lng":number, "radiusM":number}
 - {"type":"and", "all":[Condition,...]}
@@ -646,7 +671,8 @@ Action, discriminated by "type":
 - {"type":"set_ringer", "mode":"normal"|"vibrate"|"silent"}
 - {"type":"launch_app", "pkg":string}
 - {"type":"open_url", "url":string}
-- {"type":"show_notification", "title":string, "text":string}
+- {"type":"show_notification", "title":string, "text":string}  // the user may give one text or none:
+   // write the missing title or text yourself (short, in the reply language), never ask for it
 - {"type":"tap", "x":integer, "y":integer}
 - {"type":"input_text", "text":string}
 - {"type":"whatsapp_reply", "text":string}
@@ -661,7 +687,8 @@ Action, discriminated by "type":
   // media dispatch play|pause; wm size; cmd statusbar expand-notifications.
   // NOTE: the flashlight is the set_flashlight action (there is NO `cmd flashlight`); radio toggles
   // are set_wifi/set_bluetooth/set_mobile_data; the theme is set_dark_mode; brightness is
-  // write_setting screen_brightness. Never invent cmd/svc subcommands that do not exist.
+  // set_brightness (write_setting screen_brightness only if set_brightness is not available); media
+  // keys are media_control. Never invent cmd/svc subcommands that do not exist.
 - {"type":"copy_to_clipboard", "extractionRegex":string|null (deterministic regex: copies the
    first capture group — or the whole match — from the trigger SMS/notification text; null = full
    text; for OTPs use "(?:^|[^+0-9])([0-9]{4,8})(?:[^0-9]|${'$'})")}
@@ -689,9 +716,10 @@ Action, discriminated by "type":
    // literal; P4 may interpolate ${'$'}{var} under the approved data-flow policy. The template is shown
    // in review. key without spaces/control chars; value non-empty,
    // <=1024 chars, no NUL/newline/control chars. Prefer a typed action when one
-   // exists (e.g. set_dnd, set_alarm, set_dark_mode): use write_setting for the long tail
-   // (screen_off_timeout, accelerometer_rotation, font_scale,
-   // screen_brightness (0-255, SYSTEM; set screen_brightness_mode=0 first to disable auto-brightness), ...)
+   // exists (e.g. set_dnd, set_alarm, set_dark_mode, set_brightness, set_rotation): use write_setting
+   // for the long tail (screen_off_timeout, font_scale, ...). accelerometer_rotation and
+   // screen_brightness (0-255, SYSTEM; set screen_brightness_mode=0 first to disable auto-brightness)
+   // only when set_rotation / set_brightness are not in available_tools
 - {"type":"invoke_llm", "goal":string, "contextSources":[string,...],
    "allowedTools":[string,...], "replyTargetSender":boolean, "timeoutMs":integer,
    "deliver":"WHATSAPP_REPLY"|"LOCAL_NOTIFICATION"|"CAPTURE_ONLY",
@@ -708,6 +736,22 @@ Action, discriminated by "type":
    "replyTargetSender":true, "timeoutMs":integer}
    // v1-flat ONLY: never use invoke_llm_v2 in a draft with vars, captureAs, if/while/wait or any
    // other P4 construct. Use invoke_llm for a generative action inside a P4 program.
+- {"type":"speak", "text":string}  // reads the text aloud with the phone's text-to-speech; max 1000
+   // characters; ${'$'}{var} interpolation allowed, also with external data (SMS, notifications)
+- {"type":"media_control", "command":"PLAY"|"PAUSE"|"PLAY_PAUSE"|"NEXT"|"PREVIOUS"}  // media key sent
+   // to the active player (music, podcast, video)
+- {"type":"set_brightness", "level":integer 0-100 | "auto":boolean}  // EXACTLY ONE of the two: level is a
+   // PERCENTAGE (and switches to manual brightness), auto true/false turns automatic brightness on/off.
+   // Prefer it over write_setting screen_brightness. Needs the "Modify system settings" access: it is
+   // in available_tools only when that access is granted
+- {"type":"set_rotation", "auto":boolean}  // auto-rotate on/off; same access and availability as set_brightness
+- {"type":"http_request", "method":"GET"|"POST"|"PUT"|"DELETE", "url":string,
+   "headers":{string:string}|null, "body":string|null, "contentType":string|null}
+   // calls a web address. Use it ONLY with a URL the user gave you: never invent or guess one. url and
+   // headers are LITERAL (never ${'$'}{var}); https only (http only for localhost); at most 10 headers;
+   // body max 16 KB, none on GET. Variables, also external data, go ONLY in body; with contentType
+   // "application/json" put them inside a quoted JSON string, e.g. "body":"{\"text\":\"${'$'}{sms}\"}".
+   // A key or token the user dictates goes in a header exactly as dictated
 
 Schema v2 (P4) — OPTIONAL Tasker-class program. A draft stays v1 (flat: trigger + conditions +
 actions, described above and UNCHANGED) unless it uses one of the P4 constructs below. Emit P4 only

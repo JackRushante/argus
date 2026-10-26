@@ -64,7 +64,15 @@ interface BaseActionSurface {
  * mai per un outage Shizuku: queste azioni non ne dipendono. Un grant mancante è un fallimento
  * pulito e distinto (`*_policy_unavailable`), non un crash né un blocco silenzioso.
  */
-class AndroidBaseActionExecutor(private val surface: BaseActionSurface) {
+class AndroidBaseActionExecutor(
+    private val surface: BaseActionSurface,
+    /**
+     * 0.4.1 (B4): quando Android non lascia avviare un'attività dal background, invece di fallire si
+     * pubblica una notifica «Tocca per aprire …» (il tocco è un gesto dell'utente). Default `null`:
+     * senza, si resta sul fallimento `activity_start_blocked`.
+     */
+    private val deferredOpen: DeferredOpenNotifier? = null,
+) {
 
     /**
      * Non disturbare con l'API normale, poi verifica. Su Android 15+ un'app puo' spegnere solo la
@@ -111,14 +119,18 @@ class AndroidBaseActionExecutor(private val surface: BaseActionSurface) {
 
     suspend fun launchApp(pkg: String): ActionResult = guarded {
         if (!PACKAGE_NAME.matches(pkg)) return ActionResult.Failure("action_invalid")
-        if (surface.launchPackage(pkg)) ActionResult.Success
-        else ActionResult.Failure("launch_app_unresolved")
+        deferrable(DeferredOpenTarget.App(pkg)) {
+            if (surface.launchPackage(pkg)) ActionResult.Success
+            else ActionResult.Failure("launch_app_unresolved")
+        }
     }
 
     suspend fun openUrl(url: String): ActionResult = guarded {
         if (!validHttpUrl(url)) return ActionResult.Failure("open_url_invalid")
-        surface.openHttpUrl(url)
-        ActionResult.Success
+        deferrable(DeferredOpenTarget.Url(url)) {
+            surface.openHttpUrl(url)
+            ActionResult.Success
+        }
     }
 
     suspend fun setAlarm(hour: Int, minute: Int, label: String?, skipUi: Boolean): ActionResult = guarded {
@@ -163,14 +175,28 @@ class AndroidBaseActionExecutor(private val surface: BaseActionSurface) {
         if (screen == SettingsScreen.APP_DETAILS && !PACKAGE_NAME.matches(pkg ?: "")) {
             return ActionResult.Failure("action_invalid")
         }
-        if (surface.openSettingsScreen(screen, pkg)) ActionResult.Success
-        else ActionResult.Failure("settings_screen_unresolved")
+        deferrable(DeferredOpenTarget.SettingsPage(screen, pkg)) {
+            if (surface.openSettingsScreen(screen, pkg)) ActionResult.Success
+            else ActionResult.Failure("settings_screen_unresolved")
+        }
     }
 
     suspend fun vibrate(durationMs: Int): ActionResult = guarded {
         if (durationMs !in 1..MAX_VIBRATE_MS) return ActionResult.Failure("action_invalid")
         if (surface.vibrateOneShot(durationMs)) ActionResult.Success
         else ActionResult.Failure("vibrator_unavailable")
+    }
+
+    /**
+     * B4 (0.4.1): se l'avvio è bloccato perché il processo è in background, si offre all'utente un tocco
+     * ([DeferredOpenNotifier]) e il journal registra [DEFERRED_TO_NOTIFICATION], distinto da
+     * `activity_start_blocked`. Senza notifier o senza permesso di notifica il blocco riemerge e
+     * l'esito resta quello di prima.
+     */
+    private inline fun deferrable(target: DeferredOpenTarget, block: () -> ActionResult): ActionResult = try {
+        block()
+    } catch (blocked: ActivityStartBlockedException) {
+        if (deferredOpen?.publish(target) == true) ActionResult.Failure(DEFERRED_TO_NOTIFICATION) else throw blocked
     }
 
     private inline fun guarded(block: () -> ActionResult): ActionResult = try {

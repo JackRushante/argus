@@ -4,12 +4,14 @@ import dev.argus.engine.model.Action
 import dev.argus.engine.model.ArgusJson
 import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.Condition
+import dev.argus.engine.model.SolarEvent
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.safety.DraftValidator
 import dev.argus.engine.safety.Severity
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -69,6 +71,20 @@ class PersonalDataStripperTest {
         assertNull(stripped.number)
         assertEquals(BackupFixtures.phoneState.event, stripped.event)
         assertEquals("codice", stripped.textMatch)
+    }
+
+    @Test
+    fun `a sunset trigger loses the position frozen at arm and keeps event and offset`() {
+        val stripped = strip(BackupFixtures.solar) as Trigger.Time
+
+        val solar = assertNotNull(stripped.solar)
+        assertNull(solar.lat)
+        assertNull(solar.lng)
+        assertEquals(SolarEvent.SUNSET, solar.event)
+        assertEquals(-30, solar.offsetMinutes)
+        assertEquals(BackupFixtures.solar.tz, stripped.tz)
+        // Resta una bozza valida: chi la importa la arma con la posizione del proprio telefono.
+        assertEquals(emptySet(), errorCodes(PersonalDataStripper.strip(draftWith(BackupFixtures.solar))))
     }
 
     @Test

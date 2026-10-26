@@ -237,11 +237,15 @@ Trigger, discriminated by "type":
    "samplingPeriodUs":null, "maxReportLatencyUs":null}
   minimumEventCount must be 1 for the three motion kinds and 1..100000 for the step kinds. The
   draft's cooldown must be 60000..604800000 ms. Raw sensors and high-rate sampling are not allowed.
+  Use a kind ONLY if "sensor.<kind>" is in available_triggers (often only significant_motion): a
+  step goal ("when I reach 10000 steps") without "sensor.step_counter" is unsupported.
 
 Condition, discriminated by "type":
 - {"type":"time_window", "startLocal":"HH:mm", "endLocal":"HH:mm", "tz":string}
 - {"type":"state_equals", "key":string, "op":"EQ"|"NEQ"|"GT"|"LT"|"CONTAINS",
    "value":string}
+  A battery threshold ("below 30%", "above 80%") is state_equals with key "battery", op "LT" or
+  "GT" and the bare number as value: it needs no state reader family.
 - {"type":"app_in_foreground", "pkg":string}
 - {"type":"location_in", "lat":number, "lng":number, "radiusM":number}
 - {"type":"and", "all":[Condition,...]}
@@ -872,7 +876,8 @@ def build_prompt(data: dict[str, Any]) -> str:
 15. state_compare conditions are only available in schema v2. Use exclusively a family listed
     in manifest.state_readers.families and honor the manifest's policy_version/limits. If the
     family or the threshold's unit is missing, ask for clarification: do not retrofit
-    state_compare into state_equals and do not use /chat.""" if compile_v2 else ""
+    state_compare into state_equals and do not use /chat. Exception: a battery threshold always
+    uses state_equals on "battery" (see the Condition schema).""" if compile_v2 else ""
     context = json.dumps(
         {"manifest": data["manifest"], "state": data["state"]},
         ensure_ascii=False,
@@ -895,9 +900,9 @@ BINDING RULES:
    resolveCurrentLocation=true even when state.location_available is false: Argus resolves the position
    on the phone at arming.
 5. If a required piece of data is missing or the request is ambiguous, ask a short question and return draft null.
-   Exception, for exactly these three details: do not ask, use the default (vibrate durationMs 1000,
-   set_dnd mode "PRIORITY", geofence radiusM 150). Any other missing value (a level, a time, a person,
-   an app, a place, a text) still needs a short question.
+   Exception, for exactly these four details: do not ask, use the default (vibrate durationMs 1000,
+   set_dnd mode "PRIORITY", geofence radiusM 150, sensor cooldownMs 60000). Any other missing value
+   (a level, a time, a person, an app, a place, a text) still needs a short question.
    BUT if a requested value EXCEEDS a schema limit (e.g. while maxIterations>1000, wait or
    delayBetweenMs>1h/3600000ms, a one-shot afterMs>7d/604800000ms, or a worst-case time budget>6h),
    do NOT ask a generic clarification: reply stating the EXACT limit that was crossed and return

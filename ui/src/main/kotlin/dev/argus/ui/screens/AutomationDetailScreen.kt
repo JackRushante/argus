@@ -78,6 +78,7 @@ import dev.argus.ui.components.StatusBadgeChip
 import dev.argus.ui.components.WarningBanner
 import dev.argus.ui.components.CloudTag
 import dev.argus.ui.components.GenerativeTag
+import dev.argus.ui.components.ManualEntrySection
 import dev.argus.ui.R
 import dev.argus.ui.model.ActionRow
 import dev.argus.ui.model.AutomationDetailCallbacks
@@ -156,6 +157,15 @@ fun AutomationDetailScreen(
                 // Geofence: label al posto delle coordinate (§6.3, resolveCurrentLocation).
                 state.geofencePreviewLabel?.let { GeofencePreviewRow(it) }
 
+                // F8: regola manuale armata, scorciatoia Home e riquadro delle impostazioni rapide.
+                state.manual?.let {
+                    ManualEntrySection(
+                        entry = it,
+                        onAddToHome = callbacks::onAddToHome,
+                        onUseInTile = callbacks::onUseInTile,
+                    )
+                }
+
                 // Solo generative: stima chiamate/giorno (spec §10.5).
                 state.estimatedLlmCallsPerDay?.let { EstimateRow(it) }
 
@@ -206,7 +216,13 @@ fun AutomationDetailScreen(
         AlertDialog(
             onDismissRequest = { confirmRunNow = false },
             title = { Text(stringResource(R.string.run_now_dialog_title)) },
-            text = { Text(stringResource(R.string.run_now_dialog_body)) },
+            text = {
+                Text(
+                    stringResource(
+                        if (state.manual != null) R.string.manual_run_now_body else R.string.run_now_dialog_body,
+                    ),
+                )
+            },
             dismissButton = {
                 TextButton(onClick = { confirmRunNow = false }) {
                     Text(stringResource(R.string.action_cancel))

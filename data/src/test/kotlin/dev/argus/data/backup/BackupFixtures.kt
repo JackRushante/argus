@@ -9,12 +9,16 @@ import dev.argus.engine.model.ConfidentialityLabel
 import dev.argus.engine.model.ConnMedium
 import dev.argus.engine.model.ConnState
 import dev.argus.engine.model.DndMode
+import dev.argus.engine.model.HttpMethod
 import dev.argus.engine.model.IntegrityLabel
+import dev.argus.engine.model.MediaCommand
 import dev.argus.engine.model.NightMode
 import dev.argus.engine.model.PhoneEvent
 import dev.argus.engine.model.SensorKind
 import dev.argus.engine.model.SettingNamespace
 import dev.argus.engine.model.SettingsScreen
+import dev.argus.engine.model.SolarEvent
+import dev.argus.engine.model.SolarSpec
 import dev.argus.engine.model.StateQuery
 import dev.argus.engine.model.StateValueType
 import dev.argus.engine.model.TimePrecision
@@ -47,7 +51,9 @@ internal object BackupFixtures {
     val sensor = Trigger.Sensor(SensorKind.STEP_COUNTER, minimumEventCount = 100)
 
     /** Tutti i sottotipi di [Trigger]. */
-    val allTriggers: List<Trigger> = listOf(geofence, time, Trigger.Immediate, notification, phoneState, connectivity, sensor)
+    /** Tramonto con la posizione già congelata all'arm (arrotondata a 0,1°). */
+    val solar = Trigger.Time(tz = "Europe/Rome", solar = SolarSpec(SolarEvent.SUNSET, offsetMinutes = -30, lat = 45.5, lng = 9.2))
+    val allTriggers: List<Trigger> = listOf(geofence, time, solar, Trigger.Immediate, notification, phoneState, connectivity, sensor)
 
     val locationIn = Condition.LocationIn(lat = 45.4642, lng = 9.19, radiusM = 200.0)
 
@@ -87,6 +93,14 @@ internal object BackupFixtures {
         Action.Vibrate(200),
         Action.WriteSetting(SettingNamespace.SYSTEM, "screen_brightness", "100"),
         Action.Wait(500),
+        // 0.4.1 (azioni). L'http_request SENZA intestazioni: con le intestazioni l'esportazione senza
+        // dati personali ne svuota i valori (v. PersonalDataStripperHttp041Test).
+        Action.Speak("ciao"),
+        Action.MediaControl(MediaCommand.PLAY_PAUSE),
+        Action.SetBrightness(level = 40),
+        Action.SetBrightness(auto = true),
+        Action.SetRotation(auto = false),
+        Action.HttpRequest(HttpMethod.POST, "https://example.org/hook", body = "{}", contentType = "application/json"),
         Action.InvokeLlm(
             goal = "rispondi",
             contextSources = listOf("notification"),

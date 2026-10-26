@@ -183,6 +183,10 @@ private fun causeText(cause: BlockCause, l: RenderLanguage): String = when (caus
         "The required sensor is not available or the physical activity permission is missing",
         "Il sensore richiesto non è disponibile o manca il permesso attività fisica",
     )
+    BlockCause.WRITE_SETTINGS_ACCESS -> l.pick(
+        "The \"Modify system settings\" access is missing",
+        "Manca l'accesso a \"Modifica impostazioni di sistema\"",
+    )
     BlockCause.OTHER -> l.pick(
         "A required feature is not available",
         "Una funzione richiesta non è disponibile",

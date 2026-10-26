@@ -2,6 +2,7 @@ package dev.argus.engine.runtime
 
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.ConfidentialityLabel
+import dev.argus.engine.model.HttpRequestPolicy
 import dev.argus.engine.model.IntegrityLabel
 import dev.argus.engine.model.InterpolationPolicy
 import dev.argus.engine.model.RemoteEgressPolicy
@@ -69,6 +70,9 @@ class TaintAwareInterpolator {
                 is Action.SetDarkMode,
                 is Action.Vibrate,
                 is Action.Wait,
+                is Action.MediaControl,
+                is Action.SetBrightness,
+                is Action.SetRotation,
                 -> action
 
                 is Action.SetRinger -> action.copy(
@@ -123,6 +127,16 @@ class TaintAwareInterpolator {
                 is Action.InvokeLlmV2 -> action.copy(
                     goal = accumulator.field("goal", action.goal, MAX_TEXT_CHARS, frameTaintedForBrain = true),
                 )
+                is Action.Speak -> action.copy(
+                    text = accumulator.field("text", action.text, MAX_TEXT_CHARS),
+                )
+                // URL, intestazioni e content type restano quelli approvati (mai interpolati): solo il
+                // body ha segnaposto, con la codifica del suo content type (JSON, form).
+                is Action.HttpRequest -> action.copy(
+                    body = action.body?.let {
+                        accumulator.field("body", it, HttpRequestPolicy.MAX_BODY_BYTES)
+                    },
+                )
 
                 // I contenitori non sono azioni foglia e non devono mai arrivare al runner.
                 is Action.If, is Action.While -> throw ResolutionException("control_flow_not_leaf")
@@ -160,16 +174,23 @@ class TaintAwareInterpolator {
             } else {
                 null
             }
+            // Body JSON: per ogni segnaposto, se sta dentro una stringa JSON (dove l'escape basta).
+            val jsonContexts = if (policyField.encoding == InterpolationPolicy.ValueEncoding.JSON_STRING) {
+                HttpRequestPolicy.jsonStringContexts(template, REFERENCE.findAll(template).map { it.range }.toList())
+            } else {
+                null
+            }
             val rendered = buildString {
                 var cursor = 0
                 var referenceIndex = 0
                 REFERENCE.findAll(template).forEach { match ->
                     val shellContext = shellContexts?.get(referenceIndex)
+                    val jsonInString = jsonContexts?.get(referenceIndex)
                     referenceIndex++
                     append(template, cursor, match.range.first)
                     val name = match.groupValues[1]
                     val value = scope[name] ?: throw ResolutionException("variable_unavailable")
-                    if (frameTaintedForBrain && !RemoteEgressPolicy.allows(value)) {
+                    if ((frameTaintedForBrain || policyField.remoteEgress) && !RemoteEgressPolicy.allows(value)) {
                         throw ResolutionException("remote_egress_blocked")
                     }
                     if (policyField.cls == InterpolationPolicy.FieldClass.AUTHORITY &&
@@ -191,6 +212,21 @@ class TaintAwareInterpolator {
                             ShellQuoting.render(value.text, shellContext)
                                 ?: throw ResolutionException("shell_quote_context"),
                         )
+                    } else if (jsonInString != null) {
+                        // Body JSON: dentro una stringa il valore entra come contenuto con escape (non può
+                        // chiuderla né aggiungere chiavi). Un dato esterno fuori da una stringa non è
+                        // contenibile con un escape: l'azione si blocca. Un dato fidato fuori da una
+                        // stringa (un numero, per esempio) entra com'è.
+                        when {
+                            jsonInString -> append(HttpRequestPolicy.jsonStringContent(value.text))
+                            value.integrity == IntegrityLabel.TAINTED ->
+                                throw ResolutionException("json_quote_context")
+                            else -> append(value.text)
+                        }
+                    } else if (policyField.encoding == InterpolationPolicy.ValueEncoding.FORM &&
+                        value.integrity == IntegrityLabel.TAINTED
+                    ) {
+                        append(HttpRequestPolicy.formEncode(value.text))
                     } else {
                         append(value.text)
                     }
@@ -259,6 +295,10 @@ class TaintAwareInterpolator {
             is Action.CopyToClipboard -> action.extractionRegex == null ||
                 SafeExtractionRegex.isValid(action.extractionRegex)
             is Action.CopyText -> action.text.isNotBlank() && action.text.length <= MAX_TEXT_CHARS
+            is Action.Speak -> action.text.isNotBlank() && action.text.length <= MAX_TEXT_CHARS
+            is Action.HttpRequest -> HttpRequestPolicy.isResolvedShapeValid(action)
+            is Action.SetBrightness -> (action.level == null) != (action.auto == null) &&
+                (action.level == null || action.level in 0..100)
             is Action.SetWifi,
             is Action.SetBluetooth,
             is Action.SetMobileData,
@@ -269,6 +309,8 @@ class TaintAwareInterpolator {
             is Action.SetDarkMode,
             is Action.Vibrate,
             is Action.Wait,
+            is Action.MediaControl,
+            is Action.SetRotation,
             -> true
             is Action.If, is Action.While -> false
         }

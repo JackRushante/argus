@@ -11,5 +11,17 @@
     <string name="argus_budget_channel_name">LLM budget</string>
     <string name="argus_budget_channel_description">Alerts when the LLM call budget is almost or fully exhausted</string>
     <string name="argus_foreground_denied_title">Rules paused</string>
-    <string name="argus_foreground_denied_text">Wi-Fi and power rules paused: open Argus to turn them back on</string>
+    <string name="argus_foreground_denied_text">Background rules (Wi-Fi, power, screen, battery, audio, modes) paused: open Argus to turn them back on</string>
+    <!-- 0.4.1 (azioni): aperture dal background trasformate in una notifica «Tocca per aprire». -->
+    <string name="act41_open_tap_title">Tap to open %1$s</string>
+    <string name="act41_open_tap_text">Android does not let Argus open it by itself from the background.</string>
+    <string name="act41_open_dest_wifi">Wi-Fi settings</string>
+    <string name="act41_open_dest_bluetooth">Bluetooth settings</string>
+    <string name="act41_open_dest_display">display settings</string>
+    <string name="act41_open_dest_sound">sound settings</string>
+    <string name="act41_open_dest_location">location settings</string>
+    <string name="act41_open_dest_battery">battery usage</string>
+    <string name="act41_open_dest_date">date and time settings</string>
+    <string name="act41_open_dest_app_details">%1$s app settings</string>
+    <string name="act41_open_dest_settings">Settings</string>
 </resources>

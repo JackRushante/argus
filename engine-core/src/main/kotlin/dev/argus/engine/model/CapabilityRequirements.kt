@@ -19,6 +19,20 @@ object CapabilityIds {
 
     fun triggerSensor(kind: SensorKind): String = "trigger.sensor.${kind.wireName}"
 
+    // 0.4.1: trigger senza Shizuku. Receiver dinamici della sentinella in primo piano; nessun
+    // permesso runtime dedicato, quindi li pubblica il probe e li richiede la regola (come il Wi-Fi).
+    const val TRIGGER_SCREEN = "trigger.screen"
+    const val TRIGGER_BATTERY = "trigger.battery"
+    const val TRIGGER_AUDIO_OUTPUT = "trigger.audio_output"
+    const val TRIGGER_MODE_CHANGED = "trigger.mode_changed"
+    const val TRIGGER_MEDIA = "trigger.media"
+
+    // Filtro SIM di phone_state: ha senso solo su un telefono con più di uno slot.
+    const val TRIGGER_PHONE_SIM = "trigger.phone_state.sim"
+
+    // 0.4.1: avvio manuale. Nessuna dipendenza OS né grant: come l'immediato, sempre disponibile.
+    const val TRIGGER_MANUAL = "trigger.manual"
+
     const val STATE_FOREGROUND_APP = "state.foreground_app"
     const val STATE_LOCATION = "state.location"
     const val STATE_READER_BUILTIN = "state.reader.builtin"
@@ -50,6 +64,11 @@ object CapabilityIds {
     const val ACTION_VIBRATE = "action.vibrate"
     const val ACTION_WRITE_SETTING = "action.write_setting"
     const val ACTION_INVOKE_LLM = "action.invoke_llm"
+    const val ACTION_SPEAK = "action.speak"
+    const val ACTION_MEDIA_CONTROL = "action.media_control"
+    const val ACTION_SET_BRIGHTNESS = "action.set_brightness"
+    const val ACTION_SET_ROTATION = "action.set_rotation"
+    const val ACTION_HTTP_REQUEST = "action.http_request"
 
     fun state(key: String): String = "state.$key"
 }
@@ -87,9 +106,14 @@ object CapabilityRequirements {
         // solo a una Condition.LocationIn, derivata separatamente qui sotto.
         is Trigger.Geofence -> setOf(CapabilityIds.TRIGGER_GEOFENCE)
         is Trigger.Notification -> setOf(CapabilityIds.TRIGGER_NOTIFICATION)
-        is Trigger.PhoneState -> when (trigger.event) {
-            PhoneEvent.SMS_RECEIVED -> setOf(CapabilityIds.TRIGGER_PHONE_SMS)
-            PhoneEvent.INCOMING_CALL, PhoneEvent.CALL_ENDED -> setOf(CapabilityIds.TRIGGER_PHONE_CALL)
+        is Trigger.PhoneState -> buildSet {
+            when (trigger.event) {
+                PhoneEvent.SMS_RECEIVED -> add(CapabilityIds.TRIGGER_PHONE_SMS)
+                PhoneEvent.INCOMING_CALL, PhoneEvent.CALL_ENDED, PhoneEvent.MISSED_CALL ->
+                    add(CapabilityIds.TRIGGER_PHONE_CALL)
+            }
+            // Solo con il filtro: una regola senza `sim` mantiene i requisiti di prima.
+            if (trigger.sim != null) add(CapabilityIds.TRIGGER_PHONE_SIM)
         }
         is Trigger.Connectivity -> when (trigger.medium) {
             ConnMedium.WIFI -> buildSet {
@@ -100,6 +124,12 @@ object CapabilityRequirements {
             ConnMedium.POWER -> setOf(CapabilityIds.TRIGGER_CONNECTIVITY_POWER)
         }
         is Trigger.Sensor -> setOf(CapabilityIds.triggerSensor(trigger.kind))
+        is Trigger.Screen -> setOf(CapabilityIds.TRIGGER_SCREEN)
+        is Trigger.Battery -> setOf(CapabilityIds.TRIGGER_BATTERY)
+        is Trigger.AudioOutput -> setOf(CapabilityIds.TRIGGER_AUDIO_OUTPUT)
+        is Trigger.ModeChanged -> setOf(CapabilityIds.TRIGGER_MODE_CHANGED)
+        is Trigger.Media -> setOf(CapabilityIds.TRIGGER_MEDIA)
+        is Trigger.Manual -> setOf(CapabilityIds.TRIGGER_MANUAL)
     }
 
     private fun forCondition(condition: Condition): Set<String> = when (condition) {
@@ -138,6 +168,13 @@ object CapabilityRequirements {
         is Action.SetDarkMode -> setOf(CapabilityIds.ACTION_SET_DARK_MODE)
         is Action.OpenSettingsScreen -> setOf(CapabilityIds.ACTION_OPEN_SETTINGS_SCREEN)
         is Action.Vibrate -> setOf(CapabilityIds.ACTION_VIBRATE)
+        is Action.Speak -> setOf(CapabilityIds.ACTION_SPEAK)
+        is Action.MediaControl -> setOf(CapabilityIds.ACTION_MEDIA_CONTROL)
+        // Luminosità e rotazione richiedono il permesso speciale «Modifica impostazioni di sistema»:
+        // il probe le pubblica solo se concesso.
+        is Action.SetBrightness -> setOf(CapabilityIds.ACTION_SET_BRIGHTNESS)
+        is Action.SetRotation -> setOf(CapabilityIds.ACTION_SET_ROTATION)
+        is Action.HttpRequest -> setOf(CapabilityIds.ACTION_HTTP_REQUEST)
         // Pausa cooperativa interna all'interprete: nessuna capability OS.
         is Action.Wait -> emptySet()
         // Come i reader parametrici (che gatano sulla famiglia, non sul singolo canonicalId):

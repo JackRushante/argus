@@ -712,10 +712,18 @@ class AndroidCapabilityProbeTest {
             listOf(
                 "time",
                 "immediate",
+                // 0.4.1: avvio manuale, sempre armabile.
+                "manual",
                 "notification",
                 "phone_state.sms",
                 "connectivity.wifi",
                 "connectivity.power",
+                // 0.4.1: eventi di sistema senza Shizuku, sempre armabili.
+                "screen",
+                "battery",
+                "audio_output",
+                "mode_changed",
+                "media",
             ),
             manifest.availableTriggers,
         )

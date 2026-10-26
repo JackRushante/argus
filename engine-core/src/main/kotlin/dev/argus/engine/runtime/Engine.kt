@@ -31,6 +31,8 @@ class Engine(
     private val resolvedExecutor: ResolvedActionExecutor? = null,
     /** Attesa dei programmi P4 (`wait`): Android inietta una pausa che sveglia il dispositivo (B19). */
     private val pause: suspend (Long) -> Unit = { delay(it) },
+    /** «Pausa automazioni» (0.4.1, F21): se attiva, nessuna regola scatta e lo scatto saltato va nel Log. */
+    private val firingPause: AutomationPause = AutomationPause.NEVER,
     private val now: () -> Long,
 ) {
     companion object {
@@ -113,6 +115,22 @@ class Engine(
                     continue
                 }
                 if (!matcher.matches(automation.trigger, event)) continue
+
+                // «Pausa automazioni» (F21): dopo il match, così il Log mostra solo le regole che
+                // sarebbero davvero scattate; prima di policy, condizioni e claim, così lo scatto
+                // saltato non consuma cooldown né deduplica e alla ripresa non si recupera.
+                if (firingPause.isPaused()) {
+                    recordAudit(
+                        AuditEvent(
+                            automationId = automation.id,
+                            kind = AuditKind.BLOCKED_POLICY,
+                            atMillis = batchNow,
+                            detail = PauseCodes.PAUSED,
+                            eventId = envelope.id,
+                        ),
+                    )
+                    continue
+                }
 
                 when (val decision = firePolicy.evaluate(automation, event)) {
                     FirePolicyDecision.Allow -> Unit
@@ -364,7 +382,7 @@ class Engine(
                                 actionType = action.journalType(),
                                 outcome = result.journalOutcome(),
                                 atMillis = batchNow,
-                                errorCode = if (result is ActionResult.Failure) "action_failed" else null,
+                                errorCode = (result as? ActionResult.Failure)?.reason?.let(::journalErrorCode),
                             ),
                         )
                     }

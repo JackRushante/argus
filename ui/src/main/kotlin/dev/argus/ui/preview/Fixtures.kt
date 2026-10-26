@@ -664,6 +664,7 @@ object Fixtures {
 
     /** Tutto verde tranne le sveglie esatte (Android 14+: negate di default): riga in avviso con «Correggi». */
     val settingsExactAlarmsDenied = settingsAllGreen.copy(exactAlarmsGranted = false)
+    val settingsWriteSettingsDenied = settingsAllGreen.copy(writeSettingsGranted = false)
 
     /** Provider diretto selezionato (OpenAI) con chiave configurata. */
     val settingsDirectProvider = settingsAllGreen.copy(

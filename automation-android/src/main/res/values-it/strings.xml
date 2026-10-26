@@ -10,5 +10,17 @@
     <string name="argus_budget_channel_name">Budget LLM</string>
     <string name="argus_budget_channel_description">Avvisi quando il budget delle chiamate LLM è quasi o del tutto esaurito</string>
     <string name="argus_foreground_denied_title">Regole in pausa</string>
-    <string name="argus_foreground_denied_text">Regole Wi-Fi e alimentazione in pausa: apri Argus per riattivarle</string>
+    <string name="argus_foreground_denied_text">Regole in background (Wi-Fi, alimentazione, schermo, batteria, audio, modalità) in pausa: apri Argus per riattivarle</string>
+    <!-- 0.4.1 (azioni): aperture dal background trasformate in una notifica «Tocca per aprire». -->
+    <string name="act41_open_tap_title">Tocca per aprire %1$s</string>
+    <string name="act41_open_tap_text">Android non permette ad Argus di aprirlo da solo dal background.</string>
+    <string name="act41_open_dest_wifi">le impostazioni Wi-Fi</string>
+    <string name="act41_open_dest_bluetooth">le impostazioni Bluetooth</string>
+    <string name="act41_open_dest_display">le impostazioni dello schermo</string>
+    <string name="act41_open_dest_sound">le impostazioni audio</string>
+    <string name="act41_open_dest_location">le impostazioni di posizione</string>
+    <string name="act41_open_dest_battery">l\'uso della batteria</string>
+    <string name="act41_open_dest_date">le impostazioni di data e ora</string>
+    <string name="act41_open_dest_app_details">le impostazioni dell\'app %1$s</string>
+    <string name="act41_open_dest_settings">le Impostazioni</string>
 </resources>

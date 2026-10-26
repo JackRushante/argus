@@ -8,6 +8,8 @@ import android.content.pm.PackageManager
 import android.location.LocationManager
 import android.os.Build
 import android.os.PowerManager
+import android.telephony.TelephonyManager
+import android.provider.Settings
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.core.location.LocationManagerCompat
@@ -66,6 +68,16 @@ internal data class AndroidCapabilityState(
      * tutti i permessi concessi.
      */
     val locationEnabled: Boolean = true,
+    /**
+     * Il telefono ha più di uno slot SIM / modem (0.4.1): solo allora il filtro SIM di `phone_state`
+     * ha senso e viene pubblicato.
+     */
+    val multiSim: Boolean = false,
+    /**
+     * 0.4.1: permesso speciale «Modifica impostazioni di sistema» (`Settings.System.canWrite`). Abilita
+     * luminosità e rotazione dello schermo senza Shizuku.
+     */
+    val writeSettingsGranted: Boolean = false,
 ) {
     /** Permessi di posizione precisi, in primo piano e in background. */
     val locationGranted: Boolean get() = foregroundLocationGranted && backgroundLocationGranted
@@ -133,6 +145,11 @@ internal class SystemAndroidCapabilityStateSource(
             appContext.getSystemService(LocationManager::class.java)
                 ?.let(LocationManagerCompat::isLocationEnabled)
         }.getOrNull() ?: true,
+        multiSim = runCatching {
+            appContext.getSystemService(TelephonyManager::class.java)
+                ?.let { it.supportedModemCount >= 2 || it.activeModemCount >= 2 }
+        }.getOrNull() ?: false,
+        writeSettingsGranted = runCatching { Settings.System.canWrite(appContext) }.getOrDefault(false),
     )
 
     private fun granted(permission: String): Boolean =
@@ -163,6 +180,9 @@ enum class BlockCause {
     DND_ACCESS,
     AI_NOT_READY,
     SENSOR_UNAVAILABLE,
+
+    /** 0.4.1: manca «Modifica impostazioni di sistema» (luminosità, rotazione). */
+    WRITE_SETTINGS_ACCESS,
     OTHER,
 }
 
@@ -239,6 +259,8 @@ class AndroidCapabilityProbe internal constructor(
         add("time")
         // Sempre armabile: fira on-arm, nessuna dipendenza OS o grant.
         add("immediate")
+        // 0.4.1: avvio manuale, sempre armabile (nessuna dipendenza OS o grant).
+        add("manual")
         if (state.notificationListenerGranted) add("notification")
         if (state.locationUsable) add("geofence")
         if (state.receiveSmsGranted) add("phone_state.sms")
@@ -248,6 +270,16 @@ class AndroidCapabilityProbe internal constructor(
         if (state.bluetoothConnectGranted) add("connectivity.bt")
         add("connectivity.power")
         armableSensorKinds.forEach { add("sensor.${it.wireName}") }
+        // 0.4.1: eventi di sistema senza Shizuku, sempre armabili (receiver dinamici, nessun grant).
+        add("screen")
+        add("battery")
+        add("audio_output")
+        add("mode_changed")
+        add("media")
+        // Il filtro SIM vale solo su un telefono con più slot e dove SMS o chiamate sono armabili.
+        if (state.multiSim && (state.receiveSmsGranted || (state.readPhoneStateGranted && state.readCallLogGranted))) {
+            add("phone_state.sim")
+        }
     }
 
     /**
@@ -288,6 +320,7 @@ class AndroidCapabilityProbe internal constructor(
             if (baseTierActive && !state.dndPolicyGranted) BlockCause.DND_ACCESS
             else shizukuCause(state.shizukuStatus)
         capability in BASE_LAUNCH_CAPABILITIES -> shizukuCause(state.shizukuStatus)
+        capability in WRITE_SETTINGS_CAPABILITIES -> BlockCause.WRITE_SETTINGS_ACCESS
         capability == CapabilityIds.TRIGGER_GEOFENCE ||
             capability == CapabilityIds.TRIGGER_CONNECTIVITY_WIFI_IDENTITY ->
             if (state.locationGranted && !state.locationEnabled) BlockCause.LOCATION_OFF
@@ -348,11 +381,16 @@ class AndroidCapabilityProbe internal constructor(
             add(CapabilityIds.TRIGGER_TIME)
             // Trigger immediato: nessuna dipendenza OS, fira on-arm ⇒ sempre disponibile.
             add(CapabilityIds.TRIGGER_IMMEDIATE)
+            // 0.4.1: avvio manuale, stesso regime dell'immediato: nessun grant, parte da un gesto.
+            add(CapabilityIds.TRIGGER_MANUAL)
             // Geofence e SSID richiedono permessi E servizi di localizzazione accesi: con la
             // posizione spenta dalle impostazioni rapide non funzionano (blocco temporaneo, D6).
             if (state.locationUsable) add(CapabilityIds.TRIGGER_GEOFENCE)
             add(CapabilityIds.TRIGGER_CONNECTIVITY_WIFI)
             add(CapabilityIds.TRIGGER_CONNECTIVITY_POWER)
+            // 0.4.1: sorgenti di sistema della sentinella; nessun permesso, sempre pubblicate.
+            addAll(DEVICE_EVENT_TRIGGER_CAPABILITIES)
+            if (state.multiSim) add(CapabilityIds.TRIGGER_PHONE_SIM)
             if (state.bluetoothConnectGranted) add(CapabilityIds.TRIGGER_CONNECTIVITY_BT)
             if (state.locationUsable) add(CapabilityIds.TRIGGER_CONNECTIVITY_WIFI_IDENTITY)
             // Fire-time location conditions use framework LocationManager, not Shizuku.
@@ -374,6 +412,11 @@ class AndroidCapabilityProbe internal constructor(
             // runtime pubblicabile. Sempre disponibili come la clipboard (la gate DND del volume a 0
             // è un fallimento tipizzato a runtime, non un gate di pubblicazione).
             addAll(BASE_MANAGER_CAPABILITIES)
+            // 0.4.1: lettura ad alta voce, tasti multimediali e chiamata HTTP: nessun permesso da
+            // concedere (TextToSpeech, AudioManager, rete). Luminosità e rotazione solo col permesso
+            // speciale «Modifica impostazioni di sistema».
+            addAll(BASE_ACTIONS_041_CAPABILITIES)
+            if (state.writeSettingsGranted) addAll(WRITE_SETTINGS_CAPABILITIES)
             if (state.notificationsGranted) add(ActionCapabilities.SHOW_NOTIFICATION)
             // CapabilityRequirements persiste anche i raw tool approvati: il set del fire-time
             // deve contenere gli stessi nomi wire, senza alias con le capability typed.
@@ -426,6 +469,8 @@ class AndroidCapabilityProbe internal constructor(
             add(ActionTypeIds.COPY_TEXT)
             addAll(BASE_ALARM_ACTION_TYPES)
             addAll(BASE_MANAGER_ACTION_TYPES)
+            addAll(BASE_ACTIONS_041_TYPES)
+            if (state.writeSettingsGranted) addAll(WRITE_SETTINGS_ACTION_TYPES)
             if (shizukuAvailable) {
                 addAll(PRIVILEGED_ACTION_TYPES)
             }
@@ -454,6 +499,9 @@ class AndroidCapabilityProbe internal constructor(
             if (!dndBase) BASE_DND_ACTION_TYPES.forEach {
                 unavailableTools[it] = if (baseTierActive) REASON_DND_POLICY else reason
             }
+        }
+        if (!state.writeSettingsGranted) {
+            WRITE_SETTINGS_ACTION_TYPES.forEach { unavailableTools[it] = REASON_WRITE_SETTINGS }
         }
         if (!state.notificationsGranted) {
             unavailableTools[ActionTypeIds.SHOW_NOTIFICATION] = "notification permission missing"
@@ -502,6 +550,7 @@ class AndroidCapabilityProbe internal constructor(
         if (state.readCallLogGranted) add("read_call_log")
         if (state.bluetoothConnectGranted) add("bluetooth_connect")
         if (state.activityRecognitionGranted) add("activity_recognition")
+        if (state.writeSettingsGranted) add("write_settings")
     }
 
     /** Capability `state.<chiave>` leggibili ORA senza Shizuku (tutte, tranne il Bluetooth senza permesso). */
@@ -526,6 +575,15 @@ class AndroidCapabilityProbe internal constructor(
          */
         val IMPLEMENTED_SENSOR_KINDS: Set<SensorKind> = setOf(SensorKind.SIGNIFICANT_MOTION)
         const val REASON_NOTIFICATION_LISTENER = "notification access not granted"
+
+        /** Trigger di sistema senza Shizuku (0.4.1): schermo, batteria, uscita audio, modalità, media. */
+        val DEVICE_EVENT_TRIGGER_CAPABILITIES: Set<String> = setOf(
+            CapabilityIds.TRIGGER_SCREEN,
+            CapabilityIds.TRIGGER_BATTERY,
+            CapabilityIds.TRIGGER_AUDIO_OUTPUT,
+            CapabilityIds.TRIGGER_MODE_CHANGED,
+            CapabilityIds.TRIGGER_MEDIA,
+        )
 
         /** Prefisso delle capability dei trigger sensore (`trigger.sensor.<kind>`). */
         private const val SENSOR_TRIGGER_PREFIX = "trigger.sensor."
@@ -561,6 +619,26 @@ class AndroidCapabilityProbe internal constructor(
             TOOL_APP_LAUNCH,
         )
         const val REASON_DND_POLICY = "Do Not Disturb access not granted"
+
+        /** Motivo (in inglese, va al modello) per luminosità e rotazione senza il permesso speciale. */
+        const val REASON_WRITE_SETTINGS = "modify system settings access not granted"
+
+        /** 0.4.1, sempre disponibili: parlato, tasti multimediali, HTTP (nessun grant da pubblicare). */
+        val BASE_ACTIONS_041_TYPES = setOf(
+            ActionTypeIds.SPEAK,
+            ActionTypeIds.MEDIA_CONTROL,
+            ActionTypeIds.HTTP_REQUEST,
+        )
+        val BASE_ACTIONS_041_CAPABILITIES = setOf(
+            ActionCapabilities.SPEAK,
+            ActionCapabilities.MEDIA_CONTROL,
+            ActionCapabilities.HTTP_REQUEST,
+        )
+
+        /** 0.4.1, solo col permesso «Modifica impostazioni di sistema» (`WRITE_SETTINGS`). */
+        val WRITE_SETTINGS_ACTION_TYPES = setOf(ActionTypeIds.SET_BRIGHTNESS, ActionTypeIds.SET_ROTATION)
+        val WRITE_SETTINGS_CAPABILITIES =
+            setOf(ActionCapabilities.SET_BRIGHTNESS, ActionCapabilities.SET_ROTATION)
 
         /** Azioni che richiedono davvero lo shell Shizuku: toggle radio, shell e write_setting. */
         val PRIVILEGED_ACTION_TYPES = setOf(

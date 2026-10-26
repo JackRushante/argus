@@ -195,6 +195,8 @@ data class AutomationListState(
     val loading: Boolean,
     val pendingCount: Int = rows.count { it.status == StatusBadge.PENDING_APPROVAL || it.pendingEditDraftId != null },
     val needsReviewCount: Int = rows.count { it.status == StatusBadge.NEEDS_REVIEW },
+    /** 0.4.1 (F21): «Pausa automazioni» attiva. Mostra il banner «Automazioni in pausa · Riprendi». */
+    val paused: Boolean = false,
 )
 
 data class AutomationRow(
@@ -222,6 +224,7 @@ interface AutomationListCallbacks {
     fun onOpen(id: String); fun onToggleEnabled(id: String, enabled: Boolean); fun onFilter(f: StatusFilter)
     fun onEmptyCta() {}     // CTA empty-state "Vai in chat"; default no-op, la nav reale è dell'host (NavHost)
     fun onBannerTap() {}    // tap sul banner salute → Sistema; default no-op, host-owned
+    fun onResumeAutomations() {}   // «Riprendi» sul banner della pausa (F21); default no-op
 }
 
 // --- 6.3 Automazione · dettaglio / approvazione ---
@@ -257,6 +260,21 @@ data class AutomationDetailState(
      * Solo per una regola salvata (armata o disattivata); null per una bozza o finché non è letto.
      */
     val stats: RuleStatsUi? = null,
+    /** 0.4.1 (F8): ingressi dell'avvio manuale. Non nullo solo per una regola `manual` armata. */
+    val manual: ManualEntryUi? = null,
+)
+
+/**
+ * 0.4.1 (F8): ciò che il Dettaglio offre per lanciare a mano una regola `manual` armata. «Esegui ora»
+ * è il pulsante del footer ([AutomationDetailState.canRunNow]); qui stanno le altre porte d'ingresso.
+ */
+data class ManualEntryUi(
+    /** Il launcher del telefono accetta le scorciatoie fissate: senza, «Aggiungi alla Home» sparisce. */
+    val canPinShortcut: Boolean = true,
+    /** Questa regola è quella scelta per il riquadro delle impostazioni rapide «Argus: esegui regola». */
+    val isTileRule: Boolean = false,
+    /** «Pausa automazioni» attiva: anche l'avvio manuale è saltato, e l'utente lo deve sapere. */
+    val paused: Boolean = false,
 )
 
 /**
@@ -303,6 +321,8 @@ interface AutomationDetailCallbacks {
     fun onDiagnose() {}                      // apre «Perché non è scattata?»: calcola la diagnosi una volta
     fun onOpenSystem() {}                    // porta alla scheda Sistema, come la barra in basso
     fun onBack() {}                          // affordance back nell'header; default no-op, la nav reale è dell'host (NavHost)
+    fun onAddToHome() {}                     // F8: propone al launcher la scorciatoia della regola manuale
+    fun onUseInTile() {}                     // F8: sceglie questa regola per il riquadro delle impostazioni rapide
 }
 
 // --- 6.4 Log esecuzioni ---
@@ -377,6 +397,12 @@ data class SettingsState(
      * Default `true`: il permesso non esiste sotto Android 12 e un fixture non deve avvisare per caso.
      */
     val exactAlarmsGranted: Boolean = true,
+    /**
+     * 0.4.1: Android concede ad Argus «Modifica impostazioni di sistema» (`WRITE_SETTINGS`), il permesso
+     * speciale che serve alle azioni luminosità e rotazione dello schermo. Si concede solo dalle
+     * impostazioni di sistema. Default `true`: un fixture non deve avvisare per caso.
+     */
+    val writeSettingsGranted: Boolean = true,
     /** Permesso di PUBBLICARE notifiche (esiti/avvisi Argus). */
     val notificationsGranted: Boolean,
     /** Accesso notification listener: lettura notifiche WhatsApp e canale di reply (P1). */
@@ -408,6 +434,8 @@ data class SettingsState(
     val shizukuRunsAsRoot: Boolean? = null,
     /** 0.4.0 (F1): backup delle regole su file (esporta/importa). */
     val backup: RulesBackupUi = RulesBackupUi(),
+    /** 0.4.1 (F21): interruttore globale «Pausa automazioni». */
+    val automationsPaused: Boolean = false,
 )
 
 /** Operazione del backup delle regole. */
@@ -529,6 +557,8 @@ interface SettingsCallbacks {
     fun onOpenBatteryFix(); fun onOpenNotificationAccessFix(); fun onOpenLocationFix()
     /** Apre «Sveglie e promemoria» per concedere le sveglie esatte (0.3.6). Default no-op. */
     fun onOpenExactAlarmFix() {}
+    /** Apre «Modifica impostazioni di sistema» per Argus (0.4.1: luminosità e rotazione). Default no-op. */
+    fun onOpenWriteSettingsFix() {}
     /** Apre le impostazioni di sistema per l'accesso notification listener (lettura, P1). */
     fun onOpenNotificationListenerFix() {}
     /** Richieste runtime dei trigger telefonia (P2-2): RECEIVE_SMS e READ_PHONE_STATE(+CALL_LOG). */
@@ -557,6 +587,8 @@ interface SettingsCallbacks {
     ) {}
     fun onRevokePrivacy()
     fun onRerunOnboarding()
+    /** «Pausa automazioni» (F21): true = nessuna regola scatta finché non si riprende. Default no-op. */
+    fun onSetAutomationsPaused(paused: Boolean) {}
     /** Selettore provider: id = ProviderId.wireName. Id sconosciuti = no-op lato VM. */
     fun onSelectProvider(providerId: String) {}
     /** apiKey null = conserva la chiave esistente (pattern onSaveBridge). La chiave NON torna mai nello stato. */
@@ -738,6 +770,27 @@ object ShizukuCapabilityCatalog {
             title = language.pick("Flashlight and vibration", "Torcia e vibrazione"),
             requirement = ShizukuRequirement.NOT_REQUIRED,
             actionTypeIds = listOf(ActionTypeIds.SET_FLASHLIGHT, ActionTypeIds.VIBRATE),
+        ),
+        ShizukuCapabilityRow(
+            title = language.pick(
+                "Read aloud, media keys and HTTP requests",
+                "Lettura ad alta voce, tasti multimediali e richieste HTTP",
+            ),
+            requirement = ShizukuRequirement.NOT_REQUIRED,
+            actionTypeIds = listOf(
+                ActionTypeIds.SPEAK,
+                ActionTypeIds.MEDIA_CONTROL,
+                ActionTypeIds.HTTP_REQUEST,
+            ),
+        ),
+        ShizukuCapabilityRow(
+            title = language.pick("Screen brightness and rotation", "Luminosità e rotazione dello schermo"),
+            requirement = ShizukuRequirement.NOT_REQUIRED,
+            note = language.pick(
+                "They need the \"Modify system settings\" access, which you allow in Android's settings.",
+                "Serve l'accesso «Modifica impostazioni di sistema», che concedi nelle impostazioni di Android.",
+            ),
+            actionTypeIds = listOf(ActionTypeIds.SET_BRIGHTNESS, ActionTypeIds.SET_ROTATION),
         ),
         ShizukuCapabilityRow(
             title = language.pick(

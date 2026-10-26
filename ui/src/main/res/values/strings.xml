@@ -98,7 +98,7 @@
     <string name="chat_error_budget">Spending limit reached: change it in System.</string>
     <string name="chat_error_rate_limit">The service is overloaded (too many requests): try again shortly.</string>
     <string name="chat_error_output_truncated">The model\'s reply was cut off (length limit). Try again or use a model with more room.</string>
-    <string name="chat_error_context_truncated">The server cut off the instructions: the model\'s context is too small. At least about 12,000 tokens are needed (for Ollama: OLLAMA_CONTEXT_LENGTH).</string>
+    <string name="chat_error_context_truncated">The server cut off the instructions: the model\'s context is too small. At least about 16,000 tokens are needed (for Ollama: OLLAMA_CONTEXT_LENGTH).</string>
     <string name="chat_error_server_rejected">The server rejected the request (HTTP %1$d). The model\'s context is often too small.</string>
     <string name="chat_error_server_rejected_message">The server rejected the request (HTTP %1$d): %2$s</string>
     <string name="chat_error_service_unavailable">The service is not available right now (HTTP %1$d). Try again later.</string>
@@ -348,4 +348,22 @@
     <string name="ui40_secret_error_long">Too long (at most %1$d characters)</string>
     <string name="ui40_secret_error_chars">Only visible characters, no spaces</string>
     <string name="ui40_model_error_empty">Enter the model name</string>
+    <!-- 0.4.1 (azioni): permesso speciale per luminosità e rotazione. -->
+    <string name="act41_settings_write_title">Modify system settings</string>
+    <string name="act41_settings_write_ok">granted: rules can change the screen brightness and rotation</string>
+    <string name="act41_settings_write_warn">not granted: rules that set the brightness or the rotation cannot run</string>
+    <!-- 0.4.1 (manuale): avvio manuale delle regole (F8) e «Pausa automazioni» (F21). -->
+    <string name="manual_section_title">Manual start</string>
+    <string name="manual_section_body">This rule runs only when you start it: Run now, a Home-screen shortcut, a quick-settings tile or the Argus widget.</string>
+    <string name="manual_add_home">Add to Home screen</string>
+    <string name="manual_use_tile">Use in the quick-settings tile</string>
+    <string name="manual_tile_selected">In the quick-settings tile</string>
+    <string name="manual_tile_hint">Add the “Argus: run rule” tile from the quick-settings editor. Its label becomes the name of this rule.</string>
+    <string name="manual_paused_note">Automations are paused: nothing will run until you resume them.</string>
+    <string name="manual_run_now_body">The rule starts now, as if you had started it by hand. Its conditions and cooldown still apply.</string>
+    <string name="pause_banner_text">Automations paused</string>
+    <string name="pause_banner_resume">Resume</string>
+    <string name="pause_setting_title">Pause automations</string>
+    <string name="pause_setting_on">No rule runs, manual ones included. Alarms stay registered; what is skipped is not made up for when you resume.</string>
+    <string name="pause_setting_off">Rules run as usual.</string>
 </resources>

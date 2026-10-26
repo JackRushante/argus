@@ -370,11 +370,21 @@ class BridgeTest(unittest.TestCase):
                 prompt,
             )
             self.assertIn(
-                'Exception, for exactly these three details: do not ask, use the default (vibrate durationMs 1000,\n'
-                '   set_dnd mode "PRIORITY", geofence radiusM 150). Any other missing value (a level, a time, a'
-                ' person,\n   an app, a place, a text) still needs a short question.',
+                'Exception, for exactly these four details: do not ask, use the default (vibrate durationMs 1000,\n'
+                '   set_dnd mode "PRIORITY", geofence radiusM 150, sensor cooldownMs 60000). Any other missing value\n'
+                '   (a level, a time, a person, an app, a place, a text) still needs a short question.',
                 prompt,
             )
+
+    def test_prompt_writes_battery_thresholds_as_state_equals(self):
+        # Come l'app 0.4.1: le soglie di batteria sono state_equals, cosi' funzionano senza Shizuku.
+        # La regola su state_compare (e quindi l'eccezione) esiste solo nel prompt v2.
+        schema_line = ('A battery threshold ("below 30%", "above 80%") is state_equals with key "battery", op "LT" or "GT"'
+                       ' and the bare number as value: it needs no state reader family.')
+        for request in (self.request(), self.request_v2()):
+            self.assertIn(schema_line, " ".join(bridge.build_prompt(request).split()))
+        self.assertIn('Exception: a battery threshold always uses state_equals on "battery" (see the Condition schema).',
+                      " ".join(bridge.build_prompt(self.request_v2()).split()))
 
     def test_prompt_does_not_carry_the_reply_language_line_the_envelope_has_no_such_field(self):
         # La riga reply_language dell'app NON va nel bridge: la busta non la porta e resta la

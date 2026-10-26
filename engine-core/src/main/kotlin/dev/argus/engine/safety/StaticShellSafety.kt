@@ -2,6 +2,7 @@ package dev.argus.engine.safety
 
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.TriggerEvent
+import dev.argus.engine.runtime.TriggerMatcher
 
 /**
  * Confine unico per la shell autonoma approvata. Il template del comando è letterale nel
@@ -27,7 +28,14 @@ object StaticShellSafety {
         // dell'utente che ha armato la regola, quindi è fidato come Time/Geofence/Connectivity/Sensor.
         is Trigger.Time, is Trigger.Immediate,
         is Trigger.Geofence, is Trigger.Connectivity, is Trigger.Sensor,
+        // 0.4.1: eventi di sistema che solo l'utente o l'hardware locale provocano. `media` NO:
+        // qualunque app o pagina web può far partire una riproduzione, quindi non è un'identità.
+        is Trigger.Screen, is Trigger.Battery, is Trigger.AudioOutput, is Trigger.ModeChanged,
+        // 0.4.1: l'avvio manuale è un gesto dell'utente sulla propria regola approvata (con token per
+        // regola sulle scorciatoie e sui widget): nessun attore esterno preme l'interruttore.
+        is Trigger.Manual,
         -> true
+        is Trigger.Media -> false
         is Trigger.Notification -> verifiedContact(
             pkg = trigger.pkg,
             conversationId = trigger.conversationId,
@@ -44,7 +52,13 @@ object StaticShellSafety {
         is TriggerEvent.GeofenceTransitioned,
         is TriggerEvent.ConnectivityChanged,
         is TriggerEvent.SensorChanged,
+        is TriggerEvent.ScreenChanged,
+        is TriggerEvent.BatteryLevelChanged,
+        is TriggerEvent.AudioOutputChanged,
+        is TriggerEvent.DeviceModeChanged,
+        is TriggerEvent.ManualFired,
         -> true
+        is TriggerEvent.MediaPlaybackChanged -> false
         is TriggerEvent.NotificationPosted -> verifiedContact(
             pkg = event.pkg,
             conversationId = event.conversationId,
@@ -70,6 +84,7 @@ object StaticShellSafety {
         return when {
             trigger is Trigger.Time && event is TriggerEvent.TimeFired -> true
             trigger is Trigger.Immediate && event is TriggerEvent.ImmediateFired -> true
+            trigger is Trigger.Manual && event is TriggerEvent.ManualFired -> true
             trigger is Trigger.Geofence && event is TriggerEvent.GeofenceTransitioned ->
                 trigger.transition == event.transition
             trigger is Trigger.Connectivity && event is TriggerEvent.ConnectivityChanged ->
@@ -77,6 +92,14 @@ object StaticShellSafety {
                     (trigger.match == null || trigger.match == event.name)
             trigger is Trigger.Sensor && event is TriggerEvent.SensorChanged ->
                 trigger.kind == event.kind
+            trigger is Trigger.Screen && event is TriggerEvent.ScreenChanged ->
+                trigger.event == event.event
+            trigger is Trigger.Battery && event is TriggerEvent.BatteryLevelChanged ->
+                TriggerMatcher().matches(trigger, event)
+            trigger is Trigger.AudioOutput && event is TriggerEvent.AudioOutputChanged ->
+                TriggerMatcher().matches(trigger, event)
+            trigger is Trigger.ModeChanged && event is TriggerEvent.DeviceModeChanged ->
+                TriggerMatcher().matches(trigger, event)
             trigger is Trigger.Notification && event is TriggerEvent.NotificationPosted ->
                 trigger.pkg == event.pkg &&
                     trigger.conversationId != null &&

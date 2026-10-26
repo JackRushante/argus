@@ -16,6 +16,10 @@ import dev.argus.automation.RenderLanguageSource
 import dev.argus.automation.TimeAlarmRuntime
 import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
 import dev.argus.automation.di.ApplicationScope
+import dev.argus.automation.manual.AddToHomeResult
+import dev.argus.automation.manual.ManualEntryService
+import dev.argus.automation.manual.ManualRuleCatalog
+import dev.argus.automation.manual.ManualRunResult
 import dev.argus.automation.geofence.GeofenceStateStore
 import dev.argus.automation.geofence.GeofenceTriggerRuntime
 import dev.argus.automation.geofence.PersistedGeofenceRegistration
@@ -45,6 +49,7 @@ import dev.argus.engine.safety.DraftRepository
 import dev.argus.engine.safety.PendingDraft
 import dev.argus.engine.safety.Severity
 import dev.argus.ui.model.AutomationDetailState
+import dev.argus.ui.model.ManualEntryUi
 import dev.argus.ui.model.RuleDiagnosisUi
 import dev.argus.ui.model.RuleStatsUi
 import dev.argus.ui.model.StatusBadge
@@ -148,6 +153,8 @@ class AutomationDetailViewModel @Inject constructor(
     private val languageSource: RenderLanguageSource,
     /** F10: giorni di conservazione del Log; limitano la finestra lunga delle statistiche. */
     private val retention: LogRetentionStore,
+    /** F8: avvio manuale (Esegui ora, scorciatoia Home, riquadro delle impostazioni rapide). */
+    private val manual: ManualEntryService,
     /**
      * B31: scope dei lavori che devono finire anche se l'utente esce dalla schermata (l'arm lo
      * usa); nel ViewModel resta solo l'attesa del risultato.
@@ -188,6 +195,26 @@ class AutomationDetailViewModel @Inject constructor(
     private var diagnosisJob: Job? = null
 
     init {
+        // F8/F21: la pausa e il riquadro scelto cambiano fuori dal flusso della regola: si aggiorna
+        // solo la parte "avvio manuale" dello stato mostrato, senza rifare il resto.
+        viewModelScope.launch {
+            combine(manual.paused, manual.tileRuleId) { paused, tileRule -> paused to tileRule }
+                .collect { (paused, tileRule) ->
+                    mutableState.update { current ->
+                        val detail = current.detail
+                        val entry = detail?.manual
+                        if (detail == null || entry == null) {
+                            current
+                        } else {
+                            current.copy(
+                                detail = detail.copy(
+                                    manual = entry.copy(paused = paused, isTileRule = tileRule == detail.id),
+                                ),
+                            )
+                        }
+                    }
+                }
+        }
         viewModelScope.launch {
             combine(
                 drafts.observeAll(),
@@ -473,6 +500,8 @@ class AutomationDetailViewModel @Inject constructor(
         runExclusive {
             try {
                 store.delete(automation.id)
+                // F8: il token della scorciatoia e la scelta del riquadro non valgono più.
+                manual.forget(automation.id.value)
                 // Lifecycle (task #31-B): la cancellazione è sempre un'azione manuale dell'utente;
                 // il logging non deve mai cambiare l'esito del delete (pattern non-fatale standard).
                 try {
@@ -552,7 +581,82 @@ class AutomationDetailViewModel @Inject constructor(
     }
 
     fun onRunNow() {
-        mutableEvents.tryEmit(DetailEvent.Message(runNowUnavailable(language)))
+        val automation = displayedAutomation
+        if (automation == null || !ManualRuleCatalog.isRunnableManual(automation)) {
+            mutableEvents.tryEmit(DetailEvent.Message(runNowUnavailable(language)))
+            return
+        }
+        // F8: una regola manuale armata parte dalla strada normale del motore (impronta, capacità,
+        // condizioni, cooldown, Log). Qui si dice solo com'è andata la consegna.
+        viewModelScope.launch {
+            try {
+                message(
+                    when (val result = manual.run(automation.id.value)) {
+                        is ManualRunResult.Accepted ->
+                            if (result.paused) {
+                                language.pick(
+                                    "Automations are paused: the run was skipped. Resume them to run rules.",
+                                    "Le automazioni sono in pausa: l'avvio è stato saltato. Riprendile per far partire le regole.",
+                                )
+                            } else {
+                                language.pick("Rule started.", "Regola avviata.")
+                            }
+                        is ManualRunResult.Rejected -> language.pick(
+                            "This rule cannot be started now.",
+                            "Questa regola non si può avviare adesso.",
+                        )
+                    },
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                message(language.pick("Unable to start the rule.", "Impossibile avviare la regola."))
+            }
+        }
+    }
+
+    /** F8: propone al launcher la scorciatoia della regola manuale sulla schermata Home. */
+    fun onAddToHome() {
+        val automation = displayedAutomation ?: return
+        viewModelScope.launch {
+            try {
+                message(
+                    when (manual.addToHome(automation.id.value)) {
+                        AddToHomeResult.REQUESTED -> language.pick(
+                            "Shortcut requested: confirm it from the Home screen.",
+                            "Scorciatoia richiesta: conferma dalla schermata Home.",
+                        )
+                        AddToHomeResult.UNSUPPORTED -> language.pick(
+                            "This launcher does not support shortcuts on the Home screen.",
+                            "Questo launcher non supporta le scorciatoie sulla schermata Home.",
+                        )
+                        AddToHomeResult.UNAVAILABLE -> language.pick(
+                            "Only an armed manual rule can be added to the Home screen.",
+                            "Solo una regola manuale armata si può aggiungere alla schermata Home.",
+                        )
+                    },
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                message(language.pick("Unable to add the shortcut.", "Impossibile aggiungere la scorciatoia."))
+            }
+        }
+    }
+
+    /** F8: sceglie questa regola per il riquadro delle impostazioni rapide "Argus: esegui regola". */
+    fun onUseInTile() {
+        val automation = displayedAutomation ?: return
+        if (!ManualRuleCatalog.isRunnableManual(automation)) return
+        manual.useInTile(automation.id.value)
+        mutableEvents.tryEmit(
+            DetailEvent.Message(
+                language.pick(
+                    "The quick-settings tile now runs \u201c${automation.name}\u201d.",
+                    "Il riquadro delle impostazioni rapide ora esegue \u00ab${automation.name}\u00bb.",
+                ),
+            ),
+        )
     }
 
     fun onAskEdit() {
@@ -651,6 +755,16 @@ class AutomationDetailViewModel @Inject constructor(
         stats: RuleStatsUi?,
     ): DetailViewState {
         val rule = RuleRenderMapper.map(automation, conversationLabels, language)
+        // F8: "Esegui ora" e gli ingressi manuali esistono solo per una regola `manual` armata.
+        val manualEntry = if (ManualRuleCatalog.isRunnableManual(automation)) {
+            ManualEntryUi(
+                canPinShortcut = manual.canPinShortcut(),
+                isTileRule = manual.tileRuleId.value == automation.id.value,
+                paused = manual.paused.value,
+            )
+        } else {
+            null
+        }
         val warnings = buildList {
             rule.privacyNote?.let {
                 add(UiWarning(Severity.WARNING, "privacy_generative", it))
@@ -678,7 +792,9 @@ class AutomationDetailViewModel @Inject constructor(
                 estimatedLlmCallsPerDay = generativeEstimate(rule.isGenerative, language),
                 recentRuns = recentRuns(automation.id.value, records, actionsByExecution, language),
                 geofencePreviewLabel = null,
-                runNowBlockedReason = runNowBlockedReason(language),
+                canRunNow = manualEntry != null,
+                runNowBlockedReason = if (manualEntry == null) runNowBlockedReason(language) else null,
+                manual = manualEntry,
                 diagnosis = diagnosisOf(automation, records, snapshot, language),
                 diagnosisAvailable = true,
                 // Le statistiche hanno senso per una regola salvata e attiva nel tempo (armata o

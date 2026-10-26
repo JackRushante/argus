@@ -127,7 +127,7 @@ private fun resolveScheduledLocal(local: LocalDateTime, zone: ZoneId): Instant {
     }
 }
 
-/** Entry-point unico per P0-B (AlarmManagerTimeTrigger): gestisce cron e at. */
+/** Entry-point unico per P0-B (AlarmManagerTimeTrigger): gestisce cron, at, afterMs e alba/tramonto. */
 object TimeSpecs {
     /** Prossimo scatto strettamente dopo [after], o null (one-shot passato / cron senza occorrenze).
      *  Lancia IllegalArgumentException/DateTimeException su spec malformato: il DraftValidator
@@ -139,6 +139,8 @@ object TimeSpecs {
             t.at != null -> resolveScheduledLocal(LocalDateTime.parse(t.at), zone).takeIf { it > after }
             // afterMs relativo: l'ancora è sempre > after (afterMs>0 garantito dal validator).
             t.afterMs != null -> after.plusMillis(t.afterMs)
+            // Solo uno scatto vero: in notte o giorno polare null (il ricontrollo non è uno scatto).
+            t.solar != null -> SolarSchedule.nextFire(t, after)
             else -> null
         }
     }

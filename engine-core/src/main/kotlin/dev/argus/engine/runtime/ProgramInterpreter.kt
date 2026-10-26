@@ -382,6 +382,7 @@ class ProgramInterpreter(
                         }
                         PhoneEvent.INCOMING_CALL,
                         PhoneEvent.CALL_ENDED,
+                        PhoneEvent.MISSED_CALL,
                         -> if (field == TriggerField.NUMBER) current.number else null
                     }
                 else -> null
@@ -543,8 +544,7 @@ class ProgramInterpreter(
         VarType.BOOLEAN -> StateValueCoercion.boolean(raw)?.toString()
     }
 
-    private fun String.boundedCode(): String =
-        takeIf { it.matches(Regex("^[a-z][a-z0-9_]{0,63}$")) } ?: "action_failed"
+    private fun String.boundedCode(): String = journalErrorCode(this)
 
     companion object {
         const val MAX_EXECUTION_MILLIS = 6L * 60 * 60 * 1_000

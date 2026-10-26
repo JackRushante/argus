@@ -1,11 +1,15 @@
 package dev.argus.engine.runtime
+import dev.argus.engine.model.SolarEvent
+import dev.argus.engine.model.SolarSpec
 import dev.argus.engine.model.Trigger
 import java.time.Instant
 import java.time.ZoneId
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 class CronScheduleTest {
     private val rome = ZoneId.of("Europe/Rome")
     private fun next(cron: String, afterIso: String): Instant? =
@@ -74,6 +78,19 @@ class CronScheduleTest {
         assertEquals(Instant.parse("2026-07-15T06:00:00Z"), TimeSpecs.nextFire(t, Instant.parse("2026-07-12T00:00:00Z")))
         assertNull(TimeSpecs.nextFire(t, Instant.parse("2026-07-15T06:00:00Z")))   // passato -> mai più
     }
+    @Test fun `timespecs sunset uses the solar schedule and needs the frozen position`() {
+        val t = Trigger.Time(tz = "Europe/Rome", solar = SolarSpec(SolarEvent.SUNSET, 0, lat = 41.9, lng = 12.5))
+        val after = Instant.parse("2026-07-15T06:00:00Z")
+        val next = assertNotNull(TimeSpecs.nextFire(t, after))
+        assertEquals(SolarSchedule.nextFire(t, after), next)
+        // Roma, 15 luglio: tramonto verso le 20:46 locali (18:46 UTC).
+        assertTrue(next > Instant.parse("2026-07-15T18:30:00Z") && next < Instant.parse("2026-07-15T19:00:00Z"), "$next")
+        // Bozza non ancora armata: senza posizione non c'è un orario (la lista usa runCatching).
+        assertFailsWith<IllegalArgumentException> {
+            TimeSpecs.nextFire(t.copy(solar = SolarSpec(SolarEvent.SUNSET, 0)), after)
+        }
+    }
+
     @Test fun `timespecs relative afterMs fires exactly after plus delay`() {
         val t = Trigger.Time(afterMs = 120_000, tz = "Europe/Rome")
         val after = Instant.parse("2026-07-15T06:00:00Z")

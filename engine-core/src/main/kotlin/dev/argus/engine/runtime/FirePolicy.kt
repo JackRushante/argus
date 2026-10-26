@@ -59,6 +59,11 @@ object ActionCapabilities {
     const val VIBRATE = CapabilityIds.ACTION_VIBRATE
     const val WRITE_SETTING = CapabilityIds.ACTION_WRITE_SETTING
     const val INVOKE_LLM = CapabilityIds.ACTION_INVOKE_LLM
+    const val SPEAK = CapabilityIds.ACTION_SPEAK
+    const val MEDIA_CONTROL = CapabilityIds.ACTION_MEDIA_CONTROL
+    const val SET_BRIGHTNESS = CapabilityIds.ACTION_SET_BRIGHTNESS
+    const val SET_ROTATION = CapabilityIds.ACTION_SET_ROTATION
+    const val HTTP_REQUEST = CapabilityIds.ACTION_HTTP_REQUEST
 }
 
 /**

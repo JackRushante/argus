@@ -2,6 +2,68 @@
 
 Release and engineering notes, newest first.
 
+## v0.4.1 (2026-10-26) — New triggers and actions, sunrise and sunset, manual rules and pause
+
+### Added
+
+- New triggers that need neither Shizuku nor a permission:
+  - the screen turning on, off or being unlocked;
+  - the battery crossing a level ("when the battery drops below 20%"), once per crossing;
+  - headphones or a speaker connecting or disconnecting (wired, Bluetooth or any);
+  - Do Not Disturb or the ringer changing, to a given mode or at any change;
+  - media starting or stopping.
+- Calls and SMS: a missed-call trigger and, on dual-SIM phones, a filter by SIM.
+- Sunrise and sunset, moved by up to 12 hours ("30 minutes before sunset"). Argus computes them on
+  the phone, without network, for the phone's position: it reads the position when you arm the
+  rule and rounds it to about 11 km. The position never goes through the AI, and "remove
+  locations" in the export removes it.
+- New actions without Shizuku:
+  - read a text aloud with the phone's text-to-speech engine;
+  - media keys: play, pause, next, previous;
+  - screen brightness and auto-rotate, once you allow "Modify system settings" (System → Fix);
+  - HTTP request to a fixed https address, for webhooks and home servers. Data from a message
+    can enter only the body, escaped; approval shows the whole address and hides secret
+    headers; the Log keeps only the status code. "Remove contacts" in the export empties the
+    header values.
+- Rules you start by hand (`manual` trigger): "Run now" in the rule, a home-screen shortcut, the
+  "Argus: run rule" Quick Settings tile or a widget with one button per rule. Only an armed manual
+  rule can be started, shortcuts and widget buttons carry a random per-rule token, and the tile
+  waits for the phone to be unlocked.
+- "Pause automations": a Quick Settings tile, a switch in Settings and a banner in the list. While
+  paused no rule fires, manual ones included; the Log shows each skipped firing in amber. On
+  resume Argus does not catch up on what it skipped, and the tile also waits for unlock.
+
+### Changed
+
+- Without Shizuku, Android blocks opening an app, a link or a Settings screen from the
+  background. Argus now posts a "Tap to open" notification instead.
+- The Log shows the real reason of a failed action for every rule. Simple rules used to show
+  "action failed" whatever happened.
+- "Only if the battery is below 30%" now works without Shizuku: some models picked a reader that
+  needs Shizuku, and the rule could not be armed.
+- The AI no longer asks for the minimum time between two firings of a motion rule (it uses the
+  60-second minimum) or for a notification title you did not give, and it no longer compiles a
+  step goal on phones where Argus cannot count steps. On the AI bench, now 162 rule requests with
+  the new triggers and actions, Claude Haiku 5.5 gets 99% right, the preset DeepSeek V4.1 Flash 96%
+  (over two runs) and GPT-6 Luna 93%.
+- The AI's instructions are about 8,700 tokens long: a self-hosted model needs about 16,000
+  tokens of context (12,000 before).
+
+### Permissions
+
+- `WRITE_SETTINGS` ("Modify system settings", a special access you grant in Android's settings),
+  for brightness and rotation.
+- Visibility of the text-to-speech engines (`<queries>` for `TTS_SERVICE`), without which Android
+  11+ hides them from the app.
+
+### Known limits
+
+- A one-time rule (a date, a delay, "right now") that falls during a pause is skipped and counts
+  as used. A program already running when you pause finishes its steps.
+- The Hermes bridge does not propose the new triggers and actions yet.
+- An app opened through the "Tap to open" notification counts as a failed action in the Log and
+  in the statistics.
+
 ## v0.4.0 (2026-10-26) — Backup, conditions without Shizuku, examples and statistics
 
 ### Added

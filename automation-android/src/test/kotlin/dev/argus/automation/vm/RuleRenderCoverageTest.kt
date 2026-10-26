@@ -2,6 +2,7 @@ package dev.argus.automation.vm
 
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.ApprovedStateContext
+import dev.argus.engine.model.AudioOutputKind
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
@@ -13,12 +14,19 @@ import dev.argus.engine.model.ConnState
 import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.DndMode
 import dev.argus.engine.model.GenerativeDeliverMode
+import dev.argus.engine.model.HttpMethod
 import dev.argus.engine.model.IntegrityLabel
+import dev.argus.engine.model.MediaPlayState
+import dev.argus.engine.model.ModeKind
+import dev.argus.engine.model.MediaCommand
 import dev.argus.engine.model.NightMode
 import dev.argus.engine.model.PhoneEvent
+import dev.argus.engine.model.ScreenEvent
 import dev.argus.engine.model.SensorKind
 import dev.argus.engine.model.SettingNamespace
 import dev.argus.engine.model.SettingsScreen
+import dev.argus.engine.model.SolarEvent
+import dev.argus.engine.model.SolarSpec
 import dev.argus.engine.model.StateQuery
 import dev.argus.engine.model.StateQueryPolicy
 import dev.argus.engine.model.StateValueType
@@ -249,6 +257,20 @@ class RuleRenderCoverageTest {
                     Trigger.Time(afterMs = 7_200_000, tz = "UTC"),
                     "afterMs" to ms(m("2 hours", "2 ore")),
                 ),
+                v(
+                    Trigger.Time(tz = "UTC", solar = SolarSpec(SolarEvent.SUNSET, -45)),
+                    "solar" to ms(
+                        m("45 min before sunset", "45 min prima del tramonto"),
+                        m("at the phone's position", "alla posizione del telefono"),
+                    ),
+                ),
+                v(
+                    Trigger.Time(tz = "UTC", solar = SolarSpec(SolarEvent.SUNRISE, 90, lat = 41.9, lng = 12.5)),
+                    "solar" to ms(
+                        m("1 h 30 min after sunrise", "1 h 30 min dopo l'alba"),
+                        m("near 41.9, 12.5", "vicino a 41.9, 12.5"),
+                    ),
+                ),
             ),
             "immediate" to case(Trigger.Immediate, emptyMap()),
             "notification" to case(
@@ -270,11 +292,16 @@ class RuleRenderCoverageTest {
                 ),
             ),
             "phone_state" to case(
-                Trigger.PhoneState(PhoneEvent.SMS_RECEIVED, number = "+39XYZ", textMatch = "XYZ-sms"),
-                mapOf(
+                v(
+                    Trigger.PhoneState(PhoneEvent.SMS_RECEIVED, number = "+39XYZ", textMatch = "XYZ-sms"),
                     "event" to ms(m("SMS received", "SMS ricevuto")),
                     "number" to ms("+39XYZ"),
                     "textMatch" to ms("XYZ-sms"),
+                ),
+                v(
+                    Trigger.PhoneState(PhoneEvent.MISSED_CALL, sim = 2),
+                    "event" to ms(m("missed call", "chiamata persa")),
+                    "sim" to ms("SIM 2"),
                 ),
             ),
             "connectivity" to case(
@@ -296,6 +323,41 @@ class RuleRenderCoverageTest {
                     "maxReportLatencyUs" to "il validator rifiuta ogni valore non nullo (sampling batched non supportato)",
                 ),
             ),
+            // --- 0.4.1: trigger di sistema senza Shizuku ---
+            "screen" to case(
+                Trigger.Screen(ScreenEvent.UNLOCKED),
+                mapOf("event" to ms(m("the phone is unlocked", "il telefono viene sbloccato"))),
+            ),
+            "battery" to case(
+                v(
+                    Trigger.Battery(below = 17),
+                    "below" to ms(m("drops below 17%", "scende sotto il 17%")),
+                ),
+                v(
+                    Trigger.Battery(above = 83),
+                    "above" to ms(m("rises above 83%", "sale sopra il 83%")),
+                ),
+            ),
+            "audio_output" to case(
+                Trigger.AudioOutput(AudioOutputKind.BLUETOOTH, ConnState.DISCONNECTED),
+                mapOf(
+                    "kind" to ms(m("Bluetooth audio output", "uscita audio Bluetooth")),
+                    "state" to ms(m("disconnected", "scollegata")),
+                ),
+            ),
+            "mode_changed" to case(
+                Trigger.ModeChanged(ModeKind.DND, "priority"),
+                mapOf(
+                    "what" to ms(m("Do Not Disturb", "Non disturbare")),
+                    "to" to ms(m("priority only", "solo priorità")),
+                ),
+            ),
+            "media" to case(
+                Trigger.Media(MediaPlayState.STOPPED),
+                mapOf("state" to ms(m("media stops playing", "finisce la riproduzione multimediale"))),
+            ),
+            // 0.4.1: avvio manuale, nessun campo da rendere.
+            "manual" to case(Trigger.Manual, emptyMap()),
         )
         check("Trigger", Trigger.serializer(), cases) { trigger -> automation(trigger = trigger) }
     }
@@ -677,6 +739,41 @@ class RuleRenderCoverageTest {
                         maxIterationsVar = "xyz_iter",
                     ),
                     "maxIterationsVar" to ms("xyz_iter"),
+                ),
+            ),
+            // --- 0.4.1 (azioni) ---
+            "speak" to case(Action.Speak("XYZ-speak"), mapOf("text" to ms("XYZ-speak"))),
+            "media_control" to case(
+                Action.MediaControl(MediaCommand.PREVIOUS),
+                mapOf("command" to ms(m("previous track", "traccia precedente"))),
+            ),
+            "set_brightness" to case(
+                v(Action.SetBrightness(level = 37), "level" to ms("37%"), "auto" to none),
+                v(
+                    Action.SetBrightness(auto = true),
+                    "level" to none,
+                    "auto" to ms(m("automatic", "automatica")),
+                ),
+            ),
+            "set_rotation" to case(
+                v(Action.SetRotation(true), "auto" to ms(m("on", "attiva"))),
+                v(Action.SetRotation(false), "auto" to ms(m("off", "disattivata"))),
+            ),
+            "http_request" to case(
+                Action.HttpRequest(
+                    method = HttpMethod.PUT,
+                    url = "https://xyz.example.org/XYZ-path?q=1",
+                    headers = mapOf("X-XYZ-Key" to "secret-value-XYZ-wxyz", "X-XYZ-Plain" to "XYZ-plain-value"),
+                    body = "XYZ-body",
+                    contentType = "application/xyz",
+                ),
+                mapOf(
+                    "method" to ms("PUT"),
+                    "url" to ms("https://xyz.example.org/XYZ-path?q=1"),
+                    // Il valore di un'intestazione segreta compare mascherato, mai per intero.
+                    "headers" to ms("X-XYZ-Key: ••••wxyz", "X-XYZ-Plain: XYZ-plain-value"),
+                    "body" to ms(m("Body: XYZ-body", "Corpo: XYZ-body")),
+                    "contentType" to ms("Content-Type: application/xyz"),
                 ),
             ),
         )
