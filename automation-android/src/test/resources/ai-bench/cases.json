@@ -1256,10 +1256,13 @@
   "lang": "it",
   "text": "Adesso scrivi 'ciao' nel campo di testo che ho aperto",
   "expect": {
-   "outcome": "unsupported"
+   "outcome": ["unsupported", "draft"],
+   "trigger": {"type": "immediate"},
+   "actions_include": ["run_shell"],
+   "actions_text": ["input text"]
   },
   "covers": ["input_text"],
-  "note": "input_text non e' pubblicato dal probe"
+  "note": "input_text non e' pubblicato dal probe, ma con Shizuku il comando shell `input text` scrive davvero nel campo: run_shell va bene quanto il rifiuto"
  },
  {
   "id": "unsup.input.en.01",
@@ -1267,9 +1270,13 @@
   "lang": "en",
   "text": "When I connect to Wi-Fi, type 'hello world' into the focused text field",
   "expect": {
-   "outcome": "unsupported"
+   "outcome": ["unsupported", "draft"],
+   "trigger": {"type": "connectivity", "medium": "WIFI", "state": "CONNECTED"},
+   "actions_include": ["run_shell"],
+   "actions_text": ["input text"]
   },
-  "covers": ["input_text"]
+  "covers": ["input_text"],
+  "note": "input_text non e' pubblicato dal probe, ma con Shizuku il comando shell `input text` scrive davvero nel campo: run_shell va bene quanto il rifiuto"
  },
  {
   "id": "unsup.steps.it.01",
@@ -1341,9 +1348,11 @@
   "lang": "en",
   "text": "Vibrate the phone, wait 2 hours, then vibrate again",
   "expect": {
-   "outcome": "limit"
+   "outcome": ["limit", "draft"],
+   "trigger": {"type": "immediate"},
+   "actions_include": ["vibrate", "wait"]
   },
-  "note": "wait massimo 1 ora"
+  "note": "wait massimo 1 ora, ma un programma fino a 6: due pause da un'ora vanno bene quanto il limite"
  },
  {
   "id": "limit.loop.it.01",

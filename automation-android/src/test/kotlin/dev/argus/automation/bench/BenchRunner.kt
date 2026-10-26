@@ -54,6 +54,12 @@ internal data class BenchOptions(
     /** Ragionamento chiesto al modello; [ReasoningEffort.DEFAULT] omette il campo (default del provider). */
     val reasoning: ReasoningEffort = ReasoningEffort.DEFAULT,
 ) {
+    /** [filter]: uno o più prefissi di id separati da virgola; senza filtro passano tutti i casi. */
+    fun selects(caseId: String): Boolean {
+        val prefixes = filter?.split(',')?.map(String::trim)?.filter(String::isNotEmpty).orEmpty()
+        return prefixes.isEmpty() || prefixes.any(caseId::startsWith)
+    }
+
     companion object {
         const val DEFAULT_MODEL = "@preset/argus"
         const val DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"

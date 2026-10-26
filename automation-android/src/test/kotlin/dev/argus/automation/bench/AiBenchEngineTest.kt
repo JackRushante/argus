@@ -280,6 +280,13 @@ class AiBenchEngineTest {
         assertEquals("@preset/argus", BenchOptions.fromEnv { if (it == "ARGUS_BENCH_MODEL") "  " else null }.model)
         assertEquals(ReasoningEffort.NONE, BenchOptions.fromEnv { if (it == "ARGUS_BENCH_REASONING") "None" else null }.reasoning)
         assertFailsWith<BenchException> { BenchOptions.fromEnv { if (it == "ARGUS_BENCH_REASONING") "off" else null } }
+
+        // Il filtro accetta più prefissi separati da virgola; senza filtro passano tutti.
+        val several = BenchOptions.fromEnv { if (it == "ARGUS_BENCH_FILTER") "limit.wait, unsup.input." else null }
+        assertTrue(several.selects("limit.wait.en.01"))
+        assertTrue(several.selects("unsup.input.it.01"))
+        assertFalse(several.selects("time.abs.en.01"))
+        assertTrue(defaults.selects("time.abs.en.01"))
     }
 
     @Test

@@ -20,7 +20,7 @@ import kotlin.test.fail
  *
  * Variabili: `ARGUS_BENCH_KEY` (chiave OpenRouter), `ARGUS_BENCH_MODEL` (default `@preset/argus`),
  * `ARGUS_BENCH_BASE_URL` (default `https://openrouter.ai/api/v1`), `ARGUS_BENCH_REPEAT` (default 1),
- * `ARGUS_BENCH_FILTER` (prefisso degli id dei casi), `ARGUS_BENCH_PARALLEL` (default 4),
+ * `ARGUS_BENCH_FILTER` (uno o più prefissi degli id dei casi, separati da virgola), `ARGUS_BENCH_PARALLEL` (default 4),
  * `ARGUS_BENCH_REASONING` (`none`, `low`, `medium` o `high`; assente = campo omesso).
  *
  * Il rapporto esce in `build/reports/ai-bench/` (`report.json`, `summary.md`). Il test NON fallisce
@@ -36,8 +36,8 @@ class AiBenchTest {
         val options = BenchOptions.fromEnv(System::getenv)
         val compileCases = BenchCases.loadCompile()
         val actCases = BenchCases.loadAct()
-        val selectedCompile = compileCases.filter { options.filter == null || it.id.startsWith(options.filter) }
-        val selectedAct = actCases.filter { options.filter == null || it.id.startsWith(options.filter) }
+        val selectedCompile = compileCases.filter { options.selects(it.id) }
+        val selectedAct = actCases.filter { options.selects(it.id) }
         if (selectedCompile.isEmpty() && selectedAct.isEmpty()) {
             throw BenchException("ARGUS_BENCH_FILTER '${options.filter}' non seleziona alcun caso")
         }
