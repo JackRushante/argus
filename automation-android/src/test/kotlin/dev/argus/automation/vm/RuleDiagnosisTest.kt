@@ -367,7 +367,7 @@ class RuleDiagnosisTest {
             ),
             diagnose(
                 rule,
-                geofence = registration(rule, fingerprint = ApprovalFingerprint("an-older-version")),
+                geofence = registration(rule, fingerprint = ApprovalFingerprint("0".repeat(64))),
             ).rows[2],
         )
     }
