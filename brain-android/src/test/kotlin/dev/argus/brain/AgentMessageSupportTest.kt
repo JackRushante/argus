@@ -541,12 +541,17 @@ class AgentMessageSupportTest {
         val system = AgentMessageSupport.compileSystemText().lines().joinToString(" ") { it.trim() }
 
         // GPT-6 Luna chiedeva la durata della vibrazione, la modalita' del Non disturbare e il raggio.
+        // L'eccezione vale SOLO per questi tre: con una regola generica DeepSeek metteva da solo la
+        // luminosita' al 50% invece di chiedere il livello.
         assertTrue(
-            "use them: vibrate durationMs 1000, set_dnd mode \"PRIORITY\", geofence radiusM 150." in system,
+            "Exception, for exactly these three details: do not ask, use the default (vibrate durationMs 1000, " +
+                "set_dnd mode \"PRIORITY\", geofence radiusM 150). Any other missing value (a level, a time, a person, " +
+                "an app, a place, a text) still needs a short question." in system,
         )
         // E rifiutava «qui» perche' il contesto dice location_available=false.
         assertTrue(
-            "This works even when state.location_available is false: Argus resolves the position on the phone at arming." in system,
+            "Set resolveCurrentLocation=true even when state.location_available is false: Argus resolves the " +
+                "position on the phone at arming." in system,
         )
     }
 

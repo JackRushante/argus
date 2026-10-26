@@ -1022,7 +1022,7 @@
   "id": "p4.while.it.01",
   "category": "p4",
   "lang": "it",
-  "text": "Fai vibrare il telefono ogni 10 secondi, al massimo 20 volte, finché il telefono non è in carica",
+  "text": "Da adesso, fai vibrare il telefono ogni 10 secondi, al massimo 20 volte, finché il telefono non è in carica",
   "expect": {
    "outcome": "draft",
    "trigger": {"type": "immediate"},
