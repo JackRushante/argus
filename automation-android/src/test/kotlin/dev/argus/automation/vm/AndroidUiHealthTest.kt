@@ -6,6 +6,8 @@ import dev.argus.ui.model.ShizukuStatus
 import dev.argus.ui.presentation.RenderLanguage
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /**
  * Stato UI della posizione in background. Bug segnalato da Lorenzo: concessa «sempre/precisa» ma
@@ -20,6 +22,7 @@ class AndroidUiHealthTest {
         notificationsGranted = true,
         foregroundLocationGranted = fg,
         backgroundLocationGranted = bg,
+        exactAlarmsGranted = true,
     )
 
     @Test
@@ -112,5 +115,36 @@ class ShizukuAwaitingAnswerNoteTest {
             "Waiting for your answer in Shizuku",
             shizukuAwaitingAnswerNote(RenderLanguage.EN),
         )
+    }
+}
+
+/**
+ * Da Android 14 `SCHEDULE_EXACT_ALARM` e' negato di default e lo concede solo l'utente. La lettura
+ * deve dire la verita' (altrimenti la riga in Sistema non avvisa) e non deve mai far cadere la schermata.
+ */
+class ExactAlarmsHealthTest {
+    @Test
+    fun `before Android 12 exact alarms are granted without asking the system`() {
+        var asked = false
+        val granted = exactAlarmsGranted(sdkInt = 30) {
+            asked = true
+            false
+        }
+
+        assertTrue(granted)
+        assertFalse(asked, "sotto Android 12 non esiste il permesso: niente domanda ad AlarmManager")
+    }
+
+    @Test
+    fun `from Android 12 the system answer decides`() {
+        assertTrue(exactAlarmsGranted(sdkInt = 31) { true })
+        assertFalse(exactAlarmsGranted(sdkInt = 31) { false })
+        assertTrue(exactAlarmsGranted(sdkInt = 36) { true })
+        assertFalse(exactAlarmsGranted(sdkInt = 36) { false })
+    }
+
+    @Test
+    fun `a failing read counts as not granted`() {
+        assertFalse(exactAlarmsGranted(sdkInt = 34) { error("AlarmManager non disponibile") })
     }
 }

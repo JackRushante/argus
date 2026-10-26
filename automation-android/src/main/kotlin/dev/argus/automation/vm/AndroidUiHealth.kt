@@ -1,6 +1,7 @@
 package dev.argus.automation.vm
 
 import android.Manifest
+import android.app.AlarmManager
 import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.PackageManager
@@ -14,6 +15,11 @@ import dev.argus.ui.presentation.RenderLanguage
 
 internal data class AndroidUiHealth(
     val batteryExempt: Boolean,
+    /**
+     * `SCHEDULE_EXACT_ALARM` concesso (sempre true sotto Android 12). Da Android 14 e' negato di
+     * default: senza, le sveglie ripiegano su quelle inesatte e le regole a orario possono ritardare.
+     */
+    val exactAlarmsGranted: Boolean,
     val notificationListenerGranted: Boolean,
     val notificationsGranted: Boolean,
     val foregroundLocationGranted: Boolean,
@@ -34,6 +40,9 @@ internal fun readAndroidUiHealth(context: Context): AndroidUiHealth {
             app.getSystemService(PowerManager::class.java)
                 .isIgnoringBatteryOptimizations(app.packageName)
         }.getOrDefault(false),
+        exactAlarmsGranted = exactAlarmsGranted(android.os.Build.VERSION.SDK_INT) {
+            app.getSystemService(AlarmManager::class.java).canScheduleExactAlarms()
+        },
         notificationListenerGranted = runCatching {
             app.packageName in NotificationManagerCompat.getEnabledListenerPackages(app)
         }.getOrDefault(false),
@@ -52,6 +61,14 @@ internal fun readAndroidUiHealth(context: Context): AndroidUiHealth {
             android.os.Build.VERSION_CODES.S || granted(Manifest.permission.BLUETOOTH_CONNECT),
     )
 }
+
+/**
+ * Sotto Android 12 (S) il permesso non esiste e le sveglie esatte ci sono sempre. Da S in poi decide
+ * `AlarmManager.canScheduleExactAlarms()`; se la lettura fallisce vale «non concesse», cosi' la riga in
+ * Sistema avvisa invece di mostrare un falso verde.
+ */
+internal fun exactAlarmsGranted(sdkInt: Int, canScheduleExact: () -> Boolean): Boolean =
+    sdkInt < android.os.Build.VERSION_CODES.S || runCatching(canScheduleExact).getOrDefault(false)
 
 internal fun ShizukuGatewayStatus.toUiStatus(degradedAfterReboot: Boolean): ShizukuStatus = when (this) {
     ShizukuGatewayStatus.NOT_INSTALLED -> ShizukuStatus.NOT_INSTALLED
