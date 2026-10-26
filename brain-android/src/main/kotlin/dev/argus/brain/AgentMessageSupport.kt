@@ -372,9 +372,21 @@ BINDING RULES:
         append("===== UNTRUSTED STRUCTURED CONTEXT =====\n")
         append(compileContext(manifest, state))
         append("\n===== END CONTEXT =====\n\n")
+        // Il valore nel manifest non basta ai modelli col ragionamento spento: la lingua, scritta in chiaro,
+        // sta subito prima della richiesta. È un'istruzione dell'app, quindi fuori dal blocco non fidato.
+        append(replyLanguageLine(manifest.replyLanguage)).append("\n\n")
         append("===== UNTRUSTED USER REQUEST =====\n")
         append(message)
         append("\n===== END REQUEST =====")
+    }
+
+    /**
+     * Riga in chiaro con la lingua dei testi per l'utente, derivata da `manifest.replyLanguage` ("it" o
+     * "en"; ogni altro valore, che il manifest non ammette, vale inglese come il default).
+     */
+    internal fun replyLanguageLine(replyLanguage: String): String {
+        val language = if (replyLanguage == CapabilityManifest.REPLY_LANGUAGE_IT) "Italian" else "English"
+        return "Write every text meant for the user (reply, rule name, notification titles and texts, goal) in $language."
     }
 
     /**
@@ -563,7 +575,8 @@ BINDING RULES:
 Trigger, discriminated by "type":
 - {"type":"time", "cron":string|null, "at":string|null, "afterMs":integer|null, "tz":string,
    "precision":"FLEXIBLE"|"EXACT"}
-  Exactly one of cron, at and afterMs. at is local ISO, e.g. 2026-07-15T23:00.
+  Exactly one of cron, at and afterMs. cron is a standard 5-field expression "minute hour day-of-month month day-of-week" (no seconds), e.g. "30 22 * * *".
+  at is local ISO, e.g. 2026-07-15T23:00.
   afterMs = one-shot relative delay in milliseconds (1000..604800000), anchored to activation and
   re-armable ("in 2 minutes" -> afterMs=120000). Omit afterMs when you use cron or at, and vice versa.
   Omit precision or use FLEXIBLE normally; EXACT only if the user explicitly

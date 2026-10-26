@@ -1,6 +1,8 @@
 package dev.argus.engine.brain
 import dev.argus.engine.model.ArgusJson
 import dev.argus.engine.model.AutomationDraft
+import dev.argus.engine.model.Trigger
+import dev.argus.engine.runtime.CronSchedule
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -66,7 +68,19 @@ class CliBridgeParser(private val json: Json = lenient()) {
             return CompileResult(prose, null, "meta_parse_error", detail = "draft e error_code non possono coesistere")
         }
         if (draft == null) return CompileResult(prose, null, code ?: "draft_missing")
-        return CompileResult(prose, draft, null)
+        return CompileResult(prose, draft.withStandardCron(), null)
+    }
+
+    /**
+     * GPT-6 Luna e Haiku 5.5 scrivono il cron alla Quartz, coi secondi in testa (`0 30 22 * * *`), che il
+     * validatore rifiuta con `cron_invalid`. Qui, PRIMA della validazione, un cron `0 <5 campi validi>`
+     * diventa i 5 campi: l'utente approva la forma standard. Tutto il resto resta com'è.
+     */
+    private fun AutomationDraft.withStandardCron(): AutomationDraft {
+        val time = trigger as? Trigger.Time ?: return this
+        val cron = time.cron ?: return this
+        val standard = CronSchedule.dropLeadingZeroSeconds(cron)
+        return if (standard == cron) this else copy(trigger = time.copy(cron = standard))
     }
 
     /** Senza sentinel: l'ultimo blocco ```json il cui oggetto ha la chiave `draft`. */

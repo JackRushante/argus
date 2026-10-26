@@ -121,6 +121,44 @@ class AgentMessageSupportTest {
     }
 
     @Test
+    fun `the compile request writes the reply language in plain words right before the user message`() {
+        val italianLine = "Write every text meant for the user (reply, rule name, notification titles and texts, goal) in Italian."
+        val englishLine = "Write every text meant for the user (reply, rule name, notification titles and texts, goal) in English."
+        val italian = AgentMessageSupport.compileUserText(
+            "turn on the wifi", emptyManifest.copy(replyLanguage = "it"), DeviceState(),
+        )
+        val english = AgentMessageSupport.compileUserText(
+            "accendi il wifi", emptyManifest.copy(replyLanguage = "en"), DeviceState(),
+        )
+        val default = AgentMessageSupport.compileUserText("accendi il wifi", emptyManifest, DeviceState())
+
+        assertTrue(italianLine in italian)
+        assertFalse(englishLine in italian)
+        assertTrue(englishLine in english)
+        assertFalse(italianLine in english)
+        assertTrue(englishLine in default, "senza scelta vale l'inglese, come il default del manifest")
+        // UNA riga, subito prima della richiesta, fuori dal blocco non fidato.
+        assertTrue((italianLine + "\n\n===== UNTRUSTED USER REQUEST =====\nturn on the wifi") in italian, italian)
+        assertEquals(1, italian.split(italianLine).size - 1)
+        assertFalse(italianLine in italian.substringAfter("===== UNTRUSTED USER REQUEST ====="))
+        assertFalse(italianLine in italian.substringBefore("===== END CONTEXT ====="))
+        // Il campo del manifest resta.
+        assertTrue("\"reply_language\":\"it\"" in italian)
+        assertTrue("\"reply_language\":\"en\"" in english)
+    }
+
+    @Test
+    fun `compile rules ask for a standard five field cron without seconds`() {
+        val system = AgentMessageSupport.compileSystemText().lines().joinToString(" ") { it.trim() }
+        val sentence = "cron is a standard 5-field expression \"minute hour day-of-month month day-of-week\" " +
+            "(no seconds), e.g. \"30 22 * * *\"."
+
+        assertTrue(sentence in system)
+        // Subito dopo «Exactly one of cron, at and afterMs.» nello schema del trigger time.
+        assertTrue("Exactly one of cron, at and afterMs. $sentence" in system)
+    }
+
+    @Test
     fun `rule 7 makes the manifest decide the language of every text for the user`() {
         val rules = AgentMessageSupport.COMPILE_RULES
         // La regola va a capo in mezzo alle frasi: si confronta il testo con gli spazi normalizzati.
