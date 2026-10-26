@@ -1,6 +1,7 @@
 package dev.argus.data
 
 import androidx.room.withTransaction
+import dev.argus.data.backup.BulkDraftWriter
 import dev.argus.data.entities.AutomationEntity
 import dev.argus.data.entities.PendingDraftEntity
 import dev.argus.engine.model.ApprovalFingerprint
@@ -30,7 +31,7 @@ import kotlinx.coroutines.flow.map
  * regole "legacy" già messe in PENDING_APPROVAL + disabilitate da versioni precedenti restano
  * gestite come prima (rifiuto -> DISABLED, arm -> sostituzione).
  */
-class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository {
+class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository, BulkDraftWriter {
     private val drafts = db.draftDao()
     private val automations = db.automationDao()
 
@@ -81,6 +82,26 @@ class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository {
             ?: drafts.getByAutomationId(newDraft.automationId.value)
         DraftWriteResult.Conflict(current?.revision)
     }
+
+    /**
+     * Inserimento in blocco (import dei backup): ogni bozza passa dalle stesse regole di [create], ma
+     * tutte dentro UNA transazione, così chi osserva l'elenco delle bozze riceve un solo aggiornamento
+     * e un errore improvviso non lascia un import a metà. Una bozza rifiutata non scrive nulla e le
+     * altre proseguono; l'esito è nello stesso ordine dell'input.
+     */
+    override suspend fun createAll(newDrafts: List<NewDraft>): List<DraftWriteResult> =
+        db.withTransaction {
+            newDrafts.map { candidate ->
+                try {
+                    create(candidate)
+                } catch (_: IllegalArgumentException) {
+                    // Una bozza ostile che il dominio non sa nemmeno impronta non deve far fallire le altre.
+                    DraftWriteResult.Rejected("draft_unprocessable")
+                } catch (_: IllegalStateException) {
+                    DraftWriteResult.Rejected("draft_unprocessable")
+                }
+            }
+        }
 
     override suspend fun revise(
         id: DraftId,
