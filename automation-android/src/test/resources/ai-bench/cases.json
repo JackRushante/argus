@@ -1313,14 +1313,16 @@
   "covers": ["tool:send_sms"]
  },
  {
-  "id": "unsup.screen.en.01",
-  "category": "unsupported",
+  "id": "screen.on.en.01",
+  "category": "trigger.screen",
   "lang": "en",
   "text": "When the screen turns on, vibrate the phone",
   "expect": {
-   "outcome": "unsupported"
+   "outcome": "draft",
+   "trigger": {"type": "screen", "event": "ON"},
+   "actions_include": ["vibrate"]
   },
-  "covers": ["trigger:screen"]
+  "note": "Fino alla 0.4.0 era un caso 'unsupported' (nessun trigger schermo): dalla 0.4.1 il trigger screen esiste"
  },
  {
   "id": "unsup.call.en.01",
@@ -1568,5 +1570,157 @@
    "actions_include": ["show_notification"]
   },
   "note": "Senza Shizuku il manifest non pubblica chiavi di stato (state_keys vuoto): il modello non deve proporre state_equals; una bozza che lo usa comunque risulta 'capability'"
+ },
+ {
+  "id": "screen.unlock.it.01",
+  "category": "trigger.screen",
+  "lang": "it",
+  "text": "Quando sblocco il telefono porta il volume dei media al 40%",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "screen", "event": "UNLOCKED"},
+   "actions_include": ["set_volume"],
+   "params": {"set_volume.stream": "MEDIA", "set_volume.level": 40}
+  }
+ },
+ {
+  "id": "screen.off.en.01",
+  "category": "trigger.screen",
+  "lang": "en",
+  "text": "When the screen turns off, turn off Wi-Fi",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "screen", "event": "OFF"},
+   "actions_include": ["set_wifi"],
+   "params": {"set_wifi.on": false}
+  }
+ },
+ {
+  "id": "battery.below.it.01",
+  "category": "trigger.battery",
+  "lang": "it",
+  "text": "Quando la batteria scende sotto il 15% spegni il Bluetooth e mostrami una notifica 'Batteria scarica'",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "battery", "below": 15},
+   "actions_include": ["set_bluetooth", "show_notification"],
+   "params": {"set_bluetooth.on": false}
+  },
+  "note": "below = soglia che si attraversa verso il basso; above resta assente"
+ },
+ {
+  "id": "battery.above.en.01",
+  "category": "trigger.battery",
+  "lang": "en",
+  "text": "When the battery rises above 90% show me a notification saying Unplug the charger",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "battery", "above": 90},
+   "actions_include": ["show_notification"]
+  }
+ },
+ {
+  "id": "audio.wired.it.01",
+  "category": "trigger.audio_output",
+  "lang": "it",
+  "text": "Quando collego le cuffie a filo metti il volume dei media al 30%",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "audio_output", "kind": "WIRED", "state": "CONNECTED"},
+   "actions_include": ["set_volume"],
+   "params": {"set_volume.stream": "MEDIA", "set_volume.level": 30}
+  }
+ },
+ {
+  "id": "audio.any.en.01",
+  "category": "trigger.audio_output",
+  "lang": "en",
+  "text": "When any headphones or earbuds, wired or Bluetooth, get disconnected, set the media volume to zero",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "audio_output", "kind": "ANY", "state": "DISCONNECTED"},
+   "actions_include": ["set_volume"],
+   "params": {"set_volume.stream": "MEDIA", "set_volume.level": 0}
+  },
+  "note": "Nessun nome di dispositivo: non e' un trigger connectivity.bt con match"
+ },
+ {
+  "id": "mode.ringer.it.01",
+  "category": "trigger.mode_changed",
+  "lang": "it",
+  "text": "Quando la suoneria passa in silenzioso mostrami una notifica 'Silenzioso attivo'",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "mode_changed", "what": "RINGER", "to": "silent"},
+   "actions_include": ["show_notification"]
+  }
+ },
+ {
+  "id": "mode.dnd.en.01",
+  "category": "trigger.mode_changed",
+  "lang": "en",
+  "text": "When Do Not Disturb is turned off, set the ringer to normal",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "mode_changed", "what": "DND", "to": "off"},
+   "actions_include": ["set_ringer"],
+   "params": {"set_ringer.mode": "normal"}
+  }
+ },
+ {
+  "id": "media.playing.it.01",
+  "category": "trigger.media",
+  "lang": "it",
+  "text": "Quando parte una riproduzione audio o video mostrami una notifica 'In riproduzione'",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "media", "state": "PLAYING"},
+   "actions_include": ["show_notification"]
+  }
+ },
+ {
+  "id": "media.stopped.en.01",
+  "category": "trigger.media",
+  "lang": "en",
+  "text": "When media playback stops, set the media volume to 20%",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "media", "state": "STOPPED"},
+   "actions_include": ["set_volume"],
+   "params": {"set_volume.stream": "MEDIA", "set_volume.level": 20}
+  }
+ },
+ {
+  "id": "phone.missed.it.01",
+  "category": "trigger.phone",
+  "lang": "it",
+  "text": "Quando perdo una chiamata mostrami una notifica 'Chiamata persa' e fai vibrare il telefono",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "phone_state", "event": "MISSED_CALL"},
+   "actions_include": ["show_notification", "vibrate"]
+  }
+ },
+ {
+  "id": "phone.missed.en.01",
+  "category": "trigger.phone",
+  "lang": "en",
+  "text": "When I miss a call on SIM 1, show me a notification saying Missed call on SIM 1",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "phone_state", "event": "MISSED_CALL", "sim": 1},
+   "actions_include": ["show_notification"]
+  }
+ },
+ {
+  "id": "phone.sim.it.01",
+  "category": "trigger.phone",
+  "lang": "it",
+  "text": "Quando ricevo un SMS sulla SIM 2 che contiene 'codice' copia il codice numerico negli appunti",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "phone_state", "event": "SMS_RECEIVED", "sim": 2, "textMatch": {"contains": "codice"}},
+   "actions_include": ["copy_to_clipboard"]
+  }
  }
 ]

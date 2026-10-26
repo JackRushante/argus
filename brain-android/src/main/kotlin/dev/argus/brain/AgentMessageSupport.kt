@@ -520,6 +520,8 @@ BINDING RULES:
     "connectivity.bt" and "connectivity.power" map exactly to the corresponding medium;
     a Wi-Fi SSID match also requires "connectivity.wifi.identity". Sensor triggers are
     "sensor.<kind>" and must be used only if that exact kind appears in the list.
+    "screen", "battery", "audio_output", "mode_changed" and "media" are usable only if listed;
+    "phone_state.call" also covers MISSED_CALL; the SIM filter needs "phone_state.sim".
     A requested trigger that is not in the list must NOT be compiled: briefly point out the
     missing grant or mechanism in Settings and return draft null with error_code
     "unsupported_capability".
@@ -615,9 +617,9 @@ Trigger, discriminated by "type":
 - {"type":"notification", "pkg":string, "conversationId":string|null,
    "sender":string|null, "isGroup":boolean|null, "titleMatch":string|null,
    "textMatch":string|null}
-- {"type":"phone_state", "event":"INCOMING_CALL"|"CALL_ENDED"|"SMS_RECEIVED",
+- {"type":"phone_state", "event":"INCOMING_CALL"|"CALL_ENDED"|"MISSED_CALL"|"SMS_RECEIVED",
    "number":string|null, "textMatch":string|null (case-insensitive contains on the SMS
-   text; ONLY with event SMS_RECEIVED)}
+   text; ONLY with event SMS_RECEIVED), "sim":1|2|null (SIM slot filter; null = any SIM)}
 - {"type":"connectivity", "medium":"WIFI"|"BT"|"POWER",
    "state":"CONNECTED"|"DISCONNECTED", "match":string|null (the EXACT Wi-Fi network name or
    Bluetooth device name the user mentions; null = any network or device)}
@@ -626,6 +628,14 @@ Trigger, discriminated by "type":
    "samplingPeriodUs":null, "maxReportLatencyUs":null}
   minimumEventCount must be 1 for the three motion kinds and 1..100000 for the step kinds. The
   draft's cooldown must be 60000..604800000 ms. Raw sensors and high-rate sampling are not allowed.
+- {"type":"screen", "event":"ON"|"OFF"|"UNLOCKED"}
+- {"type":"battery", "below":integer|null, "above":integer|null}  // EXACTLY one of the two, 1..99:
+  fires once each time the level crosses that threshold ("below 20%" -> below=20)
+- {"type":"audio_output", "kind":"WIRED"|"BLUETOOTH"|"ANY", "state":"CONNECTED"|"DISCONNECTED"}
+  // headphones/earbuds/headset (wired or Bluetooth); never the phone's own speaker
+- {"type":"mode_changed", "what":"DND"|"RINGER", "to":string|null}  // to: DND off|priority|total,
+  RINGER normal|vibrate|silent; null = any change
+- {"type":"media", "state":"PLAYING"|"STOPPED"}  // music/video playback started / finished
 
 Condition, discriminated by "type":
 - {"type":"time_window", "startLocal":"HH:mm", "endLocal":"HH:mm", "tz":string}

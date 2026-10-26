@@ -382,6 +382,7 @@ class ProgramInterpreter(
                         }
                         PhoneEvent.INCOMING_CALL,
                         PhoneEvent.CALL_ENDED,
+                        PhoneEvent.MISSED_CALL,
                         -> if (field == TriggerField.NUMBER) current.number else null
                     }
                 else -> null

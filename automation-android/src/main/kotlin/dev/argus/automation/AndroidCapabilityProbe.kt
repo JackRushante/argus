@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.location.LocationManager
 import android.os.Build
 import android.os.PowerManager
+import android.telephony.TelephonyManager
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.core.location.LocationManagerCompat
@@ -66,6 +67,11 @@ internal data class AndroidCapabilityState(
      * tutti i permessi concessi.
      */
     val locationEnabled: Boolean = true,
+    /**
+     * Il telefono ha più di uno slot SIM / modem (0.4.1): solo allora il filtro SIM di `phone_state`
+     * ha senso e viene pubblicato.
+     */
+    val multiSim: Boolean = false,
 ) {
     /** Permessi di posizione precisi, in primo piano e in background. */
     val locationGranted: Boolean get() = foregroundLocationGranted && backgroundLocationGranted
@@ -133,6 +139,10 @@ internal class SystemAndroidCapabilityStateSource(
             appContext.getSystemService(LocationManager::class.java)
                 ?.let(LocationManagerCompat::isLocationEnabled)
         }.getOrNull() ?: true,
+        multiSim = runCatching {
+            appContext.getSystemService(TelephonyManager::class.java)
+                ?.let { it.supportedModemCount >= 2 || it.activeModemCount >= 2 }
+        }.getOrNull() ?: false,
     )
 
     private fun granted(permission: String): Boolean =
@@ -248,6 +258,16 @@ class AndroidCapabilityProbe internal constructor(
         if (state.bluetoothConnectGranted) add("connectivity.bt")
         add("connectivity.power")
         armableSensorKinds.forEach { add("sensor.${it.wireName}") }
+        // 0.4.1: eventi di sistema senza Shizuku, sempre armabili (receiver dinamici, nessun grant).
+        add("screen")
+        add("battery")
+        add("audio_output")
+        add("mode_changed")
+        add("media")
+        // Il filtro SIM vale solo su un telefono con più slot e dove SMS o chiamate sono armabili.
+        if (state.multiSim && (state.receiveSmsGranted || (state.readPhoneStateGranted && state.readCallLogGranted))) {
+            add("phone_state.sim")
+        }
     }
 
     /**
@@ -353,6 +373,9 @@ class AndroidCapabilityProbe internal constructor(
             if (state.locationUsable) add(CapabilityIds.TRIGGER_GEOFENCE)
             add(CapabilityIds.TRIGGER_CONNECTIVITY_WIFI)
             add(CapabilityIds.TRIGGER_CONNECTIVITY_POWER)
+            // 0.4.1: sorgenti di sistema della sentinella; nessun permesso, sempre pubblicate.
+            addAll(DEVICE_EVENT_TRIGGER_CAPABILITIES)
+            if (state.multiSim) add(CapabilityIds.TRIGGER_PHONE_SIM)
             if (state.bluetoothConnectGranted) add(CapabilityIds.TRIGGER_CONNECTIVITY_BT)
             if (state.locationUsable) add(CapabilityIds.TRIGGER_CONNECTIVITY_WIFI_IDENTITY)
             // Fire-time location conditions use framework LocationManager, not Shizuku.
@@ -526,6 +549,15 @@ class AndroidCapabilityProbe internal constructor(
          */
         val IMPLEMENTED_SENSOR_KINDS: Set<SensorKind> = setOf(SensorKind.SIGNIFICANT_MOTION)
         const val REASON_NOTIFICATION_LISTENER = "notification access not granted"
+
+        /** Trigger di sistema senza Shizuku (0.4.1): schermo, batteria, uscita audio, modalità, media. */
+        val DEVICE_EVENT_TRIGGER_CAPABILITIES: Set<String> = setOf(
+            CapabilityIds.TRIGGER_SCREEN,
+            CapabilityIds.TRIGGER_BATTERY,
+            CapabilityIds.TRIGGER_AUDIO_OUTPUT,
+            CapabilityIds.TRIGGER_MODE_CHANGED,
+            CapabilityIds.TRIGGER_MEDIA,
+        )
 
         /** Prefisso delle capability dei trigger sensore (`trigger.sensor.<kind>`). */
         private const val SENSOR_TRIGGER_PREFIX = "trigger.sensor."

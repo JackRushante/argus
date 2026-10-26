@@ -131,6 +131,22 @@ object ValidationMessages {
         ),
         "number_invalid" to t("The number filter is empty or too long.", "Il filtro numero è vuoto o troppo lungo."),
         "match_invalid" to t("The device filter is empty or too long.", "Il filtro dispositivo è vuoto o troppo lungo."),
+        "sim_invalid" to t(
+            "The SIM filter must be SIM 1 or SIM 2.",
+            "Il filtro SIM deve essere SIM 1 o SIM 2.",
+        ),
+        "battery_spec" to t(
+            "A battery trigger needs exactly one threshold: below or above.",
+            "Un trigger batteria richiede esattamente una soglia: sotto oppure sopra.",
+        ),
+        "battery_threshold_invalid" to t(
+            "The battery threshold must be between 1% and 99%.",
+            "La soglia della batteria deve essere tra 1% e 99%.",
+        ),
+        "mode_to_invalid" to t(
+            "The mode is not valid: Do Not Disturb is off, priority or total; the ringer is normal, vibrate or silent.",
+            "La modalità non è valida: Non disturbare è off, priority o total; la suoneria è normal, vibrate o silent.",
+        ),
         "pkg_blank" to t("The app package is missing.", "Il package dell'app manca."),
         "package_invalid" to t("The app package name is not valid.", "Il nome del package dell'app non è valido."),
         "sensor_event_count_invalid" to t(

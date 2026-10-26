@@ -27,12 +27,16 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 import dev.argus.automation.R
+import dev.argus.automation.triggers.AndroidDeviceEventSources
+import dev.argus.automation.triggers.DeviceEventDemand
+import dev.argus.automation.triggers.DeviceEventIngress
 import dev.argus.engine.model.ConnMedium
 import dev.argus.engine.model.ConnState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
@@ -42,11 +46,17 @@ import kotlinx.coroutines.launch
 internal interface ConnectivitySentinelEntryPoint {
     fun connectivityEventIngress(): ConnectivityEventIngress
     fun connectivitySentinelStatus(): ConnectivitySentinelStatus
+    fun deviceEventIngress(): DeviceEventIngress
+    fun deviceEventDemand(): DeviceEventDemand
 }
 
 /**
  * Unica sentinella persistente per i trigger che Android non può consegnare a processo spento:
  * Wi-Fi (NetworkCallback) e alimentazione (receiver dinamico). Non conserva né logga SSID.
+ *
+ * 0.4.1: ospita anche le sorgenti di eventi di sistema senza Shizuku (schermo, batteria, uscita
+ * audio, modalità, riproduzione), registrate SOLO se una regola armata le richiede
+ * ([DeviceEventDemand]) e tolte quando non servono più, a servizio già acceso.
  */
 class ConnectivitySentinelService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -58,6 +68,10 @@ class ConnectivitySentinelService : Service() {
     private lateinit var connectivityManager: ConnectivityManager
     private var wifiCallback: ConnectivityManager.NetworkCallback? = null
     private var powerReceiverRegistered = false
+    private var deviceSources: AndroidDeviceEventSources? = null
+    private var deviceIngress: DeviceEventIngress? = null
+    private var monitorMarker: ConnectivityMonitorMarker? = null
+    private var deviceDemandJob: Job? = null
     private var lastWifiName: String? = null
     private var startupFailed = false
 
@@ -88,12 +102,17 @@ class ConnectivitySentinelService : Service() {
         ingress = entry.connectivityEventIngress()
         status = entry.connectivitySentinelStatus()
         val monitorMarker = PrefsConnectivityMonitorMarker(applicationContext)
+        this.monitorMarker = monitorMarker
         recoverMissed = monitorMarker.wasActive()
+        val deviceEvents = entry.deviceEventIngress()
+        deviceIngress = deviceEvents
+        val deviceDemand = entry.deviceEventDemand()
 
         try {
             startAsForegroundService()
             registerPowerMonitoring()
             registerWifiMonitoring()
+            startDeviceEventSources(deviceEvents, deviceDemand)
             status.setActive(true)
             monitorMarker.setActive(true)
             Log.i(TAG, "sentinella attiva")
@@ -111,11 +130,22 @@ class ConnectivitySentinelService : Service() {
 
     override fun onDestroy() {
         cleanupRegistrations()
+        // Stop esplicito (marker azzerato dal backend): il livello batteria salvato non vale più.
+        if (monitorMarker?.wasActive() == false) deviceIngress?.stopBatteryObservation()
         if (::status.isInitialized) status.setActive(false)
         scope.cancel()
         stopForeground(STOP_FOREGROUND_REMOVE)
         Log.i(TAG, "sentinella arrestata")
         super.onDestroy()
+    }
+
+    /** Segue la domanda: registra le sorgenti richieste (anche dopo l'avvio) e toglie le altre. */
+    private fun startDeviceEventSources(ingress: DeviceEventIngress, demand: DeviceEventDemand) {
+        val sources = AndroidDeviceEventSources(this, ingress, scope, recoverMissed)
+        deviceSources = sources
+        deviceDemandJob = scope.launch {
+            demand.sources.collect { required -> sources.apply(required) }
+        }
     }
 
     private fun startAsForegroundService() {
@@ -362,6 +392,10 @@ class ConnectivitySentinelService : Service() {
     }
 
     private fun cleanupRegistrations() {
+        deviceDemandJob?.cancel()
+        deviceDemandJob = null
+        deviceSources?.let { sources -> runCatching { sources.close() } }
+        deviceSources = null
         wifiCallback?.let { callback ->
             runCatching { connectivityManager.unregisterNetworkCallback(callback) }
         }

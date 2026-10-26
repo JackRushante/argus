@@ -2,9 +2,13 @@
 package dev.argus.engine.runtime
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.ApprovalFingerprint
+import dev.argus.engine.model.AudioOutputKind
 import dev.argus.engine.model.ConnMedium
 import dev.argus.engine.model.ConnState
+import dev.argus.engine.model.MediaPlayState
+import dev.argus.engine.model.ModeKind
 import dev.argus.engine.model.PhoneEvent
+import dev.argus.engine.model.ScreenEvent
 import dev.argus.engine.model.SensorKind
 import dev.argus.engine.model.Transition
 
@@ -59,6 +63,26 @@ sealed interface TriggerEvent {
         /** Testo SMS VOLATILE: vive in RAM per la durata del dispatch (serve all'azione
          *  clipboard P2-3). MAI persistito, MAI loggato, MAI in chiaro nell'event id. */
         val smsText: String? = null,
+        /**
+         * Slot SIM 1|2 da cui arriva l'evento (0.4.1), `null` = non determinabile. Una regola con
+         * filtro `sim` NON scatta se qui è null (fail-closed).
+         */
+        val sim: Int? = null,
     ) : TriggerEvent
     data class ConnectivityChanged(val medium: ConnMedium, val state: ConnState, val name: String?) : TriggerEvent
+
+    // --- 0.4.1: trigger senza Shizuku. Nessun dato personale: solo valori di sistema ridotti. ---
+
+    data class ScreenChanged(val event: ScreenEvent) : TriggerEvent
+
+    /** Cambio di livello batteria: il matcher decide se la soglia è stata ATTRAVERSATA. */
+    data class BatteryLevelChanged(val previous: Int, val current: Int) : TriggerEvent
+
+    /** [kind] è WIRED o BLUETOOTH (mai ANY): ANY esiste solo come filtro del trigger. */
+    data class AudioOutputChanged(val kind: AudioOutputKind, val state: ConnState) : TriggerEvent
+
+    /** [to] e [from] usano i valori di `StateKeys`; [from] null = valore precedente non noto. */
+    data class DeviceModeChanged(val what: ModeKind, val to: String, val from: String?) : TriggerEvent
+
+    data class MediaPlaybackChanged(val state: MediaPlayState) : TriggerEvent
 }

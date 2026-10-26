@@ -42,6 +42,12 @@ object PersonalDataStripper {
         Trigger.Immediate,
         is Trigger.Connectivity,
         is Trigger.Sensor,
+        // 0.4.1: nessun dato personale (stato di sistema, soglie, slot SIM).
+        is Trigger.Screen,
+        is Trigger.Battery,
+        is Trigger.AudioOutput,
+        is Trigger.ModeChanged,
+        is Trigger.Media,
         -> trigger
     }
 

@@ -303,6 +303,9 @@ object RuleRenderMapper {
         is Trigger.PhoneState -> "phone"
         is Trigger.Connectivity -> "connectivity"
         is Trigger.Sensor -> "sensor"
+        is Trigger.Screen, is Trigger.Battery, is Trigger.AudioOutput, is Trigger.ModeChanged,
+        is Trigger.Media,
+        -> DeviceTriggerRender.iconKey(t)
     }
 
     private fun triggerLine(t: Trigger, conversationLabels: Map<String, String>, l: RenderLanguage): String = when (t) {
@@ -313,6 +316,9 @@ object RuleRenderMapper {
         is Trigger.PhoneState -> phoneStateLine(t, l)
         is Trigger.Connectivity -> connectivityLine(t, l)
         is Trigger.Sensor -> sensorLine(t, l)
+        is Trigger.Screen, is Trigger.Battery, is Trigger.AudioOutput, is Trigger.ModeChanged,
+        is Trigger.Media,
+        -> DeviceTriggerRender.line(t, l)
     }
 
     /** Prefisso "Quando: "/"When: " condiviso con chi deriva il sommario lista (UiStateMappers). */
@@ -455,11 +461,13 @@ object RuleRenderMapper {
             PhoneEvent.INCOMING_CALL -> l.pick("incoming call", "chiamata in arrivo")
             PhoneEvent.CALL_ENDED -> l.pick("call ended", "chiamata terminata")
             PhoneEvent.SMS_RECEIVED -> l.pick("SMS received", "SMS ricevuto")
+            PhoneEvent.MISSED_CALL -> l.pick("missed call", "chiamata persa")
         }
         val from = t.number?.let { l.pick("from $it", "da $it") } ?: l.pick("from anyone", "da chiunque")
         // §5: i filtri che restringono il match restano visibili integrali in review.
         val text = t.textMatch?.let { l.pick(" · text \"$it\"", " · testo \"$it\"") } ?: ""
-        return "${whenPrefix(l)}$event $from$text"
+        val sim = t.sim?.let { " · SIM $it" } ?: ""
+        return "${whenPrefix(l)}$event $from$text$sim"
     }
 
     private fun connectivityLine(t: Trigger.Connectivity, l: RenderLanguage): String {

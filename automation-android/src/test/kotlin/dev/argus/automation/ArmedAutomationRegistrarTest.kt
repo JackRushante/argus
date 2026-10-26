@@ -185,6 +185,70 @@ class ArmedAutomationRegistrarTest {
     }
 
     @Test
+    fun `system triggers need their own capability and an active sentinel`() = runTest {
+        val screen = signed(
+            rule("screen").copy(
+                trigger = Trigger.Screen(dev.argus.engine.model.ScreenEvent.UNLOCKED),
+                actions = listOf(Action.ShowNotification("Argus", "screen")),
+            ),
+        )
+        val activeRuntime = ConnectivityTriggerRuntime {
+            ConnectivityReconcileReport(requiredBy = listOf(screen.id), active = true)
+        }
+        assertTrue(
+            registrar(
+                store = SingleRuleStore(screen),
+                capabilities = setOf(CapabilityIds.TRIGGER_SCREEN),
+                connectivity = activeRuntime,
+            ).register(screen),
+        )
+        // Capability non pubblicata: non si arma.
+        assertFalse(
+            registrar(
+                store = SingleRuleStore(screen),
+                capabilities = emptySet(),
+                connectivity = activeRuntime,
+            ).register(screen),
+        )
+        // Sentinella non attiva (servizio negato) o regola non tra quelle servite: non si arma.
+        assertFalse(
+            registrar(
+                store = SingleRuleStore(screen),
+                capabilities = setOf(CapabilityIds.TRIGGER_SCREEN),
+                connectivity = ConnectivityTriggerRuntime {
+                    ConnectivityReconcileReport(requiredBy = listOf(screen.id), active = false)
+                },
+            ).register(screen),
+        )
+        assertFalse(
+            registrar(
+                store = SingleRuleStore(screen),
+                capabilities = setOf(CapabilityIds.TRIGGER_SCREEN),
+                connectivity = ConnectivityTriggerRuntime {
+                    ConnectivityReconcileReport(requiredBy = emptyList(), active = true)
+                },
+            ).register(screen),
+        )
+
+        val battery = signed(
+            rule("battery").copy(
+                trigger = Trigger.Battery(below = 20),
+                actions = listOf(Action.ShowNotification("Argus", "battery")),
+            ),
+        )
+        assertFalse(
+            registrar(
+                store = SingleRuleStore(battery),
+                // La capability di un altro trigger di sistema non basta.
+                capabilities = setOf(CapabilityIds.TRIGGER_SCREEN),
+                connectivity = ConnectivityTriggerRuntime {
+                    ConnectivityReconcileReport(requiredBy = listOf(battery.id), active = true)
+                },
+            ).register(battery),
+        )
+    }
+
+    @Test
     fun `time rule still registers through the alarm coordinator`() = runTest {
         val rule = signed(
             rule("time").copy(

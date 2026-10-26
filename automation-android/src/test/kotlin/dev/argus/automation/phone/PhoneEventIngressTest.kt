@@ -49,10 +49,86 @@ class PhoneEventIngressTest {
         ingress.onCallStateChanged("IDLE", number = null, atMillis = 2_000L)
 
         val events = dispatched.map { it.event }.filterIsInstance<TriggerEvent.PhoneStateChanged>()
-        assertEquals(listOf(PhoneEvent.INCOMING_CALL, PhoneEvent.CALL_ENDED), events.map { it.event })
+        // 0.4.1: uno squillo senza risposta produce anche MISSED_CALL, dopo CALL_ENDED (invariato).
+        assertEquals(
+            listOf(PhoneEvent.INCOMING_CALL, PhoneEvent.CALL_ENDED, PhoneEvent.MISSED_CALL),
+            events.map { it.event },
+        )
         assertEquals("3932077480", events.first().number)
+        assertEquals("3932077480", events[1].number)
         assertEquals("3932077480", events.last().number)
         assertNull(events.last().smsText)
+    }
+
+    @Test
+    fun `an answered call never produces a missed call`() = runTest {
+        ingress.onCallStateChanged("RINGING", number = "3932077480", atMillis = 1_000L)
+        ingress.onCallStateChanged("OFFHOOK", number = null, atMillis = 2_000L)
+        ingress.onCallStateChanged("IDLE", number = null, atMillis = 9_000L)
+
+        val events = dispatched.map { (it.event as TriggerEvent.PhoneStateChanged).event }
+        assertEquals(listOf(PhoneEvent.INCOMING_CALL, PhoneEvent.CALL_ENDED), events)
+    }
+
+    @Test
+    fun `an outgoing call never produces a missed call`() = runTest {
+        ingress.onCallStateChanged("OFFHOOK", number = null, atMillis = 1_000L)
+        ingress.onCallStateChanged("IDLE", number = null, atMillis = 9_000L)
+
+        val events = dispatched.map { (it.event as TriggerEvent.PhoneStateChanged).event }
+        assertEquals(listOf(PhoneEvent.CALL_ENDED), events)
+    }
+
+    @Test
+    fun `the missed call keeps its own identity and carries the number`() = runTest {
+        ingress.onCallStateChanged("RINGING", number = "3932077480", atMillis = 1_000L)
+        ingress.onCallStateChanged("IDLE", number = null, atMillis = 2_000L)
+
+        val ended = dispatched.single { (it.event as TriggerEvent.PhoneStateChanged).event == PhoneEvent.CALL_ENDED }
+        val missed = dispatched.single { (it.event as TriggerEvent.PhoneStateChanged).event == PhoneEvent.MISSED_CALL }
+        assertTrue(ended.id != missed.id)
+        assertEquals("3932077480", (missed.event as TriggerEvent.PhoneStateChanged).number)
+        assertNull(callState.pending())
+    }
+
+    @Test
+    fun `the sms slot reaches the event and an unknown slot stays unknown`() = runTest {
+        ingress.onSms(listOf(SmsPart("+39001", "uno", 1_000L)), sim = 2)
+        ingress.onSms(listOf(SmsPart("+39002", "due", 2_000L)))
+
+        val events = dispatched.map { it.event as TriggerEvent.PhoneStateChanged }
+        assertEquals(2, events[0].sim)
+        assertNull(events[1].sim)
+    }
+
+    @Test
+    fun `the call slot is carried from ringing to call ended and missed call`() = runTest {
+        ingress.onCallStateChanged("RINGING", number = "3932077480", atMillis = 1_000L, sim = 1)
+        ingress.onCallStateChanged("IDLE", number = null, atMillis = 2_000L, sim = 1)
+
+        assertEquals(listOf<Int?>(1, 1, 1), dispatched.map { (it.event as TriggerEvent.PhoneStateChanged).sim })
+        // A chiamata chiusa lo slot non resta salvato.
+        assertNull(callState.last()?.sim)
+    }
+
+    @Test
+    fun `the slot is retained across the call even when the closing broadcast does not carry it`() =
+        runTest {
+            ingress.onCallStateChanged("RINGING", number = "3932077480", atMillis = 1_000L, sim = 2)
+            ingress.onCallStateChanged("IDLE", number = null, atMillis = 2_000L, sim = null)
+
+            assertEquals(2, (dispatched.last().event as TriggerEvent.PhoneStateChanged).sim)
+        }
+
+    @Test
+    fun `a ringing broadcast that gains the slot later is re-emitted with the same identity`() = runTest {
+        ingress.onCallStateChanged("RINGING", number = "3932077480", atMillis = 1_000L, sim = null)
+        ingress.onCallStateChanged("RINGING", number = "3932077480", atMillis = 1_050L, sim = 2)
+
+        assertEquals(2, dispatched.size)
+        assertEquals(dispatched[0].id, dispatched[1].id)
+        assertNull((dispatched[0].event as TriggerEvent.PhoneStateChanged).sim)
+        assertEquals(2, (dispatched[1].event as TriggerEvent.PhoneStateChanged).sim)
     }
 
     @Test
@@ -81,7 +157,12 @@ class PhoneEventIngressTest {
 
         val events = dispatched.map { it.event as TriggerEvent.PhoneStateChanged }
         assertEquals(
-            listOf(PhoneEvent.INCOMING_CALL, PhoneEvent.INCOMING_CALL, PhoneEvent.CALL_ENDED),
+            listOf(
+                PhoneEvent.INCOMING_CALL,
+                PhoneEvent.INCOMING_CALL,
+                PhoneEvent.CALL_ENDED,
+                PhoneEvent.MISSED_CALL,
+            ),
             events.map { it.event },
         )
         assertNull(events[0].number)
@@ -164,7 +245,10 @@ class PhoneEventIngressTest {
             release.complete(Unit)
             ringing.await()
             idle.await()
-            assertEquals(listOf(PhoneEvent.INCOMING_CALL, PhoneEvent.CALL_ENDED), seen)
+            assertEquals(
+                listOf(PhoneEvent.INCOMING_CALL, PhoneEvent.CALL_ENDED, PhoneEvent.MISSED_CALL),
+                seen,
+            )
             assertNull(callState.pending())
         }
 
