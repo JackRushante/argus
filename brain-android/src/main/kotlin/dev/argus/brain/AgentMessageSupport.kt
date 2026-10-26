@@ -543,7 +543,8 @@ BINDING RULES:
 13. state_compare conditions are only available in schema v2. Use exclusively a family listed
     in manifest.state_readers.families and honor the manifest's policy_version/limits. If the
     family or the threshold's unit is missing, ask for clarification: do not retrofit
-    state_compare into state_equals and do not use /chat.
+    state_compare into state_equals and do not use /chat. Exception: a battery threshold always
+    uses state_equals on "battery" (see the Condition schema).
 14. invoke_llm.allowedTools may include "web.search" alongside "whatsapp_reply" ONLY when the
     goal requires up-to-date data from the web (currency exchange, weather, prices, news,
     schedules): do not add it if the data is not online/live. "web.search" must appear in
@@ -641,6 +642,8 @@ Condition, discriminated by "type":
 - {"type":"time_window", "startLocal":"HH:mm", "endLocal":"HH:mm", "tz":string}
 - {"type":"state_equals", "key":string, "op":"EQ"|"NEQ"|"GT"|"LT"|"CONTAINS",
    "value":string}
+  A battery threshold ("below 30%", "above 80%") is state_equals with key "battery", op "LT" or
+  "GT" and the bare number as value: it needs no state reader family.
 - {"type":"app_in_foreground", "pkg":string}
 - {"type":"location_in", "lat":number, "lng":number, "radiusM":number}
 - {"type":"and", "all":[Condition,...]}

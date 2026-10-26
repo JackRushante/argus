@@ -1722,5 +1722,35 @@
    "trigger": {"type": "phone_state", "event": "SMS_RECEIVED", "sim": 2, "textMatch": {"contains": "codice"}},
    "actions_include": ["copy_to_clipboard"]
   }
+ },
+ {
+  "id": "noshizuku.battery.en.01",
+  "category": "no_shizuku",
+  "lang": "en",
+  "text": "Every day at 9 PM remind me to charge the phone, but only if the battery is below 30%",
+  "manifest": "no_shizuku",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "time", "cron": {"present": true}},
+   "actions_include": ["show_notification"],
+   "conditions_include": ["state_equals"],
+   "conditions_text": ["battery", "\\b30\\b"]
+  },
+  "note": "0.4.0: senza Shizuku la batteria si legge con le API pubbliche; la soglia va con state_equals LT, non con state_compare (solo Shizuku)"
+ },
+ {
+  "id": "noshizuku.battery.it.01",
+  "category": "no_shizuku",
+  "lang": "it",
+  "text": "Ogni sera alle 22 ricordami di mettere in carica il telefono, ma solo se la batteria è sotto il 25%",
+  "manifest": "no_shizuku",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "time", "cron": {"present": true}},
+   "actions_include": ["show_notification"],
+   "conditions_include": ["state_equals"],
+   "conditions_text": ["battery", "\\b25\\b"]
+  },
+  "note": "0.4.0: senza Shizuku la batteria si legge con le API pubbliche; la soglia va con state_equals LT, non con state_compare (solo Shizuku)"
  }
 ]

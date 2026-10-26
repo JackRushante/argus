@@ -35,5 +35,11 @@ fun iconFor(key: String): ImageVector = when (key) {
     "input_text" -> Icons.Rounded.Keyboard
     "whatsapp_reply" -> Icons.AutoMirrored.Rounded.Reply
     "control_flow" -> Icons.Rounded.AccountTree // P4: if/while/wait — nodi di flusso
+    // Trigger del telefono senza Shizuku (0.4.1).
+    "screen" -> Icons.Rounded.Smartphone
+    "battery" -> Icons.Rounded.BatteryStd
+    "audio_output" -> Icons.Rounded.Headphones
+    "mode_changed" -> Icons.Rounded.Tune
+    "media" -> Icons.Rounded.MusicNote
     else -> Icons.Rounded.Bolt
 }

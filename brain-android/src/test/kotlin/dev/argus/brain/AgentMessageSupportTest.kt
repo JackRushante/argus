@@ -573,4 +573,15 @@ class AgentMessageSupportTest {
         assertEquals("Battery at 73%: all good, a*b*c.", AgentMessageSupport.cleanReply("Battery at 73%: all good, a*b*c."))
         assertEquals("See https://example.org", AgentMessageSupport.cleanReply("See https://example.org"))
     }
+    @Test
+    fun `battery thresholds are written as state_equals so they work without Shizuku`() {
+        val system = AgentMessageSupport.compileSystemText().lines().joinToString(" ") { it.trim() }
+
+        // Senza Shizuku il modello sceglieva state_compare (lettori, solo Shizuku) e rifiutava la regola.
+        assertTrue("Exception: a battery threshold always uses state_equals on \"battery\" (see the Condition schema)." in system)
+        assertTrue(
+            "A battery threshold (\"below 30%\", \"above 80%\") is state_equals with key \"battery\", op \"LT\" or " +
+                "\"GT\" and the bare number as value: it needs no state reader family." in system,
+        )
+    }
 }

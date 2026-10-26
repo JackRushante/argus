@@ -83,6 +83,10 @@ internal object LogReasonLabels {
             "required state unavailable",
             "stato necessario non disponibile",
         ),
+        "sim_unknown" to Label(
+            "the SIM of the call or SMS could not be determined",
+            "non è stato possibile capire la SIM della chiamata o dell'SMS",
+        ),
         "variable_unavailable" to Label("a variable has no value", "una variabile non ha valore"),
         "interpolation_policy_missing" to Label(
             "a text template has no approved policy",
