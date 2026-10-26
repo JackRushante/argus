@@ -211,7 +211,8 @@ AutomationDraft JSON (names and casing are exact):
 Trigger, discriminated by "type":
 - {"type":"time", "cron":string|null, "at":string|null, "afterMs":integer|null,
    "tz":string, "precision":"FLEXIBLE"|"EXACT"}
-  Exactly one of cron, at and afterMs. at is local ISO, e.g. 2026-07-15T23:00.
+  Exactly one of cron, at and afterMs. cron is a standard 5-field expression "minute hour day-of-month month day-of-week" (no seconds), e.g. "30 22 * * *".
+  at is local ISO, e.g. 2026-07-15T23:00.
   afterMs is a RELATIVE delay in milliseconds (one-shot): it fires once afterMs
   after the rule is activated and RESTARTS on every re-activation (for "in N").
   Omit precision or use FLEXIBLE normally; EXACT only if the user explicitly
@@ -229,7 +230,8 @@ Trigger, discriminated by "type":
    "number":string|null, "textMatch":string|null (case-insensitive contains on the SMS
    text; ONLY with event SMS_RECEIVED)}
 - {"type":"connectivity", "medium":"WIFI"|"BT"|"POWER",
-   "state":"CONNECTED"|"DISCONNECTED", "match":string|null}
+   "state":"CONNECTED"|"DISCONNECTED", "match":string|null (the EXACT Wi-Fi network name or
+   Bluetooth device name the user mentions; null = any network or device)}
 - {"type":"sensor", "kind":"significant_motion"|"stationary_detect"|"motion_detect"|
    "step_detector"|"step_counter", "minimumEventCount":integer,
    "samplingPeriodUs":null, "maxReportLatencyUs":null}
@@ -252,7 +254,7 @@ Action, discriminated by "type":
 - {"type":"set_mobile_data", "on":boolean}  // toggles mobile data; requires Shizuku (appears in
   available_tools only when available), like set_wifi/set_bluetooth
 - {"type":"set_dnd", "mode":"OFF"|"PRIORITY"|"TOTAL"}
-- {"type":"set_ringer", "mode":string}
+- {"type":"set_ringer", "mode":"normal"|"vibrate"|"silent"}
 - {"type":"launch_app", "pkg":string}
 - {"type":"open_url", "url":string}
 - {"type":"show_notification", "title":string, "text":string}
@@ -364,6 +366,10 @@ runtime data out of your own system prompt, so branch on and use these values as
 hard limits remain and are NOT about this: run_shell stays gated to whitelisted 1:1 WhatsApp senders
 (rule 11), and no eval / no actions are ever created at runtime. v1 flat rules keep exactly the
 meaning and bytes described above.
+Branching on message text: for "if the SMS (or notification) contains X then A else B" declare
+vars [{"type":"trigger_payload","name":"sms_text","field":"TEXT","extractionRegex":null,"confidentiality":"PRIVATE"}]
+and use an if whose condition is {"type":"var_compare","varName":"sms_text","op":"CONTAINS","expected":"X"}
+(then = A, orElse = B).
 """.strip()
 
 
