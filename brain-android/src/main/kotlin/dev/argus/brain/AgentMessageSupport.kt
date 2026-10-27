@@ -553,7 +553,8 @@ BINDING RULES:
     timeoutMs=120000 (web search is slow).
 15. Choosing the time TRIGGER (fundamental: distinguish immediate, relative delay and absolute instant):
     - "immediate" ONLY for "run NOW / as soon as I activate it" (right away/now), ZERO delay:
-      it runs once on activation. NEVER use it for a delay or a recurrence.
+      it runs once on activation. NEVER use it for a delay or a recurrence. A request with no trigger
+      at all ("flip a coin and…", "vibrate three times") is also "immediate", never "manual".
     - "time" with "afterMs" for a one-shot RELATIVE DELAY: "in N minutes/hours/days" -> afterMs = N
       converted to MILLISECONDS (e.g. "in 2 minutes" -> afterMs=120000). It is anchored to activation and
       RESTARTS on every re-arm (disarm/re-arm -> the countdown starts over). Do NOT use "at" for "in N".
