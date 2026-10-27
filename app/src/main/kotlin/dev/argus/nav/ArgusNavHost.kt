@@ -95,6 +95,7 @@ import dev.argus.ui.components.shellPrivilegeOf
 import dev.argus.ui.model.AutomationDetailCallbacks
 import dev.argus.ui.model.AutomationListCallbacks
 import dev.argus.ui.model.ChatCallbacks
+import dev.argus.ui.model.PermanentGrantUi
 import dev.argus.ui.model.ContactRow
 import dev.argus.ui.model.ExecutionLogCallbacks
 import dev.argus.ui.model.OnboardingCallbacks
@@ -585,6 +586,10 @@ fun ArgusNavHost() {
                             }
                             override fun onSetAutomationsPaused(paused: Boolean) =
                                 settingsViewModel.setAutomationsPaused(paused)
+                            override fun onSetRootEnabled(enabled: Boolean) =
+                                settingsViewModel.setRootEnabled(enabled)
+                            override fun onGrantPermanent(grants: Set<PermanentGrantUi>) =
+                                settingsViewModel.grantPermanent(grants)
                             override fun onRevokePrivacy() = settingsViewModel.revokePrivacy()
                             override fun onRerunOnboarding() {
                                 navController.navigate(Routes.ONBOARDING)

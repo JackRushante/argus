@@ -64,6 +64,7 @@ import dev.argus.engine.safety.DraftWriteResult
 import dev.argus.engine.safety.DraftArmResult
 import dev.argus.engine.safety.NewDraft
 import dev.argus.engine.safety.PendingDraft
+import dev.argus.shizuku.RootState
 import dev.argus.shizuku.ShizukuAccess
 import dev.argus.shizuku.ShizukuGateway
 import dev.argus.shizuku.ShizukuGatewayStatus
@@ -890,6 +891,7 @@ class SettingsViewModelTest {
         automations: AutomationStore = FakeAutomationStore(),
         rulesBackup: RulesBackup = FakeRulesBackup(),
         pause: FakePauseStore = FakePauseStore(),
+        privileged: dev.argus.automation.privileged.PrivilegedAccessCenter? = null,
     ): SettingsViewModel {
         val brain = ConfiguredBridgeBrain(store, privacyAccepted = { true }, factory = transportFactory)
         val preferences = FakePreferences(privacyAccepted = true)
@@ -919,8 +921,136 @@ class SettingsViewModelTest {
             installInfo = installInfo,
             rulesBackup = rulesBackup,
             pause = pause,
+            privileged = privileged,
         )
     }
+
+    // ------------------------------------------------------------------ 0.5.0: privilegi
+
+    private class FakeRoot(
+        private val onEnable: RootState = RootState.ACTIVE,
+        initial: RootState = RootState.OFF,
+    ) : dev.argus.shizuku.RootAccess {
+        val state = MutableStateFlow(initial)
+        override fun observeState() = state
+        override fun isEnabled() = state.value != RootState.OFF
+        override suspend fun setEnabled(enabled: Boolean): RootState {
+            state.value = if (enabled) onEnable else RootState.OFF
+            return state.value
+        }
+
+        override suspend fun verify() = state.value
+    }
+
+    private class CountingShell : dev.argus.shizuku.PrivilegedShell {
+        val commands = mutableListOf<List<String>>()
+        override suspend fun run(
+            command: List<String>,
+            priority: Int,
+            timeoutMillis: Long,
+            maxOutputBytes: Int,
+            executionId: String?,
+        ): dev.argus.shizuku.ShellResult {
+            commands += command
+            return dev.argus.shizuku.ShellResult(0)
+        }
+
+        override suspend fun runToFile(
+            command: List<String>,
+            destination: java.io.File,
+            priority: Int,
+            timeoutMillis: Long,
+            maxOutputBytes: Int,
+            executionId: String?,
+        ) = run(command)
+    }
+
+    private fun center(
+        shizuku: ShizukuAccess,
+        root: dev.argus.shizuku.RootAccess,
+        shell: CountingShell = CountingShell(),
+    ) = dev.argus.automation.privileged.PrivilegedAccessCenter(
+        shizuku,
+        root,
+        dev.argus.device.PermanentGrantsController(shell, "dev.argus"),
+        { dev.argus.device.PermanentGrant.entries.associateWith { false } },
+    )
+
+    @Test
+    fun `the privileges section follows the backend and root su shows the root warning`() = runTest(dispatcher) {
+        val shizuku = FakeShizukuAccess(ShizukuGatewayStatus.INSTALLED_NOT_RUNNING)
+        val root = FakeRoot()
+        val vm = settingsViewModel(FakeProviderStore(), shizuku = shizuku, privileged = center(shizuku, root))
+        observe(vm)
+        advanceUntilIdle()
+        assertEquals(dev.argus.ui.model.PrivilegedBackendUi.NONE, vm.state.value.privileged.backend)
+        assertEquals(4, vm.state.value.privileged.grants.size)
+        assertEquals(false, vm.state.value.privileged.canGrant)
+        assertNull(vm.state.value.shizukuRunsAsRoot)
+
+        root.state.value = RootState.ACTIVE
+        advanceUntilIdle()
+        assertEquals(dev.argus.ui.model.PrivilegedBackendUi.ROOT, vm.state.value.privileged.backend)
+        assertEquals(true, vm.state.value.privileged.canGrant)
+        assertEquals(true, vm.state.value.shizukuRunsAsRoot)
+
+        // Con Shizuku autorizzato come adb, Shizuku ha la precedenza: i comandi girano come shell.
+        shizuku.setStatus(ShizukuGatewayStatus.AUTHORIZED)
+        shizuku.setIdentity(ShizukuIdentity(uid = 2000))
+        advanceUntilIdle()
+        assertEquals(dev.argus.ui.model.PrivilegedBackendUi.SHIZUKU_SHELL, vm.state.value.privileged.backend)
+        assertEquals(false, vm.state.value.shizukuRunsAsRoot)
+    }
+
+    @Test
+    fun `turning root on reports the outcome and turning it off stays quiet`() = runTest(dispatcher) {
+        val shizuku = FakeShizukuAccess(ShizukuGatewayStatus.NOT_INSTALLED)
+        val root = FakeRoot(onEnable = RootState.DENIED)
+        val vm = settingsViewModel(FakeProviderStore(), shizuku = shizuku, privileged = center(shizuku, root))
+        observe(vm)
+        val messages = collectMessages(vm)
+        advanceUntilIdle()
+
+        vm.setRootEnabled(true)
+        advanceUntilIdle()
+        assertEquals(dev.argus.ui.model.RootStateUi.DENIED, vm.state.value.privileged.rootState)
+        assertEquals(1, messages.size)
+        assertEquals(true, messages.single().contains("gestore root"))
+
+        vm.setRootEnabled(false)
+        advanceUntilIdle()
+        assertEquals(dev.argus.ui.model.RootStateUi.OFF, vm.state.value.privileged.rootState)
+        assertEquals(1, messages.size)
+    }
+
+    @Test
+    fun `granting permanent permissions runs only the ticked ones and says when there is no backend`() =
+        runTest(dispatcher) {
+            val shizuku = FakeShizukuAccess(ShizukuGatewayStatus.NOT_INSTALLED)
+            val shell = CountingShell()
+            val vm = settingsViewModel(
+                FakeProviderStore(),
+                shizuku = shizuku,
+                privileged = center(shizuku, FakeRoot(), shell),
+            )
+            observe(vm)
+            val messages = collectMessages(vm)
+            advanceUntilIdle()
+
+            vm.grantPermanent(setOf(dev.argus.ui.model.PermanentGrantUi.USAGE_STATS))
+            advanceUntilIdle()
+            assertEquals(emptyList(), shell.commands)
+            assertEquals(listOf("Nessun backend privilegiato disponibile: avvia Shizuku o accendi il root."), messages)
+
+            shizuku.setStatus(ShizukuGatewayStatus.AUTHORIZED)
+            shizuku.setIdentity(ShizukuIdentity(uid = 2000))
+            vm.grantPermanent(setOf(dev.argus.ui.model.PermanentGrantUi.USAGE_STATS))
+            advanceUntilIdle()
+            assertEquals(
+                listOf(listOf("appops", "set", "dev.argus", "GET_USAGE_STATS", "allow")),
+                shell.commands,
+            )
+        }
 
     // ------------------------------------------------------------------ 0.3.6 voce 1: il test spiega la causa
 

@@ -25,6 +25,8 @@ import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.safety.DraftId
 import dev.argus.engine.safety.DraftRepository
 import dev.argus.engine.safety.PendingDraft
+import dev.argus.shizuku.RootAccess
+import dev.argus.shizuku.RootState
 import dev.argus.shizuku.ShizukuGateway
 import dev.argus.shizuku.ShizukuGatewayStatus
 import dev.argus.ui.model.AutomationListState
@@ -34,6 +36,7 @@ import dev.argus.ui.model.StatusBadge
 import dev.argus.ui.model.StatusFilter
 import dev.argus.ui.presentation.RenderLanguage
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -73,7 +76,20 @@ class AutomationListViewModel @Inject constructor(
     private val languageSource: RenderLanguageSource,
     /** F21: "Pausa automazioni". Il banner della lista lo mostra e "Riprendi" lo spegne. */
     private val pause: AutomationPauseStore,
+    /**
+     * 0.5.0: backend root. Con root attivo e verificato le regole «solo Shizuku» funzionano, quindi il
+     * banner «Shizuku non attivo» non va mostrato. `null` solo nei test che non lo provano.
+     */
+    rootAccess: RootAccess? = null,
 ) : ViewModel() {
+    private val shizukuOrRootStatus: Flow<ShizukuGatewayStatus> = if (rootAccess == null) {
+        shizuku.observeStatus()
+    } else {
+        combine(shizuku.observeStatus(), rootAccess.observeState()) { status, root ->
+            if (root == RootState.ACTIVE) ShizukuGatewayStatus.AUTHORIZED else status
+        }
+    }
+
     private val filter = savedStateHandle.getStateFlow(FILTER_KEY, StatusFilter.ALL)
     private val mutableMessages = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val messages = mutableMessages.asSharedFlow()
@@ -108,7 +124,7 @@ class AutomationListViewModel @Inject constructor(
                 },
                 drafts.observeAll(),
                 filter,
-                shizuku.observeStatus(),
+                shizukuOrRootStatus,
                 database.automationDao().observeUiMetadata(),
             ) { (automations, conversationLabels, language, alarms), pending, activeFilter, shizukuStatus, metadata ->
                 listState(

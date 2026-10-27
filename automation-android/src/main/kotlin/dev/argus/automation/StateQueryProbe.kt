@@ -28,8 +28,12 @@ class AndroidStateQueryProbe internal constructor(
     constructor(
         gateway: ShizukuGateway,
         reader: ParametricStateReader,
+        /** 0.5.0: root `su` attivo e verificato: per questo probe vale come Shizuku autorizzato. */
+        rootActive: () -> Boolean = { false },
     ) : this(
-        shizukuStatus = gateway::status,
+        shizukuStatus = {
+            if (runCatching(rootActive).getOrDefault(false)) ShizukuGatewayStatus.AUTHORIZED else gateway.status()
+        },
         readValues = { request ->
             reader.read(setOf(request.query))[request.query.canonicalId]
         },
