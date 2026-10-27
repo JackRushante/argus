@@ -73,7 +73,8 @@ The project's current philosophy is **Tasker-class power with explicit, reviewab
   and timers, opening apps, links and Settings screens, the clipboard, reading a text aloud, media keys,
   brightness and auto-rotate, HTTP requests, WhatsApp replies (also written by the AI at fire time); with
   Shizuku also Wi-Fi, Bluetooth and mobile data, dark mode, any setting and shell commands.
-- Rules can use variables, `if`, bounded `while` loops and waits, and one switch pauses every rule.
+- Rules can use variables (also the current time and date in any time zone), `if`, bounded `while`
+  loops and waits, and one switch pauses every rule.
 
 ---
 
@@ -175,7 +176,8 @@ Fail-closed semantics: an unreadable state is `UNKNOWN` and the condition fails 
 ### P4 variables and structured flow
 
 Schema-v2 rules can bind up to 16 typed values from literals, trigger payloads, approved device-state
-readers, engine-generated `random_int`, and captured shell/model output. They support nested `if`,
+readers, engine-generated `random_int`, the current time (`clock`, with a time zone and a format) and
+captured shell/model output. They support nested `if`,
 bounded `while` (literal or variable iteration count, clamped to 1–1000), and cooperative `wait`,
 with at most 64 action nodes, flow depth 4 and a hard six-hour runtime budget. Values carry integrity,
 confidentiality and provenance labels; only their rendered values change at runtime—the approved
@@ -300,6 +302,7 @@ Argus degrades explicitly: the onboarding shows an honest list of what depends o
 | "Do Not Disturb" access | `set_dnd`, muting via volume | DND rules |
 | "Modify system settings" (`WRITE_SETTINGS`) | `set_brightness`, `set_rotation` | brightness and rotation rules ("Fix" in System) |
 | Battery optimization exemption | reliability on aggressive OEMs | recommended |
+| Write secure settings (`WRITE_SECURE_SETTINGS`), usage access (`PACKAGE_USAGE_STATS`) | `write_setting` on SECURE/GLOBAL and the foreground-app condition without Shizuku | granted once with Shizuku, root or Sui: System → "Grant permanent permissions" |
 
 ### With and without Shizuku
 
@@ -307,7 +310,12 @@ Argus degrades explicitly: the onboarding shows an honest list of what depends o
 |---|---|
 | **Base (no Shizuku)** | volume, ringer, DND, flashlight, vibration, notifications, clipboard/OTP, real alarms and timers, WhatsApp replies, generative actions, speech, media keys, HTTP requests, brightness and rotation (with "Modify system settings" access), all triggers, state conditions (battery, charging, screen, ringer, DND, Wi-Fi, airplane mode; Bluetooth with the Bluetooth permission on Android 12+) |
 | **Degraded without Shizuku** | `launch_app`, `open_url`, `open_settings_screen`, alarm/timer **from a rule in the background** (Android restricts activity starts from the background: with Shizuku they go through `am start`; without it they start while the app is in the foreground, and an app, link or Settings screen otherwise becomes a "Tap to open" notification) |
-| **Shizuku only** | Wi-Fi/Bluetooth/mobile-data toggles, dark mode, `run_shell`, `write_setting`, privileged state readers (`setting`, `system_property`, `sysfs`, `dumpsys_field`, foreground app) |
+| **Shizuku, root (su) or Sui** | Wi-Fi/Bluetooth/mobile-data toggles, dark mode, `run_shell`, `write_setting`, privileged state readers (`setting`, `system_property`, `sysfs`, `dumpsys_field`, foreground app) |
+
+With Shizuku running once, System → "Grant permanent permissions" lets Argus keep `write_setting` on
+SECURE/GLOBAL, the foreground-app condition, brightness and rotation, and Do Not Disturb access after a
+reboot, without Shizuku. On rooted phones Argus can use Sui (Shizuku as a Magisk/KernelSU module, which
+starts at boot) or run privileged commands through `su` (System → "Use root (su)", off by default).
 
 Note: on non-rooted devices Shizuku must be started via ADB and **does not survive a reboot**; Argus detects this and degrades fail-closed (the privileged action is never executed late), guiding you through recovery.
 
@@ -408,9 +416,8 @@ Open an [Issue](https://github.com/JackRushante/argus/issues) with: what you ask
 
 Short roadmap:
 
-- **0.5.0, more power** — the current time (with a time zone) as a value a rule can use when it fires;
-  a repair round when the AI writes an invalid rule; presets for small self-hosted models; OpenRouter's
-  web search tool.
+- **0.5.1** — an "app opened/closed" trigger, more typed privileged actions, native structured output,
+  presets for self-hosted servers and OpenRouter's web search tool.
 - **0.6.0, end-to-end tests** — the main flows tested automatically on an Android emulator.
 - **0.7.0, redesign** — a new look for the app.
 - **Later** — state-aware P4 generation, interactive screen control, and testing on more phone brands

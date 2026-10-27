@@ -1,0 +1,1 @@
+The current time and date in rules, in any time zone, read when the rule fires. A repair round when the AI writes an invalid rule. With Shizuku running once, Argus can grant itself permissions that survive a reboot (secure settings, usage access, brightness, Do Not Disturb). Root support through su (off by default) and Sui.

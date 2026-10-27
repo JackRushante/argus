@@ -1,0 +1,1 @@
+L'ora e la data attuali nelle regole, in qualsiasi fuso, lette allo scatto. Un giro di riparazione quando l'AI scrive una regola non valida. Con Shizuku attivo una volta, Argus si concede permessi che restano dopo il riavvio (impostazioni protette, dati d'uso, luminosità, Non disturbare). Supporto root tramite su (spento di default) e Sui.
