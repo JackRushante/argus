@@ -132,6 +132,7 @@ import dev.argus.automation.budget.AndroidBudgetSettingsStore
 import dev.argus.automation.budget.BudgetAlerts
 import dev.argus.automation.budget.BudgetPolicy
 import dev.argus.automation.budget.BudgetSettingsStore
+import dev.argus.automation.budget.DraftErrorSource
 import dev.argus.automation.budget.MeteredBrain
 import dev.argus.brain.AndroidProviderConfigStore
 import dev.argus.brain.BridgeConfigurationStore
@@ -528,8 +529,15 @@ object ArgusModule {
         audit: AuditSink,
         alerts: BudgetAlerts,
         budgetSettings: BudgetSettingsStore,
+        validator: DraftValidator,
+        approvalWhitelist: ApprovalWhitelistProvider,
     ): Brain = MeteredBrain(
         brain, policy, usage, store::selectedProviderConfig, audit, alerts, settings = budgetSettings,
+        // 0.5.0: giro di riparazione sugli errori ERROR del validatore, lo stesso (e la stessa whitelist)
+        // che decide `canArm` in approvazione.
+        draftErrors = DraftErrorSource { draft ->
+            validator.validate(draft, approvalWhitelist.currentConversationIds())
+        },
     )
 
     @Provides
@@ -1195,12 +1203,18 @@ object ArgusModule {
     @Singleton
     fun approvalService(
         repository: DraftRepository,
+        validator: DraftValidator,
         whitelist: ApprovalWhitelistProvider,
     ): ApprovalService = ApprovalService(
         repository,
-        DraftValidator(AndroidCapabilityProbe.KNOWN_TOOLS),
+        validator,
         whitelist,
     )
+
+    /** Un solo validatore per l'approvazione e per il giro di riparazione del compile (0.5.0). */
+    @Provides
+    @Singleton
+    fun draftValidator(): DraftValidator = DraftValidator(AndroidCapabilityProbe.KNOWN_TOOLS)
 
     @Provides
     @Singleton

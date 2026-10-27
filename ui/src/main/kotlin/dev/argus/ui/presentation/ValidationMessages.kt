@@ -250,6 +250,14 @@ object ValidationMessages {
             "The random number limit must be between 1 and 1,000,000.",
             "Il limite del numero casuale deve essere tra 1 e 1.000.000.",
         ),
+        "var_clock_tz_invalid" to t(
+            "A clock variable uses a time zone that does not exist: use an IANA name such as Europe/Rome, or leave it empty for the phone's time zone.",
+            "Una variabile orologio usa un fuso orario che non esiste: usa un nome IANA come Europe/Rome, oppure lascialo vuoto per il fuso del telefono.",
+        ),
+        "var_clock_pattern_invalid" to t(
+            "A clock variable has a time format that is not valid or longer than 40 characters (for example HH:mm or EEEE d MMMM).",
+            "Una variabile orologio ha un formato dell'ora non valido o più lungo di 40 caratteri (per esempio HH:mm o EEEE d MMMM).",
+        ),
         "var_literal_invalid" to t(
             "A fixed value is too long or contains control characters.",
             "Un valore fisso è troppo lungo o contiene caratteri di controllo.",
