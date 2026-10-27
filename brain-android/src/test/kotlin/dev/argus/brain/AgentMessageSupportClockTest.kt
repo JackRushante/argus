@@ -27,7 +27,7 @@ class AgentMessageSupportClockTest {
         assertTrue(rules.contains("\n19. "))
         // Al massimo 3 righe, ed e' l'ultima regola.
         assertTrue(rule.lines().size <= 3, rule)
-        val flat = rule.replace(Regex("\s+"), " ")
+        val flat = rule.replace(Regex("\\s+"), " ")
         listOf(
             "Rule texts are frozen when you write them",
             "current time or date, battery level, weather",

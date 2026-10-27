@@ -37,10 +37,10 @@ class Engine(
     private val pause: suspend (Long) -> Unit = { delay(it) },
     /** «Pausa automazioni» (0.4.1, F21): se attiva, nessuna regola scatta e lo scatto saltato va nel Log. */
     private val firingPause: AutomationPause = AutomationPause.NEVER,
-    private val now: () -> Long,
     /** 0.5.0: orologio e lingua della variabile `clock` (ora allo scatto). Default: orologio vivo del telefono. */
     private val programClock: Clock = LiveSystemClock,
     private val programLocale: () -> Locale = ClockVariable::appLocale,
+    private val now: () -> Long,
 ) {
     companion object {
         const val MIN_GENERATIVE_COOLDOWN_MS = 60_000L
