@@ -52,6 +52,7 @@ import dev.argus.ui.model.AuthState
 import dev.argus.ui.model.BudgetUi
 import dev.argus.ui.model.ContactRow
 import dev.argus.ui.model.PermanentGrantUi
+import dev.argus.ui.model.PrivilegedBackendUi
 import dev.argus.ui.model.PrivilegedUi
 import dev.argus.ui.model.ProviderChoiceUi
 import dev.argus.ui.model.ProviderUsageUi
@@ -414,7 +415,16 @@ class SettingsViewModel @Inject constructor(
                 degradedAfterReboot = settingsSources.shizukuNeeded &&
                     settingsSources.shizukuStatus == ShizukuGatewayStatus.INSTALLED_NOT_RUNNING,
             ),
-            shizukuRunsAsRoot = settingsSources.shizukuIdentity?.runsAsRoot,
+            // 0.5.0: con il backend root `su` (o Sui) i comandi girano come root: l'approvazione mostra
+            // l'avviso «esegue comandi come root» come per Shizuku root.
+            shizukuRunsAsRoot = if (
+                privilegedState.backend == PrivilegedBackendUi.ROOT ||
+                privilegedState.backend == PrivilegedBackendUi.SUI
+            ) {
+                true
+            } else {
+                settingsSources.shizukuIdentity?.runsAsRoot
+            },
             batteryExempt = health.batteryExempt,
             exactAlarmsGranted = health.exactAlarmsGranted,
             writeSettingsGranted = health.writeSettingsGranted,

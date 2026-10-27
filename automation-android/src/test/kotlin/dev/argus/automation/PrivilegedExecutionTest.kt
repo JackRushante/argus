@@ -47,7 +47,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-private class RecordingDirect(
+private class PrivRecordingDirect(
     private val result: DirectWriteResult = DirectWriteResult.WRITTEN,
 ) : DirectSettings {
     val writes = mutableListOf<Triple<SettingNamespace, String, String>>()
@@ -110,7 +110,7 @@ class DirectWriteSettingTest {
     @Test
     fun `with a privileged backend ready the shell path is used and the direct writer is not touched`() = runTest {
         val calls = ToolCalls()
-        val direct = RecordingDirect()
+        val direct = PrivRecordingDirect()
         val result = executor(calls, direct, ready = true).execute(secureAction, context)
 
         assertEquals(ActionResult.Success, result)
@@ -122,7 +122,7 @@ class DirectWriteSettingTest {
     @Test
     fun `without a backend the granted permission writes directly and the shell is not touched`() = runTest {
         val calls = ToolCalls()
-        val direct = RecordingDirect()
+        val direct = PrivRecordingDirect()
 
         listOf(SettingNamespace.SECURE, SettingNamespace.GLOBAL, SettingNamespace.SYSTEM).forEach { namespace ->
             val result = executor(calls, direct, ready = false)
@@ -139,7 +139,7 @@ class DirectWriteSettingTest {
     @Test
     fun `a missing permission keeps the usual typed codes`() = runTest {
         val calls = ToolCalls()
-        val denied = RecordingDirect(DirectWriteResult.NOT_PERMITTED)
+        val denied = PrivRecordingDirect(DirectWriteResult.NOT_PERMITTED)
         val exec = executor(calls, denied, ready = false)
 
         assertEquals(ActionResult.Failure("shizuku_unavailable"), exec.execute(secureAction, context))
@@ -156,13 +156,13 @@ class DirectWriteSettingTest {
 
     @Test
     fun `an accepted permission that Android refuses is a typed write failure`() = runTest {
-        val exec = executor(ToolCalls(), RecordingDirect(DirectWriteResult.FAILED), ready = false)
+        val exec = executor(ToolCalls(), PrivRecordingDirect(DirectWriteResult.FAILED), ready = false)
         assertEquals(ActionResult.Failure("settings_write_failed"), exec.execute(secureAction, context))
     }
 
     @Test
     fun `the same shape validation applies to the direct path`() = runTest {
-        val direct = RecordingDirect()
+        val direct = PrivRecordingDirect()
         val exec = executor(ToolCalls(), direct, ready = false)
 
         val badKey = Action.WriteSetting(SettingNamespace.SECURE, "bad key; reboot", "1")
@@ -246,7 +246,7 @@ class UsageForegroundStateTest {
     }
 }
 
-private class FakeShizukuAccess(
+private class PrivFakeShizuku(
     status: ShizukuGatewayStatus,
     identity: ShizukuIdentity? = null,
     private val sui: Boolean = false,
@@ -260,7 +260,7 @@ private class FakeShizukuAccess(
     override fun isSui(): Boolean = sui
 }
 
-private class FakeRootAccess(initial: RootState = RootState.OFF) : RootAccess {
+private class PrivFakeRoot(initial: RootState = RootState.OFF) : RootAccess {
     val state = MutableStateFlow(initial)
     override fun observeState(): StateFlow<RootState> = state
     override fun isEnabled(): Boolean = state.value != RootState.OFF
@@ -272,7 +272,7 @@ private class FakeRootAccess(initial: RootState = RootState.OFF) : RootAccess {
     override suspend fun verify(): RootState = state.value
 }
 
-private class RecordingShell(private val exit: (List<String>) -> Int = { 0 }) : PrivilegedShell {
+private class PrivRecordingShell(private val exit: (List<String>) -> Int = { 0 }) : PrivilegedShell {
     val commands = mutableListOf<List<String>>()
     override suspend fun run(
         command: List<String>,
@@ -299,7 +299,7 @@ class PrivilegedAccessCenterTest {
     private fun center(
         shizuku: ShizukuAccess,
         root: RootAccess,
-        shell: RecordingShell,
+        shell: PrivRecordingShell,
         status: () -> Map<PermanentGrant, Boolean>,
     ) = PrivilegedAccessCenter(shizuku, root, PermanentGrantsController(shell, "dev.argus"), status)
 
@@ -307,39 +307,39 @@ class PrivilegedAccessCenterTest {
 
     @Test
     fun `the snapshot names the backend for every combination`() = runTest {
-        suspend fun backend(shizuku: FakeShizukuAccess, root: FakeRootAccess = FakeRootAccess()) =
-            center(shizuku, root, RecordingShell()) { none }.snapshots.first().backend
+        suspend fun backend(shizuku: PrivFakeShizuku, root: PrivFakeRoot = PrivFakeRoot()) =
+            center(shizuku, root, PrivRecordingShell()) { none }.snapshots.first().backend
 
         assertEquals(
             PrivilegedBackend.NONE,
-            backend(FakeShizukuAccess(ShizukuGatewayStatus.NOT_INSTALLED)),
+            backend(PrivFakeShizuku(ShizukuGatewayStatus.NOT_INSTALLED)),
         )
         assertEquals(
             PrivilegedBackend.SHIZUKU_SHELL,
-            backend(FakeShizukuAccess(ShizukuGatewayStatus.AUTHORIZED, ShizukuIdentity(2000))),
+            backend(PrivFakeShizuku(ShizukuGatewayStatus.AUTHORIZED, ShizukuIdentity(2000))),
         )
         assertEquals(
             PrivilegedBackend.SHIZUKU_ROOT,
-            backend(FakeShizukuAccess(ShizukuGatewayStatus.AUTHORIZED, ShizukuIdentity(0))),
+            backend(PrivFakeShizuku(ShizukuGatewayStatus.AUTHORIZED, ShizukuIdentity(0))),
         )
         assertEquals(
             PrivilegedBackend.SUI,
-            backend(FakeShizukuAccess(ShizukuGatewayStatus.AUTHORIZED, ShizukuIdentity(0), sui = true)),
+            backend(PrivFakeShizuku(ShizukuGatewayStatus.AUTHORIZED, ShizukuIdentity(0), sui = true)),
         )
         assertEquals(
             PrivilegedBackend.ROOT,
-            backend(FakeShizukuAccess(ShizukuGatewayStatus.INSTALLED_NOT_RUNNING), FakeRootAccess(RootState.ACTIVE)),
+            backend(PrivFakeShizuku(ShizukuGatewayStatus.INSTALLED_NOT_RUNNING), PrivFakeRoot(RootState.ACTIVE)),
         )
         assertEquals(
             PrivilegedBackend.NONE,
-            backend(FakeShizukuAccess(ShizukuGatewayStatus.INSTALLED_NOT_RUNNING), FakeRootAccess(RootState.DENIED)),
+            backend(PrivFakeShizuku(ShizukuGatewayStatus.INSTALLED_NOT_RUNNING), PrivFakeRoot(RootState.DENIED)),
         )
     }
 
     @Test
     fun `granting without a backend runs nothing`() = runTest {
-        val shell = RecordingShell()
-        val center = center(FakeShizukuAccess(ShizukuGatewayStatus.NOT_INSTALLED), FakeRootAccess(), shell) { none }
+        val shell = PrivRecordingShell()
+        val center = center(PrivFakeShizuku(ShizukuGatewayStatus.NOT_INSTALLED), PrivFakeRoot(), shell) { none }
 
         val report = center.grant(setOf(PermanentGrant.USAGE_STATS))
 
@@ -353,11 +353,11 @@ class PrivilegedAccessCenterTest {
 
     @Test
     fun `granting with a backend runs the exact commands and reports the real state`() = runTest {
-        val shell = RecordingShell()
+        val shell = PrivRecordingShell()
         val granted = mutableMapOf<PermanentGrant, Boolean>().apply { putAll(none) }
         val center = center(
-            FakeShizukuAccess(ShizukuGatewayStatus.AUTHORIZED, ShizukuIdentity(2000)),
-            FakeRootAccess(),
+            PrivFakeShizuku(ShizukuGatewayStatus.AUTHORIZED, ShizukuIdentity(2000)),
+            PrivFakeRoot(),
             shell,
         ) { granted.toMap() }
 
@@ -387,10 +387,10 @@ class PrivilegedAccessCenterTest {
 
     @Test
     fun `granting with root su works the same`() = runTest {
-        val shell = RecordingShell()
+        val shell = PrivRecordingShell()
         val center = center(
-            FakeShizukuAccess(ShizukuGatewayStatus.NOT_INSTALLED),
-            FakeRootAccess(RootState.ACTIVE),
+            PrivFakeShizuku(ShizukuGatewayStatus.NOT_INSTALLED),
+            PrivFakeRoot(RootState.ACTIVE),
             shell,
         ) { none }
         center.grant(setOf(PermanentGrant.WRITE_SETTINGS))
@@ -400,9 +400,9 @@ class PrivilegedAccessCenterTest {
     @Test
     fun `notification access is never offered and the grant list is fixed`() {
         val rows = center(
-            FakeShizukuAccess(ShizukuGatewayStatus.NOT_INSTALLED),
-            FakeRootAccess(),
-            RecordingShell(),
+            PrivFakeShizuku(ShizukuGatewayStatus.NOT_INSTALLED),
+            PrivFakeRoot(),
+            PrivRecordingShell(),
         ) { none }
         assertEquals(4, PermanentGrant.entries.size)
         assertTrue(PermanentGrant.entries.none { grant -> grant.id.contains("listener") })
@@ -413,33 +413,33 @@ class PrivilegedAccessCenterTest {
     fun `the UI model has one row per permission and offers granting only with a backend and something missing`() =
         runTest {
             val denied = center(
-                FakeShizukuAccess(ShizukuGatewayStatus.AUTHORIZED, ShizukuIdentity(2000)),
-                FakeRootAccess(),
-                RecordingShell(),
+                PrivFakeShizuku(ShizukuGatewayStatus.AUTHORIZED, ShizukuIdentity(2000)),
+                PrivFakeRoot(),
+                PrivRecordingShell(),
             ) { none }.snapshots.first().toUi()
             assertEquals(4, denied.grants.size)
             assertTrue(denied.canGrant)
 
             val allGranted = center(
-                FakeShizukuAccess(ShizukuGatewayStatus.AUTHORIZED, ShizukuIdentity(2000)),
-                FakeRootAccess(),
-                RecordingShell(),
+                PrivFakeShizuku(ShizukuGatewayStatus.AUTHORIZED, ShizukuIdentity(2000)),
+                PrivFakeRoot(),
+                PrivRecordingShell(),
             ) { PermanentGrant.entries.associateWith { true } }.snapshots.first().toUi()
             assertTrue(allGranted.grants.all { it.granted })
             assertTrue(allGranted.canGrant.not())
 
             val noBackend = center(
-                FakeShizukuAccess(ShizukuGatewayStatus.NOT_INSTALLED),
-                FakeRootAccess(),
-                RecordingShell(),
+                PrivFakeShizuku(ShizukuGatewayStatus.NOT_INSTALLED),
+                PrivFakeRoot(),
+                PrivRecordingShell(),
             ) { none }.snapshots.first().toUi()
             assertTrue(noBackend.canGrant.not())
         }
 
     @Test
     fun `turning root on and off goes through the root access`() = runTest {
-        val root = FakeRootAccess()
-        val center = center(FakeShizukuAccess(ShizukuGatewayStatus.NOT_INSTALLED), root, RecordingShell()) { none }
+        val root = PrivFakeRoot()
+        val center = center(PrivFakeShizuku(ShizukuGatewayStatus.NOT_INSTALLED), root, PrivRecordingShell()) { none }
 
         assertEquals(RootState.ACTIVE, center.setRootEnabled(true))
         assertEquals(PrivilegedBackend.ROOT, center.snapshots.first().backend)
