@@ -12,6 +12,7 @@ import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import dev.argus.device.ForegroundAppSource
 import dev.argus.device.StateReader
 import dev.argus.device.ParametricStateReader
 import dev.argus.device.PublicStateReader
@@ -79,6 +80,16 @@ class LazyDeviceStateProvider(
     private val location: CurrentLocationProvider,
     private val parametricReader: ParametricStateReader? = null,
     private val publicReader: PublicStateReader? = null,
+    /**
+     * 0.5.0: uno shell privilegiato è disponibile (Shizuku autorizzato o root verificato). `null` =
+     * come prima, conta solo `shizukuStatus`.
+     */
+    private val privilegedReady: (() -> Boolean)? = null,
+    /**
+     * 0.5.0: app in primo piano da `UsageStatsManager` (permesso permanente). Si usa SOLO quando
+     * nessun backend privilegiato è disponibile: con Shizuku attivo il comportamento non cambia.
+     */
+    private val usageForeground: ForegroundAppSource? = null,
 ) : DeviceStateSnapshotProvider {
     constructor(
         reader: StateReader,
@@ -86,7 +97,17 @@ class LazyDeviceStateProvider(
         location: CurrentLocationProvider,
         parametricReader: ParametricStateReader,
         publicReader: PublicStateReader? = null,
-    ) : this(reader, shizuku::status, location, parametricReader, publicReader)
+        privilegedReady: (() -> Boolean)? = null,
+        usageForeground: ForegroundAppSource? = null,
+    ) : this(
+        reader,
+        shizuku::status,
+        location,
+        parametricReader,
+        publicReader,
+        privilegedReady,
+        usageForeground,
+    )
 
     override suspend fun current(): DeviceState = current(StateReadRequest.LEGACY_GENERATIVE)
 
@@ -97,9 +118,10 @@ class LazyDeviceStateProvider(
         val privilegedKeys = request.keys - publicValues.keys
         val needsPrivilegedState = privilegedKeys.isNotEmpty() || request.includeForegroundApp ||
             request.queries.isNotEmpty()
-        val authorized = needsPrivilegedState &&
-            runCatching { shizukuStatus() == ShizukuGatewayStatus.AUTHORIZED }.getOrDefault(false)
-        val privileged = if (authorized && (privilegedKeys.isNotEmpty() || request.includeForegroundApp)) {
+        val authorized = needsPrivilegedState && runCatching {
+            privilegedReady?.invoke() ?: (shizukuStatus() == ShizukuGatewayStatus.AUTHORIZED)
+        }.getOrDefault(false)
+        val privilegedRead = if (authorized && (privilegedKeys.isNotEmpty() || request.includeForegroundApp)) {
             try {
                 reader.read(privilegedKeys, request.includeForegroundApp)
             } catch (error: CancellationException) {
@@ -109,6 +131,20 @@ class LazyDeviceStateProvider(
             }
         } else {
             DeviceState()
+        }
+        // 0.5.0: senza backend privilegiato l'app in primo piano si legge da UsageStatsManager, se il
+        // permesso è stato concesso; se non c'è risposta resta assente (UNKNOWN, fallisce chiuso).
+        val privileged = if (request.includeForegroundApp && !authorized) {
+            val usagePackage = try {
+                usageForeground?.current()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                null
+            }
+            if (usagePackage != null) privilegedRead.copy(foregroundApp = usagePackage) else privilegedRead
+        } else {
+            privilegedRead
         }
         val queryValues = if (authorized && request.queries.isNotEmpty()) {
             try {

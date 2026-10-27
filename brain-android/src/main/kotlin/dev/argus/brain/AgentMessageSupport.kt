@@ -553,7 +553,8 @@ BINDING RULES:
     timeoutMs=120000 (web search is slow).
 15. Choosing the time TRIGGER (fundamental: distinguish immediate, relative delay and absolute instant):
     - "immediate" ONLY for "run NOW / as soon as I activate it" (right away/now), ZERO delay:
-      it runs once on activation. NEVER use it for a delay or a recurrence.
+      it runs once on activation. NEVER use it for a delay or a recurrence. A request with no trigger
+      at all ("flip a coin and…", "vibrate three times") is also "immediate", never "manual".
     - "time" with "afterMs" for a one-shot RELATIVE DELAY: "in N minutes/hours/days" -> afterMs = N
       converted to MILLISECONDS (e.g. "in 2 minutes" -> afterMs=120000). It is anchored to activation and
       RESTARTS on every re-arm (disarm/re-arm -> the countdown starts over). Do NOT use "at" for "in N".
@@ -591,7 +592,10 @@ BINDING RULES:
     first, compile only that one, and tell the user to submit the second separately after approval.
 18. installed_app_candidates, when present in the user DATA, were matched locally from launcher apps.
     If exactly one candidate clearly matches the requested app, use its package and do NOT ask the
-    user for an exact package name. Never invent a package outside those candidates."""
+    user for an exact package name. Never invent a package outside those candidates.
+19. Rule texts are frozen when you write them. A value that changes (current time or date, battery
+    level, weather...) is never written as fixed text but read at fire time: a clock variable for
+    time and date, a state variable for phone values, invoke_llm for web data; otherwise say it cannot be done."""
 
     const val DRAFT_SCHEMA_TEXT = """AutomationDraft JSON (names and casing are exact):
 {
@@ -772,6 +776,10 @@ VarBinding, discriminated by "type":
    // ENGINE-generated random integer in [0, max) (i.e. 0..max-1). Integrity CLEAN (not tainted, not a
    // secret): resolved ONCE per run, so it holds a fixed value for the whole execution. Use it to drive
    // branching — pair with var_compare IS_EVEN/IS_ODD for a coin-flip if — and counting.
+- {"type":"clock", "name":string, "tz":string|null, "pattern":string|null}
+   // TEXT with the time AT FIRE TIME, in tz (IANA id like "Asia/Makassar"; null = the phone's zone),
+   // formatted by pattern (Java DateTimeFormatter, max 40 chars; null = "HH:mm"; "d MMMM yyyy" = date).
+   // Integrity CLEAN. Use it as ${'$'}{name} for the current time or date in any text.
 
 "captureAs":string (optional) — captures the action's OUTPUT into a new same-named variable. Allowed
 ONLY on run_shell and invoke_llm; the captured value is TAINTED. invoke_llm_v2 is flat-v1 only.

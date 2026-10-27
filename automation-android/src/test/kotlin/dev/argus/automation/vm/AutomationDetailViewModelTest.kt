@@ -229,7 +229,8 @@ class AutomationDetailViewModelTest {
 
         recordFire(automation.id, System.currentTimeMillis(), ExecutionStatus.SUCCEEDED)
 
-        awaitUntil("conteggio aggiornato") { viewModel.state.value.detail?.stats?.last7Days?.fires == 1 }
+        // Lo scatto e il suo esito arrivano con due scritture: si aspetta l'esito, non il solo scatto.
+        awaitUntil("conteggio aggiornato") { viewModel.state.value.detail?.stats?.last30Days == RuleStatsWindow(1, 1, 0) }
         assertEquals(RuleStatsWindow(1, 1, 0), viewModel.state.value.detail?.stats?.last30Days)
     }
 

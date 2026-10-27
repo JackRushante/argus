@@ -5,6 +5,8 @@ import dev.argus.automation.budget.BudgetPolicy
 import dev.argus.automation.budget.BudgetSettings
 import dev.argus.automation.budget.BudgetSettingsStore
 import dev.argus.automation.budget.BudgetLimits
+import dev.argus.automation.budget.CompileRetryKind
+import dev.argus.automation.budget.DraftErrorSource
 import dev.argus.automation.budget.MeteredBrain
 import dev.argus.brain.AgentTransport
 import dev.argus.brain.CompileTimeoutPolicy
@@ -105,6 +107,7 @@ internal data class RunResult(
     val actual: String,
     val expected: String,
     val failures: List<Failure>,
+    /** Ritentativo di FORMATO (nota di correzione). */
     val retryUsed: Boolean,
     val attempts: Int,
     val tokensIn: Long?,
@@ -114,6 +117,8 @@ internal data class RunResult(
     val reply: String?,
     /** Testo grezzo del modello: solo per i fallimenti, troncato a [BenchRunner.RAW_MAX_CHARS]. */
     val raw: String?,
+    /** Giro di RIPARAZIONE sugli errori del validatore (0.5.0), contato a parte dal ritentativo di formato. */
+    val repairUsed: Boolean = false,
 )
 
 /**
@@ -145,7 +150,7 @@ internal class BenchRunner(
     }
 
     private suspend fun runCompile(case: BenchCase, repetition: Int): RunResult {
-        val stack = Stack(transport, config)
+        val stack = Stack(transport, config, world)
         // Come ChatViewModel: la lingua dei testi per l'utente e' quella dell'interfaccia (qui la `lang`
         // del caso) e i candidati app nominati nella richiesta arrivano al modello nel prompt.
         val manifest = world.manifest(case.manifest, case.lang)
@@ -170,7 +175,8 @@ internal class BenchRunner(
                 actual = evaluation.actual,
                 expected = expected,
                 failures = evaluation.failures,
-                retryUsed = stack.recording.compileCalls > 1,
+                retryUsed = stack.retries.formatRetries > 0,
+                repairUsed = stack.retries.repairRounds > 0,
                 attempts = stack.recording.compileCalls,
                 tokensIn = stack.usage.tokensIn(),
                 tokensOut = stack.usage.tokensOut(),
@@ -191,7 +197,7 @@ internal class BenchRunner(
     }
 
     private suspend fun runAct(case: ActCase, repetition: Int): RunResult {
-        val stack = Stack(transport, config)
+        val stack = Stack(transport, config, world)
         val category = if (case.web) "act.web" else "act.plain"
         val fingerprint = ApprovalFingerprint("0".repeat(64))
         val automationId = AutomationId("bench-act")
@@ -268,7 +274,8 @@ internal class BenchRunner(
         actual = failureCategory,
         expected = expected,
         failures = listOf(Failure(failureCategory, message)),
-        retryUsed = stack.recording.compileCalls > 1,
+        retryUsed = stack.retries.formatRetries > 0,
+        repairUsed = stack.retries.repairRounds > 0,
         attempts = stack.recording.compileCalls.coerceAtLeast(1),
         tokensIn = stack.usage.tokensIn(),
         tokensOut = stack.usage.tokensOut(),
@@ -281,9 +288,10 @@ internal class BenchRunner(
     private fun rawOf(result: CompileResult): String? = result.raw?.let { BenchText.clip(it, RAW_MAX_CHARS) }
 
     /** Il percorso dell'app per UNA esecuzione, con usage e budget finti in memoria. */
-    private class Stack(transport: AgentTransport, config: ProviderConfig) {
+    private class Stack(transport: AgentTransport, config: ProviderConfig, world: BenchWorld) {
         val usage = RecordingUsageDao()
         val recording = RecordingBrain(TransportBackedBrain(transport))
+        val retries = RetryCounter()
         val brain: Brain = MeteredBrain(
             delegate = recording,
             policy = BudgetPolicy(usage, UnlimitedBudgetSettings),
@@ -291,6 +299,9 @@ internal class BenchRunner(
             selectedConfig = { config },
             audit = NoopAuditSink,
             alerts = SilentBudgetAlerts,
+            // Stessa logica dell'app: il giro di riparazione usa il validatore e la whitelist di `canArm`.
+            draftErrors = DraftErrorSource { draft -> world.validator.validate(draft, world.whitelistedIds) },
+            onRetry = retries::record,
         )
     }
 
@@ -299,6 +310,21 @@ internal class BenchRunner(
         private const val REPLY_MAX_CHARS = 300
         private const val ACT_TIMEOUT_MS = 60_000L
         private const val ACT_WEB_TIMEOUT_MS = 120_000L
+    }
+}
+
+/** Conta, per esecuzione, i ritentativi di formato e i giri di riparazione che MeteredBrain ha avviato. */
+internal class RetryCounter {
+    private val format = java.util.concurrent.atomic.AtomicInteger(0)
+    private val repair = java.util.concurrent.atomic.AtomicInteger(0)
+    val formatRetries: Int get() = format.get()
+    val repairRounds: Int get() = repair.get()
+
+    fun record(kind: CompileRetryKind) {
+        when (kind) {
+            CompileRetryKind.FORMAT -> format.incrementAndGet()
+            CompileRetryKind.REPAIR -> repair.incrementAndGet()
+        }
     }
 }
 

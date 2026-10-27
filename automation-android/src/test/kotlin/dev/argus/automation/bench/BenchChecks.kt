@@ -39,6 +39,7 @@ internal object FailureCategory {
     const val WRONG_PARAM = "wrong_param"
     const val WRONG_CONDITION = "wrong_condition"
     const val MISSING_VARS = "missing_vars"
+    const val EXTRA_VARS = "extra_vars"
     const val MISSING_FLOW = "missing_flow"
     const val VALIDATOR = "validator"
     const val CAPABILITY = "capability"
@@ -479,11 +480,16 @@ internal object CompileEvaluator {
     }
 
     private fun checkVarsAndFlow(expect: DraftExpectation, draft: AutomationDraft, failures: MutableList<Failure>) {
-        if (expect.vars.isNotEmpty()) {
+        if (expect.vars.isNotEmpty() || expect.varsExclude.isNotEmpty()) {
             val varTypes = draft.vars.map {
                 (ArgusJson.encodeToJsonElement(dev.argus.engine.model.VarBinding.serializer(), it) as JsonObject)
                     .getValue("type").jsonPrimitive.content
             }.toSet()
+            for (entry in expect.varsExclude) {
+                entry.split('|').filter { it in varTypes }.forEach { forbidden ->
+                    failures += Failure(FailureCategory.EXTRA_VARS, "variabile non necessaria presente: $forbidden")
+                }
+            }
             for (entry in expect.vars) {
                 if (entry.split('|').none { it in varTypes }) {
                     failures += Failure(

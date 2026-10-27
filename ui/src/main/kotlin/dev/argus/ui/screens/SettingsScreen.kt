@@ -77,6 +77,7 @@ import dev.argus.ui.components.ConfirmationState
 import dev.argus.ui.components.DestructiveConfirmDialog
 import dev.argus.ui.components.PauseSettingRow
 import dev.argus.ui.components.ProviderConfigurationDialog
+import dev.argus.ui.components.PrivilegesSection
 import dev.argus.ui.components.RulesBackupSection
 import dev.argus.ui.components.WarningBanner
 import dev.argus.engine.safety.Severity
@@ -128,6 +129,7 @@ fun SettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(18.dp),
             ) {
                 HealthSection(state, callbacks)
+                PrivilegesSection(state.privileged, callbacks::onSetRootEnabled, callbacks::onGrantPermanent)
                 PauseSettingRow(state.automationsPaused, callbacks::onSetAutomationsPaused)
                 TransportSection(state.transport, state.providerChoices, callbacks) { showBridgeEditor = true }
                 PrivacySection(state.privacyAccepted) { confirmPrivacyRevoke = true }

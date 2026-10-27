@@ -79,6 +79,9 @@ internal interface ShizukuApi {
     fun removeBinderDeadListener(listener: () -> Unit)
     fun addPermissionResultListener(listener: (Int, Int) -> Unit)
     fun removePermissionResultListener(listener: (Int, Int) -> Unit)
+
+    /** Il binder arriva da Sui (modulo Magisk/KernelSU), non dall'app Shizuku. */
+    fun isSui(): Boolean = false
 }
 
 internal class AndroidShizukuApi(context: Context) : ShizukuApi {
@@ -88,6 +91,15 @@ internal class AndroidShizukuApi(context: Context) : ShizukuApi {
     private val deadListeners = ConcurrentHashMap<() -> Unit, Shizuku.OnBinderDeadListener>()
     private val permissionListeners =
         ConcurrentHashMap<(Int, Int) -> Unit, Shizuku.OnRequestPermissionResultListener>()
+
+    init {
+        // Sui (0.5.0) parte da solo all'avvio e consegna il binder senza app di gestione. Il client è
+        // già in `dev.rikka.shizuku:api`, e `ShizukuProvider` lo inizializza da sé alla creazione:
+        // questa chiamata è la rete di sicurezza per quando il provider non è ancora stato creato.
+        SuiSupport.ensureInit(context.applicationContext.packageName)
+    }
+
+    override fun isSui(): Boolean = SuiSupport.isSui()
 
     @Suppress("DEPRECATION")
     override fun managerInstalled(): Boolean = try {
@@ -157,6 +169,9 @@ interface ShizukuAccess {
     suspend fun requestPermissionOutcome(
         rationaleShown: Boolean = false,
     ): ShizukuPermissionOutcome
+
+    /** 0.5.0: il servizio privilegiato è Sui (Shizuku integrato come modulo root). */
+    fun isSui(): Boolean = false
 }
 
 class ShizukuGateway internal constructor(
@@ -193,6 +208,8 @@ class ShizukuGateway internal constructor(
     override fun observeIdentity(): StateFlow<ShizukuIdentity?> = identityState.asStateFlow()
 
     override fun status(): ShizukuGatewayStatus = resolveStatus().also { publish(it) }
+
+    override fun isSui(): Boolean = runCatching { api.isSui() }.getOrDefault(false)
 
     /**
      * Contatore che avanza a ogni cambio di stato di Shizuku e a ogni evento del binder

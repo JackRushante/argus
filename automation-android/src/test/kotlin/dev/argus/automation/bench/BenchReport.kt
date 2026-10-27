@@ -104,6 +104,7 @@ internal object BenchReport {
             put("transportErrors", results.count { isTransportError(it) })
             put("percentWithoutTransport", round1(totalWithoutTransport(results).percent))
             put("retryUsed", results.count { it.retryUsed })
+            put("repairUsed", results.count { it.repairUsed })
             put("tokensIn", results.sumOf { it.tokensIn ?: 0L })
             put("tokensOut", results.sumOf { it.tokensOut ?: 0L })
         }
@@ -150,6 +151,7 @@ internal object BenchReport {
             }
         }
         put("retryUsed", run.retryUsed)
+        put("repairUsed", run.repairUsed)
         put("attempts", run.attempts)
         put("tokensIn", run.tokensIn)
         put("tokensOut", run.tokensOut)
@@ -216,6 +218,13 @@ internal object BenchReport {
             "Ritentativo con nota di correzione usato in ${retried.size} di ${compileRuns.size} compile " +
                 "(${percentText(if (compileRuns.isEmpty()) 0.0 else retried.size * 100.0 / compileRuns.size)}); " +
                 "riuscite dopo il ritentativo: ${retried.count { it.passed }}.",
+        )
+        val repaired = compileRuns.filter { it.repairUsed }
+        appendLine()
+        appendLine(
+            "Giro di riparazione sugli errori del validatore usato in ${repaired.size} di ${compileRuns.size} compile " +
+                "(${percentText(if (compileRuns.isEmpty()) 0.0 else repaired.size * 100.0 / compileRuns.size)}); " +
+                "riuscite dopo la riparazione: ${repaired.count { it.passed }}.",
         )
 
         appendLine()

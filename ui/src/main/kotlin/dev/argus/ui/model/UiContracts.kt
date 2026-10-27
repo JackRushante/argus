@@ -436,6 +436,8 @@ data class SettingsState(
     val backup: RulesBackupUi = RulesBackupUi(),
     /** 0.4.1 (F21): interruttore globale «Pausa automazioni». */
     val automationsPaused: Boolean = false,
+    /** 0.5.0: backend privilegiato, root `su` e permessi permanenti. */
+    val privileged: PrivilegedUi = PrivilegedUi(),
 )
 
 /** Operazione del backup delle regole. */
@@ -614,6 +616,12 @@ interface SettingsCallbacks {
 
     /** Dopo un import: porta all'elenco delle automazioni, dove le bozze aspettano l'approvazione. Default no-op. */
     fun onOpenImportedRules() {}
+
+    /** 0.5.0: interruttore «Usa root (su)». Acceso, il VM verifica `su -c id`. Default no-op. */
+    fun onSetRootEnabled(enabled: Boolean) {}
+
+    /** 0.5.0: «Concedi i permessi permanenti» con le voci spuntate nel dialogo. Default no-op. */
+    fun onGrantPermanent(grants: Set<PermanentGrantUi>) {}
 }
 
 // --- 6.6 Onboarding / permessi ---
@@ -843,4 +851,38 @@ interface OnboardingCallbacks {
         apiKey: String?,
         reasoningEffort: String? = null,
     ) {}
+}
+
+// --- 0.5.0 · Privilegi: backend, root `su`, permessi permanenti ---
+
+/** Chi fornisce ORA i comandi privilegiati (specchio di `PrivilegedBackend`, che la UI non conosce). */
+enum class PrivilegedBackendUi { NONE, SHIZUKU, SHIZUKU_SHELL, SHIZUKU_ROOT, SUI, ROOT }
+
+/** Stato del backend root (specchio di `RootState`). */
+enum class RootStateUi { OFF, CHECKING, ACTIVE, DENIED, NO_SU }
+
+/**
+ * Permessi che Argus si concede da sé con un backend privilegiato. L'accesso alle notifiche NON è qui:
+ * resta la schermata di sistema (è il permesso più delicato).
+ */
+enum class PermanentGrantUi(val id: String) {
+    WRITE_SECURE_SETTINGS("write_secure_settings"),
+    WRITE_SETTINGS("write_settings"),
+    USAGE_STATS("usage_stats"),
+    DND_ACCESS("dnd_access"),
+}
+
+data class PermanentGrantRow(val grant: PermanentGrantUi, val granted: Boolean)
+
+data class PrivilegedUi(
+    val backend: PrivilegedBackendUi = PrivilegedBackendUi.NONE,
+    val rootState: RootStateUi = RootStateUi.OFF,
+    /** Una riga per voce, nell'ordine di [PermanentGrantUi]; vuota = non ancora letta (la sezione la nasconde). */
+    val grants: List<PermanentGrantRow> = emptyList(),
+) {
+    /** Il bottone «Concedi» si offre solo con un backend privilegiato attivo e qualcosa da concedere. */
+    val canGrant: Boolean
+        get() = backend != PrivilegedBackendUi.NONE && grants.any { !it.granted }
+
+    val rootEnabled: Boolean get() = rootState != RootStateUi.OFF
 }

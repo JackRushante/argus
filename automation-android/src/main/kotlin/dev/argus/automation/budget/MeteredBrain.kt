@@ -18,13 +18,19 @@ import dev.argus.engine.brain.CompileMetaError
 import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.brain.TurnUsage
 import dev.argus.engine.model.Action
+import dev.argus.engine.model.AutomationDraft
+import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.AuditEvent
 import dev.argus.engine.runtime.AuditKind
 import dev.argus.engine.runtime.AuditSink
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireContext
 import dev.argus.engine.runtime.RuntimeDataBinding
+import dev.argus.engine.safety.Severity
+import dev.argus.engine.safety.ValidationIssue
+import dev.argus.automation.vm.CURRENT_CONTACT_PLACEHOLDER
 import dev.argus.ui.presentation.RenderLanguage
+import dev.argus.ui.presentation.ValidationMessages
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
@@ -85,6 +91,42 @@ internal fun correctionNote(code: String, detail: String?): String {
     return NOTE_PREFIX + cut + NOTE_SUFFIX
 }
 
+private const val REPAIR_NOTE_PREFIX = "(Argus: a first draft for this request failed validation. "
+private const val REPAIR_NOTE_SUFFIX = " Reply again with one short sentence, then the final line @@META@@ " +
+    "{\"draft\":<object-or-null>,\"error_code\":<string-or-null>}. Compile the request again avoiding exactly " +
+    "these errors; or, if the request cannot be met within these rules (for example a limit " +
+    "is exceeded), return draft null with the matching error_code (limit_exceeded for a limit) and explain why.)"
+private const val REPAIR_MAX_ERRORS = 6
+
+/**
+ * Nota del giro di riparazione: SOLO codici e messaggi (inglesi) del validatore, uno per codice. Nessun
+ * dato dell'utente oltre a quello già presente nella richiesta: i messaggi vengono dalla tabella fissa di
+ * [ValidationMessages], mai dal testo diagnostico del validatore, che può citare nomi di variabili o pacchetti.
+ */
+internal fun repairNote(errors: List<ValidationIssue>): String {
+    val reasons = errors.distinctBy { it.code }.take(REPAIR_MAX_ERRORS).joinToString(" ") { issue ->
+        "${issue.code}: ${ValidationMessages.text(issue, RenderLanguage.EN).trimEnd('.', ' ')}."
+    }
+    return REPAIR_NOTE_PREFIX + reasons + REPAIR_NOTE_SUFFIX
+}
+
+/** Quale ritentativo di compile è partito: serve al banco per contarli separatamente. */
+enum class CompileRetryKind {
+    /** Errore di formato del modello (o `draft_missing`): nota di correzione. */
+    FORMAT,
+
+    /** Bozza ben formata ma con errori ERROR del validatore: giro di riparazione. */
+    REPAIR,
+}
+
+/**
+ * Errori che il validatore dà a una bozza appena compilata: la STESSA fonte (stesso [dev.argus.engine.safety.DraftValidator],
+ * stessa whitelist) che decide `canArm` in approvazione.
+ */
+fun interface DraftErrorSource {
+    suspend fun errors(draft: AutomationDraft): List<ValidationIssue>
+}
+
 /** Canale notifiche budget, separato da AutomationNotifier (che richiede FireContext). */
 fun interface BudgetAlerts {
     suspend fun notify(title: String, text: String)
@@ -113,6 +155,10 @@ class MeteredBrain(
     private val zone: () -> ZoneId = ZoneId::systemDefault,
     /** Tetti utente: serve a contare le chiamate in volo. Senza, vale solo il verdetto di [policy]. */
     settings: BudgetSettingsStore? = null,
+    /** Se presente, abilita il giro di riparazione sugli errori del validatore (0.5.0). */
+    private val draftErrors: DraftErrorSource? = null,
+    /** Notifica ogni ritentativo che parte (formato o riparazione): per il banco e per i test. */
+    private val onRetry: ((CompileRetryKind) -> Unit)? = null,
 ) : Brain {
     private val notified = ConcurrentHashMap<String, Boolean>()
 
@@ -144,14 +190,62 @@ class MeteredBrain(
         // evento appena persistito partecipa al nuovo check e un HARD impedisce il secondo contatto. Se
         // l'utente cambia provider/modello durante il primo turno, non ritentare su una destinazione
         // diversa da quella appena contabilizzata: un retry manuale ripartirà col nuovo config.
-        val code = first.metaError ?: return first
+        // Una risposta ben formata passa al giro di riparazione; in tutto UN solo ritentativo per messaggio.
+        val code = first.metaError ?: return repairIfInvalid(nl, manifest, state, config, first)
         if (!isRetryable(code)) return first
         if (selectedConfig() != config) return first
         // Con temperatura bassa rifare la stessa richiesta ripete lo stesso errore: il secondo tentativo
         // porta in coda al testo utente una nota di correzione, SOLO per questa chiamata (non entra in
         // chat né nel DB: il chiamante conserva il proprio `nl`).
         val retryText = withCorrectionNote(nl, code, first.detail)
-        return meteredCompile(config) { delegate.compile(retryText, manifest, state) }
+        return meteredCompile(config, { onRetry?.invoke(CompileRetryKind.FORMAT) }) {
+            delegate.compile(retryText, manifest, state)
+        }
+    }
+
+    /**
+     * Giro di riparazione (0.5.0): la bozza è ben formata ma il validatore ha issue ERROR, quelle che
+     * disabiliterebbero Arma. Si rifà la richiesta con una nota coi codici e i messaggi, dal choke-point
+     * del budget come ogni altra chiamata. Niente riparazione per chiarimenti, rifiuti, `unsupported` e
+     * `limit_exceeded` (non hanno bozza), né se l'utente ha cambiato provider, né se la nota farebbe
+     * superare il tetto del messaggio. Se la riparazione non produce una risposta utilizzabile (errore di
+     * rete, formato rotto, budget) resta la bozza originale con i suoi errori visibili.
+     */
+    private suspend fun repairIfInvalid(
+        nl: String,
+        manifest: CapabilityManifest,
+        state: DeviceState,
+        config: ProviderConfig,
+        first: CompileResult,
+    ): CompileResult {
+        val source = draftErrors ?: return first
+        val draft = first.draft ?: return first
+        // In modifica il contatto è ancora il segnaposto: la chat lo ripristina DOPO, il validatore qui no.
+        if ((draft.trigger as? Trigger.Notification)?.conversationId == CURRENT_CONTACT_PLACEHOLDER) return first
+        val errors = try {
+            source.errors(draft).filter { it.severity == Severity.ERROR }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Throwable) {
+            return first
+        }
+        if (errors.isEmpty()) return first
+        if (selectedConfig() != config) return first
+        val text = nl + "\n\n" + repairNote(errors)
+        if (text.length > CompileLimits.MAX_MESSAGE_CHARS) return first
+        val repaired = try {
+            meteredCompile(config, { onRetry?.invoke(CompileRetryKind.REPAIR) }) {
+                delegate.compile(text, manifest, state)
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            return first
+        }
+        // Una bozza (anche ancora con errori) o una risposta motivata del modello (limite superato,
+        // chiarimento, non supportato) sostituisce l'originale; un errore dell'app no.
+        val usable = repaired.metaError?.let(CompileMetaError::isModelAnswer) ?: (repaired.draft != null)
+        return if (usable) repaired else first
     }
 
     /**
@@ -171,6 +265,8 @@ class MeteredBrain(
 
     private suspend fun meteredCompile(
         config: ProviderConfig,
+        /** Chiamata solo se il budget ammette la chiamata (un blocco HARD non conta come ritentativo partito). */
+        onAdmitted: (() -> Unit)? = null,
         call: suspend () -> CompileResult,
     ): CompileResult {
         val now = nowMillis()
@@ -194,7 +290,7 @@ class MeteredBrain(
                 }
                 else -> error("verdict non bloccante")
             }
-            Admission.Granted -> Unit
+            Admission.Granted -> onAdmitted?.invoke()
         }
         // Ogni tentativo costa ed entra nel budget, anche quando il JSON del modello è malformato.
         return metered(config, UsageEventKind.COMPILE, now, call, { it.metaError }, { it.usage })

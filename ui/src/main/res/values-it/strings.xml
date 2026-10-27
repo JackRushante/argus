@@ -365,4 +365,39 @@
     <string name="pause_setting_title">Pausa automazioni</string>
     <string name="pause_setting_on">Nessuna regola scatta, comprese quelle manuali. Le sveglie restano registrate; quello che viene saltato non si recupera alla ripresa.</string>
     <string name="pause_setting_off">Le regole scattano normalmente.</string>
+
+    <!-- 0.5.0 (privilegi): backend privilegiato, root su e permessi permanenti. -->
+    <string name="priv50_section">Privilegi</string>
+    <string name="priv50_backend_title">Backend privilegiato</string>
+    <string name="priv50_backend_none">Nessuno: Shizuku, Sui e root non sono disponibili. Le regole che chiedono lo shell privilegiato restano in attesa.</string>
+    <string name="priv50_backend_shizuku">Shizuku</string>
+    <string name="priv50_backend_shell">Shizuku (adb): i comandi girano con i permessi shell.</string>
+    <string name="priv50_backend_shizuku_root">Shizuku (root): i comandi girano come root.</string>
+    <string name="priv50_backend_sui">Sui (root): i comandi girano come root.</string>
+    <string name="priv50_backend_root">Root (su): i comandi girano come root.</string>
+    <string name="priv50_root_title">Usa root (su)</string>
+    <string name="priv50_root_off">Spento. Argus non chiama mai su finché resta spento.</string>
+    <string name="priv50_root_checking">Verifica di su in corso… il gestore root può chiedere il consenso.</string>
+    <string name="priv50_root_active">Acceso. su ha risposto come root (uid 0). Si usa quando Shizuku non è disponibile.</string>
+    <string name="priv50_root_denied">su non ha dato l\'accesso root. Consenti Argus nel gestore root, poi riaccendi l\'interruttore.</string>
+    <string name="priv50_root_no_su">Su questo telefono non c\'è su.</string>
+    <string name="priv50_grants_title">Permessi permanenti</string>
+    <string name="priv50_grants_hint">Argus può concedersi da solo questi permessi una volta, con Shizuku o root. Restano dopo il riavvio: queste funzioni continuano anche quando Shizuku non gira.</string>
+    <string name="priv50_granted">Concesso</string>
+    <string name="priv50_not_granted">Non concesso</string>
+    <string name="priv50_via_button">concedilo con il pulsante qui sotto</string>
+    <string name="priv50_via_need_backend">per concederlo serve Shizuku, Sui o root</string>
+    <string name="priv50_grant_secure_title">Scrivere impostazioni secure e global</string>
+    <string name="priv50_grant_secure_body">«Scrivi impostazione» su SECURE e GLOBAL, senza Shizuku.</string>
+    <string name="priv50_grant_write_title">Modifica impostazioni di sistema</string>
+    <string name="priv50_grant_write_body">Luminosità e rotazione senza il passaggio manuale.</string>
+    <string name="priv50_grant_usage_title">Accesso ai dati di utilizzo</string>
+    <string name="priv50_grant_usage_body">La condizione «app in primo piano» senza Shizuku.</string>
+    <string name="priv50_grant_dnd_title">Accesso a Non disturbare</string>
+    <string name="priv50_grant_dnd_body">Cambiare Non disturbare e suoneria senza Shizuku.</string>
+    <string name="priv50_grant_button">Concedi i permessi permanenti</string>
+    <string name="priv50_dialog_title">Concedi i permessi permanenti</string>
+    <string name="priv50_dialog_body">Argus si concederà da solo i permessi che lasci spuntati. Restano anche dopo il riavvio.</string>
+    <string name="priv50_dialog_listener_note">L\'accesso alle notifiche non si concede così: resta la schermata di sistema, perché è il permesso più delicato.</string>
+    <string name="priv50_dialog_confirm">Concedi</string>
 </resources>

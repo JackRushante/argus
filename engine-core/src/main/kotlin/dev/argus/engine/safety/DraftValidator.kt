@@ -6,6 +6,7 @@ import java.net.URI
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
+import java.util.Locale
 
 enum class Severity { ERROR, WARNING }
 /**
@@ -256,6 +257,26 @@ class DraftValidator(
                             err(
                                 "var_extraction_regex_invalid",
                                 "extractionRegex non sicura/compatibile RE2 per '${binding.name}'",
+                            )
+                        }
+                    }
+                }
+                is VarBinding.ClockTime -> {
+                    // Ora allo scatto (0.5.0): il fuso deve esistere (ZoneId.of) e il formato deve essere
+                    // accettato da DateTimeFormatter E applicabile a un istante con fuso (formattazione di prova).
+                    binding.tz?.let { tz ->
+                        if (ClockVariable.parseZone(tz) == null) {
+                            err(
+                                "var_clock_tz_invalid",
+                                "clock '${binding.name}': fuso orario non valido (id IANA, es. Europe/Rome, max ${ClockVariable.MAX_TZ_CHARS} caratteri)",
+                            )
+                        }
+                    }
+                    binding.pattern?.let { pattern ->
+                        if (ClockVariable.parseFormatter(pattern, Locale.ENGLISH) == null) {
+                            err(
+                                "var_clock_pattern_invalid",
+                                "clock '${binding.name}': formato non valido (DateTimeFormatter, 1..${ClockVariable.MAX_PATTERN_CHARS} caratteri)",
                             )
                         }
                     }

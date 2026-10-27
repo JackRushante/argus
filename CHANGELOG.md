@@ -2,6 +2,39 @@
 
 Release and engineering notes, newest first.
 
+## v0.5.0 (2026-10-27) — The current time in rules, a repair round, permanent grants and root
+
+### Added
+
+- The current time and date in rules (`clock` variable), in any time zone and format, read when the rule
+  fires. Before, the AI could only write the time it was when the rule was compiled, which stayed fixed.
+- "Shizuku once": with Shizuku running, System → "Grant permanent permissions" lets Argus grant itself
+  permissions that survive a reboot. Then `write_setting` on SECURE/GLOBAL, the foreground-app condition,
+  brightness and rotation and Do Not Disturb keep working without Shizuku. A dialog lists what will be
+  granted; notification access is never granted this way.
+- Root: System → "Use root (su)", off by default. Argus checks `su -c id` and, when Shizuku is not running,
+  runs privileged commands through a persistent `su` with the same queue, timeouts and quoting.
+- Sui (Shizuku as a Magisk/KernelSU module, which starts at boot) is detected and shown as the backend.
+
+### Changed
+
+- Repair round: when a compiled draft has validator errors, Argus asks the AI once more with the error
+  codes, at most one retry per message and within the budget. The note carries only the codes and fixed
+  messages, never user data.
+- The AI is told that texts are frozen when the rule is written: changing values are read when the rule
+  fires, or it says they cannot be.
+
+### Permissions
+
+- `WRITE_SECURE_SETTINGS` and `PACKAGE_USAGE_STATS`, which can only be granted from Shizuku, root or adb.
+
+### Verified
+
+- All unit suites and `:app:lintRelease`. On the Android 16 emulator: the permanent grants through
+  Shizuku, then a GLOBAL setting written with Shizuku stopped. AI bench: the time requests 10/10 for the
+  preset and for GPT-6 Luna, over two runs.
+- Not verified on a device: root through `su` and Sui (no rooted emulator).
+
 ## v0.4.2 (2026-10-26) — The unlock trigger fires
 
 ### Fixed

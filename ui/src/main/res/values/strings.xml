@@ -366,4 +366,39 @@
     <string name="pause_setting_title">Pause automations</string>
     <string name="pause_setting_on">No rule runs, manual ones included. Alarms stay registered; what is skipped is not made up for when you resume.</string>
     <string name="pause_setting_off">Rules run as usual.</string>
+
+    <!-- 0.5.0 (privilegi): backend privilegiato, root su e permessi permanenti. -->
+    <string name="priv50_section">Privileges</string>
+    <string name="priv50_backend_title">Privileged backend</string>
+    <string name="priv50_backend_none">None: Shizuku, Sui and root are not available. Rules that need a privileged shell wait.</string>
+    <string name="priv50_backend_shizuku">Shizuku</string>
+    <string name="priv50_backend_shell">Shizuku (adb): commands run with shell permissions.</string>
+    <string name="priv50_backend_shizuku_root">Shizuku (root): commands run as root.</string>
+    <string name="priv50_backend_sui">Sui (root): commands run as root.</string>
+    <string name="priv50_backend_root">Root (su): commands run as root.</string>
+    <string name="priv50_root_title">Use root (su)</string>
+    <string name="priv50_root_off">Off. Argus never calls su while this is off.</string>
+    <string name="priv50_root_checking">Checking su… your root manager may ask for consent.</string>
+    <string name="priv50_root_active">On. su answered as root (uid 0). It is used when Shizuku is not available.</string>
+    <string name="priv50_root_denied">su did not give root access. Allow Argus in your root manager, then turn this on again.</string>
+    <string name="priv50_root_no_su">This phone has no su.</string>
+    <string name="priv50_grants_title">Permanent permissions</string>
+    <string name="priv50_grants_hint">Argus can grant itself these permissions once, with Shizuku or root. They stay after a reboot, so these features keep working even when Shizuku is not running.</string>
+    <string name="priv50_granted">Granted</string>
+    <string name="priv50_not_granted">Not granted</string>
+    <string name="priv50_via_button">grant it with the button below</string>
+    <string name="priv50_via_need_backend">needs Shizuku, Sui or root to grant it</string>
+    <string name="priv50_grant_secure_title">Write secure and global settings</string>
+    <string name="priv50_grant_secure_body">Write setting on SECURE and GLOBAL without Shizuku.</string>
+    <string name="priv50_grant_write_title">Modify system settings</string>
+    <string name="priv50_grant_write_body">Brightness and rotation without the manual step.</string>
+    <string name="priv50_grant_usage_title">Usage data access</string>
+    <string name="priv50_grant_usage_body">The “app in foreground” condition without Shizuku.</string>
+    <string name="priv50_grant_dnd_title">Do Not Disturb access</string>
+    <string name="priv50_grant_dnd_body">Change Do Not Disturb and the ringer without Shizuku.</string>
+    <string name="priv50_grant_button">Grant permanent permissions</string>
+    <string name="priv50_dialog_title">Grant permanent permissions</string>
+    <string name="priv50_dialog_body">Argus will grant itself the permissions you leave ticked. They stay after a reboot.</string>
+    <string name="priv50_dialog_listener_note">Notification access is not granted this way: it stays in the system screen, because it is the most sensitive permission.</string>
+    <string name="priv50_dialog_confirm">Grant</string>
 </resources>

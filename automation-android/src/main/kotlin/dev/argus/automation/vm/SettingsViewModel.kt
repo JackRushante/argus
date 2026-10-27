@@ -51,6 +51,9 @@ import dev.argus.shizuku.ShizukuPermissionOutcome
 import dev.argus.ui.model.AuthState
 import dev.argus.ui.model.BudgetUi
 import dev.argus.ui.model.ContactRow
+import dev.argus.ui.model.PermanentGrantUi
+import dev.argus.ui.model.PrivilegedBackendUi
+import dev.argus.ui.model.PrivilegedUi
 import dev.argus.ui.model.ProviderChoiceUi
 import dev.argus.ui.model.ProviderUsageUi
 import dev.argus.ui.model.RulesBackupKind
@@ -62,12 +65,19 @@ import dev.argus.ui.presentation.ModelFieldHints
 import dev.argus.ui.presentation.RenderLanguage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import dev.argus.automation.privileged.PrivilegedAccessCenter
+import dev.argus.automation.privileged.toDomain
+import dev.argus.automation.privileged.toUi
+import dev.argus.automation.privileged.message
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -297,6 +307,8 @@ class SettingsViewModel @Inject constructor(
     private val rulesBackup: RulesBackup,
     /** F21: interruttore globale «Pausa automazioni». */
     private val pause: AutomationPauseStore,
+    /** 0.5.0: backend privilegiato, root `su` e permessi permanenti. `null` solo nei test che non li provano. */
+    private val privileged: PrivilegedAccessCenter? = null,
 ) : ViewModel() {
     /** Lingua corrente al momento in cui si produce un testo (messaggi, errori); segue il telefono. */
     private val language: RenderLanguage get() = languageSource.current
@@ -365,6 +377,9 @@ class SettingsViewModel @Inject constructor(
         )
     }
 
+    private val privilegedUi: Flow<PrivilegedUi> =
+        privileged?.snapshots?.map { it.toUi() } ?: flowOf(PrivilegedUi())
+
     val state: StateFlow<SettingsState> = combine(
         sources,
         bridgeHealth,
@@ -378,6 +393,7 @@ class SettingsViewModel @Inject constructor(
         languageSource.language,
         mutableBackupStatus,
         pause.paused,
+        privilegedUi,
     ) { values: Array<Any?> ->
         val settingsSources = values[0] as SettingsSources
         val bridge = values[1] as BridgeUiHealth
@@ -390,6 +406,7 @@ class SettingsViewModel @Inject constructor(
         // values[8] = lingua, usata solo come trigger di ricarica.
         val backupStatus = values[9] as RulesBackupStatus
         val automationsPaused = values[10] as Boolean
+        val privilegedState = values[11] as PrivilegedUi
         val health = readAndroidUiHealth(context)
         SettingsState(
             transport = transportUi(bridge, hasToken, keySaved),
@@ -398,7 +415,16 @@ class SettingsViewModel @Inject constructor(
                 degradedAfterReboot = settingsSources.shizukuNeeded &&
                     settingsSources.shizukuStatus == ShizukuGatewayStatus.INSTALLED_NOT_RUNNING,
             ),
-            shizukuRunsAsRoot = settingsSources.shizukuIdentity?.runsAsRoot,
+            // 0.5.0: con il backend root `su` (o Sui) i comandi girano come root: l'approvazione mostra
+            // l'avviso «esegue comandi come root» come per Shizuku root.
+            shizukuRunsAsRoot = if (
+                privilegedState.backend == PrivilegedBackendUi.ROOT ||
+                privilegedState.backend == PrivilegedBackendUi.SUI
+            ) {
+                true
+            } else {
+                settingsSources.shizukuIdentity?.runsAsRoot
+            },
             batteryExempt = health.batteryExempt,
             exactAlarmsGranted = health.exactAlarmsGranted,
             writeSettingsGranted = health.writeSettingsGranted,
@@ -418,6 +444,7 @@ class SettingsViewModel @Inject constructor(
                 !health.notificationListenerGranted && installInfo.mayHaveRestrictedSettings,
             backup = RulesBackupUi(status = backupStatus, exportableRules = settingsSources.exportableRules),
             automationsPaused = automationsPaused,
+            privileged = privilegedState,
         )
     }.stateIn(
         viewModelScope,
@@ -431,6 +458,8 @@ class SettingsViewModel @Inject constructor(
 
     fun refresh() {
         refreshSignal.value = System.nanoTime()
+        // Ritorno dalle impostazioni di sistema: i permessi si rileggono da Android.
+        privileged?.refresh()
         viewModelScope.launch {
             mutableTokenConfigured.value = cancellationSafeOrNull {
                 selectedProviderAuthConfigured()
@@ -629,6 +658,25 @@ class SettingsViewModel @Inject constructor(
         if (shizuku.observeIdentity().value != null) return
         identityProbeJob = viewModelScope.launch {
             cancellationSafeOrNull { shizukuIdentityProbe.probe() }
+        }
+    }
+
+    /** Interruttore «Usa root (su)» (0.5.0): acceso verifica `su -c id`; spento chiude la sessione. */
+    fun setRootEnabled(enabled: Boolean) {
+        val center = privileged ?: return
+        viewModelScope.launch {
+            val result = cancellationSafeOrNull { center.setRootEnabled(enabled) } ?: return@launch
+            result.message(language)?.let { message(it) }
+        }
+    }
+
+    /** «Concedi i permessi permanenti» (0.5.0): solo le voci spuntate nel dialogo. */
+    fun grantPermanent(grants: Set<PermanentGrantUi>) {
+        val center = privileged ?: return
+        val selected = grants.mapTo(linkedSetOf()) { it.toDomain() }
+        viewModelScope.launch {
+            val report = cancellationSafeOrNull { center.grant(selected) } ?: return@launch
+            message(report.message(language))
         }
     }
 

@@ -8,11 +8,15 @@ import dev.argus.automation.notification.NotificationReplyGateway
 import dev.argus.automation.notification.NotificationReplyRequest
 import dev.argus.device.DeviceController
 import dev.argus.device.DeviceToolException
+import dev.argus.device.DirectSettings
+import dev.argus.device.DirectWriteResult
 import dev.argus.device.RingerMode
 import dev.argus.engine.brain.ActResult
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.DndMode
 import dev.argus.engine.model.GenerativeAction
+import dev.argus.engine.model.SettingNamespace
+import dev.argus.engine.model.WriteSettingPolicy
 import dev.argus.engine.runtime.ActionExecutor
 import dev.argus.engine.runtime.ActionResult
 import dev.argus.engine.runtime.FireContext
@@ -86,6 +90,12 @@ class ShizukuActionExecutor(
     private val systemActions: AndroidSystemActionExecutor? = null,
     /** 0.4.1: chiamate HTTP. Default **null**: senza, `base_executor_unavailable`. */
     private val httpRequests: HttpRequestExecutor? = null,
+    /**
+     * 0.5.0: scrittura diretta delle impostazioni (permessi permanenti). Usata da `write_setting`
+     * SOLO quando nessun backend privilegiato è pronto ([shizukuReady] falso): con Shizuku o root
+     * attivi il comportamento non cambia. Default **null**: senza, resta il solo percorso privilegiato.
+     */
+    private val directSettings: DirectSettings? = null,
 ) : ActionExecutor, ResolvedActionExecutor {
     override suspend fun execute(
         action: ResolvedProgramAction,
@@ -144,14 +154,18 @@ class ShizukuActionExecutor(
             }
             // Scrittura impostazioni PARAMETRICA: PRIVILEGED puro (nessun fallback base). key/value
             // sono letterali dell'azione approvata; DeviceTools li ri-valida e costruisce argv.
-            is Action.WriteSetting -> success {
-                tools.writeSetting(
-                    action.namespace,
-                    action.key,
-                    action.value,
-                    ctx.executionId,
-                    ctx.priority,
-                )
+            is Action.WriteSetting -> if (shizukuReady() || directSettings == null) {
+                success {
+                    tools.writeSetting(
+                        action.namespace,
+                        action.key,
+                        action.value,
+                        ctx.executionId,
+                        ctx.priority,
+                    )
+                }
+            } else {
+                writeSettingDirect(directSettings, action)
             }
             is Action.SetDnd -> setDnd(action.mode, ctx)
             is Action.SetRinger -> {
@@ -274,6 +288,26 @@ class ShizukuActionExecutor(
         ActionResult.Failure("action_invalid")
     } catch (_: Exception) {
         ActionResult.Failure("action_failed")
+    }
+
+    /**
+     * `write_setting` senza backend privilegiato: scrittura col ContentResolver, possibile solo con i
+     * permessi permanenti. Stessa validazione di forma del percorso shell. Senza il permesso l'esito è
+     * quello di sempre (`shizuku_unavailable`), per SYSTEM `write_settings_unavailable`.
+     */
+    private fun writeSettingDirect(settings: DirectSettings, action: Action.WriteSetting): ActionResult {
+        if (!WriteSettingPolicy.validKey(action.key) || !WriteSettingPolicy.validValue(action.value)) {
+            return ActionResult.Failure("action_invalid")
+        }
+        return when (settings.write(action.namespace, action.key, action.value)) {
+            DirectWriteResult.WRITTEN -> ActionResult.Success
+            DirectWriteResult.FAILED -> ActionResult.Failure("settings_write_failed")
+            DirectWriteResult.NOT_PERMITTED -> if (action.namespace == SettingNamespace.SYSTEM) {
+                ActionResult.Failure("write_settings_unavailable")
+            } else {
+                ActionResult.Failure(ShizukuShellException.UNAVAILABLE)
+            }
+        }
     }
 
     /**

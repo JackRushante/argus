@@ -40,6 +40,7 @@ import dev.argus.engine.runtime.NoopAuditSink
 import kotlinx.coroutines.CancellationException
 import dev.argus.engine.safety.DraftValidator
 import dev.argus.engine.safety.Severity
+import dev.argus.device.PermanentGrantStatus
 import dev.argus.shizuku.ShizukuGateway
 import dev.argus.shizuku.ShizukuGatewayStatus
 
@@ -78,7 +79,20 @@ internal data class AndroidCapabilityState(
      * luminosità e rotazione dello schermo senza Shizuku.
      */
     val writeSettingsGranted: Boolean = false,
+    /**
+     * 0.5.0: il backend root (`su`) è acceso E verificato (uid 0). Vale come Shizuku per i comandi
+     * privilegiati: le capacità «solo Shizuku» diventano «Shizuku o root».
+     */
+    val rootActive: Boolean = false,
+    /** 0.5.0: `WRITE_SECURE_SETTINGS` concesso (permessi permanenti): `write_setting` su SECURE e GLOBAL senza Shizuku. */
+    val secureSettingsGranted: Boolean = false,
+    /** 0.5.0: accesso ai dati di utilizzo concesso (`GET_USAGE_STATS`): `app_in_foreground` senza Shizuku. */
+    val usageStatsGranted: Boolean = false,
 ) {
+    /** Uno shell privilegiato è disponibile ORA: Shizuku autorizzato (Sui compreso) o root verificato. */
+    val privilegedBackendAvailable: Boolean
+        get() = shizukuStatus == ShizukuGatewayStatus.AUTHORIZED || rootActive
+
     /** Permessi di posizione precisi, in primo piano e in background. */
     val locationGranted: Boolean get() = foregroundLocationGranted && backgroundLocationGranted
 
@@ -101,6 +115,8 @@ internal fun interface AndroidCapabilityStateSource {
 internal class SystemAndroidCapabilityStateSource(
     context: Context,
     private val shizuku: ShizukuGateway,
+    /** 0.5.0: root `su` attivo e verificato. Letto dalla cache, non chiama mai `su`. */
+    private val rootActive: () -> Boolean = { false },
 ) : AndroidCapabilityStateSource {
     private val appContext = context.applicationContext
 
@@ -150,6 +166,9 @@ internal class SystemAndroidCapabilityStateSource(
                 ?.let { it.supportedModemCount >= 2 || it.activeModemCount >= 2 }
         }.getOrNull() ?: false,
         writeSettingsGranted = runCatching { Settings.System.canWrite(appContext) }.getOrDefault(false),
+        rootActive = runCatching(rootActive).getOrDefault(false),
+        secureSettingsGranted = PermanentGrantStatus.secureSettings(appContext),
+        usageStatsGranted = PermanentGrantStatus.usageStats(appContext),
     )
 
     private fun granted(permission: String): Boolean =
@@ -217,8 +236,9 @@ class AndroidCapabilityProbe internal constructor(
         whitelist: ContactWhitelistStore,
         readiness: GenerativeRuntimeReadiness,
         baseTierActive: Boolean = false,
+        rootActive: () -> Boolean = { false },
     ) : this(
-        SystemAndroidCapabilityStateSource(context, shizuku),
+        SystemAndroidCapabilityStateSource(context, shizuku, rootActive),
         whitelist,
         readiness,
         SystemAndroidSensorCapabilitySource(context),
@@ -232,7 +252,7 @@ class AndroidCapabilityProbe internal constructor(
             deviceModel = resolved.state.deviceModel,
             androidVersion = resolved.state.androidVersion,
             androidApi = resolved.state.androidApi,
-            shizukuAvailable = resolved.state.shizukuStatus == ShizukuGatewayStatus.AUTHORIZED,
+            shizukuAvailable = resolved.state.privilegedBackendAvailable,
             grantedPermissions = grantedPermissionNames(resolved.state),
             availableTools = resolved.availableTools,
             unavailableTools = resolved.unavailableTools,
@@ -366,7 +386,8 @@ class AndroidCapabilityProbe internal constructor(
             sensors.read(state.activityRecognitionGranted),
             implementedSensorKinds,
         )
-        val shizukuAvailable = state.shizukuStatus == ShizukuGatewayStatus.AUTHORIZED
+        // 0.5.0: «Shizuku o root». Il nome resta per non toccare le decine di punti che lo usano.
+        val shizukuAvailable = state.privilegedBackendAvailable
         val shizukuTransient = state.shizukuStatus == ShizukuGatewayStatus.INSTALLED_NOT_RUNNING &&
             state.shizukuPermissionGranted
         // Tier base: LaunchApp/OpenUrl senza grant; DND/Ringer col policy `ACCESS_NOTIFICATION_POLICY`.
@@ -417,6 +438,11 @@ class AndroidCapabilityProbe internal constructor(
             // speciale «Modifica impostazioni di sistema».
             addAll(BASE_ACTIONS_041_CAPABILITIES)
             if (state.writeSettingsGranted) addAll(WRITE_SETTINGS_CAPABILITIES)
+            // 0.5.0, permessi permanenti: con `WRITE_SECURE_SETTINGS` la scrittura parametrica passa dal
+            // ContentResolver (SECURE/GLOBAL; SYSTEM resta legato a «Modifica impostazioni di sistema»),
+            // con l'accesso ai dati di utilizzo l'app in primo piano si legge da UsageStatsManager.
+            if (state.secureSettingsGranted) add(ActionCapabilities.WRITE_SETTING)
+            if (state.usageStatsGranted) add(CapabilityIds.STATE_FOREGROUND_APP)
             if (state.notificationsGranted) add(ActionCapabilities.SHOW_NOTIFICATION)
             // CapabilityRequirements persiste anche i raw tool approvati: il set del fire-time
             // deve contenere gli stessi nomi wire, senza alias con le capability typed.
@@ -476,6 +502,9 @@ class AndroidCapabilityProbe internal constructor(
             }
             if (shizukuAvailable || dndBase) addAll(BASE_DND_ACTION_TYPES)
             if (shizukuAvailable || launchBase) addAll(BASE_LAUNCH_ACTION_TYPES)
+            if (state.secureSettingsGranted && ActionTypeIds.WRITE_SETTING !in this) {
+                add(ActionTypeIds.WRITE_SETTING)
+            }
             if (state.notificationsGranted) {
                 add(ActionTypeIds.SHOW_NOTIFICATION)
                 add(TOOL_NOTIFY_SHOW)
@@ -494,7 +523,10 @@ class AndroidCapabilityProbe internal constructor(
         val unavailableTools = linkedMapOf<String, String>()
         if (!shizukuAvailable) {
             val reason = shizukuReason(state.shizukuStatus)
-            PRIVILEGED_ACTION_TYPES.forEach { unavailableTools[it] = reason }
+            PRIVILEGED_ACTION_TYPES.forEach {
+                if (it == ActionTypeIds.WRITE_SETTING && state.secureSettingsGranted) return@forEach
+                unavailableTools[it] = reason
+            }
             if (!launchBase) BASE_LAUNCH_ACTION_TYPES.forEach { unavailableTools[it] = reason }
             if (!dndBase) BASE_DND_ACTION_TYPES.forEach {
                 unavailableTools[it] = if (baseTierActive) REASON_DND_POLICY else reason
@@ -551,6 +583,8 @@ class AndroidCapabilityProbe internal constructor(
         if (state.bluetoothConnectGranted) add("bluetooth_connect")
         if (state.activityRecognitionGranted) add("activity_recognition")
         if (state.writeSettingsGranted) add("write_settings")
+        if (state.secureSettingsGranted) add("write_secure_settings")
+        if (state.usageStatsGranted) add("usage_stats")
     }
 
     /** Capability `state.<chiave>` leggibili ORA senza Shizuku (tutte, tranne il Bluetooth senza permesso). */
