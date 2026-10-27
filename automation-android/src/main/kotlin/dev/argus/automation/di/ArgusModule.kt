@@ -152,7 +152,14 @@ import dev.argus.data.backup.RulesBackupService
 import dev.argus.data.RoomExecutionJournal
 import dev.argus.data.RoomJournalMaintenance
 import dev.argus.data.RoomObservedConversationStore
+import dev.argus.automation.privileged.PrefsRootPreference
+import dev.argus.automation.privileged.PrivilegedAccessCenter
+import dev.argus.device.AndroidDirectSettings
 import dev.argus.device.AndroidPublicStateSource
+import dev.argus.device.DirectSettings
+import dev.argus.device.ForegroundAppSource
+import dev.argus.device.PermanentGrantsController
+import dev.argus.device.UsageStatsForegroundSource
 import dev.argus.device.DeviceController
 import dev.argus.device.DeviceTools
 import dev.argus.device.ParametricStateReader
@@ -201,6 +208,11 @@ import dev.argus.engine.safety.ApprovalWhitelistProvider
 import dev.argus.engine.safety.DraftRepository
 import dev.argus.engine.safety.DraftValidator
 import dev.argus.shizuku.PrivilegedShell
+import dev.argus.shizuku.RootAccess
+import dev.argus.shizuku.RootPreference
+import dev.argus.shizuku.RootPrivilegedShell
+import dev.argus.shizuku.RootState
+import dev.argus.shizuku.RoutedPrivilegedShell
 import dev.argus.shizuku.ShizukuAccess
 import dev.argus.shizuku.ShizukuGateway
 import dev.argus.shizuku.ShizukuIdentityProbe
@@ -208,6 +220,9 @@ import dev.argus.shizuku.ShizukuPrivilegedShell
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import java.time.Clock
 import java.time.Instant
 import javax.inject.Provider
@@ -374,8 +389,70 @@ object ArgusModule {
     @Provides
     fun shizukuIdentityProbe(shell: ShizukuPrivilegedShell): ShizukuIdentityProbe = shell
 
+    /** 0.5.0: interruttore «Usa root (su)», spento di default. */
     @Provides
-    fun privilegedShellBoundary(shell: ShizukuPrivilegedShell): PrivilegedShell = shell
+    @Singleton
+    fun rootPreference(@ApplicationContext context: Context): RootPreference = PrefsRootPreference(context)
+
+    /**
+     * 0.5.0: backend root. Costruirlo NON chiama `su` se l'interruttore è spento; acceso, verifica
+     * `su -c id` una volta in background.
+     */
+    @Provides
+    @Singleton
+    fun rootShell(
+        preference: RootPreference,
+        @ApplicationScope scope: CoroutineScope,
+    ): RootPrivilegedShell = RootPrivilegedShell(preference, scope)
+
+    @Provides
+    fun rootAccess(shell: RootPrivilegedShell): RootAccess = shell
+
+    /** Shizuku se autorizzato (Sui compreso), altrimenti `su` se attivo e verificato. */
+    @Provides
+    @Singleton
+    fun privilegedShellBoundary(
+        shizukuShell: ShizukuPrivilegedShell,
+        rootShell: RootPrivilegedShell,
+        gateway: ShizukuGateway,
+    ): PrivilegedShell = RoutedPrivilegedShell(
+        shizuku = shizukuShell,
+        root = rootShell,
+        shizukuAvailable = { gateway.status() == dev.argus.shizuku.ShizukuGatewayStatus.AUTHORIZED },
+        rootActive = rootShell::isActive,
+    )
+
+    // --- 0.5.0 (privilegi): permessi permanenti, scritture dirette, app in primo piano senza Shizuku ---
+
+    @Provides
+    @Singleton
+    fun permanentGrantsController(
+        @ApplicationContext context: Context,
+        shell: PrivilegedShell,
+    ): PermanentGrantsController = PermanentGrantsController(shell, context.packageName)
+
+    @Provides
+    @Singleton
+    fun directSettings(@ApplicationContext context: Context): DirectSettings = AndroidDirectSettings(context)
+
+    @Provides
+    @Singleton
+    fun usageForegroundSource(@ApplicationContext context: Context): ForegroundAppSource =
+        UsageStatsForegroundSource(context)
+
+    @Provides
+    @Singleton
+    fun privilegedAccessCenter(
+        @ApplicationContext context: Context,
+        shizuku: ShizukuAccess,
+        root: RootAccess,
+        grants: PermanentGrantsController,
+    ): PrivilegedAccessCenter = PrivilegedAccessCenter(
+        shizuku,
+        root,
+        grants,
+        PrivilegedAccessCenter.statusReader(context),
+    )
 
     @Provides
     @Singleton
@@ -405,7 +482,8 @@ object ArgusModule {
     fun stateQueryProbe(
         gateway: ShizukuGateway,
         reader: ParametricStateReader,
-    ): StateQueryProbe = AndroidStateQueryProbe(gateway, reader)
+        root: RootAccess,
+    ): StateQueryProbe = AndroidStateQueryProbe(gateway, reader, root::isActive)
 
     @Provides
     @Singleton
@@ -415,12 +493,19 @@ object ArgusModule {
         publicReader: PublicStateReader,
         gateway: ShizukuGateway,
         location: CurrentLocationProvider,
+        root: RootAccess,
+        usageForeground: ForegroundAppSource,
     ): LazyDeviceStateProvider = LazyDeviceStateProvider(
         reader,
         gateway,
         location,
         parametricReader,
         publicReader,
+        // 0.5.0: shell privilegiata = Shizuku autorizzato o root verificato.
+        privilegedReady = {
+            gateway.status() == dev.argus.shizuku.ShizukuGatewayStatus.AUTHORIZED || root.isActive()
+        },
+        usageForeground = usageForeground,
     )
 
     @Provides
@@ -442,6 +527,7 @@ object ArgusModule {
         gateway: ShizukuGateway,
         whitelist: ContactWhitelistStore,
         readiness: GenerativeRuntimeReadiness,
+        root: RootAccess,
     ): AndroidCapabilityProbe = AndroidCapabilityProbe(
         context,
         gateway,
@@ -450,6 +536,8 @@ object ArgusModule {
         // Tier base attivo (P3-3): DND/Ringer via NotificationManager, LaunchApp/OpenUrl via Intent,
         // senza Shizuku. In futuro pilotato dal flavor (personal-full/play-core).
         baseTierActive = true,
+        // 0.5.0: root `su` acceso e verificato (letto dalla cache, il probe non chiama mai `su`).
+        rootActive = root::isActive,
     )
 
     @Provides
@@ -694,6 +782,8 @@ object ArgusModule {
         gateway: ShizukuGateway,
         systemActions: AndroidSystemActionExecutor,
         httpRequests: HttpRequestExecutor,
+        root: RootAccess,
+        directSettings: DirectSettings,
     ): ShizukuActionExecutor =
         ShizukuActionExecutor(
             tools,
@@ -710,10 +800,15 @@ object ArgusModule {
             // Caveat BAL: le activity-launch (sveglia/timer/settings/app/URL) da automazione (background)
             // sono affidabili solo via `am start` privilegiato. Riletto a ogni scatto: se l'utente revoca
             // Shizuku si ricade sul percorso BASE senza riavvio.
-            shizukuReady = { gateway.status() == dev.argus.shizuku.ShizukuGatewayStatus.AUTHORIZED },
+            // 0.5.0: «Shizuku o root»: il root `su` verificato conta come un backend privilegiato pronto.
+            shizukuReady = {
+                gateway.status() == dev.argus.shizuku.ShizukuGatewayStatus.AUTHORIZED || root.isActive()
+            },
             // 0.4.1: parlato, tasti multimediali, luminosità/rotazione e chiamate HTTP, senza Shizuku.
             systemActions = systemActions,
             httpRequests = httpRequests,
+            // 0.5.0: write_setting diretto coi permessi permanenti, solo se nessun backend è pronto.
+            directSettings = directSettings,
         )
 
     @Provides
@@ -1243,12 +1338,18 @@ object ArgusModule {
         store: AutomationStore,
         audit: AuditSink,
         frame: DispatchFrame,
+        root: RootAccess,
     ): ArgusRuntimeController = ArgusRuntimeController(
         scope,
         scheduler,
         capabilities,
         maintenance,
-        shizuku.observeStatus(),
+        // 0.5.0: il flusso emette anche quando il root diventa attivo o smette di esserlo (stesso stato
+        // Shizuku): la riconciliazione delle capacità riparte come per un cambio di Shizuku.
+        combine(
+            shizuku.observeStatus(),
+            root.observeState().map { it == RootState.ACTIVE }.distinctUntilChanged(),
+        ) { status, _ -> status },
         preferences,
         replyRegistry,
         connectivity,

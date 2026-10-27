@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Permission normal: consente a OkHttp/probe di interrogare ConnectivityManager. -->
@@ -12,6 +13,16 @@
     <!-- 0.4.1: «Modifica impostazioni di sistema» (permesso speciale, si concede solo dalle impostazioni
          di sistema): serve alle azioni luminosità e rotazione dello schermo. -->
     <uses-permission android:name="android.permission.WRITE_SETTINGS" />
+    <!-- 0.5.0 («Shizuku una volta sola»): permessi che Argus si concede da sé con Shizuku o root, una
+         volta, e che restano dopo il riavvio (`pm grant` / `appops set`). Non si concedono da nessun'altra
+         parte: dichiararli non li dà. WRITE_SECURE_SETTINGS = write_setting su SECURE e GLOBAL senza Shizuku;
+         PACKAGE_USAGE_STATS = la condizione «app in primo piano» senza Shizuku. -->
+    <uses-permission
+        android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
+    <uses-permission
+        android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
 
     <!-- 0.4.1: package visibility per i motori di sintesi vocale (azione «leggi ad alta voce»);
          senza, da Android 11 TextToSpeech non vede nessun motore. -->
