@@ -63,7 +63,7 @@ class AiBenchRepairTest {
         // La nota porta codice e messaggio inglese del validatore, e non i dati della richiesta oltre al suo testo.
         val note = requests.first { "failed validation" in it && "Fra 5 minuti" in it }
         assertTrue("after_ms_invalid: The delay must be between 1 second and 7 days." in note, note)
-        assertTrue("Fix ONLY these errors" in note, note)
+        assertTrue("Compile the request again avoiding exactly these errors" in note, note)
 
         val meta = BenchMeta("m", "u", 1, 1, null, "s", "f", 3, 0)
         val totals = BenchReport.toJson(meta, results).getValue("totals").jsonObject
