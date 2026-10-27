@@ -506,6 +506,28 @@ class RuleRenderCoverageTest {
                     "confidentiality" to ms(m("public", "pubblico")),
                 ),
             ),
+            "clock" to case(
+                v(
+                    VarBinding.ClockTime(
+                        name = "xyz_clock",
+                        tz = "XYZ/Zone",
+                        pattern = "XYZ-pattern",
+                        confidentiality = ConfidentialityLabel.PUBLIC,
+                    ),
+                    "name" to ms("xyz_clock"),
+                    "tz" to ms(m("current time in XYZ/Zone", "ora attuale in XYZ/Zone")),
+                    "pattern" to ms(m("format XYZ-pattern", "formato XYZ-pattern")),
+                    "confidentiality" to ms(m("public", "pubblico")),
+                ),
+                // Senza fuso e senza formato: il fuso del telefono e HH:mm sono comunque scritti.
+                v(
+                    VarBinding.ClockTime(name = "xyz_clock_default"),
+                    "name" to ms("xyz_clock_default"),
+                    "tz" to ms(m("current time on the phone", "ora attuale del telefono")),
+                    "pattern" to ms(m("format HH:mm", "formato HH:mm")),
+                    "confidentiality" to ms(m("public", "pubblico")),
+                ),
+            ),
         )
         check("VarBinding", VarBinding.serializer(), cases) { binding ->
             automation(trigger = notificationTrigger, vars = listOf(binding))

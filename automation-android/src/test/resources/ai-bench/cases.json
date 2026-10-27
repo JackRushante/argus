@@ -2041,5 +2041,80 @@
    "actions_include": ["set_dnd", "set_ringer"],
    "params": {"set_dnd.mode": "OFF", "set_ringer.mode": "normal"}
   }
+ },
+ {
+  "id": "clock.bali.it.01",
+  "category": "p4",
+  "lang": "it",
+  "text": "Crea una regola che quando la attivo mi mostra una notifica con l'ora locale di Bali",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": ["manual", "immediate"]},
+   "actions_include": ["show_notification"],
+   "actions_text": ["\\$\\{[a-z]"],
+   "vars": ["clock"]
+  },
+  "note": "L'ora si legge allo scatto con una variabile clock: scritta nel testo sarebbe sempre quella della compilazione"
+ },
+ {
+  "id": "clock.date.it.02",
+  "category": "p4",
+  "lang": "it",
+  "text": "Ogni mattina alle 8 mostrami una notifica con la data di oggi",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "time", "cron": {"present": true}, "at": {"present": false}, "afterMs": {"present": false}},
+   "cron_fires": ["2026-11-02T08:00", "2026-11-03T08:00"],
+   "cron_silent": ["2026-11-02T09:00"],
+   "actions_include": ["show_notification"],
+   "actions_text": ["\\$\\{[a-z]"],
+   "vars": ["clock"]
+  }
+ },
+ {
+  "id": "clock.zone.en.03",
+  "category": "p4",
+  "lang": "en",
+  "text": "Every morning at 8 show me a notification with the current time in New York",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "time", "cron": {"present": true}, "at": {"present": false}, "afterMs": {"present": false}},
+   "cron_fires": ["2026-11-02T08:00", "2026-11-03T08:00"],
+   "cron_silent": ["2026-11-02T09:00"],
+   "actions_include": ["show_notification"],
+   "actions_text": ["\\$\\{[a-z]"],
+   "vars": ["clock"]
+  }
+ },
+ {
+  "id": "clock.none.it.04",
+  "category": "p4",
+  "lang": "it",
+  "text": "Ogni sera alle 22 mostrami una notifica che dice 'Ora di andare a dormire'",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "time", "cron": {"present": true}, "at": {"present": false}, "afterMs": {"present": false}},
+   "cron_fires": ["2026-11-02T22:00", "2026-11-03T22:00"],
+   "cron_silent": ["2026-11-02T21:00"],
+   "actions_include": ["show_notification"],
+   "actions_text": ["dormire"],
+   "vars_exclude": ["clock"]
+  },
+  "note": "L'ora e' nel trigger, non nel testo: una variabile clock sarebbe fuori posto"
+ },
+ {
+  "id": "clock.none.en.05",
+  "category": "p4",
+  "lang": "en",
+  "text": "Every Tuesday at 7 pm remind me to take out the trash with a notification",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "time", "cron": {"present": true}, "at": {"present": false}, "afterMs": {"present": false}},
+   "cron_fires": ["2026-11-03T19:00", "2026-11-10T19:00"],
+   "cron_silent": ["2026-11-04T19:00"],
+   "actions_include": ["show_notification"],
+   "actions_text": ["trash"],
+   "vars_exclude": ["clock"]
+  }
  }
 ]

@@ -5,6 +5,7 @@ import dev.argus.engine.model.Action
 import dev.argus.engine.model.ActionTier
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationDraft
+import dev.argus.engine.model.ClockVariable
 import dev.argus.engine.model.CmpOp
 import dev.argus.engine.model.ConnMedium
 import dev.argus.engine.model.ConnState
@@ -260,6 +261,22 @@ object RuleRenderMapper {
             "numero casuale da 0 a ${v.max - 1}",
         )
         is VarBinding.Literal -> l.pick("fixed value", "valore fisso")
+        // 0.5.0: ora allo scatto. Fuso e formato sono quelli approvati, mostrati interi.
+        is VarBinding.ClockTime -> {
+            val format = v.pattern ?: ClockVariable.DEFAULT_PATTERN
+            val zone = v.tz
+            if (zone == null) {
+                l.pick(
+                    "current time on the phone, format $format",
+                    "ora attuale del telefono, formato $format",
+                )
+            } else {
+                l.pick(
+                    "current time in $zone, format $format",
+                    "ora attuale in $zone, formato $format",
+                )
+            }
+        }
     }
 
     private fun varTypeLabel(t: VarType, l: RenderLanguage): String = when (t) {

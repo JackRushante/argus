@@ -127,6 +127,22 @@ sealed interface VarBinding {
         override val confidentiality: ConfidentialityLabel = ConfidentialityLabel.PUBLIC,
     ) : VarBinding
 
+    /**
+     * Ora attuale calcolata ALLO SCATTO (0.5.0): l'istante corrente nel fuso [tz] (id IANA, null = fuso
+     * del telefono), formattato con [pattern] (`DateTimeFormatter`, null = `HH:mm`, al massimo
+     * [ClockVariable.MAX_PATTERN_CHARS] caratteri) nella lingua dell'app. Valore TESTO, integrità CLEAN
+     * (non deriva da input esterno), risolto UNA volta a inizio esecuzione. Non è un segreto: PUBLIC.
+     * Il testo di una regola è congelato quando viene scritta; questa è l'unica fonte dell'ora corrente.
+     */
+    @Serializable
+    @SerialName("clock")
+    data class ClockTime(
+        override val name: String,
+        val tz: String? = null,
+        val pattern: String? = null,
+        override val confidentiality: ConfidentialityLabel = ConfidentialityLabel.PUBLIC,
+    ) : VarBinding
+
     companion object {
         val NAME_REGEX = Regex("^[a-z][a-z0-9_]{0,31}$")
     }
@@ -136,6 +152,7 @@ val VarBinding.integrity: IntegrityLabel
     get() = when (this) {
         is VarBinding.Literal, is VarBinding.State, is VarBinding.RandomInt -> IntegrityLabel.CLEAN
         is VarBinding.TriggerPayload -> IntegrityLabel.TAINTED
+        is VarBinding.ClockTime -> IntegrityLabel.CLEAN
     }
 
 val VarBinding.declaredType: VarType
@@ -144,6 +161,7 @@ val VarBinding.declaredType: VarType
         is VarBinding.State -> valueType.toVarType()
         is VarBinding.RandomInt -> VarType.NUMBER
         is VarBinding.TriggerPayload -> VarType.TEXT
+        is VarBinding.ClockTime -> VarType.TEXT
     }
 
 fun StateValueType.toVarType(): VarType = when (this) {
@@ -156,6 +174,7 @@ fun VarBinding.provenance(trigger: Trigger): Set<ValueProvenance> = when (this) 
     is VarBinding.Literal -> setOf(ValueProvenance.LITERAL)
     is VarBinding.State -> setOf(ValueProvenance.DEVICE_STATE)
     is VarBinding.RandomInt -> setOf(ValueProvenance.ENGINE)
+    is VarBinding.ClockTime -> setOf(ValueProvenance.ENGINE)
     is VarBinding.TriggerPayload -> when (trigger) {
         is Trigger.Notification -> setOf(ValueProvenance.NOTIFICATION)
         is Trigger.PhoneState -> when (trigger.event) {

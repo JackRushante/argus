@@ -7,6 +7,8 @@ import dev.argus.engine.model.AutomationSchema
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.ApprovalFingerprints
+import dev.argus.engine.model.ClockVariable
+import dev.argus.engine.model.LiveSystemClock
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.NonCancellable
@@ -17,6 +19,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.selects.select
+import java.time.Clock
+import java.util.Locale
 
 /** @param now fornitore di epoch-millis (Android: System::currentTimeMillis). */
 class Engine(
@@ -34,6 +38,9 @@ class Engine(
     /** «Pausa automazioni» (0.4.1, F21): se attiva, nessuna regola scatta e lo scatto saltato va nel Log. */
     private val firingPause: AutomationPause = AutomationPause.NEVER,
     private val now: () -> Long,
+    /** 0.5.0: orologio e lingua della variabile `clock` (ora allo scatto). Default: orologio vivo del telefono. */
+    private val programClock: Clock = LiveSystemClock,
+    private val programLocale: () -> Locale = ClockVariable::appLocale,
 ) {
     companion object {
         const val MIN_GENERATIVE_COOLDOWN_MS = 60_000L
@@ -300,6 +307,8 @@ class Engine(
                         stateProvider = stateProvider,
                         conditionEvaluator = evaluator,
                         pause = pause,
+                        clock = programClock,
+                        locale = programLocale,
                         journal = ProgramExecutionJournal { entry ->
                             recordJournalAction(
                                 ActionJournalEntry(

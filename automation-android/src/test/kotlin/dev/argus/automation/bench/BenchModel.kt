@@ -97,7 +97,7 @@ internal object BenchVocab {
         "and", "or", "not", "boolean_literal", "var_compare",
     )
 
-    val VAR_TYPES: Set<String> = setOf("literal", "state", "trigger_payload", "random_int")
+    val VAR_TYPES: Set<String> = setOf("literal", "state", "trigger_payload", "random_int", "clock")
 
     val FLOW_TYPES: Set<String> = setOf(ActionTypeIds.IF, ActionTypeIds.WHILE, ActionTypeIds.WAIT)
 
@@ -131,6 +131,8 @@ internal data class DraftExpectation(
     /** `tipo.campo[.sotto]` -> matcher: esiste un'azione di quel tipo il cui campo lo soddisfa. */
     val params: Map<String, JsonElement> = emptyMap(),
     val vars: List<String> = emptyList(),
+    /** Tipi di variabile che NON devono esserci (una voce `a|b` li vieta tutti): serve a `clock` fuori posto. */
+    val varsExclude: List<String> = emptyList(),
     val controlFlow: List<String> = emptyList(),
     val conditionsInclude: List<String> = emptyList(),
     val conditionsParams: Map<String, JsonElement> = emptyMap(),
@@ -139,7 +141,7 @@ internal data class DraftExpectation(
     val isEmpty: Boolean
         get() = trigger.isEmpty() && contact == null && cronFires.isEmpty() && cronSilent.isEmpty() &&
             at == null && actionsInclude.isEmpty() && actionsExclude.isEmpty() && actionsText.isEmpty() &&
-            params.isEmpty() && vars.isEmpty() && controlFlow.isEmpty() && conditionsInclude.isEmpty() &&
+            params.isEmpty() && vars.isEmpty() && varsExclude.isEmpty() && controlFlow.isEmpty() && conditionsInclude.isEmpty() &&
             conditionsParams.isEmpty() && conditionsText.isEmpty()
 }
 
@@ -179,7 +181,7 @@ internal object BenchCases {
     )
     private val EXPECT_KEYS = setOf(
         "outcome", "trigger", "contact", "cron_fires", "cron_silent", "at_datetime", "actions_include",
-        "actions_exclude", "actions_text", "params", "vars", "control_flow", "conditions_include",
+        "actions_exclude", "actions_text", "params", "vars", "vars_exclude", "control_flow", "conditions_include",
         "conditions_params", "conditions_text", "validator_errors",
     )
     private val AT_KEYS = setOf("days_from_today", "month_day", "time")
@@ -310,6 +312,7 @@ internal object BenchCases {
             actionsText = expect.strList("actions_text", at),
             params = params,
             vars = expect.strList("vars", at),
+            varsExclude = expect.strList("vars_exclude", at),
             controlFlow = expect.strList("control_flow", at),
             conditionsInclude = expect.strList("conditions_include", at),
             conditionsParams = conditionsParams,
@@ -318,6 +321,7 @@ internal object BenchCases {
         checkAlternatives(draft.actionsInclude, BenchVocab.ACTION_TYPES, "$at.expect.actions_include")
         checkAlternatives(draft.actionsExclude, BenchVocab.ACTION_TYPES, "$at.expect.actions_exclude")
         checkAlternatives(draft.vars, BenchVocab.VAR_TYPES, "$at.expect.vars")
+        checkAlternatives(draft.varsExclude, BenchVocab.VAR_TYPES, "$at.expect.vars_exclude")
         checkAlternatives(draft.controlFlow, BenchVocab.FLOW_TYPES, "$at.expect.control_flow")
         checkAlternatives(draft.conditionsInclude, BenchVocab.CONDITION_TYPES, "$at.expect.conditions_include")
         (draft.actionsText + draft.conditionsText).forEach { pattern ->

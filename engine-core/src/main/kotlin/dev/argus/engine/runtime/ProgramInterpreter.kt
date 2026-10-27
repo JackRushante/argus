@@ -2,8 +2,10 @@ package dev.argus.engine.runtime
 
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.ConfidentialityLabel
+import dev.argus.engine.model.ClockVariable
 import dev.argus.engine.model.Condition
 import dev.argus.engine.model.IntegrityLabel
+import dev.argus.engine.model.LiveSystemClock
 import dev.argus.engine.model.PhoneEvent
 import dev.argus.engine.model.StateValueCoercion
 import dev.argus.engine.model.Trigger
@@ -21,6 +23,8 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import java.time.Clock
+import java.util.Locale
 
 /** Percorso user-readable, one-based, stabile nell'albero approvato. */
 @JvmInline
@@ -118,6 +122,10 @@ class ProgramInterpreter(
     // Seam per la casualità (come il Clock in ConditionEvaluator): default di produzione, override
     // deterministico nei test. Il bound è sempre >= 1 (garantito da resolveBinding + DraftValidator).
     private val randomInt: (Int) -> Int = { bound -> kotlin.random.Random.nextInt(bound) },
+    // 0.5.0 (variabile `clock`): orologio e lingua iniettati, così i test sono deterministici. Mai
+    // System.currentTimeMillis diretto. Il default è l'orologio vivo del telefono.
+    private val clock: Clock = LiveSystemClock,
+    private val locale: () -> Locale = ClockVariable::appLocale,
 ) {
     suspend fun execute(
         trigger: Trigger,
@@ -339,6 +347,7 @@ class ProgramInterpreter(
                     if (binding.max >= 1) randomInt(binding.max).toString() else null
                 is VarBinding.State -> state.queryValues[binding.query.canonicalId]
                     ?.takeIf { StateValueCoercion.compatible(it, binding.valueType) }
+                is VarBinding.ClockTime -> ClockVariable.format(binding, clock, locale())
                 is VarBinding.TriggerPayload -> triggerValue(binding.field)?.let { payload ->
                     val pattern = binding.extractionRegex
                     if (pattern == null) {

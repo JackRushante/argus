@@ -97,6 +97,8 @@ object CapabilityRequirements {
         // Letterali e payload del trigger non richiedono capability aggiuntive: il payload viaggia
         // già col trigger (la cui capability è derivata da forTrigger).
         is VarBinding.Literal, is VarBinding.TriggerPayload, is VarBinding.RandomInt -> emptySet()
+        // L'ora attuale la dà l'orologio del motore: nessuna capability.
+        is VarBinding.ClockTime -> emptySet()
     }
 
     private fun forTrigger(trigger: Trigger): Set<String> = when (trigger) {
