@@ -79,7 +79,8 @@ class DirectWriteSettingTest {
         DeviceController::class.java.classLoader,
         arrayOf(DeviceController::class.java),
     ) { _, method, args ->
-        if (method.name == "writeSetting") {
+        // Il nome è mangled (ExecutionId è una value class): `writeSetting-<hash>`.
+        if (method.name.startsWith("writeSetting")) {
             calls.failWith?.let { throw it }
             calls.writes += args.orEmpty().take(3)
             Unit
