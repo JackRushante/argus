@@ -91,10 +91,10 @@ internal fun correctionNote(code: String, detail: String?): String {
     return NOTE_PREFIX + cut + NOTE_SUFFIX
 }
 
-private const val REPAIR_NOTE_PREFIX = "(Argus: the draft in your previous reply failed validation. "
+private const val REPAIR_NOTE_PREFIX = "(Argus: a first draft for this request failed validation. "
 private const val REPAIR_NOTE_SUFFIX = " Reply again with one short sentence, then the final line @@META@@ " +
-    "{\"draft\":<object-or-null>,\"error_code\":<string-or-null>}. Fix ONLY these errors and leave the rest " +
-    "of the draft exactly as it is; or, if the request cannot be met within these rules (for example a limit " +
+    "{\"draft\":<object-or-null>,\"error_code\":<string-or-null>}. Compile the request again avoiding exactly " +
+    "these errors; or, if the request cannot be met within these rules (for example a limit " +
     "is exceeded), return draft null with the matching error_code (limit_exceeded for a limit) and explain why.)"
 private const val REPAIR_MAX_ERRORS = 6
 

@@ -94,10 +94,10 @@ class MeteredBrainRepairTest {
         assertEquals(2, delegate.texts.size)
         assertEquals("fra 5 minuti vibra", delegate.texts[0])
         assertEquals(
-            "fra 5 minuti vibra\n\n(Argus: the draft in your previous reply failed validation. " +
+            "fra 5 minuti vibra\n\n(Argus: a first draft for this request failed validation. " +
                 "after_ms_invalid: The delay must be between 1 second and 7 days. Reply again with one short " +
                 "sentence, then the final line @@META@@ {\"draft\":<object-or-null>,\"error_code\":<string-or-null>}. " +
-                "Fix ONLY these errors and leave the rest of the draft exactly as it is; or, if the request " +
+                "Compile the request again avoiding exactly these errors; or, if the request " +
                 "cannot be met within these rules (for example a limit is exceeded), return draft null with the " +
                 "matching error_code (limit_exceeded for a limit) and explain why.)",
             delegate.texts[1],
