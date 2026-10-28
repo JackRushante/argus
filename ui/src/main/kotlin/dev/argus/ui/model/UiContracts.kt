@@ -403,6 +403,12 @@ data class SettingsState(
      * impostazioni di sistema. Default `true`: un fixture non deve avvisare per caso.
      */
     val writeSettingsGranted: Boolean = true,
+    /**
+     * 0.5.1: il servizio di Accessibilità di Argus è acceso (macro sullo schermo). Si accende solo
+     * dalle impostazioni di sistema o, con Shizuku o root, dal dialogo dei permessi permanenti.
+     * Default `true`: un fixture non deve avvisare per caso.
+     */
+    val accessibilityGranted: Boolean = true,
     /** Permesso di PUBBLICARE notifiche (esiti/avvisi Argus). */
     val notificationsGranted: Boolean,
     /** Accesso notification listener: lettura notifiche WhatsApp e canale di reply (P1). */
@@ -413,6 +419,12 @@ data class SettingsState(
     val callTriggerGranted: Boolean = false,
     /** Trigger ACL Bluetooth (P2-3): runtime grant NEARBY_DEVICES su Android 12+. */
     val bluetoothTriggerGranted: Boolean = false,
+    /**
+     * 0.5.1: «Accesso ai dati di utilizzo» concesso (`PACKAGE_USAGE_STATS`): serve alle regole «quando
+     * apro/chiudo un'app». Si concede dalle impostazioni di sistema, oppure con Shizuku o root da
+     * «Concedi i permessi permanenti». Default `true`: un fixture non deve avvisare per caso.
+     */
+    val usageAccessGranted: Boolean = true,
     /** Visibile solo mentre il monitor condiviso Wi-Fi/alimentazione è realmente attivo. */
     val connectivitySentinelActive: Boolean = false,
     val whitelist: List<ContactRow>,
@@ -499,8 +511,13 @@ sealed interface TransportUi {
         val unauthenticatedLoopback: Boolean = false,
         /** true per OpenRouter: il campo modello mostra il suggerimento sui preset `@preset/<nome>`. */
         val modelPresetHint: Boolean = false,
+        /** Preset dei server locali (solo Custom): compilano l'indirizzo e mostrano la nota sul contesto. */
+        val localPresets: List<LocalPresetUi> = emptyList(),
     ) : TransportUi
 }
+
+/** Un preset di server locale nel dialogo del provider Custom: `id` stabile, nome proprio e indirizzo. */
+data class LocalPresetUi(val id: String, val label: String, val baseUrl: String)
 enum class AuthState { OK, EXPIRED, NOT_CONFIGURED }
 
 /** Voce del selettore provider (il VM la costruisce dal ProviderCatalog). */
@@ -561,6 +578,10 @@ interface SettingsCallbacks {
     fun onOpenExactAlarmFix() {}
     /** Apre «Modifica impostazioni di sistema» per Argus (0.4.1: luminosità e rotazione). Default no-op. */
     fun onOpenWriteSettingsFix() {}
+    /** Apre «Accesso ai dati di utilizzo» per Argus (0.5.1: regole «app aperta/chiusa»). Default no-op. */
+    fun onOpenUsageAccessFix() {}
+    /** Apre le impostazioni di Accessibilità per accendere il servizio di Argus (0.5.1: macro sullo schermo). Default no-op. */
+    fun onOpenAccessibilityFix() {}
     /** Apre le impostazioni di sistema per l'accesso notification listener (lettura, P1). */
     fun onOpenNotificationListenerFix() {}
     /** Richieste runtime dei trigger telefonia (P2-2): RECEIVE_SMS e READ_PHONE_STATE(+CALL_LOG). */
@@ -728,6 +749,27 @@ object ShizukuCapabilityCatalog {
         ),
         ShizukuCapabilityRow(
             title = language.pick(
+                "Control apps, change permissions, and system switches",
+                "Controllare le app, cambiare i permessi e gli interruttori di sistema",
+            ),
+            requirement = ShizukuRequirement.REQUIRED,
+            note = language.pick(
+                "Force stop or freeze an app, grant or revoke its permissions, airplane mode, location, NFC, battery saver, lock the screen and take a screenshot. They need Shizuku or root.",
+                "Forzare l'arresto o congelare un'app, concederle o revocarle i permessi, modalità aereo, posizione, NFC, risparmio energetico, blocco dello schermo e screenshot. Richiedono Shizuku o root.",
+            ),
+            actionTypeIds = listOf(
+                ActionTypeIds.APP_CONTROL,
+                ActionTypeIds.APP_PERMISSION,
+                ActionTypeIds.SET_AIRPLANE,
+                ActionTypeIds.SET_LOCATION,
+                ActionTypeIds.SET_NFC,
+                ActionTypeIds.SET_BATTERY_SAVER,
+                ActionTypeIds.LOCK_SCREEN,
+                ActionTypeIds.SCREENSHOT,
+            ),
+        ),
+        ShizukuCapabilityRow(
+            title = language.pick(
                 "Read privileged system state",
                 "Leggere stato di sistema privilegiato",
             ),
@@ -870,6 +912,9 @@ enum class PermanentGrantUi(val id: String) {
     WRITE_SETTINGS("write_settings"),
     USAGE_STATS("usage_stats"),
     DND_ACCESS("dnd_access"),
+
+    /** 0.5.1: il servizio di Accessibilità (macro sullo schermo). Mai spuntato in anticipo nel dialogo. */
+    ACCESSIBILITY("accessibility"),
 }
 
 data class PermanentGrantRow(val grant: PermanentGrantUi, val granted: Boolean)

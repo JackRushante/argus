@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Servizio di Accessibilità di Argus (0.5.1): serve SOLO alle macro «ui_steps» che l'utente ha
+     approvato. Eventi minimi (il solo cambio di finestra, ignorato): il servizio non legge e non
+     registra niente finché non c'è una macro in corso. Nessun gesto, nessun filtro dei tasti. -->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagReportViewIds|flagIncludeNotImportantViews"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/a11y51_service_description"
+    android:notificationTimeout="200" />

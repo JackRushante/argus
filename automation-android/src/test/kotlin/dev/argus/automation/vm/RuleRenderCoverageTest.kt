@@ -1,6 +1,8 @@
 package dev.argus.automation.vm
 
 import dev.argus.engine.model.Action
+import dev.argus.engine.model.AppEventKind
+import dev.argus.engine.model.AppControlOp
 import dev.argus.engine.model.ApprovedStateContext
 import dev.argus.engine.model.AudioOutputKind
 import dev.argus.engine.model.Automation
@@ -22,6 +24,7 @@ import dev.argus.engine.model.MediaCommand
 import dev.argus.engine.model.NightMode
 import dev.argus.engine.model.PhoneEvent
 import dev.argus.engine.model.ScreenEvent
+import dev.argus.engine.model.ScrollDirection
 import dev.argus.engine.model.SensorKind
 import dev.argus.engine.model.SettingNamespace
 import dev.argus.engine.model.SettingsScreen
@@ -34,6 +37,7 @@ import dev.argus.engine.model.TimePrecision
 import dev.argus.engine.model.Transition
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.model.TriggerField
+import dev.argus.engine.model.UiStep
 import dev.argus.engine.model.VarBinding
 import dev.argus.engine.model.VarType
 import dev.argus.engine.model.VolumeStream
@@ -358,6 +362,19 @@ class RuleRenderCoverageTest {
             ),
             // 0.4.1: avvio manuale, nessun campo da rendere.
             "manual" to case(Trigger.Manual, emptyMap()),
+            // 0.5.1: app aperta/chiusa. Il package compare per intero, la direzione dice anche cosa significa.
+            "app_event" to case(
+                v(
+                    Trigger.AppEvent("org.example.xyzapp", AppEventKind.OPENED),
+                    "pkg" to ms("org.example.xyzapp"),
+                    "event" to ms(m("is opened", "viene aperta")),
+                ),
+                v(
+                    Trigger.AppEvent("org.example.xyzapp", AppEventKind.CLOSED),
+                    "pkg" to ms("org.example.xyzapp"),
+                    "event" to ms(m("is closed", "viene chiusa")),
+                ),
+            ),
         )
         check("Trigger", Trigger.serializer(), cases) { trigger -> automation(trigger = trigger) }
     }
@@ -796,6 +813,108 @@ class RuleRenderCoverageTest {
                     "headers" to ms("X-XYZ-Key: ••••wxyz", "X-XYZ-Plain: XYZ-plain-value"),
                     "body" to ms(m("Body: XYZ-body", "Corpo: XYZ-body")),
                     "contentType" to ms("Content-Type: application/xyz"),
+                ),
+            ),
+            // --- 0.5.1 (azioni privilegiate tipizzate) ---
+            "app_control" to case(
+                v(
+                    Action.AppControl("com.xyz.app", AppControlOp.FORCE_STOP),
+                    "pkg" to ms("com.xyz.app"),
+                    "op" to ms(m("Force stop", "Forza l'arresto di")),
+                ),
+                v(
+                    Action.AppControl("com.xyz.app", AppControlOp.FREEZE),
+                    "pkg" to ms("com.xyz.app"),
+                    "op" to ms(m("Freeze (disable)", "Congela (disattiva)")),
+                ),
+                v(
+                    Action.AppControl("com.xyz.app", AppControlOp.UNFREEZE),
+                    "pkg" to ms("com.xyz.app"),
+                    "op" to ms(m("Unfreeze (re-enable)", "Scongela (riattiva)")),
+                ),
+            ),
+            "set_airplane" to case(
+                v(Action.SetAirplane(true), "on" to ms(m("Turn on airplane mode", "Attiva la modalità aereo"))),
+                v(Action.SetAirplane(false), "on" to ms(m("Turn off airplane mode", "Disattiva la modalità aereo"))),
+            ),
+            "set_location" to case(
+                v(Action.SetLocation(true), "on" to ms(m("Turn on location", "Attiva la posizione"))),
+                v(Action.SetLocation(false), "on" to ms(m("Turn off location", "Disattiva la posizione"))),
+            ),
+            "set_nfc" to case(
+                v(Action.SetNfc(true), "on" to ms(m("Turn on NFC", "Attiva l'NFC"))),
+                v(Action.SetNfc(false), "on" to ms(m("Turn off NFC", "Disattiva l'NFC"))),
+            ),
+            "set_battery_saver" to case(
+                v(Action.SetBatterySaver(true), "on" to ms(m("Turn on battery saver", "Attiva il risparmio energetico"))),
+                v(Action.SetBatterySaver(false), "on" to ms(m("Turn off battery saver", "Disattiva il risparmio energetico"))),
+            ),
+            "lock_screen" to case(
+                Action.LockScreen,
+                emptyMap(),
+            ),
+            "screenshot" to case(
+                Action.Screenshot,
+                emptyMap(),
+            ),
+            "app_permission" to case(
+                v(
+                    Action.AppPermission("com.xyz.app", "android.permission.RECORD_AUDIO", grant = true),
+                    "pkg" to ms("com.xyz.app"),
+                    "permission" to ms("android.permission.RECORD_AUDIO"),
+                    "grant" to ms(m("Grant the microphone permission to", "Concedi il microfono a")),
+                ),
+                v(
+                    Action.AppPermission("com.xyz.app", "android.permission.RECORD_AUDIO", grant = false),
+                    "pkg" to ms("com.xyz.app"),
+                    "permission" to ms("android.permission.RECORD_AUDIO"),
+                    "grant" to ms(m("Revoke the microphone permission from", "Revoca il microfono a")),
+                ),
+            ),
+            // --- 0.5.1 (macro sullo schermo) ---
+            "ui_steps" to case(
+                v(
+                    Action.UiSteps(
+                        pkg = "com.xyz.shop",
+                        steps = listOf(
+                            UiStep.WaitFor(text = "XYZ-wait", id = "xyz_wait_id", timeoutMs = 8_000),
+                            UiStep.Click(text = "XYZ-click", id = "xyz_click_id", desc = "XYZ-desc", index = 2),
+                            UiStep.Type("XYZ-typed"),
+                            UiStep.Scroll(ScrollDirection.UP),
+                            UiStep.Check(text = "XYZ-check", present = false),
+                            UiStep.Back,
+                            UiStep.Home,
+                        ),
+                    ),
+                    "pkg" to ms(m("Opens com.xyz.shop first", "Prima apre com.xyz.shop")),
+                    "steps" to ms(
+                        m(
+                            """Wait up to 8 s for text "XYZ-wait" and id "xyz_wait_id"""",
+                            """Aspetta fino a 8 s: testo "XYZ-wait" e id "xyz_wait_id"""",
+                        ),
+                        m(
+                            """Tap the element with text "XYZ-click" and id "xyz_click_id" and description "XYZ-desc" (match number 3)""",
+                            """Tocca l'elemento con testo "XYZ-click" e id "xyz_click_id" e descrizione "XYZ-desc" (corrispondenza numero 3)""",
+                        ),
+                        m("""Type "XYZ-typed" in the focused field""", """Scrivi "XYZ-typed" nel campo attivo"""),
+                        m("Scroll up", "Scorri in su"),
+                        m(
+                            """Check that "XYZ-check" is NOT on the screen, otherwise stop""",
+                            """Controlla che "XYZ-check" NON sia sullo schermo, altrimenti fermati""",
+                        ),
+                        m("Press Back", "Premi Indietro"),
+                        m("Press Home", "Premi Home"),
+                        m(
+                            "Acts on the screen like you would",
+                            "Agisce sullo schermo come faresti tu",
+                        ),
+                    ),
+                ),
+                v(
+                    Action.UiSteps(pkg = null, steps = listOf(UiStep.Scroll(ScrollDirection.DOWN))),
+                    "pkg" to ms(
+                        m("Works on the screen as it is", "Lavora sullo schermo così com'è"),
+                    ),
                 ),
             ),
         )

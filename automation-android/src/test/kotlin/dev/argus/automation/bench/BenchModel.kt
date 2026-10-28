@@ -55,6 +55,8 @@ internal object BenchVocab {
         "screen", "battery", "audio_output", "mode_changed", "media",
         // 0.4.1: avvio manuale.
         "manual",
+        // 0.5.1: app aperta/chiusa.
+        "app_event",
     )
 
     val ACTION_TYPES: Set<String> = setOf(
@@ -90,6 +92,17 @@ internal object BenchVocab {
         ActionTypeIds.SET_BRIGHTNESS,
         ActionTypeIds.SET_ROTATION,
         ActionTypeIds.HTTP_REQUEST,
+        // 0.5.1: azioni privilegiate tipizzate.
+        ActionTypeIds.APP_CONTROL,
+        ActionTypeIds.SET_AIRPLANE,
+        ActionTypeIds.SET_LOCATION,
+        ActionTypeIds.SET_NFC,
+        ActionTypeIds.SET_BATTERY_SAVER,
+        ActionTypeIds.LOCK_SCREEN,
+        ActionTypeIds.SCREENSHOT,
+        ActionTypeIds.APP_PERMISSION,
+        // 0.5.1: macro sullo schermo con il servizio di Accessibilità.
+        ActionTypeIds.UI_STEPS,
     )
 
     val CONDITION_TYPES: Set<String> = setOf(

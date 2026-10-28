@@ -20,6 +20,12 @@ object CompileTimeoutPolicy {
     const val DEFAULT_MILLIS = 65_000L
     const val LOCAL_CUSTOM_MILLIS = 180_000L
 
+    /**
+     * Quanto il timeout HTTP del client eccede quello del compile: scade prima il compile, con il suo
+     * messaggio, e non la chiamata HTTP con un errore di rete generico.
+     */
+    const val HTTP_MARGIN_MILLIS = 5_000L
+
     fun timeoutMillis(providerId: ProviderId, baseUrl: String?): Long =
         if (providerId == ProviderId.CUSTOM_OPENAI_COMPAT && isLocalOrPrivateHost(baseUrl)) {
             LOCAL_CUSTOM_MILLIS

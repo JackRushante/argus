@@ -723,6 +723,7 @@ class DraftValidator(
         is Action.RunShell -> SHELL_ACTION_BUDGET_MS
         is Action.HttpRequest -> HTTP_ACTION_BUDGET_MS
         is Action.Speak -> SPEAK_ACTION_BUDGET_MS
+        is Action.UiSteps -> UiStepsPolicy.budgetMs(action)
         is Action.Wait -> action.durationMs.coerceAtLeast(0)
         is Action.If -> maxOf(worstCaseBudgetMs(action.then), worstCaseBudgetMs(action.orElse))
         // Con maxIterationsVar il conteggio è ignoto a compile-time: worst-case = MAX_WHILE_ITERATIONS
@@ -889,6 +890,13 @@ class DraftValidator(
             is Trigger.Media -> Unit
             // Avvio manuale: nessun campo da validare, parte solo su invocazione dell'utente.
             is Trigger.Manual -> Unit
+            // App aperta/chiusa (0.5.1): il package deve avere la forma dei package Android. La direzione
+            // è un enum chiuso, quindi non c'è altro da controllare.
+            is Trigger.AppEvent -> {
+                validatePackage(trigger.pkg, "pkg_blank", err)
+                if (trigger.pkg.length > AppPackagePolicy.MAX_LENGTH)
+                    err("package_invalid", "Package troppo lungo (massimo ${AppPackagePolicy.MAX_LENGTH})")
+            }
         }
     }
 
@@ -1144,6 +1152,17 @@ class DraftValidator(
             }
             is Action.SetRotation -> Unit // solo booleano, nulla da validare
             is Action.HttpRequest -> validateHttpRequest(action, err)
+            // 0.5.1: azioni privilegiate tipizzate. Solo booleani/nessun campo: nulla da validare.
+            is Action.SetAirplane,
+            is Action.SetLocation,
+            is Action.SetNfc,
+            is Action.SetBatterySaver,
+            is Action.LockScreen,
+            is Action.Screenshot,
+            -> Unit
+            is Action.AppControl -> validateAppControl(action, err, warn)
+            is Action.AppPermission -> validateAppPermission(action, err, warn)
+            is Action.UiSteps -> validateUiSteps(action, trigger, whitelist, err, warn)
             is Action.InvokeLlm -> validateInvokeLlm(action, trigger, whitelist, err, warn)
             is Action.InvokeLlmV2 -> validateInvokeLlmV2(action, trigger, whitelist, err, warn)
             // Contenitori control-flow: bound (while), rami non vuoti, condizione di flusso e
@@ -1214,6 +1233,121 @@ class DraftValidator(
                 err("http_body_too_large", "Body oltre ${HttpRequestPolicy.MAX_BODY_BYTES} byte")
             }
         }
+    }
+
+    /**
+     * `app_control` (0.5.1). `pkg` è LETTERALE: la forma del package esclude `${'$'}{…}`, quindi un dato esterno
+     * non può scegliere quale app fermare. Vietato su Argus e sui package di sistema essenziali; il
+     * launcher in uso lo conosce solo il telefono ed è controllato dall'esecutore. FREEZE è distruttivo.
+     */
+    private fun validateAppControl(
+        action: Action.AppControl,
+        err: (String, String) -> Unit,
+        warn: (String, String) -> Unit,
+    ) {
+        when (PrivilegedActionPolicy.appControlTarget(action.pkg)) {
+            PrivilegedActionPolicy.TargetVerdict.PACKAGE_INVALID ->
+                err("priv_pkg_invalid", "Package non valido: serve un package letterale (niente \${…})")
+            PrivilegedActionPolicy.TargetVerdict.FORBIDDEN ->
+                err(
+                    "priv_target_forbidden",
+                    "Argus, il launcher e i package di sistema essenziali non possono essere controllati",
+                )
+            PrivilegedActionPolicy.TargetVerdict.OK -> Unit
+        }
+        if (action.op == AppControlOp.FREEZE && PrivilegedActionPolicy.isValidPackage(action.pkg)) {
+            warn(
+                "app_control_freeze_review",
+                "Congelare disattiva l'app ${action.pkg}: sparisce dal launcher e non parte finché non " +
+                    "viene riattivata",
+            )
+        }
+    }
+
+    /**
+     * `app_permission` (0.5.1). `pkg` e `permission` sono LETTERALI. Il permesso deve essere un permesso
+     * runtime dell'elenco chiuso ([PrivilegedActionPolicy.RUNTIME_PERMISSIONS]); vietato su Argus. La
+     * revoca è distruttiva: l'app perde un accesso e può essere terminata da Android.
+     */
+    private fun validateAppPermission(
+        action: Action.AppPermission,
+        err: (String, String) -> Unit,
+        warn: (String, String) -> Unit,
+    ) {
+        when (PrivilegedActionPolicy.appPermissionTarget(action.pkg)) {
+            PrivilegedActionPolicy.TargetVerdict.PACKAGE_INVALID ->
+                err("priv_pkg_invalid", "Package non valido: serve un package letterale (niente \${…})")
+            PrivilegedActionPolicy.TargetVerdict.FORBIDDEN ->
+                err("priv_target_forbidden", "I permessi di Argus non possono essere modificati da una regola")
+            PrivilegedActionPolicy.TargetVerdict.OK -> Unit
+        }
+        if (!PrivilegedActionPolicy.isRuntimePermission(action.permission)) {
+            err(
+                "priv_permission_invalid",
+                "Permesso fuori dall'elenco dei permessi runtime ammessi (android.permission.*)",
+            )
+        }
+        if (!action.grant && PrivilegedActionPolicy.isValidPackage(action.pkg)) {
+            warn(
+                "app_permission_revoke_review",
+                "Revocare un permesso toglie un accesso all'app ${action.pkg}: ${action.permission}",
+            )
+        }
+    }
+
+    /**
+     * `ui_steps` (0.5.1). Da 1 a 20 passi a vocabolario chiuso; `pkg` è un package letterale e mai uno
+     * di quelli vietati (Argus, Impostazioni, installatore, dialoghi dei permessi); solo il testo di
+     * `type` ammette segnaposto. Il trigger deve poter avviare anche una shell ([StaticShellSafety]):
+     * niente SMS, chiamate, media né app aperta o chiusa, perché chiunque può provocarli. A runtime
+     * gli stessi limiti sono riverificati ([UiStepsPolicy.isResolvedShapeValid]).
+     */
+    private fun validateUiSteps(
+        action: Action.UiSteps,
+        trigger: Trigger,
+        whitelist: Set<String>,
+        err: (String, String) -> Unit,
+        warn: (String, String) -> Unit,
+    ) {
+        if (action.steps.isEmpty()) {
+            err("ui_steps_empty", "La macro sull'interfaccia non ha passi")
+        } else if (action.steps.size > UiStepsPolicy.MAX_STEPS) {
+            err("ui_steps_too_many", "Massimo ${UiStepsPolicy.MAX_STEPS} passi per macro")
+        }
+        val pkg = action.pkg
+        if (pkg != null) {
+            if (InterpolationPolicy.containsInterpolation(pkg) || !UiStepsPolicy.isPackageName(pkg)) {
+                err("ui_pkg_invalid", "Il package dell'app da aprire non è valido (letterale, senza \${…})")
+            } else if (UiStepsPolicy.isForbiddenPackage(pkg)) {
+                err(
+                    "ui_pkg_forbidden",
+                    "Una macro non può agire su Argus, sulle Impostazioni, sull'installatore di pacchetti " +
+                        "né sui dialoghi dei permessi",
+                )
+            }
+        }
+        action.steps.take(UiStepsPolicy.MAX_STEPS).forEach { step ->
+            if (!UiStepsPolicy.literalFieldsOnly(step)) {
+                err("ui_step_interpolated", "Solo il testo di un passo «type» ammette \${…}")
+            } else {
+                val problem = UiStepsPolicy.stepProblem(step)
+                if (problem != null) {
+                    err("ui_step_invalid", "Passo non valido ($problem)")
+                }
+            }
+        }
+        if (!StaticShellSafety.allows(trigger, whitelist)) {
+            err(
+                "ui_steps_external_trigger",
+                "Una macro sull'interfaccia parte solo da trigger che nessun altro può provocare: " +
+                    "tempo, geofence, connettività, sensori, schermo, batteria, audio, modalità, avvio manuale " +
+                    "o una chat WhatsApp 1:1 in whitelist. Non da SMS, chiamate, media né app aperta o chiusa",
+            )
+        }
+        warn(
+            "ui_steps_review",
+            "La macro agisce sull'interfaccia come farebbe l'utente: tocca, scrive e scorre nell'app indicata",
+        )
     }
 
     private fun validateInvokeLlmV2(

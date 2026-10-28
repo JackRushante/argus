@@ -344,6 +344,15 @@ private fun actionTypeLabel(type: String, l: RenderLanguage): String = when (typ
     ActionTypeIds.SET_BRIGHTNESS -> l.pick("Set screen brightness", "Imposta luminosità schermo")
     ActionTypeIds.SET_ROTATION -> l.pick("Set auto-rotate", "Imposta rotazione automatica")
     ActionTypeIds.HTTP_REQUEST -> l.pick("HTTP request", "Richiesta HTTP")
+    ActionTypeIds.APP_CONTROL -> l.pick("App control", "Controllo app")
+    ActionTypeIds.SET_AIRPLANE -> l.pick("Set airplane mode", "Imposta modalità aereo")
+    ActionTypeIds.SET_LOCATION -> l.pick("Set location", "Imposta posizione")
+    ActionTypeIds.SET_NFC -> l.pick("Set NFC", "Imposta NFC")
+    ActionTypeIds.SET_BATTERY_SAVER -> l.pick("Set battery saver", "Imposta risparmio energetico")
+    ActionTypeIds.LOCK_SCREEN -> l.pick("Lock screen", "Blocca schermo")
+    ActionTypeIds.SCREENSHOT -> l.pick("Screen capture", "Cattura schermata")
+    ActionTypeIds.APP_PERMISSION -> l.pick("App permission", "Permesso app")
+    ActionTypeIds.UI_STEPS -> l.pick("Steps on the screen", "Passi sullo schermo")
     else -> type.replace('_', ' ')
 }
 

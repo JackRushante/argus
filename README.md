@@ -154,6 +154,7 @@ The names below are the model's real wire discriminators (`engine-core`).
 | `audio_output` | `kind` `WIRED\|BLUETOOTH\|ANY`, `state` `CONNECTED\|DISCONNECTED` | Headphones and speakers. No permission. |
 | `mode_changed` | `what` `DND\|RINGER`, `to` (`off\|priority\|total` or `normal\|vibrate\|silent`; empty = any change) | No permission. |
 | `media` | `state` `PLAYING\|STOPPED` | Any app or web page can start playback, so it never triggers shell. |
+| `app_event` | `pkg` (the Android package), `event` `OPENED\|CLOSED` | An app comes to the foreground, or leaves it (to another app or the Home screen). Needs usage access: System → "Usage data access", or "Grant permanent permissions" with Shizuku or root. Read every 2.5 s only while the screen is on, with no wake lock. Any app can open another one, so it never triggers shell. |
 | `manual` | — | Runs only when you start it: "Run now" in the rule, a home-screen shortcut, the "Argus: run rule" Quick Settings tile or the widget. Every entry point accepts only an armed `manual` rule; shortcuts and widget buttons carry a random per-rule token, and the tile waits for the phone to be unlocked. |
 | `geofence` | `lat`/`lng`/`radiusM`, `transition` `ENTER\|EXIT`, `resolveCurrentLocation` | `DWELL`/loitering are represented by the model for compatibility but rejected by the current runtime. With `resolveCurrentLocation=true`, coordinates are resolved locally at arm time and never pass through the LLM. |
 | `sensor` | `kind` `significant_motion\|stationary_detect\|motion_detect\|step_detector\|step_counter`, `minimumEventCount` | The domain reserves these low-rate families, but the production backend currently arms only `significant_motion` when the device supports it. Other kinds remain unavailable until they have dedicated backends. Minimum cooldown 60 s. |
@@ -202,10 +203,15 @@ program tree and fingerprint do not.
 | `set_brightness` / `set_rotation` | Screen brightness `level` 0–100 (switches to manual) or `auto`; auto-rotate on/off | Base ("Modify system settings" access) |
 | `http_request` | `GET\|POST\|PUT\|DELETE` to a fixed https URL with fixed headers. External data enters only the body, escaped (inside JSON strings, or form-encoded); redirects only to the same host; 15 s timeout. Approval shows method and URL in full and masks secret headers; the Log keeps only the status code | Base |
 | `set_dark_mode` | Light/dark/automatic system theme; accepts the lowercase compiler wire and legacy persisted uppercase values | Shizuku |
+| `app_control` | `FORCE_STOP` (`am force-stop`), `FREEZE` (`pm disable-user`, shown with a warning) or `UNFREEZE` (`pm enable`) on a literal package. Never Argus, the launcher or an essential system app (system UI, phone, Settings, Google services) | Shizuku, root or Sui |
+| `app_permission` | `pm grant` / `pm revoke` of one runtime permission from a closed list (location, camera, microphone, contacts, SMS, phone, calendar, files and media, notifications, body sensors, nearby devices). Literal package and permission; never Argus; a revoke is shown with a warning | Shizuku, root or Sui |
+| `set_airplane` / `set_location` / `set_battery_saver` / `set_nfc` | Airplane mode, location services, battery saver and NFC on/off (`cmd connectivity airplane-mode`, `cmd location set-location-enabled`, `cmd power set-mode`, `svc nfc`). `set_nfc` exists only on phones with NFC | Shizuku, root or Sui |
+| `lock_screen` / `screenshot` | Turns the screen off and locks the phone (`input keyevent KEYCODE_SLEEP`; the lock follows Android's lock settings); saves a screenshot in `Pictures/Argus` through MediaStore, named by date and time | Shizuku, root or Sui |
 | `whatsapp_reply` | WhatsApp reply via the notification's RemoteInput | Base (notification listener) |
 | `run_shell` | Shell command template, shown in full at approval; external data enters only as one quoted argument | Shizuku |
 | `write_setting` | Parametric `settings put` on `system\|secure\|global` (any validated key/value template) | Shizuku |
 | `tap` / `input_text` | Reserved UI input primitives; rejected with `unsupported_phase` and never advertised as available | Not available |
+| `ui_steps` | Screen macro through Argus's Accessibility service: open an app, then up to 20 steps (`wait_for`, `click`, `type`, `scroll`, `back`, `home`, `check`) matched by exact text, resource id or description; 60 s at most, a "Stop" notification while it runs. Never on Argus, Settings, the package installer or permission dialogs, and only from triggers allowed to start shell | Base (Accessibility service on) |
 | `wait` / `if` / `while` | Cooperative pause and structured, bounded control flow | Engine |
 | `invoke_llm` | **Generative**: at fire time the LLM produces text for an explicit `WHATSAPP_REPLY`, `LOCAL_NOTIFICATION`, or P4 `CAPTURE_ONLY` sink. Hermes and direct providers support the resolved capture path | Base |
 | `invoke_llm_v2` | P3 variant with explicit state context: every reader, type and classification enters the approved fingerprint. Flat delivery is supported; nesting it inside P4 is rejected before approval | Base |
@@ -222,12 +228,14 @@ The "Brain" is pluggable: the app always owns the loop, the LLM is a reasoning s
 | **OpenAI** | Responses API (server-side `web_search`) | yes | $ estimate from price list |
 | **Anthropic** | Messages API (`web_search` server tool) | yes | $ estimate from price list |
 | **Google Gemini** | OpenAI-compat shim + native API for grounding (`google_search`) | yes | $ estimate from price list |
-| **OpenRouter** | OpenAI-compat (web via the `web` plugin, presets supported) | yes | tokens only |
+| **OpenRouter** | OpenAI-compat (web via the `openrouter:web_search` server tool, presets supported) | yes | tokens only |
 | **Custom (OpenAI-compat)** | endpoint of your choice (llama.cpp, Ollama, LiteLLM, etc.) | no | n/a |
 
 - **BYOK**: hosted direct providers require **your own** API key, entered in-app and stored encrypted on the device. A Custom endpoint may omit authentication. No Argus account, no project backend.
 - **Budget**: per-turn usage tracking (tokens and, where the price list is known, micro-USD), configurable limits; a generative rule that exceeds its budget is suppressed and audited (`SUPPRESSED_BUDGET`).
 - **On-device models**: Custom accepts unauthenticated OpenAI-compatible servers and cleartext HTTP only on the exact loopback hosts `localhost`, `127.0.0.1`, and `::1`. Every LAN or remote endpoint still requires HTTPS.
+- **Local server presets**: the Custom dialog has one-tap presets for Ollama (`http://127.0.0.1:11434/v1`), LM Studio (`http://127.0.0.1:1234/v1`) and the llama.cpp server (`http://127.0.0.1:8080/v1`), with a note on the context they need (about 16,000 tokens). Local servers get a 3-minute compile timeout instead of 65 seconds. There is no compact prompt: models too small to write valid rules are not worth the effort.
+- **Structured output**: when the provider supports it, the compile asks for a native JSON answer (`response_format` on OpenAI-compatible endpoints, `output_config.format` on Anthropic) instead of a sentence plus an `@@META@@` line. If the provider rejects the parameter or the model ignores it, Argus falls back to the `@@META@@` protocol by itself, which stays the base.
 - **Reasoning diagnostics**: Custom and OpenRouter can omit reasoning control or send `none`, `low`, `medium`, or `high` per request. When the server reports them, Settings shows reasoning-token usage and the latest `finish_reason`.
 
 ### Choosing a model
@@ -256,7 +264,7 @@ Measured with Argus's AI test bench in October 2026, all through OpenRouter. The
 
 - **Reasoning.** "Default" leaves the choice to the provider. In Argus you pick the reasoning level in the provider dialog for Custom and OpenRouter; the direct providers use their default. Off (`none`) works for most models and is the fastest. Some models can't turn it off (on OpenRouter: Gemini Flash, GLM Flash, MiniMax Flash); with `none` Argus then retries once at `low`. High reasoning rarely pays off: on the hardest programs DeepSeek Flash at `high` stays at 2–7 s, while Claude Haiku goes up to 15 s and gets worse.
 - **Self-hosted.** A model in the class of Qwen 3.8 27B is a reasonable floor for a local server (llama.cpp, Ollama, LM Studio and similar). Give it at least about 16,000 tokens of context.
-- **Run the bench yourself:** `ARGUS_BENCH_KEY=<OpenRouter key> ./gradlew :automation-android:testDebugUnitTest --tests "dev.argus.automation.bench.AiBenchTest"`. Optional variables: `ARGUS_BENCH_MODEL`, `ARGUS_BENCH_REASONING`, `ARGUS_BENCH_FILTER` (comma-separated case prefixes), `ARGUS_BENCH_REPEAT`, `ARGUS_BENCH_PARALLEL`, `ARGUS_BENCH_BASE_URL`. The report is written to `automation-android/build/reports/ai-bench/`. Without the key, the bench is skipped, so regular test runs never touch the network.
+- **Run the bench yourself:** `ARGUS_BENCH_KEY=<OpenRouter key> ./gradlew :automation-android:testDebugUnitTest --tests "dev.argus.automation.bench.AiBenchTest"`. Optional variables: `ARGUS_BENCH_MODEL`, `ARGUS_BENCH_REASONING`, `ARGUS_BENCH_STRUCTURED` (`on`, `off` or `auto`, the default: as the app does), `ARGUS_BENCH_FILTER` (comma-separated case prefixes), `ARGUS_BENCH_REPEAT`, `ARGUS_BENCH_PARALLEL`, `ARGUS_BENCH_BASE_URL`. The report is written to `automation-android/build/reports/ai-bench/`. Without the key, the bench is skipped, so regular test runs never touch the network.
 
 ### Hermes bridge (optional, self-hosted)
 
@@ -277,7 +285,7 @@ The main threat model is **prompt injection from external content** (SMS, notifi
 - **`DraftValidator`** — no draft enters the engine without validation: closed vocabularies (state keys, enums, tools), bounds on every field (lengths, ranges, condition-tree depth), hard invariants (e.g. `invoke_llm`'s `allowed_tools` can never contain `shell.run` or `automation.*` — re-checked at fire time as well).
 - **Centralized taint and egress policy** — integrity labels remain monotonic, but the **Aggressive** policy deliberately permits a TAINTED trigger/capture value in approved template fields such as URLs, packages and settings (shown in full at approval). The program structure and capabilities remain fingerprinted, but data-driven authority creates a real injection surface. In shell commands, external data always enters as a single quoted argument and never becomes command syntax. Remote egress is a separate decision: future credential-vault values are blocked from every remote Brain regardless of the taint posture, while generic `SECRET` data requires explicit review.
 - **Shell arguments are always quoted** — external data placed in an approved shell command always enters as one single-quoted argument (decision D1), so it cannot add, remove or reorder words, or otherwise change the command that was approved.
-- **`StaticShellSafety`** — `run_shell` can only be triggered by triggers with a non-forgeable identity (time, immediate, geofence, connectivity, sensor, screen, battery, audio output, mode changes, and `manual`, which only the unlocked phone's owner can start) or by a **whitelisted** WhatsApp 1:1 chat identified by a stable `conversationId`. SMS, caller ID and media playback are excluded as a hard limit (anyone can cause them), and the approved-trigger ↔ live-event binding is verified at runtime.
+- **`StaticShellSafety`** — `run_shell` can only be triggered by triggers with a non-forgeable identity (time, immediate, geofence, connectivity, sensor, screen, battery, audio output, mode changes, and `manual`, which only the unlocked phone's owner can start) or by a **whitelisted** WhatsApp 1:1 chat identified by a stable `conversationId`. SMS, caller ID, media playback and an app being opened or closed are excluded as a hard limit (anyone can cause them), and the approved-trigger ↔ live-event binding is verified at runtime.
 - **PII-free audit log** — every fire, suppression, error and lifecycle transition (arm/disable/delete/needs-review) is recorded in append-only Room with **closed-vocabulary reason codes**: never free text, never message content; event ids are hashed.
 - **Minimization toward the Brain** — compile receives a capability manifest and a **redacted** device state (only keys from the approved registry); GPS coordinates never leave the phone (only `location_available` is sent). Generative replies are bound to the trigger's sender, whitelisted 1:1 chats only.
 - **Fail-closed everywhere** — missing state = `UNKNOWN` = condition false; ambiguous metadata (e.g. unknown `isGroup`) = not authorized; Shizuku absent = the privileged action fails cleanly and is audited, never executed "later".
@@ -302,7 +310,8 @@ Argus degrades explicitly: the onboarding shows an honest list of what depends o
 | "Do Not Disturb" access | `set_dnd`, muting via volume | DND rules |
 | "Modify system settings" (`WRITE_SETTINGS`) | `set_brightness`, `set_rotation` | brightness and rotation rules ("Fix" in System) |
 | Battery optimization exemption | reliability on aggressive OEMs | recommended |
-| Write secure settings (`WRITE_SECURE_SETTINGS`), usage access (`PACKAGE_USAGE_STATS`) | `write_setting` on SECURE/GLOBAL and the foreground-app condition without Shizuku | granted once with Shizuku, root or Sui: System → "Grant permanent permissions" |
+| Write secure settings (`WRITE_SECURE_SETTINGS`), usage access (`PACKAGE_USAGE_STATS`) | `write_setting` on SECURE/GLOBAL, the foreground-app condition and the app opened/closed trigger without Shizuku | granted once with Shizuku, root or Sui: System → "Grant permanent permissions" |
+| Accessibility service (Argus) | `ui_steps` screen macros | only for screen macros; turn it on in Android's Accessibility settings (on sideloaded builds Android may first ask to allow restricted settings), or with Shizuku/root from "Grant permanent permissions" |
 
 ### With and without Shizuku
 
@@ -310,7 +319,7 @@ Argus degrades explicitly: the onboarding shows an honest list of what depends o
 |---|---|
 | **Base (no Shizuku)** | volume, ringer, DND, flashlight, vibration, notifications, clipboard/OTP, real alarms and timers, WhatsApp replies, generative actions, speech, media keys, HTTP requests, brightness and rotation (with "Modify system settings" access), all triggers, state conditions (battery, charging, screen, ringer, DND, Wi-Fi, airplane mode; Bluetooth with the Bluetooth permission on Android 12+) |
 | **Degraded without Shizuku** | `launch_app`, `open_url`, `open_settings_screen`, alarm/timer **from a rule in the background** (Android restricts activity starts from the background: with Shizuku they go through `am start`; without it they start while the app is in the foreground, and an app, link or Settings screen otherwise becomes a "Tap to open" notification) |
-| **Shizuku, root (su) or Sui** | Wi-Fi/Bluetooth/mobile-data toggles, dark mode, `run_shell`, `write_setting`, privileged state readers (`setting`, `system_property`, `sysfs`, `dumpsys_field`, foreground app) |
+| **Shizuku, root (su) or Sui** | Wi-Fi/Bluetooth/mobile-data toggles, dark mode, app control and permissions, airplane mode, location, battery saver, NFC, lock screen, screenshot, `run_shell`, `write_setting`, privileged state readers (`setting`, `system_property`, `sysfs`, `dumpsys_field`, foreground app) |
 
 With Shizuku running once, System → "Grant permanent permissions" lets Argus keep `write_setting` on
 SECURE/GLOBAL, the foreground-app condition, brightness and rotation, and Do Not Disturb access after a
@@ -416,8 +425,8 @@ Open an [Issue](https://github.com/JackRushante/argus/issues) with: what you ask
 
 Short roadmap:
 
-- **0.5.1** — an "app opened/closed" trigger, more typed privileged actions, native structured output,
-  presets for self-hosted servers and OpenRouter's web search tool.
+- **0.5.2** — a warning in approval when a rule names an app that is not installed, and the small items left
+  from 0.5.1.
 - **0.6.0, end-to-end tests** — the main flows tested automatically on an Android emulator.
 - **0.7.0, redesign** — a new look for the app.
 - **Later** — state-aware P4 generation, interactive screen control, and testing on more phone brands

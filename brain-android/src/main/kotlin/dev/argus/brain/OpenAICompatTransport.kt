@@ -67,7 +67,7 @@ class OpenAICompatTransport internal constructor(
     private val apiKey: suspend () -> String?,
     private val client: OkHttpClient,
     private val allowCleartextForTests: Boolean,
-    /** Giorno corrente per il prompt di ricerca web di OpenRouter; iniettabile per i test. */
+    /** Giorno corrente per la riga di ricerca web di OpenRouter; iniettabile per i test. */
     private val clock: () -> LocalDate = { LocalDate.now() },
 ) : AgentTransport {
 
@@ -100,6 +100,15 @@ class OpenAICompatTransport internal constructor(
     /** Riusa il parser sentinel dell'app (@@META@@ {json}): fail-soft, mai crash, stesso formato di Hermes. */
     private val compileParser = CliBridgeParser()
 
+    /**
+     * Primo livello dell'output strutturato che questo server non ha ancora rifiutato (indice di
+     * [StructuredLevel]). Sale solo quando un livello più basso ha risposto dopo un rifiuto, così un
+     * server che non conosce `response_format` costa un solo giro a vuoto, non uno per compile. Il
+     * transport vive finché non cambia la configurazione del provider, quindi la memoria è per modello.
+     */
+    @Volatile
+    private var structuredFloor: Int = 0
+
     init {
         require(base.username.isEmpty() && base.password.isEmpty()) { "baseUrl non deve contenere credenziali" }
         require(base.query == null && base.fragment == null) { "baseUrl non deve contenere query o fragment" }
@@ -113,10 +122,17 @@ class OpenAICompatTransport internal constructor(
     /**
      * Compile client-side NL → [dev.argus.engine.model.AutomationDraft]. Riproduce il prompt di
      * Hermes (regole vincolanti + schema draft + contesto manifest/state), fa una POST
-     * `chat/completions` senza tool, poi parsa la riga finale `@@META@@ {json}` con il parser
-     * sentinel dell'app: la strada primaria è la riga sentinel nel testo, indipendente dal
-     * tool-calling. Fail-soft: qualsiasi output non conforme diventa un `metaError` tipizzato,
-     * mai un'eccezione oltre agli errori di trasporto/configurazione.
+     * `chat/completions` senza tool e legge la risposta in uno di due modi.
+     *
+     * Output strutturato (0.5.1, `structuredOutput` del catalogo): la richiesta porta `response_format`
+     * e il modello risponde con UN oggetto `{reply, draft, error_code}`. Un server che rifiuta il
+     * parametro (400, 404, 405, 415, 422, 500) fa scendere di un livello (json_schema, json_object,
+     * niente) senza spendere token; un modello che lo ignora e risponde col protocollo base si legge
+     * comunque.
+     *
+     * Protocollo base: la riga finale `@@META@@ {json}` letta col parser sentinel dell'app, indipendente
+     * dal tool-calling. Resta la base e il ripiego di tutto. Fail-soft: qualsiasi output non conforme
+     * diventa un `metaError` tipizzato, mai un'eccezione oltre agli errori di trasporto/configurazione.
      */
     override suspend fun compile(
         message: String,
@@ -126,7 +142,27 @@ class OpenAICompatTransport internal constructor(
         val cleanMessage = AgentMessageSupport.requireMessage(message)
         val token = resolveApiKey()
         val model = resolveModel()
-        val messages = compileMessages(cleanMessage, manifest, state)
+        return compileAt(structuredStart(), false, cleanMessage, token, model, manifest, state)
+    }
+
+    /** Livello da cui parte il compile: quello del catalogo, alzato dai rifiuti già visti da questo server. */
+    private fun structuredStart(): StructuredLevel =
+        if (spec.quirks.structuredOutput == StructuredOutputMode.RESPONSE_FORMAT) {
+            StructuredLevel.entries[structuredFloor.coerceIn(0, StructuredLevel.NONE.ordinal)]
+        } else {
+            StructuredLevel.NONE
+        }
+
+    private suspend fun compileAt(
+        level: StructuredLevel,
+        fellBack: Boolean,
+        message: String,
+        token: String?,
+        model: String,
+        manifest: CapabilityManifest,
+        state: DeviceState,
+    ): CompileResult {
+        val messages = compileMessages(message, manifest, state, level)
         val request = ChatRequest(
             model = model,
             messages = messages,
@@ -135,14 +171,27 @@ class OpenAICompatTransport internal constructor(
             reasoningEffort = config.reasoningEffort.wireValue,
             // Solo il compile (e solo dove il catalogo lo prevede): risposte più costanti. Act e health no.
             temperature = spec.quirks.compileTemperature,
+            responseFormat = StructuredOutput.responseFormat(level),
         )
-        val response = postChat(token, request, clientErrorsOnly = true)
+        val response = try {
+            postChat(token, request, clientErrorsOnly = true)
+        } catch (error: TransportException) {
+            if (level == StructuredLevel.NONE || !StructuredOutput.isRejection(error)) throw error
+            return compileAt(level.next(), true, message, token, model, manifest, state)
+        }
+        // Un livello più basso ha risposto dopo un rifiuto: da ora questo server parte da lì.
+        if (fellBack) structuredFloor = maxOf(structuredFloor, level.ordinal)
         val usage = response.toTurnUsage(fallbackModel = model)
         val choice = response.choices.firstOrNull()
         val text = choice?.message?.content?.trim()
         // F5: la risposta grezza resta in memoria per le segnalazioni (mai nei log né nel DB).
         val rawText = CompileResult.capRaw(choice?.message?.content)
-        val parsed = if (text.isNullOrEmpty()) {
+        val envelope = if (level != StructuredLevel.NONE && !text.isNullOrEmpty()) {
+            compileParser.parseStructuredCompile(text)
+        } else {
+            null
+        }
+        val parsed = envelope ?: if (text.isNullOrEmpty()) {
             null
         } else {
             val raw = compileParser.parseCompile(text)
@@ -151,24 +200,33 @@ class OpenAICompatTransport internal constructor(
             // distingue sempre un draft assente da un successo.
             if (raw.draft == null && raw.metaError == null) raw.copy(metaError = "draft_missing") else raw
         }
-        if (parsed?.draft != null) return parsed.copy(usage = usage, raw = rawText)
+        val viaEnvelope = envelope != null
+        if (parsed?.draft != null) return parsed.copy(usage = usage, raw = rawText, structured = viaEnvelope)
         // B6: senza una bozza valida, distingui un output tagliato o istruzioni tagliate dal server
         // da un semplice "il modello non ha prodotto la regola".
         AgentMessageSupport.compileTruncationCode(
             outputLimitHit = choice?.finishReason == "length",
             reportedPromptTokens = response.usage?.promptTokens,
             promptChars = messages.sumOf { it.content.length },
-        )?.let { code -> return CompileResult(parsed?.reply.orEmpty(), null, code, usage, raw = rawText) }
-        if (parsed == null) return CompileResult("", null, "empty_response", usage)
-        return parsed.copy(usage = usage, raw = rawText)
+        )?.let { code ->
+            return CompileResult(parsed?.reply.orEmpty(), null, code, usage, raw = rawText, structured = viaEnvelope)
+        }
+        if (parsed == null) return CompileResult("", null, "empty_response", usage, structured = false)
+        return parsed.copy(usage = usage, raw = rawText, structured = viaEnvelope)
     }
 
     private fun compileMessages(
         message: String,
         manifest: CapabilityManifest,
         state: DeviceState,
+        level: StructuredLevel,
     ): List<ChatMessage> = listOf(
-        ChatMessage("system", AgentMessageSupport.compileSystemText()),
+        ChatMessage(
+            "system",
+            AgentMessageSupport.compileSystemText(
+                structuredRule = AgentMessageSupport.STRUCTURED_JSON_RULE.takeIf { level != StructuredLevel.NONE },
+            ),
+        ),
         ChatMessage("user", AgentMessageSupport.compileUserText(message, manifest, state)),
     )
 
@@ -276,9 +334,13 @@ class OpenAICompatTransport internal constructor(
         if (notification != null) AgentMessageSupport.actUserText(notification, stateLines)
         else AgentMessageSupport.actUserTextNotification(goal, stateLines)
 
-    /** Prompt dei risultati web di OpenRouter: dati correnti in testo semplice, senza link né citazioni. */
+    /**
+     * Riga di ricerca web di OpenRouter: la data, i fatti correnti e la risposta in testo semplice, senza
+     * link né citazioni. Col plugin `web` stava nel suo `search_prompt`; il server tool non lo ha, quindi
+     * va nel system.
+     */
     private fun openRouterSearchPrompt(): String =
-        "Web search results from ${clock()}. Use them for current facts. " +
+        "Today is ${clock()}. Use web search for current facts. " +
             "Answer in plain text: no links, no markdown, no citations."
 
     private suspend fun generate(
@@ -307,41 +369,37 @@ class OpenAICompatTransport internal constructor(
                     return generateViaGeminiNative(
                         goal, notification, stateLines, requireNotNull(token), baseModel, runtimeData,
                     )
-                else -> Unit // OPENROUTER_WEB_PLUGIN resta su Chat Completions (plugin `web` nel body).
+                else -> Unit // OPENROUTER_SERVER_TOOL resta su Chat Completions (server tool nei `tools`).
             }
         }
-        // OpenRouter attiva il loop web con il plugin `{"id":"web"}` e lascia `model` intatto (anche per
-        // i preset `@preset/...`: il suffisso `:online` li rompe con un 404; plugin e suffisso sono
-        // equivalenti). Il prompt predefinito del plugin chiede link markdown con le fonti, che in una
-        // notifica o in una reply non vogliamo: `search_prompt` lo sostituisce con testo semplice.
-        // Gli altri provider non inviano alcun plugin.
-        val plugins = if (applyWeb && spec.quirks.webSearch == WebSearchMechanism.OPENROUTER_WEB_PLUGIN) {
-            listOf(ChatPlugin(OPENROUTER_WEB_PLUGIN_ID, openRouterSearchPrompt()))
-        } else {
-            null
+        // OpenRouter attiva il loop web con il server tool `{"type":"openrouter:web_search"}` accanto agli
+        // altri `tools` e lascia `model` intatto (anche per i preset `@preset/...`: il suffisso `:online`
+        // li rompe con un 404). Il plugin `web` e il suffisso sono deprecati. Il server tool non ha un
+        // `search_prompt`: la data e la forma della risposta (testo semplice, senza link né citazioni)
+        // stanno nel system. `max_tool_calls` limita le ricerche, ognuna a pagamento. Gli altri provider
+        // non inviano nulla di tutto ciò.
+        val openRouterWeb = applyWeb && spec.quirks.webSearch == WebSearchMechanism.OPENROUTER_SERVER_TOOL
+        val tools = buildList<JsonObject> {
+            if (useReplyTool) add(replyToolDef())
+            if (openRouterWeb) add(OPENROUTER_WEB_SEARCH_TOOL)
         }
         // Sink NOTIFICA #59 (useReplyTool=false): NIENTE reply tool, NESSUN tool_choice, system della
         // NOTIFICA (nessun framing WhatsApp). Il modello (con o senza web OpenRouter) produce testo
         // semplice preso dal `content`. Reply (useReplyTool=true): invariato (reply tool + actSystemText).
+        val systemText = if (useReplyTool) {
+            AgentMessageSupport.actSystemText(goal)
+        } else {
+            AgentMessageSupport.actSystemTextNotification(goal, webAllowed = applyWeb)
+        }
         val request = ChatRequest(
             model = baseModel,
-            plugins = plugins,
             messages = buildList {
-                add(
-                    ChatMessage(
-                        "system",
-                        if (useReplyTool) {
-                            AgentMessageSupport.actSystemText(goal)
-                        } else {
-                            AgentMessageSupport.actSystemTextNotification(goal, webAllowed = applyWeb)
-                        },
-                    ),
-                )
+                add(ChatMessage("system", if (openRouterWeb) "$systemText ${openRouterSearchPrompt()}" else systemText))
                 add(ChatMessage("user", userMessageFor(goal, notification, stateLines)))
                 // Dato runtime TAINTED: messaggio DATA separato, MAI concatenato al system.
                 AgentMessageSupport.actRuntimeDataText(runtimeData)?.let { add(ChatMessage("user", it)) }
             },
-            tools = if (useReplyTool) listOf(replyToolDef()) else null,
+            tools = tools.takeIf { it.isNotEmpty() },
             // Con il web attivo il reply NON va forzato: forzarlo impedirebbe la ricerca. `replyText()`
             // fa `fromTool ?: content`, quindi il testo finale post-web (content) arriva comunque.
             toolChoice = when {
@@ -352,6 +410,7 @@ class OpenAICompatTransport internal constructor(
             maxTokens = if (spec.quirks.outputCapParam == OutputCapParam.MAX_TOKENS) MAX_OUTPUT_TOKENS else null,
             maxCompletionTokens = if (spec.quirks.outputCapParam == OutputCapParam.MAX_COMPLETION_TOKENS) MAX_OUTPUT_TOKENS else null,
             reasoningEffort = config.reasoningEffort.wireValue,
+            maxToolCalls = OPENROUTER_MAX_TOOL_CALLS.takeIf { openRouterWeb },
         )
         val response = postChat(token, request, clientErrorsOnly = true)
         val usage = response.toTurnUsage(fallbackModel = baseModel)
@@ -604,6 +663,9 @@ class OpenAICompatTransport internal constructor(
                 reasoningTokens = u.completionTokensDetails?.reasoningTokens?.takeIf { it >= 0 },
                 model = model?.takeIf { it.isNotBlank() } ?: fallbackModel,
                 finishReason = choices.firstOrNull()?.finishReason,
+                webSearches = u.serverToolUse?.webSearchRequests
+                    ?.takeIf { it in 1..TurnUsage.MAX_WEB_SEARCHES }
+                    ?.toInt(),
             )
         }.getOrNull()
     }
@@ -804,15 +866,10 @@ class OpenAICompatTransport internal constructor(
         @SerialName("max_completion_tokens") val maxCompletionTokens: Int? = null,
         @SerialName("reasoning_effort") val reasoningEffort: String? = null,
         val temperature: Double? = null,
-        /** Solo OpenRouter con web richiesto: `[{"id":"web","search_prompt":"..."}]`. Assente (null) in ogni altro caso. */
-        val plugins: List<ChatPlugin>? = null,
-    )
-
-    @Serializable
-    private data class ChatPlugin(
-        val id: String,
-        /** Prompt che precede i risultati web (solo OpenRouter): sostituisce quello predefinito con le citazioni. */
-        @SerialName("search_prompt") val searchPrompt: String? = null,
+        /** Solo il compile con output strutturato (0.5.1): `json_schema` o `json_object`. Assente (null) altrove. */
+        @SerialName("response_format") val responseFormat: JsonObject? = null,
+        /** Solo OpenRouter con web richiesto: tetto ai passi dei server tool (ogni ricerca è a pagamento). */
+        @SerialName("max_tool_calls") val maxToolCalls: Int? = null,
     )
 
     @Serializable
@@ -944,6 +1001,13 @@ class OpenAICompatTransport internal constructor(
         @SerialName("completion_tokens") val completionTokens: Long? = null,
         @SerialName("prompt_tokens_details") val promptTokensDetails: PromptTokensDetails? = null,
         @SerialName("completion_tokens_details") val completionTokensDetails: CompletionTokensDetails? = null,
+        /** OpenRouter: `usage.server_tool_use.web_search_requests` conta le ricerche del server tool. */
+        @SerialName("server_tool_use") val serverToolUse: ChatServerToolUse? = null,
+    )
+
+    @Serializable
+    private data class ChatServerToolUse(
+        @SerialName("web_search_requests") val webSearchRequests: Long? = null,
     )
 
     @Serializable
@@ -974,8 +1038,8 @@ class OpenAICompatTransport internal constructor(
         const val GEMINI_THINKING_BUDGET = 1_024
         const val REPLY_TOOL_MISSING = "reply_tool_missing"
 
-        /** Id del plugin web di OpenRouter (`"plugins":[{"id":"web"}]`). */
-        const val OPENROUTER_WEB_PLUGIN_ID = "web"
+        /** Tetto ai passi dei server tool di una richiesta OpenRouter (come le ricerche delle altre vie web). */
+        const val OPENROUTER_MAX_TOOL_CALLS = 3
         const val MAX_RESPONSE_BYTES = 512L * 1024L
         const val MAX_ERROR_BODY_BYTES = 16L * 1024L
 
@@ -986,6 +1050,9 @@ class OpenAICompatTransport internal constructor(
             put("type", "function")
             putJsonObject("function") { put("name", AgentMessageSupport.REPLY_TOOL) }
         }
+
+        /** Server tool web di OpenRouter: `{"type":"openrouter:web_search"}`. Loop di ricerca interno lato OpenRouter. */
+        val OPENROUTER_WEB_SEARCH_TOOL: JsonObject = buildJsonObject { put("type", "openrouter:web_search") }
 
         /** Tool web della Responses API OpenAI: `{"type":"web_search"}`. Loop di ricerca interno lato OpenAI. */
         val WEB_SEARCH_TOOL: JsonObject = buildJsonObject { put("type", "web_search") }

@@ -27,6 +27,14 @@ enum class PermanentGrant(val id: String) {
 
     /** Accesso a Non disturbare. */
     DND_ACCESS("dnd_access"),
+
+    /**
+     * 0.5.1: il servizio di Accessibilità di Argus, per le macro sullo schermo. A differenza degli
+     * altri NON si concede da solo con un comando: il dialogo lo propone spuntato a mano, e il
+     * controller prima legge l'elenco dei servizi già attivi e AGGIUNGE il proprio ([command] è solo
+     * l'ultimo passo, l'interruttore generale).
+     */
+    ACCESSIBILITY("accessibility"),
     ;
 
     /** Il comando esatto (argv, senza shell) da eseguire col backend privilegiato. */
@@ -36,6 +44,7 @@ enum class PermanentGrant(val id: String) {
         WRITE_SETTINGS -> listOf("appops", "set", packageName, "WRITE_SETTINGS", "allow")
         USAGE_STATS -> listOf("appops", "set", packageName, "GET_USAGE_STATS", "allow")
         DND_ACCESS -> listOf("cmd", "notification", "allow_dnd", packageName)
+        ACCESSIBILITY -> listOf("settings", "put", "secure", AccessibilityEnablement.SETTING_ENABLED, "1")
     }
 
     companion object {
@@ -69,8 +78,12 @@ class PermanentGrantsController(
         for (grant in PermanentGrant.entries) {
             if (grant !in selected) continue
             outcomes[grant] = try {
-                val result = shell.run(grant.command(packageName), timeoutMillis = timeoutMillis)
-                if (result.successful) GrantOutcome.SENT else GrantOutcome.FAILED
+                if (grant == PermanentGrant.ACCESSIBILITY) {
+                    enableAccessibility()
+                } else {
+                    val result = shell.run(grant.command(packageName), timeoutMillis = timeoutMillis)
+                    if (result.successful) GrantOutcome.SENT else GrantOutcome.FAILED
+                }
             } catch (error: CancellationException) {
                 throw error
             } catch (_: ShizukuShellException) {
@@ -80,6 +93,30 @@ class PermanentGrantsController(
             }
         }
         return outcomes
+    }
+
+    /**
+     * Accende il servizio di Accessibilità di Argus SENZA toccare gli altri: legge l'elenco dei servizi
+     * già attivi, ci aggiunge il proprio in coda (mai una sovrascrittura), poi accende l'interruttore
+     * generale. Se l'elenco letto contiene caratteri inattesi non scrive niente.
+     */
+    private suspend fun enableAccessibility(): GrantOutcome {
+        val read = shell.run(
+            listOf("settings", "get", "secure", AccessibilityEnablement.SETTING_SERVICES),
+            timeoutMillis = timeoutMillis,
+        )
+        if (!read.successful) return GrantOutcome.FAILED
+        val updated = AccessibilityEnablement.withService(read.stdoutText, packageName)
+        if (!AccessibilityEnablement.isSafeValue(updated)) return GrantOutcome.FAILED
+        if (updated != read.stdoutText.trim()) {
+            val put = shell.run(
+                listOf("settings", "put", "secure", AccessibilityEnablement.SETTING_SERVICES, updated),
+                timeoutMillis = timeoutMillis,
+            )
+            if (!put.successful) return GrantOutcome.FAILED
+        }
+        val enable = shell.run(PermanentGrant.ACCESSIBILITY.command(packageName), timeoutMillis = timeoutMillis)
+        return if (enable.successful) GrantOutcome.SENT else GrantOutcome.FAILED
     }
 
     private companion object {
@@ -117,11 +154,23 @@ object PermanentGrantStatus {
             .isNotificationPolicyAccessGranted
     }.getOrDefault(false)
 
+    /** Il servizio di Accessibilità di Argus è nell'elenco di sistema e l'interruttore generale è acceso. */
+    fun accessibility(context: Context): Boolean = runCatching {
+        val app = context.applicationContext
+        val resolver = app.contentResolver
+        AccessibilityEnablement.isEnabled(
+            servicesValue = Settings.Secure.getString(resolver, AccessibilityEnablement.SETTING_SERVICES),
+            accessibilityEnabled = Settings.Secure.getInt(resolver, AccessibilityEnablement.SETTING_ENABLED, 0),
+            packageName = app.packageName,
+        )
+    }.getOrDefault(false)
+
     fun read(context: Context): Map<PermanentGrant, Boolean> = mapOf(
         PermanentGrant.WRITE_SECURE_SETTINGS to secureSettings(context),
         PermanentGrant.WRITE_SETTINGS to writeSettings(context),
         PermanentGrant.USAGE_STATS to usageStats(context),
         PermanentGrant.DND_ACCESS to dndAccess(context),
+        PermanentGrant.ACCESSIBILITY to accessibility(context),
     )
 
     private const val SECURE_PERMISSION = "android.permission.WRITE_SECURE_SETTINGS"

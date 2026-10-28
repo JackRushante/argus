@@ -119,6 +119,12 @@ object InterpolationPolicy {
             },
         )
 
+        // Macro sull'interfaccia: SOLO il testo dei passi `type` accetta segnaposto (uscita locale, come
+        // una notifica); pkg e criteri dei passi restano letterali, mostrati interi in approvazione.
+        is Action.UiSteps -> action.steps.mapIndexedNotNull { index, step ->
+            (step as? UiStep.Type)?.let { TemplateField("steps.$index.text", it.text, FieldClass.SINK) }
+        }
+
         // --- AUTHORITY: template fingerprintati; TAINTED dipende da TaintPolicy ---
         is Action.RunShell -> listOf(
             TemplateField("cmd", action.cmd, FieldClass.AUTHORITY, shellQuoted = true),
@@ -158,6 +164,15 @@ object InterpolationPolicy {
         is Action.MediaControl,
         is Action.SetBrightness,
         is Action.SetRotation,
+        // 0.5.1: pkg e permission sono letterali (mai interpolati): nessun campo testuale.
+        is Action.AppControl,
+        is Action.SetAirplane,
+        is Action.SetLocation,
+        is Action.SetNfc,
+        is Action.SetBatterySaver,
+        is Action.LockScreen,
+        is Action.Screenshot,
+        is Action.AppPermission,
         is Action.If,
         is Action.While,
         -> emptyList()

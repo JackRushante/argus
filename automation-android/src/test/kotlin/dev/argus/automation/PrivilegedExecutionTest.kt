@@ -405,7 +405,7 @@ class PrivilegedAccessCenterTest {
             PrivFakeRoot(),
             PrivRecordingShell(),
         ) { none }
-        assertEquals(4, PermanentGrant.entries.size)
+        assertEquals(5, PermanentGrant.entries.size)
         assertTrue(PermanentGrant.entries.none { grant -> grant.id.contains("listener") })
         assertTrue(rows.backendAvailable().not())
     }
@@ -418,7 +418,7 @@ class PrivilegedAccessCenterTest {
                 PrivFakeRoot(),
                 PrivRecordingShell(),
             ) { none }.snapshots.first().toUi()
-            assertEquals(4, denied.grants.size)
+            assertEquals(5, denied.grants.size)
             assertTrue(denied.canGrant)
 
             val allGranted = center(

@@ -64,7 +64,7 @@ class PermanentGrantsTest {
     fun `notification access is never part of the permanent grants`() {
         val everything = PermanentGrant.entries.flatMap { it.command("dev.argus") }
         assertFalse(everything.any { it.contains("listener", ignoreCase = true) })
-        assertEquals(4, PermanentGrant.entries.size)
+        assertEquals(5, PermanentGrant.entries.size)
     }
 
     @Test
@@ -114,6 +114,7 @@ class PermanentGrantsTest {
         assertEquals(GrantOutcome.SENT, outcomes[PermanentGrant.WRITE_SETTINGS])
         assertEquals(GrantOutcome.SENT, outcomes[PermanentGrant.USAGE_STATS])
         assertEquals(GrantOutcome.SENT, outcomes[PermanentGrant.DND_ACCESS])
+        assertEquals(GrantOutcome.SENT, outcomes[PermanentGrant.ACCESSIBILITY])
     }
 
     @Test

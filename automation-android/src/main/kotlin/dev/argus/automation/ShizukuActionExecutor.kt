@@ -6,6 +6,8 @@ import dev.argus.automation.http.HttpRequestExecutor
 import dev.argus.automation.notification.NotificationReplyDelivery
 import dev.argus.automation.notification.NotificationReplyGateway
 import dev.argus.automation.notification.NotificationReplyRequest
+import dev.argus.automation.privileged.PrivilegedActionRunner
+import dev.argus.automation.screen.UiStepsRunner
 import dev.argus.device.DeviceController
 import dev.argus.device.DeviceToolException
 import dev.argus.device.DirectSettings
@@ -96,6 +98,18 @@ class ShizukuActionExecutor(
      * attivi il comportamento non cambia. Default **null**: senza, resta il solo percorso privilegiato.
      */
     private val directSettings: DirectSettings? = null,
+    /**
+     * 0.5.1: azioni privilegiate tipizzate (controllo app, aereo, posizione, NFC, risparmio energetico,
+     * blocco schermo, screenshot, permessi). Default **null**: senza, falliscono con
+     * `shizuku_unavailable`, mai su un percorso alternativo.
+     */
+    private val privilegedActions: PrivilegedActionRunner? = null,
+    /**
+     * 0.5.1: macro sullo schermo (`ui_steps`) via servizio di Accessibilità. Default **null**: senza,
+     * `base_executor_unavailable`. L'apertura dell'app indicata da `pkg` passa dallo stesso percorso di
+     * `launch_app` (Shizuku, intent o notifica «Tocca per aprire»).
+     */
+    private val uiSteps: UiStepsRunner? = null,
 ) : ActionExecutor, ResolvedActionExecutor {
     override suspend fun execute(
         action: ResolvedProgramAction,
@@ -259,6 +273,33 @@ class ShizukuActionExecutor(
                 ?: ActionResult.Failure("base_executor_unavailable")
             is Action.HttpRequest -> httpRequests?.execute(action)
                 ?: ActionResult.Failure("base_executor_unavailable")
+
+            // 0.5.1: azioni privilegiate tipizzate. Solo con un backend privilegiato pronto (Shizuku, Sui
+            // o root verificato); il runner ripete i controlli sul bersaglio e fa passare tutto da
+            // PrivilegedShell. Nessun percorso alternativo.
+            is Action.AppControl,
+            is Action.SetAirplane,
+            is Action.SetLocation,
+            is Action.SetNfc,
+            is Action.SetBatterySaver,
+            is Action.LockScreen,
+            is Action.Screenshot,
+            is Action.AppPermission,
+            -> if (!shizukuReady()) {
+                ActionResult.Failure(ShizukuShellException.UNAVAILABLE)
+            } else {
+                privilegedActions?.execute(action, ctx)
+                    ?: ActionResult.Failure(ShizukuShellException.UNAVAILABLE)
+            }
+
+            // 0.5.1: la macro sullo schermo ha lo stesso confine della shell sul chi la può far partire
+            // (ultima linea dopo validator e FirePolicy: si verifica l'evento realmente arrivato).
+            is Action.UiSteps -> if (!StaticShellSafety.allows(ctx.event, whitelistedIds())) {
+                ActionResult.Failure("ui_steps_external_trigger")
+            } else {
+                uiSteps?.run(action) { pkg -> execute(Action.LaunchApp(pkg), ctx) }
+                    ?: ActionResult.Failure("base_executor_unavailable")
+            }
 
             is Action.InvokeLlm -> if (generativeLane.trySubmit(ctx, action)) {
                 ActionResult.Submitted

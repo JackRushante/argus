@@ -59,6 +59,8 @@ object PersonalDataStripper {
         is Trigger.Media,
         // 0.4.1: l'avvio manuale non ha campi.
         Trigger.Manual,
+        // 0.5.1: il package dell'app e la direzione sono il criterio della regola, non un dato personale.
+        is Trigger.AppEvent,
         -> trigger
     }
 
@@ -117,8 +119,19 @@ object PersonalDataStripper {
         is Action.MediaControl,
         is Action.SetBrightness,
         is Action.SetRotation,
+        // 0.5.1: package, permessi e booleani; nessun dato personale.
+        is Action.AppControl,
+        is Action.SetAirplane,
+        is Action.SetLocation,
+        is Action.SetNfc,
+        is Action.SetBatterySaver,
+        is Action.LockScreen,
+        is Action.Screenshot,
+        is Action.AppPermission,
         is Action.InvokeLlm,
         is Action.InvokeLlmV2,
+        // 0.5.1: la macro sullo schermo non porta dati personali (package e criteri di ricerca).
+        is Action.UiSteps,
         -> action
     }
 }

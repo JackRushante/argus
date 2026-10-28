@@ -984,7 +984,7 @@ class SettingsViewModelTest {
         observe(vm)
         advanceUntilIdle()
         assertEquals(dev.argus.ui.model.PrivilegedBackendUi.NONE, vm.state.value.privileged.backend)
-        assertEquals(4, vm.state.value.privileged.grants.size)
+        assertEquals(5, vm.state.value.privileged.grants.size)
         assertEquals(false, vm.state.value.privileged.canGrant)
         assertNull(vm.state.value.shizukuRunsAsRoot)
 

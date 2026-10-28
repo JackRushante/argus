@@ -74,6 +74,16 @@ import dev.argus.automation.base.MediaKeySurface
 import dev.argus.automation.base.SpeechEngine
 import dev.argus.automation.base.SystemSettingsSurface
 import dev.argus.automation.http.HttpRequestExecutor
+import dev.argus.automation.privileged.AndroidPrivilegedActionEnvironment
+import dev.argus.automation.privileged.MediaStoreScreenshotStore
+import dev.argus.automation.privileged.PrivilegedActionEnvironment
+import dev.argus.automation.privileged.PrivilegedActionRunner
+import dev.argus.automation.privileged.ScreenshotStore
+import dev.argus.automation.screen.AccessibilityScreenSource
+import dev.argus.automation.screen.AndroidUiMacroSession
+import dev.argus.automation.screen.ScreenSource
+import dev.argus.automation.screen.UiMacroSession
+import dev.argus.automation.screen.UiStepsRunner
 import dev.argus.automation.base.BaseActionSurface
 import dev.argus.automation.foreground.AndroidForegroundDeniedNotice
 import dev.argus.automation.foreground.SharedForegroundSentinel
@@ -163,6 +173,8 @@ import dev.argus.device.PermanentGrantsController
 import dev.argus.device.UsageStatsForegroundSource
 import dev.argus.device.DeviceController
 import dev.argus.device.DeviceTools
+import dev.argus.device.PrivilegedActionController
+import dev.argus.device.PrivilegedActionTools
 import dev.argus.device.ParametricStateReader
 import dev.argus.device.PublicStateReader
 import dev.argus.device.StateReader
@@ -776,6 +788,47 @@ object ArgusModule {
     @Singleton
     fun httpRequestExecutor(): HttpRequestExecutor = HttpRequestExecutor()
 
+    // --- 0.5.1: azioni privilegiate tipizzate (controllo app, aereo, posizione, NFC, ...) ---
+
+    @Provides
+    @Singleton
+    fun privilegedActionController(
+        @ApplicationContext context: Context,
+        shell: PrivilegedShell,
+    ): PrivilegedActionController = PrivilegedActionTools(shell, context.applicationContext.cacheDir)
+
+    @Provides
+    @Singleton
+    fun screenshotStore(@ApplicationContext context: Context): ScreenshotStore =
+        MediaStoreScreenshotStore(context)
+
+    @Provides
+    @Singleton
+    fun privilegedActionEnvironment(@ApplicationContext context: Context): PrivilegedActionEnvironment =
+        AndroidPrivilegedActionEnvironment(context)
+
+    @Provides
+    @Singleton
+    fun privilegedActionRunner(
+        tools: PrivilegedActionController,
+        screenshots: ScreenshotStore,
+        environment: PrivilegedActionEnvironment,
+    ): PrivilegedActionRunner = PrivilegedActionRunner(tools, screenshots, environment)
+    /** 0.5.1: lo schermo letto e toccato dal servizio di Accessibilità (solo mentre gira una macro). */
+    @Provides
+    @Singleton
+    fun screenSource(): ScreenSource = AccessibilityScreenSource()
+
+    /** 0.5.1: la notifica «Argus sta usando lo schermo» con «Ferma». */
+    @Provides
+    @Singleton
+    fun uiMacroSession(@ApplicationContext context: Context): UiMacroSession = AndroidUiMacroSession(context)
+
+    @Provides
+    @Singleton
+    fun uiStepsRunner(screen: ScreenSource, session: UiMacroSession): UiStepsRunner =
+        UiStepsRunner(screen, session)
+
     @Provides
     @Singleton
     fun actionExecutor(
@@ -792,6 +845,8 @@ object ArgusModule {
         httpRequests: HttpRequestExecutor,
         root: RootAccess,
         directSettings: DirectSettings,
+        privilegedActions: PrivilegedActionRunner,
+        uiSteps: UiStepsRunner,
     ): ShizukuActionExecutor =
         ShizukuActionExecutor(
             tools,
@@ -817,6 +872,10 @@ object ArgusModule {
             httpRequests = httpRequests,
             // 0.5.0: write_setting diretto coi permessi permanenti, solo se nessun backend è pronto.
             directSettings = directSettings,
+            // 0.5.1: azioni privilegiate tipizzate; il runner ripete i controlli sul bersaglio.
+            privilegedActions = privilegedActions,
+            // 0.5.1: macro sullo schermo con il servizio di Accessibilità.
+            uiSteps = uiSteps,
         )
 
     @Provides

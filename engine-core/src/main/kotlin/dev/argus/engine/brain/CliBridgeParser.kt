@@ -12,6 +12,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import java.util.Locale
 
@@ -45,6 +46,49 @@ class CliBridgeParser(private val json: Json = lenient()) {
                 ?: CompileResult(cleaned.trim(), null, null)
         }
         return parseMeta(prose = cleaned.substring(0, idx).trim(), tail = cleaned.substring(idx + SENTINEL.length))
+    }
+
+    /**
+     * Output strutturato nativo (0.5.1): la risposta è UN oggetto JSON `{"reply","draft","error_code"}`
+     * (`response_format` del provider o `output_config` di Anthropic), non una frase con la riga
+     * `@@META@@`. Riusa la decodifica di [parseMeta]: stesse normalizzazioni (cron, suonerie) e stesse
+     * regole su `error_code`. `draft` può arrivare anche come stringa che contiene l'oggetto (schema
+     * chiuso di Anthropic): in quel caso viene aperta.
+     *
+     * Torna `null` quando il testo NON è un envelope (contiene `@@META@@`, non ha oggetti JSON o
+     * l'oggetto non porta né `draft` né `error_code`): il chiamante ripiega su [parseCompile], il
+     * protocollo base. Un envelope che si apre ma non si chiude, o che non è JSON, è invece un errore di
+     * formato del modello (`meta_json_missing`, `meta_parse_error`) e il ritentativo se ne occupa.
+     */
+    fun parseStructuredCompile(raw: String): CompileResult? {
+        val cleaned = ThinkBlocks.strip(raw)
+        if (cleaned.contains(SENTINEL)) return null
+        val start = cleaned.indexOf('{')
+        if (start < 0) return null
+        val body = extractJsonObject(cleaned.substring(start))
+        if (body == null) {
+            return if (ENVELOPE_KEY.containsMatchIn(cleaned)) CompileResult("", null, "meta_json_missing") else null
+        }
+        val envelope = try {
+            json.parseToJsonElement(body).jsonObject
+        } catch (error: Exception) {
+            return CompileResult("", null, "meta_parse_error", detail = safeDetail(error))
+        }
+        if ("draft" !in envelope && "error_code" !in envelope) return null
+        val reply = (envelope["reply"] as? JsonPrimitive)?.takeIf { it.isString }?.content?.trim().orEmpty()
+        return parseMeta(prose = reply, tail = openStringDraft(envelope).toString())
+    }
+
+    /** `"draft":"{...}"` (oggetto serializzato in stringa) diventa l'oggetto; ogni altro valore resta com'è. */
+    private fun openStringDraft(envelope: JsonObject): JsonObject {
+        val draft = envelope["draft"] as? JsonPrimitive ?: return envelope
+        if (!draft.isString) return envelope
+        val inner = try {
+            json.parseToJsonElement(draft.content)
+        } catch (_: Exception) {
+            return envelope
+        }
+        return if (inner is JsonObject) JsonObject(envelope + ("draft" to inner)) else envelope
     }
 
     private fun parseMeta(prose: String, tail: String): CompileResult {
@@ -211,6 +255,9 @@ class CliBridgeParser(private val json: Json = lenient()) {
         val ERROR_CODE = Regex("^[a-z][a-z0-9_]{0,63}$")
         val FENCE = Regex("```[A-Za-z]*\\s*\\n?(.*?)```", RegexOption.DOT_MATCHES_ALL)
         val MISNAMED_SENTINEL = Regex("@@[A-Z][A-Z0-9_]{1,40}@@")
+
+        /** Le chiavi che distinguono un envelope strutturato da un oggetto JSON qualunque. */
+        val ENVELOPE_KEY = Regex("\"(?:draft|error_code)\"\\s*:")
 
         /** Le modalità che il validatore accetta per `set_ringer`. */
         val RINGER_MODES = setOf("normal", "vibrate", "silent")

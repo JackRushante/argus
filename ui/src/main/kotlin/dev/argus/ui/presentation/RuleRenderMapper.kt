@@ -324,6 +324,7 @@ object RuleRenderMapper {
         is Trigger.Media,
         -> DeviceTriggerRender.iconKey(t)
         is Trigger.Manual -> "manual"
+        is Trigger.AppEvent -> AppEventTriggerRender.iconKey(t)
     }
 
     private fun triggerLine(t: Trigger, conversationLabels: Map<String, String>, l: RenderLanguage): String = when (t) {
@@ -341,6 +342,7 @@ object RuleRenderMapper {
             "you run it by hand (Run now, a Home-screen shortcut, a quick-settings tile or the widget)",
             "la lanci tu a mano (Esegui ora, una scorciatoia sulla Home, un riquadro rapido o il widget)",
         )
+        is Trigger.AppEvent -> AppEventTriggerRender.line(t, l)
     }
 
     /** Prefisso "Quando: "/"When: " condiviso con chi deriva il sommario lista (UiStateMappers). */
@@ -856,6 +858,17 @@ object RuleRenderMapper {
         is Action.SetBrightness -> ActionRows041.setBrightness(a, l)
         is Action.SetRotation -> ActionRows041.setRotation(a, l)
         is Action.HttpRequest -> ActionRows041.httpRequest(a, l)
+        // 0.5.1 (azioni privilegiate tipizzate): resa in ActionRows051.
+        is Action.AppControl -> ActionRows051.appControl(a, l)
+        is Action.SetAirplane -> ActionRows051.setAirplane(a, l)
+        is Action.SetLocation -> ActionRows051.setLocation(a, l)
+        is Action.SetNfc -> ActionRows051.setNfc(a, l)
+        is Action.SetBatterySaver -> ActionRows051.setBatterySaver(a, l)
+        is Action.LockScreen -> ActionRows051.lockScreen(l)
+        is Action.Screenshot -> ActionRows051.screenshot(l)
+        is Action.AppPermission -> ActionRows051.appPermission(a, l)
+        // 0.5.1: macro sull'interfaccia, resa in ActionRowsUiSteps.
+        is Action.UiSteps -> ActionRowsUiSteps.uiSteps(a, l)
     }
 
     private fun row(

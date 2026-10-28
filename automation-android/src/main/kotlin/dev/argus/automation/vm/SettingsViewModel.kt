@@ -428,12 +428,14 @@ class SettingsViewModel @Inject constructor(
             batteryExempt = health.batteryExempt,
             exactAlarmsGranted = health.exactAlarmsGranted,
             writeSettingsGranted = health.writeSettingsGranted,
+            accessibilityGranted = health.accessibilityGranted,
             notificationsGranted = health.notificationsGranted,
             notificationListenerGranted = health.notificationListenerGranted,
             backgroundLocation = health.backgroundLocationState(settingsSources.geofenceNeeded),
             smsTriggerGranted = health.receiveSmsGranted,
             callTriggerGranted = health.readPhoneStateGranted && health.readCallLogGranted,
             bluetoothTriggerGranted = health.bluetoothConnectGranted,
+            usageAccessGranted = health.usageAccessGranted,
             connectivitySentinelActive = sentinelActive,
             whitelist = settingsSources.contacts.map { ContactRow(it.displayName, it.id) },
             observedCandidates = settingsSources.observedCandidates,
@@ -984,6 +986,7 @@ class SettingsViewModel @Inject constructor(
                     keySaved == false &&
                     isLoopbackBaseUrl(config.baseUrl),
                 modelPresetHint = id == ProviderId.OPENROUTER,
+                localPresets = localPresetsUi(id),
             )
         }
     }
@@ -1010,12 +1013,14 @@ class SettingsViewModel @Inject constructor(
             batteryExempt = health.batteryExempt,
             exactAlarmsGranted = health.exactAlarmsGranted,
             writeSettingsGranted = health.writeSettingsGranted,
+            accessibilityGranted = health.accessibilityGranted,
             notificationsGranted = health.notificationsGranted,
             notificationListenerGranted = health.notificationListenerGranted,
             backgroundLocation = health.backgroundLocationState(false),
             smsTriggerGranted = health.receiveSmsGranted,
             callTriggerGranted = health.readPhoneStateGranted && health.readCallLogGranted,
             bluetoothTriggerGranted = health.bluetoothConnectGranted,
+            usageAccessGranted = health.usageAccessGranted,
             connectivitySentinelActive = connectivitySentinelStatus.active.value,
             whitelist = emptyList(),
             budget = BudgetUi(),

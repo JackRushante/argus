@@ -33,6 +33,9 @@ object CapabilityIds {
     // 0.4.1: avvio manuale. Nessuna dipendenza OS né grant: come l'immediato, sempre disponibile.
     const val TRIGGER_MANUAL = "trigger.manual"
 
+    // 0.5.1: app aperta/chiusa. Si legge da UsageStatsManager: serve l'accesso ai dati di utilizzo.
+    const val TRIGGER_APP_EVENT = "trigger.app_event"
+
     const val STATE_FOREGROUND_APP = "state.foreground_app"
     const val STATE_LOCATION = "state.location"
     const val STATE_READER_BUILTIN = "state.reader.builtin"
@@ -69,6 +72,18 @@ object CapabilityIds {
     const val ACTION_SET_BRIGHTNESS = "action.set_brightness"
     const val ACTION_SET_ROTATION = "action.set_rotation"
     const val ACTION_HTTP_REQUEST = "action.http_request"
+    const val ACTION_UI_STEPS = "action.ui_steps"
+
+    // 0.5.1: azioni privilegiate tipizzate. Stesso gate famiglia delle altre privilegiate (Shizuku, Sui
+    // o root verificato); set_nfc esiste solo sui telefoni con l'NFC (lo decide il probe).
+    const val ACTION_APP_CONTROL = "action.app_control"
+    const val ACTION_SET_AIRPLANE = "action.set_airplane"
+    const val ACTION_SET_LOCATION = "action.set_location"
+    const val ACTION_SET_NFC = "action.set_nfc"
+    const val ACTION_SET_BATTERY_SAVER = "action.set_battery_saver"
+    const val ACTION_LOCK_SCREEN = "action.lock_screen"
+    const val ACTION_SCREENSHOT = "action.screenshot"
+    const val ACTION_APP_PERMISSION = "action.app_permission"
 
     fun state(key: String): String = "state.$key"
 }
@@ -132,6 +147,7 @@ object CapabilityRequirements {
         is Trigger.ModeChanged -> setOf(CapabilityIds.TRIGGER_MODE_CHANGED)
         is Trigger.Media -> setOf(CapabilityIds.TRIGGER_MEDIA)
         is Trigger.Manual -> setOf(CapabilityIds.TRIGGER_MANUAL)
+        is Trigger.AppEvent -> setOf(CapabilityIds.TRIGGER_APP_EVENT)
     }
 
     private fun forCondition(condition: Condition): Set<String> = when (condition) {
@@ -177,6 +193,16 @@ object CapabilityRequirements {
         is Action.SetBrightness -> setOf(CapabilityIds.ACTION_SET_BRIGHTNESS)
         is Action.SetRotation -> setOf(CapabilityIds.ACTION_SET_ROTATION)
         is Action.HttpRequest -> setOf(CapabilityIds.ACTION_HTTP_REQUEST)
+        is Action.AppControl -> setOf(CapabilityIds.ACTION_APP_CONTROL)
+        is Action.SetAirplane -> setOf(CapabilityIds.ACTION_SET_AIRPLANE)
+        is Action.SetLocation -> setOf(CapabilityIds.ACTION_SET_LOCATION)
+        is Action.SetNfc -> setOf(CapabilityIds.ACTION_SET_NFC)
+        is Action.SetBatterySaver -> setOf(CapabilityIds.ACTION_SET_BATTERY_SAVER)
+        is Action.LockScreen -> setOf(CapabilityIds.ACTION_LOCK_SCREEN)
+        is Action.Screenshot -> setOf(CapabilityIds.ACTION_SCREENSHOT)
+        is Action.AppPermission -> setOf(CapabilityIds.ACTION_APP_PERMISSION)
+        // 0.5.1: serve il servizio di Accessibilità di Argus acceso (il probe lo pubblica solo allora).
+        is Action.UiSteps -> setOf(CapabilityIds.ACTION_UI_STEPS)
         // Pausa cooperativa interna all'interprete: nessuna capability OS.
         is Action.Wait -> emptySet()
         // Come i reader parametrici (che gatano sulla famiglia, non sul singolo canonicalId):

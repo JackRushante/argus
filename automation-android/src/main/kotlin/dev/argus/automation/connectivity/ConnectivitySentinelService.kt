@@ -141,7 +141,13 @@ class ConnectivitySentinelService : Service() {
 
     /** Segue la domanda: registra le sorgenti richieste (anche dopo l'avvio) e toglie le altre. */
     private fun startDeviceEventSources(ingress: DeviceEventIngress, demand: DeviceEventDemand) {
-        val sources = AndroidDeviceEventSources(this, ingress, scope, recoverMissed)
+        val sources = AndroidDeviceEventSources(
+            this,
+            ingress,
+            scope,
+            recoverMissed,
+            appPackages = { demand.appPackages.value },
+        )
         deviceSources = sources
         deviceDemandJob = scope.launch {
             demand.sources.collect { required -> sources.apply(required) }

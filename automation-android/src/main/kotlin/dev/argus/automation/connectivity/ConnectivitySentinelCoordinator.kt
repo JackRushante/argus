@@ -80,6 +80,10 @@ class ConnectivitySentinelCoordinator(
     override suspend fun reconcile(): ConnectivityReconcileReport = mutex.withLock {
         val armed = store.armed()
         // Prima di avviare il servizio: alla creazione legge già la domanda corrente.
+        // Prima dei package: chi registra la sorgente app legge già l'insieme aggiornato.
+        deviceEvents.updateAppPackages(
+            armed.mapNotNullTo(linkedSetOf()) { (it.trigger as? Trigger.AppEvent)?.pkg },
+        )
         deviceEvents.update(armed.mapNotNullTo(linkedSetOf()) { it.trigger.deviceEventSource() })
         val required = armed
             .filter { automation ->

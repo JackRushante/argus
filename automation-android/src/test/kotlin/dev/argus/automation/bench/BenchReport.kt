@@ -25,6 +25,8 @@ internal data class BenchMeta(
     val actCases: Int,
     /** Valore di `reasoning_effort` inviato, o `default` se omesso. */
     val reasoning: String = "default",
+    /** Impostazione dell'output strutturato: `auto` (come l'app), `on` o `off`. */
+    val structured: String = "auto",
 )
 
 internal data class Rate(val passed: Int, val total: Int) {
@@ -87,6 +89,7 @@ internal object BenchReport {
         putJsonObject("meta") {
             put("model", meta.model)
             put("reasoning", meta.reasoning)
+            put("structured", meta.structured)
             put("baseUrl", meta.baseUrl)
             put("repeat", meta.repeat)
             put("parallel", meta.parallel)
@@ -105,6 +108,7 @@ internal object BenchReport {
             put("percentWithoutTransport", round1(totalWithoutTransport(results).percent))
             put("retryUsed", results.count { it.retryUsed })
             put("repairUsed", results.count { it.repairUsed })
+            put("structuredUsed", results.count { it.structured == true })
             put("tokensIn", results.sumOf { it.tokensIn ?: 0L })
             put("tokensOut", results.sumOf { it.tokensOut ?: 0L })
         }
@@ -152,6 +156,7 @@ internal object BenchReport {
         }
         put("retryUsed", run.retryUsed)
         put("repairUsed", run.repairUsed)
+        put("structured", run.structured)
         put("attempts", run.attempts)
         put("tokensIn", run.tokensIn)
         put("tokensOut", run.tokensOut)
@@ -170,7 +175,7 @@ internal object BenchReport {
         val all = total(results)
         appendLine("# Banco di prova AI di Argus")
         appendLine()
-        appendLine("- Modello: `${meta.model}` · Ragionamento: `${meta.reasoning}`")
+        appendLine("- Modello: `${meta.model}` · Ragionamento: `${meta.reasoning}` · Output strutturato: `${meta.structured}`")
         appendLine("- Endpoint: `${meta.baseUrl}`")
         appendLine("- Casi: ${meta.compileCases} di compile + ${meta.actCases} generativi")
         appendLine(
@@ -225,6 +230,13 @@ internal object BenchReport {
             "Giro di riparazione sugli errori del validatore usato in ${repaired.size} di ${compileRuns.size} compile " +
                 "(${percentText(if (compileRuns.isEmpty()) 0.0 else repaired.size * 100.0 / compileRuns.size)}); " +
                 "riuscite dopo la riparazione: ${repaired.count { it.passed }}.",
+        )
+        val structuredRuns = compileRuns.filter { it.structured == true }
+        appendLine()
+        appendLine(
+            "Output strutturato nativo usato in ${structuredRuns.size} di ${compileRuns.size} compile " +
+                "(${percentText(if (compileRuns.isEmpty()) 0.0 else structuredRuns.size * 100.0 / compileRuns.size)}); " +
+                "riuscite con l'output strutturato: ${structuredRuns.count { it.passed }}.",
         )
 
         appendLine()

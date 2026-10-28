@@ -375,11 +375,24 @@ BINDING RULES:
      * ora): l'orologio vive nel messaggio utente ([compileUserText]) così il system resta identico
      * tra le chiamate e cache-friendly.
      */
-    fun compileSystemText(): String = buildString {
+    fun compileSystemText(structuredRule: String? = null): String = buildString {
         append(COMPILE_RULES)
         append("\n\n").append(DRAFT_SCHEMA_TEXT)
         append("\n\n").append(STATE_QUERY_SCHEMA_TEXT)
+        if (structuredRule != null) append("\n\n").append(structuredRule)
     }
+
+    /**
+     * Output strutturato nativo (0.5.1): sostituisce solo la riga finale della regola 7. Poche righe, a ogni
+     * compile: il resto delle regole non cambia. Resta valido anche se il server ignora `response_format`,
+     * perché il modello scrive comunque l'envelope e il parser lo legge.
+     */
+    const val STRUCTURED_JSON_RULE = """STRUCTURED OUTPUT (replaces the final @@META@@ line of rule 7): answer with ONE JSON object and nothing else:
+{"reply":<the one short sentence>,"draft":<object-or-null>,"error_code":<string-or-null>}
+Same meaning as the @@META@@ line, same rule 8. Do not write @@META@@."""
+
+    /** Come [STRUCTURED_JSON_RULE] per lo schema chiuso di Anthropic: `draft` è l'oggetto scritto come stringa JSON. */
+    const val STRUCTURED_JSON_STRING_DRAFT_RULE = """STRUCTURED OUTPUT (replaces the final @@META@@ line of rule 7): answer with a JSON object with three fields, "reply" (the one short sentence), "draft" and "error_code", with the same meaning as in the @@META@@ line and the same rule 8. "draft" is the AutomationDraft object written as a JSON string (escaped), or null. Do not write @@META@@."""
 
     fun compileUserText(
         message: String,
@@ -472,6 +485,8 @@ AutomationDraft, but do not execute actions and do not invent capabilities.
 
 BINDING RULES:
 1. Use only action types present in manifest.available_tools.
+   Before answering that an action is unavailable, look for its exact type name in available_tools:
+   if it is listed (vibrate, set_flashlight, set_volume and the others), it IS available: use it.
 2. Use only keys present in manifest.state_keys in state_equals conditions.
 3. Contacts: a WhatsApp generative reply or run_shell needs a whitelisted contact: use the alias of
    manifest.whitelisted_contacts (for example "contact_1") as the notification trigger's
@@ -523,6 +538,7 @@ BINDING RULES:
     "screen", "battery", "audio_output", "mode_changed" and "media" are usable only if listed;
     "phone_state.call" also covers MISSED_CALL; the SIM filter needs "phone_state.sim".
     "manual" (user-started: button, widget, shortcut, tile) is always listed.
+    "app_event" (an app opened or closed) is usable only if listed.
     A requested trigger that is not in the list must NOT be compiled: briefly point out the
     missing grant or mechanism in Settings and return draft null with error_code
     "unsupported_capability".
@@ -650,6 +666,8 @@ Trigger, discriminated by "type":
 - {"type":"mode_changed", "what":"DND"|"RINGER", "to":string|null}  // to: DND off|priority|total,
   RINGER normal|vibrate|silent; null = any change
 - {"type":"media", "state":"PLAYING"|"STOPPED"}  // music/video playback started / finished
+- {"type":"app_event", "pkg":string, "event":"OPENED"|"CLOSED"}  // an app comes to the foreground / leaves it
+  (pkg = the exact package, from installed_app_candidates; opening and closing are two rules, see rule 17)
 - {"type":"manual"}  // runs ONLY when the user starts it by hand, any number of times: a button, a widget,
   a Home-screen shortcut or a quick-settings tile. Use it ONLY when the user asks for one of those.
   Doing something now, or a request with no trigger at all, is "immediate", never "manual".
@@ -756,6 +774,33 @@ Action, discriminated by "type":
    // body max 16 KB, none on GET. Variables, also external data, go ONLY in body; with contentType
    // "application/json" put them inside a quoted JSON string, e.g. "body":"{\"text\":\"${'$'}{sms}\"}".
    // A key or token the user dictates goes in a header exactly as dictated
+- {"type":"app_control", "pkg":string, "op":"FORCE_STOP"|"FREEZE"|"UNFREEZE"}  // stops, disables (FREEZE) or
+   // re-enables an app. pkg is a literal package taken from installed_app_candidates, never ${'$'}{var}; never
+   // Argus, the launcher or a system app
+- {"type":"set_airplane", "on":boolean}  // airplane mode
+- {"type":"set_location", "on":boolean}  // location services on/off
+- {"type":"set_nfc", "on":boolean}  // NFC on/off (phones with NFC only)
+- {"type":"set_battery_saver", "on":boolean}  // battery saver on/off
+- {"type":"lock_screen"}  // turns the screen off and locks the phone
+- {"type":"screenshot"}  // saves a screenshot in Pictures/Argus
+- {"type":"app_permission", "pkg":string, "permission":string, "grant":boolean}  // grants or revokes ONE
+   // runtime permission of an app, e.g. "android.permission.RECORD_AUDIO", CAMERA, ACCESS_FINE_LOCATION,
+   // READ_CONTACTS, READ_CALENDAR, POST_NOTIFICATIONS. pkg and permission are literal, never ${'$'}{var}
+   // These eight need Shizuku or root (in available_tools only when available). ALWAYS prefer them to
+   // run_shell for these jobs
+- {"type":"ui_steps", "pkg":string|null, "steps":[Step,...]}  // taps, types and scrolls on the screen of
+   // an app, step by step, with no AI at run time. pkg = app to open first (null = the current screen);
+   // 1-20 steps, at most 60 s in all. Step, discriminated by "op":
+   // {"op":"wait_for","text":string|null,"id":string|null,"timeoutMs":integer 100-15000} |
+   // {"op":"click","text":string|null,"id":string|null,"desc":string|null,"index":integer|null (from 0)} |
+   // {"op":"type","text":string} (into the focused field; ${'$'}{var} allowed only here) |
+   // {"op":"scroll","dir":"UP"|"DOWN"} | {"op":"back"} | {"op":"home"} |
+   // {"op":"check","text":string,"present":boolean} (stops the macro if it does not hold).
+   // LAST RESORT: use it only when no typed action or intent does the job (launch_app, open_url,
+   // set_*, media_control, ...). Prefer an exact "id" or visible "text" over "desc"; begin with a
+   // wait_for when the app must load. Never on Argus, Settings, the installer or permission dialogs.
+   // Same triggers as run_shell (never sms/call/media/app_event). Needs the Accessibility service:
+   // it is in available_tools only when that service is on
 
 Schema v2 (P4) — OPTIONAL Tasker-class program. A draft stays v1 (flat: trigger + conditions +
 actions, described above and UNCHANGED) unless it uses one of the P4 constructs below. Emit P4 only

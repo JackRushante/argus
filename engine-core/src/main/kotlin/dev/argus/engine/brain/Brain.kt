@@ -29,6 +29,13 @@ data class CompileResult(
      * bozza né in `toString()`; il chiamante lo toglie prima del flusso di approvazione.
      */
     val providerMessage: String? = null,
+    /**
+     * 0.5.1: `true` se la risposta è arrivata come output strutturato nativo (un oggetto JSON
+     * `{reply, draft, error_code}`), `false` se è arrivata col protocollo base `@@META@@` (non
+     * richiesto, rifiutato dal provider o ignorato dal modello), `null` se il transport non lo dice
+     * (bridge Hermes). Solo diagnostica per il banco: non entra mai in bozza, audit o impronta.
+     */
+    val structured: Boolean? = null,
 ) {
     // `raw` e `providerMessage` non escono mai da qui: un log accidentale del risultato non deve portare
     // la risposta del modello né il testo del provider.

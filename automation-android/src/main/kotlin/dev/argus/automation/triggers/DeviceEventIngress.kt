@@ -1,6 +1,7 @@
 package dev.argus.automation.triggers
 
 import dev.argus.engine.device.DeviceEventParser
+import dev.argus.engine.model.AppEventKind
 import dev.argus.engine.model.AudioOutputKind
 import dev.argus.engine.model.ConnState
 import dev.argus.engine.model.MediaPlayState
@@ -65,6 +66,15 @@ class DeviceEventIngress(
 
     suspend fun onMedia(state: MediaPlayState, atMillis: Long) {
         dispatcher.dispatch(parser.media(state, atMillis))
+    }
+
+    /**
+     * App aperta o chiusa (0.5.1). [atMillis] è l'istante dell'evento di sistema, non quello in cui lo si
+     * scopre: lo stesso evento riletto dà lo stesso id e il motore non lo esegue due volte. Un package che
+     * non ha la forma di un package Android non produce nulla.
+     */
+    suspend fun onAppEvent(pkg: String, event: AppEventKind, atMillis: Long) {
+        parser.appEvent(pkg, event, atMillis)?.let { dispatcher.dispatch(it) }
     }
 
     /** Il valore di partenza di [what]: nessun evento. Da chiamare prima di registrare il receiver. */

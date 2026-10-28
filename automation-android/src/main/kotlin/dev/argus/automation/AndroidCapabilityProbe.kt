@@ -88,6 +88,13 @@ internal data class AndroidCapabilityState(
     val secureSettingsGranted: Boolean = false,
     /** 0.5.0: accesso ai dati di utilizzo concesso (`GET_USAGE_STATS`): `app_in_foreground` senza Shizuku. */
     val usageStatsGranted: Boolean = false,
+    /** 0.5.1: il telefono ha l'NFC (`FEATURE_NFC`): solo allora `set_nfc` si pubblica. */
+    val nfcPresent: Boolean = false,
+    /**
+     * 0.5.1: il servizio di Accessibilità di Argus è nell'elenco di sistema e acceso. Serve alle macro
+     * `ui_steps`; da solo non basta (serve anche il permesso di notifica, per l'indicatore e «Ferma»).
+     */
+    val accessibilityEnabled: Boolean = false,
 ) {
     /** Uno shell privilegiato è disponibile ORA: Shizuku autorizzato (Sui compreso) o root verificato. */
     val privilegedBackendAvailable: Boolean
@@ -169,6 +176,10 @@ internal class SystemAndroidCapabilityStateSource(
         rootActive = runCatching(rootActive).getOrDefault(false),
         secureSettingsGranted = PermanentGrantStatus.secureSettings(appContext),
         usageStatsGranted = PermanentGrantStatus.usageStats(appContext),
+        nfcPresent = runCatching {
+            appContext.packageManager.hasSystemFeature(PackageManager.FEATURE_NFC)
+        }.getOrDefault(false),
+        accessibilityEnabled = PermanentGrantStatus.accessibility(appContext),
     )
 
     private fun granted(permission: String): Boolean =
@@ -202,6 +213,11 @@ enum class BlockCause {
 
     /** 0.4.1: manca «Modifica impostazioni di sistema» (luminosità, rotazione). */
     WRITE_SETTINGS_ACCESS,
+
+    /** 0.5.1: manca l'accesso ai dati di utilizzo (regole «app aperta/chiusa»). */
+    USAGE_ACCESS,
+    /** 0.5.1: il servizio di Accessibilità di Argus non è acceso (macro sullo schermo). */
+    ACCESSIBILITY_SERVICE,
     OTHER,
 }
 
@@ -296,6 +312,9 @@ class AndroidCapabilityProbe internal constructor(
         add("audio_output")
         add("mode_changed")
         add("media")
+        // 0.5.1: app aperta/chiusa, solo con l'accesso ai dati di utilizzo concesso (altrimenti il modello
+        // proporrebbe una regola che l'app non può armare).
+        if (state.usageStatsGranted) add("app_event")
         // Il filtro SIM vale solo su un telefono con più slot e dove SMS o chiamate sono armabili.
         if (state.multiSim && (state.receiveSmsGranted || (state.readPhoneStateGranted && state.readCallLogGranted))) {
             add("phone_state.sim")
@@ -336,11 +355,16 @@ class AndroidCapabilityProbe internal constructor(
             else shizukuCause(state.shizukuStatus)
         capability in PRIVILEGED_CAPABILITIES || capability == TOOL_STATE_READ ->
             shizukuCause(state.shizukuStatus)
+        // 0.5.1: set_nfc senza NFC non ha una causa che l'utente possa rimuovere.
+        capability in NFC_CAPABILITIES ->
+            if (state.nfcPresent) shizukuCause(state.shizukuStatus) else BlockCause.OTHER
         capability in BASE_DND_CAPABILITIES ->
             if (baseTierActive && !state.dndPolicyGranted) BlockCause.DND_ACCESS
             else shizukuCause(state.shizukuStatus)
         capability in BASE_LAUNCH_CAPABILITIES -> shizukuCause(state.shizukuStatus)
         capability in WRITE_SETTINGS_CAPABILITIES -> BlockCause.WRITE_SETTINGS_ACCESS
+        capability == ActionCapabilities.UI_STEPS ->
+            if (!state.accessibilityEnabled) BlockCause.ACCESSIBILITY_SERVICE else BlockCause.NOTIFICATIONS_PERMISSION
         capability == CapabilityIds.TRIGGER_GEOFENCE ||
             capability == CapabilityIds.TRIGGER_CONNECTIVITY_WIFI_IDENTITY ->
             if (state.locationGranted && !state.locationEnabled) BlockCause.LOCATION_OFF
@@ -356,6 +380,7 @@ class AndroidCapabilityProbe internal constructor(
         capability == CapabilityIds.ACTION_INVOKE_LLM ||
             capability == GenerativeContract.TOOL_WEB_SEARCH -> BlockCause.AI_NOT_READY
         capability.startsWith(SENSOR_TRIGGER_PREFIX) -> BlockCause.SENSOR_UNAVAILABLE
+        capability == CapabilityIds.TRIGGER_APP_EVENT -> BlockCause.USAGE_ACCESS
         else -> BlockCause.OTHER
     }
 
@@ -443,9 +468,16 @@ class AndroidCapabilityProbe internal constructor(
             // con l'accesso ai dati di utilizzo l'app in primo piano si legge da UsageStatsManager.
             if (state.secureSettingsGranted) add(ActionCapabilities.WRITE_SETTING)
             if (state.usageStatsGranted) add(CapabilityIds.STATE_FOREGROUND_APP)
+            // 0.5.1: «app aperta/chiusa» legge gli stessi eventi di utilizzo: stesso permesso, nessuno shell.
+            if (state.usageStatsGranted) add(CapabilityIds.TRIGGER_APP_EVENT)
             if (state.notificationsGranted) add(ActionCapabilities.SHOW_NOTIFICATION)
+            // 0.5.1: le macro sullo schermo servono col servizio di Accessibilità acceso E con le notifiche
+            // concesse: la notifica «Argus sta usando lo schermo» con «Ferma» è il loro indicatore.
+            if (state.accessibilityEnabled && state.notificationsGranted) add(ActionCapabilities.UI_STEPS)
             // CapabilityRequirements persiste anche i raw tool approvati: il set del fire-time
             // deve contenere gli stessi nomi wire, senza alias con le capability typed.
+            // 0.5.1: set_nfc solo con un backend privilegiato E l'NFC sul telefono.
+            if (shizukuAvailable && state.nfcPresent) addAll(NFC_CAPABILITIES)
             if (shizukuAvailable) {
                 addAll(PRIVILEGED_CAPABILITIES)
                 // Capability runtime usata da contextSources=["state"]; non è un Action wire e
@@ -478,7 +510,8 @@ class AndroidCapabilityProbe internal constructor(
         val transient = if (shizukuTransient) {
             // Anche le chiavi di stato: se il Bluetooth non e' leggibile in pubblico, con Shizuku
             // fermo ma autorizzato e' un outage recuperabile, come prima della lettura pubblica.
-            PRIVILEGED_CAPABILITIES + BASE_DND_CAPABILITIES + BASE_LAUNCH_CAPABILITIES + TOOL_STATE_READ
+            PRIVILEGED_CAPABILITIES + BASE_DND_CAPABILITIES + BASE_LAUNCH_CAPABILITIES + TOOL_STATE_READ +
+                (if (state.nfcPresent) NFC_CAPABILITIES else emptySet())
         } else {
             emptySet()
         }
@@ -499,6 +532,7 @@ class AndroidCapabilityProbe internal constructor(
             if (state.writeSettingsGranted) addAll(WRITE_SETTINGS_ACTION_TYPES)
             if (shizukuAvailable) {
                 addAll(PRIVILEGED_ACTION_TYPES)
+                if (state.nfcPresent) addAll(NFC_ACTION_TYPES)
             }
             if (shizukuAvailable || dndBase) addAll(BASE_DND_ACTION_TYPES)
             if (shizukuAvailable || launchBase) addAll(BASE_LAUNCH_ACTION_TYPES)
@@ -509,6 +543,7 @@ class AndroidCapabilityProbe internal constructor(
                 add(ActionTypeIds.SHOW_NOTIFICATION)
                 add(TOOL_NOTIFY_SHOW)
             }
+            if (state.accessibilityEnabled && state.notificationsGranted) add(ActionTypeIds.UI_STEPS)
             if (listenerGranted) add(GenerativeContract.TOOL_WHATSAPP_REPLY)
             // Il compilatore usa SOLO manifest.available_tools: invoke_llm deve comparire qui,
             // altrimenti Hermes ripiega su una reply statica anche quando il runtime è pronto.
@@ -532,8 +567,19 @@ class AndroidCapabilityProbe internal constructor(
                 unavailableTools[it] = if (baseTierActive) REASON_DND_POLICY else reason
             }
         }
+        // 0.5.1: set_nfc dipende anche dall'hardware; senza NFC il motivo è questo, non Shizuku.
+        if (!state.nfcPresent) {
+            NFC_ACTION_TYPES.forEach { unavailableTools[it] = REASON_NO_NFC }
+        } else if (!shizukuAvailable) {
+            NFC_ACTION_TYPES.forEach { unavailableTools[it] = shizukuReason(state.shizukuStatus) }
+        }
         if (!state.writeSettingsGranted) {
             WRITE_SETTINGS_ACTION_TYPES.forEach { unavailableTools[it] = REASON_WRITE_SETTINGS }
+        }
+        if (!state.accessibilityEnabled) {
+            unavailableTools[ActionTypeIds.UI_STEPS] = REASON_ACCESSIBILITY
+        } else if (!state.notificationsGranted) {
+            unavailableTools[ActionTypeIds.UI_STEPS] = "notification permission missing"
         }
         if (!state.notificationsGranted) {
             unavailableTools[ActionTypeIds.SHOW_NOTIFICATION] = "notification permission missing"
@@ -585,6 +631,7 @@ class AndroidCapabilityProbe internal constructor(
         if (state.writeSettingsGranted) add("write_settings")
         if (state.secureSettingsGranted) add("write_secure_settings")
         if (state.usageStatsGranted) add("usage_stats")
+        if (state.accessibilityEnabled) add("accessibility")
     }
 
     /** Capability `state.<chiave>` leggibili ORA senza Shizuku (tutte, tranne il Bluetooth senza permesso). */
@@ -657,6 +704,9 @@ class AndroidCapabilityProbe internal constructor(
         /** Motivo (in inglese, va al modello) per luminosità e rotazione senza il permesso speciale. */
         const val REASON_WRITE_SETTINGS = "modify system settings access not granted"
 
+        /** Motivo (in inglese, va al modello) per le macro sullo schermo senza il servizio di Accessibilità. */
+        const val REASON_ACCESSIBILITY = "accessibility service not enabled"
+
         /** 0.4.1, sempre disponibili: parlato, tasti multimediali, HTTP (nessun grant da pubblicare). */
         val BASE_ACTIONS_041_TYPES = setOf(
             ActionTypeIds.SPEAK,
@@ -674,6 +724,13 @@ class AndroidCapabilityProbe internal constructor(
         val WRITE_SETTINGS_CAPABILITIES =
             setOf(ActionCapabilities.SET_BRIGHTNESS, ActionCapabilities.SET_ROTATION)
 
+        /** Motivo (in inglese, va al modello) per `set_nfc` su un telefono senza NFC. */
+        const val REASON_NO_NFC = "this phone has no NFC"
+
+        /** 0.5.1: `set_nfc` richiede un backend privilegiato e l'NFC sul telefono. */
+        val NFC_ACTION_TYPES = setOf(ActionTypeIds.SET_NFC)
+        val NFC_CAPABILITIES = setOf(ActionCapabilities.SET_NFC)
+
         /** Azioni che richiedono davvero lo shell Shizuku: toggle radio, shell e write_setting. */
         val PRIVILEGED_ACTION_TYPES = setOf(
             ActionTypeIds.SET_WIFI,
@@ -685,6 +742,14 @@ class AndroidCapabilityProbe internal constructor(
             ActionTypeIds.RUN_SHELL,
             // Scrittura impostazioni parametrica: `settings put` non ha percorso app-normale.
             ActionTypeIds.WRITE_SETTING,
+            // 0.5.1: azioni privilegiate tipizzate (set_nfc a parte, v. NFC_ACTION_TYPES).
+            ActionTypeIds.APP_CONTROL,
+            ActionTypeIds.SET_AIRPLANE,
+            ActionTypeIds.SET_LOCATION,
+            ActionTypeIds.SET_BATTERY_SAVER,
+            ActionTypeIds.LOCK_SCREEN,
+            ActionTypeIds.SCREENSHOT,
+            ActionTypeIds.APP_PERMISSION,
         )
         /** Base con grant `ACCESS_NOTIFICATION_POLICY` (NotificationManager/AudioManager). */
         val BASE_DND_ACTION_TYPES = setOf(ActionTypeIds.SET_DND, ActionTypeIds.SET_RINGER)
@@ -740,6 +805,14 @@ class AndroidCapabilityProbe internal constructor(
             // Gate famiglia della scrittura parametrica: forAction(WriteSetting) richiede questa,
             // pubblicata solo con Shizuku (e transiente se Shizuku è fermo ma autorizzato).
             add(ActionCapabilities.WRITE_SETTING)
+            // 0.5.1: azioni privilegiate tipizzate (set_nfc a parte, v. NFC_CAPABILITIES).
+            add(ActionCapabilities.APP_CONTROL)
+            add(ActionCapabilities.SET_AIRPLANE)
+            add(ActionCapabilities.SET_LOCATION)
+            add(ActionCapabilities.SET_BATTERY_SAVER)
+            add(ActionCapabilities.LOCK_SCREEN)
+            add(ActionCapabilities.SCREENSHOT)
+            add(ActionCapabilities.APP_PERMISSION)
             add(CapabilityIds.STATE_FOREGROUND_APP)
             add(CapabilityIds.STATE_READER_BUILTIN)
             add(CapabilityIds.STATE_READER_SETTING)
@@ -755,7 +828,7 @@ class AndroidCapabilityProbe internal constructor(
         // ne fanno piu' parte, una regola che usa solo quelle funziona anche senza.
         val SHIZUKU_CAPABILITIES: Set<String> =
             (PRIVILEGED_CAPABILITIES - PUBLIC_STATE_CAPABILITIES) + BASE_DND_CAPABILITIES +
-                BASE_LAUNCH_CAPABILITIES
+                BASE_LAUNCH_CAPABILITIES + NFC_CAPABILITIES
     }
 }
 

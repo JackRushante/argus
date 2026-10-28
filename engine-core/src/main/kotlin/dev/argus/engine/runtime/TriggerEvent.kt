@@ -2,6 +2,7 @@
 package dev.argus.engine.runtime
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.ApprovalFingerprint
+import dev.argus.engine.model.AppEventKind
 import dev.argus.engine.model.AudioOutputKind
 import dev.argus.engine.model.ConnMedium
 import dev.argus.engine.model.ConnState
@@ -97,4 +98,9 @@ sealed interface TriggerEvent {
         override val automationId: AutomationId,
         override val approvalFingerprint: ApprovalFingerprint,
     ) : Registered
+
+    // --- 0.5.1: app aperta/chiusa. Solo il package e la direzione, nessun altro dato dell'app. ---
+
+    /** [pkg] è passata in primo piano ([AppEventKind.OPENED]) o lo ha lasciato ([AppEventKind.CLOSED]). */
+    data class AppForegroundChanged(val pkg: String, val event: AppEventKind) : TriggerEvent
 }
