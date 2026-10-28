@@ -68,8 +68,8 @@ import dev.argus.ui.theme.ArgusTheme
  * @param titleSuffix elementi dopo il titolo sulla stessa riga (es. il triangolo «Ha avvisi»).
  * @param titleColor `onSurface` di default; `onSurfaceVariant` per le righe «rumore utile» (mai trasparenza).
  * @param subtitleColor `onSurfaceVariant` di default; per un esito colorato usare il `fg` del ruolo.
- * @param trailingAtTop `true` = [trailing] in alto, a 14 dp dal bordo (tavola «Automazioni»: l'interruttore
- *   sta sulla riga del titolo); `false` = centrato in verticale.
+ * @param trailingAtTop `true` = [trailing] in alto, a 6 dp dal bordo (tavola «Automazioni»: l'interruttore,
+ *   alto 48 dp con l'area tattile, ha il tratto visibile a 14 dp e sta sulla riga del titolo); `false` = centrato.
  */
 @Composable
 fun ArgusListRow(
@@ -124,7 +124,7 @@ fun ArgusListRow(
                 // Interruttore e freccia stanno in alto, allineati al titolo, quando la riga ha piu' righe di contenuto.
                 Modifier
                     .align(if (trailingAtTop) Alignment.Top else Alignment.CenterVertically)
-                    .padding(end = ArgusSpacing.Medium, top = if (trailingAtTop) 14.dp else 0.dp),
+                    .padding(end = ArgusSpacing.Medium, top = if (trailingAtTop) 6.dp else 0.dp),
                 contentAlignment = Alignment.Center,
             ) { trailing() }
         }

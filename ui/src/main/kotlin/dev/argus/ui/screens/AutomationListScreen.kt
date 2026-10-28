@@ -486,7 +486,8 @@ private fun AutomationRuleCard(
                         Icons.Rounded.ChevronRight,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(24.dp),
+                        // Nella tavola la freccia sta 8 dp piu' in basso dell'interruttore.
+                        modifier = Modifier.padding(top = 16.dp).size(24.dp),
                     )
                 }
             },

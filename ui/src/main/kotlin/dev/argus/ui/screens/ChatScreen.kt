@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -39,6 +40,7 @@ import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
@@ -673,55 +675,60 @@ private fun ChatEmptyState(
         SuggestionSpec(stringResource(R.string.chat_suggestion_night), Icons.Rounded.NightsStay, RoundedCornerShape(percent = 50)),
         SuggestionSpec(stringResource(R.string.chat_suggestion_whatsapp), Icons.Rounded.Notifications, RoundedCornerShape(ArgusRadius.Md)),
     )
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(start = ArgusSpacing.Large, end = ArgusSpacing.Large, top = ArgusSpacing.Small, bottom = ArgusSpacing.Medium),
-        verticalArrangement = Arrangement.spacedBy(ArgusSpacing.Section, Alignment.CenterVertically),
-    ) {
+    // L'altezza minima della colonna e' quella dello spazio disponibile: lo stato vuoto sta al centro, e con
+    // il testo grande o la tastiera aperta scorre invece di tagliarsi.
+    BoxWithConstraints(Modifier.fillMaxSize()) {
         Column(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = ArgusSpacing.Medium),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = maxHeight)
+                .verticalScroll(rememberScrollState())
+                .padding(start = ArgusSpacing.Large, end = ArgusSpacing.Large, top = ArgusSpacing.Small, bottom = ArgusSpacing.Medium),
+            verticalArrangement = Arrangement.spacedBy(ArgusSpacing.Section, Alignment.CenterVertically),
         ) {
-            ChatBrandMark(size = 72.dp)
-            Text(
-                stringResource(R.string.chat_empty_title),
-                modifier = Modifier.padding(top = ArgusSpacing.Unit),
-                color = MaterialTheme.colorScheme.onSurface,
-                style = MaterialTheme.typography.titleLarge,
-                textAlign = TextAlign.Center,
-            )
-            Text(
-                stringResource(R.string.chat_empty_body),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodyLarge,
-                textAlign = TextAlign.Center,
-            )
-        }
-        Column(verticalArrangement = Arrangement.spacedBy(ArgusSpacing.Small)) {
-            SectionLabel(stringResource(R.string.chat_empty_try), Modifier.padding(start = ArgusSpacing.Unit))
-            ArgusCardGroup(suggestions) { suggestion ->
-                SuggestionRow(suggestion) {
-                    // Stato vuoto: imposta l'input e invia (brief Task 7).
-                    callbacks.onInputChange(suggestion.text)
-                    callbacks.onSend()
-                }
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = ArgusSpacing.Medium),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                ChatBrandMark(size = 72.dp)
+                Text(
+                    stringResource(R.string.chat_empty_title),
+                    modifier = Modifier.padding(top = ArgusSpacing.Unit),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.titleLarge,
+                    textAlign = TextAlign.Center,
+                )
+                Text(
+                    stringResource(R.string.chat_empty_body),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyLarge,
+                    textAlign = TextAlign.Center,
+                )
             }
-            // 0.4.0 (F10): galleria con altre idee, divise per argomento.
-            ArgusButton(
-                text = stringResource(R.string.ui40_chat_more_examples),
-                onClick = onMoreExamples,
-                style = ButtonStyle.Text,
-                modifier = Modifier
-                    .align(Alignment.CenterHorizontally)
-                    .testTag("chat_more_examples")
-                    .semantics(mergeDescendants = true) {},
-            )
-        }
-        if (error != null) {
-            ChatErrorBubble(error, callbacks::onRetry, callbacks::onOpenSystem)
+            Column(verticalArrangement = Arrangement.spacedBy(ArgusSpacing.Small)) {
+                SectionLabel(stringResource(R.string.chat_empty_try), Modifier.padding(start = ArgusSpacing.Unit))
+                ArgusCardGroup(suggestions) { suggestion ->
+                    SuggestionRow(suggestion) {
+                        // Stato vuoto: imposta l'input e invia (brief Task 7).
+                        callbacks.onInputChange(suggestion.text)
+                        callbacks.onSend()
+                    }
+                }
+                // 0.4.0 (F10): galleria con altre idee, divise per argomento.
+                ArgusButton(
+                    text = stringResource(R.string.ui40_chat_more_examples),
+                    onClick = onMoreExamples,
+                    style = ButtonStyle.Text,
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .testTag("chat_more_examples")
+                        .semantics(mergeDescendants = true) {},
+                )
+            }
+            if (error != null) {
+                ChatErrorBubble(error, callbacks::onRetry, callbacks::onOpenSystem)
+            }
         }
     }
 }
@@ -757,6 +764,7 @@ private fun SuggestionRow(suggestion: SuggestionSpec, onTap: () -> Unit) {
 }
 
 /** Galleria «Altri esempi» (F10): foglio dal basso con gli esempi per gruppo; toccarne uno lo passa a [onPick]. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ChatExamplesSheet(
     groups: List<ChatExampleGroup>,
