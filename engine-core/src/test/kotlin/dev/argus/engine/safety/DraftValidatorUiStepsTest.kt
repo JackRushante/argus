@@ -85,7 +85,7 @@ class DraftValidatorUiStepsTest {
 
     @Test
     fun `only the type step takes a placeholder`() {
-        val vars = listOf(VarBinding.TriggerPayload("sms", TriggerField.TEXT, null, ConfidentialityLabel.PRIVATE))
+        val vars = listOf(VarBinding.Literal("sms", "x", VarType.TEXT, ConfidentialityLabel.PUBLIC))
         fun with(step: UiStep) = errors(
             v.validate(draft(macro("com.example.shop", step), vars = vars, trigger = Trigger.Immediate), emptySet()),
         )
