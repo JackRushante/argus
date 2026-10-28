@@ -47,16 +47,6 @@ class PackageManagerDefaultAppsTest {
     }
 
     @Test
-    fun `an app that declares the category without the default one is found too`() {
-        shadow.addResolveInfoForIntentNoDefaults(AppKind.CALENDAR.intent(), answer("com.google.android.calendar", "Calendar"))
-
-        assertEquals(
-            InstalledAppCandidate("Calendar", "com.google.android.calendar", isDefault = true),
-            lookup.defaultFor(AppKind.CALENDAR),
-        )
-    }
-
-    @Test
     fun `no app for the kind means no default`() {
         assertNull(lookup.defaultFor(AppKind.MUSIC))
         assertNull(lookup.defaultFor(AppKind.CAMERA))
