@@ -499,8 +499,13 @@ sealed interface TransportUi {
         val unauthenticatedLoopback: Boolean = false,
         /** true per OpenRouter: il campo modello mostra il suggerimento sui preset `@preset/<nome>`. */
         val modelPresetHint: Boolean = false,
+        /** Preset dei server locali (solo Custom): compilano l'indirizzo e mostrano la nota sul contesto. */
+        val localPresets: List<LocalPresetUi> = emptyList(),
     ) : TransportUi
 }
+
+/** Un preset di server locale nel dialogo del provider Custom: `id` stabile, nome proprio e indirizzo. */
+data class LocalPresetUi(val id: String, val label: String, val baseUrl: String)
 enum class AuthState { OK, EXPIRED, NOT_CONFIGURED }
 
 /** Voce del selettore provider (il VM la costruisce dal ProviderCatalog). */

@@ -984,6 +984,7 @@ class SettingsViewModel @Inject constructor(
                     keySaved == false &&
                     isLoopbackBaseUrl(config.baseUrl),
                 modelPresetHint = id == ProviderId.OPENROUTER,
+                localPresets = localPresetsUi(id),
             )
         }
     }

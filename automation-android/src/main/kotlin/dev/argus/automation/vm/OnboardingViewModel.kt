@@ -504,6 +504,7 @@ class OnboardingViewModel @Inject constructor(
                 apiKeyRequired = spec.apiKeyRequired,
                 reasoningEffort = config.reasoningEffort.name.lowercase(Locale.ROOT),
                 reasoningEffortEditable = spec.reasoningEffortEditable,
+                localPresets = localPresetsUi(id),
             )
         }
     }

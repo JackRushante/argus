@@ -222,12 +222,14 @@ The "Brain" is pluggable: the app always owns the loop, the LLM is a reasoning s
 | **OpenAI** | Responses API (server-side `web_search`) | yes | $ estimate from price list |
 | **Anthropic** | Messages API (`web_search` server tool) | yes | $ estimate from price list |
 | **Google Gemini** | OpenAI-compat shim + native API for grounding (`google_search`) | yes | $ estimate from price list |
-| **OpenRouter** | OpenAI-compat (web via the `web` plugin, presets supported) | yes | tokens only |
+| **OpenRouter** | OpenAI-compat (web via the `openrouter:web_search` server tool, presets supported) | yes | tokens only |
 | **Custom (OpenAI-compat)** | endpoint of your choice (llama.cpp, Ollama, LiteLLM, etc.) | no | n/a |
 
 - **BYOK**: hosted direct providers require **your own** API key, entered in-app and stored encrypted on the device. A Custom endpoint may omit authentication. No Argus account, no project backend.
 - **Budget**: per-turn usage tracking (tokens and, where the price list is known, micro-USD), configurable limits; a generative rule that exceeds its budget is suppressed and audited (`SUPPRESSED_BUDGET`).
 - **On-device models**: Custom accepts unauthenticated OpenAI-compatible servers and cleartext HTTP only on the exact loopback hosts `localhost`, `127.0.0.1`, and `::1`. Every LAN or remote endpoint still requires HTTPS.
+- **Local server presets**: the Custom dialog has one-tap presets for Ollama (`http://127.0.0.1:11434/v1`), LM Studio (`http://127.0.0.1:1234/v1`) and the llama.cpp server (`http://127.0.0.1:8080/v1`), with a note on the context they need (about 16,000 tokens). Local servers get a 3-minute compile timeout instead of 65 seconds. There is no compact prompt: models too small to write valid rules are not worth the effort.
+- **Structured output**: when the provider supports it, the compile asks for a native JSON answer (`response_format` on OpenAI-compatible endpoints, `output_config.format` on Anthropic) instead of a sentence plus an `@@META@@` line. If the provider rejects the parameter or the model ignores it, Argus falls back to the `@@META@@` protocol by itself, which stays the base.
 - **Reasoning diagnostics**: Custom and OpenRouter can omit reasoning control or send `none`, `low`, `medium`, or `high` per request. When the server reports them, Settings shows reasoning-token usage and the latest `finish_reason`.
 
 ### Choosing a model
@@ -256,7 +258,7 @@ Measured with Argus's AI test bench in October 2026, all through OpenRouter. The
 
 - **Reasoning.** "Default" leaves the choice to the provider. In Argus you pick the reasoning level in the provider dialog for Custom and OpenRouter; the direct providers use their default. Off (`none`) works for most models and is the fastest. Some models can't turn it off (on OpenRouter: Gemini Flash, GLM Flash, MiniMax Flash); with `none` Argus then retries once at `low`. High reasoning rarely pays off: on the hardest programs DeepSeek Flash at `high` stays at 2–7 s, while Claude Haiku goes up to 15 s and gets worse.
 - **Self-hosted.** A model in the class of Qwen 3.8 27B is a reasonable floor for a local server (llama.cpp, Ollama, LM Studio and similar). Give it at least about 16,000 tokens of context.
-- **Run the bench yourself:** `ARGUS_BENCH_KEY=<OpenRouter key> ./gradlew :automation-android:testDebugUnitTest --tests "dev.argus.automation.bench.AiBenchTest"`. Optional variables: `ARGUS_BENCH_MODEL`, `ARGUS_BENCH_REASONING`, `ARGUS_BENCH_FILTER` (comma-separated case prefixes), `ARGUS_BENCH_REPEAT`, `ARGUS_BENCH_PARALLEL`, `ARGUS_BENCH_BASE_URL`. The report is written to `automation-android/build/reports/ai-bench/`. Without the key, the bench is skipped, so regular test runs never touch the network.
+- **Run the bench yourself:** `ARGUS_BENCH_KEY=<OpenRouter key> ./gradlew :automation-android:testDebugUnitTest --tests "dev.argus.automation.bench.AiBenchTest"`. Optional variables: `ARGUS_BENCH_MODEL`, `ARGUS_BENCH_REASONING`, `ARGUS_BENCH_STRUCTURED` (`on`, `off` or `auto`, the default: as the app does), `ARGUS_BENCH_FILTER` (comma-separated case prefixes), `ARGUS_BENCH_REPEAT`, `ARGUS_BENCH_PARALLEL`, `ARGUS_BENCH_BASE_URL`. The report is written to `automation-android/build/reports/ai-bench/`. Without the key, the bench is skipped, so regular test runs never touch the network.
 
 ### Hermes bridge (optional, self-hosted)
 
