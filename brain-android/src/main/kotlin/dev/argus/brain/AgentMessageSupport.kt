@@ -788,6 +788,19 @@ Action, discriminated by "type":
    // READ_CONTACTS, READ_CALENDAR, POST_NOTIFICATIONS. pkg and permission are literal, never ${'$'}{var}
    // These eight need Shizuku or root (in available_tools only when available). ALWAYS prefer them to
    // run_shell for these jobs
+- {"type":"ui_steps", "pkg":string|null, "steps":[Step,...]}  // taps, types and scrolls on the screen of
+   // an app, step by step, with no AI at run time. pkg = app to open first (null = the current screen);
+   // 1-20 steps, at most 60 s in all. Step, discriminated by "op":
+   // {"op":"wait_for","text":string|null,"id":string|null,"timeoutMs":integer 100-15000} |
+   // {"op":"click","text":string|null,"id":string|null,"desc":string|null,"index":integer|null (from 0)} |
+   // {"op":"type","text":string} (into the focused field; ${'$'}{var} allowed only here) |
+   // {"op":"scroll","dir":"UP"|"DOWN"} | {"op":"back"} | {"op":"home"} |
+   // {"op":"check","text":string,"present":boolean} (stops the macro if it does not hold).
+   // LAST RESORT: use it only when no typed action or intent does the job (launch_app, open_url,
+   // set_*, media_control, ...). Prefer an exact "id" or visible "text" over "desc"; begin with a
+   // wait_for when the app must load. Never on Argus, Settings, the installer or permission dialogs.
+   // Same triggers as run_shell (never sms/call/media/app_event). Needs the Accessibility service:
+   // it is in available_tools only when that service is on
 
 Schema v2 (P4) — OPTIONAL Tasker-class program. A draft stays v1 (flat: trigger + conditions +
 actions, described above and UNCHANGED) unless it uses one of the P4 constructs below. Emit P4 only

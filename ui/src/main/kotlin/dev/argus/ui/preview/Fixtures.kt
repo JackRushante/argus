@@ -666,6 +666,7 @@ object Fixtures {
     val settingsExactAlarmsDenied = settingsAllGreen.copy(exactAlarmsGranted = false)
     val settingsWriteSettingsDenied = settingsAllGreen.copy(writeSettingsGranted = false)
     val settingsUsageAccessDenied = settingsAllGreen.copy(usageAccessGranted = false)
+    val settingsAccessibilityOff = settingsAllGreen.copy(accessibilityGranted = false)
 
     /** Provider diretto selezionato (OpenAI) con chiave configurata. */
     val settingsDirectProvider = settingsAllGreen.copy(

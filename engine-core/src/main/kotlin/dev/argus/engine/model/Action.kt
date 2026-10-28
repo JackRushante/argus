@@ -109,6 +109,8 @@ object ActionTypeIds {
     const val LOCK_SCREEN = "lock_screen"
     const val SCREENSHOT = "screenshot"
     const val APP_PERMISSION = "app_permission"
+    // 0.5.1: computer-use lento via Accessibilità (macro di passi su controlli, senza AI allo scatto).
+    const val UI_STEPS = "ui_steps"
     // Control-flow strutturato P4 §2.3: contenitori, non azioni foglia.
     const val IF = "if"
     const val WHILE = "while"
@@ -203,6 +205,7 @@ sealed interface Action {
             is LockScreen,
             is Screenshot,
             is AppPermission,
+            is UiSteps,
             -> ActionTier.DETERMINISTIC
         }
 
@@ -484,6 +487,19 @@ sealed interface Action {
      */
     @Serializable @SerialName(ActionTypeIds.APP_PERMISSION)
     data class AppPermission(val pkg: String, val permission: String, val grant: Boolean) : Action
+    /**
+     * Macro di passi sull'interfaccia (0.5.1, computer-use lento via servizio di Accessibilità): l'AI
+     * la COMPILA, il motore la esegue allo scatto senza AI. [pkg] è l'app da aprire prima dei passi
+     * (null = schermo attuale). I passi hanno vocabolario chiuso ([UiStep]), al massimo
+     * [UiStepsPolicy.MAX_STEPS], e la macro intera dura al massimo [UiStepsPolicy.MAX_MACRO_MS].
+     * Un passo che non trova l'elemento ferma la macro: mai un clic «a caso». Vietata su Argus stesso e
+     * sulle schermate di sicurezza di sistema ([UiStepsPolicy.isForbiddenPackage]).
+     */
+    @Serializable @SerialName(ActionTypeIds.UI_STEPS)
+    data class UiSteps(
+        val pkg: String? = null,
+        val steps: List<UiStep>,
+    ) : Action
 }
 
 /** Visita iterativa: il tier non può causare stack overflow su un albero non ancora validato. */

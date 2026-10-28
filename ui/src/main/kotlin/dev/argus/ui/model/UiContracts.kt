@@ -403,6 +403,12 @@ data class SettingsState(
      * impostazioni di sistema. Default `true`: un fixture non deve avvisare per caso.
      */
     val writeSettingsGranted: Boolean = true,
+    /**
+     * 0.5.1: il servizio di Accessibilità di Argus è acceso (macro sullo schermo). Si accende solo
+     * dalle impostazioni di sistema o, con Shizuku o root, dal dialogo dei permessi permanenti.
+     * Default `true`: un fixture non deve avvisare per caso.
+     */
+    val accessibilityGranted: Boolean = true,
     /** Permesso di PUBBLICARE notifiche (esiti/avvisi Argus). */
     val notificationsGranted: Boolean,
     /** Accesso notification listener: lettura notifiche WhatsApp e canale di reply (P1). */
@@ -574,6 +580,8 @@ interface SettingsCallbacks {
     fun onOpenWriteSettingsFix() {}
     /** Apre «Accesso ai dati di utilizzo» per Argus (0.5.1: regole «app aperta/chiusa»). Default no-op. */
     fun onOpenUsageAccessFix() {}
+    /** Apre le impostazioni di Accessibilità per accendere il servizio di Argus (0.5.1: macro sullo schermo). Default no-op. */
+    fun onOpenAccessibilityFix() {}
     /** Apre le impostazioni di sistema per l'accesso notification listener (lettura, P1). */
     fun onOpenNotificationListenerFix() {}
     /** Richieste runtime dei trigger telefonia (P2-2): RECEIVE_SMS e READ_PHONE_STATE(+CALL_LOG). */
@@ -904,6 +912,9 @@ enum class PermanentGrantUi(val id: String) {
     WRITE_SETTINGS("write_settings"),
     USAGE_STATS("usage_stats"),
     DND_ACCESS("dnd_access"),
+
+    /** 0.5.1: il servizio di Accessibilità (macro sullo schermo). Mai spuntato in anticipo nel dialogo. */
+    ACCESSIBILITY("accessibility"),
 }
 
 data class PermanentGrantRow(val grant: PermanentGrantUi, val granted: Boolean)

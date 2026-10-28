@@ -72,6 +72,7 @@ object CapabilityIds {
     const val ACTION_SET_BRIGHTNESS = "action.set_brightness"
     const val ACTION_SET_ROTATION = "action.set_rotation"
     const val ACTION_HTTP_REQUEST = "action.http_request"
+    const val ACTION_UI_STEPS = "action.ui_steps"
 
     // 0.5.1: azioni privilegiate tipizzate. Stesso gate famiglia delle altre privilegiate (Shizuku, Sui
     // o root verificato); set_nfc esiste solo sui telefoni con l'NFC (lo decide il probe).
@@ -200,6 +201,8 @@ object CapabilityRequirements {
         is Action.LockScreen -> setOf(CapabilityIds.ACTION_LOCK_SCREEN)
         is Action.Screenshot -> setOf(CapabilityIds.ACTION_SCREENSHOT)
         is Action.AppPermission -> setOf(CapabilityIds.ACTION_APP_PERMISSION)
+        // 0.5.1: serve il servizio di Accessibilità di Argus acceso (il probe lo pubblica solo allora).
+        is Action.UiSteps -> setOf(CapabilityIds.ACTION_UI_STEPS)
         // Pausa cooperativa interna all'interprete: nessuna capability OS.
         is Action.Wait -> emptySet()
         // Come i reader parametrici (che gatano sulla famiglia, non sul singolo canonicalId):

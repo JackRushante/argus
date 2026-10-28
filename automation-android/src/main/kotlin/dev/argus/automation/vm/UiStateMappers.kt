@@ -352,6 +352,7 @@ private fun actionTypeLabel(type: String, l: RenderLanguage): String = when (typ
     ActionTypeIds.LOCK_SCREEN -> l.pick("Lock screen", "Blocca schermo")
     ActionTypeIds.SCREENSHOT -> l.pick("Screen capture", "Cattura schermata")
     ActionTypeIds.APP_PERMISSION -> l.pick("App permission", "Permesso app")
+    ActionTypeIds.UI_STEPS -> l.pick("Steps on the screen", "Passi sullo schermo")
     else -> type.replace('_', ' ')
 }
 

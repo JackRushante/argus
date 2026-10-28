@@ -72,6 +72,7 @@ object ActionCapabilities {
     const val LOCK_SCREEN = CapabilityIds.ACTION_LOCK_SCREEN
     const val SCREENSHOT = CapabilityIds.ACTION_SCREENSHOT
     const val APP_PERMISSION = CapabilityIds.ACTION_APP_PERMISSION
+    const val UI_STEPS = CapabilityIds.ACTION_UI_STEPS
 }
 
 /**
@@ -102,6 +103,12 @@ class RevalidatingFirePolicy(
             !StaticShellSafety.allows(automation.trigger, snapshot.whitelistedConversationIds)
         ) return FirePolicyDecision.Block("shell_external_trigger", needsReview = true)
 
+        // 0.5.1: una macro sull'interfaccia ha lo stesso confine della shell: chi preme l'interruttore.
+        val hasUiSteps = containsUiSteps(automation.actions)
+        if (hasUiSteps &&
+            !StaticShellSafety.allows(automation.trigger, snapshot.whitelistedConversationIds)
+        ) return FirePolicyDecision.Block("ui_steps_external_trigger", needsReview = true)
+
         val draft = AutomationDraft(
             name = automation.name,
             trigger = automation.trigger,
@@ -127,6 +134,15 @@ class RevalidatingFirePolicy(
             )
         )
             return FirePolicyDecision.Block("shell_external_trigger", needsReview = false)
+
+        if (hasUiSteps &&
+            !StaticShellSafety.allows(
+                automation.trigger,
+                event,
+                snapshot.whitelistedConversationIds,
+            )
+        )
+            return FirePolicyDecision.Block("ui_steps_external_trigger", needsReview = false)
 
         val derivedRequirements = CapabilityRequirements.derive(
             automation.trigger,
@@ -172,6 +188,23 @@ class RevalidatingFirePolicy(
         while (pending.isNotEmpty()) {
             when (val action = pending.removeFirst()) {
                 is Action.RunShell -> return true
+                is Action.If -> {
+                    action.then.forEach(pending::addLast)
+                    action.orElse.forEach(pending::addLast)
+                }
+                is Action.While -> action.body.forEach(pending::addLast)
+                else -> Unit
+            }
+        }
+        return false
+    }
+
+    private fun containsUiSteps(actions: List<Action>): Boolean {
+        val pending = ArrayDeque<Action>()
+        actions.forEach(pending::addLast)
+        while (pending.isNotEmpty()) {
+            when (val action = pending.removeFirst()) {
+                is Action.UiSteps -> return true
                 is Action.If -> {
                     action.then.forEach(pending::addLast)
                     action.orElse.forEach(pending::addLast)

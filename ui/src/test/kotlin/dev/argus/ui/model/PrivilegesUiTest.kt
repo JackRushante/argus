@@ -18,8 +18,9 @@ class PrivilegesUiTest {
     private val englishOwn = strings(english).filterKeys { it.startsWith("priv50_") }
     private val italianOwn = strings(italian).filterKeys { it.startsWith("priv50_") }
 
+    /** Le prime voci come indicate; quelle oltre (0.5.1: Accessibilità) risultano concesse se non dette. */
     private fun rows(vararg granted: Boolean) =
-        PermanentGrantUi.entries.mapIndexed { index, grant -> PermanentGrantRow(grant, granted[index]) }
+        PermanentGrantUi.entries.mapIndexed { index, grant -> PermanentGrantRow(grant, granted.getOrElse(index) { true }) }
 
     @Test
     fun `the dialog pre-ticks only what is still to grant`() {
@@ -28,7 +29,18 @@ class PrivilegesUiTest {
             defaultGrantSelection(rows(false, true, true, false)),
         )
         assertTrue(defaultGrantSelection(rows(true, true, true, true)).isEmpty())
-        assertEquals(PermanentGrantUi.entries.toSet(), defaultGrantSelection(rows(false, false, false, false)))
+        // L'Accessibilità non si spunta mai da sé, nemmeno se manca: serve la conferma esplicita.
+        assertEquals(
+            PermanentGrantUi.entries.toSet() - PermanentGrantUi.ACCESSIBILITY,
+            defaultGrantSelection(rows(false, false, false, false, false)),
+        )
+    }
+
+    @Test
+    fun `the accessibility row is never pre-ticked but can be ticked by hand`() {
+        val onlyAccessibilityMissing = rows(true, true, true, true, false)
+        assertTrue(defaultGrantSelection(onlyAccessibilityMissing).isEmpty())
+        assertTrue(PrivilegedUi(PrivilegedBackendUi.SHIZUKU, grants = onlyAccessibilityMissing).canGrant)
     }
 
     @Test
@@ -61,7 +73,7 @@ class PrivilegesUiTest {
 
     @Test
     fun `no notification access entry among the permanent permissions`() {
-        assertEquals(4, PermanentGrantUi.entries.size)
+        assertEquals(5, PermanentGrantUi.entries.size)
         assertTrue(PermanentGrantUi.entries.none { it.id.contains("listener") || it.id.contains("notification") })
         // Il dialogo lo dice con parole sue, in entrambe le lingue.
         assertTrue(englishOwn.getValue("priv50_dialog_listener_note").contains("Notification access"))
@@ -97,6 +109,7 @@ class PrivilegesUiTest {
                 PermanentGrantUi.WRITE_SETTINGS -> "write"
                 PermanentGrantUi.USAGE_STATS -> "usage"
                 PermanentGrantUi.DND_ACCESS -> "dnd"
+                PermanentGrantUi.ACCESSIBILITY -> "accessibility"
             }
             assertTrue("priv50_grant_${stem}_title" in englishOwn, grant.name)
             assertTrue("priv50_grant_${stem}_body" in englishOwn, grant.name)

@@ -90,6 +90,11 @@ internal data class AndroidCapabilityState(
     val usageStatsGranted: Boolean = false,
     /** 0.5.1: il telefono ha l'NFC (`FEATURE_NFC`): solo allora `set_nfc` si pubblica. */
     val nfcPresent: Boolean = false,
+    /**
+     * 0.5.1: il servizio di Accessibilità di Argus è nell'elenco di sistema e acceso. Serve alle macro
+     * `ui_steps`; da solo non basta (serve anche il permesso di notifica, per l'indicatore e «Ferma»).
+     */
+    val accessibilityEnabled: Boolean = false,
 ) {
     /** Uno shell privilegiato è disponibile ORA: Shizuku autorizzato (Sui compreso) o root verificato. */
     val privilegedBackendAvailable: Boolean
@@ -174,6 +179,7 @@ internal class SystemAndroidCapabilityStateSource(
         nfcPresent = runCatching {
             appContext.packageManager.hasSystemFeature(PackageManager.FEATURE_NFC)
         }.getOrDefault(false),
+        accessibilityEnabled = PermanentGrantStatus.accessibility(appContext),
     )
 
     private fun granted(permission: String): Boolean =
@@ -210,6 +216,8 @@ enum class BlockCause {
 
     /** 0.5.1: manca l'accesso ai dati di utilizzo (regole «app aperta/chiusa»). */
     USAGE_ACCESS,
+    /** 0.5.1: il servizio di Accessibilità di Argus non è acceso (macro sullo schermo). */
+    ACCESSIBILITY_SERVICE,
     OTHER,
 }
 
@@ -355,6 +363,8 @@ class AndroidCapabilityProbe internal constructor(
             else shizukuCause(state.shizukuStatus)
         capability in BASE_LAUNCH_CAPABILITIES -> shizukuCause(state.shizukuStatus)
         capability in WRITE_SETTINGS_CAPABILITIES -> BlockCause.WRITE_SETTINGS_ACCESS
+        capability == ActionCapabilities.UI_STEPS ->
+            if (!state.accessibilityEnabled) BlockCause.ACCESSIBILITY_SERVICE else BlockCause.NOTIFICATIONS_PERMISSION
         capability == CapabilityIds.TRIGGER_GEOFENCE ||
             capability == CapabilityIds.TRIGGER_CONNECTIVITY_WIFI_IDENTITY ->
             if (state.locationGranted && !state.locationEnabled) BlockCause.LOCATION_OFF
@@ -461,6 +471,9 @@ class AndroidCapabilityProbe internal constructor(
             // 0.5.1: «app aperta/chiusa» legge gli stessi eventi di utilizzo: stesso permesso, nessuno shell.
             if (state.usageStatsGranted) add(CapabilityIds.TRIGGER_APP_EVENT)
             if (state.notificationsGranted) add(ActionCapabilities.SHOW_NOTIFICATION)
+            // 0.5.1: le macro sullo schermo servono col servizio di Accessibilità acceso E con le notifiche
+            // concesse: la notifica «Argus sta usando lo schermo» con «Ferma» è il loro indicatore.
+            if (state.accessibilityEnabled && state.notificationsGranted) add(ActionCapabilities.UI_STEPS)
             // CapabilityRequirements persiste anche i raw tool approvati: il set del fire-time
             // deve contenere gli stessi nomi wire, senza alias con le capability typed.
             // 0.5.1: set_nfc solo con un backend privilegiato E l'NFC sul telefono.
@@ -530,6 +543,7 @@ class AndroidCapabilityProbe internal constructor(
                 add(ActionTypeIds.SHOW_NOTIFICATION)
                 add(TOOL_NOTIFY_SHOW)
             }
+            if (state.accessibilityEnabled && state.notificationsGranted) add(ActionTypeIds.UI_STEPS)
             if (listenerGranted) add(GenerativeContract.TOOL_WHATSAPP_REPLY)
             // Il compilatore usa SOLO manifest.available_tools: invoke_llm deve comparire qui,
             // altrimenti Hermes ripiega su una reply statica anche quando il runtime è pronto.
@@ -561,6 +575,11 @@ class AndroidCapabilityProbe internal constructor(
         }
         if (!state.writeSettingsGranted) {
             WRITE_SETTINGS_ACTION_TYPES.forEach { unavailableTools[it] = REASON_WRITE_SETTINGS }
+        }
+        if (!state.accessibilityEnabled) {
+            unavailableTools[ActionTypeIds.UI_STEPS] = REASON_ACCESSIBILITY
+        } else if (!state.notificationsGranted) {
+            unavailableTools[ActionTypeIds.UI_STEPS] = "notification permission missing"
         }
         if (!state.notificationsGranted) {
             unavailableTools[ActionTypeIds.SHOW_NOTIFICATION] = "notification permission missing"
@@ -612,6 +631,7 @@ class AndroidCapabilityProbe internal constructor(
         if (state.writeSettingsGranted) add("write_settings")
         if (state.secureSettingsGranted) add("write_secure_settings")
         if (state.usageStatsGranted) add("usage_stats")
+        if (state.accessibilityEnabled) add("accessibility")
     }
 
     /** Capability `state.<chiave>` leggibili ORA senza Shizuku (tutte, tranne il Bluetooth senza permesso). */
@@ -683,6 +703,9 @@ class AndroidCapabilityProbe internal constructor(
 
         /** Motivo (in inglese, va al modello) per luminosità e rotazione senza il permesso speciale. */
         const val REASON_WRITE_SETTINGS = "modify system settings access not granted"
+
+        /** Motivo (in inglese, va al modello) per le macro sullo schermo senza il servizio di Accessibilità. */
+        const val REASON_ACCESSIBILITY = "accessibility service not enabled"
 
         /** 0.4.1, sempre disponibili: parlato, tasti multimediali, HTTP (nessun grant da pubblicare). */
         val BASE_ACTIONS_041_TYPES = setOf(

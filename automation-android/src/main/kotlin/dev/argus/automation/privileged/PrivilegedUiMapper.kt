@@ -32,6 +32,7 @@ internal fun PermanentGrant.toUi(): PermanentGrantUi = when (this) {
     PermanentGrant.WRITE_SETTINGS -> PermanentGrantUi.WRITE_SETTINGS
     PermanentGrant.USAGE_STATS -> PermanentGrantUi.USAGE_STATS
     PermanentGrant.DND_ACCESS -> PermanentGrantUi.DND_ACCESS
+    PermanentGrant.ACCESSIBILITY -> PermanentGrantUi.ACCESSIBILITY
 }
 
 internal fun PermanentGrantUi.toDomain(): PermanentGrant = when (this) {
@@ -39,6 +40,7 @@ internal fun PermanentGrantUi.toDomain(): PermanentGrant = when (this) {
     PermanentGrantUi.WRITE_SETTINGS -> PermanentGrant.WRITE_SETTINGS
     PermanentGrantUi.USAGE_STATS -> PermanentGrant.USAGE_STATS
     PermanentGrantUi.DND_ACCESS -> PermanentGrant.DND_ACCESS
+    PermanentGrantUi.ACCESSIBILITY -> PermanentGrant.ACCESSIBILITY
 }
 
 /** Una riga per ogni permesso, nell'ordine fisso dell'enum: Sistema mostra «concesso»/«non concesso». */

@@ -58,13 +58,20 @@ import dev.argus.ui.theme.LocalArgusSemantic
 
 /** Le voci spuntate all'apertura del dialogo: tutte quelle ancora da concedere. */
 fun defaultGrantSelection(grants: List<PermanentGrantRow>): Set<PermanentGrantUi> =
-    grants.filter { !it.granted }.mapTo(linkedSetOf()) { it.grant }
+    grants.filter { !it.granted && it.grant !in EXPLICIT_ONLY }.mapTo(linkedSetOf()) { it.grant }
+
+/**
+ * Voci che il dialogo non spunta mai da sé (0.5.1): danno ad Argus il controllo dello schermo di altre
+ * app, quindi servono una conferma esplicita, spuntando la casella a mano.
+ */
+private val EXPLICIT_ONLY: Set<PermanentGrantUi> = setOf(PermanentGrantUi.ACCESSIBILITY)
 
 private fun grantTitle(grant: PermanentGrantUi): Int = when (grant) {
     PermanentGrantUi.WRITE_SECURE_SETTINGS -> R.string.priv50_grant_secure_title
     PermanentGrantUi.WRITE_SETTINGS -> R.string.priv50_grant_write_title
     PermanentGrantUi.USAGE_STATS -> R.string.priv50_grant_usage_title
     PermanentGrantUi.DND_ACCESS -> R.string.priv50_grant_dnd_title
+    PermanentGrantUi.ACCESSIBILITY -> R.string.priv50_grant_accessibility_title
 }
 
 private fun grantBody(grant: PermanentGrantUi): Int = when (grant) {
@@ -72,6 +79,7 @@ private fun grantBody(grant: PermanentGrantUi): Int = when (grant) {
     PermanentGrantUi.WRITE_SETTINGS -> R.string.priv50_grant_write_body
     PermanentGrantUi.USAGE_STATS -> R.string.priv50_grant_usage_body
     PermanentGrantUi.DND_ACCESS -> R.string.priv50_grant_dnd_body
+    PermanentGrantUi.ACCESSIBILITY -> R.string.priv50_grant_accessibility_body
 }
 
 private fun backendBody(backend: PrivilegedBackendUi): Int = when (backend) {
@@ -315,6 +323,7 @@ private val previewGrants = listOf(
     PermanentGrantRow(PermanentGrantUi.WRITE_SETTINGS, true),
     PermanentGrantRow(PermanentGrantUi.USAGE_STATS, false),
     PermanentGrantRow(PermanentGrantUi.DND_ACCESS, false),
+    PermanentGrantRow(PermanentGrantUi.ACCESSIBILITY, false),
 )
 
 @Preview(name = "Privilegi · nessun backend", showBackground = true, backgroundColor = 0xFF0E1216)

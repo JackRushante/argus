@@ -79,6 +79,11 @@ import dev.argus.automation.privileged.MediaStoreScreenshotStore
 import dev.argus.automation.privileged.PrivilegedActionEnvironment
 import dev.argus.automation.privileged.PrivilegedActionRunner
 import dev.argus.automation.privileged.ScreenshotStore
+import dev.argus.automation.screen.AccessibilityScreenSource
+import dev.argus.automation.screen.AndroidUiMacroSession
+import dev.argus.automation.screen.ScreenSource
+import dev.argus.automation.screen.UiMacroSession
+import dev.argus.automation.screen.UiStepsRunner
 import dev.argus.automation.base.BaseActionSurface
 import dev.argus.automation.foreground.AndroidForegroundDeniedNotice
 import dev.argus.automation.foreground.SharedForegroundSentinel
@@ -809,6 +814,20 @@ object ArgusModule {
         screenshots: ScreenshotStore,
         environment: PrivilegedActionEnvironment,
     ): PrivilegedActionRunner = PrivilegedActionRunner(tools, screenshots, environment)
+    /** 0.5.1: lo schermo letto e toccato dal servizio di Accessibilità (solo mentre gira una macro). */
+    @Provides
+    @Singleton
+    fun screenSource(): ScreenSource = AccessibilityScreenSource()
+
+    /** 0.5.1: la notifica «Argus sta usando lo schermo» con «Ferma». */
+    @Provides
+    @Singleton
+    fun uiMacroSession(@ApplicationContext context: Context): UiMacroSession = AndroidUiMacroSession(context)
+
+    @Provides
+    @Singleton
+    fun uiStepsRunner(screen: ScreenSource, session: UiMacroSession): UiStepsRunner =
+        UiStepsRunner(screen, session)
 
     @Provides
     @Singleton
@@ -827,6 +846,7 @@ object ArgusModule {
         root: RootAccess,
         directSettings: DirectSettings,
         privilegedActions: PrivilegedActionRunner,
+        uiSteps: UiStepsRunner,
     ): ShizukuActionExecutor =
         ShizukuActionExecutor(
             tools,
@@ -854,6 +874,8 @@ object ArgusModule {
             directSettings = directSettings,
             // 0.5.1: azioni privilegiate tipizzate; il runner ripete i controlli sul bersaglio.
             privilegedActions = privilegedActions,
+            // 0.5.1: macro sullo schermo con il servizio di Accessibilità.
+            uiSteps = uiSteps,
         )
 
     @Provides

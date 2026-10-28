@@ -410,4 +410,10 @@
     <string name="ai51_local_hint_lmstudio">LM Studio: carica il modello con una lunghezza di contesto di almeno 16384.</string>
     <string name="ai51_local_hint_llamacpp">llama.cpp: avvia il server con -c 16384 o più.</string>
     <string name="ai51_local_loopback_note">127.0.0.1 è questo telefono: il server deve girare qui. Per un altro computer usa un indirizzo https://.</string>
+    <!-- 0.5.1 (F17): macro sullo schermo con il servizio di Accessibilità. -->
+    <string name="a11y51_settings_title">Controllo dello schermo (Accessibilità)</string>
+    <string name="a11y51_settings_ok">attivo: le macro sullo schermo approvate possono toccare e scrivere nelle app</string>
+    <string name="a11y51_settings_warn">spento: le macro sullo schermo non possono partire. Accendi Argus in Accessibilità; con Shizuku o root lo fa anche “Concedi i permessi permanenti”</string>
+    <string name="priv50_grant_accessibility_title">Controllo dello schermo (Accessibilità)</string>
+    <string name="priv50_grant_accessibility_body">Permette alle macro sullo schermo di toccare, scrivere e scorrere nelle altre app. Argus aggiunge il proprio servizio all\'elenco di Accessibilità e tiene quelli che hai già. Non è spuntato di default: spuntalo solo se lo vuoi.</string>
 </resources>

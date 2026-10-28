@@ -683,6 +683,38 @@ object ValidationMessages {
         "app_permission_revoke_review" to t(
             "Revoking a permission removes an access from the app, and Android may close it.",
             "Revocare un permesso toglie un accesso all'app, e Android può chiuderla.",
+        // --- Macro sull'interfaccia (0.5.1) ----------------------------------------------------
+        "ui_steps_empty" to t(
+            "The screen macro has no steps.",
+            "La macro sullo schermo non ha passi.",
+        ),
+        "ui_steps_too_many" to t(
+            "A screen macro can have at most 20 steps.",
+            "Una macro sullo schermo può avere al massimo 20 passi.",
+        ),
+        "ui_pkg_invalid" to t(
+            "The app to open is not a valid package name (it is fixed: no \${variable}).",
+            "L'app da aprire non è un nome di package valido (è fisso: niente \${variabile}).",
+        ),
+        "ui_pkg_forbidden" to t(
+            "A screen macro cannot act on Argus, on Settings, on the package installer or on permission dialogs.",
+            "Una macro sullo schermo non può agire su Argus, sulle Impostazioni, sull'installatore di pacchetti né sui dialoghi dei permessi.",
+        ),
+        "ui_step_invalid" to t(
+            "A step is not valid: it needs a text, an id or a description (up to 200 characters), a wait of 0.1 to 15 s, and a match number from 0 to 50.",
+            "Un passo non è valido: serve un testo, un id o una descrizione (fino a 200 caratteri), un'attesa da 0,1 a 15 s e un numero di corrispondenza da 0 a 50.",
+        ),
+        "ui_step_interpolated" to t(
+            "Only the text of a \"type\" step can contain a \${variable}; everything else in the macro is fixed.",
+            "Solo il testo di un passo \"scrivi\" può contenere una \${variabile}: il resto della macro è fisso.",
+        ),
+        "ui_steps_external_trigger" to t(
+            "A screen macro only starts from time, location, connectivity, sensor, screen, battery, audio, mode or manual triggers, or a whitelisted one-to-one WhatsApp chat. Not from SMS, calls, media or an app opening or closing: anyone can cause those.",
+            "Una macro sullo schermo parte solo da trigger a tempo, luogo, connettività, sensore, schermo, batteria, audio, modalità o avvio manuale, oppure da una chat WhatsApp 1:1 in whitelist. Non da SMS, chiamate, media né dall'apertura o chiusura di un'app, perché chiunque può provocarli.",
+        ),
+        "ui_steps_review" to t(
+            "The macro acts on the screen like you would: it taps, types and scrolls in the app, exactly as listed.",
+            "La macro agisce sullo schermo come faresti tu: tocca, scrive e scorre nell'app, esattamente come elencato.",
         ),
     )
 

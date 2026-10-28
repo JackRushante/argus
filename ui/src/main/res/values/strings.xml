@@ -411,4 +411,10 @@
     <string name="ai51_local_hint_lmstudio">LM Studio: load the model with a context length of at least 16384.</string>
     <string name="ai51_local_hint_llamacpp">llama.cpp: start the server with -c 16384 or more.</string>
     <string name="ai51_local_loopback_note">127.0.0.1 is this phone: the server must run here. For another computer, use an https:// address.</string>
+    <!-- 0.5.1 (F17): macro sullo schermo con il servizio di Accessibilità. -->
+    <string name="a11y51_settings_title">Screen control (Accessibility)</string>
+    <string name="a11y51_settings_ok">on: approved screen macros can tap and type in apps</string>
+    <string name="a11y51_settings_warn">off: screen macros cannot run. Turn on Argus in Accessibility; with Shizuku or root, “Grant permanent permissions” can do it</string>
+    <string name="priv50_grant_accessibility_title">Screen control (Accessibility)</string>
+    <string name="priv50_grant_accessibility_body">Lets screen macros tap, type and scroll in other apps. Argus adds its service to the Accessibility list and keeps the ones you already have. Not ticked by default: tick it only if you want this.</string>
 </resources>

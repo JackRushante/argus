@@ -867,6 +867,8 @@ object RuleRenderMapper {
         is Action.LockScreen -> ActionRows051.lockScreen(l)
         is Action.Screenshot -> ActionRows051.screenshot(l)
         is Action.AppPermission -> ActionRows051.appPermission(a, l)
+        // 0.5.1: macro sull'interfaccia, resa in ActionRowsUiSteps.
+        is Action.UiSteps -> ActionRowsUiSteps.uiSteps(a, l)
     }
 
     private fun row(

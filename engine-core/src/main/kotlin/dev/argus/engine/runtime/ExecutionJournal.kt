@@ -174,6 +174,7 @@ internal fun Action.journalType(): String = when (this) {
     is Action.LockScreen -> ActionTypeIds.LOCK_SCREEN
     is Action.Screenshot -> ActionTypeIds.SCREENSHOT
     is Action.AppPermission -> ActionTypeIds.APP_PERMISSION
+    is Action.UiSteps -> ActionTypeIds.UI_STEPS
     is Action.WriteSetting -> ActionTypeIds.WRITE_SETTING
     is Action.InvokeLlm -> ActionTypeIds.INVOKE_LLM
     is Action.InvokeLlmV2 -> ActionTypeIds.INVOKE_LLM_V2

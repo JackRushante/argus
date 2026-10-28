@@ -119,6 +119,12 @@ object InterpolationPolicy {
             },
         )
 
+        // Macro sull'interfaccia: SOLO il testo dei passi `type` accetta segnaposto (uscita locale, come
+        // una notifica); pkg e criteri dei passi restano letterali, mostrati interi in approvazione.
+        is Action.UiSteps -> action.steps.mapIndexedNotNull { index, step ->
+            (step as? UiStep.Type)?.let { TemplateField("steps.$index.text", it.text, FieldClass.SINK) }
+        }
+
         // --- AUTHORITY: template fingerprintati; TAINTED dipende da TaintPolicy ---
         is Action.RunShell -> listOf(
             TemplateField("cmd", action.cmd, FieldClass.AUTHORITY, shellQuoted = true),
