@@ -662,6 +662,28 @@ object ValidationMessages {
             "External data sits in the JSON body outside a quoted string: the action would be blocked when it runs.",
             "Un dato esterno è nel body JSON fuori da una stringa tra virgolette: l'azione verrebbe bloccata all'esecuzione.",
         ),
+
+        // --- 0.5.1 · azioni privilegiate tipizzate ----------------------------------------------
+        "priv_pkg_invalid" to t(
+            "The app package is missing, malformed or a \${variable}: it must be written out in full, like com.example.app.",
+            "Il package dell'app manca, non è valido o è una \${variabile}: va scritto per intero, come com.example.app.",
+        ),
+        "priv_target_forbidden" to t(
+            "A rule cannot change Argus, the launcher or an essential system app (system UI, phone, Settings, Google services).",
+            "Una regola non può modificare Argus, il launcher o un'app di sistema essenziale (interfaccia di sistema, telefono, Impostazioni, servizi Google).",
+        ),
+        "priv_permission_invalid" to t(
+            "Only runtime permissions of the allowed list can be granted or revoked (location, camera, microphone, contacts, SMS, phone, calendar, files and media, notifications, body sensors, nearby devices).",
+            "Si possono concedere o revocare solo i permessi runtime dell'elenco ammesso (posizione, fotocamera, microfono, contatti, SMS, telefono, calendario, file e media, notifiche, sensori del corpo, dispositivi vicini).",
+        ),
+        "app_control_freeze_review" to t(
+            "Freezing disables the app: it disappears from the launcher and cannot start until it is unfrozen.",
+            "Congelare disattiva l'app: sparisce dal launcher e non può partire finché non viene riattivata.",
+        ),
+        "app_permission_revoke_review" to t(
+            "Revoking a permission removes an access from the app, and Android may close it.",
+            "Revocare un permesso toglie un accesso all'app, e Android può chiuderla.",
+        ),
     )
 
     /** Tutti i codici con testo dedicato (usato dal test di copertura). */

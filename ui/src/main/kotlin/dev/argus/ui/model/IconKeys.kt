@@ -43,5 +43,14 @@ fun iconFor(key: String): ImageVector = when (key) {
     "media" -> Icons.Rounded.MusicNote
     // Avvio manuale (0.4.1): la regola parte solo quando la lancia l'utente.
     "manual" -> Icons.Rounded.PlayCircle
+    // Azioni privilegiate tipizzate (0.5.1).
+    "app_control" -> Icons.Rounded.AppBlocking
+    "app_permission" -> Icons.Rounded.Security
+    "airplane" -> Icons.Rounded.AirplanemodeActive
+    "location_services" -> Icons.Rounded.LocationSearching
+    "nfc" -> Icons.Rounded.Nfc
+    "battery_saver" -> Icons.Rounded.BatterySaver
+    "lock_screen" -> Icons.Rounded.ScreenLockPortrait
+    "screenshot" -> Icons.Rounded.Screenshot
     else -> Icons.Rounded.Bolt
 }

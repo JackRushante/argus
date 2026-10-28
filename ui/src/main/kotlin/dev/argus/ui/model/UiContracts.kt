@@ -728,6 +728,27 @@ object ShizukuCapabilityCatalog {
         ),
         ShizukuCapabilityRow(
             title = language.pick(
+                "Control apps, change permissions, and system switches",
+                "Controllare le app, cambiare i permessi e gli interruttori di sistema",
+            ),
+            requirement = ShizukuRequirement.REQUIRED,
+            note = language.pick(
+                "Force stop or freeze an app, grant or revoke its permissions, airplane mode, location, NFC, battery saver, lock the screen and take a screenshot. They need Shizuku or root.",
+                "Forzare l'arresto o congelare un'app, concederle o revocarle i permessi, modalità aereo, posizione, NFC, risparmio energetico, blocco dello schermo e screenshot. Richiedono Shizuku o root.",
+            ),
+            actionTypeIds = listOf(
+                ActionTypeIds.APP_CONTROL,
+                ActionTypeIds.APP_PERMISSION,
+                ActionTypeIds.SET_AIRPLANE,
+                ActionTypeIds.SET_LOCATION,
+                ActionTypeIds.SET_NFC,
+                ActionTypeIds.SET_BATTERY_SAVER,
+                ActionTypeIds.LOCK_SCREEN,
+                ActionTypeIds.SCREENSHOT,
+            ),
+        ),
+        ShizukuCapabilityRow(
+            title = language.pick(
                 "Read privileged system state",
                 "Leggere stato di sistema privilegiato",
             ),
