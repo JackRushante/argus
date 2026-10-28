@@ -30,13 +30,13 @@ URL cannot be built yet.
 |---|---|
 | applicationId | `dev.argus` |
 | metadata file | `metadata/dev.argus.yml` |
-| version | `0.6.0` / base versionCode `20` (ABI split → 2001/2002/2003/2004) |
-| tag (v-prefixed) | `v0.6.0` |
-| build commit (full hash) | `ae5d045f48079b63adacfb7eb56cc82688fb3f1f` |
+| version | `0.7.0` / base versionCode `21` (ABI split → 2101/2102/2103/2104) |
+| tag (v-prefixed) | `v0.7.0` |
+| build commit (full hash) | `f2adfe99dd12f4d6226be280b0f52ff0e0ad55a2` |
 | signing cert SHA-256 | `4c09633e64cf9876b0da682f5f259383af8d22742aadd93ef273b9f2c73cca6b` |
-| F-Droid release assets | `argus-2001.apk` … `argus-2004.apk` (pattern `argus-%c.apk`) |
-| artifact SHA-256 | `2001`: `701aeef31ede8299ff0dd674eb3992ecb881f6a69f2b81ee331e71673866fc11`; `2002`: `c06f18c9ed911d37ac9939539c664bfe65f53037a6db24f2a2a5dacea8c99a9f`; `2003`: `adcae284d6b5f860cf2303c4aaacd0d9cbdcd3d7770c9fe98b3cdeb18b1674b5`; `2004`: `c62551c2a2db1227bb17dceb41d68f5387cb6fe20b972b8b7e708f63eb7c1616` |
-| direct-download asset | none for v0.6.0; use the matching per-ABI APK (`argus-2002.apk` for arm64-v8a) |
+| F-Droid release assets | `argus-2101.apk` … `argus-2104.apk` (pattern `argus-%c.apk`) |
+| artifact SHA-256 | `2101`: `36fd77809db3abf05cacde48777152b4fad9685ebe4f5f2bf30074e872289028`; `2102`: `234ae8b27003a43910dc13c74d80af47fdf2b7ffbe85695fac8f8d950af1df4d`; `2103`: `eb01f53f793dce82f10c24ea90037f2fc95c255abf5f903bdfd9ed60a7fed5c6`; `2104`: `1b6a805ecd709254493924b2e28486508254842dfb60306875024c8059148797` |
+| direct-download asset | none for v0.7.0; use the matching per-ABI APK (`argus-2102.apk` for arm64-v8a) |
 | License (SPDX) | `GPL-3.0-only` |
 
 ### Reproducibility: baseline profile dropped (v0.2.4)
@@ -66,7 +66,7 @@ ABI. Mechanics:
 
 - `app/build.gradle.kts`: `splits.abi { isUniversalApk = false; include(...) }`, and
   a per-output `versionCode = 100 * base + {armeabi-v7a:1, arm64-v8a:2, x86:3, x86_64:4}`
-  → for the current base code 20: 2001/2002/2003/2004. A `-PargusAbi=<abi>` property restricts the build
+  → for the current base code 21: 2101/2102/2103/2104. A `-PargusAbi=<abi>` property restricts the build
   to a single split so F-Droid can build each ABI as its own build block byte-for-byte.
 - Recipe: **one `Builds:` block per ABI** (for v0.3.5: versionCode 1201-1204, each with
   `gradleprops: [argusAbi=<abi>]`), plus top-level `VercodeOperation: [100*%c+n]` so
