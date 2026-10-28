@@ -22,8 +22,8 @@ android {
         applicationId = "dev.argus"
         minSdk = 30
         targetSdk = 36
-        versionCode = 19
-        versionName = "0.5.1"
+        versionCode = 20
+        versionName = "0.6.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
@@ -144,6 +144,10 @@ dependencies {
     ksp(libs.hilt.compiler)
     debugImplementation(libs.compose.ui.tooling)
     debugImplementation(libs.compose.ui.test.manifest)
+    // 0.6.0 (E2E): l'aggancio di debug `dev.argus.e2e` legge il journal con SQL e parla JSON. Solo debug:
+    // la release non riceve queste dipendenze.
+    debugImplementation(libs.androidx.room.runtime)
+    debugImplementation(libs.kotlinx.serialization.json)
     // S16: i moduli runtime servono in TUTTI i buildType (prima erano debugImplementation e la
     // release nasceva senza brain/data/shizuku/device-tools). L'entry point Hilt degli E2E resta
     // esposto solo dal source set debug.

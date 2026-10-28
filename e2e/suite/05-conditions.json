@@ -1,0 +1,783 @@
+[
+ {
+  "id": "C01-ringer-true",
+  "title": "Condizione: suoneria normale (vera)",
+  "cond": "true",
+  "rule": {
+   "name": "C01-ringer-true",
+   "trigger": {
+    "type": "screen",
+    "event": "ON"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e C01 {{RUN}}",
+     "text": "e2e body"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "ringer",
+    "op": "EQ",
+    "value": "normal"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "pre": [
+   "cmd audio set-ringer-mode NORMAL",
+   "cmd notification set_dnd off"
+  ],
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e C01 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ],
+  "cleanup": [
+   "cmd audio set-ringer-mode NORMAL",
+   "cmd notification set_dnd off"
+  ]
+ },
+ {
+  "id": "C02-ringer-false",
+  "title": "Condizione: suoneria silenziosa (falsa: non esegue)",
+  "cond": "false",
+  "rule": {
+   "name": "C02-ringer-false",
+   "trigger": {
+    "type": "screen",
+    "event": "ON"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e C02 {{RUN}}",
+     "text": "e2e body"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "ringer",
+    "op": "EQ",
+    "value": "silent"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "executions": 0,
+    "audit_has": [
+     "CONDITIONS_NOT_MET"
+    ]
+   }
+  },
+  "pre": [
+   "cmd audio set-ringer-mode NORMAL",
+   "cmd notification set_dnd off"
+  ],
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e C02 {{RUN}})'",
+    "equals": "0",
+    "wait_s": 0
+   }
+  ],
+  "cleanup": [
+   "cmd audio set-ringer-mode NORMAL",
+   "cmd notification set_dnd off"
+  ]
+ },
+ {
+  "id": "C03-wifi-airplane-and",
+  "title": "Condizione: Wi-Fi acceso E aereo spento (vera)",
+  "cond": "true",
+  "rule": {
+   "name": "C03-wifi-airplane-and",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e C03 {{RUN}}",
+     "text": "e2e body"
+    }
+   ],
+   "conditions": {
+    "type": "and",
+    "all": [
+     {
+      "type": "state_equals",
+      "key": "wifi",
+      "op": "EQ",
+      "value": "on"
+     },
+     {
+      "type": "state_equals",
+      "key": "airplane",
+      "op": "EQ",
+      "value": "off"
+     }
+    ]
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "pre": [
+   "svc wifi enable"
+  ],
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e C03 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "C04-or",
+  "title": "Condizione: O (una vera e una falsa) e' vera",
+  "cond": "true",
+  "rule": {
+   "name": "C04-or",
+   "trigger": {
+    "type": "mode_changed",
+    "what": "RINGER"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e C04 {{RUN}}",
+     "text": "e2e body"
+    }
+   ],
+   "conditions": {
+    "type": "or",
+    "any": [
+     {
+      "type": "state_equals",
+      "key": "dnd",
+      "op": "EQ",
+      "value": "total"
+     },
+     {
+      "type": "state_equals",
+      "key": "screen",
+      "op": "EQ",
+      "value": "on"
+     }
+    ]
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "pre": [
+   "input keyevent KEYCODE_WAKEUP"
+  ],
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e C04 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "C05-not-false",
+  "title": "Condizione: NON (vera) e' falsa",
+  "cond": "false",
+  "rule": {
+   "name": "C05-not-false",
+   "trigger": {
+    "type": "media",
+    "state": "STOPPED"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e C05 {{RUN}}",
+     "text": "e2e body"
+    }
+   ],
+   "conditions": {
+    "type": "not",
+    "cond": {
+     "type": "state_equals",
+     "key": "airplane",
+     "op": "EQ",
+     "value": "off"
+    }
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "executions": 0,
+    "audit_has": [
+     "CONDITIONS_NOT_MET"
+    ]
+   }
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e C05 {{RUN}})'",
+    "equals": "0",
+    "wait_s": 0
+   }
+  ]
+ },
+ {
+  "id": "C06-battery-compare-true",
+  "title": "Condizione: batteria > 10 (lettore integrato, vera)",
+  "cond": "true",
+  "rule": {
+   "name": "C06-battery-compare-true",
+   "trigger": {
+    "type": "connectivity",
+    "medium": "POWER",
+    "state": "CONNECTED"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e C06 {{RUN}}",
+     "text": "e2e body"
+    }
+   ],
+   "conditions": {
+    "type": "state_compare",
+    "query": {
+     "type": "builtin",
+     "key": "battery"
+    },
+    "valueType": "NUMBER",
+    "op": "GT",
+    "expected": "10",
+    "policyVersion": 1
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "pre": [
+   "dumpsys battery reset"
+  ],
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e C06 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable",
+       "detail": "state.reader.builtin"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "C07-charging-false",
+  "title": "Condizione: non in carica (falsa, alimentatore collegato)",
+  "cond": "false",
+  "rule": {
+   "name": "C07-charging-false",
+   "trigger": {
+    "type": "battery",
+    "above": 50
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e C07 {{RUN}}",
+     "text": "e2e body"
+    }
+   ],
+   "conditions": {
+    "type": "state_compare",
+    "query": {
+     "type": "builtin",
+     "key": "charging"
+    },
+    "valueType": "BOOLEAN",
+    "op": "EQ",
+    "expected": "false",
+    "policyVersion": 1
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "executions": 0,
+    "audit_has": [
+     "CONDITIONS_NOT_MET"
+    ]
+   }
+  },
+  "pre": [
+   "dumpsys battery reset"
+  ],
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e C07 {{RUN}})'",
+    "equals": "0",
+    "wait_s": 0
+   }
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable",
+       "detail": "state.reader.builtin"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "C08-time-window-true",
+  "title": "Condizione: finestra oraria che contiene adesso (vera)",
+  "cond": "true",
+  "rule": {
+   "name": "C08-time-window-true",
+   "trigger": {
+    "type": "time",
+    "cron": "0 9 * * *",
+    "tz": "Europe/Rome"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e C08 {{RUN}}",
+     "text": "e2e body"
+    }
+   ],
+   "conditions": {
+    "type": "time_window",
+    "startLocal": "00:00",
+    "endLocal": "23:59",
+    "tz": "Europe/Rome"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e C08 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "C09-time-window-false",
+  "title": "Condizione: finestra oraria di un minuto alle 03:00 (falsa)",
+  "cond": "false",
+  "rule": {
+   "name": "C09-time-window-false",
+   "trigger": {
+    "type": "time",
+    "cron": "0 9 * * *",
+    "tz": "Europe/Rome"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e C09 {{RUN}}",
+     "text": "e2e body"
+    }
+   ],
+   "conditions": {
+    "type": "time_window",
+    "startLocal": "03:00",
+    "endLocal": "03:01",
+    "tz": "Europe/Rome"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "executions": 0,
+    "audit_has": [
+     "CONDITIONS_NOT_MET"
+    ]
+   }
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e C09 {{RUN}})'",
+    "equals": "0",
+    "wait_s": 0
+   }
+  ]
+ },
+ {
+  "id": "C10-foreground-false",
+  "title": "Condizione: app in primo piano = Impostazioni (falsa, Argus e' davanti)",
+  "cond": "false",
+  "rule": {
+   "name": "C10-foreground-false",
+   "trigger": {
+    "type": "audio_output",
+    "kind": "WIRED",
+    "state": "CONNECTED"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e C10 {{RUN}}",
+     "text": "e2e body"
+    }
+   ],
+   "conditions": {
+    "type": "app_in_foreground",
+    "pkg": "com.android.settings"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "executions": 0,
+    "audit_has": [
+     "CONDITIONS_NOT_MET"
+    ]
+   }
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e C10 {{RUN}})'",
+    "equals": "0",
+    "wait_s": 0
+   }
+  ]
+ },
+ {
+  "id": "C11-foreground-true",
+  "title": "Condizione: app in primo piano = Argus (vera)",
+  "cond": "true",
+  "rule": {
+   "name": "C11-foreground-true",
+   "trigger": {
+    "type": "geofence",
+    "lat": 45.0,
+    "lng": 9.0,
+    "radiusM": 150.0,
+    "transition": "EXIT"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e C11 {{RUN}}",
+     "text": "e2e body"
+    }
+   ],
+   "conditions": {
+    "type": "app_in_foreground",
+    "pkg": "dev.argus"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e C11 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "C12-system-property-true",
+  "title": "Condizione: proprieta' di sistema (lettore privilegiato, vera)",
+  "cond": "true",
+  "rule": {
+   "name": "C12-system-property-true",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e C12 {{RUN}}",
+     "text": "e2e body"
+    }
+   ],
+   "conditions": {
+    "type": "state_compare",
+    "query": {
+     "type": "system_property",
+     "name": "ro.build.version.sdk"
+    },
+    "valueType": "NUMBER",
+    "op": "EQ",
+    "expected": "36",
+    "policyVersion": 1
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e C12 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable",
+       "detail": "state.reader.system_property"
+      }
+     }
+    },
+    "checks": []
+   }
+  }
+ },
+ {
+  "id": "C13-setting-false",
+  "title": "Condizione: impostazione di sistema (lettore privilegiato, falsa)",
+  "cond": "false",
+  "rule": {
+   "name": "C13-setting-false",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e C13 {{RUN}}",
+     "text": "e2e body"
+    }
+   ],
+   "conditions": {
+    "type": "state_compare",
+    "query": {
+     "type": "setting",
+     "namespace": "GLOBAL",
+     "key": "airplane_mode_on"
+    },
+    "valueType": "NUMBER",
+    "op": "EQ",
+    "expected": "1",
+    "policyVersion": 1
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "executions": 0,
+    "audit_has": [
+     "CONDITIONS_NOT_MET"
+    ]
+   }
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e C13 {{RUN}})'",
+    "equals": "0",
+    "wait_s": 0
+   }
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable",
+       "detail": "state.reader.setting"
+      }
+     }
+    },
+    "checks": []
+   }
+  }
+ },
+ {
+  "id": "C14-dumpsys-field-true",
+  "title": "Condizione: campo di dumpsys (lettore privilegiato, vera)",
+  "cond": "true",
+  "rule": {
+   "name": "C14-dumpsys-field-true",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e C14 {{RUN}}",
+     "text": "e2e body"
+    }
+   ],
+   "conditions": {
+    "type": "state_compare",
+    "query": {
+     "type": "dumpsys_field",
+     "service": "battery",
+     "field": "AC powered"
+    },
+    "valueType": "BOOLEAN",
+    "op": "EQ",
+    "expected": "true",
+    "policyVersion": 1
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "pre": [
+   "dumpsys battery reset"
+  ],
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e C14 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable",
+       "detail": "state.reader.dumpsys_field"
+      }
+     }
+    },
+    "checks": []
+   }
+  }
+ },
+ {
+  "id": "C15-location-unknown-fails-closed",
+  "title": "Condizione: posizione sconosciuta fallisce chiusa anche sotto NOT",
+  "cond": "false",
+  "rule": {
+   "name": "C15-location-unknown-fails-closed",
+   "trigger": {
+    "type": "time",
+    "at": "2027-03-14T09:31",
+    "tz": "Europe/Rome"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e C15 {{RUN}}",
+     "text": "e2e body"
+    }
+   ],
+   "conditions": {
+    "type": "not",
+    "cond": {
+     "type": "location_in",
+     "lat": 0.5,
+     "lng": 0.5,
+     "radiusM": 100.0
+    }
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "executions": 0,
+    "audit_has": [
+     "CONDITIONS_NOT_MET"
+    ]
+   }
+  },
+  "pre": [
+   "cmd location set-location-enabled false"
+  ],
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e C15 {{RUN}})'",
+    "equals": "0",
+    "wait_s": 0
+   }
+  ],
+  "cleanup": [
+   "cmd location set-location-enabled true"
+  ]
+ }
+]

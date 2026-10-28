@@ -403,6 +403,8 @@ Thanks for trying it. Useful things to know and to stress:
 - **Compilation**: ask for rules in chat, from trivial to ambiguous ("in 2 minutes send me a notification with the EUR/USD rate", "when I leave home turn off Wi-Fi", "if my wife writes on WhatsApp after 11 pm reply for me"). Check that the draft rendered on the approval screen matches what you meant — it is the real rule, not the paraphrase.
 - **Approval**: try to get "nasty" rules proposed (shell from SMS, disallowed tools, out-of-range values) and check that the validator blocks them with a clear reason.
 - **Execution**: arm `time` rules (cron and one-shot), `immediate`, connectivity, geofence, notifications. Test the hostile cases: reboot, timezone change, DST, app killed by the OEM, Shizuku turned off midway.
+- **End-to-end suite**: `e2e/` runs 162 hand-written rules on an Android emulator with Shizuku as root, as shell and
+  without Shizuku, through a hook that exists only in debug builds (see `e2e/README.md`).
 - **New in 0.4**: manual rules (a button, a Quick Settings tile, a widget), "Pause automations", sunrise and sunset, the screen, unlock, battery, headphones and music triggers, reading aloud, brightness and HTTP requests.
 - **Degradation**: deny permissions and turn off Shizuku, and check that the app honestly says what it cannot do instead of failing silently.
 - **Budget** (generative rules): set a low limit and verify the audited suppression.
@@ -427,7 +429,6 @@ Short roadmap:
 
 - **0.5.2** — a warning in approval when a rule names an app that is not installed, and the small items left
   from 0.5.1.
-- **0.6.0, end-to-end tests** — the main flows tested automatically on an Android emulator.
 - **0.7.0, redesign** — a new look for the app.
 - **Later** — state-aware P4 generation, interactive screen control, and testing on more phone brands
   (background starts, Shizuku recovery, notification metadata).

@@ -1,9 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <application>
         <activity
             android:name=".ArgusTestHostActivity"
             android:exported="false"
             android:theme="@style/Theme.Argus" />
+
+        <!-- 0.6.0 (E2E): aggancio SOLO debug per la suite end-to-end. Esportato perche' la shell di adb e'
+             un altro processo, ma ogni chiamata verifica l'uid del chiamante (shell 2000 o root 0): gli altri
+             uid ricevono SecurityException. Non esiste nel manifest ne' nelle classi della release. -->
+        <provider
+            android:name="dev.argus.e2e.E2eHookProvider"
+            android:authorities="dev.argus.e2e"
+            android:exported="true"
+            tools:ignore="ExportedContentProvider" />
     </application>
 </manifest>

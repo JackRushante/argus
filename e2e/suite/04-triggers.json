@@ -1,0 +1,1335 @@
+[
+ {
+  "id": "T01-time-after-ms",
+  "title": "Tempo: fra 3 secondi (allarme esatto vero)",
+  "cond": "none",
+  "rule": {
+   "name": "T01-time-after-ms",
+   "trigger": {
+    "type": "time",
+    "afterMs": 3000,
+    "tz": "Europe/Rome",
+    "precision": "EXACT"
+   },
+   "actions": [
+    {
+     "type": "set_ringer",
+     "mode": "vibrate"
+    },
+    {
+     "type": "show_notification",
+     "title": "e2e T01 {{RUN}}",
+     "text": "e2e body"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "pre": [
+   "cmd audio set-ringer-mode NORMAL",
+   "cmd notification set_dnd off"
+  ],
+  "wait_s": 6,
+  "checks": [
+   {
+    "shell": "dumpsys audio | grep -A2 'Ringer mode'",
+    "contains": "mode (external) = VIBRATE",
+    "wait_s": 4
+   },
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e T01 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ],
+  "cleanup": [
+   "cmd audio set-ringer-mode NORMAL",
+   "cmd notification set_dnd off"
+  ]
+ },
+ {
+  "id": "T02-time-cron",
+  "title": "Tempo: cron giornaliero (evento sintetico)",
+  "cond": "none",
+  "rule": {
+   "name": "T02-time-cron",
+   "trigger": {
+    "type": "time",
+    "cron": "0 9 * * *",
+    "tz": "Europe/Rome"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e T02 {{RUN}}",
+     "text": "e2e body"
+    },
+    {
+     "type": "vibrate",
+     "durationMs": 100
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e T02 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "T03-time-at",
+  "title": "Tempo: data e ora una tantum (evento sintetico)",
+  "cond": "none",
+  "rule": {
+   "name": "T03-time-at",
+   "trigger": {
+    "type": "time",
+    "at": "2027-03-14T09:30",
+    "tz": "Europe/Rome"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e T03 {{RUN}}",
+     "text": "e2e body"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e T03 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "T04-time-solar",
+  "title": "Tempo: alba con scostamento (posizione simulata, evento sintetico)",
+  "cond": "none",
+  "rule": {
+   "name": "T04-time-solar",
+   "trigger": {
+    "type": "time",
+    "solar": {
+     "event": "SUNRISE",
+     "offsetMinutes": 30
+    },
+    "tz": "Europe/Rome"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e T04 {{RUN}}",
+     "text": "e2e body"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e T04 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ],
+  "pre": [
+   "appops set com.android.shell android:mock_location allow",
+   "asshell 'for p in fused network gps; do cmd location providers add-test-provider $p; cmd location providers set-test-provider-enabled $p true; cmd location providers set-test-provider-location $p --location 45.46,9.19 --accuracy 10; done'"
+  ],
+  "cleanup": [
+   "asshell 'for p in fused network gps; do cmd location providers remove-test-provider $p; done'",
+   "cmd location set-location-enabled false",
+   "cmd location set-location-enabled true"
+  ]
+ },
+ {
+  "id": "T05-immediate",
+  "title": "Subito: parte una sola volta e si disattiva",
+  "cond": "none",
+  "rule": {
+   "name": "T05-immediate",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "set_ringer",
+     "mode": "silent"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "SUCCEEDED",
+    "audit_has": [
+     "FIRED",
+     "RULE_DISABLED"
+    ]
+   }
+  },
+  "pre": [
+   "cmd audio set-ringer-mode NORMAL",
+   "cmd notification set_dnd off"
+  ],
+  "checks": [
+   {
+    "shell": "dumpsys audio | grep -A2 'Ringer mode'",
+    "contains": "mode (external) = SILENT",
+    "wait_s": 4
+   }
+  ],
+  "cleanup": [
+   "cmd audio set-ringer-mode NORMAL",
+   "cmd notification set_dnd off"
+  ]
+ },
+ {
+  "id": "T06-manual",
+  "title": "Manuale: parte solo dal pulsante",
+  "cond": "none",
+  "rule": {
+   "name": "T06-manual",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e T06 {{RUN}}",
+     "text": "e2e body"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e T06 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "T06b-manual-never-armed-fires",
+  "title": "Manuale: armarla non la fa partire",
+  "cond": "none",
+  "rule": {
+   "name": "T06b-manual-never-armed-fires",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e T06b {{RUN}}",
+     "text": "e2e body"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "executions": 0
+   }
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e T06b {{RUN}})'",
+    "equals": "0",
+    "wait_s": 0
+   }
+  ]
+ },
+ {
+  "id": "T07-screen-on-real",
+  "title": "Schermo acceso (spegni e riaccendi davvero)",
+  "cond": "none",
+  "rule": {
+   "name": "T07-screen-on-real",
+   "trigger": {
+    "type": "screen",
+    "event": "ON"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e T07 {{RUN}}",
+     "text": "e2e body"
+    },
+    {
+     "type": "vibrate",
+     "durationMs": 100
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "real": [
+    "input keyevent KEYCODE_SLEEP",
+    2,
+    "input keyevent KEYCODE_WAKEUP",
+    "wm dismiss-keyguard"
+   ]
+  },
+  "wait_s": 3,
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e T07 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "T08-screen-off",
+  "title": "Schermo spento (evento sintetico)",
+  "cond": "none",
+  "rule": {
+   "name": "T08-screen-off",
+   "trigger": {
+    "type": "screen",
+    "event": "OFF"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e T08 {{RUN}}",
+     "text": "e2e body"
+    },
+    {
+     "type": "set_rotation",
+     "auto": true
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e T08 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "T09-screen-unlocked",
+  "title": "Schermo sbloccato (evento sintetico)",
+  "cond": "none",
+  "rule": {
+   "name": "T09-screen-unlocked",
+   "trigger": {
+    "type": "screen",
+    "event": "UNLOCKED"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e T09 {{RUN}}",
+     "text": "e2e body"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e T09 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "T10-battery-below-real",
+  "title": "Batteria sotto il 20 % (livello reale con dumpsys battery)",
+  "cond": "none",
+  "rule": {
+   "name": "T10-battery-below-real",
+   "trigger": {
+    "type": "battery",
+    "below": 20
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e T10 {{RUN}}",
+     "text": "e2e body"
+    },
+    {
+     "type": "set_brightness",
+     "level": 10
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "pre": [
+   "dumpsys battery reset"
+  ],
+  "fire": {
+   "real": [
+    "dumpsys battery set level 15"
+   ],
+   "settle_s": 3
+  },
+  "wait_s": 3,
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e T10 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ],
+  "cleanup": [
+   "dumpsys battery reset",
+   "settings put system screen_brightness_mode 1",
+   "settings put system screen_brightness 128"
+  ]
+ },
+ {
+  "id": "T11-battery-above",
+  "title": "Batteria sopra l'80 % (evento sintetico)",
+  "cond": "none",
+  "rule": {
+   "name": "T11-battery-above",
+   "trigger": {
+    "type": "battery",
+    "above": 80
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e T11 {{RUN}}",
+     "text": "e2e body"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e T11 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "T12-battery-no-crossing",
+  "title": "Batteria: un calo che non attraversa la soglia non scatta",
+  "cond": "none",
+  "rule": {
+   "name": "T12-battery-no-crossing",
+   "trigger": {
+    "type": "battery",
+    "below": 20
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e T12 {{RUN}}",
+     "text": "e2e body"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "executions": 0
+   }
+  },
+  "fire": {
+   "payload": {
+    "previous": 50,
+    "current": 40
+   }
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e T12 {{RUN}})'",
+    "equals": "0",
+    "wait_s": 0
+   }
+  ]
+ },
+ {
+  "id": "T13-power-disconnected-real",
+  "title": "Alimentazione scollegata (davvero)",
+  "cond": "none",
+  "rule": {
+   "name": "T13-power-disconnected-real",
+   "trigger": {
+    "type": "connectivity",
+    "medium": "POWER",
+    "state": "DISCONNECTED"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e T13 {{RUN}}",
+     "text": "e2e body"
+    },
+    {
+     "type": "vibrate",
+     "durationMs": 100
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "pre": [
+   "dumpsys battery reset"
+  ],
+  "fire": {
+   "real": [
+    "dumpsys battery unplug"
+   ],
+   "settle_s": 3
+  },
+  "wait_s": 3,
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e T13 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ],
+  "cleanup": [
+   "dumpsys battery reset"
+  ]
+ },
+ {
+  "id": "T14-wifi-connected",
+  "title": "Wi-Fi collegato a una rete (evento sintetico)",
+  "cond": "none",
+  "rule": {
+   "name": "T14-wifi-connected",
+   "trigger": {
+    "type": "connectivity",
+    "medium": "WIFI",
+    "state": "CONNECTED",
+    "match": "e2e-ssid"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e T14 {{RUN}}",
+     "text": "e2e body"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e T14 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "T15-bluetooth-connected",
+  "title": "Bluetooth collegato (evento sintetico)",
+  "cond": "none",
+  "rule": {
+   "name": "T15-bluetooth-connected",
+   "trigger": {
+    "type": "connectivity",
+    "medium": "BT",
+    "state": "CONNECTED"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e T15 {{RUN}}",
+     "text": "e2e body"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e T15 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "T16-audio-bluetooth",
+  "title": "Cuffie Bluetooth collegate (evento sintetico)",
+  "cond": "none",
+  "rule": {
+   "name": "T16-audio-bluetooth",
+   "trigger": {
+    "type": "audio_output",
+    "kind": "BLUETOOTH",
+    "state": "CONNECTED"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e T16 {{RUN}}",
+     "text": "e2e body"
+    },
+    {
+     "type": "set_volume",
+     "stream": "MEDIA",
+     "level": 30
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "pre": [
+   "cmd media_session volume --stream 3 --set 1"
+  ],
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e T16 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   },
+   {
+    "shell": "cmd media_session volume --stream 3 --get | tail -1",
+    "contains": "volume is 5 in",
+    "wait_s": 3
+   }
+  ],
+  "cleanup": [
+   "cmd media_session volume --stream 3 --set 7"
+  ]
+ },
+ {
+  "id": "T17-audio-any-disconnected",
+  "title": "Cuffie (qualsiasi) scollegate (evento sintetico)",
+  "cond": "none",
+  "rule": {
+   "name": "T17-audio-any-disconnected",
+   "trigger": {
+    "type": "audio_output",
+    "kind": "ANY",
+    "state": "DISCONNECTED"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e T17 {{RUN}}",
+     "text": "e2e body"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e T17 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "T18-ringer-mode-real",
+  "title": "Suoneria cambiata a silenzioso (davvero)",
+  "cond": "none",
+  "rule": {
+   "name": "T18-ringer-mode-real",
+   "trigger": {
+    "type": "mode_changed",
+    "what": "RINGER",
+    "to": "silent"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e T18 {{RUN}}",
+     "text": "e2e body"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "pre": [
+   "cmd audio set-ringer-mode NORMAL",
+   "cmd notification set_dnd off"
+  ],
+  "fire": {
+   "real": [
+    "cmd audio set-ringer-mode SILENT"
+   ],
+   "settle_s": 3
+  },
+  "wait_s": 3,
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e T18 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ],
+  "cleanup": [
+   "cmd audio set-ringer-mode NORMAL",
+   "cmd notification set_dnd off"
+  ]
+ },
+ {
+  "id": "T19-dnd-mode-real",
+  "title": "Non disturbare messo su «priorita'» (davvero)",
+  "cond": "none",
+  "rule": {
+   "name": "T19-dnd-mode-real",
+   "trigger": {
+    "type": "mode_changed",
+    "what": "DND",
+    "to": "priority"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e T19 {{RUN}}",
+     "text": "e2e body"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "pre": [
+   "cmd audio set-ringer-mode NORMAL",
+   "cmd notification set_dnd off"
+  ],
+  "fire": {
+   "real": [
+    "cmd notification set_dnd priority"
+   ],
+   "settle_s": 3
+  },
+  "wait_s": 3,
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e T19 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ],
+  "cleanup": [
+   "cmd audio set-ringer-mode NORMAL",
+   "cmd notification set_dnd off"
+  ]
+ },
+ {
+  "id": "T20-media-playing",
+  "title": "Musica in riproduzione (evento sintetico)",
+  "cond": "none",
+  "rule": {
+   "name": "T20-media-playing",
+   "trigger": {
+    "type": "media",
+    "state": "PLAYING"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e T20 {{RUN}}",
+     "text": "e2e body"
+    },
+    {
+     "type": "vibrate",
+     "durationMs": 100
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e T20 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "T21-media-stopped",
+  "title": "Musica ferma (evento sintetico)",
+  "cond": "none",
+  "rule": {
+   "name": "T21-media-stopped",
+   "trigger": {
+    "type": "media",
+    "state": "STOPPED"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e T21 {{RUN}}",
+     "text": "e2e body"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e T21 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "T22-app-opened-real",
+  "title": "App aperta (apro davvero Impostazioni)",
+  "cond": "none",
+  "rule": {
+   "name": "T22-app-opened-real",
+   "trigger": {
+    "type": "app_event",
+    "pkg": "com.android.settings",
+    "event": "OPENED"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e T22 {{RUN}}",
+     "text": "e2e body"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "real": [
+    "am start -n com.android.settings/.Settings"
+   ],
+   "settle_s": 3
+  },
+  "wait_s": 6,
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e T22 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 8
+   }
+  ]
+ },
+ {
+  "id": "T23-app-closed",
+  "title": "App chiusa (evento sintetico)",
+  "cond": "none",
+  "rule": {
+   "name": "T23-app-closed",
+   "trigger": {
+    "type": "app_event",
+    "pkg": "com.google.android.deskclock",
+    "event": "CLOSED"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e T23 {{RUN}}",
+     "text": "e2e body"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e T23 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "T24-notification-real",
+  "title": "Notifica ricevuta (ne posto una davvero) e codice negli appunti",
+  "cond": "none",
+  "rule": {
+   "name": "T24-notification-real",
+   "trigger": {
+    "type": "notification",
+    "pkg": "com.android.shell",
+    "titleMatch": "e2e-in-{{RUN}}"
+   },
+   "actions": [
+    {
+     "type": "copy_to_clipboard",
+     "extractionRegex": "(\\d{6})"
+    },
+    {
+     "type": "show_notification",
+     "title": "e2e T24 {{RUN}}",
+     "text": "e2e body"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "real": [
+    "asshell \"cmd notification post -S bigtext -t 'e2e-in-{{RUN}}' e2etag 'Your code is 482913'\""
+   ],
+   "settle_s": 3
+  },
+  "wait_s": 4,
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e T24 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "T25-notification-conversation",
+  "title": "Notifica 1:1 con conversationId (evento sintetico)",
+  "cond": "none",
+  "rule": {
+   "name": "T25-notification-conversation",
+   "trigger": {
+    "type": "notification",
+    "pkg": "com.example.chat",
+    "conversationId": "e2e-chat-1",
+    "isGroup": false
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e T25 {{RUN}}",
+     "text": "e2e body"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e T25 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "T26-notification-group-ignored",
+  "title": "Notifica di gruppo: la regola 1:1 non scatta",
+  "cond": "none",
+  "rule": {
+   "name": "T26-notification-group-ignored",
+   "trigger": {
+    "type": "notification",
+    "pkg": "com.example.chat",
+    "conversationId": "e2e-chat-1",
+    "isGroup": false
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e T26 {{RUN}}",
+     "text": "e2e body"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "executions": 0
+   }
+  },
+  "fire": {
+   "payload": {
+    "isGroup": true
+   }
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e T26 {{RUN}})'",
+    "equals": "0",
+    "wait_s": 0
+   }
+  ]
+ },
+ {
+  "id": "T27-notification-sender-text",
+  "title": "Notifica per mittente e testo (evento sintetico)",
+  "cond": "none",
+  "rule": {
+   "name": "T27-notification-sender-text",
+   "trigger": {
+    "type": "notification",
+    "pkg": "com.example.mail",
+    "sender": "Mario",
+    "textMatch": "fattura"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e T27 {{RUN}}",
+     "text": "e2e body"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {
+    "text": "La FATTURA di ottobre"
+   }
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e T27 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "T28-sms",
+  "title": "SMS ricevuto da un numero con testo (evento sintetico)",
+  "cond": "none",
+  "rule": {
+   "name": "T28-sms",
+   "trigger": {
+    "type": "phone_state",
+    "event": "SMS_RECEIVED",
+    "number": "+393331112222",
+    "textMatch": "otp"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e T28 {{RUN}}",
+     "text": "e2e body"
+    },
+    {
+     "type": "copy_to_clipboard",
+     "extractionRegex": "(\\d{4,8})"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {
+    "text": "OTP 556677"
+   }
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e T28 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "T29-incoming-call",
+  "title": "Chiamata in arrivo (evento sintetico)",
+  "cond": "none",
+  "rule": {
+   "name": "T29-incoming-call",
+   "trigger": {
+    "type": "phone_state",
+    "event": "INCOMING_CALL"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e T29 {{RUN}}",
+     "text": "e2e body"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e T29 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "T30-missed-call",
+  "title": "Chiamata persa da un numero (evento sintetico)",
+  "cond": "none",
+  "rule": {
+   "name": "T30-missed-call",
+   "trigger": {
+    "type": "phone_state",
+    "event": "MISSED_CALL",
+    "number": "+393331112222"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e T30 {{RUN}}",
+     "text": "e2e body"
+    },
+    {
+     "type": "vibrate",
+     "durationMs": 100
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e T30 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "T31-call-ended",
+  "title": "Chiamata terminata (evento sintetico)",
+  "cond": "none",
+  "rule": {
+   "name": "T31-call-ended",
+   "trigger": {
+    "type": "phone_state",
+    "event": "CALL_ENDED"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e T31 {{RUN}}",
+     "text": "e2e body"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e T31 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "T32-sim-filter",
+  "title": "Filtro SIM: l'emulatore ha una sola SIM, la regola non si arma",
+  "cond": "none",
+  "rule": {
+   "name": "T32-sim-filter",
+   "trigger": {
+    "type": "phone_state",
+    "event": "INCOMING_CALL",
+    "sim": 2
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e T32",
+     "text": "e2e body"
+    }
+   ]
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "capability_unavailable",
+     "detail": "trigger.phone_state.sim"
+    }
+   }
+  }
+ },
+ {
+  "id": "T33-geofence",
+  "title": "Geofence: ingresso in una zona (evento sintetico)",
+  "cond": "none",
+  "rule": {
+   "name": "T33-geofence",
+   "trigger": {
+    "type": "geofence",
+    "lat": 45.4642,
+    "lng": 9.19,
+    "radiusM": 200.0,
+    "transition": "ENTER"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e T33 {{RUN}}",
+     "text": "e2e body"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e T33 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "T34-sensor-unavailable",
+  "title": "Sensore di movimento significativo: assente sull'emulatore",
+  "cond": "none",
+  "rule": {
+   "name": "T34-sensor-unavailable",
+   "trigger": {
+    "type": "sensor",
+    "kind": "significant_motion"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e T34",
+     "text": "e2e body"
+    }
+   ],
+   "cooldownMs": 60000
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "capability_unavailable",
+     "detail": "trigger.sensor.significant_motion"
+    }
+   }
+  }
+ }
+]

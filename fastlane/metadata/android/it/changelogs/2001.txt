@@ -1,0 +1,1 @@
+Correzioni trovate dalla nuova suite di test end-to-end: una regola con una variabile che richiede Shizuku ora viene rifiutata in approvazione invece di armarsi senza mai partire; l'output della shell salvato in una variabile non tiene più l'a capo finale; le macro sullo schermo possono premere i pulsanti a icona tramite la descrizione.

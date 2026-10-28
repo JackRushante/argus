@@ -139,7 +139,7 @@ class ProgramInterpreterTest {
             runner = ProgramActionRunner { action, _ ->
                 seen += action
                 if (action.action is Action.RunShell) {
-                    ProgramActionResult(ActionResult.Success, capturedText = "shell output")
+                    ProgramActionResult(ActionResult.Success, capturedText = "shell output\n")
                 } else {
                     ProgramActionResult(ActionResult.Success)
                 }
