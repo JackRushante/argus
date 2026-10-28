@@ -187,6 +187,10 @@ private fun causeText(cause: BlockCause, l: RenderLanguage): String = when (caus
         "The \"Modify system settings\" access is missing",
         "Manca l'accesso a \"Modifica impostazioni di sistema\"",
     )
+    BlockCause.ACCESSIBILITY_SERVICE -> l.pick(
+        "The Argus Accessibility service is not turned on",
+        "Il servizio di Accessibilità di Argus non è attivo",
+    )
     BlockCause.OTHER -> l.pick(
         "A required feature is not available",
         "Una funzione richiesta non è disponibile",

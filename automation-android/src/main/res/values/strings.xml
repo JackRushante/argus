@@ -24,4 +24,12 @@
     <string name="act41_open_dest_date">date and time settings</string>
     <string name="act41_open_dest_app_details">%1$s app settings</string>
     <string name="act41_open_dest_settings">Settings</string>
+    <!-- 0.5.1 (F17): macro sullo schermo con il servizio di Accessibilità. -->
+    <string name="a11y51_service_label">Argus (screen macros)</string>
+    <string name="a11y51_service_description">Lets Argus run the screen macros you approved: it taps, types and scrolls in the app you choose, one step at a time. It reads nothing and records nothing when no macro is running.</string>
+    <string name="a11y51_channel_name">Screen macros</string>
+    <string name="a11y51_channel_description">Shown while an approved macro is using the screen, with a Stop button</string>
+    <string name="a11y51_notification_title">Argus is using the screen</string>
+    <string name="a11y51_notification_text">An approved macro is tapping and typing in an app. Tap Stop to end it now.</string>
+    <string name="a11y51_notification_stop">Stop</string>
 </resources>

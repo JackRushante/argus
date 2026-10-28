@@ -74,6 +74,11 @@ import dev.argus.automation.base.MediaKeySurface
 import dev.argus.automation.base.SpeechEngine
 import dev.argus.automation.base.SystemSettingsSurface
 import dev.argus.automation.http.HttpRequestExecutor
+import dev.argus.automation.screen.AccessibilityScreenSource
+import dev.argus.automation.screen.AndroidUiMacroSession
+import dev.argus.automation.screen.ScreenSource
+import dev.argus.automation.screen.UiMacroSession
+import dev.argus.automation.screen.UiStepsRunner
 import dev.argus.automation.base.BaseActionSurface
 import dev.argus.automation.foreground.AndroidForegroundDeniedNotice
 import dev.argus.automation.foreground.SharedForegroundSentinel
@@ -776,6 +781,21 @@ object ArgusModule {
     @Singleton
     fun httpRequestExecutor(): HttpRequestExecutor = HttpRequestExecutor()
 
+    /** 0.5.1: lo schermo letto e toccato dal servizio di Accessibilità (solo mentre gira una macro). */
+    @Provides
+    @Singleton
+    fun screenSource(): ScreenSource = AccessibilityScreenSource()
+
+    /** 0.5.1: la notifica «Argus sta usando lo schermo» con «Ferma». */
+    @Provides
+    @Singleton
+    fun uiMacroSession(@ApplicationContext context: Context): UiMacroSession = AndroidUiMacroSession(context)
+
+    @Provides
+    @Singleton
+    fun uiStepsRunner(screen: ScreenSource, session: UiMacroSession): UiStepsRunner =
+        UiStepsRunner(screen, session)
+
     @Provides
     @Singleton
     fun actionExecutor(
@@ -792,6 +812,7 @@ object ArgusModule {
         httpRequests: HttpRequestExecutor,
         root: RootAccess,
         directSettings: DirectSettings,
+        uiSteps: UiStepsRunner,
     ): ShizukuActionExecutor =
         ShizukuActionExecutor(
             tools,
@@ -817,6 +838,8 @@ object ArgusModule {
             httpRequests = httpRequests,
             // 0.5.0: write_setting diretto coi permessi permanenti, solo se nessun backend è pronto.
             directSettings = directSettings,
+            // 0.5.1: macro sullo schermo con il servizio di Accessibilità.
+            uiSteps = uiSteps,
         )
 
     @Provides

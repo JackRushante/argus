@@ -344,6 +344,7 @@ private fun actionTypeLabel(type: String, l: RenderLanguage): String = when (typ
     ActionTypeIds.SET_BRIGHTNESS -> l.pick("Set screen brightness", "Imposta luminosità schermo")
     ActionTypeIds.SET_ROTATION -> l.pick("Set auto-rotate", "Imposta rotazione automatica")
     ActionTypeIds.HTTP_REQUEST -> l.pick("HTTP request", "Richiesta HTTP")
+    ActionTypeIds.UI_STEPS -> l.pick("Steps on the screen", "Passi sullo schermo")
     else -> type.replace('_', ' ')
 }
 

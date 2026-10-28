@@ -23,4 +23,12 @@
     <string name="act41_open_dest_date">le impostazioni di data e ora</string>
     <string name="act41_open_dest_app_details">le impostazioni dell\'app %1$s</string>
     <string name="act41_open_dest_settings">le Impostazioni</string>
+    <!-- 0.5.1 (F17): macro sullo schermo con il servizio di Accessibilità. -->
+    <string name="a11y51_service_label">Argus (macro sullo schermo)</string>
+    <string name="a11y51_service_description">Permette ad Argus di eseguire le macro sullo schermo che hai approvato: tocca, scrive e scorre nell\'app che scegli, un passo alla volta. Non legge e non registra niente quando nessuna macro è in corso.</string>
+    <string name="a11y51_channel_name">Macro sullo schermo</string>
+    <string name="a11y51_channel_description">Visibile mentre una macro approvata usa lo schermo, con il pulsante Ferma</string>
+    <string name="a11y51_notification_title">Argus sta usando lo schermo</string>
+    <string name="a11y51_notification_text">Una macro approvata sta toccando e scrivendo in un\'app. Tocca Ferma per interromperla subito.</string>
+    <string name="a11y51_notification_stop">Ferma</string>
 </resources>

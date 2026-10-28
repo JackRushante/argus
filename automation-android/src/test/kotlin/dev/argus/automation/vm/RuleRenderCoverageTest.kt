@@ -22,6 +22,7 @@ import dev.argus.engine.model.MediaCommand
 import dev.argus.engine.model.NightMode
 import dev.argus.engine.model.PhoneEvent
 import dev.argus.engine.model.ScreenEvent
+import dev.argus.engine.model.ScrollDirection
 import dev.argus.engine.model.SensorKind
 import dev.argus.engine.model.SettingNamespace
 import dev.argus.engine.model.SettingsScreen
@@ -34,6 +35,7 @@ import dev.argus.engine.model.TimePrecision
 import dev.argus.engine.model.Transition
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.model.TriggerField
+import dev.argus.engine.model.UiStep
 import dev.argus.engine.model.VarBinding
 import dev.argus.engine.model.VarType
 import dev.argus.engine.model.VolumeStream
@@ -796,6 +798,52 @@ class RuleRenderCoverageTest {
                     "headers" to ms("X-XYZ-Key: ••••wxyz", "X-XYZ-Plain: XYZ-plain-value"),
                     "body" to ms(m("Body: XYZ-body", "Corpo: XYZ-body")),
                     "contentType" to ms("Content-Type: application/xyz"),
+                ),
+            ),
+            // --- 0.5.1 (macro sullo schermo) ---
+            "ui_steps" to case(
+                v(
+                    Action.UiSteps(
+                        pkg = "com.xyz.shop",
+                        steps = listOf(
+                            UiStep.WaitFor(text = "XYZ-wait", id = "xyz_wait_id", timeoutMs = 8_000),
+                            UiStep.Click(text = "XYZ-click", id = "xyz_click_id", desc = "XYZ-desc", index = 2),
+                            UiStep.Type("XYZ-typed"),
+                            UiStep.Scroll(ScrollDirection.UP),
+                            UiStep.Check(text = "XYZ-check", present = false),
+                            UiStep.Back,
+                            UiStep.Home,
+                        ),
+                    ),
+                    "pkg" to ms(m("Opens com.xyz.shop first", "Prima apre com.xyz.shop")),
+                    "steps" to ms(
+                        m(
+                            """Wait up to 8 s for text "XYZ-wait" and id "xyz_wait_id"""",
+                            """Aspetta fino a 8 s: testo "XYZ-wait" e id "xyz_wait_id"""",
+                        ),
+                        m(
+                            """Tap the element with text "XYZ-click" and id "xyz_click_id" and description "XYZ-desc" (match number 3)""",
+                            """Tocca l'elemento con testo "XYZ-click" e id "xyz_click_id" e descrizione "XYZ-desc" (corrispondenza numero 3)""",
+                        ),
+                        m("""Type "XYZ-typed" in the focused field""", """Scrivi "XYZ-typed" nel campo attivo"""),
+                        m("Scroll up", "Scorri in su"),
+                        m(
+                            """Check that "XYZ-check" is NOT on the screen, otherwise stop""",
+                            """Controlla che "XYZ-check" NON sia sullo schermo, altrimenti fermati""",
+                        ),
+                        m("Press Back", "Premi Indietro"),
+                        m("Press Home", "Premi Home"),
+                        m(
+                            "Acts on the screen like you would",
+                            "Agisce sullo schermo come faresti tu",
+                        ),
+                    ),
+                ),
+                v(
+                    Action.UiSteps(pkg = null, steps = listOf(UiStep.Scroll(ScrollDirection.DOWN))),
+                    "pkg" to ms(
+                        m("Works on the screen as it is", "Lavora sullo schermo così com'è"),
+                    ),
                 ),
             ),
         )

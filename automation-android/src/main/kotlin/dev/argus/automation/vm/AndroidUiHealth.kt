@@ -31,6 +31,8 @@ internal data class AndroidUiHealth(
     val bluetoothConnectGranted: Boolean = false,
     /** 0.4.1: «Modifica impostazioni di sistema» concesso (`Settings.System.canWrite`). */
     val writeSettingsGranted: Boolean = true,
+    /** 0.5.1: il servizio di Accessibilità di Argus è acceso (macro sullo schermo). */
+    val accessibilityGranted: Boolean = true,
 )
 
 internal fun readAndroidUiHealth(context: Context): AndroidUiHealth {
@@ -64,6 +66,7 @@ internal fun readAndroidUiHealth(context: Context): AndroidUiHealth {
             android.os.Build.VERSION_CODES.S || granted(Manifest.permission.BLUETOOTH_CONNECT),
         // Se la lettura fallisce vale «non concesso»: la riga in Sistema avvisa invece di mostrare un falso verde.
         writeSettingsGranted = runCatching { android.provider.Settings.System.canWrite(app) }.getOrDefault(false),
+        accessibilityGranted = dev.argus.device.PermanentGrantStatus.accessibility(app),
     )
 }
 

@@ -177,6 +177,67 @@ internal object LogReasonLabels {
             "automations are paused",
             "le automazioni sono in pausa",
         ),
+        // --- 0.5.1: macro sullo schermo (Accessibilità) ---
+        "ui_steps_external_trigger" to Label(
+            "a screen macro cannot start from this trigger",
+            "una macro sullo schermo non può partire da questo trigger",
+        ),
+        "ui_service_unavailable" to Label(
+            "the Accessibility service of Argus is not on",
+            "il servizio di Accessibilità di Argus non è attivo",
+        ),
+        "ui_notification_unavailable" to Label(
+            "the macro needs the notification with Stop, and notifications are off",
+            "la macro richiede la notifica con Ferma, e le notifiche sono spente",
+        ),
+        "ui_busy" to Label(
+            "another screen macro is already running",
+            "un'altra macro sullo schermo è già in corso",
+        ),
+        "ui_forbidden_screen" to Label(
+            "the macro reached a screen it may not touch (Argus, Settings, installer or permissions)",
+            "la macro è arrivata su una schermata che non può toccare (Argus, Impostazioni, installatore o permessi)",
+        ),
+        "ui_open_failed" to Label(
+            "the app did not come to the front",
+            "l'app non è passata in primo piano",
+        ),
+        "ui_element_not_found" to Label(
+            "the element to tap was not on the screen",
+            "l'elemento da toccare non era sullo schermo",
+        ),
+        "ui_check_failed" to Label(
+            "a check on the screen did not hold",
+            "un controllo sullo schermo non è andato a buon fine",
+        ),
+        "ui_timeout" to Label(
+            "the element did not appear in time",
+            "l'elemento non è comparso in tempo",
+        ),
+        "ui_macro_timeout" to Label(
+            "the screen macro ran for more than 60 seconds",
+            "la macro sullo schermo è durata più di 60 secondi",
+        ),
+        "ui_stopped" to Label(
+            "you stopped the screen macro",
+            "hai fermato la macro sullo schermo",
+        ),
+        "ui_click_failed" to Label(
+            "Android did not accept the tap",
+            "Android non ha accettato il tocco",
+        ),
+        "ui_input_failed" to Label(
+            "there was no text field in focus to type into",
+            "nessun campo di testo attivo in cui scrivere",
+        ),
+        "ui_scroll_failed" to Label(
+            "there was nothing to scroll",
+            "non c'era niente da scorrere",
+        ),
+        "ui_action_failed" to Label(
+            "Android did not accept the Back or Home press",
+            "Android non ha accettato il tasto Indietro o Home",
+        ),
         // --- Codici generici (nessun motivo più preciso disponibile) ---
         "execution_error" to Label("unspecified error", "errore non specificato"),
         "policy_blocked" to Label("unspecified policy", "policy non specificata"),

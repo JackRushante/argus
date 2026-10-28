@@ -125,6 +125,8 @@ internal class BenchWorld private constructor(
             Triple("com.zhiliaoapp.musically", "TikTok", "TikTok"),
             Triple("com.android.vending", "Play Store", "Play Store"),
             Triple("com.google.android.calculator", "Calculator", "Calcolatrice"),
+            // 0.5.1: Argus stesso, bersaglio che una macro sullo schermo non puo' mai avere.
+            Triple("dev.argus", "Argus", "Argus"),
         )
 
         /**
@@ -159,6 +161,8 @@ internal class BenchWorld private constructor(
             // 0.4.1: il telefono di prova ha due SIM, quindi il filtro SIM si pubblica.
             multiSim = true,
             writeSettingsGranted = true,
+            // 0.5.1: servizio di Accessibilita' acceso, quindi ui_steps si pubblica.
+            accessibilityEnabled = true,
         )
 
         private val NO_SHIZUKU_STATE = FULL_STATE.copy(

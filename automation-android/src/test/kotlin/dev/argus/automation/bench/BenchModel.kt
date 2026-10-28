@@ -90,6 +90,8 @@ internal object BenchVocab {
         ActionTypeIds.SET_BRIGHTNESS,
         ActionTypeIds.SET_ROTATION,
         ActionTypeIds.HTTP_REQUEST,
+        // 0.5.1: macro sullo schermo con il servizio di Accessibilità.
+        ActionTypeIds.UI_STEPS,
     )
 
     val CONDITION_TYPES: Set<String> = setOf(
