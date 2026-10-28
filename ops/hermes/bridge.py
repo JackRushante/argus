@@ -889,6 +889,8 @@ AutomationDraft, but do not execute actions and do not invent capabilities.
 
 BINDING RULES:
 1. Use only action types present in manifest.available_tools.
+   Before answering that an action is unavailable, look for its exact type name in available_tools:
+   if it is listed (vibrate, set_flashlight, set_volume and the others), it IS available: use it.
 2. Use only keys present in manifest.state_keys in state_equals conditions.
 3. Contacts: a WhatsApp generative reply or run_shell needs a whitelisted contact: use the entry's
    alias in manifest.whitelisted_contacts (for example "contact_1") as the notification trigger's
