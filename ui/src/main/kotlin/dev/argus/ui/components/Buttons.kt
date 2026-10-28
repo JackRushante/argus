@@ -112,6 +112,7 @@ private fun buttonBorder(style: ButtonStyle, enabled: Boolean): BorderStroke? {
  *   scritto sotto il pulsante (visibile, non un tooltip) ed e' letto da TalkBack come stato del pulsante.
  *   Nei footer, dove il motivo sta SOPRA la fila di pulsanti, usare [ArgusActionFooter].
  * @param fillWidth se `true` il pulsante occupa tutta la larghezza disponibile.
+ * @param trailingIcon freccia o simbolo DOPO il testo («Rivedi e approva →»); decorativa, il testo dice l'azione.
  */
 @Composable
 fun ArgusButton(
@@ -124,6 +125,7 @@ fun ArgusButton(
     disabledReason: String? = null,
     fillWidth: Boolean = false,
     minHeight: Dp = ArgusSpacing.TouchTarget,
+    trailingIcon: ImageVector? = null,
 ) {
     val emphatic = style == ButtonStyle.Filled || style == ButtonStyle.Tonal
     val showReason = !enabled && !disabledReason.isNullOrBlank()
@@ -141,7 +143,11 @@ fun ArgusButton(
             colors = buttonColors(style),
             border = buttonBorder(style, enabled),
             elevation = null,
-            contentPadding = if (icon != null) PaddingValues(start = 14.dp, end = 18.dp) else PaddingValues(horizontal = 20.dp),
+            contentPadding = when {
+                icon != null -> PaddingValues(start = 14.dp, end = 18.dp)
+                trailingIcon != null -> PaddingValues(start = 20.dp, end = 14.dp)
+                else -> PaddingValues(horizontal = 20.dp)
+            },
         ) {
             if (icon != null) {
                 Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -153,6 +159,10 @@ fun ArgusButton(
                 fontWeight = if (emphatic) FontWeight.W700 else FontWeight.W600,
                 textAlign = TextAlign.Center,
             )
+            if (trailingIcon != null) {
+                Spacer(Modifier.width(6.dp))
+                Icon(trailingIcon, contentDescription = null, modifier = Modifier.size(18.dp))
+            }
         }
         if (showReason) ReasonText(disabledReason!!, Modifier.padding(top = ArgusSpacing.Small, start = ArgusSpacing.Unit))
     }

@@ -126,7 +126,7 @@ Tutti hanno `@ArgusThemePreviews` (chiaro e scuro) nel proprio file. Le firme so
   con `Arrangement.spacedBy(ArgusSpacing.GroupGap)`. Il Log usa 22/5, «ultime esecuzioni» 18/4.
 
 ### Riga lista e contenitori icona · `ListRows.kt`
-- `ArgusListRow(title, subtitle?, leading?, titleSuffix?, meta?, trailing?, onClick?, onClickLabel?, titleColor, subtitleColor)`:
+- `ArgusListRow(title, subtitle?, leading?, titleSuffix?, meta?, trailing?, onClick?, onClickLabel?, titleColor, subtitleColor, contentPadding, trailingAtTop = false)`:
   l'area tappabile è tutto tranne `trailing` (che ha il suo tocco: interruttore). Altezza minima 56. Righe «rumore utile»:
   `titleColor = onSurfaceVariant`, mai trasparenza.
 - `TriggerContainer(icon, shape: TriggerShape, tone: TriggerTone)`: 44 dp. La forma dice il tipo di trigger (`Circle` orario,
@@ -150,7 +150,7 @@ Tutti hanno `@ArgusThemePreviews` (chiaro e scuro) nel proprio file. Le firme so
 - Non aggiungono gli inset delle barre di sistema: li mette lo `Scaffold` dell'host.
 
 ### Pulsanti e interruttore · `Buttons.kt`
-- `ArgusButton(text, onClick, style: ButtonStyle = Filled, icon?, enabled = true, disabledReason?, fillWidth = false, minHeight = 48)`.
+- `ArgusButton(text, onClick, style: ButtonStyle = Filled, icon?, enabled = true, disabledReason?, fillWidth = false, minHeight = 48, trailingIcon?)`.
   `ButtonStyle`: `Filled` (UNO solo per stato), `Tonal`, `Outlined`, `Text`, `Destructive` (contorno e testo rossi; apre
   SEMPRE una conferma). Disabilitato: se c'è `disabledReason` il motivo è scritto sotto il pulsante, visibile e letto da
   TalkBack come stato (mai un tooltip). Nei footer il motivo sta sopra i pulsanti: `ArgusActionFooter`.
@@ -183,6 +183,16 @@ Tutti hanno `@ArgusThemePreviews` (chiaro e scuro) nel proprio file. Le firme so
 - `SummaryHero(counters: List<HeroCounter>, tiles: List<HeroTile>)`. `HeroCounter(value, label, tone: HeroTone,
   contentDescription, onClick?)`; `HeroTile(icon, label, value, detail?, valueTone, contentDescription, onClick?)`;
   `HeroTone`: `Primary`, `Attention`, `NeedsReview`, `Error`, `Neutral`. Solo componente: i dati li calcola il ViewModel.
+
+### Chat (fase 2, blocco lista e chat) · `ChatBrandMark.kt`, `ChatWaitCard.kt`, `ChatDraftCard.kt`
+- `ChatBrandMark(size = 36.dp)`: l'occhio di Argus per l'intestazione (36) e lo stato vuoto (72) della chat. Artwork di marca,
+  uguale nei due temi come l'icona sul launcher; decorativo.
+- `ChatWaitCard(elapsedSec, timeoutSec, expectedRangeLabel, onCancel)`: «Argus sta pensando… (12 s)» nel flusso della
+  conversazione, con la barra 0-timeout (65 s, 180 s per un server locale; `ChatState.sendingTimeoutSec`), la fascia «10-30 s» e
+  «Annulla». Il riempimento avanza di un secondo e non esce mai dalla barra. Regione viva per TalkBack.
+- `ChatDraftCard(draft, onOpenDraft)`: la card bozza (invariante 1: UN solo pulsante, «Rivedi e approva», che apre il Dettaglio).
+  Linea del tempo QUANDO / SOLO SE / ALLORA dai tipi (`RuleRender`), chip `generativa` + `esce verso il cloud` se generativa,
+  ogni ERROR per intero come «Non armabile: motivo», gli avvisi solo contati («1 avviso da leggere nel dettaglio»).
 
 ### Segmenti e filtri · `SegmentedFilter.kt`
 - `ArgusSegmentedFilter(options: List<T>, selected, onSelect, label: (T) -> String, groupDescription, segmentHeight = 40)`:
