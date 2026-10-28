@@ -1,5 +1,7 @@
 package dev.argus.automation
 
+import dev.argus.automation.apps.AssumeAllInstalled
+import dev.argus.automation.apps.InstalledPackageCheck
 import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.ApprovedStateContext
@@ -7,6 +9,8 @@ import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
+import dev.argus.engine.model.AppEventKind
+import dev.argus.engine.model.CapabilityRequirements
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.ApprovalFingerprints
 import dev.argus.engine.model.CapabilityIds
@@ -43,6 +47,7 @@ import dev.argus.engine.safety.DraftValidator
 import dev.argus.engine.safety.DraftWriteResult
 import dev.argus.engine.safety.NewDraft
 import dev.argus.engine.safety.PendingDraft
+import dev.argus.engine.safety.Severity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -649,6 +654,87 @@ class ApprovalFlowTest {
         assertEquals(query.canonicalId, review.verifiedStateQueries.single().queryId)
     }
 
+    // --- 0.7.0: avviso «app non installata» (controllo fatto sul telefono) ---------------------------
+
+    private fun appsDraft(
+        trigger: Trigger = Trigger.Immediate,
+        actions: List<Action> = listOf(Action.LaunchApp("com.youtube")),
+    ) = AutomationDraft(name = "Apri app", trigger = trigger, actions = actions)
+
+    private fun appsFixture(draft: AutomationDraft, check: InstalledPackageCheck) = fixture(
+        available = CapabilityRequirements.derive(draft.trigger, draft.actions),
+        installedPackages = check,
+    )
+
+    @Test
+    fun `a package that is not installed is a warning with the package, and the rule stays armable`() = runTest {
+        val draft = appsDraft()
+        val review = assertIs<DraftSubmissionResult.Ready>(
+            appsFixture(draft, InstalledPackageCheck { setOf("com.youtube") })
+                .flow.submit(CompileResult("ok", draft, null)),
+        ).review
+
+        val issue = review.draft.issues.single { it.code == "app_not_installed" }
+        assertEquals(Severity.WARNING, issue.severity)
+        assertEquals("com.youtube", issue.detail)
+        assertTrue(review.canArm)
+    }
+
+    @Test
+    fun `installed packages add no warning`() = runTest {
+        val draft = appsDraft()
+        val review = assertIs<DraftSubmissionResult.Ready>(
+            appsFixture(draft, InstalledPackageCheck { emptySet() })
+                .flow.submit(CompileResult("ok", draft, null)),
+        ).review
+
+        assertTrue(review.draft.issues.none { it.code == "app_not_installed" })
+    }
+
+    @Test
+    fun `one warning for each missing package, including the app of the trigger and a nested action`() = runTest {
+        val draft = appsDraft(
+            trigger = Trigger.AppEvent("org.example.video", AppEventKind.OPENED),
+            actions = listOf(Action.LaunchApp("com.youtube"), Action.LaunchApp("com.android.chrome")),
+        )
+        var asked: Collection<String> = emptyList()
+        val review = assertIs<DraftSubmissionResult.Ready>(
+            appsFixture(draft, InstalledPackageCheck { packages -> asked = packages; setOf("org.example.video", "com.youtube") })
+                .flow.submit(CompileResult("ok", draft, null)),
+        ).review
+
+        assertEquals(listOf("org.example.video", "com.youtube", "com.android.chrome"), asked.toList())
+        assertEquals(
+            listOf("org.example.video", "com.youtube"),
+            review.draft.issues.filter { it.code == "app_not_installed" }.map { it.detail },
+        )
+    }
+
+    @Test
+    fun `the app of a notification trigger is checked too`() = runTest {
+        val draft = appsDraft(
+            trigger = Trigger.Notification(pkg = "com.whatsapp", conversationId = "c1"),
+            actions = listOf(Action.SetWifi(false)),
+        )
+        val review = assertIs<DraftSubmissionResult.Ready>(
+            appsFixture(draft, InstalledPackageCheck { setOf("com.whatsapp") })
+                .flow.submit(CompileResult("ok", draft, null)),
+        ).review
+
+        assertEquals("com.whatsapp", review.draft.issues.single { it.code == "app_not_installed" }.detail)
+    }
+
+    @Test
+    fun `a failing check never invents a warning`() = runTest {
+        val draft = appsDraft()
+        val review = assertIs<DraftSubmissionResult.Ready>(
+            appsFixture(draft, InstalledPackageCheck { error("boom") })
+                .flow.submit(CompileResult("ok", draft, null)),
+        ).review
+
+        assertTrue(review.draft.issues.none { it.code == "app_not_installed" })
+    }
+
     private fun solarDraft(spec: SolarSpec = SolarSpec(SolarEvent.SUNSET, -30)) = AutomationDraft(
         name = "Luci al tramonto",
         trigger = Trigger.Time(tz = "Europe/Rome", solar = spec),
@@ -664,6 +750,7 @@ class ApprovalFlowTest {
         stateQueryProbe: StateQueryProbe = StateQueryProbe { StateQueryProbeResult.AVAILABLE },
         whitelisted: Set<String> = emptySet(),
         audit: ArmAuditRecorder = ArmAuditRecorder(),
+        installedPackages: InstalledPackageCheck = AssumeAllInstalled,
     ): Fixture {
         val store = MemoryAutomationStore(initial)
         val repository = MemoryDraftRepository(store)
@@ -690,6 +777,7 @@ class ApprovalFlowTest {
             nowMillis = { 1_000L },
             newDraftId = { DraftId("draft-${repository.count + 1}") },
             newAutomationId = { AutomationId("automation-${repository.count + 1}") },
+            installedPackages = installedPackages,
         )
         return Fixture(flow, store, repository, audit)
     }

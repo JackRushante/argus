@@ -1,14 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Sfondo finestra dark (design §5, token background) — evita il flash bianco
-         prima che Compose disegni. -->
-    <color name="argus_window_background">#FF0E1216</color>
+    <!-- Sfondo finestra (alias `page` del redesign A, tema chiaro): evita il lampo di colore sbagliato
+         prima che Compose disegni. La variante scura sta in values-night. -->
+    <color name="argus_window_background">#FFECEFF4</color>
+    <!-- Sfondo dell'icona adattiva: fisso, non segue il tema. -->
     <color name="argus_icon_background">#FF0E1216</color>
-    <!-- Widget delle regole manuali (0.4.1): token del tema dark, perche' un widget non vede Compose. -->
-    <color name="argus_widget_surface">#FF161B21</color>
-    <color name="argus_widget_text">#FFEEF1F5</color>
-    <color name="argus_widget_muted">#FF9AA2AD</color>
-    <color name="argus_widget_warn">#FFFFCF7A</color>
-    <color name="argus_widget_button">#FF00497D</color>
-    <color name="argus_widget_button_text">#FFD3E4FF</color>
+    <!-- Widget delle regole manuali (0.4.1): token del tema, perche' un widget non vede Compose.
+         Chiaro: card #FFFFFF, testo onSurface, secondario onSurfaceVariant, avviso pending.fg,
+         pulsante primaryContainer. Scuro in values-night. -->
+    <color name="argus_widget_surface">#FFFFFFFF</color>
+    <color name="argus_widget_text">#FF171C22</color>
+    <color name="argus_widget_muted">#FF424954</color>
+    <color name="argus_widget_warn">#FF7A5600</color>
+    <color name="argus_widget_button">#FFD1E4FF</color>
+    <color name="argus_widget_button_text">#FF001D36</color>
 </resources>

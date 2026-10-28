@@ -1,0 +1,1 @@
+New look, light and dark, following the system. A summary at the top of the list, a filter by outcome in the Log, the app name and "Change app" in approval, a warning when an app is not installed, and your default app (calculator, calendar, browser...) for requests that name one. Fixes for screen macros: waiting for an app to open, clearer errors.

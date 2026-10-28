@@ -14,6 +14,7 @@ import dev.argus.automation.EnablementResult
 import dev.argus.automation.RenderLanguageSource
 import dev.argus.automation.manual.AutomationPauseStore
 import dev.argus.data.ArgusDatabase
+import dev.argus.data.dao.AuditLogRecord
 import dev.argus.data.dao.AutomationUiMetadata
 import dev.argus.data.entities.ScheduledTimeAlarmEntity
 import dev.argus.engine.brain.ContactWhitelistStore
@@ -34,15 +35,19 @@ import dev.argus.ui.model.AutomationRow
 import dev.argus.ui.model.EngineBanner
 import dev.argus.ui.model.StatusBadge
 import dev.argus.ui.model.StatusFilter
+import dev.argus.ui.model.TodayErrorsSummary
 import dev.argus.ui.presentation.RenderLanguage
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -63,6 +68,7 @@ private data class ReviewInputs(
 )
 
 @HiltViewModel
+@OptIn(ExperimentalCoroutinesApi::class)
 class AutomationListViewModel @Inject constructor(
     private val store: AutomationStore,
     drafts: DraftRepository,
@@ -96,6 +102,17 @@ class AutomationListViewModel @Inject constructor(
 
     /** Lingua al momento (messaggi); le righe la ricevono dal flow e si rigenerano al cambio lingua. */
     private val language: RenderLanguage get() = languageSource.current
+
+    /**
+     * Errori di oggi dal Log (riquadro «Oggi» del riepilogo). Segue il cambio di giorno e la lingua;
+     * se il log non si legge vale `null` e il riquadro scrive «n/d», mai 0 (invariante 8).
+     */
+    private val todayErrors: Flow<TodayErrorsSummary?> =
+        combine<List<AuditLogRecord>, RenderLanguage, TodayErrorsSummary?>(
+            startOfTodayFlow().flatMapLatest { since -> database.auditDao().observeLogSince(since, TODAY_LOG_LIMIT) },
+            languageSource.language,
+        ) { records, renderLanguage -> todayErrorsOf(records, renderLanguage) }
+            .catch { emit(null) }
 
     val state: StateFlow<AutomationListState> = flow {
         // B32: una cache per raccolta del flow. Le letture costose (review delle bozze, batteria)
@@ -133,16 +150,20 @@ class AutomationListViewModel @Inject constructor(
                 )
             },
         )
-    }.combine(pause.paused) { current, paused -> current.copy(paused = paused) }.stateIn(
-        viewModelScope,
-        SharingStarted.WhileSubscribed(5_000),
-        AutomationListState(
-            rows = emptyList(),
-            filter = StatusFilter.ALL,
-            banner = EngineBanner.NONE,
-            loading = true,
-        ),
-    )
+    }.combine(pause.paused) { current, paused -> current.copy(paused = paused) }
+        .combine(todayErrors) { current, today ->
+            current.copy(summary = current.summary?.copy(todayErrors = today))
+        }
+        .stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5_000),
+            AutomationListState(
+                rows = emptyList(),
+                filter = StatusFilter.ALL,
+                banner = EngineBanner.NONE,
+                loading = true,
+            ),
+        )
 
     private suspend fun listState(
         automations: List<Automation>,
@@ -219,6 +240,9 @@ class AutomationListViewModel @Inject constructor(
             loading = false,
             pendingCount = allRows.count { it.isPendingApproval() },
             needsReviewCount = allRows.count { it.status == StatusBadge.NEEDS_REVIEW },
+            // Riepilogo sull'elenco COMPLETO (visibleRows e' gia' filtrato). Gli errori di oggi arrivano
+            // dopo, dal log (vedi `todayErrors`).
+            summary = listSummaryOf(allRows, todayErrors = null),
         )
     }
 

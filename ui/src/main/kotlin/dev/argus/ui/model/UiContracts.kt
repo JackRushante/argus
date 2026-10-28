@@ -23,7 +23,22 @@ data class RuleRender(
     val privacyNote: String?,         // valorizzato se generativa: disclosure del servizio AI configurato
     val vars: List<VarRow> = emptyList(), // P4: variabili approvate (vuoto per le regole v1 flat)
     val program: List<ProgramNode> = emptyList(), // P4: albero azioni ricorsivo (if/while/wait/foglie)
+    /** 0.7.0: package d'app del trigger `app_event` (cambiabile in approvazione); null per ogni altro trigger. */
+    val triggerAppRef: AppRef? = null,
 )
+
+/**
+ * 0.7.0: un package d'app nominato dalla regola e SOSTITUIBILE in approvazione («Cambia app»). [slot] è il
+ * numero d'ordine del package nella regola (vedi `AppPackages`): il ViewModel lo usa per sapere QUALE package
+ * sostituire. Il nome dell'app e l'esito «installata?» stanno in [AutomationDetailState.appInfo].
+ */
+data class AppRef(val slot: Int, val packageName: String)
+
+/** 0.7.0: nome leggibile e presenza sul telefono di un package. [name] è null se il telefono non lo sa. */
+data class AppInfoUi(val name: String?, val installed: Boolean)
+
+/** 0.7.0: una riga dell'elenco «Cambia app»: app avviabile installata sul telefono. */
+data class AppChoiceUi(val packageName: String, val label: String)
 
 /**
  * Nodo dell'albero del programma approvato, reso per la review ricorsiva (P4-E). Ogni stringa è
@@ -71,7 +86,13 @@ data class VarRow(
      * tipo, intervallo del numero casuale o "valore fisso". Vuoto solo per righe costruite a mano.
      */
     val sourceText: String = "",
+    /** 0.7.0: il valore arriva da fuori (integrità TAINTED): il design lo segna in ambra. */
+    val isExternal: Boolean = false,
+    /** 0.7.0: riservatezza del valore, per il segno accanto al nome. */
+    val sensitivity: VarSensitivity = VarSensitivity.PUBLIC,
 )
+
+enum class VarSensitivity { PUBLIC, PRIVATE, SECRET }
 
 data class ActionRow(
     val iconKey: String,
@@ -81,6 +102,8 @@ data class ActionRow(
     val shellCommand: String?,
     val isGenerative: Boolean,
     val requiresLiveConfirm: Boolean, // catalogo sempre-conferma (spec §10.2)
+    /** 0.7.0: package d'app nominato da questa azione e sostituibile in approvazione; null altrimenti. */
+    val appRef: AppRef? = null,
 )
 
 data class UiWarning(val severity: Severity, val code: String, val text: String)  // da ValidationIssue/ConflictWarning
@@ -116,6 +139,11 @@ data class ChatState(
      * modifica; mai nel DB, nei log, nell'audit o nella bozza. null = niente da mostrare.
      */
     val rawResponse: String? = null,
+    /**
+     * 0.7.0 (redesign A): secondi dopo cui l'attesa scade, per la barra dei tempi dell'attesa (0-65 s di
+     * norma, 0-180 s per un server locale). `null` = non noto: la barra usa l'asse standard.
+     */
+    val sendingTimeoutSec: Int? = null,
 )
 
 sealed interface ChatItem {
@@ -197,6 +225,11 @@ data class AutomationListState(
     val needsReviewCount: Int = rows.count { it.status == StatusBadge.NEEDS_REVIEW },
     /** 0.4.1 (F21): «Pausa automazioni» attiva. Mostra il banner «Automazioni in pausa · Riprendi». */
     val paused: Boolean = false,
+    /**
+     * 0.7.0 (redesign A, nota n1): riepilogo in testa alla lista. `null` = niente da riassumere (in
+     * caricamento o nessuna regola): il riepilogo non compare, mai un riepilogo di zeri.
+     */
+    val summary: ListSummary? = null,
 )
 
 data class AutomationRow(
@@ -216,15 +249,43 @@ data class AutomationRow(
      * «modifica in attesa» e il tocco sul badge apre la bozza.
      */
     val pendingEditDraftId: String? = null,
+    /** 0.7.0 (redesign A): istante (epoch ms) di [nextFireLabel], per ordinare «Prossimo scatto». `null` = senza prossimo scatto. */
+    val nextFireAtMillis: Long? = null,
 )
 
 enum class StatusFilter { ALL, ARMED, PENDING, DISABLED, NEEDS_REVIEW }
+
+/**
+ * 0.7.0 (redesign A, nota n1): riepilogo in testa alla lista. I conteggi si calcolano sull'elenco COMPLETO
+ * delle regole (le righe di [AutomationListState.rows] arrivano già filtrate), così i contatori restano veri
+ * anche con un filtro attivo e toccarne uno filtra la lista.
+ */
+data class ListSummary(
+    val armedCount: Int,
+    /** In attesa di approvazione: bozze nuove e regole attive con una modifica in attesa. */
+    val pendingCount: Int,
+    val needsReviewCount: Int,
+    /** La regola che scatta per prima; `null` = nessuna regola a orario armata. */
+    val nextFire: NextFireSummary?,
+    /** Errori di oggi dal Log; `null` = non letto: si scrive «n/d», mai 0 (invariante 8). */
+    val todayErrors: TodayErrorsSummary?,
+)
+
+/** Prossimo scatto: la regola da aprire al tocco, l'etichetta già pronta («oggi 23:00») e l'istante. */
+data class NextFireSummary(val ruleId: String, val ruleName: String, val label: String, val atMillis: Long)
+
+/**
+ * Errori di oggi letti dal Log (esiti rossi: azioni fallite, scatti bloccati, armamenti falliti).
+ * [lastRuleName] e [lastTimeLabel] descrivono l'ultimo, per il dettaglio del riquadro; `null` se non ce ne sono.
+ */
+data class TodayErrorsSummary(val count: Int, val lastRuleName: String?, val lastTimeLabel: String?)
 
 interface AutomationListCallbacks {
     fun onOpen(id: String); fun onToggleEnabled(id: String, enabled: Boolean); fun onFilter(f: StatusFilter)
     fun onEmptyCta() {}     // CTA empty-state "Vai in chat"; default no-op, la nav reale è dell'host (NavHost)
     fun onBannerTap() {}    // tap sul banner salute → Sistema; default no-op, host-owned
     fun onResumeAutomations() {}   // «Riprendi» sul banner della pausa (F21); default no-op
+    fun onOpenLog() {}      // 0.7.0: riquadro «Oggi» del riepilogo → Log; default no-op, la nav reale è dell'host
 }
 
 // --- 6.3 Automazione · dettaglio / approvazione ---
@@ -262,6 +323,16 @@ data class AutomationDetailState(
     val stats: RuleStatsUi? = null,
     /** 0.4.1 (F8): ingressi dell'avvio manuale. Non nullo solo per una regola `manual` armata. */
     val manual: ManualEntryUi? = null,
+    /** 0.7.0: salute del sistema che tocca QUESTA regola (banner tappabile verso Sistema). `NONE` = niente. */
+    val banner: EngineBanner = EngineBanner.NONE,
+    /** 0.7.0: la regola usa azioni o lettori che richiedono Shizuku: i banner «Shizuku» valgono solo allora. */
+    val usesShizuku: Boolean = false,
+    /** 0.7.0: nome e presenza sul telefono di ogni package nominato dalla regola (chiave = package). */
+    val appInfo: Map<String, AppInfoUi> = emptyMap(),
+    /** 0.7.0: «Cambia app» offerto (bozza o regola salvata con un'impronta valida e nessuna azione in corso). */
+    val canChangeApp: Boolean = false,
+    /** 0.7.0: app avviabili installate, per l'elenco di «Cambia app». `null` = non ancora caricato. */
+    val appChoices: List<AppChoiceUi>? = null,
 )
 
 /**
@@ -323,6 +394,13 @@ interface AutomationDetailCallbacks {
     fun onBack() {}                          // affordance back nell'header; default no-op, la nav reale è dell'host (NavHost)
     fun onAddToHome() {}                     // F8: propone al launcher la scorciatoia della regola manuale
     fun onUseInTile() {}                     // F8: sceglie questa regola per il riquadro delle impostazioni rapide
+    fun onBannerTap() {}                     // 0.7.0: tap sul banner salute del Dettaglio → Sistema; default no-op, host-owned
+    fun onLoadAppChoices() {}                // 0.7.0: «Cambia app» apre l'elenco: il ViewModel lo carica in `appChoices`
+    /**
+     * 0.7.0: sostituisce il package dello [slot] con [packageName]. La bozza cambia revisione e impronta e va
+     * riapprovata; su una regola armata nasce una bozza di modifica, la regola resta com'è finché non la armi.
+     */
+    fun onChangeApp(slot: Int, packageName: String) {}
 }
 
 // --- 6.4 Log esecuzioni ---

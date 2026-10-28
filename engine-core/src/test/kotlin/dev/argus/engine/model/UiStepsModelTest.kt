@@ -140,19 +140,46 @@ class UiStepsModelTest {
 
     @Test
     fun `step problems name the broken limit`() {
-        assertNull(UiStepsPolicy.stepProblem(UiStep.Click(text = "OK")))
-        assertEquals("selector", UiStepsPolicy.stepProblem(UiStep.Click()))
-        assertEquals("selector", UiStepsPolicy.stepProblem(UiStep.Click(text = "  ")))
-        assertEquals("selector", UiStepsPolicy.stepProblem(UiStep.Click(text = "a".repeat(201))))
-        assertEquals("index", UiStepsPolicy.stepProblem(UiStep.Click(text = "OK", index = -1)))
-        assertEquals("index", UiStepsPolicy.stepProblem(UiStep.Click(text = "OK", index = 51)))
-        assertEquals("selector", UiStepsPolicy.stepProblem(UiStep.WaitFor()))
-        assertEquals("timeout", UiStepsPolicy.stepProblem(UiStep.WaitFor(text = "x", timeoutMs = 15_001)))
-        assertEquals("timeout", UiStepsPolicy.stepProblem(UiStep.WaitFor(text = "x", timeoutMs = 50)))
-        assertEquals("text", UiStepsPolicy.stepProblem(UiStep.Type("")))
-        assertEquals("text", UiStepsPolicy.stepProblem(UiStep.Type("a".repeat(1_001))))
-        assertEquals("selector", UiStepsPolicy.stepProblem(UiStep.Check("", present = true)))
-        assertNull(UiStepsPolicy.stepProblem(UiStep.Back))
+        fun problem(step: UiStep, hasApp: Boolean = true) = UiStepsPolicy.stepProblem(step, hasApp)
+        assertNull(problem(UiStep.Click(text = "OK")))
+        assertEquals(UiStepProblem.SELECTOR_MISSING, problem(UiStep.Click()))
+        assertEquals(UiStepProblem.SELECTOR_EMPTY, problem(UiStep.Click(text = "  ")))
+        assertEquals(UiStepProblem.SELECTOR_EMPTY, problem(UiStep.Click(text = "OK", desc = "")))
+        assertEquals(UiStepProblem.SELECTOR_TOO_LONG, problem(UiStep.Click(text = "a".repeat(201))))
+        assertNull(problem(UiStep.Click(text = "a".repeat(200))))
+        assertEquals(UiStepProblem.SELECTOR_CONTROL, problem(UiStep.Click(id = "a\nb")))
+        assertEquals(UiStepProblem.INDEX, problem(UiStep.Click(text = "OK", index = -1)))
+        assertEquals(UiStepProblem.INDEX, problem(UiStep.Click(text = "OK", index = 51)))
+        assertNull(problem(UiStep.Click(text = "OK", index = 50)))
+        assertEquals(UiStepProblem.TIMEOUT, problem(UiStep.WaitFor(text = "x", timeoutMs = 15_001)))
+        assertEquals(UiStepProblem.TIMEOUT, problem(UiStep.WaitFor(text = "x", timeoutMs = 50)))
+        assertEquals(UiStepProblem.SELECTOR_EMPTY, problem(UiStep.WaitFor(text = "")))
+        assertEquals(UiStepProblem.TYPE_EMPTY, problem(UiStep.Type("")))
+        assertEquals(UiStepProblem.TYPE_TOO_LONG, problem(UiStep.Type("a".repeat(1_001))))
+        assertEquals(UiStepProblem.SELECTOR_EMPTY, problem(UiStep.Check("", present = true)))
+        assertNull(problem(UiStep.Back))
+    }
+
+    @Test
+    fun `a wait with no target waits for the app, so it needs a package to open`() {
+        val wait = UiStep.WaitFor(timeoutMs = 5_000)
+        assertNull(UiStepsPolicy.stepProblem(wait, hasApp = true))
+        assertEquals(UiStepProblem.WAIT_NO_TARGET, UiStepsPolicy.stepProblem(wait, hasApp = false))
+        // Il tempo resta nei limiti anche per l'attesa dell'app.
+        assertEquals(UiStepProblem.TIMEOUT, UiStepsPolicy.stepProblem(UiStep.WaitFor(timeoutMs = 20_000), hasApp = true))
+        // Un bersaglio vuoto non è «nessun bersaglio»: è un errore a sé.
+        assertEquals(UiStepProblem.SELECTOR_EMPTY, UiStepsPolicy.stepProblem(UiStep.WaitFor(id = " "), hasApp = true))
+
+        val withApp = Action.UiSteps("com.example.shop", listOf(wait, UiStep.Click(text = "OK")))
+        val withoutApp = Action.UiSteps(null, listOf(wait, UiStep.Click(text = "OK")))
+        assertTrue(UiStepsPolicy.isResolvedShapeValid(withApp))
+        assertFalse(UiStepsPolicy.isResolvedShapeValid(withoutApp))
+    }
+
+    @Test
+    fun `waiting for the app costs its timeout in the budget`() {
+        val action = Action.UiSteps("com.example.shop", listOf(UiStep.WaitFor(timeoutMs = 4_000)))
+        assertEquals(UiStepsPolicy.OPEN_TIMEOUT_MS + 4_000, UiStepsPolicy.budgetMs(action))
     }
 
     @Test

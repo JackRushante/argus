@@ -2,6 +2,7 @@ package dev.argus.ui.presentation
 import dev.argus.engine.model.*
 import dev.argus.ui.model.RuleRender
 import dev.argus.ui.model.VarRow
+import dev.argus.ui.model.VarSensitivity
 import dev.argus.ui.model.ProgramNode
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -21,7 +22,10 @@ class RuleRenderMapperTest {
         val r = RuleRenderMapper.map(otpRule(), language = RenderLanguage.IT)
         assertEquals(2, r.vars.size)
         assertEquals(
-            VarRow("otp", "testo", "esterno", "segreto", "notifica", valueText = null, sourceText = "campo testo"),
+            VarRow(
+                "otp", "testo", "esterno", "segreto", "notifica", valueText = null, sourceText = "campo testo",
+                isExternal = true, sensitivity = VarSensitivity.SECRET,
+            ),
             r.vars[0],
         )
         assertEquals(
@@ -35,7 +39,10 @@ class RuleRenderMapperTest {
     @Test fun `P4 vars render english labels by default`() {
         val r = RuleRenderMapper.map(otpRule(), language = RenderLanguage.EN)
         assertEquals(
-            VarRow("otp", "text", "external", "secret", "notification", valueText = null, sourceText = "text field"),
+            VarRow(
+                "otp", "text", "external", "secret", "notification", valueText = null, sourceText = "text field",
+                isExternal = true, sensitivity = VarSensitivity.SECRET,
+            ),
             r.vars[0],
         )
         assertEquals(

@@ -1,5 +1,6 @@
 package dev.argus.ui.components
 
+import android.content.res.Configuration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -107,37 +108,28 @@ fun PrivilegesSection(
     modifier: Modifier = Modifier,
 ) {
     var showGrantDialog by rememberSaveable { mutableStateOf(false) }
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            stringResource(R.string.priv50_section),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.labelSmall,
-        )
-        PrivilegeCard(
-            icon = { tint -> Icon(Icons.Rounded.Terminal, null, tint = tint, modifier = Modifier.size(22.dp)) },
-            title = stringResource(R.string.priv50_backend_title),
-            body = stringResource(backendBody(state.backend)),
-            warn = state.backend == PrivilegedBackendUi.NONE,
-            trailing = null,
-        )
-        val rootTitle = stringResource(R.string.priv50_root_title)
-        PrivilegeCard(
-            icon = { tint -> Icon(Icons.Rounded.Security, null, tint = tint, modifier = Modifier.size(22.dp)) },
-            title = rootTitle,
-            body = stringResource(rootBody(state.rootState)),
-            warn = state.rootState == RootStateUi.DENIED || state.rootState == RootStateUi.NO_SU,
-            trailing = {
-                Switch(
-                    checked = state.rootEnabled,
-                    onCheckedChange = onSetRootEnabled,
-                    modifier = Modifier.semantics { contentDescription = rootTitle },
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-                        checkedTrackColor = MaterialTheme.colorScheme.primary,
-                    ),
+    val rootTitle = stringResource(R.string.priv50_root_title)
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        SectionLabel(stringResource(R.string.priv50_section), Modifier.padding(horizontal = 4.dp))
+        ArgusCardGroup(listOf(false, true)) { isRoot ->
+            if (!isRoot) {
+                PrivilegeRow(
+                    icon = Icons.Rounded.Terminal,
+                    title = stringResource(R.string.priv50_backend_title),
+                    body = stringResource(backendBody(state.backend)),
+                    warn = state.backend == PrivilegedBackendUi.NONE,
+                    trailing = null,
                 )
-            },
-        )
+            } else {
+                PrivilegeRow(
+                    icon = Icons.Rounded.Security,
+                    title = rootTitle,
+                    body = stringResource(rootBody(state.rootState)),
+                    warn = state.rootState == RootStateUi.DENIED || state.rootState == RootStateUi.NO_SU,
+                    trailing = { ArgusSwitch(checked = state.rootEnabled, onCheckedChange = onSetRootEnabled, contentDescription = rootTitle) },
+                )
+            }
+        }
         if (state.grants.isNotEmpty()) {
             Text(
                 stringResource(R.string.priv50_grants_title),
@@ -153,16 +145,16 @@ fun PrivilegesSection(
                     modifier = Modifier.padding(horizontal = 4.dp),
                 )
             }
-            state.grants.forEach { row ->
+            ArgusCardGroup(state.grants) { row ->
                 GrantStatusRow(row, backendAvailable = state.backend != PrivilegedBackendUi.NONE)
             }
             if (state.canGrant) {
-                OutlinedButton(
+                ArgusButton(
+                    text = stringResource(R.string.priv50_grant_button),
                     onClick = { showGrantDialog = true },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 48.dp),
-                ) { Text(stringResource(R.string.priv50_grant_button)) }
+                    style = ButtonStyle.Outlined,
+                    fillWidth = true,
+                )
             }
         }
     }
@@ -179,28 +171,28 @@ fun PrivilegesSection(
 }
 
 @Composable
-private fun PrivilegeCard(
-    icon: @Composable (androidx.compose.ui.graphics.Color) -> Unit,
+private fun PrivilegeRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
     title: String,
     body: String,
     warn: Boolean,
     trailing: (@Composable () -> Unit)?,
 ) {
     val semantic = LocalArgusSemantic.current
-    val tint = if (warn) semantic.pending.fg else MaterialTheme.colorScheme.primary
-    val borderColor = if (warn) semantic.pending.fg.copy(alpha = 0.35f) else MaterialTheme.colorScheme.outlineVariant
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .background(if (warn) semantic.pending.fg.copy(alpha = 0.06f) else androidx.compose.ui.graphics.Color.Transparent)
-            .border(1.dp, borderColor, RoundedCornerShape(12.dp))
-            .padding(horizontal = 13.dp, vertical = 11.dp),
+        modifier = Modifier.fillMaxWidth().padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        icon(tint)
+        // L'avviso e' nel colore, nell'icona dell'intestazione e nel testo del motivo, mai solo nel colore.
+        IconBadge(
+            icon,
+            if (warn) semantic.pending.bg else MaterialTheme.colorScheme.secondaryContainer,
+            if (warn) semantic.pending.fg else MaterialTheme.colorScheme.onSecondaryContainer,
+            size = 40.dp,
+            iconSize = 22.dp,
+            shape = RoundedCornerShape(12.dp),
+        )
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(title, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge)
             Text(body, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
@@ -218,11 +210,7 @@ private fun GrantStatusRow(row: PermanentGrantRow, backendAvailable: Boolean) {
         else -> stringResource(R.string.priv50_via_need_backend)
     }
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
-            .padding(horizontal = 13.dp, vertical = 10.dp),
+        modifier = Modifier.fillMaxWidth().padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -239,7 +227,7 @@ private fun GrantStatusRow(row: PermanentGrantRow, backendAvailable: Boolean) {
             )
             Text(
                 stringResource(if (row.granted) R.string.priv50_granted else R.string.priv50_not_granted) +
-                    (via?.let { " · $it" } ?: ""),
+                    (via?.let { " · " + it } ?: ""),
                 color = if (row.granted) semantic.armed.fg else semantic.pending.fg,
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -326,13 +314,17 @@ private val previewGrants = listOf(
     PermanentGrantRow(PermanentGrantUi.ACCESSIBILITY, false),
 )
 
-@Preview(name = "Privilegi · nessun backend", showBackground = true, backgroundColor = 0xFF0E1216)
+@Preview(name = "Privilegi · nessun backend · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+
+@Preview(name = "Privilegi · nessun backend · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO)
 @Composable
 private fun PrivilegesNonePreview() {
     ArgusTheme { PrivilegesSection(PrivilegedUi(grants = previewGrants), {}, {}) }
 }
 
-@Preview(name = "Privilegi · Shizuku root, da concedere", showBackground = true, backgroundColor = 0xFF0E1216)
+@Preview(name = "Privilegi · Shizuku root, da concedere · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+
+@Preview(name = "Privilegi · Shizuku root, da concedere · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO)
 @Composable
 private fun PrivilegesShizukuPreview() {
     ArgusTheme {
@@ -344,7 +336,9 @@ private fun PrivilegesShizukuPreview() {
     }
 }
 
-@Preview(name = "Privilegi · Sui", showBackground = true, backgroundColor = 0xFF0E1216)
+@Preview(name = "Privilegi · Sui · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+
+@Preview(name = "Privilegi · Sui · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO)
 @Composable
 private fun PrivilegesSuiPreview() {
     ArgusTheme {
@@ -352,7 +346,9 @@ private fun PrivilegesSuiPreview() {
     }
 }
 
-@Preview(name = "Privilegi · root su negato", showBackground = true, backgroundColor = 0xFF0E1216)
+@Preview(name = "Privilegi · root su negato · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+
+@Preview(name = "Privilegi · root su negato · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO)
 @Composable
 private fun PrivilegesRootDeniedPreview() {
     ArgusTheme {
@@ -360,7 +356,9 @@ private fun PrivilegesRootDeniedPreview() {
     }
 }
 
-@Preview(name = "Privilegi · dialogo", showBackground = true, backgroundColor = 0xFF0E1216)
+@Preview(name = "Privilegi · dialogo · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+
+@Preview(name = "Privilegi · dialogo · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO)
 @Composable
 private fun PermanentGrantsDialogPreview() {
     ArgusTheme { PermanentGrantsDialog(previewGrants, {}, {}) }

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Variante scura del tema di lancio: parent Material scuro, icone di sistema chiare. -->
+    <style name="Theme.Argus" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/argus_window_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+</resources>

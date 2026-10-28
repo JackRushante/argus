@@ -27,6 +27,21 @@ object ValidationMessages {
         "capability_temporarily_unavailable",
         "state_query_unavailable",
         "state_query_type_mismatch",
+        "app_not_installed",
+    )
+
+    /** Codici d'errore di un passo di macro: il [ValidationIssue.detail] è il numero del passo, che si antepone. */
+    private val STEP_CODES = setOf(
+        "ui_step_wait_no_target",
+        "ui_step_selector_missing",
+        "ui_step_selector_empty",
+        "ui_step_selector_too_long",
+        "ui_step_selector_control",
+        "ui_step_timeout",
+        "ui_step_index",
+        "ui_step_type_empty",
+        "ui_step_type_too_long",
+        "ui_step_interpolated",
     )
 
     private val table: Map<String, Text> = mapOf(
@@ -554,6 +569,11 @@ object ValidationMessages {
             "The device capabilities could not be checked.",
             "Non è stato possibile verificare le capacità del dispositivo.",
         ),
+        // 0.7.0: controllo fatto sul telefono all'approvazione; solo avviso, la regola resta armabile.
+        "app_not_installed" to t(
+            "An app this rule uses is not installed on this phone: install it, or change the app.",
+            "Un'app usata da questa regola non è installata su questo telefono: installala oppure cambia app.",
+        ),
         "capability_unavailable" to t(
             "This rule needs a capability the device does not have right now.",
             "Questa regola richiede una capacità che il dispositivo non ha al momento.",
@@ -701,9 +721,42 @@ object ValidationMessages {
             "A screen macro cannot act on Argus, on Settings, on the package installer or on permission dialogs.",
             "Una macro sullo schermo non può agire su Argus, sulle Impostazioni, sull'installatore di pacchetti né sui dialoghi dei permessi.",
         ),
-        "ui_step_invalid" to t(
-            "A step is not valid: it needs a text, an id or a description (up to 200 characters), a wait of 0.1 to 15 s, and a match number from 0 to 50.",
-            "Un passo non è valido: serve un testo, un id o una descrizione (fino a 200 caratteri), un'attesa da 0,1 a 15 s e un numero di corrispondenza da 0 a 50.",
+        // Un errore per passo (0.7.0): il numero del passo sta nel `detail` e si antepone al testo.
+        "ui_step_wait_no_target" to t(
+            "A \"wait_for\" with no text and no id waits for the app to open, but the macro has no app to open (pkg). Give it a text or an id, or set pkg.",
+            "Un'attesa senza testo né id aspetta che l'app si apra, ma la macro non ha un'app da aprire (pkg). Indica un testo o un id, oppure imposta pkg.",
+        ),
+        "ui_step_selector_missing" to t(
+            "The step needs a text, an id or a description to find the element.",
+            "Il passo ha bisogno di un testo, di un id o di una descrizione per trovare l'elemento.",
+        ),
+        "ui_step_selector_empty" to t(
+            "A text, an id or a description is empty: fill it in or leave it out.",
+            "Un testo, un id o una descrizione è vuoto: compilalo oppure toglilo.",
+        ),
+        "ui_step_selector_too_long" to t(
+            "A text, an id or a description is longer than 200 characters.",
+            "Un testo, un id o una descrizione supera i 200 caratteri.",
+        ),
+        "ui_step_selector_control" to t(
+            "A text, an id or a description contains control characters.",
+            "Un testo, un id o una descrizione contiene caratteri di controllo.",
+        ),
+        "ui_step_timeout" to t(
+            "The wait must last from 0.1 to 15 seconds (timeoutMs from 100 to 15000).",
+            "L'attesa deve durare da 0,1 a 15 secondi (timeoutMs da 100 a 15000).",
+        ),
+        "ui_step_index" to t(
+            "The match number (index) must be from 0 to 50.",
+            "Il numero di corrispondenza (index) deve andare da 0 a 50.",
+        ),
+        "ui_step_type_empty" to t(
+            "The text to type is empty.",
+            "Il testo da scrivere è vuoto.",
+        ),
+        "ui_step_type_too_long" to t(
+            "The text to type is longer than 1000 characters.",
+            "Il testo da scrivere supera i 1000 caratteri.",
         ),
         "ui_step_interpolated" to t(
             "Only the text of a \"type\" step can contain a \${variable}; everything else in the macro is fixed.",
@@ -739,7 +792,12 @@ object ValidationMessages {
     fun text(issue: ValidationIssue, language: RenderLanguage): String {
         val base = text(issue.code, language)
         val detail = issue.detail?.let(::sanitize)?.takeIf { it.isNotBlank() }
-        return if (issue.code in DETAIL_CODES && detail != null) "$base ($detail)" else base
+        return when {
+            issue.code in DETAIL_CODES && detail != null -> "$base ($detail)"
+            issue.code in STEP_CODES && detail != null && detail.all(Char::isDigit) ->
+                language.pick("Step $detail: ", "Passo $detail: ") + base
+            else -> base
+        }
     }
 
     /** Elenco di codici separati da virgola (audit VALIDATION_REJECTED): un testo per codice. */

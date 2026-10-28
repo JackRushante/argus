@@ -1,14 +1,16 @@
 package dev.argus.ui.screens
 
+import android.content.res.Configuration
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -24,34 +26,29 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Alarm
 import androidx.compose.material.icons.rounded.ArrowUpward
-import androidx.compose.material.icons.rounded.Block
-import androidx.compose.material.icons.rounded.ChatBubbleOutline
-import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.Error
-import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.MoreVert
-import androidx.compose.material.icons.rounded.Pending
-import androidx.compose.material.icons.rounded.Shield
+import androidx.compose.material.icons.rounded.Notifications
+import androidx.compose.material.icons.rounded.NightsStay
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -66,17 +63,31 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import dev.argus.engine.safety.Severity
+import dev.argus.ui.R
+import dev.argus.ui.components.ArgusBottomSheet
+import dev.argus.ui.components.ArgusButton
+import dev.argus.ui.components.ArgusCardGroup
+import dev.argus.ui.components.ArgusChatTopBar
+import dev.argus.ui.components.ArgusIconButton
+import dev.argus.ui.components.ButtonStyle
+import dev.argus.ui.components.ChatBrandMark
+import dev.argus.ui.components.ChatDraftCard
+import dev.argus.ui.components.ChatWaitCard
+import dev.argus.ui.components.CodeBlock
 import dev.argus.ui.components.ConfirmationState
 import dev.argus.ui.components.DestructiveConfirmDialog
-import dev.argus.ui.components.LatencyIndicator
-import dev.argus.ui.components.RuleCard
+import dev.argus.ui.components.IconBadge
+import dev.argus.ui.components.SectionLabel
 import dev.argus.ui.model.ActionRow
 import dev.argus.ui.model.ChatCallbacks
 import dev.argus.ui.model.ChatError
@@ -89,22 +100,19 @@ import dev.argus.ui.model.UiWarning
 import dev.argus.ui.preview.Fixtures
 import dev.argus.ui.presentation.ChatExampleGroup
 import dev.argus.ui.presentation.ChatExamples
-import dev.argus.ui.presentation.secondaryText
-import dev.argus.ui.R
+import dev.argus.ui.theme.ArgusRadius
+import dev.argus.ui.theme.ArgusSpacing
 import dev.argus.ui.theme.ArgusTheme
-import dev.argus.ui.theme.LocalArgusSemantic
-import dev.argus.ui.theme.RolePair
 
 // =============================================================================
-// Schermo Chat (handoff §6.1, design §7.1). L'LLM compila le regole; la chat è
-// il punto d'ingresso. Vincoli cardine:
-//  - §4 NIENTE STREAMING: attesa one-shot lunga e onesta (LatencyIndicator con
-//    tempo trascorso), nessun cursore/typing; input disabilitato durante l'attesa.
-//  - §3 l'ARM NON avviene qui: la DraftCard porta solo "Rivedi e approva →" che
-//    apre il Dettaglio (onOpenDraft). Nessun percorso di armamento in chat.
-//  - §5.4 la DraftCard generativa porta i badge generativa + "esce verso il cloud"
-//    (via RuleCard); ERROR nelle issues ⇒ fascia "Non armabile: <motivo>".
-// Stateless: solo (state, callbacks). L'overflow in header è nav host-owned.
+// Schermo Chat (handoff §6.1, design §7.1; redesign A, tavole «Chat · primo avvio / bozza / in attesa»).
+// L'LLM compila le regole; la chat e' il punto d'ingresso. Vincoli cardine:
+//  - §4 NIENTE STREAMING: attesa one-shot lunga e onesta (scheda con tempo trascorso e barra dei tempi),
+//    nessun cursore/typing; input disabilitato durante l'attesa.
+//  - Invariante 1: l'ARM NON avviene qui. La card bozza porta solo «Rivedi e approva», che apre il
+//    Dettaglio (onOpenDraft). Un ERROR compare per intero come «Non armabile: <motivo>», gli avvisi si contano.
+//  - §5.4 la bozza generativa porta i chip «generativa» + «esce verso il cloud».
+// Stateless: solo (state, callbacks). L'overflow in header e' nav host-owned.
 // =============================================================================
 
 @Composable
@@ -128,6 +136,9 @@ fun ChatScreen(
     // 0.4.0: galleria «Altri esempi» e conferma di «Svuota conversazione» (stato effimero della schermata).
     var showExamples by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(ConfirmationState<Unit>()) }
+    // L'errore sta nel flusso della conversazione, dalla parte di Argus; "servizio irraggiungibile" ha il suo
+    // banner sopra il campo e prende il posto dell'errore (come prima).
+    val error = state.error?.takeIf { !state.sending && !brainDown }
 
     Surface(color = MaterialTheme.colorScheme.background, modifier = modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
@@ -143,55 +154,27 @@ fun ChatScreen(
                 onCheckConnection = callbacks::onCheckConnection,
             )
 
-            // Zona messaggi (o empty state coi suggerimenti).
+            // Zona messaggi (o stato vuoto coi suggerimenti).
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 if (state.items.isEmpty() && !state.sending) {
-                    ChatEmptyState(callbacks, onMoreExamples = { showExamples = true })
+                    ChatEmptyState(
+                        callbacks = callbacks,
+                        onMoreExamples = { showExamples = true },
+                        error = error,
+                    )
                 } else {
-                    val listState = rememberLazyListState()
-                    AutoScrollToNewItems(listState, itemCount = state.items.size)
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        // Chiavi stabili (B44): le card per draftId, il resto per posizione.
-                        itemsIndexed(
-                            state.items,
-                            key = { index, item -> chatItemKey(index, item) },
-                        ) { _, item -> ChatItemRow(item, callbacks) }
-                        // Senza errore l'azione sta sotto l'ultimo messaggio; con un errore, sotto il suo banner.
-                        if (rawAvailable && state.error == null) {
-                            item(key = "raw-response-action") {
-                                RawResponseAction(onClick = { showRawResponse = true })
-                            }
-                        }
-                    }
+                    ChatConversation(
+                        state = state,
+                        callbacks = callbacks,
+                        error = error,
+                        rawAvailable = rawAvailable,
+                        onShowRaw = { showRawResponse = true },
+                    )
                 }
             }
 
-            // Zona stato/notice + attesa, sopra l'input.
-            Column(
-                modifier = Modifier.padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                when {
-                    brainDown -> BrainDownBanner(callbacks::onRetry)
-                    state.error != null && !state.sending ->
-                        ChatErrorBanner(state.error, callbacks::onRetry, callbacks::onOpenSystem)
-                }
-                if (rawAvailable && state.error != null) {
-                    RawResponseAction(onClick = { showRawResponse = true })
-                }
-                // §4: attesa one-shot, nessuno streaming. elapsed onesto e visibile.
-                if (state.sending) {
-                    LatencyIndicator(
-                        elapsedSec = state.sendingElapsedSec ?: 0,
-                        expectedRangeLabel = stringResource(R.string.chat_expected_range),
-                        onCancel = callbacks::onCancelPending,
-                    )
-                }
+            if (brainDown) {
+                BrainDownBanner(callbacks::onRetry, Modifier.padding(horizontal = ArgusSpacing.Large, vertical = ArgusSpacing.Small))
             }
 
             ChatInputBar(
@@ -248,6 +231,13 @@ internal fun chatItemKey(index: Int, item: ChatItem): String =
     if (item is ChatItem.DraftCard) "draft:${item.draftId}" else "item:$index"
 
 /**
+ * Quante voci ha la lista della conversazione: i messaggi più le code (attesa, errore, «Risposta grezza»).
+ * Serve allo scroll automatico: una coda che compare è una voce nuova come un messaggio.
+ */
+internal fun chatListSize(itemCount: Int, sending: Boolean, hasError: Boolean, hasRawAction: Boolean): Int =
+    itemCount + (if (sending) 1 else 0) + (if (hasError) 1 else 0) + (if (hasRawAction) 1 else 0)
+
+/**
  * Scroll automatico (B44): quando arriva una voce nuova e l'utente era già in fondo (l'ultima voce
  * della lista PRECEDENTE era visibile), scorre sull'ultima. Chi ha scorso in alto per rileggere non
  * viene riportato giù.
@@ -275,88 +265,140 @@ private fun ChatHeader(
     onCheckConnection: () -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 18.dp, end = 8.dp, top = 8.dp, bottom = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text("Argus", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleLarge)
-            Text(
-                stringResource(R.string.chat_subtitle),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
-        Box {
-            IconButton(onClick = { menuOpen = true }, modifier = Modifier.testTag("chat_overflow")) {
-                Icon(Icons.Rounded.MoreVert, contentDescription = stringResource(R.string.chat_more), tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(24.dp))
+    ArgusChatTopBar(
+        title = "Argus",
+        subtitle = stringResource(R.string.chat_subtitle),
+        leading = { ChatBrandMark(size = 36.dp) },
+        actions = {
+            Box {
+                ArgusIconButton(
+                    icon = Icons.Rounded.MoreVert,
+                    contentDescription = stringResource(R.string.chat_more),
+                    onClick = { menuOpen = true },
+                    modifier = Modifier.testTag("chat_overflow"),
+                )
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.chat_menu_clear)) },
+                        onClick = {
+                            menuOpen = false
+                            onClearConversation()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.chat_menu_check_connection)) },
+                        onClick = {
+                            menuOpen = false
+                            onCheckConnection()
+                        },
+                    )
+                }
             }
-            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.chat_menu_clear)) },
-                    onClick = {
-                        menuOpen = false
-                        onClearConversation()
-                    },
+        },
+    )
+}
+
+// -----------------------------------------------------------------------------
+// Conversazione
+// -----------------------------------------------------------------------------
+
+@Composable
+private fun ChatConversation(
+    state: ChatState,
+    callbacks: ChatCallbacks,
+    error: ChatError?,
+    rawAvailable: Boolean,
+    onShowRaw: () -> Unit,
+) {
+    val listState = rememberLazyListState()
+    AutoScrollToNewItems(
+        listState,
+        itemCount = chatListSize(state.items.size, state.sending, error != null, rawAvailable),
+    )
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = ArgusSpacing.Large, vertical = ArgusSpacing.Medium),
+        verticalArrangement = Arrangement.spacedBy(ArgusSpacing.Large),
+    ) {
+        // Chiavi stabili (B44): le card per draftId, il resto per posizione.
+        itemsIndexed(
+            state.items,
+            key = { index, item -> chatItemKey(index, item) },
+        ) { _, item -> ChatItemRow(item, callbacks) }
+        // §4: attesa one-shot, nessuno streaming. Il tempo trascorso e' onesto e visibile.
+        if (state.sending) {
+            item(key = "chat-wait") {
+                ChatWaitCard(
+                    elapsedSec = state.sendingElapsedSec ?: 0,
+                    timeoutSec = state.sendingTimeoutSec,
+                    expectedRangeLabel = stringResource(R.string.chat_expected_range),
+                    onCancel = callbacks::onCancelPending,
                 )
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.chat_menu_check_connection)) },
-                    onClick = {
-                        menuOpen = false
-                        onCheckConnection()
-                    },
-                )
+            }
+        }
+        if (error != null) {
+            item(key = "chat-error") {
+                ChatErrorBubble(error, callbacks::onRetry, callbacks::onOpenSystem)
+            }
+        }
+        // Senza errore l'azione sta sotto l'ultimo messaggio; con un errore, sotto il suo messaggio.
+        if (rawAvailable) {
+            item(key = "raw-response-action") {
+                RawResponseAction(onClick = onShowRaw)
             }
         }
     }
 }
-
-// -----------------------------------------------------------------------------
-// Voci della conversazione
-// -----------------------------------------------------------------------------
 
 @Composable
 private fun ChatItemRow(item: ChatItem, callbacks: ChatCallbacks) {
     when (item) {
         is ChatItem.UserMessage -> MessageBubble(item.text, item.timeLabel, fromUser = true)
         is ChatItem.AssistantMessage -> MessageBubble(item.text, item.timeLabel, fromUser = false)
-        is ChatItem.SystemNotice -> NoticeBanner(item.text, isError = item.kind == NoticeKind.ERROR)
-        is ChatItem.DraftCard -> DraftCardItem(item, callbacks::onOpenDraft)
+        is ChatItem.SystemNotice -> NoticeBubble(item.text, isError = item.kind == NoticeKind.ERROR)
+        is ChatItem.DraftCard -> ChatDraftCard(
+            draft = item,
+            onOpenDraft = callbacks::onOpenDraft,
+            modifier = Modifier.testTag("chat_draft_card"),
+        )
     }
+}
+
+/** Angolo piccolo (6) sul lato di chi parla: utente = basso a destra, Argus = basso a sinistra. */
+private fun bubbleShape(fromUser: Boolean): RoundedCornerShape = if (fromUser) {
+    RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp, bottomEnd = ArgusRadius.Xs, bottomStart = 22.dp)
+} else {
+    RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp, bottomEnd = 22.dp, bottomStart = ArgusRadius.Xs)
 }
 
 @Composable
 private fun MessageBubble(text: String, timeLabel: String, fromUser: Boolean) {
-    // Angolo 4dp sul lato mittente (design §5.4): utente=basso-dx, assistant=basso-sx.
-    val shape = if (fromUser) {
-        RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomEnd = 4.dp, bottomStart = 18.dp)
-    } else {
-        RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomEnd = 18.dp, bottomStart = 4.dp)
-    }
-    val bg = if (fromUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
-    val fg = if (fromUser) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+    val scheme = MaterialTheme.colorScheme
+    val bg = if (fromUser) scheme.primaryContainer else ArgusTheme.surfaces.card
+    val fg = if (fromUser) scheme.onPrimaryContainer else scheme.onSurface
     Row(Modifier.fillMaxWidth()) {
         if (fromUser) Spacer(Modifier.weight(1f))
         Column(
             modifier = Modifier.widthIn(max = 320.dp),
             horizontalAlignment = if (fromUser) Alignment.End else Alignment.Start,
+            verticalArrangement = Arrangement.spacedBy(ArgusSpacing.Unit),
         ) {
             Box(
                 Modifier
-                    .clip(shape)
+                    .clip(bubbleShape(fromUser))
                     .background(bg)
-                    .padding(horizontal = 13.dp, vertical = 9.dp),
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
             ) {
                 Text(text, color = fg, style = MaterialTheme.typography.bodyLarge)
             }
             if (timeLabel.isNotBlank()) {
                 Text(
                     timeLabel,
-                    color = MaterialTheme.colorScheme.secondaryText(),
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 3.dp),
+                    color = scheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.W400,
+                    modifier = Modifier.padding(horizontal = 6.dp),
                 )
             }
         }
@@ -364,137 +406,81 @@ private fun MessageBubble(text: String, timeLabel: String, fromUser: Boolean) {
     }
 }
 
-/** Banner centrato info/error (design §7.1). INFO=blu, ERROR=rosso. */
-@Composable
-private fun NoticeBanner(text: String, isError: Boolean) {
-    val semantic = LocalArgusSemantic.current
-    val bg: Color
-    val fg: Color
-    val icon: ImageVector
-    if (isError) {
-        bg = semantic.error.bg; fg = semantic.error.fg; icon = Icons.Rounded.Error
-    } else {
-        bg = MaterialTheme.colorScheme.primaryContainer; fg = MaterialTheme.colorScheme.onPrimaryContainer; icon = Icons.Rounded.Info
-    }
-    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth(0.92f)
-                .clip(RoundedCornerShape(12.dp))
-                .background(bg)
-                .then(if (isError) Modifier.border(1.dp, fg.copy(alpha = 0.45f), RoundedCornerShape(12.dp)) else Modifier)
-                .padding(horizontal = 12.dp, vertical = 9.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(9.dp),
-        ) {
-            Icon(icon, contentDescription = null, tint = fg, modifier = Modifier.size(18.dp))
-            Text(text, color = fg, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-        }
-    }
-}
-
 /**
- * Card bozza: RuleCard(compact) + eventuale fascia ERROR "Non armabile" + footer
- * stato + CTA "Rivedi e approva →". §3: l'arm NON è qui; la CTA apre il Dettaglio.
+ * Avviso di sistema nella conversazione (annullata, non supportata, ...), dalla parte di Argus. ERROR = fondo
+ * rosso con il testo normale; INFO = fondo `card2`. L'icona accompagna sempre il colore.
  */
 @Composable
-private fun DraftCardItem(draft: ChatItem.DraftCard, onOpenDraft: (String) -> Unit) {
-    val semantic = LocalArgusSemantic.current
-    val errorIssue = draft.issues.firstOrNull { it.severity == Severity.ERROR }
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        // §5.1: il riassunto della regola viene da RuleRender (RuleCard), mai dalla prosa.
-        RuleCard(draft.rule, compact = true)
-
-        // ERROR ⇒ la bozza non è armabile: motivo esplicito (§5.2), ma resta rivedibile.
-        if (errorIssue != null) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(semantic.error.bg)
-                    .border(1.dp, semantic.error.fg.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
-                    .padding(horizontal = 12.dp, vertical = 9.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Icon(Icons.Rounded.Error, contentDescription = null, tint = semantic.error.fg, modifier = Modifier.size(16.dp))
-                Text(stringResource(R.string.chat_not_armable, errorIssue.text), color = semantic.error.fg, style = MaterialTheme.typography.bodyMedium)
-            }
-        }
-
-        DraftFooter(draft, onOpenDraft)
-    }
-}
-
-@Composable
-private fun DraftFooter(draft: ChatItem.DraftCard, onOpenDraft: (String) -> Unit) {
-    val semantic = LocalArgusSemantic.current
-    // Stato bozza -> copy + colore semantico; la CTA compare solo quando è azionabile (PROPOSED).
-    val (role, icon, label, showCta) = when (draft.status) {
-        DraftCardStatus.PROPOSED ->
-            StatusLine(semantic.pending, Icons.Rounded.Pending, stringResource(R.string.chat_draft_pending), true)
-        DraftCardStatus.APPROVED ->
-            StatusLine(semantic.armed, Icons.Rounded.Shield, stringResource(R.string.chat_draft_approved), false)
-        DraftCardStatus.REJECTED ->
-            StatusLine(semantic.disabled, Icons.Rounded.Block, stringResource(R.string.chat_draft_rejected), false)
-        DraftCardStatus.SUPERSEDED ->
-            StatusLine(semantic.disabled, Icons.Rounded.History, stringResource(R.string.chat_draft_superseded), false)
+private fun NoticeBubble(text: String, isError: Boolean) {
+    val semantic = ArgusTheme.semantic
+    val scheme = MaterialTheme.colorScheme
+    val bg: Color
+    val tint: Color
+    val icon: ImageVector
+    if (isError) {
+        bg = semantic.error.bg; tint = semantic.error.fg; icon = Icons.Rounded.Error
+    } else {
+        bg = ArgusTheme.surfaces.card2; tint = scheme.primary; icon = Icons.Rounded.Info
     }
     Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
+        modifier = Modifier
+            .widthIn(max = 340.dp)
+            .clip(bubbleShape(fromUser = false))
+            .background(bg)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp), modifier = Modifier.weight(1f)) {
-            Icon(icon, contentDescription = null, tint = role.fg, modifier = Modifier.size(15.dp))
-            Text(label, color = role.fg, style = MaterialTheme.typography.bodyMedium)
-        }
-        if (showCta) {
-            Button(
-                onClick = { onOpenDraft(draft.draftId) },
-                modifier = Modifier.heightIn(min = 48.dp),
-                contentPadding = PaddingValues(start = 16.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
-            ) {
-                Text(stringResource(R.string.chat_review_cta))
-                Icon(Icons.Rounded.ChevronRight, contentDescription = null, modifier = Modifier.size(18.dp))
-            }
-        }
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
+        Text(text, color = scheme.onSurface, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f, fill = false))
     }
 }
-
-private data class StatusLine(val role: RolePair, val icon: ImageVector, val label: String, val showCta: Boolean)
 
 // -----------------------------------------------------------------------------
 // Banner brain-down / errori chat (§9, copy verbatim)
 // -----------------------------------------------------------------------------
 
 @Composable
-private fun BrainDownBanner(onRetry: () -> Unit) {
-    val semantic = LocalArgusSemantic.current
+private fun BrainDownBanner(onRetry: () -> Unit, modifier: Modifier = Modifier) {
+    val scheme = MaterialTheme.colorScheme
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(semantic.error.bg)
-            .border(1.dp, semantic.error.fg.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
-            .padding(start = 14.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+            .clip(RoundedCornerShape(18.dp))
+            .background(ArgusTheme.semantic.error.bg)
+            .heightIn(min = 56.dp)
+            .padding(start = ArgusSpacing.Medium, end = ArgusSpacing.Unit, top = 10.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(ArgusSpacing.Medium),
     ) {
-        Icon(Icons.Rounded.CloudOff, contentDescription = null, tint = semantic.error.fg, modifier = Modifier.size(20.dp))
-        Text(stringResource(R.string.chat_brain_down), color = semantic.error.fg, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-        TextButton(onClick = onRetry, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.chat_retry)) }
+        IconBadge(Icons.Rounded.CloudOff, scheme.errorContainer, scheme.onErrorContainer, size = 34.dp, iconSize = 20.dp)
+        Text(
+            stringResource(R.string.chat_brain_down),
+            color = scheme.onErrorContainer,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.W500,
+            modifier = Modifier.weight(1f),
+        )
+        ArgusButton(stringResource(R.string.chat_retry), onRetry, style = ButtonStyle.Text)
     }
 }
 
 /**
- * §9: errori chat resi senza allarmismo e SPIEGATI col loro rimedio (B11). Ogni variante ha il suo
- * testo; Auth, Budget e NotConfigured portano a Sistema; il dettaglio tecnico mostra il codice.
+ * §9: errori chat resi senza allarmismo e SPIEGATI col loro rimedio (B11), come un messaggio di Argus nella
+ * conversazione. Ogni variante ha il suo testo; Auth, Budget e NotConfigured portano a Sistema; il dettaglio
+ * tecnico (il codice) si apre a richiesta e va a capo.
  */
 @Composable
-private fun ChatErrorBanner(error: ChatError, onRetry: () -> Unit, onOpenSystem: () -> Unit) {
-    val semantic = LocalArgusSemantic.current
-    var expanded by remember { mutableStateOf(false) }
+internal fun ChatErrorBubble(
+    error: ChatError,
+    onRetry: () -> Unit,
+    onOpenSystem: () -> Unit,
+    modifier: Modifier = Modifier,
+    initiallyExpanded: Boolean = false,
+) {
+    val semantic = ArgusTheme.semantic
+    val scheme = MaterialTheme.colorScheme
+    var expanded by remember { mutableStateOf(initiallyExpanded) }
     val text = when (error) {
         ChatError.Timeout -> stringResource(R.string.chat_error_timeout)
         ChatError.BridgeUnreachable -> stringResource(R.string.chat_error_unreachable)
@@ -513,41 +499,63 @@ private fun ChatErrorBanner(error: ChatError, onRetry: () -> Unit, onOpenSystem:
     val detail = chatErrorDetail(error)
     val opensSystem = error == ChatError.Auth || error == ChatError.Budget || error == ChatError.NotConfigured
     Column(
-        modifier = Modifier
+        modifier = modifier
+            .widthIn(max = 340.dp)
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(bubbleShape(fromUser = false))
             .background(semantic.error.bg)
-            .border(1.dp, semantic.error.fg.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
-            .padding(horizontal = 12.dp, vertical = 9.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+            .padding(start = 14.dp, top = 14.dp, end = 14.dp, bottom = ArgusSpacing.Small)
+            .semantics { liveRegion = LiveRegionMode.Assertive },
+        verticalArrangement = Arrangement.spacedBy(ArgusSpacing.Small),
     ) {
-        Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-            Icon(Icons.Rounded.Error, contentDescription = null, tint = semantic.error.fg, modifier = Modifier.size(18.dp))
-            Text(text, color = semantic.error.fg, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Icon(Icons.Rounded.Error, contentDescription = null, tint = semantic.error.fg, modifier = Modifier.size(20.dp))
+            Text(text, color = scheme.onSurface, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
         }
         if (detail != null) {
             // Dettaglio tecnico espandibile con il codice: atteso (l'LLM sbaglia il JSON), tono calmo.
-            TextButton(onClick = { expanded = !expanded }, modifier = Modifier.heightIn(min = 48.dp)) {
-                Text(if (expanded) stringResource(R.string.chat_error_detail_hide) else stringResource(R.string.chat_error_detail_show))
+            Row(
+                modifier = Modifier
+                    .padding(start = 24.dp)
+                    .defaultMinSize(minHeight = ArgusSpacing.TouchTarget)
+                    .clip(RoundedCornerShape(percent = 50))
+                    .clickable(role = Role.Button) { expanded = !expanded }
+                    .padding(start = 6.dp, end = ArgusSpacing.Medium),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(ArgusSpacing.Unit),
+            ) {
+                Icon(
+                    if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                    contentDescription = null,
+                    tint = semantic.error.fg,
+                    modifier = Modifier.size(20.dp),
+                )
+                Text(
+                    if (expanded) stringResource(R.string.chat_error_detail_hide) else stringResource(R.string.chat_error_detail_show),
+                    color = semantic.error.fg,
+                    style = MaterialTheme.typography.labelLarge,
+                )
             }
             if (expanded) {
-                Text(
-                    detail,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontFamily = FontFamily.Monospace,
-                )
+                CodeBlock(text = detail, modifier = Modifier.padding(start = 30.dp))
             }
         }
         // TooLong: si risolve accorciando il testo, "riprova" non servirebbe a nulla.
         if (error !is ChatError.TooLong) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 if (opensSystem) {
-                    TextButton(onClick = onOpenSystem, modifier = Modifier.heightIn(min = 48.dp)) {
-                        Text(stringResource(R.string.chat_open_system))
-                    }
+                    ArgusButton(stringResource(R.string.chat_open_system), onOpenSystem, style = ButtonStyle.Text)
                 }
-                TextButton(onClick = onRetry, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.chat_retry)) }
+                ArgusButton(
+                    text = stringResource(R.string.chat_retry),
+                    onClick = onRetry,
+                    style = ButtonStyle.Text,
+                    icon = Icons.Rounded.Refresh,
+                )
             }
         }
     }
@@ -591,9 +599,12 @@ internal fun chatErrorDetail(error: ChatError): String? = when (error) {
 /** Azione testuale «Risposta grezza» sotto l'ultimo messaggio o sotto l'errore dell'ultimo turno. */
 @Composable
 private fun RawResponseAction(onClick: () -> Unit) {
-    TextButton(onClick = onClick, modifier = Modifier.heightIn(min = 48.dp).testTag("chat_raw_action")) {
-        Text(stringResource(R.string.chat_raw_action))
-    }
+    ArgusButton(
+        text = stringResource(R.string.chat_raw_action),
+        onClick = onClick,
+        style = ButtonStyle.Text,
+        modifier = Modifier.testTag("chat_raw_action").semantics(mergeDescendants = true) {},
+    )
 }
 
 /**
@@ -604,6 +615,7 @@ private fun RawResponseAction(onClick: () -> Unit) {
 private fun RawResponseDialog(raw: String, onCopy: () -> Unit, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
+        containerColor = ArgusTheme.surfaces.sheet,
         title = { Text(stringResource(R.string.chat_raw_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -624,95 +636,130 @@ private fun RawResponseDialog(raw: String, onCopy: () -> Unit, onDismiss: () -> 
                             raw,
                             color = MaterialTheme.colorScheme.onSurface,
                             style = MaterialTheme.typography.bodyMedium,
-                            fontFamily = FontFamily.Monospace,
+                            fontFamily = dev.argus.ui.theme.ArgusMono,
                         )
                     }
                 }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.chat_raw_close)) }
+            ArgusButton(stringResource(R.string.chat_raw_close), onDismiss, style = ButtonStyle.Text)
         },
         confirmButton = {
-            Button(onClick = onCopy, modifier = Modifier.testTag("chat_raw_copy")) {
-                Text(stringResource(R.string.chat_raw_copy))
-            }
+            ArgusButton(
+                text = stringResource(R.string.chat_raw_copy),
+                onClick = onCopy,
+                modifier = Modifier.testTag("chat_raw_copy").semantics(mergeDescendants = true) {},
+            )
         },
     )
 }
 
 // -----------------------------------------------------------------------------
-// Empty state (suggerimenti) e input
+// Stato vuoto (suggerimenti) e input
 // -----------------------------------------------------------------------------
 
+/** Un suggerimento dello stato vuoto: testo, icona e forma del contenitore (cerchio per l'orario, squircle per la notifica). */
+private data class SuggestionSpec(val text: String, val icon: ImageVector, val shape: RoundedCornerShape)
+
 @Composable
-private fun ChatEmptyState(callbacks: ChatCallbacks, onMoreExamples: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Icon(Icons.Rounded.ChatBubbleOutline, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(44.dp))
-        Spacer(Modifier.size(12.dp))
-        Text(stringResource(R.string.chat_empty_title), color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
-        Spacer(Modifier.size(6.dp))
-        Text(
-            stringResource(R.string.chat_empty_body),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodyMedium,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.size(20.dp))
-        Text(
-            stringResource(R.string.chat_empty_try),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.labelSmall,
-            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-        )
-        // Esempi cliccabili dell'empty state (feedback Lorenzo 2026-07-14): niente riferimenti
-        // personali e SOLO regole armabili con le capability correnti (time/notification/geofence).
-        val suggestions = listOf(
-            stringResource(R.string.chat_suggestion_morning),
-            stringResource(R.string.chat_suggestion_night),
-            stringResource(R.string.chat_suggestion_whatsapp),
-        )
-        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            suggestions.forEach { s ->
-                SuggestionChip(s) {
-                    // Empty-state: imposta l'input e invia (brief Task 7).
-                    callbacks.onInputChange(s)
-                    callbacks.onSend()
-                }
-            }
-            // 0.4.0 (F10): galleria con altre idee, divise per argomento.
-            TextButton(
-                onClick = onMoreExamples,
-                modifier = Modifier.align(Alignment.CenterHorizontally).heightIn(min = 48.dp).testTag("chat_more_examples"),
+private fun ChatEmptyState(
+    callbacks: ChatCallbacks,
+    onMoreExamples: () -> Unit,
+    error: ChatError?,
+) {
+    // Esempi cliccabili dello stato vuoto (feedback Lorenzo 2026-07-14): niente riferimenti personali e SOLO
+    // regole armabili con le capability correnti (time/notification/geofence). Sono gli stessi testi della galleria.
+    val suggestions = listOf(
+        SuggestionSpec(stringResource(R.string.chat_suggestion_morning), Icons.Rounded.Alarm, RoundedCornerShape(percent = 50)),
+        SuggestionSpec(stringResource(R.string.chat_suggestion_night), Icons.Rounded.NightsStay, RoundedCornerShape(percent = 50)),
+        SuggestionSpec(stringResource(R.string.chat_suggestion_whatsapp), Icons.Rounded.Notifications, RoundedCornerShape(ArgusRadius.Md)),
+    )
+    // L'altezza minima della colonna e' quella dello spazio disponibile: lo stato vuoto sta al centro, e con
+    // il testo grande o la tastiera aperta scorre invece di tagliarsi.
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = maxHeight)
+                .verticalScroll(rememberScrollState())
+                .padding(start = ArgusSpacing.Large, end = ArgusSpacing.Large, top = ArgusSpacing.Small, bottom = ArgusSpacing.Medium),
+            verticalArrangement = Arrangement.spacedBy(ArgusSpacing.Section, Alignment.CenterVertically),
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = ArgusSpacing.Medium),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Text(stringResource(R.string.ui40_chat_more_examples))
+                ChatBrandMark(size = 72.dp)
+                Text(
+                    stringResource(R.string.chat_empty_title),
+                    modifier = Modifier.padding(top = ArgusSpacing.Unit),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.titleLarge,
+                    textAlign = TextAlign.Center,
+                )
+                Text(
+                    stringResource(R.string.chat_empty_body),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyLarge,
+                    textAlign = TextAlign.Center,
+                )
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(ArgusSpacing.Small)) {
+                SectionLabel(stringResource(R.string.chat_empty_try), Modifier.padding(start = ArgusSpacing.Unit))
+                ArgusCardGroup(suggestions) { suggestion ->
+                    SuggestionRow(suggestion) {
+                        // Stato vuoto: imposta l'input e invia (brief Task 7).
+                        callbacks.onInputChange(suggestion.text)
+                        callbacks.onSend()
+                    }
+                }
+                // 0.4.0 (F10): galleria con altre idee, divise per argomento.
+                ArgusButton(
+                    text = stringResource(R.string.ui40_chat_more_examples),
+                    onClick = onMoreExamples,
+                    style = ButtonStyle.Text,
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .testTag("chat_more_examples")
+                        .semantics(mergeDescendants = true) {},
+                )
+            }
+            if (error != null) {
+                ChatErrorBubble(error, callbacks::onRetry, callbacks::onOpenSystem)
             }
         }
-        Spacer(Modifier.size(16.dp))
     }
 }
 
 @Composable
-private fun SuggestionChip(text: String, onTap: () -> Unit) {
+private fun SuggestionRow(suggestion: SuggestionSpec, onTap: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .clickable { onTap() }
-            .heightIn(min = 48.dp)
-            .padding(horizontal = 13.dp, vertical = 11.dp),
+            .clickable(onClickLabel = stringResource(R.string.rda_lc_example_send_label), role = Role.Button, onClick = onTap)
+            .defaultMinSize(minHeight = 72.dp)
+            .padding(start = ArgusSpacing.Medium, end = 14.dp, top = ArgusSpacing.Medium, bottom = ArgusSpacing.Medium),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(ArgusSpacing.Medium),
     ) {
-        Text(text, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyMedium)
+        IconBadge(
+            icon = suggestion.icon,
+            container = scheme.primaryContainer,
+            content = scheme.onPrimaryContainer,
+            size = 40.dp,
+            iconSize = 20.dp,
+            shape = suggestion.shape,
+        )
+        Text(
+            suggestion.text,
+            color = scheme.onSurface,
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.weight(1f),
+        )
+        Icon(Icons.Rounded.ArrowUpward, contentDescription = null, tint = scheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
     }
 }
 
@@ -724,67 +771,44 @@ private fun ChatExamplesSheet(
     onPick: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = MaterialTheme.colorScheme.background,
-    ) {
+    ArgusBottomSheet(onDismiss = onDismiss, title = stringResource(R.string.ui40_examples_title)) {
         ChatExamplesContent(groups, onPick)
     }
 }
 
 @Composable
 internal fun ChatExamplesContent(groups: List<ChatExampleGroup>, onPick: (String) -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text(
-            stringResource(R.string.ui40_examples_title),
-            color = MaterialTheme.colorScheme.onSurface,
-            style = MaterialTheme.typography.titleMedium,
-        )
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(
             stringResource(R.string.ui40_examples_hint),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodyMedium,
         )
         groups.forEach { group ->
-            Text(
-                group.title,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.labelSmall,
-                modifier = Modifier.padding(top = 10.dp),
-            )
-            group.examples.forEach { example ->
+            SectionLabel(group.title, Modifier.padding(top = 6.dp, start = ArgusSpacing.Unit))
+            ArgusCardGroup(group.examples) { example ->
                 ExampleRow(example.text, example.requiresShizuku) { onPick(example.text) }
             }
         }
-        Spacer(Modifier.size(24.dp))
     }
 }
 
 @Composable
 private fun ExampleRow(text: String, requiresShizuku: Boolean, onTap: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
     val shizukuCd = stringResource(R.string.ui40_example_shizuku_cd)
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .clickable { onTap() }
-            .heightIn(min = 48.dp)
-            .padding(horizontal = 13.dp, vertical = 11.dp),
+            .clickable(role = Role.Button, onClick = onTap)
+            .defaultMinSize(minHeight = 56.dp)
+            .padding(horizontal = ArgusSpacing.Medium, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(ArgusSpacing.Medium),
     ) {
         Text(
             text,
-            color = MaterialTheme.colorScheme.onSurface,
+            color = scheme.onSurface,
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.weight(1f),
         )
@@ -792,11 +816,11 @@ private fun ExampleRow(text: String, requiresShizuku: Boolean, onTap: () -> Unit
             // Etichetta testuale (non solo colore): l'esempio funziona solo con Shizuku attivo.
             Text(
                 stringResource(R.string.ui40_example_shizuku_tag),
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                style = MaterialTheme.typography.labelSmall,
+                color = scheme.onPrimaryContainer,
+                style = MaterialTheme.typography.labelMedium,
                 modifier = Modifier
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(MaterialTheme.colorScheme.primaryContainer)
+                    .clip(RoundedCornerShape(percent = 50))
+                    .background(scheme.primaryContainer)
                     .padding(horizontal = 10.dp, vertical = 4.dp)
                     .semantics { contentDescription = shizukuCd },
             )
@@ -813,12 +837,15 @@ private fun ChatInputBar(
     onSend: () -> Unit,
 ) {
     val canSend = enabled && input.isNotBlank()
+    val scheme = MaterialTheme.colorScheme
+    val surfaces = ArgusTheme.surfaces
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 14.dp, end = 14.dp, top = 6.dp, bottom = 12.dp),
+            .background(surfaces.page)
+            .padding(start = ArgusSpacing.Large, end = ArgusSpacing.Medium, top = ArgusSpacing.Small, bottom = ArgusSpacing.Medium),
         verticalAlignment = Alignment.Bottom,
-        horizontalArrangement = Arrangement.spacedBy(9.dp),
+        horizontalArrangement = Arrangement.spacedBy(ArgusSpacing.Small),
     ) {
         TextField(
             value = input,
@@ -828,12 +855,20 @@ private fun ChatInputBar(
             placeholder = {
                 Text(if (sending) stringResource(R.string.chat_input_sending) else stringResource(R.string.chat_input_placeholder))
             },
-            shape = RoundedCornerShape(24.dp),
+            textStyle = MaterialTheme.typography.bodyLarge,
+            shape = RoundedCornerShape(percent = 50),
             maxLines = 4,
             colors = TextFieldDefaults.colors(
-                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                focusedContainerColor = surfaces.field,
+                unfocusedContainerColor = surfaces.field,
+                disabledContainerColor = surfaces.card2,
+                focusedTextColor = scheme.onSurface,
+                unfocusedTextColor = scheme.onSurface,
+                disabledTextColor = scheme.onSurfaceVariant,
+                focusedPlaceholderColor = scheme.onSurfaceVariant,
+                unfocusedPlaceholderColor = scheme.onSurfaceVariant,
+                disabledPlaceholderColor = scheme.onSurfaceVariant,
+                cursorColor = scheme.primary,
                 focusedIndicatorColor = Color.Transparent,
                 unfocusedIndicatorColor = Color.Transparent,
                 disabledIndicatorColor = Color.Transparent,
@@ -842,10 +877,12 @@ private fun ChatInputBar(
         FilledIconButton(
             onClick = onSend,
             enabled = canSend,
-            modifier = Modifier.size(48.dp),
+            modifier = Modifier.size(52.dp),
             colors = IconButtonDefaults.filledIconButtonColors(
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
+                containerColor = scheme.primary,
+                contentColor = scheme.onPrimary,
+                disabledContainerColor = surfaces.card2,
+                disabledContentColor = scheme.outline,
             ),
         ) {
             Icon(Icons.Rounded.ArrowUpward, contentDescription = stringResource(R.string.chat_send), modifier = Modifier.size(22.dp))
@@ -854,8 +891,12 @@ private fun ChatInputBar(
 }
 
 // =============================================================================
-// Preview — fixture inline (i Fixtures centralizzati arrivano in Unit F).
+// Anteprime: ogni stato, tema chiaro e scuro (le tavole «Chat · primo avvio / bozza / in attesa»).
 // =============================================================================
+
+@Preview(name = "Chiaro", group = "Tema", showBackground = true, widthDp = 390, heightDp = 844, uiMode = Configuration.UI_MODE_NIGHT_NO)
+@Preview(name = "Scuro", group = "Tema", showBackground = true, widthDp = 390, heightDp = 844, uiMode = Configuration.UI_MODE_NIGHT_YES)
+private annotation class ChatScreenPreviews
 
 private val previewDraftRule = RuleRender(
     triggerLine = "Quando: notifica WhatsApp da \"Moglie\" (chat 1:1)",
@@ -868,13 +909,15 @@ private val previewDraftRule = RuleRender(
     privacyNote = "Il testo della notifica verrà inviato a Hermes e ai provider cloud per generare la risposta.",
 )
 
+private val previewUserMessage = ChatItem.UserMessage(
+    "Se Moglie mi scrive su WhatsApp tra le 18 e le 22, rispondile tu nel tono che abbiamo concordato.",
+    "13:03",
+)
+
 private val previewConversation = listOf(
-    ChatItem.UserMessage(
-        "Se Moglie mi scrive su WhatsApp tra le 18 e le 22, rispondile tu nel tono che abbiamo concordato.",
-        "13:03",
-    ),
+    previewUserMessage,
     ChatItem.AssistantMessage(
-        "Ok. Ho preparato una regola: risponde solo a Moglie, solo in quella fascia, generando il testo al momento. È generativa (il contenuto esce verso il cloud), quindi controllala e armala dal dettaglio.",
+        "Ok. Ho preparato una regola: risponde solo a Moglie, solo nella fascia serale, generando il testo al momento. È generativa (il contenuto esce verso il cloud), quindi controllala e armala dal dettaglio.",
         "13:03",
     ),
     ChatItem.DraftCard(
@@ -899,100 +942,137 @@ private object NoopChatCallbacks : ChatCallbacks {
     override fun onCopyRawResponse() {}
 }
 
-@Preview(name = "Chat · risposta grezza", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)
+private fun previewState(
+    items: List<ChatItem> = emptyList(),
+    input: String = "",
+    sending: Boolean = false,
+    elapsed: Int? = null,
+    reachable: Boolean? = true,
+    error: ChatError? = null,
+    timeout: Int? = null,
+) = ChatState(
+    items = items,
+    input = input,
+    sending = sending,
+    sendingElapsedSec = elapsed,
+    brainReachable = reachable,
+    error = error,
+    sendingTimeoutSec = timeout,
+)
+
+@ChatScreenPreviews
+@Composable
+private fun ChatEmptyPreview() {
+    ArgusTheme { ChatScreen(previewState(reachable = null), NoopChatCallbacks) }
+}
+
+@ChatScreenPreviews
+@Composable
+private fun ChatConversationPreview() {
+    ArgusTheme {
+        ChatScreen(previewState(items = previewConversation), NoopChatCallbacks)
+    }
+}
+
+@ChatScreenPreviews
+@Composable
+private fun ChatSendingPreview() {
+    ArgusTheme {
+        ChatScreen(
+            previewState(items = listOf(previewUserMessage), sending = true, elapsed = 12, timeout = 65),
+            NoopChatCallbacks,
+        )
+    }
+}
+
+@ChatScreenPreviews
+@Composable
+private fun ChatNotArmablePreview() {
+    ArgusTheme {
+        val blocked = (previewConversation.last() as ChatItem.DraftCard).copy(
+            issues = listOf(
+                UiWarning(Severity.ERROR, "shell_in_generative", "il tool 'shell.run' è vietato nelle regole generative."),
+                UiWarning(Severity.WARNING, "read_plus_reply", "Legge dati dal dispositivo e li può inviare al mittente."),
+            ),
+        )
+        ChatScreen(previewState(items = previewConversation.dropLast(1) + blocked), NoopChatCallbacks)
+    }
+}
+
+@ChatScreenPreviews
+@Composable
+private fun ChatMalformedPreview() {
+    ArgusTheme {
+        ChatScreen(
+            previewState(
+                items = previewConversation + listOf(
+                    ChatItem.UserMessage("Rendila valida anche il sabato mattina.", "13:05"),
+                ),
+                error = ChatError.MalformedReply("metaError=missing_field · path=\$.draft.trigger · offset=214"),
+            ),
+            NoopChatCallbacks,
+        )
+    }
+}
+
+@ChatScreenPreviews
+@Composable
+private fun ChatErrorsPreview() {
+    ArgusTheme {
+        Surface(color = MaterialTheme.colorScheme.background) {
+            Column(
+                Modifier.padding(ArgusSpacing.Large),
+                verticalArrangement = Arrangement.spacedBy(ArgusSpacing.Large),
+            ) {
+                ChatErrorBubble(ChatError.MalformedReply("missing_field"), {}, {}, initiallyExpanded = true)
+                ChatErrorBubble(ChatError.Auth, {}, {})
+                ChatErrorBubble(ChatError.TooLong(40_000, 32_768), {}, {})
+                NoticeBubble("Richiesta annullata.", isError = false)
+                NoticeBubble("La compilazione non è riuscita.", isError = true)
+            }
+        }
+    }
+}
+
+@ChatScreenPreviews
+@Composable
+private fun ChatBrainDownPreview() {
+    ArgusTheme {
+        ChatScreen(
+            previewState(items = listOf(ChatItem.UserMessage("Crea una regola per il Wi-Fi.", "13:10")), reachable = false),
+            NoopChatCallbacks,
+        )
+    }
+}
+
+@ChatScreenPreviews
 @Composable
 private fun ChatRawResponsePreview() {
     ArgusTheme { ChatScreen(Fixtures.chatRawResponse, NoopChatCallbacks) }
 }
 
-@Preview(name = "Chat · errore interno", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)
+@ChatScreenPreviews
 @Composable
 private fun ChatInternalErrorPreview() {
     ArgusTheme { ChatScreen(Fixtures.chatInternalError, NoopChatCallbacks) }
 }
 
-@Preview(name = "Chat · conversazione + DraftCard", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)
+@ChatScreenPreviews
 @Composable
-private fun ChatConversationPreview() {
+private fun ChatComposedPreview() {
     ArgusTheme {
-        ChatScreen(
-            ChatState(items = previewConversation, input = "", sending = false, sendingElapsedSec = null, brainReachable = true, error = null),
-            NoopChatCallbacks,
-        )
+        ChatScreen(previewState(items = previewConversation, input = "Rendila valida anche il sabato mattina."), NoopChatCallbacks)
     }
 }
 
-@Preview(name = "Chat · sending (latency)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)
-@Composable
-private fun ChatSendingPreview() {
-    ArgusTheme {
-        ChatScreen(
-            ChatState(
-                items = listOf(ChatItem.UserMessage("Dopo le 23 metti Non disturbare.", "13:05")),
-                input = "",
-                sending = true,
-                sendingElapsedSec = 12,
-                brainReachable = true,
-                error = null,
-            ),
-            NoopChatCallbacks,
-        )
-    }
-}
-
-@Preview(name = "Chat · empty (suggerimenti)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)
-@Composable
-private fun ChatEmptyPreview() {
-    ArgusTheme {
-        ChatScreen(
-            ChatState(items = emptyList(), input = "", sending = false, sendingElapsedSec = null, brainReachable = null, error = null),
-            NoopChatCallbacks,
-        )
-    }
-}
-
-@Preview(name = "Chat · galleria esempi", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 900)
+@ChatScreenPreviews
 @Composable
 private fun ChatExamplesPreview() {
     ArgusTheme {
-        Surface(color = MaterialTheme.colorScheme.background) {
-            ChatExamplesContent(ChatExamples.groups(dev.argus.ui.presentation.RenderLanguage.IT), onPick = {})
+        Surface(color = ArgusTheme.surfaces.sheet) {
+            Column(Modifier.padding(ArgusSpacing.Large)) {
+                ChatExamplesContent(ChatExamples.groups(dev.argus.ui.presentation.RenderLanguage.IT), onPick = {})
+            }
         }
-    }
-}
-
-@Preview(name = "Chat · brain-down", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)
-@Composable
-private fun ChatBrainDownPreview() {
-    ArgusTheme {
-        ChatScreen(
-            ChatState(
-                items = listOf(ChatItem.UserMessage("Crea una regola per il Wi-Fi.", "13:10")),
-                input = "",
-                sending = false,
-                sendingElapsedSec = null,
-                brainReachable = false,
-                error = null,
-            ),
-            NoopChatCallbacks,
-        )
-    }
-}
-
-@Preview(name = "Chat · MalformedReply notice", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)
-@Composable
-private fun ChatMalformedPreview() {
-    ArgusTheme {
-        ChatScreen(
-            ChatState(
-                items = previewConversation,
-                input = "",
-                sending = false,
-                sendingElapsedSec = null,
-                brainReachable = true,
-                error = ChatError.MalformedReply("JSONDecodeError: expected ',' at line 3 col 12 (rule.actions[0])"),
-            ),
-            NoopChatCallbacks,
-        )
     }
 }

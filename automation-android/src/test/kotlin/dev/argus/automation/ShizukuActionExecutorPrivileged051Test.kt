@@ -120,7 +120,15 @@ class ShizukuActionExecutorPrivileged051Test {
         val tools = RecordingTools()
         val exec = executor(tools)
 
-        all.forEach { assertEquals(ActionResult.Success, exec.execute(it, context), it.toString()) }
+        all.forEach {
+            val result = exec.execute(it, context)
+            // Lo screenshot riuscito porta il nome del file (come codice); le altre azioni, solo il successo.
+            if (it == Action.Screenshot) {
+                assertEquals(true, result is ActionResult.SuccessWithDetail, it.toString())
+            } else {
+                assertEquals(ActionResult.Success, result, it.toString())
+            }
+        }
 
         assertEquals(
             listOf(

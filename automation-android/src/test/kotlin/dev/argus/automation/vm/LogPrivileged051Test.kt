@@ -86,4 +86,52 @@ class LogPrivileged051Test {
         val exit = assertNotNull(row(ActionTypeIds.SET_AIRPLANE, "set_airplane_exit_1", RenderLanguage.EN).expandedDetail).single()
         assertEquals("1. Set airplane mode → failed · the system command ended with code 1", exit)
     }
+
+    private fun screenshotRow(outcome: ActionJournalOutcome, code: String?, language: RenderLanguage) = AuditLogRecord(
+        id = 2L,
+        automationId = "a",
+        automationName = "Regola",
+        kind = AuditKind.FIRED,
+        atMillis = 1_000L,
+        detail = "",
+        executionId = "e",
+        executionStatus = null,
+        succeededCount = null,
+        failedCount = null,
+        submittedCount = null,
+    ).toLogRow(
+        actions = listOf(
+            ActionResultEntity(
+                executionId = "e",
+                actionIndex = 0,
+                actionType = ActionTypeIds.SCREENSHOT,
+                outcome = outcome,
+                atMillis = 1_000L,
+                errorCode = code,
+            ),
+        ),
+        language = language,
+    )
+
+    @Test
+    fun `a saved screenshot shows its file name and only that`() {
+        val code = "screenshot_20261028_153012"
+        assertEquals(
+            "1. Screen capture → ok · Pictures/Argus/Argus-20261028-153012.png",
+            assertNotNull(screenshotRow(ActionJournalOutcome.SUCCEEDED, code, RenderLanguage.EN).expandedDetail).single(),
+        )
+        assertEquals(
+            "1. Cattura schermata → ok · Pictures/Argus/Argus-20261028-153012.png",
+            assertNotNull(screenshotRow(ActionJournalOutcome.SUCCEEDED, code, RenderLanguage.IT).expandedDetail).single(),
+        )
+    }
+
+    @Test
+    fun `a screenshot that failed never shows a file name`() {
+        // Lo stesso codice su una riga fallita non e' un nome di file: cade sul testo dei motivi.
+        val detail = assertNotNull(
+            screenshotRow(ActionJournalOutcome.FAILED, "screenshot_20261028_153012", RenderLanguage.EN).expandedDetail,
+        ).single()
+        assertTrue("Pictures/Argus" !in detail, detail)
+    }
 }

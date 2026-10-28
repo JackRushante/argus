@@ -1,5 +1,6 @@
 package dev.argus.automation.bench
 
+import dev.argus.automation.apps.InstalledAppCandidate
 import dev.argus.engine.model.ActionTypeIds
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -24,6 +25,9 @@ internal class BenchException(message: String, cause: Throwable? = null) : Runti
 internal enum class ManifestKind(val wire: String) {
     FULL("full"),
     NO_SHIZUKU("no_shizuku"),
+
+    /** Il telefono completo ma con il servizio di Accessibilita' spento: `ui_steps` non si pubblica (0.7.0). */
+    NO_ACCESSIBILITY("no_accessibility"),
     ;
 
     companion object {
@@ -168,6 +172,16 @@ internal data class BenchCase(
     val draft: DraftExpectation,
     /** Cosa tocca la richiesta quando non c'e' una bozza: id d'azione, `trigger:<wire>` o `tool:<nome>`. */
     val covers: List<String>,
+    /**
+     * App in piu' sul telefono di prova per questo caso (0.7.0), oltre a quelle fisse: serve a un caso con
+     * due app dello stesso tipo, che le altre richieste non devono vedere.
+     */
+    val extraApps: List<InstalledAppCandidate> = emptyList(),
+    /**
+     * Espressioni regolari (su testo senza accenti e minuscolo) che la frase di risposta del modello deve
+     * contenere TUTTE: per i casi senza bozza in cui conta cosa dice (il motivo e come rimediare).
+     */
+    val replyMentions: List<String> = emptyList(),
     val note: String?,
 )
 
@@ -187,15 +201,16 @@ internal object BenchCases {
     private const val COMPILE_RESOURCE = "ai-bench/cases.json"
     private const val ACT_RESOURCE = "ai-bench/act-cases.json"
     private val ID_PATTERN = Regex("^[a-z0-9][a-z0-9._-]{0,63}$")
+    private val PACKAGE_SHAPE = Regex("^[a-z][a-zA-Z0-9_]*(\\.[a-zA-Z][a-zA-Z0-9_]*)+$")
 
-    private val CASE_KEYS = setOf("id", "category", "lang", "text", "manifest", "expect", "covers", "note")
+    private val CASE_KEYS = setOf("id", "category", "lang", "text", "manifest", "expect", "covers", "extra_apps", "note")
     private val ACT_KEYS = setOf(
         "id", "lang", "goal", "web", "context_sources", "expect_number", "must_contain_any", "note",
     )
     private val EXPECT_KEYS = setOf(
         "outcome", "trigger", "contact", "cron_fires", "cron_silent", "at_datetime", "actions_include",
         "actions_exclude", "actions_text", "params", "vars", "vars_exclude", "control_flow", "conditions_include",
-        "conditions_params", "conditions_text", "validator_errors",
+        "conditions_params", "conditions_text", "validator_errors", "reply_mentions",
     )
     private val AT_KEYS = setOf("days_from_today", "month_day", "time")
 
@@ -268,6 +283,14 @@ internal object BenchCases {
                 (entry.startsWith(BenchVocab.COVERS_TOOL) && entry.length > BenchVocab.COVERS_TOOL.length)
             if (!valid) throw BenchException("$at: covers '$entry' non valido")
         }
+        val replyMentions = expect.strList("reply_mentions", at)
+        replyMentions.forEach { pattern ->
+            try {
+                Regex(pattern)
+            } catch (error: Exception) {
+                throw BenchException("$at: regex non valida in reply_mentions '$pattern'", error)
+            }
+        }
         return BenchCase(
             id = id,
             category = category,
@@ -277,8 +300,25 @@ internal object BenchCases {
             outcomes = outcomes,
             draft = draft,
             covers = covers,
+            extraApps = parseExtraApps(obj["extra_apps"], at),
+            replyMentions = replyMentions,
             note = obj.optStr("note", at),
         )
+    }
+
+    private fun parseExtraApps(element: JsonElement?, at: String): List<InstalledAppCandidate> {
+        if (element == null) return emptyList()
+        val array = element as? JsonArray ?: throw BenchException("$at: extra_apps deve essere un array")
+        return array.mapIndexed { index, item ->
+            val where = "$at.extra_apps[$index]"
+            val app = item as? JsonObject ?: throw BenchException("$where: atteso un oggetto")
+            app.checkKeys(setOf("label", "package"), where)
+            val pkg = app.str("package", where)
+            if (!PACKAGE_SHAPE.matches(pkg)) throw BenchException("$where: package malformato '$pkg'")
+            val label = app.str("label", where)
+            if (label.isBlank()) throw BenchException("$where: etichetta vuota")
+            InstalledAppCandidate(label, pkg)
+        }
     }
 
     private fun parseOutcomes(expect: JsonObject, at: String): Set<Outcome> {

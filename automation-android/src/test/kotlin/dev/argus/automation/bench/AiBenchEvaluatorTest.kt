@@ -111,6 +111,34 @@ class AiBenchEvaluatorTest {
     }
 
     @Test
+    fun `a case can require that the reply says why and how to fix it`() {
+        val case = caseOf(
+            """{"id":"e.reply","category":"unsupported","lang":"it","text":"Premi il pulsante Oggi nel Calendario",
+               "manifest":"no_accessibility",
+               "expect":{"outcome":"unsupported","reply_mentions":["accessibilit","attiv|abilit|accend"]},
+               "covers":["ui_steps"]}""",
+        )
+        assertTrue(eval(case, CompileResult("Serve attivare l'Accessibilità di Argus nelle impostazioni.", null, "unsupported_capability")).passed)
+        // Le maiuscole e gli accenti non contano.
+        assertTrue(eval(case, CompileResult("ACCENDI il servizio di ACCESSIBILITÀ", null, "unsupported_capability")).passed)
+
+        val missingReason = eval(case, CompileResult("Questa funzione non è disponibile in questa versione.", null, "unsupported_capability"))
+        assertEquals(listOf(FailureCategory.WRONG_REPLY, FailureCategory.WRONG_REPLY), missingReason.failures.map { it.category })
+
+        val missingFix = eval(case, CompileResult("L'accessibilità è spenta.", null, "unsupported_capability"))
+        assertEquals(1, missingFix.failures.size)
+        assertTrue("attiv|abilit|accend" in missingFix.failures.single().message)
+
+        // Se l'esito e' sbagliato si vede l'esito; senza reply_mentions la risposta non si giudica.
+        assertEquals(
+            FailureCategory.UNEXPECTED_PREFIX + "clarification",
+            eval(case, CompileResult("Quale?", null, "clarification_required")).failures.first().category,
+        )
+        val plain = caseOf("""{"id":"e.plain","category":"c","lang":"it","text":"Imposta una sveglia","expect":{"outcome":"clarification"}}""")
+        assertTrue(eval(plain, CompileResult("Quale ora?", null, "clarification_required")).passed)
+    }
+
+    @Test
     fun `format and transport errors are never mistaken for answers`() {
         val case = caseOf(
             """{"id":"e.fmt","category":"c","lang":"it","text":"Imposta una sveglia","expect":{"outcome":"clarification"}}""",

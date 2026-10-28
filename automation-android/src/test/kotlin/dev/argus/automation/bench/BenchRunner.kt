@@ -184,7 +184,7 @@ internal class BenchRunner(
         // Come ChatViewModel: la lingua dei testi per l'utente e' quella dell'interfaccia (qui la `lang`
         // del caso) e i candidati app nominati nella richiesta arrivano al modello nel prompt.
         val manifest = world.manifest(case.manifest, case.lang)
-        val prompt = world.compilePrompt(case.text, case.lang)
+        val prompt = world.compilePrompt(case.text, case.lang, case.extraApps)
         val expected = case.outcomes.joinToString("|") { it.wire }
         val started = System.nanoTime()
         fun elapsed() = (System.nanoTime() - started) / 1_000_000

@@ -1,9 +1,12 @@
 package dev.argus.automation.vm
 
+import android.content.Context
+import android.os.PowerManager
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dev.argus.automation.AndroidCapabilityProbe
 import dev.argus.automation.ApprovalFlow
 import dev.argus.automation.AutomationEnablementCoordinator
@@ -16,6 +19,8 @@ import dev.argus.automation.RenderLanguageSource
 import dev.argus.automation.TimeAlarmRuntime
 import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
 import dev.argus.automation.di.ApplicationScope
+import dev.argus.automation.apps.EmptyInstalledAppCatalog
+import dev.argus.automation.apps.InstalledAppCatalog
 import dev.argus.automation.manual.AddToHomeResult
 import dev.argus.automation.manual.ManualEntryService
 import dev.argus.automation.manual.ManualRuleCatalog
@@ -29,12 +34,16 @@ import dev.argus.data.dao.AuditLogRecord
 import dev.argus.engine.brain.ContactWhitelistStore
 import dev.argus.data.entities.ActionResultEntity
 import dev.argus.data.entities.ScheduledTimeAlarmEntity
+import dev.argus.engine.model.Action
 import dev.argus.engine.model.ActionTier
+import dev.argus.engine.model.AppPackages
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.ApprovalFingerprint
+import dev.argus.engine.model.CapabilityRequirements
+import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.StateQueryFamily
 import dev.argus.engine.model.StateValueType
 import dev.argus.engine.model.Trigger
@@ -45,9 +54,17 @@ import dev.argus.engine.runtime.AuditSink
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.safety.DraftDeleteResult
 import dev.argus.engine.safety.DraftId
+import dev.argus.engine.safety.DraftWriteResult
+import dev.argus.engine.safety.NewDraft
 import dev.argus.engine.safety.DraftRepository
 import dev.argus.engine.safety.PendingDraft
 import dev.argus.engine.safety.Severity
+import dev.argus.shizuku.RootAccess
+import dev.argus.shizuku.RootState
+import dev.argus.shizuku.ShizukuGateway
+import dev.argus.shizuku.ShizukuGatewayStatus
+import dev.argus.ui.model.AppChoiceUi
+import dev.argus.ui.model.AppInfoUi
 import dev.argus.ui.model.AutomationDetailState
 import dev.argus.ui.model.ManualEntryUi
 import dev.argus.ui.model.RuleDiagnosisUi
@@ -70,11 +87,13 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 
@@ -88,6 +107,8 @@ data class DetailViewState(
 sealed interface DetailEvent {
     data class Close(val message: String) : DetailEvent
     data class Message(val text: String) : DetailEvent
+    /** 0.7.0: «Cambia app» su una regola armata ha creato (o ritrovato) la bozza di modifica: apri la sua approvazione. */
+    data class OpenDetail(val id: String) : DetailEvent
     data class OpenChat(
         val prompt: String,
         val automationId: String?,
@@ -160,6 +181,13 @@ class AutomationDetailViewModel @Inject constructor(
      * usa); nel ViewModel resta solo l'attesa del risultato.
      */
     @ApplicationScope private val applicationScope: CoroutineScope,
+    /** 0.7.0: stato di Shizuku per il banner salute del Dettaglio. `null` solo nei test che non lo provano. */
+    shizuku: ShizukuGateway? = null,
+    /** 0.7.0: con root attivo le regole «solo Shizuku» funzionano, quindi il banner non va mostrato. */
+    rootAccess: RootAccess? = null,
+    @ApplicationContext private val context: Context? = null,
+    /** 0.7.0: nomi delle app, app installate per «Cambia app». Resta sul telefono. */
+    private val appCatalog: InstalledAppCatalog = EmptyInstalledAppCatalog,
 ) : ViewModel() {
     private val routeId = requireNotNull(savedStateHandle.get<String>("id")) {
         "Dettaglio senza id"
@@ -190,11 +218,34 @@ class AutomationDetailViewModel @Inject constructor(
     /** B26: vero finché arma/rifiuta/elimina è in corso (e dopo un Close, fino alla chiusura). */
     private val actionInFlight = AtomicBoolean(false)
 
+    /** 0.7.0: ultimo stato di Shizuku (o root) osservato; `null` finché non è noto. */
+    @Volatile
+    private var shizukuStatus: ShizukuGatewayStatus? = null
+    private val healthSources: kotlinx.coroutines.flow.Flow<ShizukuGatewayStatus>? = when {
+        shizuku == null -> null
+        rootAccess == null -> shizuku.observeStatus()
+        else -> combine(shizuku.observeStatus(), rootAccess.observeState()) { status, root ->
+            if (root == RootState.ACTIVE) ShizukuGatewayStatus.AUTHORIZED else status
+        }
+    }
+
+    /** 0.7.0: elenco di «Cambia app»; `null` = non ancora caricato. Si azzera alla chiusura della schermata. */
+    private val appChoices = MutableStateFlow<List<AppChoiceUi>?>(null)
+
     /** Ultima diagnosi chiesta («Perché non è scattata?»); null finché l'utente non la apre. */
     private val diagnosisInputs = MutableStateFlow<DiagnosisSnapshot?>(null)
     private var diagnosisJob: Job? = null
 
     init {
+        // 0.7.0: la salute del sistema cambia fuori dal flusso della regola: si aggiorna solo il banner.
+        healthSources?.let { source ->
+            viewModelScope.launch {
+                source.collect { status ->
+                    shizukuStatus = status
+                    mutableState.update { it.withLiveExtras() }
+                }
+            }
+        }
         // F8/F21: la pausa e il riquadro scelto cambiano fuori dal flusso della regola: si aggiorna
         // solo la parte "avvio manuale" dello stato mostrato, senza rifare il resto.
         viewModelScope.launch {
@@ -314,7 +365,7 @@ class AutomationDetailViewModel @Inject constructor(
                 // arriva qui, quindi displayedDraft resta quello che lo schermo mostra davvero.
                 displayedDraft = sources.draft
                 displayedAutomation = sources.automation
-                mutableState.value = next.withActionInProgress(actionInFlight.get())
+                mutableState.value = next.withActionInProgress(actionInFlight.get()).withLiveExtras()
             }
         }
     }
@@ -341,7 +392,7 @@ class AutomationDetailViewModel @Inject constructor(
     }
 
     private fun publishActionInProgress() {
-        mutableState.update { it.withActionInProgress(actionInFlight.get()) }
+        mutableState.update { it.withActionInProgress(actionInFlight.get()).withLiveExtras() }
     }
 
     fun onArm() {
@@ -739,13 +790,23 @@ class AutomationDetailViewModel @Inject constructor(
                 verifiedStateReaders = review?.verifiedStateQueries.orEmpty().map { evidence ->
                     readerProbeLabel(evidence.family, evidence.valueType, language)
                 },
+                usesShizuku = requiresShizuku(
+                    CapabilityRequirements.derive(
+                        snapshot.draft.trigger,
+                        snapshot.draft.actions,
+                        snapshot.draft.conditions,
+                        snapshot.draft.vars,
+                    ),
+                ),
+                appInfo = appInfoFor(snapshot.draft.trigger, snapshot.draft.actions),
+                canChangeApp = snapshot.integrityError == null,
             ),
             automationId = snapshot.automationId.value,
             loading = false,
         )
     }
 
-    private fun automationState(
+    private suspend fun automationState(
         automation: Automation,
         records: List<AuditLogRecord>,
         actionsByExecution: Map<String, List<ActionResultEntity>>,
@@ -802,6 +863,11 @@ class AutomationDetailViewModel @Inject constructor(
                 stats = stats.takeIf {
                     automation.status == AutomationStatus.ARMED || automation.status == AutomationStatus.DISABLED
                 },
+                usesShizuku = requiresShizuku(automation.requiredCapabilities),
+                appInfo = appInfoFor(automation.trigger, automation.actions),
+                // Una regola armata non si modifica mai in place: «Cambia app» ne fa una bozza di modifica.
+                canChangeApp = automation.status == AutomationStatus.ARMED ||
+                    automation.status == AutomationStatus.DISABLED,
             ),
             automationId = automation.id.value,
             loading = false,
@@ -831,6 +897,189 @@ class AutomationDetailViewModel @Inject constructor(
             language,
         )
     }
+
+    // --- 0.7.0: nome delle app, banner salute e «Cambia app» ------------------------------------
+
+    /**
+     * Nome (se il telefono lo sa) e presenza di ogni package nominato dalla regola. Un errore del sistema
+     * non toglie niente alla schermata: senza informazioni non si scrive né un nome né un avviso.
+     */
+    private suspend fun appInfoFor(
+        trigger: dev.argus.engine.model.Trigger,
+        actions: List<Action>,
+    ): Map<String, AppInfoUi> {
+        val packages = AppPackages.refs(trigger, actions).map { it.pkg }.distinct()
+        if (packages.isEmpty()) return emptyMap()
+        return try {
+            val names = appCatalog.launchableApps().associate { it.packageName to it.label }
+            packages.associateWith { pkg ->
+                AppInfoUi(name = names[pkg], installed = pkg in names || appCatalog.isInstalled(pkg))
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            emptyMap()
+        }
+    }
+
+    /** Parti dello stato che cambiano fuori dal flusso della regola: banner salute ed elenco delle app. */
+    private fun DetailViewState.withLiveExtras(): DetailViewState {
+        val current = detail ?: return this
+        val banner = detailEngineBanner(shizukuStatus, current.usesShizuku, batteryExempt())
+        val choices = appChoices.value
+        return if (current.banner == banner && current.appChoices == choices) {
+            this
+        } else {
+            copy(detail = current.copy(banner = banner, appChoices = choices))
+        }
+    }
+
+    private fun batteryExempt(): Boolean {
+        val app = context ?: return true
+        return runCatching {
+            app.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(app.packageName)
+        }.getOrDefault(false)
+    }
+
+    /** «Cambia app» apre l'elenco: lo carica una volta per apertura. Resta sul telefono. */
+    fun onLoadAppChoices() {
+        appChoices.value = null
+        mutableState.update { it.withLiveExtras() }
+        viewModelScope.launch {
+            val apps = try {
+                appCatalog.launchableApps().map { AppChoiceUi(it.packageName, it.label) }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                emptyList()
+            }
+            appChoices.value = apps
+            mutableState.update { it.withLiveExtras() }
+        }
+    }
+
+    /**
+     * «Cambia app»: sostituisce il package dello [slot] con [packageName]. Mai una modifica silenziosa:
+     *  - su una BOZZA nasce una nuova revisione (nuova impronta) e l'utente deve riapprovarla;
+     *  - su una regola ARMATA o disattivata la regola non si tocca: si crea una bozza di modifica (D5) e si
+     *    apre la sua approvazione. La regola resta com'è finché l'utente non arma la modifica.
+     * La nuova scelta passa dal validatore come ogni altra bozza (per esempio un package vietato resta un ERROR).
+     */
+    fun onChangeApp(slot: Int, packageName: String) {
+        val draft = displayedDraft
+        val automation = displayedAutomation
+        runExclusive {
+            try {
+                when {
+                    draft != null -> changeDraftApp(draft, slot, packageName)
+                    automation != null &&
+                        (automation.status == AutomationStatus.ARMED || automation.status == AutomationStatus.DISABLED) ->
+                        changeArmedApp(automation, slot, packageName)
+                    else -> stayWith(cannotChangeAppText(language))
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                stayWith(cannotChangeAppText(language))
+            }
+        }
+    }
+
+    private suspend fun changeDraftApp(snapshot: PendingDraft, slot: Int, packageName: String): Boolean {
+        val replaced = AppPackages.replace(snapshot.draft.trigger, snapshot.draft.actions, slot, packageName)
+            ?: return stayWith(cannotChangeAppText(language))
+        if (replaced.trigger == snapshot.draft.trigger && replaced.actions == snapshot.draft.actions) {
+            return stayWith(sameAppText(language))
+        }
+        val revised = snapshot.draft.copy(
+            trigger = replaced.trigger,
+            actions = replaced.actions,
+            // La prosa del modello descriveva l'app di prima: non resta accanto a una regola che ne usa un'altra.
+            rationale = "",
+        )
+        return when (
+            drafts.revise(
+                id = snapshot.id,
+                expectedRevision = snapshot.revision,
+                draft = revised,
+                priority = snapshot.priority,
+                atMillis = System.currentTimeMillis(),
+            )
+        ) {
+            is DraftWriteResult.Saved -> stayWith(appChangedDraftText(language))
+            is DraftWriteResult.Conflict -> stayWith(
+                language.pick(
+                    "The draft changed; review the new revision.",
+                    "La bozza è cambiata: controlla la nuova revisione.",
+                ),
+            )
+            is DraftWriteResult.Rejected -> stayWith(cannotChangeAppText(language))
+        }
+    }
+
+    private suspend fun changeArmedApp(automation: Automation, slot: Int, packageName: String): Boolean {
+        val fingerprint = automation.approvalFingerprint ?: return stayWith(cannotChangeAppText(language))
+        val replaced = AppPackages.replace(automation.trigger, automation.actions, slot, packageName)
+            ?: return stayWith(cannotChangeAppText(language))
+        if (replaced.trigger == automation.trigger && replaced.actions == automation.actions) {
+            return stayWith(sameAppText(language))
+        }
+        val editDraft = automation.toDraft().copy(trigger = replaced.trigger, actions = replaced.actions)
+        val newId = DraftId(UUID.randomUUID().toString())
+        return when (
+            val result = drafts.create(
+                NewDraft(
+                    id = newId,
+                    automationId = automation.id,
+                    draft = editDraft,
+                    createdBy = automation.createdBy.takeUnless { it == CreatedBy.IMPORT } ?: CreatedBy.USER,
+                    priority = automation.priority,
+                    atMillis = System.currentTimeMillis(),
+                    expectedAutomationFingerprint = fingerprint,
+                ),
+            )
+        ) {
+            is DraftWriteResult.Saved -> {
+                mutableEvents.emit(DetailEvent.Message(appChangedArmedText(language)))
+                mutableEvents.emit(DetailEvent.OpenDetail(result.snapshot.id.value))
+                false
+            }
+            is DraftWriteResult.Conflict -> {
+                // Esiste già una modifica in attesa su questa regola: la si apre, non se ne crea una seconda.
+                val existing = drafts.observeAll().first().firstOrNull { it.automationId == automation.id }
+                if (existing != null) {
+                    mutableEvents.emit(DetailEvent.Message(editAlreadyPendingText(language)))
+                    mutableEvents.emit(DetailEvent.OpenDetail(existing.id.value))
+                    false
+                } else {
+                    stayWith(cannotChangeAppText(language))
+                }
+            }
+            is DraftWriteResult.Rejected -> stayWith(cannotChangeAppText(language))
+        }
+    }
+
+    private fun cannotChangeAppText(l: RenderLanguage) =
+        l.pick("Unable to change the app.", "Impossibile cambiare l'app.")
+
+    private fun sameAppText(l: RenderLanguage) =
+        l.pick("The rule already uses that app.", "La regola usa già quell'app.")
+
+    private fun appChangedDraftText(l: RenderLanguage) = l.pick(
+        "App changed. The draft is a new revision: check it again before arming.",
+        "App cambiata. La bozza è una nuova revisione: ricontrollala prima di armare.",
+    )
+
+    private fun appChangedArmedText(l: RenderLanguage) = l.pick(
+        "Edit draft created. The armed rule is unchanged until you approve the new version.",
+        "Bozza di modifica creata. La regola armata non cambia finché non approvi la nuova versione.",
+    )
+
+    private fun editAlreadyPendingText(l: RenderLanguage) = l.pick(
+        "This rule already has an edit waiting for approval: change the app there.",
+        "Questa regola ha già una modifica in attesa di approvazione: cambia l'app lì.",
+    )
+
 
     private fun runNowBlockedReason(language: RenderLanguage): String = runNowUnavailable(language)
 

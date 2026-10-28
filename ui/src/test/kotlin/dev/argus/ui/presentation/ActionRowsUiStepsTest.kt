@@ -71,6 +71,22 @@ class ActionRowsUiStepsTest {
     }
 
     @Test
+    fun `a wait with no text and no id reads as the wait for the app`() {
+        val wait = UiStep.WaitFor(timeoutMs = 5_000)
+        assertEquals("Wait for the app to be open (up to 5 s)", ActionRowsUiSteps.stepText(wait, RenderLanguage.EN))
+        assertEquals("Aspetta che l'app sia aperta (fino a 5 s)", ActionRowsUiSteps.stepText(wait, RenderLanguage.IT))
+        assertEquals(
+            "Wait for the app to be open (up to 7.5 s)",
+            ActionRowsUiSteps.stepText(UiStep.WaitFor(timeoutMs = 7_500), RenderLanguage.EN),
+        )
+        // Con un bersaglio resta l'attesa dell'elemento.
+        assertEquals(
+            "Wait up to 5 s for id \"ok\"",
+            ActionRowsUiSteps.stepText(UiStep.WaitFor(id = "ok", timeoutMs = 5_000), RenderLanguage.EN),
+        )
+    }
+
+    @Test
     fun `a not-present check reads as the opposite`() {
         val text = ActionRowsUiSteps.stepText(UiStep.Check("Errore", present = false), RenderLanguage.EN)
         assertTrue("is NOT on the screen" in text, text)

@@ -1,0 +1,1 @@
+Nuovo aspetto, chiaro e scuro, che segue il sistema. Un riepilogo in cima alla lista, un filtro per esito nel Log, nome dell'app e «Cambia app» in approvazione, un avviso se un'app non è installata e la tua app predefinita (calcolatrice, calendario, browser...) per le richieste che ne nominano una. Correzioni alle macro sullo schermo: attesa dell'app, errori più chiari.

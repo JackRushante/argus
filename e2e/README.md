@@ -44,6 +44,7 @@ Requirements:
 - the environment variables `ARGUS_E2E_HOST` (ssh host), `ARGUS_E2E_EMULATOR` (path of the wrapper on the host) and,
   optionally, `ARGUS_E2E_BUILDS` (folder of debug APKs on the host) and `ARGUS_E2E_AVD_DIR` (AVD folder, to clear
   stale locks);
+- on Windows with Git Bash, `export MSYS2_ENV_CONV_EXCL='ARGUS_E2E_'`, or Git Bash rewrites the host paths;
 - a **debug** x86_64 APK: `./gradlew :app:assembleDebug -PargusAbi=x86_64`, copied to the host (or pass `--apk`).
 
 Then, from the repository root:

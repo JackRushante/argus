@@ -391,7 +391,7 @@ class Engine(
                                 actionType = action.journalType(),
                                 outcome = result.journalOutcome(),
                                 atMillis = batchNow,
-                                errorCode = (result as? ActionResult.Failure)?.reason?.let(::journalErrorCode),
+                                errorCode = result.journalCode(),
                             ),
                         )
                     }

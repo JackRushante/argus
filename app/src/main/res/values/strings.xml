@@ -5,6 +5,9 @@
     <string name="nav_automations">Automations</string>
     <string name="nav_log">Log</string>
     <string name="nav_system">System</string>
+    <string name="nav_badge_pending">%1$d pending approval</string>
+    <string name="nav_badge_problems">problems to fix</string>
+    <string name="nav_badge_unread">unread messages</string>
     <string name="system_setting_unavailable">System setting unavailable.</string>
     <string name="permission_enable_in_app_settings">Enable the permission from the app settings.</string>
     <string name="whitelist_add_title">Add to whitelist</string>

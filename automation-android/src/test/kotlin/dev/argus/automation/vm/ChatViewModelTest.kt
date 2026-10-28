@@ -151,6 +151,42 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun `while waiting the state carries the timeout of the wait bar and drops it afterwards`() = runTest(dispatcher) {
+        val brain = QueuedBrain()
+        val viewModel = chatViewModel(brain)
+        assertEquals(null, viewModel.state.value.sendingTimeoutSec)
+
+        viewModel.onInputChange("domanda lenta")
+        viewModel.onSend()
+        runCurrent()
+        brain.removeFirst()
+
+        assertTrue(viewModel.state.value.sending)
+        assertEquals(65, viewModel.state.value.sendingTimeoutSec, "l'asse della barra e' il timeout di compilazione")
+
+        viewModel.onCancelPending()
+
+        assertFalse(viewModel.state.value.sending)
+        assertEquals(null, viewModel.state.value.sendingTimeoutSec)
+    }
+
+    @Test
+    fun `a request that times out also drops the wait bar timeout`() = runTest(dispatcher) {
+        val brain = QueuedBrain()
+        val viewModel = chatViewModel(brain)
+
+        viewModel.onInputChange("domanda lenta")
+        viewModel.onSend()
+        runCurrent()
+        brain.removeFirst()
+        advanceTimeBy(65_001L)
+        runCurrent()
+
+        assertEquals(ChatError.Timeout, viewModel.state.value.error)
+        assertEquals(null, viewModel.state.value.sendingTimeoutSec)
+    }
+
+    @Test
     fun `a cancelled request cannot clear or overwrite the next request`() = runTest(dispatcher) {
         val brain = QueuedBrain()
         val viewModel = chatViewModel(brain)

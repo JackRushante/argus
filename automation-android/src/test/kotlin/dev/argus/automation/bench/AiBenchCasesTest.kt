@@ -2,11 +2,14 @@
 
 package dev.argus.automation.bench
 
+import dev.argus.automation.AndroidCapabilityProbe
 import dev.argus.engine.model.Action
+import dev.argus.engine.model.ActionTypeIds
 import dev.argus.engine.model.Condition
 import dev.argus.engine.model.StateKeys
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.model.VarBinding
+import dev.argus.engine.runtime.ActionCapabilities
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.descriptors.SerialDescriptor
@@ -20,6 +23,7 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -344,6 +348,60 @@ class AiBenchCasesTest {
     }
 
     @Test
+    fun `the accessibility-off phone leaves out ui_steps and tells the model what to turn on`() = runBlocking<Unit> {
+        val world = BenchWorld.create()
+        val full = world.manifest(ManifestKind.FULL)
+        val off = world.manifest(ManifestKind.NO_ACCESSIBILITY)
+
+        assertTrue(ActionTypeIds.UI_STEPS in full.availableTools)
+        assertFalse(ActionTypeIds.UI_STEPS in off.availableTools)
+        assertEquals(AndroidCapabilityProbe.REASON_ACCESSIBILITY, off.unavailableTools[ActionTypeIds.UI_STEPS])
+        assertTrue(ActionCapabilities.UI_STEPS in world.availableCapabilities(ManifestKind.FULL))
+        assertFalse(ActionCapabilities.UI_STEPS in world.availableCapabilities(ManifestKind.NO_ACCESSIBILITY))
+        // Solo il servizio cambia: il resto del telefono e' quello completo.
+        assertEquals(full.availableTools - ActionTypeIds.UI_STEPS, off.availableTools)
+        assertEquals(full.availableTriggers, off.availableTriggers)
+    }
+
+    @Test
+    fun `the new macro cases ask for what they should`() = runBlocking<Unit> {
+        val calc = cases.single { it.id == "ui70.calc.it.01" }
+        assertEquals(setOf(Outcome.DRAFT), calc.outcomes)
+        assertEquals(ManifestKind.FULL, calc.manifest)
+        // La calcolatrice del caso e' tra i candidati che il modello vede.
+        val world = BenchWorld.create()
+        assertTrue("com.google.android.calculator" in world.compilePrompt(calc.text, calc.lang))
+
+        val off = cases.filter { it.manifest == ManifestKind.NO_ACCESSIBILITY }
+        assertEquals(setOf("ui70.a11yoff.it.01", "ui70.a11yoff.en.01"), off.map { it.id }.toSet())
+        off.forEach { case ->
+            assertEquals(setOf(Outcome.UNSUPPORTED), case.outcomes, case.id)
+            assertTrue(case.replyMentions.isNotEmpty(), "${case.id}: deve dire il motivo")
+            assertEquals(listOf(ActionTypeIds.UI_STEPS), case.covers, case.id)
+        }
+    }
+
+    @Test
+    fun `the two calculator cases show the model both calculators and no default`() = runBlocking<Unit> {
+        val world = BenchWorld.create()
+        for ((id, other) in listOf("app70.twocalc.it.01" to "Calcolatrice semplice", "app70.twocalc.en.01" to "Simple Calculator")) {
+            val case = cases.single { it.id == id }
+            // Chiedere è la risposta migliore; una bozza col nome esatto è accettata (approvazione: «Cambia app»).
+            assertEquals(setOf(Outcome.CLARIFICATION, Outcome.DRAFT), case.outcomes, id)
+            assertEquals(listOf(other), case.extraApps.map { it.label }, id)
+            val prompt = world.compilePrompt(case.text, case.lang, case.extraApps)
+            assertTrue("\"package\":\"com.google.android.calculator\"" in prompt, prompt)
+            assertTrue("\"package\":\"com.simplemobiletools.calculator\"" in prompt, prompt)
+            assertFalse("default" in prompt, prompt)
+            // L'app in piu' e' solo di questo caso: le altre richieste non la vedono.
+            assertFalse(
+                "com.simplemobiletools.calculator" in world.compilePrompt(case.text, case.lang),
+                "$id: l'app extra non deve entrare nel telefono di tutti",
+            )
+        }
+    }
+
+    @Test
     fun `a malformed case is reported as a bench error`() {
         fun parse(json: String) = BenchCases.parseCompile("[$json]")
         val ok = """{"id":"x.ok.it.01","category":"c","lang":"it","text":"Spegni subito il non disturbare",
@@ -362,6 +420,14 @@ class AiBenchCasesTest {
         assertFailsWith<BenchException>("bozza senza trigger") {
             parse(ok.replace("\"trigger\":{\"type\":\"immediate\"},", ""))
         }
+        assertFailsWith<BenchException>("regex di risposta rotta") {
+            parse(ok.replace("\"outcome\":\"draft\"", "\"outcome\":\"draft\",\"reply_mentions\":[\"(\"]"))
+        }
+        val withApps = ok.replace("\"expect\"", "\"extra_apps\":[{\"label\":\"Altra\",\"package\":\"com.example.altra\"}],\"expect\"")
+        assertEquals("com.example.altra", parse(withApps).single().extraApps.single().packageName)
+        assertFailsWith<BenchException>("package extra malformato") { parse(withApps.replace("com.example.altra", "non un package")) }
+        assertFailsWith<BenchException>("etichetta extra vuota") { parse(withApps.replace("\"Altra\"", "\" \"")) }
+        assertFailsWith<BenchException>("chiave extra sconosciuta") { parse(withApps.replace("\"label\"", "\"nome\"")) }
     }
 
     /** Per ogni sottotipo sealed: nome serial -> descrittore (campi e loro tipi). */

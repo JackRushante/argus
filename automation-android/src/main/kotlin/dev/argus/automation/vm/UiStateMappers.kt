@@ -1,6 +1,7 @@
 package dev.argus.automation.vm
 
 import dev.argus.automation.ApprovalFlowReview
+import dev.argus.automation.privileged.ScreenshotLogDetail
 import dev.argus.data.dao.AuditLogRecord
 import dev.argus.data.entities.ActionResultEntity
 import dev.argus.data.entities.ScheduledTimeAlarmEntity
@@ -49,6 +50,7 @@ internal fun Automation.toAutomationRow(
     scheduledAlarm: ScheduledTimeAlarmEntity? = null,
 ): AutomationRow {
     val render = RuleRenderMapper.map(this, conversationLabels, language)
+    val nextFireAt = nextFireAtMillis(this, nowMillis, scheduledAlarm)
     return AutomationRow(
         id = id.value,
         name = name,
@@ -59,8 +61,9 @@ internal fun Automation.toAutomationRow(
         isGenerative = actions.any { it.tier == ActionTier.GENERATIVE },
         hasWarnings = status == AutomationStatus.NEEDS_REVIEW || render.privacyNote != null,
         lastFiredLabel = lastFiredAt?.let { relativeTimeLabel(it, nowMillis, language) },
-        nextFireLabel = nextFireLabel(this, nowMillis, language, scheduledAlarm),
+        nextFireLabel = nextFireAt?.let { dayTimeLabel(it, nowMillis, language) },
         pendingEditDraftId = pendingEditDraftId,
+        nextFireAtMillis = nextFireAt,
     )
 }
 
@@ -304,7 +307,12 @@ private fun actionDetail(action: ActionResultEntity, l: RenderLanguage): String 
         null -> ""
         // D8: messaggio accorpato nella risposta unica della raffica, nessuna seconda generazione.
         COALESCED_REPLY_CODE -> l.pick(" · merged into one reply", " · unito in un'unica risposta")
-        else -> " · ${LogReasonLabels.text(code, l)}"
+        else -> {
+            // 0.7.0: uno screenshot riuscito porta il nome del file salvato (data e ora, nessun dato della regola).
+            val savedAs = ScreenshotLogDetail.displayPath(code)
+                .takeIf { action.outcome == ActionJournalOutcome.SUCCEEDED }
+            " · ${savedAs ?: LogReasonLabels.text(code, l)}"
+        }
     }
     val path = action.actionPath.ifBlank { (action.actionIndex + 1).toString() }
     return "$path. ${actionTypeLabel(action.actionType, l)} → $outcome$error"
@@ -393,12 +401,15 @@ internal fun absoluteTimeLabel(
     return "$prefix ${value.format(TIME_FORMAT)}"
 }
 
-private fun nextFireLabel(
+/**
+ * Istante (epoch ms) del prossimo scatto di una regola a orario armata, o `null`. La lista ne ricava
+ * l'etichetta («oggi 23:00») e il riepilogo in testa lo usa per ordinare «Prossimo scatto».
+ */
+private fun nextFireAtMillis(
     automation: Automation,
     nowMillis: Long,
-    language: RenderLanguage,
     scheduledAlarm: ScheduledTimeAlarmEntity?,
-): String? {
+): Long? {
     if (automation.status != AutomationStatus.ARMED || !automation.enabled) return null
     val trigger = automation.trigger as? Trigger.Time ?: return null
     val next = if (trigger.afterMs != null) {
@@ -415,7 +426,7 @@ private fun nextFireLabel(
         runCatching { TimeSpecs.nextFire(trigger, Instant.ofEpochMilli(nowMillis)) }.getOrNull()
             ?: return null
     }
-    return dayTimeLabel(next.toEpochMilli(), nowMillis, language)
+    return next.toEpochMilli()
 }
 
 /**

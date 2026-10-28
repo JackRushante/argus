@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Tema scuro del redesign A: `page` #0E1217, card #1A2028, onSurface #E2E7EF, onSurfaceVariant #A8B2C0,
+         pending.fg #FFC86B, primaryContainer #00497D / onPrimaryContainer #D1E4FF. -->
+    <color name="argus_window_background">#FF0E1217</color>
+    <color name="argus_widget_surface">#FF1A2028</color>
+    <color name="argus_widget_text">#FFE2E7EF</color>
+    <color name="argus_widget_muted">#FFA8B2C0</color>
+    <color name="argus_widget_warn">#FFFFC86B</color>
+    <color name="argus_widget_button">#FF00497D</color>
+    <color name="argus_widget_button_text">#FFD1E4FF</color>
+</resources>
