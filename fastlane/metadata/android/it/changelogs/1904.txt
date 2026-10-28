@@ -1,0 +1,1 @@
+Nuovo trigger «app aperta/chiusa». Azioni privilegiate con Shizuku, Sui o root: forza arresto o congela un'app, modalità aereo, posizione, NFC, risparmio energetico, blocco schermo, screenshot, permessi delle app. Macro sullo schermo con l'Accessibilità, senza root. Output strutturato per l'AI, preset per Ollama, LM Studio e llama.cpp, e la nuova ricerca web di OpenRouter.

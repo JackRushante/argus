@@ -211,6 +211,7 @@ program tree and fingerprint do not.
 | `run_shell` | Shell command template, shown in full at approval; external data enters only as one quoted argument | Shizuku |
 | `write_setting` | Parametric `settings put` on `system\|secure\|global` (any validated key/value template) | Shizuku |
 | `tap` / `input_text` | Reserved UI input primitives; rejected with `unsupported_phase` and never advertised as available | Not available |
+| `ui_steps` | Screen macro through Argus's Accessibility service: open an app, then up to 20 steps (`wait_for`, `click`, `type`, `scroll`, `back`, `home`, `check`) matched by exact text, resource id or description; 60 s at most, a "Stop" notification while it runs. Never on Argus, Settings, the package installer or permission dialogs, and only from triggers allowed to start shell | Base (Accessibility service on) |
 | `wait` / `if` / `while` | Cooperative pause and structured, bounded control flow | Engine |
 | `invoke_llm` | **Generative**: at fire time the LLM produces text for an explicit `WHATSAPP_REPLY`, `LOCAL_NOTIFICATION`, or P4 `CAPTURE_ONLY` sink. Hermes and direct providers support the resolved capture path | Base |
 | `invoke_llm_v2` | P3 variant with explicit state context: every reader, type and classification enters the approved fingerprint. Flat delivery is supported; nesting it inside P4 is rejected before approval | Base |
@@ -310,6 +311,7 @@ Argus degrades explicitly: the onboarding shows an honest list of what depends o
 | "Modify system settings" (`WRITE_SETTINGS`) | `set_brightness`, `set_rotation` | brightness and rotation rules ("Fix" in System) |
 | Battery optimization exemption | reliability on aggressive OEMs | recommended |
 | Write secure settings (`WRITE_SECURE_SETTINGS`), usage access (`PACKAGE_USAGE_STATS`) | `write_setting` on SECURE/GLOBAL, the foreground-app condition and the app opened/closed trigger without Shizuku | granted once with Shizuku, root or Sui: System → "Grant permanent permissions" |
+| Accessibility service (Argus) | `ui_steps` screen macros | only for screen macros; turn it on in Android's Accessibility settings (on sideloaded builds Android may first ask to allow restricted settings), or with Shizuku/root from "Grant permanent permissions" |
 
 ### With and without Shizuku
 
@@ -423,8 +425,8 @@ Open an [Issue](https://github.com/JackRushante/argus/issues) with: what you ask
 
 Short roadmap:
 
-- **0.5.1** — an "app opened/closed" trigger, more typed privileged actions, native structured output,
-  presets for self-hosted servers and OpenRouter's web search tool.
+- **0.5.2** — a warning in approval when a rule names an app that is not installed, and the small items left
+  from 0.5.1.
 - **0.6.0, end-to-end tests** — the main flows tested automatically on an Android emulator.
 - **0.7.0, redesign** — a new look for the app.
 - **Later** — state-aware P4 generation, interactive screen control, and testing on more phone brands

@@ -2,6 +2,43 @@
 
 Release and engineering notes, newest first.
 
+## v0.5.1 (2026-10-28) — App trigger, privileged actions, screen macros, structured output
+
+### Added
+
+- "App opened/closed" trigger (`app_event`), read from usage access (granted by hand or with "Grant permanent
+  permissions"), only while the screen is on and an app rule is armed. It never starts shell.
+- Typed privileged actions (Shizuku, Sui or root): force stop, freeze and unfreeze an app, airplane mode,
+  location, NFC, battery saver, lock the screen, screenshot, grant or revoke an app permission. Argus, the
+  launcher, essential system apps, Shizuku and the root managers can never be stopped or frozen.
+- Screen macros (`ui_steps`) through Argus's Accessibility service, without root: the AI writes the steps,
+  approval shows them all, and they run without AI with a "Stop" notification. Never on Argus, Settings,
+  the package installer or permission dialogs.
+- Presets for Ollama, LM Studio and llama.cpp in the Custom provider, with a longer timeout for local
+  servers.
+
+### Changed
+
+- Structured output: OpenAI-compatible providers (OpenRouter, Custom, OpenAI, Gemini) and Anthropic are
+  asked for a JSON object, with automatic fallback to the previous text format when a provider refuses it.
+  On the bench the two formats score the same.
+- OpenRouter's web search uses the `openrouter:web_search` server tool (the `web` plugin is deprecated),
+  at most 3 searches per answer.
+- The AI checks `available_tools` before saying an action is missing: GPT-6 Luna went from 93% to 97% of
+  the rule requests right.
+
+### Verified
+
+- All unit suites and `:app:lintRelease`. On the Android 16 emulator: the app trigger (Chrome opened),
+  airplane mode through Shizuku, a screen macro (Clock → Timer). AI bench, 198 rule requests: Claude
+  Haiku 5.5 98%, GPT-6 Luna 97%, the preset DeepSeek V4.1 Flash 95.5%; 12/12 generative answers for all.
+
+### Known limits
+
+- The preset sometimes writes a wrong package name for an app trigger (`com.youtube`); in the app the
+  installed-app candidates usually prevent it, and 0.5.2 will warn when a package is not installed.
+- The screenshot is saved in `Pictures/Argus/`, but the Log does not show the file name yet.
+
 ## v0.5.0 (2026-10-27) — The current time in rules, a repair round, permanent grants and root
 
 ### Added

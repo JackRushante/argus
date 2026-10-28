@@ -1,0 +1,1 @@
+New "app opened/closed" trigger. Typed privileged actions with Shizuku, Sui or root: force stop or freeze an app, airplane mode, location, NFC, battery saver, lock screen, screenshot, app permissions. Screen macros through Accessibility, without root. Structured output for the AI, presets for Ollama, LM Studio and llama.cpp, and OpenRouter's new web search.
