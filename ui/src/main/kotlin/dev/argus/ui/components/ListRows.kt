@@ -180,7 +180,7 @@ enum class TriggerShape {
 enum class TriggerTone { Normal, Pending, NeedsReview, Disabled }
 
 /** Cookie a 9 lobi della tavola: cerchio centrale + 8 cerchi sul bordo, su una griglia 72 x 72. */
-private object CookieShape : Shape {
+internal object CookieShape : Shape {
     override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
         val k = size.width / 72f
         fun circle(cx: Float, cy: Float, r: Float) = Path().apply {
