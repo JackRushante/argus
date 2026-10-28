@@ -1,0 +1,725 @@
+[
+ {
+  "id": "A01-notification",
+  "title": "Notifica locale dal trigger immediato",
+  "cond": "true",
+  "rule": {
+   "name": "A01-notification",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e A01 {{RUN}}",
+     "text": "e2e body"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e A01 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "A02-ringer-silent",
+  "title": "Suoneria silenziosa dal pulsante «Esegui ora»",
+  "cond": "true",
+  "rule": {
+   "name": "A02-ringer-silent",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "set_ringer",
+     "mode": "silent"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "pre": [
+   "cmd audio set-ringer-mode NORMAL",
+   "cmd notification set_dnd off"
+  ],
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys audio | grep -A2 'Ringer mode'",
+    "contains": "mode (external) = SILENT",
+    "wait_s": 4
+   }
+  ],
+  "cleanup": [
+   "cmd audio set-ringer-mode NORMAL",
+   "cmd notification set_dnd off"
+  ]
+ },
+ {
+  "id": "A03-dnd-total",
+  "title": "Non disturbare: silenzio totale",
+  "cond": "true",
+  "rule": {
+   "name": "A03-dnd-total",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "set_dnd",
+     "mode": "TOTAL"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "pre": [
+   "cmd audio set-ringer-mode NORMAL",
+   "cmd notification set_dnd off"
+  ],
+  "checks": [
+   {
+    "shell": "settings get global zen_mode",
+    "equals": "2",
+    "wait_s": 4
+   }
+  ],
+  "cleanup": [
+   "cmd audio set-ringer-mode NORMAL",
+   "cmd notification set_dnd off"
+  ]
+ },
+ {
+  "id": "A04-dnd-priority-off",
+  "title": "Non disturbare: priorita' poi spento (due azioni)",
+  "cond": "true",
+  "rule": {
+   "name": "A04-dnd-priority-off",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "set_dnd",
+     "mode": "PRIORITY"
+    },
+    {
+     "type": "set_dnd",
+     "mode": "OFF"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "SUCCEEDED",
+    "actions": [
+     "set_dnd:SUCCEEDED",
+     "set_dnd:SUCCEEDED"
+    ]
+   }
+  },
+  "pre": [
+   "cmd audio set-ringer-mode NORMAL",
+   "cmd notification set_dnd off"
+  ],
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "settings get global zen_mode",
+    "equals": "0",
+    "wait_s": 4
+   }
+  ],
+  "cleanup": [
+   "cmd audio set-ringer-mode NORMAL",
+   "cmd notification set_dnd off"
+  ]
+ },
+ {
+  "id": "A05-volumes",
+  "title": "Volume di tre flussi in percentuale",
+  "cond": "true",
+  "rule": {
+   "name": "A05-volumes",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "set_volume",
+     "stream": "MEDIA",
+     "level": 40
+    },
+    {
+     "type": "set_volume",
+     "stream": "ALARM",
+     "level": 100
+    },
+    {
+     "type": "set_volume",
+     "stream": "RING",
+     "level": 50
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "pre": [
+   "cmd media_session volume --stream 3 --set 1",
+   "cmd media_session volume --stream 4 --set 1",
+   "cmd media_session volume --stream 2 --set 1"
+  ],
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "cmd media_session volume --stream 3 --get | tail -1",
+    "contains": "volume is 6 in",
+    "wait_s": 3
+   },
+   {
+    "shell": "cmd media_session volume --stream 4 --get | tail -1",
+    "contains": "volume is 7 in",
+    "wait_s": 3
+   },
+   {
+    "shell": "cmd media_session volume --stream 2 --get | tail -1",
+    "contains": "volume is 4 in",
+    "wait_s": 3
+   }
+  ],
+  "cleanup": [
+   "cmd media_session volume --stream 3 --set 7",
+   "cmd media_session volume --stream 4 --set 6",
+   "cmd media_session volume --stream 2 --set 5"
+  ]
+ },
+ {
+  "id": "A06-brightness-rotation",
+  "title": "Luminosita' 20 % e rotazione automatica spenta",
+  "cond": "true",
+  "rule": {
+   "name": "A06-brightness-rotation",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "set_brightness",
+     "level": 20
+    },
+    {
+     "type": "set_rotation",
+     "auto": false
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "pre": [
+   "settings put system screen_brightness_mode 1",
+   "settings put system accelerometer_rotation 1"
+  ],
+  "checks": [
+   {
+    "shell": "settings get system screen_brightness",
+    "equals": "51",
+    "wait_s": 4
+   },
+   {
+    "shell": "settings get system screen_brightness_mode",
+    "equals": "0",
+    "wait_s": 4
+   },
+   {
+    "shell": "settings get system accelerometer_rotation",
+    "equals": "0",
+    "wait_s": 4
+   }
+  ],
+  "cleanup": [
+   "settings put system accelerometer_rotation 1",
+   "settings put system screen_brightness_mode 1",
+   "settings put system screen_brightness 128"
+  ]
+ },
+ {
+  "id": "A07-brightness-auto",
+  "title": "Luminosita' automatica",
+  "cond": "true",
+  "rule": {
+   "name": "A07-brightness-auto",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "set_brightness",
+     "auto": true
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "pre": [
+   "settings put system screen_brightness_mode 0"
+  ],
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "settings get system screen_brightness_mode",
+    "equals": "1",
+    "wait_s": 4
+   }
+  ],
+  "cleanup": [
+   "settings put system screen_brightness_mode 1"
+  ]
+ },
+ {
+  "id": "A08-feedback",
+  "title": "Torcia, vibrazione e lettura ad alta voce",
+  "cond": "true",
+  "rule": {
+   "name": "A08-feedback",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "set_flashlight",
+     "on": true
+    },
+    {
+     "type": "vibrate",
+     "durationMs": 200
+    },
+    {
+     "type": "speak",
+     "text": "Argus end to end"
+    },
+    {
+     "type": "set_flashlight",
+     "on": false
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "SUCCEEDED",
+    "actions": [
+     "set_flashlight:SUCCEEDED",
+     "vibrate:SUCCEEDED",
+     "speak:SUCCEEDED",
+     "set_flashlight:SUCCEEDED"
+    ]
+   }
+  }
+ },
+ {
+  "id": "A09-clipboard-media",
+  "title": "Testo negli appunti e tasto multimediale",
+  "cond": "true",
+  "rule": {
+   "name": "A09-clipboard-media",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "copy_text",
+     "text": "e2e-{{RUN}}"
+    },
+    {
+     "type": "media_control",
+     "command": "PLAY_PAUSE"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  }
+ },
+ {
+  "id": "A10-launch-app",
+  "title": "Apre un'app (Impostazioni)",
+  "cond": "true",
+  "rule": {
+   "name": "A10-launch-app",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "launch_app",
+     "pkg": "com.android.settings"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys activity activities | grep -E 'topResumedActivity'",
+    "contains": "com.android.settings",
+    "wait_s": 6
+   }
+  ]
+ },
+ {
+  "id": "A11-open-url",
+  "title": "Apre un link (Chrome)",
+  "cond": "true",
+  "rule": {
+   "name": "A11-open-url",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "open_url",
+     "url": "https://example.com/e2e"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "checks": [
+   {
+    "shell": "dumpsys activity activities | grep -E 'topResumedActivity'",
+    "contains": "chrome",
+    "wait_s": 6
+   }
+  ]
+ },
+ {
+  "id": "A12-settings-screen",
+  "title": "Apre la schermata Wi-Fi delle Impostazioni",
+  "cond": "true",
+  "rule": {
+   "name": "A12-settings-screen",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "open_settings_screen",
+     "screen": "WIFI"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys activity activities | grep -E 'topResumedActivity'",
+    "contains": "com.android.settings",
+    "wait_s": 6
+   }
+  ]
+ },
+ {
+  "id": "A13-alarm-timer",
+  "title": "Sveglia e timer reali",
+  "cond": "true",
+  "rule": {
+   "name": "A13-alarm-timer",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "set_alarm",
+     "hour": 6,
+     "minute": 30,
+     "label": "e2e {{RUN}}",
+     "skipUi": true
+    },
+    {
+     "type": "set_timer",
+     "seconds": 600,
+     "label": "e2e {{RUN}}",
+     "skipUi": true
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "SUCCEEDED",
+    "actions": [
+     "set_alarm:SUCCEEDED",
+     "set_timer:SUCCEEDED"
+    ]
+   }
+  },
+  "needs": [
+   "package:com.google.android.deskclock"
+  ]
+ },
+ {
+  "id": "A14-http-ok",
+  "title": "Richiesta HTTP GET riuscita",
+  "cond": "true",
+  "rule": {
+   "name": "A14-http-ok",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "http_request",
+     "method": "GET",
+     "url": "https://example.com/"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "needs": [
+   "internet"
+  ]
+ },
+ {
+  "id": "A15-http-404",
+  "title": "Richiesta HTTP: il codice 404 e' registrato nel journal",
+  "cond": "true",
+  "rule": {
+   "name": "A15-http-404",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "http_request",
+     "method": "GET",
+     "url": "https://example.com/e2e-not-found"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "FAILED",
+    "actions": [
+     "http_request:FAILED:http_status_404"
+    ]
+   }
+  },
+  "needs": [
+   "internet"
+  ],
+  "fire": {
+   "payload": {}
+  }
+ },
+ {
+  "id": "A16-http-network",
+  "title": "Richiesta HTTP: errore di rete",
+  "cond": "true",
+  "rule": {
+   "name": "A16-http-network",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "http_request",
+     "method": "GET",
+     "url": "https://localhost:9/"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "FAILED",
+    "actions": [
+     "http_request:FAILED:http_network_error"
+    ]
+   }
+  }
+ },
+ {
+  "id": "A17-http-post-json",
+  "title": "Richiesta HTTP POST con corpo JSON",
+  "cond": "true",
+  "rule": {
+   "name": "A17-http-post-json",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "http_request",
+     "method": "POST",
+     "url": "https://example.com/",
+     "headers": {
+      "Accept": "text/html"
+     },
+     "body": "{\"e2e\":\"{{RUN}}\"}",
+     "contentType": "application/json"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "executions": 1
+   }
+  },
+  "needs": [
+   "internet"
+  ],
+  "fire": {
+   "payload": {}
+  }
+ }
+]

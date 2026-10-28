@@ -1,0 +1,846 @@
+[
+ {
+  "id": "B01-wifi-off",
+  "title": "Wi-Fi spento",
+  "cond": "true",
+  "rule": {
+   "name": "B01-wifi-off",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "set_wifi",
+     "on": false
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "pre": [
+   "svc wifi enable"
+  ],
+  "wait_s": 3,
+  "checks": [
+   {
+    "shell": "settings get global wifi_on",
+    "equals": "0",
+    "wait_s": 8
+   }
+  ],
+  "cleanup": [
+   "svc wifi enable"
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable",
+       "detail": "action.set_wifi"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "B02-bluetooth-off",
+  "title": "Bluetooth spento",
+  "cond": "true",
+  "rule": {
+   "name": "B02-bluetooth-off",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "set_bluetooth",
+     "on": false
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "wait_s": 3,
+  "checks": [
+   {
+    "shell": "settings get global bluetooth_on",
+    "equals": "0",
+    "wait_s": 8
+   }
+  ],
+  "cleanup": [
+   "cmd bluetooth_manager enable"
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable",
+       "detail": "action.set_bluetooth"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "B03-mobile-data",
+  "title": "Dati mobili spenti (nessun effetto osservabile sull'emulatore: conta il journal)",
+  "cond": "true",
+  "rule": {
+   "name": "B03-mobile-data",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "set_mobile_data",
+     "on": false
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "cleanup": [
+   "svc data enable"
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable",
+       "detail": "action.set_mobile_data"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "B04-dark-mode",
+  "title": "Tema scuro acceso",
+  "cond": "true",
+  "rule": {
+   "name": "B04-dark-mode",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "set_dark_mode",
+     "mode": "ON"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "cmd uimode night",
+    "contains": "yes",
+    "wait_s": 4
+   }
+  ],
+  "cleanup": [
+   "cmd uimode night no"
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable",
+       "detail": "action.set_dark_mode"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "B05-airplane",
+  "title": "Modalita' aereo accesa",
+  "cond": "true",
+  "rule": {
+   "name": "B05-airplane",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "set_airplane",
+     "on": true
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "wait_s": 3,
+  "checks": [
+   {
+    "shell": "settings get global airplane_mode_on",
+    "equals": "1",
+    "wait_s": 8
+   }
+  ],
+  "cleanup": [
+   "cmd connectivity airplane-mode disable"
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable",
+       "detail": "action.set_airplane"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "B06-location-off",
+  "title": "Localizzazione spenta",
+  "cond": "true",
+  "rule": {
+   "name": "B06-location-off",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "set_location",
+     "on": false
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "cmd location is-location-enabled",
+    "equals": "false",
+    "wait_s": 4
+   }
+  ],
+  "cleanup": [
+   "cmd location set-location-enabled true"
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable",
+       "detail": "action.set_location"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "B07-nfc",
+  "title": "set_nfc: l'emulatore non ha l'NFC, non si arma in nessuna configurazione",
+  "cond": "none",
+  "rule": {
+   "name": "B07-nfc",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "set_nfc",
+     "on": true
+    }
+   ]
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "capability_unavailable",
+     "detail": "action.set_nfc"
+    }
+   }
+  }
+ },
+ {
+  "id": "B08-battery-saver",
+  "title": "Risparmio energetico (a batteria scollegata)",
+  "cond": "true",
+  "rule": {
+   "name": "B08-battery-saver",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "set_battery_saver",
+     "on": true
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "pre": [
+   "dumpsys battery unplug"
+  ],
+  "wait_s": 3,
+  "checks": [
+   {
+    "shell": "settings get global low_power",
+    "equals": "1",
+    "wait_s": 8
+   }
+  ],
+  "cleanup": [
+   "cmd power set-mode 0",
+   "dumpsys battery reset"
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable",
+       "detail": "action.set_battery_saver"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "B09-lock-screen",
+  "title": "Blocco dello schermo",
+  "cond": "true",
+  "rule": {
+   "name": "B09-lock-screen",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "lock_screen"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys power | grep mWakefulness= | head -1",
+    "contains": "Asleep",
+    "wait_s": 6
+   }
+  ],
+  "cleanup": [
+   "input keyevent KEYCODE_WAKEUP",
+   "wm dismiss-keyguard"
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable",
+       "detail": "action.lock_screen"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "B10-screenshot",
+  "title": "Schermata salvata in Pictures/Argus",
+  "cond": "true",
+  "rule": {
+   "name": "B10-screenshot",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "screenshot"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "pre": [
+   "rm -rf /sdcard/Pictures/Argus"
+  ],
+  "checks": [
+   {
+    "shell": "ls /sdcard/Pictures/Argus | wc -l",
+    "matches": "^[1-9]",
+    "wait_s": 8
+   }
+  ],
+  "cleanup": [
+   "rm -rf /sdcard/Pictures/Argus"
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable",
+       "detail": "action.screenshot"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "B11-app-force-stop",
+  "title": "Arresto forzato di un'app",
+  "cond": "true",
+  "rule": {
+   "name": "B11-app-force-stop",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "app_control",
+     "pkg": "com.google.android.contacts",
+     "op": "FORCE_STOP"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "pre": [
+   "monkey -p com.google.android.contacts -c android.intent.category.LAUNCHER 1"
+  ],
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys package com.google.android.contacts | grep -o 'stopped=[a-z]*'",
+    "contains": "stopped=true",
+    "wait_s": 5
+   }
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable",
+       "detail": "action.app_control"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "B12-app-freeze",
+  "title": "Congela un'app",
+  "cond": "true",
+  "rule": {
+   "name": "B12-app-freeze",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "app_control",
+     "pkg": "com.google.android.calendar",
+     "op": "FREEZE"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "checks": [
+   {
+    "shell": "pm list packages -d | grep -c com.google.android.calendar",
+    "equals": "1",
+    "wait_s": 4
+   }
+  ],
+  "cleanup": [
+   "pm enable com.google.android.calendar"
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable",
+       "detail": "action.app_control"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "B13-app-unfreeze",
+  "title": "Scongela un'app",
+  "cond": "true",
+  "rule": {
+   "name": "B13-app-unfreeze",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "app_control",
+     "pkg": "com.google.android.calendar",
+     "op": "UNFREEZE"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "pre": [
+   "pm disable-user --user 0 com.google.android.calendar"
+  ],
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "pm list packages -d | grep -c com.google.android.calendar",
+    "equals": "0",
+    "wait_s": 4
+   }
+  ],
+  "cleanup": [
+   "pm enable com.google.android.calendar"
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable",
+       "detail": "action.app_control"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "B14-permission-grant",
+  "title": "Concede un permesso a un'app",
+  "cond": "true",
+  "rule": {
+   "name": "B14-permission-grant",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "app_permission",
+     "pkg": "com.google.android.calendar",
+     "permission": "android.permission.READ_CALENDAR",
+     "grant": true
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "pre": [
+   "pm revoke com.google.android.calendar android.permission.READ_CALENDAR"
+  ],
+  "checks": [
+   {
+    "shell": "dumpsys package com.google.android.calendar | grep 'android.permission.READ_CALENDAR: granted' | head -1",
+    "contains": "granted=true",
+    "wait_s": 4
+   }
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable",
+       "detail": "action.app_permission"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "B15-permission-revoke",
+  "title": "Revoca un permesso a un'app",
+  "cond": "true",
+  "rule": {
+   "name": "B15-permission-revoke",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "app_permission",
+     "pkg": "com.google.android.calendar",
+     "permission": "android.permission.READ_CALENDAR",
+     "grant": false
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "pre": [
+   "pm grant com.google.android.calendar android.permission.READ_CALENDAR"
+  ],
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys package com.google.android.calendar | grep 'android.permission.READ_CALENDAR: granted' | head -1",
+    "contains": "granted=false",
+    "wait_s": 4
+   }
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable",
+       "detail": "action.app_permission"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "B16-forbidden-app-target",
+  "title": "app_control su Impostazioni e' vietato",
+  "cond": "none",
+  "rule": {
+   "name": "B16-forbidden-app-target",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "app_control",
+     "pkg": "com.android.settings",
+     "op": "FORCE_STOP"
+    }
+   ]
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "priv_target_forbidden"
+    }
+   }
+  }
+ },
+ {
+  "id": "B17-permission-on-argus",
+  "title": "Nessuna regola puo' toccare i permessi di Argus",
+  "cond": "none",
+  "rule": {
+   "name": "B17-permission-on-argus",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "app_permission",
+     "pkg": "dev.argus",
+     "permission": "android.permission.READ_SMS",
+     "grant": true
+    }
+   ]
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "priv_target_forbidden"
+    }
+   }
+  }
+ }
+]

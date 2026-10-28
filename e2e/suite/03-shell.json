@@ -1,0 +1,424 @@
+[
+ {
+  "id": "S01-shell-identity",
+  "title": "run_shell gira con l'identita' di Shizuku (root = 0, shell = 2000)",
+  "cond": "true",
+  "rule": {
+   "name": "S01-shell-identity",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "run_shell",
+     "cmd": "id -u > /data/local/tmp/e2e_uid"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "pre": [
+   "rm -f /data/local/tmp/e2e_uid"
+  ],
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "cat /data/local/tmp/e2e_uid",
+    "equals": "2000",
+    "wait_s": 4
+   }
+  ],
+  "cleanup": [
+   "rm -f /data/local/tmp/e2e_uid"
+  ],
+  "per_config": {
+   "shizuku_root": {
+    "checks": [
+     {
+      "shell": "cat /data/local/tmp/e2e_uid",
+      "equals": "0",
+      "wait_s": 4
+     }
+    ]
+   },
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable",
+       "detail": "action.run_shell"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "S02-write-setting-global",
+  "title": "write_setting su GLOBAL",
+  "cond": "true",
+  "rule": {
+   "name": "S02-write-setting-global",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "write_setting",
+     "namespace": "GLOBAL",
+     "key": "e2e_marker",
+     "value": "42"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "pre": [
+   "settings delete global e2e_marker"
+  ],
+  "checks": [
+   {
+    "shell": "settings get global e2e_marker",
+    "equals": "42",
+    "wait_s": 4
+   }
+  ],
+  "cleanup": [
+   "settings delete global e2e_marker"
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable",
+       "detail": "action.write_setting"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "S03-write-setting-system",
+  "title": "write_setting su SYSTEM",
+  "cond": "true",
+  "rule": {
+   "name": "S03-write-setting-system",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "write_setting",
+     "namespace": "SYSTEM",
+     "key": "e2e_marker",
+     "value": "7"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "pre": [
+   "settings delete system e2e_marker"
+  ],
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "settings get system e2e_marker",
+    "equals": "7",
+    "wait_s": 4
+   }
+  ],
+  "cleanup": [
+   "settings delete system e2e_marker"
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable",
+       "detail": "action.write_setting"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "S04-write-setting-secure",
+  "title": "write_setting su SECURE",
+  "cond": "true",
+  "rule": {
+   "name": "S04-write-setting-secure",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "write_setting",
+     "namespace": "SECURE",
+     "key": "e2e_marker",
+     "value": "9"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "pre": [
+   "settings delete secure e2e_marker"
+  ],
+  "checks": [
+   {
+    "shell": "settings get secure e2e_marker",
+    "equals": "9",
+    "wait_s": 4
+   }
+  ],
+  "cleanup": [
+   "settings delete secure e2e_marker"
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable",
+       "detail": "action.write_setting"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "S05-shell-capture-notify",
+  "title": "run_shell cattura l'output in una variabile e lo mostra in una notifica",
+  "cond": "true",
+  "rule": {
+   "name": "S05-shell-capture-notify",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "run_shell",
+     "cmd": "echo e2e-out-{{RUN}}",
+     "captureAs": "out"
+    },
+    {
+     "type": "show_notification",
+     "title": "e2e S05 ${out}",
+     "text": "e2e body"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e S05 e2e-out-{{RUN}}'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable",
+       "detail": "action.run_shell"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "S06-shell-from-sms-refused",
+  "title": "Una shell non puo' partire da un SMS",
+  "cond": "none",
+  "rule": {
+   "name": "S06-shell-from-sms-refused",
+   "trigger": {
+    "type": "phone_state",
+    "event": "SMS_RECEIVED"
+   },
+   "actions": [
+    {
+     "type": "run_shell",
+     "cmd": "true"
+    }
+   ]
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "shell_external_trigger"
+    }
+   }
+  }
+ },
+ {
+  "id": "S07-shell-from-notification-refused",
+  "title": "Una shell non puo' partire da una notifica qualsiasi",
+  "cond": "none",
+  "rule": {
+   "name": "S07-shell-from-notification-refused",
+   "trigger": {
+    "type": "notification",
+    "pkg": "com.example.chat"
+   },
+   "actions": [
+    {
+     "type": "run_shell",
+     "cmd": "true"
+    }
+   ]
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "shell_external_trigger"
+    }
+   }
+  }
+ },
+ {
+  "id": "S08-shell-from-media-refused",
+  "title": "Una shell non puo' partire dalla musica",
+  "cond": "none",
+  "rule": {
+   "name": "S08-shell-from-media-refused",
+   "trigger": {
+    "type": "media",
+    "state": "PLAYING"
+   },
+   "actions": [
+    {
+     "type": "run_shell",
+     "cmd": "true"
+    },
+    {
+     "type": "ui_steps",
+     "pkg": "com.google.android.deskclock",
+     "steps": [
+      {
+       "op": "home"
+      }
+     ]
+    }
+   ]
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "shell_external_trigger"
+    }
+   }
+  }
+ },
+ {
+  "id": "S09-shell-from-app-event-refused",
+  "title": "Una shell non puo' partire dall'apertura di un'app",
+  "cond": "none",
+  "rule": {
+   "name": "S09-shell-from-app-event-refused",
+   "trigger": {
+    "type": "app_event",
+    "pkg": "com.android.settings",
+    "event": "OPENED"
+   },
+   "actions": [
+    {
+     "type": "run_shell",
+     "cmd": "true"
+    },
+    {
+     "type": "ui_steps",
+     "pkg": "com.google.android.deskclock",
+     "steps": [
+      {
+       "op": "home"
+      }
+     ]
+    }
+   ]
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "shell_external_trigger"
+    }
+   }
+  }
+ }
+]

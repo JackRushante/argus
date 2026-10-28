@@ -1,0 +1,340 @@
+[
+ {
+  "id": "P01-dedupe",
+  "title": "Lo stesso evento due volte e' eseguito una volta sola",
+  "cond": "none",
+  "rule": {
+   "name": "P01-dedupe",
+   "trigger": {
+    "type": "screen",
+    "event": "ON"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e P01 {{RUN}}",
+     "text": "e2e body"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "executions": 1,
+    "status": "SUCCEEDED",
+    "audit_has": [
+     "SUPPRESSED_DUPLICATE"
+    ]
+   }
+  },
+  "fire": {
+   "payload": {
+    "at": 1700000000000
+   },
+   "repeat": 2
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e P01 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "P02-cooldown",
+  "title": "Cooldown: il secondo scatto entro un minuto e' soppresso",
+  "cond": "none",
+  "rule": {
+   "name": "P02-cooldown",
+   "trigger": {
+    "type": "screen",
+    "event": "OFF"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e P02 {{RUN}}",
+     "text": "e2e body"
+    }
+   ],
+   "cooldownMs": 60000
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "executions": 2,
+    "audit_has": [
+     "FIRED",
+     "SUPPRESSED_COOLDOWN"
+    ]
+   }
+  },
+  "fire": {
+   "payload": {},
+   "repeat": 2,
+   "delay_s": 1
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e P02 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "P03-pause",
+  "title": "Pausa automazioni: la regola non scatta e il Log dice «paused»",
+  "cond": "none",
+  "rule": {
+   "name": "P03-pause",
+   "trigger": {
+    "type": "screen",
+    "event": "UNLOCKED"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e P03 {{RUN}}",
+     "text": "e2e body"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "executions": 0,
+    "audit_has": [
+     "BLOCKED_POLICY"
+    ],
+    "audit_detail": {
+     "BLOCKED_POLICY": "paused"
+    }
+   }
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e P03 {{RUN}})'",
+    "equals": "0",
+    "wait_s": 0
+   }
+  ],
+  "pause": true
+ },
+ {
+  "id": "P04-unknown-field",
+  "title": "JSON con un campo inventato e' rifiutato (la suite non perde i refusi)",
+  "cond": "none",
+  "rule": {
+   "name": "P04-unknown-field",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "vibrate",
+     "durationMs": 100,
+     "volume": 3
+    }
+   ]
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "decode",
+     "code": "decode_error"
+    }
+   }
+  }
+ },
+ {
+  "id": "P05-no-actions",
+  "title": "Una regola senza azioni e' rifiutata",
+  "cond": "none",
+  "rule": {
+   "name": "P05-no-actions",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": []
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "no_actions"
+    }
+   }
+  }
+ },
+ {
+  "id": "P06-bad-volume",
+  "title": "Volume fuori intervallo rifiutato",
+  "cond": "none",
+  "rule": {
+   "name": "P06-bad-volume",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "set_volume",
+     "stream": "MEDIA",
+     "level": 150
+    }
+   ]
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "volume_level_invalid"
+    }
+   }
+  }
+ },
+ {
+  "id": "P07-bad-cron",
+  "title": "Cron non valido rifiutato",
+  "cond": "none",
+  "rule": {
+   "name": "P07-bad-cron",
+   "trigger": {
+    "type": "time",
+    "cron": "99 99 * * *",
+    "tz": "Europe/Rome"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e P07",
+     "text": "e2e body"
+    }
+   ]
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "cron_invalid"
+    }
+   }
+  }
+ },
+ {
+  "id": "P08-own-package",
+  "title": "Una regola non puo' ascoltare le notifiche di Argus",
+  "cond": "none",
+  "rule": {
+   "name": "P08-own-package",
+   "trigger": {
+    "type": "notification",
+    "pkg": "dev.argus"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e P08",
+     "text": "e2e body"
+    }
+   ]
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "notification_own_package"
+    }
+   }
+  }
+ },
+ {
+  "id": "P09-clipboard-needs-payload",
+  "title": "copy_to_clipboard senza un trigger con testo e' rifiutata",
+  "cond": "none",
+  "rule": {
+   "name": "P09-clipboard-needs-payload",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "copy_to_clipboard"
+    }
+   ]
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "clipboard_source_missing"
+    }
+   }
+  }
+ },
+ {
+  "id": "P10-shizuku-outage",
+  "title": "Shizuku si ferma a regola armata: l'azione privilegiata non parte (mai in ritardo)",
+  "cond": "none",
+  "rule": {
+   "name": "P10-shizuku-outage",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "set_wifi",
+     "on": false
+    },
+    {
+     "type": "show_notification",
+     "title": "e2e P10 {{RUN}}",
+     "text": "e2e body"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "executions": 0,
+    "audit_has": [
+     "BLOCKED_POLICY"
+    ]
+   }
+  },
+  "configs": [
+   "shizuku_root",
+   "shizuku_shell"
+  ],
+  "pre": [
+   "svc wifi enable"
+  ],
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "settings get global wifi_on",
+    "equals": "1",
+    "wait_s": 0
+   },
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e P10 {{RUN}})'",
+    "equals": "0",
+    "wait_s": 0
+   }
+  ],
+  "cleanup": [
+   "svc wifi enable"
+  ],
+  "after_load": [
+   "pkill -f shizuku_server",
+   3
+  ],
+  "restore_shizuku": true
+ }
+]

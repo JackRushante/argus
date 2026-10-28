@@ -1,0 +1,360 @@
+[
+ {
+  "id": "U01-clock-tab",
+  "title": "ui_steps: apre l'orologio e passa alla scheda Cronometro",
+  "cond": "none",
+  "rule": {
+   "name": "U01-clock-tab",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "ui_steps",
+     "pkg": "com.google.android.deskclock",
+     "steps": [
+      {
+       "op": "wait_for",
+       "text": "Stopwatch",
+       "timeoutMs": 8000
+      },
+      {
+       "op": "click",
+       "text": "Stopwatch"
+      },
+      {
+       "op": "check",
+       "text": "Stopwatch",
+       "present": true
+      }
+     ]
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "SUCCEEDED",
+    "actions": [
+     "ui_steps:SUCCEEDED"
+    ]
+   }
+  },
+  "needs": [
+   "package:com.google.android.deskclock"
+  ],
+  "fire": {
+   "payload": {}
+  },
+  "wait_s": 2,
+  "checks": [
+   {
+    "shell": "uiautomator dump /data/local/tmp/u.xml >/dev/null 2>&1; grep -o 'text=\"[^\"]*\"' /data/local/tmp/u.xml | tr '\\n' ' '",
+    "contains": "text=\"00\"",
+    "wait_s": 4
+   }
+  ],
+  "pre": [
+   "am force-stop com.google.android.deskclock",
+   "pm clear com.google.android.deskclock"
+  ]
+ },
+ {
+  "id": "U02-contacts-type",
+  "title": "ui_steps: cerca nei contatti, scrive, torna indietro e va alla Home",
+  "cond": "none",
+  "rule": {
+   "name": "U02-contacts-type",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "ui_steps",
+     "pkg": "com.google.android.contacts",
+     "steps": [
+      {
+       "op": "wait_for",
+       "text": "Search contacts",
+       "timeoutMs": 8000
+      },
+      {
+       "op": "click",
+       "text": "Search contacts"
+      },
+      {
+       "op": "type",
+       "text": "e2eprobe"
+      },
+      {
+       "op": "back"
+      },
+      {
+       "op": "home"
+      }
+     ]
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "needs": [
+   "package:com.google.android.contacts"
+  ],
+  "wait_s": 2,
+  "checks": [
+   {
+    "shell": "dumpsys window | grep -c 'mCurrentFocus.*nexuslauncher'",
+    "equals": "1",
+    "wait_s": 6
+   }
+  ],
+  "pre": [
+   "am force-stop com.google.android.contacts"
+  ]
+ },
+ {
+  "id": "U08-contacts-form-scroll",
+  "title": "ui_steps: apre il modulo Nuovo contatto (pulsante con sola descrizione), scorre giu' e su, torna indietro e va alla Home",
+  "cond": "none",
+  "rule": {
+   "name": "U08-contacts-form-scroll",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "ui_steps",
+     "pkg": "com.google.android.contacts",
+     "steps": [
+      {
+       "op": "wait_for",
+       "text": "Create contact",
+       "timeoutMs": 8000
+      },
+      {
+       "op": "click",
+       "desc": "Create contact"
+      },
+      {
+       "op": "wait_for",
+       "text": "Phone",
+       "timeoutMs": 6000
+      },
+      {
+       "op": "scroll",
+       "dir": "DOWN"
+      },
+      {
+       "op": "scroll",
+       "dir": "UP"
+      },
+      {
+       "op": "back"
+      },
+      {
+       "op": "home"
+      }
+     ]
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "needs": [
+   "package:com.google.android.contacts"
+  ],
+  "wait_s": 2,
+  "checks": [
+   {
+    "shell": "dumpsys window | grep -c 'mCurrentFocus.*nexuslauncher'",
+    "equals": "1",
+    "wait_s": 6
+   }
+  ],
+  "pre": [
+   "am force-stop com.google.android.contacts"
+  ]
+ },
+ {
+  "id": "U03-ui-timeout",
+  "title": "ui_steps: un elemento che non compare ferma la macro (ui_timeout)",
+  "cond": "none",
+  "rule": {
+   "name": "U03-ui-timeout",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "ui_steps",
+     "pkg": "com.google.android.deskclock",
+     "steps": [
+      {
+       "op": "wait_for",
+       "text": "Nonexistent Thing",
+       "timeoutMs": 1000
+      }
+     ]
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "FAILED",
+    "actions": [
+     "ui_steps:FAILED:ui_timeout"
+    ]
+   }
+  },
+  "needs": [
+   "package:com.google.android.deskclock"
+  ],
+  "fire": {
+   "payload": {}
+  }
+ },
+ {
+  "id": "U04-ui-check-failed",
+  "title": "ui_steps: un controllo che fallisce ferma la macro",
+  "cond": "none",
+  "rule": {
+   "name": "U04-ui-check-failed",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "ui_steps",
+     "pkg": "com.google.android.deskclock",
+     "steps": [
+      {
+       "op": "check",
+       "text": "Nonexistent Thing",
+       "present": true
+      }
+     ]
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "FAILED"
+   }
+  },
+  "needs": [
+   "package:com.google.android.deskclock"
+  ],
+  "wait_s": 3
+ },
+ {
+  "id": "U05-ui-forbidden-package",
+  "title": "ui_steps: le Impostazioni sono vietate",
+  "cond": "none",
+  "rule": {
+   "name": "U05-ui-forbidden-package",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "ui_steps",
+     "pkg": "com.android.settings",
+     "steps": [
+      {
+       "op": "home"
+      }
+     ]
+    }
+   ]
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "ui_pkg_forbidden"
+    }
+   }
+  }
+ },
+ {
+  "id": "U06-ui-external-trigger",
+  "title": "ui_steps: non parte da una notifica qualsiasi",
+  "cond": "none",
+  "rule": {
+   "name": "U06-ui-external-trigger",
+   "trigger": {
+    "type": "notification",
+    "pkg": "com.example.chat"
+   },
+   "actions": [
+    {
+     "type": "ui_steps",
+     "steps": [
+      {
+       "op": "home"
+      }
+     ]
+    },
+    {
+     "type": "show_notification",
+     "title": "e2e U06",
+     "text": "e2e body"
+    }
+   ]
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "ui_steps_external_trigger"
+    }
+   }
+  }
+ },
+ {
+  "id": "U07-ui-without-accessibility",
+  "title": "ui_steps: senza il servizio di Accessibilita' non si arma",
+  "cond": "none",
+  "rule": {
+   "name": "U07-ui-without-accessibility",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "ui_steps",
+     "pkg": "com.google.android.deskclock",
+     "steps": [
+      {
+       "op": "home"
+      }
+     ]
+    }
+   ]
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "capability_unavailable",
+     "detail": "action.ui_steps"
+    }
+   }
+  },
+  "pre": [
+   "settings put secure enabled_accessibility_services ''",
+   "settings put secure accessibility_enabled 0"
+  ],
+  "cleanup": [
+   "settings put secure enabled_accessibility_services dev.argus/dev.argus.automation.screen.ArgusAccessibilityService",
+   "settings put secure accessibility_enabled 1"
+  ]
+ }
+]

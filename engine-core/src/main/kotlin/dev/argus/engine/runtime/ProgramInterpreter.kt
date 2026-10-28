@@ -477,7 +477,8 @@ class ProgramInterpreter(
             add(producer)
         }
         return VarValue(
-            text = text,
+            // Come `$(…)` in shell: il newline finale dell'output non fa parte del valore.
+            text = if (action is Action.RunShell) text.removeSuffix("\n").removeSuffix("\r") else text,
             type = VarType.TEXT,
             integrity = IntegrityLabel.TAINTED,
             // Floor conservativo P4-A: output shell/model può riflettere qualunque input segreto.

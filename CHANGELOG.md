@@ -2,6 +2,31 @@
 
 Release and engineering notes, newest first.
 
+## v0.6.0 (2026-10-28) — End-to-end suite on an emulator
+
+### Added
+
+- End-to-end suite (`e2e/`): 162 rules written by hand, run on an Android 16 emulator in three
+  configurations (Shizuku as root, Shizuku as shell, no Shizuku), with pairwise coverage of triggers,
+  conditions, actions, P4 programs, the 0.5.1 privileged actions and screen macros. Effects are checked
+  through the shell and the journal; no AI and no cost. A debug-only hook (`content://dev.argus.e2e`,
+  answers only to adb shell and root) loads approved rules and fires synthetic events; a test checks that
+  release builds do not contain it.
+
+### Fixed
+
+- A rule whose variable read a value that needs Shizuku (a P4 `state` variable) was armed without Shizuku
+  and then blocked at every firing. Approval now checks the variables too and refuses it.
+- The output of a shell command saved in a variable kept its final line break, so a notification title
+  built from it had an empty second line.
+- In screen macros, "click" now also matches the element's description, like "wait for" and "check",
+  so icon buttons without text can be pressed.
+
+### Verified
+
+- The suite on the emulator: 162/162 with Shizuku as root and as shell, 161/161 without Shizuku after
+  the fixes above. All unit suites and `:app:lintRelease`.
+
 ## v0.5.1 (2026-10-28) — App trigger, privileged actions, screen macros, structured output
 
 ### Added

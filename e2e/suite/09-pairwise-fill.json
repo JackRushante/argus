@@ -1,0 +1,1836 @@
+[
+ {
+  "id": "Z01-geofence-false-audio_mode+display+launch+shell",
+  "title": "Copertura a coppie: geofence / condizione false / audio_mode, display, launch, shell / capture+vars",
+  "cond": "false",
+  "rule": {
+   "name": "Z01-geofence-false-audio_mode+display+launch+shell",
+   "trigger": {
+    "type": "geofence",
+    "lat": 41.9,
+    "lng": 12.5,
+    "radiusM": 300.0,
+    "transition": "EXIT"
+   },
+   "actions": [
+    {
+     "type": "set_volume",
+     "stream": "MEDIA",
+     "level": 30
+    },
+    {
+     "type": "set_rotation",
+     "auto": true
+    },
+    {
+     "type": "set_timer",
+     "seconds": 600,
+     "label": "e2e fill",
+     "skipUi": true
+    },
+    {
+     "type": "run_shell",
+     "cmd": "echo fill",
+     "captureAs": "cap"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "off"
+   },
+   "vars": [
+    {
+     "type": "literal",
+     "name": "v",
+     "value": "e2e",
+     "varType": "TEXT",
+     "confidentiality": "PUBLIC"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "executions": 0,
+    "audit_has": [
+     "CONDITIONS_NOT_MET"
+    ]
+   }
+  },
+  "fire": {
+   "payload": {}
+  },
+  "cleanup": [
+   "cmd media_session volume --stream 3 --set 7"
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "Z02-notification-false-device_control+network_out+radios",
+  "title": "Copertura a coppie: notification / condizione false / device_control, network_out, radios / clock+while",
+  "cond": "false",
+  "rule": {
+   "name": "Z02-notification-false-device_control+network_out+radios",
+   "trigger": {
+    "type": "notification",
+    "pkg": "com.example.chat",
+    "conversationId": "e2e-fill",
+    "isGroup": false
+   },
+   "actions": [
+    {
+     "type": "while",
+     "condition": {
+      "type": "boolean_literal",
+      "value": true
+     },
+     "body": [
+      {
+       "type": "screenshot"
+      }
+     ],
+     "maxIterations": 1,
+     "delayBetweenMs": 0
+    },
+    {
+     "type": "http_request",
+     "method": "GET",
+     "url": "https://example.com/"
+    },
+    {
+     "type": "set_wifi",
+     "on": true
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "off"
+   },
+   "vars": [
+    {
+     "type": "clock",
+     "name": "clk",
+     "tz": "Europe/Rome",
+     "pattern": "HH:mm"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "executions": 0,
+    "audit_has": [
+     "CONDITIONS_NOT_MET"
+    ]
+   }
+  },
+  "needs": [
+   "internet"
+  ],
+  "fire": {
+   "payload": {}
+  },
+  "cleanup": [
+   "rm -rf /sdcard/Pictures/Argus"
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "Z03-connectivity-false-audio_mode+screen_macro+shell",
+  "title": "Copertura a coppie: connectivity / condizione false / audio_mode, screen_macro, shell / if+wait",
+  "cond": "false",
+  "rule": {
+   "name": "Z03-connectivity-false-audio_mode+screen_macro+shell",
+   "trigger": {
+    "type": "connectivity",
+    "medium": "POWER",
+    "state": "CONNECTED"
+   },
+   "actions": [
+    {
+     "type": "wait",
+     "durationMs": 300
+    },
+    {
+     "type": "if",
+     "condition": {
+      "type": "boolean_literal",
+      "value": true
+     },
+     "then": [
+      {
+       "type": "set_volume",
+       "stream": "MEDIA",
+       "level": 30
+      }
+     ],
+     "orElse": []
+    },
+    {
+     "type": "ui_steps",
+     "steps": [
+      {
+       "op": "home"
+      }
+     ]
+    },
+    {
+     "type": "run_shell",
+     "cmd": "true"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "off"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "executions": 0,
+    "audit_has": [
+     "CONDITIONS_NOT_MET"
+    ]
+   }
+  },
+  "fire": {
+   "payload": {}
+  },
+  "cleanup": [
+   "cmd media_session volume --stream 3 --set 7"
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "Z04-app_event-false-audio_mode+display+launch",
+  "title": "Copertura a coppie: app_event / condizione false / audio_mode, display, launch / clock+while",
+  "cond": "false",
+  "rule": {
+   "name": "Z04-app_event-false-audio_mode+display+launch",
+   "trigger": {
+    "type": "app_event",
+    "pkg": "com.google.android.deskclock",
+    "event": "OPENED"
+   },
+   "actions": [
+    {
+     "type": "while",
+     "condition": {
+      "type": "boolean_literal",
+      "value": true
+     },
+     "body": [
+      {
+       "type": "set_volume",
+       "stream": "MEDIA",
+       "level": 30
+      }
+     ],
+     "maxIterations": 1,
+     "delayBetweenMs": 0
+    },
+    {
+     "type": "set_rotation",
+     "auto": true
+    },
+    {
+     "type": "set_timer",
+     "seconds": 600,
+     "label": "e2e fill",
+     "skipUi": true
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "off"
+   },
+   "vars": [
+    {
+     "type": "clock",
+     "name": "clk",
+     "tz": "Europe/Rome",
+     "pattern": "HH:mm"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "executions": 0,
+    "audit_has": [
+     "CONDITIONS_NOT_MET"
+    ]
+   }
+  },
+  "fire": {
+   "payload": {}
+  },
+  "cleanup": [
+   "cmd media_session volume --stream 3 --set 7"
+  ]
+ },
+ {
+  "id": "Z05-immediate-false-flow",
+  "title": "Copertura a coppie: immediate / condizione false / solo flusso",
+  "cond": "false",
+  "rule": {
+   "name": "Z05-immediate-false-flow",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e fill none",
+     "text": "e2e body"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "off"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "executions": 0,
+    "audit_has": [
+     "CONDITIONS_NOT_MET"
+    ]
+   }
+  }
+ },
+ {
+  "id": "Z06-mode_changed-false-audio_mode+display+launch",
+  "title": "Copertura a coppie: mode_changed / condizione false / audio_mode, display, launch / if+wait",
+  "cond": "false",
+  "rule": {
+   "name": "Z06-mode_changed-false-audio_mode+display+launch",
+   "trigger": {
+    "type": "mode_changed",
+    "what": "RINGER"
+   },
+   "actions": [
+    {
+     "type": "wait",
+     "durationMs": 300
+    },
+    {
+     "type": "if",
+     "condition": {
+      "type": "boolean_literal",
+      "value": true
+     },
+     "then": [
+      {
+       "type": "set_volume",
+       "stream": "MEDIA",
+       "level": 30
+      }
+     ],
+     "orElse": []
+    },
+    {
+     "type": "set_rotation",
+     "auto": true
+    },
+    {
+     "type": "set_timer",
+     "seconds": 600,
+     "label": "e2e fill",
+     "skipUi": true
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "off"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "executions": 0,
+    "audit_has": [
+     "CONDITIONS_NOT_MET"
+    ]
+   }
+  },
+  "fire": {
+   "payload": {}
+  },
+  "cleanup": [
+   "cmd media_session volume --stream 3 --set 7"
+  ]
+ },
+ {
+  "id": "Z07-phone_state-false-audio_mode+display+launch",
+  "title": "Copertura a coppie: phone_state / condizione false / audio_mode, display, launch",
+  "cond": "false",
+  "rule": {
+   "name": "Z07-phone_state-false-audio_mode+display+launch",
+   "trigger": {
+    "type": "phone_state",
+    "event": "SMS_RECEIVED",
+    "textMatch": "fill"
+   },
+   "actions": [
+    {
+     "type": "set_volume",
+     "stream": "MEDIA",
+     "level": 30
+    },
+    {
+     "type": "set_rotation",
+     "auto": true
+    },
+    {
+     "type": "set_timer",
+     "seconds": 600,
+     "label": "e2e fill",
+     "skipUi": true
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "off"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "executions": 0,
+    "audit_has": [
+     "CONDITIONS_NOT_MET"
+    ]
+   }
+  },
+  "fire": {
+   "payload": {}
+  },
+  "cleanup": [
+   "cmd media_session volume --stream 3 --set 7"
+  ]
+ },
+ {
+  "id": "Z08-time-none-launch+network_out+radios+shell",
+  "title": "Copertura a coppie: time / condizione none / launch, network_out, radios, shell / capture+vars",
+  "cond": "none",
+  "rule": {
+   "name": "Z08-time-none-launch+network_out+radios+shell",
+   "trigger": {
+    "type": "time",
+    "cron": "30 8 * * *",
+    "tz": "Europe/Rome"
+   },
+   "actions": [
+    {
+     "type": "set_timer",
+     "seconds": 600,
+     "label": "e2e fill",
+     "skipUi": true
+    },
+    {
+     "type": "http_request",
+     "method": "GET",
+     "url": "https://example.com/"
+    },
+    {
+     "type": "set_wifi",
+     "on": true
+    },
+    {
+     "type": "run_shell",
+     "cmd": "echo fill",
+     "captureAs": "cap"
+    }
+   ],
+   "vars": [
+    {
+     "type": "literal",
+     "name": "v",
+     "value": "e2e",
+     "varType": "TEXT",
+     "confidentiality": "PUBLIC"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "SUCCEEDED"
+   }
+  },
+  "needs": [
+   "internet"
+  ],
+  "fire": {
+   "payload": {}
+  },
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "Z09-time-none-device_control+screen_macro+shell",
+  "title": "Copertura a coppie: time / condizione none / device_control, screen_macro, shell / clock+vars",
+  "cond": "none",
+  "rule": {
+   "name": "Z09-time-none-device_control+screen_macro+shell",
+   "trigger": {
+    "type": "time",
+    "cron": "30 8 * * *",
+    "tz": "Europe/Rome"
+   },
+   "actions": [
+    {
+     "type": "screenshot"
+    },
+    {
+     "type": "ui_steps",
+     "steps": [
+      {
+       "op": "home"
+      }
+     ]
+    },
+    {
+     "type": "run_shell",
+     "cmd": "true"
+    }
+   ],
+   "vars": [
+    {
+     "type": "literal",
+     "name": "v",
+     "value": "e2e",
+     "varType": "TEXT",
+     "confidentiality": "PUBLIC"
+    },
+    {
+     "type": "clock",
+     "name": "clk",
+     "tz": "Europe/Rome",
+     "pattern": "HH:mm"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "SUCCEEDED"
+   }
+  },
+  "fire": {
+   "payload": {}
+  },
+  "cleanup": [
+   "rm -rf /sdcard/Pictures/Argus"
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  },
+  "foreground": false,
+  "pre": [
+   "input keyevent KEYCODE_WAKEUP",
+   "input keyevent KEYCODE_HOME"
+  ]
+ },
+ {
+  "id": "Z10-geofence-none-network_out+radios+screen_macro+shell",
+  "title": "Copertura a coppie: geofence / condizione none / network_out, radios, screen_macro, shell / capture+while",
+  "cond": "none",
+  "rule": {
+   "name": "Z10-geofence-none-network_out+radios+screen_macro+shell",
+   "trigger": {
+    "type": "geofence",
+    "lat": 41.9,
+    "lng": 12.5,
+    "radiusM": 300.0,
+    "transition": "EXIT"
+   },
+   "actions": [
+    {
+     "type": "while",
+     "condition": {
+      "type": "boolean_literal",
+      "value": true
+     },
+     "body": [
+      {
+       "type": "http_request",
+       "method": "GET",
+       "url": "https://example.com/"
+      }
+     ],
+     "maxIterations": 1,
+     "delayBetweenMs": 0
+    },
+    {
+     "type": "set_wifi",
+     "on": true
+    },
+    {
+     "type": "ui_steps",
+     "steps": [
+      {
+       "op": "home"
+      }
+     ]
+    },
+    {
+     "type": "run_shell",
+     "cmd": "echo fill",
+     "captureAs": "cap"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "SUCCEEDED"
+   }
+  },
+  "needs": [
+   "internet"
+  ],
+  "fire": {
+   "payload": {}
+  },
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  },
+  "foreground": false,
+  "pre": [
+   "input keyevent KEYCODE_WAKEUP",
+   "input keyevent KEYCODE_HOME"
+  ]
+ },
+ {
+  "id": "Z11-phone_state-true-network_out+radios+screen_macro",
+  "title": "Copertura a coppie: phone_state / condizione true / network_out, radios, screen_macro / if+wait",
+  "cond": "true",
+  "rule": {
+   "name": "Z11-phone_state-true-network_out+radios+screen_macro",
+   "trigger": {
+    "type": "phone_state",
+    "event": "SMS_RECEIVED",
+    "textMatch": "fill"
+   },
+   "actions": [
+    {
+     "type": "wait",
+     "durationMs": 300
+    },
+    {
+     "type": "if",
+     "condition": {
+      "type": "boolean_literal",
+      "value": true
+     },
+     "then": [
+      {
+       "type": "http_request",
+       "method": "GET",
+       "url": "https://example.com/"
+      }
+     ],
+     "orElse": []
+    },
+    {
+     "type": "set_wifi",
+     "on": true
+    },
+    {
+     "type": "ui_steps",
+     "steps": [
+      {
+       "op": "home"
+      }
+     ]
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "ui_steps_external_trigger"
+    }
+   }
+  },
+  "needs": [
+   "internet"
+  ]
+ },
+ {
+  "id": "Z12-app_event-true-device_control+network_out+radios+shell",
+  "title": "Copertura a coppie: app_event / condizione true / device_control, network_out, radios, shell / capture+if",
+  "cond": "true",
+  "rule": {
+   "name": "Z12-app_event-true-device_control+network_out+radios+shell",
+   "trigger": {
+    "type": "app_event",
+    "pkg": "com.google.android.deskclock",
+    "event": "OPENED"
+   },
+   "actions": [
+    {
+     "type": "if",
+     "condition": {
+      "type": "boolean_literal",
+      "value": true
+     },
+     "then": [
+      {
+       "type": "screenshot"
+      }
+     ],
+     "orElse": []
+    },
+    {
+     "type": "http_request",
+     "method": "GET",
+     "url": "https://example.com/"
+    },
+    {
+     "type": "set_wifi",
+     "on": true
+    },
+    {
+     "type": "run_shell",
+     "cmd": "echo fill",
+     "captureAs": "cap"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "shell_external_trigger"
+    }
+   }
+  },
+  "needs": [
+   "internet"
+  ],
+  "cleanup": [
+   "rm -rf /sdcard/Pictures/Argus"
+  ]
+ },
+ {
+  "id": "Z13-audio_output-true-display+launch+network_out",
+  "title": "Copertura a coppie: audio_output / condizione true / display, launch, network_out",
+  "cond": "true",
+  "rule": {
+   "name": "Z13-audio_output-true-display+launch+network_out",
+   "trigger": {
+    "type": "audio_output",
+    "kind": "WIRED",
+    "state": "CONNECTED"
+   },
+   "actions": [
+    {
+     "type": "set_rotation",
+     "auto": true
+    },
+    {
+     "type": "set_timer",
+     "seconds": 600,
+     "label": "e2e fill",
+     "skipUi": true
+    },
+    {
+     "type": "http_request",
+     "method": "GET",
+     "url": "https://example.com/"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "SUCCEEDED"
+   }
+  },
+  "needs": [
+   "internet"
+  ],
+  "fire": {
+   "payload": {}
+  }
+ },
+ {
+  "id": "Z14-battery-true-audio_mode+launch+network_out",
+  "title": "Copertura a coppie: battery / condizione true / audio_mode, launch, network_out",
+  "cond": "true",
+  "rule": {
+   "name": "Z14-battery-true-audio_mode+launch+network_out",
+   "trigger": {
+    "type": "battery",
+    "above": 70
+   },
+   "actions": [
+    {
+     "type": "set_volume",
+     "stream": "MEDIA",
+     "level": 30
+    },
+    {
+     "type": "set_timer",
+     "seconds": 600,
+     "label": "e2e fill",
+     "skipUi": true
+    },
+    {
+     "type": "http_request",
+     "method": "GET",
+     "url": "https://example.com/"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "SUCCEEDED"
+   }
+  },
+  "needs": [
+   "internet"
+  ],
+  "fire": {
+   "payload": {}
+  },
+  "cleanup": [
+   "cmd media_session volume --stream 3 --set 7"
+  ]
+ },
+ {
+  "id": "Z15-media-true-audio_mode+display+launch",
+  "title": "Copertura a coppie: media / condizione true / audio_mode, display, launch",
+  "cond": "true",
+  "rule": {
+   "name": "Z15-media-true-audio_mode+display+launch",
+   "trigger": {
+    "type": "media",
+    "state": "PLAYING"
+   },
+   "actions": [
+    {
+     "type": "set_volume",
+     "stream": "MEDIA",
+     "level": 30
+    },
+    {
+     "type": "set_rotation",
+     "auto": true
+    },
+    {
+     "type": "set_timer",
+     "seconds": 600,
+     "label": "e2e fill",
+     "skipUi": true
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "SUCCEEDED"
+   }
+  },
+  "fire": {
+   "payload": {}
+  },
+  "cleanup": [
+   "cmd media_session volume --stream 3 --set 7"
+  ]
+ },
+ {
+  "id": "Z16-notification-true-audio_mode+display+launch",
+  "title": "Copertura a coppie: notification / condizione true / audio_mode, display, launch",
+  "cond": "true",
+  "rule": {
+   "name": "Z16-notification-true-audio_mode+display+launch",
+   "trigger": {
+    "type": "notification",
+    "pkg": "com.example.chat",
+    "conversationId": "e2e-fill",
+    "isGroup": false
+   },
+   "actions": [
+    {
+     "type": "set_volume",
+     "stream": "MEDIA",
+     "level": 30
+    },
+    {
+     "type": "set_rotation",
+     "auto": true
+    },
+    {
+     "type": "set_timer",
+     "seconds": 600,
+     "label": "e2e fill",
+     "skipUi": true
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "SUCCEEDED"
+   }
+  },
+  "fire": {
+   "payload": {}
+  },
+  "cleanup": [
+   "cmd media_session volume --stream 3 --set 7"
+  ]
+ },
+ {
+  "id": "Z17-geofence-none-device_control+shell",
+  "title": "Copertura a coppie: geofence / condizione none / device_control, shell / wait",
+  "cond": "none",
+  "rule": {
+   "name": "Z17-geofence-none-device_control+shell",
+   "trigger": {
+    "type": "geofence",
+    "lat": 41.9,
+    "lng": 12.5,
+    "radiusM": 300.0,
+    "transition": "EXIT"
+   },
+   "actions": [
+    {
+     "type": "wait",
+     "durationMs": 300
+    },
+    {
+     "type": "screenshot"
+    },
+    {
+     "type": "run_shell",
+     "cmd": "true"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "SUCCEEDED"
+   }
+  },
+  "fire": {
+   "payload": {}
+  },
+  "cleanup": [
+   "rm -rf /sdcard/Pictures/Argus"
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "Z18-screen-none-audio_mode+launch+network_out",
+  "title": "Copertura a coppie: screen / condizione none / audio_mode, launch, network_out",
+  "cond": "none",
+  "rule": {
+   "name": "Z18-screen-none-audio_mode+launch+network_out",
+   "trigger": {
+    "type": "screen",
+    "event": "OFF"
+   },
+   "actions": [
+    {
+     "type": "set_volume",
+     "stream": "MEDIA",
+     "level": 30
+    },
+    {
+     "type": "set_timer",
+     "seconds": 600,
+     "label": "e2e fill",
+     "skipUi": true
+    },
+    {
+     "type": "http_request",
+     "method": "GET",
+     "url": "https://example.com/"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "SUCCEEDED"
+   }
+  },
+  "needs": [
+   "internet"
+  ],
+  "fire": {
+   "payload": {}
+  },
+  "cleanup": [
+   "cmd media_session volume --stream 3 --set 7"
+  ]
+ },
+ {
+  "id": "Z19-sensor-none-audio_mode+display+launch",
+  "title": "Copertura a coppie: sensor / condizione none / audio_mode, display, launch",
+  "cond": "none",
+  "rule": {
+   "name": "Z19-sensor-none-audio_mode+display+launch",
+   "trigger": {
+    "type": "sensor",
+    "kind": "significant_motion"
+   },
+   "actions": [
+    {
+     "type": "set_volume",
+     "stream": "MEDIA",
+     "level": 30
+    },
+    {
+     "type": "set_rotation",
+     "auto": true
+    },
+    {
+     "type": "set_timer",
+     "seconds": 600,
+     "label": "e2e fill",
+     "skipUi": true
+    }
+   ],
+   "cooldownMs": 60000
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "capability_unavailable",
+     "detail": "trigger.sensor.significant_motion"
+    }
+   }
+  },
+  "cleanup": [
+   "cmd media_session volume --stream 3 --set 7"
+  ]
+ },
+ {
+  "id": "Z20-audio_output-none-device_control+radios+shell",
+  "title": "Copertura a coppie: audio_output / condizione none / device_control, radios, shell",
+  "cond": "none",
+  "rule": {
+   "name": "Z20-audio_output-none-device_control+radios+shell",
+   "trigger": {
+    "type": "audio_output",
+    "kind": "WIRED",
+    "state": "CONNECTED"
+   },
+   "actions": [
+    {
+     "type": "screenshot"
+    },
+    {
+     "type": "set_wifi",
+     "on": true
+    },
+    {
+     "type": "run_shell",
+     "cmd": "true"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "SUCCEEDED"
+   }
+  },
+  "fire": {
+   "payload": {}
+  },
+  "cleanup": [
+   "rm -rf /sdcard/Pictures/Argus"
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "Z21-battery-none-device_control+radios+shell",
+  "title": "Copertura a coppie: battery / condizione none / device_control, radios, shell",
+  "cond": "none",
+  "rule": {
+   "name": "Z21-battery-none-device_control+radios+shell",
+   "trigger": {
+    "type": "battery",
+    "above": 70
+   },
+   "actions": [
+    {
+     "type": "screenshot"
+    },
+    {
+     "type": "set_wifi",
+     "on": true
+    },
+    {
+     "type": "run_shell",
+     "cmd": "true"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "SUCCEEDED"
+   }
+  },
+  "fire": {
+   "payload": {}
+  },
+  "cleanup": [
+   "rm -rf /sdcard/Pictures/Argus"
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "Z22-connectivity-none-device_control+display+launch",
+  "title": "Copertura a coppie: connectivity / condizione none / device_control, display, launch",
+  "cond": "none",
+  "rule": {
+   "name": "Z22-connectivity-none-device_control+display+launch",
+   "trigger": {
+    "type": "connectivity",
+    "medium": "POWER",
+    "state": "CONNECTED"
+   },
+   "actions": [
+    {
+     "type": "screenshot"
+    },
+    {
+     "type": "set_rotation",
+     "auto": true
+    },
+    {
+     "type": "set_timer",
+     "seconds": 600,
+     "label": "e2e fill",
+     "skipUi": true
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "SUCCEEDED"
+   }
+  },
+  "fire": {
+   "payload": {}
+  },
+  "cleanup": [
+   "rm -rf /sdcard/Pictures/Argus"
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "Z23-media-none-device_control+network_out+radios",
+  "title": "Copertura a coppie: media / condizione none / device_control, network_out, radios",
+  "cond": "none",
+  "rule": {
+   "name": "Z23-media-none-device_control+network_out+radios",
+   "trigger": {
+    "type": "media",
+    "state": "PLAYING"
+   },
+   "actions": [
+    {
+     "type": "screenshot"
+    },
+    {
+     "type": "http_request",
+     "method": "GET",
+     "url": "https://example.com/"
+    },
+    {
+     "type": "set_wifi",
+     "on": true
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "SUCCEEDED"
+   }
+  },
+  "needs": [
+   "internet"
+  ],
+  "fire": {
+   "payload": {}
+  },
+  "cleanup": [
+   "rm -rf /sdcard/Pictures/Argus"
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "Z24-mode_changed-none-device_control+network_out+radios",
+  "title": "Copertura a coppie: mode_changed / condizione none / device_control, network_out, radios",
+  "cond": "none",
+  "rule": {
+   "name": "Z24-mode_changed-none-device_control+network_out+radios",
+   "trigger": {
+    "type": "mode_changed",
+    "what": "RINGER"
+   },
+   "actions": [
+    {
+     "type": "screenshot"
+    },
+    {
+     "type": "http_request",
+     "method": "GET",
+     "url": "https://example.com/"
+    },
+    {
+     "type": "set_wifi",
+     "on": true
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "SUCCEEDED"
+   }
+  },
+  "needs": [
+   "internet"
+  ],
+  "fire": {
+   "payload": {}
+  },
+  "cleanup": [
+   "rm -rf /sdcard/Pictures/Argus"
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "Z25-phone_state-none-device_control",
+  "title": "Copertura a coppie: phone_state / condizione none / device_control",
+  "cond": "none",
+  "rule": {
+   "name": "Z25-phone_state-none-device_control",
+   "trigger": {
+    "type": "phone_state",
+    "event": "SMS_RECEIVED",
+    "textMatch": "fill"
+   },
+   "actions": [
+    {
+     "type": "screenshot"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "SUCCEEDED"
+   }
+  },
+  "fire": {
+   "payload": {}
+  },
+  "cleanup": [
+   "rm -rf /sdcard/Pictures/Argus"
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "Z26-screen-none-device_control+radios+shell",
+  "title": "Copertura a coppie: screen / condizione none / device_control, radios, shell",
+  "cond": "none",
+  "rule": {
+   "name": "Z26-screen-none-device_control+radios+shell",
+   "trigger": {
+    "type": "screen",
+    "event": "OFF"
+   },
+   "actions": [
+    {
+     "type": "screenshot"
+    },
+    {
+     "type": "set_wifi",
+     "on": true
+    },
+    {
+     "type": "run_shell",
+     "cmd": "true"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "SUCCEEDED"
+   }
+  },
+  "fire": {
+   "payload": {}
+  },
+  "cleanup": [
+   "rm -rf /sdcard/Pictures/Argus"
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "Z27-sensor-none-device_control+network_out+radios",
+  "title": "Copertura a coppie: sensor / condizione none / device_control, network_out, radios",
+  "cond": "none",
+  "rule": {
+   "name": "Z27-sensor-none-device_control+network_out+radios",
+   "trigger": {
+    "type": "sensor",
+    "kind": "significant_motion"
+   },
+   "actions": [
+    {
+     "type": "screenshot"
+    },
+    {
+     "type": "http_request",
+     "method": "GET",
+     "url": "https://example.com/"
+    },
+    {
+     "type": "set_wifi",
+     "on": true
+    }
+   ],
+   "cooldownMs": 60000
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "capability_unavailable",
+     "detail": "trigger.sensor.significant_motion"
+    }
+   }
+  },
+  "needs": [
+   "internet"
+  ],
+  "cleanup": [
+   "rm -rf /sdcard/Pictures/Argus"
+  ]
+ },
+ {
+  "id": "Z28-time-none-display",
+  "title": "Copertura a coppie: time / condizione none / display",
+  "cond": "none",
+  "rule": {
+   "name": "Z28-time-none-display",
+   "trigger": {
+    "type": "time",
+    "cron": "30 8 * * *",
+    "tz": "Europe/Rome"
+   },
+   "actions": [
+    {
+     "type": "set_rotation",
+     "auto": true
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "SUCCEEDED"
+   }
+  },
+  "fire": {
+   "payload": {}
+  }
+ },
+ {
+  "id": "Z29-connectivity-none-network_out+radios",
+  "title": "Copertura a coppie: connectivity / condizione none / network_out, radios",
+  "cond": "none",
+  "rule": {
+   "name": "Z29-connectivity-none-network_out+radios",
+   "trigger": {
+    "type": "connectivity",
+    "medium": "POWER",
+    "state": "CONNECTED"
+   },
+   "actions": [
+    {
+     "type": "http_request",
+     "method": "GET",
+     "url": "https://example.com/"
+    },
+    {
+     "type": "set_wifi",
+     "on": true
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "SUCCEEDED"
+   }
+  },
+  "needs": [
+   "internet"
+  ],
+  "fire": {
+   "payload": {}
+  },
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "Z30-audio_output-none-screen_macro",
+  "title": "Copertura a coppie: audio_output / condizione none / screen_macro",
+  "cond": "none",
+  "rule": {
+   "name": "Z30-audio_output-none-screen_macro",
+   "trigger": {
+    "type": "audio_output",
+    "kind": "WIRED",
+    "state": "CONNECTED"
+   },
+   "actions": [
+    {
+     "type": "ui_steps",
+     "steps": [
+      {
+       "op": "home"
+      }
+     ]
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "SUCCEEDED"
+   }
+  },
+  "fire": {
+   "payload": {}
+  },
+  "foreground": false,
+  "pre": [
+   "input keyevent KEYCODE_WAKEUP",
+   "input keyevent KEYCODE_HOME"
+  ]
+ },
+ {
+  "id": "Z31-battery-none-screen_macro",
+  "title": "Copertura a coppie: battery / condizione none / screen_macro",
+  "cond": "none",
+  "rule": {
+   "name": "Z31-battery-none-screen_macro",
+   "trigger": {
+    "type": "battery",
+    "above": 70
+   },
+   "actions": [
+    {
+     "type": "ui_steps",
+     "steps": [
+      {
+       "op": "home"
+      }
+     ]
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "SUCCEEDED"
+   }
+  },
+  "fire": {
+   "payload": {}
+  },
+  "foreground": false,
+  "pre": [
+   "input keyevent KEYCODE_WAKEUP",
+   "input keyevent KEYCODE_HOME"
+  ]
+ },
+ {
+  "id": "Z32-mode_changed-none-screen_macro+shell",
+  "title": "Copertura a coppie: mode_changed / condizione none / screen_macro, shell",
+  "cond": "none",
+  "rule": {
+   "name": "Z32-mode_changed-none-screen_macro+shell",
+   "trigger": {
+    "type": "mode_changed",
+    "what": "RINGER"
+   },
+   "actions": [
+    {
+     "type": "ui_steps",
+     "steps": [
+      {
+       "op": "home"
+      }
+     ]
+    },
+    {
+     "type": "run_shell",
+     "cmd": "true"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "SUCCEEDED"
+   }
+  },
+  "fire": {
+   "payload": {}
+  },
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable"
+      }
+     }
+    },
+    "checks": [],
+    "cleanup": []
+   }
+  },
+  "foreground": false,
+  "pre": [
+   "input keyevent KEYCODE_WAKEUP",
+   "input keyevent KEYCODE_HOME"
+  ]
+ },
+ {
+  "id": "Z33-screen-none-screen_macro",
+  "title": "Copertura a coppie: screen / condizione none / screen_macro",
+  "cond": "none",
+  "rule": {
+   "name": "Z33-screen-none-screen_macro",
+   "trigger": {
+    "type": "screen",
+    "event": "OFF"
+   },
+   "actions": [
+    {
+     "type": "ui_steps",
+     "steps": [
+      {
+       "op": "home"
+      }
+     ]
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "SUCCEEDED"
+   }
+  },
+  "fire": {
+   "payload": {}
+  },
+  "foreground": false,
+  "pre": [
+   "input keyevent KEYCODE_WAKEUP",
+   "input keyevent KEYCODE_HOME"
+  ]
+ },
+ {
+  "id": "Z34-sensor-none-screen_macro+shell",
+  "title": "Copertura a coppie: sensor / condizione none / screen_macro, shell",
+  "cond": "none",
+  "rule": {
+   "name": "Z34-sensor-none-screen_macro+shell",
+   "trigger": {
+    "type": "sensor",
+    "kind": "significant_motion"
+   },
+   "actions": [
+    {
+     "type": "ui_steps",
+     "steps": [
+      {
+       "op": "home"
+      }
+     ]
+    },
+    {
+     "type": "run_shell",
+     "cmd": "true"
+    }
+   ],
+   "cooldownMs": 60000
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "capability_unavailable",
+     "detail": "trigger.sensor.significant_motion"
+    }
+   }
+  }
+ }
+]

@@ -124,7 +124,8 @@ class UiStepsRunner(
     }
 
     private suspend fun click(step: UiStep.Click, deadline: Long) {
-        val query = ScreenQuery(text = step.text, id = step.id, desc = step.desc)
+        // Come wait_for e check: senza `desc`, il testo vale anche per la descrizione (pulsanti a icona).
+        val query = ScreenQuery(text = step.text, id = step.id, desc = step.desc, textAlsoDescription = step.desc == null)
         val index = step.index ?: 0
         var target: ScreenNode? = null
         val found = waitUntil(deadline, UiStepsPolicy.FIND_TIMEOUT_MS) {

@@ -334,10 +334,13 @@ class ApprovalFlow(
                 ),
             )
         }
+        // Anche i lettori delle variabili P4: senza, una regola che legge lo stato con un lettore non
+        // disponibile si armava e poi veniva bloccata a ogni scatto (trovato dalla suite e2e 0.6.0).
         val required = CapabilityRequirements.derive(
             snapshot.draft.trigger,
             snapshot.draft.actions,
             snapshot.draft.conditions,
+            snapshot.draft.vars,
         )
         val missing = required - policy.availableCapabilities
         return missing.sorted().map { capability ->

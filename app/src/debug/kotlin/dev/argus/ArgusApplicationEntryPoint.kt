@@ -4,6 +4,8 @@ import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import dev.argus.automation.AppPreferencesStore
+import dev.argus.automation.AutomationEnablementCoordinator
+import dev.argus.automation.DispatchFrame
 import dev.argus.automation.ApprovalFlow
 import dev.argus.automation.DeviceStateSnapshotProvider
 import dev.argus.automation.phone.PhoneEventIngress
@@ -13,6 +15,8 @@ import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
 import dev.argus.automation.geofence.GeofenceEventIngress
 import dev.argus.automation.geofence.GeofenceStateStore
 import dev.argus.automation.geofence.GeofenceTriggerRuntime
+import dev.argus.automation.manual.AutomationPauseStore
+import dev.argus.automation.manual.ManualRuleRunner
 import dev.argus.automation.sensor.SensorEventIngress
 import dev.argus.automation.sensor.SensorTriggerRuntime
 import dev.argus.automation.ShizukuStaticShellRunner
@@ -24,6 +28,8 @@ import dev.argus.data.ArgusDatabase
 import dev.argus.device.DeviceController
 import dev.argus.engine.brain.Brain
 import dev.argus.engine.brain.CapabilityProbe
+import dev.argus.engine.runtime.Engine
+import dev.argus.engine.runtime.FirePolicySnapshotProvider
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.safety.DraftRepository
 import dev.argus.shizuku.ShizukuGateway
@@ -56,4 +62,13 @@ interface ArgusApplicationEntryPoint {
     fun database(): ArgusDatabase
     fun shizukuGateway(): ShizukuGateway
     fun deviceController(): DeviceController
+
+    // 0.6.0 (E2E): servono all'aggancio di debug `dev.argus.e2e` per consegnare eventi sintetici al
+    // motore e disarmare le regole della suite con la stessa strada dell'app.
+    fun engine(): Engine
+    fun dispatchFrame(): DispatchFrame
+    fun enablementCoordinator(): AutomationEnablementCoordinator
+    fun automationPauseStore(): AutomationPauseStore
+    fun manualRuleRunner(): ManualRuleRunner
+    fun firePolicySnapshots(): FirePolicySnapshotProvider
 }

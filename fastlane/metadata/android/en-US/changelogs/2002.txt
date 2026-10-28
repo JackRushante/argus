@@ -1,0 +1,1 @@
+Fixes found by the new end-to-end test suite: a rule whose variable needs Shizuku is now refused at approval instead of being armed and never running; shell output saved in a variable no longer keeps its final line break; screen macros can click icon buttons by their description.
