@@ -34,6 +34,9 @@ class TriggerMatcher {
         // Avvio manuale (0.4.1): id e impronta sono verificati a monte dall'Engine; un ManualFired su
         // qualsiasi altro trigger non matcha, e un trigger manual non matcha nessun altro evento.
         spec is Trigger.Manual && event is TriggerEvent.ManualFired -> true
+        // App aperta/chiusa (0.5.1): stesso package (confronto esatto) e stessa direzione.
+        spec is Trigger.AppEvent && event is TriggerEvent.AppForegroundChanged ->
+            spec.pkg == event.pkg && spec.event == event.event
         else -> false
     }
 

@@ -889,6 +889,13 @@ class DraftValidator(
             is Trigger.Media -> Unit
             // Avvio manuale: nessun campo da validare, parte solo su invocazione dell'utente.
             is Trigger.Manual -> Unit
+            // App aperta/chiusa (0.5.1): il package deve avere la forma dei package Android. La direzione
+            // è un enum chiuso, quindi non c'è altro da controllare.
+            is Trigger.AppEvent -> {
+                validatePackage(trigger.pkg, "pkg_blank", err)
+                if (trigger.pkg.length > AppPackagePolicy.MAX_LENGTH)
+                    err("package_invalid", "Package troppo lungo (massimo ${AppPackagePolicy.MAX_LENGTH})")
+            }
         }
     }
 

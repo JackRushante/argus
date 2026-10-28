@@ -33,6 +33,9 @@ object CapabilityIds {
     // 0.4.1: avvio manuale. Nessuna dipendenza OS né grant: come l'immediato, sempre disponibile.
     const val TRIGGER_MANUAL = "trigger.manual"
 
+    // 0.5.1: app aperta/chiusa. Si legge da UsageStatsManager: serve l'accesso ai dati di utilizzo.
+    const val TRIGGER_APP_EVENT = "trigger.app_event"
+
     const val STATE_FOREGROUND_APP = "state.foreground_app"
     const val STATE_LOCATION = "state.location"
     const val STATE_READER_BUILTIN = "state.reader.builtin"
@@ -132,6 +135,7 @@ object CapabilityRequirements {
         is Trigger.ModeChanged -> setOf(CapabilityIds.TRIGGER_MODE_CHANGED)
         is Trigger.Media -> setOf(CapabilityIds.TRIGGER_MEDIA)
         is Trigger.Manual -> setOf(CapabilityIds.TRIGGER_MANUAL)
+        is Trigger.AppEvent -> setOf(CapabilityIds.TRIGGER_APP_EVENT)
     }
 
     private fun forCondition(condition: Condition): Set<String> = when (condition) {
