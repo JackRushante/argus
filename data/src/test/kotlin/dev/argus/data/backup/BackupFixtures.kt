@@ -1,6 +1,7 @@
 package dev.argus.data.backup
 
 import dev.argus.engine.model.Action
+import dev.argus.engine.model.AppControlOp
 import dev.argus.engine.model.ApprovedStateContext
 import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.CmpOp
@@ -101,6 +102,15 @@ internal object BackupFixtures {
         Action.SetBrightness(auto = true),
         Action.SetRotation(auto = false),
         Action.HttpRequest(HttpMethod.POST, "https://example.org/hook", body = "{}", contentType = "application/json"),
+        // 0.5.1 (azioni privilegiate tipizzate).
+        Action.AppControl("com.android.chrome", AppControlOp.FORCE_STOP),
+        Action.SetAirplane(true),
+        Action.SetLocation(false),
+        Action.SetNfc(true),
+        Action.SetBatterySaver(true),
+        Action.LockScreen,
+        Action.Screenshot,
+        Action.AppPermission("com.android.chrome", "android.permission.CAMERA", grant = false),
         Action.InvokeLlm(
             goal = "rispondi",
             contextSources = listOf("notification"),

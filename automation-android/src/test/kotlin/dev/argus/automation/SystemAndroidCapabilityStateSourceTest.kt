@@ -49,4 +49,18 @@ class SystemAndroidCapabilityStateSourceTest {
         assertTrue(source.read().locationEnabled)
         gateway.close()
     }
+
+    @Test
+    fun `the NFC feature of the phone is reflected in the state`() {
+        val context: Context = ApplicationProvider.getApplicationContext()
+        val gateway = ShizukuGateway(context)
+        val source = SystemAndroidCapabilityStateSource(context, gateway)
+
+        shadowOf(context.packageManager).setSystemFeature(android.content.pm.PackageManager.FEATURE_NFC, false)
+        assertFalse(source.read().nfcPresent)
+
+        shadowOf(context.packageManager).setSystemFeature(android.content.pm.PackageManager.FEATURE_NFC, true)
+        assertTrue(source.read().nfcPresent)
+        gateway.close()
+    }
 }

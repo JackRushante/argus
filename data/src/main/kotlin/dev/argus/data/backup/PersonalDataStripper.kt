@@ -117,6 +117,15 @@ object PersonalDataStripper {
         is Action.MediaControl,
         is Action.SetBrightness,
         is Action.SetRotation,
+        // 0.5.1: package, permessi e booleani; nessun dato personale.
+        is Action.AppControl,
+        is Action.SetAirplane,
+        is Action.SetLocation,
+        is Action.SetNfc,
+        is Action.SetBatterySaver,
+        is Action.LockScreen,
+        is Action.Screenshot,
+        is Action.AppPermission,
         is Action.InvokeLlm,
         is Action.InvokeLlmV2,
         -> action
