@@ -1,5 +1,6 @@
 package dev.argus.ui.screens
 
+import android.content.res.Configuration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -68,7 +69,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontFamily
+import dev.argus.ui.theme.ArgusMono
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -535,7 +536,7 @@ private fun ChatErrorBanner(error: ChatError, onRetry: () -> Unit, onOpenSystem:
                     detail,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodyMedium,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = ArgusMono,
                 )
             }
         }
@@ -624,7 +625,7 @@ private fun RawResponseDialog(raw: String, onCopy: () -> Unit, onDismiss: () -> 
                             raw,
                             color = MaterialTheme.colorScheme.onSurface,
                             style = MaterialTheme.typography.bodyMedium,
-                            fontFamily = FontFamily.Monospace,
+                            fontFamily = ArgusMono,
                         )
                     }
                 }
@@ -899,19 +900,25 @@ private object NoopChatCallbacks : ChatCallbacks {
     override fun onCopyRawResponse() {}
 }
 
-@Preview(name = "Chat · risposta grezza", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)
+@Preview(name = "Chat · risposta grezza · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 820)
+
+@Preview(name = "Chat · risposta grezza · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 820)
 @Composable
 private fun ChatRawResponsePreview() {
     ArgusTheme { ChatScreen(Fixtures.chatRawResponse, NoopChatCallbacks) }
 }
 
-@Preview(name = "Chat · errore interno", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)
+@Preview(name = "Chat · errore interno · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 820)
+
+@Preview(name = "Chat · errore interno · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 820)
 @Composable
 private fun ChatInternalErrorPreview() {
     ArgusTheme { ChatScreen(Fixtures.chatInternalError, NoopChatCallbacks) }
 }
 
-@Preview(name = "Chat · conversazione + DraftCard", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)
+@Preview(name = "Chat · conversazione + DraftCard · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 820)
+
+@Preview(name = "Chat · conversazione + DraftCard · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 820)
 @Composable
 private fun ChatConversationPreview() {
     ArgusTheme {
@@ -922,7 +929,9 @@ private fun ChatConversationPreview() {
     }
 }
 
-@Preview(name = "Chat · sending (latency)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)
+@Preview(name = "Chat · sending (latency) · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 820)
+
+@Preview(name = "Chat · sending (latency) · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 820)
 @Composable
 private fun ChatSendingPreview() {
     ArgusTheme {
@@ -940,7 +949,9 @@ private fun ChatSendingPreview() {
     }
 }
 
-@Preview(name = "Chat · empty (suggerimenti)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)
+@Preview(name = "Chat · empty (suggerimenti) · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 820)
+
+@Preview(name = "Chat · empty (suggerimenti) · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 820)
 @Composable
 private fun ChatEmptyPreview() {
     ArgusTheme {
@@ -951,7 +962,9 @@ private fun ChatEmptyPreview() {
     }
 }
 
-@Preview(name = "Chat · galleria esempi", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 900)
+@Preview(name = "Chat · galleria esempi · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 900)
+
+@Preview(name = "Chat · galleria esempi · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 900)
 @Composable
 private fun ChatExamplesPreview() {
     ArgusTheme {
@@ -961,7 +974,9 @@ private fun ChatExamplesPreview() {
     }
 }
 
-@Preview(name = "Chat · brain-down", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)
+@Preview(name = "Chat · brain-down · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 820)
+
+@Preview(name = "Chat · brain-down · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 820)
 @Composable
 private fun ChatBrainDownPreview() {
     ArgusTheme {
@@ -979,7 +994,9 @@ private fun ChatBrainDownPreview() {
     }
 }
 
-@Preview(name = "Chat · MalformedReply notice", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)
+@Preview(name = "Chat · MalformedReply notice · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 820)
+
+@Preview(name = "Chat · MalformedReply notice · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 820)
 @Composable
 private fun ChatMalformedPreview() {
     ArgusTheme {

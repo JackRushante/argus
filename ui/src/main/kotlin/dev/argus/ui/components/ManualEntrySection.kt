@@ -1,5 +1,6 @@
 package dev.argus.ui.components
 
+import android.content.res.Configuration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -113,7 +114,9 @@ fun ManualEntrySection(
     }
 }
 
-@Preview(name = "Avvio manuale (dark)", showBackground = true, backgroundColor = 0xFF0E1216)
+@Preview(name = "Avvio manuale · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+
+@Preview(name = "Avvio manuale · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO)
 @Composable
 private fun ManualEntrySectionPreview() {
     ArgusTheme {

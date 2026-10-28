@@ -1,5 +1,6 @@
 package dev.argus.ui.components
 
+import android.content.res.Configuration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -224,19 +225,25 @@ private fun BackupPreview(state: RulesBackupUi) {
     }
 }
 
-@Preview(name = "Backup · pronto", showBackground = true, backgroundColor = 0xFF0E1216)
+@Preview(name = "Backup · pronto · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+
+@Preview(name = "Backup · pronto · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO)
 @Composable
 private fun RulesBackupIdlePreview() {
     BackupPreview(RulesBackupUi(exportableRules = 7))
 }
 
-@Preview(name = "Backup · nessuna regola da esportare", showBackground = true, backgroundColor = 0xFF0E1216)
+@Preview(name = "Backup · nessuna regola da esportare · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+
+@Preview(name = "Backup · nessuna regola da esportare · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO)
 @Composable
 private fun RulesBackupNothingToExportPreview() {
     BackupPreview(RulesBackupUi(exportableRules = 0))
 }
 
-@Preview(name = "Backup · in corso", showBackground = true, backgroundColor = 0xFF0E1216)
+@Preview(name = "Backup · in corso · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+
+@Preview(name = "Backup · in corso · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO)
 @Composable
 private fun RulesBackupWorkingPreview() {
     BackupPreview(
@@ -244,7 +251,9 @@ private fun RulesBackupWorkingPreview() {
     )
 }
 
-@Preview(name = "Backup · import riuscito", showBackground = true, backgroundColor = 0xFF0E1216)
+@Preview(name = "Backup · import riuscito · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+
+@Preview(name = "Backup · import riuscito · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO)
 @Composable
 private fun RulesBackupImportDonePreview() {
     BackupPreview(
@@ -259,7 +268,9 @@ private fun RulesBackupImportDonePreview() {
     )
 }
 
-@Preview(name = "Backup · export riuscito", showBackground = true, backgroundColor = 0xFF0E1216)
+@Preview(name = "Backup · export riuscito · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+
+@Preview(name = "Backup · export riuscito · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO)
 @Composable
 private fun RulesBackupExportDonePreview() {
     BackupPreview(
@@ -270,7 +281,9 @@ private fun RulesBackupExportDonePreview() {
     )
 }
 
-@Preview(name = "Backup · errore", showBackground = true, backgroundColor = 0xFF0E1216)
+@Preview(name = "Backup · errore · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+
+@Preview(name = "Backup · errore · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO)
 @Composable
 private fun RulesBackupFailedPreview() {
     BackupPreview(

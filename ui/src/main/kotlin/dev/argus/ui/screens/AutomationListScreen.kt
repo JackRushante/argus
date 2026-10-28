@@ -1,5 +1,6 @@
 package dev.argus.ui.screens
 
+import android.content.res.Configuration
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -435,7 +436,9 @@ private object NoopListCallbacks : AutomationListCallbacks {
     override fun onFilter(f: StatusFilter) {}
 }
 
-@Preview(name = "Lista · mista (pending+armed+disabled+needs_review)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)
+@Preview(name = "Lista · mista (pending+armed+disabled+needs_review) · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 820)
+
+@Preview(name = "Lista · mista (pending+armed+disabled+needs_review) · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 820)
 @Composable
 private fun ListMixedPreview() {
     ArgusTheme {
@@ -446,7 +449,9 @@ private fun ListMixedPreview() {
     }
 }
 
-@Preview(name = "Lista · banner SHIZUKU_DOWN", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)
+@Preview(name = "Lista · banner SHIZUKU_DOWN · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 820)
+
+@Preview(name = "Lista · banner SHIZUKU_DOWN · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 820)
 @Composable
 private fun ListBannerPreview() {
     ArgusTheme {
@@ -457,7 +462,9 @@ private fun ListBannerPreview() {
     }
 }
 
-@Preview(name = "Lista · filtro senza risultati", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)
+@Preview(name = "Lista · filtro senza risultati · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 820)
+
+@Preview(name = "Lista · filtro senza risultati · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 820)
 @Composable
 private fun ListFilterEmptyPreview() {
     ArgusTheme {
@@ -468,7 +475,9 @@ private fun ListFilterEmptyPreview() {
     }
 }
 
-@Preview(name = "Lista · empty", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)
+@Preview(name = "Lista · empty · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 820)
+
+@Preview(name = "Lista · empty · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 820)
 @Composable
 private fun ListEmptyPreview() {
     ArgusTheme {

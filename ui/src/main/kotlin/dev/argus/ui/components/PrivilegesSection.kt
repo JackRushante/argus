@@ -1,5 +1,6 @@
 package dev.argus.ui.components
 
+import android.content.res.Configuration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -326,13 +327,17 @@ private val previewGrants = listOf(
     PermanentGrantRow(PermanentGrantUi.ACCESSIBILITY, false),
 )
 
-@Preview(name = "Privilegi · nessun backend", showBackground = true, backgroundColor = 0xFF0E1216)
+@Preview(name = "Privilegi · nessun backend · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+
+@Preview(name = "Privilegi · nessun backend · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO)
 @Composable
 private fun PrivilegesNonePreview() {
     ArgusTheme { PrivilegesSection(PrivilegedUi(grants = previewGrants), {}, {}) }
 }
 
-@Preview(name = "Privilegi · Shizuku root, da concedere", showBackground = true, backgroundColor = 0xFF0E1216)
+@Preview(name = "Privilegi · Shizuku root, da concedere · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+
+@Preview(name = "Privilegi · Shizuku root, da concedere · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO)
 @Composable
 private fun PrivilegesShizukuPreview() {
     ArgusTheme {
@@ -344,7 +349,9 @@ private fun PrivilegesShizukuPreview() {
     }
 }
 
-@Preview(name = "Privilegi · Sui", showBackground = true, backgroundColor = 0xFF0E1216)
+@Preview(name = "Privilegi · Sui · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+
+@Preview(name = "Privilegi · Sui · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO)
 @Composable
 private fun PrivilegesSuiPreview() {
     ArgusTheme {
@@ -352,7 +359,9 @@ private fun PrivilegesSuiPreview() {
     }
 }
 
-@Preview(name = "Privilegi · root su negato", showBackground = true, backgroundColor = 0xFF0E1216)
+@Preview(name = "Privilegi · root su negato · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+
+@Preview(name = "Privilegi · root su negato · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO)
 @Composable
 private fun PrivilegesRootDeniedPreview() {
     ArgusTheme {
@@ -360,7 +369,9 @@ private fun PrivilegesRootDeniedPreview() {
     }
 }
 
-@Preview(name = "Privilegi · dialogo", showBackground = true, backgroundColor = 0xFF0E1216)
+@Preview(name = "Privilegi · dialogo · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+
+@Preview(name = "Privilegi · dialogo · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO)
 @Composable
 private fun PermanentGrantsDialogPreview() {
     ArgusTheme { PermanentGrantsDialog(previewGrants, {}, {}) }

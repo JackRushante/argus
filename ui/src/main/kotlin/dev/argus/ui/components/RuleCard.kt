@@ -1,9 +1,9 @@
 package dev.argus.ui.components
 
+import android.content.res.Configuration
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,12 +13,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.FilterAlt
 import androidx.compose.material.icons.rounded.Terminal
-import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -31,7 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
+import dev.argus.ui.theme.ArgusMono
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import dev.argus.ui.R
@@ -51,65 +49,25 @@ import dev.argus.ui.theme.LocalArgusSemantic
 
 /**
  * Blocco comando shell — invariante di sicurezza §5.3/§7.3.
- * Superficie scura recessa, label dei privilegi in ambra (UID 2000, root o non noto, da
- * [LocalShellPrivilege]), comando in monospace `codeText` con scroll orizzontale: MAI a capo,
- * MAI troncato (nessun maxLines).
+ * Etichetta dei privilegi in ambra (UID 2000, root o non noto, da [LocalShellPrivilege]) sopra un
+ * [CodeBlock]: monospace, INTEGRALE, va a capo anche dentro i token lunghi; MAI troncato (nessun
+ * maxLines, nessuna ellissi).
  */
 @Composable
 fun ShellCommandBlock(cmd: String, modifier: Modifier = Modifier) {
-    val semantic = LocalArgusSemantic.current
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.background)
-            .border(1.dp, semantic.cloud.fg.copy(alpha = 0.30f), RoundedCornerShape(12.dp))
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Icon(Icons.Rounded.Terminal, contentDescription = null, tint = semantic.cloud.fg, modifier = Modifier.size(16.dp))
-            Text(
-                stringResource(
-                    when (LocalShellPrivilege.current) {
-                        ShellPrivilege.SHELL -> R.string.rule_shell_privileges_label
-                        ShellPrivilege.ROOT -> R.string.rule_shell_privileges_root_label
-                        ShellPrivilege.UNKNOWN -> R.string.rule_shell_privileges_unknown_label
-                    },
-                ),
-                color = semantic.cloud.fg,
-                style = MaterialTheme.typography.labelSmall,
-            )
-        }
-        // Integrale: softWrap=false + horizontalScroll, senza maxLines/ellipsis.
-        Text(
-            cmd,
-            color = semantic.codeText,
-            fontFamily = FontFamily.Monospace,
-            softWrap = false,
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.horizontalScroll(rememberScrollState()),
-        )
-    }
-}
-
-/** Chip outline "conferma live" — azione del catalogo sempre-conferma (spec §10.2). */
-@Composable
-private fun LiveConfirmChip(modifier: Modifier = Modifier) {
-    Row(
-        modifier = modifier
-            .clip(RoundedCornerShape(20.dp))
-            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(20.dp))
-            .padding(horizontal = 10.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Icon(Icons.Rounded.TouchApp, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(13.dp))
-        Text(stringResource(R.string.rule_live_confirm), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-    }
+    CodeBlock(
+        text = cmd,
+        modifier = modifier,
+        label = stringResource(
+            when (LocalShellPrivilege.current) {
+                ShellPrivilege.SHELL -> R.string.rule_shell_privileges_label
+                ShellPrivilege.ROOT -> R.string.rule_shell_privileges_root_label
+                ShellPrivilege.UNKNOWN -> R.string.rule_shell_privileges_unknown_label
+            },
+        ),
+        labelIcon = Icons.Rounded.Terminal,
+        borderColor = ArgusTheme.semantic.attention.copy(alpha = 0.35f),
+    )
 }
 
 /**
@@ -134,7 +92,7 @@ fun ActionRowItem(row: ActionRow, modifier: Modifier = Modifier) {
                 ) {
                     Text(row.label, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge)
                     if (row.isGenerative) GenerativeTag()
-                    if (row.requiresLiveConfirm) LiveConfirmChip()
+                    if (row.requiresLiveConfirm) LiveConfirmTag()
                 }
                 row.detail?.let {
                     Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
@@ -363,7 +321,7 @@ private fun VarRowItem(v: VarRow) {
             Text(
                 value,
                 color = semantic.codeText,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = ArgusMono,
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
@@ -447,7 +405,9 @@ private val previewShell = RuleRender(
     privacyNote = null,
 )
 
-@Preview(name = "RuleCard compatta (dark)", showBackground = true, backgroundColor = 0xFF0E1216)
+@Preview(name = "RuleCard compatta · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+
+@Preview(name = "RuleCard compatta · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO)
 @Composable
 private fun RuleCardCompactPreview() {
     ArgusTheme {
@@ -460,7 +420,9 @@ private fun RuleCardCompactPreview() {
     }
 }
 
-@Preview(name = "RuleCard estesa + shell (dark)", showBackground = true, backgroundColor = 0xFF0E1216)
+@Preview(name = "RuleCard estesa + shell · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+
+@Preview(name = "RuleCard estesa + shell · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO)
 @Composable
 private fun RuleCardExtendedPreview() {
     ArgusTheme {
@@ -473,7 +435,9 @@ private fun RuleCardExtendedPreview() {
     }
 }
 
-@Preview(name = "ShellCommandBlock (dark)", showBackground = true, backgroundColor = 0xFF0E1216)
+@Preview(name = "ShellCommandBlock · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+
+@Preview(name = "ShellCommandBlock · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO)
 @Composable
 private fun ShellCommandBlockPreview() {
     ArgusTheme {
