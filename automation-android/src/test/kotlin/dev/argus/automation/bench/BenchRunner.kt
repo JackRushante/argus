@@ -12,7 +12,9 @@ import dev.argus.brain.AgentTransport
 import dev.argus.brain.CompileTimeoutPolicy
 import dev.argus.brain.ProviderConfig
 import dev.argus.brain.ProviderId
+import dev.argus.brain.ProviderSpec
 import dev.argus.brain.ReasoningEffort
+import dev.argus.brain.StructuredOutputMode
 import dev.argus.brain.TransportBackedBrain
 import dev.argus.data.dao.ProviderTokensAggregate
 import dev.argus.data.dao.ProviderUsageAggregate
@@ -55,7 +57,19 @@ internal data class BenchOptions(
     val parallel: Int,
     /** Ragionamento chiesto al modello; [ReasoningEffort.DEFAULT] omette il campo (default del provider). */
     val reasoning: ReasoningEffort = ReasoningEffort.DEFAULT,
+    /** Output strutturato nativo del compile (0.5.1): come l'app, forzato acceso o forzato spento. */
+    val structured: StructuredSetting = StructuredSetting.AUTO,
 ) {
+    /**
+     * Il [spec] del provider con l'output strutturato impostato come chiede il banco: `auto` lascia il
+     * catalogo (cioe' l'app), `on` lo accende, `off` lo spegne e lascia il solo protocollo `@@META@@`.
+     */
+    fun applyTo(spec: ProviderSpec): ProviderSpec = when (structured) {
+        StructuredSetting.AUTO -> spec
+        StructuredSetting.ON -> spec.copy(quirks = spec.quirks.copy(structuredOutput = StructuredOutputMode.RESPONSE_FORMAT))
+        StructuredSetting.OFF -> spec.copy(quirks = spec.quirks.copy(structuredOutput = StructuredOutputMode.NONE))
+    }
+
     /** [filter]: uno o più prefissi di id separati da virgola; senza filtro passano tutti i casi. */
     fun selects(caseId: String): Boolean {
         val prefixes = filter?.split(',')?.map(String::trim)?.filter(String::isNotEmpty).orEmpty()
@@ -89,9 +103,20 @@ internal data class BenchOptions(
                     ReasoningEffort.entries.firstOrNull { it.wireValue == raw.lowercase() }
                         ?: throw BenchException("ARGUS_BENCH_REASONING: '$raw' non e' none, low, medium o high")
                 } ?: ReasoningEffort.DEFAULT,
+                structured = value("ARGUS_BENCH_STRUCTURED")?.let { raw ->
+                    StructuredSetting.entries.firstOrNull { it.wire == raw.lowercase() }
+                        ?: throw BenchException("ARGUS_BENCH_STRUCTURED: '$raw' non e' on, off o auto")
+                } ?: StructuredSetting.AUTO,
             )
         }
     }
+}
+
+/** `ARGUS_BENCH_STRUCTURED`: `auto` = come l'app (catalogo), `on` = acceso, `off` = solo protocollo `@@META@@`. */
+internal enum class StructuredSetting(val wire: String) {
+    AUTO("auto"),
+    ON("on"),
+    OFF("off"),
 }
 
 /** Esito di una singola esecuzione (un caso, una ripetizione). */
@@ -119,6 +144,11 @@ internal data class RunResult(
     val raw: String?,
     /** Giro di RIPARAZIONE sugli errori del validatore (0.5.0), contato a parte dal ritentativo di formato. */
     val repairUsed: Boolean = false,
+    /**
+     * Compile: la risposta e' arrivata come output strutturato nativo (`true`) o col protocollo `@@META@@`
+     * (`false`: spento, rifiutato dal provider o ignorato dal modello). `null` per gli act e per i fallimenti.
+     */
+    val structured: Boolean? = null,
 )
 
 /**
@@ -177,6 +207,7 @@ internal class BenchRunner(
                 failures = evaluation.failures,
                 retryUsed = stack.retries.formatRetries > 0,
                 repairUsed = stack.retries.repairRounds > 0,
+                structured = result.structured,
                 attempts = stack.recording.compileCalls,
                 tokensIn = stack.usage.tokensIn(),
                 tokensOut = stack.usage.tokensOut(),
