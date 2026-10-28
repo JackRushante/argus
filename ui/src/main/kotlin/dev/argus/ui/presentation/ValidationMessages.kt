@@ -27,6 +27,7 @@ object ValidationMessages {
         "capability_temporarily_unavailable",
         "state_query_unavailable",
         "state_query_type_mismatch",
+        "app_not_installed",
     )
 
     private val table: Map<String, Text> = mapOf(
@@ -553,6 +554,11 @@ object ValidationMessages {
         "capability_policy_unavailable" to t(
             "The device capabilities could not be checked.",
             "Non è stato possibile verificare le capacità del dispositivo.",
+        ),
+        // 0.7.0: controllo fatto sul telefono all'approvazione; solo avviso, la regola resta armabile.
+        "app_not_installed" to t(
+            "An app this rule uses is not installed on this phone: install it, or change the app.",
+            "Un'app usata da questa regola non è installata su questo telefono: installala oppure cambia app.",
         ),
         "capability_unavailable" to t(
             "This rule needs a capability the device does not have right now.",

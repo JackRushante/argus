@@ -416,4 +416,25 @@
     <string name="a11y51_settings_warn">spento: le macro sullo schermo non possono partire. Accendi Argus in Accessibilità; con Shizuku o root lo fa anche “Concedi i permessi permanenti”</string>
     <string name="priv50_grant_accessibility_title">Controllo dello schermo (Accessibilità)</string>
     <string name="priv50_grant_accessibility_body">Permette alle macro sullo schermo di toccare, scrivere e scorrere nelle altre app. Argus aggiunge il proprio servizio all\'elenco di Accessibilità e tiene quelli che hai già. Non è spuntato di default: spuntalo solo se lo vuoi.</string>
+    <!-- 0.7.0 · Approvazione e dettaglio (redesign A, blocco rda_ap_). -->
+    <string name="rda_ap_risks_title">Prima di armare</string>
+    <string name="rda_ap_warnings_title">Avvisi</string>
+    <string name="rda_ap_errors_one">1 errore</string>
+    <string name="rda_ap_errors_many">%1$d errori</string>
+    <string name="rda_ap_warnings_one">1 avviso</string>
+    <string name="rda_ap_warnings_many">%1$d avvisi</string>
+    <string name="rda_ap_error_label">Errore</string>
+    <string name="rda_ap_then_full">ALLORA · programma completo</string>
+    <string name="rda_ap_app_not_installed">Non installata</string>
+    <string name="rda_ap_change_app">Cambia app</string>
+    <string name="rda_ap_change_app_cd">Cambia app %1$s</string>
+    <string name="rda_ap_picker_title">Scegli un'app</string>
+    <string name="rda_ap_picker_note_draft">La regola diventa una nuova revisione: dovrai approvarla di nuovo.</string>
+    <string name="rda_ap_picker_note_armed">La regola armata resta com'è. La modifica diventa una bozza che approvi prima che sostituisca la regola.</string>
+    <string name="rda_ap_picker_search">Cerca tra le app</string>
+    <string name="rda_ap_picker_loading">Carico le app…</string>
+    <string name="rda_ap_picker_empty">Nessuna app corrisponde.</string>
+    <string name="rda_ap_picker_current">in uso</string>
+    <string name="rda_ap_picker_pick_cd">Usa %1$s</string>
+    <string name="rda_ap_run_now_fallback">Esegui ora non è ancora disponibile.</string>
 </resources>
