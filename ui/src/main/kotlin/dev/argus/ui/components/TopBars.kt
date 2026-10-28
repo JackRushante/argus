@@ -25,7 +25,6 @@ import androidx.compose.ui.unit.sp
 import dev.argus.ui.preview.ArgusPreviewSurface
 import dev.argus.ui.preview.ArgusThemePreviews
 import dev.argus.ui.theme.ArgusSpacing
-import dev.argus.ui.theme.ArgusTheme
 
 // =============================================================================
 // Top bar. Nessuna ombra e nessun colore proprio: stanno sul fondo `page`. Non aggiungono gli inset
