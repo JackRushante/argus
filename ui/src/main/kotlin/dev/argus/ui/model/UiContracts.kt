@@ -116,6 +116,11 @@ data class ChatState(
      * modifica; mai nel DB, nei log, nell'audit o nella bozza. null = niente da mostrare.
      */
     val rawResponse: String? = null,
+    /**
+     * 0.7.0 (redesign A): secondi dopo cui l'attesa scade, per la barra dei tempi dell'attesa (0-65 s di
+     * norma, 0-180 s per un server locale). `null` = non noto: la barra usa l'asse standard.
+     */
+    val sendingTimeoutSec: Int? = null,
 )
 
 sealed interface ChatItem {
@@ -197,6 +202,11 @@ data class AutomationListState(
     val needsReviewCount: Int = rows.count { it.status == StatusBadge.NEEDS_REVIEW },
     /** 0.4.1 (F21): «Pausa automazioni» attiva. Mostra il banner «Automazioni in pausa · Riprendi». */
     val paused: Boolean = false,
+    /**
+     * 0.7.0 (redesign A, nota n1): riepilogo in testa alla lista. `null` = niente da riassumere (in
+     * caricamento o nessuna regola): il riepilogo non compare, mai un riepilogo di zeri.
+     */
+    val summary: ListSummary? = null,
 )
 
 data class AutomationRow(
@@ -216,15 +226,43 @@ data class AutomationRow(
      * «modifica in attesa» e il tocco sul badge apre la bozza.
      */
     val pendingEditDraftId: String? = null,
+    /** 0.7.0 (redesign A): istante (epoch ms) di [nextFireLabel], per ordinare «Prossimo scatto». `null` = senza prossimo scatto. */
+    val nextFireAtMillis: Long? = null,
 )
 
 enum class StatusFilter { ALL, ARMED, PENDING, DISABLED, NEEDS_REVIEW }
+
+/**
+ * 0.7.0 (redesign A, nota n1): riepilogo in testa alla lista. I conteggi si calcolano sull'elenco COMPLETO
+ * delle regole (le righe di [AutomationListState.rows] arrivano già filtrate), così i contatori restano veri
+ * anche con un filtro attivo e toccarne uno filtra la lista.
+ */
+data class ListSummary(
+    val armedCount: Int,
+    /** In attesa di approvazione: bozze nuove e regole attive con una modifica in attesa. */
+    val pendingCount: Int,
+    val needsReviewCount: Int,
+    /** La regola che scatta per prima; `null` = nessuna regola a orario armata. */
+    val nextFire: NextFireSummary?,
+    /** Errori di oggi dal Log; `null` = non letto: si scrive «n/d», mai 0 (invariante 8). */
+    val todayErrors: TodayErrorsSummary?,
+)
+
+/** Prossimo scatto: la regola da aprire al tocco, l'etichetta già pronta («oggi 23:00») e l'istante. */
+data class NextFireSummary(val ruleId: String, val ruleName: String, val label: String, val atMillis: Long)
+
+/**
+ * Errori di oggi letti dal Log (esiti rossi: azioni fallite, scatti bloccati, armamenti falliti).
+ * [lastRuleName] e [lastTimeLabel] descrivono l'ultimo, per il dettaglio del riquadro; `null` se non ce ne sono.
+ */
+data class TodayErrorsSummary(val count: Int, val lastRuleName: String?, val lastTimeLabel: String?)
 
 interface AutomationListCallbacks {
     fun onOpen(id: String); fun onToggleEnabled(id: String, enabled: Boolean); fun onFilter(f: StatusFilter)
     fun onEmptyCta() {}     // CTA empty-state "Vai in chat"; default no-op, la nav reale è dell'host (NavHost)
     fun onBannerTap() {}    // tap sul banner salute → Sistema; default no-op, host-owned
     fun onResumeAutomations() {}   // «Riprendi» sul banner della pausa (F21); default no-op
+    fun onOpenLog() {}      // 0.7.0: riquadro «Oggi» del riepilogo → Log; default no-op, la nav reale è dell'host
 }
 
 // --- 6.3 Automazione · dettaglio / approvazione ---

@@ -390,6 +390,7 @@ fun ArgusNavHost() {
                             override fun onEmptyCta() = switchTop(Routes.CHAT)
                             override fun onBannerTap() = switchTop(Routes.SETTINGS)
                             override fun onResumeAutomations() = listViewModel.onResumeAutomations()
+                            override fun onOpenLog() = switchTop(Routes.LOG)
                         },
                         modifier = Modifier.testTag("screen_list"),
                     )

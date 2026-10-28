@@ -68,6 +68,27 @@ interface AuditDao {
     )
     fun observeLogForAutomation(automationId: String, limit: Int): Flow<List<AuditLogRecord>>
 
+    /**
+     * Le righe del log da [sinceMillis] in poi (0.7.0: «errori di oggi» nel riepilogo della lista). Stessa
+     * proiezione di [observeLog]; il limite protegge da giornate con migliaia di righe.
+     */
+    @Query(
+        "SELECT audit.id AS id, audit.automationId AS automationId, " +
+            "automations.name AS automationName, audit.kind AS kind, audit.atMillis AS atMillis, " +
+            "audit.detail AS detail, audit.executionId AS executionId, " +
+            "fire_claims.status AS executionStatus, " +
+            "fire_claims.succeededCount AS succeededCount, " +
+            "fire_claims.failedCount AS failedCount, " +
+            "fire_claims.submittedCount AS submittedCount, " +
+            "fire_claims.deferredCount AS deferredCount " +
+            "FROM audit " +
+            "LEFT JOIN automations ON automations.id = audit.automationId " +
+            "LEFT JOIN fire_claims ON fire_claims.executionId = audit.executionId " +
+            "WHERE audit.atMillis >= :sinceMillis " +
+            "ORDER BY audit.atMillis DESC, audit.id DESC LIMIT :limit",
+    )
+    fun observeLogSince(sinceMillis: Long, limit: Int): Flow<List<AuditLogRecord>>
+
     @Query(
         "DELETE FROM audit WHERE atMillis < :olderThanMillis OR id NOT IN (" +
             "SELECT id FROM audit ORDER BY atMillis DESC, id DESC LIMIT :maxRows)",

@@ -15,6 +15,7 @@ import dev.argus.automation.manual.FakePauseStore
 import dev.argus.automation.TimeAlarmRuntime
 import dev.argus.data.ArgusDatabase
 import dev.argus.data.RoomAutomationStore
+import dev.argus.data.entities.AuditEntity
 import dev.argus.data.entities.AutomationEntity
 import dev.argus.data.entities.ScheduledTimeAlarmEntity
 import dev.argus.data.RoomContactWhitelistStore
@@ -29,6 +30,7 @@ import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.runtime.AuditKind
 import dev.argus.engine.runtime.FirePolicySnapshot
 import dev.argus.engine.runtime.FirePolicySnapshotProvider
 import dev.argus.engine.safety.ApprovalService
@@ -424,6 +426,93 @@ class AutomationListViewModelTest {
         settle()
 
         assertEquals(1, reads.get(), "la sveglia non rifa le letture costose delle bozze")
+    }
+
+    // --- 0.7.0: riepilogo in testa alla lista (nota n1) ---------------------------------------------
+
+    @Test
+    fun `the summary counts the complete list while a filter shows only some rows`() = runTest {
+        armedRule("s1")
+        armedRuleWithEdit("s2")
+        assertIs<DraftWriteResult.Saved>(repository.create(newDraft("s3")))
+        seedAutomation("s4", Trigger.Time(cron = "0 8 * * *", tz = "UTC"), AutomationStatus.NEEDS_REVIEW, enabled = false)
+        val viewModel = viewModel()
+        val latest = collectState(viewModel)
+        awaitUntil("quattro righe") { latest().rows.size == 4 }
+
+        viewModel.onFilter(StatusFilter.NEEDS_REVIEW)
+        awaitUntil("filtro applicato") { latest().filter == StatusFilter.NEEDS_REVIEW && latest().rows.size == 1 }
+
+        val summary = assertNotNull(latest().summary)
+        assertEquals(2, summary.armedCount, "s1 e s2")
+        assertEquals(2, summary.pendingCount, "la bozza nuova s3 e la modifica in attesa di s2")
+        assertEquals(1, summary.needsReviewCount, "s4")
+    }
+
+    @Test
+    fun `the summary points at the earliest next firing and the rows carry its instant`() = runTest {
+        seedAutomation("late", Trigger.Time(at = "2099-01-01T09:00", tz = "UTC"), AutomationStatus.ARMED, enabled = true)
+        seedAutomation("soon", Trigger.Time(at = "2098-06-01T09:00", tz = "UTC"), AutomationStatus.ARMED, enabled = true)
+        armedRule("cron")
+        val latest = collectState(viewModel())
+        awaitUntil("tre righe") { latest().rows.size == 3 }
+
+        val soonAt = java.time.Instant.parse("2098-06-01T09:00:00Z").toEpochMilli()
+        assertEquals(soonAt, latest().rows.first { it.id == "soon" }.nextFireAtMillis)
+        val next = assertNotNull(assertNotNull(latest().summary).nextFire)
+        // Il cron di "cron" scatta alla prossima occorrenza, molto prima del 2098: e' lui il prossimo.
+        assertEquals("cron", next.ruleId)
+        assertTrue(next.atMillis < soonAt)
+        assertEquals(latest().rows.first { it.id == "cron" }.nextFireLabel, next.label)
+    }
+
+    @Test
+    fun `without time rules armed the summary has no next firing`() = runTest {
+        seedAutomation("off", Trigger.Time(cron = "0 8 * * *", tz = "UTC"), AutomationStatus.DISABLED, enabled = false)
+        val latest = collectState(viewModel())
+        awaitUntil("riga") { latest().rows.isNotEmpty() }
+
+        assertNull(assertNotNull(latest().summary).nextFire)
+        assertNull(latest().rows.single().nextFireAtMillis)
+    }
+
+    @Test
+    fun `without rules there is no summary, not a summary of zeros`() = runTest {
+        val latest = collectState(viewModel())
+        awaitUntil("lista caricata") { !latest().loading }
+
+        assertNull(latest().summary)
+    }
+
+    @Test
+    fun `today errors count the red rows of today only and name the last one`() = runTest {
+        armedRule("rule")
+        val now = System.currentTimeMillis()
+        val midnight = startOfDayMillis(java.time.ZonedDateTime.now())
+        val audit = db.auditDao()
+        // Ieri sera: fuori dal riepilogo.
+        audit.insert(AuditEntity(automationId = "rule", kind = AuditKind.ERROR, atMillis = midnight - 3_600_000L, detail = "boom"))
+        // Oggi: due errori, un esito riuscito e una regola rimossa.
+        audit.insert(AuditEntity(automationId = "rule", kind = AuditKind.ERROR, atMillis = now - 2_000L, detail = "boom"))
+        audit.insert(AuditEntity(automationId = "gone", kind = AuditKind.ARM_FAILED, atMillis = now - 1_000L, detail = "boom"))
+        audit.insert(AuditEntity(automationId = "rule", kind = AuditKind.RULE_ARMED, atMillis = now))
+        val latest = collectState(viewModel())
+
+        awaitUntil("errori di oggi") { latest().summary?.todayErrors?.count == 2 }
+
+        val errors = assertNotNull(latest().summary?.todayErrors)
+        assertEquals("Deleted automation", errors.lastRuleName, "l'ultimo errore di oggi e' di una regola rimossa")
+        assertEquals(clockLabel(now - 1_000L), errors.lastTimeLabel)
+    }
+
+    @Test
+    fun `a day without errors says zero errors, which is not the same as not read`() = runTest {
+        armedRule("quiet")
+        val latest = collectState(viewModel())
+
+        awaitUntil("riepilogo con il log letto") { latest().summary?.todayErrors != null }
+
+        assertEquals(0, assertNotNull(latest().summary?.todayErrors).count)
     }
 
     // --- helpers -------------------------------------------------------------------------------------
