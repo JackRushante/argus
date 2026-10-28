@@ -57,7 +57,7 @@ class AndroidCapabilityProbeAppEventTest {
         assertTrue(CapabilityIds.TRIGGER_APP_EVENT in snapshot.availableCapabilities)
         val required = CapabilityRequirements.derive(trigger, listOf<Action>(Action.Vibrate(100)))
             .filterNot { it.startsWith("action.") }
-        assertEquals(setOf(CapabilityIds.TRIGGER_APP_EVENT), required)
+        assertEquals(setOf(CapabilityIds.TRIGGER_APP_EVENT), required.toSet())
         assertTrue(snapshot.availableCapabilities.containsAll(required))
     }
 
