@@ -290,6 +290,8 @@ class ShizukuActionExecutor(
             } else {
                 privilegedActions?.execute(action, ctx)
                     ?: ActionResult.Failure(ShizukuShellException.UNAVAILABLE)
+            }
+
             // 0.5.1: la macro sullo schermo ha lo stesso confine della shell sul chi la può far partire
             // (ultima linea dopo validator e FirePolicy: si verifica l'evento realmente arrivato).
             is Action.UiSteps -> if (!StaticShellSafety.allows(ctx.event, whitelistedIds())) {

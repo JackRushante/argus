@@ -683,6 +683,7 @@ object ValidationMessages {
         "app_permission_revoke_review" to t(
             "Revoking a permission removes an access from the app, and Android may close it.",
             "Revocare un permesso toglie un accesso all'app, e Android può chiuderla.",
+        ),
         // --- Macro sull'interfaccia (0.5.1) ----------------------------------------------------
         "ui_steps_empty" to t(
             "The screen macro has no steps.",

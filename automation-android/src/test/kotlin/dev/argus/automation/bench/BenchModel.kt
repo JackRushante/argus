@@ -101,6 +101,7 @@ internal object BenchVocab {
         ActionTypeIds.LOCK_SCREEN,
         ActionTypeIds.SCREENSHOT,
         ActionTypeIds.APP_PERMISSION,
+    )
         // 0.5.1: macro sullo schermo con il servizio di Accessibilità.
         ActionTypeIds.UI_STEPS,
     )

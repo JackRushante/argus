@@ -179,6 +179,7 @@ internal class SystemAndroidCapabilityStateSource(
         nfcPresent = runCatching {
             appContext.packageManager.hasSystemFeature(PackageManager.FEATURE_NFC)
         }.getOrDefault(false),
+    )
         accessibilityEnabled = PermanentGrantStatus.accessibility(appContext),
     )
 

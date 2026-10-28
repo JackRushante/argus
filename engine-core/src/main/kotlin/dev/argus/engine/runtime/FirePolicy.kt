@@ -72,6 +72,8 @@ object ActionCapabilities {
     const val LOCK_SCREEN = CapabilityIds.ACTION_LOCK_SCREEN
     const val SCREENSHOT = CapabilityIds.ACTION_SCREENSHOT
     const val APP_PERMISSION = CapabilityIds.ACTION_APP_PERMISSION
+}
+
     const val UI_STEPS = CapabilityIds.ACTION_UI_STEPS
 }
 

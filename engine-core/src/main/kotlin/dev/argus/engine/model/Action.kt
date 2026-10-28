@@ -487,6 +487,8 @@ sealed interface Action {
      */
     @Serializable @SerialName(ActionTypeIds.APP_PERMISSION)
     data class AppPermission(val pkg: String, val permission: String, val grant: Boolean) : Action
+}
+
     /**
      * Macro di passi sull'interfaccia (0.5.1, computer-use lento via servizio di Accessibilità): l'AI
      * la COMPILA, il motore la esegue allo scatto senza AI. [pkg] è l'app da aprire prima dei passi

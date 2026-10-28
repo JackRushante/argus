@@ -869,6 +869,7 @@ class RuleRenderCoverageTest {
                     "pkg" to ms("com.xyz.app"),
                     "permission" to ms("android.permission.RECORD_AUDIO"),
                     "grant" to ms(m("Revoke the microphone permission from", "Revoca il microfono a")),
+                ),
             // --- 0.5.1 (macro sullo schermo) ---
             "ui_steps" to case(
                 v(

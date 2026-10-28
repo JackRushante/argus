@@ -286,6 +286,7 @@ private fun HealthSection(state: SettingsState, callbacks: SettingsCallbacks) {
                 },
                 if (state.usageAccessGranted) HealthLevel.OK else HealthLevel.WARN,
                 onFix = callbacks::onOpenUsageAccessFix,
+            )
             // 0.5.1: servizio di Accessibilità, serve alle macro sullo schermo (si accende solo da lì).
             HealthRow(
                 Icons.Rounded.TouchApp, stringResource(R.string.a11y51_settings_title),
@@ -1140,6 +1141,8 @@ private fun SettingsWriteSettingsDeniedPreview() {
 @Composable
 private fun SettingsUsageAccessDeniedPreview() {
     ArgusTheme { SettingsScreen(Fixtures.settingsUsageAccessDenied, NoopSettingsCallbacks) }
+}
+
 @Preview(name = "Sistema · Accessibilità spenta (CTA)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 1100)
 @Composable
 private fun SettingsAccessibilityOffPreview() {
