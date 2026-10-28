@@ -95,4 +95,15 @@ class ChatScreenLogicTest {
         // Le proposte in attesa restano comunque (sono il canale di approvazione): niente da confermare.
         assertFalse(hasClearableContent(state(listOf(card("d1"), card("d2")))))
     }
+
+    // --- 0.7.0 (redesign A): attesa, errore e azione grezza sono voci in coda alla conversazione ----------
+
+    @Test
+    fun `the tails of the conversation count as entries for the automatic scroll`() {
+        assertEquals(3, chatListSize(itemCount = 3, sending = false, hasError = false, hasRawAction = false))
+        assertEquals(4, chatListSize(itemCount = 3, sending = true, hasError = false, hasRawAction = false))
+        assertEquals(4, chatListSize(itemCount = 3, sending = false, hasError = true, hasRawAction = false))
+        assertEquals(5, chatListSize(itemCount = 3, sending = false, hasError = true, hasRawAction = true))
+        assertEquals(0, chatListSize(itemCount = 0, sending = false, hasError = false, hasRawAction = false))
+    }
 }

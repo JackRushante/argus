@@ -445,4 +445,33 @@
     <string name="rda_ls_budget_in">in</string>
     <string name="rda_ls_budget_out">out</string>
     <string name="rda_ls_onboarding_finish_blocked">Complete Privacy and Brain to finish.</string>
+    <!-- 0.7.0 (redesign A, fase 2 · blocco lista e chat): riepilogo della lista, righe, attesa e bozza in chat. -->
+    <string name="rda_lc_filter_group">Filter by status</string>
+    <string name="rda_lc_hero_armed">armed</string>
+    <string name="rda_lc_hero_armed_cd">Armed: %1$d. Show only armed rules</string>
+    <string name="rda_lc_hero_pending">waiting</string>
+    <string name="rda_lc_hero_pending_cd">Waiting for approval: %1$d. Show only these</string>
+    <string name="rda_lc_hero_review">to review</string>
+    <string name="rda_lc_hero_review_cd">To review: %1$d. Show only these</string>
+    <string name="rda_lc_tile_next">Next firing</string>
+    <string name="rda_lc_tile_next_cd">Next firing %1$s, %2$s. Open the rule</string>
+    <string name="rda_lc_tile_next_none">None</string>
+    <string name="rda_lc_tile_next_none_cd">Next firing: none</string>
+    <string name="rda_lc_tile_today">Today</string>
+    <string name="rda_lc_today_none">No errors</string>
+    <string name="rda_lc_today_one">1 error</string>
+    <string name="rda_lc_today_many">%1$d errors</string>
+    <string name="rda_lc_na">n/a</string>
+    <string name="rda_lc_tile_today_cd">Today, %1$s. Open the Log</string>
+    <string name="rda_lc_tile_today_cd_detail">Today, %1$s: %2$s. Open the Log</string>
+    <string name="rda_lc_row_open">Open the rule</string>
+    <string name="rda_lc_next_fire_cd">Next firing: %1$s</string>
+    <string name="rda_lc_last_fire_cd">Last firing: %1$s</string>
+    <string name="rda_lc_wait_cd">Argus is thinking, %1$d seconds</string>
+    <string name="rda_lc_wait_axis_start">0 s</string>
+    <string name="rda_lc_wait_axis_band">%1$d-%2$d s</string>
+    <string name="rda_lc_wait_axis_end">%1$d s</string>
+    <string name="rda_lc_draft_warning_one">1 warning to read in the details</string>
+    <string name="rda_lc_draft_warning_many">%1$d warnings to read in the details</string>
+    <string name="rda_lc_example_send_label">Send this example</string>
 </resources>

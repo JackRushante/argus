@@ -242,6 +242,7 @@ class ChatViewModel @Inject constructor(
             it.copy(
                 sending = false,
                 sendingElapsedSec = null,
+                sendingTimeoutSec = null,
                 rawResponse = null,
                 items = it.items + ChatItem.SystemNotice(
                     language.pick("Request cancelled.", "Richiesta annullata."),
@@ -301,6 +302,7 @@ class ChatViewModel @Inject constructor(
         lastPrompt = prompt
         // Nuovo invio: la risposta grezza e il codice d'errore dell'ultimo turno non valgono più.
         turnErrorCode = null
+        val timeoutMillis = compileTimeoutMillis()
         mutableState.update { current ->
             current.copy(
                 items = if (appendUserMessage) {
@@ -311,12 +313,13 @@ class ChatViewModel @Inject constructor(
                 input = "",
                 sending = true,
                 sendingElapsedSec = 0,
+                // 0.7.0: l'asse della barra dei tempi arriva al vero timeout (65 s, 180 s per un server locale).
+                sendingTimeoutSec = (timeoutMillis / 1_000L).toInt(),
                 brainReachable = null,
                 error = null,
                 rawResponse = null,
             )
         }
-        val timeoutMillis = compileTimeoutMillis()
         val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
             try {
                 val compiled = coroutineScope {
@@ -439,7 +442,7 @@ class ChatViewModel @Inject constructor(
                 }
             } finally {
                 if (generation == requestGeneration) {
-                    mutableState.update { it.copy(sending = false, sendingElapsedSec = null) }
+                    mutableState.update { it.copy(sending = false, sendingElapsedSec = null, sendingTimeoutSec = null) }
                     sendJob = null
                 }
             }
