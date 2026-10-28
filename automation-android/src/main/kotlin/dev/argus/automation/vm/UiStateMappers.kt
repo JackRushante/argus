@@ -350,7 +350,7 @@ private fun actionTypeLabel(type: String, l: RenderLanguage): String = when (typ
     ActionTypeIds.SET_NFC -> l.pick("Set NFC", "Imposta NFC")
     ActionTypeIds.SET_BATTERY_SAVER -> l.pick("Set battery saver", "Imposta risparmio energetico")
     ActionTypeIds.LOCK_SCREEN -> l.pick("Lock screen", "Blocca schermo")
-    ActionTypeIds.SCREENSHOT -> l.pick("Take screenshot", "Cattura schermata")
+    ActionTypeIds.SCREENSHOT -> l.pick("Screen capture", "Cattura schermata")
     ActionTypeIds.APP_PERMISSION -> l.pick("App permission", "Permesso app")
     else -> type.replace('_', ' ')
 }

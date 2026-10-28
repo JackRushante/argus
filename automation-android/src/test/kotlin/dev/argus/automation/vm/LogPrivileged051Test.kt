@@ -67,7 +67,7 @@ class LogPrivileged051Test {
             ActionTypeIds.SET_NFC to ("Set NFC" to "Imposta NFC"),
             ActionTypeIds.SET_BATTERY_SAVER to ("Set battery saver" to "Imposta risparmio energetico"),
             ActionTypeIds.LOCK_SCREEN to ("Lock screen" to "Blocca schermo"),
-            ActionTypeIds.SCREENSHOT to ("Take screenshot" to "Cattura schermata"),
+            ActionTypeIds.SCREENSHOT to ("Screen capture" to "Cattura schermata"),
             ActionTypeIds.APP_PERMISSION to ("App permission" to "Permesso app"),
         )
         expected.forEach { (type, names) ->
