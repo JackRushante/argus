@@ -37,6 +37,7 @@ import androidx.compose.material.icons.rounded.PrivacyTip
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Terminal
+import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
@@ -272,6 +273,17 @@ private fun HealthSection(state: SettingsState, callbacks: SettingsCallbacks) {
                 },
                 if (state.writeSettingsGranted) HealthLevel.OK else HealthLevel.WARN,
                 onFix = callbacks::onOpenWriteSettingsFix,
+            )
+            // 0.5.1: servizio di Accessibilità, serve alle macro sullo schermo (si accende solo da lì).
+            HealthRow(
+                Icons.Rounded.TouchApp, stringResource(R.string.a11y51_settings_title),
+                if (state.accessibilityGranted) {
+                    stringResource(R.string.a11y51_settings_ok)
+                } else {
+                    stringResource(R.string.a11y51_settings_warn)
+                },
+                if (state.accessibilityGranted) HealthLevel.OK else HealthLevel.WARN,
+                onFix = callbacks::onOpenAccessibilityFix,
             )
             HealthRow(
                 Icons.Rounded.Notifications, stringResource(R.string.settings_notifications_title),
@@ -1110,4 +1122,10 @@ private fun SettingsExactAlarmsDeniedPreview() {
 @Composable
 private fun SettingsWriteSettingsDeniedPreview() {
     ArgusTheme { SettingsScreen(Fixtures.settingsWriteSettingsDenied, NoopSettingsCallbacks) }
+}
+
+@Preview(name = "Sistema · Accessibilità spenta (CTA)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 1100)
+@Composable
+private fun SettingsAccessibilityOffPreview() {
+    ArgusTheme { SettingsScreen(Fixtures.settingsAccessibilityOff, NoopSettingsCallbacks) }
 }

@@ -856,6 +856,8 @@ object RuleRenderMapper {
         is Action.SetBrightness -> ActionRows041.setBrightness(a, l)
         is Action.SetRotation -> ActionRows041.setRotation(a, l)
         is Action.HttpRequest -> ActionRows041.httpRequest(a, l)
+        // 0.5.1: macro sull'interfaccia, resa in ActionRowsUiSteps.
+        is Action.UiSteps -> ActionRowsUiSteps.uiSteps(a, l)
     }
 
     private fun row(

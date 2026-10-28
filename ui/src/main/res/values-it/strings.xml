@@ -400,4 +400,10 @@
     <string name="priv50_dialog_body">Argus si concederà da solo i permessi che lasci spuntati. Restano anche dopo il riavvio.</string>
     <string name="priv50_dialog_listener_note">L\'accesso alle notifiche non si concede così: resta la schermata di sistema, perché è il permesso più delicato.</string>
     <string name="priv50_dialog_confirm">Concedi</string>
+    <!-- 0.5.1 (F17): macro sullo schermo con il servizio di Accessibilità. -->
+    <string name="a11y51_settings_title">Controllo dello schermo (Accessibilità)</string>
+    <string name="a11y51_settings_ok">attivo: le macro sullo schermo approvate possono toccare e scrivere nelle app</string>
+    <string name="a11y51_settings_warn">spento: le macro sullo schermo non possono partire. Accendi Argus in Accessibilità; con Shizuku o root lo fa anche “Concedi i permessi permanenti”</string>
+    <string name="priv50_grant_accessibility_title">Controllo dello schermo (Accessibilità)</string>
+    <string name="priv50_grant_accessibility_body">Permette alle macro sullo schermo di toccare, scrivere e scorrere nelle altre app. Argus aggiunge il proprio servizio all\'elenco di Accessibilità e tiene quelli che hai già. Non è spuntato di default: spuntalo solo se lo vuoi.</string>
 </resources>

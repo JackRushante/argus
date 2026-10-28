@@ -401,4 +401,10 @@
     <string name="priv50_dialog_body">Argus will grant itself the permissions you leave ticked. They stay after a reboot.</string>
     <string name="priv50_dialog_listener_note">Notification access is not granted this way: it stays in the system screen, because it is the most sensitive permission.</string>
     <string name="priv50_dialog_confirm">Grant</string>
+    <!-- 0.5.1 (F17): macro sullo schermo con il servizio di Accessibilità. -->
+    <string name="a11y51_settings_title">Screen control (Accessibility)</string>
+    <string name="a11y51_settings_ok">on: approved screen macros can tap and type in apps</string>
+    <string name="a11y51_settings_warn">off: screen macros cannot run. Turn on Argus in Accessibility; with Shizuku or root, “Grant permanent permissions” can do it</string>
+    <string name="priv50_grant_accessibility_title">Screen control (Accessibility)</string>
+    <string name="priv50_grant_accessibility_body">Lets screen macros tap, type and scroll in other apps. Argus adds its service to the Accessibility list and keeps the ones you already have. Not ticked by default: tick it only if you want this.</string>
 </resources>
