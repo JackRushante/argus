@@ -523,6 +523,7 @@ BINDING RULES:
     "screen", "battery", "audio_output", "mode_changed" and "media" are usable only if listed;
     "phone_state.call" also covers MISSED_CALL; the SIM filter needs "phone_state.sim".
     "manual" (user-started: button, widget, shortcut, tile) is always listed.
+    "app_event" (an app opened or closed) is usable only if listed.
     A requested trigger that is not in the list must NOT be compiled: briefly point out the
     missing grant or mechanism in Settings and return draft null with error_code
     "unsupported_capability".
@@ -650,6 +651,8 @@ Trigger, discriminated by "type":
 - {"type":"mode_changed", "what":"DND"|"RINGER", "to":string|null}  // to: DND off|priority|total,
   RINGER normal|vibrate|silent; null = any change
 - {"type":"media", "state":"PLAYING"|"STOPPED"}  // music/video playback started / finished
+- {"type":"app_event", "pkg":string, "event":"OPENED"|"CLOSED"}  // an app comes to the foreground / leaves it
+  (pkg = the exact package, from installed_app_candidates; opening and closing are two rules, see rule 17)
 - {"type":"manual"}  // runs ONLY when the user starts it by hand, any number of times: a button, a widget,
   a Home-screen shortcut or a quick-settings tile. Use it ONLY when the user asks for one of those.
   Doing something now, or a request with no trigger at all, is "immediate", never "manual".

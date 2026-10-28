@@ -413,6 +413,12 @@ data class SettingsState(
     val callTriggerGranted: Boolean = false,
     /** Trigger ACL Bluetooth (P2-3): runtime grant NEARBY_DEVICES su Android 12+. */
     val bluetoothTriggerGranted: Boolean = false,
+    /**
+     * 0.5.1: «Accesso ai dati di utilizzo» concesso (`PACKAGE_USAGE_STATS`): serve alle regole «quando
+     * apro/chiudo un'app». Si concede dalle impostazioni di sistema, oppure con Shizuku o root da
+     * «Concedi i permessi permanenti». Default `true`: un fixture non deve avvisare per caso.
+     */
+    val usageAccessGranted: Boolean = true,
     /** Visibile solo mentre il monitor condiviso Wi-Fi/alimentazione è realmente attivo. */
     val connectivitySentinelActive: Boolean = false,
     val whitelist: List<ContactRow>,
@@ -561,6 +567,8 @@ interface SettingsCallbacks {
     fun onOpenExactAlarmFix() {}
     /** Apre «Modifica impostazioni di sistema» per Argus (0.4.1: luminosità e rotazione). Default no-op. */
     fun onOpenWriteSettingsFix() {}
+    /** Apre «Accesso ai dati di utilizzo» per Argus (0.5.1: regole «app aperta/chiusa»). Default no-op. */
+    fun onOpenUsageAccessFix() {}
     /** Apre le impostazioni di sistema per l'accesso notification listener (lettura, P1). */
     fun onOpenNotificationListenerFix() {}
     /** Richieste runtime dei trigger telefonia (P2-2): RECEIVE_SMS e READ_PHONE_STATE(+CALL_LOG). */
