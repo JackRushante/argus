@@ -1241,7 +1241,7 @@ class AutomationDetailViewModelTest {
     }
 
     @Test
-    fun `change app on an armed rule never edits it: it opens an edit draft for approval`() = runTest {
+    fun `change app on an armed rule never edits it and opens an edit draft for approval`() = runTest {
         val store = RoomAutomationStore(db.automationDao())
         val armed = persist(
             Automation(
