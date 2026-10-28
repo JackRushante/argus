@@ -515,6 +515,8 @@ fun ArgusNavHost() {
                                     runCatching { context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
                                         .isSuccess
                                 }
+                                if (!opened) openAppDetailsSettings()
+                            }
                             override fun onOpenAccessibilityFix() {
                                 // Impostazioni di Accessibilità (0.5.1): l'utente accende Argus dall'elenco; da
                                 // Android 13 un APK fuori dagli store può chiedere prima «Consenti impostazioni
