@@ -1,10 +1,13 @@
 package dev.argus.automation
 
+import dev.argus.automation.apps.AssumeAllInstalled
+import dev.argus.automation.apps.InstalledPackageCheck
 import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.Action
+import dev.argus.engine.model.AppPackages
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.CapabilityRequirements
 import dev.argus.engine.model.CreatedBy
@@ -117,6 +120,8 @@ class ApprovalFlow(
     private val newAutomationId: () -> AutomationId = {
         AutomationId(UUID.randomUUID().toString())
     },
+    /** 0.7.0: controllo fatto SUL TELEFONO all'approvazione: un package non installato è un avviso, mai un errore. */
+    private val installedPackages: InstalledPackageCheck = AssumeAllInstalled,
 ) {
     suspend fun submit(compile: CompileResult): DraftSubmissionResult {
         return persistCompile(
@@ -228,6 +233,7 @@ class ApprovalFlow(
     suspend fun review(id: DraftId): ApprovalFlowReview? {
         val base = approvals.review(id) ?: return null
         val capabilityIssues = capabilityIssues(base.snapshot)
+        val appIssues = missingAppIssues(base.snapshot)
         val queryReport = if (capabilityIssues.any { it.severity == Severity.ERROR }) {
             StateQueryProbeReport()
         } else {
@@ -243,7 +249,7 @@ class ApprovalFlow(
         return ApprovalFlowReview(
             draft = DraftReview(
                 base.snapshot,
-                (base.issues + capabilityIssues + queryReport.issues).distinct(),
+                (base.issues + capabilityIssues + appIssues + queryReport.issues).distinct(),
             ),
             conflicts = conflictWarnings,
             verifiedStateQueries = queryReport.verified,
@@ -359,6 +365,30 @@ class ApprovalFlow(
                     detail = capability,
                 )
             }
+        }
+    }
+
+    /**
+     * 0.7.0: una regola che nomina un'app non installata non può funzionare, ma non è pericolosa: WARNING
+     * `app_not_installed` con il package in `detail`, uno per package. Se il controllo fallisce non si avvisa.
+     */
+    private suspend fun missingAppIssues(snapshot: PendingDraft): List<ValidationIssue> {
+        val packages = AppPackages.packagesToCheck(snapshot.draft.trigger, snapshot.draft.actions)
+        if (packages.isEmpty()) return emptyList()
+        val missing = try {
+            installedPackages.missing(packages)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            return emptyList()
+        }
+        return packages.filter { it in missing }.map { pkg ->
+            ValidationIssue(
+                Severity.WARNING,
+                "app_not_installed",
+                "App non installata su questo telefono: $pkg",
+                detail = pkg,
+            )
         }
     }
 
