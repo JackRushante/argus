@@ -13,6 +13,11 @@ import javax.inject.Inject
 data class InstalledAppCandidate(
     val label: String,
     val packageName: String,
+    /**
+     * Vero se è l'app PREDEFINITA dell'utente per il tipo di app che la richiesta nomina (calcolatrice,
+     * calendario…), anche se il nome non c'entra con le parole della richiesta (0.7.0).
+     */
+    val isDefault: Boolean = false,
 )
 
 fun interface InstalledAppResolver {
@@ -25,7 +30,8 @@ object EmptyInstalledAppResolver : InstalledAppResolver {
 
 /**
  * Espone al compiler soltanto le app launcher che corrispondono deterministicamente alla richiesta,
- * mai l'inventario completo del telefono. Nessun dato viene persistito.
+ * mai l'inventario completo del telefono, più l'app predefinita dell'utente per i tipi di app che la
+ * richiesta nomina (calcolatrice, calendario…). Nessun dato viene persistito.
  */
 class AndroidInstalledAppResolver @Inject constructor(
     @ApplicationContext context: Context,
@@ -46,7 +52,9 @@ class AndroidInstalledAppResolver @Inject constructor(
                     }
                     .distinctBy(InstalledAppCandidate::packageName)
             }.getOrDefault(emptyList())
-            matchInstalledApps(query, apps)
+            val matched = matchInstalledApps(query, apps)
+            runCatching { withDefaultApps(query, matched, PackageManagerDefaultApps(appContext.packageManager)) }
+                .getOrDefault(matched)
         }
 }
 
@@ -89,7 +97,7 @@ internal fun matchInstalledApps(
         .toList()
 }
 
-private fun normalizeAppText(value: String): String = Normalizer
+internal fun normalizeAppText(value: String): String = Normalizer
     .normalize(value, Normalizer.Form.NFD)
     .replace(Regex("\\p{M}+"), "")
     .lowercase(Locale.ROOT)

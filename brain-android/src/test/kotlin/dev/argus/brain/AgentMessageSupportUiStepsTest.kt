@@ -55,7 +55,8 @@ class AgentMessageSupportUiStepsTest {
     @Test
     fun `a tool that is off is explained to the user with how to turn it on, never as a missing feature`() {
         val rules = AgentMessageSupport.COMPILE_RULES.replace(Regex("\\s+"), " ")
-        val rule = rules.substring(rules.indexOf("20. manifest.unavailable_tools"))
+        val rule = rules.substring(rules.indexOf("A tool in manifest.unavailable_tools"), rules.indexOf(" 2. Use only keys"))
+        assertTrue("the value says why" in rule, rule)
         assertTrue("never say the function does not exist or is not available in this version" in rule, rule)
         assertTrue("how to turn it on" in rule, rule)
         assertTrue("ui_steps" in rule && "Accessibility service" in rule, rule)

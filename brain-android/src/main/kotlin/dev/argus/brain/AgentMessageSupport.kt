@@ -487,6 +487,10 @@ BINDING RULES:
 1. Use only action types present in manifest.available_tools.
    Before answering that an action is unavailable, look for its exact type name in available_tools:
    if it is listed (vibrate, set_flashlight, set_volume and the others), it IS available: use it.
+   A tool in manifest.unavailable_tools is off right now and the value says why: never say the function
+   does not exist or is not available in this version; tell the user that reason in one short sentence and
+   how to turn it on (ui_steps: switch on Argus's Accessibility service in Android Settings), and return
+   draft null with error_code "unsupported_capability".
 2. Use only keys present in manifest.state_keys in state_equals conditions.
 3. Contacts: a WhatsApp generative reply or run_shell needs a whitelisted contact: use the alias of
    manifest.whitelisted_contacts (for example "contact_1") as the notification trigger's
@@ -615,11 +619,7 @@ BINDING RULES:
     clarification naming them) and return draft null.
 19. Rule texts are frozen when you write them. A value that changes (current time or date, battery
     level, weather...) is never written as fixed text but read at fire time: a clock variable for
-    time and date, a state variable for phone values, invoke_llm for web data; otherwise say it cannot be done.
-20. manifest.unavailable_tools gives, per tool, why it is off right now. If the request needs one of those
-    tools, never say the function does not exist or is not available in this version: tell the user, in
-    one short sentence, the reason given and how to turn it on (for ui_steps: switch on Argus's
-    Accessibility service in Android Settings), then return draft null with error_code "unsupported_capability"."""
+    time and date, a state variable for phone values, invoke_llm for web data; otherwise say it cannot be done."""
 
     const val DRAFT_SCHEMA_TEXT = """AutomationDraft JSON (names and casing are exact):
 {

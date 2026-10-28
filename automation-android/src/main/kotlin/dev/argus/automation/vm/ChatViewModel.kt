@@ -870,6 +870,7 @@ internal fun composeInstalledAppCandidatesPrompt(
             addJsonObject {
                 put("label", candidate.label)
                 put("package", candidate.packageName)
+                if (candidate.isDefault) put("default", true)
             }
         }
     }.toString()
@@ -880,6 +881,9 @@ internal fun composeInstalledAppCandidatesPrompt(
         appendLine(encoded)
         appendLine("Use a candidate when its label clearly matches the requested app.")
         appendLine("Do not ask for the exact Android package when one candidate is unambiguous.")
+        if (candidates.any { it.isDefault }) {
+            appendLine("A candidate with \"default\":true is the user's default app for the kind of app the request names, even if its label shares no word with the request.")
+        }
         appendLine("User request:")
         append(userRequest)
     }

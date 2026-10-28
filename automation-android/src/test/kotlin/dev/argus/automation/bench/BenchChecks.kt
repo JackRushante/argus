@@ -44,6 +44,7 @@ internal object FailureCategory {
     const val VALIDATOR = "validator"
     const val CAPABILITY = "capability"
     const val WRONG_LANGUAGE = "wrong_language"
+    const val WRONG_REPLY = "wrong_reply"
     const val ACT_EMPTY = "act_empty"
     const val ACT_LANGUAGE = "act_language"
     const val ACT_LINK = "act_link"
@@ -222,6 +223,7 @@ internal object CompileEvaluator {
                     checkDraft(case, requireNotNull(result.draft), world, today, failures)
                 }
                 checkLanguage(case, result, failures)
+                checkReply(case, result, failures)
                 Evaluation(label, failures)
             }
         }
@@ -284,6 +286,23 @@ internal object CompileEvaluator {
                 failures += Failure(
                     FailureCategory.WRONG_LANGUAGE,
                     "$what non e' in ${case.lang}: \"${BenchText.clip(text.replace('\n', ' '), 80)}\"",
+                )
+            }
+        }
+    }
+
+    /**
+     * `reply_mentions`: la frase di risposta deve contenere tutte le espressioni del caso (testo senza accenti
+     * e minuscolo). Per i casi in cui conta cosa dice il modello: il motivo di un rifiuto, come rimediare.
+     */
+    private fun checkReply(case: BenchCase, result: CompileResult, failures: MutableList<Failure>) {
+        if (case.replyMentions.isEmpty()) return
+        val reply = BenchText.normalize(result.reply)
+        for (pattern in case.replyMentions) {
+            if (!Regex(pattern).containsMatchIn(reply)) {
+                failures += Failure(
+                    FailureCategory.WRONG_REPLY,
+                    "la risposta non dice '$pattern': \"${BenchText.clip(result.reply.replace('\n', ' '), 120)}\"",
                 )
             }
         }

@@ -2533,5 +2533,69 @@
    "params": {"set_wifi.on": false}
   },
   "note": "Esiste l'azione tipizzata set_wifi: ui_steps e' l'ultima risorsa e non va usata al suo posto"
+ },
+ {
+  "id": "ui70.calc.it.01",
+  "category": "action",
+  "lang": "it",
+  "text": "Fammi un pulsante che apre la calcolatrice, preme 7 poi + poi 8, e controlla che compaia 15",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "manual"},
+   "actions_include": ["ui_steps"],
+   "actions_text": ["com\\.google\\.android\\.calculator", "15"],
+   "params": {"ui_steps.steps": {"contains": ["click", "check"]}}
+  },
+  "note": "Caso reale 0.7.0: il modello scriveva wait_for senza testo ne' id per «aspetta che l'app si apra» e il validatore rifiutava la macro. Ora quel passo e' valido con pkg; la bozza deve passare il validatore vero"
+ },
+ {
+  "id": "ui70.a11yoff.it.01",
+  "category": "unsupported",
+  "lang": "it",
+  "text": "Ogni giorno alle 9 apri l'app Calendario e premi il pulsante Oggi",
+  "manifest": "no_accessibility",
+  "expect": {
+   "outcome": "unsupported",
+   "reply_mentions": ["accessibilit", "attiv|abilit|accend"]
+  },
+  "covers": ["ui_steps"],
+  "note": "Servizio di Accessibilita' spento: il motivo in unavailable_tools dice cosa accendere e dove; la risposta deve dirlo all'utente, non dire che la funzione non esiste in questa versione"
+ },
+ {
+  "id": "ui70.a11yoff.en.01",
+  "category": "unsupported",
+  "lang": "en",
+  "text": "Every evening at 8 pm open Spotify and tap the Shuffle button",
+  "manifest": "no_accessibility",
+  "expect": {
+   "outcome": "unsupported",
+   "reply_mentions": ["accessibility", "turn|enable|switch|settings"]
+  },
+  "covers": ["ui_steps"],
+  "note": "Come ui70.a11yoff.it.01, in inglese"
+ },
+ {
+  "id": "app70.twocalc.it.01",
+  "category": "clarification",
+  "lang": "it",
+  "text": "Tra 5 minuti apri la calcolatrice",
+  "extra_apps": [{"label": "Calcolatrice semplice", "package": "com.simplemobiletools.calculator"}],
+  "expect": {
+   "outcome": "clarification",
+   "reply_mentions": ["semplice"]
+  },
+  "note": "Due calcolatrici tra i candidati e nessuna predefinita: il modello chiede quale (breve, coi nomi) invece di sceglierne una"
+ },
+ {
+  "id": "app70.twocalc.en.01",
+  "category": "clarification",
+  "lang": "en",
+  "text": "In 5 minutes open the calculator",
+  "extra_apps": [{"label": "Simple Calculator", "package": "com.simplemobiletools.calculator"}],
+  "expect": {
+   "outcome": "clarification",
+   "reply_mentions": ["simple"]
+  },
+  "note": "Come app70.twocalc.it.01, in inglese"
  }
 ]
