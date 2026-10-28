@@ -173,6 +173,7 @@ class E2eOperations(
 
     private fun describe(result: ActionResult): String = when (result) {
         ActionResult.Success -> "success"
+        is ActionResult.SuccessWithDetail -> "success:${result.detailCode}"
         ActionResult.Submitted -> "submitted"
         is ActionResult.Failure -> "failure:${result.reason}"
     }

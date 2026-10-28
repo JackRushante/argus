@@ -183,9 +183,16 @@ internal fun Action.journalType(): String = when (this) {
 }
 
 internal fun ActionResult.journalOutcome(): ActionJournalOutcome = when (this) {
-    ActionResult.Success -> ActionJournalOutcome.SUCCEEDED
+    ActionResult.Success, is ActionResult.SuccessWithDetail -> ActionJournalOutcome.SUCCEEDED
     ActionResult.Submitted -> ActionJournalOutcome.SUBMITTED
     is ActionResult.Failure -> ActionJournalOutcome.FAILED
+}
+
+/** Codice del journal di un risultato: il motivo di un fallimento, il dettaglio di un successo, altrimenti niente. */
+internal fun ActionResult.journalCode(): String? = when (this) {
+    is ActionResult.Failure -> journalErrorCode(reason)
+    is ActionResult.SuccessWithDetail -> detailCode
+    ActionResult.Success, ActionResult.Submitted -> null
 }
 
 internal fun List<ActionResult>.completion(
@@ -193,7 +200,7 @@ internal fun List<ActionResult>.completion(
     atMillis: Long,
     forcedStatus: ExecutionStatus? = null,
 ): ExecutionCompletion {
-    val succeeded = count { it == ActionResult.Success }
+    val succeeded = count { it == ActionResult.Success || it is ActionResult.SuccessWithDetail }
     val failed = count { it is ActionResult.Failure }
     val submitted = count { it == ActionResult.Submitted }
     val status = forcedStatus ?: when {

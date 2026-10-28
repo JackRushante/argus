@@ -420,6 +420,33 @@ class EngineTest {
     }
 
     @Test
+    fun `a success with a detail is journaled as a success carrying the closed code`() = runTest {
+        val a = armed("shot", Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome"), listOf(Action.Screenshot, Action.LockScreen))
+        val ex = ActionExecutor { action, _ ->
+            if (action == Action.Screenshot) ActionResult.SuccessWithDetail("screenshot_20261028_153012") else ActionResult.Success
+        }
+        val journal = FakeExecutionJournal()
+
+        engine(FakeAutomationStore(listOf(a)), ex, "2026-07-12T21:30:00Z", journal = journal)
+            .onTrigger(envelope("alarm:shot:1", timeEvent(a))) { DeviceState(values = emptyMap()) }
+
+        assertEquals(
+            listOf(ActionJournalOutcome.SUCCEEDED to "screenshot_20261028_153012", ActionJournalOutcome.SUCCEEDED to null),
+            journal.actions.sortedBy { it.actionIndex }.map { it.outcome to it.errorCode },
+        )
+        val completion = journal.completions.single()
+        assertEquals(ExecutionStatus.SUCCEEDED, completion.status)
+        assertEquals(2, completion.succeededCount)
+        assertEquals(0, completion.failedCount)
+    }
+
+    @Test
+    fun `a detail code must be a closed snake_case code`() {
+        assertFailsWith<IllegalArgumentException> { ActionResult.SuccessWithDetail("Argus-2026.png") }
+        assertFailsWith<IllegalArgumentException> { ActionResult.SuccessWithDetail("") }
+    }
+
+    @Test
     fun `condition false skips actions and audits event identity`() = runTest {
         val a = armed(
             "a1",

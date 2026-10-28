@@ -27,6 +27,20 @@ data class FireContext(
 sealed interface ActionResult {
     /** Azione deterministica completata in modo sincrono. */
     data object Success : ActionResult
+    /**
+     * Azione completata, con un dettaglio non sensibile che il Log mostra accanto all'esito (per ora il
+     * nome del file di uno screenshot). Viaggia nel journal come codice (`snake_case`, al massimo 64
+     * caratteri, nessun testo libero) e conta come [Success] in ogni esito e contatore.
+     */
+    data class SuccessWithDetail(val detailCode: String) : ActionResult {
+        init {
+            require(DETAIL_CODE.matches(detailCode)) { "detailCode non valido" }
+        }
+
+        private companion object {
+            val DETAIL_CODE = Regex("^[a-z][a-z0-9_]{0,63}$")
+        }
+    }
     /** Azione GENERATIVA accodata nella lane async (spec §6/C3): execute() NON deve bloccare
      *  10-30 s; l'esito reale della lane viene riportato all'AuditSink. */
     data object Submitted : ActionResult

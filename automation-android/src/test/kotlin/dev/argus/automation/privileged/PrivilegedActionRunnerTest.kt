@@ -177,9 +177,17 @@ class PrivilegedActionRunnerTest {
         val tools = FakeTools().apply { png = byteArrayOf(9, 8, 7) }
         val store = FakeStore()
 
-        assertEquals(ActionResult.Success, runner(tools, store).execute(Action.Screenshot, context))
+        // Il nome del file arriva al Log come codice chiuso (data e ora), lo stesso del file salvato.
+        assertEquals(
+            ActionResult.SuccessWithDetail("screenshot_20261028_120000"),
+            runner(tools, store).execute(Action.Screenshot, context),
+        )
 
         assertEquals(listOf("Argus-20261028-120000.png"), store.saved.map { it.first })
+        assertEquals(
+            "Pictures/Argus/Argus-20261028-120000.png",
+            ScreenshotLogDetail.displayPath("screenshot_20261028_120000"),
+        )
         assertEquals(listOf(9, 8, 7), store.saved.single().second.map { it.toInt() })
         assertEquals("Argus-20261028-130000.png", PrivilegedActionRunner.screenshotName(noon, ZoneId.of("Europe/Rome")))
     }
@@ -205,5 +213,19 @@ class PrivilegedActionRunnerTest {
 
         assertEquals(ActionResult.Failure("action_invalid"), runner(tools).execute(Action.SetWifi(true), context))
         assertEquals(emptyList(), tools.calls)
+    }
+
+    @Test
+    fun `the log code of a screenshot rebuilds exactly the saved file name`() {
+        val zone = ZoneId.of("Europe/Rome")
+        val code = ScreenshotLogDetail.code(noon, zone)
+
+        assertEquals("screenshot_20261028_130000", code)
+        assertEquals(PrivilegedActionRunner.screenshotName(noon, zone), ScreenshotLogDetail.fileName(code))
+        assertEquals(null, ScreenshotLogDetail.fileName("screenshot_save_failed"))
+        assertEquals(null, ScreenshotLogDetail.fileName("screenshot_2026"))
+        assertEquals(null, ScreenshotLogDetail.fileName(null))
+        // Il codice rispetta la forma chiusa del journal.
+        assertEquals(ActionResult.SuccessWithDetail(code).detailCode, code)
     }
 }
