@@ -46,8 +46,11 @@ class AnthropicMessagesTransportTest {
         model: String? = null,
         client: OkHttpClient = CliBridgeTransport.defaultClient(),
         apiKey: String? = API_KEY,
+        /** null = il catalogo (cioè l'app); un valore lo forza, per provare un modo alla volta. */
+        structuredOutput: StructuredOutputMode? = null,
     ): AnthropicMessagesTransport {
-        val spec = ProviderCatalog.spec(ProviderId.ANTHROPIC)
+        val catalog = ProviderCatalog.spec(ProviderId.ANTHROPIC)
+        val spec = structuredOutput?.let { catalog.copy(quirks = catalog.quirks.copy(structuredOutput = it)) } ?: catalog
         return AnthropicMessagesTransport(
             spec = spec,
             config = ProviderConfig(ProviderId.ANTHROPIC, server.url("/").toString().trimEnd('/'), model),
@@ -339,7 +342,8 @@ class AnthropicMessagesTransportTest {
     @Test fun `health compile and act carry the masked provider message on a 4xx`(): Unit = runBlocking {
         val body = """{"type":"error","error":{"type":"not_found_error","message":"model: claude-x ($API_KEY)"}}"""
         repeat(3) { server.enqueue(jsonResponse(body).setResponseCode(404)) }
-        val t = transport(model = "claude-x")
+        // Output strutturato spento: qui conta il messaggio del provider, non il ripiego di formato.
+        val t = transport(model = "claude-x", structuredOutput = StructuredOutputMode.NONE)
 
         val health = assertFailsWith<TransportException> { t.health() }
         val compile = assertFailsWith<TransportException> { t.compile("crea", manifest(), deviceState()) }

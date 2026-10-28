@@ -375,11 +375,24 @@ BINDING RULES:
      * ora): l'orologio vive nel messaggio utente ([compileUserText]) così il system resta identico
      * tra le chiamate e cache-friendly.
      */
-    fun compileSystemText(): String = buildString {
+    fun compileSystemText(structuredRule: String? = null): String = buildString {
         append(COMPILE_RULES)
         append("\n\n").append(DRAFT_SCHEMA_TEXT)
         append("\n\n").append(STATE_QUERY_SCHEMA_TEXT)
+        if (structuredRule != null) append("\n\n").append(structuredRule)
     }
+
+    /**
+     * Output strutturato nativo (0.5.1): sostituisce solo la riga finale della regola 7. Poche righe, a ogni
+     * compile: il resto delle regole non cambia. Resta valido anche se il server ignora `response_format`,
+     * perché il modello scrive comunque l'envelope e il parser lo legge.
+     */
+    const val STRUCTURED_JSON_RULE = """STRUCTURED OUTPUT (replaces the final @@META@@ line of rule 7): answer with ONE JSON object and nothing else:
+{"reply":<the one short sentence>,"draft":<object-or-null>,"error_code":<string-or-null>}
+Same meaning as the @@META@@ line, same rule 8. Do not write @@META@@."""
+
+    /** Come [STRUCTURED_JSON_RULE] per lo schema chiuso di Anthropic: `draft` è l'oggetto scritto come stringa JSON. */
+    const val STRUCTURED_JSON_STRING_DRAFT_RULE = """STRUCTURED OUTPUT (replaces the final @@META@@ line of rule 7): answer with a JSON object with three fields, "reply" (the one short sentence), "draft" and "error_code", with the same meaning as in the @@META@@ line and the same rule 8. "draft" is the AutomationDraft object written as a JSON string (escaped), or null. Do not write @@META@@."""
 
     fun compileUserText(
         message: String,

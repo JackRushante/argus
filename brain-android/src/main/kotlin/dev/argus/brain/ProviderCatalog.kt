@@ -26,9 +26,10 @@ enum class ReasoningEffort(val wireValue: String?) {
  * testo finale in UNA chiamata — l'architettura single-turn dei transport resta invariata.
  * - [NONE]: web non attivabile da questo path (default; degradazione graziosa se richiesto).
  * - [ANTHROPIC_TOOL]: server tool `{"type":"web_search_20250305","name":"web_search"}` nei `tools`.
- * - [OPENROUTER_WEB_PLUGIN]: plugin `"plugins":[{"id":"web"}]` nel body Chat Completions, `model` intatto.
- *   Il suffisso `:online` è equivalente ma rompe i preset (`@preset/...:online` dà 404). Entrambi sono
- *   deprecati da OpenRouter a favore del tool lato server `openrouter:web_search` (lavoro futuro).
+ * - [OPENROUTER_SERVER_TOOL]: server tool `{"type":"openrouter:web_search"}` nei `tools` del body Chat
+ *   Completions (accanto al reply tool), `model` intatto, con `max_tool_calls` come tetto di ricerche.
+ *   Dalla 0.5.1 sostituisce il plugin `{"id":"web"}` e il suffisso `:online`, deprecati da OpenRouter
+ *   (il suffisso rompeva anche i preset: `@preset/...:online` dava 404).
  * - [OPENAI_RESPONSES]: tool `{"type":"web_search"}` sulla Responses API (`POST {base}/responses`,
  *   endpoint diverso da /chat/completions). Il modello gpt-5.x fa il loop web internamente e ritorna il
  *   testo negli item `output→message→output_text`. Validato live 2026-07-17.
@@ -37,7 +38,20 @@ enum class ReasoningEffort(val wireValue: String?) {
  *   OpenAI-compat (che rifiuta il grounding con 400). Testo = `candidates[0].content.parts[].text`.
  *   Validato live 2026-07-17.
  */
-enum class WebSearchMechanism { NONE, ANTHROPIC_TOOL, OPENROUTER_WEB_PLUGIN, OPENAI_RESPONSES, GEMINI_NATIVE }
+enum class WebSearchMechanism { NONE, ANTHROPIC_TOOL, OPENROUTER_SERVER_TOOL, OPENAI_RESPONSES, GEMINI_NATIVE }
+
+/**
+ * Output strutturato nativo del COMPILE (0.5.1): al posto di «una frase + riga `@@META@@ {json}`» il modello
+ * risponde con un oggetto JSON `{reply, draft, error_code}`. Il protocollo `@@META@@` resta la base e il
+ * ripiego: se il provider rifiuta il parametro, o il modello lo ignora, il transport torna ad esso da solo
+ * (vedi `StructuredOutput`). Un flag per provider: spegnerlo qui basta a tornare al solo protocollo base.
+ * - [NONE]: mai (default; bridge Hermes).
+ * - [RESPONSE_FORMAT]: Chat Completions OpenAI-compatibile. Prova `response_format` `json_schema`, se il
+ *   server lo rifiuta `json_object`, se rifiuta anche quello il protocollo base.
+ * - [OUTPUT_CONFIG]: Messages API di Anthropic, `output_config.format` di tipo `json_schema` (GA, senza header
+ *   beta). Lo schema è chiuso e senza ricorsione, quindi `draft` viaggia come stringa che contiene l'oggetto.
+ */
+enum class StructuredOutputMode { NONE, RESPONSE_FORMAT, OUTPUT_CONFIG }
 
 /** Flag di comportamento per-provider: MAI `if (provider == ...)` dentro un transport. */
 data class ProviderQuirks(
@@ -59,6 +73,8 @@ data class ProviderQuirks(
      * - Gemini 3: abbassarla degrada le risposte.
      */
     val compileTemperature: Double? = null,
+    /** Output strutturato nativo del compile (solo compile: act e health non lo usano). */
+    val structuredOutput: StructuredOutputMode = StructuredOutputMode.NONE,
 )
 
 /** Prezzi in micro-USD per 1M token (es. $2.50/MTok = 2_500_000). Interi: niente float sui soldi. */
@@ -161,6 +177,7 @@ object ProviderCatalog {
             quirks = ProviderQuirks(
                 outputCapParam = OutputCapParam.MAX_COMPLETION_TOKENS,
                 webSearch = WebSearchMechanism.OPENAI_RESPONSES,
+                structuredOutput = StructuredOutputMode.RESPONSE_FORMAT,
             ),
             costTracked = true,
             // Le voci dei modelli non più suggeriti restano: chi li ha già configurati conserva la stima del costo.
@@ -185,6 +202,9 @@ object ProviderCatalog {
                 extraHeaders = mapOf("anthropic-version" to "2023-06-01"),
                 // Server tool web_search_20250305: loop di ricerca interno lato Anthropic, single-turn.
                 webSearch = WebSearchMechanism.ANTHROPIC_TOOL,
+                // Compile con `output_config.format` json_schema: il ragionamento resta libero (la grammatica
+                // vale solo per l'output finale). Un tool forzato lo salterebbe, e i modelli più recenti lo rifiutano.
+                structuredOutput = StructuredOutputMode.OUTPUT_CONFIG,
             ),
             costTracked = true,
             // Le voci dei modelli non più suggeriti restano: chi li ha già configurati conserva la stima del costo.
@@ -215,6 +235,7 @@ object ProviderCatalog {
             quirks = ProviderQuirks(
                 extraBodyPassthrough = true,
                 webSearch = WebSearchMechanism.GEMINI_NATIVE,
+                structuredOutput = StructuredOutputMode.RESPONSE_FORMAT,
             ),
             costTracked = true,
             // Le voci dei modelli non più suggeriti restano: chi li ha già configurati conserva la stima del costo.
@@ -255,11 +276,14 @@ object ProviderCatalog {
                 "~moonshotai/kimi-latest",
                 "~anthropic/claude-haiku-latest",
             ),
-            // Web attivato dal plugin `{"id":"web"}` (loop di ricerca interno lato OpenRouter); non dal
-            // suffisso `:online`, che rompe i preset `@preset/...`.
+            // Web attivato dal server tool `openrouter:web_search` (loop di ricerca interno lato OpenRouter);
+            // non dal plugin `web` né dal suffisso `:online`, deprecati (e il suffisso rompe i preset
+            // `@preset/...`). Output strutturato: si prova e, se il provider rifiuta il parametro o il
+            // modello non lo supporta, si torna al protocollo base.
             quirks = ProviderQuirks(
-                webSearch = WebSearchMechanism.OPENROUTER_WEB_PLUGIN,
+                webSearch = WebSearchMechanism.OPENROUTER_SERVER_TOOL,
                 compileTemperature = COMPILE_TEMPERATURE,
+                structuredOutput = StructuredOutputMode.RESPONSE_FORMAT,
             ),
             // TOKEN-ONLY: il listino statico copriva 2 modelli su centinaia e non leggiamo il
             // costo reale dal wire — niente stime in dollari, si contano solo i token.
@@ -276,7 +300,11 @@ object ProviderCatalog {
             authStyle = AuthStyle.BEARER,
             defaultModels = emptyList(),
             // Endpoint e listino sconosciuti a priori: costo "n/d".
-            quirks = ProviderQuirks(compileTemperature = COMPILE_TEMPERATURE),
+            quirks = ProviderQuirks(
+                compileTemperature = COMPILE_TEMPERATURE,
+                // Ollama, LM Studio e llama.cpp accettano json_schema; chi non lo supporta ripiega da solo.
+                structuredOutput = StructuredOutputMode.RESPONSE_FORMAT,
+            ),
             prices = emptyMap(),
             apiKeyRequired = false,
             reasoningEffortEditable = true,

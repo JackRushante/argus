@@ -20,6 +20,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -55,8 +56,11 @@ class OpenAICompatTransportTest {
         apiKey: String? = API_KEY,
         clock: () -> LocalDate = { SEARCH_DAY },
         reasoning: ReasoningEffort = ReasoningEffort.DEFAULT,
+        /** null = il catalogo (cioè l'app); un valore lo forza, per provare un modo alla volta. */
+        structuredOutput: StructuredOutputMode? = null,
     ): OpenAICompatTransport {
-        val spec = ProviderCatalog.spec(providerId)
+        val catalog = ProviderCatalog.spec(providerId)
+        val spec = structuredOutput?.let { catalog.copy(quirks = catalog.quirks.copy(structuredOutput = it)) } ?: catalog
         return OpenAICompatTransport(
             providerId = providerId,
             spec = spec,
@@ -228,10 +232,10 @@ class OpenAICompatTransportTest {
 
     // --- #52 F3: web search server-side sui provider diretti ---
 
-    @Test fun `openrouter web search sends the web plugin keeps the model and forces tool_choice auto`(): Unit = runBlocking {
-        // Con web richiesto, OpenRouter attiva il loop server-side via plugin `{"id":"web"}` (il campo
-        // `model` resta invariato: il suffisso `:online` rompe i preset); il reply NON va forzato
-        // (impedirebbe la ricerca) e il testo finale post-web arriva come content.
+    @Test fun `openrouter web search sends the server tool keeps the model and forces tool_choice auto`(): Unit = runBlocking {
+        // Con web richiesto, OpenRouter attiva il loop server-side via server tool `openrouter:web_search`
+        // (0.5.1: il plugin `web` e il suffisso `:online` sono deprecati; `model` resta invariato); il reply
+        // NON va forzato (impedirebbe la ricerca) e il testo finale post-web arriva come content.
         server.enqueue(jsonResponse(
             """
             {"model":"openai/gpt-5.5",
@@ -251,12 +255,23 @@ class OpenAICompatTransportTest {
             assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
         ).jsonObject
         assertEquals("openai/gpt-5.5", root.getValue("model").jsonPrimitive.content)
-        assertEquals(WEB_PLUGIN, root.getValue("plugins"))
+        assertFalse("plugins" in root, "il plugin web e' deprecato: non si invia piu'")
         assertEquals("auto", root.getValue("tool_choice").jsonPrimitive.content)
-        // il reply tool resta dichiarato accanto al web server-side.
-        val tool = root.getValue("tools").jsonArray.single().jsonObject.getValue("function").jsonObject
-        assertEquals("whatsapp_reply", tool.getValue("name").jsonPrimitive.content)
+        // il reply tool resta dichiarato accanto al server tool web, che e' l'ultimo.
+        val tools = root.getValue("tools").jsonArray
+        assertEquals(2, tools.size)
+        assertEquals(
+            "whatsapp_reply",
+            tools[0].jsonObject.getValue("function").jsonObject.getValue("name").jsonPrimitive.content,
+        )
+        assertEquals(WEB_SEARCH_TOOL, tools[1])
+        // tetto alle ricerche a pagamento
+        assertEquals(3, root.getValue("max_tool_calls").jsonPrimitive.int)
         assertFalse("extra_body" in root)
+        // la data e la forma della risposta stanno nel system, non piu' nel `search_prompt` del plugin
+        val system = root.getValue("messages").jsonArray.first().jsonObject.getValue("content").jsonPrimitive.content
+        assertTrue(system.endsWith(SEARCH_LINE), system)
+        assertFalse("search_prompt" in root.toString())
     }
 
     @Test fun `openrouter without web keeps forced reply and plain model`(): Unit = runBlocking {
@@ -277,13 +292,17 @@ class OpenAICompatTransportTest {
         ).jsonObject
         assertEquals("openai/gpt-5.5", root.getValue("model").jsonPrimitive.content)
         assertFalse("plugins" in root, "senza web non compare alcun plugin")
+        assertFalse("max_tool_calls" in root, "senza web non c'e' alcun tetto di ricerche")
+        assertEquals(1, root.getValue("tools").jsonArray.size, "senza web solo il reply tool")
+        val system = root.getValue("messages").jsonArray.first().jsonObject.getValue("content").jsonPrimitive.content
+        assertFalse(SEARCH_LINE in system, "senza web il system non porta la riga di ricerca")
         val toolChoice = root.getValue("tool_choice").jsonObject
         assertEquals("whatsapp_reply", toolChoice.getValue("function").jsonObject.getValue("name").jsonPrimitive.content)
     }
 
-    @Test fun `openrouter web search with a preset model keeps the preset slug and sends the web plugin`(): Unit = runBlocking {
+    @Test fun `openrouter web search with a preset model keeps the preset slug and sends the server tool`(): Unit = runBlocking {
         // Il suffisso `:online` su `@preset/...` e' un 404 di OpenRouter: il modello deve restare
-        // esatto e il web passa dal plugin, per entrambi i sink (reply WhatsApp e notifica).
+        // esatto e il web passa dal server tool, per entrambi i sink (reply WhatsApp e notifica).
         val reply = """
             {"model":"openai/gpt-5.5",
              "choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"BTC a 100000."}}],
@@ -301,11 +320,12 @@ class OpenAICompatTransportTest {
                 assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
             ).jsonObject
             assertEquals("@preset/argus", root.getValue("model").jsonPrimitive.content)
-            assertEquals(WEB_PLUGIN, root.getValue("plugins"))
+            assertEquals(WEB_SEARCH_TOOL, root.getValue("tools").jsonArray.last())
+            assertFalse("plugins" in root)
         }
     }
 
-    @Test fun `openrouter web plugin carries a plain text search prompt with the date from the clock`(): Unit = runBlocking {
+    @Test fun `openrouter web search asks for plain text with the date from the clock in the system`(): Unit = runBlocking {
         val reply = """
             {"model":"openai/gpt-5.5",
              "choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"BTC a 100000."}}],
@@ -319,17 +339,23 @@ class OpenAICompatTransportTest {
         val root = Json.parseToJsonElement(
             assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
         ).jsonObject
-        val plugin = root.getValue("plugins").jsonArray.single().jsonObject
-        assertEquals(setOf("id", "search_prompt"), plugin.keys)
-        assertEquals("web", plugin.getValue("id").jsonPrimitive.content)
-        assertEquals(
-            "Web search results from 2027-01-05. Use them for current facts. " +
-                "Answer in plain text: no links, no markdown, no citations.",
-            plugin.getValue("search_prompt").jsonPrimitive.content,
+        // Il server tool non ha un `search_prompt`: la riga di ricerca sta in fondo al system.
+        assertFalse("plugins" in root)
+        assertFalse("search_prompt" in root.toString())
+        val system = root.getValue("messages").jsonArray.first().jsonObject.getValue("content").jsonPrimitive.content
+        assertTrue(
+            system.endsWith(
+                "Today is 2027-01-05. Use web search for current facts. " +
+                    "Answer in plain text: no links, no markdown, no citations.",
+            ),
+            system,
         )
+        // Sink notifica (nessun reply tool): il solo server tool, nessun tool_choice.
+        assertEquals(listOf(WEB_SEARCH_TOOL), root.getValue("tools").jsonArray.toList())
+        assertFalse("tool_choice" in root)
     }
 
-    @Test fun `openrouter without web sends no plugin and no search prompt on the notification sink`(): Unit = runBlocking {
+    @Test fun `openrouter without web sends no server tool and no search line on the notification sink`(): Unit = runBlocking {
         server.enqueue(jsonResponse(
             """
             {"model":"openai/gpt-5.5",
@@ -342,12 +368,17 @@ class OpenAICompatTransportTest {
         t.act(timerContext(), "genera un promemoria", emptyList(), emptyList())
 
         val body = assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8()
-        assertFalse("plugins" in Json.parseToJsonElement(body).jsonObject)
+        val root = Json.parseToJsonElement(body).jsonObject
+        assertFalse("plugins" in root)
+        assertFalse("tools" in root)
+        assertFalse("max_tool_calls" in root)
         assertFalse("search_prompt" in body)
+        assertFalse("openrouter:web_search" in body)
+        assertFalse(SEARCH_LINE in body)
     }
 
-    @Test fun `custom openai-compat with web requested sends no plugins and keeps the model`(): Unit = runBlocking {
-        // Custom non ha un meccanismo web (NONE): il web si degrada e il plugin e' solo di OpenRouter.
+    @Test fun `custom openai-compat with web requested sends no server tool and keeps the model`(): Unit = runBlocking {
+        // Custom non ha un meccanismo web (NONE): il web si degrada e il server tool e' solo di OpenRouter.
         server.enqueue(jsonResponse(
             """
             {"model":"m",
@@ -364,6 +395,8 @@ class OpenAICompatTransportTest {
         ).jsonObject
         assertEquals("m", root.getValue("model").jsonPrimitive.content)
         assertFalse("plugins" in root)
+        assertFalse("tools" in root)
+        assertFalse("max_tool_calls" in root)
     }
 
     @Test fun `gemini web search uses native generateContent with google_search`(): Unit = runBlocking {
@@ -532,8 +565,8 @@ class OpenAICompatTransportTest {
         assertNull(server.takeRequest(200, TimeUnit.MILLISECONDS))
     }
 
-    @Test fun `notification sink with web on openrouter sends the web plugin and no reply tool`(): Unit = runBlocking {
-        // Sink notifica + web su OpenRouter: resta su Chat Completions con il plugin web (modello
+    @Test fun `notification sink with web on openrouter sends the server tool and no reply tool`(): Unit = runBlocking {
+        // Sink notifica + web su OpenRouter: resta su Chat Completions con il server tool web (modello
         // invariato), ma senza reply tool né tool_choice; il testo finale post-web arriva dal content.
         server.enqueue(jsonResponse(
             """
@@ -551,10 +584,11 @@ class OpenAICompatTransportTest {
             assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8(),
         ).jsonObject
         assertEquals("openai/gpt-5.5", root.getValue("model").jsonPrimitive.content)
-        assertEquals(WEB_PLUGIN, root.getValue("plugins"))
-        assertFalse("tools" in root)
+        assertFalse("plugins" in root)
+        // Nessun reply tool: l'unico tool e' il server tool web.
+        assertEquals(listOf(WEB_SEARCH_TOOL), root.getValue("tools").jsonArray.toList())
         assertFalse("tool_choice" in root)
-        // La ricerca del plugin usa il messaggio utente: deve contenere l'obiettivo, non una frase neutra.
+        // La ricerca usa il messaggio utente: deve contenere l'obiettivo, non una frase neutra.
         val user = root.getValue("messages").jsonArray.last().jsonObject.getValue("content").jsonPrimitive.content
         assertEquals("Goal: dimmi il cambio", user)
     }
@@ -781,7 +815,11 @@ class OpenAICompatTransportTest {
         var expectedRequests = 0
         listOf(ReasoningEffort.DEFAULT, ReasoningEffort.LOW, ReasoningEffort.HIGH).forEach { effort ->
             server.enqueue(mandatoryReasoning())
-            val t = transport(ProviderId.OPENROUTER, model = "x/flash", reasoning = effort)
+            // Output strutturato spento: qui conta solo il ritentativo del ragionamento, non i livelli di formato.
+            val t = transport(
+                ProviderId.OPENROUTER, model = "x/flash", reasoning = effort,
+                structuredOutput = StructuredOutputMode.NONE,
+            )
 
             val error = assertFailsWith<TransportException> { t.compile("crea", manifest(), deviceState()) }
 
@@ -794,7 +832,10 @@ class OpenAICompatTransportTest {
 
     @Test fun `a 400 that does not talk about reasoning is not retried`(): Unit = runBlocking {
         server.enqueue(jsonResponse("""{"error":{"message":"x is not a valid model ID"}}""").setResponseCode(400))
-        val t = transport(ProviderId.OPENROUTER, model = "x", reasoning = ReasoningEffort.NONE)
+        val t = transport(
+            ProviderId.OPENROUTER, model = "x", reasoning = ReasoningEffort.NONE,
+            structuredOutput = StructuredOutputMode.NONE,
+        )
 
         val error = assertFailsWith<TransportException> { t.compile("crea", manifest(), deviceState()) }
 
@@ -806,7 +847,10 @@ class OpenAICompatTransportTest {
     @Test fun `only a 400 is retried and only once`(): Unit = runBlocking {
         server.enqueue(mandatoryReasoning())
         server.enqueue(mandatoryReasoning())
-        val t = transport(ProviderId.OPENROUTER, model = "x/flash", reasoning = ReasoningEffort.NONE)
+        val t = transport(
+            ProviderId.OPENROUTER, model = "x/flash", reasoning = ReasoningEffort.NONE,
+            structuredOutput = StructuredOutputMode.NONE,
+        )
 
         val error = assertFailsWith<TransportException> { t.compile("crea", manifest(), deviceState()) }
 
@@ -875,7 +919,7 @@ class OpenAICompatTransportTest {
         val body = """{"error":{"message":"x is not a valid model ID\n(key $API_KEY) ${"y".repeat(300)}"}}"""
         server.enqueue(jsonResponse(body).setResponseCode(400))
         server.enqueue(jsonResponse(body).setResponseCode(400))
-        val t = transport(ProviderId.OPENROUTER, model = "x")
+        val t = transport(ProviderId.OPENROUTER, model = "x", structuredOutput = StructuredOutputMode.NONE)
 
         val compileError = assertFailsWith<TransportException> { t.compile("crea", manifest(), deviceState()) }
         val actError = assertFailsWith<TransportException> {
@@ -898,7 +942,7 @@ class OpenAICompatTransportTest {
     @Test fun `compile and act do not read the message of a 5xx`(): Unit = runBlocking {
         server.enqueue(jsonResponse("""{"error":{"message":"secret detail"}}""").setResponseCode(500))
         server.enqueue(jsonResponse("""{"error":{"message":"secret detail"}}""").setResponseCode(503))
-        val t = transport(ProviderId.OPENROUTER, model = "x")
+        val t = transport(ProviderId.OPENROUTER, model = "x", structuredOutput = StructuredOutputMode.NONE)
 
         val compileError = assertFailsWith<TransportException> { t.compile("crea", manifest(), deviceState()) }
         val actError = assertFailsWith<TransportException> {
@@ -914,7 +958,9 @@ class OpenAICompatTransportTest {
         server.enqueue(
             jsonResponse("""{"error":{"message":"x is not a valid model ID"}}""").setResponseCode(400),
         )
-        val brain = TransportBackedBrain(transport(ProviderId.OPENROUTER, model = "x"))
+        val brain = TransportBackedBrain(
+            transport(ProviderId.OPENROUTER, model = "x", structuredOutput = StructuredOutputMode.NONE),
+        )
 
         val result = brain.compile("crea", manifest(), deviceState())
 
@@ -1242,6 +1288,310 @@ class OpenAICompatTransportTest {
         assertTrue(RuntimeDataTestFixture.SENTINEL in contentsConcat)
     }
 
+    // --- 0.5.1 F3b: output strutturato nativo del compile ({reply, draft, error_code}) ---
+
+    private val draftJson =
+        """{"name":"dnd sera","trigger":{"type":"time","cron":"0 23 * * *","tz":"Europe/Rome"},"actions":[{"type":"set_dnd","mode":"PRIORITY"}]}"""
+
+    /** Una risposta nel formato strutturato: l'envelope `{reply, draft, error_code}`. */
+    private fun envelope(reply: String, draft: String? = draftJson, errorCode: String? = null): String =
+        """{"reply":"$reply","draft":${draft ?: "null"},"error_code":${errorCode?.let { "\"$it\"" } ?: "null"}}"""
+
+    /** Una risposta nel protocollo base: una frase e la riga `@@META@@`. */
+    private fun sentinelReply(reply: String = "Fatto."): String = "$reply\n@@META@@ {\"draft\": $draftJson}"
+
+    private fun requestRoot(request: okhttp3.mockwebserver.RecordedRequest) =
+        Json.parseToJsonElement(request.body.readUtf8()).jsonObject
+
+    private fun formatType(request: okhttp3.mockwebserver.RecordedRequest): String? =
+        requestRoot(request)["response_format"]?.jsonObject?.get("type")?.jsonPrimitive?.content
+
+    private fun rejected(code: Int = 400) = jsonResponse(
+        """{"error":{"message":"response_format is not supported by this model"}}""",
+    ).setResponseCode(code)
+
+    @Test fun `compile asks for a json schema envelope and reads the draft from it`(): Unit = runBlocking {
+        server.enqueue(jsonResponse(chatContent(envelope("Ho creato la regola."))))
+        val t = transport(ProviderId.OPENROUTER, model = "deepseek/deepseek-v4.1-flash")
+
+        val result = t.compile("metti in silenzioso alle 23", manifest(), deviceState())
+
+        assertNull(result.metaError)
+        assertEquals("Ho creato la regola.", result.reply)
+        assertEquals("dnd sera", assertNotNull(result.draft).name)
+        assertEquals(true, result.structured)
+        assertEquals(1, server.requestCount)
+        val root = requestRoot(assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)))
+        val format = root.getValue("response_format").jsonObject
+        assertEquals("json_schema", format.getValue("type").jsonPrimitive.content)
+        val schema = format.getValue("json_schema").jsonObject
+        assertEquals("argus_compile", schema.getValue("name").jsonPrimitive.content)
+        // La bozza e' un oggetto libero: lo schema non puo' essere rigido.
+        assertEquals("false", schema.getValue("strict").toString())
+        val body = schema.getValue("schema").jsonObject
+        val fields = setOf("reply", "draft", "error_code")
+        assertEquals(fields, body.getValue("properties").jsonObject.keys)
+        assertEquals(fields, body.getValue("required").jsonArray.map { it.jsonPrimitive.content }.toSet())
+        assertEquals("false", body.getValue("additionalProperties").toString())
+        // Niente tool: l'envelope e' il contenuto della risposta.
+        assertFalse("tools" in root)
+        val system = root.getValue("messages").jsonArray.first().jsonObject.getValue("content").jsonPrimitive.content
+        assertTrue(AgentMessageSupport.STRUCTURED_JSON_RULE in system, "il system chiede l'envelope")
+        assertTrue(system.startsWith(AgentMessageSupport.COMPILE_RULES), "le regole restano quelle di sempre")
+    }
+
+    @Test fun `a structured clarification keeps the question and the error code`(): Unit = runBlocking {
+        server.enqueue(jsonResponse(chatContent(envelope("A che ora?", draft = null, errorCode = "clarification_required"))))
+        val t = transport(ProviderId.OPENAI, model = "gpt-5.5")
+
+        val result = t.compile("silenzioso", manifest(), deviceState())
+
+        assertNull(result.draft)
+        assertEquals("clarification_required", result.metaError)
+        assertEquals("A che ora?", result.reply)
+        assertEquals(true, result.structured)
+    }
+
+    @Test fun `every openai compatible provider asks for the structured output by default`(): Unit = runBlocking {
+        listOf(ProviderId.OPENAI, ProviderId.GEMINI, ProviderId.OPENROUTER, ProviderId.CUSTOM_OPENAI_COMPAT)
+            .forEach { provider ->
+                server.enqueue(jsonResponse(chatContent(envelope("Fatto."))))
+
+                transport(provider, model = "m").compile("crea", manifest(), deviceState())
+
+                assertEquals("json_schema", formatType(assertNotNull(server.takeRequest(2, TimeUnit.SECONDS))), provider.name)
+            }
+    }
+
+    @Test fun `a server that rejects json_schema falls back to json_object and remembers it`(): Unit = runBlocking {
+        server.enqueue(rejected())
+        server.enqueue(jsonResponse(chatContent(envelope("Fatto."))))
+        server.enqueue(jsonResponse(chatContent(envelope("Ancora."))))
+        val t = transport(ProviderId.CUSTOM_OPENAI_COMPAT, model = "qwen-local")
+
+        val first = t.compile("crea", manifest(), deviceState())
+        val second = t.compile("crea ancora", manifest(), deviceState())
+
+        assertEquals("Fatto.", first.reply)
+        assertEquals(true, first.structured)
+        assertEquals("Ancora.", second.reply)
+        assertEquals(3, server.requestCount, "dopo il rifiuto il server riparte da json_object: nessun giro a vuoto")
+        val types = List(3) { formatType(assertNotNull(server.takeRequest(2, TimeUnit.SECONDS))) }
+        assertEquals(listOf("json_schema", "json_object", "json_object"), types)
+    }
+
+    @Test fun `json_object mode keeps the envelope rule in the system prompt`(): Unit = runBlocking {
+        server.enqueue(rejected(422))
+        server.enqueue(jsonResponse(chatContent(envelope("Fatto."))))
+        val t = transport(ProviderId.CUSTOM_OPENAI_COMPAT, model = "qwen-local")
+
+        t.compile("crea", manifest(), deviceState())
+
+        server.takeRequest(2, TimeUnit.SECONDS)
+        val second = requestRoot(assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)))
+        assertEquals("json_object", second.getValue("response_format").jsonObject.getValue("type").jsonPrimitive.content)
+        assertEquals(setOf("type"), second.getValue("response_format").jsonObject.keys)
+        val system = second.getValue("messages").jsonArray.first().jsonObject.getValue("content").jsonPrimitive.content
+        assertTrue(AgentMessageSupport.STRUCTURED_JSON_RULE in system)
+    }
+
+    @Test fun `a server that rejects every response_format gets the base protocol and keeps getting it`(): Unit = runBlocking {
+        server.enqueue(rejected(400))
+        server.enqueue(rejected(404))
+        server.enqueue(jsonResponse(chatContent(sentinelReply("Prima."))))
+        server.enqueue(jsonResponse(chatContent(sentinelReply("Seconda."))))
+        val t = transport(ProviderId.CUSTOM_OPENAI_COMPAT, model = "vecchio-server")
+
+        val first = t.compile("crea", manifest(), deviceState())
+        val second = t.compile("crea ancora", manifest(), deviceState())
+
+        assertEquals("dnd sera", assertNotNull(first.draft).name)
+        assertEquals("Prima.", first.reply)
+        assertEquals(false, first.structured)
+        assertEquals("Seconda.", second.reply)
+        assertEquals(4, server.requestCount)
+        val requests = List(4) { requestRoot(assertNotNull(server.takeRequest(2, TimeUnit.SECONDS))) }
+        assertEquals(
+            listOf("json_schema", "json_object", null, null),
+            requests.map { it["response_format"]?.jsonObject?.get("type")?.jsonPrimitive?.content },
+        )
+        // Il protocollo base e' quello di sempre, byte per byte: il system senza la regola dell'envelope.
+        val system = requests[2].getValue("messages").jsonArray.first().jsonObject.getValue("content").jsonPrimitive.content
+        assertEquals(AgentMessageSupport.compileSystemText(), system)
+        assertFalse(AgentMessageSupport.STRUCTURED_JSON_RULE in system)
+    }
+
+    @Test fun `a 500 from a local server is a rejection of the parameter too`(): Unit = runBlocking {
+        // llama.cpp risponde 500 a una grammatica che non digerisce.
+        server.enqueue(jsonResponse("""{"error":{"message":"Failed to parse grammar"}}""").setResponseCode(500))
+        server.enqueue(jsonResponse(chatContent(envelope("Fatto."))))
+        val t = transport(ProviderId.CUSTOM_OPENAI_COMPAT, model = "m")
+
+        val result = t.compile("crea", manifest(), deviceState())
+
+        assertNotNull(result.draft)
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test fun `a refusal that is not about the format is not remembered`(): Unit = runBlocking {
+        // Tre rifiuti di fila (modello inesistente): l'errore e' quello del modello, non del formato.
+        repeat(3) { server.enqueue(jsonResponse("""{"error":{"message":"x is not a valid model ID"}}""").setResponseCode(400)) }
+        val t = transport(ProviderId.OPENROUTER, model = "x")
+
+        val error = assertFailsWith<TransportException> { t.compile("crea", manifest(), deviceState()) }
+
+        assertEquals(400, error.statusCode)
+        assertEquals("x is not a valid model ID", error.providerMessage)
+        assertEquals(3, server.requestCount)
+
+        // Il modello adesso esiste: la memoria non e' stata sporcata, si riparte da json_schema.
+        server.enqueue(jsonResponse(chatContent(envelope("Fatto."))))
+        t.compile("crea", manifest(), deviceState())
+        repeat(3) { server.takeRequest(2, TimeUnit.SECONDS) }
+        assertEquals("json_schema", formatType(assertNotNull(server.takeRequest(2, TimeUnit.SECONDS))))
+    }
+
+    @Test fun `errors that do not depend on the format are never retried`(): Unit = runBlocking {
+        val cases = mapOf(
+            401 to TransportErrorKind.AUTH,
+            402 to TransportErrorKind.BUDGET,
+            403 to TransportErrorKind.AUTH,
+            429 to TransportErrorKind.RATE_LIMIT,
+            502 to TransportErrorKind.HTTP,
+            503 to TransportErrorKind.HTTP,
+        )
+        var expected = 0
+        cases.forEach { (code, kind) ->
+            server.enqueue(jsonResponse("""{"error":{"message":"x"}}""").setResponseCode(code))
+            val t = transport(ProviderId.OPENROUTER, model = "m")
+
+            val error = assertFailsWith<TransportException> { t.compile("crea", manifest(), deviceState()) }
+
+            assertEquals(kind, error.kind, "code $code")
+            expected += 1
+            assertEquals(expected, server.requestCount, "code $code: una sola richiesta")
+        }
+    }
+
+    @Test fun `a model that ignores the parameter and writes the sentinel line is still read`(): Unit = runBlocking {
+        server.enqueue(jsonResponse(chatContent(sentinelReply("Ho creato la regola."))))
+        val t = transport(ProviderId.OPENROUTER, model = "~deepseek/deepseek-flash-latest")
+
+        val result = t.compile("crea", manifest(), deviceState())
+
+        assertNull(result.metaError)
+        assertEquals("dnd sera", assertNotNull(result.draft).name)
+        assertEquals("Ho creato la regola.", result.reply)
+        assertEquals(false, result.structured, "e' arrivata col protocollo base")
+        assertEquals(1, server.requestCount, "ignorare il parametro non e' un rifiuto: nessun secondo giro")
+    }
+
+    @Test fun `an envelope wrapped in a fence or after reasoning is read`(): Unit = runBlocking {
+        server.enqueue(jsonResponse(chatContent("```json\n" + envelope("Fatto.") + "\n```")))
+        server.enqueue(jsonResponse(chatContent("<think>vediamo</think>" + envelope("Fatto."))))
+        val t = transport(ProviderId.OPENROUTER, model = "m")
+
+        repeat(2) {
+            val result = t.compile("crea", manifest(), deviceState())
+            assertEquals("dnd sera", assertNotNull(result.draft).name)
+            assertEquals(true, result.structured)
+        }
+    }
+
+    @Test fun `a malformed or cut envelope is a typed format error and keeps the usage`(): Unit = runBlocking {
+        val t = transport(ProviderId.OPENROUTER, model = "m")
+
+        server.enqueue(jsonResponse(chatContent("""{"reply":"x","draft":{"name":"senza trigger"},"error_code":null}""")))
+        val shape = t.compile("crea", manifest(), deviceState())
+        assertNull(shape.draft)
+        assertEquals("meta_parse_error", shape.metaError)
+        assertNotNull(shape.detail)
+        assertEquals(12_000L, assertNotNull(shape.usage).inputTokens)
+
+        server.enqueue(jsonResponse(chatContent("""{"reply":"Fatto.","draft":{"name":"dnd","trigger":{"type":"imm""")))
+        val cut = t.compile("crea", manifest(), deviceState())
+        assertNull(cut.draft)
+        assertEquals("meta_json_missing", cut.metaError)
+
+        // Se in piu' il modello ha esaurito il tetto di output, la causa e' il troncamento.
+        server.enqueue(
+            jsonResponse(
+                chatContent("""{"reply":"Fatto.","draft":{"name":"dnd","trigger":{"type":"imm""").replace("\"stop\"", "\"length\""),
+            ),
+        )
+        val truncated = t.compile("crea", manifest(), deviceState())
+        assertEquals("output_truncated", truncated.metaError)
+        assertEquals(1 + 1 + 1, server.requestCount)
+    }
+
+    @Test fun `with the structured output off the request is the base protocol and an envelope is not read`(): Unit = runBlocking {
+        server.enqueue(jsonResponse(chatContent(envelope("Fatto."))))
+        val t = transport(ProviderId.OPENROUTER, model = "m", structuredOutput = StructuredOutputMode.NONE)
+
+        val result = t.compile("crea", manifest(), deviceState())
+
+        // Il protocollo base resta la base: senza la richiesta strutturata si legge solo la riga sentinel.
+        assertNull(result.draft)
+        assertEquals("draft_missing", result.metaError)
+        assertEquals(false, result.structured)
+        val root = requestRoot(assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)))
+        assertFalse("response_format" in root)
+        val system = root.getValue("messages").jsonArray.first().jsonObject.getValue("content").jsonPrimitive.content
+        assertEquals(AgentMessageSupport.compileSystemText(), system)
+    }
+
+    @Test fun `act and health never carry a response_format`(): Unit = runBlocking {
+        server.enqueue(jsonResponse(chatContent("Promemoria.")))
+        server.enqueue(jsonResponse(chatContent("pong")))
+        val t = transport(ProviderId.OPENROUTER, model = "m")
+
+        t.act(timerContext(), "genera un promemoria", emptyList(), emptyList())
+        t.health()
+
+        repeat(2) {
+            assertFalse("response_format" in assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8())
+        }
+    }
+
+    @Test fun `the structured output composes with the reasoning retry`(): Unit = runBlocking {
+        server.enqueue(mandatoryReasoning())
+        server.enqueue(jsonResponse(chatContent(envelope("Fatto."))))
+        val t = transport(ProviderId.OPENROUTER, model = "x/flash", reasoning = ReasoningEffort.NONE)
+
+        val result = t.compile("crea", manifest(), deviceState())
+
+        assertNotNull(result.draft)
+        assertEquals(2, server.requestCount)
+        val efforts = List(2) { reasoningEffortOf(assertNotNull(server.takeRequest(2, TimeUnit.SECONDS))) }
+        assertEquals(listOf("none", "low"), efforts)
+    }
+
+    // --- 0.5.1: ricerca web di OpenRouter, conteggio delle ricerche del server tool ---
+
+    @Test fun `openrouter server tool searches are counted in the usage`(): Unit = runBlocking {
+        server.enqueue(jsonResponse(
+            """
+            {"model":"openai/gpt-5.5",
+             "choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"BTC a 100000."}}],
+             "usage":{"prompt_tokens":50,"completion_tokens":10,"server_tool_use":{"web_search_requests":2}}}
+            """.trimIndent(),
+        ))
+        server.enqueue(jsonResponse(
+            """
+            {"model":"openai/gpt-5.5",
+             "choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"Nessuna ricerca."}}],
+             "usage":{"prompt_tokens":50,"completion_tokens":10}}
+            """.trimIndent(),
+        ))
+        val t = transport(ProviderId.OPENROUTER, model = "openai/gpt-5.5")
+
+        val searched = t.act(timerContext(), "dimmi il prezzo BTC", emptyList(), listOf("web.search"))
+        val plain = t.act(timerContext(), "dimmi il prezzo BTC", emptyList(), listOf("web.search"))
+
+        assertEquals(2, assertNotNull(searched.usage).webSearches)
+        assertNull(assertNotNull(plain.usage).webSearches)
+    }
+
     private fun chatContent(content: String): String = buildJsonObject {
         put("id", "chatcmpl-c1")
         put("model", "gpt-5.5")
@@ -1324,9 +1674,11 @@ class OpenAICompatTransportTest {
         /** Giorno fisso dell'orologio iniettato nel transport dei test. */
         val SEARCH_DAY: LocalDate = LocalDate.of(2026, 10, 26)
 
-        /** Plugin web di OpenRouter come deve comparire nel body, con il prompt di ricerca in testo semplice. */
-        val WEB_PLUGIN = Json.parseToJsonElement(
-            """[{"id":"web","search_prompt":"Web search results from 2026-10-26. Use them for current facts. Answer in plain text: no links, no markdown, no citations."}]""",
-        )
+        /** Server tool web di OpenRouter come deve comparire nei `tools` del body. */
+        val WEB_SEARCH_TOOL = Json.parseToJsonElement("""{"type":"openrouter:web_search"}""")
+
+        /** La riga di ricerca in fondo al system con web OpenRouter, alla data fissa dell'orologio dei test. */
+        const val SEARCH_LINE = "Today is 2026-10-26. Use web search for current facts. " +
+            "Answer in plain text: no links, no markdown, no citations."
     }
 }
