@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -73,6 +74,7 @@ internal fun filterAppChoices(choices: List<AppChoiceUi>, query: String): List<A
  * @param currentPackage package oggi nella regola (segnato «in uso» e non scegliibile).
  * @param armedRule la regola è già armata: la nota dice che nasce una bozza di modifica.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ApprovalAppPickerSheet(
     choices: List<AppChoiceUi>?,

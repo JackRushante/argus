@@ -217,3 +217,23 @@ Le schermate non sono ridisegnate: leggono i nuovi token (via `MaterialTheme.col
 layout è quello di prima. Ogni worker sostituisce gli stili locali con i componenti sopra. Già adottati in fase 1:
 `ArgusNavigationBar` (nav host), `HealthBanner` (via `EngineBannerBar`), `CodeBlock` (via `ShellCommandBlock`, ora a capo
 invece che a scorrimento orizzontale), i chip di `Badges.kt`, `JetBrains Mono` per tutto il monospace.
+
+## 5. Fase 2 · blocco approvazione e dettaglio (0.7.0)
+
+Componenti aggiunti per le tavole «Approvazione · generativa», «Approvazione · P4 con shell» e «Dettaglio · armata»
+(ognuno con anteprima nei due temi, prefisso stringhe `rda_ap_`):
+
+- `ApprovalRiskPanel(title, warnings)` (`ApprovalRisk.kt`): riepilogo rischi sopra la regola, con i conteggi errori/avvisi,
+  la nota privacy e, per un ERROR, l'etichetta «Errore» (il colore non è l'unico segnale). Mai collassato.
+- `ApprovalRuleTimeline(rule, geofenceLabel, estimate, appInfo, onChangeApp)` (`ApprovalRule.kt`): QUANDO / SOLO SE /
+  VARIABILI / ALLORA come linea del tempo. Il contenitore del trigger ha la forma del tipo; il comando shell è un `CodeBlock`
+  integrale; l'albero del programma è tutto espanso (nessun nodo si chiude). `AppRefLine` mostra il nome dell'app, il package e
+  «Cambia app»; l'app non installata ha il suo chip ambra con icona e testo.
+- `ModelDescriptionNote(text)` (`ApprovalNotes.kt`): la prosa del modello come commento subordinato (tratteggiato, attenuato,
+  etichettato), sempre dopo la regola.
+- `ApprovalAppPickerSheet(choices, currentPackage, armedRule, onPick, onDismiss)` (`ApprovalAppPicker.kt`): elenco delle app
+  installate (nome + icona letta in modo pigro) con ricerca. Sostituisce il package nella bozza.
+
+Regole del blocco: «Arma» è l'unico pulsante pieno; con un ERROR è disabilitato e il motivo sta sopra i pulsanti
+(`ArgusActionFooter`). Nel dettaglio salvato «Disattiva» è tonale, Elimina è distruttivo (conferma) e «Esegui ora» resta visibile,
+disabilitato col suo motivo. Una regola armata non si modifica mai da qui: «Cambia app» ne fa una bozza di modifica da riapprovare.
