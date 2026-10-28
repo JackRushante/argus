@@ -84,8 +84,11 @@ class PrivilegedActionRunner(
         }
         is Action.Screenshot -> {
             val png = tools.screenshot()
-            if (screenshots.save(screenshotName(clock(), zone()), png)) {
-                ActionResult.Success
+            val at = clock()
+            val zoneId = zone()
+            if (screenshots.save(screenshotName(at, zoneId), png)) {
+                // Il nome del file arriva al Log come codice chiuso (data e ora), mai come testo libero.
+                ActionResult.SuccessWithDetail(ScreenshotLogDetail.code(at, zoneId))
             } else {
                 ActionResult.Failure(SCREENSHOT_SAVE_FAILED)
             }
@@ -108,4 +111,29 @@ class PrivilegedActionRunner(
         fun screenshotName(epochMillis: Long, zone: ZoneId): String =
             "Argus-" + NAME_TIME.format(Instant.ofEpochMilli(epochMillis).atZone(zone)) + ".png"
     }
+}
+
+/**
+ * Il nome del file di uno screenshot nel Log. Il journal conserva solo codici chiusi (`snake_case`), quindi il
+ * nome `Argus-20261028-153012.png` viaggia come `screenshot_20261028_153012` (la stessa data e ora, nessun
+ * percorso e nessun dato della regola) e il Log lo ricostruisce con [fileName].
+ */
+object ScreenshotLogDetail {
+    private const val PREFIX = "screenshot_"
+    private val CODE_TIME: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss", Locale.ROOT)
+    private val CODE = Regex("""^screenshot_(\d{8})_(\d{6})${'$'}""")
+
+    /** Codice del journal per lo screenshot salvato all'istante [epochMillis] nel fuso [zone]. */
+    fun code(epochMillis: Long, zone: ZoneId): String =
+        PREFIX + CODE_TIME.format(Instant.ofEpochMilli(epochMillis).atZone(zone))
+
+    /** Nome del file salvato in Pictures/Argus, oppure null se [code] non e' un codice di screenshot. */
+    fun fileName(code: String?): String? {
+        val match = code?.let(CODE::matchEntire) ?: return null
+        return "Argus-${match.groupValues[1]}-${match.groupValues[2]}.png"
+    }
+
+    /** Percorso mostrato nel Log: cartella visibile all'utente piu' nome del file. */
+    fun displayPath(code: String?): String? =
+        fileName(code)?.let { "Pictures/" + PrivilegedActionRunner.SCREENSHOT_FOLDER + "/" + it }
 }

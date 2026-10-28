@@ -5,14 +5,19 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BatterySaver
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Terminal
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -22,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.argus.ui.preview.ArgusPreviewSurface
 import dev.argus.ui.preview.ArgusThemePreviews
@@ -92,10 +98,21 @@ fun HealthTile(
                 Text(subtitle, color = subColor, style = MaterialTheme.typography.bodyMedium)
             }
             when {
+                // «Correggi» ha il colore caldo dell'attenzione (tavola «Sistema»): pillola piena `attention`.
+                actionLabel != null && onClick != null && level == HealthTileLevel.Warn -> Button(
+                    onClick = onClick,
+                    modifier = Modifier.heightIn(min = ArgusSpacing.TouchTarget),
+                    shape = CircleShape,
+                    colors = ButtonDefaults.buttonColors(containerColor = semantic.attention, contentColor = semantic.onAttention),
+                    elevation = null,
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                ) {
+                    Text(actionLabel, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.W700)
+                }
                 actionLabel != null && onClick != null -> ArgusButton(
                     text = actionLabel,
                     onClick = onClick,
-                    style = if (level == HealthTileLevel.Warn) ButtonStyle.Tonal else ButtonStyle.Outlined,
+                    style = ButtonStyle.Outlined,
                 )
                 level == HealthTileLevel.Ok -> Icon(
                     Icons.Rounded.CheckCircle,

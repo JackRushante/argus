@@ -6,13 +6,16 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Error
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -58,86 +61,77 @@ fun RulesBackupSection(
 ) {
     var stripPersonalData by rememberSaveable { mutableStateOf(false) }
     val working = state.status is RulesBackupStatus.Working
-    val shape = RoundedCornerShape(14.dp)
-    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            stringResource(R.string.backup_section),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.labelSmall,
-        )
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(shape)
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape)
-                .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(
-                stringResource(R.string.backup_body),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodyMedium,
-            )
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        SectionLabel(stringResource(R.string.backup_section), Modifier.padding(horizontal = 4.dp))
+        ArgusCard(Modifier.fillMaxWidth(), contentPadding = PaddingValues(14.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    stringResource(R.string.backup_body),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 48.dp)
-                    .toggleable(
-                        value = stripPersonalData,
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .toggleable(
+                            value = stripPersonalData,
+                            enabled = !working,
+                            role = Role.Checkbox,
+                            onValueChange = { stripPersonalData = it },
+                        ),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Checkbox(checked = stripPersonalData, onCheckedChange = null, enabled = !working)
+                    Text(
+                        stringResource(R.string.backup_strip_label),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                }
+                if (stripPersonalData) {
+                    Text(
+                        stringResource(R.string.backup_strip_hint),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                    ArgusButton(
+                        text = stringResource(R.string.backup_export),
+                        onClick = { onExport(stripPersonalData) },
+                        style = ButtonStyle.Tonal,
+                        enabled = !working && state.exportableRules > 0,
+                        modifier = Modifier.weight(1f),
+                        fillWidth = true,
+                    )
+                    ArgusButton(
+                        text = stringResource(R.string.backup_import),
+                        onClick = onImport,
+                        style = ButtonStyle.Outlined,
                         enabled = !working,
-                        role = Role.Checkbox,
-                        onValueChange = { stripPersonalData = it },
-                    ),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Checkbox(checked = stripPersonalData, onCheckedChange = null, enabled = !working)
+                        modifier = Modifier.weight(1f),
+                        fillWidth = true,
+                    )
+                }
+                if (state.exportableRules == 0) {
+                    Text(
+                        stringResource(R.string.backup_export_none),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
                 Text(
-                    stringResource(R.string.backup_strip_label),
-                    color = MaterialTheme.colorScheme.onSurface,
-                    style = MaterialTheme.typography.labelLarge,
-                )
-            }
-            if (stripPersonalData) {
-                Text(
-                    stringResource(R.string.backup_strip_hint),
+                    stringResource(R.string.backup_import_hint),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodyMedium,
                 )
-            }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-                Button(
-                    onClick = { onExport(stripPersonalData) },
-                    enabled = !working && state.exportableRules > 0,
-                    modifier = Modifier
-                        .weight(1f)
-                        .heightIn(min = 48.dp),
-                ) { Text(stringResource(R.string.backup_export)) }
-                OutlinedButton(
-                    onClick = onImport,
-                    enabled = !working,
-                    modifier = Modifier
-                        .weight(1f)
-                        .heightIn(min = 48.dp),
-                ) { Text(stringResource(R.string.backup_import)) }
+                BackupStatusRow(state.status, onDismissResult, onOpenImported)
             }
-            if (state.exportableRules == 0) {
-                Text(
-                    stringResource(R.string.backup_export_none),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
-            Text(
-                stringResource(R.string.backup_import_hint),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-
-            BackupStatusRow(state.status, onDismissResult, onOpenImported)
         }
     }
 }
@@ -180,13 +174,9 @@ private fun BackupStatusRow(
             )
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (status.importedCount > 0) {
-                    TextButton(onClick = onOpenImported, modifier = Modifier.heightIn(min = 48.dp)) {
-                        Text(stringResource(R.string.backup_open_rules))
-                    }
+                    ArgusButton(stringResource(R.string.backup_open_rules), onOpenImported, style = ButtonStyle.Text)
                 }
-                TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) {
-                    Text(stringResource(R.string.backup_dismiss))
-                }
+                ArgusButton(stringResource(R.string.backup_dismiss), onDismiss, style = ButtonStyle.Text)
             }
         }
         is RulesBackupStatus.Failed -> Column(
@@ -195,14 +185,21 @@ private fun BackupStatusRow(
                 .semantics { liveRegion = LiveRegionMode.Polite },
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Text(
-                status.message,
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) {
-                Text(stringResource(R.string.backup_dismiss))
+            // L'errore e' scritto, con l'icona: il rosso non e' l'unico segnale.
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
+                Icon(
+                    Icons.Rounded.Error,
+                    contentDescription = null,
+                    tint = ArgusTheme.semantic.error.fg,
+                    modifier = Modifier.size(18.dp),
+                )
+                Text(
+                    status.message,
+                    color = ArgusTheme.semantic.error.fg,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
             }
+            ArgusButton(stringResource(R.string.backup_dismiss), onDismiss, style = ButtonStyle.Text)
         }
     }
 }

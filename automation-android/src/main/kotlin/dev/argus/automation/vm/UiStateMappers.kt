@@ -1,6 +1,7 @@
 package dev.argus.automation.vm
 
 import dev.argus.automation.ApprovalFlowReview
+import dev.argus.automation.privileged.ScreenshotLogDetail
 import dev.argus.data.dao.AuditLogRecord
 import dev.argus.data.entities.ActionResultEntity
 import dev.argus.data.entities.ScheduledTimeAlarmEntity
@@ -304,7 +305,12 @@ private fun actionDetail(action: ActionResultEntity, l: RenderLanguage): String 
         null -> ""
         // D8: messaggio accorpato nella risposta unica della raffica, nessuna seconda generazione.
         COALESCED_REPLY_CODE -> l.pick(" · merged into one reply", " · unito in un'unica risposta")
-        else -> " · ${LogReasonLabels.text(code, l)}"
+        else -> {
+            // 0.7.0: uno screenshot riuscito porta il nome del file salvato (data e ora, nessun dato della regola).
+            val savedAs = ScreenshotLogDetail.displayPath(code)
+                .takeIf { action.outcome == ActionJournalOutcome.SUCCEEDED }
+            " · ${savedAs ?: LogReasonLabels.text(code, l)}"
+        }
     }
     val path = action.actionPath.ifBlank { (action.actionIndex + 1).toString() }
     return "$path. ${actionTypeLabel(action.actionType, l)} → $outcome$error"

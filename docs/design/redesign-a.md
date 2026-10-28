@@ -195,6 +195,20 @@ Tutti hanno `@ArgusThemePreviews` (chiaro e scuro) nel proprio file. Le firme so
   `ArgusActionRow { }` per «Annulla» (testo) + conferma (pieno), allineati a destra.
 - `ArgusActionFooter(disabledReason?) { ColumnScope }`: footer fisso su `nav`, filetto in alto, motivo SOPRA i pulsanti.
 
+### Sistema e foglio del provider (blocco LOG-SISTEMA) · `SystemTiles.kt`, `TransportConfigurationSheet.kt`
+- `SystemSectionNav(items: List<SystemNavItem>, onSelect, groupDescription)`: chip «Vai a una sezione»; `SystemNavItem(id, label,
+  badge?, badgeDescription?)` (il conteggio ambra si legge «Salute, 2 da correggere»). `SystemCountBadge(count)`.
+- `SystemHealthCompactTile(icon, title, subtitle, level, onClick?, actionLabel?, okContentDescription?)`: tessera salute a
+  mezza larghezza (spunta in alto, «Attiva» sotto per le righe opt-in). I problemi (`Warn`) e i testi lunghi usano
+  `HealthTile` a tutta larghezza; la disposizione a coppie e' `SystemHealthLayout.rows` (`presentation/`).
+- `SystemMeterCard(label, progress?, footnote?) { valore }` con `SystemBigValue`, `SystemMediumValue`, `SystemProgressBar`:
+  riquadri del budget; senza limite niente barra (mai una barra a zero). `SystemDotChip(text, role)`: «raggiungibile».
+- `TransportConfigurationSheet(transport, onDismiss, onSaveBridge, onSaveProvider, providerChoices, onSelectProvider)`:
+  UN foglio per Hermes e per i provider diretti (sostituisce i due dialoghi). La chiave/il bearer non si mostrano mai: campo
+  sempre vuoto (`remember`, mai `rememberSaveable`), chip «Chiave configurata», «Lascia vuoto per conservare la chiave attuale.».
+  Con `providerChoices` vuoto (onboarding) la scelta del provider non si ripete nel foglio.
+- Log: `LogFilter` (`presentation/`) filtra le righe gia' caricate per esito, solo nella schermata.
+
 ## 3. Regole
 
 1. Un solo pulsante pieno per stato di una schermata. Elimina, Esegui ora e Revoca consenso aprono una conferma; le azioni

@@ -415,7 +415,7 @@ class ProgramInterpreter(
                     path = path,
                     actionType = step.actionType,
                     outcome = outcome,
-                    errorCode = (result as? ActionResult.Failure)?.reason?.boundedCode(),
+                    errorCode = result.journalCode(),
                 ),
             )
         }
@@ -553,8 +553,6 @@ class ProgramInterpreter(
         VarType.NUMBER -> raw.takeIf { StateValueCoercion.number(it) != null }
         VarType.BOOLEAN -> StateValueCoercion.boolean(raw)?.toString()
     }
-
-    private fun String.boundedCode(): String = journalErrorCode(this)
 
     companion object {
         const val MAX_EXECUTION_MILLIS = 6L * 60 * 60 * 1_000

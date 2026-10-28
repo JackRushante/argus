@@ -73,39 +73,32 @@ fun PauseSettingRow(
     modifier: Modifier = Modifier,
 ) {
     val title = stringResource(R.string.pause_setting_title)
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(14.dp))
-            .padding(horizontal = 13.dp, vertical = 11.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Icon(
-            Icons.Rounded.PauseCircle,
-            contentDescription = null,
-            tint = if (paused) LocalArgusSemantic.current.pending.fg else MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(22.dp),
-        )
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(title, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge)
-            Text(
-                stringResource(if (paused) R.string.pause_setting_on else R.string.pause_setting_off),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodyMedium,
+    val pending = ArgusTheme.semantic.pending
+    ArgusCard(modifier.fillMaxWidth(), contentPadding = androidx.compose.foundation.layout.PaddingValues(14.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            // In pausa l'icona e' ambra (nessuna regola gira); altrimenti e' neutra.
+            IconBadge(
+                Icons.Rounded.PauseCircle,
+                if (paused) pending.bg else ArgusTheme.surfaces.card2,
+                if (paused) pending.fg else MaterialTheme.colorScheme.onSurfaceVariant,
+                size = 40.dp,
+                iconSize = 22.dp,
+                shape = RoundedCornerShape(dev.argus.ui.theme.ArgusRadius.Md - 2.dp),
             )
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(title, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge)
+                Text(
+                    stringResource(if (paused) R.string.pause_setting_on else R.string.pause_setting_off),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            ArgusSwitch(checked = paused, onCheckedChange = onPausedChange, contentDescription = title)
         }
-        Switch(
-            checked = paused,
-            onCheckedChange = onPausedChange,
-            modifier = Modifier.semantics { contentDescription = title },
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-                checkedTrackColor = MaterialTheme.colorScheme.primary,
-            ),
-        )
     }
 }
 
