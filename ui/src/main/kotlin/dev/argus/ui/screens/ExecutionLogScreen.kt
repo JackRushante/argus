@@ -1,5 +1,6 @@
 package dev.argus.ui.screens
 
+import android.content.res.Configuration
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
@@ -59,7 +60,7 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
+import dev.argus.ui.theme.ArgusMono
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import dev.argus.engine.runtime.AuditKind
@@ -456,7 +457,7 @@ private fun ExpandedDetail(
                 step,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodyMedium,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = ArgusMono,
             )
         }
         if (isDeferred) {
@@ -578,7 +579,9 @@ private object NoopLogCallbacks : ExecutionLogCallbacks {
     override fun onOpenAutomation(id: String) {}
 }
 
-@Preview(name = "Log · timeline (Oggi/Ieri, tutti gli esiti)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 900)
+@Preview(name = "Log · timeline (Oggi/Ieri, tutti gli esiti) · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 900)
+
+@Preview(name = "Log · timeline (Oggi/Ieri, tutti gli esiti) · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 900)
 @Composable
 private fun LogTimelinePreview() {
     ArgusTheme {
@@ -589,7 +592,9 @@ private fun LogTimelinePreview() {
     }
 }
 
-@Preview(name = "Log · riga espansa (passi per-azione)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)
+@Preview(name = "Log · riga espansa (passi per-azione) · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 820)
+
+@Preview(name = "Log · riga espansa (passi per-azione) · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 820)
 @Composable
 private fun LogExpandedPreview() {
     ArgusTheme {
@@ -617,7 +622,9 @@ private fun LogExpandedPreview() {
     }
 }
 
-@Preview(name = "Log · filtrato per automazione", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)
+@Preview(name = "Log · filtrato per automazione · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 820)
+
+@Preview(name = "Log · filtrato per automazione · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 820)
 @Composable
 private fun LogFilteredPreview() {
     ArgusTheme {

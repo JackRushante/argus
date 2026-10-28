@@ -1,5 +1,6 @@
 package dev.argus.ui.screens
 
+import android.content.res.Configuration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -60,7 +61,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
+import dev.argus.ui.theme.ArgusMono
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -479,7 +480,7 @@ private fun TransportSection(
                             transport.url,
                             color = MaterialTheme.colorScheme.onSurface,
                             style = MaterialTheme.typography.bodyMedium,
-                            fontFamily = FontFamily.Monospace,
+                            fontFamily = ArgusMono,
                             modifier = Modifier.weight(1f),
                         )
                         Icon(Icons.Rounded.Edit, contentDescription = stringResource(R.string.settings_edit_bridge_cd), tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
@@ -538,7 +539,7 @@ private fun TransportSection(
                             transport.baseUrl,
                             color = MaterialTheme.colorScheme.onSurface,
                             style = MaterialTheme.typography.bodyMedium,
-                            fontFamily = FontFamily.Monospace,
+                            fontFamily = ArgusMono,
                             modifier = Modifier.weight(1f),
                         )
                         Icon(Icons.Rounded.Edit, contentDescription = stringResource(R.string.settings_edit_provider_cd, transport.providerLabel), tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
@@ -726,7 +727,7 @@ private fun ContactRowItem(contact: ContactRow, onRemove: () -> Unit) {
                 maskConversationId(contact.conversationId),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodyMedium,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = ArgusMono,
             )
         }
         Box(
@@ -862,7 +863,7 @@ private fun BudgetCallsRow(label: String, used: Long, limit: Int?) {
                 BudgetFormat.callsLabel(used, limit),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodyMedium,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = ArgusMono,
             )
         }
         if (limit != null && limit > 0) {
@@ -891,7 +892,7 @@ private fun BudgetTokensRow(tokensIn: Long?, tokensOut: Long?, tokenLimitMonth: 
                 BudgetFormat.tokensLabel(tokensIn, tokensOut),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodyMedium,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = ArgusMono,
             )
         }
         if (tokenLimitMonth != null && tokenLimitMonth > 0L) {
@@ -920,7 +921,7 @@ private fun BudgetCostRow(costMonthMicros: Long?, costLimitMicros: Long?) {
                 BudgetFormat.costLabel(costMonthMicros),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodyMedium,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = ArgusMono,
             )
         }
         if (costLimitMicros != null && costLimitMicros > 0L) {
@@ -1089,61 +1090,81 @@ private val previewDegraded = SettingsState(
     appVersionLabel = "Argus v0.3.6 · APK",
 )
 
-@Preview(name = "Sistema · tutto verde + 1 contatto", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 1100)
+@Preview(name = "Sistema · tutto verde + 1 contatto · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 1100)
+
+@Preview(name = "Sistema · tutto verde + 1 contatto · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 1100)
 @Composable
 private fun SettingsAllGreenPreview() {
     ArgusTheme { SettingsScreen(previewAllGreen, NoopSettingsCallbacks) }
 }
 
-@Preview(name = "Sistema · Shizuku degradato + batteria non-exempt (CTA)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 1100)
+@Preview(name = "Sistema · Shizuku degradato + batteria non-exempt (CTA) · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 1100)
+
+@Preview(name = "Sistema · Shizuku degradato + batteria non-exempt (CTA) · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 1100)
 @Composable
 private fun SettingsDegradedPreview() {
     ArgusTheme { SettingsScreen(previewDegraded, NoopSettingsCallbacks) }
 }
 
-@Preview(name = "Sistema · Shizuku gira come root", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 1100)
+@Preview(name = "Sistema · Shizuku gira come root · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 1100)
+
+@Preview(name = "Sistema · Shizuku gira come root · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 1100)
 @Composable
 private fun SettingsShizukuRootPreview() {
     ArgusTheme { SettingsScreen(Fixtures.settingsShizukuRoot, NoopSettingsCallbacks) }
 }
 
-@Preview(name = "Sistema · Shizuku troppo vecchio", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 1100)
+@Preview(name = "Sistema · Shizuku troppo vecchio · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 1100)
+
+@Preview(name = "Sistema · Shizuku troppo vecchio · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 1100)
 @Composable
 private fun SettingsShizukuUnsupportedPreview() {
     ArgusTheme { SettingsScreen(Fixtures.settingsShizukuUnsupported, NoopSettingsCallbacks) }
 }
 
-@Preview(name = "Sistema · provider diretto (OpenAI)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 1100)
+@Preview(name = "Sistema · provider diretto (OpenAI) · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 1100)
+
+@Preview(name = "Sistema · provider diretto (OpenAI) · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 1100)
 @Composable
 private fun SettingsDirectProviderPreview() {
     ArgusTheme { SettingsScreen(previewDirectProvider, NoopSettingsCallbacks) }
 }
 
-@Preview(name = "Sistema · guida impostazioni con restrizioni (APK, Android 13+)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 1100)
+@Preview(name = "Sistema · guida impostazioni con restrizioni (APK, Android 13+) · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 1100)
+
+@Preview(name = "Sistema · guida impostazioni con restrizioni (APK, Android 13+) · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 1100)
 @Composable
 private fun SettingsRestrictedHintPreview() {
     ArgusTheme { SettingsScreen(Fixtures.settingsRestrictedHint, NoopSettingsCallbacks) }
 }
 
-@Preview(name = "Sistema · sveglie esatte non concesse (CTA)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 1100)
+@Preview(name = "Sistema · sveglie esatte non concesse (CTA) · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 1100)
+
+@Preview(name = "Sistema · sveglie esatte non concesse (CTA) · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 1100)
 @Composable
 private fun SettingsExactAlarmsDeniedPreview() {
     ArgusTheme { SettingsScreen(Fixtures.settingsExactAlarmsDenied, NoopSettingsCallbacks) }
 }
 
-@Preview(name = "Sistema · modifica impostazioni di sistema non concessa (CTA)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 1100)
+@Preview(name = "Sistema · modifica impostazioni di sistema non concessa (CTA) · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 1100)
+
+@Preview(name = "Sistema · modifica impostazioni di sistema non concessa (CTA) · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 1100)
 @Composable
 private fun SettingsWriteSettingsDeniedPreview() {
     ArgusTheme { SettingsScreen(Fixtures.settingsWriteSettingsDenied, NoopSettingsCallbacks) }
 }
 
-@Preview(name = "Sistema · accesso ai dati di utilizzo non concesso (CTA)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 1100)
+@Preview(name = "Sistema · accesso ai dati di utilizzo non concesso (CTA) · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 1100)
+
+@Preview(name = "Sistema · accesso ai dati di utilizzo non concesso (CTA) · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 1100)
 @Composable
 private fun SettingsUsageAccessDeniedPreview() {
     ArgusTheme { SettingsScreen(Fixtures.settingsUsageAccessDenied, NoopSettingsCallbacks) }
 }
 
-@Preview(name = "Sistema · Accessibilità spenta (CTA)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 1100)
+@Preview(name = "Sistema · Accessibilità spenta (CTA) · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 1100)
+
+@Preview(name = "Sistema · Accessibilità spenta (CTA) · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 1100)
 @Composable
 private fun SettingsAccessibilityOffPreview() {
     ArgusTheme { SettingsScreen(Fixtures.settingsAccessibilityOff, NoopSettingsCallbacks) }

@@ -36,15 +36,15 @@ class TextContrastTest {
     }
 
     @Test
-    fun `outline is not the text token and was unreadable as text on the dark theme`() {
+    fun `outline is a border token and not the text token`() {
         themes.forEach { (name, scheme) ->
             assertNotEquals(scheme.outline, scheme.secondaryText(), "$name: outline non e' un token per i testi")
+            // Redesign A: outline e' un contorno di controllo, quindi regge 3:1 (WCAG 1.4.11) su fondo e card.
+            listOf(scheme.background, scheme.surfaceVariant).forEach { background ->
+                val ratio = contrast(scheme.outline, background)
+                assertTrue(ratio >= 3.0, "$name: outline $ratio:1 su $background")
+            }
         }
-        val dark = ArgusDarkColors
-        assertTrue(
-            contrast(dark.outline, dark.background) < 3.0,
-            "outline sul fondo scuro e' sotto 3:1: va tenuto per bordi e divisori",
-        )
     }
 
     @Test
@@ -62,10 +62,10 @@ class TextContrastTest {
 
     @Test
     fun `the old attenuation of the log was too faint`() {
-        // Documenta il perche' della correzione: con 0.5 il testo secondario scendeva sotto 3:1.
+        // Documenta il perche' della correzione: con 0.5 il testo secondario scendeva sotto 4,5:1.
         val dark = ArgusDarkColors
         val old = over(dark.secondaryText(), 0.5f, dark.background)
-        assertTrue(contrast(old, dark.background) < 3.0)
+        assertTrue(contrast(old, dark.background) < 4.5)
     }
 
     @Test

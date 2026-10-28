@@ -1,5 +1,6 @@
 package dev.argus.ui.screens
 
+import android.content.res.Configuration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -662,7 +663,9 @@ private fun PreviewFor(kind: StepKind, shizuku: ShizukuStatus = ShizukuStatus.RU
     }
 }
 
-@Preview(name = "Onboarding · Privacy (consenso)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)
+@Preview(name = "Onboarding · Privacy (consenso) · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 820)
+
+@Preview(name = "Onboarding · Privacy (consenso) · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 820)
 @Composable
 private fun OnboardingPrivacyPreview() {
     // WELCOME_PRIVACY step corrente (mostra "Passo obbligatorio", no Salta, CTA consenso).
@@ -676,19 +679,25 @@ private fun OnboardingPrivacyPreview() {
     }
 }
 
-@Preview(name = "Onboarding · Shizuku RUNNING_NOT_AUTHORIZED", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)
+@Preview(name = "Onboarding · Shizuku RUNNING_NOT_AUTHORIZED · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 820)
+
+@Preview(name = "Onboarding · Shizuku RUNNING_NOT_AUTHORIZED · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 820)
 @Composable
 private fun OnboardingShizukuPreview() {
     PreviewFor(StepKind.SHIZUKU, ShizukuStatus.RUNNING_NOT_AUTHORIZED)
 }
 
-@Preview(name = "Onboarding · Shizuku UNSUPPORTED (troppo vecchio)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)
+@Preview(name = "Onboarding · Shizuku UNSUPPORTED (troppo vecchio) · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 820)
+
+@Preview(name = "Onboarding · Shizuku UNSUPPORTED (troppo vecchio) · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 820)
 @Composable
 private fun OnboardingShizukuUnsupportedPreview() {
     PreviewFor(StepKind.SHIZUKU, ShizukuStatus.UNSUPPORTED)
 }
 
-@Preview(name = "Onboarding · Scegli il cervello (selettore provider)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)
+@Preview(name = "Onboarding · Scegli il cervello (selettore provider) · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 820)
+
+@Preview(name = "Onboarding · Scegli il cervello (selettore provider) · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 820)
 @Composable
 private fun OnboardingBrainConfigPreview() {
     val choices = listOf(
@@ -733,13 +742,17 @@ private fun OnboardingBrainConfigPreview() {
     }
 }
 
-@Preview(name = "Onboarding · Batteria (conseguenza)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)
+@Preview(name = "Onboarding · Batteria (conseguenza) · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 820)
+
+@Preview(name = "Onboarding · Batteria (conseguenza) · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 820)
 @Composable
 private fun OnboardingBatteryPreview() {
     PreviewFor(StepKind.BATTERY_OEM)
 }
 
-@Preview(name = "Onboarding · Posizione (opzionale)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 820)
+@Preview(name = "Onboarding · Posizione (opzionale) · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 820)
+
+@Preview(name = "Onboarding · Posizione (opzionale) · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 820)
 @Composable
 private fun OnboardingLocationPreview() {
     PreviewFor(StepKind.BACKGROUND_LOCATION)

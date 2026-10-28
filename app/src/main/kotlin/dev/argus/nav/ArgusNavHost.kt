@@ -29,15 +29,10 @@ import androidx.compose.material.icons.rounded.ChatBubble
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Badge
-import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
@@ -62,7 +57,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
+import dev.argus.ui.components.ArgusNavigationBar
+import dev.argus.ui.components.ArgusNavItem
+import dev.argus.ui.components.NavBadge
+import dev.argus.ui.theme.ArgusMono
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationManagerCompat
@@ -846,7 +844,7 @@ private fun ContactPickerDialog(
                                 Text(
                                     maskConversationId(contact.conversationId),
                                     style = MaterialTheme.typography.bodySmall,
-                                    fontFamily = FontFamily.Monospace,
+                                    fontFamily = ArgusMono,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
@@ -963,41 +961,31 @@ private fun ArgusBottomBar(
     chatUnread: Boolean,
     onSelect: (String) -> Unit,
 ) {
-    NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceVariant) {
-        TopDestinations.forEach { destination ->
-            val label = stringResource(destination.labelRes)
-            NavigationBarItem(
-                modifier = Modifier.testTag("nav_${destination.route}"),
-                selected = currentRoute == destination.route,
-                onClick = { onSelect(destination.route) },
-                icon = {
-                    when {
-                        destination.route == Routes.LIST && pendingCount > 0 ->
-                            BadgedBox(badge = { Badge { Text("$pendingCount") } }) {
-                                Icon(destination.icon, contentDescription = label)
-                            }
-                        destination.route == Routes.SETTINGS && needsReviewCount > 0 ->
-                            BadgedBox(badge = { Badge { Text("!") } }) {
-                                Icon(destination.icon, contentDescription = label)
-                            }
-                        destination.route == Routes.CHAT && chatUnread ->
-                            BadgedBox(badge = { Badge() }) {
-                                Icon(destination.icon, contentDescription = label)
-                            }
-                        else -> Icon(destination.icon, contentDescription = label)
-                    }
-                },
-                label = { Text(label) },
-                colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = MaterialTheme.colorScheme.onPrimary,
-                    selectedTextColor = MaterialTheme.colorScheme.primary,
-                    indicatorColor = MaterialTheme.colorScheme.primary,
-                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                ),
-            )
+    val pendingDescription = if (pendingCount > 0) stringResource(R.string.nav_badge_pending, pendingCount) else null
+    val problemsDescription = stringResource(R.string.nav_badge_problems)
+    val unreadDescription = stringResource(R.string.nav_badge_unread)
+    val items = TopDestinations.map { destination ->
+        val badge: NavBadge? = when {
+            destination.route == Routes.LIST && pendingCount > 0 -> NavBadge.Count(pendingCount)
+            destination.route == Routes.SETTINGS && needsReviewCount > 0 -> NavBadge.Alert
+            destination.route == Routes.CHAT && chatUnread -> NavBadge.Dot
+            else -> null
         }
+        ArgusNavItem(
+            route = destination.route,
+            label = stringResource(destination.labelRes),
+            icon = destination.icon,
+            badge = badge,
+            badgeDescription = when (badge) {
+                is NavBadge.Count -> pendingDescription
+                NavBadge.Alert -> problemsDescription
+                NavBadge.Dot -> unreadDescription
+                null -> null
+            },
+            testTag = "nav_${destination.route}",
+        )
     }
+    ArgusNavigationBar(items = items, selectedRoute = currentRoute, onSelect = onSelect)
 }
 
 private const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"

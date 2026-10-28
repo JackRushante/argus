@@ -1,5 +1,6 @@
 package dev.argus.ui.screens
 
+import android.content.res.Configuration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -1053,37 +1054,49 @@ private object NoopDetailCallbacks : AutomationDetailCallbacks {
     override fun onOpenSystem() {}
 }
 
-@Preview(name = "Detail · PENDING pulita (canArm)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 900)
+@Preview(name = "Detail · PENDING pulita (canArm) · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 900)
+
+@Preview(name = "Detail · PENDING pulita (canArm) · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 900)
 @Composable
 private fun DetailPendingCleanPreview() {
     ArgusTheme { AutomationDetailScreen(previewReplyDetail, NoopDetailCallbacks) }
 }
 
-@Preview(name = "Detail · PENDING ERROR (arm bloccato)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 900)
+@Preview(name = "Detail · PENDING ERROR (arm bloccato) · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 900)
+
+@Preview(name = "Detail · PENDING ERROR (arm bloccato) · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 900)
 @Composable
 private fun DetailPendingBlockedPreview() {
     ArgusTheme { AutomationDetailScreen(previewForbiddenShellDetail, NoopDetailCallbacks) }
 }
 
-@Preview(name = "Detail · ARMED", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 900)
+@Preview(name = "Detail · ARMED · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 900)
+
+@Preview(name = "Detail · ARMED · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 900)
 @Composable
 private fun DetailArmedPreview() {
     ArgusTheme { AutomationDetailScreen(previewArmedDetail, NoopDetailCallbacks) }
 }
 
-@Preview(name = "Detail · NEEDS_REVIEW", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 900)
+@Preview(name = "Detail · NEEDS_REVIEW · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 900)
+
+@Preview(name = "Detail · NEEDS_REVIEW · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 900)
 @Composable
 private fun DetailNeedsReviewPreview() {
     ArgusTheme { AutomationDetailScreen(previewNeedsReviewDetail, NoopDetailCallbacks) }
 }
 
-@Preview(name = "Detail · ARMED a orario (sezione chiusa)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 900)
+@Preview(name = "Detail · ARMED a orario (sezione chiusa) · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 900)
+
+@Preview(name = "Detail · ARMED a orario (sezione chiusa) · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 900)
 @Composable
 private fun DetailDiagnosisClosedPreview() {
     ArgusTheme { AutomationDetailScreen(Fixtures.detailTimeShizukuOff, NoopDetailCallbacks) }
 }
 
-@Preview(name = "Perché non è scattata? · orario, Shizuku spento", showBackground = true, backgroundColor = 0xFF0E1216)
+@Preview(name = "Perché non è scattata? · orario, Shizuku spento · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+
+@Preview(name = "Perché non è scattata? · orario, Shizuku spento · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO)
 @Composable
 private fun DiagnosisShizukuOffPreview() {
     ArgusTheme {
@@ -1100,7 +1113,9 @@ private fun DiagnosisShizukuOffPreview() {
     }
 }
 
-@Preview(name = "Perché non è scattata? · geofence, posizione sconosciuta", showBackground = true, backgroundColor = 0xFF0E1216)
+@Preview(name = "Perché non è scattata? · geofence, posizione sconosciuta · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+
+@Preview(name = "Perché non è scattata? · geofence, posizione sconosciuta · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO)
 @Composable
 private fun DiagnosisGeofenceUnknownPreview() {
     ArgusTheme {
@@ -1122,7 +1137,7 @@ private fun DiagnosisGeofenceUnknownPreview() {
 @Preview(
     name = "Detail · approvazione · 320 dp, carattere x2",
     showBackground = true,
-    backgroundColor = 0xFF0E1216,
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
     widthDp = 320,
     heightDp = 900,
     fontScale = 2f,
@@ -1135,7 +1150,7 @@ private fun DetailPendingLargeFontPreview() {
 @Preview(
     name = "Detail · regola armata · 320 dp, carattere x2",
     showBackground = true,
-    backgroundColor = 0xFF0E1216,
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
     widthDp = 320,
     heightDp = 900,
     fontScale = 2f,
@@ -1145,7 +1160,9 @@ private fun DetailArmedLargeFontPreview() {
     ArgusTheme { AutomationDetailScreen(previewArmedDetail.copy(canRunNow = true), NoopDetailCallbacks) }
 }
 
-@Preview(name = "Detail · ARMED con statistiche", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 1000)
+@Preview(name = "Detail · ARMED con statistiche · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, heightDp = 1000)
+
+@Preview(name = "Detail · ARMED con statistiche · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO, heightDp = 1000)
 @Composable
 private fun DetailArmedStatsPreview() {
     ArgusTheme {
@@ -1161,7 +1178,9 @@ private fun DetailArmedStatsPreview() {
     }
 }
 
-@Preview(name = "Statistiche · nessuno scatto", showBackground = true, backgroundColor = 0xFF0E1216)
+@Preview(name = "Statistiche · nessuno scatto · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+
+@Preview(name = "Statistiche · nessuno scatto · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO)
 @Composable
 private fun RuleStatsEmptyPreview() {
     ArgusTheme {
@@ -1173,7 +1192,9 @@ private fun RuleStatsEmptyPreview() {
     }
 }
 
-@Preview(name = "Statistiche · Log conservato 7 giorni", showBackground = true, backgroundColor = 0xFF0E1216)
+@Preview(name = "Statistiche · Log conservato 7 giorni · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+
+@Preview(name = "Statistiche · Log conservato 7 giorni · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO)
 @Composable
 private fun RuleStatsShortRetentionPreview() {
     ArgusTheme {
