@@ -202,6 +202,10 @@ program tree and fingerprint do not.
 | `set_brightness` / `set_rotation` | Screen brightness `level` 0–100 (switches to manual) or `auto`; auto-rotate on/off | Base ("Modify system settings" access) |
 | `http_request` | `GET\|POST\|PUT\|DELETE` to a fixed https URL with fixed headers. External data enters only the body, escaped (inside JSON strings, or form-encoded); redirects only to the same host; 15 s timeout. Approval shows method and URL in full and masks secret headers; the Log keeps only the status code | Base |
 | `set_dark_mode` | Light/dark/automatic system theme; accepts the lowercase compiler wire and legacy persisted uppercase values | Shizuku |
+| `app_control` | `FORCE_STOP` (`am force-stop`), `FREEZE` (`pm disable-user`, shown with a warning) or `UNFREEZE` (`pm enable`) on a literal package. Never Argus, the launcher or an essential system app (system UI, phone, Settings, Google services) | Shizuku, root or Sui |
+| `app_permission` | `pm grant` / `pm revoke` of one runtime permission from a closed list (location, camera, microphone, contacts, SMS, phone, calendar, files and media, notifications, body sensors, nearby devices). Literal package and permission; never Argus; a revoke is shown with a warning | Shizuku, root or Sui |
+| `set_airplane` / `set_location` / `set_battery_saver` / `set_nfc` | Airplane mode, location services, battery saver and NFC on/off (`cmd connectivity airplane-mode`, `cmd location set-location-enabled`, `cmd power set-mode`, `svc nfc`). `set_nfc` exists only on phones with NFC | Shizuku, root or Sui |
+| `lock_screen` / `screenshot` | Turns the screen off and locks the phone (`input keyevent KEYCODE_SLEEP`; the lock follows Android's lock settings); saves a screenshot in `Pictures/Argus` through MediaStore, named by date and time | Shizuku, root or Sui |
 | `whatsapp_reply` | WhatsApp reply via the notification's RemoteInput | Base (notification listener) |
 | `run_shell` | Shell command template, shown in full at approval; external data enters only as one quoted argument | Shizuku |
 | `write_setting` | Parametric `settings put` on `system\|secure\|global` (any validated key/value template) | Shizuku |
@@ -310,7 +314,7 @@ Argus degrades explicitly: the onboarding shows an honest list of what depends o
 |---|---|
 | **Base (no Shizuku)** | volume, ringer, DND, flashlight, vibration, notifications, clipboard/OTP, real alarms and timers, WhatsApp replies, generative actions, speech, media keys, HTTP requests, brightness and rotation (with "Modify system settings" access), all triggers, state conditions (battery, charging, screen, ringer, DND, Wi-Fi, airplane mode; Bluetooth with the Bluetooth permission on Android 12+) |
 | **Degraded without Shizuku** | `launch_app`, `open_url`, `open_settings_screen`, alarm/timer **from a rule in the background** (Android restricts activity starts from the background: with Shizuku they go through `am start`; without it they start while the app is in the foreground, and an app, link or Settings screen otherwise becomes a "Tap to open" notification) |
-| **Shizuku, root (su) or Sui** | Wi-Fi/Bluetooth/mobile-data toggles, dark mode, `run_shell`, `write_setting`, privileged state readers (`setting`, `system_property`, `sysfs`, `dumpsys_field`, foreground app) |
+| **Shizuku, root (su) or Sui** | Wi-Fi/Bluetooth/mobile-data toggles, dark mode, app control and permissions, airplane mode, location, battery saver, NFC, lock screen, screenshot, `run_shell`, `write_setting`, privileged state readers (`setting`, `system_property`, `sysfs`, `dumpsys_field`, foreground app) |
 
 With Shizuku running once, System → "Grant permanent permissions" lets Argus keep `write_setting` on
 SECURE/GLOBAL, the foreground-app condition, brightness and rotation, and Do Not Disturb access after a

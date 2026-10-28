@@ -756,6 +756,20 @@ Action, discriminated by "type":
    // body max 16 KB, none on GET. Variables, also external data, go ONLY in body; with contentType
    // "application/json" put them inside a quoted JSON string, e.g. "body":"{\"text\":\"${'$'}{sms}\"}".
    // A key or token the user dictates goes in a header exactly as dictated
+- {"type":"app_control", "pkg":string, "op":"FORCE_STOP"|"FREEZE"|"UNFREEZE"}  // stops, disables (FREEZE) or
+   // re-enables an app. pkg is a literal package taken from installed_app_candidates, never ${'$'}{var}; never
+   // Argus, the launcher or a system app
+- {"type":"set_airplane", "on":boolean}  // airplane mode
+- {"type":"set_location", "on":boolean}  // location services on/off
+- {"type":"set_nfc", "on":boolean}  // NFC on/off (phones with NFC only)
+- {"type":"set_battery_saver", "on":boolean}  // battery saver on/off
+- {"type":"lock_screen"}  // turns the screen off and locks the phone
+- {"type":"screenshot"}  // saves a screenshot in Pictures/Argus
+- {"type":"app_permission", "pkg":string, "permission":string, "grant":boolean}  // grants or revokes ONE
+   // runtime permission of an app, e.g. "android.permission.RECORD_AUDIO", CAMERA, ACCESS_FINE_LOCATION,
+   // READ_CONTACTS, READ_CALENDAR, POST_NOTIFICATIONS. pkg and permission are literal, never ${'$'}{var}
+   // These eight need Shizuku or root (in available_tools only when available). ALWAYS prefer them to
+   // run_shell for these jobs
 
 Schema v2 (P4) — OPTIONAL Tasker-class program. A draft stays v1 (flat: trigger + conditions +
 actions, described above and UNCHANGED) unless it uses one of the P4 constructs below. Emit P4 only

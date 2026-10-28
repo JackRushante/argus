@@ -90,6 +90,15 @@ internal object BenchVocab {
         ActionTypeIds.SET_BRIGHTNESS,
         ActionTypeIds.SET_ROTATION,
         ActionTypeIds.HTTP_REQUEST,
+        // 0.5.1: azioni privilegiate tipizzate.
+        ActionTypeIds.APP_CONTROL,
+        ActionTypeIds.SET_AIRPLANE,
+        ActionTypeIds.SET_LOCATION,
+        ActionTypeIds.SET_NFC,
+        ActionTypeIds.SET_BATTERY_SAVER,
+        ActionTypeIds.LOCK_SCREEN,
+        ActionTypeIds.SCREENSHOT,
+        ActionTypeIds.APP_PERMISSION,
     )
 
     val CONDITION_TYPES: Set<String> = setOf(

@@ -159,6 +159,8 @@ internal class BenchWorld private constructor(
             // 0.4.1: il telefono di prova ha due SIM, quindi il filtro SIM si pubblica.
             multiSim = true,
             writeSettingsGranted = true,
+            // 0.5.1: il telefono di prova ha l'NFC, quindi set_nfc si pubblica con Shizuku.
+            nfcPresent = true,
         )
 
         private val NO_SHIZUKU_STATE = FULL_STATE.copy(
