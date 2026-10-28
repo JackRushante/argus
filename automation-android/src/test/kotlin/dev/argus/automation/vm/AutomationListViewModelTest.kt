@@ -438,7 +438,13 @@ class AutomationListViewModelTest {
         seedAutomation("s4", Trigger.Time(cron = "0 8 * * *", tz = "UTC"), AutomationStatus.NEEDS_REVIEW, enabled = false)
         val viewModel = viewModel()
         val latest = collectState(viewModel)
-        awaitUntil("quattro righe") { latest().rows.size == 4 }
+        awaitUntil("almeno una riga") { latest().rows.isNotEmpty() }
+        settle()
+        assertEquals(
+            setOf("s1", "s2", "s3", "draft-s3", "s4"),
+            latest().rows.map { it.id }.toSet(),
+            latest().rows.joinToString { "${it.id}:${it.status}" },
+        )
 
         viewModel.onFilter(StatusFilter.NEEDS_REVIEW)
         awaitUntil("filtro applicato") { latest().filter == StatusFilter.NEEDS_REVIEW && latest().rows.size == 1 }
