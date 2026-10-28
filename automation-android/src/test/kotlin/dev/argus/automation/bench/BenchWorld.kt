@@ -165,7 +165,6 @@ internal class BenchWorld private constructor(
             usageStatsGranted = true,
             // 0.5.1: il telefono di prova ha l'NFC, quindi set_nfc si pubblica con Shizuku.
             nfcPresent = true,
-        )
             // 0.5.1: servizio di Accessibilita' acceso, quindi ui_steps si pubblica.
             accessibilityEnabled = true,
         )

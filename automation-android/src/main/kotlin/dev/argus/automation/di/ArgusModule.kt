@@ -874,7 +874,6 @@ object ArgusModule {
             directSettings = directSettings,
             // 0.5.1: azioni privilegiate tipizzate; il runner ripete i controlli sul bersaglio.
             privilegedActions = privilegedActions,
-        )
             // 0.5.1: macro sullo schermo con il servizio di Accessibilità.
             uiSteps = uiSteps,
         )

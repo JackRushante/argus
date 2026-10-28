@@ -34,7 +34,6 @@ internal data class AndroidUiHealth(
     val writeSettingsGranted: Boolean = true,
     /** 0.5.1: «Accesso ai dati di utilizzo» concesso (regole «app aperta/chiusa»). */
     val usageAccessGranted: Boolean = true,
-)
     /** 0.5.1: il servizio di Accessibilità di Argus è acceso (macro sullo schermo). */
     val accessibilityGranted: Boolean = true,
 )
@@ -72,7 +71,6 @@ internal fun readAndroidUiHealth(context: Context): AndroidUiHealth {
         writeSettingsGranted = runCatching { android.provider.Settings.System.canWrite(app) }.getOrDefault(false),
         // Stessa lettura reale che usa il probe: se non si riesce a leggere vale «non concesso».
         usageAccessGranted = PermanentGrantStatus.usageStats(app),
-    )
         accessibilityGranted = dev.argus.device.PermanentGrantStatus.accessibility(app),
     )
 }
