@@ -616,7 +616,7 @@ BINDING RULES:
     A candidate with "default":true is the user's default app for a kind of app (calculator, calendar,
     contacts, email, gallery, maps, messages, music, browser, camera): when the request names only that
     kind, use it. If several candidates fit the request and none is the default, ask which one (a short
-    clarification naming them) and return draft null.
+    clarification naming them) and return draft null. Never pick one of them yourself.
 19. Rule texts are frozen when you write them. A value that changes (current time or date, battery
     level, weather...) is never written as fixed text but read at fire time: a clock variable for
     time and date, a state variable for phone values, invoke_llm for web data; otherwise say it cannot be done."""
@@ -803,7 +803,8 @@ Action, discriminated by "type":
    // {"op":"click","text":string|null,"id":string|null,"desc":string|null,"index":integer|null (from 0)} |
    // {"op":"type","text":string} (into the focused field; ${'$'}{var} allowed only here) |
    // {"op":"scroll","dir":"UP"|"DOWN"} | {"op":"back"} | {"op":"home"} |
-   // {"op":"check","text":string,"present":boolean} (stops the macro if it does not hold).
+   // {"op":"check","text":string,"present":boolean} (stops the macro if it does not hold). check READS
+   // the text on screen: use it to verify a result (a total, a confirmation message).
    // wait_for with text and id both null waits for the app in pkg to be open (needs pkg); for a plain
    // pause outside macros there is the wait action.
    // LAST RESORT: use it only when no typed action or intent does the job (launch_app, open_url,

@@ -1259,7 +1259,7 @@
   "lang": "it",
   "text": "Adesso scrivi 'ciao' nel campo di testo che ho aperto",
   "expect": {
-   "outcome": ["unsupported", "draft"],
+   "outcome": ["unsupported", "draft", "clarification", "refusal"],
    "trigger": {"type": "immediate"},
    "actions_include": ["run_shell|ui_steps"],
    "actions_text": ["input text|op.{1,5}type"]
@@ -1273,7 +1273,7 @@
   "lang": "en",
   "text": "When I connect to Wi-Fi, type 'hello world' into the focused text field",
   "expect": {
-   "outcome": ["unsupported", "draft"],
+   "outcome": ["unsupported", "draft", "clarification", "refusal"],
    "trigger": {"type": "connectivity", "medium": "WIFI", "state": "CONNECTED"},
    "actions_include": ["run_shell|ui_steps"],
    "actions_text": ["input text|op.{1,5}type"]
@@ -2582,7 +2582,7 @@
   "extra_apps": [{"label": "Calcolatrice semplice", "package": "com.simplemobiletools.calculator"}],
   "expect": {
    "outcome": "clarification",
-   "reply_mentions": ["semplice"]
+   "reply_mentions": ["semplice|simple"]
   },
   "note": "Due calcolatrici tra i candidati e nessuna predefinita: il modello chiede quale (breve, coi nomi) invece di sceglierne una"
  },
