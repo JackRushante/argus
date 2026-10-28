@@ -2,6 +2,39 @@
 
 Release and engineering notes, newest first.
 
+## v0.7.0 (2026-10-28) — Redesign A, light and dark
+
+### Changed
+
+- New look for the whole app (redesign A): a light and a dark theme that follow the system, Roboto and
+  JetBrains Mono bundled in the app (OFL), grouped cards, clearer status chips and a new navigation bar.
+- Automations: a summary at the top (armed, waiting for approval, to review, next firing, today's errors),
+  computed on the whole list; tapping a counter filters, "Today" opens the Log.
+- Chat: a clearer waiting card with typical times and "Cancel"; the draft card has only "Review and
+  approve", shows every error in full and counts the warnings.
+- Approval and detail: risks and privacy notes above the rule, "Arm" the only filled button with the reason
+  written above it when it is disabled, the model's description after the rule, shell commands in full,
+  the P4 tree fully expanded. The health banner now shows in the detail too, when the rule uses Shizuku.
+- Log: a filter by outcome (all, problems, generative, lifecycle); missing values read "n/a".
+- System: jump-to-section chips and health tiles; the provider settings are one bottom sheet, and the API
+  key never shows. Onboarding: a six-step progress bar.
+
+### Added
+
+- Approval shows the app's name next to every package, with "Change app" to pick another installed app; on
+  an armed rule this creates an edit to approve, it never changes the armed rule.
+- A warning in approval when a rule names an app that is not installed.
+- When a request names a kind of app (calculator, calendar, contacts, email, gallery, maps, messages, music,
+  browser, camera), the AI gets your default app for it; when several apps fit and none is the default, it
+  asks which one.
+- The Log shows the file name of a screenshot.
+
+### Fixed
+
+- Screen macros: "wait" with nothing to wait for, in a macro that opens an app, now waits for that app to
+  open (it was refused); a refused step says which step and why; with the Accessibility service off the AI
+  says how to turn it on instead of "not available in this version"; "check" is known to read the screen.
+
 ## v0.6.0 (2026-10-28) — End-to-end suite on an emulator
 
 ### Added
