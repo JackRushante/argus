@@ -328,8 +328,8 @@ starts at boot) or run privileged commands through `su` (System → "Use root (s
 
 Note: on non-rooted devices Shizuku must be started via ADB and **does not survive a reboot**; Argus detects this and degrades fail-closed (the privileged action is never executed late), guiding you through recovery.
 
-`tap` and `input_text` are present in the domain/tooling as foundations for future computer-use,
-but the production executor rejects them and the capability manifest marks them unavailable.
+`tap` and `input_text` (coordinates and blind typing) stay rejected by the executor and marked unavailable in the
+capability manifest: screen automation goes only through `ui_steps`, with closed steps reviewed at approval.
 
 ---
 
@@ -430,8 +430,6 @@ Short roadmap:
 - **0.5.2** — a warning in approval when a rule names an app that is not installed, and the small items left
   from 0.5.1.
 - **0.7.0, redesign** — a new look for the app.
-- **Later** — state-aware P4 generation, interactive screen control, and testing on more phone brands
-  (background starts, Shizuku recovery, notification metadata).
 
 **Disclaimer**: this is a personal project, developed and tested mainly on a single device (OnePlus 15, Android 16) and on an Android 16 emulator. Expect rough edges on other OEMs — that is exactly the feedback we are looking for. No warranty: rules execute real actions on your phone, read what you approve.
 
