@@ -13,9 +13,12 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 
 // =============================================================================
 // Riepilogo in testa alla lista (0.7.0, redesign A, nota n1). Funzioni pure: i dati si calcolano
@@ -76,6 +79,11 @@ internal fun startOfDayMillis(now: ZonedDateTime): Long =
 /**
  * Inizio del giorno corrente, rinnovato a ogni mezzanotte: la lista aperta a cavallo del cambio di giorno
  * smette di contare gli errori di ieri senza aspettare un'altra emissione.
+ *
+ * Gira su `Dispatchers.Default`, non sul dispatcher del chiamante: l'attesa fino a mezzanotte e' tempo reale.
+ * Su un dispatcher di test con tempo virtuale `delay` salterebbe subito alla mezzanotte, ricalcolerebbe lo
+ * stesso giorno e ripartirebbe in un ciclo senza fine che affama il resto. `distinctUntilChanged` evita di
+ * riaprire la lettura del log quando il giorno non e' cambiato.
  */
 internal fun startOfTodayFlow(): Flow<Long> = flow {
     while (true) {
@@ -84,4 +92,4 @@ internal fun startOfTodayFlow(): Flow<Long> = flow {
         val nextMidnight = now.toLocalDate().plusDays(1).atStartOfDay(now.zone)
         delay(Duration.between(now, nextMidnight).toMillis() + 1_000)
     }
-}
+}.distinctUntilChanged().flowOn(Dispatchers.Default)
