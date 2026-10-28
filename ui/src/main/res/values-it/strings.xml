@@ -404,4 +404,10 @@
     <string name="app51_settings_usage_title">Accesso ai dati di utilizzo</string>
     <string name="app51_settings_usage_ok">concesso: le regole possono reagire all\'apertura e alla chiusura di un\'app</string>
     <string name="app51_settings_usage_warn">non concesso: le regole che reagiscono all\'apertura o alla chiusura di un\'app non possono partire. Con Shizuku o root basta \"Concedi i permessi permanenti\"</string>
+    <string name="ai51_local_presets_label">Server locale</string>
+    <string name="ai51_local_note">Argus ha bisogno di un contesto di circa 16.000 token. Un modello locale può impiegare fino a 3 minuti per rispondere.</string>
+    <string name="ai51_local_hint_ollama">Ollama: imposta OLLAMA_CONTEXT_LENGTH ad almeno 16384.</string>
+    <string name="ai51_local_hint_lmstudio">LM Studio: carica il modello con una lunghezza di contesto di almeno 16384.</string>
+    <string name="ai51_local_hint_llamacpp">llama.cpp: avvia il server con -c 16384 o più.</string>
+    <string name="ai51_local_loopback_note">127.0.0.1 è questo telefono: il server deve girare qui. Per un altro computer usa un indirizzo https://.</string>
 </resources>

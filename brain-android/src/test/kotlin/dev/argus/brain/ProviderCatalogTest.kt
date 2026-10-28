@@ -101,8 +101,9 @@ class ProviderCatalogTest {
     @Test fun `web search mechanism follows the verified per-provider table`() {
         // Anthropic: server tool web_search_20250305 nell'array tools (loop interno lato Anthropic).
         assertEquals(WebSearchMechanism.ANTHROPIC_TOOL, ProviderCatalog.spec(ProviderId.ANTHROPIC).quirks.webSearch)
-        // OpenRouter: plugin `{"id":"web"}` nel body (il suffisso `:online` rompe i preset `@preset/...`).
-        assertEquals(WebSearchMechanism.OPENROUTER_WEB_PLUGIN, ProviderCatalog.spec(ProviderId.OPENROUTER).quirks.webSearch)
+        // OpenRouter: server tool `openrouter:web_search` nei `tools` (0.5.1: il plugin `web` e il suffisso
+        // `:online`, che rompeva i preset `@preset/...`, sono deprecati).
+        assertEquals(WebSearchMechanism.OPENROUTER_SERVER_TOOL, ProviderCatalog.spec(ProviderId.OPENROUTER).quirks.webSearch)
         // Gemini: GEMINI_NATIVE — grounding `google_search` via API nativa generateContent (validato
         // live 2026-07-17). Non passa dallo shim OpenAI-compat /chat/completions.
         assertEquals(WebSearchMechanism.GEMINI_NATIVE, ProviderCatalog.spec(ProviderId.GEMINI).quirks.webSearch)

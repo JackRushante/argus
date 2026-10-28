@@ -405,4 +405,10 @@
     <string name="app51_settings_usage_title">Usage data access</string>
     <string name="app51_settings_usage_ok">granted: rules can react when an app is opened or closed</string>
     <string name="app51_settings_usage_warn">not granted: rules that react to an app opening or closing cannot run. With Shizuku or root, \"Grant permanent permissions\" is enough</string>
+    <string name="ai51_local_presets_label">Local server</string>
+    <string name="ai51_local_note">Argus needs a context of about 16,000 tokens. A local model can take up to 3 minutes to answer.</string>
+    <string name="ai51_local_hint_ollama">Ollama: set OLLAMA_CONTEXT_LENGTH to at least 16384.</string>
+    <string name="ai51_local_hint_lmstudio">LM Studio: load the model with a context length of at least 16384.</string>
+    <string name="ai51_local_hint_llamacpp">llama.cpp: start the server with -c 16384 or more.</string>
+    <string name="ai51_local_loopback_note">127.0.0.1 is this phone: the server must run here. For another computer, use an https:// address.</string>
 </resources>

@@ -21,7 +21,9 @@ import kotlin.test.fail
  * Variabili: `ARGUS_BENCH_KEY` (chiave OpenRouter), `ARGUS_BENCH_MODEL` (default `@preset/argus`),
  * `ARGUS_BENCH_BASE_URL` (default `https://openrouter.ai/api/v1`), `ARGUS_BENCH_REPEAT` (default 1),
  * `ARGUS_BENCH_FILTER` (uno o più prefissi degli id dei casi, separati da virgola), `ARGUS_BENCH_PARALLEL` (default 4),
- * `ARGUS_BENCH_REASONING` (`none`, `low`, `medium` o `high`; assente = campo omesso).
+ * `ARGUS_BENCH_REASONING` (`none`, `low`, `medium` o `high`; assente = campo omesso),
+ * `ARGUS_BENCH_STRUCTURED` (`on`, `off` o `auto`; default `auto` = come l'app: output strutturato nativo del
+ * compile se il catalogo lo prevede. `off` misura il solo protocollo `@@META@@`, `on` lo forza).
  *
  * Il rapporto esce in `build/reports/ai-bench/` (`report.json`, `summary.md`). Il test NON fallisce
  * per una percentuale bassa: misura e basta. Fallisce solo per errori del banco stesso (caso
@@ -53,7 +55,7 @@ class AiBenchTest {
                 val config = ProviderConfig(ProviderId.OPENROUTER, options.baseUrl, options.model, options.reasoning)
                 val transport = OpenAICompatTransport(
                     providerId = ProviderId.OPENROUTER,
-                    spec = ProviderCatalog.spec(ProviderId.OPENROUTER),
+                    spec = options.applyTo(ProviderCatalog.spec(ProviderId.OPENROUTER)),
                     config = config,
                     apiKey = { key },
                     client = CliBridgeTransport.defaultClient(),
@@ -71,6 +73,7 @@ class AiBenchTest {
                 compileCases = selectedCompile.size,
                 actCases = selectedAct.size,
                 reasoning = options.reasoning.wireValue ?: "default",
+                structured = options.structured.wire,
             )
             val reportDir = File(REPORT_DIR)
             BenchReport.write(reportDir, meta, results)

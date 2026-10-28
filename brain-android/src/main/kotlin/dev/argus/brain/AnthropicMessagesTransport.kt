@@ -90,6 +90,13 @@ class AnthropicMessagesTransport internal constructor(
     /** Riusa il parser sentinel dell'app (@@META@@ {json}): fail-soft, mai crash, stesso formato di Hermes. */
     private val compileParser = CliBridgeParser()
 
+    /**
+     * true dopo che un compile con `output_config` è stato rifiutato e quello senza ha risposto: questo
+     * modello non lo supporta e non si riprova finché il transport vive (cioè finché la configurazione non cambia).
+     */
+    @Volatile
+    private var structuredRejected = false
+
     init {
         require(base.username.isEmpty() && base.password.isEmpty()) { "baseUrl non deve contenere credenziali" }
         require(base.query == null && base.fragment == null) { "baseUrl non deve contenere query o fragment" }
@@ -98,6 +105,14 @@ class AnthropicMessagesTransport internal constructor(
         }
     }
 
+    /**
+     * Compile: prompt Hermes + riga sentinel `@@META@@`, oppure (0.5.1, `structuredOutput` del catalogo)
+     * output strutturato con `output_config.format` `json_schema`: la risposta è UN oggetto
+     * `{reply, draft, error_code}` in cui `draft` è l'oggetto scritto come stringa (lo schema di Anthropic
+     * è chiuso e non ricorsivo). Il ragionamento resta libero: la grammatica vale solo per l'output finale.
+     * Un 4xx (modello che non lo supporta) fa ripiegare sul protocollo base, senza token spesi; un modello
+     * che risponde comunque con la riga sentinel si legge lo stesso.
+     */
     override suspend fun compile(
         message: String,
         manifest: CapabilityManifest,
@@ -106,35 +121,63 @@ class AnthropicMessagesTransport internal constructor(
         val cleanMessage = AgentMessageSupport.requireMessage(message)
         val token = requireKey()
         val model = resolveModel()
+        val structured = spec.quirks.structuredOutput == StructuredOutputMode.OUTPUT_CONFIG && !structuredRejected
+        return compileAt(structured, false, cleanMessage, token, model, manifest, state)
+    }
+
+    private suspend fun compileAt(
+        structured: Boolean,
+        fellBack: Boolean,
+        message: String,
+        token: String,
+        model: String,
+        manifest: CapabilityManifest,
+        state: DeviceState,
+    ): CompileResult {
         val request = MessagesRequest(
             model = model,
             maxTokens = COMPILE_MAX_TOKENS,
-            system = AgentMessageSupport.compileSystemText(),
-            messages = listOf(InputMessage("user", AgentMessageSupport.compileUserText(cleanMessage, manifest, state))),
+            system = AgentMessageSupport.compileSystemText(
+                structuredRule = AgentMessageSupport.STRUCTURED_JSON_STRING_DRAFT_RULE.takeIf { structured },
+            ),
+            messages = listOf(InputMessage("user", AgentMessageSupport.compileUserText(message, manifest, state))),
+            outputConfig = StructuredOutput.ANTHROPIC_OUTPUT_CONFIG.takeIf { structured },
         )
-        val response = parseResponse(
-            execute(buildRequest(token, json.encodeToString(request)), ErrorDiagnostics(listOf(token), clientErrorsOnly = true)),
-        )
+        val response = try {
+            parseResponse(
+                execute(buildRequest(token, json.encodeToString(request)), ErrorDiagnostics(listOf(token), clientErrorsOnly = true)),
+            )
+        } catch (error: TransportException) {
+            if (!structured || !StructuredOutput.isRejection(error)) throw error
+            return compileAt(false, true, message, token, model, manifest, state)
+        }
+        // Il protocollo base ha risposto dopo un rifiuto: da ora questo modello parte da lì.
+        if (fellBack) structuredRejected = true
         // B15: l'usage viaggia su TUTTI i rami (anche errori di formato e troncamenti): il turno è costato.
         val usage = response.toTurnUsage(fallbackModel = model)
         val fullText = response.textContent()
         val text = fullText.trim()
         // F5: la risposta grezza resta in memoria per le segnalazioni (mai nei log né nel DB).
         val rawText = CompileResult.capRaw(fullText)
-        val parsed = if (text.isEmpty()) {
+        val envelope = if (structured && text.isNotEmpty()) compileParser.parseStructuredCompile(text) else null
+        val parsed = envelope ?: if (text.isEmpty()) {
             null
         } else {
             val raw = compileParser.parseCompile(text)
             if (raw.draft == null && raw.metaError == null) raw.copy(metaError = "draft_missing") else raw
         }
-        if (parsed?.draft != null) return parsed.copy(usage = usage, raw = rawText)
+        val viaEnvelope = envelope != null
+        if (parsed?.draft != null) return parsed.copy(usage = usage, raw = rawText, structured = viaEnvelope)
         // B6: `max_tokens` = tetto di output esaurito. Anthropic non taglia il contesto in silenzio
         // (rifiuta le richieste troppo lunghe): niente controllo `context_truncated`.
         if (response.stopReason == "max_tokens") {
-            return CompileResult(parsed?.reply.orEmpty(), null, CompileMetaError.OUTPUT_TRUNCATED, usage, raw = rawText)
+            return CompileResult(
+                parsed?.reply.orEmpty(), null, CompileMetaError.OUTPUT_TRUNCATED, usage,
+                raw = rawText, structured = viaEnvelope,
+            )
         }
-        if (parsed == null) return CompileResult("", null, "empty_response", usage)
-        return parsed.copy(usage = usage, raw = rawText)
+        if (parsed == null) return CompileResult("", null, "empty_response", usage, structured = false)
+        return parsed.copy(usage = usage, raw = rawText, structured = viaEnvelope)
     }
 
     override suspend fun act(
@@ -518,6 +561,8 @@ class AnthropicMessagesTransport internal constructor(
         val messages: List<InputMessage>,
         val tools: List<JsonObject>? = null,
         @SerialName("tool_choice") val toolChoice: JsonElement? = null,
+        /** Solo il compile con output strutturato (0.5.1): `{"format":{"type":"json_schema","schema":{...}}}`. */
+        @SerialName("output_config") val outputConfig: JsonObject? = null,
     )
 
     @Serializable

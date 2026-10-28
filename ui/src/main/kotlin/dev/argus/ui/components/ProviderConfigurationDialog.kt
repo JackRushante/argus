@@ -25,8 +25,10 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import dev.argus.ui.R
 import dev.argus.ui.model.AuthState
+import dev.argus.ui.model.LocalPresetUi
 import dev.argus.ui.model.TransportUi
 import dev.argus.ui.presentation.ConnectionFormValidation
+import dev.argus.ui.presentation.LocalPresetHints
 import dev.argus.ui.presentation.ModelFieldHints
 
 /**
@@ -102,6 +104,13 @@ fun ProviderConfigurationDialog(
                     label = { Text(stringResource(R.string.provider_endpoint_label)) },
                     supportingText = urlProblem?.let { problem -> { Text(urlProblemText(problem)) } },
                 )
+                if (provider.localPresets.isNotEmpty()) {
+                    LocalServerPresetsSection(
+                        presets = provider.localPresets,
+                        currentBaseUrl = cleanBaseUrl,
+                        onPick = { baseUrl = it.baseUrl },
+                    )
+                }
                 OutlinedTextField(
                     value = model,
                     onValueChange = { model = it },
@@ -202,4 +211,56 @@ fun ProviderConfigurationDialog(
             ) { Text(stringResource(R.string.action_save_and_test)) }
         },
     )
+}
+
+/**
+ * Preset dei server locali (0.5.1, F4): un tocco compila l'indirizzo. Con un preset scelto compaiono la nota
+ * sul contesto (circa 16.000 token), quella del server scelto e quella sul loopback. Stateless: l'indirizzo
+ * corrente arriva dal dialogo, che resta l'unico a conservarlo.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun LocalServerPresetsSection(
+    presets: List<LocalPresetUi>,
+    currentBaseUrl: String,
+    onPick: (LocalPresetUi) -> Unit,
+) {
+    val active = LocalPresetHints.active(presets, currentBaseUrl)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = stringResource(R.string.ai51_local_presets_label),
+            style = MaterialTheme.typography.labelLarge,
+        )
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            presets.forEach { preset ->
+                FilterChip(
+                    selected = preset.id == active?.id,
+                    onClick = { onPick(preset) },
+                    label = { Text(preset.label) },
+                )
+            }
+        }
+        if (active != null) {
+            val notes = listOfNotNull(
+                R.string.ai51_local_note,
+                localPresetHintRes(active.id),
+                R.string.ai51_local_loopback_note,
+            )
+            notes.forEach { note ->
+                Text(
+                    text = stringResource(note),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+/** La nota specifica del server locale (come portare il contesto a 16.000 token), o null per un id sconosciuto. */
+internal fun localPresetHintRes(id: String): Int? = when (id) {
+    "ollama" -> R.string.ai51_local_hint_ollama
+    "lmstudio" -> R.string.ai51_local_hint_lmstudio
+    "llamacpp" -> R.string.ai51_local_hint_llamacpp
+    else -> null
 }
