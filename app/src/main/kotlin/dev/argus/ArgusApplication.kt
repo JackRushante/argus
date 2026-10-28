@@ -10,7 +10,9 @@ import dev.argus.automation.ArgusRuntimeController
 import dev.argus.automation.RenderLanguageSource
 import dev.argus.automation.TimeAlarmRuntime
 import dev.argus.automation.TimeAlarmRuntimeRegistry
+import dev.argus.automation.apps.AndroidAppLabelLookup
 import dev.argus.manual.ManualWidgetRefresher
+import dev.argus.ui.presentation.AppLabels
 import javax.inject.Inject
 
 @HiltAndroidApp
@@ -23,6 +25,8 @@ class ArgusApplication : Application(), DefaultLifecycleObserver {
     override fun onCreate() {
         super<Application>.onCreate()
         TimeAlarmRuntimeRegistry.install(alarmRuntime)
+        // 0.5.1: il testo di approvazione di «app aperta/chiusa» mostra il nome dell'app se il telefono lo conosce.
+        AppLabels.install(AndroidAppLabelLookup(this)::labelOf)
         ProcessLifecycleOwner.get().lifecycle.addObserver(this)
         runtimeController.start()
         // 0.4.1 (F8): il widget delle regole manuali segue le regole armate e la pausa.

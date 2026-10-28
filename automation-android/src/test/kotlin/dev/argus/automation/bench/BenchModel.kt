@@ -55,6 +55,8 @@ internal object BenchVocab {
         "screen", "battery", "audio_output", "mode_changed", "media",
         // 0.4.1: avvio manuale.
         "manual",
+        // 0.5.1: app aperta/chiusa.
+        "app_event",
     )
 
     val ACTION_TYPES: Set<String> = setOf(

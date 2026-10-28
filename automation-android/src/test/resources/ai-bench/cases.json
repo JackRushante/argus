@@ -2116,5 +2116,57 @@
    "actions_text": ["trash"],
    "vars_exclude": ["clock"]
   }
+ },
+ {
+  "id": "app.open.it.01",
+  "category": "trigger.app",
+  "lang": "it",
+  "text": "Quando apro YouTube disattiva la rotazione automatica dello schermo",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "app_event", "pkg": "com.google.android.youtube", "event": "OPENED"},
+   "actions_include": ["set_rotation"],
+   "params": {"set_rotation.auto": false}
+  },
+  "note": "Aprire un'app e' il trigger app_event OPENED con il package preso dai candidati (YouTube), non una condizione app_in_foreground"
+ },
+ {
+  "id": "app.close.en.01",
+  "category": "trigger.app",
+  "lang": "en",
+  "text": "When I close Spotify, set the media volume to 30%",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "app_event", "pkg": "com.spotify.music", "event": "CLOSED"},
+   "actions_include": ["set_volume"],
+   "params": {"set_volume.stream": "MEDIA", "set_volume.level": 30}
+  },
+  "note": "Chiudere un'app e' app_event CLOSED (l'app lascia il primo piano)"
+ },
+ {
+  "id": "app.pair.it.02",
+  "category": "trigger.app",
+  "lang": "it",
+  "text": "Quando apro YouTube togli la rotazione automatica e quando lo chiudo rimettila",
+  "expect": {
+   "outcome": ["draft", "clarification"],
+   "trigger": {"type": "app_event", "pkg": "com.google.android.youtube"},
+   "actions_include": ["set_rotation"]
+  },
+  "note": "Due direzioni = due regole (regola 17): va bene chiedere quale creare per prima, oppure compilarne una sola (apertura o chiusura) e dire di chiedere l'altra dopo l'approvazione"
+ },
+ {
+  "id": "app.open.en.02",
+  "category": "trigger.app",
+  "lang": "en",
+  "text": "Every time I open Instagram, set the ringer to vibrate",
+  "manifest": "no_shizuku",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "app_event", "pkg": "com.instagram.android", "event": "OPENED"},
+   "actions_include": ["set_ringer"],
+   "params": {"set_ringer.mode": "vibrate"}
+  },
+  "note": "app_event non richiede Shizuku: basta l'accesso ai dati di utilizzo, e il telefono di prova senza Shizuku ce l'ha"
  }
 ]

@@ -9,6 +9,7 @@ import android.os.PowerManager
 import androidx.annotation.ChecksSdkIntAtLeast
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import dev.argus.device.PermanentGrantStatus
 import dev.argus.shizuku.ShizukuGatewayStatus
 import dev.argus.ui.model.BgLocationState
 import dev.argus.ui.model.ShizukuStatus
@@ -31,6 +32,8 @@ internal data class AndroidUiHealth(
     val bluetoothConnectGranted: Boolean = false,
     /** 0.4.1: «Modifica impostazioni di sistema» concesso (`Settings.System.canWrite`). */
     val writeSettingsGranted: Boolean = true,
+    /** 0.5.1: «Accesso ai dati di utilizzo» concesso (regole «app aperta/chiusa»). */
+    val usageAccessGranted: Boolean = true,
 )
 
 internal fun readAndroidUiHealth(context: Context): AndroidUiHealth {
@@ -64,6 +67,8 @@ internal fun readAndroidUiHealth(context: Context): AndroidUiHealth {
             android.os.Build.VERSION_CODES.S || granted(Manifest.permission.BLUETOOTH_CONNECT),
         // Se la lettura fallisce vale «non concesso»: la riga in Sistema avvisa invece di mostrare un falso verde.
         writeSettingsGranted = runCatching { android.provider.Settings.System.canWrite(app) }.getOrDefault(false),
+        // Stessa lettura reale che usa il probe: se non si riesce a leggere vale «non concesso».
+        usageAccessGranted = PermanentGrantStatus.usageStats(app),
     )
 }
 

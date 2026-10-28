@@ -504,6 +504,19 @@ fun ArgusNavHost() {
                                 }.isSuccess
                                 if (!opened) openAppDetailsSettings()
                             }
+                            override fun onOpenUsageAccessFix() {
+                                // «Accesso ai dati di utilizzo» (0.5.1, regole app aperta/chiusa): si concede solo da
+                                // questa schermata di sistema (o con Shizuku/root da «Concedi i permessi permanenti»).
+                                // Prima la pagina di Argus, poi l'elenco generale; se nulla si apre, i dettagli app.
+                                val opened = listOf(
+                                    Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS, Uri.parse("package:${context.packageName}")),
+                                    Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS),
+                                ).any { intent ->
+                                    runCatching { context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                                        .isSuccess
+                                }
+                                if (!opened) openAppDetailsSettings()
+                            }
                             override fun onOpenNotificationAccessFix() = requestNotificationAccess()
                             override fun onOpenNotificationListenerFix() {
                                 openNotificationListenerSettings()

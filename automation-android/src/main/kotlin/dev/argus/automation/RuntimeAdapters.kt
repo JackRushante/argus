@@ -343,6 +343,8 @@ class AndroidArmedAutomationRegistrar(
         // 0.4.1: eventi di sistema senza Shizuku, registrati dalla sentinella condivisa.
         is Trigger.Screen, is Trigger.Battery, is Trigger.AudioOutput, is Trigger.ModeChanged,
         is Trigger.Media,
+        // 0.5.1: app aperta/chiusa, letta dalla sentinella condivisa (serve l'accesso ai dati di utilizzo).
+        is Trigger.AppEvent,
         -> registerDeviceEvent(automation)
         // 0.4.1: avvio manuale. Nessuna registrazione OS: parte solo da un gesto dell'utente. Basta che
         // la capability sia pubblicata e che la regola sia davvero armata nello store.
