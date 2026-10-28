@@ -386,7 +386,8 @@ class AiBenchCasesTest {
         val world = BenchWorld.create()
         for ((id, other) in listOf("app70.twocalc.it.01" to "Calcolatrice semplice", "app70.twocalc.en.01" to "Simple Calculator")) {
             val case = cases.single { it.id == id }
-            assertEquals(setOf(Outcome.CLARIFICATION), case.outcomes, id)
+            // Chiedere è la risposta migliore; una bozza col nome esatto è accettata (approvazione: «Cambia app»).
+            assertEquals(setOf(Outcome.CLARIFICATION, Outcome.DRAFT), case.outcomes, id)
             assertEquals(listOf(other), case.extraApps.map { it.label }, id)
             val prompt = world.compilePrompt(case.text, case.lang, case.extraApps)
             assertTrue("\"package\":\"com.google.android.calculator\"" in prompt, prompt)
