@@ -647,6 +647,8 @@ fun ArgusNavHost() {
                                     showMessage(event.message)
                                 }
                                 is DetailEvent.Message -> showMessage(event.text)
+                                // 0.7.0: «Cambia app» su una regola armata apre l'approvazione della bozza di modifica.
+                                is DetailEvent.OpenDetail -> navController.navigate(Routes.detail(event.id))
                                 is DetailEvent.OpenChat -> {
                                     chatViewModel.prefillEdit(
                                         text = event.prompt,
@@ -684,6 +686,11 @@ fun ArgusNavHost() {
                                     override fun onDiagnose() = viewModel.onDiagnose()
                                     // Come la barra in basso: cambia scheda, conservando lo stato salvato.
                                     override fun onOpenSystem() = switchTop(Routes.SETTINGS)
+                                    // 0.7.0: banner salute del Dettaglio, tappabile verso le impostazioni come quello della Lista.
+                                    override fun onBannerTap() = switchTop(Routes.SETTINGS)
+                                    override fun onLoadAppChoices() = viewModel.onLoadAppChoices()
+                                    override fun onChangeApp(slot: Int, packageName: String) =
+                                        viewModel.onChangeApp(slot, packageName)
                                     override fun onOpenFullLog() {
                                         state.automationId?.let {
                                             switchTop(Routes.log(it, detail.name))

@@ -474,4 +474,25 @@
     <string name="rda_lc_draft_warning_one">1 warning to read in the details</string>
     <string name="rda_lc_draft_warning_many">%1$d warnings to read in the details</string>
     <string name="rda_lc_example_send_label">Send this example</string>
+    <!-- 0.7.0 · Approvazione e dettaglio (redesign A, blocco rda_ap_). -->
+    <string name="rda_ap_risks_title">Before arming</string>
+    <string name="rda_ap_warnings_title">Warnings</string>
+    <string name="rda_ap_errors_one">1 error</string>
+    <string name="rda_ap_errors_many">%1$d errors</string>
+    <string name="rda_ap_warnings_one">1 warning</string>
+    <string name="rda_ap_warnings_many">%1$d warnings</string>
+    <string name="rda_ap_error_label">Error</string>
+    <string name="rda_ap_then_full">THEN · full program</string>
+    <string name="rda_ap_app_not_installed">Not installed</string>
+    <string name="rda_ap_change_app">Change app</string>
+    <string name="rda_ap_change_app_cd">Change app %1$s</string>
+    <string name="rda_ap_picker_title">Choose an app</string>
+    <string name="rda_ap_picker_note_draft">The rule becomes a new revision: you will approve it again.</string>
+    <string name="rda_ap_picker_note_armed">The armed rule stays as it is. The change becomes a draft that you approve before it replaces the rule.</string>
+    <string name="rda_ap_picker_search">Search apps</string>
+    <string name="rda_ap_picker_loading">Loading apps…</string>
+    <string name="rda_ap_picker_empty">No app matches.</string>
+    <string name="rda_ap_picker_current">in use</string>
+    <string name="rda_ap_picker_pick_cd">Use %1$s</string>
+    <string name="rda_ap_run_now_fallback">Run now is not available yet.</string>
 </resources>

@@ -2,6 +2,7 @@ package dev.argus.ui.presentation
 
 import java.util.Locale
 import dev.argus.engine.model.Action
+import dev.argus.engine.model.AppPackages
 import dev.argus.engine.model.ActionTier
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationDraft
@@ -32,9 +33,11 @@ import dev.argus.engine.model.integrity
 import dev.argus.engine.model.declaredType
 import dev.argus.engine.model.provenance
 import dev.argus.ui.model.ActionRow
+import dev.argus.ui.model.AppRef
 import dev.argus.ui.model.ProgramNode
 import dev.argus.ui.model.RuleRender
 import dev.argus.ui.model.VarRow
+import dev.argus.ui.model.VarSensitivity
 
 /**
  * DETERMINISTIC rendering of an automation into [RuleRender] — direttiva sicurezza §5.1.
@@ -176,16 +179,34 @@ object RuleRenderMapper {
         l: RenderLanguage,
     ): RuleRender {
         val isGenerative = actions.any { it.tier == ActionTier.GENERATIVE }
+        // 0.7.0: i package sostituibili portano il loro slot («Cambia app»); l'ordine è quello di AppPackages.
+        val slots = AppPackages.slotsByAction(trigger, actions)
         return RuleRender(
             triggerLine = triggerLine(trigger, conversationLabels, l),
             triggerIconKey = triggerIconKey(trigger),
             conditionLines = conditions?.let { flattenConditions(it, 0, l) } ?: emptyList(),
-            actions = actions.map { actionRow(it, l) },
+            actions = actions.map { withAppRef(actionRow(it, l), it, slots) },
             isGenerative = isGenerative,
             privacyNote = if (isGenerative) privacyNote(trigger, actions, l) else null,
             vars = vars.map { varRow(it, trigger, l) },
-            program = programNodes(actions, l),
+            program = programNodes(actions, l, slots),
+            triggerAppRef = (trigger as? Trigger.AppEvent)?.let { event ->
+                AppPackages.triggerSlot(event)?.let { AppRef(it, event.pkg) }
+            },
         )
+    }
+
+    /** Package nominato da un'azione sostituibile, se [slots] gliene assegna uno. */
+    private fun withAppRef(row: ActionRow, action: Action, slots: Map<Action, Int>): ActionRow {
+        val slot = slots[action] ?: return row
+        val pkg = when (action) {
+            is Action.LaunchApp -> action.pkg
+            is Action.AppControl -> action.pkg
+            is Action.AppPermission -> action.pkg
+            is Action.UiSteps -> action.pkg
+            else -> null
+        } ?: return row
+        return row.copy(appRef = AppRef(slot, pkg))
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -193,17 +214,17 @@ object RuleRenderMapper {
     // foglia annidata può restare nascosta (lo verifica lo snapshot test). Wait è una foglia.
     // ---------------------------------------------------------------------------------------------
 
-    private fun programNodes(actions: List<Action>, l: RenderLanguage): List<ProgramNode> =
-        actions.map { programNode(it, l) }
+    private fun programNodes(actions: List<Action>, l: RenderLanguage, slots: Map<Action, Int>): List<ProgramNode> =
+        actions.map { programNode(it, l, slots) }
 
-    private fun programNode(a: Action, l: RenderLanguage): ProgramNode = when (a) {
+    private fun programNode(a: Action, l: RenderLanguage, slots: Map<Action, Int>): ProgramNode = when (a) {
         is Action.If -> ProgramNode.IfNode(
             title = l.pick("If:", "Se:"),
             conditionLines = flattenConditions(a.condition, 0, l),
             thenTitle = l.pick("Then:", "Allora:"),
-            then = programNodes(a.then, l),
+            then = programNodes(a.then, l, slots),
             elseTitle = if (a.orElse.isNotEmpty()) l.pick("Otherwise:", "Altrimenti:") else null,
-            orElse = programNodes(a.orElse, l),
+            orElse = programNodes(a.orElse, l, slots),
         )
         is Action.While -> ProgramNode.WhileNode(
             title = l.pick(
@@ -213,9 +234,9 @@ object RuleRenderMapper {
                     (if (a.delayBetweenMs > 0) " · ${a.delayBetweenMs} ms tra le iterazioni" else ""),
             ),
             conditionLines = flattenConditions(a.condition, 0, l),
-            body = programNodes(a.body, l),
+            body = programNodes(a.body, l, slots),
         )
-        else -> ProgramNode.Leaf(actionRow(a, l))
+        else -> ProgramNode.Leaf(withAppRef(actionRow(a, l), a, slots))
     }
 
     // Conteggio iterazioni del while: letterale ("up to N times") oppure variabile NUMBER, che
@@ -241,6 +262,12 @@ object RuleRenderMapper {
         // S1: il letterale approvato si mostra INTEGRALE; per gli altri tipi mai un valore.
         valueText = (v as? VarBinding.Literal)?.value,
         sourceText = varSourceText(v, l),
+        isExternal = v.integrity == IntegrityLabel.TAINTED,
+        sensitivity = when (v.confidentiality) {
+            ConfidentialityLabel.PUBLIC -> VarSensitivity.PUBLIC
+            ConfidentialityLabel.PRIVATE -> VarSensitivity.PRIVATE
+            ConfidentialityLabel.SECRET -> VarSensitivity.SECRET
+        },
     )
 
     /** Da dove nasce il valore, reso dai tipi (nessun valore runtime, §5.1). */

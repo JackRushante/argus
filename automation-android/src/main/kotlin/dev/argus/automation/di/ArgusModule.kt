@@ -60,7 +60,9 @@ import dev.argus.automation.LogRetentionStore
 import dev.argus.automation.RenderLanguageSource
 import dev.argus.automation.RoomTimeAlarmStateStore
 import dev.argus.automation.ShizukuActionExecutor
+import dev.argus.automation.apps.AndroidInstalledAppCatalog
 import dev.argus.automation.apps.AndroidInstalledAppResolver
+import dev.argus.automation.apps.InstalledAppCatalog
 import dev.argus.automation.apps.InstalledAppResolver
 import dev.argus.automation.base.AndroidBaseActionExecutor
 import dev.argus.automation.base.AndroidBaseActionSurface
@@ -262,6 +264,13 @@ object ArgusModule {
     fun installedAppResolver(
         @ApplicationContext context: Context,
     ): InstalledAppResolver = AndroidInstalledAppResolver(context)
+
+    /** 0.7.0: nomi delle app e «Cambia app» in approvazione, avviso «app non installata». Resta sul telefono. */
+    @Provides
+    @Singleton
+    fun installedAppCatalog(
+        @ApplicationContext context: Context,
+    ): InstalledAppCatalog = AndroidInstalledAppCatalog(context)
 
     @Provides
     @Singleton
@@ -1381,6 +1390,7 @@ object ArgusModule {
         registrar: ArmedAutomationRegistrar,
         stateQueries: StateQueryProbe,
         audit: AuditSink,
+        installedApps: InstalledAppCatalog,
     ): ApprovalFlow = ApprovalFlow(
         drafts,
         approvals,
@@ -1390,6 +1400,7 @@ object ArgusModule {
         registrar,
         stateQueries,
         audit,
+        installedPackages = installedApps,
     )
 
     @Provides

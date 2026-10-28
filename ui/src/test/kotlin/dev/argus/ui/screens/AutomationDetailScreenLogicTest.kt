@@ -1,6 +1,7 @@
 package dev.argus.ui.screens
 
 import dev.argus.ui.model.AutomationDetailState
+import dev.argus.ui.model.EngineBanner
 import dev.argus.ui.model.RuleRender
 import dev.argus.ui.model.RuleStatsUi
 import dev.argus.ui.model.RuleStatsWindow
@@ -49,6 +50,48 @@ class AutomationDetailScreenLogicTest {
     fun `run now is never offered outside the armed and disabled footer`() {
         assertFalse(showRunNowAction(detail(StatusBadge.PENDING_APPROVAL, canRunNow = true)))
         assertFalse(showRunNowAction(detail(StatusBadge.NEEDS_REVIEW, canRunNow = true)))
+    }
+
+    // ---- 0.7.0: banner salute, «Esegui ora» sempre visibile, «Cambia app» ---------------------------
+
+    @Test
+    fun `run now has its own row for a saved rule even when it cannot run`() {
+        assertTrue(showRunNowRow(detail(StatusBadge.ARMED, canRunNow = false)))
+        assertTrue(showRunNowRow(detail(StatusBadge.DISABLED, canRunNow = false)))
+        assertFalse(showRunNowRow(detail(StatusBadge.PENDING_APPROVAL, canRunNow = false)))
+        assertFalse(showRunNowRow(detail(StatusBadge.NEEDS_REVIEW, canRunNow = false)))
+    }
+
+    @Test
+    fun `a shizuku banner is shown only when the rule uses shizuku`() {
+        val armed = detail(StatusBadge.ARMED, canRunNow = false)
+
+        assertEquals(EngineBanner.NONE, detailBannerToShow(armed.copy(banner = EngineBanner.SHIZUKU_DOWN, usesShizuku = false)))
+        assertEquals(EngineBanner.SHIZUKU_DOWN, detailBannerToShow(armed.copy(banner = EngineBanner.SHIZUKU_DOWN, usesShizuku = true)))
+        assertEquals(
+            EngineBanner.SHIZUKU_DEGRADED_AFTER_REBOOT,
+            detailBannerToShow(armed.copy(banner = EngineBanner.SHIZUKU_DEGRADED_AFTER_REBOOT, usesShizuku = true)),
+        )
+    }
+
+    @Test
+    fun `the battery banner does not depend on shizuku and the ai banner never reaches the detail`() {
+        val armed = detail(StatusBadge.ARMED, canRunNow = false)
+
+        assertEquals(EngineBanner.BATTERY_NOT_EXEMPT, detailBannerToShow(armed.copy(banner = EngineBanner.BATTERY_NOT_EXEMPT)))
+        assertEquals(EngineBanner.NONE, detailBannerToShow(armed.copy(banner = EngineBanner.BRAIN_UNREACHABLE, usesShizuku = true)))
+        assertEquals(EngineBanner.NONE, detailBannerToShow(armed))
+    }
+
+    @Test
+    fun `change app needs the host consent, an idle footer and a rule that can be read`() {
+        val pending = detail(StatusBadge.PENDING_APPROVAL, canRunNow = false)
+
+        assertFalse(canChangeApp(pending))
+        assertTrue(canChangeApp(pending.copy(canChangeApp = true)))
+        assertFalse(canChangeApp(pending.copy(canChangeApp = true, actionInProgress = true)))
+        assertFalse(canChangeApp(detail(StatusBadge.NEEDS_REVIEW, canRunNow = false).copy(canChangeApp = true)))
+        assertTrue(canChangeApp(detail(StatusBadge.ARMED, canRunNow = false).copy(canChangeApp = true)))
     }
 
     // ---- F10: statistiche della regola -----------------------------------------------------------
