@@ -24,6 +24,13 @@ enum class MediaCommand { PLAY, PAUSE, PLAY_PAUSE, NEXT, PREVIOUS }
 @kotlinx.serialization.Serializable(with = HttpMethodSerializer::class)
 enum class HttpMethod { GET, POST, PUT, DELETE }
 
+/**
+ * Operazione di [Action.AppControl]. Enum CHIUSO mappato 1:1 su un comando fisso (`am force-stop`,
+ * `pm disable-user`, `pm enable`). Wire maiuscolo, lettura tollerante al minuscolo.
+ */
+@kotlinx.serialization.Serializable(with = AppControlOpSerializer::class)
+enum class AppControlOp { FORCE_STOP, FREEZE, UNFREEZE }
+
 /** Serializer di un enum chiuso: scrive il nome, legge il nome senza badare alle maiuscole. */
 abstract class CaseInsensitiveEnumSerializer<E : Enum<E>>(
     private val serialName: String,
@@ -51,4 +58,9 @@ object MediaCommandSerializer : CaseInsensitiveEnumSerializer<MediaCommand>(
 object HttpMethodSerializer : CaseInsensitiveEnumSerializer<HttpMethod>(
     "dev.argus.engine.model.HttpMethod",
     HttpMethod.entries.toTypedArray(),
+)
+
+object AppControlOpSerializer : CaseInsensitiveEnumSerializer<AppControlOp>(
+    "dev.argus.engine.model.AppControlOp",
+    AppControlOp.entries.toTypedArray(),
 )

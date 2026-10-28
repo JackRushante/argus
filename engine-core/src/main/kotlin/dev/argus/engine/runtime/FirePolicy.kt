@@ -64,6 +64,14 @@ object ActionCapabilities {
     const val SET_BRIGHTNESS = CapabilityIds.ACTION_SET_BRIGHTNESS
     const val SET_ROTATION = CapabilityIds.ACTION_SET_ROTATION
     const val HTTP_REQUEST = CapabilityIds.ACTION_HTTP_REQUEST
+    const val APP_CONTROL = CapabilityIds.ACTION_APP_CONTROL
+    const val SET_AIRPLANE = CapabilityIds.ACTION_SET_AIRPLANE
+    const val SET_LOCATION = CapabilityIds.ACTION_SET_LOCATION
+    const val SET_NFC = CapabilityIds.ACTION_SET_NFC
+    const val SET_BATTERY_SAVER = CapabilityIds.ACTION_SET_BATTERY_SAVER
+    const val LOCK_SCREEN = CapabilityIds.ACTION_LOCK_SCREEN
+    const val SCREENSHOT = CapabilityIds.ACTION_SCREENSHOT
+    const val APP_PERMISSION = CapabilityIds.ACTION_APP_PERMISSION
 }
 
 /**

@@ -158,6 +158,15 @@ object InterpolationPolicy {
         is Action.MediaControl,
         is Action.SetBrightness,
         is Action.SetRotation,
+        // 0.5.1: pkg e permission sono letterali (mai interpolati): nessun campo testuale.
+        is Action.AppControl,
+        is Action.SetAirplane,
+        is Action.SetLocation,
+        is Action.SetNfc,
+        is Action.SetBatterySaver,
+        is Action.LockScreen,
+        is Action.Screenshot,
+        is Action.AppPermission,
         is Action.If,
         is Action.While,
         -> emptyList()

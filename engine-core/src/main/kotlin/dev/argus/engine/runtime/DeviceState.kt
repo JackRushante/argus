@@ -125,6 +125,15 @@ object StateReadPlanner {
         is Action.SetBrightness,
         is Action.SetRotation,
         is Action.HttpRequest,
+        // 0.5.1: azioni privilegiate tipizzate, nessuna lettura di stato.
+        is Action.AppControl,
+        is Action.SetAirplane,
+        is Action.SetLocation,
+        is Action.SetNfc,
+        is Action.SetBatterySaver,
+        is Action.LockScreen,
+        is Action.Screenshot,
+        is Action.AppPermission,
         // write_setting non legge stato: namespace/key/value sono letterali approvati.
         is Action.WriteSetting,
         -> StateReadRequest.EMPTY

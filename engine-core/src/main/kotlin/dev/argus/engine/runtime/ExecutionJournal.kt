@@ -166,6 +166,14 @@ internal fun Action.journalType(): String = when (this) {
     is Action.SetBrightness -> ActionTypeIds.SET_BRIGHTNESS
     is Action.SetRotation -> ActionTypeIds.SET_ROTATION
     is Action.HttpRequest -> ActionTypeIds.HTTP_REQUEST
+    is Action.AppControl -> ActionTypeIds.APP_CONTROL
+    is Action.SetAirplane -> ActionTypeIds.SET_AIRPLANE
+    is Action.SetLocation -> ActionTypeIds.SET_LOCATION
+    is Action.SetNfc -> ActionTypeIds.SET_NFC
+    is Action.SetBatterySaver -> ActionTypeIds.SET_BATTERY_SAVER
+    is Action.LockScreen -> ActionTypeIds.LOCK_SCREEN
+    is Action.Screenshot -> ActionTypeIds.SCREENSHOT
+    is Action.AppPermission -> ActionTypeIds.APP_PERMISSION
     is Action.WriteSetting -> ActionTypeIds.WRITE_SETTING
     is Action.InvokeLlm -> ActionTypeIds.INVOKE_LLM
     is Action.InvokeLlmV2 -> ActionTypeIds.INVOKE_LLM_V2
