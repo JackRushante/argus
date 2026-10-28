@@ -69,6 +69,7 @@ object CapabilityIds {
     const val ACTION_SET_BRIGHTNESS = "action.set_brightness"
     const val ACTION_SET_ROTATION = "action.set_rotation"
     const val ACTION_HTTP_REQUEST = "action.http_request"
+    const val ACTION_UI_STEPS = "action.ui_steps"
 
     fun state(key: String): String = "state.$key"
 }
@@ -177,6 +178,8 @@ object CapabilityRequirements {
         is Action.SetBrightness -> setOf(CapabilityIds.ACTION_SET_BRIGHTNESS)
         is Action.SetRotation -> setOf(CapabilityIds.ACTION_SET_ROTATION)
         is Action.HttpRequest -> setOf(CapabilityIds.ACTION_HTTP_REQUEST)
+        // 0.5.1: serve il servizio di Accessibilità di Argus acceso (il probe lo pubblica solo allora).
+        is Action.UiSteps -> setOf(CapabilityIds.ACTION_UI_STEPS)
         // Pausa cooperativa interna all'interprete: nessuna capability OS.
         is Action.Wait -> emptySet()
         // Come i reader parametrici (che gatano sulla famiglia, non sul singolo canonicalId):

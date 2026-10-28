@@ -166,6 +166,7 @@ internal fun Action.journalType(): String = when (this) {
     is Action.SetBrightness -> ActionTypeIds.SET_BRIGHTNESS
     is Action.SetRotation -> ActionTypeIds.SET_ROTATION
     is Action.HttpRequest -> ActionTypeIds.HTTP_REQUEST
+    is Action.UiSteps -> ActionTypeIds.UI_STEPS
     is Action.WriteSetting -> ActionTypeIds.WRITE_SETTING
     is Action.InvokeLlm -> ActionTypeIds.INVOKE_LLM
     is Action.InvokeLlmV2 -> ActionTypeIds.INVOKE_LLM_V2

@@ -125,6 +125,7 @@ object StateReadPlanner {
         is Action.SetBrightness,
         is Action.SetRotation,
         is Action.HttpRequest,
+        is Action.UiSteps,
         // write_setting non legge stato: namespace/key/value sono letterali approvati.
         is Action.WriteSetting,
         -> StateReadRequest.EMPTY

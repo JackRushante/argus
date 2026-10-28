@@ -100,6 +100,8 @@ object ActionTypeIds {
     const val SET_BRIGHTNESS = "set_brightness"
     const val SET_ROTATION = "set_rotation"
     const val HTTP_REQUEST = "http_request"
+    // 0.5.1: computer-use lento via Accessibilità (macro di passi su controlli, senza AI allo scatto).
+    const val UI_STEPS = "ui_steps"
     // Control-flow strutturato P4 §2.3: contenitori, non azioni foglia.
     const val IF = "if"
     const val WHILE = "while"
@@ -186,6 +188,7 @@ sealed interface Action {
             is SetBrightness,
             is SetRotation,
             is HttpRequest,
+            is UiSteps,
             -> ActionTier.DETERMINISTIC
         }
 
@@ -425,6 +428,20 @@ sealed interface Action {
         val headers: Map<String, String>? = null,
         val body: String? = null,
         val contentType: String? = null,
+    ) : Action
+
+    /**
+     * Macro di passi sull'interfaccia (0.5.1, computer-use lento via servizio di Accessibilità): l'AI
+     * la COMPILA, il motore la esegue allo scatto senza AI. [pkg] è l'app da aprire prima dei passi
+     * (null = schermo attuale). I passi hanno vocabolario chiuso ([UiStep]), al massimo
+     * [UiStepsPolicy.MAX_STEPS], e la macro intera dura al massimo [UiStepsPolicy.MAX_MACRO_MS].
+     * Un passo che non trova l'elemento ferma la macro: mai un clic «a caso». Vietata su Argus stesso e
+     * sulle schermate di sicurezza di sistema ([UiStepsPolicy.isForbiddenPackage]).
+     */
+    @Serializable @SerialName(ActionTypeIds.UI_STEPS)
+    data class UiSteps(
+        val pkg: String? = null,
+        val steps: List<UiStep>,
     ) : Action
 }
 

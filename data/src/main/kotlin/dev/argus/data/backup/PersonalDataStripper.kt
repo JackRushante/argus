@@ -119,6 +119,8 @@ object PersonalDataStripper {
         is Action.SetRotation,
         is Action.InvokeLlm,
         is Action.InvokeLlmV2,
+        // 0.5.1: la macro sullo schermo non porta dati personali (package e criteri di ricerca).
+        is Action.UiSteps,
         -> action
     }
 }

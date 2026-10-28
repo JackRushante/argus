@@ -9,6 +9,8 @@ import dev.argus.engine.model.RemoteEgressPolicy
 import dev.argus.engine.model.SettingsScreen
 import dev.argus.engine.model.ShellQuoting
 import dev.argus.engine.model.TaintPolicy
+import dev.argus.engine.model.UiStep
+import dev.argus.engine.model.UiStepsPolicy
 import dev.argus.engine.model.ValueProvenance
 import dev.argus.engine.model.VarValue
 import dev.argus.engine.model.WriteSettingPolicy
@@ -135,6 +137,18 @@ class TaintAwareInterpolator {
                 is Action.HttpRequest -> action.copy(
                     body = action.body?.let {
                         accumulator.field("body", it, HttpRequestPolicy.MAX_BODY_BYTES)
+                    },
+                )
+                // Solo il testo dei passi `type` ha segnaposto; pkg e criteri restano quelli approvati.
+                is Action.UiSteps -> action.copy(
+                    steps = action.steps.mapIndexed { index, step ->
+                        if (step is UiStep.Type) {
+                            step.copy(
+                                text = accumulator.field("steps.$index.text", step.text, UiStepsPolicy.MAX_TYPE_CHARS),
+                            )
+                        } else {
+                            step
+                        }
                     },
                 )
 
@@ -297,6 +311,7 @@ class TaintAwareInterpolator {
             is Action.CopyText -> action.text.isNotBlank() && action.text.length <= MAX_TEXT_CHARS
             is Action.Speak -> action.text.isNotBlank() && action.text.length <= MAX_TEXT_CHARS
             is Action.HttpRequest -> HttpRequestPolicy.isResolvedShapeValid(action)
+            is Action.UiSteps -> UiStepsPolicy.isResolvedShapeValid(action)
             is Action.SetBrightness -> (action.level == null) != (action.auto == null) &&
                 (action.level == null || action.level in 0..100)
             is Action.SetWifi,

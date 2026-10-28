@@ -723,6 +723,7 @@ class DraftValidator(
         is Action.RunShell -> SHELL_ACTION_BUDGET_MS
         is Action.HttpRequest -> HTTP_ACTION_BUDGET_MS
         is Action.Speak -> SPEAK_ACTION_BUDGET_MS
+        is Action.UiSteps -> UiStepsPolicy.budgetMs(action)
         is Action.Wait -> action.durationMs.coerceAtLeast(0)
         is Action.If -> maxOf(worstCaseBudgetMs(action.then), worstCaseBudgetMs(action.orElse))
         // Con maxIterationsVar il conteggio è ignoto a compile-time: worst-case = MAX_WHILE_ITERATIONS
@@ -1144,6 +1145,7 @@ class DraftValidator(
             }
             is Action.SetRotation -> Unit // solo booleano, nulla da validare
             is Action.HttpRequest -> validateHttpRequest(action, err)
+            is Action.UiSteps -> validateUiSteps(action, trigger, whitelist, err, warn)
             is Action.InvokeLlm -> validateInvokeLlm(action, trigger, whitelist, err, warn)
             is Action.InvokeLlmV2 -> validateInvokeLlmV2(action, trigger, whitelist, err, warn)
             // Contenitori control-flow: bound (while), rami non vuoti, condizione di flusso e
@@ -1214,6 +1216,61 @@ class DraftValidator(
                 err("http_body_too_large", "Body oltre ${HttpRequestPolicy.MAX_BODY_BYTES} byte")
             }
         }
+    }
+
+    /**
+     * `ui_steps` (0.5.1). Da 1 a 20 passi a vocabolario chiuso; `pkg` è un package letterale e mai uno
+     * di quelli vietati (Argus, Impostazioni, installatore, dialoghi dei permessi); solo il testo di
+     * `type` ammette segnaposto. Il trigger deve poter avviare anche una shell ([StaticShellSafety]):
+     * niente SMS, chiamate, media né app aperta o chiusa, perché chiunque può provocarli. A runtime
+     * gli stessi limiti sono riverificati ([UiStepsPolicy.isResolvedShapeValid]).
+     */
+    private fun validateUiSteps(
+        action: Action.UiSteps,
+        trigger: Trigger,
+        whitelist: Set<String>,
+        err: (String, String) -> Unit,
+        warn: (String, String) -> Unit,
+    ) {
+        if (action.steps.isEmpty()) {
+            err("ui_steps_empty", "La macro sull'interfaccia non ha passi")
+        } else if (action.steps.size > UiStepsPolicy.MAX_STEPS) {
+            err("ui_steps_too_many", "Massimo ${UiStepsPolicy.MAX_STEPS} passi per macro")
+        }
+        val pkg = action.pkg
+        if (pkg != null) {
+            if (InterpolationPolicy.containsInterpolation(pkg) || !UiStepsPolicy.isPackageName(pkg)) {
+                err("ui_pkg_invalid", "Il package dell'app da aprire non è valido (letterale, senza \${…})")
+            } else if (UiStepsPolicy.isForbiddenPackage(pkg)) {
+                err(
+                    "ui_pkg_forbidden",
+                    "Una macro non può agire su Argus, sulle Impostazioni, sull'installatore di pacchetti " +
+                        "né sui dialoghi dei permessi",
+                )
+            }
+        }
+        action.steps.take(UiStepsPolicy.MAX_STEPS).forEach { step ->
+            if (!UiStepsPolicy.literalFieldsOnly(step)) {
+                err("ui_step_interpolated", "Solo il testo di un passo «type» ammette \${…}")
+            } else {
+                val problem = UiStepsPolicy.stepProblem(step)
+                if (problem != null) {
+                    err("ui_step_invalid", "Passo non valido ($problem)")
+                }
+            }
+        }
+        if (!StaticShellSafety.allows(trigger, whitelist)) {
+            err(
+                "ui_steps_external_trigger",
+                "Una macro sull'interfaccia parte solo da trigger che nessun altro può provocare: " +
+                    "tempo, geofence, connettività, sensori, schermo, batteria, audio, modalità, avvio manuale " +
+                    "o una chat WhatsApp 1:1 in whitelist. Non da SMS, chiamate, media né app aperta o chiusa",
+            )
+        }
+        warn(
+            "ui_steps_review",
+            "La macro agisce sull'interfaccia come farebbe l'utente: tocca, scrive e scorre nell'app indicata",
+        )
     }
 
     private fun validateInvokeLlmV2(

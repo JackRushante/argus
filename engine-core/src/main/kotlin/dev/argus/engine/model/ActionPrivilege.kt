@@ -59,6 +59,8 @@ object ActionPrivileges {
         is Action.SetBrightness,
         is Action.SetRotation,
         is Action.HttpRequest,
+        // 0.5.1: la macro sull'interfaccia passa dal servizio di Accessibilità di Argus, non da uno shell.
+        is Action.UiSteps,
         is Action.InvokeLlm,
         is Action.InvokeLlmV2,
         -> ActionPrivilege.BASE
