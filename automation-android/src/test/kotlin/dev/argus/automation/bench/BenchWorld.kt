@@ -161,6 +161,8 @@ internal class BenchWorld private constructor(
             writeSettingsGranted = true,
             // 0.5.1: accesso ai dati di utilizzo concesso (anche a mano, senza Shizuku): app_event si pubblica.
             usageStatsGranted = true,
+            // 0.5.1: il telefono di prova ha l'NFC, quindi set_nfc si pubblica con Shizuku.
+            nfcPresent = true,
         )
 
         private val NO_SHIZUKU_STATE = FULL_STATE.copy(

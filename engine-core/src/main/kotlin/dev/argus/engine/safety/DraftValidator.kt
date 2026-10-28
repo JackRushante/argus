@@ -1151,6 +1151,16 @@ class DraftValidator(
             }
             is Action.SetRotation -> Unit // solo booleano, nulla da validare
             is Action.HttpRequest -> validateHttpRequest(action, err)
+            // 0.5.1: azioni privilegiate tipizzate. Solo booleani/nessun campo: nulla da validare.
+            is Action.SetAirplane,
+            is Action.SetLocation,
+            is Action.SetNfc,
+            is Action.SetBatterySaver,
+            is Action.LockScreen,
+            is Action.Screenshot,
+            -> Unit
+            is Action.AppControl -> validateAppControl(action, err, warn)
+            is Action.AppPermission -> validateAppPermission(action, err, warn)
             is Action.InvokeLlm -> validateInvokeLlm(action, trigger, whitelist, err, warn)
             is Action.InvokeLlmV2 -> validateInvokeLlmV2(action, trigger, whitelist, err, warn)
             // Contenitori control-flow: bound (while), rami non vuoti, condizione di flusso e
@@ -1220,6 +1230,66 @@ class DraftValidator(
             if (HttpRequestPolicy.bodyBytes(body) > HttpRequestPolicy.MAX_BODY_BYTES) {
                 err("http_body_too_large", "Body oltre ${HttpRequestPolicy.MAX_BODY_BYTES} byte")
             }
+        }
+    }
+
+    /**
+     * `app_control` (0.5.1). `pkg` è LETTERALE: la forma del package esclude `${'$'}{…}`, quindi un dato esterno
+     * non può scegliere quale app fermare. Vietato su Argus e sui package di sistema essenziali; il
+     * launcher in uso lo conosce solo il telefono ed è controllato dall'esecutore. FREEZE è distruttivo.
+     */
+    private fun validateAppControl(
+        action: Action.AppControl,
+        err: (String, String) -> Unit,
+        warn: (String, String) -> Unit,
+    ) {
+        when (PrivilegedActionPolicy.appControlTarget(action.pkg)) {
+            PrivilegedActionPolicy.TargetVerdict.PACKAGE_INVALID ->
+                err("priv_pkg_invalid", "Package non valido: serve un package letterale (niente \${…})")
+            PrivilegedActionPolicy.TargetVerdict.FORBIDDEN ->
+                err(
+                    "priv_target_forbidden",
+                    "Argus, il launcher e i package di sistema essenziali non possono essere controllati",
+                )
+            PrivilegedActionPolicy.TargetVerdict.OK -> Unit
+        }
+        if (action.op == AppControlOp.FREEZE && PrivilegedActionPolicy.isValidPackage(action.pkg)) {
+            warn(
+                "app_control_freeze_review",
+                "Congelare disattiva l'app ${action.pkg}: sparisce dal launcher e non parte finché non " +
+                    "viene riattivata",
+            )
+        }
+    }
+
+    /**
+     * `app_permission` (0.5.1). `pkg` e `permission` sono LETTERALI. Il permesso deve essere un permesso
+     * runtime dell'elenco chiuso ([PrivilegedActionPolicy.RUNTIME_PERMISSIONS]); vietato su Argus. La
+     * revoca è distruttiva: l'app perde un accesso e può essere terminata da Android.
+     */
+    private fun validateAppPermission(
+        action: Action.AppPermission,
+        err: (String, String) -> Unit,
+        warn: (String, String) -> Unit,
+    ) {
+        when (PrivilegedActionPolicy.appPermissionTarget(action.pkg)) {
+            PrivilegedActionPolicy.TargetVerdict.PACKAGE_INVALID ->
+                err("priv_pkg_invalid", "Package non valido: serve un package letterale (niente \${…})")
+            PrivilegedActionPolicy.TargetVerdict.FORBIDDEN ->
+                err("priv_target_forbidden", "I permessi di Argus non possono essere modificati da una regola")
+            PrivilegedActionPolicy.TargetVerdict.OK -> Unit
+        }
+        if (!PrivilegedActionPolicy.isRuntimePermission(action.permission)) {
+            err(
+                "priv_permission_invalid",
+                "Permesso fuori dall'elenco dei permessi runtime ammessi (android.permission.*)",
+            )
+        }
+        if (!action.grant && PrivilegedActionPolicy.isValidPackage(action.pkg)) {
+            warn(
+                "app_permission_revoke_review",
+                "Revocare un permesso toglie un accesso all'app ${action.pkg}: ${action.permission}",
+            )
         }
     }
 

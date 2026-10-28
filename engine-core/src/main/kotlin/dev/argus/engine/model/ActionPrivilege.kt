@@ -32,6 +32,16 @@ object ActionPrivileges {
         is Action.InputText,
         // Scrittura impostazioni: `settings put` su secure/global passa dallo shell Shizuku.
         is Action.WriteSetting,
+        // 0.5.1: azioni privilegiate tipizzate (vocabolario chiuso al posto di run_shell): am/pm/cmd/svc/
+        // input/screencap non hanno percorso app-normale.
+        is Action.AppControl,
+        is Action.SetAirplane,
+        is Action.SetLocation,
+        is Action.SetNfc,
+        is Action.SetBatterySaver,
+        is Action.LockScreen,
+        is Action.Screenshot,
+        is Action.AppPermission,
         -> ActionPrivilege.PRIVILEGED
 
         // Base: Intent, policy/audio manager, notifiche, clipboard, RemoteInput reply e lane LLM

@@ -100,6 +100,15 @@ object ActionTypeIds {
     const val SET_BRIGHTNESS = "set_brightness"
     const val SET_ROTATION = "set_rotation"
     const val HTTP_REQUEST = "http_request"
+    // 0.5.1: azioni privilegiate tipizzate (Shizuku, Sui o root), vocabolario chiuso al posto di run_shell.
+    const val APP_CONTROL = "app_control"
+    const val SET_AIRPLANE = "set_airplane"
+    const val SET_LOCATION = "set_location"
+    const val SET_NFC = "set_nfc"
+    const val SET_BATTERY_SAVER = "set_battery_saver"
+    const val LOCK_SCREEN = "lock_screen"
+    const val SCREENSHOT = "screenshot"
+    const val APP_PERMISSION = "app_permission"
     // Control-flow strutturato P4 §2.3: contenitori, non azioni foglia.
     const val IF = "if"
     const val WHILE = "while"
@@ -186,6 +195,14 @@ sealed interface Action {
             is SetBrightness,
             is SetRotation,
             is HttpRequest,
+            is AppControl,
+            is SetAirplane,
+            is SetLocation,
+            is SetNfc,
+            is SetBatterySaver,
+            is LockScreen,
+            is Screenshot,
+            is AppPermission,
             -> ActionTier.DETERMINISTIC
         }
 
@@ -426,6 +443,47 @@ sealed interface Action {
         val body: String? = null,
         val contentType: String? = null,
     ) : Action
+
+    /**
+     * Controllo di un'app (0.5.1), PRIVILEGED: [AppControlOp.FORCE_STOP] = `am force-stop`,
+     * [AppControlOp.FREEZE] = `pm disable-user` (l'app sparisce dal launcher e non parte più),
+     * [AppControlOp.UNFREEZE] = `pm enable`. [pkg] è un package LETTERALE (mai `${'$'}{var}`): vietato su
+     * Argus, sul launcher in uso e sui package di sistema essenziali ([PrivilegedActionPolicy]).
+     */
+    @Serializable @SerialName(ActionTypeIds.APP_CONTROL)
+    data class AppControl(val pkg: String, val op: AppControlOp) : Action
+
+    /** Modalità aereo on/off via `cmd connectivity airplane-mode`. PRIVILEGED. */
+    @Serializable @SerialName(ActionTypeIds.SET_AIRPLANE)
+    data class SetAirplane(val on: Boolean) : Action
+
+    /** Servizi di localizzazione on/off via `cmd location set-location-enabled`. PRIVILEGED. */
+    @Serializable @SerialName(ActionTypeIds.SET_LOCATION)
+    data class SetLocation(val on: Boolean) : Action
+
+    /** NFC on/off via `svc nfc`. PRIVILEGED; pubblicata solo se il telefono ha l'NFC. */
+    @Serializable @SerialName(ActionTypeIds.SET_NFC)
+    data class SetNfc(val on: Boolean) : Action
+
+    /** Risparmio energetico on/off via `cmd power set-mode`. PRIVILEGED. */
+    @Serializable @SerialName(ActionTypeIds.SET_BATTERY_SAVER)
+    data class SetBatterySaver(val on: Boolean) : Action
+
+    /** Spegne lo schermo e blocca il telefono (`input keyevent KEYCODE_SLEEP`). PRIVILEGED. */
+    @Serializable @SerialName(ActionTypeIds.LOCK_SCREEN)
+    data object LockScreen : Action
+
+    /** Salva uno screenshot in Pictures/Argus (`screencap -p`). PRIVILEGED. Nessun campo. */
+    @Serializable @SerialName(ActionTypeIds.SCREENSHOT)
+    data object Screenshot : Action
+
+    /**
+     * Concede o revoca un permesso runtime a un'app (`pm grant|revoke`). PRIVILEGED. [pkg] e
+     * [permission] sono LETTERALI approvati (mai `${'$'}{var}`); il permesso deve stare nell'elenco chiuso
+     * dei permessi runtime ([PrivilegedActionPolicy.RUNTIME_PERMISSIONS]); vietato su Argus.
+     */
+    @Serializable @SerialName(ActionTypeIds.APP_PERMISSION)
+    data class AppPermission(val pkg: String, val permission: String, val grant: Boolean) : Action
 }
 
 /** Visita iterativa: il tier non può causare stack overflow su un albero non ancora validato. */

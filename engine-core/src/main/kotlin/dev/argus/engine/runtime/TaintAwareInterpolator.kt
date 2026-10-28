@@ -5,6 +5,7 @@ import dev.argus.engine.model.ConfidentialityLabel
 import dev.argus.engine.model.HttpRequestPolicy
 import dev.argus.engine.model.IntegrityLabel
 import dev.argus.engine.model.InterpolationPolicy
+import dev.argus.engine.model.PrivilegedActionPolicy
 import dev.argus.engine.model.RemoteEgressPolicy
 import dev.argus.engine.model.SettingsScreen
 import dev.argus.engine.model.ShellQuoting
@@ -73,6 +74,15 @@ class TaintAwareInterpolator {
                 is Action.MediaControl,
                 is Action.SetBrightness,
                 is Action.SetRotation,
+                // 0.5.1: pkg/permission sono letterali, nessun segnaposto da risolvere.
+                is Action.AppControl,
+                is Action.SetAirplane,
+                is Action.SetLocation,
+                is Action.SetNfc,
+                is Action.SetBatterySaver,
+                is Action.LockScreen,
+                is Action.Screenshot,
+                is Action.AppPermission,
                 -> action
 
                 is Action.SetRinger -> action.copy(
@@ -311,7 +321,15 @@ class TaintAwareInterpolator {
             is Action.Wait,
             is Action.MediaControl,
             is Action.SetRotation,
+            is Action.SetAirplane,
+            is Action.SetLocation,
+            is Action.SetNfc,
+            is Action.SetBatterySaver,
+            is Action.LockScreen,
+            is Action.Screenshot,
             -> true
+            // 0.5.1: forma e bersagli vietati (Argus, package di sistema essenziali, permesso fuori elenco).
+            is Action.AppControl, is Action.AppPermission -> PrivilegedActionPolicy.isShapeValid(action)
             is Action.If, is Action.While -> false
         }
     }

@@ -6,6 +6,7 @@ import dev.argus.automation.http.HttpRequestExecutor
 import dev.argus.automation.notification.NotificationReplyDelivery
 import dev.argus.automation.notification.NotificationReplyGateway
 import dev.argus.automation.notification.NotificationReplyRequest
+import dev.argus.automation.privileged.PrivilegedActionRunner
 import dev.argus.device.DeviceController
 import dev.argus.device.DeviceToolException
 import dev.argus.device.DirectSettings
@@ -96,6 +97,12 @@ class ShizukuActionExecutor(
      * attivi il comportamento non cambia. Default **null**: senza, resta il solo percorso privilegiato.
      */
     private val directSettings: DirectSettings? = null,
+    /**
+     * 0.5.1: azioni privilegiate tipizzate (controllo app, aereo, posizione, NFC, risparmio energetico,
+     * blocco schermo, screenshot, permessi). Default **null**: senza, falliscono con
+     * `shizuku_unavailable`, mai su un percorso alternativo.
+     */
+    private val privilegedActions: PrivilegedActionRunner? = null,
 ) : ActionExecutor, ResolvedActionExecutor {
     override suspend fun execute(
         action: ResolvedProgramAction,
@@ -259,6 +266,24 @@ class ShizukuActionExecutor(
                 ?: ActionResult.Failure("base_executor_unavailable")
             is Action.HttpRequest -> httpRequests?.execute(action)
                 ?: ActionResult.Failure("base_executor_unavailable")
+
+            // 0.5.1: azioni privilegiate tipizzate. Solo con un backend privilegiato pronto (Shizuku, Sui
+            // o root verificato); il runner ripete i controlli sul bersaglio e fa passare tutto da
+            // PrivilegedShell. Nessun percorso alternativo.
+            is Action.AppControl,
+            is Action.SetAirplane,
+            is Action.SetLocation,
+            is Action.SetNfc,
+            is Action.SetBatterySaver,
+            is Action.LockScreen,
+            is Action.Screenshot,
+            is Action.AppPermission,
+            -> if (!shizukuReady()) {
+                ActionResult.Failure(ShizukuShellException.UNAVAILABLE)
+            } else {
+                privilegedActions?.execute(action, ctx)
+                    ?: ActionResult.Failure(ShizukuShellException.UNAVAILABLE)
+            }
 
             is Action.InvokeLlm -> if (generativeLane.trySubmit(ctx, action)) {
                 ActionResult.Submitted

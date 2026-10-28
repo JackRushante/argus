@@ -45,5 +45,14 @@ fun iconFor(key: String): ImageVector = when (key) {
     "manual" -> Icons.Rounded.PlayCircle
     // App aperta/chiusa (0.5.1).
     "app_event" -> Icons.Rounded.Apps
+    // Azioni privilegiate tipizzate (0.5.1).
+    "app_control" -> Icons.Rounded.AppBlocking
+    "app_permission" -> Icons.Rounded.Security
+    "airplane" -> Icons.Rounded.AirplanemodeActive
+    "location_services" -> Icons.Rounded.LocationSearching
+    "nfc" -> Icons.Rounded.Nfc
+    "battery_saver" -> Icons.Rounded.BatterySaver
+    "lock_screen" -> Icons.Rounded.ScreenLockPortrait
+    "screenshot" -> Icons.Rounded.Screenshot
     else -> Icons.Rounded.Bolt
 }

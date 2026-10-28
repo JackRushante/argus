@@ -172,6 +172,28 @@ internal object LogReasonLabels {
             "external data in a JSON body must sit inside a quoted string",
             "un dato esterno in un body JSON deve stare dentro una stringa tra virgolette",
         ),
+        // --- 0.5.1: azioni privilegiate tipizzate ---
+        "target_forbidden" to Label(
+            "Argus, the launcher and essential system apps cannot be changed by a rule",
+            "Argus, il launcher e le app di sistema essenziali non si possono modificare con una regola",
+        ),
+        "nfc_unavailable" to Label("this phone has no NFC", "questo telefono non ha l'NFC"),
+        "permission_not_applied" to Label(
+            "Android did not apply the permission change (the app may not use that permission)",
+            "Android non ha applicato il cambio di permesso (l'app potrebbe non usare quel permesso)",
+        ),
+        "screenshot_save_failed" to Label(
+            "the screenshot could not be saved",
+            "non è stato possibile salvare la schermata",
+        ),
+        "screen_capture_failed" to Label(
+            "the screenshot could not be taken",
+            "non è stato possibile catturare la schermata",
+        ),
+        "screen_capture_invalid" to Label(
+            "the screen capture was not a valid image",
+            "la cattura dello schermo non è un'immagine valida",
+        ),
         // --- 0.4.1: «Pausa automazioni» ---
         "paused" to Label(
             "automations are paused",

@@ -2,6 +2,7 @@ package dev.argus.automation.vm
 
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.AppEventKind
+import dev.argus.engine.model.AppControlOp
 import dev.argus.engine.model.ApprovedStateContext
 import dev.argus.engine.model.AudioOutputKind
 import dev.argus.engine.model.Automation
@@ -810,6 +811,62 @@ class RuleRenderCoverageTest {
                     "headers" to ms("X-XYZ-Key: ••••wxyz", "X-XYZ-Plain: XYZ-plain-value"),
                     "body" to ms(m("Body: XYZ-body", "Corpo: XYZ-body")),
                     "contentType" to ms("Content-Type: application/xyz"),
+                ),
+            ),
+            // --- 0.5.1 (azioni privilegiate tipizzate) ---
+            "app_control" to case(
+                v(
+                    Action.AppControl("com.xyz.app", AppControlOp.FORCE_STOP),
+                    "pkg" to ms("com.xyz.app"),
+                    "op" to ms(m("Force stop", "Forza l'arresto di")),
+                ),
+                v(
+                    Action.AppControl("com.xyz.app", AppControlOp.FREEZE),
+                    "pkg" to ms("com.xyz.app"),
+                    "op" to ms(m("Freeze (disable)", "Congela (disattiva)")),
+                ),
+                v(
+                    Action.AppControl("com.xyz.app", AppControlOp.UNFREEZE),
+                    "pkg" to ms("com.xyz.app"),
+                    "op" to ms(m("Unfreeze (re-enable)", "Scongela (riattiva)")),
+                ),
+            ),
+            "set_airplane" to case(
+                v(Action.SetAirplane(true), "on" to ms(m("Turn on airplane mode", "Attiva la modalità aereo"))),
+                v(Action.SetAirplane(false), "on" to ms(m("Turn off airplane mode", "Disattiva la modalità aereo"))),
+            ),
+            "set_location" to case(
+                v(Action.SetLocation(true), "on" to ms(m("Turn on location", "Attiva la posizione"))),
+                v(Action.SetLocation(false), "on" to ms(m("Turn off location", "Disattiva la posizione"))),
+            ),
+            "set_nfc" to case(
+                v(Action.SetNfc(true), "on" to ms(m("Turn on NFC", "Attiva l'NFC"))),
+                v(Action.SetNfc(false), "on" to ms(m("Turn off NFC", "Disattiva l'NFC"))),
+            ),
+            "set_battery_saver" to case(
+                v(Action.SetBatterySaver(true), "on" to ms(m("Turn on battery saver", "Attiva il risparmio energetico"))),
+                v(Action.SetBatterySaver(false), "on" to ms(m("Turn off battery saver", "Disattiva il risparmio energetico"))),
+            ),
+            "lock_screen" to case(
+                Action.LockScreen,
+                emptyMap(),
+            ),
+            "screenshot" to case(
+                Action.Screenshot,
+                emptyMap(),
+            ),
+            "app_permission" to case(
+                v(
+                    Action.AppPermission("com.xyz.app", "android.permission.RECORD_AUDIO", grant = true),
+                    "pkg" to ms("com.xyz.app"),
+                    "permission" to ms("android.permission.RECORD_AUDIO"),
+                    "grant" to ms(m("Grant the microphone permission to", "Concedi il microfono a")),
+                ),
+                v(
+                    Action.AppPermission("com.xyz.app", "android.permission.RECORD_AUDIO", grant = false),
+                    "pkg" to ms("com.xyz.app"),
+                    "permission" to ms("android.permission.RECORD_AUDIO"),
+                    "grant" to ms(m("Revoke the microphone permission from", "Revoca il microfono a")),
                 ),
             ),
         )

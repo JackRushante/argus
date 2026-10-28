@@ -73,6 +73,17 @@ object CapabilityIds {
     const val ACTION_SET_ROTATION = "action.set_rotation"
     const val ACTION_HTTP_REQUEST = "action.http_request"
 
+    // 0.5.1: azioni privilegiate tipizzate. Stesso gate famiglia delle altre privilegiate (Shizuku, Sui
+    // o root verificato); set_nfc esiste solo sui telefoni con l'NFC (lo decide il probe).
+    const val ACTION_APP_CONTROL = "action.app_control"
+    const val ACTION_SET_AIRPLANE = "action.set_airplane"
+    const val ACTION_SET_LOCATION = "action.set_location"
+    const val ACTION_SET_NFC = "action.set_nfc"
+    const val ACTION_SET_BATTERY_SAVER = "action.set_battery_saver"
+    const val ACTION_LOCK_SCREEN = "action.lock_screen"
+    const val ACTION_SCREENSHOT = "action.screenshot"
+    const val ACTION_APP_PERMISSION = "action.app_permission"
+
     fun state(key: String): String = "state.$key"
 }
 
@@ -181,6 +192,14 @@ object CapabilityRequirements {
         is Action.SetBrightness -> setOf(CapabilityIds.ACTION_SET_BRIGHTNESS)
         is Action.SetRotation -> setOf(CapabilityIds.ACTION_SET_ROTATION)
         is Action.HttpRequest -> setOf(CapabilityIds.ACTION_HTTP_REQUEST)
+        is Action.AppControl -> setOf(CapabilityIds.ACTION_APP_CONTROL)
+        is Action.SetAirplane -> setOf(CapabilityIds.ACTION_SET_AIRPLANE)
+        is Action.SetLocation -> setOf(CapabilityIds.ACTION_SET_LOCATION)
+        is Action.SetNfc -> setOf(CapabilityIds.ACTION_SET_NFC)
+        is Action.SetBatterySaver -> setOf(CapabilityIds.ACTION_SET_BATTERY_SAVER)
+        is Action.LockScreen -> setOf(CapabilityIds.ACTION_LOCK_SCREEN)
+        is Action.Screenshot -> setOf(CapabilityIds.ACTION_SCREENSHOT)
+        is Action.AppPermission -> setOf(CapabilityIds.ACTION_APP_PERMISSION)
         // Pausa cooperativa interna all'interprete: nessuna capability OS.
         is Action.Wait -> emptySet()
         // Come i reader parametrici (che gatano sulla famiglia, non sul singolo canonicalId):
