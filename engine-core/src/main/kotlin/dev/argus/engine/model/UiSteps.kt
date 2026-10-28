@@ -23,7 +23,11 @@ object ScrollDirectionSerializer : CaseInsensitiveEnumSerializer<ScrollDirection
 @Serializable
 @JsonClassDiscriminator("op")
 sealed interface UiStep {
-    /** Aspetta che compaia un elemento con questo testo (esatto o contenuto) e/o id risorsa. */
+    /**
+     * Aspetta che compaia un elemento con questo testo (esatto o contenuto) e/o id risorsa. Senza
+     * `text` né `id` (0.7.0) aspetta invece che l'app `pkg` della macro sia in primo piano con una
+     * finestra leggibile; senza `pkg` quella forma non è valida.
+     */
     @Serializable @SerialName("wait_for")
     data class WaitFor(
         val text: String? = null,
@@ -109,11 +113,18 @@ object UiStepsPolicy {
 
     fun isPackageName(pkg: String): Boolean = pkg.length <= 255 && PACKAGE_NAME.matches(pkg)
 
-    /** Selettore di un passo: almeno uno dei criteri, e tutti non vuoti e limitati. */
-    fun selectorShapeValid(vararg criteria: String?): Boolean {
+    /**
+     * Cosa non va nei criteri di ricerca di un passo, o null se vanno bene: almeno uno presente, tutti
+     * non vuoti, entro [MAX_SELECTOR_CHARS] e senza caratteri di controllo.
+     */
+    fun selectorProblem(vararg criteria: String?): UiStepProblem? {
         val present = criteria.filterNotNull()
-        return present.isNotEmpty() && present.all {
-            it.isNotBlank() && it.length <= MAX_SELECTOR_CHARS && it.none(Char::isISOControl)
+        return when {
+            present.isEmpty() -> UiStepProblem.SELECTOR_MISSING
+            present.any(String::isBlank) -> UiStepProblem.SELECTOR_EMPTY
+            present.any { it.length > MAX_SELECTOR_CHARS } -> UiStepProblem.SELECTOR_TOO_LONG
+            present.any { text -> text.any(Char::isISOControl) } -> UiStepProblem.SELECTOR_CONTROL
+            else -> null
         }
     }
 
@@ -145,26 +156,28 @@ object UiStepsPolicy {
     /**
      * Forma di un passo già risolto (dopo l'interpolazione) o letterale: limiti rispettati, criteri
      * presenti. Usata dal validatore (con i `${…}` ancora nel testo di `type`) e, dopo la risoluzione,
-     * dall'interpolatore. Ritorna il codice del problema o null.
+     * dall'interpolatore. Ritorna il primo problema del passo o null. [hasApp] dice se la macro ha un
+     * `pkg` da aprire: solo allora un `wait_for` senza bersaglio è l'attesa dell'app.
      */
-    fun stepProblem(step: UiStep): String? = when (step) {
+    fun stepProblem(step: UiStep, hasApp: Boolean): UiStepProblem? = when (step) {
         is UiStep.WaitFor -> when {
-            !selectorShapeValid(step.text, step.id) -> "selector"
-            step.timeoutMs !in MIN_WAIT_MS..MAX_WAIT_MS -> "timeout"
-            else -> null
+            step.text == null && step.id == null ->
+                if (hasApp) timeoutProblem(step) else UiStepProblem.WAIT_NO_TARGET
+            else -> selectorProblem(step.text, step.id) ?: timeoutProblem(step)
         }
-        is UiStep.Click -> when {
-            !selectorShapeValid(step.text, step.id, step.desc) -> "selector"
-            step.index != null && step.index !in 0..MAX_INDEX -> "index"
-            else -> null
-        }
+        is UiStep.Click -> selectorProblem(step.text, step.id, step.desc)
+            ?: if (step.index != null && step.index !in 0..MAX_INDEX) UiStepProblem.INDEX else null
         is UiStep.Type -> when {
-            step.text.isEmpty() || step.text.length > MAX_TYPE_CHARS -> "text"
+            step.text.isEmpty() -> UiStepProblem.TYPE_EMPTY
+            step.text.length > MAX_TYPE_CHARS -> UiStepProblem.TYPE_TOO_LONG
             else -> null
         }
-        is UiStep.Check -> if (selectorShapeValid(step.text)) null else "selector"
+        is UiStep.Check -> selectorProblem(step.text)
         is UiStep.Scroll, UiStep.Back, UiStep.Home -> null
     }
+
+    private fun timeoutProblem(step: UiStep.WaitFor): UiStepProblem? =
+        if (step.timeoutMs in MIN_WAIT_MS..MAX_WAIT_MS) null else UiStepProblem.TIMEOUT
 
     /**
      * Forma dell'azione intera, a letterali o già risolta: da 1 a [MAX_STEPS] passi, `pkg` assente o un
@@ -174,5 +187,30 @@ object UiStepsPolicy {
     fun isResolvedShapeValid(action: Action.UiSteps): Boolean =
         action.steps.size in 1..MAX_STEPS &&
             (action.pkg == null || (isPackageName(action.pkg) && !isForbiddenPackage(action.pkg))) &&
-            action.steps.all { stepProblem(it) == null && literalFieldsOnly(it) }
+            action.steps.all { stepProblem(it, hasApp = action.pkg != null) == null && literalFieldsOnly(it) }
+}
+
+/**
+ * Perché un passo di una macro non è valido (0.7.0). Vocabolario chiuso: il validatore ne ricava un
+ * codice d'errore col numero del passo, così l'utente e il modello sanno quale passo correggere e come.
+ */
+enum class UiStepProblem {
+    /** `wait_for` senza `text` né `id` in una macro senza `pkg`: non c'è nulla da aspettare. */
+    WAIT_NO_TARGET,
+
+    /** Nessun criterio di ricerca (testo, id, descrizione). */
+    SELECTOR_MISSING,
+
+    /** Un criterio presente ma vuoto. */
+    SELECTOR_EMPTY,
+    SELECTOR_TOO_LONG,
+    SELECTOR_CONTROL,
+
+    /** `wait_for.timeoutMs` fuori da 100-15000 ms. */
+    TIMEOUT,
+
+    /** `click.index` fuori da 0-50. */
+    INDEX,
+    TYPE_EMPTY,
+    TYPE_TOO_LONG,
 }

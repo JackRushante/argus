@@ -28,8 +28,8 @@ class ValidationMessagesTest {
         source("engine-core/src/main/kotlin/dev/argus/engine/safety/DraftValidator.kt")
 
     private val validatorCodes: Set<String> = buildSet {
-        // err("codice", …) e warn("codice", …)
-        Regex("""\b(?:err|warn)\(\s*$Q([a-z][a-z0-9_]*)$Q""").findAll(validatorSource)
+        // err("codice", …), warn("codice", …) e errDetail("codice", …, dettaglio)
+        Regex("""\b(?:err|warn|errDetail)\(\s*$Q([a-z][a-z0-9_]*)$Q""").findAll(validatorSource)
             .forEach { add(it.groupValues[1]) }
         // helper che ricevono il codice come argomento: validateX(valore, …, "codice", err)
         Regex("""$Q([a-z][a-z0-9_]*)$Q,\s*err\)""").findAll(validatorSource)
@@ -174,6 +174,44 @@ class ValidationMessagesTest {
                 RenderLanguage.IT,
             ),
         )
+    }
+
+    @Test
+    fun `a macro step error names the step and says why`() {
+        val noTarget = ValidationIssue(Severity.ERROR, "ui_step_wait_no_target", "x", detail = "1")
+        val en = ValidationMessages.text(noTarget, RenderLanguage.EN)
+        assertTrue(en.startsWith("Step 1: "), en)
+        assertTrue("no text and no id" in en && "no app to open" in en, en)
+        val italian = ValidationMessages.text(noTarget, RenderLanguage.IT)
+        assertTrue(italian.startsWith("Passo 1: "), italian)
+        assertTrue("senza testo né id" in italian && "non ha un'app da aprire" in italian, italian)
+
+        // Ogni motivo ha un testo suo, e il passo viene dal detail (solo cifre).
+        val reasons = listOf(
+            "ui_step_wait_no_target", "ui_step_selector_missing", "ui_step_selector_empty",
+            "ui_step_selector_too_long", "ui_step_selector_control", "ui_step_timeout", "ui_step_index",
+            "ui_step_type_empty", "ui_step_type_too_long", "ui_step_interpolated",
+        )
+        val texts = reasons.map { code ->
+            ValidationMessages.text(ValidationIssue(Severity.ERROR, code, "x", detail = "12"), RenderLanguage.EN)
+        }
+        assertEquals(reasons.size, texts.toSet().size)
+        assertTrue(texts.all { text -> text.startsWith("Step 12: ") }, texts.toString())
+
+        // Senza numero (voci d'audit con i soli codici) o con un detail strano il testo resta quello del codice.
+        assertEquals(
+            ValidationMessages.text("ui_step_timeout", RenderLanguage.EN),
+            ValidationMessages.text(ValidationIssue(Severity.ERROR, "ui_step_timeout", "x"), RenderLanguage.EN),
+        )
+        assertEquals(
+            ValidationMessages.text("ui_step_timeout", RenderLanguage.EN),
+            ValidationMessages.text(
+                ValidationIssue(Severity.ERROR, "ui_step_timeout", "x", detail = "3<b>"),
+                RenderLanguage.EN,
+            ),
+        )
+        // Il vecchio codice generico non esiste più: niente testo che non dice quale passo né perché.
+        assertTrue(!ValidationMessages.isKnown("ui_step_invalid"))
     }
 
     @Test

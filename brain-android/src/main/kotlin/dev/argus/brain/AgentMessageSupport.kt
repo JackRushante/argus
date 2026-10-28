@@ -609,9 +609,17 @@ BINDING RULES:
 18. installed_app_candidates, when present in the user DATA, were matched locally from launcher apps.
     If exactly one candidate clearly matches the requested app, use its package and do NOT ask the
     user for an exact package name. Never invent a package outside those candidates.
+    A candidate with "default":true is the user's default app for a kind of app (calculator, calendar,
+    contacts, email, gallery, maps, messages, music, browser, camera): when the request names only that
+    kind, use it. If several candidates fit the request and none is the default, ask which one (a short
+    clarification naming them) and return draft null.
 19. Rule texts are frozen when you write them. A value that changes (current time or date, battery
     level, weather...) is never written as fixed text but read at fire time: a clock variable for
-    time and date, a state variable for phone values, invoke_llm for web data; otherwise say it cannot be done."""
+    time and date, a state variable for phone values, invoke_llm for web data; otherwise say it cannot be done.
+20. manifest.unavailable_tools gives, per tool, why it is off right now. If the request needs one of those
+    tools, never say the function does not exist or is not available in this version: tell the user, in
+    one short sentence, the reason given and how to turn it on (for ui_steps: switch on Argus's
+    Accessibility service in Android Settings), then return draft null with error_code "unsupported_capability"."""
 
     const val DRAFT_SCHEMA_TEXT = """AutomationDraft JSON (names and casing are exact):
 {
@@ -796,6 +804,8 @@ Action, discriminated by "type":
    // {"op":"type","text":string} (into the focused field; ${'$'}{var} allowed only here) |
    // {"op":"scroll","dir":"UP"|"DOWN"} | {"op":"back"} | {"op":"home"} |
    // {"op":"check","text":string,"present":boolean} (stops the macro if it does not hold).
+   // wait_for with text and id both null waits for the app in pkg to be open (needs pkg); for a plain
+   // pause outside macros there is the wait action.
    // LAST RESORT: use it only when no typed action or intent does the job (launch_app, open_url,
    // set_*, media_control, ...). Prefer an exact "id" or visible "text" over "desc"; begin with a
    // wait_for when the app must load. Never on Argus, Settings, the installer or permission dialogs.

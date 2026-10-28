@@ -185,6 +185,73 @@ class UiStepsRunnerTest {
         assertTrue(clock.time in 4_000..4_500, "tempo: ${clock.time}")
     }
 
+    // --- attesa dell'app (wait_for senza testo né id) ------------------------------------------
+
+    private val appWait = UiStep.WaitFor(timeoutMs = 5_000)
+
+    @Test
+    fun `a wait with no target succeeds at once when the app is already in front with a readable window`() = runTest {
+        val seven = FakeNode(text = "7", isClickable = true)
+        val root = FakeNode(children = listOf(seven))
+        val result = runner(screen({ root }, active = { "com.example.app" }))
+            .run(macro(appWait, UiStep.Click(text = "7"), pkg = "com.example.app"), noOpen)
+
+        assertEquals(ActionResult.Success, result)
+        assertEquals(1, seven.clicks.size)
+    }
+
+    @Test
+    fun `a wait with no target waits for the window to become readable and then goes on`() = runTest {
+        val seven = FakeNode(text = "7", isClickable = true)
+        val tree: (Long) -> ScreenNode? = { now -> if (now >= 1_000) FakeNode(children = listOf(seven)) else null }
+        val result = runner(screen(tree, active = { "com.example.app" }))
+            .run(macro(appWait, UiStep.Click(text = "7"), pkg = "com.example.app"), noOpen)
+
+        assertEquals(ActionResult.Success, result)
+        assertEquals(1, seven.clicks.size)
+        assertTrue(clock.time >= 1_000, "ha aspettato la finestra: ${clock.time}")
+    }
+
+    @Test
+    fun `a wait with no target that never sees the app in front stops with a timeout and taps nothing`() = runTest {
+        val seven = FakeNode(text = "7", isClickable = true)
+        val root = FakeNode(children = listOf(seven))
+        // L'app compare davanti per l'apertura e poi un'altra app (non vietata) le passa sopra.
+        val active = { if (clock.time < 100) "com.example.app" else "com.example.other" }
+        val result = runner(screen({ root }, active = active))
+            .run(macro(UiStep.WaitFor(timeoutMs = 1_000), UiStep.Click(text = "7"), pkg = "com.example.app"), noOpen)
+
+        assertEquals("ui_timeout", failure(result))
+        assertEquals(emptyList(), seven.clicks, "il passo dopo non deve partire")
+        assertTrue(clock.time in 1_400..1_900, "tempo: ${clock.time}")
+    }
+
+    @Test
+    fun `a wait with no target on a window that stays unreadable times out at its own limit`() = runTest {
+        val result = runner(screen({ null }, active = { "com.example.app" }))
+            .run(macro(UiStep.WaitFor(timeoutMs = 2_000), pkg = "com.example.app"), noOpen)
+
+        assertEquals("ui_timeout", failure(result))
+        assertTrue(clock.time in 2_400..2_900, "tempo: ${clock.time}")
+    }
+
+    @Test
+    fun `a wait with no target never lets a forbidden screen pass`() = runTest {
+        val result = runner(screen({ FakeNode() }, active = { if (clock.time < 100) "com.example.app" else "com.android.settings" }))
+            .run(macro(appWait, pkg = "com.example.app"), noOpen)
+
+        assertEquals("ui_forbidden_screen", failure(result))
+    }
+
+    @Test
+    fun `a wait with no target and no app to open is refused before anything runs`() = runTest {
+        val screen = screen({ FakeNode() })
+        val result = runner(screen).run(macro(appWait, UiStep.Home), noOpen)
+
+        assertEquals("resolved_action_invalid", failure(result))
+        assertEquals(emptyList(), screen.globals)
+    }
+
     @Test
     fun `wait_for also sees a label that the app exposes only as a content description`() = runTest {
         val root = FakeNode(children = listOf(FakeNode(contentDescription = "Cerca")))

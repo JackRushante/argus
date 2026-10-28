@@ -233,8 +233,8 @@ internal object LogReasonLabels {
             "un controllo sullo schermo non è andato a buon fine",
         ),
         "ui_timeout" to Label(
-            "the element did not appear in time",
-            "l'elemento non è comparso in tempo",
+            "the element or the app did not appear in time",
+            "l'elemento o l'app non è comparso in tempo",
         ),
         "ui_macro_timeout" to Label(
             "the screen macro ran for more than 60 seconds",

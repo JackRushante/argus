@@ -17,6 +17,7 @@ import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.UiStep
 import dev.argus.engine.runtime.AuditEvent
 import dev.argus.engine.runtime.AuditSink
 import dev.argus.engine.runtime.DeviceState
@@ -302,6 +303,54 @@ class MeteredBrainRepairTest {
         assertFalse("segreto_di_mario" in note || "333" in note || "duplicato" in note, note)
         assertTrue("var_name_invalid: A variable name is not valid" in note, note)
         assertEquals(1, Regex("after_ms_invalid").findAll(note).count(), "un solo messaggio per codice")
+    }
+
+    @Test
+    fun `a macro step error reaches the model with the step number and the exact reason, one per step`() {
+        // Il testo del passo (qui un nome di app scelto dall'utente) non entra mai nella nota.
+        val errors = listOf(
+            ValidationIssue(Severity.ERROR, "ui_step_wait_no_target", "Passo 1: attesa di Segreto", detail = "1"),
+            ValidationIssue(Severity.ERROR, "ui_step_selector_missing", "Passo 3", detail = "3"),
+            ValidationIssue(Severity.ERROR, "ui_step_selector_missing", "Passo 5", detail = "5"),
+            ValidationIssue(Severity.ERROR, "ui_step_selector_missing", "Passo 5 ancora", detail = "5"),
+        )
+
+        val note = repairNote(errors)
+
+        assertTrue("ui_step_wait_no_target: Step 1: " in note && "no text and no id" in note, note)
+        assertTrue("ui_step_selector_missing: Step 3: The step needs a text, an id or a description" in note, note)
+        assertTrue("ui_step_selector_missing: Step 5: " in note, note)
+        assertEquals(1, Regex("Step 5:").findAll(note).count(), "un solo messaggio per passo")
+        assertFalse("Segreto" in note, note)
+    }
+
+    @Test
+    fun `the real validator turns the calculator macro without a target into a repair with the step`() = runTest {
+        val broken = CompileResult(
+            "ok",
+            AutomationDraft(
+                name = "Calcolatrice",
+                trigger = Trigger.Manual,
+                actions = listOf(Action.UiSteps(pkg = null, steps = listOf(UiStep.WaitFor(timeoutMs = 5_000), UiStep.Back))),
+            ),
+            null,
+        )
+        val fixed = CompileResult(
+            "ok",
+            AutomationDraft(
+                name = "Calcolatrice",
+                trigger = Trigger.Manual,
+                actions = listOf(Action.UiSteps(pkg = "com.oneplus.calculator", steps = listOf(UiStep.WaitFor(timeoutMs = 5_000)))),
+            ),
+            null,
+        )
+        val delegate = FakeBrain(broken, fixed)
+
+        val result = metered(delegate).compile("apri la calcolatrice", manifest, DeviceState())
+
+        assertSame(fixed, result)
+        assertEquals(2, delegate.texts.size)
+        assertTrue("ui_step_wait_no_target: Step 1: " in delegate.texts[1], delegate.texts[1])
     }
 
     @Test

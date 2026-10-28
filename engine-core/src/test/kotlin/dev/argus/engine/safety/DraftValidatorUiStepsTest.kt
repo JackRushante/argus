@@ -72,15 +72,70 @@ class DraftValidatorUiStepsTest {
     }
 
     @Test
-    fun `every step respects its limits`() {
-        fun bad(step: UiStep) = errors(v.validate(draft(macro("com.example.shop", step)), emptySet()))
-        assertTrue("ui_step_invalid" in bad(UiStep.Click()))
-        assertTrue("ui_step_invalid" in bad(UiStep.Click(text = "OK", index = 99)))
-        assertTrue("ui_step_invalid" in bad(UiStep.WaitFor(text = "x", timeoutMs = 20_000)))
-        assertTrue("ui_step_invalid" in bad(UiStep.WaitFor(timeoutMs = 1_000)))
-        assertTrue("ui_step_invalid" in bad(UiStep.Type("")))
-        assertTrue("ui_step_invalid" in bad(UiStep.Check("", true)))
+    fun `every step respects its limits and the error names the step and the reason`() {
+        // Il passo da provare è il secondo: il numero nel detail parte da 1.
+        fun bad(step: UiStep, pkg: String? = "com.example.shop") =
+            v.validate(draft(macro(pkg, UiStep.Back, step)), emptySet())
+                .filter { it.severity == Severity.ERROR }.map { it.code to it.detail }
+        assertEquals(listOf("ui_step_selector_missing" to "2"), bad(UiStep.Click()))
+        assertEquals(listOf("ui_step_selector_empty" to "2"), bad(UiStep.Click(text = "  ")))
+        assertEquals(listOf("ui_step_selector_too_long" to "2"), bad(UiStep.Click(text = "a".repeat(201))))
+        assertEquals(listOf("ui_step_selector_control" to "2"), bad(UiStep.Click(id = "a\tb")))
+        assertEquals(listOf("ui_step_index" to "2"), bad(UiStep.Click(text = "OK", index = 99)))
+        assertEquals(listOf("ui_step_timeout" to "2"), bad(UiStep.WaitFor(text = "x", timeoutMs = 20_000)))
+        assertEquals(listOf("ui_step_timeout" to "2"), bad(UiStep.WaitFor(timeoutMs = 50)))
+        assertEquals(listOf("ui_step_type_empty" to "2"), bad(UiStep.Type("")))
+        assertEquals(listOf("ui_step_type_too_long" to "2"), bad(UiStep.Type("a".repeat(1_001))))
+        assertEquals(listOf("ui_step_selector_empty" to "2"), bad(UiStep.Check("", true)))
         assertEquals(emptyList(), bad(UiStep.WaitFor(text = "x", timeoutMs = 15_000)))
+    }
+
+    @Test
+    fun `a wait with no target is the app wait, valid only when the macro opens an app`() {
+        val wait = UiStep.WaitFor(timeoutMs = 5_000)
+        assertEquals(
+            emptyList(),
+            errors(v.validate(draft(macro("com.example.shop", wait, UiStep.Click(text = "7"))), emptySet())),
+        )
+        val issues = v.validate(draft(macro(null, wait, UiStep.Click(text = "7"))), emptySet())
+        val issue = issues.single { it.severity == Severity.ERROR }
+        assertEquals("ui_step_wait_no_target", issue.code)
+        assertEquals("1", issue.detail)
+    }
+
+    @Test
+    fun `each broken step gets its own error with its own number`() {
+        val issues = v.validate(
+            draft(
+                macro(
+                    "com.example.shop",
+                    UiStep.Click(text = "ok"),
+                    UiStep.Click(),
+                    UiStep.Type("fine"),
+                    UiStep.Click(text = "ok", index = 70),
+                    UiStep.Type(""),
+                ),
+            ),
+            emptySet(),
+        )
+        assertEquals(
+            listOf("ui_step_selector_missing" to "2", "ui_step_index" to "4", "ui_step_type_empty" to "5"),
+            issues.filter { it.severity == Severity.ERROR }.map { it.code to it.detail },
+        )
+    }
+
+    @Test
+    fun `the calculator macro the model wrote, with a wait on the app, is valid`() {
+        val calculator = macro(
+            "com.oneplus.calculator",
+            UiStep.WaitFor(timeoutMs = 5_000),
+            UiStep.Click(text = "7"),
+            UiStep.Click(text = "+"),
+            UiStep.Click(text = "8"),
+            UiStep.Click(text = "="),
+            UiStep.Check("15", present = true),
+        )
+        assertEquals(emptyList(), errors(v.validate(draft(calculator, trigger = Trigger.Manual), emptySet())))
     }
 
     @Test
@@ -91,6 +146,11 @@ class DraftValidatorUiStepsTest {
         )
         assertEquals(emptyList(), with(UiStep.Type("Ciao \${sms}")))
         assertTrue("ui_step_interpolated" in with(UiStep.Click(text = "\${sms}")))
+        val interpolated = v.validate(
+            draft(macro("com.example.shop", UiStep.Click(text = "\${sms}")), vars = vars, trigger = Trigger.Immediate),
+            emptySet(),
+        ).single { it.code == "ui_step_interpolated" }
+        assertEquals("1", interpolated.detail)
         assertTrue("ui_step_interpolated" in with(UiStep.WaitFor(id = "\${sms}")))
         assertTrue("ui_step_interpolated" in with(UiStep.Check("\${sms}", true)))
     }

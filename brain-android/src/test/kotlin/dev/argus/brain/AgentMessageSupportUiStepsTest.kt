@@ -45,6 +45,24 @@ class AgentMessageSupportUiStepsTest {
     }
 
     @Test
+    fun `it explains that a wait with no target waits for the app and points to the wait action`() {
+        val text = block()
+        assertTrue("wait_for with text and id both null waits for the app in pkg to be open" in text, text)
+        assertTrue("needs pkg" in text, text)
+        assertTrue("outside macros there is the wait action" in text, text)
+    }
+
+    @Test
+    fun `a tool that is off is explained to the user with how to turn it on, never as a missing feature`() {
+        val rules = AgentMessageSupport.COMPILE_RULES.replace(Regex("\\s+"), " ")
+        val rule = rules.substring(rules.indexOf("20. manifest.unavailable_tools"))
+        assertTrue("never say the function does not exist or is not available in this version" in rule, rule)
+        assertTrue("how to turn it on" in rule, rule)
+        assertTrue("ui_steps" in rule && "Accessibility service" in rule, rule)
+        assertTrue("unsupported_capability" in rule, rule)
+    }
+
+    @Test
     fun `an interpolation is allowed only in the typed text`() {
         assertTrue("\${var} allowed only here" in block(), block())
     }

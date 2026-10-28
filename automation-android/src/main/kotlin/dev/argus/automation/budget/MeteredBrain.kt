@@ -99,12 +99,13 @@ private const val REPAIR_NOTE_SUFFIX = " Reply again with one short sentence, th
 private const val REPAIR_MAX_ERRORS = 6
 
 /**
- * Nota del giro di riparazione: SOLO codici e messaggi (inglesi) del validatore, uno per codice. Nessun
- * dato dell'utente oltre a quello già presente nella richiesta: i messaggi vengono dalla tabella fissa di
- * [ValidationMessages], mai dal testo diagnostico del validatore, che può citare nomi di variabili o pacchetti.
+ * Nota del giro di riparazione: SOLO codici e messaggi (inglesi) del validatore, uno per codice (e per
+ * passo, quando il codice porta il numero del passo di una macro). Nessun dato dell'utente oltre a quello
+ * già presente nella richiesta: i messaggi vengono dalla tabella fissa di [ValidationMessages], mai dal
+ * testo diagnostico del validatore, che può citare nomi di variabili o pacchetti.
  */
 internal fun repairNote(errors: List<ValidationIssue>): String {
-    val reasons = errors.distinctBy { it.code }.take(REPAIR_MAX_ERRORS).joinToString(" ") { issue ->
+    val reasons = errors.distinctBy { it.code to it.detail }.take(REPAIR_MAX_ERRORS).joinToString(" ") { issue ->
         "${issue.code}: ${ValidationMessages.text(issue, RenderLanguage.EN).trimEnd('.', ' ')}."
     }
     return REPAIR_NOTE_PREFIX + reasons + REPAIR_NOTE_SUFFIX

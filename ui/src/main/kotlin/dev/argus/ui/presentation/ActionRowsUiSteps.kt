@@ -43,10 +43,18 @@ internal object ActionRowsUiSteps {
     }
 
     fun stepText(step: UiStep, l: RenderLanguage): String = when (step) {
-        is UiStep.WaitFor -> l.pick(
-            "Wait up to ${seconds(step.timeoutMs)} s for ${criteria(step.text, step.id, null, l)}",
-            "Aspetta fino a ${seconds(step.timeoutMs)} s: ${criteria(step.text, step.id, null, l)}",
-        )
+        // Senza testo né id l'attesa è quella dell'app indicata da `pkg` (0.7.0).
+        is UiStep.WaitFor -> if (step.text == null && step.id == null) {
+            l.pick(
+                "Wait for the app to be open (up to ${seconds(step.timeoutMs)} s)",
+                "Aspetta che l'app sia aperta (fino a ${seconds(step.timeoutMs)} s)",
+            )
+        } else {
+            l.pick(
+                "Wait up to ${seconds(step.timeoutMs)} s for ${criteria(step.text, step.id, null, l)}",
+                "Aspetta fino a ${seconds(step.timeoutMs)} s: ${criteria(step.text, step.id, null, l)}",
+            )
+        }
         is UiStep.Click -> {
             val which = step.index?.let { l.pick(" (match number ${it + 1})", " (corrispondenza numero ${it + 1})") }.orEmpty()
             l.pick(

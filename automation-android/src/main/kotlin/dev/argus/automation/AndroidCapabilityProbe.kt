@@ -704,8 +704,13 @@ class AndroidCapabilityProbe internal constructor(
         /** Motivo (in inglese, va al modello) per luminosità e rotazione senza il permesso speciale. */
         const val REASON_WRITE_SETTINGS = "modify system settings access not granted"
 
-        /** Motivo (in inglese, va al modello) per le macro sullo schermo senza il servizio di Accessibilità. */
-        const val REASON_ACCESSIBILITY = "accessibility service not enabled"
+        /**
+         * Motivo (in inglese, va al modello) per le macro sullo schermo senza il servizio di Accessibilità.
+         * Dice COSA è spento e DOVE si accende, così il modello lo riferisce all'utente invece di rispondere
+         * che la funzione non esiste in questa versione (0.7.0).
+         */
+        const val REASON_ACCESSIBILITY = "Argus's Accessibility service is turned off: the user must turn it on in " +
+            "Android Settings > Accessibility > Argus (or from Argus Settings > Screen control (Accessibility))"
 
         /** 0.4.1, sempre disponibili: parlato, tasti multimediali, HTTP (nessun grant da pubblicare). */
         val BASE_ACTIONS_041_TYPES = setOf(

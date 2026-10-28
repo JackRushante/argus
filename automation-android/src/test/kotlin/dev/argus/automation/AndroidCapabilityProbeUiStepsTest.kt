@@ -65,6 +65,21 @@ class AndroidCapabilityProbeUiStepsTest {
     }
 
     @Test
+    fun `the reason for the service being off says what to turn on and where, not that the feature is missing`() = runTest {
+        val manifest = probe(state(accessibility = false, notifications = true)).probe(DeviceState())
+        val reason = manifest.unavailableTools.getValue(ActionTypeIds.UI_STEPS)
+
+        assertTrue("Accessibility" in reason && "Argus" in reason, reason)
+        assertTrue("turned off" in reason && "turn it on" in reason, reason)
+        assertTrue("Settings > Accessibility" in reason, reason)
+        listOf("not available", "not supported", "this version").forEach {
+            assertFalse(it in reason, "$it in: $reason")
+        }
+        // Il motivo è fisso: nessun dato dell'utente, e abbastanza corto da stare in ogni compile.
+        assertTrue(reason.length < 250, "${reason.length} caratteri")
+    }
+
+    @Test
     fun `without notifications the macro has no stop button so it is not offered`() = runTest {
         val probe = probe(state(accessibility = true, notifications = false))
         val manifest = probe.probe(DeviceState())
