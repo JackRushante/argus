@@ -1293,6 +1293,8 @@ class DraftValidator(
                 "Revocare un permesso toglie un accesso all'app ${action.pkg}: ${action.permission}",
             )
         }
+    }
+
     /**
      * `ui_steps` (0.5.1). Da 1 a 20 passi a vocabolario chiuso; `pkg` è un package letterale e mai uno
      * di quelli vietati (Argus, Impostazioni, installatore, dialoghi dei permessi); solo il testo di
