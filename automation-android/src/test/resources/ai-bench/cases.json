@@ -2581,7 +2581,7 @@
   "text": "Tra 5 minuti apri la calcolatrice",
   "extra_apps": [{"label": "Calcolatrice semplice", "package": "com.simplemobiletools.calculator"}],
   "expect": {
-   "outcome": ["clarification", "draft"],
+   "outcome": ["clarification", "draft"], "trigger": {"type": "time", "afterMs": {"present": true}}, "actions_include": ["launch_app"],
    "reply_mentions": ["semplice|simple"]
   },
   "note": "Due calcolatrici tra i candidati e nessuna predefinita: il modello chiede quale (breve, coi nomi) invece di sceglierne una"
@@ -2593,7 +2593,7 @@
   "text": "In 5 minutes open the calculator",
   "extra_apps": [{"label": "Simple Calculator", "package": "com.simplemobiletools.calculator"}],
   "expect": {
-   "outcome": ["clarification", "draft"],
+   "outcome": ["clarification", "draft"], "trigger": {"type": "time", "afterMs": {"present": true}}, "actions_include": ["launch_app"],
    "reply_mentions": ["simple"]
   },
   "note": "Come app70.twocalc.it.01, in inglese"
