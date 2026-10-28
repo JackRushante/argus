@@ -427,9 +427,8 @@ Open an [Issue](https://github.com/JackRushante/argus/issues) with: what you ask
 
 Short roadmap:
 
-- **0.5.2** — a warning in approval when a rule names an app that is not installed, and the small items left
-  from 0.5.1.
-- **0.7.0, redesign** — a new look for the app.
+- **0.7.0, redesign** — a new look for the app, light and dark; plus a warning in approval when a rule names an
+  app that is not installed, and the screenshot file name in the Log.
 
 **Disclaimer**: this is a personal project, developed and tested mainly on a single device (OnePlus 15, Android 16) and on an Android 16 emulator. Expect rough edges on other OEMs — that is exactly the feedback we are looking for. No warranty: rules execute real actions on your phone, read what you approve.
 
