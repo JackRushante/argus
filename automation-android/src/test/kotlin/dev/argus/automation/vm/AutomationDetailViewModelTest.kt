@@ -13,6 +13,9 @@ import dev.argus.automation.AutomationEnablementCoordinator
 import dev.argus.automation.CurrentLocationProvider
 import dev.argus.automation.GenerativeReadiness
 import dev.argus.automation.GenerativeRuntimeReadiness
+import dev.argus.automation.apps.EmptyInstalledAppCatalog
+import dev.argus.automation.apps.InstalledAppCatalog
+import dev.argus.automation.apps.InstalledAppEntry
 import dev.argus.automation.LogRetentionStore
 import dev.argus.automation.AlarmDeliveryResult
 import dev.argus.automation.ReconcileReason
@@ -46,6 +49,7 @@ import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.AutomationStatus
+import dev.argus.engine.model.AppEventKind
 import dev.argus.engine.model.CapabilityRequirements
 import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.GenerativeDeliverMode
@@ -70,6 +74,7 @@ import dev.argus.engine.safety.DraftWriteResult
 import dev.argus.engine.safety.NewDraft
 import dev.argus.engine.safety.PendingDraft
 import dev.argus.shizuku.ShizukuGatewayStatus
+import dev.argus.ui.model.AppInfoUi
 import dev.argus.ui.model.ManualEntryUi
 import dev.argus.ui.model.RuleStatsWindow
 import dev.argus.ui.model.StatusBadge
@@ -82,6 +87,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -1085,6 +1091,7 @@ class AutomationDetailViewModelTest {
         geofenceState: GeofenceStateStore = MemoryGeofenceStateStore(),
         retention: LogRetentionStore = LogRetentionStore(ApplicationProvider.getApplicationContext<Context>()),
         manual: ManualEntryService = ManualHarness(store).service,
+        appCatalog: InstalledAppCatalog = EmptyInstalledAppCatalog,
     ): AutomationDetailViewModel {
         val whitelist = RoomContactWhitelistStore(db.contactWhitelistDao())
         val snapshots = FirePolicySnapshotProvider {
@@ -1132,7 +1139,187 @@ class AutomationDetailViewModelTest {
             retention = retention,
             manual = manual,
             applicationScope = applicationScope,
+            appCatalog = appCatalog,
         ).also { lastViewModel = it }
+    }
+
+    // --- 0.7.0: nome delle app e «Cambia app» --------------------------------------------------------
+
+    private class FakeCatalog(
+        private val apps: List<InstalledAppEntry>,
+        private val installed: Set<String> = apps.map { it.packageName }.toSet(),
+    ) : InstalledAppCatalog {
+        override suspend fun launchableApps() = apps
+        override suspend fun isInstalled(packageName: String) = packageName in installed
+        override suspend fun missing(packages: Collection<String>) = packages.filterNot { it in installed }.toSet()
+    }
+
+    private val appCatalog = FakeCatalog(
+        listOf(
+            InstalledAppEntry("Chrome", "com.android.chrome"),
+            InstalledAppEntry("Firefox", "org.mozilla.firefox"),
+        ),
+    )
+
+    private fun appsDraft(id: String) = NewDraft(
+        id = DraftId("draft-$id"),
+        automationId = AutomationId(id),
+        draft = AutomationDraft(
+            name = "Apri app $id",
+            trigger = Trigger.AppEvent("com.youtube", AppEventKind.OPENED),
+            actions = listOf(Action.LaunchApp("com.android.chrome")),
+            rationale = "Quando apri YouTube apro Chrome.",
+        ),
+        atMillis = 1_000,
+    )
+
+    @Test
+    fun `the detail names the apps of the rule and flags the one that is not installed`() = runTest {
+        val store = RoomAutomationStore(db.automationDao())
+        assertIs<DraftWriteResult.Saved>(RoomDraftRepository(db).create(appsDraft("ap1")))
+        val viewModel = viewModel("draft-ap1", store, DetailAuditRecorder(), RenderLanguage.EN, appCatalog = appCatalog)
+        awaitUntil("dettaglio caricato") { viewModel.state.value.detail?.appInfo?.isNotEmpty() == true }
+
+        val detail = assertNotNull(viewModel.state.value.detail)
+        assertEquals(AppInfoUi(name = "Chrome", installed = true), detail.appInfo["com.android.chrome"])
+        assertEquals(AppInfoUi(name = null, installed = false), detail.appInfo["com.youtube"])
+        assertTrue(detail.canChangeApp)
+        assertEquals(dev.argus.ui.model.AppRef(0, "com.youtube"), detail.rule.triggerAppRef)
+    }
+
+    @Test
+    fun `change app on a draft makes a new revision with a new fingerprint and drops the old prose`() = runTest {
+        val store = RoomAutomationStore(db.automationDao())
+        val repository = RoomDraftRepository(db)
+        val first = assertIs<DraftWriteResult.Saved>(repository.create(appsDraft("ap2"))).snapshot
+        val viewModel = viewModel("draft-ap2", store, DetailAuditRecorder(), RenderLanguage.EN, appCatalog = appCatalog)
+        awaitUntil("dettaglio caricato") { viewModel.state.value.detail != null }
+        val events = collectEvents(viewModel)
+
+        viewModel.onChangeApp(slot = 1, packageName = "org.mozilla.firefox")
+        awaitUntil("nuova revisione") { events.any { it is DetailEvent.Message } }
+
+        val second = assertNotNull(repository.get(first.id))
+        assertEquals(first.revision + 1, second.revision)
+        assertTrue(second.fingerprint != first.fingerprint)
+        assertEquals(Action.LaunchApp("org.mozilla.firefox"), second.draft.actions.single())
+        assertEquals(first.draft.trigger, second.draft.trigger)
+        assertEquals("", second.draft.rationale)
+        assertTrue((events.single() as DetailEvent.Message).text.contains("new revision"))
+    }
+
+    @Test
+    fun `change app refuses a package that is not a package name and never touches the draft`() = runTest {
+        val store = RoomAutomationStore(db.automationDao())
+        val repository = RoomDraftRepository(db)
+        val first = assertIs<DraftWriteResult.Saved>(repository.create(appsDraft("ap3"))).snapshot
+        val viewModel = viewModel("draft-ap3", store, DetailAuditRecorder(), RenderLanguage.EN, appCatalog = appCatalog)
+        awaitUntil("dettaglio caricato") { viewModel.state.value.detail != null }
+        val events = collectEvents(viewModel)
+
+        viewModel.onChangeApp(slot = 1, packageName = "not a package")
+        awaitUntil("rifiuto") { events.any { it is DetailEvent.Message } }
+
+        assertEquals(first.revision, repository.get(first.id)?.revision)
+        assertEquals("Unable to change the app.", (events.single() as DetailEvent.Message).text)
+    }
+
+    @Test
+    fun `choosing the app already in use changes nothing`() = runTest {
+        val store = RoomAutomationStore(db.automationDao())
+        val repository = RoomDraftRepository(db)
+        val first = assertIs<DraftWriteResult.Saved>(repository.create(appsDraft("ap4"))).snapshot
+        val viewModel = viewModel("draft-ap4", store, DetailAuditRecorder(), RenderLanguage.EN, appCatalog = appCatalog)
+        awaitUntil("dettaglio caricato") { viewModel.state.value.detail != null }
+        val events = collectEvents(viewModel)
+
+        viewModel.onChangeApp(slot = 1, packageName = "com.android.chrome")
+        awaitUntil("messaggio") { events.any { it is DetailEvent.Message } }
+
+        assertEquals(first.revision, repository.get(first.id)?.revision)
+        assertEquals("The rule already uses that app.", (events.single() as DetailEvent.Message).text)
+    }
+
+    @Test
+    fun `change app on an armed rule never edits it: it opens an edit draft for approval`() = runTest {
+        val store = RoomAutomationStore(db.automationDao())
+        val armed = persist(
+            Automation(
+                id = AutomationId("armed-ap"),
+                name = "Apri Chrome",
+                createdBy = CreatedBy.USER,
+                status = AutomationStatus.ARMED,
+                trigger = Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+                actions = listOf(Action.LaunchApp("com.android.chrome")),
+                enabled = true,
+            ),
+        )
+        val repository = RoomDraftRepository(db)
+        val viewModel = viewModel("armed-ap", store, DetailAuditRecorder(), RenderLanguage.EN, appCatalog = appCatalog)
+        awaitUntil("dettaglio caricato") { viewModel.state.value.detail != null }
+        assertTrue(assertNotNull(viewModel.state.value.detail).canChangeApp)
+        val events = collectEvents(viewModel)
+
+        viewModel.onChangeApp(slot = 0, packageName = "org.mozilla.firefox")
+        awaitUntil("bozza di modifica aperta") { events.any { it is DetailEvent.OpenDetail } }
+
+        // La regola armata è identica, stesso stato e stessa impronta.
+        val still = assertNotNull(store.get(armed.id))
+        assertEquals(AutomationStatus.ARMED, still.status)
+        assertEquals(armed.approvalFingerprint, still.approvalFingerprint)
+        assertEquals(armed.actions, still.actions)
+        // La bozza di modifica porta il nuovo package e punta alla versione approvata.
+        val opened = events.filterIsInstance<DetailEvent.OpenDetail>().single()
+        val draft = assertNotNull(repository.get(DraftId(opened.id)))
+        assertEquals(armed.id, draft.automationId)
+        assertEquals(armed.approvalFingerprint, draft.baseAutomationFingerprint)
+        assertEquals(Action.LaunchApp("org.mozilla.firefox"), draft.draft.actions.single())
+    }
+
+    @Test
+    fun `a second change app on an armed rule opens the edit that is already waiting`() = runTest {
+        val store = RoomAutomationStore(db.automationDao())
+        persist(
+            Automation(
+                id = AutomationId("armed-ap2"),
+                name = "Apri Chrome",
+                createdBy = CreatedBy.USER,
+                status = AutomationStatus.ARMED,
+                trigger = Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+                actions = listOf(Action.LaunchApp("com.android.chrome")),
+                enabled = true,
+            ),
+        )
+        val viewModel = viewModel("armed-ap2", store, DetailAuditRecorder(), RenderLanguage.EN, appCatalog = appCatalog)
+        awaitUntil("dettaglio caricato") { viewModel.state.value.detail != null }
+        val events = collectEvents(viewModel)
+
+        viewModel.onChangeApp(slot = 0, packageName = "org.mozilla.firefox")
+        awaitUntil("prima bozza") { events.any { it is DetailEvent.OpenDetail } }
+        awaitUntil("footer di nuovo attivo") { viewModel.state.value.detail?.actionInProgress == false }
+        viewModel.onChangeApp(slot = 0, packageName = "com.example.other")
+        awaitUntil("seconda apertura") { events.count { it is DetailEvent.OpenDetail } == 2 }
+
+        val ids = events.filterIsInstance<DetailEvent.OpenDetail>().map { it.id }
+        assertEquals(ids[0], ids[1])
+        assertEquals(1, RoomDraftRepository(db).observeAll().first().count { it.automationId.value == "armed-ap2" })
+    }
+
+    @Test
+    fun `opening change app loads the installed apps once, in the catalog order`() = runTest {
+        val store = RoomAutomationStore(db.automationDao())
+        assertIs<DraftWriteResult.Saved>(RoomDraftRepository(db).create(appsDraft("ap6")))
+        val viewModel = viewModel("draft-ap6", store, DetailAuditRecorder(), RenderLanguage.EN, appCatalog = appCatalog)
+        awaitUntil("dettaglio caricato") { viewModel.state.value.detail != null }
+        assertNull(viewModel.state.value.detail?.appChoices)
+
+        viewModel.onLoadAppChoices()
+        awaitUntil("elenco caricato") { viewModel.state.value.detail?.appChoices != null }
+
+        assertEquals(
+            listOf("com.android.chrome", "org.mozilla.firefox"),
+            viewModel.state.value.detail?.appChoices?.map { it.packageName },
+        )
     }
 
     // --- F8/F21: avvio manuale e pausa nel Dettaglio ---------------------------------------------

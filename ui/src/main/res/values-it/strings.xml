@@ -428,9 +428,9 @@
     <string name="rda_ap_app_not_installed">Non installata</string>
     <string name="rda_ap_change_app">Cambia app</string>
     <string name="rda_ap_change_app_cd">Cambia app %1$s</string>
-    <string name="rda_ap_picker_title">Scegli un'app</string>
+    <string name="rda_ap_picker_title">Scegli un\'app</string>
     <string name="rda_ap_picker_note_draft">La regola diventa una nuova revisione: dovrai approvarla di nuovo.</string>
-    <string name="rda_ap_picker_note_armed">La regola armata resta com'è. La modifica diventa una bozza che approvi prima che sostituisca la regola.</string>
+    <string name="rda_ap_picker_note_armed">La regola armata resta com\'è. La modifica diventa una bozza che approvi prima che sostituisca la regola.</string>
     <string name="rda_ap_picker_search">Cerca tra le app</string>
     <string name="rda_ap_picker_loading">Carico le app…</string>
     <string name="rda_ap_picker_empty">Nessuna app corrisponde.</string>
