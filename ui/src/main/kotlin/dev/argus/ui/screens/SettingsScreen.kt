@@ -22,6 +22,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Alarm
+import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.BatterySaver
 import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.CheckCircle
@@ -272,6 +273,18 @@ private fun HealthSection(state: SettingsState, callbacks: SettingsCallbacks) {
                 },
                 if (state.writeSettingsGranted) HealthLevel.OK else HealthLevel.WARN,
                 onFix = callbacks::onOpenWriteSettingsFix,
+            )
+            // 0.5.1: accesso ai dati di utilizzo per le regole «app aperta/chiusa» (si concede solo da qui,
+            // oppure con Shizuku/root da «Concedi i permessi permanenti»).
+            HealthRow(
+                Icons.Rounded.Apps, stringResource(R.string.app51_settings_usage_title),
+                if (state.usageAccessGranted) {
+                    stringResource(R.string.app51_settings_usage_ok)
+                } else {
+                    stringResource(R.string.app51_settings_usage_warn)
+                },
+                if (state.usageAccessGranted) HealthLevel.OK else HealthLevel.WARN,
+                onFix = callbacks::onOpenUsageAccessFix,
             )
             HealthRow(
                 Icons.Rounded.Notifications, stringResource(R.string.settings_notifications_title),
@@ -1110,4 +1123,10 @@ private fun SettingsExactAlarmsDeniedPreview() {
 @Composable
 private fun SettingsWriteSettingsDeniedPreview() {
     ArgusTheme { SettingsScreen(Fixtures.settingsWriteSettingsDenied, NoopSettingsCallbacks) }
+}
+
+@Preview(name = "Sistema · accesso ai dati di utilizzo non concesso (CTA)", showBackground = true, backgroundColor = 0xFF0E1216, heightDp = 1100)
+@Composable
+private fun SettingsUsageAccessDeniedPreview() {
+    ArgusTheme { SettingsScreen(Fixtures.settingsUsageAccessDenied, NoopSettingsCallbacks) }
 }

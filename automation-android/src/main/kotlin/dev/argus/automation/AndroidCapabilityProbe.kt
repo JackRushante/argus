@@ -202,6 +202,9 @@ enum class BlockCause {
 
     /** 0.4.1: manca «Modifica impostazioni di sistema» (luminosità, rotazione). */
     WRITE_SETTINGS_ACCESS,
+
+    /** 0.5.1: manca l'accesso ai dati di utilizzo (regole «app aperta/chiusa»). */
+    USAGE_ACCESS,
     OTHER,
 }
 
@@ -296,6 +299,9 @@ class AndroidCapabilityProbe internal constructor(
         add("audio_output")
         add("mode_changed")
         add("media")
+        // 0.5.1: app aperta/chiusa, solo con l'accesso ai dati di utilizzo concesso (altrimenti il modello
+        // proporrebbe una regola che l'app non può armare).
+        if (state.usageStatsGranted) add("app_event")
         // Il filtro SIM vale solo su un telefono con più slot e dove SMS o chiamate sono armabili.
         if (state.multiSim && (state.receiveSmsGranted || (state.readPhoneStateGranted && state.readCallLogGranted))) {
             add("phone_state.sim")
@@ -356,6 +362,7 @@ class AndroidCapabilityProbe internal constructor(
         capability == CapabilityIds.ACTION_INVOKE_LLM ||
             capability == GenerativeContract.TOOL_WEB_SEARCH -> BlockCause.AI_NOT_READY
         capability.startsWith(SENSOR_TRIGGER_PREFIX) -> BlockCause.SENSOR_UNAVAILABLE
+        capability == CapabilityIds.TRIGGER_APP_EVENT -> BlockCause.USAGE_ACCESS
         else -> BlockCause.OTHER
     }
 
@@ -443,6 +450,8 @@ class AndroidCapabilityProbe internal constructor(
             // con l'accesso ai dati di utilizzo l'app in primo piano si legge da UsageStatsManager.
             if (state.secureSettingsGranted) add(ActionCapabilities.WRITE_SETTING)
             if (state.usageStatsGranted) add(CapabilityIds.STATE_FOREGROUND_APP)
+            // 0.5.1: «app aperta/chiusa» legge gli stessi eventi di utilizzo: stesso permesso, nessuno shell.
+            if (state.usageStatsGranted) add(CapabilityIds.TRIGGER_APP_EVENT)
             if (state.notificationsGranted) add(ActionCapabilities.SHOW_NOTIFICATION)
             // CapabilityRequirements persiste anche i raw tool approvati: il set del fire-time
             // deve contenere gli stessi nomi wire, senza alias con le capability typed.

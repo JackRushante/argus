@@ -1,5 +1,7 @@
 package dev.argus.engine.device
 
+import dev.argus.engine.model.AppEventKind
+import dev.argus.engine.model.AppPackagePolicy
 import dev.argus.engine.model.AudioOutputKind
 import dev.argus.engine.model.ConnState
 import dev.argus.engine.model.MediaPlayState
@@ -63,6 +65,19 @@ class DeviceEventParser {
         TriggerEvent.MediaPlaybackChanged(state),
         "media", state.name, instant(atMillis),
     )
+
+    /**
+     * App aperta o chiusa (0.5.1). L'id è un digest di package, direzione e istante dell'evento di
+     * sistema: la stessa transizione riletta due volte dà lo stesso id e il motore non la esegue due
+     * volte. `null` se il package non ha la forma di un package Android (mai un valore inventato).
+     */
+    fun appEvent(pkg: String, event: AppEventKind, atMillis: Long): TriggerEnvelope? {
+        if (!AppPackagePolicy.valid(pkg)) return null
+        return envelope(
+            TriggerEvent.AppForegroundChanged(pkg, event),
+            "app_event", pkg, event.name, instant(atMillis),
+        )
+    }
 
     private fun instant(atMillis: Long): String = atMillis.coerceAtLeast(0).toString()
 

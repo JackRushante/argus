@@ -43,5 +43,7 @@ fun iconFor(key: String): ImageVector = when (key) {
     "media" -> Icons.Rounded.MusicNote
     // Avvio manuale (0.4.1): la regola parte solo quando la lancia l'utente.
     "manual" -> Icons.Rounded.PlayCircle
+    // App aperta/chiusa (0.5.1).
+    "app_event" -> Icons.Rounded.Apps
     else -> Icons.Rounded.Bolt
 }

@@ -401,4 +401,8 @@
     <string name="priv50_dialog_body">Argus will grant itself the permissions you leave ticked. They stay after a reboot.</string>
     <string name="priv50_dialog_listener_note">Notification access is not granted this way: it stays in the system screen, because it is the most sensitive permission.</string>
     <string name="priv50_dialog_confirm">Grant</string>
+    <!-- 0.5.1 (trigger app aperta/chiusa): accesso ai dati di utilizzo. -->
+    <string name="app51_settings_usage_title">Usage data access</string>
+    <string name="app51_settings_usage_ok">granted: rules can react when an app is opened or closed</string>
+    <string name="app51_settings_usage_warn">not granted: rules that react to an app opening or closing cannot run. With Shizuku or root, \"Grant permanent permissions\" is enough</string>
 </resources>

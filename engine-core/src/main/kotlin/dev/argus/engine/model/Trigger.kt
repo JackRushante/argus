@@ -193,6 +193,14 @@ sealed interface Trigger {
      */
     @Serializable @SerialName("manual")
     data object Manual : Trigger
+
+    /**
+     * App aperta o chiusa (0.5.1): [event] OPENED quando [pkg] passa in primo piano, CLOSED quando lo
+     * lascia. Il package è quello di Android (`com.google.android.youtube`); l'app che lo apre può
+     * essere una qualunque, quindi il trigger NON può avviare la shell (vedi `StaticShellSafety`).
+     */
+    @Serializable @SerialName("app_event")
+    data class AppEvent(val pkg: String, val event: AppEventKind) : Trigger
 }
 
 /** One-shot = fira una volta e si auto-consuma: `at` assoluto o `afterMs` relativo (mai cron ricorrente). */

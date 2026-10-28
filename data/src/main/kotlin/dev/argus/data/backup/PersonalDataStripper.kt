@@ -59,6 +59,8 @@ object PersonalDataStripper {
         is Trigger.Media,
         // 0.4.1: l'avvio manuale non ha campi.
         Trigger.Manual,
+        // 0.5.1: il package dell'app e la direzione sono il criterio della regola, non un dato personale.
+        is Trigger.AppEvent,
         -> trigger
     }
 

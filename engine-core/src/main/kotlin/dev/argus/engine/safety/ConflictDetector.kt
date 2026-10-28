@@ -34,6 +34,8 @@ class ConflictDetector {
         t1 is Trigger.Media && t2 is Trigger.Media -> t1.state != t2.state
         t1 is Trigger.ModeChanged && t2 is Trigger.ModeChanged ->
             t1.what == t2.what && t1.to != null && t2.to != null && t1.to != t2.to
+        // 0.5.1: aperta/chiusa della stessa app è la coppia classica («apro: spegni, chiudo: riaccendi»).
+        t1 is Trigger.AppEvent && t2 is Trigger.AppEvent -> t1.pkg == t2.pkg && t1.event != t2.event
         else -> false
     }
 

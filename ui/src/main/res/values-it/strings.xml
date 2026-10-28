@@ -400,4 +400,8 @@
     <string name="priv50_dialog_body">Argus si concederà da solo i permessi che lasci spuntati. Restano anche dopo il riavvio.</string>
     <string name="priv50_dialog_listener_note">L\'accesso alle notifiche non si concede così: resta la schermata di sistema, perché è il permesso più delicato.</string>
     <string name="priv50_dialog_confirm">Concedi</string>
+    <!-- 0.5.1 (trigger app aperta/chiusa): accesso ai dati di utilizzo. -->
+    <string name="app51_settings_usage_title">Accesso ai dati di utilizzo</string>
+    <string name="app51_settings_usage_ok">concesso: le regole possono reagire all\'apertura e alla chiusura di un\'app</string>
+    <string name="app51_settings_usage_warn">non concesso: le regole che reagiscono all\'apertura o alla chiusura di un\'app non possono partire. Con Shizuku o root basta \"Concedi i permessi permanenti\"</string>
 </resources>

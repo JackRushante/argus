@@ -1,6 +1,7 @@
 package dev.argus.automation.vm
 
 import dev.argus.engine.model.Action
+import dev.argus.engine.model.AppEventKind
 import dev.argus.engine.model.ApprovedStateContext
 import dev.argus.engine.model.AudioOutputKind
 import dev.argus.engine.model.Automation
@@ -358,6 +359,19 @@ class RuleRenderCoverageTest {
             ),
             // 0.4.1: avvio manuale, nessun campo da rendere.
             "manual" to case(Trigger.Manual, emptyMap()),
+            // 0.5.1: app aperta/chiusa. Il package compare per intero, la direzione dice anche cosa significa.
+            "app_event" to case(
+                v(
+                    Trigger.AppEvent("org.example.xyzapp", AppEventKind.OPENED),
+                    "pkg" to ms("org.example.xyzapp"),
+                    "event" to ms(m("is opened", "viene aperta")),
+                ),
+                v(
+                    Trigger.AppEvent("org.example.xyzapp", AppEventKind.CLOSED),
+                    "pkg" to ms("org.example.xyzapp"),
+                    "event" to ms(m("is closed", "viene chiusa")),
+                ),
+            ),
         )
         check("Trigger", Trigger.serializer(), cases) { trigger -> automation(trigger = trigger) }
     }

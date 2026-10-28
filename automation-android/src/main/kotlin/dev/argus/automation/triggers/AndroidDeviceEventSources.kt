@@ -13,8 +13,10 @@ import android.media.AudioPlaybackConfiguration
 import android.os.BatteryManager
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.util.Log
 import androidx.core.content.ContextCompat
+import dev.argus.device.AndroidUsageEventsSource
 import dev.argus.device.BatteryReading
 import dev.argus.device.PublicStateReader
 import dev.argus.engine.model.ModeKind
@@ -39,6 +41,8 @@ class AndroidDeviceEventSources(
     /** `true` se il monitor precedente è morto senza uno stop esplicito (vedi `ConnectivityMonitorMarker`). */
     private val recoverMissed: Boolean,
     private val nowMillis: () -> Long = System::currentTimeMillis,
+    /** 0.5.1: package delle app osservate da una regola armata `app_event` (letto a ogni consegna). */
+    private val appPackages: () -> Set<String> = { emptySet() },
 ) {
     private val appContext = context.applicationContext
     private val lock = Any()
@@ -92,6 +96,7 @@ class AndroidDeviceEventSources(
         DeviceEventSource.MODE_DND -> registerDnd()
         DeviceEventSource.MODE_RINGER -> registerRinger()
         DeviceEventSource.MEDIA -> registerMedia()
+        DeviceEventSource.APP_EVENT -> registerAppEvents()
     }
 
     /** Una consegna: parte sul thread del callback, nell'ordine di arrivo, e prosegue sul dispatcher. */
@@ -273,6 +278,61 @@ class AndroidDeviceEventSources(
             unregister = {
                 audio.unregisterAudioPlaybackCallback(callback)
                 tracker.close()
+            },
+        )
+    }
+
+    // --- App aperta/chiusa (0.5.1) ---------------------------------------------------------------
+
+    /**
+     * Legge gli eventi di utilizzo (`UsageStatsManager`) a intervalli brevi SOLO a schermo acceso: allo
+     * spegnimento si ferma, alla riaccensione riparte da dove era arrivata. Gli eventi schermo sono quelli
+     * del sistema (ACTION_SCREEN_ON/OFF), con un receiver proprio perché questa sorgente funzioni anche
+     * senza regole sullo schermo. Nessun wakelock.
+     */
+    private fun registerAppEvents(): Registration {
+        val power = appContext.getSystemService(PowerManager::class.java)
+        val poller = AppEventPoller(
+            scope = scope,
+            source = AndroidUsageEventsSource(appContext),
+            nowMillis = nowMillis,
+            watched = appPackages,
+            emit = { transition ->
+                try {
+                    ingress.onAppEvent(transition.pkg, transition.event, transition.atMillis)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    Log.w(TAG, "dispatch app_event fallito: ${error::class.java.simpleName}")
+                }
+            },
+        )
+        poller.start(screenOn = false)
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                when (intent.action) {
+                    Intent.ACTION_SCREEN_ON -> poller.onScreenOn()
+                    Intent.ACTION_SCREEN_OFF -> poller.onScreenOff()
+                }
+            }
+        }
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_SCREEN_OFF)
+        }
+        // Acceso/spento li invia system_server: bastano i receiver non esportati.
+        try {
+            ContextCompat.registerReceiver(appContext, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+        } catch (error: RuntimeException) {
+            poller.close()
+            throw error
+        }
+        // Lo stato attuale si legge DOPO la registrazione: un cambio in mezzo arriva comunque dal receiver.
+        if (power?.isInteractive == true) poller.onScreenOn()
+        return Registration(
+            unregister = {
+                appContext.unregisterReceiver(receiver)
+                poller.close()
             },
         )
     }

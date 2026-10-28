@@ -17,6 +17,9 @@ enum class DeviceEventSource {
     MODE_DND,
     MODE_RINGER,
     MEDIA,
+
+    /** 0.5.1: app aperta/chiusa, letta da `UsageStatsManager` (serve l'accesso ai dati di utilizzo). */
+    APP_EVENT,
 }
 
 /** La sorgente di cui ha bisogno il trigger, o `null` se il trigger non passa dalla sentinella. */
@@ -29,6 +32,7 @@ fun Trigger.deviceEventSource(): DeviceEventSource? = when (this) {
         ModeKind.RINGER -> DeviceEventSource.MODE_RINGER
     }
     is Trigger.Media -> DeviceEventSource.MEDIA
+    is Trigger.AppEvent -> DeviceEventSource.APP_EVENT
     else -> null
 }
 
@@ -39,10 +43,21 @@ fun Trigger.deviceEventSource(): DeviceEventSource? = when (this) {
  */
 class DeviceEventDemand {
     private val required = MutableStateFlow<Set<DeviceEventSource>>(emptySet())
+    private val apps = MutableStateFlow<Set<String>>(emptySet())
 
     val sources: StateFlow<Set<DeviceEventSource>> = required.asStateFlow()
 
+    /**
+     * Package delle app che una regola armata `app_event` osserva (0.5.1). La lettura degli eventi di
+     * utilizzo segue tutte le app per tenere lo stato, ma consegna al motore solo queste.
+     */
+    val appPackages: StateFlow<Set<String>> = apps.asStateFlow()
+
     fun update(sources: Set<DeviceEventSource>) {
         required.value = sources.toSet()
+    }
+
+    fun updateAppPackages(packages: Set<String>) {
+        apps.value = packages.toSet()
     }
 }

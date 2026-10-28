@@ -36,6 +36,9 @@ object StaticShellSafety {
         is Trigger.Manual,
         -> true
         is Trigger.Media -> false
+        // 0.5.1: qualunque app può aprirne un'altra (un link, un'intent, uno schermo bloccato), quindi
+        // «app aperta/chiusa» non è un'identità fidata e non può avviare la shell.
+        is Trigger.AppEvent -> false
         is Trigger.Notification -> verifiedContact(
             pkg = trigger.pkg,
             conversationId = trigger.conversationId,
@@ -59,6 +62,7 @@ object StaticShellSafety {
         is TriggerEvent.ManualFired,
         -> true
         is TriggerEvent.MediaPlaybackChanged -> false
+        is TriggerEvent.AppForegroundChanged -> false
         is TriggerEvent.NotificationPosted -> verifiedContact(
             pkg = event.pkg,
             conversationId = event.conversationId,
