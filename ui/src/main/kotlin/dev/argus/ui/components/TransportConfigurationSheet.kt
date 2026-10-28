@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.VpnKey
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -78,6 +79,7 @@ import dev.argus.ui.theme.ArgusTheme
  * @param onSelectProvider cambia il provider selezionato (`id` = `ProviderId.wireName`); lo stato [transport] che
  *   arriva dall'host segue la scelta e il foglio mostra i campi del nuovo ramo.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TransportConfigurationSheet(
     transport: TransportUi,

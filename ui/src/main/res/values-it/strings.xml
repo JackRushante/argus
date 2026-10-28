@@ -251,7 +251,6 @@
     <string name="settings_budget_tokens_month">Token · mese (token-only)</string>
     <string name="settings_budget_cost_month">Costo · mese corrente</string>
     <string name="settings_budget_limit">Limite: %1$s</string>
-    <string name="settings_budget_provider_tokens">token · ora %1$s · oggi %2$s · mese %3$s</string>
     <string name="settings_budget_provider_calls">chiamate · ora %1$d · oggi %2$d</string>
     <string name="settings_budget_provider_reasoning">token reasoning · mese %1$s</string>
     <string name="settings_budget_provider_finish">ultimo motivo di termine · %1$s</string>

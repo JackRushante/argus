@@ -156,7 +156,7 @@ fun SettingsScreen(
     fun Modifier.sectionAnchor(id: String): Modifier =
         onGloballyPositioned { sectionTops[id] = it.positionInRoot().y }
 
-    val healthItems = healthItems(state, callbacks)
+    val healthItems = buildHealthItems(state, callbacks)
     val needsFix = healthItems.count { it is HealthItem.Tile && it.spec.level == HealthTileLevel.Warn }
     val navItems = listOf(
         SystemNavItem(
@@ -294,7 +294,7 @@ private sealed interface HealthItem {
 }
 
 @Composable
-private fun healthItems(state: SettingsState, callbacks: SettingsCallbacks): List<HealthItem> {
+private fun buildHealthItems(state: SettingsState, callbacks: SettingsCallbacks): List<HealthItem> {
     val shizukuSub = when (state.shizuku) {
         ShizukuStatus.AUTHORIZED -> if (state.shizukuRunsAsRoot == true) {
             stringResource(R.string.settings_shizuku_ok_root)
