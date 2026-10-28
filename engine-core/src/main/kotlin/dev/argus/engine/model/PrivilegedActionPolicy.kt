@@ -30,6 +30,9 @@ object PrivilegedActionPolicy {
         "com.android.vending",
         // Il backend privilegiato stesso: fermarlo o congelarlo toglierebbe ad Argus Shizuku.
         "moe.shizuku.privileged.api",
+        // I gestori root: congelarli toglierebbe il backend `su` (KernelSU, Magisk).
+        "me.weishu.kernelsu",
+        "com.topjohnwu.magisk",
     )
 
     /** Argus stesso, varianti comprese (`dev.argus.debug`): mai un bersaglio. */
