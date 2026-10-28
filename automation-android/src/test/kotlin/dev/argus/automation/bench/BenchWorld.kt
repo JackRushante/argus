@@ -30,12 +30,16 @@ import java.time.ZoneId
  * - `full`: Shizuku autorizzato, tutti i permessi, accesso notifiche, DND e impostazioni di sistema, posizione accesa; l'unico
  *   sensore armabile e' il movimento significativo, come sul telefono (e' l'unico con un backend).
  * - `no_shizuku`: stesso telefono senza Shizuku installato; restano le azioni del tier base.
+ * - `no_accessibility`: il telefono completo con il servizio di Accessibilita' spento: `ui_steps` e' tra
+ *   gli strumenti non disponibili, col motivo che l'app pubblica davvero.
  */
 internal class BenchWorld private constructor(
     private val fullManifest: CapabilityManifest,
     private val fullCapabilities: Set<String>,
     private val noShizukuManifest: CapabilityManifest,
     private val noShizukuCapabilities: Set<String>,
+    private val noAccessibilityManifest: CapabilityManifest,
+    private val noAccessibilityCapabilities: Set<String>,
 ) {
     /** Fuso del telefono: i casi orari sono scritti in ora locale di Roma. */
     val zone: ZoneId = ZoneId.of(ZONE_ID)
@@ -59,8 +63,8 @@ internal class BenchWorld private constructor(
      * La richiesta come la manda ChatViewModel al compile: il testo piu' i candidati app che
      * corrispondono (`installed_app_candidates`), cercati con le funzioni vere dell'app. Mai l'elenco intero.
      */
-    fun compilePrompt(text: String, lang: String): String =
-        composeInstalledAppCandidatesPrompt(text, matchInstalledApps(text, installedApps(lang)))
+    fun compilePrompt(text: String, lang: String, extraApps: List<InstalledAppCandidate> = emptyList()): String =
+        composeInstalledAppCandidatesPrompt(text, matchInstalledApps(text, installedApps(lang) + extraApps))
 
     /** Il manifest del caso, con la lingua dei testi per l'utente impostata come fa l'app (lingua dell'interfaccia). */
     fun manifest(kind: ManifestKind, lang: String): CapabilityManifest {
@@ -79,12 +83,14 @@ internal class BenchWorld private constructor(
     fun manifest(kind: ManifestKind): CapabilityManifest = when (kind) {
         ManifestKind.FULL -> fullManifest
         ManifestKind.NO_SHIZUKU -> noShizukuManifest
+        ManifestKind.NO_ACCESSIBILITY -> noAccessibilityManifest
     }
 
     /** Capability che il fire-time e la revisione considerano disponibili ORA per [kind]. */
     fun availableCapabilities(kind: ManifestKind): Set<String> = when (kind) {
         ManifestKind.FULL -> fullCapabilities
         ManifestKind.NO_SHIZUKU -> noShizukuCapabilities
+        ManifestKind.NO_ACCESSIBILITY -> noAccessibilityCapabilities
     }
 
     fun contactId(displayName: String): String? = CONTACTS.firstOrNull { it.displayName == displayName }?.id
@@ -174,6 +180,8 @@ internal class BenchWorld private constructor(
             shizukuPermissionGranted = false,
         )
 
+        private val NO_ACCESSIBILITY_STATE = FULL_STATE.copy(accessibilityEnabled = false)
+
         private val SIGNIFICANT_MOTION = AndroidSensorCapability(
             kind = SensorKind.SIGNIFICANT_MOTION,
             reportingMode = SensorReportingMode.ONE_SHOT,
@@ -199,7 +207,15 @@ internal class BenchWorld private constructor(
             val deviceState = DeviceState(values = baseValues("80"))
             val full = snapshot(FULL_STATE, deviceState)
             val noShizuku = snapshot(NO_SHIZUKU_STATE, deviceState)
-            return BenchWorld(full.first, full.second, noShizuku.first, noShizuku.second)
+            val noAccessibility = snapshot(NO_ACCESSIBILITY_STATE, deviceState)
+            return BenchWorld(
+                full.first,
+                full.second,
+                noShizuku.first,
+                noShizuku.second,
+                noAccessibility.first,
+                noAccessibility.second,
+            )
         }
 
         private suspend fun snapshot(

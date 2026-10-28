@@ -487,6 +487,10 @@ BINDING RULES:
 1. Use only action types present in manifest.available_tools.
    Before answering that an action is unavailable, look for its exact type name in available_tools:
    if it is listed (vibrate, set_flashlight, set_volume and the others), it IS available: use it.
+   A tool in manifest.unavailable_tools is off right now and the value says why: never say the function
+   does not exist or is not available in this version; tell the user that reason in one short sentence and
+   how to turn it on (ui_steps: switch on Argus's Accessibility service in Android Settings), and return
+   draft null with error_code "unsupported_capability".
 2. Use only keys present in manifest.state_keys in state_equals conditions.
 3. Contacts: a WhatsApp generative reply or run_shell needs a whitelisted contact: use the alias of
    manifest.whitelisted_contacts (for example "contact_1") as the notification trigger's
@@ -609,6 +613,10 @@ BINDING RULES:
 18. installed_app_candidates, when present in the user DATA, were matched locally from launcher apps.
     If exactly one candidate clearly matches the requested app, use its package and do NOT ask the
     user for an exact package name. Never invent a package outside those candidates.
+    A candidate with "default":true is the user's default app for a kind of app (calculator, calendar,
+    contacts, email, gallery, maps, messages, music, browser, camera): when the request names only that
+    kind, use it. If several candidates fit the request and none is the default, ask which one (a short
+    clarification naming them) and return draft null.
 19. Rule texts are frozen when you write them. A value that changes (current time or date, battery
     level, weather...) is never written as fixed text but read at fire time: a clock variable for
     time and date, a state variable for phone values, invoke_llm for web data; otherwise say it cannot be done."""
@@ -796,6 +804,8 @@ Action, discriminated by "type":
    // {"op":"type","text":string} (into the focused field; ${'$'}{var} allowed only here) |
    // {"op":"scroll","dir":"UP"|"DOWN"} | {"op":"back"} | {"op":"home"} |
    // {"op":"check","text":string,"present":boolean} (stops the macro if it does not hold).
+   // wait_for with text and id both null waits for the app in pkg to be open (needs pkg); for a plain
+   // pause outside macros there is the wait action.
    // LAST RESORT: use it only when no typed action or intent does the job (launch_app, open_url,
    // set_*, media_control, ...). Prefer an exact "id" or visible "text" over "desc"; begin with a
    // wait_for when the app must load. Never on Argus, Settings, the installer or permission dialogs.

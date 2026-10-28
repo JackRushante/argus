@@ -66,7 +66,7 @@ class UiStepsRunner(
             return try {
                 val pkg = action.pkg
                 if (pkg != null) openAndWait(pkg, deadline, openApp)
-                for (step in action.steps) execute(step, deadline)
+                for (step in action.steps) execute(step, deadline, pkg)
                 ActionResult.Success
             } catch (stop: MacroStop) {
                 ActionResult.Failure(stop.code)
@@ -100,14 +100,10 @@ class UiStepsRunner(
         pause(UiStepsPolicy.SETTLE_MS)
     }
 
-    private suspend fun execute(step: UiStep, deadline: Long) {
+    private suspend fun execute(step: UiStep, deadline: Long, appPkg: String?) {
         checkpoint(deadline)
         when (step) {
-            is UiStep.WaitFor -> {
-                val query = ScreenQuery(text = step.text, id = step.id, textAlsoDescription = true)
-                val appeared = waitUntil(deadline, step.timeoutMs.toLong()) { firstMatch(query) != null }
-                if (!appeared) throw MacroStop(ScreenCodes.TIMEOUT)
-            }
+            is UiStep.WaitFor -> waitFor(step, appPkg, deadline)
             is UiStep.Click -> click(step, deadline)
             is UiStep.Type -> type(step, deadline)
             is UiStep.Scroll -> scroll(step.dir, deadline)
@@ -121,6 +117,22 @@ class UiStepsRunner(
             }
             is UiStep.Check -> check(step, deadline)
         }
+    }
+
+    /**
+     * `wait_for`. Con un bersaglio (testo e/o id) aspetta che l'elemento compaia. Senza bersaglio
+     * (0.7.0) aspetta che l'app `pkg` della macro sia in primo piano con una finestra leggibile: è il
+     * «aspetta che l'app si apra». Il validatore garantisce il `pkg`; qui, senza, la macro si ferma.
+     */
+    private suspend fun waitFor(step: UiStep.WaitFor, appPkg: String?, deadline: Long) {
+        val ready = if (step.text == null && step.id == null) {
+            val pkg = appPkg ?: throw MacroStop(ScreenCodes.ACTION_FAILED)
+            waitUntil(deadline, step.timeoutMs.toLong()) { screen.activePackage() == pkg && screen.root() != null }
+        } else {
+            val query = ScreenQuery(text = step.text, id = step.id, textAlsoDescription = true)
+            waitUntil(deadline, step.timeoutMs.toLong()) { firstMatch(query) != null }
+        }
+        if (!ready) throw MacroStop(ScreenCodes.TIMEOUT)
     }
 
     private suspend fun click(step: UiStep.Click, deadline: Long) {

@@ -88,6 +88,9 @@ class DraftValidator(
         val issues = mutableListOf<ValidationIssue>()
         fun err(code: String, msg: String) { issues += ValidationIssue(Severity.ERROR, code, msg) }
         fun warn(code: String, msg: String) { issues += ValidationIssue(Severity.WARNING, code, msg) }
+        fun errDetail(code: String, msg: String, detail: String) {
+            issues += ValidationIssue(Severity.ERROR, code, msg, detail)
+        }
 
         if (d.name.isBlank() || d.name.length > MAX_NAME_LENGTH)
             err("name_invalid", "Nome regola obbligatorio e lungo al massimo $MAX_NAME_LENGTH caratteri")
@@ -156,6 +159,7 @@ class DraftValidator(
                 countCondition = ::countCondition,
                 err = ::err,
                 warn = ::warn,
+                errDetail = ::errDetail,
             )
             if (worstCaseBudgetMs(d.actions) > MAX_TIME_BUDGET_MS)
                 err(
@@ -399,6 +403,7 @@ class DraftValidator(
         countCondition: () -> Int,
         err: (String, String) -> Unit,
         warn: (String, String) -> Unit,
+        errDetail: (String, String, String) -> Unit,
     ): Set<String> {
         if (depth > MAX_FLOW_DEPTH) {
             err("flow_too_deep", "Annidamento if/while oltre profondità $MAX_FLOW_DEPTH")
@@ -414,7 +419,7 @@ class DraftValidator(
                 err,
                 warn,
             )
-            validateAction(action, trigger, whitelist, err, warn)
+            validateAction(action, trigger, whitelist, err, warn, errDetail)
             when (action) {
                 is Action.If -> {
                     if (action.then.isEmpty() && action.orElse.isEmpty())
@@ -430,12 +435,12 @@ class DraftValidator(
                     val thenOut = walkActions(
                         action.then, trigger, whitelist, knownVars, declaredTypes,
                         declaredIntegrity, declaredConfidentiality, availableVars.toMutableSet(),
-                        depth + 1, countCondition, err, warn,
+                        depth + 1, countCondition, err, warn, errDetail,
                     )
                     val elseOut = walkActions(
                         action.orElse, trigger, whitelist, knownVars, declaredTypes,
                         declaredIntegrity, declaredConfidentiality, availableVars.toMutableSet(),
-                        depth + 1, countCondition, err, warn,
+                        depth + 1, countCondition, err, warn, errDetail,
                     )
                     availableVars.retainAll(thenOut.intersect(elseOut))
                 }
@@ -456,7 +461,7 @@ class DraftValidator(
                     walkActions(
                         action.body, trigger, whitelist, knownVars, declaredTypes,
                         declaredIntegrity, declaredConfidentiality, availableVars.toMutableSet(),
-                        depth + 1, countCondition, err, warn,
+                        depth + 1, countCondition, err, warn, errDetail,
                     )
                 }
                 else -> captureDeclaration(action)?.let { availableVars += it.name }
@@ -1007,6 +1012,7 @@ class DraftValidator(
         whitelist: Set<String>,
         err: (String, String) -> Unit,
         warn: (String, String) -> Unit,
+        errDetail: (String, String, String) -> Unit,
     ) {
         when (action) {
             is Action.SetWifi, is Action.SetBluetooth, is Action.SetMobileData, is Action.SetDnd -> Unit
@@ -1162,7 +1168,7 @@ class DraftValidator(
             -> Unit
             is Action.AppControl -> validateAppControl(action, err, warn)
             is Action.AppPermission -> validateAppPermission(action, err, warn)
-            is Action.UiSteps -> validateUiSteps(action, trigger, whitelist, err, warn)
+            is Action.UiSteps -> validateUiSteps(action, trigger, whitelist, err, warn, errDetail)
             is Action.InvokeLlm -> validateInvokeLlm(action, trigger, whitelist, err, warn)
             is Action.InvokeLlmV2 -> validateInvokeLlmV2(action, trigger, whitelist, err, warn)
             // Contenitori control-flow: bound (while), rami non vuoti, condizione di flusso e
@@ -1308,6 +1314,7 @@ class DraftValidator(
         whitelist: Set<String>,
         err: (String, String) -> Unit,
         warn: (String, String) -> Unit,
+        errDetail: (String, String, String) -> Unit,
     ) {
         if (action.steps.isEmpty()) {
             err("ui_steps_empty", "La macro sull'interfaccia non ha passi")
@@ -1326,14 +1333,55 @@ class DraftValidator(
                 )
             }
         }
-        action.steps.take(UiStepsPolicy.MAX_STEPS).forEach { step ->
+        // Un errore per passo, col numero del passo (da 1) in `detail`: l'utente e il modello vedono quale passo
+        // correggere e perché. Il messaggio qui è la diagnostica italiana; il testo EN/IT sta in ValidationMessages.
+        action.steps.take(UiStepsPolicy.MAX_STEPS).forEachIndexed { index, step ->
+            val n = (index + 1).toString()
             if (!UiStepsPolicy.literalFieldsOnly(step)) {
-                err("ui_step_interpolated", "Solo il testo di un passo «type» ammette \${…}")
-            } else {
-                val problem = UiStepsPolicy.stepProblem(step)
-                if (problem != null) {
-                    err("ui_step_invalid", "Passo non valido ($problem)")
-                }
+                errDetail("ui_step_interpolated", "Passo $n: solo il testo di un passo «type» ammette \${…}", n)
+            } else when (UiStepsPolicy.stepProblem(step, hasApp = pkg != null)) {
+                null -> Unit
+                UiStepProblem.WAIT_NO_TARGET -> errDetail(
+                    "ui_step_wait_no_target",
+                    "Passo $n: «wait_for» senza testo né id e senza app da aprire (pkg)",
+                    n,
+                )
+                UiStepProblem.SELECTOR_MISSING -> errDetail(
+                    "ui_step_selector_missing",
+                    "Passo $n: serve almeno un testo, un id o una descrizione",
+                    n,
+                )
+                UiStepProblem.SELECTOR_EMPTY -> errDetail(
+                    "ui_step_selector_empty",
+                    "Passo $n: testo, id o descrizione vuoti",
+                    n,
+                )
+                UiStepProblem.SELECTOR_TOO_LONG -> errDetail(
+                    "ui_step_selector_too_long",
+                    "Passo $n: testo, id o descrizione oltre ${UiStepsPolicy.MAX_SELECTOR_CHARS} caratteri",
+                    n,
+                )
+                UiStepProblem.SELECTOR_CONTROL -> errDetail(
+                    "ui_step_selector_control",
+                    "Passo $n: testo, id o descrizione con caratteri di controllo",
+                    n,
+                )
+                UiStepProblem.TIMEOUT -> errDetail(
+                    "ui_step_timeout",
+                    "Passo $n: l'attesa deve stare tra ${UiStepsPolicy.MIN_WAIT_MS} e ${UiStepsPolicy.MAX_WAIT_MS} ms",
+                    n,
+                )
+                UiStepProblem.INDEX -> errDetail(
+                    "ui_step_index",
+                    "Passo $n: l'indice deve stare tra 0 e ${UiStepsPolicy.MAX_INDEX}",
+                    n,
+                )
+                UiStepProblem.TYPE_EMPTY -> errDetail("ui_step_type_empty", "Passo $n: il testo da scrivere è vuoto", n)
+                UiStepProblem.TYPE_TOO_LONG -> errDetail(
+                    "ui_step_type_too_long",
+                    "Passo $n: il testo da scrivere supera ${UiStepsPolicy.MAX_TYPE_CHARS} caratteri",
+                    n,
+                )
             }
         }
         if (!StaticShellSafety.allows(trigger, whitelist)) {
