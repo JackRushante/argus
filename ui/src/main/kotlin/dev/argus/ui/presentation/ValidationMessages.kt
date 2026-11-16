@@ -58,6 +58,97 @@ object ValidationMessages {
             "This is not available in this version.",
             "Non disponibile in questa versione.",
         ),
+        // --- 0.8: SMS, chiamate, Intent, filtro chiamate ---
+        "sms_number_invalid" to t(
+            "The SMS number is not valid: an optional + and 7 to 15 digits, nothing else.",
+            "Il numero dell'SMS non è valido: + facoltativo e da 7 a 15 cifre, nient'altro.",
+        ),
+        "sms_number_template_invalid" to t(
+            "The SMS recipient is either a number or only a variable with the number of whoever called or texted.",
+            "Il destinatario dell'SMS è un numero oppure solo una variabile col numero di chi ha chiamato o scritto.",
+        ),
+        "sms_number_not_sender" to t(
+            "The SMS recipient variable must be the number of whoever called or texted, as it arrived.",
+            "La variabile del destinatario deve essere il numero di chi ha chiamato o scritto, così com'è arrivato.",
+        ),
+        "sms_text_invalid" to t(
+            "The SMS text is empty or longer than 480 characters.",
+            "Il testo dell'SMS è vuoto o supera i 480 caratteri.",
+        ),
+        "sms_cost" to t(
+            "Sending SMS may cost money. Argus sends at most 10 SMS an hour, 3 an hour to the same number.",
+            "Inviare SMS può costare. Argus ne invia al massimo 10 l'ora, 3 l'ora allo stesso numero.",
+        ),
+        "sms_to_caller" to t(
+            "The SMS goes to whoever called or texted. Caller IDs can be forged: a stranger can make your phone text a number of their choice, even a paid one, up to 3 times an hour.",
+            "L'SMS va a chi ha chiamato o scritto. Il numero di chi chiama si può falsificare: un estraneo può far mandare dal tuo telefono SMS a un numero scelto da lui, anche a pagamento, fino a 3 volte l'ora.",
+        ),
+        "call_number_invalid" to t(
+            "The number to call is not valid: a written number with an optional + and 7 to 15 digits, no * # or pauses.",
+            "Il numero da chiamare non è valido: un numero scritto, + facoltativo e da 7 a 15 cifre, senza * # o pause.",
+        ),
+        "call_cost" to t(
+            "A phone call may cost money. Argus places at most 3 calls an hour.",
+            "Una chiamata può costare. Argus ne fa al massimo 3 l'ora.",
+        ),
+        "intent_target_missing" to t(
+            "The Intent needs an action, or a package and a class together.",
+            "L'Intent ha bisogno di un'azione, oppure di pacchetto e classe insieme.",
+        ),
+        "intent_service_needs_component" to t(
+            "Starting a service needs both the package and the class.",
+            "Per avviare un servizio servono sia il pacchetto sia la classe.",
+        ),
+        "intent_name_invalid" to t(
+            "The Intent action, package, class or MIME type is not valid or has hidden characters.",
+            "Azione, pacchetto, classe o tipo MIME dell'Intent non validi o con caratteri nascosti.",
+        ),
+        "intent_target_forbidden" to t(
+            "An Intent cannot be sent to Argus itself.",
+            "Un Intent non può essere rivolto ad Argus stesso.",
+        ),
+        "intent_action_forbidden" to t(
+            "This Intent action is not allowed: it would call, install, uninstall, delete or reset.",
+            "Questa azione dell'Intent non è ammessa: chiamerebbe, installerebbe, disinstallerebbe, cancellerebbe o resetterebbe.",
+        ),
+        "intent_data_invalid" to t(
+            "The Intent data must be a written address (URI) with a scheme, without variables.",
+            "I dati dell'Intent devono essere un indirizzo (URI) scritto, con uno schema e senza variabili.",
+        ),
+        "intent_data_scheme_forbidden" to t(
+            "The Intent data cannot be a file:, javascript: or intent: address.",
+            "I dati dell'Intent non possono essere un indirizzo file:, javascript: o intent:.",
+        ),
+        "intent_too_many_extras" to t("An Intent has at most 16 extras.", "Un Intent ha al massimo 16 extra."),
+        "intent_extra_invalid" to t(
+            "An Intent extra has an invalid or repeated name, or an empty value or one that does not match its type.",
+            "Un extra dell'Intent ha un nome non valido o ripetuto, oppure un valore vuoto o diverso dal suo tipo.",
+        ),
+        "intent_extra_external_value" to t(
+            "An Intent extra is filled with outside data (a message, a notification or text read from the phone): the other app receives it as it is.",
+            "Un extra dell'Intent è riempito con un dato esterno (messaggio, notifica o testo letto dal telefono): l'altra app lo riceve così com'è.",
+        ),
+        "screen_call_trigger" to t(
+            "Call screening needs the \"incoming call\" trigger.",
+            "Il filtro chiamate richiede il trigger «chiamata in arrivo».",
+        ),
+        "screen_call_sim_filter" to t(
+            "Call screening does not support the SIM filter.",
+            "Il filtro chiamate non ammette il filtro SIM.",
+        ),
+        "screen_call_nested" to t(
+            "Call screening must be one of the main actions, not inside if/while or the end actions.",
+            "Il filtro chiamate va tra le azioni principali, non dentro if/while o nelle azioni di fine.",
+        ),
+        "screen_call_duplicate" to t("A rule can screen calls only once.", "Una regola può filtrare le chiamate una volta sola."),
+        "screen_call_confirm_exit" to t(
+            "Call screening decides before the phone rings: it cannot ask for confirmation or span an interval.",
+            "Il filtro chiamate decide prima dello squillo: non può chiedere conferma né durare un intervallo.",
+        ),
+        "screen_call_condition_slow" to t(
+            "With call screening only time-of-day and day-of-week conditions are allowed: the answer must be immediate.",
+            "Con il filtro chiamate sono ammesse solo condizioni di orario e giorno della settimana: la risposta deve essere immediata.",
+        ),
         "cooldown_invalid" to t("The cooldown cannot be negative.", "Il cooldown non può essere negativo."),
         "cooldown_raised" to t(
             "Cooldown below 60 s on an AI rule: Argus will enforce 60 s.",
