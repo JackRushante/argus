@@ -1117,7 +1117,8 @@ object ArgusModule {
         @ApplicationScope scope: CoroutineScope,
         sentinel: SharedForegroundSentinel,
         audit: AuditSink,
-    ): ReceiverWorkLauncher = ReceiverWorkLauncher(scope, sentinel, audit)
+        wakeLock: ExecutionWakeLock,
+    ): ReceiverWorkLauncher = ReceiverWorkLauncher(scope, sentinel, audit, wakeLock = wakeLock)
 
     @Provides
     @Singleton

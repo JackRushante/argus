@@ -1,6 +1,8 @@
 package dev.argus.automation.foreground
 
 import dev.argus.automation.connectivity.ConnectivitySentinelBackend
+import dev.argus.automation.power.ExecutionWakeLock
+import dev.argus.automation.power.RecordingPowerLock
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.runtime.AuditEvent
 import dev.argus.engine.runtime.AuditKind
@@ -114,6 +116,59 @@ class ReceiverWorkLauncherTest {
 
         finishWork.complete(Unit)
         advanceUntilIdle()
+    }
+
+    // --- B7 (0.7.2): il wakelock copre il passaggio dal receiver all'esecuzione -----------------
+
+    @Test
+    fun `the execution wake lock is held before the receiver is released and until the work ends`() = runTest {
+        val system = RecordingPowerLock()
+        val wakeLock = ExecutionWakeLock(system)
+        val launcher = ReceiverWorkLauncher(
+            scope = this,
+            sentinel = SharedForegroundSentinel(LauncherBackend()),
+            wakeLock = wakeLock,
+        )
+        val finishWork = CompletableDeferred<Unit>()
+        var holdersAtRelease = -1
+        var holdersInWork = -1
+
+        val job = launcher.launch("alarm", { holdersAtRelease = wakeLock.activeHolders }) {
+            holdersInWork = wakeLock.activeHolders
+            finishWork.await()
+        }
+        runCurrent()
+
+        assertEquals(1, holdersAtRelease)
+        assertEquals(1, holdersInWork)
+        assertEquals(1, wakeLock.activeHolders)
+
+        finishWork.complete(Unit)
+        job.join()
+        assertEquals(0, wakeLock.activeHolders)
+        assertEquals("release", system.events.last())
+    }
+
+    @Test
+    fun `a denied lease keeps the wake lock for the best effort work beyond the receiver window`() = runTest {
+        val wakeLock = ExecutionWakeLock(RecordingPowerLock())
+        val launcher = ReceiverWorkLauncher(
+            scope = this,
+            sentinel = SharedForegroundSentinel(LauncherBackend(startResult = false)),
+            wakeLock = wakeLock,
+        )
+        val finishWork = CompletableDeferred<Unit>()
+        var receiverReleased = false
+
+        launcher.launch("sms", { receiverReleased = true }) { finishWork.await() }
+        advanceTimeBy(ReceiverWorkLauncher.FALLBACK_RECEIVER_LEASE_MILLIS)
+        runCurrent()
+        assertTrue(receiverReleased)
+        assertEquals(1, wakeLock.activeHolders, "il lavoro ancora in corso tiene la sua quota")
+
+        finishWork.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(0, wakeLock.activeHolders)
     }
 
     // --- B20: lease negata, traccia nel Log -------------------------------------------------------
