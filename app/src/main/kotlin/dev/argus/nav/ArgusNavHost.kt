@@ -604,6 +604,8 @@ fun ArgusNavHost() {
                                     )
                                 }.onFailure { showMessage(backupPickerUnavailable) }
                             }
+                            override fun onImportTextChange(text: String) = settingsViewModel.onImportTextChange(text)
+                            override fun onImportText(text: String) = settingsViewModel.importText(text)
                             override fun onDismissBackupResult() = settingsViewModel.dismissBackupResult()
                             override fun onOpenImportedRules() {
                                 settingsViewModel.dismissBackupResult()

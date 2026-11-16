@@ -329,6 +329,23 @@
     <string name="share_as_text">Share as text</string>
     <string name="share_save_file">Save file</string>
     <string name="share_copy">Copy</string>
+    <!-- 0.7.2 · Receive a rule: import from text, or from another app (prefix import_) -->
+    <string name="import_text_action">Import from text</string>
+    <string name="import_text_title">Import from text</string>
+    <string name="import_text_hint">Paste the text of a shared rule or of a rules backup.</string>
+    <string name="import_text_label">Rule text</string>
+    <string name="import_text_empty">The rules it contains appear here before you import them.</string>
+    <string name="import_checking">Checking…</string>
+    <string name="import_confirm">Import</string>
+    <string name="import_cancel">Cancel</string>
+    <string name="import_pick_file">Choose a file</string>
+    <string name="import_unnamed">(no name)</string>
+    <string name="import_received_title">Import into Argus</string>
+    <string name="import_received_body">Another app sent this to Argus. Nothing changes until you confirm: each rule becomes a draft that you read and approve on its own.</string>
+    <string name="import_received_loading">Reading…</string>
+    <string name="import_received_working">Importing…</string>
+    <string name="import_received_open">Open Argus</string>
+    <string name="import_received_close">Close</string>
 
     <!-- 0.4.0 blocco UI (prefisso ui40_) -->
     <string name="ui40_chat_clear_title">Clear the conversation?</string>

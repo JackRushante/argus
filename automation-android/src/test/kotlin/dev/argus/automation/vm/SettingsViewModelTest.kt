@@ -900,6 +900,55 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun `importing from text uses the same import and shows the summary`() = runTest(dispatcher) {
+        val backup = FakeRulesBackup().apply {
+            importOutcome = ImportOutcome.Done(ImportSummary(imported = 1, discarded = emptyMap()), listOf("d1"))
+        }
+        val vm = backupVm(backup)
+        observe(vm)
+
+        vm.importText("""{"format":"argus-rules"}""")
+        advanceUntilIdle()
+
+        assertEquals(listOf("""{"format":"argus-rules"}"""), backup.importedTexts)
+        assertEquals(
+            RulesBackupStatus.Done(RulesBackupKind.IMPORT, "1 regola importata da approvare.", importedCount = 1),
+            vm.state.value.backup.status,
+        )
+    }
+
+    @Test
+    fun `a text over the size cap is refused before it is imported`() = runTest(dispatcher) {
+        val backup = FakeRulesBackup()
+        val vm = backupVm(backup)
+        observe(vm)
+
+        vm.importText("x".repeat(dev.argus.data.backup.RulesBackupFormat.MAX_FILE_BYTES + 1))
+        advanceUntilIdle()
+
+        assertEquals(emptyList(), backup.importedTexts)
+        assertEquals(
+            RulesBackupStatus.Failed(RulesBackupKind.IMPORT, "Il testo è troppo grande (limite 2 MB)."),
+            vm.state.value.backup.status,
+        )
+    }
+
+    @Test
+    fun `a text that is not a rule says so`() = runTest(dispatcher) {
+        val backup = FakeRulesBackup().apply { importOutcome = ImportOutcome.Failed(BackupFailure.NOT_JSON) }
+        val vm = backupVm(backup)
+        observe(vm)
+
+        vm.importText("ciao")
+        advanceUntilIdle()
+
+        assertEquals(
+            RulesBackupStatus.Failed(RulesBackupKind.IMPORT, "Questo testo non è una regola Argus né un backup delle regole."),
+            vm.state.value.backup.status,
+        )
+    }
+
+    @Test
     fun `a second request while one is running is ignored`() = runTest(dispatcher) {
         val backup = FakeRulesBackup().apply { gate = CompletableDeferred() }
         val vm = backupVm(backup)

@@ -328,6 +328,23 @@
     <string name="share_as_text">Condividi come testo</string>
     <string name="share_save_file">Salva file</string>
     <string name="share_copy">Copia</string>
+    <!-- 0.7.2 · Ricevere una regola: import da testo o da un'altra app (prefisso import_) -->
+    <string name="import_text_action">Importa da testo</string>
+    <string name="import_text_title">Importa da testo</string>
+    <string name="import_text_hint">Incolla il testo di una regola condivisa o di un backup delle regole.</string>
+    <string name="import_text_label">Testo della regola</string>
+    <string name="import_text_empty">Qui compaiono le regole che contiene, prima di importarle.</string>
+    <string name="import_checking">Controllo in corso…</string>
+    <string name="import_confirm">Importa</string>
+    <string name="import_cancel">Annulla</string>
+    <string name="import_pick_file">Scegli un file</string>
+    <string name="import_unnamed">(senza nome)</string>
+    <string name="import_received_title">Importa in Argus</string>
+    <string name="import_received_body">Un\'altra app ha mandato questo ad Argus. Non cambia nulla finché non confermi: ogni regola diventa una bozza che leggi e approvi da sola.</string>
+    <string name="import_received_loading">Lettura in corso…</string>
+    <string name="import_received_working">Importazione in corso…</string>
+    <string name="import_received_open">Apri Argus</string>
+    <string name="import_received_close">Chiudi</string>
 
     <!-- 0.4.0 blocco UI (prefisso ui40_) -->
     <string name="ui40_chat_clear_title">Svuotare la conversazione?</string>

@@ -224,6 +224,8 @@ fun SettingsScreen(
                     callbacks::onImportRules,
                     callbacks::onDismissBackupResult,
                     callbacks::onOpenImportedRules,
+                    onImportTextChange = callbacks::onImportTextChange,
+                    onImportText = callbacks::onImportText,
                 )
                 RerunRow(callbacks::onRerunOnboarding)
                 VersionFooter(state.appVersionLabel)

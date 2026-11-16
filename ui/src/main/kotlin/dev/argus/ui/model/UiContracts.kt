@@ -603,7 +603,60 @@ data class RulesBackupUi(
     val status: RulesBackupStatus = RulesBackupStatus.Idle,
     /** Regole che finirebbero nel file: con 0 «Esporta» è disabilitato. */
     val exportableRules: Int = 0,
+    /** 0.7.2: anteprima del testo incollato in «Importa da testo». */
+    val textPreview: TextImportPreview = TextImportPreview.Empty,
 )
+
+/**
+ * 0.7.2: cosa contiene un testo o un file da importare, prima di confermare. Testi già pronti nella lingua
+ * dell'utente; i nomi vengono dal contenuto ricevuto, ripuliti per la sola visualizzazione.
+ */
+data class ImportPreviewUi(
+    /** «2 regole · 1,4 KB». */
+    val title: String,
+    /** I primi nomi delle regole valide (al più una ventina). */
+    val ruleNames: List<String>,
+    /** «e altre 5», se i nomi sono di più; `null` altrimenti. */
+    val moreText: String? = null,
+    /** «1 voce verrà scartata (regola non valida).»; `null` se non se ne scarta nessuna. */
+    val discardedText: String? = null,
+) {
+    /** C'è almeno una regola da importare: solo allora «Importa» è attivo. */
+    val canImport: Boolean get() = ruleNames.isNotEmpty()
+}
+
+/** 0.7.2: stato dell'anteprima di «Importa da testo». */
+sealed interface TextImportPreview {
+    /** Nessun testo. */
+    data object Empty : TextImportPreview
+
+    data object Checking : TextImportPreview
+
+    data class Ready(val preview: ImportPreviewUi) : TextImportPreview
+
+    /** Il testo non è importabile: il motivo, già scritto. */
+    data class Invalid(val message: String) : TextImportPreview
+}
+
+/**
+ * 0.7.2: schermata che riceve una regola da un'altra app (foglio di condivisione o file manager). Non fa nulla
+ * finché l'utente non conferma: ogni regola diventa una bozza da approvare.
+ */
+sealed interface ReceivedImportState {
+    data object Loading : ReceivedImportState
+
+    data class Ready(val preview: ImportPreviewUi, val working: Boolean = false) : ReceivedImportState
+
+    data class Rejected(val message: String) : ReceivedImportState
+
+    data class Done(val message: String, val importedCount: Int) : ReceivedImportState
+}
+
+interface ReceivedImportCallbacks {
+    fun onConfirm()
+    fun onCancel()
+    fun onOpenArgus()
+}
 
 sealed interface TransportUi {
     data class CliBridge(
@@ -766,6 +819,12 @@ interface SettingsCallbacks {
 
     /** Backup (0.4.0): «Importa». Il file lo sceglie il chiamante con il selettore di documenti. Default no-op. */
     fun onImportRules() {}
+
+    /** 0.7.2: «Importa da testo», il testo è cambiato: il VM ne prepara l'anteprima. Default no-op. */
+    fun onImportTextChange(text: String) {}
+
+    /** 0.7.2: «Importa da testo», conferma: ogni regola valida diventa una bozza da approvare. Default no-op. */
+    fun onImportText(text: String) {}
 
     /** Chiude il riepilogo (o l'errore) dell'ultima operazione di backup. Default no-op. */
     fun onDismissBackupResult() {}

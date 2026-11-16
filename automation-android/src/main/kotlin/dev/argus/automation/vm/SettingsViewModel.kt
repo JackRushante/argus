@@ -30,6 +30,7 @@ import dev.argus.data.backup.ExportOutcome
 import dev.argus.data.backup.BackupFailure
 import dev.argus.data.backup.ImportOutcome
 import dev.argus.data.backup.RulesBackup
+import dev.argus.data.backup.RulesBackupFormat
 import dev.argus.data.backup.isBackupExportable
 import dev.argus.data.dao.ProviderUsageAggregate
 import dev.argus.data.dao.UsageDao
@@ -60,6 +61,7 @@ import dev.argus.ui.model.ProviderUsageUi
 import dev.argus.ui.model.RulesBackupKind
 import dev.argus.ui.model.RulesBackupStatus
 import dev.argus.ui.model.RulesBackupUi
+import dev.argus.ui.model.TextImportPreview
 import dev.argus.ui.model.SettingsState
 import dev.argus.ui.model.TransportUi
 import dev.argus.ui.presentation.ModelFieldHints
@@ -338,6 +340,9 @@ class SettingsViewModel @Inject constructor(
     private val mutableBackupStatus = MutableStateFlow<RulesBackupStatus>(RulesBackupStatus.Idle)
     private val backupBusy = AtomicBoolean(false)
 
+    /** 0.7.2: anteprima di «Importa da testo». Il testo resta in memoria, mai nello stato salvato. */
+    private val textImport = TextImportPreviewer(rulesBackup, viewModelScope, { language })
+
     private val sources = combine(
         whitelist.observeAll(),
         preferences.observe(),
@@ -401,6 +406,7 @@ class SettingsViewModel @Inject constructor(
         mutableBackupStatus,
         pause.paused,
         privilegedUi,
+        textImport.preview,
     ) { values: Array<Any?> ->
         val settingsSources = values[0] as SettingsSources
         val bridge = values[1] as BridgeUiHealth
@@ -414,6 +420,7 @@ class SettingsViewModel @Inject constructor(
         val backupStatus = values[9] as RulesBackupStatus
         val automationsPaused = values[10] as Boolean
         val privilegedState = values[11] as PrivilegedUi
+        val textPreview = values[12] as TextImportPreview
         val health = readAndroidUiHealth(context)
         SettingsState(
             transport = transportUi(bridge, hasToken, keySaved),
@@ -453,7 +460,11 @@ class SettingsViewModel @Inject constructor(
             appVersionLabel = appVersionLabel(),
             notificationListenerRestrictedHint =
                 !health.notificationListenerGranted && installInfo.mayHaveRestrictedSettings,
-            backup = RulesBackupUi(status = backupStatus, exportableRules = settingsSources.exportableRules),
+            backup = RulesBackupUi(
+                status = backupStatus,
+                exportableRules = settingsSources.exportableRules,
+                textPreview = textPreview,
+            ),
             automationsPaused = automationsPaused,
             privileged = privilegedState,
         )
@@ -904,6 +915,30 @@ class SettingsViewModel @Inject constructor(
                     RulesBackupKind.IMPORT,
                     RulesBackupText.failure(outcome.failure, language),
                 )
+            }
+        }
+    }
+
+    /** 0.7.2, «Importa da testo»: il testo è cambiato, se ne prepara l'anteprima (vuoto = foglio chiuso). */
+    fun onImportTextChange(text: String) = textImport.onTextChange(text)
+
+    /**
+     * 0.7.2, «Importa da testo»: ogni regola valida del testo diventa una bozza da approvare, con lo stesso import
+     * di un file (limite prima del contenuto, decodifica stretta, bozze `IMPORT`). Mai una regola armata.
+     */
+    fun importText(text: String) {
+        textImport.clear()
+        runBackup(RulesBackupKind.IMPORT) {
+            val bytes = RulesBackupFormat.utf8WithinCap(text)
+                ?: return@runBackup RulesBackupStatus.Failed(
+                    RulesBackupKind.IMPORT,
+                    ImportPreviewText.textFailure(BackupFailure.FILE_TOO_LARGE, language),
+                )
+            val (message, imported) = ImportPreviewText.outcome(rulesBackup.importBytes(bytes), language, text = true)
+            if (imported > 0) {
+                RulesBackupStatus.Done(RulesBackupKind.IMPORT, message, imported)
+            } else {
+                RulesBackupStatus.Failed(RulesBackupKind.IMPORT, message)
             }
         }
     }

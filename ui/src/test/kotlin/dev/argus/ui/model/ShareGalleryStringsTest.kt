@@ -57,7 +57,7 @@ class ShareGalleryStringsTest {
     }
 
     private companion object {
-        val PREFIXES = listOf("share_", "diff_")
+        val PREFIXES = listOf("share_", "diff_", "import_")
         val STRING = Regex("""<string name="([^"]+)">(.*?)</string>""", RegexOption.DOT_MATCHES_ALL)
         val PLACEHOLDER = Regex("""%\d+\$[sd]""")
     }
