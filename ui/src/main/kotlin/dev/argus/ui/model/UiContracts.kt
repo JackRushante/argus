@@ -657,6 +657,8 @@ data class SettingsState(
     val callTriggerGranted: Boolean = false,
     /** Trigger ACL Bluetooth (P2-3): runtime grant NEARBY_DEVICES su Android 12+. */
     val bluetoothTriggerGranted: Boolean = false,
+    /** 0.8: READ_CALENDAR concesso: regole «evento in corso» e «inizio/fine di un evento». Opt-in come gli SMS. */
+    val calendarGranted: Boolean = false,
     /**
      * 0.5.1: «Accesso ai dati di utilizzo» concesso (`PACKAGE_USAGE_STATS`): serve alle regole «quando
      * apro/chiudo un'app». Si concede dalle impostazioni di sistema, oppure con Shizuku o root da
@@ -924,6 +926,8 @@ interface SettingsCallbacks {
     fun onRequestSmsPermission() {}
     fun onRequestCallPermissions() {}
     fun onRequestBluetoothPermission() {}
+    /** 0.8: READ_CALENDAR per le regole sul calendario (condizione e trigger). */
+    fun onRequestCalendarPermission() {}
     fun onRemoveContact(conversationId: String); fun onAddContact()   // picker → risoluzione conversationId
     /** Selezione dal picker delle conversazioni 1:1 osservate. */
     fun onAddObservedContact(contact: ContactRow) {}

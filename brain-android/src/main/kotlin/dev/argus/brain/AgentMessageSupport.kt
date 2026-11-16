@@ -552,6 +552,7 @@ BINDING RULES:
     "phone_state.call" also covers MISSED_CALL; the SIM filter needs "phone_state.sim".
     "manual" (user-started: button, widget, shortcut, tile) is always listed.
     "app_event" (an app opened or closed) is usable only if listed.
+    "calendar_event" (start or end of a calendar event) is usable only if listed.
     A requested trigger that is not in the list must NOT be compiled: briefly point out the
     missing grant or mechanism in Settings and return draft null with error_code
     "unsupported_capability".
@@ -688,6 +689,11 @@ Trigger, discriminated by "type":
 - {"type":"media", "state":"PLAYING"|"STOPPED"}  // music/video playback started / finished
 - {"type":"app_event", "pkg":string, "event":"OPENED"|"CLOSED"}  // an app comes to the foreground / leaves it
   (pkg = the exact package, from installed_app_candidates; opening and closing are two rules, see rule 17)
+- {"type":"calendar_event", "phase":"START"|"END", "offsetMinutes":integer, "titleMatch":string|null,
+   "calendar":string|null}  // at the start or end of each matching event in the phone's calendar, shifted by
+  offsetMinutes (-120..120, negative = before). titleMatch = the title contains it (any case), calendar = the
+  calendar's exact name; null = any. All-day, declined and "free" events never count. Never with run_shell or
+  ui_steps (an invitation is written by others). The event title can be bound as trigger_payload field "TITLE".
 - {"type":"manual"}  // runs ONLY when the user starts it by hand, any number of times: a button, a widget,
   a Home-screen shortcut or a quick-settings tile. Use it ONLY when the user asks for one of those.
   Doing something now, or a request with no trigger at all, is "immediate", never "manual".
@@ -700,6 +706,17 @@ Condition, discriminated by "type":
   "GT" and the bare number as value: it needs no state reader family.
 - {"type":"app_in_foreground", "pkg":string}
 - {"type":"location_in", "lat":number, "lng":number, "radiusM":number}
+- {"type":"weekday", "days":["MON"|"TUE"|"WED"|"THU"|"FRI"|"SAT"|"SUN",...], "tz":string}  // today, in tz
+  (IANA id as for time_window), is one of the days; at least one day
+- {"type":"wifi_connected", "ssid":string|null}  // connected to Wi-Fi; ssid = the EXACT network name the user
+  mentions, null = any network. A name also needs "connectivity.wifi.identity" in available_triggers
+- {"type":"bluetooth_connected", "device":string|null}  // a Bluetooth device is connected; device = its exact
+  name (any case) or MAC address, null = any device. Needs "connectivity.bt" in available_triggers
+- {"type":"headset_connected", "kind":"WIRED"|"BLUETOOTH"|"ANY"}  // headphones or a headset are connected
+  (wired and USB are WIRED); never the phone's own speaker
+- {"type":"calendar_busy", "titleMatch":string|null, "calendar":string|null}  // an event of the phone's
+  calendar is in progress now; filters as calendar_event, same exclusions. Needs "calendar_event" in
+  available_triggers (same calendar permission)
 - {"type":"and", "all":[Condition,...]}
 - {"type":"or", "any":[Condition,...]}
 - {"type":"not", "cond":Condition}
@@ -840,7 +857,8 @@ VarBinding, discriminated by "type":
    // for builtin readers and NUMBER/BOOLEAN; TEXT from setting/system_property/sysfs/dumpsys_field is TAINTED
 - {"type":"trigger_payload", "name":string, "field":"TEXT"|"TITLE"|"SENDER"|"NUMBER",
    "extractionRegex":string|null, "confidentiality":"PUBLIC"|"PRIVATE"|"SECRET"}
-   // EXTERNAL payload of the trigger (SMS/notification): integrity TAINTED, confidentiality >= PRIVATE.
+   // EXTERNAL payload of the trigger (SMS/notification; calendar_event: only TITLE): integrity TAINTED,
+   // confidentiality >= PRIVATE.
    // extractionRegex = first non-empty capture group, or the whole match; null = full field.
 - {"type":"random_int", "name":string, "max":integer (1..1000000)}
    // ENGINE-generated random integer in [0, max) (i.e. 0..max-1). Integrity CLEAN (not tainted, not a

@@ -201,6 +201,27 @@ object ValidationMessages {
             "The time window is not valid: use HH:mm and a time zone.",
             "La finestra oraria non è valida: usa HH:mm e un fuso orario.",
         ),
+        // 0.8: condizioni di contesto e trigger del calendario.
+        "weekday_invalid" to t(
+            "The days condition needs at least one day and a valid time zone.",
+            "La condizione sui giorni ha bisogno di almeno un giorno e di un fuso orario valido.",
+        ),
+        "wifi_ssid_invalid" to t(
+            "Write the Wi-Fi network name (up to 32 characters).",
+            "Scrivi il nome della rete Wi-Fi (al massimo 32 caratteri).",
+        ),
+        "bluetooth_device_invalid" to t(
+            "Write the Bluetooth device name or address.",
+            "Scrivi il nome o l'indirizzo del dispositivo Bluetooth.",
+        ),
+        "calendar_filter_invalid" to t(
+            "Write the event title or the calendar name, or leave the filter out.",
+            "Scrivi il titolo dell'evento o il nome del calendario, oppure togli il filtro.",
+        ),
+        "calendar_offset_invalid" to t(
+            "The calendar offset must be between -120 and 120 minutes.",
+            "Lo spostamento rispetto all'evento deve essere tra -120 e 120 minuti.",
+        ),
         "state_key_unknown" to t(
             "The device state used in a condition is not known.",
             "Lo stato del dispositivo usato in una condizione non è noto.",

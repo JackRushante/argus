@@ -408,6 +408,9 @@ class ProgramInterpreter(
                         PhoneEvent.MISSED_CALL,
                         -> if (field == TriggerField.NUMBER) current.number else null
                     }
+                // 0.8: il titolo dell'evento di calendario che ha fatto scattare la regola.
+                trigger is Trigger.CalendarEvent && current is TriggerEvent.CalendarEventFired ->
+                    if (field == TriggerField.TITLE) current.title else null
                 else -> null
             }
         }

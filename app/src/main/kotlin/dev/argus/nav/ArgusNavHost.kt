@@ -236,6 +236,12 @@ fun ArgusNavHost() {
         openAppSettings = openAppDetailsSettings,
         showMessage = showMessage,
     )
+    // 0.8: READ_CALENDAR, chiesto solo dalla riga «Regole del calendario» per le regole che lo usano.
+    val requestCalendarPermission = rememberPermissionRequester(
+        onResult = afterPermissionResult,
+        openAppSettings = openAppDetailsSettings,
+        showMessage = showMessage,
+    )
     val requestNotificationAccess = {
         val runtimePermissionMissing = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(
@@ -630,6 +636,9 @@ fun ArgusNavHost() {
                                     permissionRefresh += 1
                                     settingsViewModel.refresh()
                                 }
+                            }
+                            override fun onRequestCalendarPermission() {
+                                requestCalendarPermission(arrayOf(Manifest.permission.READ_CALENDAR))
                             }
                             override fun onRemoveContact(conversationId: String) {
                                 settingsViewModel.removeContact(conversationId)

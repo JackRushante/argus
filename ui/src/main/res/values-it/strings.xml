@@ -244,6 +244,9 @@
     <string name="settings_bt_title">Trigger Bluetooth</string>
     <string name="settings_bt_on">attivi — connessione e disconnessione dei dispositivi sono armabili</string>
     <string name="settings_bt_off">non attivi — consenti Dispositivi nelle vicinanze per armare le regole</string>
+    <string name="settings_calendar_title">Regole del calendario</string>
+    <string name="settings_calendar_on">attive — le regole possono leggere gli eventi del calendario</string>
+    <string name="settings_calendar_off">non attive — consenti Calendario per armare le regole che usano i tuoi eventi</string>
     <string name="settings_sentinel_title">Sentinella connettività</string>
     <string name="settings_sentinel_active">attiva — monitora Wi-Fi e alimentazione per le regole armate</string>
     <string name="settings_clibridge_title">CliBridge · Hermes</string>
