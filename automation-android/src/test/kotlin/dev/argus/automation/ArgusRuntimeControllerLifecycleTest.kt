@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import dev.argus.automation.geofence.GeofenceReconcileReport
 import dev.argus.automation.geofence.GeofenceTriggerRuntime
 import dev.argus.automation.notification.ActiveNotificationReplyRegistry
+import dev.argus.automation.notification.NotificationListenerWatchdog
 import dev.argus.automation.phone.CallStateSnapshot
 import dev.argus.automation.phone.CallStateStore
 import dev.argus.automation.phone.PhoneEventIngress
@@ -201,6 +202,47 @@ class ArgusRuntimeControllerLifecycleTest {
         awaitUntil("sensore riconciliato dopo l'eliminazione") { sensor.calls.get() > before }
     }
 
+    @Test
+    fun `every reconcile runs the capability health check`() = withFixture { env ->
+        val checks = AtomicInteger()
+        val controller = env.controller(capabilityHealth = { checks.incrementAndGet() })
+
+        controller.reconcile(ReconcileReason.CAPABILITY_CHANGED)
+        controller.reconcile(ReconcileReason.APP_START)
+
+        assertEquals(2, checks.get())
+    }
+
+    @Test
+    fun `a failing health check does not stop the reconcile`() = withFixture { env ->
+        val geofence = CountingGeofence()
+        val controller = env.controller(geofence = geofence, capabilityHealth = { error("probe rotto") })
+
+        controller.reconcile(ReconcileReason.CAPABILITY_CHANGED)
+
+        assertEquals(1, geofence.calls.get())
+    }
+
+    @Test
+    fun `the notification listener is rebound at most once per interval`() = withFixture { env ->
+        val rebinds = AtomicInteger()
+        val controller = env.controller(
+            listenerWatchdog = NotificationListenerWatchdog(
+                notificationRulesArmed = { true },
+                accessGranted = { true },
+                connected = { false },
+                requestRebind = { rebinds.incrementAndGet() },
+            ),
+        )
+
+        controller.maintenanceIfDue()
+        awaitUntil("primo ricollegamento") { rebinds.get() == 1 }
+        // Stesso istante (orologio fermo): l'intervallo non è passato, nessuna seconda richiesta.
+        controller.maintenanceIfDue()
+        delay(200)
+        assertEquals(1, rebinds.get())
+    }
+
     private fun withFixture(body: suspend (Env) -> Unit) {
         runBlocking {
             val context = ApplicationProvider.getApplicationContext<Context>()
@@ -223,6 +265,8 @@ class ArgusRuntimeControllerLifecycleTest {
             phoneIngress: PhoneEventIngress? = null,
             store: AutomationStore? = null,
             audit: AuditSink = RecordingAudit(),
+            capabilityHealth: (suspend () -> Unit)? = null,
+            listenerWatchdog: NotificationListenerWatchdog? = null,
         ) = ArgusRuntimeController(
             scope = scope,
             scheduler = scheduler,
@@ -240,6 +284,8 @@ class ArgusRuntimeControllerLifecycleTest {
             nowMillis = { 1_000L },
             store = store,
             audit = audit,
+            capabilityHealth = capabilityHealth,
+            listenerWatchdog = listenerWatchdog,
         )
     }
 

@@ -136,6 +136,9 @@ import dev.argus.automation.notification.ActiveNotificationReplyRegistry
 import dev.argus.automation.notification.AndroidNotificationReplyGateway
 import dev.argus.automation.notification.AndroidNotificationSnapshotFactory
 import dev.argus.automation.notification.NotificationIngress
+import dev.argus.automation.notification.NotificationListenerWatchdog
+import dev.argus.automation.health.CapabilityHealthMonitor
+import dev.argus.automation.health.HealthReportingExecutionJournal
 import dev.argus.automation.notification.NotificationTriggerDemand
 import dev.argus.automation.notification.NotificationReplyGateway
 import dev.argus.automation.notification.NotificationReplyHandleFactory
@@ -322,11 +325,12 @@ object ArgusModule {
     fun executionJournal(database: ArgusDatabase): RoomExecutionJournal =
         RoomExecutionJournal(database.executionJournalDao())
 
+    // 0.7.2: il journal passa dagli avvisi di salute (HealthModule), le scritture restano quelle di Room.
     @Provides
-    fun executionJournalBoundary(journal: RoomExecutionJournal): ExecutionJournal = journal
+    fun executionJournalBoundary(journal: HealthReportingExecutionJournal): ExecutionJournal = journal
 
     @Provides
-    fun submittedActionJournalBoundary(journal: RoomExecutionJournal): SubmittedActionJournal = journal
+    fun submittedActionJournalBoundary(journal: HealthReportingExecutionJournal): SubmittedActionJournal = journal
 
     @Provides
     @Singleton
@@ -1423,6 +1427,8 @@ object ArgusModule {
         audit: AuditSink,
         frame: DispatchFrame,
         root: RootAccess,
+        capabilityHealth: CapabilityHealthMonitor,
+        listenerWatchdog: NotificationListenerWatchdog,
     ): ArgusRuntimeController = ArgusRuntimeController(
         scope,
         scheduler,
@@ -1445,6 +1451,8 @@ object ArgusModule {
         store = store,
         audit = audit,
         dispatchesIdle = { frame.idle },
+        capabilityHealth = capabilityHealth::check,
+        listenerWatchdog = listenerWatchdog,
     )
 
     // --- 0.4.1 (manuale): avvio manuale delle regole (F8) e «Pausa automazioni» (F21) ---
