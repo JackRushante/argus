@@ -17,6 +17,7 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -307,6 +308,7 @@ private fun HowToUseCard() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SecretFormSheet(
     form: SecretForm,
