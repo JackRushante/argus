@@ -9,11 +9,18 @@ data class JournalRetentionPolicy(
     val runningStaleAfterMillis: Long = 15L * 60 * 1_000,
     // 35gg: copre sempre l'intero mese corrente (tetto mensile), per questo NON riusa maxAgeMillis (30gg).
     val usageRetentionMillis: Long = 35L * 24 * 60 * 60 * 1_000,
+    /**
+     * B13: i claim più giovani di così restano anche oltre [maxExecutions], perché deduplicano gli eventi
+     * (una notifica ripubblicata con lo stesso orario non rifà scattare la regola). 24 ore come il TTL delle
+     * risposte differite.
+     */
+    val dedupWindowMillis: Long = 24L * 60 * 60 * 1_000,
 ) {
     init {
         require(maxAuditRows > 0 && maxExecutions > 0) { "I limiti retention devono essere positivi" }
         require(maxAgeMillis > 0 && runningStaleAfterMillis > 0) { "Le durate retention devono essere positive" }
         require(usageRetentionMillis > 0) { "La retention usage deve essere positiva" }
+        require(dedupWindowMillis > 0) { "La finestra di deduplica deve essere positiva" }
     }
 
     companion object {
@@ -61,7 +68,9 @@ class RoomJournalMaintenance(
             } else {
                 0
             }
-            val deletedExecutions = db.executionJournalDao().trim(logOlderThan, policy.maxExecutions)
+            val dedupSince = (nowMillis - policy.dedupWindowMillis).coerceAtLeast(0)
+            val deletedExecutions = db.executionJournalDao()
+                .trim(logOlderThan, policy.maxExecutions, nowMillis, dedupSince)
             val deletedAuditRows = db.auditDao().trim(logOlderThan, policy.maxAuditRows)
             // Il ciphertext di una reply consumata o scaduta non deve sopravvivere al suo TTL.
             val purgedDeferred = db.deferredReplyDao().purge(nowMillis)
