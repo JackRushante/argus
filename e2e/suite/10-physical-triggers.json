@@ -1,0 +1,441 @@
+[
+ {
+  "id": "P01-next_alarm-none-local_ui+audio_mode+display+launch",
+  "title": "Prossima sveglia: scatta prima della sveglia (evento sintetico) / azioni base",
+  "cond": "none",
+  "rule": {
+   "name": "P01-next_alarm-none-local_ui+audio_mode+display+launch",
+   "trigger": {
+    "type": "next_alarm",
+    "offsetMinutes": 15
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e P01 {{RUN}}",
+     "text": "e2e body"
+    },
+    {
+     "type": "set_volume",
+     "stream": "MEDIA",
+     "level": 30
+    },
+    {
+     "type": "set_rotation",
+     "auto": true
+    },
+    {
+     "type": "set_timer",
+     "seconds": 600,
+     "label": "e2e fill",
+     "skipUi": true
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e P01 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ],
+  "cleanup": [
+   "cmd media_session volume --stream 3 --set 7"
+  ]
+ },
+ {
+  "id": "P02-next_alarm-true-device_control+network_out+radios+shell",
+  "title": "Prossima sveglia / condizione vera / azioni privilegiate (mai la shell: qualunque app imposta la sveglia)",
+  "cond": "true",
+  "rule": {
+   "name": "P02-next_alarm-true-device_control+network_out+radios+shell",
+   "trigger": {
+    "type": "next_alarm",
+    "offsetMinutes": 0
+   },
+   "actions": [
+    {
+     "type": "screenshot"
+    },
+    {
+     "type": "http_request",
+     "method": "GET",
+     "url": "https://example.com/"
+    },
+    {
+     "type": "set_wifi",
+     "on": true
+    },
+    {
+     "type": "write_setting",
+     "namespace": "GLOBAL",
+     "key": "e2e_marker",
+     "value": "81"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "needs": [
+   "internet"
+  ],
+  "pre": [
+   "settings delete global e2e_marker"
+  ],
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "settings get global e2e_marker",
+    "equals": "81",
+    "wait_s": 6
+   }
+  ],
+  "cleanup": [
+   "settings delete global e2e_marker",
+   "rm -rf /sdcard/Pictures/Argus"
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable"
+      }
+     }
+    },
+    "checks": [],
+    "pre": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "P03-next_alarm-false-local_ui+screen_macro-refused",
+  "title": "Prossima sveglia: una macro sullo schermo non puo' partire da una sveglia impostata da un'app",
+  "cond": "false",
+  "rule": {
+   "name": "P03-next_alarm-false-local_ui+screen_macro-refused",
+   "trigger": {
+    "type": "next_alarm",
+    "offsetMinutes": 30
+   },
+   "actions": [
+    {
+     "type": "vibrate",
+     "durationMs": 100
+    },
+    {
+     "type": "ui_steps",
+     "steps": [
+      {
+       "op": "home"
+      }
+     ]
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "off"
+   }
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "ui_steps_external_trigger"
+    }
+   }
+  }
+ },
+ {
+  "id": "P04-app_usage-none-local_ui+audio_mode+display+launch",
+  "title": "Tempo d'uso di un'app: la soglia di oggi e' raggiunta (evento sintetico) / azioni base",
+  "cond": "none",
+  "rule": {
+   "name": "P04-app_usage-none-local_ui+audio_mode+display+launch",
+   "trigger": {
+    "type": "app_usage",
+    "pkg": "com.google.android.deskclock",
+    "minutes": 30
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e P04 {{RUN}}",
+     "text": "e2e body"
+    },
+    {
+     "type": "set_volume",
+     "stream": "MEDIA",
+     "level": 30
+    },
+    {
+     "type": "set_rotation",
+     "auto": true
+    },
+    {
+     "type": "set_timer",
+     "seconds": 600,
+     "label": "e2e fill",
+     "skipUi": true
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e P04 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ],
+  "cleanup": [
+   "cmd media_session volume --stream 3 --set 7"
+  ]
+ },
+ {
+  "id": "P05-app_usage-true-device_control+network_out+radios+shell",
+  "title": "Tempo d'uso di un'app / condizione vera / azioni privilegiate (mai la shell)",
+  "cond": "true",
+  "rule": {
+   "name": "P05-app_usage-true-device_control+network_out+radios+shell",
+   "trigger": {
+    "type": "app_usage",
+    "pkg": "com.google.android.deskclock",
+    "minutes": 45
+   },
+   "actions": [
+    {
+     "type": "screenshot"
+    },
+    {
+     "type": "http_request",
+     "method": "GET",
+     "url": "https://example.com/"
+    },
+    {
+     "type": "set_wifi",
+     "on": true
+    },
+    {
+     "type": "write_setting",
+     "namespace": "GLOBAL",
+     "key": "e2e_marker",
+     "value": "82"
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "on"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "needs": [
+   "internet"
+  ],
+  "pre": [
+   "settings delete global e2e_marker"
+  ],
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "settings get global e2e_marker",
+    "equals": "82",
+    "wait_s": 6
+   }
+  ],
+  "cleanup": [
+   "settings delete global e2e_marker",
+   "rm -rf /sdcard/Pictures/Argus"
+  ],
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable"
+      }
+     }
+    },
+    "checks": [],
+    "pre": [],
+    "cleanup": []
+   }
+  }
+ },
+ {
+  "id": "P06-app_usage-false-local_ui+screen_macro-refused",
+  "title": "Tempo d'uso: una macro sullo schermo non puo' partire dall'uso di un'app",
+  "cond": "false",
+  "rule": {
+   "name": "P06-app_usage-false-local_ui+screen_macro-refused",
+   "trigger": {
+    "type": "app_usage",
+    "pkg": "com.google.android.deskclock",
+    "minutes": 10
+   },
+   "actions": [
+    {
+     "type": "vibrate",
+     "durationMs": 100
+    },
+    {
+     "type": "ui_steps",
+     "steps": [
+      {
+       "op": "home"
+      }
+     ]
+    }
+   ],
+   "conditions": {
+    "type": "state_equals",
+    "key": "screen",
+    "op": "EQ",
+    "value": "off"
+   }
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "ui_steps_external_trigger"
+    }
+   }
+  }
+ },
+ {
+  "id": "P07-nfc_tag-unavailable-every-class",
+  "title": "Tag NFC: l'emulatore non ha l'NFC, quindi il trigger non e' armabile (ogni classe di azione)",
+  "cond": "none",
+  "rule": {
+   "name": "P07-nfc_tag-unavailable-every-class",
+   "trigger": {
+    "type": "nfc_tag",
+    "tagId": "04:E2:E0:00:00:00:01"
+   },
+   "actions": [
+    {
+     "type": "vibrate",
+     "durationMs": 100
+    },
+    {
+     "type": "set_volume",
+     "stream": "MEDIA",
+     "level": 30
+    },
+    {
+     "type": "set_rotation",
+     "auto": true
+    },
+    {
+     "type": "set_timer",
+     "seconds": 600,
+     "label": "e2e fill",
+     "skipUi": true
+    },
+    {
+     "type": "http_request",
+     "method": "GET",
+     "url": "https://example.com/"
+    },
+    {
+     "type": "set_wifi",
+     "on": true
+    },
+    {
+     "type": "screenshot"
+    },
+    {
+     "type": "run_shell",
+     "cmd": "true"
+    },
+    {
+     "type": "ui_steps",
+     "steps": [
+      {
+       "op": "home"
+      }
+     ]
+    }
+   ]
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "capability_unavailable",
+     "detail": "trigger.nfc_tag"
+    }
+   }
+  }
+ },
+ {
+  "id": "P08-sensor-shake",
+  "title": "Doppia scossa: armabile con l'accelerometro dell'emulatore (evento sintetico)",
+  "cond": "none",
+  "rule": {
+   "name": "P08-sensor-shake",
+   "trigger": {
+    "type": "sensor",
+    "kind": "shake"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e P08 {{RUN}}",
+     "text": "e2e body"
+    }
+   ],
+   "cooldownMs": 60000
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e P08 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ }
+]

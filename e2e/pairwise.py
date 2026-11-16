@@ -22,6 +22,8 @@ CONFIGS = ["shizuku_root", "shizuku_shell", "none"]
 TRIGGERS = [
     "time", "immediate", "manual", "geofence", "notification", "phone_state", "connectivity",
     "sensor", "screen", "battery", "audio_output", "mode_changed", "media", "app_event",
+    # 0.8, trigger fisici.
+    "nfc_tag", "next_alarm", "app_usage",
 ]
 
 # Classi di azioni: raggruppano i tipi per natura dell'effetto e per tier. `wait`, `if` e `while` non
@@ -49,7 +51,7 @@ CONTROL_FLOW = ["wait", "if", "while"]
 # `not_available_yet`). Non entra nella copertura a coppie finche' e' spento; una regola della suite puo'
 # usarlo solo per provare quel rifiuto. Chi accende un tipo lo sposta in TRIGGERS o ACTION_CLASSES e
 # aggiunge le sue regole.
-NOT_YET_AVAILABLE_TRIGGERS = ["calendar_event", "nfc_tag", "next_alarm", "app_usage", "user_mode_changed"]
+NOT_YET_AVAILABLE_TRIGGERS = ["calendar_event", "user_mode_changed"]
 NOT_YET_AVAILABLE_ACTIONS = [
     "ask", "set_stored", "set_user_mode", "notification_reply", "notification_action", "send_sms",
     "call_number", "send_intent", "screen_call",
@@ -124,6 +126,9 @@ def features(record: dict) -> Dict[str, Set[str]]:
 INFEASIBLE: Set[Pair] = {
     frozenset({("trigger", "sensor"), ("cond", "true")}),
     frozenset({("trigger", "sensor"), ("cond", "false")}),
+    # 0.8: l'emulatore non ha l'NFC: una regola nfc_tag non si arma mai (capability_unavailable).
+    frozenset({("trigger", "nfc_tag"), ("cond", "true")}),
+    frozenset({("trigger", "nfc_tag"), ("cond", "false")}),
 }
 
 
