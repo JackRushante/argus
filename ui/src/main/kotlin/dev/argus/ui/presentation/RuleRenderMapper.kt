@@ -431,8 +431,8 @@ object RuleRenderMapper {
             // Ritardo relativo one-shot (ri-armabile): nessun orario assoluto da mostrare, solo la
             // durata umanizzata (l'ancora reale è congelata a runtime nel ScheduledTimeAlarm).
             afterMs != null -> l.pick(
-                "Once, in ${humanizeDelay(afterMs, l)}",
-                "Una volta, tra ${humanizeDelay(afterMs, l)}",
+                "Once, in ${humanizeDuration(afterMs, l)}",
+                "Una volta, tra ${humanizeDuration(afterMs, l)}",
             )
             solar != null -> SolarTriggerRender.line(solar, l)
             else -> l.pick("Time not specified (${t.tz})", "Orario non specificato (${t.tz})")
@@ -446,31 +446,27 @@ object RuleRenderMapper {
     }
 
     /**
-     * Umanizza un ritardo relativo: unità più significativa più, se presente, quella immediatamente
-     * inferiore (es. 5_400_000 → "1 ora e 30 minuti" / "1 hour and 30 minutes"), con singolare e
-     * plurale corretti per lingua. Le unità sotto la seconda scelta vengono troncate.
+     * Umanizza una durata con TUTTE le unità non nulle, dalla più grande ai millisecondi (B14: «1 giorno e
+     * 30 minuti», mai «1 giorno»), con singolare e plurale per lingua: 5_400_000 → «1 ora e 30 minuti»,
+     * 90_061_000 → «1 giorno, 1 ora, 1 minuto e 1 secondo». Zero → «0 secondi».
      */
-    private fun humanizeDelay(ms: Long, l: RenderLanguage): String {
+    internal fun humanizeDuration(ms: Long, l: RenderLanguage): String {
         val totalSeconds = ms / 1_000
         val units = listOf(
-            Triple(totalSeconds / 86_400, l.pick("day", "giorno") to l.pick("days", "giorni"), Unit),
-            Triple((totalSeconds % 86_400) / 3_600, l.pick("hour", "ora") to l.pick("hours", "ore"), Unit),
-            Triple((totalSeconds % 3_600) / 60, l.pick("minute", "minuto") to l.pick("minutes", "minuti"), Unit),
-            Triple(totalSeconds % 60, l.pick("second", "secondo") to l.pick("seconds", "secondi"), Unit),
+            totalSeconds / 86_400 to (l.pick("day", "giorno") to l.pick("days", "giorni")),
+            (totalSeconds % 86_400) / 3_600 to (l.pick("hour", "ora") to l.pick("hours", "ore")),
+            (totalSeconds % 3_600) / 60 to (l.pick("minute", "minuto") to l.pick("minutes", "minuti")),
+            totalSeconds % 60 to (l.pick("second", "secondo") to l.pick("seconds", "secondi")),
+            ms % 1_000 to (l.pick("millisecond", "millisecondo") to l.pick("milliseconds", "millisecondi")),
         )
-        fun render(value: Long, names: Pair<String, String>) =
-            "$value ${if (value == 1L) names.first else names.second}"
-
-        val primaryIndex = units.indexOfFirst { it.first != 0L }
-        // Difensivo: afterMs >= 1s.
-        if (primaryIndex == -1) return render(0, l.pick("second", "secondo") to l.pick("seconds", "secondi"))
-        val (pv, pn, _) = units[primaryIndex]
-        val primary = render(pv, pn)
-        val secondary = units.getOrNull(primaryIndex + 1)
-            ?.takeIf { it.first != 0L }
-            ?.let { (sv, sn, _) -> render(sv, sn) }
-        val joiner = l.pick(" and ", " e ")
-        return if (secondary != null) "$primary$joiner$secondary" else primary
+        val parts = units
+            .filter { (value, _) -> value != 0L }
+            .map { (value, names) -> "$value ${if (value == 1L) names.first else names.second}" }
+        return when (parts.size) {
+            0 -> l.pick("0 seconds", "0 secondi")
+            1 -> parts.single()
+            else -> parts.dropLast(1).joinToString(", ") + l.pick(" and ", " e ") + parts.last()
+        }
     }
 
     private fun geofenceLine(t: Trigger.Geofence, l: RenderLanguage): String {
@@ -752,7 +748,7 @@ object RuleRenderMapper {
         is Action.SetTimer -> row(
             iconKey = "timer",
             label = l.pick("Start timer", "Avvia timer"),
-            detail = "${a.seconds}s" +
+            detail = humanizeDuration(a.seconds * 1_000L, l) +
                 (a.label?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: "") +
                 clockUiSuffix(a.skipUi, l),
         )

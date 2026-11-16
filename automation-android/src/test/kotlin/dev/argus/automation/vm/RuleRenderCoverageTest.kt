@@ -663,7 +663,7 @@ class RuleRenderCoverageTest {
             "set_timer" to case(
                 Action.SetTimer(seconds = 4321, label = "XYZ-timer", skipUi = false),
                 mapOf(
-                    "seconds" to ms("4321"),
+                    "seconds" to ms(m("1 hour, 12 minutes and 1 second", "1 ora, 12 minuti e 1 secondo")),
                     "label" to ms("XYZ-timer"),
                     "skipUi" to ms(m("opens the clock app", "apre l'app Orologio")),
                 ),
