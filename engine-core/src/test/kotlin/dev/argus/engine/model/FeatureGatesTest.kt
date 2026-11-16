@@ -55,7 +55,6 @@ class FeatureGatesTest {
         FeatureGate.TRIGGER_NFC_TAG to Trigger.NfcTag("04:A2:19", resolveTag = false),
         FeatureGate.TRIGGER_NEXT_ALARM to Trigger.NextAlarm(15),
         FeatureGate.TRIGGER_APP_USAGE to Trigger.AppUsage("com.example.game", 60),
-        FeatureGate.TRIGGER_USER_MODE_CHANGED to Trigger.UserModeChanged("lavoro"),
         FeatureGate.TRIGGER_SENSOR_SHAKE to Trigger.Sensor(SensorKind.SHAKE),
         FeatureGate.TRIGGER_SENSOR_FLIP_FACE_DOWN to Trigger.Sensor(SensorKind.FLIP_FACE_DOWN),
     )
@@ -66,14 +65,10 @@ class FeatureGatesTest {
         FeatureGate.CONDITION_BLUETOOTH_CONNECTED to Condition.BluetoothConnected(),
         FeatureGate.CONDITION_HEADSET_CONNECTED to Condition.HeadsetConnected(AudioOutputKind.WIRED),
         FeatureGate.CONDITION_CALENDAR_BUSY to Condition.CalendarBusy(titleMatch = "Riunione"),
-        FeatureGate.CONDITION_STORED_COMPARE to Condition.StoredCompare("count", StateValueType.NUMBER, CmpOp.GT, "3"),
-        FeatureGate.CONDITION_USER_MODE_IS to Condition.UserModeIs("casa"),
     )
 
     private val newActions: Map<FeatureGate, Action> = linkedMapOf(
         FeatureGate.ACTION_ASK to Action.Ask("Esco?", listOf("Sì", "No"), "answer", defaultChoice = "No"),
-        FeatureGate.ACTION_SET_STORED to Action.SetStored("count", StoredOp.INCREMENT),
-        FeatureGate.ACTION_SET_USER_MODE to Action.SetUserMode("lavoro"),
         FeatureGate.ACTION_NOTIFICATION_REPLY to Action.NotificationReply("Arrivo"),
         FeatureGate.ACTION_NOTIFICATION_ACTION to Action.NotificationAction(NotificationActionOp.DISMISS),
         FeatureGate.ACTION_SEND_SMS to Action.SendSms("+393331112222", "Arrivo"),
@@ -97,16 +92,27 @@ class FeatureGatesTest {
         ),
     )
 
+    /** Interruttori già accesi: i loro test veri stanno nei test della feature. */
+    private val switchedOn: Set<FeatureGate> = setOf(
+        // 0.8: valori conservati e modalità (StoredStateTest, StoredModesRuntimeTest, DraftValidatorStoredModesTest).
+        FeatureGate.VAR_STORED,
+        FeatureGate.CONDITION_STORED_COMPARE,
+        FeatureGate.CONDITION_USER_MODE_IS,
+        FeatureGate.TRIGGER_USER_MODE_CHANGED,
+        FeatureGate.ACTION_SET_STORED,
+        FeatureGate.ACTION_SET_USER_MODE,
+    )
+
     @Test
-    fun `every gate is off in this version`() {
-        assertEquals(emptyList(), FeatureGate.entries.filter { it.enabled })
+    fun `only the switched-on gates are on in this version`() {
+        assertEquals(switchedOn, FeatureGate.entries.filter { it.enabled }.toSet())
         assertEquals(FeatureGate.entries.size, FeatureGate.entries.map { it.wireName }.toSet().size)
     }
 
     @Test
     fun `the tables above cover every gate`() {
         val covered = newTriggers.keys + newConditions.keys + newActions.keys +
-            setOf(FeatureGate.CONFIRM, FeatureGate.EXIT, FeatureGate.VAR_STORED)
+            setOf(FeatureGate.CONFIRM, FeatureGate.EXIT) + switchedOn
         assertEquals(FeatureGate.entries.toSet(), covered)
     }
 
@@ -129,8 +135,6 @@ class FeatureGatesTest {
             val nested = Action.If(Condition.BooleanLiteral(true), then = listOf(action))
             assertTrue(gate.wireName in notAvailable(draft(actions = listOf(nested))), "azione annidata $action")
         }
-        val stored = VarBinding.Stored("count", "count", StateValueType.NUMBER, ConfidentialityLabel.PRIVATE)
-        assertEquals(listOf(FeatureGate.VAR_STORED.wireName), notAvailable(draft(vars = listOf(stored))))
         assertEquals(listOf(FeatureGate.CONFIRM.wireName), notAvailable(draft(confirm = ConfirmSpec())))
         assertEquals(listOf(FeatureGate.EXIT.wireName), notAvailable(draft(exit = ExitSpec(Trigger.Manual))))
         // Un tipo spento nel trigger o nelle azioni d'uscita conta anche lui.
@@ -218,7 +222,7 @@ class FeatureGatesTest {
         fun caps(d: AutomationDraft) = CapabilityRequirements.derive(d)
         assertTrue(CapabilityIds.TRIGGER_CALENDAR_EVENT in caps(draft(trigger = newTriggers.getValue(FeatureGate.TRIGGER_CALENDAR_EVENT))))
         assertTrue(CapabilityIds.triggerSensor(SensorKind.SHAKE) in caps(draft(trigger = Trigger.Sensor(SensorKind.SHAKE))))
-        assertTrue(CapabilityIds.STATE_STORED in caps(draft(conditions = newConditions.getValue(FeatureGate.CONDITION_STORED_COMPARE))))
+        assertTrue(CapabilityIds.STATE_STORED in caps(draft(conditions = Condition.StoredCompare("count", StateValueType.NUMBER, CmpOp.GT, "3"))))
         assertTrue(CapabilityIds.ACTION_SEND_SMS in caps(draft(actions = listOf(newActions.getValue(FeatureGate.ACTION_SEND_SMS)))))
         assertTrue(CapabilityIds.ACTION_HTTP_REQUEST_SECRETS in caps(draft(actions = listOf(newActions.getValue(FeatureGate.HTTP_SECRETS)))))
         assertTrue(CapabilityIds.RULE_CONFIRM in caps(draft(confirm = ConfirmSpec())))
@@ -234,7 +238,7 @@ class FeatureGatesTest {
     fun `capturing and stored-value actions make the rule a p4 program`() {
         listOf(
             newActions.getValue(FeatureGate.ACTION_ASK),
-            newActions.getValue(FeatureGate.ACTION_SET_STORED),
+            Action.SetStored("count", StoredOp.INCREMENT),
             newActions.getValue(FeatureGate.HTTP_CAPTURE),
         ).forEach { action ->
             assertEquals(AUTOMATION_SCHEMA_VERSION_P4, AutomationSchema.versionFor(draft(actions = listOf(action))), "$action")

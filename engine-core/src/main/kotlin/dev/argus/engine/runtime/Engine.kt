@@ -543,6 +543,8 @@ class Engine(
         foregroundApp = other.foregroundApp ?: foregroundApp,
         location = other.location ?: location,
         queryValues = queryValues + other.queryValues,
+        stored = stored + other.stored,
+        userMode = other.userMode ?: userMode,
     )
 
 }

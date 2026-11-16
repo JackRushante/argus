@@ -301,8 +301,9 @@ class DraftValidator(
                         }
                     }
                 }
-                // 0.8 scaffold: spento (not_available_yet). Chi lo accende valida qui chiave e riservatezza.
-                is VarBinding.Stored -> Unit
+                // 0.8: la chiave ha la forma dei nomi di variabile. Il valore porta a runtime le etichette
+                // salvate; qui conta come TAINTED (VarBinding.integrity), il caso peggiore.
+                is VarBinding.Stored -> validateStoredKey(binding.key, err)
             }
         }
     }
@@ -1019,7 +1020,65 @@ class DraftValidator(
 
             is Trigger.AppUsage -> Unit
 
-            is Trigger.UserModeChanged -> Unit
+            // 0.8: modalità letterale (che esista lo controlla la revisione sul telefono).
+            is Trigger.UserModeChanged -> trigger.to?.let { validateModeName(it, err) }
+        }
+    }
+
+    private fun validateStoredKey(key: String, err: (String, String) -> Unit) {
+        if (!StoredValuePolicy.validKey(key)) {
+            err("stored_key_invalid", "Chiave del valore conservato non valida: [a-z][a-z0-9_]{0,31}")
+        }
+    }
+
+    private fun validateModeName(mode: String, err: (String, String) -> Unit) {
+        if (!UserModePolicy.validLiteral(mode)) {
+            err(
+                "user_mode_name_invalid",
+                "Nome di modalità non valido: da 1 a ${UserModePolicy.MAX_NAME_CHARS} caratteri, letterale",
+            )
+        }
+    }
+
+    private fun validateStoredCompare(c: Condition.StoredCompare, err: (String, String) -> Unit) {
+        validateStoredKey(c.key, err)
+        val opAllowed = when (c.valueType) {
+            StateValueType.TEXT -> c.op in setOf(CmpOp.EQ, CmpOp.NEQ, CmpOp.CONTAINS)
+            StateValueType.NUMBER -> c.op in setOf(CmpOp.EQ, CmpOp.NEQ, CmpOp.GT, CmpOp.LT)
+            StateValueType.BOOLEAN -> c.op in setOf(CmpOp.EQ, CmpOp.NEQ)
+        }
+        val expectedValid = c.expected.length <= StoredValuePolicy.MAX_VALUE_CHARS &&
+            !InterpolationPolicy.containsInterpolation(c.expected) &&
+            (c.valueType == StateValueType.TEXT || StoredValuePolicy.canonical(c.expected, c.valueType) != null)
+        if (!opAllowed || !expectedValid) {
+            err(
+                "stored_compare_invalid",
+                "stored_compare '${c.key.take(32)}': operatore o valore atteso non adatti al tipo ${c.valueType}",
+            )
+        }
+    }
+
+    private fun validateSetStored(a: Action.SetStored, err: (String, String) -> Unit) {
+        validateStoredKey(a.key, err)
+        val valid = when (a.op) {
+            StoredOp.SET -> {
+                val value = a.value
+                value != null && value.length <= StoredValuePolicy.MAX_VALUE_CHARS &&
+                    // Un letterale tipizzato deve già essere del suo tipo; un template si controlla allo scatto.
+                    (a.valueType == null || a.valueType == StateValueType.TEXT ||
+                        InterpolationPolicy.containsInterpolation(value) ||
+                        StoredValuePolicy.canonical(value, a.valueType) != null)
+            }
+            StoredOp.INCREMENT -> a.valueType == null &&
+                (a.value == null || StoredValuePolicy.INCREMENT_LITERAL.matches(a.value))
+            StoredOp.TOGGLE, StoredOp.CLEAR -> a.value == null && a.valueType == null
+        }
+        if (!valid) {
+            err(
+                "set_stored_invalid",
+                "set_stored ${a.op}: SET vuole un valore (max ${StoredValuePolicy.MAX_VALUE_CHARS} caratteri), " +
+                    "INCREMENT al più un intero letterale, TOGGLE e CLEAR nessun valore",
+            )
         }
     }
 
@@ -1098,9 +1157,10 @@ class DraftValidator(
 
             is Condition.CalendarBusy -> Unit
 
-            is Condition.StoredCompare -> Unit
+            // 0.8: usabili allo scatto e dentro if/while; valore assente = UNKNOWN.
+            is Condition.StoredCompare -> validateStoredCompare(condition, err)
 
-            is Condition.UserModeIs -> Unit
+            is Condition.UserModeIs -> validateModeName(condition.mode, err)
         }
     }
 
@@ -1320,9 +1380,10 @@ class DraftValidator(
             // i suoi limiti; i campi letterali (numeri, chiavi, etichette) non devono contenere `${'$'}{`.
             is Action.Ask -> Unit
 
-            is Action.SetStored -> Unit
+            is Action.SetStored -> validateSetStored(action, err)
 
-            is Action.SetUserMode -> Unit
+            // 0.8: modalità letterale; che esista lo controlla la revisione sul telefono (e lo scatto).
+            is Action.SetUserMode -> validateModeName(action.mode, err)
 
             is Action.NotificationReply -> Unit
 

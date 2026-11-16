@@ -32,7 +32,7 @@ enum class FeatureGate(
     // --- Variabili -------------------------------------------------------------------------------
 
     /** Variabile `stored`: valore conservato fra le esecuzioni. */
-    VAR_STORED("stored", enabled = false),
+    VAR_STORED("stored", enabled = true),
 
     // --- Condizioni ------------------------------------------------------------------------------
 
@@ -52,10 +52,10 @@ enum class FeatureGate(
     CONDITION_CALENDAR_BUSY("calendar_busy", enabled = false),
 
     /** Condizione `stored_compare`. */
-    CONDITION_STORED_COMPARE("stored_compare", enabled = false),
+    CONDITION_STORED_COMPARE("stored_compare", enabled = true),
 
     /** Condizione `user_mode_is`. */
-    CONDITION_USER_MODE_IS("user_mode_is", enabled = false),
+    CONDITION_USER_MODE_IS("user_mode_is", enabled = true),
 
     // --- Trigger ---------------------------------------------------------------------------------
 
@@ -72,7 +72,7 @@ enum class FeatureGate(
     TRIGGER_APP_USAGE("app_usage", enabled = false),
 
     /** Trigger `user_mode_changed`. */
-    TRIGGER_USER_MODE_CHANGED("user_mode_changed", enabled = false),
+    TRIGGER_USER_MODE_CHANGED("user_mode_changed", enabled = true),
 
     /** Trigger `sensor` con `kind` = `shake`. */
     TRIGGER_SENSOR_SHAKE("sensor.shake", enabled = false),
@@ -86,10 +86,10 @@ enum class FeatureGate(
     ACTION_ASK("ask", enabled = false),
 
     /** Azione `set_stored`. */
-    ACTION_SET_STORED("set_stored", enabled = false),
+    ACTION_SET_STORED("set_stored", enabled = true),
 
     /** Azione `set_user_mode`. */
-    ACTION_SET_USER_MODE("set_user_mode", enabled = false),
+    ACTION_SET_USER_MODE("set_user_mode", enabled = true),
 
     /** Azione `notification_reply`. */
     ACTION_NOTIFICATION_REPLY("notification_reply", enabled = false),
