@@ -137,8 +137,6 @@ internal object BenchVocab {
         ActionTypeIds.ASK,
         ActionTypeIds.SET_STORED,
         ActionTypeIds.SET_USER_MODE,
-        ActionTypeIds.NOTIFICATION_REPLY,
-        ActionTypeIds.NOTIFICATION_ACTION,
         ActionTypeIds.SEND_SMS,
         ActionTypeIds.CALL_NUMBER,
         ActionTypeIds.SEND_INTENT,
