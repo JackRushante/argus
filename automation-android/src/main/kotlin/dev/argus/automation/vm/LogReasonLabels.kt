@@ -217,8 +217,12 @@ internal object LogReasonLabels {
             "un'altra macro sullo schermo è già in corso",
         ),
         "ui_forbidden_screen" to Label(
-            "the macro reached a screen it may not touch (Argus, Settings, installer or permissions)",
-            "la macro è arrivata su una schermata che non può toccare (Argus, Impostazioni, installatore o permessi)",
+            "the macro reached a screen it may not touch (Argus, Settings, system, permission or security screens)",
+            "la macro è arrivata su una schermata che non può toccare (Argus, Impostazioni, sistema, permessi o sicurezza)",
+        ),
+        "ui_wrong_app" to Label(
+            "another app came to the front, so the macro stopped before touching it",
+            "è passata davanti un'altra app, quindi la macro si è fermata prima di toccarla",
         ),
         "ui_open_failed" to Label(
             "the app did not come to the front",

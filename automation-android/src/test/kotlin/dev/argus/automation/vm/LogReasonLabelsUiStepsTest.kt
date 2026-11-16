@@ -12,6 +12,7 @@ class LogReasonLabelsUiStepsTest {
         ScreenCodes.SERVICE_UNAVAILABLE,
         ScreenCodes.BUSY,
         ScreenCodes.FORBIDDEN_SCREEN,
+        ScreenCodes.WRONG_APP,
         ScreenCodes.OPEN_FAILED,
         ScreenCodes.ELEMENT_NOT_FOUND,
         ScreenCodes.CHECK_FAILED,

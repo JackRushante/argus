@@ -5,6 +5,7 @@ internal class FakeNode(
     override val text: String? = null,
     override val contentDescription: String? = null,
     override val viewId: String? = null,
+    override val packageName: String? = "com.example.app",
     override val isClickable: Boolean = false,
     override val isEditable: Boolean = false,
     override val isScrollable: Boolean = false,

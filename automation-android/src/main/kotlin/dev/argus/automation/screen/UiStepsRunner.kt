@@ -29,8 +29,15 @@ interface UiMacroSession {
  * cerca ferma la macro con un codice: mai un clic «a caso».
  *
  * Confini che l'esecutore fa rispettare a ogni passo, oltre al validatore:
- *  - l'app in primo piano non è mai Argus, le Impostazioni, l'installatore o i dialoghi dei permessi
- *    ([UiStepsPolicy.isForbiddenPackage]): se compare, la macro si ferma prima di toccare;
+ *  - l'app in primo piano non è mai Argus, le Impostazioni, l'installatore, i dialoghi dei permessi
+ *    o le altre schermate vietate ([UiStepsPolicy.isForbiddenPackage]): se compare, la macro si
+ *    ferma prima di toccare;
+ *  - la macro è agganciata alla sua app (0.7.2): il `pkg` se c'è, altrimenti l'app in primo piano al
+ *    primo passo (o, se in quel momento non si legge, la prima che si legge a un passo successivo).
+ *    Un clic, una scrittura o uno scorrimento avvengono solo se, subito prima del gesto, la finestra
+ *    attiva e il nodo da toccare appartengono a quell'app; altrimenti la macro si ferma con
+ *    `ui_wrong_app`. Le attese e i controlli non toccano niente e tollerano un'app momentaneamente
+ *    illeggibile;
  *  - una sola macro per volta (`ui_busy`);
  *  - la notifica «Ferma» è visibile finché la macro gira.
  *
@@ -49,6 +56,9 @@ class UiStepsRunner(
     /** Ferma la macro con un codice chiuso. */
     private class MacroStop(val code: String) : RuntimeException(null, null, false, false)
 
+    /** L'app a cui la macro è agganciata: il `pkg`, oppure quella in primo piano al primo passo che la legge. */
+    private class Pin(var pkg: String?)
+
     /**
      * Esegue la macro. [openApp] apre `pkg` come farebbe l'azione `launch_app` (stesso percorso:
      * Shizuku, intent o notifica «Tocca per aprire»); il suo esito, se non è un successo, ferma la macro.
@@ -66,7 +76,8 @@ class UiStepsRunner(
             return try {
                 val pkg = action.pkg
                 if (pkg != null) openAndWait(pkg, deadline, openApp)
-                for (step in action.steps) execute(step, deadline, pkg)
+                val pin = Pin(pkg)
+                for (step in action.steps) execute(step, deadline, pkg, pin)
                 ActionResult.Success
             } catch (stop: MacroStop) {
                 ActionResult.Failure(stop.code)
@@ -100,13 +111,15 @@ class UiStepsRunner(
         pause(UiStepsPolicy.SETTLE_MS)
     }
 
-    private suspend fun execute(step: UiStep, deadline: Long, appPkg: String?) {
+    private suspend fun execute(step: UiStep, deadline: Long, appPkg: String?, pin: Pin) {
         checkpoint(deadline)
+        // Senza `pkg` la macro si aggancia all'app che trova davanti; null = ancora non leggibile.
+        if (pin.pkg == null) pin.pkg = screen.activePackage()
         when (step) {
             is UiStep.WaitFor -> waitFor(step, appPkg, deadline)
-            is UiStep.Click -> click(step, deadline)
-            is UiStep.Type -> type(step, deadline)
-            is UiStep.Scroll -> scroll(step.dir, deadline)
+            is UiStep.Click -> click(step, deadline, pin)
+            is UiStep.Type -> type(step, deadline, pin)
+            is UiStep.Scroll -> scroll(step.dir, deadline, pin)
             UiStep.Back -> {
                 if (!screen.back()) throw MacroStop(ScreenCodes.ACTION_FAILED)
                 pause(UiStepsPolicy.SETTLE_MS)
@@ -135,7 +148,7 @@ class UiStepsRunner(
         if (!ready) throw MacroStop(ScreenCodes.TIMEOUT)
     }
 
-    private suspend fun click(step: UiStep.Click, deadline: Long) {
+    private suspend fun click(step: UiStep.Click, deadline: Long, pin: Pin) {
         // Come wait_for e check: senza `desc`, il testo vale anche per la descrizione (pulsanti a icona).
         val query = ScreenQuery(text = step.text, id = step.id, desc = step.desc, textAlsoDescription = step.desc == null)
         val index = step.index ?: 0
@@ -148,28 +161,43 @@ class UiStepsRunner(
         val clickable = ScreenMatcher.clickableFor(requireNotNull(target)) ?: throw MacroStop(ScreenCodes.CLICK_FAILED)
         // Ultimo controllo prima del tocco: la schermata può essere cambiata durante la ricerca.
         checkpoint(deadline)
+        ensureOnTarget(pin, clickable)
         if (!clickable.click()) throw MacroStop(ScreenCodes.CLICK_FAILED)
         pause(UiStepsPolicy.SETTLE_MS)
     }
 
-    private suspend fun type(step: UiStep.Type, deadline: Long) {
+    private suspend fun type(step: UiStep.Type, deadline: Long, pin: Pin) {
         var field: ScreenNode? = null
         val found = waitUntil(deadline, UiStepsPolicy.FIND_TIMEOUT_MS) {
             field = screen.focusedInput()?.takeIf { it.isEditable }
             field != null
         }
         if (!found) throw MacroStop(ScreenCodes.INPUT_FAILED)
+        val input = requireNotNull(field)
         checkpoint(deadline)
-        if (!requireNotNull(field).setText(step.text)) throw MacroStop(ScreenCodes.INPUT_FAILED)
+        ensureOnTarget(pin, input)
+        if (!input.setText(step.text)) throw MacroStop(ScreenCodes.INPUT_FAILED)
         pause(UiStepsPolicy.SETTLE_MS)
     }
 
-    private suspend fun scroll(dir: ScrollDirection, deadline: Long) {
+    private suspend fun scroll(dir: ScrollDirection, deadline: Long, pin: Pin) {
         val container = screen.root()?.let(ScreenMatcher::firstScrollable)
             ?: throw MacroStop(ScreenCodes.SCROLL_FAILED)
         checkpoint(deadline)
+        ensureOnTarget(pin, container)
         if (!container.scroll(forward = dir == ScrollDirection.DOWN)) throw MacroStop(ScreenCodes.SCROLL_FAILED)
         pause(UiStepsPolicy.SETTLE_MS)
+    }
+
+    /**
+     * Aggancio all'app, controllato subito prima di ogni gesto su un nodo: la finestra attiva e il nodo
+     * stesso devono essere dell'app della macro. Se l'app della macro non è ancora nota la si prende ora
+     * dalla finestra attiva; un package che non si legge non è mai un sì.
+     */
+    private fun ensureOnTarget(pin: Pin, node: ScreenNode) {
+        val active = screen.activePackage() ?: throw MacroStop(ScreenCodes.WRONG_APP)
+        val target = pin.pkg ?: active.also { pin.pkg = it }
+        if (active != target || node.packageName != target) throw MacroStop(ScreenCodes.WRONG_APP)
     }
 
     private suspend fun check(step: UiStep.Check, deadline: Long) {
