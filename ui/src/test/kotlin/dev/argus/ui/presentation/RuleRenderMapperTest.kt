@@ -188,12 +188,12 @@ class RuleRenderMapperTest {
             ),
             language = RenderLanguage.IT,
         ).triggerLine
-        assertEquals("Una volta, tra 2 minuti · circa (Android può ritardarlo)", line(120_000))
-        assertEquals("Una volta, tra 1 minuto · circa (Android può ritardarlo)", line(60_000))
-        assertEquals("Una volta, tra 1 ora · circa (Android può ritardarlo)", line(3_600_000))
-        assertEquals("Una volta, tra 30 secondi · circa (Android può ritardarlo)", line(30_000))
-        assertEquals("Una volta, tra 2 giorni · circa (Android può ritardarlo)", line(2L * 24 * 60 * 60 * 1_000))
-        assertEquals("Una volta, tra 1 ora e 30 minuti · circa (Android può ritardarlo)", line(5_400_000))
+        assertEquals("Una volta, tra 2 minuti", line(120_000))
+        assertEquals("Una volta, tra 1 minuto", line(60_000))
+        assertEquals("Una volta, tra 1 ora", line(3_600_000))
+        assertEquals("Una volta, tra 30 secondi", line(30_000))
+        assertEquals("Una volta, tra 2 giorni", line(2L * 24 * 60 * 60 * 1_000))
+        assertEquals("Una volta, tra 1 ora e 30 minuti", line(5_400_000))
     }
 
     @Test fun `immediate trigger renders the on-arm one-shot line`() {
@@ -625,9 +625,9 @@ class RuleRenderMapperTest {
             ),
             language = RenderLanguage.EN,
         ).triggerLine
-        assertEquals("Once, in 2 minutes · about (Android may delay it)", line(120_000))
-        assertEquals("Once, in 1 minute · about (Android may delay it)", line(60_000))
-        assertEquals("Once, in 1 hour and 30 minutes · about (Android may delay it)", line(5_400_000))
+        assertEquals("Once, in 2 minutes", line(120_000))
+        assertEquals("Once, in 1 minute", line(60_000))
+        assertEquals("Once, in 1 hour and 30 minutes", line(5_400_000))
     }
 
     @Test fun `EN immediate trigger renders the english on-arm one-shot line`() {

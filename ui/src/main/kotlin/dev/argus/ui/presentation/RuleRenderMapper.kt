@@ -459,10 +459,12 @@ object RuleRenderMapper {
             else -> return l.pick("Time not specified (${t.tz})", "Orario non specificato (${t.tz})")
         }
         // S1: la puntualità cambia l'esecuzione e va dichiarata. B14: FLEXIBLE (il default) è una sveglia
-        // inesatta che Android può ritardare: non si legge come un orario puntuale.
-        return line + when (t.precision) {
-            TimePrecision.EXACT -> l.pick(" · exact time", " · orario esatto")
-            TimePrecision.FLEXIBLE -> l.pick(" · about (Android may delay it)", " · circa (Android può ritardarlo)")
+        // inesatta che Android può ritardare: non si legge come un orario puntuale. Un ritardo relativo
+        // (`afterMs`) è sempre pianificato esatto (TimeAlarmPlanner.effectivePrecision): mai «circa».
+        return line + when {
+            t.precision == TimePrecision.EXACT -> l.pick(" · exact time", " · orario esatto")
+            afterMs != null -> ""
+            else -> l.pick(" · about (Android may delay it)", " · circa (Android può ritardarlo)")
         }
     }
 

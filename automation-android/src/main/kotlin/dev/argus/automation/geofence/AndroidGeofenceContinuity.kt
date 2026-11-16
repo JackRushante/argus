@@ -58,12 +58,12 @@ class AndroidGeofenceContinuity(
     }.getOrDefault(true)
 
     private fun stopReasons(): Set<Int> = buildSet {
+        // USER_REQUESTED (arresto forzato) e USER_STOPPED esistono da API 30 (il minSdk).
         add(ApplicationExitInfo.REASON_USER_REQUESTED)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        add(ApplicationExitInfo.REASON_USER_STOPPED)
+        // PACKAGE_UPDATED è di API 34: prima un aggiornamento non ha un motivo suo.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             add(ApplicationExitInfo.REASON_PACKAGE_UPDATED)
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
-            add(ApplicationExitInfo.REASON_USER_STOPPED)
         }
     }
 
