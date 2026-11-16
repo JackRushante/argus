@@ -19,7 +19,11 @@ import android.provider.Settings
  * muore prima di aver riallineato le fence lascia il «forse perse» al successivo. Un contatore
  * illeggibile vale «forse perse» (il comportamento precedente), mai il contrario.
  */
-class AndroidGeofenceContinuity(context: Context) : GeofenceContinuity {
+class AndroidGeofenceContinuity(
+    context: Context,
+    /** Motivo dell'ultima uscita del processo (`ApplicationExitInfo.reason`), `null` se nessuna. */
+    private val lastExitReason: () -> Int? = { lastExitReasonOf(context.applicationContext) },
+) : GeofenceContinuity {
     private val appContext = context.applicationContext
     private val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     private var lapsed: Boolean? = null
@@ -47,11 +51,10 @@ class AndroidGeofenceContinuity(context: Context) : GeofenceContinuity {
         Settings.Global.getInt(appContext.contentResolver, Settings.Global.BOOT_COUNT, NO_BOOT_COUNT)
     }.getOrNull()?.takeIf { it >= 0 }
 
+    /** Un motivo illeggibile vale «forse perse». */
     private fun lastExitStoppedTheApp(): Boolean = runCatching {
-        val manager = appContext.getSystemService(ActivityManager::class.java) ?: return false
-        val last = manager.getHistoricalProcessExitReasons(appContext.packageName, 0, 1)
-            .firstOrNull() ?: return false
-        last.reason in stopReasons()
+        val reason = lastExitReason() ?: return false
+        reason in stopReasons()
     }.getOrDefault(true)
 
     private fun stopReasons(): Set<Int> = buildSet {
@@ -69,5 +72,11 @@ class AndroidGeofenceContinuity(context: Context) : GeofenceContinuity {
         private const val KEY_BOOT_COUNT = "boot_count"
         private const val KEY_LAPSED = "lapsed"
         private const val NO_BOOT_COUNT = -1
+
+        private fun lastExitReasonOf(context: Context): Int? {
+            val manager = requireNotNull(context.getSystemService(ActivityManager::class.java))
+            return manager.getHistoricalProcessExitReasons(context.packageName, 0, 1)
+                .firstOrNull()?.reason
+        }
     }
 }
