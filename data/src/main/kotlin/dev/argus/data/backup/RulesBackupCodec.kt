@@ -61,7 +61,7 @@ object RulesBackupCodec {
     }
 
     fun decode(text: String): DecodedBackup {
-        val body = text.removePrefix("﻿")
+        val body = text.removePrefix("\uFEFF")
         if (exceedsNesting(body)) return DecodedBackup.Rejected(BackupFailure.NOT_JSON)
         val root = try {
             Json.parseToJsonElement(body)
