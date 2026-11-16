@@ -178,6 +178,9 @@ import dev.argus.data.backup.ContentResolverDocumentIo
 import dev.argus.data.backup.DocumentTreeBackupFolder
 import dev.argus.data.backup.RulesBackup
 import dev.argus.data.backup.RulesBackupService
+import dev.argus.data.backup.RuleSharing
+import dev.argus.data.backup.AndroidTemplateAssets
+import dev.argus.data.backup.RuleTemplateCatalog
 import dev.argus.data.RoomExecutionJournal
 import dev.argus.data.RoomJournalMaintenance
 import dev.argus.data.RoomObservedConversationStore
@@ -327,6 +330,23 @@ object ArgusModule {
         documents = ContentResolverDocumentIo(context),
         appVersion = { installInfo.versionName },
         labels = { labelStore.snapshot() },
+    )
+
+    /** 0.7.2: modelli di regola negli asset dell'app (galleria «Modelli»). */
+    @Provides
+    @Singleton
+    fun ruleTemplateCatalog(@ApplicationContext context: Context): RuleTemplateCatalog =
+        RuleTemplateCatalog(AndroidTemplateAssets(context.assets))
+
+    /** 0.7.2: «Condividi» del Dettaglio: lo stesso file di backup con una sola regola. */
+    @Provides
+    @Singleton
+    fun ruleSharing(
+        @ApplicationContext context: Context,
+        installInfo: AppInstallInfo,
+    ): RuleSharing = RuleSharing(
+        documents = ContentResolverDocumentIo(context),
+        appVersion = { installInfo.versionName },
     )
 
     @Provides

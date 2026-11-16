@@ -1,6 +1,7 @@
 package dev.argus.automation.vm
 
 import android.content.Context
+import android.net.Uri
 import android.os.PowerManager
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
@@ -34,6 +35,9 @@ import dev.argus.automation.geofence.GeofenceTriggerRuntime
 import dev.argus.automation.geofence.PersistedGeofenceRegistration
 import dev.argus.automation.sensor.SensorTriggerRuntime
 import dev.argus.data.ArgusDatabase
+import dev.argus.data.backup.RuleSharing
+import dev.argus.data.backup.RulesBackupFormat
+import dev.argus.data.backup.isBackupExportable
 import dev.argus.data.dao.AuditLogRecord
 import dev.argus.engine.brain.ContactWhitelistStore
 import dev.argus.data.entities.ActionResultEntity
@@ -77,9 +81,12 @@ import dev.argus.ui.model.ManualEntryUi
 import dev.argus.ui.model.RuleDiagnosisUi
 import dev.argus.ui.model.RuleLabelUi
 import dev.argus.ui.model.RuleLabelsUi
+import dev.argus.ui.model.RuleShareText
+import dev.argus.ui.model.RuleShareUi
 import dev.argus.ui.model.RuleStatsUi
 import dev.argus.ui.model.StatusBadge
 import dev.argus.ui.model.UiWarning
+import dev.argus.ui.presentation.RuleRenderDiff
 import dev.argus.ui.presentation.RuleRenderMapper
 import dev.argus.ui.presentation.RenderLanguage
 import dev.argus.ui.presentation.ValidationMessages
@@ -200,6 +207,8 @@ class AutomationDetailViewModel @Inject constructor(
     private val appCatalog: InstalledAppCatalog = EmptyInstalledAppCatalog,
     /** 0.7.2: etichette della regola (organizzazione: mai una nuova approvazione). */
     private val ruleLabels: RuleLabelDirectory = NoRuleLabelDirectory,
+    /** 0.7.2: testi e file di «Condividi». `null` solo nei test che non lo provano: «Condividi» non compare. */
+    private val sharing: RuleSharing? = null,
 ) : ViewModel() {
     private val routeId = requireNotNull(savedStateHandle.get<String>("id")) {
         "Dettaglio senza id"
@@ -243,6 +252,9 @@ class AutomationDetailViewModel @Inject constructor(
 
     /** 0.7.0: elenco di «Cambia app»; `null` = non ancora caricato. Si azzera alla chiusura della schermata. */
     private val appChoices = MutableStateFlow<List<AppChoiceUi>?>(null)
+
+    /** 0.7.2: il foglio «Condividi regola» aperto (i due testi), `null` = chiuso. Solo in memoria. */
+    private val shareTexts = MutableStateFlow<RuleShareUi?>(null)
 
     /** Ultima diagnosi chiesta («Perché non è scattata?»); null finché l'utente non la apre. */
     private val diagnosisInputs = MutableStateFlow<DiagnosisSnapshot?>(null)
@@ -370,6 +382,7 @@ class AutomationDetailViewModel @Inject constructor(
                         sources.actionsByExecution,
                         sources.conversationLabels,
                         sources.language,
+                        approved = sources.automation,
                     )
                     sources.automation != null -> automationState(
                         sources.automation,
@@ -783,9 +796,17 @@ class AutomationDetailViewModel @Inject constructor(
         actionsByExecution: Map<String, List<ActionResultEntity>>,
         conversationLabels: Map<String, String>,
         language: RenderLanguage,
+        approved: Automation? = null,
     ): DetailViewState {
         val review = cancellationSafeOrNull { approvals.review(snapshot.id) }
         val rule = RuleRenderMapper.mapDraft(snapshot.draft, conversationLabels, language)
+        // 0.7.2: la bozza sostituisce una regola già approvata: «Cosa cambia», confrontando le due rese.
+        val changes = approved
+            ?.takeIf {
+                it.id == snapshot.automationId &&
+                    (it.status == AutomationStatus.ARMED || it.status == AutomationStatus.DISABLED)
+            }
+            ?.let { RuleRenderDiff.diff(RuleRenderMapper.map(it, conversationLabels, language), rule) }
         val warnings = if (review == null) {
             listOf(
                 UiWarning(
@@ -839,6 +860,7 @@ class AutomationDetailViewModel @Inject constructor(
                 canChangeApp = snapshot.integrityError == null,
                 // S8: una bozza importata da file lo dice in approvazione.
                 imported = snapshot.createdBy == CreatedBy.IMPORT,
+                changes = changes,
             ),
             automationId = snapshot.automationId.value,
             loading = false,
@@ -911,6 +933,7 @@ class AutomationDetailViewModel @Inject constructor(
                 // Una regola armata non si modifica mai in place: «Cambia app» ne fa una bozza di modifica.
                 canChangeApp = automation.status == AutomationStatus.ARMED ||
                     automation.status == AutomationStatus.DISABLED,
+                canShare = sharing != null && automation.isBackupExportable(),
             ),
             automationId = automation.id.value,
             loading = false,
@@ -974,12 +997,22 @@ class AutomationDetailViewModel @Inject constructor(
         val manualEntry = current.manual?.let { entry ->
             entry.copy(paused = manual.paused.value || labelSnapshot.value.isRulePaused(current.id))
         }
+        // Il foglio «Condividi» vale solo per la regola per cui è stato aperto e finché si può condividere.
+        val share = shareTexts.value?.takeIf { current.canShare }
         return if (current.banner == banner && current.appChoices == choices && current.labels == labels &&
-            current.manual == manualEntry
+            current.manual == manualEntry && current.share == share
         ) {
             this
         } else {
-            copy(detail = current.copy(banner = banner, appChoices = choices, labels = labels, manual = manualEntry))
+            copy(
+                detail = current.copy(
+                    banner = banner,
+                    appChoices = choices,
+                    labels = labels,
+                    manual = manualEntry,
+                    share = share,
+                ),
+            )
         }
     }
 
@@ -1033,6 +1066,70 @@ class AutomationDetailViewModel @Inject constructor(
             }
         }
     }
+
+    // --- 0.7.2: «Condividi» ------------------------------------------------------------------------
+
+    /**
+     * Apre il foglio «Condividi regola» con i due testi della regola mostrata (senza dati personali e integrale).
+     * Una bozza non si condivide; una regola troppo grande per il file di backup lo dice.
+     */
+    fun onShare() {
+        val automation = displayedAutomation?.takeIf { displayedDraft == null } ?: return
+        val service = sharing ?: return
+        viewModelScope.launch {
+            val texts = try {
+                withContext(Dispatchers.Default) { service.texts(automation) }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                null
+            }
+            if (texts == null) {
+                message(shareUnavailableText(language))
+                return@launch
+            }
+            shareTexts.value = RuleShareUi(
+                ruleName = automation.name,
+                stripped = RuleShareText(texts.stripped.text, texts.stripped.compactText),
+                full = RuleShareText(texts.full.text, texts.full.compactText),
+                fileName = RulesBackupFormat.shareFileName(automation.name),
+            )
+            mutableState.update { it.withLiveExtras() }
+        }
+    }
+
+    fun onDismissShare() {
+        shareTexts.value = null
+        mutableState.update { it.withLiveExtras() }
+    }
+
+    /** Il testo da condividere, copiare o salvare dal foglio aperto; `null` se il foglio è chiuso. */
+    fun shareText(stripPersonalData: Boolean): String? = shareTexts.value?.text(stripPersonalData)?.text
+
+    /** Nome proposto da «Salva file»; `null` se il foglio è chiuso. */
+    fun shareFileName(): String? = shareTexts.value?.fileName
+
+    /** «Salva file»: scrive il testo scelto nel documento indicato dall'utente. [destination] null = annullato. */
+    fun onSaveShareFile(destination: Uri?, stripPersonalData: Boolean) {
+        if (destination == null) return
+        val text = shareText(stripPersonalData) ?: return
+        val service = sharing ?: return
+        viewModelScope.launch {
+            val saved = service.save(destination, text)
+            message(
+                if (saved) {
+                    language.pick("Rule saved to the file.", "Regola salvata nel file.")
+                } else {
+                    language.pick("Unable to write the file.", "Impossibile scrivere il file.")
+                },
+            )
+        }
+    }
+
+    private fun shareUnavailableText(l: RenderLanguage) = l.pick(
+        "This rule cannot be shared: it is not readable or it is too large for a file.",
+        "Questa regola non si può condividere: non è leggibile o è troppo grande per un file.",
+    )
 
     private fun batteryExempt(): Boolean {
         val app = context ?: return true

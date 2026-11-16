@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Checkbox
@@ -62,12 +63,31 @@ fun RulesBackupSection(
     onImport: () -> Unit,
     onDismissResult: () -> Unit,
     onOpenImported: () -> Unit,
+    /** 0.7.2: «Importa da testo»: anteprima a ogni cambio del testo, poi conferma. */
+    onImportTextChange: (String) -> Unit = {},
+    onImportText: (String) -> Unit = {},
     modifier: Modifier = Modifier,
     onSubmitImportPassphrase: (String) -> Unit = {},
     autoBackupActions: AutoBackupActions = AutoBackupActions(),
 ) {
     var stripPersonalData by rememberSaveable { mutableStateOf(false) }
+    var showTextImport by rememberSaveable { mutableStateOf(false) }
     val working = state.status is RulesBackupStatus.Working
+    if (showTextImport) {
+        val close = {
+            showTextImport = false
+            onImportTextChange("")
+        }
+        ImportTextSheet(
+            preview = state.textPreview,
+            onTextChange = onImportTextChange,
+            onConfirm = { text ->
+                showTextImport = false
+                onImportText(text)
+            },
+            onDismiss = close,
+        )
+    }
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         SectionLabel(stringResource(R.string.backup_section), Modifier.padding(horizontal = 4.dp))
         ArgusCard(Modifier.fillMaxWidth(), contentPadding = PaddingValues(14.dp)) {
@@ -124,6 +144,14 @@ fun RulesBackupSection(
                         fillWidth = true,
                     )
                 }
+                // 0.7.2: una regola condivisa come testo (chat, mail, note) si incolla qui.
+                ArgusButton(
+                    text = stringResource(R.string.import_text_action),
+                    onClick = { showTextImport = true },
+                    style = ButtonStyle.Text,
+                    icon = Icons.Rounded.ContentPaste,
+                    enabled = !working,
+                )
                 if (state.exportableRules == 0) {
                     Text(
                         stringResource(R.string.backup_export_none),

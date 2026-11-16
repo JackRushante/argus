@@ -60,6 +60,33 @@
             </intent-filter>
         </activity>
 
+        <!-- 0.7.2: riceve una regola da un'altra app (testo dal foglio di condivisione, file di backup da un
+             file manager). Esportata per forza, quindi fa il minimo: mostra cosa è arrivato e, solo su conferma
+             dell'utente in questa schermata, crea bozze da approvare con l'import esistente. Mai una regola
+             armata. MainActivity resta l'unico launcher e non legge i dati degli Intent. -->
+        <activity
+            android:name=".importing.ImportRuleActivity"
+            android:exported="true"
+            android:label="@string/import_activity_label"
+            android:theme="@style/Theme.Argus">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/json" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:mimeType="application/json" />
+            </intent-filter>
+        </activity>
+
         <!-- 0.4.1 (F8): trampolino invisibile di scorciatoie Home e pulsanti del widget. NON esportato:
              lo avvia solo il sistema per conto di Argus, e ogni avvio verifica il token della regola. -->
         <activity

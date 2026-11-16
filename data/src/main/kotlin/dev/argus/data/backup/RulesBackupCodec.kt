@@ -37,8 +37,13 @@ object RulesBackupCodec {
     /** Come [ArgusJson] ma senza tollerare chiavi sconosciute. */
     private val strictJson = Json(from = ArgusJson) { ignoreUnknownKeys = false }
     private val prettyJson = Json { prettyPrint = true }
+    private val compactJson = Json { prettyPrint = false }
 
-    fun encode(rules: List<BackupRule>, exportedAt: String, appVersion: String): String {
+    /**
+     * [pretty] = false (0.7.2) scrive lo stesso documento senza spazi né a capo: è la forma del codice QR
+     * di una regola condivisa, che ogni import legge come il file indentato.
+     */
+    fun encode(rules: List<BackupRule>, exportedAt: String, appVersion: String, pretty: Boolean = true): String {
         val root = buildJsonObject {
             put("format", RulesBackupFormat.FORMAT)
             put("version", RulesBackupFormat.VERSION)
@@ -77,7 +82,7 @@ object RulesBackupCodec {
                 )
             }
         }
-        return prettyJson.encodeToString(JsonElement.serializer(), root)
+        return (if (pretty) prettyJson else compactJson).encodeToString(JsonElement.serializer(), root)
     }
 
     /**

@@ -51,8 +51,21 @@ internal object RulesBackupText {
         return "$imported; $discarded."
     }
 
-    private fun reasons(summary: ImportSummary, language: RenderLanguage): String {
-        val entries = summary.discarded.filterValues { it > 0 }.entries.sortedBy { it.key.ordinal }
+    /** 0.7.2, anteprima: «1 voce verrà scartata (regola non valida).»; null se non si scarta nulla. */
+    fun previewDiscarded(discarded: Map<RuleDiscardReason, Int>, language: RenderLanguage): String? {
+        val total = discarded.values.sum()
+        if (total <= 0) return null
+        val why = reasons(discarded, language)
+        return language.pick(
+            if (total == 1) "1 entry will be discarded ($why)." else "$total entries will be discarded ($why).",
+            if (total == 1) "1 voce verrà scartata ($why)." else "$total voci verranno scartate ($why).",
+        )
+    }
+
+    private fun reasons(summary: ImportSummary, language: RenderLanguage): String = reasons(summary.discarded, language)
+
+    private fun reasons(discarded: Map<RuleDiscardReason, Int>, language: RenderLanguage): String {
+        val entries = discarded.filterValues { it > 0 }.entries.sortedBy { it.key.ordinal }
         if (entries.size == 1) return reason(entries.single().key, language)
         return entries.joinToString(", ") { (why, count) -> "${reason(why, language)}: $count" }
     }

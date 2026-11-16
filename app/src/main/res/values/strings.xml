@@ -24,6 +24,9 @@
     <string name="cancel">Cancel</string>
     <string name="add">Add</string>
     <string name="backup_picker_unavailable">No file picker is available on this phone.</string>
+    <string name="share_copied">Rule copied</string>
+    <string name="share_clip_label">Argus rule</string>
+    <string name="import_activity_label">Import into Argus</string>
     <string name="dictation_unavailable">No speech recognizer is available on this phone.</string>
     <!-- 0.4.1 (manuale): avvio manuale (F8) e Pausa automazioni (F21). -->
     <string name="manual_tile_label">Argus: run rule</string>

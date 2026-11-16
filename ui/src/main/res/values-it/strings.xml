@@ -334,6 +334,67 @@
     <string name="backup_working_import">Importazione in corso…</string>
     <string name="backup_open_rules">Vedi le regole</string>
     <string name="backup_dismiss">Chiudi</string>
+    <!-- 0.7.2 · Condividi una regola (prefisso share_) -->
+    <string name="share_action_cd">Condividi regola</string>
+    <string name="share_title">Condividi regola</string>
+    <string name="share_subtitle">Chi la riceve la importa come bozza e la approva sul suo telefono.</string>
+    <string name="share_strip_label">Togli i dati personali</string>
+    <string name="share_strip_hint">Numeri, chat, luoghi, nomi di reti e segreti restano fuori. Chi importa li completa prima di armare.</string>
+    <string name="share_strip_off_warning">Il testo contiene le tue chat, i numeri, i luoghi e i valori segreti: condividilo solo con persone di cui ti fidi.</string>
+    <string name="share_qr_caption">Inquadra con la fotocamera</string>
+    <string name="share_qr_cd">Codice QR della regola</string>
+    <string name="share_qr_too_long">Questa regola è troppo lunga per un codice QR: condividila come testo o come file.</string>
+    <string name="share_as_text">Condividi come testo</string>
+    <string name="share_save_file">Salva file</string>
+    <string name="share_copy">Copia</string>
+    <!-- 0.7.2 · Ricevere una regola: import da testo o da un'altra app (prefisso import_) -->
+    <string name="import_text_action">Importa da testo</string>
+    <string name="import_text_title">Importa da testo</string>
+    <string name="import_text_hint">Incolla il testo di una regola condivisa o di un backup delle regole.</string>
+    <string name="import_text_label">Testo della regola</string>
+    <string name="import_text_empty">Qui compaiono le regole che contiene, prima di importarle.</string>
+    <string name="import_checking">Controllo in corso…</string>
+    <string name="import_confirm">Importa</string>
+    <string name="import_cancel">Annulla</string>
+    <string name="import_pick_file">Scegli un file</string>
+    <string name="import_unnamed">(senza nome)</string>
+    <string name="import_received_title">Importa in Argus</string>
+    <string name="import_received_body">Un\'altra app ha mandato questo ad Argus. Non cambia nulla finché non confermi: ogni regola diventa una bozza che leggi e approvi da sola.</string>
+    <string name="import_received_loading">Lettura in corso…</string>
+    <string name="import_received_working">Importazione in corso…</string>
+    <string name="import_received_open">Apri Argus</string>
+    <string name="import_received_close">Chiudi</string>
+    <!-- 0.7.2 · Galleria dei modelli (prefisso tpl_) -->
+    <string name="tpl_open">Modelli</string>
+    <string name="tpl_title">Modelli</string>
+    <string name="tpl_intro">Regole pronte da adattare. Un modello entra come bozza: la leggi e la approvi come tutte le altre.</string>
+    <string name="tpl_filter_cd">Categoria dei modelli</string>
+    <string name="tpl_filter_all">Tutti</string>
+    <string name="tpl_filter_home">Casa</string>
+    <string name="tpl_filter_work">Lavoro</string>
+    <string name="tpl_filter_battery">Batteria</string>
+    <string name="tpl_filter_messages">Messaggi</string>
+    <string name="tpl_use">Usa questo modello</string>
+    <string name="tpl_import_row">Importa una regola da file o da testo</string>
+    <string name="tpl_empty">Nessun modello disponibile.</string>
+    <string name="tpl_need_privileged">Serve Shizuku o root</string>
+    <string name="tpl_need_dnd">Chiede l\'accesso a Non disturbare</string>
+    <string name="tpl_need_write_settings">Chiede di modificare le impostazioni di sistema</string>
+    <string name="tpl_need_location">Chiede la tua posizione</string>
+    <string name="tpl_need_notification_access">Chiede l\'accesso alle notifiche</string>
+    <string name="tpl_need_notifications">Mostra notifiche</string>
+    <string name="tpl_need_sms">Chiede di ricevere gli SMS</string>
+    <string name="tpl_need_calls">Chiede l\'accesso alle chiamate</string>
+    <string name="tpl_need_bluetooth">Chiede l\'accesso al Bluetooth</string>
+    <string name="tpl_need_usage">Chiede l\'accesso ai dati di utilizzo</string>
+    <string name="tpl_need_accessibility">Usa il servizio di Accessibilità</string>
+    <string name="tpl_blank_chat">La chat la scegli tu</string>
+    <string name="tpl_blank_sender">Il mittente lo scegli tu</string>
+    <string name="tpl_blank_number">Il numero lo scegli tu</string>
+    <string name="tpl_blank_network">La rete la scegli tu</string>
+    <string name="tpl_blank_place">Il luogo lo scegli tu</string>
+    <string name="tpl_blank_secret">I valori segreti li aggiungi tu</string>
+    <string name="tpl_blank_current_location">Il luogo è dove la armi</string>
     <!-- Import cifrato e backup automatico (0.7.2) -->
     <string name="backup_import_encrypted_body">Questo backup è cifrato. Inserisci la passphrase con cui è stato fatto.</string>
     <string name="backup_import_passphrase_field">Passphrase del backup</string>
@@ -581,6 +642,15 @@
     <string name="rda_ap_picker_current">in uso</string>
     <string name="rda_ap_picker_pick_cd">Usa %1$s</string>
     <string name="rda_ap_run_now_fallback">Esegui ora non è ancora disponibile.</string>
+    <!-- 0.7.2 · Cosa cambia quando approvi una modifica (prefisso diff_) -->
+    <string name="diff_title">Cosa cambia</string>
+    <string name="diff_subtitle">Rispetto alla versione approvata. La regola intera resta qui sotto.</string>
+    <string name="diff_nothing">Non cambia nulla di ciò che viene eseguito: cambiano solo il nome o la descrizione.</string>
+    <string name="diff_added">Aggiunto</string>
+    <string name="diff_removed">Tolto</string>
+    <string name="diff_changed">Cambiato</string>
+    <string name="diff_before">Prima</string>
+    <string name="diff_now">Ora</string>
     <!-- Issue #19: endpoint http:// sulla rete locale -->
     <string name="provider_unencrypted_lan_warning">Connessione non cifrata: la chiave e le tue richieste viaggiano in chiaro. Usala solo su una rete di cui ti fidi.</string>
     <!-- Issue #20: tempo massimo di risposta -->

@@ -227,6 +227,8 @@ fun SettingsScreen(
                     callbacks::onImportRules,
                     callbacks::onDismissBackupResult,
                     callbacks::onOpenImportedRules,
+                    onImportTextChange = callbacks::onImportTextChange,
+                    onImportText = callbacks::onImportText,
                     onSubmitImportPassphrase = callbacks::onSubmitImportPassphrase,
                     autoBackupActions = AutoBackupActions(
                         onSetEnabled = callbacks::onSetAutoBackupEnabled,

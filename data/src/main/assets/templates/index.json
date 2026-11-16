@@ -1,0 +1,114 @@
+{
+  "format": "argus-templates",
+  "version": 1,
+  "templates": [
+    {
+      "id": "home-night-dnd",
+      "category": "home",
+      "title": { "en": "Quiet night", "it": "Notte tranquilla" },
+      "description": {
+        "en": "Every night at 23:00 it turns on Do Not Disturb, so only priority calls and messages get through. Pair it with «Good morning» to turn it off.",
+        "it": "Ogni sera alle 23:00 attiva Non disturbare: passano solo le chiamate e i messaggi prioritari. Abbinala a «Buongiorno» per spegnerlo."
+      }
+    },
+    {
+      "id": "home-morning-dnd-off",
+      "category": "home",
+      "title": { "en": "Good morning", "it": "Buongiorno" },
+      "description": {
+        "en": "Every morning at 07:00 it turns off Do Not Disturb.",
+        "it": "Ogni mattina alle 7:00 spegne Non disturbare."
+      }
+    },
+    {
+      "id": "home-wifi-ringer",
+      "category": "home",
+      "title": { "en": "Home Wi-Fi: ringer on", "it": "Wi-Fi di casa: suoneria" },
+      "description": {
+        "en": "When the phone connects to your home Wi-Fi it turns the ringer back on, at 70% volume. You choose the network before arming it.",
+        "it": "Quando il telefono si collega al Wi-Fi di casa rimette la suoneria, al 70% del volume. La rete la scegli tu prima di armarla."
+      }
+    },
+    {
+      "id": "home-leave-wifi-off",
+      "category": "home",
+      "title": { "en": "Leaving home: Wi-Fi off", "it": "Esco di casa: Wi-Fi spento" },
+      "description": {
+        "en": "When you leave home it turns Wi-Fi off. Arm it while you are at home: the place is where the phone is at that moment.",
+        "it": "Quando esci di casa spegne il Wi-Fi. Armala mentre sei a casa: il luogo è dove si trova il telefono in quel momento."
+      }
+    },
+    {
+      "id": "work-office-vibrate",
+      "category": "work",
+      "title": { "en": "At the office: vibrate", "it": "In ufficio: vibrazione" },
+      "description": {
+        "en": "When you arrive at the office the phone switches to vibrate. Arm it at the office: the place is where the phone is at that moment.",
+        "it": "Quando arrivi in ufficio il telefono passa alla vibrazione. Armala in ufficio: il luogo è dove si trova il telefono in quel momento."
+      }
+    },
+    {
+      "id": "work-end-of-day",
+      "category": "work",
+      "title": { "en": "End of the working day", "it": "Fine della giornata" },
+      "description": {
+        "en": "From Monday to Friday at 18:00 a notification reminds you to wrap up the day.",
+        "it": "Dal lunedì al venerdì alle 18:00 una notifica ti ricorda di chiudere la giornata."
+      }
+    },
+    {
+      "id": "work-focus",
+      "category": "work",
+      "title": { "en": "Focus for 25 minutes", "it": "Concentrazione per 25 minuti" },
+      "description": {
+        "en": "You start it yourself, from the rule, a Home screen shortcut or the quick settings tile: it turns on Do Not Disturb and starts a 25-minute timer. Turn Do Not Disturb off when the timer rings.",
+        "it": "La avvii tu, dalla regola, da una scorciatoia sulla Home o dal riquadro delle impostazioni rapide: attiva Non disturbare e avvia un timer di 25 minuti. Quando suona il timer spegni Non disturbare."
+      }
+    },
+    {
+      "id": "battery-low-saver",
+      "category": "battery",
+      "title": { "en": "Battery at 20%: saver", "it": "Batteria al 20%: risparmio" },
+      "description": {
+        "en": "When the battery drops below 20% it turns on battery saver and lowers the brightness.",
+        "it": "Quando la batteria scende sotto il 20% accende il risparmio energetico e abbassa la luminosità."
+      }
+    },
+    {
+      "id": "battery-charging-normal",
+      "category": "battery",
+      "title": { "en": "Charging: back to normal", "it": "In carica: tutto come prima" },
+      "description": {
+        "en": "When you plug in the charger it turns battery saver off and sets the brightness back to automatic.",
+        "it": "Quando colleghi il caricatore spegne il risparmio energetico e rimette la luminosità automatica."
+      }
+    },
+    {
+      "id": "battery-full-unplug",
+      "category": "battery",
+      "title": { "en": "Charged to 85%", "it": "Carica all'85%" },
+      "description": {
+        "en": "When the battery goes above 85% while charging, a notification and a short vibration remind you to unplug it.",
+        "it": "Quando la batteria supera l'85% in carica, una notifica e una breve vibrazione ti ricordano di staccarla."
+      }
+    },
+    {
+      "id": "messages-sms-code",
+      "category": "messages",
+      "title": { "en": "SMS code to the clipboard", "it": "Codice SMS negli appunti" },
+      "description": {
+        "en": "When an SMS containing «code» arrives, its 4 to 8 digit code is copied to the clipboard. Argus clears the clipboard after a minute.",
+        "it": "Quando arriva un SMS che contiene «codice», il suo codice da 4 a 8 cifre viene copiato negli appunti. Argus li svuota dopo un minuto."
+      }
+    },
+    {
+      "id": "messages-ai-busy-reply",
+      "category": "messages",
+      "title": { "en": "Busy? The AI replies", "it": "Occupato? Risponde l'AI" },
+      "description": {
+        "en": "For one WhatsApp chat you choose (1:1, on your whitelist): the AI reads the new message and replies that you are busy and will answer later, at most once every 10 minutes. You choose the chat before arming it.",
+        "it": "Per una chat WhatsApp che scegli tu (1:1, nella whitelist): l'AI legge il nuovo messaggio e risponde che sei occupato e risponderai più tardi, al massimo una volta ogni 10 minuti. La chat la scegli prima di armarla."
+      }
+    }
+  ]
+}

@@ -24,6 +24,9 @@
     <string name="cancel">Annulla</string>
     <string name="add">Aggiungi</string>
     <string name="backup_picker_unavailable">Nessun selettore di file disponibile su questo telefono.</string>
+    <string name="share_copied">Regola copiata</string>
+    <string name="share_clip_label">Regola Argus</string>
+    <string name="import_activity_label">Importa in Argus</string>
     <string name="dictation_unavailable">Nessun riconoscimento vocale disponibile su questo telefono.</string>
     <!-- 0.4.1 (manuale): avvio manuale (F8) e Pausa automazioni (F21). -->
     <string name="manual_tile_label">Argus: esegui regola</string>

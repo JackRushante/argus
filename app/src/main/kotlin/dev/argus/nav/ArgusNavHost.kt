@@ -85,6 +85,8 @@ import dev.argus.automation.vm.ExecutionLogViewModel
 import dev.argus.automation.vm.OnboardingEvent
 import dev.argus.automation.vm.OnboardingViewModel
 import dev.argus.automation.vm.SettingsViewModel
+import dev.argus.automation.vm.TemplateGalleryEvent
+import dev.argus.automation.vm.TemplateGalleryViewModel
 import dev.argus.data.backup.RulesBackupFormat
 import dev.argus.shizuku.ShizukuGatewayStatus
 import dev.argus.ui.components.LocalShellPrivilege
@@ -101,6 +103,8 @@ import dev.argus.ui.model.SettingsCallbacks
 import dev.argus.ui.model.ShizukuStatus
 import dev.argus.ui.model.StatusFilter
 import dev.argus.ui.model.StepKind
+import dev.argus.ui.model.TemplateCategoryUi
+import dev.argus.ui.model.TemplateGalleryCallbacks
 import dev.argus.ui.presentation.ChatDictation
 import dev.argus.ui.screens.AutomationDetailScreen
 import dev.argus.ui.screens.AutomationListScreen
@@ -108,6 +112,7 @@ import dev.argus.ui.screens.ChatScreen
 import dev.argus.ui.screens.ExecutionLogScreen
 import dev.argus.ui.screens.OnboardingScreen
 import dev.argus.ui.screens.SettingsScreen
+import dev.argus.ui.screens.TemplateGalleryScreen
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -119,6 +124,7 @@ private object Routes {
     const val SETTINGS = "settings"
     const val DETAIL = "detail/{id}"
     const val ONBOARDING = "onboarding"
+    const val TEMPLATES = "templates"
     const val LOG_PATTERN = "$LOG?automationId={automationId}&automationName={automationName}"
 
     fun detail(id: String): String = "detail/${Uri.encode(id)}"
@@ -146,6 +152,8 @@ fun ArgusNavHost() {
     val context = LocalContext.current
     val systemSettingUnavailable = stringResource(R.string.system_setting_unavailable)
     val backupPickerUnavailable = stringResource(R.string.backup_picker_unavailable)
+    val shareCopied = stringResource(R.string.share_copied)
+    val shareClipLabel = stringResource(R.string.share_clip_label)
     val navController = rememberNavController()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -419,11 +427,52 @@ fun ArgusNavHost() {
                             override fun onBannerTap() = switchTop(Routes.SETTINGS)
                             override fun onResumeAutomations() = listViewModel.onResumeAutomations()
                             override fun onOpenLog() = switchTop(Routes.LOG)
+                            override fun onOpenTemplates() {
+                                navController.navigate(Routes.TEMPLATES) { launchSingleTop = true }
+                            }
                             override fun onSelectLabel(label: String?) = listViewModel.onSelectLabel(label)
                             override fun onSetLabelPaused(label: String, paused: Boolean) =
                                 listViewModel.onSetLabelPaused(label, paused)
                         },
                         modifier = Modifier.testTag("screen_list"),
+                    )
+                }
+
+                // 0.7.2: galleria dei modelli. Ogni modello entra come bozza importata e si apre l'approvazione.
+                composable(Routes.TEMPLATES) {
+                    val viewModel: TemplateGalleryViewModel = hiltViewModel()
+                    val state by viewModel.state.collectAsStateWithLifecycle()
+                    val importTemplateFile = rememberLauncherForActivityResult(
+                        ActivityResultContracts.OpenDocument(),
+                    ) { uri -> viewModel.onImportFile(uri) }
+                    LaunchedEffect(viewModel) {
+                        viewModel.events.collect { event ->
+                            when (event) {
+                                is TemplateGalleryEvent.Message -> showMessage(event.text)
+                                is TemplateGalleryEvent.OpenDraft -> navController.navigate(Routes.detail(event.draftId))
+                                TemplateGalleryEvent.OpenList -> switchTop(Routes.LIST)
+                            }
+                        }
+                    }
+                    TemplateGalleryScreen(
+                        state = state,
+                        callbacks = object : TemplateGalleryCallbacks {
+                            override fun onBack() {
+                                navController.popBackStack()
+                            }
+                            override fun onFilter(category: TemplateCategoryUi?) = viewModel.onFilter(category)
+                            override fun onUseTemplate(id: String) = viewModel.onUseTemplate(id)
+                            override fun onImportFile() {
+                                runCatching {
+                                    importTemplateFile.launch(
+                                        arrayOf(RulesBackupFormat.MIME_TYPE, "text/plain", "application/octet-stream"),
+                                    )
+                                }.onFailure { showMessage(backupPickerUnavailable) }
+                            }
+                            override fun onImportTextChange(text: String) = viewModel.onImportTextChange(text)
+                            override fun onImportText(text: String) = viewModel.onImportText(text)
+                        },
+                        modifier = Modifier.testTag("screen_templates"),
                     )
                 }
 
@@ -633,6 +682,8 @@ fun ArgusNavHost() {
                                     )
                                 }.onFailure { showMessage(backupPickerUnavailable) }
                             }
+                            override fun onImportTextChange(text: String) = settingsViewModel.onImportTextChange(text)
+                            override fun onImportText(text: String) = settingsViewModel.importText(text)
                             override fun onDismissBackupResult() = settingsViewModel.dismissBackupResult()
                             override fun onOpenImportedRules() {
                                 settingsViewModel.dismissBackupResult()
@@ -689,6 +740,11 @@ fun ArgusNavHost() {
                 ) {
                     val viewModel: AutomationDetailViewModel = hiltViewModel()
                     val state by viewModel.state.collectAsStateWithLifecycle()
+                    // 0.7.2, «Condividi» → «Salva file»: lo stesso selettore di documenti dell'export.
+                    var shareStripForFile by rememberSaveable { mutableStateOf(true) }
+                    val saveShareFile = rememberLauncherForActivityResult(
+                        ActivityResultContracts.CreateDocument(RulesBackupFormat.MIME_TYPE),
+                    ) { uri -> viewModel.onSaveShareFile(uri, shareStripForFile) }
                     LaunchedEffect(viewModel) {
                         viewModel.events.collect { event ->
                             when (event) {
@@ -750,6 +806,36 @@ fun ArgusNavHost() {
                                     }
                                     override fun onBack() {
                                         navController.popBackStack()
+                                    }
+                                    // 0.7.2: «Condividi regola».
+                                    override fun onShare() = viewModel.onShare()
+                                    override fun onDismissShare() = viewModel.onDismissShare()
+                                    override fun onShareAsText(stripPersonalData: Boolean) {
+                                        val text = viewModel.shareText(stripPersonalData) ?: return
+                                        val send = Intent(Intent.ACTION_SEND)
+                                            .setType("text/plain")
+                                            .putExtra(Intent.EXTRA_SUBJECT, detail.name)
+                                            .putExtra(Intent.EXTRA_TEXT, text)
+                                        runCatching {
+                                            context.startActivity(
+                                                Intent.createChooser(send, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                                            )
+                                        }.onFailure { showMessage(systemSettingUnavailable) }
+                                    }
+                                    override fun onSaveShareFile(stripPersonalData: Boolean) {
+                                        val name = viewModel.shareFileName() ?: return
+                                        shareStripForFile = stripPersonalData
+                                        runCatching { saveShareFile.launch(name) }
+                                            .onFailure { showMessage(backupPickerUnavailable) }
+                                    }
+                                    override fun onCopyShare(stripPersonalData: Boolean) {
+                                        val text = viewModel.shareText(stripPersonalData) ?: return
+                                        if (copySharedRule(context, shareClipLabel, text, sensitive = !stripPersonalData)) {
+                                            // Da Android 13 il sistema conferma da sé la copia.
+                                            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) showMessage(shareCopied)
+                                        } else {
+                                            showMessage(systemSettingUnavailable)
+                                        }
                                     }
                                 },
                                 modifier = Modifier.testTag("screen_detail"),
@@ -920,6 +1006,22 @@ private fun ContactPickerDialog(
         },
     )
 }
+
+/**
+ * 0.7.2: copia negli appunti il testo di una regola condivisa. Il testo integrale (con chat, numeri e segreti)
+ * è marcato sensibile, così la tastiera e l'anteprima degli appunti non lo mostrano.
+ */
+private fun copySharedRule(context: android.content.Context, label: String, text: String, sensitive: Boolean): Boolean =
+    runCatching {
+        val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
+        val clip = android.content.ClipData.newPlainText(label, text)
+        if (sensitive) {
+            clip.description.extras = android.os.PersistableBundle().apply {
+                putBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE, true)
+            }
+        }
+        clipboard.setPrimaryClip(clip)
+    }.isSuccess
 
 private fun maskConversationId(value: String): String =
     if (value.length <= 18) value else "${value.take(14)}…${value.takeLast(4)}"

@@ -335,6 +335,67 @@
     <string name="backup_working_import">Importing…</string>
     <string name="backup_open_rules">See the rules</string>
     <string name="backup_dismiss">Close</string>
+    <!-- 0.7.2 · Share one rule (prefix share_) -->
+    <string name="share_action_cd">Share rule</string>
+    <string name="share_title">Share rule</string>
+    <string name="share_subtitle">Whoever receives it imports it as a draft and approves it on their phone.</string>
+    <string name="share_strip_label">Remove personal data</string>
+    <string name="share_strip_hint">Numbers, chats, places, network names and secrets stay out. Whoever imports it fills them in before arming.</string>
+    <string name="share_strip_off_warning">The text includes your chats, numbers, places and secret values: share it only with someone you trust.</string>
+    <string name="share_qr_caption">Scan with the camera</string>
+    <string name="share_qr_cd">QR code of the rule</string>
+    <string name="share_qr_too_long">This rule is too long for a QR code: share it as text or as a file.</string>
+    <string name="share_as_text">Share as text</string>
+    <string name="share_save_file">Save file</string>
+    <string name="share_copy">Copy</string>
+    <!-- 0.7.2 · Receive a rule: import from text, or from another app (prefix import_) -->
+    <string name="import_text_action">Import from text</string>
+    <string name="import_text_title">Import from text</string>
+    <string name="import_text_hint">Paste the text of a shared rule or of a rules backup.</string>
+    <string name="import_text_label">Rule text</string>
+    <string name="import_text_empty">The rules it contains appear here before you import them.</string>
+    <string name="import_checking">Checking…</string>
+    <string name="import_confirm">Import</string>
+    <string name="import_cancel">Cancel</string>
+    <string name="import_pick_file">Choose a file</string>
+    <string name="import_unnamed">(no name)</string>
+    <string name="import_received_title">Import into Argus</string>
+    <string name="import_received_body">Another app sent this to Argus. Nothing changes until you confirm: each rule becomes a draft that you read and approve on its own.</string>
+    <string name="import_received_loading">Reading…</string>
+    <string name="import_received_working">Importing…</string>
+    <string name="import_received_open">Open Argus</string>
+    <string name="import_received_close">Close</string>
+    <!-- 0.7.2 · Template gallery (prefix tpl_) -->
+    <string name="tpl_open">Templates</string>
+    <string name="tpl_title">Templates</string>
+    <string name="tpl_intro">Ready-made rules to adapt. A template arrives as a draft: you read it and approve it like any other.</string>
+    <string name="tpl_filter_cd">Template category</string>
+    <string name="tpl_filter_all">All</string>
+    <string name="tpl_filter_home">Home</string>
+    <string name="tpl_filter_work">Work</string>
+    <string name="tpl_filter_battery">Battery</string>
+    <string name="tpl_filter_messages">Messages</string>
+    <string name="tpl_use">Use this template</string>
+    <string name="tpl_import_row">Import a rule from a file or from text</string>
+    <string name="tpl_empty">No templates available.</string>
+    <string name="tpl_need_privileged">Needs Shizuku or root</string>
+    <string name="tpl_need_dnd">Asks for Do Not Disturb access</string>
+    <string name="tpl_need_write_settings">Asks to modify system settings</string>
+    <string name="tpl_need_location">Asks for your location</string>
+    <string name="tpl_need_notification_access">Asks for notification access</string>
+    <string name="tpl_need_notifications">Shows notifications</string>
+    <string name="tpl_need_sms">Asks to receive SMS</string>
+    <string name="tpl_need_calls">Asks for call access</string>
+    <string name="tpl_need_bluetooth">Asks for Bluetooth access</string>
+    <string name="tpl_need_usage">Asks for usage access</string>
+    <string name="tpl_need_accessibility">Uses the Accessibility service</string>
+    <string name="tpl_blank_chat">You choose the chat</string>
+    <string name="tpl_blank_sender">You choose the sender</string>
+    <string name="tpl_blank_number">You choose the number</string>
+    <string name="tpl_blank_network">You choose the network</string>
+    <string name="tpl_blank_place">You choose the place</string>
+    <string name="tpl_blank_secret">You add the secret values</string>
+    <string name="tpl_blank_current_location">The place is where you arm it</string>
     <!-- Encrypted import and automatic backup (0.7.2) -->
     <string name="backup_import_encrypted_body">This backup is encrypted. Enter the passphrase it was made with.</string>
     <string name="backup_import_passphrase_field">Backup passphrase</string>
@@ -582,6 +643,15 @@
     <string name="rda_ap_picker_current">in use</string>
     <string name="rda_ap_picker_pick_cd">Use %1$s</string>
     <string name="rda_ap_run_now_fallback">Run now is not available yet.</string>
+    <!-- 0.7.2 · What changes when you approve an edit (prefix diff_) -->
+    <string name="diff_title">What changes</string>
+    <string name="diff_subtitle">Compared with the approved version. The whole rule stays below.</string>
+    <string name="diff_nothing">Nothing that runs changes: only the name or the description differ.</string>
+    <string name="diff_added">Added</string>
+    <string name="diff_removed">Removed</string>
+    <string name="diff_changed">Changed</string>
+    <string name="diff_before">Before</string>
+    <string name="diff_now">Now</string>
     <!-- Issue #19: http:// endpoint on the local network -->
     <string name="provider_unencrypted_lan_warning">Unencrypted connection: the key and your requests travel in clear text. Use it only on a network you trust.</string>
     <!-- Issue #20: response timeout -->

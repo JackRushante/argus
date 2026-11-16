@@ -45,6 +45,33 @@ object RulesBackupFormat {
 
     /** Nome predefinito proposto dal selettore di file: `argus-rules-yyyy-MM-dd.json`. */
     fun defaultFileName(date: LocalDate): String = "argus-rules-$date.json"
+
+    /**
+     * 0.7.2: nome proposto per una regola condivisa come file, `argus-rule-<nome>.json`. Del nome restano
+     * lettere e cifre ASCII (minuscole) unite da trattini, al massimo 40 caratteri; senza, `argus-rule.json`.
+     */
+    fun shareFileName(ruleName: String): String {
+        val slug = java.text.Normalizer.normalize(ruleName, java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{Mn}+"), "")
+            .lowercase(java.util.Locale.ROOT)
+            .replace(Regex("[^a-z0-9]+"), "-")
+            .trim('-')
+            .take(MAX_SLUG_CHARS)
+            .trim('-')
+        return if (slug.isEmpty()) "argus-rule.json" else "argus-rule-$slug.json"
+    }
+
+    /**
+     * 0.7.2: un testo incollato o ricevuto da un'altra app, come byte UTF-8 da importare. null se supera
+     * [MAX_FILE_BYTES]: il controllo avviene PRIMA di qualsiasi lettura del contenuto, come per un file.
+     */
+    fun utf8WithinCap(text: String): ByteArray? {
+        // Ogni carattere vale almeno un byte: oltre il limite in caratteri lo è anche in byte.
+        if (text.length > MAX_FILE_BYTES) return null
+        return text.toByteArray(Charsets.UTF_8).takeIf { it.size <= MAX_FILE_BYTES }
+    }
+
+    private const val MAX_SLUG_CHARS = 40
 }
 
 /** Una voce del file: la bozza, se la regola era attiva al momento dell'export e le sue etichette. */
@@ -130,8 +157,31 @@ sealed interface ExportOutcome {
 }
 
 sealed interface ImportOutcome {
-    data class Done(val summary: ImportSummary) : ImportOutcome
+    /** [draftIds] (0.7.2): gli id delle bozze create, nell'ordine del file, per aprirne l'approvazione. */
+    data class Done(val summary: ImportSummary, val draftIds: List<String> = emptyList()) : ImportOutcome
     data class Failed(val failure: BackupFailure) : ImportOutcome
+}
+
+/** 0.7.2: lettura di un documento con il limite dell'import, senza decodificarlo. */
+sealed interface DocumentRead {
+    class Bytes(val bytes: ByteArray) : DocumentRead
+    data class Failed(val failure: BackupFailure) : DocumentRead
+}
+
+/**
+ * 0.7.2: cosa importerebbe un testo o un file, senza scrivere nulla: i nomi delle regole valide (ripuliti
+ * per la sola visualizzazione), le voci che verrebbero scartate e la dimensione in byte.
+ */
+sealed interface ImportPreview {
+    data class Ready(
+        val ruleNames: List<String>,
+        val discarded: Map<RuleDiscardReason, Int>,
+        val sizeBytes: Int,
+    ) : ImportPreview {
+        val discardedTotal: Int get() = discarded.values.sum()
+    }
+
+    data class Rejected(val failure: BackupFailure) : ImportPreview
 }
 
 /** Il testo dell'export completo, pronto da scrivere (in chiaro o cifrato). */

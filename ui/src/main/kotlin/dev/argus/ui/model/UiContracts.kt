@@ -4,6 +4,7 @@ import dev.argus.engine.model.ActionTypeIds
 import dev.argus.engine.runtime.AuditKind
 import dev.argus.engine.safety.Severity
 import dev.argus.ui.presentation.RenderLanguage
+import dev.argus.ui.presentation.RuleChangeRow
 
 // =============================================================================
 // Contratti di stato UI (handoff-frontend.md §6). Kotlin UI-layer: stringhe
@@ -329,6 +330,63 @@ interface AutomationListCallbacks {
     fun onOpenLog() {}      // 0.7.0: riquadro «Oggi» del riepilogo → Log; default no-op, la nav reale è dell'host
     fun onSelectLabel(label: String?) {}                    // 0.7.2: chip etichetta; null = «Tutte»
     fun onSetLabelPaused(label: String, paused: Boolean) {} // 0.7.2: «Pausa gruppo» / «Riprendi gruppo»
+    fun onOpenTemplates() {} // 0.7.2: «Modelli» → galleria dei modelli; default no-op, la nav reale è dell'host
+}
+
+// --- 0.7.2 · Galleria dei modelli ---
+
+enum class TemplateCategoryUi { HOME, WORK, BATTERY, MESSAGES }
+
+/** Cosa chiede un modello per funzionare, derivato dalle capacità della sua regola (mai dichiarato a mano). */
+enum class TemplateNeedUi {
+    PRIVILEGED,
+    DND_ACCESS,
+    WRITE_SETTINGS,
+    LOCATION,
+    NOTIFICATION_ACCESS,
+    NOTIFICATIONS,
+    SMS,
+    CALLS,
+    BLUETOOTH,
+    USAGE_ACCESS,
+    ACCESSIBILITY,
+}
+
+/** Un dato che il modello lascia a chi lo usa (i valori «da completare»), o il luogo preso all'arm. */
+enum class TemplateBlankUi { CHAT, SENDER, PHONE_NUMBER, NETWORK, PLACE, SECRET, CURRENT_LOCATION }
+
+data class TemplateCardUi(
+    val id: String,
+    val category: TemplateCategoryUi,
+    val title: String,
+    val description: String,
+    /** Icona e forma del contenitore dal trigger della regola, come nella lista. */
+    val triggerIconKey: String,
+    /** Regola generativa: la card porta la coppia di chip «generativa» + «esce verso il cloud» (invariante 5). */
+    val isGenerative: Boolean,
+    val needs: List<TemplateNeedUi>,
+    val blanks: List<TemplateBlankUi> = emptyList(),
+)
+
+data class TemplateGalleryState(
+    val templates: List<TemplateCardUi> = emptyList(),
+    /** Categoria scelta; `null` = «Tutti». */
+    val filter: TemplateCategoryUi? = null,
+    val loading: Boolean = true,
+    /** Il modello che si sta importando: i pulsanti non rispondono a un secondo tocco. */
+    val busyTemplateId: String? = null,
+    /** Anteprima di «Importa da testo» aperto dalla galleria. */
+    val textPreview: TextImportPreview = TextImportPreview.Empty,
+)
+
+interface TemplateGalleryCallbacks {
+    fun onBack()
+    fun onFilter(category: TemplateCategoryUi?)
+    /** «Usa questo modello»: diventa una bozza importata da leggere e approvare. */
+    fun onUseTemplate(id: String)
+    fun onImportFile()
+    fun onImportTextChange(text: String)
+    fun onImportText(text: String)
 }
 
 // --- 6.3 Automazione · dettaglio / approvazione ---
@@ -383,6 +441,15 @@ data class AutomationDetailState(
      * regola salvata. Non cambiano la regola e non chiedono una nuova approvazione.
      */
     val labels: RuleLabelsUi? = null,
+    /**
+     * 0.7.2: la bozza sostituisce una regola già approvata (armata o disattivata): le righe rese che cambiano
+     * rispetto a quella, per la card «Cosa cambia». `null` = non è una modifica; vuota = nulla di eseguibile cambia.
+     */
+    val changes: List<RuleChangeRow>? = null,
+    /** 0.7.2: «Condividi» si offre (regola approvata o da rivedere ma leggibile; mai una bozza). */
+    val canShare: Boolean = false,
+    /** 0.7.2: il foglio «Condividi regola» è aperto con questi testi; `null` = chiuso. */
+    val share: RuleShareUi? = null,
 )
 
 /** 0.7.2: le etichette di una regola nel dettaglio e quelle già in uso, da proporre per prime. */
@@ -394,6 +461,22 @@ data class RuleLabelsUi(
 
 /** 0.7.2: un'etichetta della regola; [paused] = il suo gruppo è in pausa. */
 data class RuleLabelUi(val label: String, val paused: Boolean)
+
+/**
+ * 0.7.2: una regola da condividere, nelle due versioni del foglio: senza dati personali ([stripped], la scelta
+ * di partenza) e integrale ([full]). [fileName] è il nome proposto da «Salva file».
+ */
+data class RuleShareUi(
+    val ruleName: String,
+    val stripped: RuleShareText,
+    val full: RuleShareText,
+    val fileName: String,
+) {
+    fun text(stripPersonalData: Boolean): RuleShareText = if (stripPersonalData) stripped else full
+}
+
+/** Il testo da condividere (file di backup con una regola) e la sua forma compatta per il codice QR. */
+data class RuleShareText(val text: String, val qrText: String)
 
 /**
  * 0.4.1 (F8): ciò che il Dettaglio offre per lanciare a mano una regola `manual` armata. «Esegui ora»
@@ -463,6 +546,15 @@ interface AutomationDetailCallbacks {
     fun onChangeApp(slot: Int, packageName: String) {}
     fun onAddLabel(label: String) {}         // 0.7.2: aggiunge un'etichetta (nessuna nuova approvazione)
     fun onRemoveLabel(label: String) {}      // 0.7.2: toglie un'etichetta
+    /** 0.7.2: «Condividi» apre il foglio: il ViewModel prepara i testi in `share`. Default no-op, host-owned. */
+    fun onShare() {}
+    fun onDismissShare() {}
+    /** 0.7.2: foglio di sistema con il testo (senza dati personali se [stripPersonalData]). */
+    fun onShareAsText(stripPersonalData: Boolean) {}
+    /** 0.7.2: «Salva file» con il selettore di documenti esistente. */
+    fun onSaveShareFile(stripPersonalData: Boolean) {}
+    /** 0.7.2: copia il testo negli appunti. */
+    fun onCopyShare(stripPersonalData: Boolean) {}
 }
 
 // --- 6.4 Log esecuzioni ---
@@ -633,7 +725,60 @@ data class RulesBackupUi(
     val exportableRules: Int = 0,
     /** 0.7.2: card «Backup automatico»; null = non disponibile (la card non si mostra). */
     val autoBackup: AutoBackupUi? = null,
+    /** 0.7.2: anteprima del testo incollato in «Importa da testo». */
+    val textPreview: TextImportPreview = TextImportPreview.Empty,
 )
+
+/**
+ * 0.7.2: cosa contiene un testo o un file da importare, prima di confermare. Testi già pronti nella lingua
+ * dell'utente; i nomi vengono dal contenuto ricevuto, ripuliti per la sola visualizzazione.
+ */
+data class ImportPreviewUi(
+    /** «2 regole · 1,4 KB». */
+    val title: String,
+    /** I primi nomi delle regole valide (al più una ventina). */
+    val ruleNames: List<String>,
+    /** «e altre 5», se i nomi sono di più; `null` altrimenti. */
+    val moreText: String? = null,
+    /** «1 voce verrà scartata (regola non valida).»; `null` se non se ne scarta nessuna. */
+    val discardedText: String? = null,
+) {
+    /** C'è almeno una regola da importare: solo allora «Importa» è attivo. */
+    val canImport: Boolean get() = ruleNames.isNotEmpty()
+}
+
+/** 0.7.2: stato dell'anteprima di «Importa da testo». */
+sealed interface TextImportPreview {
+    /** Nessun testo. */
+    data object Empty : TextImportPreview
+
+    data object Checking : TextImportPreview
+
+    data class Ready(val preview: ImportPreviewUi) : TextImportPreview
+
+    /** Il testo non è importabile: il motivo, già scritto. */
+    data class Invalid(val message: String) : TextImportPreview
+}
+
+/**
+ * 0.7.2: schermata che riceve una regola da un'altra app (foglio di condivisione o file manager). Non fa nulla
+ * finché l'utente non conferma: ogni regola diventa una bozza da approvare.
+ */
+sealed interface ReceivedImportState {
+    data object Loading : ReceivedImportState
+
+    data class Ready(val preview: ImportPreviewUi, val working: Boolean = false) : ReceivedImportState
+
+    data class Rejected(val message: String) : ReceivedImportState
+
+    data class Done(val message: String, val importedCount: Int) : ReceivedImportState
+}
+
+interface ReceivedImportCallbacks {
+    fun onConfirm()
+    fun onCancel()
+    fun onOpenArgus()
+}
 
 enum class AutoBackupFrequencyUi { DAILY, WEEKLY }
 
@@ -824,6 +969,12 @@ interface SettingsCallbacks {
 
     /** Backup (0.4.0): «Importa». Il file lo sceglie il chiamante con il selettore di documenti. Default no-op. */
     fun onImportRules() {}
+
+    /** 0.7.2: «Importa da testo», il testo è cambiato: il VM ne prepara l'anteprima. Default no-op. */
+    fun onImportTextChange(text: String) {}
+
+    /** 0.7.2: «Importa da testo», conferma: ogni regola valida diventa una bozza da approvare. Default no-op. */
+    fun onImportText(text: String) {}
 
     /** Chiude il riepilogo (o l'errore) dell'ultima operazione di backup. Default no-op. */
     fun onDismissBackupResult() {}
