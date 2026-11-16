@@ -8,6 +8,9 @@ import dev.argus.data.entities.PendingDraftEntity
 import dev.argus.engine.model.CreatedBy
 import kotlinx.coroutines.flow.Flow
 
+/** Proiezione delle etichette di una bozza: [labels] è la colonna grezza, letta con `DraftLabels.decode`. */
+data class DraftLabelsRow(val automationId: String, val labels: String)
+
 @Dao
 interface DraftDao {
     @Query("SELECT * FROM pending_drafts WHERE id = :id")
@@ -18,6 +21,13 @@ interface DraftDao {
 
     @Query("SELECT * FROM pending_drafts ORDER BY updatedAtMillis DESC, id ASC")
     fun observeAll(): Flow<List<PendingDraftEntity>>
+
+    /** 0.7.2: etichette delle bozze di regole nuove (colonna `labels`, una per riga). */
+    @Query("SELECT automationId, labels FROM pending_drafts WHERE labels IS NOT NULL ORDER BY automationId ASC")
+    fun observeLabels(): Flow<List<DraftLabelsRow>>
+
+    @Query("SELECT automationId, labels FROM pending_drafts WHERE labels IS NOT NULL ORDER BY automationId ASC")
+    suspend fun allLabels(): List<DraftLabelsRow>
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(entity: PendingDraftEntity): Long

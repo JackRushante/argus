@@ -13,6 +13,11 @@ import dev.argus.automation.AutomationEnablementCoordinator
 import dev.argus.automation.EnablementResult
 import dev.argus.automation.RenderLanguageSource
 import dev.argus.automation.manual.AutomationPauseStore
+import dev.argus.automation.apps.EmptyInstalledAppCatalog
+import dev.argus.automation.apps.InstalledAppCatalog
+import dev.argus.automation.labels.LabelsSnapshot
+import dev.argus.automation.labels.NoRuleLabelDirectory
+import dev.argus.automation.labels.RuleLabelDirectory
 import dev.argus.data.ArgusDatabase
 import dev.argus.data.dao.AuditLogRecord
 import dev.argus.data.dao.AutomationUiMetadata
@@ -21,6 +26,8 @@ import dev.argus.engine.brain.ContactWhitelistStore
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
+import dev.argus.engine.model.AppPackages
+import dev.argus.engine.model.RuleLabels
 import dev.argus.engine.model.CapabilityRequirements
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.safety.DraftId
@@ -37,6 +44,8 @@ import dev.argus.ui.model.StatusBadge
 import dev.argus.ui.model.StatusFilter
 import dev.argus.ui.model.TodayErrorsSummary
 import dev.argus.ui.presentation.RenderLanguage
+import dev.argus.ui.presentation.hasLabel
+import dev.argus.ui.presentation.labelChipsOf
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -59,6 +68,8 @@ private data class ListInputs(
     val language: RenderLanguage,
     /** Sveglie persistite per regola: dai ritardi relativi («tra 2 ore») il prossimo scatto si legge da qui. */
     val alarms: Map<String, ScheduledTimeAlarmEntity>,
+    /** 0.7.2: etichette per regola e gruppi in pausa. */
+    val labels: LabelsSnapshot,
 )
 
 /** Ciò che la review di una bozza legge oltre alla bozza stessa: capacità del dispositivo e regole attive. */
@@ -87,6 +98,10 @@ class AutomationListViewModel @Inject constructor(
      * banner «Shizuku non attivo» non va mostrato. `null` solo nei test che non lo provano.
      */
     rootAccess: RootAccess? = null,
+    /** 0.7.2: etichette delle regole e gruppi in pausa. */
+    private val labels: RuleLabelDirectory = NoRuleLabelDirectory,
+    /** 0.7.2: nomi delle app, solo per la ricerca. Restano sul telefono. */
+    private val appCatalog: InstalledAppCatalog = EmptyInstalledAppCatalog,
 ) : ViewModel() {
     private val shizukuOrRootStatus: Flow<ShizukuGatewayStatus> = if (rootAccess == null) {
         shizuku.observeStatus()
@@ -97,6 +112,7 @@ class AutomationListViewModel @Inject constructor(
     }
 
     private val filter = savedStateHandle.getStateFlow(FILTER_KEY, StatusFilter.ALL)
+    private val selectedLabel = savedStateHandle.getStateFlow<String?>(LABEL_KEY, null)
     private val mutableMessages = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val messages = mutableMessages.asSharedFlow()
 
@@ -120,33 +136,37 @@ class AutomationListViewModel @Inject constructor(
         val reads = ListReadCache(
             review = { id -> approvals.review(id) },
             readBatteryExempt = { readAndroidUiHealth(context).batteryExempt },
+            readAppLabels = { appCatalog.launchableApps().associate { it.packageName to it.label } },
         )
         emitAll(
             combine(
-                // Il combine tipizzato arriva a 5 flow: automazioni, nomi whitelist, lingua e sveglie
-                // persistite viaggiano insieme. La sveglia e' un input in piu' della sola riga: non
-                // entra nel contesto delle letture costose (review delle bozze, batteria).
+                // Il combine tipizzato arriva a 5 flow: automazioni, nomi whitelist, lingua, sveglie persistite ed
+                // etichette (0.7.2) viaggiano insieme. Sveglia ed etichette sono input in piu' della sola riga: non
+                // entrano nel contesto delle letture costose (review delle bozze, batteria).
                 combine(
                     store.observeAll(),
                     whitelist.observeAll(),
                     languageSource.language,
                     database.scheduledTimeAlarmDao().observeAll(),
-                ) { automations, contacts, renderLanguage, alarms ->
+                    labels.snapshot,
+                ) { automations, contacts, renderLanguage, alarms, labelSnapshot ->
                     ListInputs(
                         automations,
                         contacts.associate { it.id to it.displayName },
                         renderLanguage,
                         alarms.associateBy { it.automationId },
+                        labelSnapshot,
                     )
                 },
                 drafts.observeAll(),
-                filter,
+                // 0.7.2: filtro di stato ed etichetta scelta viaggiano insieme.
+                combine(filter, selectedLabel) { activeFilter, activeLabel -> activeFilter to activeLabel },
                 shizukuOrRootStatus,
                 database.automationDao().observeUiMetadata(),
-            ) { (automations, conversationLabels, language, alarms), pending, activeFilter, shizukuStatus, metadata ->
+            ) { inputs, pending, (activeFilter, activeLabel), shizukuStatus, metadata ->
                 listState(
-                    automations, conversationLabels, language, alarms, pending, activeFilter, shizukuStatus,
-                    metadata, reads,
+                    inputs.automations, inputs.conversationLabels, inputs.language, inputs.alarms, pending,
+                    activeFilter, activeLabel, inputs.labels, shizukuStatus, metadata, reads,
                 )
             },
         )
@@ -172,6 +192,8 @@ class AutomationListViewModel @Inject constructor(
         alarms: Map<String, ScheduledTimeAlarmEntity>,
         pending: List<PendingDraft>,
         activeFilter: StatusFilter,
+        activeLabel: String?,
+        labelSnapshot: LabelsSnapshot,
         shizukuStatus: ShizukuGatewayStatus,
         metadata: List<AutomationUiMetadata>,
         reads: ListReadCache,
@@ -191,6 +213,11 @@ class AutomationListViewModel @Inject constructor(
         val editDraftIdByAutomation = editDrafts.associate { it.automationId to it.id.value }
         val replacedByDraftRow = pending.filterNot { it in editDrafts }
             .mapTo(hashSetOf()) { it.automationId }
+        // 0.7.2: nomi delle app per la ricerca, letti solo se una regola nomina un package.
+        val appLabels = reads.appLabels(
+            needed = automations.any { AppPackages.packagesToCheck(it.trigger, it.actions).isNotEmpty() } ||
+                pending.any { AppPackages.packagesToCheck(it.draft.trigger, it.draft.actions).isNotEmpty() },
+        )
         val automationRows = automations
             .filterNot { it.id in replacedByDraftRow }
             .map { automation ->
@@ -201,6 +228,7 @@ class AutomationListViewModel @Inject constructor(
                     language,
                     pendingEditDraftId = editDraftIdByAutomation[automation.id],
                     scheduledAlarm = alarms[automation.id.value],
+                    appLabels = appLabels,
                 )
             }
         val standaloneDrafts = pending.filterNot { it in editDrafts }
@@ -214,10 +242,26 @@ class AutomationListViewModel @Inject constructor(
             ),
         )
         val pendingRows = standaloneDrafts.map { snapshot ->
-            snapshot.toAutomationRow(reviews[snapshot.id], conversationLabels, language)
+            snapshot.toAutomationRow(reviews[snapshot.id], conversationLabels, language, appLabels = appLabels)
         }
-        val allRows = pendingRows + automationRows
-        val visibleRows = allRows.filter { it.matches(activeFilter) }
+        // 0.7.2: etichette dalla tabella (le bozze importate per id di regola) e pausa del loro gruppo.
+        val draftRuleIds = standaloneDrafts.associate { it.id.value to it.automationId.value }
+        val allRows = (pendingRows + automationRows).map { row ->
+            val ruleId = draftRuleIds[row.id] ?: row.id
+            row.copy(
+                labels = labelSnapshot.byRule[ruleId].orEmpty(),
+                groupPaused = row.id !in draftRuleIds && labelSnapshot.isRulePaused(ruleId),
+            )
+        }
+        // Chip e conteggi sull'elenco completo; un'etichetta che ha perso l'ultima regola sparisce e la scelta torna «Tutte».
+        val chips = labelChipsOf(allRows, labelSnapshot.pausedKeys)
+        val selectedChip = activeLabel?.let { selected ->
+            chips.firstOrNull { RuleLabels.key(it.label) == RuleLabels.key(selected) }
+        }
+        if (activeLabel != null && selectedChip == null) savedStateHandle[LABEL_KEY] = null
+        val visibleRows = allRows.filter { row ->
+            row.matches(activeFilter) && (selectedChip == null || row.hasLabel(selectedChip.label))
+        }
         val usesShizuku = automations.any { automation ->
             automation.enabled &&
                 automation.status == AutomationStatus.ARMED &&
@@ -243,11 +287,22 @@ class AutomationListViewModel @Inject constructor(
             // Riepilogo sull'elenco COMPLETO (visibleRows e' gia' filtrato). Gli errori di oggi arrivano
             // dopo, dal log (vedi `todayErrors`).
             summary = listSummaryOf(allRows, todayErrors = null),
+            labels = chips,
+            totalCount = allRows.size,
+            selectedLabel = selectedChip?.label,
         )
     }
 
     /** F21: "Riprendi" sul banner della pausa. */
     fun onResumeAutomations() = pause.setPaused(false)
+
+    /** 0.7.2: chip etichetta; null = «Tutte». */
+    fun onSelectLabel(label: String?) {
+        savedStateHandle[LABEL_KEY] = label
+    }
+
+    /** 0.7.2: «Pausa gruppo» / «Riprendi gruppo». Stessa pausa del motore, decisa per regola. */
+    fun onSetLabelPaused(label: String, paused: Boolean) = labels.setGroupPaused(label, paused)
 
     fun onFilter(value: StatusFilter) {
         savedStateHandle[FILTER_KEY] = value
@@ -304,6 +359,7 @@ class AutomationListViewModel @Inject constructor(
 
     private companion object {
         const val FILTER_KEY = "automation_filter"
+        const val LABEL_KEY = "automation_label"
     }
 }
 
@@ -329,12 +385,25 @@ private fun AutomationRow.isPendingApproval(): Boolean =
 internal class ListReadCache(
     private val review: suspend (DraftId) -> ApprovalFlowReview?,
     private val readBatteryExempt: () -> Boolean,
+    private val readAppLabels: suspend () -> Map<String, String> = { emptyMap() },
 ) {
     private var reviewContext: Any? = null
     private val reviews = HashMap<PendingDraft, ApprovalFlowReview>()
 
     private var batteryKey: Any? = null
     private var batteryValue: Boolean? = null
+
+    private var appLabelsValue: Map<String, String>? = null
+
+    /**
+     * 0.7.2: nome delle app per package, per la ricerca. Letto una volta per raccolta e solo se una regola nomina
+     * un package; una lettura fallita non si memorizza (la prossima emissione ritenta).
+     */
+    suspend fun appLabels(needed: Boolean): Map<String, String> {
+        if (!needed) return emptyMap()
+        appLabelsValue?.let { return it }
+        return cancellationSafeOrNull { readAppLabels() }?.also { appLabelsValue = it }.orEmpty()
+    }
 
     /**
      * Review delle [pending] nel [context] dato (stato Shizuku, regole attive: quel che la review

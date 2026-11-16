@@ -23,6 +23,15 @@ import java.util.UUID
 fun interface BulkDraftWriter {
     /** Una voce per ogni [NewDraft], nello stesso ordine. Tutto dentro una transazione. */
     suspend fun createAll(newDrafts: List<NewDraft>): List<DraftWriteResult>
+
+    /**
+     * 0.7.2: come [createAll], con le etichette di ogni bozza (per id). Le etichette non entrano nella bozza né
+     * nella sua impronta; chi non sa conservarle le ignora (default).
+     */
+    suspend fun createAll(
+        newDrafts: List<NewDraft>,
+        labels: Map<DraftId, List<String>>,
+    ): List<DraftWriteResult> = createAll(newDrafts)
 }
 
 /** Esporta e importa le regole. Il confine usato da Impostazioni. */
@@ -67,6 +76,11 @@ class RulesBackupService(
     private val nowMillis: () -> Long = System::currentTimeMillis,
     private val newId: () -> String = { UUID.randomUUID().toString() },
     private val keyDeriver: BackupKeyDeriver = DefaultBackupKeyDeriver,
+    /**
+     * 0.7.2: etichette per id di regola (`RoomRuleLabelStore.snapshot`). Viaggiano nell'export completo; la
+     * versione da condividere senza dati personali non le scrive (un'etichetta può dire «Moglie»).
+     */
+    private val labels: suspend () -> Map<String, List<String>> = { emptyMap() },
 ) : RulesBackup {
 
     override suspend fun export(destination: Uri, stripPersonalData: Boolean): ExportOutcome {
@@ -108,12 +122,25 @@ class RulesBackupService(
         }
         // «Da rivedere» ma illeggibili (segnaposto senza azioni) non hanno nulla da esportare.
         val skipped = all.count { it.status in CANDIDATE_STATUSES } - exportable.size
+        // Le etichette sono organizzazione: se non si leggono, il backup delle regole si fa lo stesso.
+        val labelsById = if (stripPersonalData) {
+            emptyMap()
+        } else {
+            try {
+                labels()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                emptyMap()
+            }
+        }
 
         val rules = exportable.map { automation ->
             val draft = automation.toDraft()
             BackupRule(
                 enabled = automation.status == AutomationStatus.ARMED && automation.enabled,
                 draft = if (stripPersonalData) PersonalDataStripper.strip(draft) else draft,
+                labels = labelsById[automation.id.value].orEmpty(),
             )
         }
         val bytes = RulesBackupCodec.encode(
@@ -225,11 +252,15 @@ class RulesBackupService(
                 expectedAutomationFingerprint = null,
             )
         }
+        // 0.7.2: le etichette viaggiano accanto alla bozza, mai dentro: la bozza e la sua impronta non cambiano.
+        val labelsByDraft = newDrafts.zip(accepted)
+            .filter { (_, rule) -> rule.labels.isNotEmpty() }
+            .associate { (draft, rule) -> draft.id to rule.labels }
         val results: List<DraftWriteResult> = if (newDrafts.isEmpty()) {
             emptyList()
         } else {
             try {
-                drafts.createAll(newDrafts)
+                drafts.createAll(newDrafts, labelsByDraft)
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {

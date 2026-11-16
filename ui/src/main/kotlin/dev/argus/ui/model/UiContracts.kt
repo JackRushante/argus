@@ -242,6 +242,27 @@ data class AutomationListState(
      * caricamento o nessuna regola): il riepilogo non compare, mai un riepilogo di zeri.
      */
     val summary: ListSummary? = null,
+    /**
+     * 0.7.2: un chip per etichetta, con i conteggi sull'elenco COMPLETO (come il riepilogo). Vuoto = nessuna
+     * etichetta ancora: la fila mostra solo «Tutte».
+     */
+    val labels: List<LabelChipUi> = emptyList(),
+    /** 0.7.2: regole in tutto, per «Tutte · N». */
+    val totalCount: Int = 0,
+    /** 0.7.2: etichetta scelta (la sua grafia); `null` = «Tutte». Le righe arrivano già filtrate. */
+    val selectedLabel: String? = null,
+)
+
+/**
+ * 0.7.2: un'etichetta nella fila dei filtri. [activeCount]: regole armate e attive; [waitingCount]: in attesa
+ * di approvazione (bozze e modifiche in attesa). [paused]: il gruppo è in pausa (le sue regole non scattano).
+ */
+data class LabelChipUi(
+    val label: String,
+    val count: Int,
+    val activeCount: Int,
+    val waitingCount: Int,
+    val paused: Boolean,
 )
 
 data class AutomationRow(
@@ -263,6 +284,14 @@ data class AutomationRow(
     val pendingEditDraftId: String? = null,
     /** 0.7.0 (redesign A): istante (epoch ms) di [nextFireLabel], per ordinare «Prossimo scatto». `null` = senza prossimo scatto. */
     val nextFireAtMillis: Long? = null,
+    /** 0.7.2: le azioni in breve, dai tipi («Modalità Casa, Volume»); la riga le mostra dopo il trigger. */
+    val actionSummary: String? = null,
+    /** 0.7.2: nomi delle app che la regola nomina (dal telefono), solo per la ricerca. */
+    val appNames: List<String> = emptyList(),
+    /** 0.7.2: etichette della regola (organizzazione, fuori dall'impronta). */
+    val labels: List<String> = emptyList(),
+    /** 0.7.2: un gruppo (etichetta) della regola è in pausa: la regola non scatta. */
+    val groupPaused: Boolean = false,
 )
 
 enum class StatusFilter { ALL, ARMED, PENDING, DISABLED, NEEDS_REVIEW }
@@ -298,6 +327,8 @@ interface AutomationListCallbacks {
     fun onBannerTap() {}    // tap sul banner salute → Sistema; default no-op, host-owned
     fun onResumeAutomations() {}   // «Riprendi» sul banner della pausa (F21); default no-op
     fun onOpenLog() {}      // 0.7.0: riquadro «Oggi» del riepilogo → Log; default no-op, la nav reale è dell'host
+    fun onSelectLabel(label: String?) {}                    // 0.7.2: chip etichetta; null = «Tutte»
+    fun onSetLabelPaused(label: String, paused: Boolean) {} // 0.7.2: «Pausa gruppo» / «Riprendi gruppo»
 }
 
 // --- 6.3 Automazione · dettaglio / approvazione ---
@@ -347,7 +378,22 @@ data class AutomationDetailState(
     val appChoices: List<AppChoiceUi>? = null,
     /** 0.7.2 (S8): la bozza viene da un file importato (`createdBy = IMPORT`), non dalla chat: l'approvazione lo dice. */
     val imported: Boolean = false,
+    /**
+     * 0.7.2: etichette della regola salvata, con aggiungi e togli. `null` per una bozza: si etichetta una
+     * regola salvata. Non cambiano la regola e non chiedono una nuova approvazione.
+     */
+    val labels: RuleLabelsUi? = null,
 )
+
+/** 0.7.2: le etichette di una regola nel dettaglio e quelle già in uso, da proporre per prime. */
+data class RuleLabelsUi(
+    val labels: List<RuleLabelUi>,
+    /** Tutte le etichette in uso (anche su altre regole), una per etichetta. */
+    val existing: List<String>,
+)
+
+/** 0.7.2: un'etichetta della regola; [paused] = il suo gruppo è in pausa. */
+data class RuleLabelUi(val label: String, val paused: Boolean)
 
 /**
  * 0.4.1 (F8): ciò che il Dettaglio offre per lanciare a mano una regola `manual` armata. «Esegui ora»
@@ -415,6 +461,8 @@ interface AutomationDetailCallbacks {
      * riapprovata; su una regola armata nasce una bozza di modifica, la regola resta com'è finché non la armi.
      */
     fun onChangeApp(slot: Int, packageName: String) {}
+    fun onAddLabel(label: String) {}         // 0.7.2: aggiunge un'etichetta (nessuna nuova approvazione)
+    fun onRemoveLabel(label: String) {}      // 0.7.2: toglie un'etichetta
 }
 
 // --- 6.4 Log esecuzioni ---

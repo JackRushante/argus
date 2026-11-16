@@ -108,6 +108,13 @@ import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import dev.argus.automation.labels.LabelPauseStore
+import dev.argus.automation.labels.NoRuleLabelDirectory
+import dev.argus.automation.labels.RoomRuleLabelDirectory
+import dev.argus.automation.labels.RuleLabelDirectory
+import dev.argus.data.RoomRuleLabelStore
+import dev.argus.engine.model.RuleLabels
+import dev.argus.ui.model.RuleLabelUi
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -1145,6 +1152,7 @@ class AutomationDetailViewModelTest {
         retention: LogRetentionStore = LogRetentionStore(ApplicationProvider.getApplicationContext<Context>()),
         manual: ManualEntryService = ManualHarness(store).service,
         appCatalog: InstalledAppCatalog = EmptyInstalledAppCatalog,
+        ruleLabels: RuleLabelDirectory = NoRuleLabelDirectory,
     ): AutomationDetailViewModel {
         val whitelist = RoomContactWhitelistStore(db.contactWhitelistDao())
         val snapshots = FirePolicySnapshotProvider {
@@ -1193,7 +1201,90 @@ class AutomationDetailViewModelTest {
             manual = manual,
             applicationScope = applicationScope,
             appCatalog = appCatalog,
+            ruleLabels = ruleLabels,
         ).also { lastViewModel = it }
+    }
+
+    // --- 0.7.2: etichette ----------------------------------------------------------------------------
+
+    private class MemoryLabelPause : LabelPauseStore {
+        private val state = kotlinx.coroutines.flow.MutableStateFlow(emptySet<String>())
+        override val pausedKeys: kotlinx.coroutines.flow.StateFlow<Set<String>> = state
+        override fun setPaused(label: String, paused: Boolean) {
+            val key = RuleLabels.key(label)
+            state.value = if (paused) state.value + key else state.value - key
+        }
+
+        override fun retainOnly(keysInUse: Set<String>) {
+            state.value = state.value intersect keysInUse
+        }
+    }
+
+    @Test
+    fun `labels are added and removed from the detail without a new approval`() = runTest {
+        val rule = seedArmedAutomation("lab1")
+        seedArmedAutomation("lab2")
+        val store = RoomAutomationStore(db.automationDao())
+        val labelStore = RoomRuleLabelStore(db)
+        labelStore.add(AutomationId("lab2"), "Lavoro")
+        val pauses = MemoryLabelPause()
+        val directory = RoomRuleLabelDirectory(labelStore, pauses)
+        val viewModel = viewModel("lab1", store, DetailAuditRecorder(), RenderLanguage.EN, ruleLabels = directory)
+        awaitUntil("riga etichette") { viewModel.state.value.detail?.labels != null }
+        assertEquals(emptyList(), viewModel.state.value.detail?.labels?.labels)
+        assertEquals(listOf("Lavoro"), viewModel.state.value.detail?.labels?.existing, "le etichette in uso si propongono")
+
+        viewModel.onAddLabel("Casa")
+        awaitUntil("etichetta aggiunta") { viewModel.state.value.detail?.labels?.labels?.size == 1 }
+        assertEquals(listOf(RuleLabelUi("Casa", paused = false)), viewModel.state.value.detail?.labels?.labels)
+
+        val after = assertNotNull(store.get(rule.id))
+        assertEquals(rule.approvalFingerprint, after.approvalFingerprint, "stessa impronta: nessuna nuova approvazione")
+        assertEquals(AutomationStatus.ARMED, after.status)
+        assertTrue(RoomDraftRepository(db).observeAll().first().isEmpty(), "nessuna bozza da approvare")
+
+        pauses.setPaused("casa", true)
+        awaitUntil("gruppo in pausa") { viewModel.state.value.detail?.labels?.labels?.single()?.paused == true }
+
+        viewModel.onRemoveLabel("Casa")
+        awaitUntil("etichetta tolta") { viewModel.state.value.detail?.labels?.labels?.isEmpty() == true }
+        assertEquals(rule.approvalFingerprint, store.get(rule.id)?.approvalFingerprint)
+    }
+
+    @Test
+    fun `a draft has no labels row`() = runTest {
+        val store = RoomAutomationStore(db.automationDao())
+        assertIs<DraftWriteResult.Saved>(RoomDraftRepository(db).create(appsDraft("lab3")))
+        val directory = RoomRuleLabelDirectory(RoomRuleLabelStore(db), MemoryLabelPause())
+        val viewModel = viewModel("draft-lab3", store, DetailAuditRecorder(), RenderLanguage.EN, ruleLabels = directory)
+        awaitUntil("dettaglio caricato") { viewModel.state.value.detail != null }
+
+        assertNull(viewModel.state.value.detail?.labels)
+    }
+
+    @Test
+    fun `a sixth label is refused with a message`() = runTest {
+        seedArmedAutomation("lab4")
+        val labelStore = RoomRuleLabelStore(db)
+        (1..5).forEach { labelStore.add(AutomationId("lab4"), "L$it") }
+        val directory = RoomRuleLabelDirectory(labelStore, MemoryLabelPause())
+        val viewModel = viewModel(
+            "lab4",
+            RoomAutomationStore(db.automationDao()),
+            DetailAuditRecorder(),
+            RenderLanguage.EN,
+            ruleLabels = directory,
+        )
+        awaitUntil("cinque etichette") { viewModel.state.value.detail?.labels?.labels?.size == 5 }
+        val events = collectEvents(viewModel)
+
+        viewModel.onAddLabel("L6")
+        awaitUntil("messaggio") { events.any { it is DetailEvent.Message } }
+        assertEquals(
+            "A rule can have up to 5 labels.",
+            (events.first { it is DetailEvent.Message } as DetailEvent.Message).text,
+        )
+        assertEquals(5, viewModel.state.value.detail?.labels?.labels?.size)
     }
 
     // --- 0.7.0: nome delle app e «Cambia app» --------------------------------------------------------

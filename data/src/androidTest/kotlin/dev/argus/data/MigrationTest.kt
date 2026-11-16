@@ -11,7 +11,7 @@ import org.junit.runner.RunWith
 /**
  * Verifica strutturale: claim/audit v2, bozze v3, journal v4/v7, scheduler v5, whitelist v6,
  * conversazioni osservate v8, reply differite cifrate v9, consumo LLM v10, path azioni P4 v11 e
- * diagnostica provider v12.
+ * diagnostica provider v12, etichette delle regole v13.
  */
 @RunWith(AndroidJUnit4::class)
 class MigrationTest {
@@ -339,7 +339,36 @@ class MigrationTest {
         }
     }
 
+    @Test
+    fun migrate_v12_to_v13_adds_rule_labels() {
+        helper.createDatabase(TEST_DB_V12, 12).apply {
+            execSQL(
+                "INSERT INTO pending_drafts (id, automationId, name, revision, fingerprint, createdBy, priority, " +
+                    "schemaVersion, createdAtMillis, updatedAtMillis, baseAutomationFingerprint, quarantineCode, draftJson) " +
+                    "VALUES ('d1', 'r1', 'Bozza', 1, 'fp', 'LLM', 0, 1, 5, 5, NULL, NULL, '{}')",
+            )
+            close()
+        }
+
+        helper.runMigrationsAndValidate(
+            TEST_DB_V12,
+            13,
+            true,
+            ArgusDatabase.MIGRATION_12_13,
+        ).use { db ->
+            db.query("SELECT labels FROM pending_drafts WHERE id = 'd1'").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals(true, cursor.isNull(0))
+            }
+            db.query("SELECT COUNT(*) FROM automation_labels").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals(0, cursor.getInt(0))
+            }
+        }
+    }
+
     private companion object {
+        const val TEST_DB_V12 = "argus-migration-v12-test.db"
         const val TEST_DB_V1 = "argus-migration-v1-test.db"
         const val TEST_DB_V2 = "argus-migration-v2-test.db"
         const val TEST_DB_V3 = "argus-migration-v3-test.db"

@@ -419,6 +419,9 @@ fun ArgusNavHost() {
                             override fun onBannerTap() = switchTop(Routes.SETTINGS)
                             override fun onResumeAutomations() = listViewModel.onResumeAutomations()
                             override fun onOpenLog() = switchTop(Routes.LOG)
+                            override fun onSelectLabel(label: String?) = listViewModel.onSelectLabel(label)
+                            override fun onSetLabelPaused(label: String, paused: Boolean) =
+                                listViewModel.onSetLabelPaused(label, paused)
                         },
                         modifier = Modifier.testTag("screen_list"),
                     )
@@ -738,6 +741,8 @@ fun ArgusNavHost() {
                                     override fun onLoadAppChoices() = viewModel.onLoadAppChoices()
                                     override fun onChangeApp(slot: Int, packageName: String) =
                                         viewModel.onChangeApp(slot, packageName)
+                                    override fun onAddLabel(label: String) = viewModel.onAddLabel(label)
+                                    override fun onRemoveLabel(label: String) = viewModel.onRemoveLabel(label)
                                     override fun onOpenFullLog() {
                                         state.automationId?.let {
                                             switchTop(Routes.log(it, detail.name))

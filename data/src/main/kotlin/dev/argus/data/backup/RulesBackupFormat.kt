@@ -17,6 +17,16 @@ import java.time.LocalDate
  * chat): niente impronte, dati di approvazione, log, audit, impostazioni, chiavi API, whitelist dei
  * contatti, consumi. All'import ogni voce diventa una bozza da approvare: `enabled` è solo
  * informativo e non arma mai nulla.
+ *
+ * 0.7.2, etichette: una chiave FACOLTATIVA alla radice, scritta solo se almeno una regola ne ha,
+ * ```
+ *  "labels":[{"rule":<indice in rules>,"names":["Casa","Lavoro"]}]
+ * ```
+ * La versione resta 1, in entrambe le direzioni: le versioni precedenti leggono solo `format`, `version` e
+ * `rules` e ignorano le altre chiavi della radice, quindi importano tutte le regole senza etichette; un file
+ * senza `labels` (versioni precedenti) si importa come prima. La voce di una regola resta esattamente
+ * `{"enabled","draft"}`: una chiave in più lì farebbe scartare la regola alle versioni precedenti. Le
+ * etichette sono organizzazione: una sezione `labels` illeggibile si ignora e non scarta mai una regola.
  */
 object RulesBackupFormat {
     const val FORMAT = "argus-rules"
@@ -37,8 +47,13 @@ object RulesBackupFormat {
     fun defaultFileName(date: LocalDate): String = "argus-rules-$date.json"
 }
 
-/** Una voce del file: la bozza e se la regola era attiva al momento dell'export. */
-data class BackupRule(val enabled: Boolean, val draft: AutomationDraft)
+/** Una voce del file: la bozza, se la regola era attiva al momento dell'export e le sue etichette. */
+data class BackupRule(
+    val enabled: Boolean,
+    val draft: AutomationDraft,
+    /** 0.7.2: etichette della regola (organizzazione, fuori dalla bozza e dalla sua impronta). */
+    val labels: List<String> = emptyList(),
+)
 
 /** Perché un export o un import non è andato a buon fine. Vocabolario chiuso: il testo lo scrive la UI. */
 enum class BackupFailure {

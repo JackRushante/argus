@@ -136,13 +136,15 @@ class Engine(
                 // «Pausa automazioni» (F21): dopo il match, così il Log mostra solo le regole che
                 // sarebbero davvero scattate; prima di policy, condizioni e claim, così lo scatto
                 // saltato non consuma cooldown né deduplica e alla ripresa non si recupera.
-                if (firingPause.isPaused()) {
+                // 0.7.2: decisa per regola, così la pausa di un gruppo (etichetta) segue la stessa strada.
+                val pauseCode = firingPause.pauseCodeFor(automation.id)
+                if (pauseCode != null) {
                     recordAudit(
                         AuditEvent(
                             automationId = automation.id,
                             kind = AuditKind.BLOCKED_POLICY,
                             atMillis = batchNow,
-                            detail = PauseCodes.PAUSED,
+                            detail = pauseCode,
                             eventId = envelope.id,
                         ),
                     )

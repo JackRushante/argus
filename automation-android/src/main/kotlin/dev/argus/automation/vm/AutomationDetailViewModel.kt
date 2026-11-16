@@ -21,6 +21,10 @@ import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
 import dev.argus.automation.di.ApplicationScope
 import dev.argus.automation.apps.EmptyInstalledAppCatalog
 import dev.argus.automation.apps.InstalledAppCatalog
+import dev.argus.automation.labels.LabelsSnapshot
+import dev.argus.automation.labels.NoRuleLabelDirectory
+import dev.argus.automation.labels.RuleLabelDirectory
+import dev.argus.data.LabelAddResult
 import dev.argus.automation.manual.AddToHomeResult
 import dev.argus.automation.manual.ManualEntryService
 import dev.argus.automation.manual.ManualRuleCatalog
@@ -71,6 +75,8 @@ import dev.argus.ui.model.AppInfoUi
 import dev.argus.ui.model.AutomationDetailState
 import dev.argus.ui.model.ManualEntryUi
 import dev.argus.ui.model.RuleDiagnosisUi
+import dev.argus.ui.model.RuleLabelUi
+import dev.argus.ui.model.RuleLabelsUi
 import dev.argus.ui.model.RuleStatsUi
 import dev.argus.ui.model.StatusBadge
 import dev.argus.ui.model.UiWarning
@@ -88,6 +94,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
@@ -191,6 +198,8 @@ class AutomationDetailViewModel @Inject constructor(
     @ApplicationContext private val context: Context? = null,
     /** 0.7.0: nomi delle app, app installate per «Cambia app». Resta sul telefono. */
     private val appCatalog: InstalledAppCatalog = EmptyInstalledAppCatalog,
+    /** 0.7.2: etichette della regola (organizzazione: mai una nuova approvazione). */
+    private val ruleLabels: RuleLabelDirectory = NoRuleLabelDirectory,
 ) : ViewModel() {
     private val routeId = requireNotNull(savedStateHandle.get<String>("id")) {
         "Dettaglio senza id"
@@ -237,6 +246,9 @@ class AutomationDetailViewModel @Inject constructor(
 
     /** Ultima diagnosi chiesta («Perché non è scattata?»); null finché l'utente non la apre. */
     private val diagnosisInputs = MutableStateFlow<DiagnosisSnapshot?>(null)
+
+    /** 0.7.2: etichette per regola e gruppi in pausa, dall'ultima emissione della directory. */
+    private val labelSnapshot = MutableStateFlow(LabelsSnapshot())
     private var diagnosisJob: Job? = null
 
     init {
@@ -248,6 +260,16 @@ class AutomationDetailViewModel @Inject constructor(
                     mutableState.update { it.withLiveExtras() }
                 }
             }
+        }
+        // 0.7.2: etichette e gruppi in pausa cambiano fuori dal flusso della regola: si aggiornano solo
+        // la riga «Etichette» e la pausa dell'avvio manuale.
+        viewModelScope.launch {
+            ruleLabels.snapshot
+                .catch { error -> if (error is CancellationException) throw error }
+                .collect { snapshot ->
+                    labelSnapshot.value = snapshot
+                    mutableState.update { it.withLiveExtras() }
+                }
         }
         // F8/F21: la pausa e il riquadro scelto cambiano fuori dal flusso della regola: si aggiorna
         // solo la parte "avvio manuale" dello stato mostrato, senza rifare il resto.
@@ -262,7 +284,11 @@ class AutomationDetailViewModel @Inject constructor(
                         } else {
                             current.copy(
                                 detail = detail.copy(
-                                    manual = entry.copy(paused = paused, isTileRule = tileRule == detail.id),
+                                    manual = entry.copy(
+                                        // 0.7.2: anche la pausa di un gruppo (etichetta) della regola ferma l'avvio manuale.
+                                        paused = paused || labelSnapshot.value.isRulePaused(detail.id),
+                                        isTileRule = tileRule == detail.id,
+                                    ),
                                 ),
                             )
                         }
@@ -647,7 +673,14 @@ class AutomationDetailViewModel @Inject constructor(
                 message(
                     when (val result = manual.run(automation.id.value)) {
                         is ManualRunResult.Accepted ->
-                            if (result.paused) {
+                            if (result.paused && !manual.paused.value) {
+                                // 0.7.2: non è la pausa globale ma un gruppo (etichetta) di questa regola.
+                                language.pick(
+                                    "A label group of this rule is paused: the run was skipped. Resume the group to run it.",
+                                    "Un gruppo (etichetta) di questa regola è in pausa: l'avvio è stato saltato. " +
+                                        "Riprendi il gruppo per farla partire.",
+                                )
+                            } else if (result.paused) {
                                 language.pick(
                                     "Automations are paused: the run was skipped. Resume them to run rules.",
                                     "Le automazioni sono in pausa: l'avvio è stato saltato. Riprendile per far partire le regole.",
@@ -937,10 +970,67 @@ class AutomationDetailViewModel @Inject constructor(
         val current = detail ?: return this
         val banner = detailEngineBanner(shizukuStatus, current.usesShizuku, batteryExempt())
         val choices = appChoices.value
-        return if (current.banner == banner && current.appChoices == choices) {
+        val labels = ruleLabelsUi()
+        val manualEntry = current.manual?.let { entry ->
+            entry.copy(paused = manual.paused.value || labelSnapshot.value.isRulePaused(current.id))
+        }
+        return if (current.banner == banner && current.appChoices == choices && current.labels == labels &&
+            current.manual == manualEntry
+        ) {
             this
         } else {
-            copy(detail = current.copy(banner = banner, appChoices = choices))
+            copy(detail = current.copy(banner = banner, appChoices = choices, labels = labels, manual = manualEntry))
+        }
+    }
+
+    /**
+     * 0.7.2: etichette della regola SALVATA che lo schermo mostra (una bozza non si etichetta) e quelle già in
+     * uso da proporre. Si leggono dalla directory, fuori dal flusso della regola: non la toccano.
+     */
+    private fun ruleLabelsUi(): RuleLabelsUi? {
+        val automation = displayedAutomation ?: return null
+        if (displayedDraft != null) return null
+        val snapshot = labelSnapshot.value
+        return RuleLabelsUi(
+            labels = snapshot.byRule[automation.id.value].orEmpty().map { RuleLabelUi(it, snapshot.isPaused(it)) },
+            existing = snapshot.allLabels,
+        )
+    }
+
+    /** 0.7.2: aggiunge un'etichetta. Nessuna nuova revisione, impronta o approvazione: la regola non cambia. */
+    fun onAddLabel(label: String) {
+        val automation = displayedAutomation ?: return
+        if (displayedDraft != null) return
+        viewModelScope.launch {
+            val result = try {
+                ruleLabels.add(automation.id, label)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                null
+            }
+            labelAddMessage(result, language)?.let { mutableEvents.emit(DetailEvent.Message(it)) }
+        }
+    }
+
+    /** 0.7.2: toglie un'etichetta; se era l'ultima regola dell'etichetta, l'etichetta sparisce. */
+    fun onRemoveLabel(label: String) {
+        val automation = displayedAutomation ?: return
+        viewModelScope.launch {
+            val removed = try {
+                ruleLabels.remove(automation.id, label)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                false
+            }
+            if (!removed) {
+                mutableEvents.emit(
+                    DetailEvent.Message(
+                        language.pick("Unable to remove the label.", "Impossibile togliere l'etichetta."),
+                    ),
+                )
+            }
         }
     }
 
