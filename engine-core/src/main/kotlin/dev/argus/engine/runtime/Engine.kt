@@ -63,6 +63,9 @@ class Engine(
             "url_host_changed",
             "write_setting_key_interpolated",
             "remote_egress_blocked",
+            // 0.8: il destinatario di un SMS non è il numero di chi ha chiamato o scritto, o non è un numero.
+            "sms_number_not_sender",
+            "sms_number_invalid",
             "p4_invoke_llm_v2_unsupported",
             ProgramInterpreter.GENERATIVE_CALL_LIMIT,
         )
