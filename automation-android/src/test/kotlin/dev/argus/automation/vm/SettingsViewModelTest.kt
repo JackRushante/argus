@@ -72,6 +72,8 @@ import dev.argus.shizuku.ShizukuIdentity
 import dev.argus.shizuku.ShizukuIdentityProbe
 import dev.argus.shizuku.ShizukuPermissionOutcome
 import dev.argus.ui.model.AuthState
+import dev.argus.automation.backup.AutoBackupTestRig
+import dev.argus.ui.model.AutoBackupUi
 import dev.argus.ui.model.RulesBackupKind
 import dev.argus.ui.model.RulesBackupStatus
 import dev.argus.ui.model.ShizukuStatus
@@ -104,6 +106,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowAlarmManager
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -880,6 +883,125 @@ class SettingsViewModelTest {
         )
     }
 
+    // ---- 0.7.2: import cifrato e backup automatico ---------------------------------------------------
+
+    @Test
+    fun `an encrypted file asks for the passphrase, then imports like a plain file`() = runTest(dispatcher) {
+        val backup = FakeRulesBackup().apply {
+            importOutcome = ImportOutcome.Failed(BackupFailure.PASSPHRASE_REQUIRED)
+            encryptedOutcome = ImportOutcome.Done(ImportSummary(imported = 3, discarded = emptyMap()))
+        }
+        val vm = backupVm(backup)
+        observe(vm)
+
+        vm.importRules(backupFile)
+        advanceUntilIdle()
+        assertEquals(RulesBackupStatus.NeedsPassphrase(), vm.state.value.backup.status)
+
+        vm.submitImportPassphrase("cavallo-batteria")
+        advanceUntilIdle()
+
+        assertEquals(listOf("cavallo-batteria"), backup.passphrases)
+        assertEquals(
+            RulesBackupStatus.Done(RulesBackupKind.IMPORT, "3 regole importate da approvare.", importedCount = 3),
+            vm.state.value.backup.status,
+        )
+        // Finito l'import, una passphrase in più non riapre nulla.
+        vm.submitImportPassphrase("cavallo-batteria")
+        advanceUntilIdle()
+        assertEquals(1, backup.passphrases.size)
+    }
+
+    @Test
+    fun `a wrong passphrase asks again with a clear reason and never lands in the state`() = runTest(dispatcher) {
+        val backup = FakeRulesBackup().apply {
+            importOutcome = ImportOutcome.Failed(BackupFailure.PASSPHRASE_REQUIRED)
+            encryptedOutcome = ImportOutcome.Failed(BackupFailure.WRONG_PASSPHRASE)
+        }
+        val vm = backupVm(backup)
+        observe(vm)
+        vm.importRules(backupFile)
+        advanceUntilIdle()
+
+        vm.submitImportPassphrase("segreto-sbagliato")
+        advanceUntilIdle()
+
+        assertEquals(
+            RulesBackupStatus.NeedsPassphrase(
+                "Passphrase errata, oppure il file è stato modificato dopo il backup. Non è stato importato nulla.",
+            ),
+            vm.state.value.backup.status,
+        )
+        assertFalse("segreto-sbagliato" in vm.state.value.toString())
+    }
+
+    @Test
+    fun `cancelling the passphrase prompt forgets the encrypted file`() = runTest(dispatcher) {
+        val backup = FakeRulesBackup().apply { importOutcome = ImportOutcome.Failed(BackupFailure.PASSPHRASE_REQUIRED) }
+        val vm = backupVm(backup)
+        observe(vm)
+        vm.importRules(backupFile)
+        advanceUntilIdle()
+
+        vm.dismissBackupResult()
+        vm.submitImportPassphrase("cavallo-batteria")
+        advanceUntilIdle()
+
+        assertEquals(RulesBackupStatus.Idle, vm.state.value.backup.status)
+        assertTrue(backup.passphrases.isEmpty())
+    }
+
+    @Test
+    fun `without the coordinator there is no automatic backup card`() = runTest(dispatcher) {
+        val vm = backupVm(FakeRulesBackup())
+        observe(vm)
+        advanceUntilIdle()
+
+        assertNull(vm.state.value.backup.autoBackup)
+    }
+
+    @Test
+    fun `the automatic backup card follows the coordinator and the passphrase stays out of the state`() =
+        runTest(dispatcher) {
+            val rig = AutoBackupTestRig(scope = this, now = System.currentTimeMillis())
+            val vm = settingsViewModel(FakeProviderStore(), autoBackup = rig.coordinator)
+            observe(vm)
+            advanceUntilIdle()
+            assertEquals(AutoBackupUi(), vm.state.value.backup.autoBackup)
+
+            vm.chooseAutoBackupFolder(Uri.parse(AutoBackupTestRig.FOLDER))
+            vm.setAutoBackupPassphrase("cavallo-batteria")
+            advanceUntilIdle()
+
+            val ui = requireNotNull(vm.state.value.backup.autoBackup)
+            assertEquals("Backup", ui.folderLabel)
+            assertTrue(ui.passphraseSet && ui.ready)
+            assertFalse("cavallo-batteria" in vm.state.value.toString())
+            assertNotNull(rig.keys.saved)
+
+            vm.setAutoBackupEnabled(true)
+            advanceUntilIdle()
+            val running = requireNotNull(vm.state.value.backup.autoBackup)
+            assertTrue(running.enabled)
+            assertTrue(running.lastRun!!.startsWith("Ultimo backup: oggi"), running.lastRun)
+            assertEquals(1, rig.folder.files.size)
+        }
+
+    @Test
+    fun `a too short passphrase is refused with a message and nothing is saved`() = runTest(dispatcher) {
+        val rig = AutoBackupTestRig(scope = this, now = System.currentTimeMillis())
+        val vm = settingsViewModel(FakeProviderStore(), autoBackup = rig.coordinator)
+        observe(vm)
+        val messages = collectMessages(vm)
+        advanceUntilIdle()
+
+        vm.setAutoBackupPassphrase("corta")
+        advanceUntilIdle()
+
+        assertNull(rig.keys.saved)
+        assertEquals(listOf("La passphrase deve avere almeno 8 caratteri."), messages)
+    }
+
     @Test
     fun `an unexpected exception becomes an error state and the next request still works`() = runTest(dispatcher) {
         val backup = FakeRulesBackup().apply { failure = IllegalStateException("boom") }
@@ -996,6 +1118,7 @@ class SettingsViewModelTest {
         rulesBackup: RulesBackup = FakeRulesBackup(),
         pause: FakePauseStore = FakePauseStore(),
         privileged: dev.argus.automation.privileged.PrivilegedAccessCenter? = null,
+        autoBackup: dev.argus.automation.backup.AutoBackupCoordinator? = null,
     ): SettingsViewModel {
         val brain = ConfiguredBridgeBrain(store, privacyAccepted = { true }, factory = transportFactory)
         val preferences = FakePreferences(privacyAccepted = true)
@@ -1026,6 +1149,7 @@ class SettingsViewModelTest {
             rulesBackup = rulesBackup,
             pause = pause,
             privileged = privileged,
+            autoBackup = autoBackup,
         )
     }
 
