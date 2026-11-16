@@ -10,10 +10,15 @@ import androidx.core.app.NotificationManagerCompat
 import dev.argus.automation.R
 
 /**
- * Dove porta il tocco di un avviso di salute (0.7.2). Gli extra viaggiano sull'intent di avvio dell'app;
- * `MainActivity` li legge e il NavHost apre la schermata (solo navigazione: nessuna azione parte da qui).
+ * Dove porta il tocco di un avviso di salute (0.7.2). L'intent esplicito va al trampolino NON esportato
+ * del modulo app ([OPEN_ACTIVITY_CLASS]), che passa la destinazione alla navigazione dentro il processo.
+ * `MainActivity` è esportata e non legge mai questi extra: un'altra app non può farle aprire nulla.
  */
 object HealthDeepLinks {
+    const val ACTION_OPEN = "dev.argus.action.OPEN_FROM_HEALTH_ALERT"
+    /** Classe del trampolino (modulo app): il manifest la dichiara non esportata. */
+    const val OPEN_ACTIVITY_CLASS = "dev.argus.nav.HealthAlertOpenActivity"
+
     /** Id della regola da aprire nel Dettaglio. */
     const val EXTRA_OPEN_RULE = "dev.argus.extra.OPEN_RULE"
     /** Apre la schermata Sistema, dove si sistemano permessi e privilegi. */
@@ -82,10 +87,9 @@ class AndroidHealthNotifier(context: Context) : HealthNotifier {
             .setCategory(NotificationCompat.CATEGORY_STATUS)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
 
-    /** Intent di avvio dell'app con l'extra; CLEAR_TOP + SINGLE_TOP: un'Activity già aperta lo riceve in onNewIntent. */
-    private fun open(requestCode: Int, extras: Intent.() -> Unit): PendingIntent? {
-        val launch = appContext.packageManager.getLaunchIntentForPackage(appContext.packageName) ?: return null
-        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+    /** Intent esplicito verso il trampolino non esportato: stesso pacchetto, mai implicito. */
+    private fun open(requestCode: Int, extras: Intent.() -> Unit): PendingIntent {
+        val launch = openIntent(appContext.packageName)
         launch.extras()
         return PendingIntent.getActivity(
             appContext,
@@ -114,6 +118,10 @@ class AndroidHealthNotifier(context: Context) : HealthNotifier {
     internal companion object {
         const val CHANNEL_ID = "argus_health"
         private const val CAPABILITY_ID_BASE = 0x4EA1_7000
+
+        fun openIntent(packageName: String): Intent = Intent(HealthDeepLinks.ACTION_OPEN)
+            .setClassName(packageName, HealthDeepLinks.OPEN_ACTIVITY_CLASS)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
         /** Un id per regola, stabile e lontano da quelli delle capacità. */
         fun ruleNotificationId(ruleId: String): Int = ("health-rule:$ruleId").hashCode() and 0x3FFF_FFFF

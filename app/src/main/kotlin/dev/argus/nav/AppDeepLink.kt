@@ -1,13 +1,11 @@
 package dev.argus.nav
 
-import android.content.Intent
 import dev.argus.automation.health.HealthDeepLinks
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
-/**
- * Schermata da aprire quando l'app parte dal tocco di un avviso di salute (0.7.2). Solo navigazione:
- * il Dettaglio e Sistema si aprono come dalla barra, nessuna azione parte da qui. `MainActivity` è
- * esportata (launcher), quindi l'extra viene da chiunque: un id non valido apre un Dettaglio vuoto.
- */
+/** Schermata da aprire per il tocco di un avviso di salute (0.7.2). Solo navigazione, nessuna azione. */
 sealed interface AppDeepLink {
     data class Rule(val id: String) : AppDeepLink
     data object System : AppDeepLink
@@ -15,17 +13,36 @@ sealed interface AppDeepLink {
     companion object {
         private const val MAX_RULE_ID_LENGTH = 128
 
-        fun from(intent: Intent?): AppDeepLink? = intent?.let {
-            parse(
-                ruleId = it.getStringExtra(HealthDeepLinks.EXTRA_OPEN_RULE),
-                openSystem = it.getBooleanExtra(HealthDeepLinks.EXTRA_OPEN_SYSTEM, false),
-            )
+        /**
+         * La destinazione di un avvio del trampolino [HealthAlertOpenActivity]: solo con la sua azione,
+         * che mette soltanto il `PendingIntent` esplicito creato da Argus.
+         */
+        fun parse(action: String?, ruleId: String?, openSystem: Boolean): AppDeepLink? {
+            if (action != HealthDeepLinks.ACTION_OPEN) return null
+            return when {
+                ruleId != null && ruleId.isNotBlank() && ruleId.length <= MAX_RULE_ID_LENGTH -> Rule(ruleId)
+                openSystem -> System
+                else -> null
+            }
         }
+    }
+}
 
-        fun parse(ruleId: String?, openSystem: Boolean): AppDeepLink? = when {
-            ruleId != null && ruleId.isNotBlank() && ruleId.length <= MAX_RULE_ID_LENGTH -> Rule(ruleId)
-            openSystem -> System
-            else -> null
-        }
+/**
+ * Passaggio della destinazione dal trampolino al NavHost, dentro il processo. `MainActivity` è esportata
+ * e non legge extra dal suo intent: l'unico che scrive qui è il trampolino non esportato.
+ */
+object HealthAlertNavigation {
+    private val pending = MutableStateFlow<AppDeepLink?>(null)
+
+    val requests: StateFlow<AppDeepLink?> = pending.asStateFlow()
+
+    internal fun post(link: AppDeepLink) {
+        pending.value = link
+    }
+
+    /** Il NavHost ha aperto [link]; una richiesta più nuova arrivata nel frattempo resta. */
+    fun consume(link: AppDeepLink) {
+        pending.compareAndSet(link, null)
     }
 }
