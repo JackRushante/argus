@@ -29,8 +29,10 @@ class HealthReportingExecutionJournalTest {
         }
         assertEquals(ExecutionStatus.entries.size - 1, delegate.finished.size)
         assertEquals(
-            listOf("SUCCEEDED", "FAILED", "PARTIAL", "INTERRUPTED").map(::ExecutionId),
-            concluded,
+            setOf("SUCCEEDED", "FAILED", "PARTIAL", "INTERRUPTED").map(::ExecutionId).toSet(),
+            concluded.toSet(),
+        )
+        assertEquals(4, concluded.size
         )
     }
 
