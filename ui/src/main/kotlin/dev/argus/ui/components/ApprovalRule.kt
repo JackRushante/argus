@@ -25,6 +25,7 @@ import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.DataObject
 import androidx.compose.material.icons.rounded.FilterAlt
+import androidx.compose.material.icons.rounded.HourglassTop
 import androidx.compose.material.icons.rounded.Insights
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Place
@@ -139,6 +140,8 @@ fun ApprovalRuleTimeline(
                 AppRefLine(ref, appInfo[ref.packageName], onChangeApp, Modifier.padding(top = ArgusSpacing.Small))
             }
             geofenceLabel?.let { GeofenceLabel(it, Modifier.padding(top = 10.dp)) }
+            // S8: la pausa dopo ogni scatto scarta in silenzio gli eventi: si dichiara sotto QUANDO.
+            rule.cooldownLine?.let { TriggerNote(Icons.Rounded.HourglassTop, it, Modifier.padding(top = 10.dp)) }
         }
         if (hasConditions) {
             TimelineStep(
@@ -251,7 +254,11 @@ private fun StepNode(icon: ImageVector, container: Color, content: Color, shape:
 }
 
 @Composable
-private fun GeofenceLabel(text: String, modifier: Modifier = Modifier) {
+private fun GeofenceLabel(text: String, modifier: Modifier = Modifier) = TriggerNote(Icons.Rounded.Place, text, modifier)
+
+/** Nota sotto il trigger (posizione letta all'attivazione, pausa dopo ogni scatto): icona primaria + testo. */
+@Composable
+private fun TriggerNote(icon: ImageVector, text: String, modifier: Modifier = Modifier) {
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -261,7 +268,7 @@ private fun GeofenceLabel(text: String, modifier: Modifier = Modifier) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(ArgusSpacing.Medium),
     ) {
-        Icon(Icons.Rounded.Place, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
         Text(text, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyMedium)
     }
 }

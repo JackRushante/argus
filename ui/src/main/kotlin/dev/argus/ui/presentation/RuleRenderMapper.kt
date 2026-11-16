@@ -32,6 +32,7 @@ import dev.argus.engine.model.ValueProvenance
 import dev.argus.engine.model.integrity
 import dev.argus.engine.model.declaredType
 import dev.argus.engine.model.provenance
+import dev.argus.engine.runtime.Engine
 import dev.argus.ui.model.ActionRow
 import dev.argus.ui.model.AppRef
 import dev.argus.ui.model.ProgramNode
@@ -162,23 +163,30 @@ object RuleRenderMapper {
         a: Automation,
         conversationLabels: Map<String, String> = emptyMap(),
         language: RenderLanguage = RenderLanguage.system(),
-    ): RuleRender = render(a.trigger, a.actions, a.conditions, a.vars, conversationLabels, language)
+    ): RuleRender = render(a.trigger, a.actions, a.conditions, a.vars, a.cooldownMs, conversationLabels, language)
 
     fun mapDraft(
         d: AutomationDraft,
         conversationLabels: Map<String, String> = emptyMap(),
         language: RenderLanguage = RenderLanguage.system(),
-    ): RuleRender = render(d.trigger, d.actions, d.conditions, d.vars, conversationLabels, language)
+    ): RuleRender = render(d.trigger, d.actions, d.conditions, d.vars, d.cooldownMs, conversationLabels, language)
 
     private fun render(
         trigger: Trigger,
         actions: List<Action>,
         conditions: Condition?,
         vars: List<VarBinding>,
+        cooldownMs: Long,
         conversationLabels: Map<String, String>,
         l: RenderLanguage,
     ): RuleRender {
         val isGenerative = actions.any { it.tier == ActionTier.GENERATIVE }
+        // S8: la pausa che l'engine applica davvero (Engine.effectiveCooldown: almeno 60 s se generativa).
+        val effectiveCooldownMs = if (isGenerative) {
+            maxOf(cooldownMs, Engine.MIN_GENERATIVE_COOLDOWN_MS)
+        } else {
+            cooldownMs
+        }
         // 0.7.0: i package sostituibili portano il loro slot («Cambia app»); l'ordine è quello di AppPackages.
         val slots = AppPackages.slotsByAction(trigger, actions)
         return RuleRender(
@@ -193,6 +201,16 @@ object RuleRenderMapper {
             triggerAppRef = (trigger as? Trigger.AppEvent)?.let { event ->
                 AppPackages.triggerSlot(event)?.let { AppRef(it, event.pkg) }
             },
+            cooldownLine = effectiveCooldownMs.takeIf { it > 0 }?.let { cooldownLine(it, l) },
+        )
+    }
+
+    /** S8: dopo uno scatto gli eventi entro la pausa si scartano; con un ritardo lungo va detto chiaro. */
+    private fun cooldownLine(ms: Long, l: RenderLanguage): String {
+        val span = humanizeDuration(ms, l)
+        return l.pick(
+            "After it fires, it ignores new events for $span",
+            "Dopo ogni scatto ignora i nuovi eventi per $span",
         )
     }
 

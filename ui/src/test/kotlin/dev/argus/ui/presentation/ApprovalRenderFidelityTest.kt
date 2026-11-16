@@ -54,6 +54,45 @@ class ApprovalRenderFidelityTest {
     private val reply = Action.InvokeLlm("rispondi", listOf("notification"), listOf("whatsapp_reply"), true)
     private val chat = Trigger.Notification("com.whatsapp", conversationId = "jid:1", isGroup = false)
 
+    // --- S8: cooldown ----------------------------------------------------------------------------
+
+    @Test
+    fun `a 24 hour cooldown is shown under when in human units`() {
+        val a = rule(cooldownMs = 24L * 60 * 60 * 1_000)
+        assertEquals("After it fires, it ignores new events for 1 day", render(a, RenderLanguage.EN).cooldownLine)
+        assertEquals("Dopo ogni scatto ignora i nuovi eventi per 1 giorno", render(a, RenderLanguage.IT).cooldownLine)
+    }
+
+    @Test
+    fun `a rule without cooldown has no cooldown line`() {
+        assertNull(render(rule(), RenderLanguage.EN).cooldownLine)
+    }
+
+    @Test
+    fun `a generative rule shows the effective cooldown of at least 60 seconds`() {
+        val zero = rule(listOf(reply), chat, cooldownMs = 0)
+        assertEquals("After it fires, it ignores new events for 1 minute", render(zero, RenderLanguage.EN).cooldownLine)
+        val longer = rule(listOf(reply), chat, cooldownMs = 2L * 60 * 60 * 1_000)
+        assertEquals("Dopo ogni scatto ignora i nuovi eventi per 2 ore", render(longer, RenderLanguage.IT).cooldownLine)
+        // Generativa anche se annidata: l'engine usa il tier aggregato.
+        val nested = rule(listOf(Action.If(Condition.BooleanLiteral(true), then = listOf(reply))), chat)
+        assertEquals("After it fires, it ignores new events for 1 minute", render(nested, RenderLanguage.EN).cooldownLine)
+    }
+
+    @Test
+    fun `the draft path shows the cooldown too and keeps sub-second parts`() {
+        val draft = AutomationDraft(
+            name = "bozza",
+            trigger = Trigger.Immediate,
+            actions = listOf(Action.SetWifi(false)),
+            cooldownMs = 1_500,
+        )
+        assertEquals(
+            "After it fires, it ignores new events for 1 second and 500 milliseconds",
+            RuleRenderMapper.mapDraft(draft, language = RenderLanguage.EN).cooldownLine,
+        )
+    }
+
     // --- B14: durate ------------------------------------------------------------------------------
 
     @Test
