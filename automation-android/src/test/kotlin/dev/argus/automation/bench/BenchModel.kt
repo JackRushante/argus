@@ -61,6 +61,8 @@ internal object BenchVocab {
         "manual",
         // 0.5.1: app aperta/chiusa.
         "app_event",
+        // 0.8 scaffold: nel modello ma spenti (FeatureGates).
+        "calendar_event", "nfc_tag", "next_alarm", "app_usage", "user_mode_changed",
     )
 
     val ACTION_TYPES: Set<String> = setOf(
@@ -107,14 +109,43 @@ internal object BenchVocab {
         ActionTypeIds.APP_PERMISSION,
         // 0.5.1: macro sullo schermo con il servizio di Accessibilità.
         ActionTypeIds.UI_STEPS,
+        // 0.8 scaffold: nel modello ma spente (FeatureGates); nessun caso del banco le usa ancora.
+        ActionTypeIds.ASK,
+        ActionTypeIds.SET_STORED,
+        ActionTypeIds.SET_USER_MODE,
+        ActionTypeIds.NOTIFICATION_REPLY,
+        ActionTypeIds.NOTIFICATION_ACTION,
+        ActionTypeIds.SEND_SMS,
+        ActionTypeIds.CALL_NUMBER,
+        ActionTypeIds.SEND_INTENT,
+        ActionTypeIds.SCREEN_CALL,
     )
 
     val CONDITION_TYPES: Set<String> = setOf(
         "time_window", "state_equals", "state_compare", "app_in_foreground", "location_in",
         "and", "or", "not", "boolean_literal", "var_compare",
+        // 0.8 scaffold: nel modello ma spente (FeatureGates).
+        "weekday", "wifi_connected", "bluetooth_connected", "headset_connected", "calendar_busy",
+        "stored_compare", "user_mode_is",
     )
 
-    val VAR_TYPES: Set<String> = setOf("literal", "state", "trigger_payload", "random_int", "clock")
+    /**
+     * 0.8 scaffold: azioni spente (FeatureGates), escluse dalla copertura minima dei casi finché il modello
+     * non le vede. Chi accende un'azione la toglie da qui e aggiunge i suoi casi.
+     */
+    val NOT_YET_AVAILABLE_ACTION_TYPES: Set<String> = setOf(
+        ActionTypeIds.ASK,
+        ActionTypeIds.SET_STORED,
+        ActionTypeIds.SET_USER_MODE,
+        ActionTypeIds.NOTIFICATION_REPLY,
+        ActionTypeIds.NOTIFICATION_ACTION,
+        ActionTypeIds.SEND_SMS,
+        ActionTypeIds.CALL_NUMBER,
+        ActionTypeIds.SEND_INTENT,
+        ActionTypeIds.SCREEN_CALL,
+    )
+
+    val VAR_TYPES: Set<String> = setOf("literal", "state", "trigger_payload", "random_int", "clock", "stored")
 
     val FLOW_TYPES: Set<String> = setOf(ActionTypeIds.IF, ActionTypeIds.WHILE, ActionTypeIds.WAIT)
 

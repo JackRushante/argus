@@ -406,6 +406,16 @@ private fun actionTypeLabel(type: String, l: RenderLanguage): String = when (typ
     ActionTypeIds.SCREENSHOT -> l.pick("Screen capture", "Cattura schermata")
     ActionTypeIds.APP_PERMISSION -> l.pick("App permission", "Permesso app")
     ActionTypeIds.UI_STEPS -> l.pick("Steps on the screen", "Passi sullo schermo")
+    // 0.8 scaffold: azioni nuove (spente finché il loro FeatureGate è off).
+    ActionTypeIds.ASK -> l.pick("Ask", "Domanda")
+    ActionTypeIds.SET_STORED -> l.pick("Set stored value", "Imposta valore conservato")
+    ActionTypeIds.SET_USER_MODE -> l.pick("Set mode", "Imposta modalità")
+    ActionTypeIds.NOTIFICATION_REPLY -> l.pick("Notification reply", "Risposta alla notifica")
+    ActionTypeIds.NOTIFICATION_ACTION -> l.pick("Notification action", "Azione sulla notifica")
+    ActionTypeIds.SEND_SMS -> l.pick("Send SMS", "Invia SMS")
+    ActionTypeIds.CALL_NUMBER -> l.pick("Phone call", "Chiamata")
+    ActionTypeIds.SEND_INTENT -> l.pick("Send intent", "Invia intent")
+    ActionTypeIds.SCREEN_CALL -> l.pick("Screen call", "Filtro chiamata")
     else -> type.replace('_', ' ')
 }
 

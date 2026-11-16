@@ -269,11 +269,8 @@ class AutomationListViewModel @Inject constructor(
                     AndroidCapabilityProbe.SHIZUKU_CAPABILITIES::contains,
                 )
         } || pending.any { snapshot ->
-            CapabilityRequirements.derive(
-                snapshot.draft.trigger,
-                snapshot.draft.actions,
-                snapshot.draft.conditions,
-            ).any(AndroidCapabilityProbe.SHIZUKU_CAPABILITIES::contains)
+            CapabilityRequirements.derive(snapshot.draft)
+                .any(AndroidCapabilityProbe.SHIZUKU_CAPABILITIES::contains)
         }
         return AutomationListState(
             rows = visibleRows,

@@ -11,7 +11,9 @@ import dev.argus.engine.model.CmpOp
 import dev.argus.engine.model.ConnMedium
 import dev.argus.engine.model.ConnState
 import dev.argus.engine.model.Condition
+import dev.argus.engine.model.ConfirmSpec
 import dev.argus.engine.model.DndMode
+import dev.argus.engine.model.ExitSpec
 import dev.argus.engine.model.GenerativeContract
 import dev.argus.engine.model.GenerativeDeliverMode
 import dev.argus.engine.model.InterpolationPolicy
@@ -165,13 +167,17 @@ object RuleRenderMapper {
         a: Automation,
         conversationLabels: Map<String, String> = emptyMap(),
         language: RenderLanguage = RenderLanguage.system(),
-    ): RuleRender = render(a.trigger, a.actions, a.conditions, a.vars, a.cooldownMs, conversationLabels, language)
+    ): RuleRender = render(
+        a.trigger, a.actions, a.conditions, a.vars, a.cooldownMs, a.confirm, a.exit, conversationLabels, language,
+    )
 
     fun mapDraft(
         d: AutomationDraft,
         conversationLabels: Map<String, String> = emptyMap(),
         language: RenderLanguage = RenderLanguage.system(),
-    ): RuleRender = render(d.trigger, d.actions, d.conditions, d.vars, d.cooldownMs, conversationLabels, language)
+    ): RuleRender = render(
+        d.trigger, d.actions, d.conditions, d.vars, d.cooldownMs, d.confirm, d.exit, conversationLabels, language,
+    )
 
     private fun render(
         trigger: Trigger,
@@ -179,6 +185,8 @@ object RuleRenderMapper {
         conditions: Condition?,
         vars: List<VarBinding>,
         cooldownMs: Long,
+        confirm: ConfirmSpec?,
+        exit: ExitSpec?,
         conversationLabels: Map<String, String>,
         l: RenderLanguage,
     ): RuleRender {
@@ -200,11 +208,25 @@ object RuleRenderMapper {
             privacyNote = if (isGenerative) privacyNote(trigger, actions, l) else null,
             vars = vars.map { varRow(it, trigger, l) },
             program = programNodes(actions, l, slots),
-            triggerAppRef = (trigger as? Trigger.AppEvent)?.let { event ->
-                AppPackages.triggerSlot(event)?.let { AppRef(it, event.pkg) }
+            triggerAppRef = triggerPackage(trigger)?.let { pkg ->
+                AppPackages.triggerSlot(trigger)?.let { AppRef(it, pkg) }
             },
             cooldownLine = effectiveCooldownMs.takeIf { it > 0 }?.let { cooldownLine(it, l) },
+            // 0.8: conferma prima di eseguire e regola-intervallo, resi dai tipi come il resto.
+            confirmLine = confirm?.let { RuleSpanRender.confirmLine(it, l) },
+            exitLine = exit?.let {
+                RuleSpanRender.exitLine(it, triggerLine(it.trigger, conversationLabels, l), l)
+            },
+            // Nessuno slot «Cambia app» per le azioni di fine: AppPackages numera solo trigger e azioni d'inizio.
+            exitProgram = exit?.let { programNodes(it.actions, l, emptyMap()) }.orEmpty(),
         )
+    }
+
+    /** Package sostituibile del trigger («Cambia app»): `app_event` e (0.8) `app_usage`. */
+    private fun triggerPackage(trigger: Trigger): String? = when (trigger) {
+        is Trigger.AppEvent -> trigger.pkg
+        is Trigger.AppUsage -> trigger.pkg
+        else -> null
     }
 
     /** S8: dopo uno scatto gli eventi entro la pausa si scartano; con un ritardo lungo va detto chiaro. */
@@ -325,6 +347,11 @@ object RuleRenderMapper {
                 )
             }
         }
+        // 0.8: valore conservato fra le esecuzioni; la chiave è il criterio reale, mostrata intera.
+        is VarBinding.Stored -> l.pick(
+            "stored value \"${VisibleText.singleLine(v.key)}\" [${valueTypeLabel(v.valueType, l)}]",
+            "valore conservato \"${VisibleText.singleLine(v.key)}\" [${valueTypeLabel(v.valueType, l)}]",
+        )
     }
 
     private fun varTypeLabel(t: VarType, l: RenderLanguage): String = when (t) {
@@ -354,6 +381,9 @@ object RuleRenderMapper {
         ValueProvenance.SHELL -> l.pick("shell output", "output shell")
         ValueProvenance.ENGINE -> l.pick("random", "casuale")
         ValueProvenance.CREDENTIAL -> l.pick("credential", "credenziale")
+        ValueProvenance.STORED -> l.pick("stored value", "valore conservato")
+        ValueProvenance.USER -> l.pick("your answer", "la tua risposta")
+        ValueProvenance.NETWORK -> l.pick("web response", "risposta web")
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -373,6 +403,16 @@ object RuleRenderMapper {
         -> DeviceTriggerRender.iconKey(t)
         is Trigger.Manual -> "manual"
         is Trigger.AppEvent -> AppEventTriggerRender.iconKey(t)
+        // 0.8 (spenti finché il loro FeatureGate è off).
+        is Trigger.CalendarEvent -> "calendar"
+
+        is Trigger.NfcTag -> "nfc"
+
+        is Trigger.NextAlarm -> "alarm"
+
+        is Trigger.AppUsage -> "app_usage"
+
+        is Trigger.UserModeChanged -> "user_mode"
     }
 
     private fun triggerLine(t: Trigger, conversationLabels: Map<String, String>, l: RenderLanguage): String = when (t) {
@@ -391,6 +431,16 @@ object RuleRenderMapper {
             "la lanci tu a mano (Esegui ora, una scorciatoia sulla Home, un riquadro rapido o il widget)",
         )
         is Trigger.AppEvent -> AppEventTriggerRender.line(t, l)
+        // 0.8: resa in Render08.kt.
+        is Trigger.CalendarEvent -> Trigger08Render.calendarEvent(t, l)
+
+        is Trigger.NfcTag -> Trigger08Render.nfcTag(t, l)
+
+        is Trigger.NextAlarm -> Trigger08Render.nextAlarm(t, l)
+
+        is Trigger.AppUsage -> Trigger08Render.appUsage(t, l)
+
+        is Trigger.UserModeChanged -> Trigger08Render.userModeChanged(t, l)
     }
 
     /** Prefisso "Quando: "/"When: " condiviso con chi deriva il sommario lista (UiStateMappers). */
@@ -582,6 +632,10 @@ object RuleRenderMapper {
                 "the step counter increases by ${t.minimumEventCount} steps",
                 "il contatore aumenta di ${t.minimumEventCount} passi",
             )
+            // 0.8 (spenti finché il loro FeatureGate è off).
+            SensorKind.SHAKE -> Trigger08Render.shake(l)
+
+            SensorKind.FLIP_FACE_DOWN -> Trigger08Render.flipFaceDown(l)
         }
         return "${whenPrefix(l)}$kind"
     }
@@ -663,6 +717,30 @@ object RuleRenderMapper {
                 val right = if (unary) "" else " " + (c.expectedVar?.let { "\${$it}" } ?: literal ?: "<?>")
                 listOf("$pad$first \${${c.varName}} ${opLabel(c.op, l)}$right")
             }
+            // 0.8: resa in Render08.kt (spente finché il loro FeatureGate è off).
+            is Condition.Weekday -> listOf("$pad$first ${Condition08Render.weekday(c.days, c.tz, l)}")
+
+            is Condition.WifiConnected -> listOf("$pad$first ${Condition08Render.wifiConnected(c.ssid, l)}")
+
+            is Condition.BluetoothConnected -> listOf("$pad$first ${Condition08Render.bluetoothConnected(c.device, l)}")
+
+            is Condition.HeadsetConnected -> listOf("$pad$first ${Condition08Render.headsetConnected(c.kind, l)}")
+
+            is Condition.CalendarBusy -> listOf(
+                "$pad$first ${Condition08Render.calendarBusy(c.titleMatch, c.calendar, l)}",
+            )
+
+            is Condition.StoredCompare -> listOf(
+                "$pad$first " + Condition08Render.storedCompare(
+                    c.key,
+                    valueTypeLabel(c.valueType, l),
+                    opLabel(c.op, l),
+                    c.expected,
+                    l,
+                ),
+            )
+
+            is Condition.UserModeIs -> listOf("$pad$first ${Condition08Render.userModeIs(c.mode, l)}")
         }
     }
 
@@ -863,7 +941,7 @@ object RuleRenderMapper {
                     "Valore interno · Obiettivo: ${a.goal} · tool: ${a.allowedTools.joinToString(", ")}",
                 )
             } + contextSuffix(a.contextSources, l) + replyBindingSuffix(a.replyTargetSender, l) +
-                captureSuffix(a.captureAs, l),
+                captureSuffix(a.captureAs, l) + ActionRows08.outputSuffix(a.output, l),
             isGenerative = true,
         )
         is Action.InvokeLlmV2 -> row(
@@ -932,6 +1010,24 @@ object RuleRenderMapper {
         is Action.AppPermission -> ActionRows051.appPermission(a, l)
         // 0.5.1: macro sull'interfaccia, resa in ActionRowsUiSteps.
         is Action.UiSteps -> ActionRowsUiSteps.uiSteps(a, l)
+        // 0.8: resa in ActionRows08 (spente finché il loro FeatureGate è off).
+        is Action.Ask -> ActionRows08.ask(a, l)
+
+        is Action.SetStored -> ActionRows08.setStored(a, l)
+
+        is Action.SetUserMode -> ActionRows08.setUserMode(a, l)
+
+        is Action.NotificationReply -> ActionRows08.notificationReply(a, l)
+
+        is Action.NotificationAction -> ActionRows08.notificationAction(a, l)
+
+        is Action.SendSms -> ActionRows08.sendSms(a, l)
+
+        is Action.CallNumber -> ActionRows08.callNumber(a, l)
+
+        is Action.SendIntent -> ActionRows08.sendIntent(a, l)
+
+        is Action.ScreenCall -> ActionRows08.screenCall(a, l)
     }
 
     private fun row(

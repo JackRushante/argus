@@ -392,11 +392,8 @@ class SettingsViewModel @Inject constructor(
         val shizukuNeeded = rules.any { rule ->
             rule.requiredCapabilities.any(AndroidCapabilityProbe.SHIZUKU_CAPABILITIES::contains)
         } || pending.any { snapshot ->
-            CapabilityRequirements.derive(
-                snapshot.draft.trigger,
-                snapshot.draft.actions,
-                snapshot.draft.conditions,
-            ).any(AndroidCapabilityProbe.SHIZUKU_CAPABILITIES::contains)
+            CapabilityRequirements.derive(snapshot.draft)
+                .any(AndroidCapabilityProbe.SHIZUKU_CAPABILITIES::contains)
         }
         SettingsSources(
             contacts = contacts,

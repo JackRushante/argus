@@ -54,5 +54,16 @@ fun iconFor(key: String): ImageVector = when (key) {
     "battery_saver" -> Icons.Rounded.BatterySaver
     "lock_screen" -> Icons.Rounded.ScreenLockPortrait
     "screenshot" -> Icons.Rounded.Screenshot
+    // Vocabolario 0.8 (trigger e azioni ancora spenti, ma già resi in approvazione).
+    "calendar" -> Icons.Rounded.Event
+    "alarm" -> Icons.Rounded.Alarm
+    "app_usage" -> Icons.Rounded.Timer
+    "user_mode" -> Icons.Rounded.Person
+    "ask" -> Icons.Rounded.QuestionAnswer
+    "stored" -> Icons.Rounded.Save
+    "reply" -> Icons.AutoMirrored.Rounded.Reply
+    "sms" -> Icons.Rounded.Sms
+    "send_intent" -> Icons.Rounded.Share
+    "screen_call" -> Icons.Rounded.CallEnd
     else -> Icons.Rounded.Bolt
 }

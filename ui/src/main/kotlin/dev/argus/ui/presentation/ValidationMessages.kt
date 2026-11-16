@@ -29,6 +29,7 @@ object ValidationMessages {
         "state_query_type_mismatch",
         "app_not_installed",
         "app_control_freeze_system",
+        "not_available_yet",
     )
 
     /** Codici d'errore di un passo di macro: il [ValidationIssue.detail] è il numero del passo, che si antepone. */
@@ -52,6 +53,11 @@ object ValidationMessages {
             "La regola ha bisogno di un nome lungo al massimo 120 caratteri.",
         ),
         "no_actions" to t("The rule has no actions.", "La regola non ha azioni."),
+        // 0.8: un tipo (o un campo) che esiste nel modello ma è ancora spento; il dettaglio dice quale.
+        "not_available_yet" to t(
+            "This is not available in this version.",
+            "Non disponibile in questa versione.",
+        ),
         "cooldown_invalid" to t("The cooldown cannot be negative.", "Il cooldown non può essere negativo."),
         "cooldown_raised" to t(
             "Cooldown below 60 s on an AI rule: Argus will enforce 60 s.",
@@ -664,6 +670,10 @@ object ValidationMessages {
         "conflict_dark_mode" to t(
             "Another active rule sets dark mode to a different value on triggers that may overlap.",
             "Un'altra regola attiva imposta la modalità scura su un valore diverso con trigger che possono sovrapporsi.",
+        ),
+        "conflict_user_mode" to t(
+            "Another active rule sets the user mode to a different value on triggers that may overlap.",
+            "Un'altra regola attiva imposta la modalità utente su un valore diverso con trigger che possono sovrapporsi.",
         ),
 
         // --- 0.4.1 · azioni senza Shizuku e richiesta HTTP --------------------------------------

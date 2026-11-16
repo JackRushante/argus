@@ -84,6 +84,15 @@ object StateReadPlanner {
             request + forCondition(child)
         }
         is Condition.Not -> forCondition(condition.cond)
+        // 0.8 scaffold: nessuna lettura pianificata finché il tipo è spento (il valutatore dà UNKNOWN).
+        // Chi lo implementa dichiara qui cosa legge (una chiave nuova del DeviceState o una query).
+        is Condition.Weekday -> StateReadRequest.EMPTY
+        is Condition.WifiConnected -> StateReadRequest.EMPTY
+        is Condition.BluetoothConnected -> StateReadRequest.EMPTY
+        is Condition.HeadsetConnected -> StateReadRequest.EMPTY
+        is Condition.CalendarBusy -> StateReadRequest.EMPTY
+        is Condition.StoredCompare -> StateReadRequest.EMPTY
+        is Condition.UserModeIs -> StateReadRequest.EMPTY
     }
 
     fun forAction(action: Action): StateReadRequest = when (action) {
@@ -137,6 +146,16 @@ object StateReadPlanner {
         is Action.UiSteps,
         // write_setting non legge stato: namespace/key/value sono letterali approvati.
         is Action.WriteSetting,
+        // 0.8 scaffold: nessuna lettura di stato del device.
+        is Action.Ask,
+        is Action.SetStored,
+        is Action.SetUserMode,
+        is Action.NotificationReply,
+        is Action.NotificationAction,
+        is Action.SendSms,
+        is Action.CallNumber,
+        is Action.SendIntent,
+        is Action.ScreenCall,
         -> StateReadRequest.EMPTY
         // Contenitori control-flow: uniscono le letture della condizione di flusso e di tutte le
         // azioni annidate, così il planner prepara lo stato che l'interprete P4-B leggerà davvero.

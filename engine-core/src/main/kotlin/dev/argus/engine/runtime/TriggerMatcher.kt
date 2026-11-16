@@ -37,6 +37,23 @@ class TriggerMatcher {
         // App aperta/chiusa (0.5.1): stesso package (confronto esatto) e stessa direzione.
         spec is Trigger.AppEvent && event is TriggerEvent.AppForegroundChanged ->
             spec.pkg == event.pkg && spec.event == event.event
+        // --- 0.8 scaffold: i trigger restano spenti finché il loro FeatureGate è off. ---
+        // Calendario e prossima sveglia sono programmati per regola: id e impronta li verifica l'Engine.
+        spec is Trigger.CalendarEvent && event is TriggerEvent.CalendarEventFired -> spec.phase == event.phase
+
+        // Un tagId vuoto (non ancora letto all'arm) non combacia con nessun tag.
+        spec is Trigger.NfcTag && event is TriggerEvent.NfcTagScanned ->
+            spec.tagId.isNotEmpty() && spec.tagId.equals(event.tagId, ignoreCase = true)
+
+        spec is Trigger.NextAlarm && event is TriggerEvent.NextAlarmFired -> true
+
+        // Attraversamento della soglia, come la batteria: una volta al giorno lo garantisce la sorgente.
+        spec is Trigger.AppUsage && event is TriggerEvent.AppUsageChanged ->
+            spec.pkg == event.pkg && event.previousMinutes < spec.minutes && event.currentMinutes >= spec.minutes
+
+        spec is Trigger.UserModeChanged && event is TriggerEvent.UserModeChanged ->
+            spec.to == null || spec.to == event.to
+
         else -> false
     }
 

@@ -51,6 +51,8 @@ data class PendingDraft(
         priority = priority,
         cooldownMs = draft.cooldownMs,
         schemaVersion = schemaVersion,
+        confirm = draft.confirm,
+        exit = draft.exit,
         approvalFingerprint = null,
     )
 

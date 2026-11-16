@@ -2,8 +2,10 @@ package dev.argus.engine.runtime
 
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.ConfidentialityLabel
+import dev.argus.engine.model.FeatureGates
 import dev.argus.engine.model.HttpRequestPolicy
 import dev.argus.engine.model.IntegrityLabel
+import dev.argus.engine.model.IntentExtraType
 import dev.argus.engine.model.InterpolationPolicy
 import dev.argus.engine.model.PrivilegedActionPolicy
 import dev.argus.engine.model.RemoteEgressPolicy
@@ -62,6 +64,8 @@ sealed interface ActionResolution {
  */
 class TaintAwareInterpolator {
     fun resolve(action: Action, scope: VarScope): ActionResolution {
+        // 0.8 scaffold: un tipo (o un campo) dietro un FeatureGate spento non si risolve mai.
+        if (FeatureGates.blocks(action)) return ActionResolution.Blocked(FeatureGates.NOT_AVAILABLE_YET)
         val accumulator = Accumulator(action, scope)
         val resolved = try {
             when (action) {
@@ -172,6 +176,42 @@ class TaintAwareInterpolator {
                         }
                     },
                 )
+
+                // 0.8 scaffold: i campi template si risolvono come gli altri sink/autorità; la forma
+                // risolta di questi tipi è rifiutata da validResolvedShape finché non è implementata.
+                is Action.Ask -> action.copy(
+                    prompt = accumulator.field("prompt", action.prompt, MAX_TEXT_CHARS),
+                )
+
+                is Action.SetStored -> action.copy(
+                    value = action.value?.let { accumulator.field("value", it, MAX_TEXT_CHARS) },
+                )
+
+                is Action.NotificationReply -> action.copy(
+                    text = accumulator.field("text", action.text, MAX_TEXT_CHARS),
+                )
+
+                is Action.SendSms -> action.copy(
+                    text = accumulator.field("text", action.text, MAX_TEXT_CHARS),
+                )
+
+                is Action.SendIntent -> action.copy(
+                    extras = action.extras.mapIndexed { index, extra ->
+                        if (extra.type == IntentExtraType.STRING) {
+                            extra.copy(value = accumulator.field("extras.$index.value", extra.value, MAX_TEXT_CHARS))
+                        } else {
+                            extra
+                        }
+                    },
+                )
+
+                is Action.SetUserMode -> action
+
+                is Action.NotificationAction -> action
+
+                is Action.CallNumber -> action
+
+                is Action.ScreenCall -> action
 
                 // I contenitori non sono azioni foglia e non devono mai arrivare al runner.
                 is Action.If, is Action.While -> throw ResolutionException("control_flow_not_leaf")
@@ -380,6 +420,25 @@ class TaintAwareInterpolator {
             // 0.5.1: forma e bersagli vietati (Argus, package di sistema essenziali, permesso fuori elenco).
             is Action.AppControl, is Action.AppPermission -> PrivilegedActionPolicy.isShapeValid(action)
             is Action.If, is Action.While -> false
+            // 0.8 scaffold: forma risolta non ancora definita ⇒ fail-closed anche a interruttore acceso.
+            // Chi implementa il tipo scrive qui il suo controllo (gli stessi limiti del validator).
+            is Action.Ask -> false
+
+            is Action.SetStored -> false
+
+            is Action.SetUserMode -> false
+
+            is Action.NotificationReply -> false
+
+            is Action.NotificationAction -> false
+
+            is Action.SendSms -> false
+
+            is Action.CallNumber -> false
+
+            is Action.SendIntent -> false
+
+            is Action.ScreenCall -> false
         }
     }
 }

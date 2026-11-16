@@ -360,6 +360,8 @@ class ProgramInterpreter(
                 is VarBinding.State -> state.queryValues[binding.query.canonicalId]
                     ?.takeIf { StateValueCoercion.compatible(it, binding.valueType) }
                 is VarBinding.ClockTime -> ClockVariable.format(binding, clock, locale())
+                // 0.8 scaffold: lo store dei valori conservati non esiste ancora ⇒ binding_unavailable.
+                is VarBinding.Stored -> null
                 is VarBinding.TriggerPayload -> triggerValue(binding.field)?.let { payload ->
                     val pattern = binding.extractionRegex
                     if (pattern == null) {
@@ -479,6 +481,9 @@ class ProgramInterpreter(
         val producer = when (action) {
             is Action.RunShell -> ValueProvenance.SHELL
             is Action.InvokeLlm, is Action.InvokeLlmV2 -> ValueProvenance.MODEL
+            // 0.8 scaffold: la scelta dell'utente e la risposta di un server.
+            is Action.Ask -> ValueProvenance.USER
+            is Action.HttpRequest -> ValueProvenance.NETWORK
             else -> error("Azione non catturabile")
         }
         val provenance = buildSet {
@@ -503,6 +508,8 @@ class ProgramInterpreter(
         is Action.RunShell -> action.captureAs
         is Action.InvokeLlm -> action.captureAs
         is Action.InvokeLlmV2 -> action.captureAs
+        is Action.Ask -> action.captureAs
+        is Action.HttpRequest -> action.captureAs
         else -> null
     }
 

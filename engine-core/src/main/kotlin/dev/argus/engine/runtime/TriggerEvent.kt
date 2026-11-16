@@ -4,6 +4,7 @@ import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.AppEventKind
 import dev.argus.engine.model.AudioOutputKind
+import dev.argus.engine.model.CalendarPhase
 import dev.argus.engine.model.ConnMedium
 import dev.argus.engine.model.ConnState
 import dev.argus.engine.model.MediaPlayState
@@ -103,4 +104,41 @@ sealed interface TriggerEvent {
 
     /** [pkg] è passata in primo piano ([AppEventKind.OPENED]) o lo ha lasciato ([AppEventKind.CLOSED]). */
     data class AppForegroundChanged(val pkg: String, val event: AppEventKind) : TriggerEvent
+
+    // --- 0.8 scaffold: eventi dei trigger nuovi. Nessuna sorgente li produce finché il trigger è spento. ---
+
+    /**
+     * Inizio o fine (spostati dell'offset approvato) di un evento di calendario che combacia coi filtri
+     * della regola: lo programma la sorgente per la regola, come una sveglia, quindi porta id e impronta.
+     * Titolo e calendario dell'evento non entrano nel core.
+     */
+    data class CalendarEventFired(
+        override val automationId: AutomationId,
+        val phase: CalendarPhase,
+        override val approvalFingerprint: ApprovalFingerprint,
+    ) : Registered
+
+    /** Un tag NFC letto dal telefono. [tagId] vive solo in RAM per il match: mai persistito né loggato. */
+    data class NfcTagScanned(val tagId: String) : TriggerEvent {
+        override fun toString(): String = "NfcTagScanned(tagId=<redacted>)"
+    }
+
+    /** L'istante «offset minuti prima della prossima sveglia» della regola: programmato per regola. */
+    data class NextAlarmFired(
+        override val automationId: AutomationId,
+        override val approvalFingerprint: ApprovalFingerprint,
+    ) : Registered
+
+    /**
+     * Il tempo in primo piano di oggi di [pkg], in minuti, è passato da [previousMinutes] a [currentMinutes]:
+     * il matcher decide se la soglia della regola è stata attraversata.
+     */
+    data class AppUsageChanged(
+        val pkg: String,
+        val previousMinutes: Int,
+        val currentMinutes: Int,
+    ) : TriggerEvent
+
+    /** La modalità utente è passata da [from] (null = nessuna o ignota) a [to]. */
+    data class UserModeChanged(val to: String, val from: String?) : TriggerEvent
 }

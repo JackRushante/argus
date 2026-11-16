@@ -79,6 +79,38 @@ class DeviceEventParser {
         )
     }
 
+    // --- 0.8 scaffold: eventi dei trigger nuovi (nessuna sorgente reale li produce ancora). ---
+
+    /**
+     * Tag NFC letto. L'identificativo entra solo nel digest dell'id, mai in chiaro. `null` se vuoto, troppo
+     * lungo o con caratteri di controllo (mai un valore inventato).
+     */
+    fun nfcTag(tagId: String, atMillis: Long): TriggerEnvelope? {
+        val id = tagId.takeIf {
+            it.isNotBlank() && it.length <= MAX_SOURCE_IDENTITY_CHARS && it.none(Char::isISOControl)
+        } ?: return null
+        return envelope(TriggerEvent.NfcTagScanned(id), "nfc_tag", id, instant(atMillis))
+    }
+
+    /** Tempo d'uso di oggi di un'app, in minuti. `null` con un package non valido o minuti negativi. */
+    fun appUsage(pkg: String, previousMinutes: Int, currentMinutes: Int, atMillis: Long): TriggerEnvelope? {
+        if (!AppPackagePolicy.valid(pkg) || previousMinutes < 0 || currentMinutes < previousMinutes) return null
+        return envelope(
+            TriggerEvent.AppUsageChanged(pkg, previousMinutes, currentMinutes),
+            "app_usage", pkg, previousMinutes.toString(), currentMinutes.toString(), instant(atMillis),
+        )
+    }
+
+    /** Cambio di modalità utente. `null` se [to] è vuota o troppo lunga. */
+    fun userMode(to: String, from: String?, atMillis: Long): TriggerEnvelope? {
+        fun valid(mode: String) = mode.isNotBlank() && mode.length <= MAX_MODE_CHARS && mode.none(Char::isISOControl)
+        if (!valid(to) || (from != null && !valid(from))) return null
+        return envelope(
+            TriggerEvent.UserModeChanged(to, from),
+            "user_mode", from.orEmpty(), to, instant(atMillis),
+        )
+    }
+
     private fun instant(atMillis: Long): String = atMillis.coerceAtLeast(0).toString()
 
     private fun envelope(event: TriggerEvent, vararg identity: String) =
@@ -95,6 +127,7 @@ class DeviceEventParser {
 
     companion object {
         private const val MAX_SOURCE_IDENTITY_CHARS = 512
+        private const val MAX_MODE_CHARS = 64
         private val LEVELS = 0..100
     }
 }
