@@ -604,8 +604,17 @@ object ValidationMessages {
             "Una risposta richiede un trigger di notifica.",
         ),
         "reply_wrong_package" to t(
-            "A WhatsApp reply needs a recognized WhatsApp package.",
-            "Una risposta WhatsApp richiede un package WhatsApp riconosciuto.",
+            "This reply does not work with the app of the trigger: WhatsApp uses the WhatsApp reply; Telegram, Signal and Google Messages use the notification reply.",
+            "Questa risposta non vale per l'app del trigger: WhatsApp usa la risposta WhatsApp; Telegram, Signal e Google Messaggi la risposta alla notifica.",
+        ),
+        // 0.8: risposte su Telegram, Signal e Google Messaggi.
+        "reply_app_unsupported" to t(
+            "Automatic replies are not available for this app: its notifications do not identify the chat reliably.",
+            "Le risposte automatiche non sono disponibili per questa app: le sue notifiche non identificano la chat in modo affidabile.",
+        ),
+        "reply_conversation_unstable" to t(
+            "Pick the chat from the whitelist: outside WhatsApp only a chat the app itself identifies can receive replies.",
+            "Scegli la chat dalla whitelist: fuori da WhatsApp solo una chat che l'app stessa identifica può ricevere risposte.",
         ),
         "reply_target_group" to t(
             "Automatic replies are only allowed in verified one-to-one chats.",
@@ -618,6 +627,31 @@ object ValidationMessages {
         "target_not_whitelisted" to t(
             "The conversation is not in the whitelist.",
             "La conversazione non è in whitelist.",
+        ),
+        // 0.8: azioni sulla notifica che ha avviato la regola.
+        "notification_action_no_notification" to t(
+            "Acting on a notification needs a notification trigger.",
+            "Per agire su una notifica serve un trigger di notifica.",
+        ),
+        "notification_action_label_invalid" to t(
+            "Pressing a button needs its visible text (one line, up to 100 characters); dismiss and snooze have none.",
+            "Per premere un pulsante serve il suo testo visibile (una riga, al massimo 100 caratteri); chiudi e posticipa non ne hanno.",
+        ),
+        "notification_action_label_interpolated" to t(
+            "The button text must be written out, without variables.",
+            "Il testo del pulsante va scritto per intero, senza variabili.",
+        ),
+        "notification_action_snooze_invalid" to t(
+            "Snooze needs a duration from 1 to 1440 minutes; the other operations have none.",
+            "Posticipa richiede una durata da 1 a 1440 minuti; le altre operazioni non ne hanno.",
+        ),
+        "notification_action_forbidden_app" to t(
+            "Argus never presses buttons on notifications of this app (system, permissions, store or Argus).",
+            "Argus non preme mai pulsanti nelle notifiche di questa app (sistema, permessi, store o Argus).",
+        ),
+        "notification_click_review" to t(
+            "Argus will press this button for you, in the app of the trigger, every time the rule fires.",
+            "Argus premerà questo pulsante al posto tuo, nell'app del trigger, ogni volta che la regola scatta.",
         ),
 
         // --- Approvazione e arm ---------------------------------------------------------------

@@ -16,6 +16,7 @@ import dev.argus.automation.connectivity.ConnectivitySentinelStatus
 import dev.argus.automation.PrivacyRevocationCoordinator
 import dev.argus.automation.PrivacyRevocationResult
 import dev.argus.automation.RenderLanguageSource
+import dev.argus.automation.notification.isReplyConversation
 import dev.argus.automation.manual.AutomationPauseStore
 import dev.argus.automation.budget.BudgetLimits
 import dev.argus.automation.budget.BudgetSettings
@@ -49,7 +50,7 @@ import dev.argus.engine.notification.ObservedConversation
 import dev.argus.engine.notification.ObservedConversationStore
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.safety.DraftRepository
-import dev.argus.engine.safety.DraftValidator
+import dev.argus.engine.safety.ReplyChannels
 import dev.argus.engine.safety.PendingDraft
 import dev.argus.shizuku.ShizukuAccess
 import dev.argus.shizuku.ShizukuGatewayStatus
@@ -116,7 +117,8 @@ private data class SettingsSources(
 )
 
 /**
- * Candidate del picker whitelist: solo conversazioni WhatsApp confermate 1:1, non ancora in
+ * Candidate del picker whitelist: solo conversazioni 1:1 confermate a cui si può rispondere (WhatsApp e,
+ * dalla 0.8, Telegram, Signal e Google Messaggi con lo shortcut di conversazione), non ancora in
  * whitelist, più recenti prima. L'inserimento manuale dell'hash resta diagnostica avanzata.
  */
 internal fun observedWhitelistCandidates(
@@ -126,13 +128,17 @@ internal fun observedWhitelistCandidates(
 ): List<ContactRow> {
     val taken = whitelisted.mapTo(hashSetOf()) { it.id }
     return observed.asSequence()
-        .filter { it.packageName in DraftValidator.WHATSAPP_PACKAGES }
+        .filter { it.isReplyConversation() }
         .filter { it.isGroup == false }
         .filterNot { it.id in taken }
         .take(limit)
-        .map { ContactRow(displayName = it.displayName, conversationId = it.id) }
+        .map { ContactRow(displayName = it.displayName, conversationId = it.id, app = ReplyChannels.appName(it.packageName)) }
         .toList()
 }
+
+/** App di una voce di whitelist, dal package nel suo id (`<fonte>:<package>:<hash>`); null se manuale. */
+internal fun whitelistApp(conversationId: String): String? =
+    ReplyChannels.packageOf(conversationId)?.let(ReplyChannels::appName)
 
 /** Aggregati usage per le tre finestre (ora/giorno/mese), caricati da [UsageDao] in [SettingsViewModel.refresh]. */
 internal data class BudgetUsageSnapshot(
@@ -477,7 +483,7 @@ class SettingsViewModel @Inject constructor(
             calendarGranted = health.readCalendarGranted,
             usageAccessGranted = health.usageAccessGranted,
             connectivitySentinelActive = sentinelActive,
-            whitelist = settingsSources.contacts.map { ContactRow(it.displayName, it.id) },
+            whitelist = settingsSources.contacts.map { ContactRow(it.displayName, it.id, app = whitelistApp(it.id)) },
             observedCandidates = settingsSources.observedCandidates,
             budget = budgetUi(usageSnapshot, budgetConfig),
             privacyAccepted = settingsSources.privacyAccepted,

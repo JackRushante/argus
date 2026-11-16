@@ -42,7 +42,7 @@ class DraftValidator(
         const val FORBIDDEN_PREFIX = "automation."
         const val FORBIDDEN_PREFIX_BARE = "automation"
 
-        val WHATSAPP_PACKAGES = setOf("com.whatsapp", "com.whatsapp.w4b")
+        val WHATSAPP_PACKAGES = ReplyChannels.WHATSAPP_PACKAGES
         val REPLY_TOOLS = setOf("whatsapp_reply")
         const val ARGUS_PACKAGE = "dev.argus"
 
@@ -1217,7 +1217,7 @@ class DraftValidator(
             is Action.InputText -> validateRequiredText(action.text, MAX_TEXT_LENGTH, "text_invalid", err)
             is Action.WhatsAppReply -> {
                 validateRequiredText(action.text, MAX_TEXT_LENGTH, "text_invalid", err)
-                validateReplyTarget(trigger, whitelist, err)
+                validateReplyTarget(trigger, whitelist, err, ReplyKind.WHATSAPP)
             }
             is Action.RunShell -> {
                 validateRequiredText(action.cmd, MAX_COMMAND_LENGTH, "shell_invalid", err)
@@ -1366,9 +1366,12 @@ class DraftValidator(
 
             is Action.SetUserMode -> Unit
 
-            is Action.NotificationReply -> Unit
+            is Action.NotificationReply -> {
+                validateRequiredText(action.text, MAX_TEXT_LENGTH, "text_invalid", err)
+                validateReplyTarget(trigger, whitelist, err, ReplyKind.NOTIFICATION)
+            }
 
-            is Action.NotificationAction -> Unit
+            is Action.NotificationAction -> validateNotificationAction(action, trigger, err, warn)
 
             is Action.SendSms -> Unit
 
@@ -1709,7 +1712,7 @@ class DraftValidator(
         }
         if (replyTargetSender) {
             if (!hasReplyTool) err("reply_target_without_tool", "replyTargetSender senza tool di reply")
-            validateReplyTarget(trigger, whitelist, err)
+            validateReplyTarget(trigger, whitelist, err, ReplyKind.GENERATIVE)
         }
     }
 
@@ -1814,7 +1817,7 @@ class DraftValidator(
             err("reply_target_unbound", "Un tool di reply deve essere vincolato al mittente del trigger")
         if (action.replyTargetSender) {
             if (!hasReplyTool) err("reply_target_without_tool", "replyTargetSender senza tool di reply")
-            validateReplyTarget(trigger, whitelist, err)
+            validateReplyTarget(trigger, whitelist, err, ReplyKind.GENERATIVE)
         }
 
         if (action.allowedTools.any { it.startsWith("screen.") || it == "state.read" } && hasReplyTool)
@@ -1851,18 +1854,35 @@ class DraftValidator(
             err("context_sources_duplicated", "Context sources duplicate in InvokeLlm")
     }
 
+    /** Chi risponde: `whatsapp_reply`, `notification_reply` (0.8) o l'AI (entrambe le famiglie). */
+    private enum class ReplyKind { WHATSAPP, NOTIFICATION, GENERATIVE }
+
     private fun validateReplyTarget(
         trigger: Trigger,
         whitelist: Set<String>,
         err: (String, String) -> Unit,
+        kind: ReplyKind,
     ) {
         val notification = trigger as? Trigger.Notification
         if (notification == null) {
             err("reply_target_no_notification", "Reply richiede un trigger Notification")
             return
         }
-        if (notification.pkg !in WHATSAPP_PACKAGES)
-            err("reply_wrong_package", "WhatsAppReply richiede un package WhatsApp riconosciuto")
+        val pkg = notification.pkg
+        val packageAllowed = when (kind) {
+            ReplyKind.WHATSAPP -> ReplyChannels.isWhatsApp(pkg)
+            ReplyKind.NOTIFICATION -> ReplyChannels.isNotificationReplyPackage(pkg)
+            ReplyKind.GENERATIVE -> ReplyChannels.isReplyPackage(pkg)
+        }
+        when {
+            packageAllowed -> Unit
+            kind != ReplyKind.WHATSAPP && pkg in ReplyChannels.REFUSED_PACKAGES ->
+                err("reply_app_unsupported", "App di messaggi senza una chiave di conversazione affidabile")
+            kind == ReplyKind.NOTIFICATION ->
+                err("reply_wrong_package", "notification_reply richiede Telegram, Signal o Google Messaggi (WhatsApp usa whatsapp_reply)")
+            else ->
+                err("reply_wrong_package", "WhatsAppReply richiede un package WhatsApp riconosciuto")
+        }
         if (notification.isGroup != false)
             err("reply_target_group", "Reply automatiche solo su chat 1:1 verificata")
         val conversationId = notification.conversationId
@@ -1870,6 +1890,56 @@ class DraftValidator(
             err("reply_needs_conversation_id", "Reply automatiche richiedono conversationId")
         else if (conversationId !in whitelist)
             err("target_not_whitelisted", "Conversazione non in whitelist")
+        // Fuori da WhatsApp la chat è solo lo shortcut di conversazione della STESSA app (ReplyChannels).
+        if (packageAllowed && !conversationId.isNullOrBlank() &&
+            !ReplyChannels.isStableConversation(pkg, conversationId)
+        ) err("reply_conversation_unstable", "La conversazione non è lo shortcut di conversazione dell'app")
+    }
+
+    /**
+     * `notification_action` (0.8): agisce sulla notifica del trigger. CLICK preme il pulsante col testo
+     * approvato: mai su Argus né sulle app vietate alle macro, ed è sempre segnalato in revisione.
+     */
+    private fun validateNotificationAction(
+        action: Action.NotificationAction,
+        trigger: Trigger,
+        err: (String, String) -> Unit,
+        warn: (String, String) -> Unit,
+    ) {
+        val notification = trigger as? Trigger.Notification
+        if (notification == null)
+            err("notification_action_no_notification", "notification_action richiede un trigger Notification")
+        NotificationActionPolicy.problems(action).forEach { problem ->
+            when (problem) {
+                NotificationActionPolicy.Problem.LABEL_MISSING,
+                NotificationActionPolicy.Problem.LABEL_UNEXPECTED,
+                NotificationActionPolicy.Problem.LABEL_INVALID,
+                -> err(
+                    "notification_action_label_invalid",
+                    "CLICK richiede il testo del pulsante (1..${NotificationActionPolicy.MAX_LABEL_CHARS} " +
+                        "caratteri, una riga); DISMISS e SNOOZE non ne hanno",
+                )
+                NotificationActionPolicy.Problem.LABEL_INTERPOLATED ->
+                    err("notification_action_label_interpolated", "Il testo del pulsante è letterale, senza variabili")
+                NotificationActionPolicy.Problem.SNOOZE_MISSING,
+                NotificationActionPolicy.Problem.SNOOZE_UNEXPECTED,
+                NotificationActionPolicy.Problem.SNOOZE_RANGE,
+                -> err(
+                    "notification_action_snooze_invalid",
+                    "SNOOZE richiede snoozeMinutes tra ${NotificationActionPolicy.MIN_SNOOZE_MINUTES} e " +
+                        "${NotificationActionPolicy.MAX_SNOOZE_MINUTES}; le altre operazioni non lo usano",
+                )
+            }
+        }
+        if (action.op == NotificationActionOp.CLICK) {
+            if (notification != null && NotificationActionPolicy.isForbiddenTarget(notification.pkg))
+                err("notification_action_forbidden_app", "Non si premono pulsanti nelle notifiche di questa app")
+            warn(
+                "notification_click_review",
+                "Argus premerà per te il pulsante «${action.label.orEmpty()}» della notifica di " +
+                    "${notification?.pkg.orEmpty()}",
+            )
+        }
     }
 
     private fun validatePackage(value: String, blankCode: String, err: (String, String) -> Unit) {

@@ -68,8 +68,6 @@ class FeatureGatesTest {
         FeatureGate.ACTION_ASK to Action.Ask("Esco?", listOf("Sì", "No"), "answer", defaultChoice = "No"),
         FeatureGate.ACTION_SET_STORED to Action.SetStored("count", StoredOp.INCREMENT),
         FeatureGate.ACTION_SET_USER_MODE to Action.SetUserMode("lavoro"),
-        FeatureGate.ACTION_NOTIFICATION_REPLY to Action.NotificationReply("Arrivo"),
-        FeatureGate.ACTION_NOTIFICATION_ACTION to Action.NotificationAction(NotificationActionOp.DISMISS),
         FeatureGate.ACTION_SEND_SMS to Action.SendSms("+393331112222", "Arrivo"),
         FeatureGate.ACTION_CALL_NUMBER to Action.CallNumber("+393331112222"),
         FeatureGate.ACTION_SEND_INTENT to Action.SendIntent(IntentKind.BROADCAST, action = "dev.example.PING"),
@@ -100,6 +98,9 @@ class FeatureGatesTest {
         FeatureGate.CONDITION_HEADSET_CONNECTED,
         FeatureGate.CONDITION_CALENDAR_BUSY,
         FeatureGate.TRIGGER_CALENDAR_EVENT,
+        // Risposte e azioni sulle notifiche.
+        FeatureGate.ACTION_NOTIFICATION_REPLY,
+        FeatureGate.ACTION_NOTIFICATION_ACTION,
     )
 
     @Test

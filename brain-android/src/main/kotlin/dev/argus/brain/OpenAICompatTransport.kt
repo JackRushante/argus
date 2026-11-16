@@ -255,7 +255,7 @@ class OpenAICompatTransport internal constructor(
         // Reply: esige una notifica WhatsApp 1:1 in arrivo. Sink NOTIFICA #59 (da timer/immediate):
         // nessuna notifica, il testo nasce dal solo goal (+ web/state).
         val notification =
-            if (useReplyTool) AgentMessageSupport.requireWhatsAppNotification(context) else null
+            if (useReplyTool) AgentMessageSupport.requireReplyNotification(context) else null
         val stateLines = if ("state" in contextSources) AgentMessageSupport.safeStateLines(context.state) else emptyList()
         val webRequested = GenerativeContract.TOOL_WEB_SEARCH in allowedTools
         return generate(
@@ -280,7 +280,7 @@ class OpenAICompatTransport internal constructor(
         val useReplyTool = AgentMessageSupport.requireGenerativeToolset(allowedTools)
         AgentMessageSupport.requireGenerativeContextSources(contextSources, useReplyTool)
         val notification =
-            if (useReplyTool) AgentMessageSupport.requireWhatsAppNotification(context) else null
+            if (useReplyTool) AgentMessageSupport.requireReplyNotification(context) else null
         val stateLines = if ("state" in contextSources) AgentMessageSupport.safeStateLines(context.state) else emptyList()
         val webRequested = GenerativeContract.TOOL_WEB_SEARCH in allowedTools
         return generate(
@@ -307,7 +307,7 @@ class OpenAICompatTransport internal constructor(
         ) {
             throw config("state context act v2 non valido")
         }
-        val notification = AgentMessageSupport.requireWhatsAppNotification(context)
+        val notification = AgentMessageSupport.requireReplyNotification(context)
         val stateLines = action.stateContext.map { approved -> AgentMessageSupport.toStateLine(approved, context.state) }
         val webRequested = GenerativeContract.TOOL_WEB_SEARCH in action.allowedTools
         // act v2 è sempre un reply (allowedTools include whatsapp_reply): reply tool sempre attivo.

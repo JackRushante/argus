@@ -948,7 +948,12 @@ private fun ContactRowItem(contact: ContactRow, onRemove: () -> Unit) {
             )
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(contact.displayName, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge)
+            // 0.8: la whitelist vale per (app, conversazione): l'app si vede accanto al nome.
+            Text(
+                contact.app?.let { "${contact.displayName} · $it" } ?: contact.displayName,
+                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.labelLarge,
+            )
             // conversationId MASCHERATO in monospace: non esporre il numero/handle completo.
             Row(
                 modifier = Modifier

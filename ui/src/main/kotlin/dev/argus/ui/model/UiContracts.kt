@@ -857,7 +857,12 @@ enum class AuthState { OK, EXPIRED, NOT_CONFIGURED }
 data class ProviderChoiceUi(val id: String, val label: String, val selected: Boolean)
 enum class BgLocationState { GRANTED, WHILE_IN_USE, DENIED, NOT_NEEDED }
 
-data class ContactRow(val displayName: String, val conversationId: String)   // id in monospace, azione rimuovi
+data class ContactRow(
+    val displayName: String,
+    val conversationId: String,   // id in monospace, azione rimuovi
+    /** 0.8: app della conversazione (WhatsApp, Telegram, Signal, Google Messages); null se non nota. */
+    val app: String? = null,
+)
 
 /**
  * Riga per-provider del breakdown budget. Metrica primaria: TOKEN in/out per finestra (null = "n/d",

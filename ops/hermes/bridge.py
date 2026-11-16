@@ -127,6 +127,14 @@ BUILTIN_STATE_VALUES = {
     "screen": "on|off",
 }
 WHATSAPP_PACKAGES = frozenset({"com.whatsapp", "com.whatsapp.w4b"})
+# 0.8: le risposte (anche dell'AI) valgono anche per Telegram, Signal e Google Messaggi, con le stesse
+# garanzie verificate sul telefono. La shell resta solo WhatsApp (validate_trigger).
+REPLY_PACKAGES = WHATSAPP_PACKAGES | frozenset({
+    "org.telegram.messenger",
+    "org.telegram.messenger.web",
+    "org.thoughtcrime.securesms",
+    "com.google.android.apps.messaging",
+})
 ACT_REPLY_TOOL = "whatsapp_reply"
 WEB_SEARCH_TOOL = "web.search"
 
@@ -752,7 +760,7 @@ def validate_notification_context(value: Any) -> None:
         raise RequestError(400, "invalid_notification_context")
     if (
         not isinstance(value["package"], str)
-        or value["package"] not in WHATSAPP_PACKAGES
+        or value["package"] not in REPLY_PACKAGES
         or value["is_group"] is not False
     ):
         raise RequestError(400, "notification_reply_not_authorized")
@@ -1422,7 +1430,7 @@ def _reply_trigger_allowed(trigger: Any, whitelisted_contact_ids: set[str]) -> b
     return (
         isinstance(trigger, dict)
         and trigger.get("type") == "notification"
-        and trigger.get("pkg") in WHATSAPP_PACKAGES
+        and trigger.get("pkg") in REPLY_PACKAGES
         and trigger.get("isGroup") is False
         and trigger.get("conversationId") in whitelisted_contact_ids
     )

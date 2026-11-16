@@ -92,10 +92,10 @@ enum class FeatureGate(
     ACTION_SET_USER_MODE("set_user_mode", enabled = false),
 
     /** Azione `notification_reply`. */
-    ACTION_NOTIFICATION_REPLY("notification_reply", enabled = false),
+    ACTION_NOTIFICATION_REPLY("notification_reply", enabled = true),
 
     /** Azione `notification_action`. */
-    ACTION_NOTIFICATION_ACTION("notification_action", enabled = false),
+    ACTION_NOTIFICATION_ACTION("notification_action", enabled = true),
 
     /** Azione `send_sms`. */
     ACTION_SEND_SMS("send_sms", enabled = false),

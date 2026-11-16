@@ -7,6 +7,7 @@ import dev.argus.engine.model.HttpRequestPolicy
 import dev.argus.engine.model.IntegrityLabel
 import dev.argus.engine.model.IntentExtraType
 import dev.argus.engine.model.InterpolationPolicy
+import dev.argus.engine.model.NotificationActionPolicy
 import dev.argus.engine.model.PrivilegedActionPolicy
 import dev.argus.engine.model.RemoteEgressPolicy
 import dev.argus.engine.model.SettingsScreen
@@ -428,9 +429,9 @@ class TaintAwareInterpolator {
 
             is Action.SetUserMode -> false
 
-            is Action.NotificationReply -> false
+            is Action.NotificationReply -> action.text.isNotBlank() && action.text.length <= MAX_TEXT_CHARS
 
-            is Action.NotificationAction -> false
+            is Action.NotificationAction -> NotificationActionPolicy.isShapeValid(action)
 
             is Action.SendSms -> false
 

@@ -397,7 +397,10 @@ class AndroidCapabilityProbe internal constructor(
         capability == CapabilityIds.STATE_LOCATION -> BlockCause.LOCATION_PERMISSION
         capability == CapabilityIds.TRIGGER_NOTIFICATION ||
             capability == GenerativeContract.TOOL_WHATSAPP_REPLY ||
-            capability == ActionCapabilities.WHATSAPP_REPLY -> BlockCause.NOTIFICATION_ACCESS
+            capability == ActionCapabilities.WHATSAPP_REPLY ||
+            // 0.8: risposta e azione sulla notifica passano dallo stesso listener.
+            capability == CapabilityIds.ACTION_NOTIFICATION_REPLY ||
+            capability == CapabilityIds.ACTION_NOTIFICATION_ACTION -> BlockCause.NOTIFICATION_ACCESS
         capability == ActionCapabilities.SHOW_NOTIFICATION -> BlockCause.NOTIFICATIONS_PERMISSION
         capability == CapabilityIds.TRIGGER_PHONE_SMS -> BlockCause.SMS_PERMISSION
         capability == CapabilityIds.TRIGGER_PHONE_CALL -> BlockCause.CALL_PERMISSION
@@ -522,6 +525,9 @@ class AndroidCapabilityProbe internal constructor(
                 // La reply statica è eseguita da ShizukuActionExecutor via NotificationReplyGateway:
                 // stesso canale del tool raw, quindi stesso grant.
                 add(ActionCapabilities.WHATSAPP_REPLY)
+                // 0.8: reply su Telegram/Signal/Google Messaggi e azioni sulla notifica, stesso listener.
+                add(CapabilityIds.ACTION_NOTIFICATION_REPLY)
+                add(CapabilityIds.ACTION_NOTIFICATION_ACTION)
             }
             // Telefonia (P2-2): grant runtime distinti per evento.
             if (state.receiveSmsGranted) add(CapabilityIds.TRIGGER_PHONE_SMS)
@@ -585,6 +591,7 @@ class AndroidCapabilityProbe internal constructor(
             }
             if (state.accessibilityEnabled && state.notificationsGranted) add(ActionTypeIds.UI_STEPS)
             if (listenerGranted) add(GenerativeContract.TOOL_WHATSAPP_REPLY)
+            if (listenerGranted) addAll(NOTIFICATION_08_ACTION_TYPES)
             // Il compilatore usa SOLO manifest.available_tools: invoke_llm deve comparire qui,
             // altrimenti Hermes ripiega su una reply statica anche quando il runtime è pronto.
             if (generativeReady) {
@@ -627,6 +634,7 @@ class AndroidCapabilityProbe internal constructor(
         }
         if (!listenerGranted) {
             unavailableTools[GenerativeContract.TOOL_WHATSAPP_REPLY] = REASON_NOTIFICATION_LISTENER
+            NOTIFICATION_08_ACTION_TYPES.forEach { unavailableTools[it] = REASON_NOTIFICATION_LISTENER }
         }
         if (!generativeReady) {
             unavailableTools[ActionTypeIds.INVOKE_LLM] = REASON_GENERATIVE_RUNTIME
@@ -698,6 +706,10 @@ class AndroidCapabilityProbe internal constructor(
         val IMPLEMENTED_SENSOR_KINDS: Set<SensorKind> = setOf(SensorKind.SIGNIFICANT_MOTION)
         const val REASON_NOTIFICATION_LISTENER = "notification access not granted"
 
+        /** 0.8: `notification_reply` e `notification_action`, pubblicati col listener delle notifiche. */
+        val NOTIFICATION_08_ACTION_TYPES: List<String> =
+            listOf(ActionTypeIds.NOTIFICATION_REPLY, ActionTypeIds.NOTIFICATION_ACTION)
+
         /**
          * 0.8 scaffold: capability delle famiglie nuove. Il probe non le pubblica mai (né in `available`, né
          * nel manifest: il modello non deve vederle) e ne riporta la causa [BlockCause.NOT_AVAILABLE_YET].
@@ -718,8 +730,6 @@ class AndroidCapabilityProbe internal constructor(
             CapabilityIds.ACTION_ASK,
             CapabilityIds.ACTION_SET_STORED,
             CapabilityIds.ACTION_SET_USER_MODE,
-            CapabilityIds.ACTION_NOTIFICATION_REPLY,
-            CapabilityIds.ACTION_NOTIFICATION_ACTION,
             CapabilityIds.ACTION_SEND_SMS,
             CapabilityIds.ACTION_CALL_NUMBER,
             CapabilityIds.ACTION_SEND_INTENT,

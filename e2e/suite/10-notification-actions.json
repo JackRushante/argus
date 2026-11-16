@@ -1,0 +1,115 @@
+[
+ {
+  "id": "N01-notification-dismiss",
+  "title": "Chiude la notifica che ha fatto scattare la regola (ne posto una davvero)",
+  "cond": "none",
+  "rule": {
+   "name": "N01-notification-dismiss",
+   "trigger": {
+    "type": "notification",
+    "pkg": "com.android.shell",
+    "titleMatch": "e2e-nd-{{RUN}}"
+   },
+   "actions": [
+    {
+     "type": "notification_action",
+     "op": "DISMISS"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "SUCCEEDED",
+    "actions": [
+     "notification_action:SUCCEEDED"
+    ]
+   }
+  },
+  "fire": {
+   "real": [
+    "asshell \"cmd notification post -S bigtext -t 'e2e-nd-{{RUN}}' e2endtag 'da chiudere'\""
+   ],
+   "settle_s": 3
+  },
+  "wait_s": 4,
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e-nd-{{RUN}})'",
+    "matches": "^0$",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "N02-notification-click-missing-button",
+  "title": "Il pulsante non c'e': l'azione fallisce con un codice chiuso e non preme altro",
+  "cond": "none",
+  "rule": {
+   "name": "N02-notification-click-missing-button",
+   "trigger": {
+    "type": "notification",
+    "pkg": "com.android.shell",
+    "titleMatch": "e2e-nc-{{RUN}}"
+   },
+   "actions": [
+    {
+     "type": "notification_action",
+     "op": "CLICK",
+     "label": "Archivia"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "FAILED",
+    "actions": [
+     "notification_action:FAILED:notification_action_button_not_found"
+    ]
+   }
+  },
+  "fire": {
+   "real": [
+    "asshell \"cmd notification post -S bigtext -t 'e2e-nc-{{RUN}}' e2enctag 'senza pulsanti'\""
+   ],
+   "settle_s": 3
+  },
+  "wait_s": 4,
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e-nc-{{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "N03-notification-reply-not-whitelisted",
+  "title": "Risposta su Telegram a una chat non in whitelist: rifiutata in revisione",
+  "cond": "none",
+  "rule": {
+   "name": "N03-notification-reply-not-whitelisted",
+   "trigger": {
+    "type": "notification",
+    "pkg": "org.telegram.messenger",
+    "conversationId": "shortcut:org.telegram.messenger:0000000000000000000000000000000000000000000000000000000000000000",
+    "isGroup": false
+   },
+   "actions": [
+    {
+     "type": "notification_reply",
+     "text": "Arrivo"
+    }
+   ]
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "target_not_whitelisted"
+    }
+   }
+  }
+ }
+]

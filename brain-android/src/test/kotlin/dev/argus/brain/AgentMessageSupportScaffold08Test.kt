@@ -22,7 +22,7 @@ class AgentMessageSupportScaffold08Test {
     private val hiddenTypes = listOf(
         "nfc_tag", "next_alarm", "app_usage", "user_mode_changed",
         "stored_compare", "user_mode_is", "stored",
-        "ask", "set_stored", "set_user_mode", "notification_reply", "notification_action", "send_sms",
+        "ask", "set_stored", "set_user_mode", "send_sms",
         "call_number", "send_intent", "screen_call",
     )
 
@@ -44,6 +44,8 @@ class AgentMessageSupportScaffold08Test {
         FeatureGate.CONDITION_HEADSET_CONNECTED to "headset_connected",
         FeatureGate.CONDITION_CALENDAR_BUSY to "calendar_busy",
         FeatureGate.TRIGGER_CALENDAR_EVENT to "calendar_event",
+        FeatureGate.ACTION_NOTIFICATION_REPLY to "notification_reply",
+        FeatureGate.ACTION_NOTIFICATION_ACTION to "notification_action",
     )
 
     @Test

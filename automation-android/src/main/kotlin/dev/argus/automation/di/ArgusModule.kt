@@ -995,6 +995,10 @@ object ArgusModule {
             privilegedActions = privilegedActions,
             // 0.5.1: macro sullo schermo con il servizio di Accessibilità.
             uiSteps = uiSteps,
+            // 0.8: chiudi, posticipa o premi un pulsante della notifica, via il listener collegato.
+            notificationActions = dev.argus.automation.notification.ListenerNotificationActionGateway(
+                dev.argus.automation.notification.ConnectedNotificationListener,
+            ),
         )
 
     @Provides

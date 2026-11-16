@@ -13,6 +13,7 @@ import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireContext
 import dev.argus.engine.runtime.RuntimeDataBinding
 import dev.argus.engine.runtime.TriggerEvent
+import dev.argus.engine.safety.ReplyChannels
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonArray
@@ -47,7 +48,6 @@ internal object AgentMessageSupport {
     const val MIN_ACT_TIMEOUT_MILLIS = 1_000L
     const val MAX_ACT_TIMEOUT_MILLIS = 120_000L
 
-    val WHATSAPP_PACKAGES = setOf("com.whatsapp", "com.whatsapp.w4b")
     val ACT_CONTEXT_SOURCES = setOf("notification", "state")
 
     /** Sorgenti di contesto ammesse per il sink NOTIFICA #59: solo "state" (opzionale), MAI
@@ -123,10 +123,11 @@ internal object AgentMessageSupport {
         }
     }
 
-    fun requireWhatsAppNotification(context: FireContext): TriggerEvent.NotificationPosted {
+    /** Reply: un messaggio 1:1 in arrivo da WhatsApp o (0.8) da Telegram, Signal, Google Messaggi. */
+    fun requireReplyNotification(context: FireContext): TriggerEvent.NotificationPosted {
         val notification = context.event as? TriggerEvent.NotificationPosted
             ?: throw config("richiede un evento Notification")
-        if (notification.pkg !in WHATSAPP_PACKAGES || notification.isGroup != false) {
+        if (!ReplyChannels.isReplyPackage(notification.pkg) || notification.isGroup != false) {
             throw config("reply non autorizzata")
         }
         cleanUntrusted(notification.text, MAX_NOTIFICATION_TEXT_CHARS)
@@ -329,6 +330,10 @@ BINDING RULES:
         val sender = cleanUntrusted(notification.sender, MAX_NOTIFICATION_SENDER_CHARS)
         val text = cleanUntrusted(notification.text, MAX_NOTIFICATION_TEXT_CHARS).orEmpty()
         append("Message received")
+        // 0.8: fuori da WhatsApp il modello sa in quale app risponde (WhatsApp resta byte-identico).
+        if (!ReplyChannels.isWhatsApp(notification.pkg)) {
+            ReplyChannels.appName(notification.pkg)?.let { append(" on ").append(it) }
+        }
         if (sender != null) append(" from ").append(sender)
         append(": ").append(text)
         if (stateLines.isNotEmpty()) {
@@ -469,7 +474,7 @@ Same meaning as the @@META@@ line, same rule 8. Do not write @@META@@."""
                     manifest.whitelistedContacts.forEachIndexed { index, contact ->
                         addJsonObject {
                             put("alias", ContactAliasMapper.aliasFor(index))
-                            put("display_name", contact.displayName)
+                            put("display_name", ContactAliasMapper.modelDisplayName(contact))
                         }
                     }
                 }
@@ -540,6 +545,12 @@ BINDING RULES:
    minimum classification; allowedTools must be exactly ["whatsapp_reply"],
    replyTargetSender=true and an explicit timeoutMs;
    use a static whatsapp_reply only if the user dictates the exact text of the reply.
+   Telegram (org.telegram.messenger, org.telegram.messenger.web), Signal (org.thoughtcrime.securesms)
+   and Google Messages (com.google.android.apps.messaging) get the SAME replies under the same rules:
+   a whitelisted contact on one of them shows "(App, pkg <package>)" in its display_name and the
+   trigger pkg must be exactly that package. The static reply there is notification_reply (never
+   whatsapp_reply); a generated reply is invoke_llm/invoke_llm_v2 exactly as above, allowedTools
+   still ["whatsapp_reply"] (the reply tool of every app). No automatic replies on any other app.
 10. If manifest.available_triggers is present, use ONLY the listed triggers (empty list =
     no armable trigger):
     "time", "immediate" (run-once-on-activation), "notification", "geofence";
@@ -735,6 +746,13 @@ Action, discriminated by "type":
 - {"type":"tap", "x":integer, "y":integer}
 - {"type":"input_text", "text":string}
 - {"type":"whatsapp_reply", "text":string}
+- {"type":"notification_reply", "text":string}  // like whatsapp_reply (rule 9) for Telegram, Signal and
+   // Google Messages: replies in the 1:1 chat whose notification started the rule
+- {"type":"notification_action", "op":"DISMISS"|"SNOOZE"|"CLICK", "label":string|null,
+   "snoozeMinutes":integer|null}  // acts on the notification that started the rule (notification
+   // trigger only): DISMISS clears it, SNOOZE hides it for snoozeMinutes (1-1440, only with SNOOZE),
+   // CLICK presses its button whose visible text is exactly label (literal, never ${'$'}{var}; only with
+   // CLICK). Never a button that asks for text: use a reply for that. Not on system apps or Argus
 - {"type":"run_shell", "cmd":string}  // flat v1: literal command; P4: ${'$'}{var} interpolation allowed;
   // max 8192 characters; only with
   time/geofence/connectivity/sensor triggers or with a whitelisted 1:1 WhatsApp chat;
