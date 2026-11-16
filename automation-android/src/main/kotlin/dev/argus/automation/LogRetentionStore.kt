@@ -3,6 +3,9 @@ package dev.argus.automation
 import android.content.Context
 import android.content.SharedPreferences
 import dev.argus.data.JournalRetentionPolicy
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -15,6 +18,8 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 class LogRetentionStore internal constructor(
     private val preferences: SharedPreferences,
+    /** La scrittura su disco (`commit`) non gira mai sul thread principale. */
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
     constructor(context: Context) : this(
         context.applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE),
@@ -29,9 +34,9 @@ class LogRetentionStore internal constructor(
     fun currentDays(): Int = state.value
 
     /** false se [value] non e' una delle opzioni ammesse o la scrittura fallisce. */
-    fun setDays(value: Int): Boolean {
+    suspend fun setDays(value: Int): Boolean {
         if (value !in OPTIONS) return false
-        val saved = preferences.edit().putInt(KEY_DAYS, value).commit()
+        val saved = withContext(ioDispatcher) { preferences.edit().putInt(KEY_DAYS, value).commit() }
         if (saved) state.value = value
         return saved
     }
