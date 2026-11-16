@@ -105,6 +105,16 @@ class ValidationTest(unittest.TestCase):
         bad["per_config"] = {"none": {"rule": {}, "title": "x"}}
         self.assertTrue(any("non ammessi" in p for p in suite.validate([bad])))
 
+    def test_switched_off_types_only_prove_their_rejection(self):
+        rule = self.valid()
+        rule["rule"]["trigger"] = {"type": "nfc_tag", "tagId": "04:AA"}
+        rule["rule"]["actions"] = [{"type": "send_sms", "number": "+39", "text": "x"}]
+        problems = suite.validate([rule])
+        self.assertTrue(any("trigger spento" in p for p in problems))
+        self.assertTrue(any("azione spenta" in p for p in problems))
+        rule["expect"] = {"load": {"fail": {"stage": "review", "code": "not_available_yet"}}}
+        self.assertEqual([], suite.validate([rule]))
+
 
 if __name__ == "__main__":
     unittest.main()

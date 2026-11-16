@@ -44,6 +44,17 @@ ACTION_CLASSES: Dict[str, List[str]] = {
     "screen_macro": ["ui_steps"],
 }
 CONTROL_FLOW = ["wait", "if", "while"]
+
+# Vocabolario 0.8 gia' nel modello ma spento (FeatureGates: il validator lo rifiuta con
+# `not_available_yet`). Non entra nella copertura a coppie finche' e' spento; una regola della suite puo'
+# usarlo solo per provare quel rifiuto. Chi accende un tipo lo sposta in TRIGGERS o ACTION_CLASSES e
+# aggiunge le sue regole.
+NOT_YET_AVAILABLE_TRIGGERS = ["calendar_event", "nfc_tag", "next_alarm", "app_usage", "user_mode_changed"]
+NOT_YET_AVAILABLE_ACTIONS = [
+    "ask", "set_stored", "set_user_mode", "notification_reply", "notification_action", "send_sms",
+    "call_number", "send_intent", "screen_call",
+]
+NOT_YET_AVAILABLE_CODE = "not_available_yet"
 ACTION_CLASS_OF: Dict[str, str] = {a: c for c, items in ACTION_CLASSES.items() for a in items}
 ALL_ACTION_TYPES = sorted(ACTION_CLASS_OF) + CONTROL_FLOW
 
