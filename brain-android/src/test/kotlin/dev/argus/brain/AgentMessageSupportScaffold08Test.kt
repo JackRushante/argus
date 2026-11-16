@@ -22,7 +22,7 @@ class AgentMessageSupportScaffold08Test {
         "calendar_event", "nfc_tag", "next_alarm", "app_usage", "user_mode_changed",
         "weekday", "wifi_connected", "bluetooth_connected", "headset_connected", "calendar_busy",
         "stored_compare", "user_mode_is", "stored",
-        "ask", "set_stored", "set_user_mode", "notification_reply", "notification_action", "send_sms",
+        "set_stored", "set_user_mode", "notification_reply", "notification_action", "send_sms",
         "call_number", "send_intent", "screen_call",
     )
 
@@ -32,14 +32,17 @@ class AgentMessageSupportScaffold08Test {
             assertFalse("\"type\":\"$type\"" in prompt, "il prompt nomina il tipo spento $type")
         }
         // Campi e valori nuovi di tipi esistenti.
-        listOf("\"shake\"", "\"flip_face_down\"", "secretHeaders", "secretQuery", "\"extract\"", "\"output\"", "\"confirm\"", "\"exit\"")
+        listOf("\"shake\"", "\"flip_face_down\"", "secretHeaders", "secretQuery", "\"extract\"", "\"exit\"")
             .forEach { assertFalse(it in prompt, "il prompt nomina $it") }
     }
 
     @Test
     fun `every gate is still off, so this test still describes the prompt`() {
         // Quando un engineer accende un tipo, aggiorna anche [hiddenTypes] e questo elenco.
-        assertEquals(emptyList(), FeatureGate.entries.filter { it.enabled })
+        assertEquals(
+            listOf(FeatureGate.CONFIRM, FeatureGate.ACTION_ASK, FeatureGate.LLM_OUTPUT),
+            FeatureGate.entries.filter { it.enabled },
+        )
     }
 
     @Test

@@ -4,6 +4,8 @@ import dev.argus.engine.brain.ActResult
 import dev.argus.engine.brain.CapabilityManifest
 import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.model.Action
+import dev.argus.engine.model.LlmOutputPolicy
+import dev.argus.engine.model.OutputSpec
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireContext
 import dev.argus.engine.runtime.RuntimeDataBinding
@@ -45,6 +47,27 @@ interface AgentTransport {
         allowedTools: List<String>,
         runtimeData: List<RuntimeDataBinding>,
     ): ActResult = ActResult(text = null, metaError = "act_resolved_unsupported")
+
+    /**
+     * 0.8 `invoke_llm.output`: risposta in una forma chiusa. Default: l'istruzione fissa della forma in
+     * coda al goal, sul canale normale. I transport con output strutturato lo sovrascrivono; il chiamante
+     * ricontrolla comunque la risposta.
+     */
+    suspend fun actConstrained(
+        context: FireContext,
+        goal: String,
+        contextSources: List<String>,
+        allowedTools: List<String>,
+        runtimeData: List<RuntimeDataBinding>,
+        output: OutputSpec,
+    ): ActResult {
+        val constrained = LlmOutputPolicy.constrainedGoal(goal, output)
+        return if (runtimeData.isEmpty()) {
+            act(context, constrained, contextSources, allowedTools)
+        } else {
+            actResolved(context, constrained, contextSources, allowedTools, runtimeData)
+        }
+    }
 
     suspend fun health(): TransportHealth
 }

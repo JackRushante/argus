@@ -640,7 +640,11 @@ BINDING RULES:
   "actions": [Action, ...],
   "conditions": Condition | null,          // optional
   "rationale": string,                     // optional
-  "cooldownMs": integer >= 0               // optional
+  "cooldownMs": integer >= 0,              // optional
+  "confirm": {"timeoutMs":integer}         // optional: "ask me first / before running it". When the rule
+                                           // fires the phone asks Run/Cancel; no answer within timeoutMs
+                                           // (30000..3600000, default 300000) = not run. Never with immediate
+                                           // or one-shot time triggers (at, afterMs). Omit it otherwise.
 }
 
 Trigger, discriminated by "type":
@@ -766,7 +770,13 @@ Action, discriminated by "type":
 - {"type":"invoke_llm", "goal":string, "contextSources":[string,...],
    "allowedTools":[string,...], "replyTargetSender":boolean, "timeoutMs":integer,
    "deliver":"WHATSAPP_REPLY"|"LOCAL_NOTIFICATION"|"CAPTURE_ONLY",
-   "notificationTitle":string|null}
+   "notificationTitle":string|null,
+   "output":{"kind":"CHOICE"|"NUMBER"|"BOOLEAN","choices":[string,...],"min":integer,"max":integer}|null}
+   // output (only with CAPTURE_ONLY + captureAs) constrains the answer: CHOICE = exactly one of 2-8
+   // labels matching [a-z0-9_-]{1,24}; NUMBER = an integer between min and max (both required);
+   // BOOLEAN = yes/no, captured as true/false. PREFER a constrained output whenever the rule only needs
+   // a decision ("is this urgent?" -> BOOLEAN, "urgent, normal or low?" -> CHOICE, "rate 1 to 5" ->
+   // NUMBER) and then branch with var_compare: the captured value is trusted, free text is not.
    // deliver defaults to WHATSAPP_REPLY (reply to an incoming notification). LOCAL_NOTIFICATION =
    // posts a local notification with the generated text (any trigger): allowedTools without
    // whatsapp_reply, replyTargetSender=false, contextSources []/["state"], notificationTitle
@@ -853,6 +863,7 @@ VarBinding, discriminated by "type":
 
 "captureAs":string (optional) — captures the action's OUTPUT into a new same-named variable. Allowed
 ONLY on run_shell and invoke_llm; the captured value is TAINTED. invoke_llm_v2 is flat-v1 only.
+Exceptions (trusted, CLEAN): the answer of an "ask" and an invoke_llm with "output".
 
 Control-flow actions (containers, NOT leaf actions; never eval, never goto). Nesting depth <= 4;
 at most 64 action nodes total across the whole program:
@@ -864,6 +875,11 @@ at most 64 action nodes total across the whole program:
    // deadline forbid infinite loops). maxIterationsVar names a NUMBER variable (e.g. a random_int)
    // read at run time and clamped to 1..1000 — use it to repeat a dynamic number of times.
 - {"type":"wait", "durationMs":integer 1..3600000}   // cooperative pause, <= 1 hour.
+- {"type":"ask", "prompt":string, "choices":[string,...], "captureAs":string, "timeoutMs":integer,
+   "defaultChoice":string|null}   // asks the user with a notification, one button per choice, and waits.
+   // 2-4 unique choices of 1-24 characters; prompt <= 120 characters after ${'$'}{var} filling; timeoutMs
+   // 10000..3600000. No answer: defaultChoice (one of the choices) if set, otherwise the program stops.
+   // The captured value is ALWAYS one of the choices: branch on it with var_compare EQ.
 The worst-case time budget of the whole program must stay <= 6 hours (reduce maxIterations/delays).
 If the user asks for a value beyond any of these bounds, do not silently clamp it and do not ask a
 generic question: return draft null with error_code "limit_exceeded" and state the exact limit (rule 5).
