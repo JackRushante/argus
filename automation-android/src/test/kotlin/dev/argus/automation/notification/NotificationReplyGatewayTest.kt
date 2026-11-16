@@ -131,13 +131,14 @@ class NotificationReplyGatewayTest {
         val burst = assertNotNull(registry.burst(NOTIFICATION_KEY, CONVERSATION_ID, first))
         assertEquals(listOf("uno", "due", "tre"), burst.messages.map { it.text })
         assertEquals(third, burst.latestEventId)
-        // Dal secondo evento in poi; un evento sconosciuto restituisce solo l'ultimo messaggio.
+        // Dal secondo evento in poi; un evento non più nel log (uscito per primo) restituisce tutto
+        // ciò che resta, che è tutto successivo a lui.
         assertEquals(
             listOf("due", "tre"),
             assertNotNull(registry.burst(NOTIFICATION_KEY, CONVERSATION_ID, second)).messages.map { it.text },
         )
         assertEquals(
-            listOf("tre"),
+            listOf("uno", "due", "tre"),
             assertNotNull(registry.burst(NOTIFICATION_KEY, CONVERSATION_ID, TriggerEventId("notification:x")))
                 .messages.map { it.text },
         )
@@ -165,6 +166,9 @@ class NotificationReplyGatewayTest {
         }
         val burst = assertNotNull(registry.burst(NOTIFICATION_KEY, CONVERSATION_ID, TriggerEventId("notification:4")))
         assertEquals((4..11).map { "m$it" }, burst.messages.map { it.text })
+        // Il primo messaggio della raffica è uscito dal log: restano tutti gli 8 successivi, non solo l'ultimo.
+        val evicted = assertNotNull(registry.burst(NOTIFICATION_KEY, CONVERSATION_ID, TriggerEventId("notification:0")))
+        assertEquals((4..11).map { "m$it" }, evicted.messages.map { it.text })
 
         registry.replace(
             handle(

@@ -182,6 +182,99 @@ class GenerativeActionLaneTest {
     }
 
     @Test
+    fun `ten short messages reach the model even when the first left the bounded burst log`() = runTest {
+        val bursts = FakeBurstSource().apply { post("notification:event-1", "messaggio") }
+        val fixture = fixture(bursts = bursts)
+
+        assertTrue(fixture.lane.trySubmit(fixture.context, fixture.action))
+        fixture.journal.ready()
+        runCurrent()
+        for (i in 2..10) {
+            advanceTimeBy(1_000)
+            bursts.post("notification:event-$i", "m$i")
+            runCurrent()
+        }
+        advanceTimeBy(8_001)
+        runCurrent()
+
+        assertEquals(1, fixture.brain.calls)
+        val prompted = fixture.brain.lastContext!!.event as TriggerEvent.NotificationPosted
+        // Il log tiene gli ultimi 8 (m3..m10): il primo arriva dall'evento stesso, l'ultimo c'è.
+        assertEquals((listOf("messaggio") + (3..10).map { "m$it" }).joinToString("\n"), prompted.text)
+        assertEquals(TriggerEventId("notification:event-1"), fixture.gateway.requests.single().eventId)
+    }
+
+    @Test
+    fun `a second generative action on the same chat is never closed as coalesced`() = runTest {
+        val bursts = FakeBurstSource().apply {
+            post("notification:event-1", "uno")
+            post("notification:event-2", "due")
+        }
+        val reply = action()
+        val otherReply = action().copy(goal = "rispondi in inglese")
+        val notify = notificationAction()
+        val automation = approvedAutomation(reply).let { base ->
+            val unsigned = base.copy(actions = listOf(reply, otherReply, notify), approvalFingerprint = null)
+            unsigned.copy(approvalFingerprint = ApprovalFingerprints.of(unsigned))
+        }
+        val fixture = fixture(action = reply, automation = automation, context = context(automation, reply), bursts = bursts)
+        fun second(action: Action, execution: String) = context(automation, action).copy(
+            eventId = TriggerEventId("notification:event-2"),
+            executionId = ExecutionId(execution),
+        )
+
+        assertTrue(fixture.lane.trySubmit(fixture.context, reply))
+        // Lo stesso secondo messaggio arriva anche ad altre due azioni AI della chat.
+        assertTrue(fixture.lane.trySubmit(second(otherReply, "execution-2"), otherReply))
+        assertTrue(fixture.lane.trySubmit(second(notify, "execution-3"), notify))
+        fixture.journal.ready("execution-1")
+        fixture.journal.ready("execution-2")
+        fixture.journal.ready("execution-3")
+        advanceTimeBy(20_000)
+        runCurrent()
+
+        // La raffica è accorpata solo per l'azione che ha risposto: le altre generano davvero.
+        assertEquals(3, fixture.brain.calls)
+        assertTrue(fixture.journal.completions.none { it.errorCode == "coalesced" })
+        assertEquals(1, fixture.notifier.calls.size)
+    }
+
+    @Test
+    fun `a failed generation leaves the other messages of the burst unanswered not coalesced`() = runTest {
+        val bursts = FakeBurstSource().apply {
+            post("notification:event-1", "uno")
+            post("notification:event-2", "due")
+        }
+        var attempt = 0
+        val fixture = fixture(
+            bursts = bursts,
+            act = {
+                attempt += 1
+                if (attempt == 1) ActResult(null, "brain_failed") else ActResult("risposta", null)
+            },
+        )
+        val second = fixture.context.copy(
+            eventId = TriggerEventId("notification:event-2"),
+            executionId = ExecutionId("execution-2"),
+        )
+
+        assertTrue(fixture.lane.trySubmit(fixture.context, fixture.action))
+        assertTrue(fixture.lane.trySubmit(second, fixture.action))
+        fixture.journal.ready("execution-1")
+        fixture.journal.ready("execution-2")
+        advanceTimeBy(20_000)
+        runCurrent()
+
+        assertEquals(2, fixture.brain.calls, "il secondo messaggio non ha avuto risposta: si genera")
+        assertEquals(
+            listOf(ActionJournalOutcome.FAILED, ActionJournalOutcome.SUCCEEDED),
+            fixture.journal.completions.map { it.outcome },
+        )
+        assertEquals(listOf("brain_failed", null), fixture.journal.completions.map { it.errorCode })
+        assertEquals(1, fixture.gateway.calls)
+    }
+
+    @Test
     fun `a rule changed while waiting for the burst never reaches the model`() = runTest {
         val bursts = FakeBurstSource().apply { post("notification:event-1", "ciao") }
         val fixture = fixture(bursts = bursts)
@@ -1194,13 +1287,18 @@ class GenerativeActionLaneTest {
         }
     }
 
-    /** Sorgente di raffica finta: il test pubblica i messaggi nei momenti voluti del tempo virtuale. */
-    private class FakeBurstSource : ReplyBurstSource {
+    /**
+     * Sorgente di raffica finta: il test pubblica i messaggi nei momenti voluti del tempo virtuale.
+     * Come il registry reale tiene solo gli ultimi [capacity] messaggi e, se il primo evento ne è
+     * uscito, restituisce tutti quelli rimasti.
+     */
+    private class FakeBurstSource(private val capacity: Int = 8) : ReplyBurstSource {
         private val messages = mutableListOf<BurstMessage>()
         private val version = MutableStateFlow(0)
 
         fun post(eventId: String, text: String) {
             messages += BurstMessage(TriggerEventId(eventId), text)
+            while (messages.size > capacity) messages.removeAt(0)
             version.value += 1
         }
 
@@ -1209,8 +1307,8 @@ class GenerativeActionLaneTest {
             conversationId: String,
             firstEventId: TriggerEventId,
         ): ReplyBurst? {
-            val start = messages.indexOfFirst { it.eventId == firstEventId }
-            if (messages.isEmpty() || start < 0) return null
+            if (messages.isEmpty()) return null
+            val start = messages.indexOfFirst { it.eventId == firstEventId }.coerceAtLeast(0)
             return ReplyBurst(messages.subList(start, messages.size).toList())
         }
 
