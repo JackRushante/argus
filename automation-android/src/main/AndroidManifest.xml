@@ -138,6 +138,12 @@
             android:enabled="true"
             android:exported="false" />
 
+        <!-- 0.7.2: sveglia inexact del backup automatico delle regole; intent esplicito, nessuna azione esterna. -->
+        <receiver
+            android:name="dev.argus.automation.backup.AutoBackupAlarmReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
         <receiver
             android:name="dev.argus.automation.geofence.GeofenceTransitionReceiver"
             android:enabled="true"

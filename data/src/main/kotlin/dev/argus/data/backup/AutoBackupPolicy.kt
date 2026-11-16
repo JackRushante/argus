@@ -129,7 +129,8 @@ object AutoBackupSchedule {
         if (state.consecutiveFailures > 0 && attempt != null) {
             return attempt + retryDelayMillis(state.consecutiveFailures)
         }
-        val completed = state.lastCompletedAtMillis ?: return nightAfter(nowMillis, zone)
+        // Mai riuscito (appena configurato, o dopo aver sistemato cartella o passphrase): alla prima occasione.
+        val completed = state.lastCompletedAtMillis ?: return nowMillis
         val earliest = completed + state.frequency.days * DAY_MILLIS - EARLY_TOLERANCE_MILLIS
         return nightAfter(earliest, zone)
     }

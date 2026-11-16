@@ -81,9 +81,17 @@ class AutoBackupPolicyTest {
     }
 
     @Test
-    fun `the first backup is the next night at three`() {
-        assertEquals("2026-11-17T03:00", local(AutoBackupSchedule.nextRunAt(ready, at("2026-11-16T12:00"), rome)!!))
-        assertEquals("2026-11-16T03:00", local(AutoBackupSchedule.nextRunAt(ready, at("2026-11-16T01:30"), rome)!!))
+    fun `a backup that never completed is due at the first opportunity`() {
+        val now = at("2026-11-16T12:00")
+        assertEquals(now, AutoBackupSchedule.nextRunAt(ready, now, rome))
+        assertTrue(AutoBackupSchedule.isDue(ready, now, rome))
+    }
+
+    @Test
+    fun `the night is the next three o'clock after a time`() {
+        assertEquals("2026-11-17T03:00", local(AutoBackupSchedule.nightAfter(at("2026-11-16T12:00"), rome)))
+        assertEquals("2026-11-16T03:00", local(AutoBackupSchedule.nightAfter(at("2026-11-16T01:30"), rome)))
+        assertEquals("2026-11-17T03:00", local(AutoBackupSchedule.nightAfter(at("2026-11-16T03:00"), rome)))
     }
 
     @Test
