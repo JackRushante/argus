@@ -80,12 +80,6 @@ class FeatureGatesTest {
         FeatureGate.ACTION_CALL_NUMBER to Action.CallNumber("+393331112222"),
         FeatureGate.ACTION_SEND_INTENT to Action.SendIntent(IntentKind.BROADCAST, action = "dev.example.PING"),
         FeatureGate.ACTION_SCREEN_CALL to Action.ScreenCall(ScreenCallOp.REJECT),
-        FeatureGate.HTTP_CAPTURE to Action.HttpRequest(HttpMethod.GET, "https://example.org", captureAs = "body"),
-        FeatureGate.HTTP_SECRETS to Action.HttpRequest(
-            HttpMethod.GET,
-            "https://example.org",
-            secretHeaders = listOf(SecretRef("Authorization", "home_token", "Bearer ")),
-        ),
         FeatureGate.LLM_OUTPUT to Action.InvokeLlm(
             "Piove?",
             emptyList(),
@@ -97,16 +91,26 @@ class FeatureGatesTest {
         ),
     )
 
+    /** Gates already switched on: their features have their own tests (HttpCapture08Test, HttpSecrets08Test). */
+    private val switchedOn = setOf(FeatureGate.HTTP_CAPTURE, FeatureGate.HTTP_SECRETS)
+
+    private val httpCapture = Action.HttpRequest(HttpMethod.GET, "https://example.org", captureAs = "body")
+    private val httpSecrets = Action.HttpRequest(
+        HttpMethod.GET,
+        "https://example.org",
+        secretHeaders = listOf(SecretRef("Authorization", "home_token", "Bearer ")),
+    )
+
     @Test
     fun `every gate is off in this version`() {
-        assertEquals(emptyList(), FeatureGate.entries.filter { it.enabled })
+        assertEquals(switchedOn, FeatureGate.entries.filter { it.enabled }.toSet())
         assertEquals(FeatureGate.entries.size, FeatureGate.entries.map { it.wireName }.toSet().size)
     }
 
     @Test
     fun `the tables above cover every gate`() {
         val covered = newTriggers.keys + newConditions.keys + newActions.keys +
-            setOf(FeatureGate.CONFIRM, FeatureGate.EXIT, FeatureGate.VAR_STORED)
+            setOf(FeatureGate.CONFIRM, FeatureGate.EXIT, FeatureGate.VAR_STORED) + switchedOn
         assertEquals(FeatureGate.entries.toSet(), covered)
     }
 
@@ -220,7 +224,7 @@ class FeatureGatesTest {
         assertTrue(CapabilityIds.triggerSensor(SensorKind.SHAKE) in caps(draft(trigger = Trigger.Sensor(SensorKind.SHAKE))))
         assertTrue(CapabilityIds.STATE_STORED in caps(draft(conditions = newConditions.getValue(FeatureGate.CONDITION_STORED_COMPARE))))
         assertTrue(CapabilityIds.ACTION_SEND_SMS in caps(draft(actions = listOf(newActions.getValue(FeatureGate.ACTION_SEND_SMS)))))
-        assertTrue(CapabilityIds.ACTION_HTTP_REQUEST_SECRETS in caps(draft(actions = listOf(newActions.getValue(FeatureGate.HTTP_SECRETS)))))
+        assertTrue(CapabilityIds.ACTION_HTTP_REQUEST_SECRETS in caps(draft(actions = listOf(httpSecrets))))
         assertTrue(CapabilityIds.RULE_CONFIRM in caps(draft(confirm = ConfirmSpec())))
         val span = caps(draft(exit = ExitSpec(Trigger.NfcTag("04"), actions = listOf(Action.SetUserMode("casa")))))
         assertTrue(span.containsAll(setOf(CapabilityIds.RULE_EXIT, CapabilityIds.TRIGGER_NFC_TAG, CapabilityIds.ACTION_SET_USER_MODE)))
@@ -235,7 +239,7 @@ class FeatureGatesTest {
         listOf(
             newActions.getValue(FeatureGate.ACTION_ASK),
             newActions.getValue(FeatureGate.ACTION_SET_STORED),
-            newActions.getValue(FeatureGate.HTTP_CAPTURE),
+            httpCapture,
         ).forEach { action ->
             assertEquals(AUTOMATION_SCHEMA_VERSION_P4, AutomationSchema.versionFor(draft(actions = listOf(action))), "$action")
         }
