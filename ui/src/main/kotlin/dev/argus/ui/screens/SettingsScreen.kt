@@ -33,6 +33,7 @@ import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Error
+import androidx.compose.material.icons.rounded.Event
 import androidx.compose.material.icons.rounded.Hub
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.MyLocation
@@ -470,6 +471,15 @@ private fun buildHealthItems(state: SettingsState, callbacks: SettingsCallbacks)
                 stringResource(if (state.bluetoothTriggerGranted) R.string.settings_bt_on else R.string.settings_bt_off),
                 okOrOptIn(state.bluetoothTriggerGranted), callbacks::onRequestBluetoothPermission,
                 actionLabel = enable.takeIf { !state.bluetoothTriggerGranted },
+            ),
+        )
+        // 0.8: calendario, stesso opt-in degli SMS: il tocco chiede READ_CALENDAR.
+        add(
+            HealthSpec(
+                Icons.Rounded.Event, stringResource(R.string.settings_calendar_title),
+                stringResource(if (state.calendarGranted) R.string.settings_calendar_on else R.string.settings_calendar_off),
+                okOrOptIn(state.calendarGranted), callbacks::onRequestCalendarPermission,
+                actionLabel = enable.takeIf { !state.calendarGranted },
             ),
         )
         if (state.connectivitySentinelActive) {

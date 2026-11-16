@@ -245,6 +245,9 @@
     <string name="settings_bt_title">Bluetooth triggers</string>
     <string name="settings_bt_on">active — device connections and disconnections are armable</string>
     <string name="settings_bt_off">not active — allow Nearby devices to arm the rules</string>
+    <string name="settings_calendar_title">Calendar rules</string>
+    <string name="settings_calendar_on">active — rules can read the events in your calendar</string>
+    <string name="settings_calendar_off">not active — allow Calendar to arm the rules that use your events</string>
     <string name="settings_sentinel_title">Connectivity sentinel</string>
     <string name="settings_sentinel_active">active — monitors Wi-Fi and power for armed rules</string>
     <string name="settings_clibridge_title">CliBridge · Hermes</string>
