@@ -125,7 +125,9 @@ class DraftValidator(
 
         // --- P4 §2.5: variabili, capture, control-flow, interpolazione, budget ---
         validateVars(d.vars, d.trigger, ::err)
-        val tree = preflightActions(d.actions, ::err)
+        val tree = preflightActions(d.actions, ::err).let { summary ->
+            summary.copy(captures = resolveInheritedConfidentiality(summary.captures, d.vars))
+        }
         if (AutomationSchema.versionFor(d) == AUTOMATION_SCHEMA_VERSION_P4 && tree.hasInvokeLlmV2) {
             err(
                 "p4_invoke_llm_v2_unsupported",
@@ -321,7 +323,43 @@ class DraftValidator(
         val type: VarType = VarType.TEXT,
         val integrity: IntegrityLabel = IntegrityLabel.TAINTED,
         val confidentiality: ConfidentialityLabel,
+        /**
+         * 0.8: variabili da cui la cattura eredita la riservatezza (il body di una richiesta HTTP): se una
+         * è SECRET, o è un'altra cattura, la cattura diventa SECRET (vedi [resolveInheritedConfidentiality]).
+         */
+        val inheritsFrom: Set<String> = emptySet(),
     )
+
+    /**
+     * Floor statico della riservatezza delle catture che ereditano dagli input (0.8, `http_request`): SECRET
+     * se un input è un binding SECRET o una cattura SECRET. Punto fisso sulle catture (al massimo una
+     * passata per cattura): l'ordine dell'albero non conta e il risultato non è mai sotto il runtime.
+     */
+    private fun resolveInheritedConfidentiality(
+        captures: List<CaptureDeclaration>,
+        vars: List<VarBinding>,
+    ): List<CaptureDeclaration> {
+        val bindings = vars.associate { it.name to it.confidentiality }
+        var current = captures
+        repeat(captures.size) {
+            val secretCaptures = current.filter { it.confidentiality == ConfidentialityLabel.SECRET }
+                .mapTo(HashSet()) { it.name }
+            var changed = false
+            current = current.map { capture ->
+                val secretInput = capture.inheritsFrom.any {
+                    bindings[it] == ConfidentialityLabel.SECRET || it in secretCaptures
+                }
+                if (secretInput && capture.confidentiality != ConfidentialityLabel.SECRET) {
+                    changed = true
+                    capture.copy(confidentiality = ConfidentialityLabel.SECRET)
+                } else {
+                    capture
+                }
+            }
+            if (!changed) return current
+        }
+        return current
+    }
 
     private data class ActionFrame(val action: Action, val depth: Int, val inLoop: Boolean = false)
     private data class ActionTreeSummary(
@@ -392,10 +430,18 @@ class DraftValidator(
         // 0.8 scaffold: la scelta dell'utente è una delle etichette approvate, ma finché `ask` è spento
         // resta TAINTED (default fail-closed); chi la accende decide se può essere CLEAN.
         is Action.Ask -> CaptureDeclaration(action.captureAs, confidentiality = ConfidentialityLabel.PRIVATE)
-        // 0.8 scaffold: la risposta di un server esterno è TAINTED; SECRET come l'output shell, perché la
-        // richiesta può portare intestazioni segrete.
+        // 0.8: la risposta di un server esterno è TAINTED. SECRET se la richiesta porta un valore della
+        // cassaforte o una variabile SECRET nel body, altrimenti PRIVATE (come il join del runtime).
         is Action.HttpRequest -> action.captureAs?.let {
-            CaptureDeclaration(it, confidentiality = ConfidentialityLabel.SECRET)
+            CaptureDeclaration(
+                it,
+                confidentiality = if (SecretPolicy.carriesSecrets(action)) {
+                    ConfidentialityLabel.SECRET
+                } else {
+                    ConfidentialityLabel.PRIVATE
+                },
+                inheritsFrom = action.body?.let { body -> InterpolationPolicy.parse(body).refs.toSet() }.orEmpty(),
+            )
         }
         else -> null
     }
@@ -1299,7 +1345,7 @@ class DraftValidator(
                 }
             }
             is Action.SetRotation -> Unit // solo booleano, nulla da validare
-            is Action.HttpRequest -> validateHttpRequest(action, err)
+            is Action.HttpRequest -> validateHttpRequest(action, err, warn)
             // 0.5.1: azioni privilegiate tipizzate. Solo booleani/nessun campo: nulla da validare.
             is Action.SetAirplane,
             is Action.SetLocation,
@@ -1340,18 +1386,22 @@ class DraftValidator(
 
     /**
      * `http_request` (0.4.1). URL e intestazioni sono LETTERALI: un segnaposto lì è un errore, perché i
-     * dati esterni possono entrare solo nel body. https obbligatorio (http solo verso loopback),
+     * dati esterni possono entrare solo nel body. https obbligatorio (http solo loopback o rete locale, 0.8),
      * nessun userinfo; al massimo 10 intestazioni con nomi validi, senza `Host`, `Content-Length`,
      * `Transfer-Encoding`, `Connection`; body fino a 16 KB. Le stesse regole valgono a runtime
      * ([HttpRequestPolicy.isResolvedShapeValid]).
      */
-    private fun validateHttpRequest(action: Action.HttpRequest, err: (String, String) -> Unit) {
+    private fun validateHttpRequest(
+        action: Action.HttpRequest,
+        err: (String, String) -> Unit,
+        warn: (String, String) -> Unit,
+    ) {
         if (InterpolationPolicy.containsInterpolation(action.url)) {
             err("http_url_interpolated", "L'URL della richiesta HTTP è letterale: niente \${…}")
         } else if (!HttpRequestPolicy.isUrlAllowed(action.url)) {
             err(
                 "http_url_invalid",
-                "URL non valido: serve https:// (http:// solo per localhost), senza utente:password",
+                "URL non valido: serve https:// (http:// solo su questo telefono o sulla rete locale), senza utente:password",
             )
         }
 
@@ -1407,6 +1457,81 @@ class DraftValidator(
             if (HttpRequestPolicy.bodyBytes(body) > HttpRequestPolicy.MAX_BODY_BYTES) {
                 err("http_body_too_large", "Body oltre ${HttpRequestPolicy.MAX_BODY_BYTES} byte")
             }
+        }
+        validateHttpCapture(action, err)
+        validateHttpSecrets(action, err)
+        // 0.8: `http://` sulla rete dell'utente è ammesso ma viaggia in chiaro. Con un valore della
+        // cassaforte è un errore (fuori dal loopback il segreto non viaggia mai in chiaro).
+        if (!InterpolationPolicy.containsInterpolation(action.url) &&
+            HttpRequestPolicy.isUrlAllowed(action.url) &&
+            HttpRequestPolicy.isCleartextOnLocalNetwork(action.url)
+        ) {
+            if (SecretPolicy.carriesSecrets(action)) {
+                err(
+                    "http_cleartext_secret",
+                    "Un segreto non viaggia senza cifratura: per la rete locale serve https://",
+                )
+            } else {
+                warn("http_cleartext_local", "La richiesta viaggia senza cifratura sulla tua rete")
+            }
+        }
+    }
+
+    /** 0.8: `captureAs` (nome di variabile) ed `extract` (puntatore JSON letterale, solo con la cattura). */
+    private fun validateHttpCapture(action: Action.HttpRequest, err: (String, String) -> Unit) {
+        val extract = action.extract ?: return
+        if (action.captureAs == null) {
+            err("http_extract_without_capture", "extract serve solo con captureAs")
+        }
+        if (!HttpCapturePolicy.isPointerValid(extract)) {
+            err(
+                "http_extract_invalid",
+                "Puntatore JSON non valido: inizia con /, al massimo ${HttpCapturePolicy.MAX_POINTER_CHARS} " +
+                    "caratteri, ~ solo come ~0 o ~1, niente \${…}",
+            )
+        }
+    }
+
+    /**
+     * 0.8: intestazioni e parametri dalla cassaforte. La regola porta solo nomi: nome del segreto
+     * `[a-z][a-z0-9_]{0,31}`, nome dell'intestazione con le regole di quelle letterali, prefisso letterale.
+     * Che il segreto esista lo controlla l'approvazione sul telefono (`secret_missing`), non il validatore.
+     */
+    private fun validateHttpSecrets(action: Action.HttpRequest, err: (String, String) -> Unit) {
+        val secretHeaders = action.secretHeaders.orEmpty()
+        val secretQuery = action.secretQuery.orEmpty()
+        if (secretHeaders.isEmpty() && secretQuery.isEmpty()) return
+        if (action.headers.orEmpty().size + secretHeaders.size > HttpRequestPolicy.MAX_HEADERS ||
+            secretQuery.size > HttpRequestPolicy.MAX_SECRET_QUERY
+        ) {
+            err(
+                "http_secrets_too_many",
+                "Massimo ${HttpRequestPolicy.MAX_HEADERS} intestazioni in tutto e " +
+                    "${HttpRequestPolicy.MAX_SECRET_QUERY} parametri segreti",
+            )
+        }
+        val refs = secretHeaders + secretQuery
+        if (refs.any { !SecretPolicy.isNameValid(it.secret) }) {
+            err("secret_name_invalid", "Nome del segreto non valido: [a-z][a-z0-9_]{0,31}")
+        }
+        val badHeader = secretHeaders.any { ref ->
+            !HttpRequestPolicy.isHeaderNameValid(ref.name) || HttpRequestPolicy.isHeaderNameForbidden(ref.name) ||
+                ref.name.lowercase(java.util.Locale.ROOT) == HttpRequestPolicy.CONTENT_TYPE_HEADER
+        }
+        val badQuery = secretQuery.any { !HttpRequestPolicy.isSecretQueryValid(it.copy(secret = "x")) }
+        val badPrefix = refs.any { !HttpRequestPolicy.isSecretPrefixValid(it.prefix) }
+        if (badHeader || badQuery || badPrefix || HttpRequestPolicy.secretQueryDuplicates(action)) {
+            err(
+                "http_secret_ref_invalid",
+                "Intestazione o parametro segreto non valido (nome, duplicato, Content-Type, o prefisso " +
+                    "oltre ${HttpRequestPolicy.MAX_SECRET_PREFIX_CHARS} caratteri o con \${…})",
+            )
+        }
+        if (HttpRequestPolicy.secretHeaderConflicts(action)) {
+            err(
+                "http_secret_header_conflict",
+                "Un'intestazione segreta ha lo stesso nome di un'altra intestazione",
+            )
         }
     }
 

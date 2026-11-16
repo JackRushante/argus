@@ -17,7 +17,7 @@ class HttpRequestPolicyTest {
     // --- URL ----------------------------------------------------------------------------------
 
     @Test
-    fun `https is required and http is allowed only for an exact loopback host`() {
+    fun `https is required and http is allowed only for loopback or the local network`() {
         assertTrue(HttpRequestPolicy.isUrlAllowed("https://example.org/path?q=1"))
         assertTrue(HttpRequestPolicy.isUrlAllowed("https://example.org:8443/x"))
         assertTrue(HttpRequestPolicy.isUrlAllowed("HTTPS://Example.ORG/"))
@@ -25,8 +25,14 @@ class HttpRequestPolicyTest {
         assertTrue(HttpRequestPolicy.isUrlAllowed("http://127.0.0.1/api"))
         assertTrue(HttpRequestPolicy.isUrlAllowed("http://[::1]:3000/api"))
 
+        // 0.8: the user's own network, judged from the host text only (LocalNetworkPolicy).
+        assertTrue(HttpRequestPolicy.isUrlAllowed("http://192.168.1.10/hook"))
+        assertTrue(HttpRequestPolicy.isUrlAllowed("http://homeassistant.local:8123/api"))
+        assertTrue(HttpRequestPolicy.isUrlAllowed("http://[fd00::1]/api"))
+
         assertFalse(HttpRequestPolicy.isUrlAllowed("http://example.org/hook"))
-        assertFalse(HttpRequestPolicy.isUrlAllowed("http://192.168.1.10/hook"))
+        assertFalse(HttpRequestPolicy.isUrlAllowed("http://8.8.8.8/hook"))
+        assertFalse(HttpRequestPolicy.isUrlAllowed("http://0x7f000001/hook"))
         assertFalse(HttpRequestPolicy.isUrlAllowed("http://localhost.evil.example/hook"))
         assertFalse(HttpRequestPolicy.isUrlAllowed("http://127.0.0.1.nip.io/hook"))
         assertFalse(HttpRequestPolicy.isUrlAllowed("ftp://example.org/file"))
