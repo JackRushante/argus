@@ -200,6 +200,18 @@ interface ExecutionJournalDao {
         since30Millis: Long,
     ): Flow<RuleFireStats>
 
+    /**
+     * Esiti delle ultime [limit] esecuzioni CONCLUSE di [automationId], dalla più recente (avvisi di
+     * salute, 0.7.2). Contano riuscite, fallite, parziali e interrotte; soppressioni, annullamenti e
+     * esecuzioni ancora aperte o in attesa non sono esiti e restano fuori. Sola lettura, nessuno schema nuovo.
+     */
+    @Query(
+        "SELECT status FROM fire_claims WHERE automationId = :automationId " +
+            "AND status IN ('SUCCEEDED', 'FAILED', 'PARTIAL', 'INTERRUPTED') " +
+            "ORDER BY claimedAtMillis DESC, executionId DESC LIMIT :limit",
+    )
+    suspend fun recentOutcomes(automationId: String, limit: Int): List<ExecutionStatus>
+
     @Query("SELECT COUNT(*) FROM fire_claims")
     suspend fun executionCount(): Int
 
