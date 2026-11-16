@@ -150,12 +150,15 @@ object TimeAlarmPlanner {
             "Automazione ARMED priva di fingerprint"
         }
         val afterMs = trigger.afterMs
+        // Un record persistito vale solo per la revisione approvata che l'ha prodotto: dopo una
+        // modifica riapprovata («tra 10 minuti» → «tra 3 ore») la vecchia ancora non va riusata.
+        val sameRevision = existing?.takeIf { it.approvalFingerprint == approvalFingerprint }
         val eventAt = if (trigger.solar != null) {
-            solarEventAt(trigger, after, existing?.takeIf { it.approvalFingerprint == approvalFingerprint })
+            solarEventAt(trigger, after, sameRevision)
         } else if (afterMs != null) {
             // Ritardo relativo: l'ancora si calcola UNA volta all'arm e poi si congela sul record
             // persistito. Senza questo freeze ogni reconcile ricalcolerebbe now+afterMs, slittando.
-            existing?.let { Instant.ofEpochMilli(it.eventAtMillis) } ?: after.plusMillis(afterMs)
+            sameRevision?.let { Instant.ofEpochMilli(it.eventAtMillis) } ?: after.plusMillis(afterMs)
         } else {
             TimeSpecs.nextFire(trigger, after) ?: return null
         }
@@ -225,6 +228,14 @@ class TimeAlarmCoordinator(
      */
     private val inFlight = mutableSetOf<AutomationId>()
 
+    /**
+     * Regole viste NON armate mentre il loro record persistito sopravviveva (pulizia rinviata: in
+     * volo o guasto di Room). Se tornano armate (riattivazione) quel record appartiene all'arming
+     * precedente: non si recupera come «dovuto» né se ne riusa l'ancora. Solo sotto [mutex]; dopo
+     * la morte del processo APP_START, con la regola ancora spenta, ripulisce comunque il record.
+     */
+    private val disarmed = mutableSetOf<AutomationId>()
+
     suspend fun reconcile(reason: ReconcileReason): ReconcileReport {
         val scheduled = mutableListOf<AutomationId>()
         val cancelled = mutableListOf<AutomationId>()
@@ -240,9 +251,10 @@ class TimeAlarmCoordinator(
                 .associateBy { it.id }
 
             state.all().sortedBy { it.automationId.value }.forEach { persisted ->
-                if (persisted.automationId in inFlight) return@forEach
                 if (persisted.automationId !in desired) {
-                    cancelAndForget(persisted.automationId)
+                    disarmed += persisted.automationId
+                    if (persisted.automationId in inFlight) return@forEach
+                    forgetDisarmed(persisted.automationId)
                     cancelled += persisted.automationId
                 }
             }
@@ -250,6 +262,14 @@ class TimeAlarmCoordinator(
             desired.values.sortedBy { it.id.value }.forEach { automation ->
                 if (automation.id in inFlight) return@forEach
                 var persisted = state.get(automation.id)
+                if (automation.id in disarmed) {
+                    // Riattivata dopo una pulizia rinviata: il record è dell'arming precedente.
+                    if (persisted != null) {
+                        cancelAndForget(automation.id)
+                        persisted = null
+                    }
+                    disarmed -= automation.id
+                }
                 if (persisted != null && persisted.eventAtMillis <= currentNow.toEpochMilli()) {
                     if (reason.recoverDueAlarm) {
                         dueRecoveries += automation.id to persisted.eventAtMillis
@@ -399,7 +419,7 @@ class TimeAlarmCoordinator(
         if (automation == null || trigger == null || automation.status != AutomationStatus.ARMED ||
             !automation.enabled
         ) {
-            cancelAndForget(automationId)
+            forgetDisarmed(automationId)
             return Preparation.Done(AlarmDeliveryResult.Ignored)
         }
         if (automation.approvalFingerprint != eventFingerprint) {
@@ -474,13 +494,15 @@ class TimeAlarmCoordinator(
         val recoveryRecord = prepared.recoveryRecord
         val envelope = prepared.envelope
         val currentNow = now()
+        // Chi completa decide dallo stato più recente: un disable visto durante il volo non conta più.
+        disarmed -= automationId
 
         val latest = store.get(automationId)
         val latestTrigger = latest?.trigger as? Trigger.Time
         if (latest == null || latestTrigger == null || latest.status != AutomationStatus.ARMED ||
             !latest.enabled
         ) {
-            cancelAndForget(automationId)
+            forgetDisarmed(automationId)
             return AlarmDeliveryResult.Delivered
         }
         if (latest.approvalFingerprint != eventFingerprint) {
@@ -620,6 +642,13 @@ class TimeAlarmCoordinator(
         } finally {
             state.delete(automationId)
         }
+    }
+
+    /** Pulizia di una regola non più armata: se fallisce, il marker [disarmed] resta acceso. */
+    private suspend fun forgetDisarmed(automationId: AutomationId) {
+        disarmed += automationId
+        cancelAndForget(automationId)
+        disarmed -= automationId
     }
 
     /** Registra SCHEDULING_FAILED col reason chiuso e restituisce l'esito di consegna fallito. */
