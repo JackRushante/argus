@@ -40,6 +40,9 @@ enum class ValueProvenance {
 
     /** 0.8 scaffold: la risposta di un server ([Action.HttpRequest] con `captureAs`). */
     NETWORK,
+
+    /** 0.8: il titolo di un evento del calendario ([Trigger.CalendarEvent]); un invito lo scrive un altro. */
+    CALENDAR,
 }
 
 fun joinIntegrity(a: IntegrityLabel, b: IntegrityLabel): IntegrityLabel =
@@ -222,6 +225,7 @@ fun VarBinding.provenance(trigger: Trigger): Set<ValueProvenance> = when (this) 
             PhoneEvent.INCOMING_CALL, PhoneEvent.CALL_ENDED, PhoneEvent.MISSED_CALL ->
                 setOf(ValueProvenance.PHONE)
         }
+        is Trigger.CalendarEvent -> setOf(ValueProvenance.CALENDAR)
         else -> emptySet() // DraftValidator impedisce questa combinazione.
     }
 }

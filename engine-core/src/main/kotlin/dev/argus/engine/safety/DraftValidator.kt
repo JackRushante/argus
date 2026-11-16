@@ -1,6 +1,7 @@
 package dev.argus.engine.safety
 
 import dev.argus.engine.model.*
+import dev.argus.engine.runtime.CalendarTriggerPlanner
 import dev.argus.engine.runtime.CronSchedule
 import dev.argus.engine.runtime.ProgramInterpreter
 import java.net.URI
@@ -54,6 +55,12 @@ class DraftValidator(
         private const val MAX_GEOFENCE_RADIUS_M = 100_000.0
         private const val MAX_LOITERING_MS = 86_400_000L
         private const val MAX_LLM_TIMEOUT_MS = 120_000L
+
+        // 0.8: condizioni di contesto e calendario. Un SSID è al massimo 32 byte, un nome Bluetooth 248.
+        private const val MAX_ZONE_ID_CHARS = 64
+        private const val MAX_SSID_CHARS = 32
+        private const val MAX_BLUETOOTH_DEVICE_CHARS = 248
+        private const val MAX_CALENDAR_FILTER_CHARS = 200
 
         /** Ritardo relativo one-shot (Trigger.Time.afterMs): da 1 secondo a 7 giorni. */
         const val MIN_DELAY_MS = 1_000L
@@ -313,6 +320,8 @@ class DraftValidator(
             PhoneEvent.SMS_RECEIVED -> setOf(TriggerField.TEXT, TriggerField.NUMBER)
             PhoneEvent.INCOMING_CALL, PhoneEvent.CALL_ENDED, PhoneEvent.MISSED_CALL -> setOf(TriggerField.NUMBER)
         }
+        // 0.8: il titolo dell'evento (dato esterno: un invito lo scrive un altro).
+        is Trigger.CalendarEvent -> setOf(TriggerField.TITLE)
         else -> emptySet()
     }
 
@@ -1011,7 +1020,15 @@ class DraftValidator(
             }
             // 0.8 scaffold: spenti (not_available_yet, vedi validate). Chi accende un trigger scrive qui i
             // suoi limiti; i sensori shake e flip_face_down passano già dal ramo Sensor.
-            is Trigger.CalendarEvent -> Unit
+            is Trigger.CalendarEvent -> {
+                if (trigger.offsetMinutes !in -CalendarTriggerPlanner.MAX_OFFSET_MINUTES..CalendarTriggerPlanner.MAX_OFFSET_MINUTES)
+                    err(
+                        "calendar_offset_invalid",
+                        "Offset calendario fuori da -${CalendarTriggerPlanner.MAX_OFFSET_MINUTES}.." +
+                            "${CalendarTriggerPlanner.MAX_OFFSET_MINUTES} minuti",
+                    )
+                validateCalendarFilters(trigger.titleMatch, trigger.calendar, err)
+            }
 
             is Trigger.NfcTag -> Unit
 
@@ -1088,20 +1105,45 @@ class DraftValidator(
             }
             // 0.8 scaffold: spente (not_available_yet, vedi validate). Chi accende una condizione scrive
             // qui i suoi limiti (un campo personale svuotato dall'export è "" e va rifiutato).
-            is Condition.Weekday -> Unit
+            is Condition.Weekday ->
+                if (condition.days.isEmpty() || !validZoneId(condition.tz))
+                    err("weekday_invalid", "Giorni della settimana: almeno un giorno e un fuso IANA valido")
 
-            is Condition.WifiConnected -> Unit
+            is Condition.WifiConnected -> condition.ssid?.let { ssid ->
+                if (!validContextText(ssid, MAX_SSID_CHARS))
+                    err("wifi_ssid_invalid", "Nome della rete Wi-Fi vuoto, troppo lungo o con caratteri di controllo")
+            }
 
-            is Condition.BluetoothConnected -> Unit
+            is Condition.BluetoothConnected -> condition.device?.let { device ->
+                if (!validContextText(device, MAX_BLUETOOTH_DEVICE_CHARS))
+                    err("bluetooth_device_invalid", "Dispositivo Bluetooth vuoto, troppo lungo o con caratteri di controllo")
+            }
 
             is Condition.HeadsetConnected -> Unit
 
-            is Condition.CalendarBusy -> Unit
+            is Condition.CalendarBusy -> validateCalendarFilters(condition.titleMatch, condition.calendar, err)
 
             is Condition.StoredCompare -> Unit
 
             is Condition.UserModeIs -> Unit
         }
+    }
+
+    // --- 0.8: condizioni di contesto e trigger del calendario ---------------------------------------
+
+    private fun validZoneId(tz: String): Boolean =
+        tz.length <= MAX_ZONE_ID_CHARS && runCatching { ZoneId.of(tz) }.isSuccess
+
+    /**
+     * Un filtro di testo letterale: non vuoto (il PersonalDataStripper lascia "" da completare), limitato,
+     * senza caratteri di controllo.
+     */
+    private fun validContextText(value: String, maxChars: Int): Boolean =
+        value.isNotBlank() && value.length <= maxChars && value.none(Char::isISOControl)
+
+    private fun validateCalendarFilters(titleMatch: String?, calendar: String?, err: (String, String) -> Unit) {
+        if (listOfNotNull(titleMatch, calendar).any { !validContextText(it, MAX_CALENDAR_FILTER_CHARS) })
+            err("calendar_filter_invalid", "Filtro del calendario vuoto, troppo lungo o con caratteri di controllo")
     }
 
     private fun validateStateCondition(c: Condition.StateEquals, err: (String, String) -> Unit) {
