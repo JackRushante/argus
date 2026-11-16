@@ -62,7 +62,8 @@ internal object ActionRowsUiSteps {
                 "Tocca l'elemento con ${criteria(step.text, step.id, step.desc, l)}$which",
             )
         }
-        is UiStep.Type -> l.pick("Type \"${step.text}\" in the focused field", "Scrivi \"${step.text}\" nel campo attivo")
+        // S8: un a capo nel testo diventa ⏎: non può imitare un passo in più della macro.
+        is UiStep.Type -> line(step.text).let { l.pick("Type \"$it\" in the focused field", "Scrivi \"$it\" nel campo attivo") }
         is UiStep.Scroll -> when (step.dir) {
             ScrollDirection.UP -> l.pick("Scroll up", "Scorri in su")
             ScrollDirection.DOWN -> l.pick("Scroll down", "Scorri in giù")
@@ -71,16 +72,19 @@ internal object ActionRowsUiSteps {
         UiStep.Home -> l.pick("Press Home", "Premi Home")
         is UiStep.Check -> if (step.present) {
             l.pick(
-                "Check that \"${step.text}\" is on the screen, otherwise stop",
-                "Controlla che \"${step.text}\" sia sullo schermo, altrimenti fermati",
+                "Check that \"${line(step.text)}\" is on the screen, otherwise stop",
+                "Controlla che \"${line(step.text)}\" sia sullo schermo, altrimenti fermati",
             )
         } else {
             l.pick(
-                "Check that \"${step.text}\" is NOT on the screen, otherwise stop",
-                "Controlla che \"${step.text}\" NON sia sullo schermo, altrimenti fermati",
+                "Check that \"${line(step.text)}\" is NOT on the screen, otherwise stop",
+                "Controlla che \"${line(step.text)}\" NON sia sullo schermo, altrimenti fermati",
             )
         }
     }
+
+    /** S8: ogni dato tra virgolette resta su una riga: la macro è resa un passo per riga. */
+    private fun line(text: String): String = VisibleText.singleLine(text)
 
     private fun seconds(timeoutMs: Int): String {
         val whole = timeoutMs / 1_000
@@ -91,9 +95,9 @@ internal object ActionRowsUiSteps {
     /** Criteri di ricerca, tutti quelli presenti, nell'ordine fisso testo · id · descrizione. */
     private fun criteria(text: String?, id: String?, desc: String?, l: RenderLanguage): String {
         val parts = buildList {
-            text?.let { add(l.pick("text \"$it\"", "testo \"$it\"")) }
-            id?.let { add(l.pick("id \"$it\"", "id \"$it\"")) }
-            desc?.let { add(l.pick("description \"$it\"", "descrizione \"$it\"")) }
+            text?.let(::line)?.let { add(l.pick("text \"$it\"", "testo \"$it\"")) }
+            id?.let(::line)?.let { add(l.pick("id \"$it\"", "id \"$it\"")) }
+            desc?.let(::line)?.let { add(l.pick("description \"$it\"", "descrizione \"$it\"")) }
         }
         return parts.joinToString(l.pick(" and ", " e "))
     }

@@ -727,7 +727,8 @@ object RuleRenderMapper {
         is Action.InputText -> row(
             iconKey = "input_text",
             label = l.pick("Type text", "Digita testo"),
-            detail = a.text,
+            // S8: un a capo nel testo da digitare si vede come ⏎.
+            detail = VisibleText.singleLine(a.text),
             requiresLiveConfirm = true,
         )
         is Action.WhatsAppReply -> row(

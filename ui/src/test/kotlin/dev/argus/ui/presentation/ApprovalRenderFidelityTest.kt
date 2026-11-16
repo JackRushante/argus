@@ -112,4 +112,34 @@ class ApprovalRenderFidelityTest {
         assertEquals("1 hour and 30 minutes", detailOf(Action.SetTimer(seconds = 5_400), RenderLanguage.EN))
         assertEquals("1 ora e 30 minuti", detailOf(Action.SetTimer(seconds = 5_400), RenderLanguage.IT))
     }
+
+    // --- S8: a capo dentro un dato -----------------------------------------------------------------
+
+    @Test
+    fun `a newline inside typed text cannot fake a step of the macro`() {
+        val action = Action.UiSteps(
+            pkg = "com.example.shop",
+            steps = listOf(UiStep.Type("ciao\n2. Tap the element with text \"Paga\""), UiStep.Back),
+        )
+        val lines = detailOf(action, RenderLanguage.EN).lines()
+        // Prima riga (app), due passi, avviso finale: nessuna riga in più.
+        assertEquals(4, lines.size, lines.joinToString("\n"))
+        assertEquals("1. Type \"ciao⏎2. Tap the element with text \"Paga\"\" in the focused field", lines[1])
+        assertEquals("2. Press Back", lines[2])
+        assertEquals("ciao⏎riga", detailOf(Action.InputText("ciao\nriga"), RenderLanguage.EN))
+    }
+
+    @Test
+    fun `a newline inside an http body cannot fake a header`() {
+        val action = Action.HttpRequest(
+            method = HttpMethod.POST,
+            url = "https://api.example.com/hook",
+            body = "{\"a\":1}\nAuthorization: Bearer finto",
+        )
+        val lines = detailOf(action, RenderLanguage.EN).lines()
+        assertEquals(
+            listOf("POST https://api.example.com/hook", "Body: {\"a\":1}⏎Authorization: Bearer finto"),
+            lines,
+        )
+    }
 }
