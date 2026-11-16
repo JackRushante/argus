@@ -9,6 +9,7 @@ import dev.argus.engine.model.Trigger
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /**
  * Vocabolario 0.8: finché un tipo è dietro un FeatureGate spento, il modello non lo deve mai vedere. Chi
@@ -22,7 +23,7 @@ class AgentMessageSupportScaffold08Test {
         "calendar_event", "nfc_tag", "next_alarm", "app_usage", "user_mode_changed",
         "weekday", "wifi_connected", "bluetooth_connected", "headset_connected", "calendar_busy",
         "stored_compare", "user_mode_is", "stored",
-        "ask", "set_stored", "set_user_mode", "notification_reply", "notification_action", "send_sms",
+        "ask", "set_stored", "set_user_mode", "send_sms",
         "call_number", "send_intent", "screen_call",
     )
 
@@ -36,10 +37,23 @@ class AgentMessageSupportScaffold08Test {
             .forEach { assertFalse(it in prompt, "il prompt nomina $it") }
     }
 
+    /** Gate accesi: i loro tipi hanno una riga di schema e non stanno più in [hiddenTypes]. */
+    private val switchedOn = setOf(
+        FeatureGate.ACTION_NOTIFICATION_REPLY,
+        FeatureGate.ACTION_NOTIFICATION_ACTION,
+    )
+
     @Test
     fun `every gate is still off, so this test still describes the prompt`() {
         // Quando un engineer accende un tipo, aggiorna anche [hiddenTypes] e questo elenco.
-        assertEquals(emptyList(), FeatureGate.entries.filter { it.enabled })
+        assertEquals(emptyList(), FeatureGate.entries.filter { it.enabled && it !in switchedOn })
+    }
+
+    @Test
+    fun `switched-on types have their schema line`() {
+        switchedOn.forEach { gate ->
+            assertTrue("{\"type\":\"${gate.wireName}\"" in prompt, "manca la riga di schema di ${gate.wireName}")
+        }
     }
 
     @Test
