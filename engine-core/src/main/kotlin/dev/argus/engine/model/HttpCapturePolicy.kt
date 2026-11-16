@@ -69,6 +69,10 @@ object HttpCapturePolicy {
 
     private fun pointed(body: String, pointer: String): Outcome {
         if (!isPointerValid(pointer)) return Outcome.Failed(PATH_MISSING)
+        // A pointer always goes into an object or an array. The parser reads some bare text as a string
+        // even when strict, so a body that does not open a JSON container is simply not JSON.
+        val start = body.trimStart()
+        if (!start.startsWith('{') && !start.startsWith('[')) return Outcome.Failed(NOT_JSON)
         val root: JsonElement = try {
             parser.parseToJsonElement(body)
         } catch (_: Exception) {
