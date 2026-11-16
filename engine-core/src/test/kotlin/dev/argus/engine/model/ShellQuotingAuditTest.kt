@@ -146,6 +146,10 @@ class ShellQuotingAuditTest {
             "printf '%s\\n' <x>",
             "echo -- <x>",
             "f=<x>; rm \"\$f\"",
+            "f=<x>; [[ \$f == a ]]",
+            "f=<x>; case \$f in a) :;; esac",
+            "f=<x>; g=\$f; echo \"\$g\"",
+            "f=<x>; for w in \$f; do echo \"\$w\"; done",
         )
         val wrong = failures(templates) { it in plain }
         assertTrue(wrong.isEmpty(), "bloccati senza motivo:\n" + wrong.joinToString("\n"))
@@ -154,7 +158,14 @@ class ShellQuotingAuditTest {
     @Test
     fun `a stored value expanded without quotes is not an inert argument`() {
         // `$f` senza apici subisce divisione in parole e glob: non è più "un solo argomento".
-        val wrong = failures(listOf("f=<x>; rm \$f", "f=<x>; ls -l \$f /sdcard")) { it !in plain }
+        val wrong = failures(
+            listOf(
+                "f=<x>; rm \$f",
+                "f=<x>; ls -l \$f /sdcard",
+                "f=<x>; echo hi > \$f",
+                "f=<x>; for w in \$f; do rm \$w; done",
+            ),
+        ) { it !in plain }
         assertTrue(wrong.isEmpty(), "riuso non quotato ammesso:\n" + wrong.joinToString("\n"))
     }
 }

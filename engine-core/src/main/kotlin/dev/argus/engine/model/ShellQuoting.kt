@@ -249,6 +249,9 @@ object ShellQuoting {
         /** Nomi letti con `$NOME` fuori dagli apici singoli. */
         val refs = LinkedHashSet<String>()
 
+        /** Sottoinsieme di [refs] letto fuori da OGNI apice: la shell lo divide in parole e ne espande i glob. */
+        val unquotedRefs = LinkedHashSet<String>()
+
         /** Contiene un'espansione della shell che non è un segnaposto (`$NOME`, `$1`, `$?`…). */
         var expansion = false
         var quoted = false
@@ -477,6 +480,7 @@ object ShellQuoting {
                     while (end < limit && !placeholderAt(end) && template[end].isNameChar()) end++
                     val name = template.substring(i + 1, end)
                     w.refs += name
+                    if (!inDouble) w.unquotedRefs += name
                     w.expansion = true
                     ("\$" + name).forEach { w.append(it, inDouble) }
                     i = end
@@ -814,6 +818,16 @@ object ShellQuoting {
                     markEverything(stdin, Context.REEVALUATED)
                 }
                 return
+            }
+            // Un dato conservato in una variabile della shell e riletto SENZA apici (`f=…; rm $f`) viene
+            // diviso in parole e i suoi glob espansi: non è più "un solo argomento". Resta inerte solo
+            // se è un intero. Fuori: `[[ … ]]` e la parola di `case` (nessuna divisione), le
+            // dichiarazioni (`export G=$f` non divide) e la lista di `for` (il dato prosegue nella
+            // variabile del ciclo, che è tracciata a sua volta).
+            if (name != "[[" && name != "case" && name != "for" && name != "select" && name !in DECLARATIONS) {
+                (arguments + command.redirects).forEach { w ->
+                    storedIn(w.unquotedRefs).forEach { mark(it, Context.NUMERIC) }
+                }
             }
             when (name) {
                 "[", "test" -> testOperands(arguments.filterNot { name == "[" && it === arguments.lastOrNull() && it.plain && it.text == "]" })
