@@ -101,6 +101,21 @@ class ConnectivityEventIngressTest {
     }
 
     @Test
+    fun `a renamed bluetooth device keeps its transition identity`() = runTest {
+        val store = MemoryConnectivityStateStore()
+        val events = mutableListOf<TriggerEnvelope>()
+        val ingress = ingress(store, events)
+
+        ingress.observe(ConnMedium.BT, ConnState.CONNECTED, "Auto", "AA:BB", 100)
+        ingress.observe(ConnMedium.BT, ConnState.CONNECTED, "Auto di Lia", "AA:BB", 500)
+
+        assertEquals(listOf(ConnState.CONNECTED, ConnState.CONNECTED), events.map {
+            (it.event as TriggerEvent.ConnectivityChanged).state
+        })
+        assertEquals(events[0].id, events[1].id)
+    }
+
+    @Test
     fun `a failed disconnect of the old network stays pending and the new network follows`() = runTest {
         val store = MemoryConnectivityStateStore()
         val delivered = mutableListOf<TriggerEvent.ConnectivityChanged>()

@@ -170,7 +170,10 @@ class ConnectivityEventIngress(
                 pending?.let(Step::Deliver)
             }
             previous.name == effectiveName -> null
-            previous.name == null -> {
+            // Bluetooth: l'identità è il dispositivo stesso, quindi un nome diverso è lo stesso
+            // dispositivo rinominato, non un'altra connessione. Il Wi-Fi ha un'identità unica per
+            // tutte le reti e il nome è ciò che le distingue.
+            previous.name == null || medium != ConnMedium.WIFI -> {
                 // Solo un nome che arriva dopo (null → nome) è un arricchimento della stessa
                 // transizione, come il doppio broadcast telefonia anonimo/numerato: stessa identità.
                 val enriched = parser.parse(
