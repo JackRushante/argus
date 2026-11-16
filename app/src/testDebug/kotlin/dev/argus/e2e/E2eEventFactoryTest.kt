@@ -76,6 +76,15 @@ class E2eEventFactoryTest {
         Trigger.ModeChanged(ModeKind.DND, to = "total"),
         Trigger.Media(MediaPlayState.PLAYING),
         Trigger.AppEvent("com.android.calculator2", AppEventKind.CLOSED),
+        // 0.8 scaffold: i trigger spenti hanno già il loro evento sintetico.
+        Trigger.Sensor(SensorKind.SHAKE),
+        Trigger.Sensor(SensorKind.FLIP_FACE_DOWN),
+        Trigger.CalendarEvent(dev.argus.engine.model.CalendarPhase.END, offsetMinutes = -5),
+        Trigger.NfcTag("04:AA:BB:CC"),
+        Trigger.NextAlarm(10),
+        Trigger.AppUsage("com.example.game", 30),
+        Trigger.UserModeChanged("lavoro"),
+        Trigger.UserModeChanged(),
     )
 
     @Test

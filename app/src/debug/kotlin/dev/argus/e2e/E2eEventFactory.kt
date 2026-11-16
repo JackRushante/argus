@@ -6,6 +6,7 @@ import dev.argus.engine.model.AppEventKind
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.AudioOutputKind
 import dev.argus.engine.model.Automation
+import dev.argus.engine.model.CalendarPhase
 import dev.argus.engine.model.ConnMedium
 import dev.argus.engine.model.ConnState
 import dev.argus.engine.model.MediaPlayState
@@ -48,6 +49,12 @@ fun triggerTypeOf(trigger: Trigger): String = when (trigger) {
     is Trigger.Media -> "media"
     is Trigger.Manual -> "manual"
     is Trigger.AppEvent -> "app_event"
+    // 0.8 scaffold: trigger spenti (il motore li rifiuta con not_available_yet), ma l'evento sintetico esiste.
+    is Trigger.CalendarEvent -> "calendar_event"
+    is Trigger.NfcTag -> "nfc_tag"
+    is Trigger.NextAlarm -> "next_alarm"
+    is Trigger.AppUsage -> "app_usage"
+    is Trigger.UserModeChanged -> "user_mode_changed"
 }
 
 /**
@@ -194,6 +201,37 @@ class E2eEventFactory(private val nowMillis: () -> Long = System::currentTimeMil
                     at,
                 )
             }
+            // --- 0.8 scaffold ---
+            "calendar_event" -> {
+                val phase = payload.enum<CalendarPhase>("phase")
+                    ?: (own as? Trigger.CalendarEvent)?.phase ?: CalendarPhase.START
+                registered(automation, type, at) { TriggerEvent.CalendarEventFired(automation.id, phase, it) }
+            }
+
+            "nfc_tag" -> devices.nfcTag(
+                payload.string("tagId") ?: (own as? Trigger.NfcTag)?.tagId?.takeIf { it.isNotEmpty() } ?: DEFAULT_TAG,
+                at,
+            )
+
+            "next_alarm" -> registered(automation, type, at) { TriggerEvent.NextAlarmFired(automation.id, it) }
+
+            "app_usage" -> {
+                val trigger = own as? Trigger.AppUsage
+                val threshold = trigger?.minutes ?: 1
+                devices.appUsage(
+                    payload.string("pkg") ?: trigger?.pkg ?: DEFAULT_PACKAGE,
+                    payload.int("previous") ?: (threshold - 1).coerceAtLeast(0),
+                    payload.int("current") ?: threshold,
+                    at,
+                )
+            }
+
+            "user_mode_changed" -> devices.userMode(
+                payload.string("to") ?: (own as? Trigger.UserModeChanged)?.to ?: DEFAULT_MODE,
+                payload.string("from"),
+                at,
+            )
+
             else -> return E2eEventResult.Invalid("unknown_event_type")
         }
         return if (built == null) E2eEventResult.Invalid("event_rejected_by_parser") else E2eEventResult.Built(built, type)
@@ -212,6 +250,8 @@ class E2eEventFactory(private val nowMillis: () -> Long = System::currentTimeMil
     private companion object {
         const val DEFAULT_PACKAGE = "com.example.e2e"
         const val DEFAULT_NUMBER = "+393331234567"
+        const val DEFAULT_TAG = "04:E2:E0:00:00:00:01"
+        const val DEFAULT_MODE = "e2e"
     }
 }
 
