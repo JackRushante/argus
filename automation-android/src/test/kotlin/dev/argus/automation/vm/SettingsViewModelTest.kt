@@ -295,6 +295,85 @@ class SettingsViewModelTest {
         assertNull(call.apiKey, "una save con apiKey null non deve inviare una scrittura di chiave")
     }
 
+    // --- S6: la chiave salvata non parte verso un altro server ---
+
+    @Test
+    fun `a new server origin without a new key removes the saved key and says so`() = runTest(dispatcher) {
+        val store = FakeProviderStore().apply {
+            seed(ProviderId.CUSTOM_OPENAI_COMPAT, baseUrl = "https://api.cloud.example/v1", key = "sk-cloud-1234567890")
+        }
+        val vm = settingsViewModel(store, language = RenderLanguage.EN)
+        observe(vm)
+        val messages = collectMessages(vm)
+        advanceUntilIdle()
+
+        vm.saveProviderConfig("custom_openai_compat", baseUrl = "http://127.0.0.1:11434/v1", model = "qwen", apiKey = null)
+        advanceUntilIdle()
+
+        assertFalse(store.hasApiKeyBlocking(ProviderId.CUSTOM_OPENAI_COMPAT))
+        assertTrue(
+            messages.any { "the saved key was removed" in it },
+            messages.toString(),
+        )
+    }
+
+    @Test
+    fun `the same origin or a new key keeps the key without a notice`() = runTest(dispatcher) {
+        val store = FakeProviderStore().apply {
+            seed(ProviderId.CUSTOM_OPENAI_COMPAT, baseUrl = "https://api.cloud.example/v1", key = "sk-cloud-1234567890")
+        }
+        val vm = settingsViewModel(store, language = RenderLanguage.EN)
+        observe(vm)
+        val messages = collectMessages(vm)
+        advanceUntilIdle()
+
+        vm.saveProviderConfig("custom_openai_compat", baseUrl = "https://api.cloud.example/v2", model = "qwen", apiKey = null)
+        advanceUntilIdle()
+        assertTrue(store.hasApiKeyBlocking(ProviderId.CUSTOM_OPENAI_COMPAT))
+
+        vm.saveProviderConfig("custom_openai_compat", baseUrl = "http://127.0.0.1:11434/v1", model = "qwen", apiKey = "local")
+        advanceUntilIdle()
+        assertTrue(store.hasApiKeyBlocking(ProviderId.CUSTOM_OPENAI_COMPAT))
+        assertTrue(messages.none { "key was removed" in it }, messages.toString())
+    }
+
+    @Test
+    fun `remove key clears the saved key of that provider`() = runTest(dispatcher) {
+        val store = FakeProviderStore().apply {
+            seed(ProviderId.OPENAI, key = "sk-existing-1234567890")
+            seed(ProviderId.ANTHROPIC, key = "sk-ant-existing-1234567890")
+        }
+        val vm = settingsViewModel(store, language = RenderLanguage.EN)
+        observe(vm)
+        val messages = collectMessages(vm)
+        advanceUntilIdle()
+
+        vm.removeProviderKey("openai")
+        advanceUntilIdle()
+
+        assertFalse(store.hasApiKeyBlocking(ProviderId.OPENAI))
+        assertTrue(store.hasApiKeyBlocking(ProviderId.ANTHROPIC))
+        assertEquals("Key removed.", messages.last())
+    }
+
+    @Test
+    fun `the bridge refuses a new server without a new bearer and keeps the old one`() = runTest(dispatcher) {
+        val store = FakeProviderStore().apply {
+            seed(ProviderId.HERMES, baseUrl = "https://hermes.old", key = "bearer-existing-0123456789")
+        }
+        val vm = settingsViewModel(store, language = RenderLanguage.EN)
+        observe(vm)
+        val messages = collectMessages(vm)
+        advanceUntilIdle()
+
+        vm.saveBridge("https://hermes.other", null)
+        advanceUntilIdle()
+
+        assertEquals("https://hermes.old", store.providerConfig(ProviderId.HERMES).baseUrl)
+        assertTrue(store.hasApiKeyBlocking(ProviderId.HERMES))
+        assertEquals("The server address changed: enter the bearer again.", messages.last())
+    }
+
     @Test
     fun `la chiave API non compare mai nello stato UI`() = runTest(dispatcher) {
         val store = FakeProviderStore()

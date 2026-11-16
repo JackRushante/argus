@@ -77,6 +77,14 @@ class AndroidProviderConfigStore(context: Context) : ProviderConfigStore {
         synchronized(lock) {
             runCatching {
                 val editor = preferences.edit()
+                // S6: verso un'altra origine la chiave salvata non si porta dietro. Senza una chiave nuova
+                // si cancella (anche il ciphertext legacy di Hermes, che apiKey() rileggerebbe).
+                if (normalizedBase != null && apiKey == null &&
+                    !ProviderPrefsSchema.sameOrigin(providerConfig(id).baseUrl, normalizedBase)
+                ) {
+                    editor.remove(ProviderPrefsSchema.apiKeyKey(id))
+                    if (id == ProviderId.HERMES) editor.remove(ProviderPrefsSchema.LEGACY_KEY_BEARER)
+                }
                 if (normalizedBase != null) editor.putString(ProviderPrefsSchema.baseUrlKey(id), normalizedBase)
                 if (model != null) editor.putString(ProviderPrefsSchema.modelKey(id), model)
                 if (reasoningEffort != null) {

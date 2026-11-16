@@ -500,6 +500,16 @@ class SettingsViewModel @Inject constructor(
     fun saveBridge(url: String, bearer: String?) {
         viewModelScope.launch {
             try {
+                // S6: verso un altro server il bearer salvato non si riusa.
+                if (bearer == null && configuration.baseUrlChangesOrigin(ProviderId.HERMES, url)) {
+                    message(
+                        language.pick(
+                            "The server address changed: enter the bearer again.",
+                            "L'indirizzo del server è cambiato: inserisci di nuovo il bearer.",
+                        ),
+                    )
+                    return@launch
+                }
                 if (!configuration.saveConfiguration(url, bearer)) {
                     message(
                         language.pick(
@@ -597,12 +607,25 @@ class SettingsViewModel @Inject constructor(
         val strippedSuffix = strippedBaseUrl != null
         viewModelScope.launch {
             try {
+                // S6: un indirizzo con un'altra origine e nessuna chiave nuova = la chiave salvata si toglie
+                // (lo fa anche lo store), e l'utente lo sa.
+                val dropsKey = apiKey == null && cleanBaseUrl != null &&
+                    configuration.baseUrlChangesOrigin(id, cleanBaseUrl) && configuration.hasApiKey(id)
                 if (!configuration.saveProviderConfig(
                         id, baseUrl = cleanBaseUrl, model = model, apiKey = apiKey, reasoningEffort = effort,
                     )
                 ) {
                     message(language.pick("Invalid configuration.", "Configurazione non valida."))
                     return@launch
+                }
+                if (dropsKey) {
+                    configuration.clearApiKey(id)
+                    message(
+                        language.pick(
+                            "The server address changed, so the saved key was removed. Enter it again if the new server needs it.",
+                            "L'indirizzo del server è cambiato, quindi la chiave salvata è stata tolta. Inseriscila di nuovo se il nuovo server la richiede.",
+                        ),
+                    )
                 }
                 if (strippedSuffix) {
                     message(
@@ -629,6 +652,26 @@ class SettingsViewModel @Inject constructor(
                     ),
                 )
             }
+        }
+    }
+
+    /** «Rimuovi chiave» del foglio del provider (S6): la chiave salvata si cancella dallo storage cifrato. */
+    fun removeProviderKey(wireName: String) {
+        val id = ProviderId.fromWireName(wireName) ?: run {
+            mutableMessages.tryEmit(language.pick("Unknown provider.", "Provider sconosciuto."))
+            return
+        }
+        viewModelScope.launch {
+            val removed = cancellationSafeOrNull { configuration.clearApiKey(id) } == true
+            message(
+                if (removed) {
+                    language.pick("Key removed.", "Chiave rimossa.")
+                } else {
+                    language.pick("Unable to remove the key.", "Impossibile rimuovere la chiave.")
+                },
+            )
+            bridgeHealth.value = BridgeUiHealth()
+            refresh()
         }
     }
 
