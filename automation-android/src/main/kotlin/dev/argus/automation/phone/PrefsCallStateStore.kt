@@ -33,44 +33,16 @@ class PrefsCallStateStore(context: Context) : CallStateStore {
         )
     }.getOrNull()
 
-    override fun pending(): TriggerEnvelope? = runCatching {
-        val id = requireNotNull(prefs.getString(KEY_PENDING_ID, null))
-        require(id.matches(EVENT_ID_PATTERN))
-        val event = PhoneEvent.valueOf(requireNotNull(prefs.getString(KEY_PENDING_EVENT, null)))
-        require(
-            event == PhoneEvent.INCOMING_CALL || event == PhoneEvent.CALL_ENDED ||
-                event == PhoneEvent.MISSED_CALL,
-        )
-        val number = readBoundedNumber(KEY_PENDING_NUMBER)
-        TriggerEnvelope(
-            TriggerEventId(id),
-            TriggerEvent.PhoneStateChanged(event, number, smsText = null, sim = readSim(KEY_PENDING_SIM)),
-        )
-    }.getOrNull()
+    override fun pending(): TriggerEnvelope? = readPending(HEAD)
 
-    override fun record(snapshot: CallStateSnapshot, pending: TriggerEnvelope?) {
+    override fun record(snapshot: CallStateSnapshot, pending: TriggerEnvelope?, next: TriggerEnvelope?) {
         require(snapshot.state in VALID_STATES) { "phone_state_invalid" }
         require(snapshot.transitionAtMillis >= 0) { "phone_transition_time_invalid" }
         require(snapshot.number.isBoundedNumber()) { "phone_number_invalid" }
         require(snapshot.sim.isValidSim()) { "phone_sim_invalid" }
-        val pendingEvent = pending?.let {
-            require(it.id.value.matches(EVENT_ID_PATTERN)) { "phone_pending_id_invalid" }
-            requireNotNull(it.event as? TriggerEvent.PhoneStateChanged)
-                .also { event ->
-                    require(event.smsText == null && event.event != PhoneEvent.SMS_RECEIVED) {
-                        "phone_pending_event_invalid"
-                    }
-                    require(event.number.isBoundedNumber()) { "phone_pending_number_invalid" }
-                    require(event.sim.isValidSim()) { "phone_pending_sim_invalid" }
-                    require(
-                        (event.event == PhoneEvent.INCOMING_CALL && snapshot.state == "RINGING") ||
-                            (
-                                (event.event == PhoneEvent.CALL_ENDED || event.event == PhoneEvent.MISSED_CALL) &&
-                                    snapshot.state == "IDLE"
-                                ),
-                    ) { "phone_pending_snapshot_mismatch" }
-                }
-        }
+        require(next == null || pending != null) { "phone_pending_next_without_head" }
+        val pendingEvent = pending?.let { validPending(it, snapshot) }
+        val nextEvent = next?.let { validPending(it, snapshot) }
         val persisted = prefs.edit()
             .putString(KEY_LAST_STATE, snapshot.state)
             .putLong(KEY_TRANSITION_AT, snapshot.transitionAtMillis)
@@ -79,31 +51,92 @@ class PrefsCallStateStore(context: Context) : CallStateStore {
                 val sim = snapshot.sim
                 if (sim == null) remove(KEY_SIM) else putInt(KEY_SIM, sim)
                 if (pending == null || pendingEvent == null) {
-                    removePending()
+                    removePending(HEAD)
                 } else {
-                    putString(KEY_PENDING_ID, pending.id.value)
-                    putString(KEY_PENDING_EVENT, pendingEvent.event.name)
-                    if (pendingEvent.number == null) remove(KEY_PENDING_NUMBER)
-                    else putString(KEY_PENDING_NUMBER, pendingEvent.number)
-                    val pendingSim = pendingEvent.sim
-                    if (pendingSim == null) remove(KEY_PENDING_SIM) else putInt(KEY_PENDING_SIM, pendingSim)
+                    putPending(HEAD, pending, pendingEvent)
+                }
+                if (next == null || nextEvent == null) {
+                    removePending(NEXT)
+                } else {
+                    putPending(NEXT, next, nextEvent)
                 }
             }
             .commit()
         check(persisted) { "phone_state_persist_failed" }
     }
 
+    /** Completa la testa della coda; il successivo (MISSED_CALL dopo CALL_ENDED) prende il suo posto. */
     override fun complete(eventId: String) {
-        require(prefs.getString(KEY_PENDING_ID, null) == eventId) { "phone_pending_stale" }
-        check(prefs.edit().apply { removePending() }.commit()) { "phone_state_persist_failed" }
+        require(prefs.getString(HEAD.id, null) == eventId) { "phone_pending_stale" }
+        val next = readPending(NEXT)
+        val nextEvent = next?.event as? TriggerEvent.PhoneStateChanged
+        check(
+            prefs.edit().apply {
+                removePending(HEAD)
+                removePending(NEXT)
+                if (next != null && nextEvent != null) putPending(HEAD, next, nextEvent)
+            }.commit(),
+        ) { "phone_state_persist_failed" }
     }
 
-    private fun android.content.SharedPreferences.Editor.removePending() {
-        remove(KEY_PENDING_ID)
-        remove(KEY_PENDING_EVENT)
-        remove(KEY_PENDING_NUMBER)
-        remove(KEY_PENDING_SIM)
+    private fun validPending(
+        envelope: TriggerEnvelope,
+        snapshot: CallStateSnapshot,
+    ): TriggerEvent.PhoneStateChanged {
+        require(envelope.id.value.matches(EVENT_ID_PATTERN)) { "phone_pending_id_invalid" }
+        return requireNotNull(envelope.event as? TriggerEvent.PhoneStateChanged)
+            .also { event ->
+                require(event.smsText == null && event.event != PhoneEvent.SMS_RECEIVED) {
+                    "phone_pending_event_invalid"
+                }
+                require(event.number.isBoundedNumber()) { "phone_pending_number_invalid" }
+                require(event.sim.isValidSim()) { "phone_pending_sim_invalid" }
+                require(
+                    (event.event == PhoneEvent.INCOMING_CALL && snapshot.state == "RINGING") ||
+                        (
+                            (event.event == PhoneEvent.CALL_ENDED || event.event == PhoneEvent.MISSED_CALL) &&
+                                snapshot.state == "IDLE"
+                            ),
+                ) { "phone_pending_snapshot_mismatch" }
+            }
     }
+
+    private fun readPending(slot: PendingSlot): TriggerEnvelope? = runCatching {
+        val id = requireNotNull(prefs.getString(slot.id, null))
+        require(id.matches(EVENT_ID_PATTERN))
+        val event = PhoneEvent.valueOf(requireNotNull(prefs.getString(slot.event, null)))
+        require(
+            event == PhoneEvent.INCOMING_CALL || event == PhoneEvent.CALL_ENDED ||
+                event == PhoneEvent.MISSED_CALL,
+        )
+        val number = readBoundedNumber(slot.number)
+        TriggerEnvelope(
+            TriggerEventId(id),
+            TriggerEvent.PhoneStateChanged(event, number, smsText = null, sim = readSim(slot.sim)),
+        )
+    }.getOrNull()
+
+    private fun android.content.SharedPreferences.Editor.putPending(
+        slot: PendingSlot,
+        envelope: TriggerEnvelope,
+        event: TriggerEvent.PhoneStateChanged,
+    ) {
+        putString(slot.id, envelope.id.value)
+        putString(slot.event, event.event.name)
+        if (event.number == null) remove(slot.number) else putString(slot.number, event.number)
+        val sim = event.sim
+        if (sim == null) remove(slot.sim) else putInt(slot.sim, sim)
+    }
+
+    private fun android.content.SharedPreferences.Editor.removePending(slot: PendingSlot) {
+        remove(slot.id)
+        remove(slot.event)
+        remove(slot.number)
+        remove(slot.sim)
+    }
+
+    /** Chiavi di uno slot della coda pending: la testa usa le chiavi storiche (compatibilità). */
+    private class PendingSlot(val id: String, val event: String, val number: String, val sim: String)
 
     private fun readBoundedNumber(storageKey: String): String? {
         val value = prefs.getString(storageKey, null) ?: return null
@@ -130,6 +163,13 @@ class PrefsCallStateStore(context: Context) : CallStateStore {
         const val KEY_PENDING_NUMBER = "pending_call_number"
         const val KEY_SIM = "last_call_sim"
         const val KEY_PENDING_SIM = "pending_call_sim"
+        private val HEAD = PendingSlot(KEY_PENDING_ID, KEY_PENDING_EVENT, KEY_PENDING_NUMBER, KEY_PENDING_SIM)
+        private val NEXT = PendingSlot(
+            "next_call_event_id",
+            "next_call_event",
+            "next_call_number",
+            "next_call_sim",
+        )
         val VALID_STATES = setOf("RINGING", "OFFHOOK", "IDLE")
         val EVENT_ID_PATTERN = Regex("^phone:[0-9a-f]{64}$")
         const val MAX_NUMBER_CHARS = 32

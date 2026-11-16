@@ -22,8 +22,8 @@ class ReplyBurst(val messages: List<BurstMessage>) {
 interface ReplyBurstSource {
     /**
      * La raffica della conversazione a partire dall'evento [firstEventId] (incluso), oppure `null`
-     * se non c'è più un canale attivo per la conversazione. Se [firstEventId] non è più nel log
-     * restituisce soltanto l'ultimo messaggio.
+     * se non c'è più un canale attivo per la conversazione. Se [firstEventId] non è più nel log (il log
+     * è limitato e il primo esce per primo) restituisce tutti i messaggi rimasti, tutti successivi a lui.
      */
     fun burst(
         notificationKey: String,

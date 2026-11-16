@@ -2,7 +2,9 @@ package dev.argus.engine.safety
 
 import dev.argus.engine.model.*
 import dev.argus.engine.runtime.CronSchedule
+import dev.argus.engine.runtime.ProgramInterpreter
 import java.net.URI
+import java.time.Clock
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
@@ -31,6 +33,8 @@ class DraftValidator(
     private val knownTools: Set<String>,
     private val stateKeys: Set<String> = StateKeys.ALL.keys,
     private val deniedNotificationPackages: Set<String> = setOf(ARGUS_PACKAGE),
+    /** Solo per il controllo `cron_never_fires`: un cron deve avere uno scatto nell'orizzonte da adesso. */
+    private val clock: Clock = Clock.systemUTC(),
 ) {
     companion object {
         val FORBIDDEN_IN_INVOKE_LLM = setOf("shell.run", "app.install")
@@ -173,6 +177,12 @@ class DraftValidator(
 
         if (tree.hasGenerative && d.cooldownMs < 60_000)
             warn("cooldown_raised", "Cooldown sotto 60 s su regola generativa: l'engine imporrà 60 s")
+        if (tree.hasGenerativeInLoop)
+            warn(
+                "generative_in_loop",
+                "Chiamata AI dentro un ciclo: può ripetersi a ogni giro, fino a " +
+                    "${ProgramInterpreter.MAX_GENERATIVE_CALLS_PER_EXECUTION} chiamate per scatto",
+            )
 
         return issues
     }
@@ -305,13 +315,15 @@ class DraftValidator(
         val confidentiality: ConfidentialityLabel,
     )
 
-    private data class ActionFrame(val action: Action, val depth: Int)
+    private data class ActionFrame(val action: Action, val depth: Int, val inLoop: Boolean = false)
     private data class ActionTreeSummary(
         val totalActions: Int,
         val captures: List<CaptureDeclaration>,
         val tooDeep: Boolean,
         val hasGenerative: Boolean,
         val hasInvokeLlmV2: Boolean,
+        /** Una chiamata AI dentro un `while`: può partire una volta per giro (tetto per esecuzione). */
+        val hasGenerativeInLoop: Boolean = false,
     )
 
     /** Preflight iterativo: nessuna ricorsione prima del bound profondità/numero nodi. */
@@ -326,8 +338,9 @@ class DraftValidator(
         var tooDeep = false
         var hasGenerative = false
         var hasInvokeLlmV2 = false
+        var hasGenerativeInLoop = false
         while (pending.isNotEmpty()) {
-            val (action, depth) = pending.removeFirst()
+            val (action, depth, inLoop) = pending.removeFirst()
             total = (total + 1).coerceAtMost(MAX_TOTAL_ACTIONS + 1)
             if (depth > MAX_FLOW_DEPTH) {
                 if (!tooDeep) err("flow_too_deep", "Annidamento if/while oltre profondità $MAX_FLOW_DEPTH")
@@ -336,20 +349,24 @@ class DraftValidator(
             }
             captureDeclaration(action)?.let(captures::add)
             when (action) {
-                is Action.InvokeLlm -> hasGenerative = true
+                is Action.InvokeLlm -> {
+                    hasGenerative = true
+                    if (inLoop) hasGenerativeInLoop = true
+                }
                 is Action.InvokeLlmV2 -> {
                     hasGenerative = true
                     hasInvokeLlmV2 = true
+                    if (inLoop) hasGenerativeInLoop = true
                 }
                 is Action.If -> {
-                    action.then.forEach { pending.addLast(ActionFrame(it, depth + 1)) }
-                    action.orElse.forEach { pending.addLast(ActionFrame(it, depth + 1)) }
+                    action.then.forEach { pending.addLast(ActionFrame(it, depth + 1, inLoop)) }
+                    action.orElse.forEach { pending.addLast(ActionFrame(it, depth + 1, inLoop)) }
                 }
-                is Action.While -> action.body.forEach { pending.addLast(ActionFrame(it, depth + 1)) }
+                is Action.While -> action.body.forEach { pending.addLast(ActionFrame(it, depth + 1, inLoop = true)) }
                 else -> Unit
             }
         }
-        return ActionTreeSummary(total, captures, tooDeep, hasGenerative, hasInvokeLlmV2)
+        return ActionTreeSummary(total, captures, tooDeep, hasGenerative, hasInvokeLlmV2, hasGenerativeInLoop)
     }
 
     private fun captureDeclaration(action: Action): CaptureDeclaration? = when (action) {
@@ -619,6 +636,8 @@ class DraftValidator(
         err: (String, String) -> Unit,
         warn: (String, String) -> Unit,
     ) {
+        // Visita ogni azione (anche annidata) come questo controllo: qui anche i caratteri invisibili.
+        warnInvisibleCharacters(action, warn)
         for (field in InterpolationPolicy.textFields(action)) {
             if (!InterpolationPolicy.containsInterpolation(field.value)) continue
             val parsed = InterpolationPolicy.parse(field.value)
@@ -667,18 +686,48 @@ class DraftValidator(
             // del template non è quotabile in sicurezza l'azione verrebbe bloccata: meglio dirlo ora.
             if (field.shellQuoted && !parsed.malformed) {
                 val references = InterpolationPolicy.references(field.value)
-                val contexts = ShellQuoting.contexts(field.value, references.map { it.range })
-                val unquotable = references.indices.any { index ->
+                val placements = ShellQuoting.placements(field.value, references.map { it.range })
+                val external = references.indices.filter { index ->
                     val name = references[index].name
-                    contexts[index] == ShellQuoting.Context.UNSAFE && name in knownVars &&
-                        declaredIntegrity[name] != IntegrityLabel.CLEAN
+                    name in knownVars && declaredIntegrity[name] != IntegrityLabel.CLEAN
+                }.map { placements[it] }
+                val contexts = external.mapTo(mutableSetOf()) { it.context }
+                // S3: il dato sceglierebbe il programma, o il comando lo rilegge come codice: l'azione
+                // non potrebbe mai partire, quindi è un errore.
+                if (ShellQuoting.Context.COMMAND_POSITION in contexts) {
+                    err(
+                        "interpolation_shell_command_position",
+                        "Un dato esterno è nella posizione del nome del comando: sceglierebbe quale programma parte",
+                    )
                 }
-                if (unquotable) {
+                if (ShellQuoting.Context.REEVALUATED in contexts) {
+                    err(
+                        "interpolation_shell_reevaluated",
+                        "Un dato esterno è passato a un comando che lo rilegge come codice " +
+                            "(sh -c, eval, su, xargs, awk, sed, find -exec…): gli apici non lo proteggono",
+                    )
+                }
+                if (ShellQuoting.Context.UNSAFE in contexts) {
                     warn(
                         "interpolation_shell_context",
                         "Un dato esterno è usato in un punto del comando shell che non si può quotare " +
-                            "in sicurezza (sostituzione di comando, backtick, here-doc o commento): " +
-                            "a runtime l'azione sarebbe bloccata",
+                            "in sicurezza (sostituzione di comando, backtick, here-doc, commento, nome di " +
+                            "variabile o numero con altro testo attaccato): a runtime l'azione sarebbe bloccata",
+                    )
+                }
+                // S2: dove la shell valuta un numero, solo un intero passa a runtime.
+                if (ShellQuoting.Context.NUMERIC in contexts) {
+                    warn(
+                        "interpolation_shell_numeric",
+                        "Un dato esterno è usato dove la shell calcola un numero: a runtime deve essere " +
+                            "un numero intero, altrimenti l'azione si blocca",
+                    )
+                }
+                if (external.any { it.optionLike }) {
+                    warn(
+                        "interpolation_shell_option",
+                        "Un dato esterno apre un argomento del comando senza un `--` prima: un valore che " +
+                            "inizia con `-` sarebbe letto come un'opzione",
                     )
                 }
             }
@@ -704,7 +753,8 @@ class DraftValidator(
                 }
             }
         }
-        // D2: la scrittura di un'impostazione guidata da un dato esterno (messaggio o notifica).
+        // D2: la scrittura di un'impostazione guidata da un dato esterno (messaggio, notifica, testo
+        // letto dal telefono, uscita catturata).
         if (action is Action.WriteSetting) {
             val external = InterpolationPolicy.textFields(action)
                 .flatMap { InterpolationPolicy.parse(it.value).refs }
@@ -712,9 +762,40 @@ class DraftValidator(
             if (external) {
                 warn(
                     "write_setting_external_value",
-                    "Il valore scritto arriva da un dato esterno (messaggio o notifica).",
+                    "Il valore scritto arriva da un dato esterno (messaggio, notifica o testo letto dal telefono).",
                 )
             }
+        }
+    }
+
+    /**
+     * Caratteri che non si vedono o che cambiano la direzione del testo (categorie Cf, Zl, Zp e i
+     * controlli Cc) nei campi che danno autorità: la review mostrerebbe un comando, un indirizzo o
+     * un'impostazione diversi da quelli che girano. Nel comando shell tab e a capo sono normali.
+     */
+    private fun warnInvisibleCharacters(action: Action, warn: (String, String) -> Unit) {
+        val fields: List<Pair<String, Boolean>> = when (action) {
+            is Action.RunShell -> listOf(action.cmd to true)
+            is Action.OpenUrl -> listOf(action.url to false)
+            is Action.HttpRequest -> listOf(action.url to false) + action.headers.orEmpty().values.map { it to false }
+            is Action.WriteSetting -> listOf(action.key to false, action.value to false)
+            else -> emptyList()
+        }
+        val hidden = fields.any { (text, shell) ->
+            text.codePoints().anyMatch { code ->
+                when (Character.getType(code).toByte()) {
+                    Character.FORMAT, Character.LINE_SEPARATOR, Character.PARAGRAPH_SEPARATOR -> true
+                    Character.CONTROL -> !(shell && (code == '\t'.code || code == '\n'.code))
+                    else -> false
+                }
+            }
+        }
+        if (hidden) {
+            warn(
+                "invisible_characters",
+                "Il comando, l'indirizzo o l'impostazione contiene caratteri invisibili o che cambiano " +
+                    "la direzione del testo: quello che vedi può non essere quello che viene eseguito",
+            )
         }
     }
 
@@ -764,6 +845,14 @@ class DraftValidator(
                 trigger.cron?.let { cron ->
                     runCatching { CronSchedule.parse(cron) }
                         .onFailure { err("cron_invalid", "Cron '$cron' non valido: ${it.message}") }
+                        .onSuccess { schedule ->
+                            // Una data che non esiste (30 febbraio, 31 aprile) si armerebbe senza mai
+                            // scattare: stesso orizzonte di ricerca del motore. Con un fuso non valido
+                            // decide già tz_invalid.
+                            val zone = runCatching { ZoneId.of(trigger.tz) }.getOrNull()
+                            if (zone != null && schedule.nextFireAfter(clock.instant(), zone) == null)
+                                err("cron_never_fires", "Cron '$cron' non ha nessuno scatto: la data non esiste")
+                        }
                 }
                 trigger.at?.let { at ->
                     runCatching { LocalDateTime.parse(at) }
@@ -1023,8 +1112,13 @@ class DraftValidator(
             is Action.LaunchApp -> if (!InterpolationPolicy.containsInterpolation(action.pkg)) {
                 validatePackage(action.pkg, "package_invalid", err)
             }
-            is Action.OpenUrl -> if (!InterpolationPolicy.containsInterpolation(action.url) && !validHttpUrl(action.url))
-                err("url_invalid", "URL non valido o schema non consentito")
+            is Action.OpenUrl -> when {
+                // `https://banca.example@altro.example/` si legge come la banca ma apre l'altro host.
+                urlHasUserInfo(action.url) ->
+                    err("url_userinfo", "L'URL contiene un nome o credenziali prima di @: non è ammesso")
+                !InterpolationPolicy.containsInterpolation(action.url) && !validHttpUrl(action.url) ->
+                    err("url_invalid", "URL non valido o schema non consentito")
+            }
             is Action.ShowNotification -> {
                 validateRequiredText(action.title, 120, "title_invalid", err)
                 // Il corpo può restare vuoto (notifica di solo titolo, come ammette il bridge):
@@ -1124,7 +1218,10 @@ class DraftValidator(
             is Action.WriteSetting -> {
                 // PARAMETRICA (D0: nessuna allowlist di chiavi). Solo validazione di forma via
                 // WriteSettingPolicy: key stile QUERY_NAME, value bounded, control char rifiutati.
-                if (!InterpolationPolicy.containsInterpolation(action.key) && !WriteSettingPolicy.validKey(action.key))
+                // S7: la chiave è sempre letterale, così il controllo "alto impatto" vede quella vera.
+                if (InterpolationPolicy.containsInterpolation(action.key))
+                    err("write_setting_key_interpolated", "La chiave dell'impostazione deve essere letterale, senza variabili")
+                else if (!WriteSettingPolicy.validKey(action.key))
                     err("write_setting_key_invalid", "Chiave impostazione non valida (forma/limite)")
                 if (!InterpolationPolicy.containsInterpolation(action.value) && !WriteSettingPolicy.validValue(action.value))
                     err(
@@ -1141,7 +1238,8 @@ class DraftValidator(
                     warn(
                         "write_setting_high_impact",
                         "Questa regola cambia un'impostazione di sicurezza del telefono (debug, " +
-                            "accessibilità, tastiera o verifica delle app). Armala solo se sai cosa fa.",
+                            "accessibilità, tastiera, verifica delle app, accesso alle notifiche, " +
+                            "compilazione automatica, assistente, proxy o DNS). Armala solo se sai cosa fa.",
                     )
                 }
             }
@@ -1205,16 +1303,24 @@ class DraftValidator(
             err("http_header_interpolated", "Le intestazioni sono letterali: niente \${…}")
         } else {
             val lowerNames = headers.keys.map { it.lowercase(java.util.Locale.ROOT) }
+            // I caratteri non ASCII hanno un codice loro (0.7.2): il client HTTP li rifiuta a ogni scatto.
+            val notAscii = headers.values.any(HttpRequestPolicy::hasNonAsciiChars)
             val invalid = headers.any { (name, value) ->
                 !HttpRequestPolicy.isHeaderNameValid(name) ||
                     HttpRequestPolicy.isHeaderNameForbidden(name) ||
-                    !HttpRequestPolicy.isHeaderValueValid(value)
+                    (!HttpRequestPolicy.isHeaderValueValid(value) && !HttpRequestPolicy.hasNonAsciiChars(value))
             }
             if (invalid || lowerNames.size != lowerNames.toSet().size) {
                 err(
                     "http_header_invalid",
                     "Intestazione non valida (nome, valore vuoto o con caratteri di controllo, " +
                         "duplicata, o vietata: Host, Content-Length, Transfer-Encoding, Connection)",
+                )
+            }
+            if (notAscii) {
+                err(
+                    "http_header_not_ascii",
+                    "Valore di intestazione con caratteri non ASCII (lettere accentate, virgolette tipografiche, emoji)",
                 )
             }
         }
@@ -1677,6 +1783,13 @@ class DraftValidator(
 
     private fun validHttpUrl(raw: String): Boolean = runCatching {
         val uri = URI(raw)
-        uri.scheme?.lowercase() in setOf("http", "https") && !uri.host.isNullOrBlank()
+        uri.scheme?.lowercase() in setOf("http", "https") && !uri.host.isNullOrBlank() && uri.rawUserInfo == null
     }.getOrDefault(false)
+
+    /** Una `@` letterale nell'autorità del template (tra `://` e il primo `/`, `?` o `#`). */
+    private fun urlHasUserInfo(template: String): Boolean {
+        val start = template.indexOf("://").takeIf { it >= 0 }?.plus(3) ?: return false
+        val end = template.indexOfAny(charArrayOf('/', '?', '#'), start).takeIf { it >= 0 } ?: template.length
+        return '@' in template.substring(start, end)
+    }
 }

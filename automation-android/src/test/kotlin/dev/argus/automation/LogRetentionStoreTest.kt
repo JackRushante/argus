@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import dev.argus.data.JournalRetentionPolicy
 import dev.argus.ui.model.LogRetentionOptions
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.test.runTest
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -25,7 +27,7 @@ class LogRetentionStoreTest {
     }
 
     @Test
-    fun `only seven thirty or ninety days are accepted and persisted`() {
+    fun `only seven thirty or ninety days are accepted and persisted`() = runTest {
         val store = LogRetentionStore(context)
 
         assertTrue(store.setDays(7))
@@ -41,6 +43,27 @@ class LogRetentionStoreTest {
         assertFalse(store.setDays(0))
         assertFalse(store.setDays(-30))
         assertEquals(90, store.currentDays())
+    }
+
+    @Test
+    fun `the disk write runs on the io dispatcher, not on the caller thread`() = runTest {
+        var dispatched = 0
+        val io = object : CoroutineDispatcher() {
+            override fun dispatch(context: kotlin.coroutines.CoroutineContext, block: Runnable) {
+                dispatched += 1
+                block.run()
+            }
+        }
+        val preferences = context.getSharedPreferences("argus_log_retention", Context.MODE_PRIVATE)
+        val store = LogRetentionStore(preferences, io)
+
+        assertTrue(store.setDays(90))
+        assertTrue(dispatched >= 1, "commit() deve passare dal dispatcher IO")
+        assertEquals(90, store.currentDays())
+        // Un valore non ammesso non tocca il disco.
+        val before = dispatched
+        assertFalse(store.setDays(14))
+        assertEquals(before, dispatched)
     }
 
     @Test

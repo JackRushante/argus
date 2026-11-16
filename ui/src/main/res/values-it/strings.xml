@@ -15,6 +15,7 @@
     <string name="bridge_token_label">Bearer token</string>
     <string name="bridge_token_keep_hint">Lascia vuoto per conservare il token protetto</string>
     <string name="bridge_token_required_hint">Inserisci il bearer token</string>
+    <string name="bridge_token_origin_changed_hint">Nuovo indirizzo del server: inserisci di nuovo il bearer. Quello salvato non parte mai verso un altro server.</string>
     <string name="bridge_token_configured">Token protetto configurato</string>
     <string name="bridge_token_missing">Token non configurato</string>
 
@@ -29,6 +30,8 @@
     <string name="provider_key_keep_hint">Lascia vuoto per conservare la chiave attuale.</string>
     <string name="provider_key_required_hint">Obbligatoria.</string>
     <string name="provider_key_optional_hint">Opzionale per endpoint senza autenticazione.</string>
+    <string name="provider_key_origin_changed_hint">Nuovo indirizzo del server: salvando, la chiave salvata viene tolta. Inseriscila di nuovo se il nuovo server la richiede.</string>
+    <string name="provider_key_remove">Rimuovi chiave</string>
     <string name="provider_reasoning_label">Ragionamento per richiesta</string>
     <string name="provider_reasoning_default">Predefinito server</string>
     <string name="provider_reasoning_none">Disattivato</string>
@@ -305,8 +308,8 @@
     <!-- Backup delle regole (0.4.0, F1) -->
     <string name="backup_section">BACKUP DELLE REGOLE</string>
     <string name="backup_body">Salva le regole in un file o portale su un altro telefono. Il backup di Android resta disattivato, per la tua privacy.</string>
-    <string name="backup_strip_label">Togli posizioni e contatti (per condividere)</string>
-    <string name="backup_strip_hint">Coordinate, ID delle conversazioni, nomi dei mittenti e numeri di telefono vengono tolti, e i geofence chiedono la posizione corrente quando li armi. I filtri sul testo restano: rileggi il file prima di condividerlo.</string>
+    <string name="backup_strip_label">Togli i dati personali (per condividere)</string>
+    <string name="backup_strip_hint">Coordinate, ID delle conversazioni, nomi dei mittenti, numeri di telefono, nomi di reti e dispositivi, titoli delle notifiche e valori segreti vengono tolti; i geofence chiedono la posizione corrente quando li armi. Chi importa la regola li completa prima di armarla. I filtri sul testo restano: rileggi il file prima di condividerlo.</string>
     <string name="backup_export">Esporta</string>
     <string name="backup_import">Importa</string>
     <string name="backup_import_hint">Le regole importate arrivano come bozze da approvare: nessuna si arma da sola.</string>
@@ -483,6 +486,8 @@
     <!-- 0.7.0 · Approvazione e dettaglio (redesign A, blocco rda_ap_). -->
     <string name="rda_ap_risks_title">Prima di armare</string>
     <string name="rda_ap_warnings_title">Avvisi</string>
+    <string name="rda_ap_imported">Regola importata</string>
+    <string name="rda_ap_imported_note">Viene da un file importato, non dalla chat: controlla ogni passo prima di armarla.</string>
     <string name="rda_ap_errors_one">1 errore</string>
     <string name="rda_ap_errors_many">%1$d errori</string>
     <string name="rda_ap_warnings_one">1 avviso</string>

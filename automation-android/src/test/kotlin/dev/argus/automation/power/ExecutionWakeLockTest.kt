@@ -1,5 +1,6 @@
 package dev.argus.automation.power
 
+import dev.argus.engine.runtime.ProgramInterpreter
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -23,18 +24,65 @@ class ExecutionWakeLockTest {
     private val wakeLock = ExecutionWakeLock(system)
 
     @Test
-    fun `acquires on the first holder with a seventy minute safety timeout and releases on the last`() {
+    fun `acquires on the first holder with a safety timeout and releases on the last`() {
         wakeLock.acquire()
         wakeLock.acquire()
         assertEquals(2, wakeLock.activeHolders)
-        assertEquals(listOf("acquire:${70 * 60 * 1_000L}"), system.events)
+        assertEquals(listOf("acquire:${ExecutionWakeLock.DEFAULT_TIMEOUT_MILLIS}"), system.events)
 
         assertTrue(wakeLock.release())
-        assertEquals(listOf("acquire:${70 * 60 * 1_000L}"), system.events)
+        assertEquals(listOf("acquire:${ExecutionWakeLock.DEFAULT_TIMEOUT_MILLIS}"), system.events)
 
         assertTrue(wakeLock.release())
         assertEquals(0, wakeLock.activeHolders)
-        assertEquals(listOf("acquire:${70 * 60 * 1_000L}", "release"), system.events)
+        assertEquals(listOf("acquire:${ExecutionWakeLock.DEFAULT_TIMEOUT_MILLIS}", "release"), system.events)
+    }
+
+    @Test
+    fun `the safety timeout outlasts the longest program`() {
+        assertTrue(
+            ExecutionWakeLock.DEFAULT_TIMEOUT_MILLIS >
+                ProgramInterpreter.MAX_EXECUTION_MILLIS + ExecutionWakeLock.REFRESH_EVERY_MILLIS,
+        )
+    }
+
+    @Test
+    fun `an overlapping holder extends the timeout of the system lock`() {
+        var uptime = 0L
+        val lock = ExecutionWakeLock(system, timeoutMillis = 1_000, uptimeMillis = { uptime }, refreshEveryMillis = 100)
+
+        lock.acquire()
+        uptime = 900
+        // Il primo lavoro ha quasi esaurito il timeout: il secondo lo fa ripartire da adesso.
+        lock.acquire()
+        assertTrue(lock.release())
+
+        assertEquals(listOf("acquire:1000", "acquire:1000"), system.events)
+    }
+
+    @Test
+    fun `refresh renews a held lock at most once per interval and never an idle one`() {
+        var uptime = 0L
+        val lock = ExecutionWakeLock(system, timeoutMillis = 1_000, uptimeMillis = { uptime }, refreshEveryMillis = 100)
+
+        lock.refresh()
+        assertEquals(emptyList(), system.events)
+
+        lock.acquire()
+        uptime = 50
+        lock.refresh()
+        assertEquals(listOf("acquire:1000"), system.events)
+
+        uptime = 150
+        lock.refresh()
+        uptime = 200
+        lock.refresh()
+        assertEquals(listOf("acquire:1000", "acquire:1000"), system.events)
+
+        assertTrue(lock.release())
+        uptime = 1_000
+        lock.refresh()
+        assertEquals(listOf("acquire:1000", "acquire:1000", "release"), system.events)
     }
 
     @Test
@@ -55,7 +103,7 @@ class ExecutionWakeLockTest {
         }
         assertEquals(0, wakeLock.activeHolders)
         assertEquals(
-            listOf("acquire:${70 * 60 * 1_000L}", "release", "acquire:${70 * 60 * 1_000L}", "release"),
+            listOf("acquire:${ExecutionWakeLock.DEFAULT_TIMEOUT_MILLIS}", "release", "acquire:${ExecutionWakeLock.DEFAULT_TIMEOUT_MILLIS}", "release"),
             system.events,
         )
     }

@@ -197,6 +197,7 @@ import dev.argus.automation.connectivity.ConnectivitySentinelStatus
 import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
 import dev.argus.automation.connectivity.PrefsConnectivityStateStore
 import dev.argus.automation.geofence.AndroidGeofenceBackend
+import dev.argus.automation.geofence.AndroidGeofenceContinuity
 import dev.argus.automation.geofence.GeofenceBackend
 import dev.argus.automation.geofence.GeofenceCoordinator
 import dev.argus.automation.geofence.GeofenceEventDispatcher
@@ -1113,7 +1114,8 @@ object ArgusModule {
     @Singleton
     fun sharedForegroundSentinel(
         backend: ConnectivitySentinelBackend,
-    ): SharedForegroundSentinel = SharedForegroundSentinel(backend)
+        status: ConnectivitySentinelStatus,
+    ): SharedForegroundSentinel = SharedForegroundSentinel(backend, serviceActive = { status.active.value })
 
     @Provides
     @Singleton
@@ -1121,7 +1123,8 @@ object ArgusModule {
         @ApplicationScope scope: CoroutineScope,
         sentinel: SharedForegroundSentinel,
         audit: AuditSink,
-    ): ReceiverWorkLauncher = ReceiverWorkLauncher(scope, sentinel, audit)
+        wakeLock: ExecutionWakeLock,
+    ): ReceiverWorkLauncher = ReceiverWorkLauncher(scope, sentinel, audit, wakeLock = wakeLock)
 
     @Provides
     @Singleton
@@ -1268,12 +1271,20 @@ object ArgusModule {
     @Provides
     @Singleton
     fun geofenceCoordinator(
+        @ApplicationContext context: Context,
         store: AutomationStore,
         state: GeofenceStateStore,
         backend: GeofenceBackend,
         location: CurrentLocationProvider,
         ingress: GeofenceEventIngress,
-    ): GeofenceCoordinator = GeofenceCoordinator(store, state, backend, location, ingress)
+    ): GeofenceCoordinator = GeofenceCoordinator(
+        store,
+        state,
+        backend,
+        location,
+        ingress,
+        continuity = AndroidGeofenceContinuity(context),
+    )
 
     @Provides
     fun geofenceTriggerRuntime(coordinator: GeofenceCoordinator): GeofenceTriggerRuntime =
@@ -1427,6 +1438,7 @@ object ArgusModule {
         audit: AuditSink,
         frame: DispatchFrame,
         root: RootAccess,
+        sentinel: SharedForegroundSentinel,
         capabilityHealth: CapabilityHealthMonitor,
         listenerWatchdog: NotificationListenerWatchdog,
     ): ArgusRuntimeController = ArgusRuntimeController(
@@ -1451,6 +1463,7 @@ object ArgusModule {
         store = store,
         audit = audit,
         dispatchesIdle = { frame.idle },
+        onStartupReconciled = { sentinel.settle() },
         capabilityHealth = capabilityHealth::check,
         listenerWatchdog = listenerWatchdog,
     )

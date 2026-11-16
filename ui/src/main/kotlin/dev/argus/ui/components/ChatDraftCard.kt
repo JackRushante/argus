@@ -176,7 +176,7 @@ private fun RuleTimeline(rule: RuleRender) {
             shape = RoundedCornerShape(ArgusRadius.Sm),
             isLast = !hasConditions && !hasActions,
         ) {
-            Text(stripWhenPrefix(rule.triggerLine), color = scheme.onSurface, style = MaterialTheme.typography.bodyMedium)
+            Text(rememberRevealed(stripWhenPrefix(rule.triggerLine)), color = scheme.onSurface, style = MaterialTheme.typography.bodyMedium)
         }
         if (hasConditions) {
             TimelineStep(
@@ -189,7 +189,7 @@ private fun RuleTimeline(rule: RuleRender) {
                 isLast = !hasActions,
             ) {
                 rule.conditionLines.forEach {
-                    Text(it, color = scheme.onSurface, style = MaterialTheme.typography.bodyMedium)
+                    Text(rememberRevealed(it), color = scheme.onSurface, style = MaterialTheme.typography.bodyMedium)
                 }
             }
         }

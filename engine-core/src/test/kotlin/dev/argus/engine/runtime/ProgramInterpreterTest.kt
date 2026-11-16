@@ -8,6 +8,7 @@ import dev.argus.engine.model.IntegrityLabel
 import dev.argus.engine.model.PhoneEvent
 import dev.argus.engine.model.StateKeys
 import dev.argus.engine.model.StateQuery
+import dev.argus.engine.model.StateQueryPolicy
 import dev.argus.engine.model.StateValueType
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.model.TriggerField
@@ -162,6 +163,98 @@ class ProgramInterpreterTest {
         assertEquals(IntegrityLabel.TAINTED, notification.inputIntegrity)
         assertEquals(ConfidentialityLabel.SECRET, notification.inputConfidentiality)
         assertTrue(ValueProvenance.SHELL in notification.inputProvenance)
+    }
+
+    @Test
+    fun `text read from a parametric state reader is external and enters a shell command quoted`() = runTest {
+        val wifiName = StateQuery.DumpsysField("wifi", "SSID")
+        val seen = mutableListOf<ResolvedProgramAction>()
+        val interpreter = ProgramInterpreter(
+            runner = ProgramActionRunner { action, _ ->
+                seen += action
+                ProgramActionResult(ActionResult.Success)
+            },
+            stateProvider = { DeviceState(queryValues = mapOf(wifiName.canonicalId to "net; reboot")) },
+            conditionEvaluator = evaluator,
+            pause = {},
+        )
+
+        val result = interpreter.execute(
+            Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+            timeEvent(),
+            listOf(
+                VarBinding.State("ssid", wifiName, StateValueType.TEXT, StateQueryPolicy.VERSION, ConfidentialityLabel.SECRET),
+            ),
+            listOf(Action.RunShell("log -t argus \${ssid}")),
+        )
+
+        assertTrue(result.completed)
+        assertEquals("log -t argus 'net; reboot'", assertIs<Action.RunShell>(seen.single().action).cmd)
+        assertEquals(IntegrityLabel.TAINTED, seen.single().inputIntegrity)
+        assertEquals(setOf(ValueProvenance.DEVICE_STATE), seen.single().inputProvenance)
+    }
+
+    @Test
+    fun `numbers and booleans read from state are inserted in canonical form`() = runTest {
+        val level = StateQuery.Setting(dev.argus.engine.model.SettingNamespace.SYSTEM, "screen_brightness")
+        val flag = StateQuery.SystemProperty("persist.sys.flag")
+        val raw = mapOf(
+            " 1e2" to "100",
+            "007" to "7",
+            "1.500" to "1.5",
+            "-0.0" to "0",
+            "12d" to "12",
+            "0x1p3" to "8",
+        )
+        raw.forEach { (reading, canonical) ->
+            val seen = mutableListOf<ResolvedProgramAction>()
+            val interpreter = ProgramInterpreter(
+                runner = ProgramActionRunner { action, _ ->
+                    seen += action
+                    ProgramActionResult(ActionResult.Success)
+                },
+                stateProvider = {
+                    DeviceState(queryValues = mapOf(level.canonicalId to reading, flag.canonicalId to " ON"))
+                },
+                conditionEvaluator = evaluator,
+                pause = {},
+            )
+            val result = interpreter.execute(
+                Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+                timeEvent(),
+                listOf(
+                    VarBinding.State("n", level, StateValueType.NUMBER, StateQueryPolicy.VERSION, ConfidentialityLabel.SECRET),
+                    VarBinding.State("b", flag, StateValueType.BOOLEAN, StateQueryPolicy.VERSION, ConfidentialityLabel.SECRET),
+                ),
+                listOf(Action.RunShell("echo \${n} \${b}")),
+            )
+            assertTrue(result.completed, reading)
+            assertEquals("echo $canonical true", assertIs<Action.RunShell>(seen.single().action).cmd, reading)
+            assertEquals(IntegrityLabel.CLEAN, seen.single().inputIntegrity, reading)
+        }
+    }
+
+    @Test
+    fun `a number that has no plain decimal form is unavailable`() = runTest {
+        val level = StateQuery.Sysfs("/sys/class/power_supply/battery/capacity")
+        val seen = mutableListOf<ResolvedProgramAction>()
+        val interpreter = ProgramInterpreter(
+            runner = ProgramActionRunner { action, _ ->
+                seen += action
+                ProgramActionResult(ActionResult.Success)
+            },
+            stateProvider = { DeviceState(queryValues = mapOf(level.canonicalId to "1e300")) },
+            conditionEvaluator = evaluator,
+            pause = {},
+        )
+        val result = interpreter.execute(
+            Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+            timeEvent(),
+            listOf(VarBinding.State("n", level, StateValueType.NUMBER, StateQueryPolicy.VERSION, ConfidentialityLabel.SECRET)),
+            listOf(Action.RunShell("echo \${n}")),
+        )
+        assertFalse(result.completed)
+        assertTrue(seen.isEmpty())
     }
 
     @Test
@@ -716,6 +809,118 @@ class ProgramInterpreterTest {
                 values::get,
             ),
         )
+    }
+
+    @Test
+    fun `a non numeric comparison under not takes the else branch and never aborts the program`() = runTest {
+        val seen = mutableListOf<String>()
+        val interpreter = interpreter(
+            runner = ProgramActionRunner { action, _ ->
+                seen += assertIs<Action.ShowNotification>(action.action).title
+                ProgramActionResult(ActionResult.Success)
+            },
+        )
+
+        val result = interpreter.execute(
+            Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+            timeEvent(),
+            bindings = listOf(VarBinding.Literal("word", "abc", VarType.TEXT, ConfidentialityLabel.PUBLIC)),
+            actions = listOf(
+                Action.If(
+                    Condition.Not(Condition.VarCompare("word", CmpOp.GT, "5")),
+                    then = listOf(Action.ShowNotification("then", "x")),
+                    orElse = listOf(Action.ShowNotification("else", "x")),
+                ),
+                Action.While(
+                    Condition.Not(Condition.VarCompare("word", CmpOp.IS_EVEN)),
+                    body = listOf(Action.ShowNotification("loop", "x")),
+                    maxIterations = 3,
+                ),
+                Action.ShowNotification("after", "x"),
+            ),
+        )
+
+        assertTrue(result.completed)
+        assertEquals(listOf("else", "after"), seen)
+    }
+
+    @Test
+    fun `a loop around a generative call stops at the per execution cap with a policy code`() = runTest {
+        var calls = 0
+        val interpreter = interpreter(
+            runner = ProgramActionRunner { action, _ ->
+                if (action.action is Action.InvokeLlm) calls += 1
+                ProgramActionResult(ActionResult.Success, capturedText = "ok")
+            },
+        )
+
+        val result = interpreter.execute(
+            Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+            timeEvent(),
+            emptyList(),
+            listOf(
+                Action.While(
+                    Condition.BooleanLiteral(true),
+                    body = listOf(
+                        Action.InvokeLlm(
+                            goal = "summarize",
+                            contextSources = emptyList(),
+                            allowedTools = emptyList(),
+                            replyTargetSender = false,
+                            timeoutMs = 60_000,
+                            deliver = dev.argus.engine.model.GenerativeDeliverMode.CAPTURE_ONLY,
+                            captureAs = "summary",
+                        ),
+                        Action.SetFlashlight(true),
+                    ),
+                    maxIterations = 1_000,
+                ),
+            ),
+        )
+
+        assertEquals(ProgramInterpreter.MAX_GENERATIVE_CALLS_PER_EXECUTION, calls)
+        assertEquals("generative_call_limit", result.stopCode)
+        assertEquals("1.while[31].1", result.stopPath?.value)
+        val last = result.steps.last()
+        assertEquals("1.while[31].1", last.path.value)
+        assertEquals(ActionResult.Failure("generative_call_limit"), last.result)
+    }
+
+    @Test
+    fun `exactly the cap of generative calls completes normally`() = runTest {
+        var calls = 0
+        val interpreter = interpreter(
+            runner = ProgramActionRunner { _, _ ->
+                calls += 1
+                ProgramActionResult(ActionResult.Submitted)
+            },
+        )
+
+        val result = interpreter.execute(
+            Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+            timeEvent(),
+            emptyList(),
+            listOf(
+                Action.While(
+                    Condition.BooleanLiteral(true),
+                    body = listOf(
+                        Action.InvokeLlm(
+                            goal = "say hi",
+                            contextSources = emptyList(),
+                            allowedTools = emptyList(),
+                            replyTargetSender = false,
+                            timeoutMs = 60_000,
+                            deliver = dev.argus.engine.model.GenerativeDeliverMode.LOCAL_NOTIFICATION,
+                            notificationTitle = "Hi",
+                        ),
+                    ),
+                    maxIterations = ProgramInterpreter.MAX_GENERATIVE_CALLS_PER_EXECUTION,
+                ),
+            ),
+        )
+
+        assertTrue(result.completed)
+        assertEquals(ProgramInterpreter.MAX_GENERATIVE_CALLS_PER_EXECUTION, calls)
     }
 
     // --- B27: i cicli non gonfiano il journal ---------------------------------------------

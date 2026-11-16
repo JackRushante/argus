@@ -111,6 +111,21 @@ class StructuredOutputTest {
     }
 
     @Test
+    fun `only a 4xx that names the parameter is remembered`() {
+        fun http(status: Int, message: String?) =
+            TransportException(TransportErrorKind.HTTP, "Provider HTTP $status", statusCode = status, providerMessage = message)
+        assertTrue(StructuredOutput.isLastingRejection(http(400, "response_format is not supported by this model")))
+        assertTrue(StructuredOutput.isLastingRejection(http(422, "Invalid json_schema")))
+        assertTrue(StructuredOutput.isLastingRejection(http(400, "output_config.format is not supported for this model")))
+        // Un 500 (anche llama.cpp sulla grammatica) fa scendere solo quella richiesta.
+        assertFalse(StructuredOutput.isLastingRejection(http(500, "response_format failed")))
+        // Un 4xx su altro, o senza messaggio, non spegne l'output strutturato.
+        assertFalse(StructuredOutput.isLastingRejection(http(400, "x is not a valid model ID")))
+        assertFalse(StructuredOutput.isLastingRejection(http(404, null)))
+        assertFalse(StructuredOutput.isLastingRejection(http(401, "response_format")))
+    }
+
+    @Test
     fun `the structured rule only replaces the last line of rule 7 and the base prompt is untouched`() {
         val base = AgentMessageSupport.compileSystemText()
         assertEquals(base, AgentMessageSupport.compileSystemText(structuredRule = null))

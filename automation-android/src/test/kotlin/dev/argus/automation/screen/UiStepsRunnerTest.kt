@@ -358,7 +358,7 @@ class UiStepsRunnerTest {
     fun `the app is opened first and the steps start when it is in front`() = runTest {
         var front = "com.example.launcher"
         val opened = mutableListOf<String>()
-        val button = FakeNode(text = "Invia", isClickable = true)
+        val button = FakeNode(text = "Invia", isClickable = true, packageName = "com.example.shop")
         val screen = screen({ FakeNode(children = listOf(button)) }, active = { front })
         val result = runner(screen).run(macro(UiStep.Click(text = "Invia"), pkg = "com.example.shop")) { pkg ->
             opened += pkg
@@ -373,7 +373,7 @@ class UiStepsRunnerTest {
     @Test
     fun `starting from argus or settings does not stop a macro that opens another app`() = runTest {
         var front = "dev.argus"
-        val button = FakeNode(text = "Invia", isClickable = true)
+        val button = FakeNode(text = "Invia", isClickable = true, packageName = "com.example.shop")
         val result = runner(screen({ FakeNode(children = listOf(button)) }, active = { front }))
             .run(macro(UiStep.Click(text = "Invia"), pkg = "com.example.shop")) { pkg ->
                 front = pkg
@@ -409,6 +409,9 @@ class UiStepsRunnerTest {
             "com.android.settings",
             "com.android.packageinstaller",
             "com.google.android.permissioncontroller",
+            "com.android.systemui",
+            "com.rifsxd.ksunext",
+            "moe.shizuku.privileged.api",
         ).forEach { forbidden ->
             val result = runner(screen({ FakeNode(children = listOf(button)) }, active = { forbidden }))
                 .run(macro(UiStep.Click(text = "Consenti")), noOpen)
@@ -434,6 +437,93 @@ class UiStepsRunnerTest {
         assertEquals("ui_forbidden_screen", failure(result))
         assertEquals(1, shoot.clicks.size)
         assertEquals(emptyList(), allow.clicks)
+    }
+
+    // --- aggancio all'app della macro (0.7.2) -------------------------------------------------
+
+    @Test
+    fun `another app that comes to the front mid macro is never tapped`() = runTest {
+        val first = FakeNode(text = "Uno", isClickable = true, packageName = "com.example.shop")
+        val pay = FakeNode(text = "Paga", isClickable = true, packageName = "com.example.bank")
+        var front = "com.example.launcher"
+        // Dopo il primo tocco un'altra app (non vietata) passa davanti con un pulsante dallo stesso testo.
+        val screen = screen(
+            { if (first.clicks.isEmpty()) FakeNode(children = listOf(first)) else FakeNode(children = listOf(pay)) },
+            active = { if (first.clicks.isEmpty()) front else "com.example.bank" },
+        )
+        val result = runner(screen).run(
+            macro(UiStep.Click(text = "Uno"), UiStep.Click(text = "Paga"), pkg = "com.example.shop"),
+        ) { pkg ->
+            front = pkg
+            ActionResult.Success
+        }
+        assertEquals("ui_wrong_app", failure(result))
+        assertEquals(1, first.clicks.size)
+        assertEquals(emptyList(), pay.clicks)
+    }
+
+    @Test
+    fun `a node of another app is not tapped even when the macro app is the active window`() = runTest {
+        val overlay = FakeNode(text = "Consenti", isClickable = true, packageName = "com.example.overlay")
+        val result = runner(screen({ FakeNode(children = listOf(overlay)) }, active = { "com.example.app" }))
+            .run(macro(UiStep.Click(text = "Consenti"), pkg = "com.example.app"), noOpen)
+        assertEquals("ui_wrong_app", failure(result))
+        assertEquals(emptyList(), overlay.clicks)
+    }
+
+    @Test
+    fun `a macro without an app is pinned to the app in front at its first step`() = runTest {
+        val first = FakeNode(text = "Uno", isClickable = true, packageName = "com.example.app")
+        val other = FakeNode(text = "Due", isClickable = true, packageName = "com.example.other")
+        val screen = screen(
+            { FakeNode(children = listOf(first, other)) },
+            active = { if (first.clicks.isEmpty()) "com.example.app" else "com.example.other" },
+        )
+        val result = runner(screen).run(macro(UiStep.Click(text = "Uno"), UiStep.Click(text = "Due")), noOpen)
+        assertEquals("ui_wrong_app", failure(result))
+        assertEquals(1, first.clicks.size)
+        assertEquals(emptyList(), other.clicks)
+    }
+
+    @Test
+    fun `typing and scrolling are pinned to the macro app too`() = runTest {
+        val foreignField = FakeNode(isEditable = true, packageName = "com.example.keyboard")
+        assertEquals(
+            "ui_wrong_app",
+            failure(runner(screen(focus = { foreignField })).run(macro(UiStep.Type("segreto")), noOpen)),
+        )
+        assertEquals(emptyList(), foreignField.typed)
+
+        val foreignList = FakeNode(isScrollable = true, packageName = "com.example.other")
+        assertEquals(
+            "ui_wrong_app",
+            failure(runner(screen({ FakeNode(children = listOf(foreignList)) })).run(macro(UiStep.Scroll(ScrollDirection.DOWN)), noOpen)),
+        )
+        assertEquals(emptyList(), foreignList.scrolls)
+    }
+
+    @Test
+    fun `a tap when the active app cannot be read is not made`() = runTest {
+        val button = FakeNode(text = "Invia", isClickable = true)
+        val result = runner(screen({ FakeNode(children = listOf(button)) }, active = { null }))
+            .run(macro(UiStep.Click(text = "Invia")), noOpen)
+        assertEquals("ui_wrong_app", failure(result))
+        assertEquals(emptyList(), button.clicks)
+    }
+
+    @Test
+    fun `waiting steps tolerate an active app that is momentarily unreadable`() = runTest {
+        val button = FakeNode(text = "Invia", isClickable = true)
+        val screen = screen(
+            { now -> if (now >= 1_000) FakeNode(children = listOf(button)) else FakeNode() },
+            active = { if (clock.time >= 500) "com.example.app" else null },
+        )
+        val result = runner(screen).run(
+            macro(UiStep.WaitFor(text = "Invia", timeoutMs = 3_000), UiStep.Click(text = "Invia")),
+            noOpen,
+        )
+        assertEquals(ActionResult.Success, result)
+        assertEquals(1, button.clicks.size)
     }
 
     @Test

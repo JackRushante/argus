@@ -224,12 +224,22 @@ interface ExecutionJournalDao {
     )
     suspend fun interruptStale(staleBeforeMillis: Long, atMillis: Long): Int
 
+    /**
+     * Conservazione delle esecuzioni (B13). Non si toccano mai: le esecuzioni aperte (RUNNING,
+     * SUBMITTED), una DEFERRED la cui risposta manuale è ancora consegnabile (la FK CASCADE la
+     * cancellerebbe) e, dal tetto di righe, i claim più giovani di [dedupSinceMillis]: sono la
+     * deduplica degli eventi, e senza di loro una ripubblicazione della stessa notifica rifarebbe
+     * scattare la regola. L'età massima ([olderThanMillis], almeno 7 giorni) vale per tutti gli altri.
+     */
     @Query(
-        "DELETE FROM fire_claims WHERE status NOT IN ('RUNNING', 'SUBMITTED') AND (" +
-            "claimedAtMillis < :olderThanMillis OR executionId NOT IN (" +
-            "SELECT executionId FROM fire_claims ORDER BY claimedAtMillis DESC, executionId DESC LIMIT :maxRows))",
+        "DELETE FROM fire_claims WHERE status NOT IN ('RUNNING', 'SUBMITTED') " +
+            "AND NOT (status = 'DEFERRED' AND executionId IN (" +
+            "SELECT executionId FROM deferred_replies " +
+            "WHERE consumedAtMillis IS NULL AND expiresAtMillis > :nowMillis)) " +
+            "AND (claimedAtMillis < :olderThanMillis OR (claimedAtMillis < :dedupSinceMillis AND executionId NOT IN (" +
+            "SELECT executionId FROM fire_claims ORDER BY claimedAtMillis DESC, executionId DESC LIMIT :maxRows)))",
     )
-    suspend fun trim(olderThanMillis: Long, maxRows: Int): Int
+    suspend fun trim(olderThanMillis: Long, maxRows: Int, nowMillis: Long, dedupSinceMillis: Long): Int
 
     /** Righe azione delle esecuzioni concluse; quelle aperte o recuperabili restano (vedi [AuditDao]). */
     @Query(

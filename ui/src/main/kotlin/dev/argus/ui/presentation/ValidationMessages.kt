@@ -28,6 +28,7 @@ object ValidationMessages {
         "state_query_unavailable",
         "state_query_type_mismatch",
         "app_not_installed",
+        "app_control_freeze_system",
     )
 
     /** Codici d'errore di un passo di macro: il [ValidationIssue.detail] è il numero del passo, che si antepone. */
@@ -88,6 +89,10 @@ object ValidationMessages {
             "The worst-case running time is over 6 hours: reduce repeats, delays or long actions.",
             "Il tempo massimo di esecuzione supera le 6 ore: riduci ripetizioni, attese o azioni lunghe.",
         ),
+        "generative_in_loop" to t(
+            "An AI call is inside a repeat: it can run on every round, up to 30 AI calls each time the rule runs.",
+            "Una chiamata AI è dentro una ripetizione: può partire a ogni giro, fino a 30 chiamate AI a ogni esecuzione della regola.",
+        ),
 
         // --- Trigger --------------------------------------------------------------------------
         "time_spec" to t(
@@ -96,6 +101,10 @@ object ValidationMessages {
         ),
         "tz_invalid" to t("The time zone is not valid.", "Il fuso orario non è valido."),
         "cron_invalid" to t("The schedule expression is not valid.", "L'espressione di pianificazione non è valida."),
+        "cron_never_fires" to t(
+            "The schedule never matches a real date (for example 30 February), so the rule would never run.",
+            "La pianificazione non corrisponde a nessuna data reale (per esempio il 30 febbraio): la regola non scatterebbe mai.",
+        ),
         "at_invalid" to t("The date and time are not valid.", "La data e l'ora non sono valide."),
         "after_ms_invalid" to t(
             "The delay must be between 1 second and 7 days.",
@@ -274,8 +283,8 @@ object ValidationMessages {
             "Una variabile orologio ha un formato dell'ora non valido o più lungo di 40 caratteri (per esempio HH:mm o EEEE d MMMM).",
         ),
         "var_literal_invalid" to t(
-            "A fixed value is too long or contains control characters.",
-            "Un valore fisso è troppo lungo o contiene caratteri di controllo.",
+            "A fixed value is too long, contains control characters, or was removed when the rule was shared: write it again.",
+            "Un valore fisso è troppo lungo, contiene caratteri di controllo oppure è stato tolto quando la regola è stata condivisa: riscrivilo.",
         ),
         "var_literal_type_invalid" to t(
             "A fixed value does not match its declared type.",
@@ -322,8 +331,24 @@ object ValidationMessages {
             "I dati esterni non sono ammessi in questo campo di comando o destinazione.",
         ),
         "interpolation_shell_context" to t(
-            "External data sits where a shell command cannot quote it safely (command substitution, backticks, here-document or comment): the action would be blocked when it runs.",
-            "Un dato esterno è in un punto del comando shell dove non si può quotare in sicurezza (sostituzione di comando, backtick, here-document o commento): l'azione verrebbe bloccata all'esecuzione.",
+            "External data sits where a shell command cannot quote it safely (command substitution, backticks, here-document, comment, a variable name, or a number with other text attached): the action would be blocked when it runs.",
+            "Un dato esterno è in un punto del comando shell dove non si può quotare in sicurezza (sostituzione di comando, backtick, here-document, commento, nome di variabile o numero con altro testo attaccato): l'azione verrebbe bloccata all'esecuzione.",
+        ),
+        "interpolation_shell_command_position" to t(
+            "External data is in the command name position: it would choose which program runs. Write the command name literally.",
+            "Un dato esterno è al posto del nome del comando: sceglierebbe quale programma parte. Scrivi il nome del comando per esteso.",
+        ),
+        "interpolation_shell_reevaluated" to t(
+            "External data goes to a command that reads it again as code (sh -c, eval, su, xargs, awk, sed, find -exec…): quotes cannot protect it, so the action could never run.",
+            "Un dato esterno va a un comando che lo rilegge come codice (sh -c, eval, su, xargs, awk, sed, find -exec…): gli apici non lo proteggono, quindi l'azione non potrebbe mai partire.",
+        ),
+        "interpolation_shell_numeric" to t(
+            "External data is used where the shell computes a number: when the rule runs it must be a whole number, otherwise the action is blocked.",
+            "Un dato esterno è usato dove la shell calcola un numero: quando la regola gira deve essere un numero intero, altrimenti l'azione si blocca.",
+        ),
+        "interpolation_shell_option" to t(
+            "External data starts a command argument with no \"--\" before it: a value starting with \"-\" would be read as an option.",
+            "Un dato esterno apre un argomento del comando senza \"--\" prima: un valore che inizia con \"-\" verrebbe letto come un'opzione.",
         ),
         "secret_interpolation_disclosure" to t(
             "A secret variable will be sent to the configured AI service.",
@@ -355,6 +380,10 @@ object ValidationMessages {
         "url_invalid" to t(
             "The URL is not valid or its scheme is not allowed.",
             "L'URL non è valido o lo schema non è consentito.",
+        ),
+        "url_userinfo" to t(
+            "The URL has a name or credentials before \"@\": the address would open a different site than the one it seems to show.",
+            "L'URL ha un nome o delle credenziali prima di \"@\": l'indirizzo aprirebbe un sito diverso da quello che sembra.",
         ),
         "title_invalid" to t("The title is missing or too long.", "Il titolo manca o è troppo lungo."),
         "text_invalid" to t("The text is missing or too long.", "Il testo manca o è troppo lungo."),
@@ -413,6 +442,10 @@ object ValidationMessages {
             "The setting name is not valid (shape or length).",
             "Il nome dell'impostazione non è valido (forma o lunghezza).",
         ),
+        "write_setting_key_interpolated" to t(
+            "The setting name must be written literally, without variables.",
+            "Il nome dell'impostazione va scritto per esteso, senza variabili.",
+        ),
         "write_setting_value_invalid" to t(
             "The setting value is empty, too long or contains control characters.",
             "Il valore dell'impostazione è vuoto, troppo lungo o contiene caratteri di controllo.",
@@ -422,12 +455,16 @@ object ValidationMessages {
             "L'impostazione viene scritta esattamente come mostrato nella regola: controlla namespace, nome e valore.",
         ),
         "write_setting_high_impact" to t(
-            "This rule changes a phone security setting (debugging, accessibility, keyboard or app verification). Only arm it if you know what it does.",
-            "Questa regola cambia un'impostazione di sicurezza del telefono (debug, accessibilità, tastiera o verifica delle app). Armala solo se sai cosa fa.",
+            "This rule changes a phone security setting (debugging, accessibility, keyboard, app verification, notification access, autofill, assistant, proxy or DNS). Only arm it if you know what it does.",
+            "Questa regola cambia un'impostazione di sicurezza del telefono (debug, accessibilità, tastiera, verifica delle app, accesso alle notifiche, compilazione automatica, assistente, proxy o DNS). Armala solo se sai cosa fa.",
         ),
         "write_setting_external_value" to t(
-            "The value written comes from external data (a message or notification).",
-            "Il valore scritto arriva da un dato esterno (messaggio o notifica).",
+            "The value written comes from external data (a message, a notification or text read from the phone).",
+            "Il valore scritto arriva da un dato esterno (messaggio, notifica o testo letto dal telefono).",
+        ),
+        "invisible_characters" to t(
+            "The command, address or setting contains invisible or text-direction characters: what you see may not be what runs.",
+            "Il comando, l'indirizzo o l'impostazione contiene caratteri invisibili o che cambiano la direzione del testo: quello che vedi può non essere quello che viene eseguito.",
         ),
 
         // --- Azioni generative ----------------------------------------------------------------
@@ -662,6 +699,10 @@ object ValidationMessages {
             "A header is not valid: check its name and value (not empty, no line breaks, no duplicates; Host, Content-Length, Transfer-Encoding and Connection are not allowed).",
             "Un'intestazione non è valida: controlla nome e valore (non vuoto, senza a capo, senza duplicati; Host, Content-Length, Transfer-Encoding e Connection non sono ammessi).",
         ),
+        "http_header_not_ascii" to t(
+            "A header value can only use plain ASCII characters: no accented letters, curly quotes or emoji. The request would fail every time.",
+            "Il valore di un'intestazione può usare solo caratteri ASCII semplici: niente lettere accentate, virgolette tipografiche o emoji. La richiesta fallirebbe ogni volta.",
+        ),
         "http_content_type_invalid" to t(
             "The content type is not valid or differs from the Content-Type header.",
             "Il content type non è valido o è diverso dall'intestazione Content-Type.",
@@ -689,8 +730,8 @@ object ValidationMessages {
             "Il package dell'app manca, non è valido o è una \${variabile}: va scritto per intero, come com.example.app.",
         ),
         "priv_target_forbidden" to t(
-            "A rule cannot change Argus, the launcher or an essential system app (system UI, phone, Settings, Google services).",
-            "Una regola non può modificare Argus, il launcher o un'app di sistema essenziale (interfaccia di sistema, telefono, Impostazioni, servizi Google).",
+            "A rule cannot change Argus, the launcher, the keyboard, WebView or an essential system app (system UI, phone, Settings, permissions, Google services, Shizuku, root managers).",
+            "Una regola non può modificare Argus, il launcher, la tastiera, WebView o un'app di sistema essenziale (interfaccia di sistema, telefono, Impostazioni, permessi, servizi Google, Shizuku, gestori root).",
         ),
         "priv_permission_invalid" to t(
             "Only runtime permissions of the allowed list can be granted or revoked (location, camera, microphone, contacts, SMS, phone, calendar, files and media, notifications, body sensors, nearby devices).",
@@ -699,6 +740,11 @@ object ValidationMessages {
         "app_control_freeze_review" to t(
             "Freezing disables the app: it disappears from the launcher and cannot start until it is unfrozen.",
             "Congelare disattiva l'app: sparisce dal launcher e non può partire finché non viene riattivata.",
+        ),
+        // 0.7.2: controllo fatto sul telefono all'approvazione; solo avviso, la regola resta armabile.
+        "app_control_freeze_system" to t(
+            "This rule freezes an app that came with the phone. That is fine for preinstalled apps you do not use, but some are needed by the system: freeze it only if you know it is safe.",
+            "Questa regola congela un'app preinstallata sul telefono. Va bene per le app del produttore che non usi, ma alcune servono al sistema: congelala solo se sai che si può.",
         ),
         "app_permission_revoke_review" to t(
             "Revoking a permission removes an access from the app, and Android may close it.",
@@ -718,8 +764,8 @@ object ValidationMessages {
             "L'app da aprire non è un nome di package valido (è fisso: niente \${variabile}).",
         ),
         "ui_pkg_forbidden" to t(
-            "A screen macro cannot act on Argus, on Settings, on the package installer or on permission dialogs.",
-            "Una macro sullo schermo non può agire su Argus, sulle Impostazioni, sull'installatore di pacchetti né sui dialoghi dei permessi.",
+            "A screen macro cannot act on Argus, Settings, the system interface, the package installer, the Play Store, permission, VPN or certificate dialogs, Shizuku, root managers or the phone maker's security apps.",
+            "Una macro sullo schermo non può agire su Argus, Impostazioni, interfaccia di sistema, installatore di pacchetti, Play Store, dialoghi dei permessi, della VPN o dei certificati, Shizuku, gestori root né sulle app di sicurezza del produttore.",
         ),
         // Un errore per passo (0.7.0): il numero del passo sta nel `detail` e si antepone al testo.
         "ui_step_wait_no_target" to t(

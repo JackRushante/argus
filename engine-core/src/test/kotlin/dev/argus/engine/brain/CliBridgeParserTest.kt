@@ -157,6 +157,97 @@ class CliBridgeParserTest {
         assertEquals("", assertNotNull(r.draft).rationale)
     }
 
+    // --- S9: una chiave sconosciuta nella bozza non sparisce in silenzio ---
+
+    private fun unknownKeyResult(draft: String): CompileResult {
+        val r = p.parseCompile("ok @@META@@ {\"draft\":$draft}")
+        assertNull(r.draft, draft)
+        assertEquals("draft_invalid", r.metaError, draft)
+        return r
+    }
+
+    @Test fun `a misspelled conditions key is draft_invalid with key and path`() {
+        val draft = """{"name":"x","trigger":{"type":"time","cron":"0 8 * * *","tz":"Europe/Rome"},""" +
+            """"condition":{"type":"time_window","startLocal":"08:00","endLocal":"09:00","tz":"Europe/Rome"},""" +
+            """"actions":[{"type":"set_wifi","on":true}]}"""
+        val detail = assertNotNull(unknownKeyResult(draft).detail)
+        assertTrue("unknown key \"condition\" at $.draft:" in detail, detail)
+    }
+
+    @Test fun `else instead of orElse and cooldown instead of cooldownMs are reported`() {
+        val ifDraft = """{"name":"x","trigger":{"type":"immediate"},"vars":[{"type":"random_int","name":"n","max":2}],""" +
+            """"actions":[{"type":"if","condition":{"type":"var_compare","varName":"n","op":"IS_EVEN"},""" +
+            """"then":[{"type":"set_wifi","on":true}],"else":[{"type":"set_wifi","on":false}]}]}"""
+        assertTrue("\"else\" at $.draft.actions[0]:" in assertNotNull(unknownKeyResult(ifDraft).detail))
+
+        val cooldown = """{"name":"x","trigger":{"type":"immediate"},"actions":[{"type":"set_wifi","on":true}],"cooldown":60000}"""
+        assertTrue("\"cooldown\" at $.draft:" in assertNotNull(unknownKeyResult(cooldown).detail))
+    }
+
+    @Test fun `unknown keys are found in nested conditions and in macro steps`() {
+        val nested = """{"name":"x","trigger":{"type":"immediate"},"actions":[{"type":"set_wifi","on":true}],""" +
+            """"conditions":{"type":"and","all":[{"type":"not","cond":{"type":"app_in_foreground","pkg":"a.b","package":"a.b"}}]}}"""
+        assertTrue("\"package\" at $.draft.conditions.all[0].cond:" in assertNotNull(unknownKeyResult(nested).detail))
+
+        val macro = """{"name":"x","trigger":{"type":"manual"},"actions":[{"type":"ui_steps","pkg":null,""" +
+            """"steps":[{"op":"click","text":"OK","exact":true}]}]}"""
+        assertTrue("\"exact\" at $.draft.actions[0].steps[0]:" in assertNotNull(unknownKeyResult(macro).detail))
+        // Il discriminatore `op` dei passi non è una chiave sconosciuta.
+        val validMacro = macro.replace(""","exact":true""", "")
+        assertNull(p.parseCompile("ok @@META@@ {\"draft\":$validMacro}").metaError)
+    }
+
+    @Test fun `a key on an object trigger is unknown too`() {
+        val draft = """{"name":"x","trigger":{"type":"immediate","delayMs":0},"actions":[{"type":"set_wifi","on":true}]}"""
+        assertTrue("\"delayMs\" at $.draft.trigger:" in assertNotNull(unknownKeyResult(draft).detail))
+    }
+
+    @Test fun `the reported key never carries input text and stays short`() {
+        val key = "segreto con spazi " + "x".repeat(100)
+        val draft = """{"name":"x","trigger":{"type":"immediate"},"actions":[{"type":"set_wifi","on":true}],"$key":1}"""
+        val detail = assertNotNull(unknownKeyResult(draft).detail)
+        assertFalse("segreto con spazi" in detail, detail)
+        assertTrue(detail.length <= 200, detail)
+    }
+
+    @Test fun `a null unknown key, comments and trailing commas are still accepted`() {
+        val raw = """ok @@META@@ {"draft":{"name":"x", // nome
+            "trigger":{"type":"immediate",},"actions":[{"type":"set_wifi","on":true},],"condition":null,},}"""
+        val r = p.parseCompile(raw)
+        assertNull(r.metaError, r.detail)
+        assertNotNull(r.draft)
+    }
+
+    @Test fun `extra keys outside the draft are still ignored`() {
+        val r = p.parseCompile("""ok @@META@@ {"draft":$goodDraft},"note":"x","error_code":null}""")
+        assertNull(r.metaError, r.detail)
+        assertNotNull(r.draft)
+    }
+
+    /**
+     * Ogni regola della suite e2e (162 regole, tutti i tipi di trigger, condizione, azione, variabile e passo)
+     * che la decodifica rigorosa accetta passa anche dal parser: la visita delle chiavi non rifiuta campi veri.
+     */
+    @Test fun `every e2e suite rule that decodes strictly is accepted by the parser`() {
+        val suite = java.io.File("../e2e/suite")
+        assertTrue(suite.isDirectory, suite.absolutePath)
+        val strict = kotlinx.serialization.json.Json(ArgusJson) { ignoreUnknownKeys = false }
+        var checked = 0
+        suite.listFiles { f -> f.name.endsWith(".json") }!!.sorted().forEach { file ->
+            kotlinx.serialization.json.Json.parseToJsonElement(file.readText()).let { it as kotlinx.serialization.json.JsonArray }
+                .forEach { element ->
+                    val case = element as kotlinx.serialization.json.JsonObject
+                    val rule = case["rule"] ?: return@forEach
+                    val decodes = runCatching { strict.decodeFromJsonElement(AutomationDraft.serializer(), rule) }.isSuccess
+                    if (!decodes) return@forEach
+                    val r = p.parseCompile("ok @@META@@ {\"draft\":$rule}")
+                    assertNull(r.metaError, "${file.name} ${case["id"]}: ${r.detail}")
+                    checked++
+                }
+        }
+        assertTrue(checked > 100, "regole controllate: $checked")
+    }
+
     @Test fun `trailing commas are accepted`() {
         val r = p.parseCompile("""ok @@META@@ {"draft":{"name":"x","trigger":{"type":"time","cron":"0 8 * * *","tz":"Europe/Rome",},"actions":[{"type":"set_wifi","on":true},],},}""")
         assertNull(r.metaError)
@@ -241,10 +332,11 @@ class CliBridgeParserTest {
     @Test fun `a wrongly named sentinel with a draft is read as meta and reports the schema error`() {
         val r = p.parseCompile(wrongSentinelReply)
         assertNull(r.draft)
-        assertEquals("meta_parse_error", r.metaError)
+        // S9: la chiave inventata (`instant`) si segnala prima del campo mancante.
+        assertEquals("draft_invalid", r.metaError)
         assertEquals(wrongSentinelProse, r.reply)
         val detail = assertNotNull(r.detail)
-        assertTrue("tz" in detail, detail)
+        assertTrue("\"instant\"" in detail, detail)
         assertTrue("draft.trigger" in detail, detail)
         assertTrue(detail.length <= 200)
         // niente frammenti dell'input (nome della regola, tipo di azione)

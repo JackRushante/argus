@@ -42,6 +42,9 @@ import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.ApprovalFingerprint
+import dev.argus.engine.model.AUTOMATION_SCHEMA_VERSION_P4
+import dev.argus.engine.model.AutomationSchema
+import dev.argus.engine.runtime.ProgramInterpreter
 import dev.argus.engine.model.CapabilityRequirements
 import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.StateQueryFamily
@@ -774,7 +777,8 @@ class AutomationDetailViewModel @Inject constructor(
                 canArm = canArm,
                 armBlockedReason = warnings.firstOrNull { it.severity == Severity.ERROR }?.text,
                 estimatedLlmCallsPerDay = generativeEstimate(
-                    snapshot.draft.actions.any { it.tier == ActionTier.GENERATIVE },
+                    snapshot.draft.actions,
+                    program = AutomationSchema.versionFor(snapshot.draft) == AUTOMATION_SCHEMA_VERSION_P4,
                     language,
                 ),
                 recentRuns = recent,
@@ -800,6 +804,8 @@ class AutomationDetailViewModel @Inject constructor(
                 ),
                 appInfo = appInfoFor(snapshot.draft.trigger, snapshot.draft.actions),
                 canChangeApp = snapshot.integrityError == null,
+                // S8: una bozza importata da file lo dice in approvazione.
+                imported = snapshot.createdBy == CreatedBy.IMPORT,
             ),
             automationId = snapshot.automationId.value,
             loading = false,
@@ -850,7 +856,11 @@ class AutomationDetailViewModel @Inject constructor(
                 warnings = warnings,
                 canArm = false,
                 armBlockedReason = warnings.firstOrNull { it.severity == Severity.ERROR }?.text,
-                estimatedLlmCallsPerDay = generativeEstimate(rule.isGenerative, language),
+                estimatedLlmCallsPerDay = generativeEstimate(
+                    automation.actions,
+                    program = AutomationSchema.requiresP4(automation),
+                    language,
+                ),
                 recentRuns = recentRuns(automation.id.value, records, actionsByExecution, language),
                 geofencePreviewLabel = null,
                 canRunNow = manualEntry != null,
@@ -1108,13 +1118,52 @@ class AutomationDetailViewModel @Inject constructor(
         }
         .toList()
 
-    private fun generativeEstimate(generative: Boolean, language: RenderLanguage): String? = if (generative) {
-        language.pick(
-            "Minimum cooldown 60 s between two AI replies",
-            "Cooldown minimo 60 s tra due risposte AI",
-        )
-    } else {
-        null
+    /**
+     * Nota di costo in approvazione (S10): il caso peggiore di chiamate AI a ogni scatto, non solo il
+     * cooldown. Un `while` moltiplica le chiamate del suo corpo; un programma si ferma comunque al
+     * tetto [ProgramInterpreter.MAX_GENERATIVE_CALLS_PER_EXECUTION].
+     */
+    private fun generativeEstimate(
+        actions: List<Action>,
+        program: Boolean,
+        language: RenderLanguage,
+    ): String? {
+        val worst = worstCaseAiCalls(actions)
+        if (worst <= 0L) return null
+        val calls = if (program) {
+            worst.coerceAtMost(ProgramInterpreter.MAX_GENERATIVE_CALLS_PER_EXECUTION.toLong())
+        } else {
+            worst
+        }
+        return if (calls == 1L) {
+            language.pick(
+                "At most 1 AI call each time it runs; minimum cooldown 60 s between two runs",
+                "Al massimo 1 chiamata AI a ogni esecuzione; cooldown minimo 60 s tra due esecuzioni",
+            )
+        } else {
+            language.pick(
+                "At most $calls AI calls each time it runs; minimum cooldown 60 s between two runs",
+                "Al massimo $calls chiamate AI a ogni esecuzione; cooldown minimo 60 s tra due esecuzioni",
+            )
+        }
+    }
+
+    /** Chiamate AI nel percorso più costoso: rami dell'if al massimo, corpo del while per le iterazioni. */
+    private fun worstCaseAiCalls(actions: List<Action>): Long = actions.fold(0L) { total, action ->
+        val calls = when (action) {
+            is Action.If -> maxOf(worstCaseAiCalls(action.then), worstCaseAiCalls(action.orElse))
+            is Action.While -> worstCaseAiCalls(action.body) *
+                (action.maxIterations?.toLong() ?: AiCallBounds.WHILE_ITERATIONS)
+            else -> if (action.tier == ActionTier.GENERATIVE) 1L else 0L
+        }
+        (total + calls).coerceAtMost(AiCallBounds.CEILING)
+    }
+
+    private object AiCallBounds {
+        /** Un conteggio da variabile vale fino al tetto del validatore (1000 giri). */
+        const val WHILE_ITERATIONS = 1_000L
+        /** Solo contro l'overflow: la nota mostra comunque il tetto del programma. */
+        const val CEILING = 1_000_000L
     }
 
     private fun readerProbeLabel(

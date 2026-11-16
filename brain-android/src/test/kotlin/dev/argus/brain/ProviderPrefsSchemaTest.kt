@@ -103,4 +103,60 @@ class ProviderPrefsSchemaTest {
             ProviderPrefsSchema.apiKeyKey(ProviderId.CUSTOM_OPENAI_COMPAT),
         )
     }
+
+    // --- S6: la chiave vale per la sua origine ---
+
+    @Test
+    fun `same origin means same scheme host and effective port`() {
+        assertTrue(ProviderPrefsSchema.sameOrigin("https://api.example.com/v1", "https://api.example.com/v2"))
+        assertTrue(ProviderPrefsSchema.sameOrigin("https://API.example.com/v1", "https://api.example.com:443/v1"))
+        assertFalse(ProviderPrefsSchema.sameOrigin("https://api.example.com/v1", "http://api.example.com/v1"))
+        assertFalse(ProviderPrefsSchema.sameOrigin("https://api.example.com/v1", "https://api.example.com:8443/v1"))
+        assertFalse(ProviderPrefsSchema.sameOrigin("https://api.example.com/v1", "http://127.0.0.1:11434/v1"))
+        assertFalse(ProviderPrefsSchema.sameOrigin("https://api.example.com/v1", "https://evil.example.com/v1"))
+        assertFalse(ProviderPrefsSchema.sameOrigin("not a url", "https://api.example.com/v1"))
+    }
+
+    /** Store in memoria che applica la stessa regola dell'implementazione Android. */
+    private class MemoryStore(var base: String, var key: String?) : ProviderConfigStore {
+        override fun selectedProviderId() = ProviderId.CUSTOM_OPENAI_COMPAT
+        override suspend fun selectProvider(id: ProviderId) = true
+        override fun providerConfig(id: ProviderId) = ProviderConfig(id, base, "m")
+        override suspend fun saveProviderConfig(
+            id: ProviderId,
+            baseUrl: String?,
+            model: String?,
+            apiKey: String?,
+            reasoningEffort: ReasoningEffort?,
+        ): Boolean {
+            if (baseUrl != null && apiKey == null && baseUrlChangesOrigin(id, baseUrl)) key = null
+            if (baseUrl != null) base = normalizeProviderBaseUrl(baseUrl, id) ?: return false
+            if (apiKey != null) key = apiKey
+            return true
+        }
+        override suspend fun apiKey(id: ProviderId) = key
+        override suspend fun hasApiKey(id: ProviderId) = key != null
+        override suspend fun clearApiKey(id: ProviderId) = true.also { key = null }
+    }
+
+    @Test
+    fun `a new server address is a change of origin only when scheme host or port change`() {
+        val store = MemoryStore("https://api.example.com/v1", "sk-cloud-1234567890abcdef")
+        val custom = ProviderId.CUSTOM_OPENAI_COMPAT
+
+        assertFalse(store.baseUrlChangesOrigin(custom, "https://api.example.com/v2"))
+        assertTrue(store.baseUrlChangesOrigin(custom, "http://127.0.0.1:11434/v1"))
+        assertTrue(store.baseUrlChangesOrigin(custom, "http://192.168.1.20:8080/v1"))
+        // Un indirizzo che il salvataggio rifiuta non cambia nulla.
+        assertFalse(store.baseUrlChangesOrigin(custom, "http://public.example.com/v1"))
+    }
+
+    @Test
+    fun `the legacy hermes save refuses a new server without a new bearer`() = kotlinx.coroutines.runBlocking {
+        val store = MemoryStore("https://bridge.example", "bearer-0123456789abcdef")
+
+        assertTrue(store.saveConfiguration("https://bridge.example/", bearerToken = null))
+        assertFalse(store.saveConfiguration("https://other-bridge.example", bearerToken = null))
+        assertTrue(store.saveConfiguration("https://other-bridge.example", bearerToken = "bearer-new-0123456789ab"))
+    }
 }

@@ -55,8 +55,10 @@ sealed interface ActionResolution {
  *
  * Nel comando shell (`run_shell.cmd`, [InterpolationPolicy.TemplateField.shellQuoted]) un valore
  * TAINTED non viene mai inserito grezzo: lo si rende inerte con [ShellQuoting] secondo il contesto
- * del segnaposto nel template; se il contesto non è quotabile in sicurezza l'azione è bloccata con
- * `shell_quote_context`. I valori CLEAN restano come sono.
+ * del segnaposto nel template; se il contesto non è quotabile in sicurezza (posizione del comando,
+ * comando che rilegge gli argomenti, costrutti non modellati) l'azione è bloccata con
+ * `shell_quote_context`, e un valore non intero dove la shell valuta un numero con
+ * `shell_numeric_context`. I valori CLEAN restano come sono.
  */
 class TaintAwareInterpolator {
     fun resolve(action: Action, scope: VarScope): ActionResolution {
@@ -93,9 +95,15 @@ class TaintAwareInterpolator {
                 is Action.LaunchApp -> action.copy(
                     pkg = accumulator.field("pkg", action.pkg, MAX_PACKAGE_CHARS),
                 )
-                is Action.OpenUrl -> action.copy(
-                    url = accumulator.field("url", action.url, MAX_TEXT_CHARS),
-                )
+                is Action.OpenUrl -> {
+                    val url = accumulator.field("url", action.url, MAX_TEXT_CHARS)
+                    // Con l'host scritto nel template, i dati inseriti dopo non possono cambiarlo.
+                    val approvedHost = literalHost(action.url)
+                    if (approvedHost != null && !approvedHost.equals(hostOf(url), ignoreCase = true)) {
+                        throw ResolutionException("url_host_changed")
+                    }
+                    action.copy(url = url)
+                }
                 is Action.ShowNotification -> action.copy(
                     title = accumulator.field("title", action.title, MAX_TITLE_CHARS),
                     text = accumulator.field("text", action.text, MAX_TEXT_CHARS),
@@ -126,7 +134,10 @@ class TaintAwareInterpolator {
                 is Action.OpenSettingsScreen -> action.copy(
                     pkg = action.pkg?.let { accumulator.field("pkg", it, MAX_PACKAGE_CHARS) },
                 )
-                is Action.WriteSetting -> action.copy(
+                // S7: la chiave è sempre letterale; un template con la chiave interpolata non si esegue.
+                is Action.WriteSetting -> if (InterpolationPolicy.containsInterpolation(action.key)) {
+                    throw ResolutionException("write_setting_key_interpolated")
+                } else action.copy(
                     key = accumulator.field("key", action.key, WriteSettingPolicy.MAX_KEY_LENGTH),
                     value = accumulator.field("value", action.value, WriteSettingPolicy.MAX_VALUE_LENGTH),
                 )
@@ -140,7 +151,7 @@ class TaintAwareInterpolator {
                     goal = accumulator.field("goal", action.goal, MAX_TEXT_CHARS, frameTaintedForBrain = true),
                 )
                 is Action.Speak -> action.copy(
-                    text = accumulator.field("text", action.text, MAX_TEXT_CHARS),
+                    text = accumulator.field("text", action.text, MAX_SPEAK_CHARS),
                 )
                 // URL, intestazioni e content type restano quelli approvati (mai interpolati): solo il
                 // body ha segnaposto, con la codifica del suo content type (JSON, form).
@@ -231,10 +242,13 @@ class TaintAwareInterpolator {
                         }
                         append("{{").append(binding.token).append("}}")
                     } else if (shellContext != null && value.integrity == IntegrityLabel.TAINTED) {
-                        // D1: un dato esterno entra nel comando solo come argomento inerte.
+                        // D1: un dato esterno entra nel comando solo come argomento inerte. Dove la
+                        // shell lo valuta come numero (S2) gli apici non bastano: deve essere un intero.
                         append(
-                            ShellQuoting.render(value.text, shellContext)
-                                ?: throw ResolutionException("shell_quote_context"),
+                            ShellQuoting.render(value.text, shellContext) ?: throw ResolutionException(
+                                if (shellContext == ShellQuoting.Context.NUMERIC) "shell_numeric_context"
+                                else "shell_quote_context",
+                            ),
                         )
                     } else if (jsonInString != null) {
                         // Body JSON: dentro una stringa il valore entra come contenuto con escape (non può
@@ -288,16 +302,36 @@ class TaintAwareInterpolator {
         const val MAX_PACKAGE_CHARS = 255
         const val MAX_TITLE_CHARS = 120
         const val MAX_TEXT_CHARS = 4_000
+
+        /** Lo stesso limite che il DraftValidator applica al template di `speak`. */
+        const val MAX_SPEAK_CHARS = 1_000
         const val MAX_COMMAND_CHARS = 8_192
 
         val PACKAGE_NAME = Regex("^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+$")
 
+        /**
+         * Host del template `open_url` quando è letterale: ogni segnaposto viene dopo il `/`, `?` o `#`
+         * che chiude l'autorità. Null se l'host dipende da un segnaposto o il template non ha forma URL.
+         */
+        fun literalHost(template: String): String? {
+            if (!InterpolationPolicy.containsInterpolation(template)) return null
+            val authorityStart = template.indexOf("://").takeIf { it > 0 }?.plus(3) ?: return null
+            val authorityEnd = template.indexOfAny(charArrayOf('/', '?', '#'), authorityStart)
+                .takeIf { it >= 0 } ?: return null
+            if (template.indexOf("\${").let { it in 0 until authorityEnd }) return null
+            return hostOf(template.substring(0, authorityEnd))
+        }
+
+        fun hostOf(url: String): String? = runCatching { URI(url).host }.getOrNull()
+
         fun validResolvedShape(action: Action): Boolean = when (action) {
             is Action.SetRinger -> action.mode in setOf("normal", "vibrate", "silent")
             is Action.LaunchApp -> PACKAGE_NAME.matches(action.pkg)
+            // Niente `utente@host`: si leggerebbe come l'host prima della chiocciola.
             is Action.OpenUrl -> runCatching {
                 val uri = URI(action.url)
-                uri.scheme?.lowercase() in setOf("http", "https") && !uri.host.isNullOrBlank()
+                uri.scheme?.lowercase() in setOf("http", "https") && !uri.host.isNullOrBlank() &&
+                    uri.rawUserInfo == null
             }.getOrDefault(false)
             is Action.ShowNotification -> action.title.isNotBlank() &&
                 action.title.length <= MAX_TITLE_CHARS && action.text.length <= MAX_TEXT_CHARS
@@ -319,7 +353,7 @@ class TaintAwareInterpolator {
             is Action.CopyToClipboard -> action.extractionRegex == null ||
                 SafeExtractionRegex.isValid(action.extractionRegex)
             is Action.CopyText -> action.text.isNotBlank() && action.text.length <= MAX_TEXT_CHARS
-            is Action.Speak -> action.text.isNotBlank() && action.text.length <= MAX_TEXT_CHARS
+            is Action.Speak -> action.text.isNotBlank() && action.text.length <= MAX_SPEAK_CHARS
             is Action.HttpRequest -> HttpRequestPolicy.isResolvedShapeValid(action)
             is Action.UiSteps -> UiStepsPolicy.isResolvedShapeValid(action)
             is Action.SetBrightness -> (action.level == null) != (action.auto == null) &&

@@ -7,8 +7,13 @@ import dev.argus.engine.runtime.CronSchedule
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PolymorphicKind
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.descriptors.StructureKind
+import kotlinx.serialization.encoding.CompositeDecoder
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonClassDiscriminator
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -37,6 +42,9 @@ private data class MetaEnvelope(
  * testo prima del marcatore. Un marcatore il cui oggetto non ha quelle chiavi resta prosa.
  */
 class CliBridgeParser(private val json: Json = lenient()) {
+    /** S9: la stessa tolleranza di sintassi di [json] (commenti, virgola finale), ma nessuna chiave sconosciuta. */
+    private val strictJson = Json(json) { ignoreUnknownKeys = false }
+
     fun parseCompile(raw: String): CompileResult {
         val cleaned = ThinkBlocks.strip(raw)
         val idx = cleaned.lastIndexOf(SENTINEL)
@@ -101,8 +109,19 @@ class CliBridgeParser(private val json: Json = lenient()) {
             // Si decodifica dal testo (non dall'albero JSON): solo il decoder in streaming aggiunge
             // all'errore il percorso (`at path: $.draft.trigger`), che il ritentativo passa al modello.
             val cleanObject = stripNulls(json.parseToJsonElement(obj))
-            json.decodeFromString(MetaEnvelope.serializer(), cleanObject.toString())
+            // S9: fuori dalla bozza l'envelope può portare altro (`reply` dell'output strutturato), che
+            // si ignora; DENTRO la bozza ogni chiave sconosciuta è un errore. `"condition"` al posto di
+            // `"conditions"` o `"else"` al posto di `"orElse"` farebbero sparire una guardia in silenzio
+            // e la regola sarebbe più larga di quanto il modello dice.
+            val envelope = (cleanObject as? JsonObject)?.filterKeys { it in ENVELOPE_FIELDS }
+                ?.let(::JsonObject)
+                ?: cleanObject
+            (envelope as? JsonObject)?.get("draft")?.let { draft ->
+                unknownDraftKey(draft)?.let { return CompileResult(prose, null, CompileMetaError.DRAFT_INVALID, detail = it) }
+            }
+            strictJson.decodeFromString(MetaEnvelope.serializer(), envelope.toString())
         } catch (error: Exception) {
+            unknownKeyDetail(error)?.let { return CompileResult(prose, null, CompileMetaError.DRAFT_INVALID, detail = it) }
             return CompileResult(prose, null, "meta_parse_error", detail = safeDetail(error))
         }
         val code = meta.errorCode
@@ -211,6 +230,82 @@ class CliBridgeParser(private val json: Json = lenient()) {
         else -> element
     }
 
+    /**
+     * S9: la prima chiave della bozza che lo schema non conosce, come `unknown key "condition" at $.draft`
+     * (il percorso è l'oggetto che la contiene). Visita l'albero seguendo i descrittori dei tipi: per le
+     * gerarchie sealed sceglie la sottoclasse dal discriminatore (`type`, `op` per i passi delle macro).
+     * Un discriminatore sconosciuto o un valore del tipo sbagliato non si giudicano qui: ci pensa la
+     * decodifica, che resta comunque rigorosa. Nessun valore dell'input entra nel dettaglio, solo il nome
+     * della chiave, ripulito e accorciato.
+     */
+    private fun unknownDraftKey(draft: JsonElement): String? {
+        val found = findUnknownKey(draft, AutomationDraft.serializer().descriptor, "$.draft", null, 0)
+            ?: return null
+        return "unknown key \"${cleanKey(found.first)}\" at ${found.second}: use only the exact field names of the schema"
+    }
+
+    @OptIn(ExperimentalSerializationApi::class)
+    private fun findUnknownKey(
+        element: JsonElement,
+        descriptor: SerialDescriptor,
+        path: String,
+        discriminator: String?,
+        depth: Int,
+    ): Pair<String, String>? {
+        if (depth > MAX_KEY_SCAN_DEPTH) return null
+        return when (descriptor.kind) {
+            PolymorphicKind.SEALED -> {
+                val obj = element as? JsonObject ?: return null
+                val key = descriptor.annotations.filterIsInstance<JsonClassDiscriminator>().firstOrNull()?.discriminator
+                    ?: json.configuration.classDiscriminator
+                val type = (obj[key] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return null
+                val subclasses = descriptor.getElementDescriptor(1)
+                val sub = (0 until subclasses.elementsCount)
+                    .map(subclasses::getElementDescriptor)
+                    .firstOrNull { it.serialName == type }
+                    ?: return null
+                findUnknownKey(obj, sub, path, key, depth + 1)
+            }
+            StructureKind.CLASS, StructureKind.OBJECT -> {
+                val obj = element as? JsonObject ?: return null
+                obj.keys.firstOrNull { it != discriminator && descriptor.getElementIndex(it) == CompositeDecoder.UNKNOWN_NAME }
+                    ?.let { return it to path }
+                obj.entries.firstNotNullOfOrNull { (name, value) ->
+                    val index = descriptor.getElementIndex(name)
+                    if (index == CompositeDecoder.UNKNOWN_NAME) return@firstNotNullOfOrNull null
+                    findUnknownKey(value, descriptor.getElementDescriptor(index), "$path.$name", null, depth + 1)
+                }
+            }
+            StructureKind.LIST -> {
+                val array = element as? JsonArray ?: return null
+                val item = descriptor.getElementDescriptor(0)
+                array.withIndex().firstNotNullOfOrNull { (index, value) ->
+                    findUnknownKey(value, item, "$path[$index]", null, depth + 1)
+                }
+            }
+            StructureKind.MAP -> {
+                val obj = element as? JsonObject ?: return null
+                val value = descriptor.getElementDescriptor(1)
+                obj.entries.firstNotNullOfOrNull { (name, item) ->
+                    findUnknownKey(item, value, "$path[\"${cleanKey(name)}\"]", null, depth + 1)
+                }
+            }
+            else -> null
+        }
+    }
+
+    /** Ripiego: una chiave sconosciuta che la visita non ha trovato e che la decodifica rigorosa ha visto. */
+    private fun unknownKeyDetail(error: Exception): String? {
+        val key = UNKNOWN_KEY.find(error.message.orEmpty())?.groupValues?.get(1) ?: return null
+        return "unknown key \"${cleanKey(key)}\" in the draft: use only the exact field names of the schema"
+    }
+
+    /** Il nome di una chiave scritta dal modello, senza caratteri strani e mai più lungo di 40 caratteri. */
+    private fun cleanKey(key: String): String =
+        key.map { if (it.isLetterOrDigit() && it.code < 0x80 || it == '_' || it == '-' || it == '.') it else '?' }
+            .joinToString("")
+            .take(MAX_KEY_CHARS)
+
     /** Solo percorso e tipo dell'errore kotlinx: mai il frammento di input (può contenere dati utente). */
     private fun safeDetail(error: Exception): String {
         val message = error.message.orEmpty()
@@ -258,6 +353,16 @@ class CliBridgeParser(private val json: Json = lenient()) {
 
         /** Le chiavi che distinguono un envelope strutturato da un oggetto JSON qualunque. */
         val ENVELOPE_KEY = Regex("\"(?:draft|error_code)\"\\s*:")
+
+        /** I soli campi dell'envelope che contano: gli altri (`reply`) restano fuori dalla decodifica rigorosa. */
+        val ENVELOPE_FIELDS = setOf("draft", "error_code")
+
+        /** Il nome della chiave nel messaggio di kotlinx (`Encountered an unknown key 'x'`). */
+        val UNKNOWN_KEY = Regex("unknown key '([^']{1,200})'")
+
+        /** Ben oltre il limite di annidamento del validatore: la visita delle chiavi non cresce senza fine. */
+        const val MAX_KEY_SCAN_DEPTH = 64
+        const val MAX_KEY_CHARS = 40
 
         /** Le modalità che il validatore accetta per `set_ringer`. */
         val RINGER_MODES = setOf("normal", "vibrate", "silent")

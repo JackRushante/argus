@@ -1,6 +1,7 @@
 package dev.argus.automation.apps
 
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.content.pm.LauncherApps
 import android.os.Process
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -16,6 +17,12 @@ import javax.inject.Inject
 fun interface InstalledPackageCheck {
     /** I package di [packages] che NON risultano installati. Se non si riesce a dirlo, nessuno: meglio un avviso in meno. */
     suspend fun missing(packages: Collection<String>): Set<String>
+
+    /**
+     * 0.7.2: i package di [packages] che sono app di sistema (preinstallate), per l'avviso sul congelamento.
+     * Se non si riesce a dirlo, nessuno: è un avviso, mai un blocco.
+     */
+    suspend fun systemApps(packages: Collection<String>): Set<String> = emptySet()
 }
 
 /** Nessun controllo: ogni package si considera installato (default dei test e dei flussi senza telefono). */
@@ -89,6 +96,14 @@ class AndroidInstalledAppCatalog @Inject constructor(
         // Senza l'elenco non si può dire nulla: nessun avviso, mai un falso allarme.
         if (known.isEmpty()) return emptySet()
         return packages.filterTo(linkedSetOf()) { it !in known && !isInstalled(it) }
+    }
+
+    override suspend fun systemApps(packages: Collection<String>): Set<String> = withContext(Dispatchers.Default) {
+        packages.filterTo(linkedSetOf()) { pkg ->
+            runCatching {
+                (appContext.packageManager.getApplicationInfo(pkg, 0).flags and ApplicationInfo.FLAG_SYSTEM) != 0
+            }.getOrDefault(false)
+        }
     }
 
     private companion object {

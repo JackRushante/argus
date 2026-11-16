@@ -103,6 +103,27 @@ class P4ModelSerializationTest {
         assertEquals(setOf(ValueProvenance.SMS, ValueProvenance.MODEL), value.provenance)
     }
 
+    @Test fun `state text from parametric readers is external while builtin numbers and booleans stay trusted`() {
+        fun state(query: StateQuery, type: StateValueType) =
+            VarBinding.State("s", query, type, StateQueryPolicy.VERSION, ConfidentialityLabel.SECRET)
+        val parametric = listOf(
+            StateQuery.Setting(SettingNamespace.GLOBAL, "device_name"),
+            StateQuery.SystemProperty("ro.product.model"),
+            StateQuery.Sysfs("/sys/class/power_supply/battery/status"),
+            StateQuery.DumpsysField("wifi", "SSID"),
+        )
+        parametric.forEach { query ->
+            assertEquals(IntegrityLabel.TAINTED, state(query, StateValueType.TEXT).integrity, query.family.wireName)
+            assertEquals(IntegrityLabel.CLEAN, state(query, StateValueType.NUMBER).integrity, query.family.wireName)
+            assertEquals(IntegrityLabel.CLEAN, state(query, StateValueType.BOOLEAN).integrity, query.family.wireName)
+        }
+        assertEquals(IntegrityLabel.CLEAN, state(StateQuery.Builtin(StateKeys.RINGER), StateValueType.TEXT).integrity)
+        // L'integrità è calcolata, mai serializzata: le impronte delle regole esistenti non cambiano.
+        val encoded = ArgusJson.encodeToString(VarBinding.serializer(), state(parametric.last(), StateValueType.TEXT))
+        assertFalse("integrity" in encoded, encoded)
+        assertFalse("TAINTED" in encoded, encoded)
+    }
+
     @Test fun `state binding carries its approved type instead of degrading to text`() {
         assertEquals(
             VarType.NUMBER,

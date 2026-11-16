@@ -1,39 +1,66 @@
 package dev.argus.automation.privileged
 
+import android.content.ComponentName
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Environment
 import android.provider.MediaStore
+import android.provider.Settings
+import android.webkit.WebView
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.IOException
 
 /**
- * NFC e launcher del telefono. Il launcher in uso si risolve con l'intent HOME (visibile grazie al
- * `<queries>` del manifest); se Android risponde col selettore di sistema (`android`, nessun launcher
- * predefinito) o non risponde, si proteggono tutti i launcher installati: meglio un rifiuto in più che
- * lasciare congelare l'unico modo di tornare alla Home.
+ * NFC e app che `app_control` non può toccare su questo telefono (0.7.2):
+ *  - TUTTI i gestori HOME installati (visibili grazie al `<queries>` del manifest), non solo quello
+ *    predefinito: congelare il launcher di riserva o quello appena scelto lascia senza Home;
+ *  - la tastiera predefinita (`Settings.Secure.DEFAULT_INPUT_METHOD`): congelata, non si scrive più;
+ *  - il fornitore WebView in uso.
+ *
+ * Fallisce chiuso: se i gestori HOME non si leggono (eccezione o nessuno visibile) o la tastiera
+ * predefinita non si interpreta, [protectedPackages] lancia e l'esecutore rifiuta l'azione.
  */
-class AndroidPrivilegedActionEnvironment(context: Context) : PrivilegedActionEnvironment {
+class AndroidPrivilegedActionEnvironment internal constructor(
+    context: Context,
+    private val webViewPackage: () -> String?,
+) : PrivilegedActionEnvironment {
+    constructor(context: Context) : this(context, { WebView.getCurrentWebViewPackage()?.packageName })
+
     private val packageManager = context.applicationContext.packageManager
+    private val resolver = context.applicationContext.contentResolver
 
     override fun hasNfc(): Boolean =
         runCatching { packageManager.hasSystemFeature(PackageManager.FEATURE_NFC) }.getOrDefault(false)
 
-    override fun launcherPackages(): Set<String> = runCatching {
+    override fun protectedPackages(): Set<String> = linkedSetOf<String>().apply {
+        addAll(launcherPackages())
+        defaultInputMethodPackage()?.let(::add)
+        webViewPackage()?.let(::add)
+    }
+
+    private fun launcherPackages(): Set<String> {
         val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
-        val default = packageManager.resolveActivity(home, PackageManager.MATCH_DEFAULT_ONLY)
+        val all = packageManager.queryIntentActivities(home, 0)
+            .mapNotNullTo(linkedSetOf()) { it.activityInfo?.packageName }
+        packageManager.resolveActivity(home, PackageManager.MATCH_DEFAULT_ONLY)
             ?.activityInfo?.packageName
             ?.takeIf { it != SYSTEM_RESOLVER }
-        if (default != null) {
-            setOf(default)
-        } else {
-            packageManager.queryIntentActivities(home, 0).mapNotNullTo(linkedSetOf()) { it.activityInfo?.packageName }
-        }
-    }.getOrDefault(emptySet())
+            ?.let(all::add)
+        // Un telefono ha sempre almeno un gestore HOME: nessuno visibile vuol dire che la lettura non va.
+        check(all.isNotEmpty()) { "no HOME handler visible" }
+        return all
+    }
+
+    /** Package della tastiera predefinita; null se non ce n'è una impostata. */
+    private fun defaultInputMethodPackage(): String? {
+        val id = Settings.Secure.getString(resolver, Settings.Secure.DEFAULT_INPUT_METHOD)
+        if (id.isNullOrBlank()) return null
+        return checkNotNull(ComponentName.unflattenFromString(id)?.packageName) { "unreadable input method" }
+    }
 
     private companion object {
         const val SYSTEM_RESOLVER = "android"

@@ -85,6 +85,47 @@ class SharedForegroundSentinelTest {
         assertTrue(sentinel.setDemand(second, required = false))
         assertEquals(1, backend.stopCalls)
     }
+
+    // --- 0.7.2: servizio orfano dopo la morte del processo ---------------------------------------
+
+    @Test
+    fun `a service recreated without any demand is stopped once the first reconcile settles`() = runTest {
+        val backend = RecordingBackend()
+        // Ricreato da START_STICKY: acceso, ma nessuna domanda in questo processo.
+        val sentinel = SharedForegroundSentinel(backend, serviceActive = { true })
+
+        sentinel.onServiceActive()
+        assertEquals(0, backend.stopCalls, "prima del primo reconcile i domini non hanno ancora parlato")
+
+        sentinel.settle()
+        assertEquals(1, backend.stopCalls)
+    }
+
+    @Test
+    fun `a service recreated after the first reconcile is stopped when it becomes active`() = runTest {
+        val backend = RecordingBackend()
+        var running = false
+        val sentinel = SharedForegroundSentinel(backend, serviceActive = { running })
+
+        sentinel.settle()
+        assertEquals(0, backend.stopCalls)
+
+        running = true
+        sentinel.onServiceActive()
+        assertEquals(1, backend.stopCalls)
+    }
+
+    @Test
+    fun `a service with a live demand is never stopped as an orphan`() = runTest {
+        val backend = RecordingBackend()
+        val sentinel = SharedForegroundSentinel(backend, serviceActive = { true })
+
+        sentinel.setDemand(SentinelDemand.Sensor, required = true)
+        sentinel.settle()
+        sentinel.onServiceActive()
+
+        assertEquals(0, backend.stopCalls)
+    }
 }
 
 private class RecordingBackend(

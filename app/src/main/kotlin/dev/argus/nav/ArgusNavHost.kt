@@ -657,6 +657,8 @@ fun ArgusNavHost(
                             ) = settingsViewModel.saveProviderConfig(
                                 providerId, baseUrl, model, apiKey, reasoningEffort,
                             )
+                            override fun onRemoveProviderKey(providerId: String) =
+                                settingsViewModel.removeProviderKey(providerId)
                         },
                         modifier = Modifier.testTag("screen_settings"),
                     )

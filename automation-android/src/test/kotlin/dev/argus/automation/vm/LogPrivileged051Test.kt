@@ -15,6 +15,7 @@ import kotlin.test.assertTrue
 class LogPrivileged051Test {
     private val codes = listOf(
         "target_forbidden",
+        "protected_apps_unknown",
         "nfc_unavailable",
         "permission_not_applied",
         "screenshot_save_failed",
@@ -80,7 +81,7 @@ class LogPrivileged051Test {
     fun `a failed action shows the reason and never a path or a package`() {
         val detail = assertNotNull(row(ActionTypeIds.APP_CONTROL, "target_forbidden", RenderLanguage.IT).expandedDetail).single()
         assertEquals(
-            "1. Controllo app → fallita · Argus, il launcher e le app di sistema essenziali non si possono modificare con una regola",
+            "1. Controllo app → fallita · Argus, il launcher, la tastiera, WebView e le app di sistema essenziali non si possono modificare con una regola",
             detail,
         )
         val exit = assertNotNull(row(ActionTypeIds.SET_AIRPLANE, "set_airplane_exit_1", RenderLanguage.EN).expandedDetail).single()

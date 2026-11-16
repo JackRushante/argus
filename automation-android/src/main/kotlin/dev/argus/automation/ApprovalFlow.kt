@@ -7,6 +7,7 @@ import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.Action
+import dev.argus.engine.model.AppControlOp
 import dev.argus.engine.model.AppPackages
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.CapabilityRequirements
@@ -233,7 +234,7 @@ class ApprovalFlow(
     suspend fun review(id: DraftId): ApprovalFlowReview? {
         val base = approvals.review(id) ?: return null
         val capabilityIssues = capabilityIssues(base.snapshot)
-        val appIssues = missingAppIssues(base.snapshot)
+        val appIssues = missingAppIssues(base.snapshot) + systemFreezeIssues(base.snapshot)
         val queryReport = if (capabilityIssues.any { it.severity == Severity.ERROR }) {
             StateQueryProbeReport()
         } else {
@@ -387,6 +388,35 @@ class ApprovalFlow(
                 Severity.WARNING,
                 "app_not_installed",
                 "App non installata su questo telefono: $pkg",
+                detail = pkg,
+            )
+        }
+    }
+
+    /**
+     * 0.7.2: congelare un'app di sistema (preinstallata) può togliere al telefono qualcosa che gli serve, ma
+     * è anche il modo legittimo di spegnere le app superflue del produttore: WARNING
+     * `app_control_freeze_system` con il package in `detail`, uno per package, mai un blocco. Se il
+     * controllo fallisce non si avvisa.
+     */
+    private suspend fun systemFreezeIssues(snapshot: PendingDraft): List<ValidationIssue> {
+        val frozen = AppPackages.slotsByAction(snapshot.draft.trigger, snapshot.draft.actions).entries
+            .sortedBy { it.value }
+            .mapNotNull { (action, _) -> (action as? Action.AppControl)?.takeIf { it.op == AppControlOp.FREEZE }?.pkg }
+            .distinct()
+        if (frozen.isEmpty()) return emptyList()
+        val system = try {
+            installedPackages.systemApps(frozen)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            return emptyList()
+        }
+        return frozen.filter { it in system }.map { pkg ->
+            ValidationIssue(
+                Severity.WARNING,
+                "app_control_freeze_system",
+                "La regola congela un'app di sistema: $pkg",
                 detail = pkg,
             )
         }

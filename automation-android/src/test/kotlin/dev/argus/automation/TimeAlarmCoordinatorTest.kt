@@ -742,6 +742,150 @@ class TimeAlarmCoordinatorTest {
         assertNotEquals(firstAnchor, secondAnchor)
     }
 
+    // --- B1 (0.7.2): una revisione nuova non eredita l'ancora della vecchia -------------------
+
+    @Test
+    fun `edited relative rule gets a fresh anchor instead of the old revision's one`() = runTest {
+        val old = automation(Trigger.Time(afterMs = 600_000, tz = "UTC"))
+        val edited = automation(Trigger.Time(afterMs = 3 * 3_600_000L, tz = "UTC"))
+        val oldAnchor = now.plusSeconds(300).toEpochMilli()
+        val state = FakeTimeAlarmStateStore(record(old, oldAnchor))
+        val backend = FakeTimeAlarmBackend()
+
+        val report = coordinator(FakeAutomationStore(edited), state, backend)
+            .reconcile(ReconcileReason.CAPABILITY_CHANGED)
+
+        val fresh = now.plusMillis(3 * 3_600_000L).toEpochMilli()
+        assertEquals(listOf(edited.id), report.scheduled)
+        assertEquals(fresh, state.get(edited.id)?.eventAtMillis)
+        assertEquals(edited.approvalFingerprint, state.get(edited.id)?.approvalFingerprint)
+        assertEquals(fresh, backend.scheduled.single().eventAtMillis)
+    }
+
+    @Test
+    fun `edited relative rule with a past old anchor does not fire at once`() = runTest {
+        val old = automation(Trigger.Time(afterMs = 600_000, tz = "UTC"))
+        val edited = automation(Trigger.Time(afterMs = 3 * 3_600_000L, tz = "UTC"))
+        val oldAnchor = now.minusSeconds(60).toEpochMilli()
+        val store = FakeAutomationStore(edited)
+        val state = FakeTimeAlarmStateStore(record(old, oldAnchor))
+        val dispatched = mutableListOf<TriggerEnvelope>()
+        val coordinator = TimeAlarmCoordinator(
+            store = store,
+            state = state,
+            backend = FakeTimeAlarmBackend(),
+            dispatcher = TimeEventDispatcher { dispatched += it },
+            now = { now },
+        )
+
+        coordinator.reconcile(ReconcileReason.APP_START)
+        // Anche la vecchia sveglia del sistema, se arriva, non consegna nulla.
+        coordinator.onAlarm(old.id, fingerprint(old), oldAnchor)
+
+        assertEquals(emptyList(), dispatched)
+        assertEquals(AutomationStatus.ARMED, store.get(edited.id)?.status)
+        assertEquals(now.plusMillis(3 * 3_600_000L).toEpochMilli(), state.get(edited.id)?.eventAtMillis)
+    }
+
+    @Test
+    fun `edited at rule with a past old occurrence is rescheduled without firing`() = runTest {
+        val old = automation(Trigger.Time(at = "2026-07-13T19:00", tz = "UTC"))
+        val edited = automation(Trigger.Time(at = "2026-07-13T23:00", tz = "UTC"))
+        val oldAt = Instant.parse("2026-07-13T19:00:00Z").toEpochMilli()
+        val state = FakeTimeAlarmStateStore(record(old, oldAt))
+        val dispatched = mutableListOf<TriggerEnvelope>()
+        val coordinator = TimeAlarmCoordinator(
+            store = FakeAutomationStore(edited),
+            state = state,
+            backend = FakeTimeAlarmBackend(),
+            dispatcher = TimeEventDispatcher { dispatched += it },
+            now = { now },
+        )
+
+        coordinator.reconcile(ReconcileReason.APP_START)
+
+        assertEquals(emptyList(), dispatched)
+        assertEquals(
+            Instant.parse("2026-07-13T23:00:00Z").toEpochMilli(),
+            state.get(edited.id)?.eventAtMillis,
+        )
+    }
+
+    @Test
+    fun `re-enable after a deferred disable cleanup does not recover the old anchor`() = runTest {
+        var clock = now
+        val armed = automation(Trigger.Time(afterMs = 600_000, tz = "UTC"))
+        val store = FakeAutomationStore(armed)
+        val state = FakeTimeAlarmStateStore()
+        val dispatched = mutableListOf<TriggerEnvelope>()
+        val coordinator = TimeAlarmCoordinator(
+            store = store,
+            state = state,
+            backend = FakeTimeAlarmBackend(),
+            dispatcher = TimeEventDispatcher { dispatched += it },
+            now = { clock },
+        )
+        coordinator.reconcile(ReconcileReason.APP_START)
+        val firstAnchor = clock.plusMillis(600_000).toEpochMilli()
+
+        // Disable: Room non riesce a cancellare il record (pulizia rinviata).
+        store.disable(armed.id)
+        state.failDeletes = true
+        runCatching { coordinator.reconcile(ReconcileReason.CAPABILITY_CHANGED) }
+        state.failDeletes = false
+        assertEquals(firstAnchor, state.get(armed.id)?.eventAtMillis)
+
+        // Riattivata dopo la vecchia ancora: non scatta subito, riparte da adesso.
+        clock = clock.plusSeconds(1_200)
+        store.replace(armed)
+        val report = coordinator.reconcile(ReconcileReason.CAPABILITY_CHANGED)
+
+        assertEquals(emptyList(), dispatched)
+        assertEquals(emptyList(), report.recovered)
+        assertEquals(clock.plusMillis(600_000).toEpochMilli(), state.get(armed.id)?.eventAtMillis)
+        assertEquals(AutomationStatus.ARMED, store.get(armed.id)?.status)
+    }
+
+    // --- 0.7.2: sveglia di riserva per la revoca di «Sveglie e promemoria» -------------------
+
+    @Test
+    fun `an inexact watchdog follows the earliest future exact alarm`() = runTest {
+        val soon = automation(Trigger.Time(at = "2026-07-13T21:00", tz = "UTC", precision = TimePrecision.EXACT), "soon")
+        val later = automation(Trigger.Time(at = "2026-07-13T23:00", tz = "UTC", precision = TimePrecision.EXACT), "later")
+        val flexible = automation(Trigger.Time(at = "2026-07-13T20:30", tz = "UTC"), "flex")
+        val store = FakeAutomationStore(soon, later, flexible)
+        val state = FakeTimeAlarmStateStore()
+        val backend = FakeTimeAlarmBackend(exactAllowed = true)
+        val coordinator = coordinator(store, state, backend)
+
+        coordinator.reconcile(ReconcileReason.APP_START)
+        val soonAt = Instant.parse("2026-07-13T21:00:00Z").toEpochMilli()
+        // La FLEXIBLE (20:30) è già inexact e sopravvive alla revoca: non conta.
+        assertEquals(listOf<Long?>(soonAt + 120_000), backend.watchdogs)
+
+        // Un reconcile senza cambiamenti non riprogramma la riserva.
+        coordinator.reconcile(ReconcileReason.CAPABILITY_CHANGED)
+        assertEquals(1, backend.watchdogs.size)
+
+        // Consumata la prima, la riserva passa alla successiva; senza exact viene tolta.
+        coordinator.onAlarm(soon.id, fingerprint(soon), soonAt)
+        assertEquals(Instant.parse("2026-07-13T23:00:00Z").toEpochMilli() + 120_000, backend.watchdogs.last())
+        store.disable(later.id)
+        coordinator.reconcile(ReconcileReason.CAPABILITY_CHANGED)
+        assertNull(backend.watchdogs.last())
+    }
+
+    @Test
+    fun `without exact access there is no watchdog`() = runTest {
+        val rule = automation(Trigger.Time(at = "2026-07-13T21:00", tz = "UTC", precision = TimePrecision.EXACT))
+        val backend = FakeTimeAlarmBackend(exactAllowed = false)
+
+        coordinator(FakeAutomationStore(rule), FakeTimeAlarmStateStore(), backend)
+            .reconcile(ReconcileReason.APP_START)
+
+        assertEquals(listOf<Long?>(null), backend.watchdogs)
+    }
+
     @Test
     fun `relative afterMs schedules exact by default when permitted`() = runTest {
         // Campo (2026-07-17): un "tra 3 minuti" INEXACT è scattato con +2m33s di batching OEM.
@@ -1277,6 +1421,12 @@ private class FakeTimeAlarmBackend(
     override fun cancel(automationId: AutomationId) {
         cancelled += automationId
     }
+
+    val watchdogs = mutableListOf<Long?>()
+
+    override fun syncWatchdog(atMillis: Long?) {
+        watchdogs += atMillis
+    }
 }
 
 private class FakeTimeAlarmStateStore(
@@ -1284,6 +1434,7 @@ private class FakeTimeAlarmStateStore(
     private val failUpserts: Boolean = false,
 ) : TimeAlarmStateStore {
     private val values = initial.associateByTo(linkedMapOf()) { it.automationId }
+    var failDeletes = false
 
     override suspend fun get(automationId: AutomationId): ScheduledTimeAlarm? = values[automationId]
     override suspend fun all(): List<ScheduledTimeAlarm> = values.values.toList()
@@ -1291,7 +1442,10 @@ private class FakeTimeAlarmStateStore(
         if (failUpserts) error("forced upsert failure")
         values[alarm.automationId] = alarm
     }
-    override suspend fun delete(automationId: AutomationId) { values.remove(automationId) }
+    override suspend fun delete(automationId: AutomationId) {
+        if (failDeletes) error("forced delete failure")
+        values.remove(automationId)
+    }
 }
 
 private class FakeAutomationStore(vararg initial: Automation) : AutomationStore {

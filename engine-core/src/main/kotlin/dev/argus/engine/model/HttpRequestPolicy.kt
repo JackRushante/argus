@@ -52,8 +52,14 @@ object HttpRequestPolicy {
      */
     val LOOPBACK_HOSTS: Set<String> = setOf("localhost", "127.0.0.1", "::1")
 
-    /** Frammenti del nome (minuscolo) che marcano un'intestazione come segreta nella review. */
-    private val SENSITIVE_NAME_PARTS = listOf("authorization", "token", "key", "secret")
+    /**
+     * Frammenti del nome (minuscolo) che marcano un'intestazione come segreta nella review. Meglio
+     * mascherare un'intestazione innocua in più che mostrare un segreto.
+     */
+    private val SENSITIVE_NAME_PARTS = listOf(
+        "authorization", "token", "key", "secret", "cookie", "auth", "pass", "pwd", "session", "signature",
+        "credential", "bearer",
+    )
 
     /** Cifre mostrate in coda a un segreto mascherato, solo se il segreto è abbastanza lungo. */
     private const val MASK_TAIL_CHARS = 4
@@ -115,15 +121,24 @@ object HttpRequestPolicy {
     fun isHeaderNameForbidden(name: String): Boolean =
         name.lowercase(Locale.ROOT) in FORBIDDEN_HEADER_NAMES
 
-    /** Valore di intestazione: non vuoto, senza CR/LF né caratteri di controllo (tab ammesso), limitato. */
-    fun isHeaderValueValid(value: String): Boolean =
-        value.isNotBlank() && value.length <= MAX_HEADER_VALUE_CHARS &&
-            value.none { it != '\t' && it.isISOControl() }
+    /** Carattere ammesso nel valore di un'intestazione: ASCII visibile, spazio o tab (come il client HTTP). */
+    private fun isHeaderValueChar(c: Char): Boolean = c == '\t' || c in ' '..'~'
 
-    /** Forma di un content type `tipo/sottotipo` con parametri opzionali; niente CR/LF. */
+    /**
+     * Valore di intestazione: non vuoto, limitato, solo ASCII visibile più spazio e tab. Niente CR/LF né
+     * altri caratteri di controllo; niente lettere accentate, virgolette tipografiche o emoji, che il
+     * client HTTP rifiuta a ogni scatto (0.7.2).
+     */
+    fun isHeaderValueValid(value: String): Boolean =
+        value.isNotBlank() && value.length <= MAX_HEADER_VALUE_CHARS && value.all(::isHeaderValueChar)
+
+    /** true se [value] contiene caratteri oltre l'ASCII: il validatore lo dice con un codice suo. */
+    fun hasNonAsciiChars(value: String): Boolean = value.any { it.code > '~'.code }
+
+    /** Forma di un content type `tipo/sottotipo` con parametri opzionali; niente CR/LF né caratteri non ASCII. */
     fun isContentTypeValid(contentType: String): Boolean {
         if (contentType.isBlank() || contentType.length > MAX_CONTENT_TYPE_CHARS) return false
-        if (contentType.any { it.isISOControl() }) return false
+        if (!contentType.all(::isHeaderValueChar) || contentType.contains('\t')) return false
         val mediaType = contentType.substringBefore(';').trim()
         val parts = mediaType.split('/')
         return parts.size == 2 && parts.all { it.isNotEmpty() && it.all(::isTokenChar) }
@@ -229,7 +244,7 @@ object HttpRequestPolicy {
     // Review: mascheratura
     // ---------------------------------------------------------------------------------------------
 
-    /** true se il NOME dell'intestazione contiene `authorization`, `token`, `key` o `secret`. */
+    /** true se il NOME dell'intestazione contiene uno dei frammenti sensibili (`authorization`, `token`, `cookie`, …). */
     fun isSensitiveHeader(name: String): Boolean {
         val lower = name.lowercase(Locale.ROOT)
         return SENSITIVE_NAME_PARTS.any { it in lower }

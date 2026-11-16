@@ -1124,6 +1124,19 @@
   }
  },
  {
+  "id": "p4.shell.en.01",
+  "category": "p4",
+  "lang": "en",
+  "text": "Run the shell command 'getprop ro.product.model', save the result, then run a second shell command that writes that value to the system log with log -t argus",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "immediate"},
+   "actions_include": ["run_shell"],
+   "actions_text": ["getprop ro\\.product\\.model", "log -t argus", "\\$\\{[a-z][a-z0-9_]*\\}"]
+  },
+  "note": "L'uscita catturata e' TAINTED: deve entrare come argomento diretto di log, mai dentro sh -c o eval (errore del validatore)"
+ },
+ {
   "id": "clar.alarm.it.01",
   "category": "clarification",
   "lang": "it",

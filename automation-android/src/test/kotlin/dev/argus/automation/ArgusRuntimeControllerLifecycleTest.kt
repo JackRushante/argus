@@ -384,7 +384,7 @@ class ArgusRuntimeControllerLifecycleTest {
         private val pending = java.util.concurrent.atomic.AtomicReference<TriggerEnvelope?>(initial)
         override fun last(): CallStateSnapshot? = null
         override fun pending(): TriggerEnvelope? = pending.get()
-        override fun record(snapshot: CallStateSnapshot, pending: TriggerEnvelope?) {
+        override fun record(snapshot: CallStateSnapshot, pending: TriggerEnvelope?, next: TriggerEnvelope?) {
             this.pending.set(pending)
         }
 

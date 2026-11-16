@@ -66,6 +66,24 @@ class CliBridgeParserStructuredTest {
     }
 
     @Test
+    fun `an unknown key inside the draft is draft_invalid while reply stays allowed`() {
+        val misspelled = draftJson.replace("\"actions\"", "\"cooldown\":60000,\"actions\"")
+        val result = assertNotNull(
+            parser.parseStructuredCompile("""{"reply":"Fatto.","draft":$misspelled,"error_code":null}"""),
+        )
+
+        assertNull(result.draft)
+        assertEquals("draft_invalid", result.metaError)
+        assertTrue("\"cooldown\" at $.draft:" in assertNotNull(result.detail), result.detail)
+        // Bozza scritta come stringa (schema chiuso di Anthropic): stesso controllo.
+        val asString = kotlinx.serialization.json.JsonPrimitive(misspelled).toString()
+        val fromString = assertNotNull(
+            parser.parseStructuredCompile("""{"reply":"Fatto.","draft":$asString,"error_code":null}"""),
+        )
+        assertEquals("draft_invalid", fromString.metaError)
+    }
+
+    @Test
     fun `fences and reasoning around the object are tolerated`() {
         val fenced = "```json\n{\"reply\":\"Fatto.\",\"draft\":$draftJson,\"error_code\":null}\n```"
         assertEquals("dnd sera", assertNotNull(assertNotNull(parser.parseStructuredCompile(fenced)).draft).name)

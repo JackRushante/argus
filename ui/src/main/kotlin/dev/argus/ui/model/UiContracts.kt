@@ -25,6 +25,11 @@ data class RuleRender(
     val program: List<ProgramNode> = emptyList(), // P4: albero azioni ricorsivo (if/while/wait/foglie)
     /** 0.7.0: package d'app del trigger `app_event` (cambiabile in approvazione); null per ogni altro trigger. */
     val triggerAppRef: AppRef? = null,
+    /**
+     * 0.7.2 (S8): pausa EFFETTIVA dopo ogni scatto, in unità umane («Dopo ogni scatto ignora i nuovi eventi
+     * per 24 ore»), resa sotto QUANDO. null se la regola non ha pausa (cooldown effettivo 0).
+     */
+    val cooldownLine: String? = null,
 )
 
 /**
@@ -340,6 +345,8 @@ data class AutomationDetailState(
     val canChangeApp: Boolean = false,
     /** 0.7.0: app avviabili installate, per l'elenco di «Cambia app». `null` = non ancora caricato. */
     val appChoices: List<AppChoiceUi>? = null,
+    /** 0.7.2 (S8): la bozza viene da un file importato (`createdBy = IMPORT`), non dalla chat: l'approvazione lo dice. */
+    val imported: Boolean = false,
 )
 
 /**
@@ -639,6 +646,8 @@ data class ProviderUsageUi(
     val tokensOutMonth: Long? = null,
     val reasoningTokensMonth: Long? = null,
     val lastFinishReason: String? = null,
+    /** Alcuni token sono stimati dalle lunghezze (il provider non riporta l'uso): la UI li marca «≈». */
+    val tokensEstimated: Boolean = false,
 )
 
 /**
@@ -657,6 +666,7 @@ data class BudgetUi(
     val tokensInMonth: Long? = null,     // null = n/d; solo provider token-only
     val tokensOutMonth: Long? = null,
     val tokenLimitMonth: Long? = null,   // tetto TOKEN mensile globale (token-only); null = illimitato
+    val tokensMonthEstimated: Boolean = false, // parte dei token del mese è stimata: mostrata con «≈»
     val perProvider: List<ProviderUsageUi> = emptyList(),
     val softWarningActive: Boolean = false,
     /** L'utente non ha mai salvato limiti: [limitDay] è il tetto di default, spiegato sotto i contatori. */
@@ -722,6 +732,9 @@ interface SettingsCallbacks {
         apiKey: String?,
         reasoningEffort: String? = null,
     ) {}
+
+    /** «Rimuovi chiave» del foglio del provider (S6): cancella la chiave salvata. Default no-op. */
+    fun onRemoveProviderKey(providerId: String) {}
 
     /**
      * Backup (0.4.0): «Esporta». [stripPersonalData] = opzione «Togli posizioni e contatti (per

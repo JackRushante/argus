@@ -28,9 +28,11 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import dev.argus.ui.presentation.VisibleText
 import dev.argus.ui.preview.ArgusPreviewSurface
 import dev.argus.ui.preview.ArgusThemePreviews
 import dev.argus.ui.theme.ArgusCodeSmall
+import dev.argus.ui.theme.RolePair
 import dev.argus.ui.theme.ArgusSpacing
 import dev.argus.ui.theme.ArgusTheme
 
@@ -56,6 +58,30 @@ enum class CodeTone {
 data class CodePart(val text: String, val tone: CodeTone = CodeTone.Plain)
 
 /**
+ * S8: aggiunge [text] con ogni carattere invisibile o di direzione ([VisibleText]) sostituito dal suo
+ * marcatore `⟨U+202E⟩`, disegnato nel tono [marker]: non può né nascondersi né riordinare il testo.
+ */
+internal fun AnnotatedString.Builder.appendRevealed(text: String, marker: RolePair) {
+    VisibleText.parts(text).forEach { part ->
+        if (part.isMarker) {
+            withStyle(SpanStyle(background = marker.bg, color = marker.fg)) { append(part.text) }
+        } else {
+            append(part.text)
+        }
+    }
+}
+
+/**
+ * S8: il testo di una regola pronto per un `Text`, con i caratteri nascosti resi visibili (tono `error`).
+ * Da usare per ogni testo che descrive ciò che la regola esegue (trigger, condizioni, azioni, variabili).
+ */
+@Composable
+fun rememberRevealed(text: String): AnnotatedString {
+    val marker = ArgusTheme.semantic.error
+    return remember(text, marker) { buildAnnotatedString { appendRevealed(text, marker) } }
+}
+
+/**
  * Blocco di codice su `codeSurface`, raggio 12, testo `codeText`.
  *
  * @param label riga sopra il codice (es. «esegue comandi con privilegi shell (UID 2000)»), con [labelIcon].
@@ -76,11 +102,16 @@ fun CodeBlock(
     val onSurface = MaterialTheme.colorScheme.onSurface
     val annotated: AnnotatedString = remember(parts, semantic, surfaces, onSurface) {
         buildAnnotatedString {
+            // S8: i caratteri nascosti o di direzione diventano marcatori visibili anche dentro le variabili.
             parts.forEach { part ->
                 when (part.tone) {
-                    CodeTone.Plain -> append(part.text)
-                    CodeTone.External -> withStyle(SpanStyle(background = semantic.pending.bg, color = semantic.pending.fg)) { append(part.text) }
-                    CodeTone.Local -> withStyle(SpanStyle(background = surfaces.field, color = onSurface)) { append(part.text) }
+                    CodeTone.Plain -> appendRevealed(part.text, semantic.error)
+                    CodeTone.External -> withStyle(SpanStyle(background = semantic.pending.bg, color = semantic.pending.fg)) {
+                        appendRevealed(part.text, semantic.error)
+                    }
+                    CodeTone.Local -> withStyle(SpanStyle(background = surfaces.field, color = onSurface)) {
+                        appendRevealed(part.text, semantic.error)
+                    }
                 }
             }
         }
