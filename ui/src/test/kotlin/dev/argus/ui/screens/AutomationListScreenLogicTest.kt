@@ -3,7 +3,10 @@ package dev.argus.ui.screens
 import dev.argus.ui.components.GroupPosition
 import dev.argus.ui.components.TriggerShape
 import dev.argus.ui.components.TriggerTone
+import dev.argus.ui.model.AutomationListState
 import dev.argus.ui.model.AutomationRow
+import dev.argus.ui.model.EngineBanner
+import dev.argus.ui.model.LabelChipUi
 import dev.argus.ui.model.StatusBadge
 import dev.argus.ui.model.StatusFilter
 import dev.argus.ui.model.TodayErrorsSummary
@@ -121,5 +124,53 @@ class AutomationListScreenLogicTest {
         assertEquals(TodayKind.NONE, todayKindOf(TodayErrorsSummary(0, null, null)))
         assertEquals(TodayKind.ONE, todayKindOf(TodayErrorsSummary(1, "Backup", "12:05")))
         assertEquals(TodayKind.MANY, todayKindOf(TodayErrorsSummary(4, "Backup", "12:05")))
+    }
+
+    // --- 0.7.2: ricerca ed etichette ---
+
+    @Test
+    fun `a search with no result is told apart from a filter with no result and from no rules at all`() {
+        assertEquals(
+            ListEmptyKind.NO_MATCH_FOR_SEARCH,
+            listEmptyKind(rowCount = 0, filter = StatusFilter.ALL, beforeSearch = 4),
+        )
+        assertEquals(
+            ListEmptyKind.NO_MATCH_FOR_SEARCH,
+            listEmptyKind(rowCount = 0, filter = StatusFilter.ARMED, labelSelected = true, beforeSearch = 1),
+        )
+        assertEquals(ListEmptyKind.NO_MATCH_FOR_FILTER, listEmptyKind(rowCount = 0, filter = StatusFilter.ALL, labelSelected = true))
+        assertEquals(ListEmptyKind.NO_RULES, listEmptyKind(rowCount = 0, filter = StatusFilter.ALL, beforeSearch = 0))
+        assertEquals(ListEmptyKind.NONE, listEmptyKind(rowCount = 2, filter = StatusFilter.ALL, beforeSearch = 5))
+    }
+
+    @Test
+    fun `the group subtitle names active and waiting rules, or says none is active`() {
+        assertEquals(
+            listOf(GroupCountPart.Active(3), GroupCountPart.Waiting(1)),
+            groupCountParts(active = 3, waiting = 1),
+        )
+        assertEquals(listOf(GroupCountPart.Waiting(2)), groupCountParts(active = 0, waiting = 2))
+        assertEquals(listOf(GroupCountPart.Active(1)), groupCountParts(active = 1, waiting = 0))
+        assertEquals(listOf(GroupCountPart.NoneActive), groupCountParts(active = 0, waiting = 0))
+    }
+
+    @Test
+    fun `a selected label that lost its last rule selects nothing`() {
+        val casa = LabelChipUi("Casa", count = 2, activeCount = 2, waitingCount = 0, paused = false)
+        fun state(selected: String?, labels: List<LabelChipUi>) = AutomationListState(
+            rows = emptyList(), filter = StatusFilter.ALL, banner = EngineBanner.NONE, loading = false,
+            labels = labels, selectedLabel = selected,
+        )
+        assertEquals(casa, selectedLabelChip(state("casa", listOf(casa))))
+        assertEquals(null, selectedLabelChip(state("Casa", emptyList())))
+        assertEquals(null, selectedLabelChip(state(null, listOf(casa))))
+    }
+
+    @Test
+    fun `the row shows the trigger then the actions, as the mockup`() {
+        val plain = row("a", StatusBadge.ARMED)
+        assertEquals("sommario", rowSubtitle(plain))
+        assertEquals("sommario → Modalità Casa", rowSubtitle(plain.copy(actionSummary = "Modalità Casa")))
+        assertEquals("sommario", rowSubtitle(plain.copy(actionSummary = " ")))
     }
 }
