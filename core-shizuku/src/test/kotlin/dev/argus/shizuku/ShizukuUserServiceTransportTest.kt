@@ -155,6 +155,31 @@ class ShizukuUserServiceTransportTest {
     }
 
     @Test
+    fun `a bound service is not reused once Shizuku stops authorizing Argus`() = runTest {
+        val api = authorizedApi()
+        val service = FakeService(uid = 0)
+        val binder = FakeBinder { service }
+        ShizukuGateway(api).use { gateway ->
+            val transport = ShizukuUserServiceTransport(binder, gateway, clock = { now })
+            assertSame(service, transport.connectedService())
+
+            // L'utente revoca il permesso: il binder in cache risponderebbe ancora.
+            api.granted = false
+            assertEquals("shizuku_unavailable", transport.failureCode())
+            assertNull(binder.live)
+            assertNull(gateway.observeIdentity().value)
+
+            // Shizuku troppo vecchio dopo un aggiornamento all'indietro: stesso discorso.
+            api.granted = true
+            assertSame(service, transport.connectedService())
+            api.old = true
+            assertEquals("shizuku_unsupported", transport.failureCode())
+            assertNull(binder.live)
+            assertEquals(2, binder.bindCalls)
+        }
+    }
+
+    @Test
     fun `the identity is read once per service session after the bind`() = runTest {
         val service = FakeService(uid = 0)
         val binder = FakeBinder { service }

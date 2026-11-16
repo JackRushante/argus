@@ -128,6 +128,33 @@ class UiStepsModelTest {
     }
 
     @Test
+    fun `system ui, the privileged backends, the store and the vendor security apps are forbidden packages`() {
+        listOf(
+            // Debug USB, consenso alla cattura dello schermo, Impostazioni rapide.
+            "com.android.systemui",
+            // Shizuku e i gestori root: concedono privilegi con un tocco.
+            "moe.shizuku.privileged.api",
+            "com.topjohnwu.magisk",
+            "me.weishu.kernelsu",
+            "com.rifsxd.ksunext",
+            // Installazione di app, VPN e certificati.
+            "com.android.vending",
+            "com.android.vpndialogs",
+            "com.android.certinstaller",
+            // App dei permessi e della sicurezza dei produttori.
+            "com.miui.securitycenter",
+            "com.lbe.security.miui",
+            "com.coloros.safecenter",
+            "com.oplus.safecenter",
+            "com.oplus.securitypermission",
+            "com.samsung.android.permissioncontroller",
+        ).forEach { pkg ->
+            assertTrue(UiStepsPolicy.isForbiddenPackage(pkg), pkg)
+            assertFalse(UiStepsPolicy.isResolvedShapeValid(Action.UiSteps(pkg, listOf(UiStep.Back))), pkg)
+        }
+    }
+
+    @Test
     fun `the budget counts the opening and each step and never passes the macro cap`() {
         val short = Action.UiSteps(pkg = null, steps = listOf(UiStep.Back, UiStep.Home))
         assertEquals(2 * UiStepsPolicy.SETTLE_MS, UiStepsPolicy.budgetMs(short))

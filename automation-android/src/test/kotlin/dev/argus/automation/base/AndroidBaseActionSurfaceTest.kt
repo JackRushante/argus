@@ -4,6 +4,7 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
+import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -12,6 +13,7 @@ import org.robolectric.annotation.Config
 import dev.argus.engine.model.SettingsScreen
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 @RunWith(RobolectricTestRunner::class)
@@ -96,6 +98,14 @@ class AndroidBaseActionSurfaceTest {
         foreground = true
         assertTrue(surface.launchPackage("com.example.app"))
         assertEquals(1, context.started.size)
+    }
+
+    @Test
+    fun `an unreadable lifecycle counts as background, never as foreground`() {
+        assertFalse(isProcessInForeground { throw IllegalStateException("not initialized") })
+        assertFalse(isProcessInForeground { Lifecycle.State.CREATED })
+        assertTrue(isProcessInForeground { Lifecycle.State.STARTED })
+        assertTrue(isProcessInForeground { Lifecycle.State.RESUMED })
     }
 
     private class RecordingContext(base: Context) : ContextWrapper(base) {

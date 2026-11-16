@@ -34,7 +34,7 @@ class AndroidBaseActionSurface(
      * visibile: da background `startActivity` può «riuscire» senza aprire nulla (BAL), un falso
      * riuscito. Iniettabile per i test; il default legge `ProcessLifecycleOwner` (almeno STARTED).
      */
-    private val isProcessForeground: () -> Boolean = ::isProcessInForeground,
+    private val isProcessForeground: () -> Boolean = { isProcessInForeground() },
 ) : BaseActionSurface {
     private val appContext = context.applicationContext
     private val notificationManager: NotificationManager
@@ -208,7 +208,11 @@ internal fun dndModeOf(filter: Int): DndMode? = when (filter) {
     else -> null
 }
 
-/** Primo piano = `ProcessLifecycleOwner` almeno STARTED. Se il lifecycle non è leggibile non si blocca. */
-internal fun isProcessInForeground(): Boolean = runCatching {
-    ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
-}.getOrDefault(true)
+/**
+ * Primo piano = `ProcessLifecycleOwner` almeno STARTED. Se il lifecycle non è leggibile si considera in
+ * background (0.7.2): l'apertura passa alla notifica «Tocca per aprire» invece di un avvio che Android
+ * può bloccare in silenzio e che il Log registrerebbe come riuscito.
+ */
+internal fun isProcessInForeground(
+    state: () -> Lifecycle.State = { ProcessLifecycleOwner.get().lifecycle.currentState },
+): Boolean = runCatching { state().isAtLeast(Lifecycle.State.STARTED) }.getOrDefault(false)

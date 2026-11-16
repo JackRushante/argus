@@ -166,10 +166,29 @@ class PrivilegedActions051Test {
         assertEquals(PrivilegedActionPolicy.TargetVerdict.OK, PrivilegedActionPolicy.appControlTarget(youtube))
         assertEquals(
             PrivilegedActionPolicy.TargetVerdict.FORBIDDEN,
-            PrivilegedActionPolicy.appControlTarget("com.example.launcher", launcher = setOf("com.example.launcher")),
+            PrivilegedActionPolicy.appControlTarget("com.example.launcher", deviceProtected = setOf("com.example.launcher")),
         )
         // Un nome che inizia come Argus ma non lo è resta consentito.
         assertEquals(PrivilegedActionPolicy.TargetVerdict.OK, PrivilegedActionPolicy.appControlTarget("dev.argusx.app"))
+    }
+
+    @Test
+    fun `app control refuses the shell, settings storage, permission controllers, WebView and KernelSU Next`() {
+        listOf(
+            // L'uid di Shizuku e il fornitore delle impostazioni: congelarli rompe il telefono.
+            "com.android.shell",
+            "com.android.providers.settings",
+            "com.android.permissioncontroller",
+            "com.google.android.permissioncontroller",
+            "com.google.android.webview",
+            "com.android.webview",
+            // Il gestore root di questo telefono: congelarlo toglierebbe il backend `su`.
+            "com.rifsxd.ksunext",
+        ).forEach {
+            assertTrue(it in PrivilegedActionPolicy.PROTECTED_SYSTEM_PACKAGES, it)
+            assertEquals(PrivilegedActionPolicy.TargetVerdict.FORBIDDEN, PrivilegedActionPolicy.appControlTarget(it), it)
+            assertFalse(PrivilegedActionPolicy.isShapeValid(Action.AppControl(it, AppControlOp.FREEZE)), it)
+        }
     }
 
     @Test

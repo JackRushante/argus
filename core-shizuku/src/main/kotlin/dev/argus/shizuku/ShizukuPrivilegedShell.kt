@@ -140,12 +140,21 @@ internal class ShizukuUserServiceTransport(
         }
     }
 
+    /**
+     * Il servizio collegato, dopo aver ricontrollato lo stato di Shizuku a OGNI richiesta (0.7.2): un
+     * binder ancora vivo non basta, perché dopo una revoca del permesso (o un Shizuku tornato troppo
+     * vecchio) il servizio già collegato risponderebbe ancora. Se lo stato non è più AUTHORIZED il
+     * collegamento si scioglie e la richiesta fallisce.
+     */
     internal suspend fun connectedService(): IPrivilegedShellService = connectMutex.withLock {
         check(!closed.get()) { "PrivilegedShell chiusa" }
-        binder.liveService()?.let { return@withLock it }
+        val status = gateway.status()
+        if (status == ShizukuGatewayStatus.AUTHORIZED) {
+            binder.liveService()?.let { return@withLock it }
+        }
         binder.detach()
         gateway.publishIdentity(null)
-        when (gateway.status()) {
+        when (status) {
             ShizukuGatewayStatus.AUTHORIZED -> Unit
             ShizukuGatewayStatus.UNSUPPORTED ->
                 throw ShizukuShellException(ShizukuShellException.UNSUPPORTED)

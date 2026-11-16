@@ -46,8 +46,9 @@ class UiMacroStopReceiver : BroadcastReceiver() {
 
 /**
  * La notifica in corso «Argus sta usando lo schermo» con «Ferma» (0.5.1). Senza il permesso di
- * pubblicare notifiche non si può mostrare: [begin] torna falso e la macro non parte, perché non
- * avrebbe né indicatore né tasto di stop.
+ * pubblicare notifiche, con le notifiche dell'app spente o con il canale della macro bloccato non si
+ * può mostrare: [begin] torna falso e la macro non parte, perché non avrebbe né indicatore né tasto
+ * di stop.
  */
 class AndroidUiMacroSession(context: Context) : UiMacroSession {
     private val appContext = context.applicationContext
@@ -58,7 +59,13 @@ class AndroidUiMacroSession(context: Context) : UiMacroSession {
     override fun begin(): Boolean {
         UiMacroStopSignal.clear()
         if (!canPost()) return false
+        // 0.7.2: un canale bloccato dall'utente accetta la notifica ma non la mostra: niente «Ferma».
+        // Si guarda prima di ricrearlo (l'utente può averlo spento) e di nuovo dopo; se non si legge, no.
+        val before = runCatching { channelImportance() }.getOrElse { return false }
+        if (before != null && before <= NotificationManager.IMPORTANCE_NONE) return false
         ensureChannel()
+        val after = runCatching { channelImportance() }.getOrNull()
+        if (after == null || after <= NotificationManager.IMPORTANCE_NONE) return false
         val stop = PendingIntent.getBroadcast(
             appContext,
             STOP_REQUEST_CODE,
@@ -102,6 +109,10 @@ class AndroidUiMacroSession(context: Context) : UiMacroSession {
             },
         )
     }
+
+    /** Importanza del canale della macro, o null se il canale non esiste ancora. */
+    private fun channelImportance(): Int? =
+        appContext.getSystemService(NotificationManager::class.java).getNotificationChannel(CHANNEL_ID)?.importance
 
     private fun canPost(): Boolean = (
         Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||

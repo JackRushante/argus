@@ -28,6 +28,7 @@ object ValidationMessages {
         "state_query_unavailable",
         "state_query_type_mismatch",
         "app_not_installed",
+        "app_control_freeze_system",
     )
 
     /** Codici d'errore di un passo di macro: il [ValidationIssue.detail] è il numero del passo, che si antepone. */
@@ -662,6 +663,10 @@ object ValidationMessages {
             "A header is not valid: check its name and value (not empty, no line breaks, no duplicates; Host, Content-Length, Transfer-Encoding and Connection are not allowed).",
             "Un'intestazione non è valida: controlla nome e valore (non vuoto, senza a capo, senza duplicati; Host, Content-Length, Transfer-Encoding e Connection non sono ammessi).",
         ),
+        "http_header_not_ascii" to t(
+            "A header value can only use plain ASCII characters: no accented letters, curly quotes or emoji. The request would fail every time.",
+            "Il valore di un'intestazione può usare solo caratteri ASCII semplici: niente lettere accentate, virgolette tipografiche o emoji. La richiesta fallirebbe ogni volta.",
+        ),
         "http_content_type_invalid" to t(
             "The content type is not valid or differs from the Content-Type header.",
             "Il content type non è valido o è diverso dall'intestazione Content-Type.",
@@ -689,8 +694,8 @@ object ValidationMessages {
             "Il package dell'app manca, non è valido o è una \${variabile}: va scritto per intero, come com.example.app.",
         ),
         "priv_target_forbidden" to t(
-            "A rule cannot change Argus, the launcher or an essential system app (system UI, phone, Settings, Google services).",
-            "Una regola non può modificare Argus, il launcher o un'app di sistema essenziale (interfaccia di sistema, telefono, Impostazioni, servizi Google).",
+            "A rule cannot change Argus, the launcher, the keyboard, WebView or an essential system app (system UI, phone, Settings, permissions, Google services, Shizuku, root managers).",
+            "Una regola non può modificare Argus, il launcher, la tastiera, WebView o un'app di sistema essenziale (interfaccia di sistema, telefono, Impostazioni, permessi, servizi Google, Shizuku, gestori root).",
         ),
         "priv_permission_invalid" to t(
             "Only runtime permissions of the allowed list can be granted or revoked (location, camera, microphone, contacts, SMS, phone, calendar, files and media, notifications, body sensors, nearby devices).",
@@ -699,6 +704,11 @@ object ValidationMessages {
         "app_control_freeze_review" to t(
             "Freezing disables the app: it disappears from the launcher and cannot start until it is unfrozen.",
             "Congelare disattiva l'app: sparisce dal launcher e non può partire finché non viene riattivata.",
+        ),
+        // 0.7.2: controllo fatto sul telefono all'approvazione; solo avviso, la regola resta armabile.
+        "app_control_freeze_system" to t(
+            "This rule freezes an app that came with the phone. That is fine for preinstalled apps you do not use, but some are needed by the system: freeze it only if you know it is safe.",
+            "Questa regola congela un'app preinstallata sul telefono. Va bene per le app del produttore che non usi, ma alcune servono al sistema: congelala solo se sai che si può.",
         ),
         "app_permission_revoke_review" to t(
             "Revoking a permission removes an access from the app, and Android may close it.",
@@ -718,8 +728,8 @@ object ValidationMessages {
             "L'app da aprire non è un nome di package valido (è fisso: niente \${variabile}).",
         ),
         "ui_pkg_forbidden" to t(
-            "A screen macro cannot act on Argus, on Settings, on the package installer or on permission dialogs.",
-            "Una macro sullo schermo non può agire su Argus, sulle Impostazioni, sull'installatore di pacchetti né sui dialoghi dei permessi.",
+            "A screen macro cannot act on Argus, Settings, the system interface, the package installer, the Play Store, permission, VPN or certificate dialogs, Shizuku, root managers or the phone maker's security apps.",
+            "Una macro sullo schermo non può agire su Argus, Impostazioni, interfaccia di sistema, installatore di pacchetti, Play Store, dialoghi dei permessi, della VPN o dei certificati, Shizuku, gestori root né sulle app di sicurezza del produttore.",
         ),
         // Un errore per passo (0.7.0): il numero del passo sta nel `detail` e si antepone al testo.
         "ui_step_wait_no_target" to t(
