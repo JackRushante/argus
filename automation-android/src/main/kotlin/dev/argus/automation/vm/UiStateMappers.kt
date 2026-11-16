@@ -186,6 +186,8 @@ private fun ExecutionStatus?.toLogOutcome(kind: AuditKind): LogOutcome = when {
     // Gli altri eventi lifecycle sono transizioni riuscite, non esiti di esecuzione.
     kind == AuditKind.RULE_ARMED || kind == AuditKind.RULE_DISABLED ||
         kind == AuditKind.RULE_ENABLED || kind == AuditKind.RULE_DELETED -> LogOutcome.SUCCESS
+    // 0.8: decisione del filtro chiamate, un evento informativo come il ciclo di vita.
+    kind == AuditKind.CALL_SCREENED -> LogOutcome.SUCCESS
     this == ExecutionStatus.PARTIAL -> LogOutcome.PARTIAL
     this == ExecutionStatus.DEFERRED -> LogOutcome.DEFERRED
     // Risposta AI bloccata dal budget: non e' un successo, e' un avviso (ambra).
@@ -325,6 +327,16 @@ private fun auditSummary(record: AuditLogRecord, l: RenderLanguage): String = wh
         "Rule needs review (${record.detail.safeDiagnostic()})",
         "Regola da rivedere (${record.detail.safeDiagnostic()})",
     )
+    // 0.8: decisione del filtro chiamate, presa prima dello squillo (il numero non è nel Log).
+    AuditKind.CALL_SCREENED -> when (record.detail) {
+        "screen_call_rejected" -> l.pick("Incoming call rejected", "Chiamata in arrivo rifiutata")
+        "screen_call_silenced" -> l.pick("Incoming call silenced", "Chiamata in arrivo silenziata")
+        "screen_call_failed_open" -> l.pick(
+            "Call screening could not decide in time: the call rang",
+            "Il filtro chiamate non ha deciso in tempo: la chiamata ha squillato",
+        )
+        else -> l.pick("Incoming call screened", "Chiamata in arrivo filtrata")
+    }
 }
 
 /** Codice con cui la lane chiude un evento già accorpato in una raffica (D8). */
