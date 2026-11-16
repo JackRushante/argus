@@ -90,12 +90,12 @@ fun ActionRowItem(row: ActionRow, modifier: Modifier = Modifier) {
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    Text(row.label, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge)
+                    Text(rememberRevealed(row.label), color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge)
                     if (row.isGenerative) GenerativeTag()
                     if (row.requiresLiveConfirm) LiveConfirmTag()
                 }
                 row.detail?.let {
-                    Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                    Text(rememberRevealed(it), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
                 }
             }
         }
@@ -151,7 +151,7 @@ private fun TriggerLine(rule: RuleRender) {
             tint = MaterialTheme.colorScheme.primary,
             modifier = Modifier.size(20.dp),
         )
-        Text(rule.triggerLine, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+        Text(rememberRevealed(rule.triggerLine), color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
     }
 }
 
@@ -202,7 +202,7 @@ private fun ExtendedRuleCard(rule: RuleRender, modifier: Modifier, showGenerativ
                     )
                     Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         rule.conditionLines.forEach {
-                            Text(it, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyLarge)
+                            Text(rememberRevealed(it), color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyLarge)
                         }
                     }
                 }
@@ -268,9 +268,9 @@ private fun ControlHeader(title: String, conditionLines: List<String>) {
             modifier = Modifier.size(20.dp),
         )
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(title, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyLarge)
+            Text(rememberRevealed(title), color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyLarge)
             conditionLines.forEach {
-                Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                Text(rememberRevealed(it), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
             }
         }
     }
@@ -295,7 +295,7 @@ private fun VarRowItem(v: VarRow) {
     val semantic = LocalArgusSemantic.current
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(
-            v.name,
+            rememberRevealed(v.name),
             color = MaterialTheme.colorScheme.onSurface,
             style = MaterialTheme.typography.bodyLarge,
         )
@@ -306,7 +306,7 @@ private fun VarRowItem(v: VarRow) {
         )
         if (v.sourceText.isNotBlank()) {
             Text(
-                v.sourceText,
+                rememberRevealed(v.sourceText),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -319,7 +319,7 @@ private fun VarRowItem(v: VarRow) {
             )
             // Integrale: softWrap di default (a capo), nessun maxLines/overflow.
             Text(
-                value,
+                rememberRevealed(value),
                 color = semantic.codeText,
                 fontFamily = ArgusMono,
                 style = MaterialTheme.typography.bodyMedium,

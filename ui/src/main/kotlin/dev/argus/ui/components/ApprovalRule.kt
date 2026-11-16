@@ -131,7 +131,7 @@ fun ApprovalRuleTimeline(
         ) {
             StepTitle(stringResource(R.string.rule_section_when))
             Text(
-                triggerText(rule.triggerLine),
+                rememberRevealed(triggerText(rule.triggerLine)),
                 color = MaterialTheme.colorScheme.onSurface,
                 style = MaterialTheme.typography.bodyLarge,
             )
@@ -149,7 +149,7 @@ fun ApprovalRuleTimeline(
             ) {
                 StepTitle(stringResource(R.string.rule_section_only_if))
                 rule.conditionLines.forEach {
-                    Text(it, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyLarge)
+                    Text(rememberRevealed(it), color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyLarge)
                 }
             }
         }
@@ -299,7 +299,7 @@ private fun ApprovalVarItem(v: VarRow, shape: Shape) {
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text(v.name, color = MaterialTheme.colorScheme.onSurface, style = ArgusCode)
+        Text(rememberRevealed(v.name), color = MaterialTheme.colorScheme.onSurface, style = ArgusCode)
         Text(
             "${v.typeLabel} · ${v.provenanceLabel}",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -318,7 +318,7 @@ private fun ApprovalVarItem(v: VarRow, shape: Shape) {
             }
         }
         if (v.sourceText.isNotBlank()) {
-            Text(v.sourceText, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+            Text(rememberRevealed(v.sourceText), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
         }
         v.valueText?.let { value ->
             Text(
@@ -327,7 +327,7 @@ private fun ApprovalVarItem(v: VarRow, shape: Shape) {
                 style = MaterialTheme.typography.labelMedium,
             )
             // Il letterale approvato si mostra INTEGRALE: a capo, mai troncato.
-            Text(value, color = semantic.codeText, style = ArgusCodeSmall)
+            Text(rememberRevealed(value), color = semantic.codeText, style = ArgusCodeSmall)
         }
     }
 }
@@ -410,12 +410,12 @@ private fun ActionItem(
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                     itemVerticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(row.label, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge)
+                    Text(rememberRevealed(row.label), color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge)
                     if (row.isGenerative) GenerativeTag()
                     if (row.requiresLiveConfirm) LiveConfirmTag()
                 }
                 row.detail?.let {
-                    Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                    Text(rememberRevealed(it), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
                 }
                 row.appRef?.let { ref -> AppRefLine(ref, appInfo[ref.packageName], onChangeApp) }
             }
@@ -452,9 +452,9 @@ private fun ControlItem(
                 iconSize = 16.dp,
             )
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(title, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge)
+                Text(rememberRevealed(title), color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge)
                 conditionLines.forEach {
-                    Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                    Text(rememberRevealed(it), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
                 }
             }
         }
@@ -517,7 +517,7 @@ fun AppRefLine(
                 StatusChip(ArgusTheme.semantic.pending, Icons.Rounded.AppBlocking, stringResource(R.string.rda_ap_app_not_installed))
             }
         }
-        Text(ref.packageName, color = MaterialTheme.colorScheme.onSurfaceVariant, style = ArgusCodeSmall)
+        Text(rememberRevealed(ref.packageName), color = MaterialTheme.colorScheme.onSurfaceVariant, style = ArgusCodeSmall)
         if (onChangeApp != null) {
             // L'etichetta per TalkBack dice QUALE app: una regola può nominarne più d'una.
             val description = stringResource(R.string.rda_ap_change_app_cd, name ?: ref.packageName)
