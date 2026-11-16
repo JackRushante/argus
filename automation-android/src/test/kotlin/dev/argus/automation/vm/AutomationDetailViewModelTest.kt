@@ -51,6 +51,7 @@ import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.AppEventKind
 import dev.argus.engine.model.CapabilityRequirements
+import dev.argus.engine.model.Condition
 import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.GenerativeDeliverMode
 import dev.argus.engine.model.Trigger
@@ -311,7 +312,7 @@ class AutomationDetailViewModelTest {
         val events = collectEvents(viewModel)
 
         assertEquals(
-            "Minimum cooldown 60 s between two AI replies",
+            "At most 1 AI call each time it runs; minimum cooldown 60 s between two runs",
             viewModel.state.value.detail?.estimatedLlmCallsPerDay,
         )
         viewModel.onRunNow()
@@ -326,7 +327,7 @@ class AutomationDetailViewModelTest {
         system = RenderLanguage.IT
         source.refresh()
         awaitUntil("italian estimate") {
-            viewModel.state.value.detail?.estimatedLlmCallsPerDay == "Cooldown minimo 60 s tra due risposte AI"
+            viewModel.state.value.detail?.estimatedLlmCallsPerDay == "Al massimo 1 chiamata AI a ogni esecuzione; cooldown minimo 60 s tra due esecuzioni"
         }
         viewModel.onRunNow()
         awaitUntil("italian run-now message") { events.size == 2 }
@@ -335,6 +336,41 @@ class AutomationDetailViewModelTest {
             viewModel.state.value.detail?.estimatedLlmCallsPerDay.orEmpty(),
             viewModel.state.value.detail?.runNowBlockedReason.orEmpty(),
             (events.last() as DetailEvent.Message).text,
+        )
+    }
+
+    @Test
+    fun `the approval note states the worst case of AI calls per run for a loop`() = runTest {
+        val repository = RoomDraftRepository(db)
+        fun looped(id: String, iterations: Int) = generativeDraft(id).let { base ->
+            base.copy(
+                draft = base.draft.copy(
+                    actions = listOf(
+                        Action.While(
+                            Condition.BooleanLiteral(true),
+                            body = base.draft.actions,
+                            maxIterations = iterations,
+                        ),
+                    ),
+                ),
+            )
+        }
+        assertIs<DraftWriteResult.Saved>(repository.create(looped("five", 5)))
+        assertIs<DraftWriteResult.Saved>(repository.create(looped("many", 1_000)))
+        val source = RenderLanguageSource { RenderLanguage.EN }
+
+        val five = viewModel("draft-five", RoomAutomationStore(db.automationDao()), DetailAuditRecorder(), languageSource = source)
+        awaitUntil("five loaded") { five.state.value.detail != null }
+        assertEquals(
+            "At most 5 AI calls each time it runs; minimum cooldown 60 s between two runs",
+            five.state.value.detail?.estimatedLlmCallsPerDay,
+        )
+        // Mille giri: la nota dice il tetto per esecuzione, non mille.
+        val many = viewModel("draft-many", RoomAutomationStore(db.automationDao()), DetailAuditRecorder(), languageSource = source)
+        awaitUntil("many loaded") { many.state.value.detail != null }
+        assertEquals(
+            "At most 30 AI calls each time it runs; minimum cooldown 60 s between two runs",
+            many.state.value.detail?.estimatedLlmCallsPerDay,
         )
     }
 

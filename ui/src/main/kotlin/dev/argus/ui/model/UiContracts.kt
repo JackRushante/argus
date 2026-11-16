@@ -637,6 +637,8 @@ data class ProviderUsageUi(
     val tokensOutMonth: Long? = null,
     val reasoningTokensMonth: Long? = null,
     val lastFinishReason: String? = null,
+    /** Alcuni token sono stimati dalle lunghezze (il provider non riporta l'uso): la UI li marca «≈». */
+    val tokensEstimated: Boolean = false,
 )
 
 /**
@@ -655,6 +657,7 @@ data class BudgetUi(
     val tokensInMonth: Long? = null,     // null = n/d; solo provider token-only
     val tokensOutMonth: Long? = null,
     val tokenLimitMonth: Long? = null,   // tetto TOKEN mensile globale (token-only); null = illimitato
+    val tokensMonthEstimated: Boolean = false, // parte dei token del mese è stimata: mostrata con «≈»
     val perProvider: List<ProviderUsageUi> = emptyList(),
     val softWarningActive: Boolean = false,
 )

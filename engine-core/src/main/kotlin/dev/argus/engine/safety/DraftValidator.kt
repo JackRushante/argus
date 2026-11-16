@@ -2,7 +2,9 @@ package dev.argus.engine.safety
 
 import dev.argus.engine.model.*
 import dev.argus.engine.runtime.CronSchedule
+import dev.argus.engine.runtime.ProgramInterpreter
 import java.net.URI
+import java.time.Clock
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
@@ -31,6 +33,8 @@ class DraftValidator(
     private val knownTools: Set<String>,
     private val stateKeys: Set<String> = StateKeys.ALL.keys,
     private val deniedNotificationPackages: Set<String> = setOf(ARGUS_PACKAGE),
+    /** Solo per il controllo `cron_never_fires`: un cron deve avere uno scatto nell'orizzonte da adesso. */
+    private val clock: Clock = Clock.systemUTC(),
 ) {
     companion object {
         val FORBIDDEN_IN_INVOKE_LLM = setOf("shell.run", "app.install")
@@ -173,6 +177,12 @@ class DraftValidator(
 
         if (tree.hasGenerative && d.cooldownMs < 60_000)
             warn("cooldown_raised", "Cooldown sotto 60 s su regola generativa: l'engine imporrà 60 s")
+        if (tree.hasGenerativeInLoop)
+            warn(
+                "generative_in_loop",
+                "Chiamata AI dentro un ciclo: può ripetersi a ogni giro, fino a " +
+                    "${ProgramInterpreter.MAX_GENERATIVE_CALLS_PER_EXECUTION} chiamate per scatto",
+            )
 
         return issues
     }
@@ -305,13 +315,15 @@ class DraftValidator(
         val confidentiality: ConfidentialityLabel,
     )
 
-    private data class ActionFrame(val action: Action, val depth: Int)
+    private data class ActionFrame(val action: Action, val depth: Int, val inLoop: Boolean = false)
     private data class ActionTreeSummary(
         val totalActions: Int,
         val captures: List<CaptureDeclaration>,
         val tooDeep: Boolean,
         val hasGenerative: Boolean,
         val hasInvokeLlmV2: Boolean,
+        /** Una chiamata AI dentro un `while`: può partire una volta per giro (tetto per esecuzione). */
+        val hasGenerativeInLoop: Boolean = false,
     )
 
     /** Preflight iterativo: nessuna ricorsione prima del bound profondità/numero nodi. */
@@ -326,8 +338,9 @@ class DraftValidator(
         var tooDeep = false
         var hasGenerative = false
         var hasInvokeLlmV2 = false
+        var hasGenerativeInLoop = false
         while (pending.isNotEmpty()) {
-            val (action, depth) = pending.removeFirst()
+            val (action, depth, inLoop) = pending.removeFirst()
             total = (total + 1).coerceAtMost(MAX_TOTAL_ACTIONS + 1)
             if (depth > MAX_FLOW_DEPTH) {
                 if (!tooDeep) err("flow_too_deep", "Annidamento if/while oltre profondità $MAX_FLOW_DEPTH")
@@ -336,20 +349,24 @@ class DraftValidator(
             }
             captureDeclaration(action)?.let(captures::add)
             when (action) {
-                is Action.InvokeLlm -> hasGenerative = true
+                is Action.InvokeLlm -> {
+                    hasGenerative = true
+                    if (inLoop) hasGenerativeInLoop = true
+                }
                 is Action.InvokeLlmV2 -> {
                     hasGenerative = true
                     hasInvokeLlmV2 = true
+                    if (inLoop) hasGenerativeInLoop = true
                 }
                 is Action.If -> {
-                    action.then.forEach { pending.addLast(ActionFrame(it, depth + 1)) }
-                    action.orElse.forEach { pending.addLast(ActionFrame(it, depth + 1)) }
+                    action.then.forEach { pending.addLast(ActionFrame(it, depth + 1, inLoop)) }
+                    action.orElse.forEach { pending.addLast(ActionFrame(it, depth + 1, inLoop)) }
                 }
-                is Action.While -> action.body.forEach { pending.addLast(ActionFrame(it, depth + 1)) }
+                is Action.While -> action.body.forEach { pending.addLast(ActionFrame(it, depth + 1, inLoop = true)) }
                 else -> Unit
             }
         }
-        return ActionTreeSummary(total, captures, tooDeep, hasGenerative, hasInvokeLlmV2)
+        return ActionTreeSummary(total, captures, tooDeep, hasGenerative, hasInvokeLlmV2, hasGenerativeInLoop)
     }
 
     private fun captureDeclaration(action: Action): CaptureDeclaration? = when (action) {
@@ -764,6 +781,14 @@ class DraftValidator(
                 trigger.cron?.let { cron ->
                     runCatching { CronSchedule.parse(cron) }
                         .onFailure { err("cron_invalid", "Cron '$cron' non valido: ${it.message}") }
+                        .onSuccess { schedule ->
+                            // Una data che non esiste (30 febbraio, 31 aprile) si armerebbe senza mai
+                            // scattare: stesso orizzonte di ricerca del motore. Con un fuso non valido
+                            // decide già tz_invalid.
+                            val zone = runCatching { ZoneId.of(trigger.tz) }.getOrNull()
+                            if (zone != null && schedule.nextFireAfter(clock.instant(), zone) == null)
+                                err("cron_never_fires", "Cron '$cron' non ha nessuno scatto: la data non esiste")
+                        }
                 }
                 trigger.at?.let { at ->
                     runCatching { LocalDateTime.parse(at) }

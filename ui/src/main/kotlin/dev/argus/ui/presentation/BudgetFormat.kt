@@ -65,24 +65,31 @@ object BudgetFormat {
 
     // --- TOKEN (metrica primaria dei provider token-only: Hermes/OpenRouter/Custom) ---
 
-    /** (1500,300)->"in 1,500 · out 300" (EN) / "in 1.500 · out 300" (IT); un lato null->"n/a"/"n/d"; entrambi null->"n/a"/"n/d". */
+    /** Segno davanti a una cifra di token stimata (provider che non riportano l'uso). */
+    const val ESTIMATE_MARK = "≈ "
+
+    /** (1500,300)->"in 1,500 · out 300" (EN) / "in 1.500 · out 300" (IT); un lato null->"n/a"/"n/d"; entrambi null->"n/a"/"n/d"; [estimated]->"≈ in …". */
     fun tokensLabel(
         tokensIn: Long?,
         tokensOut: Long?,
         language: RenderLanguage = RenderLanguage.system(),
+        estimated: Boolean = false,
     ): String {
         val na = language.pick("n/a", "n/d")
         if (tokensIn == null && tokensOut == null) return na
-        return "in ${tokensIn?.let { grouped(it, language) } ?: na} · out ${tokensOut?.let { grouped(it, language) } ?: na}"
+        val mark = if (estimated) ESTIMATE_MARK else ""
+        return "${mark}in ${tokensIn?.let { grouped(it, language) } ?: na} · out ${tokensOut?.let { grouped(it, language) } ?: na}"
     }
 
-    /** (300,1000000)->"300 / 1,000,000" (EN) / "300 / 1.000.000" (IT); limite null/<=0->"300 · unlimited"/"illimitato"; usato null->"n/a"/"n/d". */
+    /** (300,1000000)->"300 / 1,000,000" (EN) / "300 / 1.000.000" (IT); limite null/<=0->"300 · unlimited"/"illimitato"; usato null->"n/a"/"n/d"; [estimated]->"≈ 300 / …". */
     fun tokensCapLabel(
         used: Long?,
         limit: Long?,
         language: RenderLanguage = RenderLanguage.system(),
+        estimated: Boolean = false,
     ): String {
-        val usedLabel = used?.let { grouped(it, language) } ?: language.pick("n/a", "n/d")
+        val usedLabel = used?.let { (if (estimated) ESTIMATE_MARK else "") + grouped(it, language) }
+            ?: language.pick("n/a", "n/d")
         return if (limit != null && limit > 0) "$usedLabel / ${grouped(limit, language)}"
         else "$usedLabel · " + language.pick("unlimited", "illimitato")
     }

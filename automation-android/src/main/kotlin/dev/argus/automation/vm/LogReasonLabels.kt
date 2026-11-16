@@ -111,6 +111,10 @@ internal object LogReasonLabels {
             "questa azione AI non è supportata in un programma",
         ),
         "deadline_exceeded" to Label("the rule ran for too long", "la regola è durata troppo a lungo"),
+        "generative_call_limit" to Label(
+            "too many AI calls in one run, at most 30",
+            "troppe chiamate AI in una sola esecuzione, al massimo 30",
+        ),
         "capture_missing" to Label("the result to keep was missing", "il risultato da conservare mancava"),
         "capture_too_long" to Label("the result to keep is too long", "il risultato da conservare è troppo lungo"),
         "while_count_unavailable" to Label(

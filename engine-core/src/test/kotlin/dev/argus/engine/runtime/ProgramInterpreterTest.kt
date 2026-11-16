@@ -718,6 +718,118 @@ class ProgramInterpreterTest {
         )
     }
 
+    @Test
+    fun `a non numeric comparison under not takes the else branch and never aborts the program`() = runTest {
+        val seen = mutableListOf<String>()
+        val interpreter = interpreter(
+            runner = ProgramActionRunner { action, _ ->
+                seen += assertIs<Action.ShowNotification>(action.action).title
+                ProgramActionResult(ActionResult.Success)
+            },
+        )
+
+        val result = interpreter.execute(
+            Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+            timeEvent(),
+            bindings = listOf(VarBinding.Literal("word", "abc", VarType.TEXT, ConfidentialityLabel.PUBLIC)),
+            actions = listOf(
+                Action.If(
+                    Condition.Not(Condition.VarCompare("word", CmpOp.GT, "5")),
+                    then = listOf(Action.ShowNotification("then", "x")),
+                    orElse = listOf(Action.ShowNotification("else", "x")),
+                ),
+                Action.While(
+                    Condition.Not(Condition.VarCompare("word", CmpOp.IS_EVEN)),
+                    body = listOf(Action.ShowNotification("loop", "x")),
+                    maxIterations = 3,
+                ),
+                Action.ShowNotification("after", "x"),
+            ),
+        )
+
+        assertTrue(result.completed)
+        assertEquals(listOf("else", "after"), seen)
+    }
+
+    @Test
+    fun `a loop around a generative call stops at the per execution cap with a policy code`() = runTest {
+        var calls = 0
+        val interpreter = interpreter(
+            runner = ProgramActionRunner { action, _ ->
+                if (action.action is Action.InvokeLlm) calls += 1
+                ProgramActionResult(ActionResult.Success, capturedText = "ok")
+            },
+        )
+
+        val result = interpreter.execute(
+            Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+            timeEvent(),
+            emptyList(),
+            listOf(
+                Action.While(
+                    Condition.BooleanLiteral(true),
+                    body = listOf(
+                        Action.InvokeLlm(
+                            goal = "summarize",
+                            contextSources = emptyList(),
+                            allowedTools = emptyList(),
+                            replyTargetSender = false,
+                            timeoutMs = 60_000,
+                            deliver = dev.argus.engine.model.GenerativeDeliverMode.CAPTURE_ONLY,
+                            captureAs = "summary",
+                        ),
+                        Action.SetFlashlight(true),
+                    ),
+                    maxIterations = 1_000,
+                ),
+            ),
+        )
+
+        assertEquals(ProgramInterpreter.MAX_GENERATIVE_CALLS_PER_EXECUTION, calls)
+        assertEquals("generative_call_limit", result.stopCode)
+        assertEquals("1.while[31].1", result.stopPath?.value)
+        val last = result.steps.last()
+        assertEquals("1.while[31].1", last.path.value)
+        assertEquals(ActionResult.Failure("generative_call_limit"), last.result)
+    }
+
+    @Test
+    fun `exactly the cap of generative calls completes normally`() = runTest {
+        var calls = 0
+        val interpreter = interpreter(
+            runner = ProgramActionRunner { _, _ ->
+                calls += 1
+                ProgramActionResult(ActionResult.Submitted)
+            },
+        )
+
+        val result = interpreter.execute(
+            Trigger.Time(cron = "0 8 * * *", tz = "UTC"),
+            timeEvent(),
+            emptyList(),
+            listOf(
+                Action.While(
+                    Condition.BooleanLiteral(true),
+                    body = listOf(
+                        Action.InvokeLlm(
+                            goal = "say hi",
+                            contextSources = emptyList(),
+                            allowedTools = emptyList(),
+                            replyTargetSender = false,
+                            timeoutMs = 60_000,
+                            deliver = dev.argus.engine.model.GenerativeDeliverMode.LOCAL_NOTIFICATION,
+                            notificationTitle = "Hi",
+                        ),
+                    ),
+                    maxIterations = ProgramInterpreter.MAX_GENERATIVE_CALLS_PER_EXECUTION,
+                ),
+            ),
+        )
+
+        assertTrue(result.completed)
+        assertEquals(ProgramInterpreter.MAX_GENERATIVE_CALLS_PER_EXECUTION, calls)
+    }
+
     // --- B27: i cicli non gonfiano il journal ---------------------------------------------
 
     private fun threeLeafLoop(iterations: Int) = Action.While(

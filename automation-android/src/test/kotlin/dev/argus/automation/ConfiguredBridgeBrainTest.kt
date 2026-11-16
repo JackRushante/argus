@@ -153,6 +153,37 @@ class ConfiguredBridgeBrainTest {
     }
 
     @Test
+    fun `a bound brain calls the admitted provider even after the selection changed`() = runTest {
+        val configuration = FakeBridgeConfiguration().apply { token = "a-valid-bridge-token" }
+        val factory = FakeTransportFactory()
+        val brain = ConfiguredBridgeBrain(configuration, privacyAccepted = { true }, factory = factory)
+        val admitted = ProviderConfig(ProviderId.HERMES, "https://bridge.example", null)
+        val bound = brain.boundTo(admitted)
+
+        // L'utente passa a un altro provider fra l'ammissione del budget e la chiamata.
+        configuration.selected = ProviderId.CUSTOM_OPENAI_COMPAT
+        configuration.configReads = 0
+        bound.act(notificationContext(), "rispondi", listOf("notification"), listOf("whatsapp_reply"))
+
+        assertEquals(listOf(admitted), factory.configs)
+        assertEquals(0, configuration.configReads, "la config ammessa non si rilegge")
+    }
+
+    @Test
+    fun `a bound brain still requires the privacy consent`() = runTest {
+        val configuration = FakeBridgeConfiguration()
+        val factory = FakeTransportFactory()
+        val brain = ConfiguredBridgeBrain(configuration, privacyAccepted = { false }, factory = factory)
+
+        val error = assertFailsWith<BridgeException> {
+            brain.boundTo(ProviderConfig(ProviderId.HERMES, "https://bridge.example", null))
+                .compile("crea", TEST_MANIFEST, DeviceState())
+        }
+        assertEquals(BridgeErrorKind.CONFIGURATION, error.kind)
+        assertEquals(0, factory.created)
+    }
+
+    @Test
     fun `a factory configuration error propagates out of compile`() = runTest {
         // Proprieta' documentata (ConfiguredBridgeBrain §currentTransport): il throw della factory
         // per un provider che non puo' essere costruito si propaga FUORI dal try di
@@ -284,9 +315,11 @@ private class FakeBridgeConfiguration : ProviderConfigStore {
 
 private class FakeTransportFactory : TransportFactory {
     var created = 0
+    val configs = mutableListOf<ProviderConfig>()
 
     override fun create(config: ProviderConfig): AgentTransport {
         created += 1
+        configs += config
         return FakeAgentTransport(config.providerId)
     }
 }
