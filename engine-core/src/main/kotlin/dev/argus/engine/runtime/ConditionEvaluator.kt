@@ -26,7 +26,8 @@ class ConditionEvaluator(private val clock: Clock) {
 
     private fun resultOf(truth: Truth): Result = when (truth) {
         Truth.TRUE -> Result.MET
-        Truth.FALSE -> Result.NOT_MET
+        // Un confronto impossibile non è soddisfatto, ma non ferma il programma come uno stato assente.
+        Truth.FALSE, Truth.INVALID -> Result.NOT_MET
         Truth.UNKNOWN -> Result.STATE_UNAVAILABLE
     }
 
@@ -69,10 +70,10 @@ class ConditionEvaluator(private val clock: Clock) {
     ): Truth {
         val left = variable(condition.varName) ?: return Truth.UNKNOWN
         // Operatori UNARI di parità: nessun RHS. Si coercizza il SOLO lato sinistro a INTERO e si
-        // valuta la parità; fail-closed Truth.FALSE se non coercibile a intero (stesso pattern di
+        // valuta la parità; fail-closed Truth.INVALID se non coercibile a intero (stesso pattern di
         // GT/LT su TEXT: mai UNKNOWN, mai eccezione, il TAINT non è declassificato).
         if (condition.op == CmpOp.IS_EVEN || condition.op == CmpOp.IS_ODD) {
-            val number = StateValueCoercion.integer(left.text) ?: return Truth.FALSE
+            val number = StateValueCoercion.integer(left.text) ?: return Truth.INVALID
             val even = number % 2L == 0L
             return Truth.of(if (condition.op == CmpOp.IS_EVEN) even else !even)
         }
@@ -93,13 +94,14 @@ class ConditionEvaluator(private val clock: Clock) {
                 CmpOp.CONTAINS -> Truth.of(left.text.contains(right.text, ignoreCase = true))
                 // device-found: GT/LT su TEXT (es. un numero chiesto all'LLM e catturato come TEXT).
                 // Si prova a coercizzare numericamente ENTRAMBI i lati: se uno solo non è numerico il
-                // confronto è FALSE (fail-closed), mai UNKNOWN (che fermerebbe il programma) e mai una
-                // eccezione. La coercizione tocca solo il boolean del confronto, non declassifica il TAINT.
+                // confronto è INVALID (non soddisfatto anche sotto `not`), mai UNKNOWN (che fermerebbe il
+                // programma) e mai una eccezione. La coercizione tocca solo il boolean del confronto, non
+                // declassifica il TAINT.
                 CmpOp.GT, CmpOp.LT -> {
                     val leftNumber = StateValueCoercion.number(left.text)
                     val rightNumber = StateValueCoercion.number(right.text)
                     if (leftNumber == null || rightNumber == null) {
-                        Truth.FALSE
+                        Truth.INVALID
                     } else when (condition.op) {
                         CmpOp.GT -> Truth.of(leftNumber > rightNumber)
                         else -> Truth.of(leftNumber < rightNumber)
@@ -201,20 +203,29 @@ class ConditionEvaluator(private val clock: Clock) {
         }
     }
 
+    /**
+     * Logica a tre valori più [INVALID]: un confronto numerico su un operando non numerico. Come
+     * [UNKNOWN] non ha un valore di verità (quindi `not` non lo inverte e AND/OR lo propagano), ma al
+     * confine è NOT_MET e non STATE_UNAVAILABLE: l'`if` prende il ramo else, il `while` si ferma, il
+     * programma non si interrompe. Se nello stesso ramo manca anche uno stato, vince [UNKNOWN].
+     */
     private enum class Truth {
         TRUE,
         FALSE,
-        UNKNOWN;
+        UNKNOWN,
+        INVALID;
 
         infix fun and(other: Truth): Truth = when {
             this == FALSE || other == FALSE -> FALSE
             this == UNKNOWN || other == UNKNOWN -> UNKNOWN
+            this == INVALID || other == INVALID -> INVALID
             else -> TRUE
         }
 
         infix fun or(other: Truth): Truth = when {
             this == TRUE || other == TRUE -> TRUE
             this == UNKNOWN || other == UNKNOWN -> UNKNOWN
+            this == INVALID || other == INVALID -> INVALID
             else -> FALSE
         }
 
@@ -222,6 +233,7 @@ class ConditionEvaluator(private val clock: Clock) {
             TRUE -> FALSE
             FALSE -> TRUE
             UNKNOWN -> UNKNOWN
+            INVALID -> INVALID
         }
 
         companion object {
