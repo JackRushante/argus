@@ -11,6 +11,7 @@ import dev.argus.engine.model.TimePrecision
 import dev.argus.engine.model.Transition
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.AuditKind
+import dev.argus.engine.runtime.ExecutionStatus
 import dev.argus.ui.model.DiagnosisFix
 import dev.argus.ui.model.DiagnosisLevel
 import dev.argus.ui.model.DiagnosisRow
@@ -344,6 +345,26 @@ private fun lastEventRow(
     }
     if (fired != null) {
         val moment = relativeTimeLabel(fired.atMillis, nowMillis, language)
+        // B11: lo scatto c'è stato, ma l'esito è quello delle azioni: se sono fallite non è «OK».
+        val level = when (fired.executionStatus) {
+            null, ExecutionStatus.SUCCEEDED, ExecutionStatus.RUNNING, ExecutionStatus.SUBMITTED -> null
+            ExecutionStatus.DEFERRED -> DiagnosisLevel.INFO
+            ExecutionStatus.PARTIAL,
+            ExecutionStatus.FAILED,
+            ExecutionStatus.CANCELLED,
+            ExecutionStatus.INTERRUPTED,
+            ExecutionStatus.SUPPRESSED_COOLDOWN,
+            ExecutionStatus.SUPPRESSED_BUDGET,
+            ExecutionStatus.SUPPRESSED_NOT_ELIGIBLE,
+            -> DiagnosisLevel.WARN
+        }
+        if (level != null) {
+            val what = fired.toLogRow(emptyList(), language).summary
+            return DiagnosisRow(
+                level,
+                language.pick("Last run $moment: $what", "Ultimo scatto $moment: $what"),
+            )
+        }
         return DiagnosisRow(
             DiagnosisLevel.OK,
             language.pick("Last run: $moment", "Ultimo scatto: $moment"),

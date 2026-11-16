@@ -102,13 +102,29 @@ internal fun posixQuote(argument: String): String =
 
 /**
  * Riga di script per la shell `su` persistente. Il comando gira con stdin su `/dev/null` (non può
- * mangiare le righe successive), sotto `timeout -s KILL` se esiste, e finisce con un marcatore
- * casuale su stdout (con l'exit code) e su stderr: l'output è tutto ciò che precede il marcatore.
+ * mangiare le righe successive) e finisce con un marcatore casuale su stdout (con l'exit code) e su
+ * stderr: l'output è tutto ciò che precede il marcatore.
+ *
+ * Il tempo massimo (0.7.2): con `setsid` il comando parte in un gruppo di processi suo (il suo PID è il
+ * pgid, come nel backend Shizuku) e un guardiano, anch'esso in un gruppo suo, allo scadere uccide
+ * l'INTERO gruppo: i figli del comando non sopravvivono come processi root orfani. Finito il comando il
+ * guardiano viene ucciso con il suo `sleep`. Il guardiano conta in secondi interi arrotondati per
+ * eccesso (un `sleep` senza frazioni non deve uccidere subito) e uccide solo se `sleep` è riuscito.
+ * Senza `setsid` resta `timeout -s KILL` (solo il processo diretto), e senza neanche quello il comando
+ * nudo: in ogni caso [RootSession] butta la sessione oltre tempo massimo e tolleranza.
  */
 internal fun rootScript(command: List<String>, timeoutMillis: Long, token: String): String {
     val quoted = command.joinToString(" ") { posixQuote(it) }
     val seconds = String.format(Locale.ROOT, "%d.%03d", timeoutMillis / 1000, timeoutMillis % 1000)
-    return "{ if command -v timeout >/dev/null 2>&1; then timeout -s KILL $seconds $quoted; " +
+    val wholeSeconds = maxOf(1L, (timeoutMillis + 999) / 1000)
+    return "{ if command -v setsid >/dev/null 2>&1; then " +
+        "setsid $quoted & __argus_pid=\$!; " +
+        "setsid sh -c 'sleep \"\$1\" && kill -9 -\"\$2\" \"\$2\"' argus-watchdog $wholeSeconds \"\$__argus_pid\" " +
+        "</dev/null >/dev/null 2>&1 & __argus_dog=\$!; " +
+        "wait \"\$__argus_pid\" 2>/dev/null; __argus_wait=\$?; " +
+        "kill -9 -\"\$__argus_dog\" \"\$__argus_dog\" 2>/dev/null; wait \"\$__argus_dog\" 2>/dev/null; " +
+        "(exit \"\$__argus_wait\"); " +
+        "elif command -v timeout >/dev/null 2>&1; then timeout -s KILL $seconds $quoted; " +
         "else $quoted; fi; } </dev/null; __argus_rc=\$?; " +
         "printf '%s:%d\\n' '$token' \"\$__argus_rc\"; printf '%s\\n' '$token' >&2\n"
 }
@@ -239,6 +255,7 @@ private class RootSession(
         val errSink = LimitedSink(stderrBytes, minOf(request.maxOutputBytes, MAX_STDERR_BYTES))
         val outScan = MarkerScanner(token, outSink)
         val errScan = MarkerScanner(token, errSink)
+        drainStrayOutput()
         try {
             process.stdin.write(
                 rootScript(request.command, request.timeoutMillis, token).toByteArray(Charsets.UTF_8),
@@ -274,6 +291,21 @@ private class RootSession(
             truncated = outSink.truncated || errSink.truncated,
             errorCode = if (code == MarkerScanner.PROTOCOL_ERROR_EXIT) "root_protocol" else null,
         )
+    }
+
+    /**
+     * Scarta l'output arrivato DOPO il marcatore del comando precedente e prima di questo (un processo
+     * lasciato in background che scrive ancora): non appartiene a nessun comando e non deve finire nella
+     * cattura del prossimo (0.7.2). Una fine flusso in mezzo vuol dire che il `su` è morto.
+     */
+    private fun drainStrayOutput() {
+        while (true) {
+            val chunk = chunks.poll() ?: return
+            if (chunk.data.isEmpty()) {
+                poisoned = true
+                throw SessionDeadException()
+            }
+        }
     }
 
     private fun newToken(): String {

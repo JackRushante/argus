@@ -54,4 +54,27 @@ class PrefsCallStateStoreTest {
             assertNull(pending())
         }
     }
+
+    @Test
+    fun `a queued missed call survives a new store instance and follows call ended`() {
+        val ended = TriggerEnvelope(
+            TriggerEventId("phone:${"e".repeat(64)}"),
+            TriggerEvent.PhoneStateChanged(PhoneEvent.CALL_ENDED, "+3932077480", sim = 2),
+        )
+        val missed = TriggerEnvelope(
+            TriggerEventId("phone:${"f".repeat(64)}"),
+            TriggerEvent.PhoneStateChanged(PhoneEvent.MISSED_CALL, "+3932077480", sim = 2),
+        )
+        store.record(CallStateSnapshot("IDLE", null, 14_000L), ended, missed)
+
+        PrefsCallStateStore(context).apply {
+            assertEquals(ended, pending())
+            complete(ended.id.value)
+        }
+        PrefsCallStateStore(context).apply {
+            assertEquals(missed, pending())
+            complete(missed.id.value)
+            assertNull(pending())
+        }
+    }
 }

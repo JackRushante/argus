@@ -93,6 +93,24 @@ class HttpRequestPolicyTest {
     }
 
     @Test
+    fun `header values are visible ascii plus space and tab, as the http client requires`() {
+        assertTrue(HttpRequestPolicy.isHeaderValueValid("!~ a\tz {}[]\"'"))
+        listOf("Caffè", "token€", "“curly”", "emoji 🙂", "nbsp x", "del\u007Fx", "c1\u0085x").forEach {
+            assertFalse(HttpRequestPolicy.isHeaderValueValid(it), it)
+            assertFalse(
+                HttpRequestPolicy.isResolvedShapeValid(
+                    Action.HttpRequest(HttpMethod.GET, "https://example.com/", headers = mapOf("X-V" to it)),
+                ),
+                it,
+            )
+        }
+        assertTrue(HttpRequestPolicy.hasNonAsciiChars("Caffè"))
+        assertFalse(HttpRequestPolicy.hasNonAsciiChars("line\r\nbreak"))
+        // Anche i parametri del content type finiscono in un'intestazione.
+        assertFalse(HttpRequestPolicy.isContentTypeValid("text/plain; name=caffè"))
+    }
+
+    @Test
     fun `content type must look like type slash subtype with optional parameters`() {
         assertTrue(HttpRequestPolicy.isContentTypeValid("application/json"))
         assertTrue(HttpRequestPolicy.isContentTypeValid("application/json; charset=utf-8"))
@@ -188,6 +206,10 @@ class HttpRequestPolicyTest {
     fun `sensitive headers are detected from the name only`() {
         listOf("Authorization", "Proxy-Authorization", "X-Auth-Token", "X-Api-Key", "apikey", "Client-Secret")
             .forEach { assertTrue(HttpRequestPolicy.isSensitiveHeader(it), it) }
+        listOf(
+            "Cookie", "Set-Cookie", "X-Auth", "X-Password", "X-User-Pass", "X-Pwd", "X-Session-Id",
+            "X-Hub-Signature", "X-Credential", "X-Bearer",
+        ).forEach { assertTrue(HttpRequestPolicy.isSensitiveHeader(it), it) }
         listOf("Accept", "Content-Type", "User-Agent", "X-Trace").forEach {
             assertFalse(HttpRequestPolicy.isSensitiveHeader(it), it)
         }

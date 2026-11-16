@@ -23,6 +23,8 @@ enum class UsageEventOutcome { OK, ERROR, BLOCKED_BUDGET }
  *   che non risolvono il modello, la convenzione è la stringa `"unknown"` (T9).
  * - [tokensIn]/[tokensOut] null = provider senza usage (es. Hermes pre-S15): semantica "n/d", non 0.
  * - [costMicros] (micro-USD) e [pricingVersion] restano colonne vuote in S11: le popola S13.
+ *   [pricingVersion] = [TOKEN_ESTIMATE] marca token stimati dalle lunghezze (provider senza usage):
+ *   contano nel tetto token e la UI li mostra come stima; il costo resta null.
  */
 @Entity(tableName = "usage_events", indices = [Index("timestampMs")])
 data class UsageEventEntity(
@@ -40,4 +42,9 @@ data class UsageEventEntity(
     val reasoningTokens: Long? = null,
     /** Motivo di terminazione provider, già validato e limitato dal transport. */
     val finishReason: String? = null,
-)
+) {
+    companion object {
+        /** Valore di [pricingVersion] per un evento con token stimati (letterale anche in UsageDao). */
+        const val TOKEN_ESTIMATE = "token_estimate"
+    }
+}

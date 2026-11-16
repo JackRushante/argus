@@ -127,8 +127,9 @@ class ActiveNotificationReplyRegistry : ReplyBurstSource {
         if (relevant.isEmpty()) {
             null
         } else {
-            val start = relevant.indexOfFirst { it.message.eventId == firstEventId }
-                .takeIf { it >= 0 } ?: (relevant.size - 1)
+            // Il log tiene gli ultimi MAX_BURST_MESSAGES: se il primo evento ne è già uscito, tutto ciò
+            // che resta è successivo a lui e fa parte della raffica (B2), non solo l'ultimo messaggio.
+            val start = relevant.indexOfFirst { it.message.eventId == firstEventId }.coerceAtLeast(0)
             ReplyBurst(relevant.subList(start, relevant.size).map { it.message })
         }
     }

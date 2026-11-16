@@ -43,6 +43,19 @@ internal object StructuredOutput {
     fun isRejection(error: TransportException): Boolean =
         error.kind == TransportErrorKind.HTTP && error.statusCode in REJECTION_STATUSES
 
+    /**
+     * true se il rifiuto va RICORDATO per la vita del transport: un 4xx il cui messaggio nomina il parametro
+     * (`response_format`, `json_schema`, `output_config`…). Un 500 (anche quello di llama.cpp) o un 4xx che
+     * parla d'altro fanno scendere di livello solo quella richiesta: un errore passeggero del server non
+     * spegne per sempre l'output strutturato.
+     */
+    fun isLastingRejection(error: TransportException): Boolean =
+        isRejection(error) && error.statusCode in 400..499 &&
+            error.providerMessage?.let(PARAMETER_NAMES::containsMatchIn) == true
+
+    private val PARAMETER_NAMES =
+        Regex("response_format|json_schema|json_object|output_config|output_format|structured output|schema", RegexOption.IGNORE_CASE)
+
     private fun nullable(type: String): JsonObject = buildJsonObject {
         putJsonArray("type") {
             add(JsonPrimitive(type))

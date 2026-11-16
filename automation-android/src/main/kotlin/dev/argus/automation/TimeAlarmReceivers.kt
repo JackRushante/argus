@@ -73,6 +73,8 @@ internal fun reconcileReason(action: String?): ReconcileReason? = when (action) 
     Intent.ACTION_MY_PACKAGE_REPLACED -> ReconcileReason.PACKAGE_REPLACED
     AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED ->
         ReconcileReason.EXACT_ALARM_PERMISSION_CHANGED
+    // La revoca del permesso non ha broadcast: la sveglia di riserva riconcilia come se l'avesse.
+    AndroidTimeAlarmBackend.ACTION_TIME_WATCHDOG -> ReconcileReason.EXACT_ALARM_PERMISSION_CHANGED
     else -> null
 }
 

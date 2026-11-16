@@ -73,7 +73,7 @@ class WakeAwarePauseTest {
         // Durante l'attesa la quota è rilasciata: il processore può dormire.
         assertEquals(0, wakeLock.activeHolders)
         assertEquals(listOf(1L to start + 300_000), alarms.scheduled)
-        assertEquals(listOf("acquire:${70 * 60 * 1_000L}", "release"), system.events)
+        assertEquals(listOf("acquire:${ExecutionWakeLock.DEFAULT_TIMEOUT_MILLIS}", "release"), system.events)
 
         // Il telefono ha dormito: scatta la sveglia, il `delay` (uptime) non è passato.
         elapsed = start + 300_000
@@ -85,9 +85,9 @@ class WakeAwarePauseTest {
         assertEquals(listOf(1L), alarms.cancelled)
         assertEquals(
             listOf(
-                "acquire:${70 * 60 * 1_000L}",
+                "acquire:${ExecutionWakeLock.DEFAULT_TIMEOUT_MILLIS}",
                 "release",
-                "acquire:${70 * 60 * 1_000L}",
+                "acquire:${ExecutionWakeLock.DEFAULT_TIMEOUT_MILLIS}",
                 "release",
             ),
             system.events,
@@ -180,19 +180,19 @@ class WakeAwarePauseTest {
         launch { wakeLock.holding { pause.pause(50_000); secondDone = true } }
         runCurrent()
         assertEquals(2, wakeLock.activeHolders)
-        assertEquals(listOf("acquire:${70 * 60 * 1_000L}"), system.events)
+        assertEquals(listOf("acquire:${ExecutionWakeLock.DEFAULT_TIMEOUT_MILLIS}"), system.events)
 
         advanceTimeBy(30_000)
         runCurrent()
         assertTrue(firstDone)
         assertFalse(secondDone)
         assertEquals(1, wakeLock.activeHolders)
-        assertEquals(listOf("acquire:${70 * 60 * 1_000L}"), system.events)
+        assertEquals(listOf("acquire:${ExecutionWakeLock.DEFAULT_TIMEOUT_MILLIS}"), system.events)
 
         advanceTimeBy(20_000)
         runCurrent()
         assertTrue(secondDone)
-        assertEquals(listOf("acquire:${70 * 60 * 1_000L}", "release"), system.events)
+        assertEquals(listOf("acquire:${ExecutionWakeLock.DEFAULT_TIMEOUT_MILLIS}", "release"), system.events)
     }
 
     @Test
@@ -207,7 +207,7 @@ class WakeAwarePauseTest {
         runCurrent()
         // Il programma lungo ha ceduto la sua quota, quello breve no: il lock resta tenuto.
         assertEquals(1, wakeLock.activeHolders)
-        assertEquals(listOf("acquire:${70 * 60 * 1_000L}"), system.events)
+        assertEquals(listOf("acquire:${ExecutionWakeLock.DEFAULT_TIMEOUT_MILLIS}"), system.events)
 
         advanceTimeBy(30_000)
         runCurrent()
@@ -219,6 +219,26 @@ class WakeAwarePauseTest {
         runCurrent()
         assertTrue(longDone)
         assertEquals(0, wakeLock.activeHolders)
+    }
+
+    @Test
+    fun `short waits of a long program keep renewing the wakelock timeout`() = runTest {
+        val renewing = ExecutionWakeLock(
+            system,
+            timeoutMillis = 70_000,
+            uptimeMillis = { testScheduler.currentTime },
+            refreshEveryMillis = 45_000,
+        )
+        val pause = WakeAwarePause(renewing, alarms, signals, { elapsed }, nextToken = { ++tokens })
+
+        // Tre attese brevi (plain delay, la quota non scende mai a zero) per 90 secondi in tutto:
+        // senza rinnovo il lock di sistema scadrebbe a 70 secondi.
+        launch { renewing.holding { repeat(3) { pause.pause(30_000) } } }
+        advanceTimeBy(100_000)
+        runCurrent()
+
+        assertEquals(listOf("acquire:70000", "acquire:70000", "release"), system.events)
+        assertEquals(emptyList(), alarms.scheduled)
     }
 
     @Test

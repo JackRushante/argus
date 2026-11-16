@@ -4,8 +4,11 @@ import dev.argus.engine.model.Action
 import dev.argus.engine.model.ArgusJson
 import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.Condition
+import dev.argus.engine.model.ConfidentialityLabel
 import dev.argus.engine.model.SolarEvent
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.VarBinding
+import dev.argus.engine.model.VarType
 import dev.argus.engine.safety.DraftValidator
 import dev.argus.engine.safety.Severity
 import kotlin.test.Test
@@ -53,14 +56,14 @@ class PersonalDataStripperTest {
     }
 
     @Test
-    fun `notification trigger loses conversation id and sender but keeps package and text filters`() {
+    fun `notification trigger loses conversation id sender and title but keeps package and text filter`() {
         val stripped = strip(BackupFixtures.notification) as Trigger.Notification
 
-        assertNull(stripped.conversationId)
-        assertNull(stripped.sender)
+        assertEquals(PersonalDataStripper.REMOVED_TEXT, stripped.conversationId)
+        assertEquals(PersonalDataStripper.REMOVED_TEXT, stripped.sender)
+        assertEquals(PersonalDataStripper.REMOVED_TEXT, stripped.titleMatch)
         assertEquals("com.whatsapp", stripped.pkg)
         assertEquals(false, stripped.isGroup)
-        assertEquals("ciao", stripped.titleMatch)
         assertEquals("cena", stripped.textMatch)
     }
 
@@ -68,9 +71,67 @@ class PersonalDataStripperTest {
     fun `phone trigger loses the number but keeps event and text filter`() {
         val stripped = strip(BackupFixtures.phoneState) as Trigger.PhoneState
 
-        assertNull(stripped.number)
+        assertEquals(PersonalDataStripper.REMOVED_TEXT, stripped.number)
         assertEquals(BackupFixtures.phoneState.event, stripped.event)
         assertEquals("codice", stripped.textMatch)
+    }
+
+    @Test
+    fun `connectivity trigger loses the network name but keeps medium and state`() {
+        val stripped = strip(BackupFixtures.connectivity) as Trigger.Connectivity
+
+        assertEquals(PersonalDataStripper.REMOVED_TEXT, stripped.match)
+        assertEquals(BackupFixtures.connectivity.medium, stripped.medium)
+        assertEquals(BackupFixtures.connectivity.state, stripped.state)
+        // Senza nome di rete la regola valeva per qualunque rete: resta da completare.
+        val any = Trigger.Connectivity(BackupFixtures.connectivity.medium, BackupFixtures.connectivity.state, match = null)
+        assertEquals(any, strip(any))
+    }
+
+    @Test
+    fun `a stripped identity never widens the trigger and the validator blocks the rule until it is completed`() {
+        mapOf(
+            BackupFixtures.notification to setOf("conversation_id_invalid", "sender_invalid", "title_match_invalid"),
+            BackupFixtures.phoneState to setOf("number_invalid"),
+            BackupFixtures.connectivity to setOf("match_invalid"),
+        ).forEach { (trigger, expected) ->
+            assertEquals(emptySet(), errorCodes(draftWith(trigger)) intersect expected, "originale $trigger")
+            val codes = errorCodes(PersonalDataStripper.strip(draftWith(trigger)))
+            assertTrue(codes.containsAll(expected), "$trigger: $codes")
+        }
+        // Un campo che era già null resta null: nessun errore nuovo.
+        val bySender = Trigger.Notification(pkg = "com.whatsapp", sender = BackupFixtures.SENDER)
+        val stripped = strip(bySender) as Trigger.Notification
+        assertNull(stripped.conversationId)
+        assertNull(stripped.titleMatch)
+        assertEquals(PersonalDataStripper.REMOVED_TEXT, stripped.sender)
+    }
+
+    @Test
+    fun `secret literals lose their value and are rejected, the other variables stay`() {
+        val draft = AutomationDraft(
+            name = "v",
+            trigger = Trigger.Immediate,
+            actions = listOf(Action.CopyText("\${token} \${saluto}")),
+            vars = listOf(
+                VarBinding.Literal("token", "sk-segreto-123", VarType.TEXT, ConfidentialityLabel.SECRET),
+                VarBinding.Literal("saluto", "ciao", VarType.TEXT, ConfidentialityLabel.PUBLIC),
+            ),
+        )
+        assertFalse("var_literal_invalid" in errorCodes(draft))
+
+        val stripped = PersonalDataStripper.strip(draft)
+
+        assertEquals(
+            listOf(
+                VarBinding.Literal("token", PersonalDataStripper.REMOVED_SECRET, VarType.TEXT, ConfidentialityLabel.SECRET),
+                VarBinding.Literal("saluto", "ciao", VarType.TEXT, ConfidentialityLabel.PUBLIC),
+            ),
+            stripped.vars,
+        )
+        assertFalse("sk-segreto-123" in ArgusJson.encodeToString(AutomationDraft.serializer(), stripped))
+        assertTrue("var_literal_invalid" in errorCodes(stripped))
+        assertEquals(stripped, PersonalDataStripper.strip(stripped))
     }
 
     @Test
@@ -89,7 +150,7 @@ class PersonalDataStripperTest {
 
     @Test
     fun `triggers without positions or contacts are left exactly as they are`() {
-        listOf(BackupFixtures.time, Trigger.Immediate, BackupFixtures.connectivity, BackupFixtures.sensor)
+        listOf(BackupFixtures.time, Trigger.Immediate, BackupFixtures.sensor)
             .forEach { trigger -> assertEquals(trigger, strip(trigger)) }
     }
 
@@ -100,6 +161,8 @@ class PersonalDataStripperTest {
             assertFalse(BackupFixtures.CONVERSATION in json, "conversationId in $trigger")
             assertFalse(BackupFixtures.SENDER in json, "sender in $trigger")
             assertFalse(BackupFixtures.NUMBER in json, "number in $trigger")
+            assertFalse("CasaMia" in json, "rete in $trigger")
+            assertFalse("\"ciao\"" in json, "titolo in $trigger")
             assertFalse("45.4642" in json, "latitudine in $trigger")
         }
     }

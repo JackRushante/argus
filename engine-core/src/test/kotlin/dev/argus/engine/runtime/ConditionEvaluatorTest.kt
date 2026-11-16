@@ -117,6 +117,39 @@ class ConditionEvaluatorTest {
         assertEquals(ConditionEvaluator.Result.NOT_MET, ev.flowResult(Condition.VarCompare("half", CmpOp.IS_EVEN), state, values::get))
     }
 
+    @Test fun `a failed numeric coercion is never inverted by not`() {
+        val ev = ConditionEvaluator(clockAt("2026-07-12T10:00:00Z"))
+        val state = DeviceState()
+        fun textVar(value: String) = VarValue(
+            value, VarType.TEXT, IntegrityLabel.CLEAN, ConfidentialityLabel.PUBLIC, setOf(ValueProvenance.LITERAL),
+        )
+        val values = mapOf("word" to textVar("abc"), "seven" to textVar("7"))
+        fun result(c: Condition) = ev.flowResult(c, state, values::get)
+        val gt = Condition.VarCompare("word", CmpOp.GT, "5")
+        val lt = Condition.VarCompare("word", CmpOp.LT, "5")
+        val even = Condition.VarCompare("word", CmpOp.IS_EVEN)
+        val odd = Condition.VarCompare("word", CmpOp.IS_ODD)
+        val literal = Condition.VarCompare("seven", CmpOp.GT, "cinque")
+
+        for (c in listOf(gt, lt, even, odd, literal)) {
+            // Non soddisfatta, e `not` non la rende vera: resta non soddisfatta, senza STATE_UNAVAILABLE
+            // (che fermerebbe il programma).
+            assertEquals(ConditionEvaluator.Result.NOT_MET, result(c), "$c")
+            assertEquals(ConditionEvaluator.Result.NOT_MET, result(Condition.Not(c)), "not $c")
+            assertEquals(ConditionEvaluator.Result.NOT_MET, result(Condition.Not(Condition.Not(c))), "not not $c")
+        }
+        // Dentro una congiunzione o una disgiunzione negata la condizione resta non soddisfatta.
+        val truthy = Condition.VarCompare("seven", CmpOp.GT, "5")
+        assertEquals(ConditionEvaluator.Result.NOT_MET, result(Condition.Not(Condition.And(listOf(truthy, gt)))))
+        assertEquals(ConditionEvaluator.Result.NOT_MET, result(Condition.Not(Condition.Or(listOf(Condition.Not(truthy), gt)))))
+        // Un ramo davvero vero di un OR resta vero; un ramo davvero falso di un AND resta falso.
+        assertEquals(ConditionEvaluator.Result.MET, result(Condition.Or(listOf(truthy, gt))))
+        assertEquals(ConditionEvaluator.Result.NOT_MET, result(Condition.And(listOf(Condition.Not(truthy), gt))))
+        // Uno stato assente resta più forte: STATE_UNAVAILABLE come prima.
+        val missing = Condition.VarCompare("absent", CmpOp.EQ, "x")
+        assertEquals(ConditionEvaluator.Result.STATE_UNAVAILABLE, result(Condition.And(listOf(missing, gt))))
+    }
+
     @Test fun `typed boolean values are normalized while missing remains unknown under not`() {
         val ev = ConditionEvaluator(clockAt("2026-07-12T10:00:00Z"))
         val query = StateQuery.Setting(SettingNamespace.GLOBAL, "airplane_mode_on")

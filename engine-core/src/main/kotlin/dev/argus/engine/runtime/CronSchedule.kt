@@ -6,7 +6,8 @@ import java.time.LocalDateTime
 import java.time.ZoneId
 
 // Cron 5 campi (min hour dom mon dow). Subset supportato: `*`, `n`, liste `a,b`, range `a-b`, step `*/s` e `a-b/s`.
-// DOW 0-7 (0 e 7 = domenica). DOM e DOW entrambi ristretti = OR (semantica vixie).
+// DOW 0-7 (0 e 7 = domenica). DOM e DOW entrambi ristretti = OR, altrimenti AND (semantica vixie:
+// un campo che comincia con `*`, come `*/2`, non è ristretto).
 // DST: ora locale saltata -> fire spostato avanti della durata del gap; ora duplicata -> una sola
 // esecuzione al primo offset (comportamento documentato di java.time, testato).
 class CronSchedule private constructor(
@@ -40,12 +41,9 @@ class CronSchedule private constructor(
     private fun dayMatches(d: LocalDate): Boolean {
         val domOk = d.dayOfMonth in dom
         val dowOk = (d.dayOfWeek.value % 7) in dow   // java Mon=1..Sun=7 -> cron Sun=0
-        return when {
-            domRestricted && dowRestricted -> domOk || dowOk
-            domRestricted -> domOk
-            dowRestricted -> dowOk
-            else -> true
-        }
+        // Come vixie cron: OR solo se entrambi i campi sono ristretti, altrimenti AND (un campo che
+        // comincia con '*' vale come filtro, così `*/2 * 1` sono i lunedì dispari).
+        return if (domRestricted && dowRestricted) domOk || dowOk else domOk && dowOk
     }
 
     companion object {
@@ -72,8 +70,9 @@ class CronSchedule private constructor(
                 dom = parseField(f[2], 1, 31),
                 months = parseField(f[3], 1, 12),
                 dow = dowRaw.map { it % 7 }.toSet(),
-                domRestricted = f[2] != "*",
-                dowRestricted = f[4] != "*",
+                // Vixie: un campo che comincia con '*' (anche `*/2`) non è ristretto.
+                domRestricted = !f[2].startsWith('*'),
+                dowRestricted = !f[4].startsWith('*'),
             )
         }
 

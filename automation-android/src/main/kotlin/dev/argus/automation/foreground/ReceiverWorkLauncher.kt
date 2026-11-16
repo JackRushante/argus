@@ -7,6 +7,7 @@ import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
+import dev.argus.automation.power.ExecutionWakeLock
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.runtime.AuditEvent
 import dev.argus.engine.runtime.AuditKind
@@ -45,6 +46,8 @@ class ReceiverWorkLauncher(
     private val sentinel: SharedForegroundSentinel,
     private val audit: AuditSink = NoopAuditSink,
     private val nowMillis: () -> Long = System::currentTimeMillis,
+    /** Tenuto da prima del rilascio del receiver fino alla fine del lavoro (B7). */
+    private val wakeLock: ExecutionWakeLock = ExecutionWakeLock.NONE,
 ) {
     /**
      * Variante per callback di sistema che non possiedono un PendingResult (per esempio il
@@ -68,6 +71,10 @@ class ReceiverWorkLauncher(
         automationId: AutomationId? = null,
         block: suspend () -> Unit,
     ): Job = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+        // Prima di tutto, finché il broadcast tiene ancora sveglio il telefono (B7): un servizio
+        // in primo piano NON impedisce il deep sleep, e fra `finish()` e il wakelock del dispatch
+        // ci sono letture Room e, per il geofence, fino a 15 s di attesa di una posizione.
+        wakeLock.acquire()
         val demand = SentinelDemand.Execution(sentinel.nextExecutionToken())
         val receiverReleased = AtomicBoolean(false)
         var leased = false
@@ -90,8 +97,9 @@ class ReceiverWorkLauncher(
             } else {
                 Log.w(RECEIVER_WORK_TAG, "lease foreground $source non disponibile; fallback bounded")
                 if (automationId != null) recordDenied(automationId)
+                // Il lavoro best-effort può durare oltre la finestra: tiene una quota propria.
                 val work = scope.launch(start = CoroutineStart.UNDISPATCHED) {
-                    runSafely(source, block)
+                    wakeLock.holding { runSafely(source, block) }
                 }
                 withTimeoutOrNull(FALLBACK_RECEIVER_LEASE_MILLIS) { work.join() }
                 releaseReceiverOnce()
@@ -102,7 +110,11 @@ class ReceiverWorkLauncher(
             Log.e(RECEIVER_WORK_TAG, "launcher receiver $source fallito: ${error::class.java.simpleName}")
         } finally {
             releaseReceiverOnce()
-            if (leased) sentinel.releaseExecution(demand)
+            try {
+                if (leased) sentinel.releaseExecution(demand)
+            } finally {
+                wakeLock.release()
+            }
         }
     }
 

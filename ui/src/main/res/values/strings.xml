@@ -16,6 +16,7 @@
     <string name="bridge_token_label">Bearer token</string>
     <string name="bridge_token_keep_hint">Leave blank to keep the protected token</string>
     <string name="bridge_token_required_hint">Enter the bearer token</string>
+    <string name="bridge_token_origin_changed_hint">New server address: enter the bearer again. The saved one is never sent to another server.</string>
     <string name="bridge_token_configured">Protected token configured</string>
     <string name="bridge_token_missing">Token not configured</string>
 
@@ -30,6 +31,8 @@
     <string name="provider_key_keep_hint">Leave blank to keep the current key.</string>
     <string name="provider_key_required_hint">Required.</string>
     <string name="provider_key_optional_hint">Optional for endpoints without authentication.</string>
+    <string name="provider_key_origin_changed_hint">New server address: saving removes the saved key. Enter it again if the new server needs it.</string>
+    <string name="provider_key_remove">Remove key</string>
     <string name="provider_reasoning_label">Reasoning per request</string>
     <string name="provider_reasoning_default">Server default</string>
     <string name="provider_reasoning_none">Off</string>
@@ -319,8 +322,8 @@
     <!-- Rules backup (0.4.0, F1) -->
     <string name="backup_section">RULES BACKUP</string>
     <string name="backup_body">Save your rules to a file, or bring them to another phone. Android\'s own backup stays off, for your privacy.</string>
-    <string name="backup_strip_label">Remove locations and contacts (for sharing)</string>
-    <string name="backup_strip_hint">Coordinates, conversation IDs, sender names and phone numbers are taken out, and geofences ask for the current location when armed. Text filters stay: read the file before sharing it.</string>
+    <string name="backup_strip_label">Remove personal data (for sharing)</string>
+    <string name="backup_strip_hint">Coordinates, conversation IDs, sender names, phone numbers, network and device names, notification titles and secret values are taken out; geofences ask for the current location when armed. Whoever imports the rule fills them in before arming it. Text filters stay: read the file before sharing it.</string>
     <string name="backup_export">Export</string>
     <string name="backup_import">Import</string>
     <string name="backup_import_hint">Imported rules arrive as drafts to approve: none is armed on its own.</string>
@@ -517,6 +520,8 @@
     <!-- 0.7.0 · Approvazione e dettaglio (redesign A, blocco rda_ap_). -->
     <string name="rda_ap_risks_title">Before arming</string>
     <string name="rda_ap_warnings_title">Warnings</string>
+    <string name="rda_ap_imported">Imported rule</string>
+    <string name="rda_ap_imported_note">It comes from an imported file, not from your chat: check every step before arming it.</string>
     <string name="rda_ap_errors_one">1 error</string>
     <string name="rda_ap_errors_many">%1$d errors</string>
     <string name="rda_ap_warnings_one">1 warning</string>

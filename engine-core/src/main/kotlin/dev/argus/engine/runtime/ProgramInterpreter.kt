@@ -23,6 +23,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import java.math.BigDecimal
 import java.time.Clock
 import java.util.Locale
 
@@ -174,6 +175,9 @@ class ProgramInterpreter(
         private var omittedCount = 0
         private var firstOmittedPath: ActionPath? = null
 
+        /** Chiamate AI già partite in questa esecuzione (tetto [MAX_GENERATIVE_CALLS_PER_EXECUTION]). */
+        private var generativeCalls = 0
+
         suspend fun initialize(bindings: List<VarBinding>): Boolean {
             if (bindings.size > MAX_VARIABLES) return stop("invalid_program", null)
             val stateBindings = bindings.filterIsInstance<VarBinding.State>()
@@ -276,6 +280,14 @@ class ProgramInterpreter(
         }
 
         private suspend fun runLeaf(action: Action, path: ActionPath): Boolean {
+            // S10: un `while` intorno a una chiamata AI non può arrivare a 1000 chiamate per scatto.
+            if (action is Action.InvokeLlm || action is Action.InvokeLlmV2) {
+                if (generativeCalls >= MAX_GENERATIVE_CALLS_PER_EXECUTION) {
+                    record(path, action, ActionResult.Failure(GENERATIVE_CALL_LIMIT))
+                    return stop(GENERATIVE_CALL_LIMIT, path)
+                }
+                generativeCalls += 1
+            }
             val resolved = when (val resolution = interpolator.resolve(action, scope)) {
                 is ActionResolution.Blocked -> {
                     record(path, action, ActionResult.Failure(resolution.code))
@@ -548,10 +560,22 @@ class ProgramInterpreter(
         return true
     }
 
+    /**
+     * NUMBER e BOOLEAN entrano nei template in forma CANONICA, mai come la stringa grezza che è solo
+     * riuscita a passare il parsing (S1): un numero diventa `-?[0-9]+(\.[0-9]+)?`, un booleano
+     * `true`/`false`. Un numero che non si scrive così resta non disponibile, come un valore non
+     * convertibile.
+     */
     private fun normalize(raw: String, type: VarType): String? = when (type) {
         VarType.TEXT -> raw
-        VarType.NUMBER -> raw.takeIf { StateValueCoercion.number(it) != null }
+        VarType.NUMBER -> StateValueCoercion.number(raw)?.let(::canonicalNumber)
         VarType.BOOLEAN -> StateValueCoercion.boolean(raw)?.toString()
+    }
+
+    private fun canonicalNumber(value: Double): String? {
+        val plain = BigDecimal.valueOf(value).stripTrailingZeros().toPlainString()
+        val text = if (plain == "-0") "0" else plain
+        return text.takeIf { it.length <= MAX_CANONICAL_NUMBER_CHARS && CANONICAL_NUMBER.matches(it) }
     }
 
     companion object {
@@ -563,5 +587,15 @@ class ProgramInterpreter(
         private const val MAX_PAUSE_MILLIS = 3_600_000L
         /** Voci di journal scritte per esecuzione prima di tenere solo quelle non riuscite (B27). */
         const val MAX_JOURNAL_ENTRIES = 100
+
+        /**
+         * Tetto duro alle chiamate AI (invoke_llm) di una sola esecuzione: oltre, il programma si ferma
+         * con [GENERATIVE_CALL_LIMIT], un codice di policy. È anche il caso peggiore mostrato in
+         * approvazione per una regola con una chiamata AI dentro un ciclo.
+         */
+        const val MAX_GENERATIVE_CALLS_PER_EXECUTION = 30
+        const val GENERATIVE_CALL_LIMIT = "generative_call_limit"
+        private const val MAX_CANONICAL_NUMBER_CHARS = 64
+        private val CANONICAL_NUMBER = Regex("^-?[0-9]+(?:\\.[0-9]+)?$")
     }
 }

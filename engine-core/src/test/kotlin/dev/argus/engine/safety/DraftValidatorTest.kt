@@ -437,6 +437,28 @@ class DraftValidatorTest {
         val e = errors(v.validate(d, emptySet()))
         assertTrue("cron_invalid" in e); assertTrue("state_key_unknown" in e)
     }
+    @Test fun `a cron on a date that never occurs is rejected with its own code`() {
+        val at2026 = DraftValidator(
+            knownTools = setOf("whatsapp_reply", "notify.show", "state.read"),
+            clock = java.time.Clock.fixed(java.time.Instant.parse("2026-07-01T00:00:00Z"), java.time.ZoneOffset.UTC),
+        )
+        fun codes(cron: String) = errors(
+            at2026.validate(
+                AutomationDraft(
+                    "x",
+                    Trigger.Time(cron = cron, tz = "Europe/Rome"),
+                    listOf(Action.ShowNotification("t", "x")),
+                ),
+                emptySet(),
+            ),
+        )
+        assertEquals(listOf("cron_never_fires"), codes("0 9 30 2 *"))
+        assertEquals(listOf("cron_never_fires"), codes("0 9 31 4 *"))
+        // 29 febbraio: il 2028 è entro l'orizzonte di ricerca.
+        assertEquals(emptyList(), codes("0 9 29 2 *"))
+        // Un cron non valido resta cron_invalid, senza un secondo errore.
+        assertEquals(listOf("cron_invalid"), codes("0 9 32 2 *"))
+    }
     @Test fun `immediate trigger with valid actions has no trigger errors`() {
         val d = AutomationDraft(
             name = "sveglia adesso",

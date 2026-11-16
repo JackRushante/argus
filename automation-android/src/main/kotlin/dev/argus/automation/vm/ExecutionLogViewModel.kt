@@ -137,8 +137,9 @@ class ExecutionLogViewModel @Inject constructor(
 
     /** Conservazione 7, 30 o 90 giorni: la applica subito con una passata di manutenzione. */
     fun onSetRetention(days: Int) {
-        if (!retention.setDays(days)) return
         viewModelScope.launch {
+            // La scrittura su disco passa su IO dentro lo store, mai sul thread principale.
+            if (!retention.setDays(days)) return@launch
             try {
                 // Qui possono esserci dispatch in corso: la conservazione si applica subito, senza
                 // marcare come interrotto un programma vivo in un'attesa lunga.

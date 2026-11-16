@@ -13,6 +13,7 @@ internal class AccessibilityScreenNode(private val info: AccessibilityNodeInfo) 
     override val text: String? get() = info.text?.toString()
     override val contentDescription: String? get() = info.contentDescription?.toString()
     override val viewId: String? get() = info.viewIdResourceName
+    override val packageName: String? get() = info.packageName?.toString()
     override val isClickable: Boolean get() = info.isClickable && info.isEnabled
     override val isEditable: Boolean get() = info.isEditable
     override val isScrollable: Boolean get() = info.isScrollable

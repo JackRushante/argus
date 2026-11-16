@@ -58,6 +58,11 @@ class ArgusRuntimeController(
      * mentre un programma lungo è in esecuzione: marcherebbe come interrotta un'esecuzione viva.
      */
     private val dispatchesIdle: () -> Boolean = { true },
+    /**
+     * Dopo il primo reconcile del processo ogni dominio ha dichiarato la sua domanda del servizio
+     * in primo piano: il sentinel può fermare un servizio ricreato senza più domande.
+     */
+    private val onStartupReconciled: suspend () -> Unit = {},
 ) {
     private val started = AtomicBoolean(false)
     private val reconcileMutex = Mutex()
@@ -78,6 +83,10 @@ class ArgusRuntimeController(
             // Prima la pulizia, poi il reconcile: stesso ordine di sempre all'avvio.
             runMaintenanceIfDue()
             reconcile(ReconcileReason.APP_START)
+            runCatchingPreservingCancellation { onStartupReconciled() }
+                .onFailure { error ->
+                    Log.w(TAG, "controllo servizio orfano fallito: ${error::class.java.simpleName}")
+                }
         }
         scope.launch {
             shizukuStatus

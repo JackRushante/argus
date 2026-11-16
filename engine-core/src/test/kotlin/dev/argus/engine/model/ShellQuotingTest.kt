@@ -117,6 +117,201 @@ class ShellQuotingTest {
         assertEquals("a'\\''b", ShellQuoting.render("a'b", Context.SINGLE_QUOTED))
         assertEquals("a\\\"b", ShellQuoting.render("a\"b", Context.DOUBLE_QUOTED))
         assertNull(ShellQuoting.render("x", Context.UNSAFE))
+        assertNull(ShellQuoting.render("x", Context.COMMAND_POSITION))
+        assertNull(ShellQuoting.render("x", Context.REEVALUATED))
+    }
+
+    // --- S2: posizioni in cui la shell valuta un numero ---------------------------------------------
+
+    @Test
+    fun `operands the shell evaluates as arithmetic are numeric whether bare or quoted`() {
+        val numeric = listOf(
+            "[ \${x} -eq 1 ]",
+            "[ \"\${x}\" -gt 1 ]",
+            "[ 1 -lt '\${x}' ]",
+            "test \${x} -le 5",
+            "[[ \${x} -ne 0 ]] && echo hi",
+            "if [ \${x} -ge 3 ]; then echo hi; fi",
+            "(( \${x} > 1 ))",
+            "(( n = \"\${x}\" + 1 ))",
+            "while (( \${x} )); do break; done",
+            "let n=\${x}",
+            "let \${x}",
+            "typeset -i n=\${x}",
+            "integer n=\${x}",
+            "local -i n=\${x}",
+            "a[\${x}]=1",
+            "RANDOM=\${x}",
+            "shift \${x}",
+            "ulimit -t \${x}",
+        )
+        numeric.forEach { assertEquals(listOf(Context.NUMERIC), contexts(it), it) }
+    }
+
+    @Test
+    fun `a numeric position with other text glued to the value or an unclassifiable neighbour is unsafe`() {
+        listOf(
+            "[ x\${x} -eq 1 ]",
+            "[ \"\${x}1\" -eq 1 ]",
+            "(( a\${x} > 1 ))",
+            "let n=a\${x}",
+            "[[ -v \${x} ]]",
+            "typeset \${x}",
+            "unset \${x}",
+            "read \${x}",
+        ).forEach { assertEquals(listOf(Context.UNSAFE), contexts(it), it) }
+        // L'operatore stesso viene dal dato: l'altro operando potrebbe diventare aritmetico.
+        assertEquals(listOf(Context.UNSAFE, Context.UNSAFE), contexts("[ \${x} \${y} 1 ]"))
+        assertEquals(listOf(Context.UNSAFE), contexts("[ \"\$a\" \${x} 1 ]"))
+    }
+
+    @Test
+    fun `a value stored in a shell variable is numeric where that variable is evaluated as a number`() {
+        assertEquals(listOf(Context.NUMERIC), contexts("n=\${x}; [ \"\$n\" -gt 3 ] && echo big"))
+        assertEquals(listOf(Context.NUMERIC), contexts("n=\${x}; (( n > 3 ))"))
+        assertEquals(listOf(Context.NUMERIC), contexts("typeset -i n; n=\${x}"))
+        assertEquals(listOf(Context.NUMERIC), contexts("for v in \${x}; do [ \$v -eq 1 ]; done"))
+        // Riletto dopo un costrutto che lo scanner non modella: non si sa come viene usato.
+        assertEquals(listOf(Context.UNSAFE), contexts("n=\${x}; echo \$((n + 1))"))
+        // Usato come testo resta un argomento quotato.
+        assertEquals(listOf(Context.WORD), contexts("n=\${x}; echo \"\$n\""))
+    }
+
+    @Test
+    fun `text comparisons and ordinary arguments keep their quoting context`() {
+        assertEquals(listOf(Context.DOUBLE_QUOTED), contexts("[ \"\${x}\" = yes ]"))
+        assertEquals(listOf(Context.WORD, Context.WORD), contexts("[ \${x} != \${y} ]"))
+        assertEquals(listOf(Context.WORD), contexts("[ -n \${x} ]"))
+        assertEquals(listOf(Context.WORD), contexts("echo \${x} -eq"))
+        assertEquals(listOf(Context.WORD), contexts("case \${x} in yes) echo y;; esac"))
+    }
+
+    // --- S3: posizione del comando e comandi che rileggono gli argomenti ----------------------------
+
+    @Test
+    fun `a placeholder in the command word is command position`() {
+        listOf(
+            "\${x}",
+            "\${x} --help",
+            "\"\${x}\" arg",
+            "/system/bin/\${x}",
+            "echo hi; \${x}",
+            "echo hi\n\${x}",
+            "true && \${x}",
+            "false || \${x}",
+            "echo hi | \${x}",
+            "sleep 1 & \${x}",
+            "(\${x})",
+            "{ \${x}; }",
+            "if \${x}; then echo y; fi",
+            "if true; then \${x}; else \${x}; fi".substringBefore("; else"),
+            "while true; do \${x}; done",
+            "! \${x}",
+            "FOO=1 \${x}",
+            "env \${x}",
+            "env -i FOO=1 \${x}",
+            "nohup \${x} &",
+            "timeout 5 \${x}",
+            "timeout -s KILL 5 \${x}",
+            "nice -n 5 \${x}",
+            "busybox \${x} -h",
+            "command -v \${x}",
+            "exec \${x}",
+            ">/dev/null \${x}",
+        ).forEach { assertEquals(Context.COMMAND_POSITION, contexts(it).first(), it) }
+    }
+
+    @Test
+    fun `every placeholder of a command that reads its arguments again is reevaluated`() {
+        listOf(
+            "sh -c \"echo \${x}\"",
+            "sh -c 'echo \${x}'",
+            "/system/bin/sh -c \${x}",
+            "bash -c \"\${x}\"",
+            "su -c \"echo \${x}\"",
+            "su 0 sh -c \${x}",
+            "eval echo \${x}",
+            "eval \"echo \${x}\"",
+            ". \${x}",
+            "trap \${x} EXIT",
+            "xargs echo \${x}",
+            "find /sdcard -name \${x} -exec rm {} ';'",
+            "awk \"BEGIN{print \\\"\${x}\\\"}\"",
+            "sed \"s/a/\${x}/\" /tmp/f",
+            "python3 -c \${x}",
+            "sqlite3 /data/db \"select \${x}\"",
+            "busybox sh -c \${x}",
+            "toybox xargs \${x}",
+            "env FOO=1 sh -c \${x}",
+            "nohup sh -c \${x}",
+            "timeout 5 sh -c \${x}",
+            "env -S \${x}",
+            "X=\${x} sh -c 'echo \$X'",
+            "\$CMD \${x}",
+        ).forEach { assertEquals(listOf(Context.REEVALUATED), contexts(it), it) }
+    }
+
+    @Test
+    fun `data piped into an interpreter or stored and re-read as code is reevaluated`() {
+        listOf(
+            "echo \${x} | sh",
+            "echo \"\${x}\" | xargs rm",
+            "printf %s \${x} | su",
+            "echo \${x} | grep a | sh",
+            "echo \${x} | while read l; do eval \"\$l\"; done",
+            "while read l; do echo \$l; done < /dev/null; echo \${x} | (sh)",
+            "msg=\${x}; sh -c \"echo \$msg\"",
+            "msg=\${x}; sh -c 'echo \$msg'",
+            "msg=\${x}; \$msg",
+        ).forEach { assertTrue(contexts(it).first() in setOf(Context.REEVALUATED, Context.COMMAND_POSITION), it) }
+        // Una pipe verso un comando che legge dati, non codice, non cambia nulla.
+        assertEquals(listOf(Context.WORD), contexts("echo \${x} | grep -c a"))
+        // Un comando successivo, non in pipe, non riceve il dato.
+        assertEquals(listOf(Context.WORD), contexts("echo \${x} > /tmp/f; sh /tmp/script"))
+    }
+
+    @Test
+    fun `a value that starts an argument without a preceding double dash is option like`() {
+        fun optionLike(template: String) = ShellQuoting.placements(
+            template, InterpolationPolicy.references(template).map { it.range },
+        ).map { it.optionLike }
+        assertEquals(listOf(true), optionLike("rm \${x}"))
+        assertEquals(listOf(true), optionLike("rm \"\${x}\""))
+        assertEquals(listOf(false), optionLike("rm -- \${x}"))
+        assertEquals(listOf(false), optionLike("rm /sdcard/\${x}"))
+        assertEquals(listOf(false), optionLike("am broadcast --es text=\${x}"))
+        assertEquals(listOf(true, false), optionLike("cp \${x} -- \${y}"))
+        // Le posizioni bloccate o numeriche non portano questo avviso.
+        assertEquals(listOf(false), optionLike("\${x}"))
+        assertEquals(listOf(false), optionLike("[ \${x} -eq 1 ]"))
+    }
+
+    @Test
+    fun `numeric placeholders accept only a plain integer from external data`() {
+        val template = "[ \${x} -gt 5 ] && echo big"
+        assertEquals("[ 7 -gt 5 ] && echo big", resolvedCommand(template, tainted("7")))
+        assertEquals("[ -3 -gt 5 ] && echo big", resolvedCommand(template, tainted("-3")))
+        listOf(
+            "a[\$(id)]", "1.5", "0x10", "1e3", " 7", "7 ", "+7", "", "1234567890123456789", "1+1", "x",
+        ).forEach { value ->
+            val resolution = TaintAwareInterpolator().resolve(
+                Action.RunShell(template), VarScope(mapOf("x" to tainted(value))),
+            )
+            assertEquals("shell_numeric_context", assertIs<ActionResolution.Blocked>(resolution, value).code, value)
+        }
+        // Un valore fidato (letterale approvato) entra com'è, come in ogni altro contesto.
+        val clean = VarValue("2", VarType.NUMBER, IntegrityLabel.CLEAN, ConfidentialityLabel.PUBLIC, setOf(ValueProvenance.LITERAL))
+        assertEquals("[ 2 -gt 5 ] && echo big", resolvedCommand(template, clean))
+    }
+
+    @Test
+    fun `external data in command position or in a reevaluating command is blocked at run time`() {
+        listOf("\${x}", "sh -c \"echo \${x}\"", "echo \${x} | sh", "eval echo \${x}").forEach { template ->
+            val resolution = TaintAwareInterpolator().resolve(
+                Action.RunShell(template), VarScope(mapOf("x" to tainted("ls"))),
+            )
+            assertEquals("shell_quote_context", assertIs<ActionResolution.Blocked>(resolution, template).code, template)
+        }
     }
 
     // --- prova con una shell vera ------------------------------------------------------------------

@@ -662,4 +662,41 @@ class DraftValidatorP4Test {
             "capture_required" in errors(v.validate(draft(listOf(missingCapture)), emptySet())),
         )
     }
+
+    @Test fun `a generative action inside a loop is a warning, outside a loop it is not`() {
+        fun warnings(d: AutomationDraft) =
+            v.validate(d, emptySet()).filter { it.severity == Severity.WARNING }.map { it.code }
+        val capture = Action.InvokeLlm(
+            goal = "summarize",
+            contextSources = emptyList(),
+            allowedTools = emptyList(),
+            replyTargetSender = false,
+            deliver = GenerativeDeliverMode.CAPTURE_ONLY,
+            captureAs = "summary",
+        )
+        val looped = draft(listOf(Action.While(flowCond, listOf(capture), maxIterations = 5)))
+        assertEquals(emptyList(), errors(v.validate(looped, emptySet())))
+        assertEquals(1, warnings(looped).count { it == "generative_in_loop" })
+
+        // Anche dentro un if annidato nel ciclo: un solo avviso per regola.
+        val nested = draft(
+            listOf(
+                Action.While(
+                    flowCond,
+                    listOf(
+                        Action.If(
+                            flowCond,
+                            then = listOf(capture),
+                            orElse = listOf(capture.copy(captureAs = "other")),
+                        ),
+                    ),
+                    maxIterations = 5,
+                ),
+            ),
+        )
+        assertEquals(1, warnings(nested).count { it == "generative_in_loop" })
+
+        val flat = draft(listOf(Action.If(flowCond, then = listOf(capture))))
+        assertFalse("generative_in_loop" in warnings(flat))
+    }
 }

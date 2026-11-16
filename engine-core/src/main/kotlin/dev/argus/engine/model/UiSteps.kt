@@ -95,8 +95,11 @@ object UiStepsPolicy {
     /**
      * Package su cui una macro non può mai agire, né aprirli né trovarseli in primo piano a metà
      * macro: Argus stesso, le Impostazioni (le schermate di sicurezza e privacy non si distinguono con
-     * affidabilità dal package, quindi tutte), l'installatore di pacchetti e i dialoghi dei permessi.
-     * Una macro non può concedersi permessi, né confermare un'installazione, né toccare Argus.
+     * affidabilità dal package, quindi tutte), l'installatore di pacchetti e i dialoghi dei permessi,
+     * l'interfaccia di sistema (consenso al debug USB e alla cattura dello schermo, Impostazioni
+     * rapide), Shizuku e i gestori root, il Play Store, i dialoghi di VPN e certificati e le app dei
+     * permessi e della sicurezza dei produttori. Una macro non può concedersi permessi o privilegi, né
+     * confermare un'installazione, né toccare Argus.
      */
     val FORBIDDEN_PACKAGES: Set<String> = setOf(
         "com.android.settings",
@@ -104,6 +107,20 @@ object UiStepsPolicy {
         "com.google.android.packageinstaller",
         "com.android.permissioncontroller",
         "com.google.android.permissioncontroller",
+        "com.android.systemui",
+        "moe.shizuku.privileged.api",
+        "com.topjohnwu.magisk",
+        "me.weishu.kernelsu",
+        "com.rifsxd.ksunext",
+        "com.android.vending",
+        "com.android.vpndialogs",
+        "com.android.certinstaller",
+        "com.miui.securitycenter",
+        "com.lbe.security.miui",
+        "com.coloros.safecenter",
+        "com.oplus.safecenter",
+        "com.oplus.securitypermission",
+        "com.samsung.android.permissioncontroller",
     )
 
     private const val ARGUS_PACKAGE = "dev.argus"

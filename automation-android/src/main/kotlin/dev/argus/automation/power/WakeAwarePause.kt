@@ -76,6 +76,9 @@ class WakeAwarePause(
 ) {
     suspend fun pause(millis: Long) {
         if (millis <= 0) return
+        // Un programma lungo fatto di attese brevi non passa mai da 0 quote: ogni attesa rinnova
+        // il timeout del wakelock (B6), con un limite di frequenza interno al lock.
+        wakeLock.refresh()
         if (millis <= shortWaitMillis) {
             delay(millis)
             return

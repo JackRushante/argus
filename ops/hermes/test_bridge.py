@@ -1,5 +1,10 @@
+import http.client
 import json
 import os
+import signal
+import socket
+import socketserver
+import subprocess
 import tempfile
 import threading
 import time
@@ -467,9 +472,175 @@ class BridgeTest(unittest.TestCase):
         draft["trigger"]["conversationId"] = "contact_2"
         self.assertFalse(bridge.validate_draft(draft, tools, set(), keys))
 
+    def test_nested_or_non_string_allowed_tools_fail_closed_without_type_errors(self):
+        for tools in ([["whatsapp_reply"]], ["whatsapp_reply", ["x"]], [{"a": 1}, "whatsapp_reply"], [1]):
+            self.assertFalse(bridge._valid_generative_toolset(tools))
+            self.assertFalse(bridge._valid_notification_toolset(tools))
+            request = self.act_request()
+            request["allowed_tools"] = tools
+            with self.assertRaises(bridge.RequestError) as raised:
+                bridge.validate_act_request(request, "act-test-1")
+            self.assertEqual(400, raised.exception.status)
+            self.assertEqual("invalid_allowed_tools", raised.exception.code)
+
+    def test_deeply_nested_json_is_a_strict_json_error_not_a_recursion_error(self):
+        depth = 100_000
+        for raw in (b"[" * depth + b"]" * depth, b'{"a":' * depth + b"1" + b"}" * depth):
+            with self.assertRaises(bridge.StrictJsonError):
+                bridge.parse_json_body(raw)
+        self.assertEqual({"a": [1, 2]}, bridge.parse_json_body(b'{"a":[1,2]}'))
+        with self.assertRaises(UnicodeDecodeError):
+            bridge.parse_json_body(b'{"a":"\xff"}')
+
+    def test_overflowing_float_literals_are_rejected_at_parse_time(self):
+        for raw in ('{"lat":1e999}', '{"lat":-1e999}', "[1E400]"):
+            with self.assertRaises(bridge.StrictJsonError):
+                bridge.parse_json_body(raw.encode())
+        self.assertEqual({"lat": 45.5}, bridge.parse_json_body(b'{"lat":45.5}'))
+
+    def test_coordinates_must_be_finite_and_in_range(self):
+        geofence = {
+            "type": "geofence", "lat": 45.0, "lng": 9.0, "radiusM": 150,
+            "transition": "EXIT", "loiteringDelayMs": 0, "resolveCurrentLocation": False,
+        }
+        self.assertTrue(bridge.validate_trigger(geofence, set()))
+        inf, nan = float("inf"), float("nan")
+        for patch in (
+            {"lat": 90.0001}, {"lat": -91}, {"lng": 180.5}, {"lng": -181},
+            {"lat": inf}, {"lng": -inf}, {"lat": nan}, {"radiusM": inf}, {"radiusM": nan},
+            {"lat": 10**400},
+        ):
+            self.assertFalse(bridge.validate_trigger({**geofence, **patch}, set()), patch)
+        self.assertTrue(bridge.validate_trigger({**geofence, "lat": -90, "lng": 180}, set()))
+
+        location = {"type": "location_in", "lat": 45.0, "lng": 9.0, "radiusM": 100}
+        self.assertTrue(bridge.validate_condition(location, 0, set()))
+        for patch in (
+            {"lat": 91}, {"lat": -90.5}, {"lng": 181}, {"lng": -180.5},
+            {"lat": inf}, {"lng": nan}, {"radiusM": inf}, {"radiusM": nan},
+            {"radiusM": 0}, {"radiusM": -5}, {"lat": True},
+        ):
+            self.assertFalse(bridge.validate_condition({**location, **patch}, 0, set()), patch)
+
+    def test_bearer_comparison_never_raises_on_non_ascii_or_malformed_values(self):
+        with mock.patch.object(bridge, "TOKEN", "test-token"):
+            self.assertTrue(bridge.bearer_matches("Bearer test-token"))
+            for supplied in (
+                "Bearer test-tokén", "Bearer €", "ÿBearer test-token",
+                "Bearer \ud800", "Bearer test-token ", "bearer test-token", "", None, b"Bearer test-token",
+            ):
+                self.assertFalse(bridge.bearer_matches(supplied), supplied)
+        with mock.patch.object(bridge, "TOKEN", "töken"):
+            # Un token non-ASCII configurato resta confrontabile (byte UTF-8 su entrambi i lati).
+            self.assertTrue(bridge.bearer_matches("Bearer töken"))
+            self.assertFalse(bridge.bearer_matches("Bearer token"))
+        with mock.patch.object(bridge, "TOKEN", ""):
+            self.assertFalse(bridge.bearer_matches("Bearer "))
+
+    def test_kill_process_group_signals_the_group_and_ignores_a_vanished_one(self):
+        proc = mock.Mock(pid=424242)
+        with mock.patch.object(bridge.os, "killpg") as killpg:
+            bridge._kill_process_group(proc)
+        killpg.assert_called_once_with(424242, signal.SIGKILL)
+        with mock.patch.object(bridge.os, "killpg", side_effect=ProcessLookupError):
+            bridge._kill_process_group(proc)
+        proc.kill.assert_not_called()
+        with mock.patch.object(bridge.os, "killpg", side_effect=PermissionError):
+            bridge._kill_process_group(proc)
+        proc.kill.assert_called_once()
+
+    def test_subprocess_timeout_is_still_a_504_in_the_idempotency_cache(self):
+        cache = bridge.IdempotencyCache()
+
+        def producer():
+            raise subprocess.TimeoutExpired(["hermes"], 1)
+
+        status, body, _replayed = cache.execute("timeout-key", "digest", producer)
+        self.assertEqual((504, {"error": "model_timeout"}), (status, body))
+
+    @staticmethod
+    def _process_alive(pid):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        try:
+            with open(f"/proc/{pid}/stat", encoding="utf-8") as stat:
+                # Zombie (non ancora raccolto da init) = morto a tutti gli effetti.
+                return stat.read().rsplit(")", 1)[1].split()[0] != "Z"
+        except (OSError, IndexError):
+            return True
+
+    @unittest.skipUnless(os.name == "posix", "process groups require POSIX")
+    def test_run_bounded_returns_streams_and_exit_code(self):
+        with tempfile.TemporaryDirectory() as cwd:
+            completed = bridge._run_bounded(
+                ["sh", "-c", "echo out; echo err >&2; exit 3"],
+                timeout=10, cwd=cwd, env=dict(os.environ),
+            )
+        self.assertEqual(3, completed.returncode)
+        self.assertEqual("out\n", completed.stdout)
+        self.assertEqual("err\n", completed.stderr)
+
+    @unittest.skipUnless(os.name == "posix", "process groups require POSIX")
+    def test_run_bounded_timeout_kills_the_whole_process_group(self):
+        with tempfile.TemporaryDirectory() as directory:
+            pid_file = os.path.join(directory, "grandchild.pid")
+            started = time.monotonic()
+            with self.assertRaises(subprocess.TimeoutExpired):
+                bridge._run_bounded(
+                    ["sh", "-c", 'sleep 30 & echo $! > "$0"; sleep 30 & wait', pid_file],
+                    timeout=1.0, cwd=directory, env=dict(os.environ),
+                )
+            self.assertLess(time.monotonic() - started, 10)
+            with open(pid_file, encoding="utf-8") as handle:
+                grandchild = int(handle.read().strip())
+            for _ in range(40):
+                if not self._process_alive(grandchild):
+                    break
+                time.sleep(0.1)
+            self.assertFalse(self._process_alive(grandchild))
+
+    @unittest.skipUnless(os.name == "posix", "process groups require POSIX")
+    def test_run_bounded_kills_the_group_when_stdout_exceeds_the_cap(self):
+        started = time.monotonic()
+        with tempfile.TemporaryDirectory() as cwd:
+            with self.assertRaises(bridge.ModelProcessError) as raised:
+                bridge._run_bounded(
+                    ["sh", "-c", "yes"],
+                    timeout=30, cwd=cwd, env=dict(os.environ), max_stdout_bytes=1_000,
+                )
+        self.assertEqual((502, "model_output_too_large"), (raised.exception.status, raised.exception.code))
+        self.assertLess(time.monotonic() - started, 15)
+
+    @unittest.skipUnless(os.name == "posix", "process groups require POSIX")
+    def test_run_bounded_truncates_stderr_but_keeps_draining_it(self):
+        with tempfile.TemporaryDirectory() as cwd:
+            completed = bridge._run_bounded(
+                ["sh", "-c", "head -c 300000 /dev/zero >&2; echo done"],
+                timeout=20, cwd=cwd, env=dict(os.environ), max_stderr_bytes=100,
+            )
+        self.assertEqual(0, completed.returncode)
+        self.assertEqual("done\n", completed.stdout)
+        self.assertEqual(100, len(completed.stderr))
+
+    @unittest.skipUnless(os.name == "posix", "process groups require POSIX")
+    def test_run_bounded_does_not_hang_on_a_background_child_holding_the_pipe(self):
+        started = time.monotonic()
+        with mock.patch.object(bridge, "PIPE_DRAIN_GRACE_SECONDS", 0.3):
+            with tempfile.TemporaryDirectory() as cwd:
+                completed = bridge._run_bounded(
+                    ["sh", "-c", "echo hi; sleep 30 &"],
+                    timeout=20, cwd=cwd, env=dict(os.environ),
+                )
+        self.assertEqual("hi\n", completed.stdout)
+        self.assertLess(time.monotonic() - started, 10)
+
     def test_oversized_prompt_is_rejected_before_any_exec(self):
         huge = "x" * (bridge.MAX_PROMPT_BYTES + 1)
-        with mock.patch.object(bridge.subprocess, "run") as run:
+        with mock.patch.object(bridge, "_run_bounded") as run:
             with self.assertRaises(bridge.ModelProcessError) as caught:
                 bridge.run_gpt(huge)
         self.assertEqual("prompt_too_large", caught.exception.code)
@@ -479,7 +650,7 @@ class BridgeTest(unittest.TestCase):
     def test_prompt_limit_counts_utf8_bytes_not_characters(self):
         # 40_000 caratteri da 3 byte = 120_000 byte > 100_000, pur essendo < 100_000 caratteri.
         multibyte = "\u20ac" * 40_000
-        with mock.patch.object(bridge.subprocess, "run") as run:
+        with mock.patch.object(bridge, "_run_bounded") as run:
             with self.assertRaises(bridge.ModelProcessError):
                 bridge.run_gpt(multibyte)
         run.assert_not_called()
@@ -1400,14 +1571,14 @@ class BridgeTest(unittest.TestCase):
         with self.assertRaises(bridge.RequestError):
             cache.execute("id", "different", producer)
 
-    @mock.patch("bridge.subprocess.run")
+    @mock.patch("bridge._run_bounded")
     def test_model_process_does_not_inherit_bridge_secret(self, run):
         run.return_value = mock.Mock(returncode=0, stdout="ok", stderr="")
         with mock.patch.dict(os.environ, {"ARGUS_BRIDGE_TOKEN": "never-forward"}, clear=False):
             bridge.run_gpt("prompt")
         self.assertNotIn("ARGUS_BRIDGE_TOKEN", run.call_args.kwargs["env"])
 
-    @mock.patch("bridge.subprocess.run")
+    @mock.patch("bridge._run_bounded")
     def test_provider_quota_never_becomes_model_output(self, run):
         run.return_value = mock.Mock(
             returncode=0,
@@ -1419,7 +1590,7 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(503, raised.exception.status)
         self.assertEqual("provider_quota_exhausted", raised.exception.code)
 
-    @mock.patch("bridge.subprocess.run")
+    @mock.patch("bridge._run_bounded")
     def test_quota_words_in_valid_protocol_output_are_not_misclassified(self, run):
         output = (
             "Quota exhausted è solo il nome richiesto.\n"
@@ -1885,6 +2056,154 @@ class BridgeHttpTest(unittest.TestCase):
         cache.execute("k2", "d", failing)
         cache.execute("k2", "d", failing)
         self.assertEqual(["busy", "busy", "failing"], calls)
+
+    def post_raw(self, path, raw, token="test-token", request_id="req-http-1"):
+        connection = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=5)
+        try:
+            connection.request("POST", path, body=raw, headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+                "Idempotency-Key": request_id,
+            })
+            response = connection.getresponse()
+            return response.status, json.loads(response.read())
+        finally:
+            connection.close()
+
+    def raw_exchange(self, payload, half_close=False):
+        """Invia byte grezzi su un socket e legge fino a chiusura (o timeout lato client)."""
+        sock = socket.create_connection(("127.0.0.1", self.server.server_port), timeout=5)
+        chunks = []
+        try:
+            sock.sendall(payload)
+            if half_close:
+                sock.shutdown(socket.SHUT_WR)
+            while True:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+        except (socket.timeout, ConnectionResetError):
+            pass
+        finally:
+            sock.close()
+        return b"".join(chunks)
+
+    @staticmethod
+    def partial_compile_head(declared_length=100):
+        return (
+            "POST /compile HTTP/1.1\r\nHost: localhost\r\n"
+            "Authorization: Bearer test-token\r\nContent-Type: application/json\r\n"
+            f"Idempotency-Key: req-http-1\r\nContent-Length: {declared_length}\r\n\r\n"
+        ).encode()
+
+    def test_non_ascii_authorization_is_a_plain_401_on_every_endpoint(self):
+        self.assertEqual(401, self.request("/health", token="test-tokén")[0])
+        self.assertEqual(401, self.request("/health/v2", token="ÿ")[0])
+        status, body = self.request("/compile", self.valid_request(), token="test-tokén")
+        self.assertEqual((401, {"error": "unauthorized"}), (status, body))
+        status, body = self.request("/act", self.valid_act_request(), token="é")
+        self.assertEqual(401, status)
+        self.assertEqual(0, self.calls)
+        self.assertEqual(200, self.request("/health")[0])
+
+    def test_nested_allowed_tools_over_http_is_a_400_not_a_crash(self):
+        request = self.valid_act_request()
+        request["allowed_tools"] = [["whatsapp_reply"]]
+        status, body = self.request("/act", request, request_id="act-http-1")
+        self.assertEqual((400, {"error": "invalid_allowed_tools"}), (status, body))
+        self.assertEqual(0, self.calls)
+
+    def test_deeply_nested_json_body_is_a_400(self):
+        depth = 50_000
+        status, body = self.post_raw("/compile", b"[" * depth + b"]" * depth)
+        self.assertEqual((400, {"error": "invalid_json"}), (status, body))
+        self.assertEqual(0, self.calls)
+        # Il server resta in piedi.
+        self.assertEqual(200, self.request("/health")[0])
+
+    def test_overflowing_number_in_body_is_a_400_and_never_cached(self):
+        raw = json.dumps(self.valid_request()).encode().replace(b'"android_api": 36', b'"android_api": 1e999')
+        self.assertIn(b"1e999", raw)
+        status, body = self.post_raw("/compile", raw)
+        self.assertEqual((400, {"error": "invalid_json"}), (status, body))
+        self.assertEqual(0, self.calls)
+
+    def test_short_body_is_a_closed_400(self):
+        response = self.raw_exchange(self.partial_compile_head(100) + b"{" * 10, half_close=True)
+        self.assertIn(b" 400 ", response.split(b"\r\n", 1)[0])
+        self.assertIn(b'"incomplete_body"', response)
+        self.assertIn(b"Connection: close", response)
+        self.assertEqual(0, self.calls)
+
+    def test_stalled_body_read_times_out_with_a_closed_408(self):
+        with mock.patch.object(bridge, "BODY_READ_DEADLINE_SECONDS", 0.3):
+            response = self.raw_exchange(self.partial_compile_head(100) + b"{" * 10)
+        self.assertIn(b" 408 ", response.split(b"\r\n", 1)[0])
+        self.assertIn(b'"request_timeout"', response)
+        self.assertEqual(0, self.calls)
+
+    def test_silent_client_is_dropped_by_the_header_read_timeout(self):
+        self.assertEqual(bridge.SOCKET_TIMEOUT_SECONDS, bridge.Handler.timeout)
+        with mock.patch.object(bridge.Handler, "timeout", 0.3):
+            started = time.monotonic()
+            # Nessun byte inviato: il server deve chiudere da solo (recv -> b"").
+            response = self.raw_exchange(b"")
+            self.assertEqual(b"", response)
+            self.assertLess(time.monotonic() - started, 4)
+            # Header incompleti: stessa chiusura.
+            self.assertEqual(b"", self.raw_exchange(b"GET /health HTTP/1.1\r\nHost: x\r\n"))
+
+    def test_unexpected_handler_exception_is_a_generic_500_without_details(self):
+        with mock.patch.object(bridge, "validate_request", side_effect=RuntimeError("secret-detail")):
+            status, body = self.request("/compile", self.valid_request())
+        self.assertEqual((500, {"error": "internal_error"}), (status, body))
+        self.assertNotIn("secret-detail", json.dumps(body))
+        self.assertEqual(200, self.request("/health")[0])
+
+    def test_connection_cap_closes_excess_connections_without_spawning_a_thread(self):
+        release = threading.Event()
+        started = threading.Event()
+        handled = []
+
+        class BlockingHandler(socketserver.BaseRequestHandler):
+            def handle(self):
+                handled.append(1)
+                started.set()
+                release.wait(10)
+
+        server = bridge.ArgusBridgeServer(("127.0.0.1", 0), BlockingHandler, max_connections=1)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        sockets = []
+        try:
+            first = socket.create_connection(("127.0.0.1", server.server_port), timeout=5)
+            sockets.append(first)
+            self.assertTrue(started.wait(5))
+            second = socket.create_connection(("127.0.0.1", server.server_port), timeout=5)
+            sockets.append(second)
+            try:
+                data = second.recv(16)
+            except ConnectionResetError:
+                data = b""
+            self.assertEqual(b"", data)
+            self.assertEqual(1, len(handled))
+
+            release.set()
+            # Slot liberato dal primo handler: una nuova connessione torna ad essere servita.
+            for _ in range(50):
+                sockets.append(socket.create_connection(("127.0.0.1", server.server_port), timeout=5))
+                time.sleep(0.1)
+                if len(handled) >= 2:
+                    break
+            self.assertGreaterEqual(len(handled), 2)
+        finally:
+            release.set()
+            for sock in sockets:
+                sock.close()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
 
     def test_prompt_too_large_is_a_closed_http_error(self):
         request = self.valid_request(message="a" * 32_768)

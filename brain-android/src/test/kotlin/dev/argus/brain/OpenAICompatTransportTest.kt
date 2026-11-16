@@ -209,6 +209,115 @@ class OpenAICompatTransportTest {
         assertNull(result.usage)
     }
 
+    @Test fun `one bad optional usage field drops only that field`(): Unit = runBlocking {
+        // Token in cache oltre l'input, reasoning oltre l'output, modello con un a capo: prima cadeva tutto
+        // l'uso e il turno, pagato, non entrava nel budget.
+        server.enqueue(jsonResponse(
+            """
+            {"id":"1","model":"gpt\n5.5",
+             "choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"Ok"}}],
+             "usage":{"prompt_tokens":100,"completion_tokens":10,
+                      "prompt_tokens_details":{"cached_tokens":500},
+                      "completion_tokens_details":{"reasoning_tokens":50}}}
+            """.trimIndent(),
+        ))
+        val t = transport(ProviderId.OPENAI, model = "gpt-5.5")
+
+        val result = t.act(timerContext(), "promemoria", emptyList(), emptyList())
+
+        assertEquals("Ok", result.text)
+        val usage = assertNotNull(result.usage)
+        assertEquals(100L, usage.inputTokens)
+        assertEquals(10L, usage.outputTokens)
+        assertNull(usage.cachedInputTokens)
+        assertNull(usage.reasoningTokens)
+        assertEquals("gpt-5.5", usage.model, "il modello configurato sostituisce quello anomalo")
+    }
+
+    // --- B5: testo tagliato sui percorsi senza reply tool ---
+
+    @Test fun `a cut notification text on chat completions is output_truncated, never delivered`(): Unit = runBlocking {
+        server.enqueue(jsonResponse(
+            """
+            {"model":"gpt-5.5",
+             "choices":[{"index":0,"finish_reason":"length","message":{"role":"assistant","content":"Il cambio di oggi e"}}],
+             "usage":{"prompt_tokens":20,"completion_tokens":2048}}
+            """.trimIndent(),
+        ))
+        val t = transport(ProviderId.OPENROUTER, model = "openai/gpt-5.5")
+
+        val result = t.act(timerContext(), "dimmi il cambio", emptyList(), emptyList())
+
+        assertNull(result.text)
+        assertEquals("output_truncated", result.metaError)
+        assertEquals(2048L, assertNotNull(result.usage).outputTokens)
+    }
+
+    @Test fun `a local server without a finish reason still delivers the notification text`(): Unit = runBlocking {
+        server.enqueue(jsonResponse(
+            """{"choices":[{"index":0,"message":{"role":"assistant","content":"Promemoria."}}]}""",
+        ))
+        val t = transport(ProviderId.CUSTOM_OPENAI_COMPAT, model = "qwen-local")
+
+        val result = t.act(timerContext(), "promemoria", emptyList(), emptyList())
+
+        assertEquals("Promemoria.", result.text)
+        assertNull(result.metaError)
+    }
+
+    @Test fun `an incomplete responses answer is output_truncated on the reply and the notification paths`(): Unit = runBlocking {
+        val incomplete = """
+            {"model":"gpt-5.5","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},
+             "output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Il cambio e"}]}],
+             "usage":{"input_tokens":220,"output_tokens":2048}}
+        """.trimIndent()
+        server.enqueue(jsonResponse(incomplete))
+        server.enqueue(jsonResponse(incomplete))
+        val t = transport(ProviderId.OPENAI, model = "gpt-5.5")
+
+        val reply = t.act(fireContext(), "dimmi il cambio", listOf("notification"), listOf("whatsapp_reply", "web.search"))
+        val notification = t.act(timerContext(), "dimmi il cambio", emptyList(), listOf("web.search"))
+
+        listOf(reply, notification).forEach { result ->
+            assertNull(result.text)
+            assertEquals("output_truncated", result.metaError)
+            assertEquals(2048L, assertNotNull(result.usage).outputTokens)
+        }
+
+        // Una risposta completa resta valida.
+        server.enqueue(jsonResponse(incomplete.replace("\"incomplete\"", "\"completed\"").replace(
+            ""","incomplete_details":{"reason":"max_output_tokens"}""", "",
+        )))
+        assertEquals("Il cambio e", t.act(timerContext(), "dimmi il cambio", emptyList(), listOf("web.search")).text)
+    }
+
+    @Test fun `a gemini native answer that did not stop normally is output_truncated`(): Unit = runBlocking {
+        listOf("MAX_TOKENS", "SAFETY").forEach { reason ->
+            server.enqueue(jsonResponse(
+                """
+                {"candidates":[{"content":{"role":"model","parts":[{"text":"Oggi a Roma "}]},"finishReason":"$reason"}],
+                 "usageMetadata":{"promptTokenCount":45,"candidatesTokenCount":9}}
+                """.trimIndent(),
+            ))
+        }
+        server.enqueue(jsonResponse(
+            """
+            {"candidates":[{"content":{"role":"model","parts":[{"text":"Oggi a Roma 29 gradi."}]},"finishReason":"STOP"}],
+             "usageMetadata":{"promptTokenCount":45,"candidatesTokenCount":9}}
+            """.trimIndent(),
+        ))
+        val t = transport(ProviderId.GEMINI, model = "gemini-2.5-flash")
+
+        repeat(2) {
+            val cut = t.act(fireContext(), "che tempo fa", listOf("notification"), listOf("whatsapp_reply", "web.search"))
+            assertNull(cut.text)
+            assertEquals("output_truncated", cut.metaError)
+            assertNotNull(cut.usage)
+        }
+        val ok = t.act(timerContext(), "che tempo fa", emptyList(), listOf("web.search"))
+        assertEquals("Oggi a Roma 29 gradi.", ok.text)
+    }
+
     @Test fun `openrouter default model is resolved from catalog`(): Unit = runBlocking {
         server.enqueue(jsonResponse(
             """
@@ -1431,6 +1540,24 @@ class OpenAICompatTransportTest {
 
         assertNotNull(result.draft)
         assertEquals(2, server.requestCount)
+    }
+
+    @Test fun `a transient 500 or a 4xx about something else makes only that compile fall back`(): Unit = runBlocking {
+        // 500 passeggero: si scende per questa richiesta, ma il compile dopo riparte da json_schema.
+        server.enqueue(jsonResponse("""{"error":{"message":"upstream hiccup"}}""").setResponseCode(500))
+        server.enqueue(jsonResponse(chatContent(envelope("Prima."))))
+        // 400 che non nomina il parametro: idem.
+        server.enqueue(jsonResponse("""{"error":{"message":"temporary validation glitch"}}""").setResponseCode(400))
+        server.enqueue(jsonResponse(chatContent(envelope("Seconda."))))
+        server.enqueue(jsonResponse(chatContent(envelope("Terza."))))
+        val t = transport(ProviderId.CUSTOM_OPENAI_COMPAT, model = "m")
+
+        assertEquals("Prima.", t.compile("crea", manifest(), deviceState()).reply)
+        assertEquals("Seconda.", t.compile("crea", manifest(), deviceState()).reply)
+        assertEquals("Terza.", t.compile("crea", manifest(), deviceState()).reply)
+
+        val types = List(5) { formatType(assertNotNull(server.takeRequest(2, TimeUnit.SECONDS))) }
+        assertEquals(listOf("json_schema", "json_object", "json_schema", "json_object", "json_schema"), types)
     }
 
     @Test fun `a refusal that is not about the format is not remembered`(): Unit = runBlocking {

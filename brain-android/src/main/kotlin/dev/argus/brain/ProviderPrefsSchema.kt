@@ -1,5 +1,7 @@
 package dev.argus.brain
 
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+
 /**
  * Logica pura (JVM, senza Android) dello schema prefs multi-provider. Isola il naming su disco e
  * la migrazione legacy dalla shell Android [AndroidProviderConfigStore], così da poterla provare
@@ -53,4 +55,15 @@ internal object ProviderPrefsSchema {
         } else {
             validApiKey(value)
         }
+
+    /**
+     * S6: true se i due indirizzi hanno la stessa origine (schema, host e porta effettiva). Una chiave
+     * salvata vale solo per la sua origine: cambiare il path (`/v1` → `/v2`) la conserva, cambiare server,
+     * schema o porta no. Un indirizzo che non si legge conta come un'origine diversa (fail closed).
+     */
+    fun sameOrigin(first: String, second: String): Boolean {
+        val a = first.toHttpUrlOrNull() ?: return false
+        val b = second.toHttpUrlOrNull() ?: return false
+        return a.scheme == b.scheme && a.host == b.host && a.port == b.port
+    }
 }

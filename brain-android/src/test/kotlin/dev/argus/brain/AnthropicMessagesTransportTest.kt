@@ -195,6 +195,29 @@ class AnthropicMessagesTransportTest {
         assertEquals("Goal: genera un promemoria", user, "il user message del sink porta l'obiettivo")
     }
 
+    @Test fun `a notification text cut by max_tokens or pause_turn is output_truncated`(): Unit = runBlocking {
+        listOf("max_tokens", "pause_turn").forEach { reason ->
+            server.enqueue(jsonResponse(
+                """
+                {"id":"msg_t","type":"message","role":"assistant","model":"claude-opus-4-8",
+                 "content":[{"type":"text","text":"Promemoria: chiama il"}],
+                 "stop_reason":"$reason","usage":{"input_tokens":30,"output_tokens":2048,"cache_read_input_tokens":99}}
+                """.trimIndent(),
+            ))
+        }
+        val t = transport(model = "claude-opus-4-8")
+
+        repeat(2) {
+            val result = t.act(timerContext(), "genera un promemoria", emptyList(), emptyList())
+            assertNull(result.text)
+            assertEquals("output_truncated", result.metaError)
+            // Token in cache oltre l'input: si scarta solo quel campo, il turno resta contato.
+            val usage = assertNotNull(result.usage)
+            assertEquals(2048L, usage.outputTokens)
+            assertNull(usage.cachedInputTokens)
+        }
+    }
+
     @Test fun `notification sink with web adds only the web tool and no reply`(): Unit = runBlocking {
         // Sink notifica + web (da timer): solo il server tool web_search, nessun reply tool, nessun
         // tool_choice forzato; il testo finale post-web arriva via textContent().

@@ -239,6 +239,7 @@ fun SettingsScreen(
             onSaveProvider = callbacks::onSaveProviderConfig,
             providerChoices = state.providerChoices,
             onSelectProvider = callbacks::onSelectProvider,
+            onRemoveKey = callbacks::onRemoveProviderKey,
         )
     }
     if (confirmPrivacyRevoke) {
@@ -979,8 +980,17 @@ private fun BudgetSection(budget: BudgetUi, callbacks: SettingsCallbacks, modifi
             label = stringResource(R.string.settings_budget_tokens_month),
             modifier = Modifier.fillMaxWidth(),
             progress = tokenLimit?.let { BudgetFormat.tokenRatio(tokensUsed, it) },
-            footnote = tokenLimit?.let { stringResource(R.string.settings_budget_limit, BudgetFormat.tokensCapLabel(tokensUsed, it)) },
-        ) { SystemMediumValue(BudgetFormat.tokensLabel(budget.tokensInMonth, budget.tokensOutMonth)) }
+            footnote = tokenLimit?.let {
+                stringResource(
+                    R.string.settings_budget_limit,
+                    BudgetFormat.tokensCapLabel(tokensUsed, it, estimated = budget.tokensMonthEstimated),
+                )
+            },
+        ) {
+            SystemMediumValue(
+                BudgetFormat.tokensLabel(budget.tokensInMonth, budget.tokensOutMonth, estimated = budget.tokensMonthEstimated),
+            )
+        }
         val costLimit = budget.costLimitMicros?.takeIf { it > 0L }
         SystemMeterCard(
             label = stringResource(R.string.settings_budget_cost_month),
@@ -1061,8 +1071,8 @@ private fun ProviderUsageCard(provider: ProviderUsageUi, notAvailable: String) {
                 TableCell(stringResource(R.string.rda_ls_budget_col_day), Modifier.weight(1f), header = true)
                 TableCell(stringResource(R.string.rda_ls_budget_col_month), Modifier.weight(1f), header = true)
             }
-            TokenRow(stringResource(R.string.rda_ls_budget_in), provider.tokensInHour, provider.tokensInDay, provider.tokensInMonth, notAvailable)
-            TokenRow(stringResource(R.string.rda_ls_budget_out), provider.tokensOutHour, provider.tokensOutDay, provider.tokensOutMonth, notAvailable)
+            TokenRow(stringResource(R.string.rda_ls_budget_in), provider.tokensInHour, provider.tokensInDay, provider.tokensInMonth, notAvailable, provider.tokensEstimated)
+            TokenRow(stringResource(R.string.rda_ls_budget_out), provider.tokensOutHour, provider.tokensOutDay, provider.tokensOutMonth, notAvailable, provider.tokensEstimated)
         }
         provider.reasoningTokensMonth?.let { reasoningTokens ->
             Text(
@@ -1090,14 +1100,15 @@ private fun ProviderUsageCard(provider: ProviderUsageUi, notAvailable: String) {
 }
 
 @Composable
-private fun TokenRow(label: String, hour: Long?, day: Long?, month: Long?, notAvailable: String) {
+private fun TokenRow(label: String, hour: Long?, day: Long?, month: Long?, notAvailable: String, estimated: Boolean = false) {
     Column {
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         Row(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
             TableCell(label, Modifier.weight(1.1f), header = true, start = true)
             listOf(hour, day, month).forEach { value ->
                 TableCell(
-                    value?.let { BudgetFormat.grouped(it) } ?: notAvailable,
+                    // «≈»: il provider non riporta l'uso, Argus lo stima dalle lunghezze.
+                    value?.let { (if (estimated) BudgetFormat.ESTIMATE_MARK else "") + BudgetFormat.grouped(it) } ?: notAvailable,
                     Modifier.weight(1f),
                     missing = value == null,
                 )
