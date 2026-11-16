@@ -5,6 +5,7 @@ import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertSame
@@ -110,14 +111,22 @@ class LocalServerPresetsTest {
     fun `every other client stays the shared one and a missing timeout stays missing`() {
         val shared = CliBridgeTransport.defaultClient()
         val factory = DefaultTransportFactory(secrets, shared)
+        // Il bridge usa il client di base (le sue richieste hanno una chiave di idempotenza).
+        assertSame(shared, factory.clientFor(ProviderConfig(ProviderId.HERMES, "https://hermes.example", null)))
         listOf(
-            ProviderConfig(ProviderId.HERMES, "https://hermes.example", null),
             ProviderConfig(ProviderId.OPENAI, "https://api.openai.com/v1", null),
             ProviderConfig(ProviderId.GEMINI, "https://generativelanguage.googleapis.com/v1beta/openai", null),
             ProviderConfig(ProviderId.OPENROUTER, "https://openrouter.ai/api/v1", null),
             ProviderConfig(ProviderId.ANTHROPIC, "https://api.anthropic.com", null),
         ).forEach { config ->
-            assertSame(shared, factory.clientFor(config), config.providerId.name)
+            // I provider: stesse connessioni e stessi timeout, ma nessun ritentativo automatico di una POST
+            // a pagamento già partita.
+            val client = factory.clientFor(config)
+            assertSame(shared.connectionPool, client.connectionPool, config.providerId.name)
+            assertEquals(shared.callTimeoutMillis, client.callTimeoutMillis, config.providerId.name)
+            assertEquals(shared.readTimeoutMillis, client.readTimeoutMillis, config.providerId.name)
+            assertTrue(shared.retryOnConnectionFailure)
+            assertFalse(client.retryOnConnectionFailure, config.providerId.name)
         }
         // Il Custom ha la sua guardia (rete locale) ma, su un host pubblico, i timeout del client di base.
         val remoteCustom = factory.clientFor(ProviderConfig(custom, "https://api.example.com/v1", "m"))
