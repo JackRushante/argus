@@ -162,6 +162,7 @@ import dev.argus.data.RoomDraftRepository
 import dev.argus.data.backup.ContentResolverDocumentIo
 import dev.argus.data.backup.RulesBackup
 import dev.argus.data.backup.RulesBackupService
+import dev.argus.data.backup.RuleSharing
 import dev.argus.data.RoomExecutionJournal
 import dev.argus.data.RoomJournalMaintenance
 import dev.argus.data.RoomObservedConversationStore
@@ -307,6 +308,17 @@ object ArgusModule {
     ): RulesBackup = RulesBackupService(
         automations = store,
         drafts = repository,
+        documents = ContentResolverDocumentIo(context),
+        appVersion = { installInfo.versionName },
+    )
+
+    /** 0.7.2: «Condividi» del Dettaglio: lo stesso file di backup con una sola regola. */
+    @Provides
+    @Singleton
+    fun ruleSharing(
+        @ApplicationContext context: Context,
+        installInfo: AppInstallInfo,
+    ): RuleSharing = RuleSharing(
         documents = ContentResolverDocumentIo(context),
         appVersion = { installInfo.versionName },
     )

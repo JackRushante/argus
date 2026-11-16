@@ -35,6 +35,7 @@ import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.PauseCircle
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PowerSettingsNew
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.SyncProblem
 import androidx.compose.material.icons.rounded.WarningAmber
@@ -87,7 +88,9 @@ import dev.argus.ui.components.HealthBanner
 import dev.argus.ui.components.IconBadge
 import dev.argus.ui.components.ManualEntrySection
 import dev.argus.ui.components.ModelDescriptionNote
+import dev.argus.ui.components.ArgusIconButton
 import dev.argus.ui.components.RuleChangesCard
+import dev.argus.ui.components.RuleShareSheet
 import dev.argus.ui.components.SectionLabel
 import dev.argus.ui.components.StatusBadgeChip
 import dev.argus.ui.components.StatusChip
@@ -186,6 +189,17 @@ fun AutomationDetailScreen(
                 else stringResource(R.string.detail_header_detail),
                 onBack = callbacks::onBack,
                 backContentDescription = stringResource(R.string.action_back),
+                actions = {
+                    // 0.7.2: solo una regola salvata e leggibile si condivide; mai una bozza da approvare.
+                    if (state.canShare) {
+                        ArgusIconButton(
+                            Icons.Rounded.Share,
+                            stringResource(R.string.share_action_cd),
+                            callbacks::onShare,
+                            tint = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                },
             )
 
             Column(
@@ -282,6 +296,15 @@ fun AutomationDetailScreen(
                 callbacks.onChangeApp(slot, choice.packageName)
             },
             onDismiss = { pickerSlot = null },
+        )
+    }
+    state.share?.let { share ->
+        RuleShareSheet(
+            share = share,
+            onDismiss = callbacks::onDismissShare,
+            onShareAsText = callbacks::onShareAsText,
+            onSaveFile = callbacks::onSaveShareFile,
+            onCopy = callbacks::onCopyShare,
         )
     }
     if (confirmDelete) {

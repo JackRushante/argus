@@ -1,6 +1,7 @@
 package dev.argus.automation.vm
 
 import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import androidx.test.core.app.ApplicationProvider
@@ -28,6 +29,8 @@ import dev.argus.data.ArgusDatabase
 import dev.argus.data.RoomAutomationStore
 import dev.argus.data.RoomContactWhitelistStore
 import dev.argus.data.RoomDraftRepository
+import dev.argus.data.backup.BackupDocumentIo
+import dev.argus.data.backup.RuleSharing
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.Automation
@@ -75,6 +78,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /**
  * 0.7.2, «Cosa cambia»: la bozza che sostituisce una regola armata mostra nel dettaglio di approvazione
@@ -162,7 +166,73 @@ class DetailEditChangesTest {
         assertNull(detail.changes)
     }
 
+    // --- 0.7.2: «Condividi» ----------------------------------------------------------------------
+
+    @Test
+    fun `an armed rule opens the share sheet with the text without personal data and the full one`() = runTest {
+        val armed = armed("notte", base)
+        val viewModel = detailViewModel(armed.id.value)
+        awaitUntil("dettaglio caricato") { viewModel.state.value.detail != null }
+        assertEquals(true, viewModel.state.value.detail?.canShare)
+
+        viewModel.onShare()
+        awaitUntil("foglio aperto") { viewModel.state.value.detail?.share != null }
+
+        val share = assertNotNull(viewModel.state.value.detail?.share)
+        assertEquals("Notte", share.ruleName)
+        assertEquals("argus-rule-notte.json", share.fileName)
+        assertEquals(share.stripped.text, viewModel.shareText(stripPersonalData = true))
+        assertEquals(share.full.text, viewModel.shareText(stripPersonalData = false))
+        assertTrue("\"format\": \"argus-rules\"" in share.full.text)
+        assertTrue('\n' !in share.full.qrText)
+
+        viewModel.onDismissShare()
+        awaitUntil("foglio chiuso") { viewModel.state.value.detail?.share == null }
+        assertNull(viewModel.shareText(stripPersonalData = true))
+    }
+
+    @Test
+    fun `saving the shared rule writes the chosen text to the document`() = runTest {
+        val armed = armed("notte", base)
+        val viewModel = detailViewModel(armed.id.value)
+        awaitUntil("dettaglio caricato") { viewModel.state.value.detail != null }
+        viewModel.onShare()
+        awaitUntil("foglio aperto") { viewModel.state.value.detail?.share != null }
+
+        val uri = Uri.parse("content://test/regola.json")
+        viewModel.onSaveShareFile(uri, stripPersonalData = false)
+        awaitUntil("file scritto") { documents.containsKey(uri) }
+
+        assertEquals(viewModel.shareText(stripPersonalData = false), documents.getValue(uri).toString(Charsets.UTF_8))
+    }
+
+    @Test
+    fun `a draft to approve cannot be shared`() = runTest {
+        val saved = assertIs<DraftWriteResult.Saved>(
+            repository.create(NewDraft(DraftId("nuova"), AutomationId("nuova"), base, atMillis = 1_000)),
+        ).snapshot
+        val viewModel = detailViewModel(saved.id.value)
+        awaitUntil("dettaglio caricato") { viewModel.state.value.detail != null }
+
+        assertEquals(false, viewModel.state.value.detail?.canShare)
+        viewModel.onShare()
+        withContext(Dispatchers.Default) { delay(200) }
+        assertNull(viewModel.state.value.detail?.share)
+    }
+
     // --- aiuti ---------------------------------------------------------------------------------
+
+    private val documents = java.util.concurrent.ConcurrentHashMap<Uri, ByteArray>()
+
+    private val sharing = RuleSharing(
+        documents = object : BackupDocumentIo {
+            override suspend fun read(source: Uri, maxBytes: Int): ByteArray? = documents[source]
+            override suspend fun write(destination: Uri, bytes: ByteArray) {
+                documents[destination] = bytes
+            }
+        },
+        appVersion = { "0.7.2-test" },
+    )
 
     private suspend fun detailOf(routeId: String): AutomationDetailState {
         val viewModel = detailViewModel(routeId)
@@ -236,6 +306,7 @@ class DetailEditChangesTest {
             applicationScope = applicationScope,
             retention = LogRetentionStore(ApplicationProvider.getApplicationContext<Context>()),
             manual = ManualHarness(store).service,
+            sharing = sharing,
         ).also { viewModels += it }
     }
 

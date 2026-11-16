@@ -315,6 +315,19 @@
     <string name="backup_working_import">Importazione in corso…</string>
     <string name="backup_open_rules">Vedi le regole</string>
     <string name="backup_dismiss">Chiudi</string>
+    <!-- 0.7.2 · Condividi una regola (prefisso share_) -->
+    <string name="share_action_cd">Condividi regola</string>
+    <string name="share_title">Condividi regola</string>
+    <string name="share_subtitle">Chi la riceve la importa come bozza e la approva sul suo telefono.</string>
+    <string name="share_strip_label">Togli i dati personali</string>
+    <string name="share_strip_hint">Numeri, chat, luoghi, nomi di reti e segreti restano fuori. Chi importa li completa prima di armare.</string>
+    <string name="share_strip_off_warning">Il testo contiene le tue chat, i numeri, i luoghi e i valori segreti: condividilo solo con persone di cui ti fidi.</string>
+    <string name="share_qr_caption">Inquadra con la fotocamera</string>
+    <string name="share_qr_cd">Codice QR della regola</string>
+    <string name="share_qr_too_long">Questa regola è troppo lunga per un codice QR: condividila come testo o come file.</string>
+    <string name="share_as_text">Condividi come testo</string>
+    <string name="share_save_file">Salva file</string>
+    <string name="share_copy">Copia</string>
 
     <!-- 0.4.0 blocco UI (prefisso ui40_) -->
     <string name="ui40_chat_clear_title">Svuotare la conversazione?</string>

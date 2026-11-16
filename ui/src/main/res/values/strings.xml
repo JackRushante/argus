@@ -316,6 +316,19 @@
     <string name="backup_working_import">Importing…</string>
     <string name="backup_open_rules">See the rules</string>
     <string name="backup_dismiss">Close</string>
+    <!-- 0.7.2 · Share one rule (prefix share_) -->
+    <string name="share_action_cd">Share rule</string>
+    <string name="share_title">Share rule</string>
+    <string name="share_subtitle">Whoever receives it imports it as a draft and approves it on their phone.</string>
+    <string name="share_strip_label">Remove personal data</string>
+    <string name="share_strip_hint">Numbers, chats, places, network names and secrets stay out. Whoever imports it fills them in before arming.</string>
+    <string name="share_strip_off_warning">The text includes your chats, numbers, places and secret values: share it only with someone you trust.</string>
+    <string name="share_qr_caption">Scan with the camera</string>
+    <string name="share_qr_cd">QR code of the rule</string>
+    <string name="share_qr_too_long">This rule is too long for a QR code: share it as text or as a file.</string>
+    <string name="share_as_text">Share as text</string>
+    <string name="share_save_file">Save file</string>
+    <string name="share_copy">Copy</string>
 
     <!-- 0.4.0 blocco UI (prefisso ui40_) -->
     <string name="ui40_chat_clear_title">Clear the conversation?</string>

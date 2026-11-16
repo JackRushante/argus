@@ -144,6 +144,8 @@ fun ArgusNavHost() {
     val context = LocalContext.current
     val systemSettingUnavailable = stringResource(R.string.system_setting_unavailable)
     val backupPickerUnavailable = stringResource(R.string.backup_picker_unavailable)
+    val shareCopied = stringResource(R.string.share_copied)
+    val shareClipLabel = stringResource(R.string.share_clip_label)
     val navController = rememberNavController()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -643,6 +645,11 @@ fun ArgusNavHost() {
                 ) {
                     val viewModel: AutomationDetailViewModel = hiltViewModel()
                     val state by viewModel.state.collectAsStateWithLifecycle()
+                    // 0.7.2, «Condividi» → «Salva file»: lo stesso selettore di documenti dell'export.
+                    var shareStripForFile by rememberSaveable { mutableStateOf(true) }
+                    val saveShareFile = rememberLauncherForActivityResult(
+                        ActivityResultContracts.CreateDocument(RulesBackupFormat.MIME_TYPE),
+                    ) { uri -> viewModel.onSaveShareFile(uri, shareStripForFile) }
                     LaunchedEffect(viewModel) {
                         viewModel.events.collect { event ->
                             when (event) {
@@ -702,6 +709,36 @@ fun ArgusNavHost() {
                                     }
                                     override fun onBack() {
                                         navController.popBackStack()
+                                    }
+                                    // 0.7.2: «Condividi regola».
+                                    override fun onShare() = viewModel.onShare()
+                                    override fun onDismissShare() = viewModel.onDismissShare()
+                                    override fun onShareAsText(stripPersonalData: Boolean) {
+                                        val text = viewModel.shareText(stripPersonalData) ?: return
+                                        val send = Intent(Intent.ACTION_SEND)
+                                            .setType("text/plain")
+                                            .putExtra(Intent.EXTRA_SUBJECT, detail.name)
+                                            .putExtra(Intent.EXTRA_TEXT, text)
+                                        runCatching {
+                                            context.startActivity(
+                                                Intent.createChooser(send, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                                            )
+                                        }.onFailure { showMessage(systemSettingUnavailable) }
+                                    }
+                                    override fun onSaveShareFile(stripPersonalData: Boolean) {
+                                        val name = viewModel.shareFileName() ?: return
+                                        shareStripForFile = stripPersonalData
+                                        runCatching { saveShareFile.launch(name) }
+                                            .onFailure { showMessage(backupPickerUnavailable) }
+                                    }
+                                    override fun onCopyShare(stripPersonalData: Boolean) {
+                                        val text = viewModel.shareText(stripPersonalData) ?: return
+                                        if (copySharedRule(context, shareClipLabel, text, sensitive = !stripPersonalData)) {
+                                            // Da Android 13 il sistema conferma da sé la copia.
+                                            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) showMessage(shareCopied)
+                                        } else {
+                                            showMessage(systemSettingUnavailable)
+                                        }
                                     }
                                 },
                                 modifier = Modifier.testTag("screen_detail"),
@@ -872,6 +909,22 @@ private fun ContactPickerDialog(
         },
     )
 }
+
+/**
+ * 0.7.2: copia negli appunti il testo di una regola condivisa. Il testo integrale (con chat, numeri e segreti)
+ * è marcato sensibile, così la tastiera e l'anteprima degli appunti non lo mostrano.
+ */
+private fun copySharedRule(context: android.content.Context, label: String, text: String, sensitive: Boolean): Boolean =
+    runCatching {
+        val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
+        val clip = android.content.ClipData.newPlainText(label, text)
+        if (sensitive) {
+            clip.description.extras = android.os.PersistableBundle().apply {
+                putBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE, true)
+            }
+        }
+        clipboard.setPrimaryClip(clip)
+    }.isSuccess
 
 private fun maskConversationId(value: String): String =
     if (value.length <= 18) value else "${value.take(14)}…${value.takeLast(4)}"

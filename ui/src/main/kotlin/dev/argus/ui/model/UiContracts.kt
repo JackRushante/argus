@@ -346,7 +346,27 @@ data class AutomationDetailState(
      * rispetto a quella, per la card «Cosa cambia». `null` = non è una modifica; vuota = nulla di eseguibile cambia.
      */
     val changes: List<RuleChangeRow>? = null,
+    /** 0.7.2: «Condividi» si offre (regola approvata o da rivedere ma leggibile; mai una bozza). */
+    val canShare: Boolean = false,
+    /** 0.7.2: il foglio «Condividi regola» è aperto con questi testi; `null` = chiuso. */
+    val share: RuleShareUi? = null,
 )
+
+/**
+ * 0.7.2: una regola da condividere, nelle due versioni del foglio: senza dati personali ([stripped], la scelta
+ * di partenza) e integrale ([full]). [fileName] è il nome proposto da «Salva file».
+ */
+data class RuleShareUi(
+    val ruleName: String,
+    val stripped: RuleShareText,
+    val full: RuleShareText,
+    val fileName: String,
+) {
+    fun text(stripPersonalData: Boolean): RuleShareText = if (stripPersonalData) stripped else full
+}
+
+/** Il testo da condividere (file di backup con una regola) e la sua forma compatta per il codice QR. */
+data class RuleShareText(val text: String, val qrText: String)
 
 /**
  * 0.4.1 (F8): ciò che il Dettaglio offre per lanciare a mano una regola `manual` armata. «Esegui ora»
@@ -414,6 +434,15 @@ interface AutomationDetailCallbacks {
      * riapprovata; su una regola armata nasce una bozza di modifica, la regola resta com'è finché non la armi.
      */
     fun onChangeApp(slot: Int, packageName: String) {}
+    /** 0.7.2: «Condividi» apre il foglio: il ViewModel prepara i testi in `share`. Default no-op, host-owned. */
+    fun onShare() {}
+    fun onDismissShare() {}
+    /** 0.7.2: foglio di sistema con il testo (senza dati personali se [stripPersonalData]). */
+    fun onShareAsText(stripPersonalData: Boolean) {}
+    /** 0.7.2: «Salva file» con il selettore di documenti esistente. */
+    fun onSaveShareFile(stripPersonalData: Boolean) {}
+    /** 0.7.2: copia il testo negli appunti. */
+    fun onCopyShare(stripPersonalData: Boolean) {}
 }
 
 // --- 6.4 Log esecuzioni ---
