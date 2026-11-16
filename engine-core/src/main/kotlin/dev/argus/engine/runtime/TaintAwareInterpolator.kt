@@ -151,7 +151,7 @@ class TaintAwareInterpolator {
                     goal = accumulator.field("goal", action.goal, MAX_TEXT_CHARS, frameTaintedForBrain = true),
                 )
                 is Action.Speak -> action.copy(
-                    text = accumulator.field("text", action.text, MAX_TEXT_CHARS),
+                    text = accumulator.field("text", action.text, MAX_SPEAK_CHARS),
                 )
                 // URL, intestazioni e content type restano quelli approvati (mai interpolati): solo il
                 // body ha segnaposto, con la codifica del suo content type (JSON, form).
@@ -302,6 +302,9 @@ class TaintAwareInterpolator {
         const val MAX_PACKAGE_CHARS = 255
         const val MAX_TITLE_CHARS = 120
         const val MAX_TEXT_CHARS = 4_000
+
+        /** Lo stesso limite che il DraftValidator applica al template di `speak`. */
+        const val MAX_SPEAK_CHARS = 1_000
         const val MAX_COMMAND_CHARS = 8_192
 
         val PACKAGE_NAME = Regex("^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+$")
@@ -350,7 +353,7 @@ class TaintAwareInterpolator {
             is Action.CopyToClipboard -> action.extractionRegex == null ||
                 SafeExtractionRegex.isValid(action.extractionRegex)
             is Action.CopyText -> action.text.isNotBlank() && action.text.length <= MAX_TEXT_CHARS
-            is Action.Speak -> action.text.isNotBlank() && action.text.length <= MAX_TEXT_CHARS
+            is Action.Speak -> action.text.isNotBlank() && action.text.length <= MAX_SPEAK_CHARS
             is Action.HttpRequest -> HttpRequestPolicy.isResolvedShapeValid(action)
             is Action.UiSteps -> UiStepsPolicy.isResolvedShapeValid(action)
             is Action.SetBrightness -> (action.level == null) != (action.auto == null) &&
