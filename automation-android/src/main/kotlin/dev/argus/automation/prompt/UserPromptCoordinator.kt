@@ -219,7 +219,7 @@ class UserPromptCoordinator(
         for (prompt in store.all()) {
             try {
                 when (prompt.kind) {
-                    PromptKind.ASK -> if (prompt.id !in waiters) {
+                    PromptKind.ASK -> if (!waiters.containsKey(prompt.id)) {
                         store.remove(prompt.id)
                         surface.dismiss(prompt.id)
                     }

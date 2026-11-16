@@ -74,12 +74,22 @@ class PendingPrompt internal constructor(
         const val VERSION = 1
 
         /** null se il blob non è una domanda di questa versione, mai una domanda parziale. */
-        fun fromJson(text: String): PendingPrompt? = try {
+        fun fromJson(text: String): PendingPrompt? {
+            return try {
+                parse(text)
+            } catch (_: IllegalArgumentException) {
+                null
+            } catch (_: IllegalStateException) {
+                null
+            }
+        }
+
+        private fun parse(text: String): PendingPrompt? {
             val o = Json.parseToJsonElement(text).jsonObject
             fun string(name: String): String? =
                 o[name]?.takeIf { it !is JsonNull }?.jsonPrimitive?.takeIf { it.isString }?.content
             fun long(name: String): Long? = o[name]?.jsonPrimitive?.takeIf { !it.isString }?.longOrNull
-            if (long("v") != VERSION.toLong()) {
+            return if (long("v") != VERSION.toLong()) {
                 null
             } else {
                 PendingPrompt(
@@ -97,10 +107,6 @@ class PendingPrompt internal constructor(
                     choices = o["choices"]?.jsonArray?.map { it.jsonPrimitive.content } ?: return null,
                 )
             }
-        } catch (_: IllegalArgumentException) {
-            null
-        } catch (_: IllegalStateException) {
-            null
         }
     }
 }
