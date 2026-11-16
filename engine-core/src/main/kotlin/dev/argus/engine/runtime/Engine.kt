@@ -41,11 +41,11 @@ class Engine(
     /** 0.5.0: orologio e lingua della variabile `clock` (ora allo scatto). Default: orologio vivo del telefono. */
     private val programClock: Clock = LiveSystemClock,
     private val programLocale: () -> Locale = ClockVariable::appLocale,
-    private val now: () -> Long,
     /** 0.8 `confirm`: chiede Esegui/Annulla invece di eseguire. Default: non si può chiedere ⇒ non esegue. */
     private val confirmations: ConfirmationGate = ConfirmationGate.UNAVAILABLE,
     /** 0.8 `ask`: domande con pulsanti dentro un programma. Default: nessuna domanda ⇒ il programma si ferma. */
     private val questions: QuestionAsker = QuestionAsker.UNAVAILABLE,
+    private val now: () -> Long,
 ) {
     companion object {
         const val MIN_GENERATIVE_COOLDOWN_MS = 60_000L

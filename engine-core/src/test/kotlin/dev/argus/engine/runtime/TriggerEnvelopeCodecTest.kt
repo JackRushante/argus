@@ -35,7 +35,7 @@ class TriggerEnvelopeCodecTest {
         TriggerEvent.PhoneStateChanged(PhoneEvent.SMS_RECEIVED, "+39333", "Codice 123", sim = 1),
         TriggerEvent.PhoneStateChanged(PhoneEvent.MISSED_CALL, null),
         TriggerEvent.ConnectivityChanged(ConnMedium.WIFI, ConnState.CONNECTED, "Casa"),
-        TriggerEvent.ConnectivityChanged(ConnMedium.BLUETOOTH, ConnState.DISCONNECTED, null),
+        TriggerEvent.ConnectivityChanged(ConnMedium.BT, ConnState.DISCONNECTED, null),
         TriggerEvent.ScreenChanged(ScreenEvent.UNLOCKED),
         TriggerEvent.BatteryLevelChanged(21, 19),
         TriggerEvent.AudioOutputChanged(AudioOutputKind.WIRED, ConnState.CONNECTED),
