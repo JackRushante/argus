@@ -2,7 +2,7 @@
 
 Release and engineering notes, newest first.
 
-## Unreleased
+## v0.7.1 (2026-11-16) — AI servers on your network, response timeout, copyable chat
 
 ### Added
 
