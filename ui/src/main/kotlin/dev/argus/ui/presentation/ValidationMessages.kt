@@ -372,6 +372,10 @@ object ValidationMessages {
             "The URL is not valid or its scheme is not allowed.",
             "L'URL non è valido o lo schema non è consentito.",
         ),
+        "url_userinfo" to t(
+            "The URL has a name or credentials before \"@\": the address would open a different site than the one it seems to show.",
+            "L'URL ha un nome o delle credenziali prima di \"@\": l'indirizzo aprirebbe un sito diverso da quello che sembra.",
+        ),
         "title_invalid" to t("The title is missing or too long.", "Il titolo manca o è troppo lungo."),
         "text_invalid" to t("The text is missing or too long.", "Il testo manca o è troppo lungo."),
         "coordinates_invalid" to t("The tap coordinates are out of range.", "Le coordinate del tocco sono fuori intervallo."),

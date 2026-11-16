@@ -27,6 +27,7 @@ class LogReasonLabelsActions041Test {
         "shell_quote_context",
         "shell_numeric_context",
         "write_setting_key_interpolated",
+        "url_host_changed",
     )
 
     @Test

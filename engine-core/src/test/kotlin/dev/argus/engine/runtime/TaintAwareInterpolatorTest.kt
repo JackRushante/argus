@@ -255,6 +255,25 @@ class TaintAwareInterpolatorTest {
     }
 
     @Test
+    fun `a resolved url with a name before the host is blocked`() {
+        val blocked = assertIs<ActionResolution.Blocked>(
+            interpolator.resolve(Action.OpenUrl("https://\${host}/x"), scope("host", tainted("bank.example@other.example"))),
+        )
+        assertEquals("resolved_action_invalid", blocked.code)
+    }
+
+    @Test
+    fun `a literal url host stays the approved host whatever the data`() {
+        listOf("@other.example/", "//other.example/", "x?y#z@other.example", "%40other.example").forEach { value ->
+            when (val resolution = interpolator.resolve(Action.OpenUrl("https://example.com/\${p}"), scope("p", tainted(value)))) {
+                is ActionResolution.Resolved ->
+                    assertEquals("example.com", java.net.URI(assertIs<Action.OpenUrl>(resolution.value.action).url).host, value)
+                is ActionResolution.Blocked -> assertTrue(resolution.code in setOf("resolved_action_invalid", "url_host_changed"), value)
+            }
+        }
+    }
+
+    @Test
     fun `a write setting whose approved key is interpolated never runs`() {
         val blocked = assertIs<ActionResolution.Blocked>(
             interpolator.resolve(

@@ -95,9 +95,15 @@ class TaintAwareInterpolator {
                 is Action.LaunchApp -> action.copy(
                     pkg = accumulator.field("pkg", action.pkg, MAX_PACKAGE_CHARS),
                 )
-                is Action.OpenUrl -> action.copy(
-                    url = accumulator.field("url", action.url, MAX_TEXT_CHARS),
-                )
+                is Action.OpenUrl -> {
+                    val url = accumulator.field("url", action.url, MAX_TEXT_CHARS)
+                    // Con l'host scritto nel template, i dati inseriti dopo non possono cambiarlo.
+                    val approvedHost = literalHost(action.url)
+                    if (approvedHost != null && !approvedHost.equals(hostOf(url), ignoreCase = true)) {
+                        throw ResolutionException("url_host_changed")
+                    }
+                    action.copy(url = url)
+                }
                 is Action.ShowNotification -> action.copy(
                     title = accumulator.field("title", action.title, MAX_TITLE_CHARS),
                     text = accumulator.field("text", action.text, MAX_TEXT_CHARS),
@@ -300,12 +306,29 @@ class TaintAwareInterpolator {
 
         val PACKAGE_NAME = Regex("^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+$")
 
+        /**
+         * Host del template `open_url` quando è letterale: ogni segnaposto viene dopo il `/`, `?` o `#`
+         * che chiude l'autorità. Null se l'host dipende da un segnaposto o il template non ha forma URL.
+         */
+        fun literalHost(template: String): String? {
+            if (!InterpolationPolicy.containsInterpolation(template)) return null
+            val authorityStart = template.indexOf("://").takeIf { it > 0 }?.plus(3) ?: return null
+            val authorityEnd = template.indexOfAny(charArrayOf('/', '?', '#'), authorityStart)
+                .takeIf { it >= 0 } ?: return null
+            if (template.indexOf("\${").let { it in 0 until authorityEnd }) return null
+            return hostOf(template.substring(0, authorityEnd))
+        }
+
+        fun hostOf(url: String): String? = runCatching { URI(url).host }.getOrNull()
+
         fun validResolvedShape(action: Action): Boolean = when (action) {
             is Action.SetRinger -> action.mode in setOf("normal", "vibrate", "silent")
             is Action.LaunchApp -> PACKAGE_NAME.matches(action.pkg)
+            // Niente `utente@host`: si leggerebbe come l'host prima della chiocciola.
             is Action.OpenUrl -> runCatching {
                 val uri = URI(action.url)
-                uri.scheme?.lowercase() in setOf("http", "https") && !uri.host.isNullOrBlank()
+                uri.scheme?.lowercase() in setOf("http", "https") && !uri.host.isNullOrBlank() &&
+                    uri.rawUserInfo == null
             }.getOrDefault(false)
             is Action.ShowNotification -> action.title.isNotBlank() &&
                 action.title.length <= MAX_TITLE_CHARS && action.text.length <= MAX_TEXT_CHARS

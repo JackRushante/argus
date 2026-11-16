@@ -184,6 +184,10 @@ internal object LogReasonLabels {
             "the setting name must be literal",
             "il nome dell'impostazione deve essere scritto per esteso",
         ),
+        "url_host_changed" to Label(
+            "the filled-in address pointed to a different site than the approved one",
+            "l'indirizzo completato portava a un sito diverso da quello approvato",
+        ),
         // --- 0.5.1: azioni privilegiate tipizzate ---
         "target_forbidden" to Label(
             "Argus, the launcher and essential system apps cannot be changed by a rule",

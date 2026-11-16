@@ -164,6 +164,30 @@ class DraftValidatorSecurityWarningsTest {
         assertFalse("interpolation_shell_numeric" in warnings(numeric))
     }
 
+    // --- open_url ----------------------------------------------------------------------------------
+
+    @Test
+    fun `an url with a name or credentials before the host is rejected`() {
+        listOf(
+            "https://bank.example@other.example/",
+            "https://user:pass@example.com",
+            "https://bank.example@\${body}/",
+        ).forEach { url ->
+            val d = draft(listOf(Action.OpenUrl(url)), trigger = sms, vars = listOf(smsBody))
+            assertTrue("url_userinfo" in errors(d), url)
+            assertFalse("url_invalid" in errors(d), url)
+        }
+        listOf(
+            "https://example.com/mail?to=a@b.example&q=\${body}",
+            "https://example.com/\${body}",
+            "https://example.com",
+        ).forEach { url ->
+            val fine = draft(listOf(Action.OpenUrl(url)), trigger = sms, vars = listOf(smsBody))
+            assertFalse("url_userinfo" in errors(fine), url)
+            assertFalse("url_invalid" in errors(fine), url)
+        }
+    }
+
     @Test
     fun `captured shell output counts as external data for a setting`() {
         val d = draft(

@@ -1054,8 +1054,13 @@ class DraftValidator(
             is Action.LaunchApp -> if (!InterpolationPolicy.containsInterpolation(action.pkg)) {
                 validatePackage(action.pkg, "package_invalid", err)
             }
-            is Action.OpenUrl -> if (!InterpolationPolicy.containsInterpolation(action.url) && !validHttpUrl(action.url))
-                err("url_invalid", "URL non valido o schema non consentito")
+            is Action.OpenUrl -> when {
+                // `https://banca.example@altro.example/` si legge come la banca ma apre l'altro host.
+                urlHasUserInfo(action.url) ->
+                    err("url_userinfo", "L'URL contiene un nome o credenziali prima di @: non è ammesso")
+                !InterpolationPolicy.containsInterpolation(action.url) && !validHttpUrl(action.url) ->
+                    err("url_invalid", "URL non valido o schema non consentito")
+            }
             is Action.ShowNotification -> {
                 validateRequiredText(action.title, 120, "title_invalid", err)
                 // Il corpo può restare vuoto (notifica di solo titolo, come ammette il bridge):
@@ -1712,6 +1717,13 @@ class DraftValidator(
 
     private fun validHttpUrl(raw: String): Boolean = runCatching {
         val uri = URI(raw)
-        uri.scheme?.lowercase() in setOf("http", "https") && !uri.host.isNullOrBlank()
+        uri.scheme?.lowercase() in setOf("http", "https") && !uri.host.isNullOrBlank() && uri.rawUserInfo == null
     }.getOrDefault(false)
+
+    /** Una `@` letterale nell'autorità del template (tra `://` e il primo `/`, `?` o `#`). */
+    private fun urlHasUserInfo(template: String): Boolean {
+        val start = template.indexOf("://").takeIf { it >= 0 }?.plus(3) ?: return false
+        val end = template.indexOfAny(charArrayOf('/', '?', '#'), start).takeIf { it >= 0 } ?: template.length
+        return '@' in template.substring(start, end)
+    }
 }
