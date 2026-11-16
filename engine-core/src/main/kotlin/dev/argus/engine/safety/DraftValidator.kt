@@ -1724,11 +1724,20 @@ class DraftValidator(
 
         // 0.8: uscita vincolata, solo per una chiamata che cattura in una variabile.
         action.output?.let { output ->
-            val problem = LlmOutputPolicy.specProblem(output)
-            if (problem != null) {
-                err(problem, "Forma della risposta non valida: scelte [a-z0-9_-] da 2 a 8, numero con min e max")
-            } else if (!LlmOutputPolicy.constrainedGoalFits(action.goal, output, MAX_TEXT_LENGTH)) {
-                err("goal_invalid", "Il goal con l'istruzione della forma supera $MAX_TEXT_LENGTH caratteri")
+            // Codici letterali (li legge la copertura dei testi della UI), uno per problema della forma.
+            when (LlmOutputPolicy.specProblem(output)) {
+                null -> if (!LlmOutputPolicy.constrainedGoalFits(action.goal, output, MAX_TEXT_LENGTH)) {
+                    err("goal_invalid", "Il goal con l'istruzione della forma supera $MAX_TEXT_LENGTH caratteri")
+                }
+                "llm_output_choices_invalid" ->
+                    err("llm_output_choices_invalid", "Da 2 a 8 etichette uniche [a-z0-9_-]{1,24}")
+                "llm_output_choices_forbidden" ->
+                    err("llm_output_choices_forbidden", "Solo una risposta CHOICE ha etichette")
+                "llm_output_bounds_required" ->
+                    err("llm_output_bounds_required", "Una risposta NUMBER richiede min e max")
+                "llm_output_bounds_invalid" ->
+                    err("llm_output_bounds_invalid", "min non oltre max, entro ±${LlmOutputPolicy.MAX_ABS_NUMBER}")
+                else -> err("llm_output_bounds_forbidden", "Solo una risposta NUMBER ha min e max")
             }
             if (action.captureAs == null || action.deliver != GenerativeDeliverMode.CAPTURE_ONLY) {
                 err(
