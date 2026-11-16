@@ -73,6 +73,7 @@ class ConnectivitySentinelService : Service() {
     private var monitorMarker: ConnectivityMonitorMarker? = null
     private var deviceDemandJob: Job? = null
     private var lastWifiName: String? = null
+    private val wifiReference = WifiInitialReference()
     private var startupFailed = false
 
     /**
@@ -359,7 +360,7 @@ class ConnectivitySentinelService : Service() {
             state = state,
             name = name,
             sourceIdentity = WIFI_SOURCE_ID,
-            initial = initial,
+            initial = wifiReference.classify(state, name, initial, recoverMissed),
         )
     }
 
@@ -418,6 +419,34 @@ class ConnectivitySentinelService : Service() {
         const val NOTIFICATION_ID = 0x41524743
         const val WIFI_SOURCE_ID = "device-wifi"
         const val POWER_SOURCE_ID = "device-power"
+    }
+}
+
+/**
+ * Prima osservazione Wi-Fi di un monitor appena acceso (B4). Da Android 12 lo snapshot iniziale
+ * non porta l'SSID (le capability lette senza `FLAG_INCLUDE_LOCATION_INFO` sono redatte): il nome
+ * arriva poco dopo dalla prima callback. Quella callback completa il RIFERIMENTO iniziale e non è
+ * una transizione: altrimenti armare «quando mi collego a Casa» stando già a casa scatterebbe
+ * subito. Restituisce il flag `initial` da passare all'ingress.
+ */
+internal class WifiInitialReference {
+    private var awaitingName = false
+
+    @Synchronized
+    fun classify(state: ConnState, name: String?, initial: Boolean, recoverMissed: Boolean): Boolean {
+        if (initial) {
+            // Con un monitor già attivo in continuo la prima osservazione è un recupero, non un
+            // riferimento: allora il nome tardivo resta un arricchimento come prima.
+            awaitingName = !recoverMissed && state == ConnState.CONNECTED && name == null
+            return true
+        }
+        if (!awaitingName) return false
+        if (state == ConnState.DISCONNECTED) {
+            awaitingName = false
+            return false
+        }
+        if (name != null) awaitingName = false
+        return true
     }
 }
 

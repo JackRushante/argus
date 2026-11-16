@@ -82,7 +82,7 @@ class ConnectivityEventIngress(
         lanes.run(sourceKey) {
             // Un pending lasciato indietro (dispatch fallito/processo morto) va prima di tutto.
             mutex.withLock { state.pending(sourceKey) }?.let { deliver(sourceKey, it) }
-            val envelope = mutex.withLock {
+            val step = mutex.withLock {
                 recordTransition(
                     medium,
                     connectionState,
@@ -95,11 +95,34 @@ class ConnectivityEventIngress(
                     referenceOnly,
                 )
             }
-            envelope?.let { deliver(sourceKey, it) }
+            when (step) {
+                null -> Unit
+                is Step.Deliver -> deliver(sourceKey, step.envelope)
+                is Step.Switch -> {
+                    // Il pending è uno per sorgente: prima la disconnessione dalla rete vecchia
+                    // (già persistita), poi si persiste e si consegna la connessione alla nuova.
+                    // Se il processo muore in mezzo, lo stato salvato resta «scollegato» e la
+                    // prossima osservazione della rete nuova è una transizione vera.
+                    deliver(sourceKey, step.disconnected)
+                    mutex.withLock { state.record(sourceKey, step.connectedSnapshot, step.connected) }
+                    deliver(sourceKey, step.connected)
+                }
+            }
         }
     }
 
-    /** Sotto lock: decide la transizione e la persiste (pending incluso). Non consegna. */
+    private sealed interface Step {
+        class Deliver(val envelope: TriggerEnvelope) : Step
+
+        /** Cambio di rete a stato invariato (B4): due transizioni con id nuovi. */
+        class Switch(
+            val disconnected: TriggerEnvelope,
+            val connected: TriggerEnvelope,
+            val connectedSnapshot: ConnectivityStateSnapshot,
+        ) : Step
+    }
+
+    /** Sotto lock: decide la transizione e la persiste (il primo pending). Non consegna. */
     private fun recordTransition(
         medium: ConnMedium,
         connectionState: ConnState,
@@ -110,7 +133,7 @@ class ConnectivityEventIngress(
         safeName: String?,
         initial: Boolean,
         referenceOnly: Boolean,
-    ): TriggerEnvelope? {
+    ): Step? {
         val previous = state.last(sourceKey)
         // DISCONNECTED non porta sempre l'identità; conserva quella dell'ultima connessione.
         // Un nuovo CONNECTED anonimo invece non deve ereditare un vecchio SSID/dispositivo.
@@ -135,7 +158,7 @@ class ConnectivityEventIngress(
                     ConnectivityStateSnapshot(connectionState, effectiveName, currentAt),
                     parsed.takeUnless { initial },
                 )
-                parsed.takeUnless { initial }
+                parsed.takeUnless { initial }?.let(Step::Deliver)
             }
             previous.state != connectionState -> {
                 val pending = parsed.takeUnless { referenceOnly }
@@ -144,10 +167,12 @@ class ConnectivityEventIngress(
                     ConnectivityStateSnapshot(connectionState, effectiveName, currentAt),
                     pending,
                 )
-                pending
+                pending?.let(Step::Deliver)
             }
-            previous.name != effectiveName -> {
-                // Come per il doppio broadcast telefonia anonimo/numerato: stessa identità.
+            previous.name == effectiveName -> null
+            previous.name == null -> {
+                // Solo un nome che arriva dopo (null → nome) è un arricchimento della stessa
+                // transizione, come il doppio broadcast telefonia anonimo/numerato: stessa identità.
                 val enriched = parser.parse(
                     medium,
                     connectionState,
@@ -156,9 +181,43 @@ class ConnectivityEventIngress(
                     previous.transitionAtMillis,
                 )?.takeUnless { initial }
                 state.record(sourceKey, previous.copy(name = effectiveName), enriched)
-                enriched
+                enriched?.let(Step::Deliver)
             }
-            else -> null
+            connectionState == ConnState.DISCONNECTED -> {
+                // Già scollegati: un nome diverso non è un evento, si aggiorna solo il riferimento.
+                state.record(sourceKey, previous.copy(name = effectiveName), null)
+                null
+            }
+            referenceOnly -> {
+                // Il cambio di rete è avvenuto a monitor spento: nuovo riferimento, nessun evento.
+                state.record(
+                    sourceKey,
+                    ConnectivityStateSnapshot(connectionState, effectiveName, currentAt),
+                    null,
+                )
+                null
+            }
+            else -> {
+                // Un'altra rete con nome (B4): è una transizione nuova, non un arricchimento.
+                // DISCONNECTED per la rete vecchia, poi CONNECTED per la nuova, con id freschi.
+                val disconnected = parser.parse(
+                    medium,
+                    ConnState.DISCONNECTED,
+                    previous.name,
+                    sourceIdentity,
+                    currentAt,
+                ) ?: return null
+                state.record(
+                    sourceKey,
+                    ConnectivityStateSnapshot(ConnState.DISCONNECTED, previous.name, currentAt),
+                    disconnected,
+                )
+                Step.Switch(
+                    disconnected = disconnected,
+                    connected = parsed,
+                    connectedSnapshot = ConnectivityStateSnapshot(connectionState, effectiveName, currentAt),
+                )
+            }
         }
     }
 
