@@ -104,6 +104,11 @@ import dev.argus.automation.manual.ManualTileSelection
 import dev.argus.automation.manual.ManualTokenStore
 import dev.argus.automation.manual.ManualWorkLauncher
 import dev.argus.automation.manual.PrefsAutomationPauseStore
+import dev.argus.automation.labels.LabelAwarePause
+import dev.argus.automation.labels.LabelPauseStore
+import dev.argus.automation.labels.PrefsLabelPauseStore
+import dev.argus.automation.labels.RoomRuleLabelDirectory
+import dev.argus.automation.labels.RuleLabelDirectory
 import dev.argus.automation.manual.PrefsManualTileSelection
 import dev.argus.automation.manual.PrefsManualTokenStore
 import dev.argus.automation.manual.QuickTileController
@@ -159,6 +164,7 @@ import dev.argus.data.RoomAuditSink
 import dev.argus.data.RoomAutomationStore
 import dev.argus.data.RoomContactWhitelistStore
 import dev.argus.data.RoomDraftRepository
+import dev.argus.data.RoomRuleLabelStore
 import dev.argus.data.backup.ContentResolverDocumentIo
 import dev.argus.data.backup.RulesBackup
 import dev.argus.data.backup.RulesBackupService
@@ -303,11 +309,13 @@ object ArgusModule {
         store: AutomationStore,
         repository: RoomDraftRepository,
         installInfo: AppInstallInfo,
+        labelStore: RoomRuleLabelStore,
     ): RulesBackup = RulesBackupService(
         automations = store,
         drafts = repository,
         documents = ContentResolverDocumentIo(context),
         appVersion = { installInfo.versionName },
+        labels = { labelStore.snapshot() },
     )
 
     @Provides
@@ -941,7 +949,7 @@ object ArgusModule {
         journal: ExecutionJournal,
         resolvedExecutor: ResolvedActionExecutor,
         wakeAwarePause: WakeAwarePause,
-        automationPause: AutomationPauseStore,
+        automationPause: LabelAwarePause,
     ): Engine = Engine(
         store = store,
         executor = executor,
@@ -953,6 +961,7 @@ object ArgusModule {
         resolvedExecutor = resolvedExecutor,
         pause = { millis -> wakeAwarePause.pause(millis) },
         // 0.4.1 (F21): «Pausa automazioni», letta dal motore a ogni scatto.
+        // 0.7.2: decisa per regola, con la pausa dei gruppi (etichette).
         firingPause = automationPause,
         now = System::currentTimeMillis,
     )
@@ -1454,6 +1463,37 @@ object ArgusModule {
     fun automationPauseStore(@ApplicationContext context: Context): AutomationPauseStore =
         PrefsAutomationPauseStore(context)
 
+    // --- 0.7.2: etichette delle regole e pausa per gruppo ---
+
+    @Provides
+    @Singleton
+    fun labelPauseStore(@ApplicationContext context: Context): LabelPauseStore = PrefsLabelPauseStore(context)
+
+    @Provides
+    @Singleton
+    fun ruleLabelStore(database: ArgusDatabase): RoomRuleLabelStore = RoomRuleLabelStore(database)
+
+    @Provides
+    @Singleton
+    fun ruleLabelDirectory(
+        store: RoomRuleLabelStore,
+        pauses: LabelPauseStore,
+        @ApplicationScope scope: CoroutineScope,
+    ): RuleLabelDirectory = RoomRuleLabelDirectory(store, pauses).also { it.startPruning(scope) }
+
+    /**
+     * La pausa letta dal motore e dall'avvio manuale: globale (F21) più gruppi. Dipende dalla directory solo
+     * perché la pulizia delle pause di etichette non più usate parta con il motore, anche senza la UI.
+     */
+    @Provides
+    @Singleton
+    fun labelAwarePause(
+        global: AutomationPauseStore,
+        groups: LabelPauseStore,
+        store: RoomRuleLabelStore,
+        @Suppress("UNUSED_PARAMETER") directory: RuleLabelDirectory,
+    ): LabelAwarePause = LabelAwarePause(global, groups) { id -> store.keysOf(id) }
+
     @Provides
     @Singleton
     fun manualTokenStore(@ApplicationContext context: Context): ManualTokenStore =
@@ -1492,7 +1532,7 @@ object ArgusModule {
     fun manualRuleRunner(
         store: AutomationStore,
         tokens: ManualTokenStore,
-        pause: AutomationPauseStore,
+        pause: LabelAwarePause,
         dispatcher: ManualEventDispatcher,
         launcher: ManualWorkLauncher,
     ): ManualRuleRunner = ManualRuleRunner(store, tokens, pause, dispatcher, launcher)

@@ -113,8 +113,9 @@ internal fun AuditLogRecord.toLogRow(
     actions: List<ActionResultEntity>,
     language: RenderLanguage = RenderLanguage.system(),
 ): LogRow {
-    val outcome = if (kind == AuditKind.BLOCKED_POLICY && detail == PauseCodes.PAUSED) {
+    val outcome = if (kind == AuditKind.BLOCKED_POLICY && (detail == PauseCodes.PAUSED || detail == PauseCodes.GROUP_PAUSED)) {
         // F21: uno scatto saltato per la pausa non e' un guasto: ambra, non rosso.
+        // 0.7.2: lo stesso per la pausa di un gruppo.
         LogOutcome.PARTIAL
     } else {
         executionStatus.toLogOutcome(kind)
@@ -237,6 +238,11 @@ private fun auditSummary(record: AuditLogRecord, l: RenderLanguage): String = wh
         PauseCodes.PAUSED -> l.pick(
             "skipped: automations are paused",
             "saltata: automazioni in pausa",
+        )
+        // 0.7.2: il nome dell'etichetta non è nel Log (testo dell'utente): si dice solo che è il gruppo.
+        PauseCodes.GROUP_PAUSED -> l.pick(
+            "skipped: its label group is paused",
+            "saltata: gruppo in pausa",
         )
         else -> l.pick(
             "blocked by policy (${LogReasonLabels.text(record.detail, l)})",
