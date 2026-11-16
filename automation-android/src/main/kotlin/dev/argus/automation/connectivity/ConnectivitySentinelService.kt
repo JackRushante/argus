@@ -27,6 +27,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 import dev.argus.automation.R
+import dev.argus.automation.foreground.SharedForegroundSentinel
 import dev.argus.automation.triggers.AndroidDeviceEventSources
 import dev.argus.automation.triggers.DeviceEventDemand
 import dev.argus.automation.triggers.DeviceEventIngress
@@ -48,6 +49,7 @@ internal interface ConnectivitySentinelEntryPoint {
     fun connectivitySentinelStatus(): ConnectivitySentinelStatus
     fun deviceEventIngress(): DeviceEventIngress
     fun deviceEventDemand(): DeviceEventDemand
+    fun sharedForegroundSentinel(): SharedForegroundSentinel
 }
 
 /**
@@ -117,6 +119,17 @@ class ConnectivitySentinelService : Service() {
             status.setActive(true)
             monitorMarker.setActive(true)
             Log.i(TAG, "sentinella attiva")
+            // Ricreato da START_STICKY dopo la morte del processo senza più nessuna domanda: si ferma.
+            val sentinel = entry.sharedForegroundSentinel()
+            scope.launch {
+                try {
+                    sentinel.onServiceActive()
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    Log.w(TAG, "controllo servizio orfano fallito: ${error::class.java.simpleName}")
+                }
+            }
         } catch (error: SecurityException) {
             failStartup(error)
         } catch (error: RuntimeException) {

@@ -1110,7 +1110,8 @@ object ArgusModule {
     @Singleton
     fun sharedForegroundSentinel(
         backend: ConnectivitySentinelBackend,
-    ): SharedForegroundSentinel = SharedForegroundSentinel(backend)
+        status: ConnectivitySentinelStatus,
+    ): SharedForegroundSentinel = SharedForegroundSentinel(backend, serviceActive = { status.active.value })
 
     @Provides
     @Singleton
@@ -1433,6 +1434,7 @@ object ArgusModule {
         audit: AuditSink,
         frame: DispatchFrame,
         root: RootAccess,
+        sentinel: SharedForegroundSentinel,
     ): ArgusRuntimeController = ArgusRuntimeController(
         scope,
         scheduler,
@@ -1455,6 +1457,7 @@ object ArgusModule {
         store = store,
         audit = audit,
         dispatchesIdle = { frame.idle },
+        onStartupReconciled = { sentinel.settle() },
     )
 
     // --- 0.4.1 (manuale): avvio manuale delle regole (F8) e «Pausa automazioni» (F21) ---

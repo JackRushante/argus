@@ -31,9 +31,35 @@ sealed interface SentinelDemand {
  */
 class SharedForegroundSentinel(
     private val backend: ConnectivitySentinelBackend,
+    /** Il servizio reale è acceso (anche se nessuna domanda di QUESTO processo lo ha chiesto). */
+    private val serviceActive: () -> Boolean = { false },
 ) {
     private val mutex = Mutex()
     private val active = mutableSetOf<SentinelDemand>()
+
+    /** `true` dopo il primo reconcile del processo: ogni dominio ha già dichiarato la sua domanda. */
+    private var settled = false
+
+    /**
+     * Fine del primo reconcile del processo. Le domande vivono in memoria: dopo la morte del
+     * processo Android ricrea il servizio (`START_STICKY`) anche se era acceso solo per la lease di
+     * un'esecuzione, e nessuno lo spegnerebbe più (notifica e callback restano). Da qui un servizio
+     * acceso senza alcuna domanda è orfano e si ferma.
+     */
+    suspend fun settle() = mutex.withLock {
+        settled = true
+        stopOrphanLocked()
+    }
+
+    /** Chiamato dal servizio appena attivo: copre il servizio ricreato dopo [settle]. */
+    suspend fun onServiceActive() = mutex.withLock {
+        if (settled) stopOrphanLocked()
+    }
+
+    private suspend fun stopOrphanLocked() {
+        if (active.isNotEmpty() || !runCatching(serviceActive).getOrDefault(false)) return
+        if (!backend.stop()) Log.w(TAG, "servizio orfano non fermato")
+    }
 
     suspend fun setDemand(demand: SentinelDemand, required: Boolean): Boolean = mutex.withLock {
         if (required) {
