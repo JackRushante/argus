@@ -2,6 +2,7 @@ package dev.argus.engine.safety
 
 import dev.argus.engine.model.*
 import dev.argus.engine.runtime.CronSchedule
+import dev.argus.engine.runtime.ProgramInterpreter
 import java.net.URI
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -173,6 +174,12 @@ class DraftValidator(
 
         if (tree.hasGenerative && d.cooldownMs < 60_000)
             warn("cooldown_raised", "Cooldown sotto 60 s su regola generativa: l'engine imporrà 60 s")
+        if (tree.hasGenerativeInLoop)
+            warn(
+                "generative_in_loop",
+                "Chiamata AI dentro un ciclo: può ripetersi a ogni giro, fino a " +
+                    "${ProgramInterpreter.MAX_GENERATIVE_CALLS_PER_EXECUTION} chiamate per scatto",
+            )
 
         return issues
     }
@@ -305,13 +312,15 @@ class DraftValidator(
         val confidentiality: ConfidentialityLabel,
     )
 
-    private data class ActionFrame(val action: Action, val depth: Int)
+    private data class ActionFrame(val action: Action, val depth: Int, val inLoop: Boolean = false)
     private data class ActionTreeSummary(
         val totalActions: Int,
         val captures: List<CaptureDeclaration>,
         val tooDeep: Boolean,
         val hasGenerative: Boolean,
         val hasInvokeLlmV2: Boolean,
+        /** Una chiamata AI dentro un `while`: può partire una volta per giro (tetto per esecuzione). */
+        val hasGenerativeInLoop: Boolean = false,
     )
 
     /** Preflight iterativo: nessuna ricorsione prima del bound profondità/numero nodi. */
@@ -326,8 +335,9 @@ class DraftValidator(
         var tooDeep = false
         var hasGenerative = false
         var hasInvokeLlmV2 = false
+        var hasGenerativeInLoop = false
         while (pending.isNotEmpty()) {
-            val (action, depth) = pending.removeFirst()
+            val (action, depth, inLoop) = pending.removeFirst()
             total = (total + 1).coerceAtMost(MAX_TOTAL_ACTIONS + 1)
             if (depth > MAX_FLOW_DEPTH) {
                 if (!tooDeep) err("flow_too_deep", "Annidamento if/while oltre profondità $MAX_FLOW_DEPTH")
@@ -336,20 +346,24 @@ class DraftValidator(
             }
             captureDeclaration(action)?.let(captures::add)
             when (action) {
-                is Action.InvokeLlm -> hasGenerative = true
+                is Action.InvokeLlm -> {
+                    hasGenerative = true
+                    if (inLoop) hasGenerativeInLoop = true
+                }
                 is Action.InvokeLlmV2 -> {
                     hasGenerative = true
                     hasInvokeLlmV2 = true
+                    if (inLoop) hasGenerativeInLoop = true
                 }
                 is Action.If -> {
-                    action.then.forEach { pending.addLast(ActionFrame(it, depth + 1)) }
-                    action.orElse.forEach { pending.addLast(ActionFrame(it, depth + 1)) }
+                    action.then.forEach { pending.addLast(ActionFrame(it, depth + 1, inLoop)) }
+                    action.orElse.forEach { pending.addLast(ActionFrame(it, depth + 1, inLoop)) }
                 }
-                is Action.While -> action.body.forEach { pending.addLast(ActionFrame(it, depth + 1)) }
+                is Action.While -> action.body.forEach { pending.addLast(ActionFrame(it, depth + 1, inLoop = true)) }
                 else -> Unit
             }
         }
-        return ActionTreeSummary(total, captures, tooDeep, hasGenerative, hasInvokeLlmV2)
+        return ActionTreeSummary(total, captures, tooDeep, hasGenerative, hasInvokeLlmV2, hasGenerativeInLoop)
     }
 
     private fun captureDeclaration(action: Action): CaptureDeclaration? = when (action) {

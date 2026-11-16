@@ -58,6 +58,7 @@ class Engine(
             "taint_blocked",
             "remote_egress_blocked",
             "p4_invoke_llm_v2_unsupported",
+            ProgramInterpreter.GENERATIVE_CALL_LIMIT,
         )
 
         /** Programma fermato perché la regola è stata spenta, cancellata o modificata durante l'esecuzione. */

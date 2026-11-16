@@ -88,6 +88,10 @@ object ValidationMessages {
             "The worst-case running time is over 6 hours: reduce repeats, delays or long actions.",
             "Il tempo massimo di esecuzione supera le 6 ore: riduci ripetizioni, attese o azioni lunghe.",
         ),
+        "generative_in_loop" to t(
+            "An AI call is inside a repeat: it can run on every round, up to 30 AI calls each time the rule runs.",
+            "Una chiamata AI è dentro una ripetizione: può partire a ogni giro, fino a 30 chiamate AI a ogni esecuzione della regola.",
+        ),
 
         // --- Trigger --------------------------------------------------------------------------
         "time_spec" to t(
