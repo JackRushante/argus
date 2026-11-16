@@ -454,7 +454,7 @@ class ChatViewModel @Inject constructor(
     private fun compileTimeoutMillis(): Long {
         val config = runCatching { configuredBridge.selectedConfig() }.getOrNull()
             ?: return CompileTimeoutPolicy.DEFAULT_MILLIS
-        return CompileTimeoutPolicy.timeoutMillis(config.providerId, config.baseUrl)
+        return CompileTimeoutPolicy.timeoutMillis(config)
     }
 
     /**

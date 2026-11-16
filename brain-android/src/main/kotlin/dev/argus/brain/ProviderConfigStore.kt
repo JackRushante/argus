@@ -9,6 +9,8 @@ data class ProviderConfig(
     val baseUrl: String,
     val model: String?,
     val reasoningEffort: ReasoningEffort = ReasoningEffort.DEFAULT,
+    /** One choice for every provider (#20); part of the config so a change rebuilds the transport. */
+    val responseTimeout: ResponseTimeout = ResponseTimeout.AUTOMATIC,
 )
 
 /** Sorgente segreti on-demand: mai cache del plaintext, lettura suspend dallo storage cifrato. */
@@ -37,6 +39,11 @@ interface ProviderConfigStore : BridgeConfigurationStore, ProviderSecrets {
         apiKey: String? = null,
         reasoningEffort: ReasoningEffort? = null,
     ): Boolean
+
+    /** Response timeout chosen in Settings (#20), the same for every provider. */
+    fun responseTimeout(): ResponseTimeout = ResponseTimeout.AUTOMATIC
+
+    suspend fun saveResponseTimeout(value: ResponseTimeout): Boolean = false
 
     suspend fun hasApiKey(id: ProviderId): Boolean
     suspend fun clearApiKey(id: ProviderId): Boolean

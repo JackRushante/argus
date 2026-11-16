@@ -12,7 +12,7 @@ import kotlin.test.assertTrue
 
 /**
  * 0.5.1 F4: preset per i server locali (Ollama, LM Studio, llama.cpp) nel provider Custom. Nessun prompt
- * compatto; il cleartext resta ammesso solo per un host loopback esatto e solo per il Custom.
+ * compatto; il cleartext è ammesso solo per il Custom, verso il telefono o la rete locale (#19).
  */
 class LocalServerPresetsTest {
     private val secrets = ProviderSecrets { "test-token-0123456789abcdef" }
@@ -53,14 +53,24 @@ class LocalServerPresetsTest {
     }
 
     @Test
-    fun `the cleartext rule is unchanged loopback only and custom only`() {
+    fun `the custom provider accepts http on the local network and nowhere public`() {
         listOf(
             "http://192.168.1.10:11434/v1",
             "http://10.0.0.5:8080/v1",
             "http://100.101.102.103:1234/v1",
             "http://studio.local:11434/v1",
+            "http://[fd00::1]:8080/v1",
+        ).forEach { url ->
+            assertEquals(url, normalizeProviderBaseUrl(url, custom), url)
+            val transport = OpenAICompatTransport(custom, ProviderCatalog.spec(custom), ProviderConfig(custom, url, "m"), { null })
+            assertEquals(custom, transport.providerId, url)
+        }
+        listOf(
             "http://localhost.example.com/v1",
             "http://127.0.0.1.example.com/v1",
+            "http://192.168.0.10.evil.com/v1",
+            "http://8.8.8.8/v1",
+            "http://api.example.com/v1",
         ).forEach { url ->
             assertNull(normalizeProviderBaseUrl(url, custom), url)
             assertFailsWith<IllegalArgumentException>(url) {
@@ -101,23 +111,29 @@ class LocalServerPresetsTest {
         val shared = CliBridgeTransport.defaultClient()
         val factory = DefaultTransportFactory(secrets, shared)
         listOf(
+            ProviderConfig(ProviderId.HERMES, "https://hermes.example", null),
             ProviderConfig(ProviderId.OPENAI, "https://api.openai.com/v1", null),
             ProviderConfig(ProviderId.GEMINI, "https://generativelanguage.googleapis.com/v1beta/openai", null),
             ProviderConfig(ProviderId.OPENROUTER, "https://openrouter.ai/api/v1", null),
-            ProviderConfig(custom, "https://api.example.com/v1", "m"),
+            ProviderConfig(ProviderId.ANTHROPIC, "https://api.anthropic.com", null),
         ).forEach { config ->
             assertSame(shared, factory.clientFor(config), config.providerId.name)
         }
+        // Il Custom ha la sua guardia (rete locale) ma, su un host pubblico, i timeout del client di base.
+        val remoteCustom = factory.clientFor(ProviderConfig(custom, "https://api.example.com/v1", "m"))
+        assertEquals(shared.callTimeoutMillis, remoteCustom.callTimeoutMillis)
+        assertEquals(shared.readTimeoutMillis, remoteCustom.readTimeoutMillis)
+        assertSame(shared.connectionPool, remoteCustom.connectionPool)
 
         // Un client senza timeout di chiamata (0 = infinito) non viene limitato.
         val unlimited = OkHttpClient.Builder().callTimeout(0, TimeUnit.MILLISECONDS).build()
         val local = ProviderConfig(custom, LocalServerPresets.all.first().baseUrl, "m")
-        assertSame(unlimited, DefaultTransportFactory(secrets, unlimited).clientFor(local))
+        assertEquals(0, DefaultTransportFactory(secrets, unlimited).clientFor(local).callTimeoutMillis)
 
         // Un client gia' piu' paziente di cosi' non viene accorciato.
         val patient = CliBridgeTransport.defaultClient(timeoutSeconds = 600)
         val kept = DefaultTransportFactory(secrets, patient).clientFor(local)
-        assertSame(patient, kept)
+        assertEquals(600_000, kept.callTimeoutMillis)
         assertNotNull(kept)
     }
 }

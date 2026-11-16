@@ -37,15 +37,18 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import dev.argus.engine.safety.Severity
 import dev.argus.ui.R
 import dev.argus.ui.model.AuthState
 import dev.argus.ui.model.LocalPresetUi
 import dev.argus.ui.model.ProviderChoiceUi
 import dev.argus.ui.model.TransportUi
+import dev.argus.ui.model.UiWarning
 import dev.argus.ui.preview.ArgusPreviewSurface
 import dev.argus.ui.preview.ArgusThemePreviews
 import dev.argus.ui.presentation.ConnectionFormValidation
@@ -226,7 +229,7 @@ private fun ColumnScope.ProviderForm(
     val keyConfigured = provider.authState == AuthState.OK
     val presetMistyped = provider.modelPresetHint && ModelFieldHints.isMistypedPreset(model)
     // L'indirizzo si modifica solo per il provider Custom: e' anche l'unico che ammette http verso
-    // localhost e chiavi corte (endpoint locali).
+    // il telefono o la rete locale e chiavi corte (endpoint locali).
     val minKeyLength = if (provider.baseUrlEditable) {
         ConnectionFormValidation.MIN_CUSTOM_SECRET_LENGTH
     } else {
@@ -237,7 +240,7 @@ private fun ColumnScope.ProviderForm(
         model = model,
         apiKey = apiKey,
         baseUrlEditable = provider.baseUrlEditable,
-        cleartextLoopbackAllowed = provider.baseUrlEditable,
+        cleartextLocalAllowed = provider.baseUrlEditable,
         keyRequired = provider.apiKeyRequired,
         keyConfigured = keyConfigured,
         minKeyLength = minKeyLength,
@@ -272,6 +275,13 @@ private fun ColumnScope.ProviderForm(
             }
         },
     )
+    // #19: http verso la rete locale è ammesso, ma viaggia in chiaro. Avviso che non blocca, mentre si scrive.
+    if (provider.baseUrlEditable && ConnectionFormValidation.unencryptedLocalNetwork(baseUrl)) {
+        WarningBanner(
+            UiWarning(Severity.WARNING, "unencrypted_local_network", stringResource(R.string.provider_unencrypted_lan_warning)),
+            modifier = Modifier.testTag("provider_unencrypted_warning"),
+        )
+    }
     if (provider.localPresets.isNotEmpty()) {
         LocalServerPresetsSection(
             presets = provider.localPresets,

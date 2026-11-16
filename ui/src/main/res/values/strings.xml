@@ -341,7 +341,7 @@
     <string name="ui40_stats_cell_cd">%1$s in the last %2$s</string>
     <string name="ui40_url_error_empty">Enter the address</string>
     <string name="ui40_url_error_not_https">The address must start with https://</string>
-    <string name="ui40_url_error_not_https_or_local">Use https://, or http:// only for localhost</string>
+    <string name="ui40_url_error_not_https_or_local">Use https://. http:// works only for this phone or your local network (for example 192.168.x.x, 10.x.x.x or a .local name)</string>
     <string name="ui40_url_error_invalid">Not a valid address: use https://host or https://host:port/path, without user name, ? or #</string>
     <string name="ui40_secret_error_short">At least %1$d characters</string>
     <string name="ui40_secret_error_long">Too long (at most %1$d characters)</string>
@@ -405,11 +405,11 @@
     <string name="app51_settings_usage_ok">granted: rules can react when an app is opened or closed</string>
     <string name="app51_settings_usage_warn">not granted: rules that react to an app opening or closing cannot run. With Shizuku or root, \"Grant permanent permissions\" is enough</string>
     <string name="ai51_local_presets_label">Local server</string>
-    <string name="ai51_local_note">Argus needs a context of about 16,000 tokens. A local model can take up to 3 minutes to answer.</string>
+    <string name="ai51_local_note">Argus needs a context of about 16,000 tokens. A local model can take up to 3 minutes to answer; for a slower one, raise the Response timeout in System.</string>
     <string name="ai51_local_hint_ollama">Ollama: set OLLAMA_CONTEXT_LENGTH to at least 16384.</string>
     <string name="ai51_local_hint_lmstudio">LM Studio: load the model with a context length of at least 16384.</string>
     <string name="ai51_local_hint_llamacpp">llama.cpp: start the server with -c 16384 or more.</string>
-    <string name="ai51_local_loopback_note">127.0.0.1 is this phone: the server must run here. For another computer, use an https:// address.</string>
+    <string name="ai51_local_loopback_note">127.0.0.1 is this phone: the server must run here. For a computer on your network, use its address, for example http://192.168.1.20:11434/v1.</string>
     <!-- 0.5.1 (F17): macro sullo schermo con il servizio di Accessibilità. -->
     <string name="a11y51_settings_title">Screen control (Accessibility)</string>
     <string name="a11y51_settings_ok">on: approved screen macros can tap and type in apps</string>
@@ -495,4 +495,14 @@
     <string name="rda_ap_picker_current">in use</string>
     <string name="rda_ap_picker_pick_cd">Use %1$s</string>
     <string name="rda_ap_run_now_fallback">Run now is not available yet.</string>
+    <!-- Issue #19: http:// endpoint on the local network -->
+    <string name="provider_unencrypted_lan_warning">Unencrypted connection: the key and your requests travel in clear text. Use it only on a network you trust.</string>
+    <!-- Issue #20: response timeout -->
+    <string name="settings_response_timeout_label">Response timeout</string>
+    <string name="settings_response_timeout_hint">How long Argus waits for the AI to answer a request in the chat. Automatic: 65 s, 3 minutes for a server on your network.</string>
+    <string name="settings_response_timeout_auto">Automatic</string>
+    <string name="settings_response_timeout_minutes">%1$d min</string>
+    <!-- Issue #21: copy a chat message -->
+    <string name="chat_message_copy_action">Copy message</string>
+    <string name="chat_message_copied">Message copied</string>
 </resources>

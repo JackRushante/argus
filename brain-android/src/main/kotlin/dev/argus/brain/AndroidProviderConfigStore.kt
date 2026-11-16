@@ -51,7 +51,14 @@ class AndroidProviderConfigStore(context: Context) : ProviderConfigStore {
         val reasoningEffort = ReasoningEffort.fromWireValue(
             preferences.getString(ProviderPrefsSchema.reasoningEffortKey(id), null),
         )
-        return ProviderConfig(id, baseUrl, model, reasoningEffort)
+        return ProviderConfig(id, baseUrl, model, reasoningEffort, responseTimeout())
+    }
+
+    override fun responseTimeout(): ResponseTimeout =
+        ResponseTimeout.fromWireValue(preferences.getString(ProviderPrefsSchema.KEY_RESPONSE_TIMEOUT, null))
+
+    override suspend fun saveResponseTimeout(value: ResponseTimeout): Boolean = withContext(Dispatchers.IO) {
+        preferences.edit().putString(ProviderPrefsSchema.KEY_RESPONSE_TIMEOUT, value.wireValue).commit()
     }
 
     override suspend fun saveProviderConfig(

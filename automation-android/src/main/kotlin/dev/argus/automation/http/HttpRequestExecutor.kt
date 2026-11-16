@@ -1,5 +1,6 @@
 package dev.argus.automation.http
 
+import dev.argus.brain.CleartextGuard
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.HttpMethod
 import dev.argus.engine.model.HttpRequestPolicy
@@ -43,11 +44,15 @@ class HttpRequestExecutor(
     private val timeoutMs: Long = HttpRequestPolicy.TIMEOUT_MS,
 ) {
     // Nessun redirect automatico: la regola «stesso host» non si delega alla libreria.
-    private val client: OkHttpClient = client.newBuilder()
-        .followRedirects(false)
-        .followSslRedirects(false)
-        .retryOnConnectionFailure(false)
-        .build()
+    // #19: la piattaforma ora ammette il cleartext (per i server AI in rete locale); per le richieste web delle
+    // regole la guardia tiene la regola di prima, `http://` solo verso il loopback esatto.
+    private val client: OkHttpClient = CleartextGuard.install(
+        client.newBuilder()
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .retryOnConnectionFailure(false),
+        CleartextGuard.LOOPBACK_ONLY,
+    ).build()
 
     suspend fun execute(action: Action.HttpRequest): ActionResult {
         if (!HttpRequestPolicy.isResolvedShapeValid(action)) {

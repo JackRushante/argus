@@ -11,7 +11,7 @@ import dev.argus.ui.presentation.ConnectionFormValidation.UrlProblem
 internal fun urlProblemText(problem: UrlProblem): String = when (problem) {
     UrlProblem.EMPTY -> stringResource(R.string.ui40_url_error_empty)
     UrlProblem.NOT_HTTPS -> stringResource(R.string.ui40_url_error_not_https)
-    UrlProblem.NOT_HTTPS_OR_LOOPBACK -> stringResource(R.string.ui40_url_error_not_https_or_local)
+    UrlProblem.NOT_HTTPS_OR_LOCAL -> stringResource(R.string.ui40_url_error_not_https_or_local)
     UrlProblem.INVALID -> stringResource(R.string.ui40_url_error_invalid)
 }
 

@@ -12,6 +12,9 @@ internal object ProviderPrefsSchema {
     const val LEGACY_KEY_BASE_URL = "base_url" // BridgeConfigurationStore.kt: KEY_BASE_URL
     const val LEGACY_KEY_BEARER = "bearer_v1" // BridgeConfigurationStore.kt: KEY_BEARER
 
+    /** Response timeout (#20): one value for every provider, [ResponseTimeout.wireValue]. */
+    const val KEY_RESPONSE_TIMEOUT = "response_timeout"
+
     fun baseUrlKey(id: ProviderId): String = "provider.${id.wireName}.base_url"
     fun modelKey(id: ProviderId): String = "provider.${id.wireName}.model"
     fun apiKeyKey(id: ProviderId): String = "provider.${id.wireName}.key_v1"

@@ -1,5 +1,6 @@
 package dev.argus.ui.presentation
 
+import dev.argus.engine.model.LocalNetworkPolicy
 import java.util.Locale
 
 /**
@@ -20,8 +21,8 @@ object ConnectionFormValidation {
         /** Schema diverso da https (o assente). */
         NOT_HTTPS,
 
-        /** Provider Custom: https, oppure http solo verso localhost / 127.0.0.1 / ::1. */
-        NOT_HTTPS_OR_LOOPBACK,
+        /** Provider Custom: https, oppure http solo verso il telefono o la rete locale ([LocalNetworkPolicy]). */
+        NOT_HTTPS_OR_LOCAL,
 
         /** Indirizzo non interpretabile: host o porta sbagliati, utente, query o frammento. */
         INVALID,
@@ -44,14 +45,27 @@ object ConnectionFormValidation {
     const val MIN_CUSTOM_SECRET_LENGTH = 1
     const val MAX_SECRET_LENGTH = 4_096
 
-    private val LOOPBACK_HOSTS = setOf("localhost", "127.0.0.1", "::1")
-
     /** Hermes: solo https. */
-    fun bridgeUrl(raw: String): UrlProblem? = checkUrl(raw, cleartextLoopbackAllowed = false)
+    fun bridgeUrl(raw: String): UrlProblem? = checkUrl(raw, cleartextLocalAllowed = false)
 
-    /** Provider diretto: https; http soltanto verso un host loopback e solo se [cleartextLoopbackAllowed]. */
-    fun providerUrl(raw: String, cleartextLoopbackAllowed: Boolean): UrlProblem? =
-        checkUrl(raw, cleartextLoopbackAllowed)
+    /**
+     * Provider diretto: https; http soltanto se [cleartextLocalAllowed] (il Custom) e verso il telefono o la
+     * rete locale dell'utente (#19), mai verso un host pubblico.
+     */
+    fun providerUrl(raw: String, cleartextLocalAllowed: Boolean): UrlProblem? =
+        checkUrl(raw, cleartextLocalAllowed)
+
+    /**
+     * true se [raw] è un indirizzo accettato che viaggia in chiaro fuori dal telefono (http verso la rete
+     * locale): il foglio lo segnala con un avviso che non blocca. Il loopback non esce dal telefono.
+     */
+    fun unencryptedLocalNetwork(raw: String): Boolean {
+        if (providerUrl(raw, cleartextLocalAllowed = true) != null) return false
+        val text = raw.trim()
+        if (!text.lowercase(Locale.ROOT).startsWith("http://")) return false
+        val host = hostOf(text.substring("http://".length)) ?: return false
+        return LocalNetworkPolicy.scopeOf(host) == LocalNetworkPolicy.HostScope.LOCAL_NETWORK
+    }
 
     /**
      * Bearer o chiave API. Vuoto con [required] = [SecretProblem.MISSING]; vuoto e non richiesto = valido
@@ -91,54 +105,57 @@ object ConnectionFormValidation {
         model: String,
         apiKey: String,
         baseUrlEditable: Boolean,
-        cleartextLoopbackAllowed: Boolean,
+        cleartextLocalAllowed: Boolean,
         keyRequired: Boolean,
         keyConfigured: Boolean,
         minKeyLength: Int,
     ): ProviderProblems = ProviderProblems(
-        url = if (baseUrlEditable) providerUrl(baseUrl, cleartextLoopbackAllowed) else null,
+        url = if (baseUrlEditable) providerUrl(baseUrl, cleartextLocalAllowed) else null,
         modelMissing = model.isBlank(),
         key = secret(apiKey, required = keyRequired && !keyConfigured, minLength = minKeyLength),
     )
 
-    private fun checkUrl(raw: String, cleartextLoopbackAllowed: Boolean): UrlProblem? {
+    private fun checkUrl(raw: String, cleartextLocalAllowed: Boolean): UrlProblem? {
         val text = raw.trim()
         if (text.isEmpty()) return UrlProblem.EMPTY
-        val insecure = if (cleartextLoopbackAllowed) UrlProblem.NOT_HTTPS_OR_LOOPBACK else UrlProblem.NOT_HTTPS
+        val insecure = if (cleartextLocalAllowed) UrlProblem.NOT_HTTPS_OR_LOCAL else UrlProblem.NOT_HTTPS
         val separator = text.indexOf("://")
         if (separator <= 0) return insecure
         val scheme = text.substring(0, separator).lowercase(Locale.ROOT)
         val cleartext = scheme == "http"
         if (scheme != "https" && !cleartext) return insecure
-        val rest = text.substring(separator + 3)
-        // L'archivio rifiuta utente, query e frammento: meglio dirlo prima.
-        if ('?' in rest || '#' in rest) return UrlProblem.INVALID
-        val authority = rest.substringBefore('/')
-        if ('@' in authority || authority.any { it.isWhitespace() || it.isISOControl() }) {
-            return UrlProblem.INVALID
+        val host = hostOf(text.substring(separator + 3)) ?: return UrlProblem.INVALID
+        if (cleartext) {
+            // http è ammesso solo per il provider Custom e solo fuori da internet ([LocalNetworkPolicy]).
+            if (!cleartextLocalAllowed || !LocalNetworkPolicy.allowsLlmCleartext(host)) return insecure
         }
+        return null
+    }
+
+    /** L'host di quello che segue `scheme://`, o null se la forma non è accettata (utente, query, porta...). */
+    private fun hostOf(rest: String): String? {
+        // L'archivio rifiuta utente, query e frammento: meglio dirlo prima.
+        if ('?' in rest || '#' in rest) return null
+        val authority = rest.substringBefore('/')
+        if ('@' in authority || authority.any { it.isWhitespace() || it.isISOControl() }) return null
         val host: String
         val port: String
         if (authority.startsWith("[")) {
             val close = authority.indexOf(']')
-            if (close < 0) return UrlProblem.INVALID
+            if (close < 0) return null
             host = authority.substring(1, close)
             val after = authority.substring(close + 1)
-            if (after.isNotEmpty() && !after.startsWith(":")) return UrlProblem.INVALID
+            if (after.isNotEmpty() && !after.startsWith(":")) return null
             port = after.removePrefix(":")
         } else {
             val colon = authority.lastIndexOf(':')
             host = if (colon >= 0) authority.substring(0, colon) else authority
             port = if (colon >= 0) authority.substring(colon + 1) else ""
         }
-        if (host.isEmpty()) return UrlProblem.INVALID
+        if (host.isEmpty()) return null
         if (port.isNotEmpty() && (port.length > 5 || !port.all(Char::isDigit) || port.toInt() !in 1..65_535)) {
-            return UrlProblem.INVALID
+            return null
         }
-        if (cleartext) {
-            // http è ammesso solo per il provider Custom e solo verso un host loopback esatto.
-            if (!cleartextLoopbackAllowed || host.lowercase(Locale.ROOT) !in LOOPBACK_HOSTS) return insecure
-        }
-        return null
+        return host.lowercase(Locale.ROOT)
     }
 }

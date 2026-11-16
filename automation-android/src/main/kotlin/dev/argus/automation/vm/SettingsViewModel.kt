@@ -24,6 +24,7 @@ import dev.argus.brain.ProviderCatalog
 import dev.argus.brain.ProviderConfigStore
 import dev.argus.brain.ProviderId
 import dev.argus.brain.ReasoningEffort
+import dev.argus.brain.ResponseTimeout
 import dev.argus.data.UsageWindows
 import dev.argus.data.backup.ExportOutcome
 import dev.argus.data.backup.BackupFailure
@@ -268,6 +269,9 @@ internal fun budgetUi(usage: BudgetUsageSnapshot, settings: BudgetSettings): Bud
 
 private val LOOPBACK_HOSTS = setOf("localhost", "127.0.0.1", "::1")
 
+/** #20: i chip del tempo massimo di risposta, in minuti (0 = automatico), dalle scelte del brain. */
+internal val RESPONSE_TIMEOUT_CHOICES: List<Int> = ResponseTimeout.entries.map { it.minutes }
+
 private const val CHAT_COMPLETIONS_SUFFIX = "/chat/completions"
 
 /**
@@ -411,6 +415,8 @@ class SettingsViewModel @Inject constructor(
         SettingsState(
             transport = transportUi(bridge, hasToken, keySaved),
             providerChoices = providerChoices(),
+            responseTimeoutMinutes = configuration.responseTimeout().minutes,
+            responseTimeoutChoices = RESPONSE_TIMEOUT_CHOICES,
             shizuku = settingsSources.shizukuStatus.toUiStatus(
                 degradedAfterReboot = settingsSources.shizukuNeeded &&
                     settingsSources.shizukuStatus == ShizukuGatewayStatus.INSTALLED_NOT_RUNNING,
@@ -547,6 +553,21 @@ class SettingsViewModel @Inject constructor(
                 message(
                     language.pick("Unable to select the provider.", "Impossibile selezionare il provider."),
                 )
+            }
+        }
+    }
+
+    /** #20: il tempo massimo di risposta vale per ogni provider; la chat lo legge al prossimo invio. */
+    fun setResponseTimeout(minutes: Int) {
+        val value = ResponseTimeout.fromMinutes(minutes) ?: run {
+            mutableMessages.tryEmit(language.pick("Invalid timeout.", "Tempo massimo non valido."))
+            return
+        }
+        viewModelScope.launch {
+            if (configuration.saveResponseTimeout(value)) {
+                refresh()
+            } else {
+                message(language.pick("Unable to save the timeout.", "Impossibile salvare il tempo massimo."))
             }
         }
     }
@@ -1008,6 +1029,8 @@ class SettingsViewModel @Inject constructor(
         return SettingsState(
             transport = transportUi(BridgeUiHealth(), hasToken = false),
             providerChoices = providerChoices(),
+            responseTimeoutMinutes = configuration.responseTimeout().minutes,
+            responseTimeoutChoices = RESPONSE_TIMEOUT_CHOICES,
             shizuku = shizuku.status().toUiStatus(false),
             shizukuRunsAsRoot = shizuku.observeIdentity().value?.runsAsRoot,
             batteryExempt = health.batteryExempt,
