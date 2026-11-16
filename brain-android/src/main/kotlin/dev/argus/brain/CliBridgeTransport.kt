@@ -22,6 +22,7 @@ import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireContext
 import dev.argus.engine.runtime.RuntimeDataBinding
 import dev.argus.engine.runtime.TriggerEvent
+import dev.argus.engine.safety.ReplyChannels
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.SerialName
@@ -368,7 +369,7 @@ class CliBridgeTransport internal constructor(
             }
             val notification = context.event as? TriggerEvent.NotificationPosted
                 ?: throw BridgeException(BridgeErrorKind.CONFIGURATION, "act richiede un evento Notification")
-            if (notification.pkg !in WHATSAPP_PACKAGES || notification.isGroup != false) {
+            if (!ReplyChannels.isReplyPackage(notification.pkg) || notification.isGroup != false) {
                 throw BridgeException(BridgeErrorKind.CONFIGURATION, "reply act non autorizzata")
             }
             val cleanText = notification.text.cleanUntrusted(MAX_NOTIFICATION_TEXT_CHARS)
@@ -385,7 +386,7 @@ class CliBridgeTransport internal constructor(
             )
         } else {
             // Sink NOTIFICA #59 (da timer/immediate): NESSUNA notifica (né in sorgenti né come evento,
-            // niente requireWhatsAppNotification). contextSources = [] oppure il solo [state]. La
+            // niente requireReplyNotification). contextSources = [] oppure il solo [state]. La
             // notifica è OMESSA dall'envelope; lo stato viaggia solo se "state" è fra le sorgenti.
             if (contextSources != contextSources.distinct() ||
                 contextSources.any { it !in SINK_CONTEXT_SOURCES }
@@ -451,7 +452,7 @@ class CliBridgeTransport internal constructor(
             }
             val notification = context.event as? TriggerEvent.NotificationPosted
                 ?: throw BridgeException(BridgeErrorKind.CONFIGURATION, "act richiede un evento Notification")
-            if (notification.pkg !in WHATSAPP_PACKAGES || notification.isGroup != false) {
+            if (!ReplyChannels.isReplyPackage(notification.pkg) || notification.isGroup != false) {
                 throw BridgeException(BridgeErrorKind.CONFIGURATION, "reply act non autorizzata")
             }
             val cleanText = notification.text.cleanUntrusted(MAX_NOTIFICATION_TEXT_CHARS)
@@ -530,7 +531,7 @@ class CliBridgeTransport internal constructor(
         }
         val notification = context.event as? TriggerEvent.NotificationPosted
             ?: throw BridgeException(BridgeErrorKind.CONFIGURATION, "act v2 richiede un evento Notification")
-        if (notification.pkg !in WHATSAPP_PACKAGES || notification.isGroup != false) {
+        if (!ReplyChannels.isReplyPackage(notification.pkg) || notification.isGroup != false) {
             throw BridgeException(BridgeErrorKind.CONFIGURATION, "reply act v2 non autorizzata")
         }
         val cleanText = notification.text.cleanUntrusted(MAX_NOTIFICATION_TEXT_CHARS)
@@ -770,7 +771,7 @@ class CliBridgeTransport internal constructor(
         availableTools = availableTools,
         unavailableTools = unavailableTools,
         whitelistedContacts = whitelistedContacts.mapIndexed { index, contact ->
-            ContactEnvelope(alias = ContactAliasMapper.aliasFor(index), displayName = contact.displayName)
+            ContactEnvelope(alias = ContactAliasMapper.aliasFor(index), displayName = ContactAliasMapper.modelDisplayName(contact))
         },
         stateKeys = stateKeys,
         availableTriggers = availableTriggers,
@@ -907,7 +908,6 @@ class CliBridgeTransport internal constructor(
         /** Sink NOTIFICA #59: sorgenti ammesse senza reply — solo "state" (opzionale), MAI
          *  "notification". Lista vuota valida (testo dal solo goal). */
         private val SINK_CONTEXT_SOURCES = setOf("state")
-        private val WHATSAPP_PACKAGES = setOf("com.whatsapp", "com.whatsapp.w4b")
 
         // 125s > timeout azione massimo (120s, MAX_ACT_TIMEOUT_MILLIS): l'HTTP non deve tagliare
         // prima che scada il withTimeout della lane generativa, altrimenti una /act web lenta

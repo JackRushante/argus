@@ -12,6 +12,7 @@ import dev.argus.automation.TimeAlarmRuntime
 import dev.argus.automation.TimeAlarmRuntimeRegistry
 import dev.argus.automation.apps.AndroidAppLabelLookup
 import dev.argus.automation.backup.AutoBackupCoordinator
+import dev.argus.automation.calendar.CalendarTriggerLifecycle
 import dev.argus.automation.prompt.UserPromptStartup
 import dev.argus.manual.ManualWidgetRefresher
 import dev.argus.ui.presentation.AppLabels
@@ -25,6 +26,7 @@ class ArgusApplication : Application(), DefaultLifecycleObserver {
     @Inject lateinit var manualWidgetRefresher: ManualWidgetRefresher
     @Inject lateinit var autoBackup: AutoBackupCoordinator
     @Inject lateinit var userPrompts: UserPromptStartup
+    @Inject lateinit var calendarTrigger: CalendarTriggerLifecycle
 
     override fun onCreate() {
         super<Application>.onCreate()
@@ -39,6 +41,8 @@ class ArgusApplication : Application(), DefaultLifecycleObserver {
         autoBackup.start()
         // 0.8: rimostra le conferme ancora valide dopo un riavvio, chiude le scadute.
         userPrompts.start()
+        // 0.8: programma le istanze del calendario delle regole armate e segue i cambi del calendario.
+        calendarTrigger.start()
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -50,5 +54,6 @@ class ArgusApplication : Application(), DefaultLifecycleObserver {
     override fun onStart(owner: LifecycleOwner) {
         runtimeController.onForeground()
         autoBackup.onForeground()
+        calendarTrigger.onForeground()
     }
 }

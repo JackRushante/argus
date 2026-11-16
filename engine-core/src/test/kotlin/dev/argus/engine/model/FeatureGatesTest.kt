@@ -51,7 +51,6 @@ class FeatureGatesTest {
             .map { it.detail }
 
     private val newTriggers: Map<FeatureGate, Trigger> = linkedMapOf(
-        FeatureGate.TRIGGER_CALENDAR_EVENT to Trigger.CalendarEvent(CalendarPhase.START, -10, "Riunione", "Lavoro"),
         FeatureGate.TRIGGER_NFC_TAG to Trigger.NfcTag("04:A2:19", resolveTag = false),
         FeatureGate.TRIGGER_NEXT_ALARM to Trigger.NextAlarm(15),
         FeatureGate.TRIGGER_APP_USAGE to Trigger.AppUsage("com.example.game", 60),
@@ -61,11 +60,6 @@ class FeatureGatesTest {
     )
 
     private val newConditions: Map<FeatureGate, Condition> = linkedMapOf(
-        FeatureGate.CONDITION_WEEKDAY to Condition.Weekday(setOf(Day.MON, Day.TUE), "Europe/Rome"),
-        FeatureGate.CONDITION_WIFI_CONNECTED to Condition.WifiConnected("CasaMia"),
-        FeatureGate.CONDITION_BLUETOOTH_CONNECTED to Condition.BluetoothConnected(),
-        FeatureGate.CONDITION_HEADSET_CONNECTED to Condition.HeadsetConnected(AudioOutputKind.WIRED),
-        FeatureGate.CONDITION_CALENDAR_BUSY to Condition.CalendarBusy(titleMatch = "Riunione"),
         FeatureGate.CONDITION_STORED_COMPARE to Condition.StoredCompare("count", StateValueType.NUMBER, CmpOp.GT, "3"),
         FeatureGate.CONDITION_USER_MODE_IS to Condition.UserModeIs("casa"),
     )
@@ -73,8 +67,6 @@ class FeatureGatesTest {
     private val newActions: Map<FeatureGate, Action> = linkedMapOf(
         FeatureGate.ACTION_SET_STORED to Action.SetStored("count", StoredOp.INCREMENT),
         FeatureGate.ACTION_SET_USER_MODE to Action.SetUserMode("lavoro"),
-        FeatureGate.ACTION_NOTIFICATION_REPLY to Action.NotificationReply("Arrivo"),
-        FeatureGate.ACTION_NOTIFICATION_ACTION to Action.NotificationAction(NotificationActionOp.DISMISS),
         FeatureGate.ACTION_SEND_SMS to Action.SendSms("+393331112222", "Arrivo"),
         FeatureGate.ACTION_CALL_NUMBER to Action.CallNumber("+393331112222"),
         FeatureGate.ACTION_SEND_INTENT to Action.SendIntent(IntentKind.BROADCAST, action = "dev.example.PING"),
@@ -87,20 +79,35 @@ class FeatureGatesTest {
         ),
     )
 
-    /** Accese e coperte dai loro test: `confirm`, `ask`, `invoke_llm.output` (0.8). */
-    private val implemented = setOf(FeatureGate.CONFIRM, FeatureGate.ACTION_ASK, FeatureGate.LLM_OUTPUT)
+    /** Interruttori già accesi: i loro test stanno con la feature. */
+    private val switchedOn: Set<FeatureGate> = setOf(
+        // Condizioni di contesto e trigger del calendario.
+        FeatureGate.CONDITION_WEEKDAY,
+        FeatureGate.CONDITION_WIFI_CONNECTED,
+        FeatureGate.CONDITION_BLUETOOTH_CONNECTED,
+        FeatureGate.CONDITION_HEADSET_CONNECTED,
+        FeatureGate.CONDITION_CALENDAR_BUSY,
+        FeatureGate.TRIGGER_CALENDAR_EVENT,
+        // Risposte e azioni sulle notifiche.
+        FeatureGate.ACTION_NOTIFICATION_REPLY,
+        FeatureGate.ACTION_NOTIFICATION_ACTION,
+        // Conferma, domanda con pulsanti e risposte vincolate dell'AI.
+        FeatureGate.CONFIRM,
+        FeatureGate.ACTION_ASK,
+        FeatureGate.LLM_OUTPUT,
+    )
 
     private val ask = Action.Ask("Esco?", listOf("Sì", "No"), "answer", defaultChoice = "No")
 
     @Test
-    fun `every gate is off in this version`() {
-        assertEquals(implemented.sorted(), FeatureGate.entries.filter { it.enabled })
+    fun `every gate not yet switched on is off in this version`() {
+        assertEquals(switchedOn, FeatureGate.entries.filter { it.enabled }.toSet())
         assertEquals(FeatureGate.entries.size, FeatureGate.entries.map { it.wireName }.toSet().size)
     }
 
     @Test
     fun `the tables above cover every gate`() {
-        val covered = newTriggers.keys + newConditions.keys + newActions.keys + implemented +
+        val covered = newTriggers.keys + newConditions.keys + newActions.keys + switchedOn +
             setOf(FeatureGate.EXIT, FeatureGate.VAR_STORED)
         assertEquals(FeatureGate.entries.toSet(), covered)
     }
@@ -210,7 +217,7 @@ class FeatureGatesTest {
     @Test
     fun `each new family requires its own capability`() {
         fun caps(d: AutomationDraft) = CapabilityRequirements.derive(d)
-        assertTrue(CapabilityIds.TRIGGER_CALENDAR_EVENT in caps(draft(trigger = newTriggers.getValue(FeatureGate.TRIGGER_CALENDAR_EVENT))))
+        assertTrue(CapabilityIds.TRIGGER_CALENDAR_EVENT in caps(draft(trigger = Trigger.CalendarEvent(CalendarPhase.START, -10, "Riunione", "Lavoro"))))
         assertTrue(CapabilityIds.triggerSensor(SensorKind.SHAKE) in caps(draft(trigger = Trigger.Sensor(SensorKind.SHAKE))))
         assertTrue(CapabilityIds.STATE_STORED in caps(draft(conditions = newConditions.getValue(FeatureGate.CONDITION_STORED_COMPARE))))
         assertTrue(CapabilityIds.ACTION_SEND_SMS in caps(draft(actions = listOf(newActions.getValue(FeatureGate.ACTION_SEND_SMS)))))
@@ -219,7 +226,7 @@ class FeatureGatesTest {
         val span = caps(draft(exit = ExitSpec(Trigger.NfcTag("04"), actions = listOf(Action.SetUserMode("casa")))))
         assertTrue(span.containsAll(setOf(CapabilityIds.RULE_EXIT, CapabilityIds.TRIGGER_NFC_TAG, CapabilityIds.ACTION_SET_USER_MODE)))
         // weekday usa l'orologio del motore, come time_window.
-        assertEquals(caps(draft()), caps(draft(conditions = newConditions.getValue(FeatureGate.CONDITION_WEEKDAY))))
+        assertEquals(caps(draft()), caps(draft(conditions = Condition.Weekday(setOf(Day.MON, Day.TUE), "Europe/Rome"))))
         // Nessuna azione nuova chiede lo shell privilegiato.
         newActions.values.forEach { assertEquals(ActionPrivilege.BASE, ActionPrivileges.of(it), "$it") }
     }
@@ -258,7 +265,7 @@ class FeatureGatesTest {
         )
         assertEquals(
             """{"type":"weekday","days":["MON","TUE"],"tz":"Europe/Rome"}""",
-            json.encodeToString(Condition.serializer(), newConditions.getValue(FeatureGate.CONDITION_WEEKDAY)),
+            json.encodeToString(Condition.serializer(), Condition.Weekday(setOf(Day.MON, Day.TUE), "Europe/Rome")),
         )
         // I nuovi enum leggono anche il minuscolo, come gli enum 0.4.1.
         assertEquals(

@@ -12,7 +12,6 @@ import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.CapabilityIds
 import dev.argus.engine.model.HttpMethod
 import dev.argus.engine.model.IntentKind
-import dev.argus.engine.model.NotificationActionOp
 import dev.argus.engine.model.ScreenCallOp
 import dev.argus.engine.model.SensorKind
 import dev.argus.engine.model.StoredOp
@@ -79,8 +78,6 @@ class AndroidCapabilityProbeScaffold08Test {
     private val newActionTypes = setOf(
         ActionTypeIds.SET_STORED,
         ActionTypeIds.SET_USER_MODE,
-        ActionTypeIds.NOTIFICATION_REPLY,
-        ActionTypeIds.NOTIFICATION_ACTION,
         ActionTypeIds.SEND_SMS,
         ActionTypeIds.CALL_NUMBER,
         ActionTypeIds.SEND_INTENT,
@@ -88,7 +85,7 @@ class AndroidCapabilityProbeScaffold08Test {
     )
 
     private val newTriggers = setOf(
-        "calendar_event", "nfc_tag", "next_alarm", "app_usage", "user_mode_changed",
+        "nfc_tag", "next_alarm", "app_usage", "user_mode_changed",
         "sensor.${SensorKind.SHAKE.wireName}", "sensor.${SensorKind.FLIP_FACE_DOWN.wireName}",
     )
 
@@ -143,8 +140,6 @@ class AndroidCapabilityProbeScaffold08Test {
         val actions = listOf(
             Action.SetStored("k", StoredOp.CLEAR),
             Action.SetUserMode("lavoro"),
-            Action.NotificationReply("ok"),
-            Action.NotificationAction(NotificationActionOp.DISMISS),
             Action.SendSms("+393331112222", "ok"),
             Action.CallNumber("+393331112222"),
             Action.SendIntent(IntentKind.BROADCAST, action = "dev.example.PING"),

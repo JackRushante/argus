@@ -190,6 +190,7 @@ class Engine(
             foregroundApp = other.foregroundApp ?: foregroundApp,
             location = other.location ?: location,
             queryValues = queryValues + other.queryValues,
+            facts = facts.merge(other.facts),
         )
     }
 

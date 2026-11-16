@@ -20,6 +20,9 @@
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
     <!-- Connectivity BT (API 31+): grant runtime opt-in, separato da Wi-Fi/alimentazione. -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <!-- 0.8, calendario (condizione calendar_busy e trigger calendar_event): grant runtime opt-in,
+         chiesto solo per le regole che leggono il calendario. -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
     <!-- Tier base senza Shizuku (P3-3): DND/Ringer via NotificationManager/AudioManager.
          Grant «Accesso Non disturbare» concesso dall'utente, non runtime. -->
     <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
@@ -167,6 +170,25 @@
                 <action android:name="android.intent.action.TIMEZONE_CHANGED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
                 <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- 0.8: sveglia per regola del trigger calendario; intent esplicito, nessuna azione esterna. -->
+        <receiver
+            android:name="dev.argus.automation.calendar.CalendarAlarmReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
+        <!-- 0.8: ripianifica le istanze del calendario dopo riavvio, cambio di ora o di fuso, aggiornamento. -->
+        <receiver
+            android:name="dev.argus.automation.calendar.CalendarReplanReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
 

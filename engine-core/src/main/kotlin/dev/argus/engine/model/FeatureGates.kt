@@ -37,19 +37,19 @@ enum class FeatureGate(
     // --- Condizioni ------------------------------------------------------------------------------
 
     /** Condizione `weekday`. */
-    CONDITION_WEEKDAY("weekday", enabled = false),
+    CONDITION_WEEKDAY("weekday", enabled = true),
 
     /** Condizione `wifi_connected`. */
-    CONDITION_WIFI_CONNECTED("wifi_connected", enabled = false),
+    CONDITION_WIFI_CONNECTED("wifi_connected", enabled = true),
 
     /** Condizione `bluetooth_connected`. */
-    CONDITION_BLUETOOTH_CONNECTED("bluetooth_connected", enabled = false),
+    CONDITION_BLUETOOTH_CONNECTED("bluetooth_connected", enabled = true),
 
     /** Condizione `headset_connected`. */
-    CONDITION_HEADSET_CONNECTED("headset_connected", enabled = false),
+    CONDITION_HEADSET_CONNECTED("headset_connected", enabled = true),
 
     /** Condizione `calendar_busy`. */
-    CONDITION_CALENDAR_BUSY("calendar_busy", enabled = false),
+    CONDITION_CALENDAR_BUSY("calendar_busy", enabled = true),
 
     /** Condizione `stored_compare`. */
     CONDITION_STORED_COMPARE("stored_compare", enabled = false),
@@ -60,7 +60,7 @@ enum class FeatureGate(
     // --- Trigger ---------------------------------------------------------------------------------
 
     /** Trigger `calendar_event`. */
-    TRIGGER_CALENDAR_EVENT("calendar_event", enabled = false),
+    TRIGGER_CALENDAR_EVENT("calendar_event", enabled = true),
 
     /** Trigger `nfc_tag`. */
     TRIGGER_NFC_TAG("nfc_tag", enabled = false),
@@ -92,10 +92,10 @@ enum class FeatureGate(
     ACTION_SET_USER_MODE("set_user_mode", enabled = false),
 
     /** Azione `notification_reply`. */
-    ACTION_NOTIFICATION_REPLY("notification_reply", enabled = false),
+    ACTION_NOTIFICATION_REPLY("notification_reply", enabled = true),
 
     /** Azione `notification_action`. */
-    ACTION_NOTIFICATION_ACTION("notification_action", enabled = false),
+    ACTION_NOTIFICATION_ACTION("notification_action", enabled = true),
 
     /** Azione `send_sms`. */
     ACTION_SEND_SMS("send_sms", enabled = false),

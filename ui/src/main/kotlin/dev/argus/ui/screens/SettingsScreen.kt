@@ -33,6 +33,7 @@ import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Error
+import androidx.compose.material.icons.rounded.Event
 import androidx.compose.material.icons.rounded.Hub
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.MyLocation
@@ -470,6 +471,15 @@ private fun buildHealthItems(state: SettingsState, callbacks: SettingsCallbacks)
                 stringResource(if (state.bluetoothTriggerGranted) R.string.settings_bt_on else R.string.settings_bt_off),
                 okOrOptIn(state.bluetoothTriggerGranted), callbacks::onRequestBluetoothPermission,
                 actionLabel = enable.takeIf { !state.bluetoothTriggerGranted },
+            ),
+        )
+        // 0.8: calendario, stesso opt-in degli SMS: il tocco chiede READ_CALENDAR.
+        add(
+            HealthSpec(
+                Icons.Rounded.Event, stringResource(R.string.settings_calendar_title),
+                stringResource(if (state.calendarGranted) R.string.settings_calendar_on else R.string.settings_calendar_off),
+                okOrOptIn(state.calendarGranted), callbacks::onRequestCalendarPermission,
+                actionLabel = enable.takeIf { !state.calendarGranted },
             ),
         )
         if (state.connectivitySentinelActive) {
@@ -938,7 +948,12 @@ private fun ContactRowItem(contact: ContactRow, onRemove: () -> Unit) {
             )
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(contact.displayName, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge)
+            // 0.8: la whitelist vale per (app, conversazione): l'app si vede accanto al nome.
+            Text(
+                contact.app?.let { "${contact.displayName} · $it" } ?: contact.displayName,
+                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.labelLarge,
+            )
             // conversationId MASCHERATO in monospace: non esporre il numero/handle completo.
             Row(
                 modifier = Modifier

@@ -16,6 +16,9 @@ import dev.argus.device.ForegroundAppSource
 import dev.argus.device.StateReader
 import dev.argus.device.ParametricStateReader
 import dev.argus.device.PublicStateReader
+import dev.argus.automation.calendar.CalendarTriggerRuntime
+import dev.argus.automation.calendar.NoopCalendarTriggerRuntime
+import dev.argus.automation.context.DeviceFactsReader
 import dev.argus.automation.connectivity.ConnectivityEventDispatcher
 import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
 import dev.argus.automation.connectivity.NoopConnectivityTriggerRuntime
@@ -39,6 +42,7 @@ import dev.argus.engine.runtime.AuditEvent
 import dev.argus.engine.runtime.AuditKind
 import dev.argus.engine.runtime.AuditSink
 import dev.argus.engine.runtime.AutomationStore
+import dev.argus.engine.runtime.DeviceFacts
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.Engine
 import dev.argus.engine.runtime.NoopAuditSink
@@ -90,6 +94,8 @@ class LazyDeviceStateProvider(
      * nessun backend privilegiato è disponibile: con Shizuku attivo il comportamento non cambia.
      */
     private val usageForeground: ForegroundAppSource? = null,
+    /** 0.8: connessioni, cuffie e calendario delle condizioni di contesto; null = mai leggibili. */
+    private val factsReader: DeviceFactsReader? = null,
 ) : DeviceStateSnapshotProvider {
     constructor(
         reader: StateReader,
@@ -99,6 +105,7 @@ class LazyDeviceStateProvider(
         publicReader: PublicStateReader? = null,
         privilegedReady: (() -> Boolean)? = null,
         usageForeground: ForegroundAppSource? = null,
+        factsReader: DeviceFactsReader? = null,
     ) : this(
         reader,
         shizuku::status,
@@ -107,6 +114,7 @@ class LazyDeviceStateProvider(
         publicReader,
         privilegedReady,
         usageForeground,
+        factsReader,
     )
 
     override suspend fun current(): DeviceState = current(StateReadRequest.LEGACY_GENERATIVE)
@@ -170,11 +178,24 @@ class LazyDeviceStateProvider(
         } else {
             null
         }
+        // 0.8: API pubbliche, senza Shizuku; ciò che non si legge resta null (UNKNOWN).
+        val facts = if (request.facts.isNotEmpty()) {
+            try {
+                factsReader?.read(request.facts) ?: DeviceFacts()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                DeviceFacts()
+            }
+        } else {
+            DeviceFacts()
+        }
         return request.project(
             privileged.copy(
                 values = publicValues + privileged.values,
                 location = point,
                 queryValues = queryValues,
+                facts = facts,
             ),
         )
     }
@@ -329,6 +350,8 @@ class AndroidArmedAutomationRegistrar(
     private val oneShotConsumptions: OneShotConsumptionRegistry = NoopOneShotConsumptionRegistry,
     /** Production: sgancia il fire immediato dalla coroutine UI e ne possiede la durata via FGS. */
     private val foregroundLauncher: ReceiverWorkLauncher? = null,
+    /** 0.8: sveglie per regola del trigger `calendar_event`. */
+    private val calendar: CalendarTriggerRuntime = NoopCalendarTriggerRuntime,
 ) : ArmedAutomationRegistrar {
     override suspend fun register(automation: Automation): Boolean = when (automation.trigger) {
         is Trigger.Time -> registerTime(automation)
@@ -351,7 +374,7 @@ class AndroidArmedAutomationRegistrar(
         is Trigger.Manual -> registerBroadcastBacked(automation)
         // 0.8 scaffold: nessuna sorgente ancora (il validator li rifiuta con not_available_yet). Chi
         // implementa un trigger registra qui la sua sorgente al posto di `false`.
-        is Trigger.CalendarEvent -> false
+        is Trigger.CalendarEvent -> registerCalendar(automation)
 
         is Trigger.NfcTag -> false
 
@@ -506,6 +529,22 @@ class AndroidArmedAutomationRegistrar(
             automation.id in report.requiredBy &&
                 automation.id !in report.needsReview &&
                 automation.id !in report.failed
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * 0.8, calendario: capability pubblicata (permesso `READ_CALENDAR`), poi il reconcile legge il
+     * calendario e programma la prossima istanza. Armata solo se il calendario si è letto davvero.
+     */
+    private suspend fun registerCalendar(automation: Automation): Boolean {
+        if (!registerBroadcastBacked(automation)) return false
+        return try {
+            val report = calendar.reconcile()
+            automation.id in report.requiredBy && automation.id !in report.failed
         } catch (error: CancellationException) {
             throw error
         } catch (_: Exception) {

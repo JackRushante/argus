@@ -168,4 +168,15 @@ class E2eEventFactoryTest {
         assertIs<E2eEventResult.Built>(built)
         assertFalse(matcher.matches(chat.trigger, built.envelope.event))
     }
+
+    @Test
+    fun `a calendar event carries the title only when the case passes one`() {
+        val calendar = rule(Trigger.CalendarEvent(dev.argus.engine.model.CalendarPhase.START))
+        val titled = factory.build(calendar, buildJsonObject { put("title", "Dentista") })
+        assertIs<E2eEventResult.Built>(titled)
+        assertEquals("Dentista", assertIs<TriggerEvent.CalendarEventFired>(titled.envelope.event).title)
+        val plain = factory.build(calendar, JsonObject(emptyMap()))
+        assertIs<E2eEventResult.Built>(plain)
+        assertEquals(null, assertIs<TriggerEvent.CalendarEventFired>(plain.envelope.event).title)
+    }
 }

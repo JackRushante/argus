@@ -9,6 +9,7 @@ import dev.argus.engine.model.Trigger
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /**
  * Vocabolario 0.8: finché un tipo è dietro un FeatureGate spento, il modello non lo deve mai vedere. Chi
@@ -19,10 +20,9 @@ class AgentMessageSupportScaffold08Test {
 
     /** Il discriminatore wire di ogni tipo spento, com'è scritto nelle righe di schema del prompt. */
     private val hiddenTypes = listOf(
-        "calendar_event", "nfc_tag", "next_alarm", "app_usage", "user_mode_changed",
-        "weekday", "wifi_connected", "bluetooth_connected", "headset_connected", "calendar_busy",
+        "nfc_tag", "next_alarm", "app_usage", "user_mode_changed",
         "stored_compare", "user_mode_is", "stored",
-        "set_stored", "set_user_mode", "notification_reply", "notification_action", "send_sms",
+        "set_stored", "set_user_mode", "send_sms",
         "call_number", "send_intent", "screen_call",
     )
 
@@ -36,13 +36,39 @@ class AgentMessageSupportScaffold08Test {
             .forEach { assertFalse(it in prompt, "il prompt nomina $it") }
     }
 
+    /** Tipi accesi: il prompt ne ha la riga di schema. */
+    private val switchedOn = mapOf(
+        FeatureGate.CONDITION_WEEKDAY to "weekday",
+        FeatureGate.CONDITION_WIFI_CONNECTED to "wifi_connected",
+        FeatureGate.CONDITION_BLUETOOTH_CONNECTED to "bluetooth_connected",
+        FeatureGate.CONDITION_HEADSET_CONNECTED to "headset_connected",
+        FeatureGate.CONDITION_CALENDAR_BUSY to "calendar_busy",
+        FeatureGate.TRIGGER_CALENDAR_EVENT to "calendar_event",
+        FeatureGate.ACTION_NOTIFICATION_REPLY to "notification_reply",
+        FeatureGate.ACTION_NOTIFICATION_ACTION to "notification_action",
+        FeatureGate.ACTION_ASK to "ask",
+    )
+
+    /** Interruttori accesi che non sono un tipo: il prompt ne descrive il campo. */
+    private val switchedOnFields = mapOf(
+        FeatureGate.CONFIRM to "\"confirm\": {\"timeoutMs\":integer}",
+        FeatureGate.LLM_OUTPUT to "\"output\":{\"kind\":\"CHOICE\"|\"NUMBER\"|\"BOOLEAN\"",
+    )
+
     @Test
-    fun `every gate is still off, so this test still describes the prompt`() {
+    fun `only the switched-on gates are on, so this test still describes the prompt`() {
         // Quando un engineer accende un tipo, aggiorna anche [hiddenTypes] e questo elenco.
-        assertEquals(
-            listOf(FeatureGate.CONFIRM, FeatureGate.ACTION_ASK, FeatureGate.LLM_OUTPUT),
-            FeatureGate.entries.filter { it.enabled },
-        )
+        assertEquals(switchedOn.keys + switchedOnFields.keys, FeatureGate.entries.filter { it.enabled }.toSet())
+    }
+
+    @Test
+    fun `every switched-on type has its schema line`() {
+        switchedOn.values.forEach { type ->
+            assertTrue("\"type\":\"$type\"" in prompt, "il prompt non descrive $type")
+        }
+        switchedOnFields.values.forEach { field ->
+            assertTrue(field in prompt, "il prompt non descrive $field")
+        }
     }
 
     @Test
