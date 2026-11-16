@@ -15,7 +15,7 @@ import kotlin.test.assertTrue
 
 /**
  * 0.5.1 F4: preset dei server locali nel dialogo del provider Custom. Il dialogo compila l'indirizzo e mostra la
- * nota sui 16.000 token di contesto; la regola sul cleartext (solo loopback) non cambia.
+ * nota sui 16.000 token di contesto; il cleartext resta escluso per gli host pubblici (#19).
  */
 class LocalPresetsDialogTest {
     private val presets = listOf(
@@ -50,19 +50,19 @@ class LocalPresetsDialogTest {
                 model = "qwen-local",
                 apiKey = "",
                 baseUrlEditable = true,
-                cleartextLoopbackAllowed = true,
+                cleartextLocalAllowed = true,
                 keyRequired = false,
                 keyConfigured = false,
                 minKeyLength = ConnectionFormValidation.MIN_CUSTOM_SECRET_LENGTH,
             )
             assertTrue(problems.accepted, "${preset.id}: ${problems.url}")
         }
-        // La regola non cambia: http solo verso un host loopback esatto, e solo se il dialogo lo ammette.
-        listOf("http://192.168.1.10:11434/v1", "http://studio.local:1234/v1", "http://localhost.example.com/v1")
+        // #19: http verso il telefono o la rete locale, mai verso un host pubblico.
+        listOf("http://llm.example.com:11434/v1", "http://8.8.8.8:1234/v1", "http://localhost.example.com/v1")
             .forEach { url ->
                 val problems = ConnectionFormValidation.providerForm(
                     baseUrl = url, model = "m", apiKey = "", baseUrlEditable = true,
-                    cleartextLoopbackAllowed = true, keyRequired = false, keyConfigured = false,
+                    cleartextLocalAllowed = true, keyRequired = false, keyConfigured = false,
                     minKeyLength = ConnectionFormValidation.MIN_CUSTOM_SECRET_LENGTH,
                 )
                 assertFalse(problems.accepted, url)
