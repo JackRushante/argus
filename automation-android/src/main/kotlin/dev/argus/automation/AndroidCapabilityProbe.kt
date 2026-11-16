@@ -319,6 +319,8 @@ class AndroidCapabilityProbe internal constructor(
         // 0.5.1: app aperta/chiusa, solo con l'accesso ai dati di utilizzo concesso (altrimenti il modello
         // proporrebbe una regola che l'app non può armare).
         if (state.usageStatsGranted) add("app_event")
+        // 0.8: la prossima sveglia, sempre (AlarmManager, nessun permesso).
+        add("next_alarm")
         // Il filtro SIM vale solo su un telefono con più slot e dove SMS o chiamate sono armabili.
         if (state.multiSim && (state.receiveSmsGranted || (state.readPhoneStateGranted && state.readCallLogGranted))) {
             add("phone_state.sim")
@@ -483,6 +485,8 @@ class AndroidCapabilityProbe internal constructor(
             // 0.5.0, permessi permanenti: con `WRITE_SECURE_SETTINGS` la scrittura parametrica passa dal
             // ContentResolver (SECURE/GLOBAL; SYSTEM resta legato a «Modifica impostazioni di sistema»),
             // con l'accesso ai dati di utilizzo l'app in primo piano si legge da UsageStatsManager.
+            // 0.8: la prossima sveglia, vedi availableTriggers.
+            add(CapabilityIds.TRIGGER_NEXT_ALARM)
             if (state.secureSettingsGranted) add(ActionCapabilities.WRITE_SETTING)
             if (state.usageStatsGranted) add(CapabilityIds.STATE_FOREGROUND_APP)
             // 0.5.1: «app aperta/chiusa» legge gli stessi eventi di utilizzo: stesso permesso, nessuno shell.
@@ -690,7 +694,6 @@ class AndroidCapabilityProbe internal constructor(
             CapabilityIds.RULE_EXIT,
             CapabilityIds.TRIGGER_CALENDAR_EVENT,
             CapabilityIds.TRIGGER_NFC_TAG,
-            CapabilityIds.TRIGGER_NEXT_ALARM,
             CapabilityIds.TRIGGER_APP_USAGE,
             CapabilityIds.TRIGGER_USER_MODE_CHANGED,
             CapabilityIds.STATE_WIFI_CONNECTED,

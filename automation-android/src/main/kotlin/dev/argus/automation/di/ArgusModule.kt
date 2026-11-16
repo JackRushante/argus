@@ -1398,6 +1398,7 @@ object ArgusModule {
         audit: AuditSink,
         oneShotConsumptions: OneShotConsumptionRegistry,
         launcher: ReceiverWorkLauncher,
+        @ApplicationContext context: Context,
     ): TimeAlarmCoordinator =
         TimeAlarmCoordinator(
             store,
@@ -1410,6 +1411,8 @@ object ArgusModule {
             // I recuperi dovuti partono in background e tengono la lease del servizio in primo
             // piano per tutta la loro durata: il reconcile non aspetta un programma lungo (B3).
             recoveryLauncher = RecoveryLauncher { block -> launcher.launch("time_recovery", block) },
+            // 0.8: le regole next_alarm leggono la prossima sveglia a ogni pianificazione.
+            nextAlarmAt = AndroidNextAlarmClock(context)::nextAlarmAt,
         )
 
     @Provides

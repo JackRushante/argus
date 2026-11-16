@@ -159,6 +159,9 @@
                 <action android:name="android.intent.action.TIMEZONE_CHANGED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
                 <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+                <!-- 0.8: la prossima sveglia è cambiata (trigger next_alarm). Broadcast di sistema esente dai
+                     limiti sugli implicit receiver; senza regole next_alarm il reconcile non cambia nulla. -->
+                <action android:name="android.app.action.NEXT_ALARM_CLOCK_CHANGED" />
             </intent-filter>
         </receiver>
 

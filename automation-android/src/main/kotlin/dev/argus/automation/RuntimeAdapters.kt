@@ -355,7 +355,8 @@ class AndroidArmedAutomationRegistrar(
 
         is Trigger.NfcTag -> false
 
-        is Trigger.NextAlarm -> false
+        // 0.8: la prossima sveglia passa dallo stesso coordinatore delle regole a orario.
+        is Trigger.NextAlarm -> registerTime(automation)
 
         is Trigger.AppUsage -> false
 

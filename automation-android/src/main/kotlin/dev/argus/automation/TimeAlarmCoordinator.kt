@@ -121,6 +121,12 @@ enum class ReconcileReason(
      * per TIME_CHANGED.
      */
     TIMEZONE_CHANGED(true),
+
+    /**
+     * 0.8: la prossima sveglia del telefono è cambiata (`ACTION_NEXT_ALARM_CLOCK_CHANGED`): le regole
+     * `next_alarm` si ripianificano. Un'occorrenza già dovuta si recupera come per TIME_CHANGED.
+     */
+    NEXT_ALARM_CHANGED(true),
 }
 
 data class ReconcileReport(
@@ -145,6 +151,50 @@ object TimeAlarmPlanner {
      */
     fun effectivePrecision(trigger: Trigger.Time): TimePrecision =
         if (trigger.afterMs != null) TimePrecision.EXACT else trigger.precision
+
+    /** Precisione di scheduling di un trigger pianificato da questo coordinatore. */
+    fun effectivePrecision(trigger: Trigger): TimePrecision = when (trigger) {
+        is Trigger.Time -> effectivePrecision(trigger)
+        // Minuti prima della sveglia: puntuale come un ritardo relativo (fallback inexact senza permesso).
+        else -> TimePrecision.EXACT
+    }
+
+    /**
+     * 0.8: [Trigger.NextAlarm] scatta [Trigger.NextAlarm.offsetMinutes] minuti prima della prossima sveglia
+     * ([nextAlarmAt], `null` = nessuna sveglia). Un istante già passato (sveglia più vicina dell'offset, o
+     * questa istanza già consegnata) non si pianifica: si aspetta la sveglia successiva. Così ogni istanza
+     * della sveglia scatta al più una volta.
+     */
+    fun nextAlarm(
+        automation: Automation,
+        after: Instant,
+        nextAlarmAt: () -> Long?,
+    ): TimeAlarmRegistration? {
+        if (automation.status != AutomationStatus.ARMED || !automation.enabled) return null
+        val trigger = automation.trigger as? Trigger.NextAlarm ?: return null
+        val approvalFingerprint = requireNotNull(automation.approvalFingerprint) {
+            "Automazione ARMED priva di fingerprint"
+        }
+        val alarmAt = nextAlarmAt()?.takeIf { it > 0 } ?: return null
+        val eventAt = alarmAt - trigger.offsetMinutes * MINUTE_MILLIS
+        if (eventAt <= after.toEpochMilli() || eventAt < 0) return null
+        return TimeAlarmRegistration(
+            automationId = automation.id,
+            approvalFingerprint = approvalFingerprint,
+            eventAtMillis = eventAt,
+            requestedPrecision = TimePrecision.EXACT,
+        )
+    }
+
+    /**
+     * Un'occorrenza `next_alarm` dovuta (processo morto, telefono spento) si recupera solo finché la sveglia
+     * a cui si riferisce non è suonata da più di [NEXT_ALARM_RECOVERY_GRACE_MILLIS]: dopo non ha più senso.
+     */
+    fun nextAlarmStillDue(trigger: Trigger.NextAlarm, eventAtMillis: Long, nowMillis: Long): Boolean =
+        nowMillis <= eventAtMillis + trigger.offsetMinutes * MINUTE_MILLIS + NEXT_ALARM_RECOVERY_GRACE_MILLIS
+
+    private const val MINUTE_MILLIS = 60_000L
+    const val NEXT_ALARM_RECOVERY_GRACE_MILLIS = 10L * 60 * 1_000
 
     fun next(
         automation: Automation,
@@ -220,6 +270,11 @@ class TimeAlarmCoordinator(
      * resta vuoto). Senza launcher (test, caller non Android) i recuperi sono sincroni.
      */
     private val recoveryLauncher: RecoveryLauncher? = null,
+    /**
+     * 0.8: istante della prossima sveglia del telefono (`AlarmManager.getNextAlarmClock`), per le regole
+     * `next_alarm`; `null` = nessuna sveglia. Letto a ogni pianificazione, mai conservato.
+     */
+    private val nextAlarmAt: () -> Long? = { null },
 ) {
     private val mutex = Mutex()
 
@@ -258,7 +313,7 @@ class TimeAlarmCoordinator(
         mutex.withLock {
             val currentNow = now()
             val desired = store.armed()
-                .filter { it.trigger is Trigger.Time }
+                .filter { it.trigger.scheduledHere() }
                 .associateBy { it.id }
 
             state.all().sortedBy { it.automationId.value }.forEach { persisted ->
@@ -282,7 +337,12 @@ class TimeAlarmCoordinator(
                     disarmed -= automation.id
                 }
                 if (persisted != null && persisted.eventAtMillis <= currentNow.toEpochMilli()) {
-                    if (reason.recoverDueAlarm) {
+                    // 0.8: «prima della sveglia» dopo che la sveglia è suonata non ha più senso.
+                    val dueAt = persisted.eventAtMillis
+                    val stale = (automation.trigger as? Trigger.NextAlarm)?.let { trigger ->
+                        !TimeAlarmPlanner.nextAlarmStillDue(trigger, dueAt, currentNow.toEpochMilli())
+                    } == true
+                    if (reason.recoverDueAlarm && !stale) {
                         dueRecoveries += automation.id to persisted.eventAtMillis
                         return@forEach
                     }
@@ -306,7 +366,7 @@ class TimeAlarmCoordinator(
                     }
                     ScheduleResult.EXPIRED -> {
                         if (persisted != null) cancelled += automation.id
-                        if ((automation.trigger as Trigger.Time).isOneShot()) {
+                        if ((automation.trigger as? Trigger.Time)?.isOneShot() == true) {
                             val disabled = store.disableIfApproved(
                                 automation.id,
                                 requireNotNull(automation.approvalFingerprint),
@@ -319,6 +379,8 @@ class TimeAlarmCoordinator(
                         recordSchedulingFailed(automation.id, "expired")
                     }
                     ScheduleResult.UNCHANGED -> Unit
+                    // 0.8: nessuna sveglia da anticipare ora; si ripianifica al prossimo cambio di sveglia.
+                    ScheduleResult.IDLE -> if (persisted != null) cancelled += automation.id
                 }
             }
             syncWatchdogLocked()
@@ -431,7 +493,7 @@ class TimeAlarmCoordinator(
             ?: return Preparation.Done(AlarmDeliveryResult.Ignored)
 
         val automation = store.get(automationId)
-        val trigger = automation?.trigger as? Trigger.Time
+        val trigger = automation?.trigger?.takeIf { it.scheduledHere() }
         if (automation == null || trigger == null || automation.status != AutomationStatus.ARMED ||
             !automation.enabled
         ) {
@@ -450,7 +512,7 @@ class TimeAlarmCoordinator(
         // Alba/tramonto: se l'istante non è un vero scatto è un ricontrollo di notte/giorno polare.
         // Niente da consegnare: si ricalcola da adesso (un nuovo evento o un altro ricontrollo).
         // Un guasto del calcolo conta come «non è uno scatto», e il planner mette la regola in quarantena.
-        if (trigger.solar != null &&
+        if (trigger is Trigger.Time && trigger.solar != null &&
             !runCatching { SolarSchedule.isFireInstant(trigger, eventAtMillis) }.getOrDefault(false)
         ) {
             return Preparation.Done(
@@ -487,10 +549,18 @@ class TimeAlarmCoordinator(
 
         inFlight += automationId
         return Preparation.Ready(
-            envelope = TriggerEnvelope(
-                id = TriggerEventId("time:${eventFingerprint.value}:$eventAtMillis"),
-                event = TriggerEvent.TimeFired(automationId, eventFingerprint),
-            ),
+            envelope = if (trigger is Trigger.NextAlarm) {
+                // 0.8: un id per istanza della sveglia (l'istante deriva dalla sveglia e dall'offset approvato).
+                TriggerEnvelope(
+                    id = TriggerEventId("next_alarm:${eventFingerprint.value}:$eventAtMillis"),
+                    event = TriggerEvent.NextAlarmFired(automationId, eventFingerprint),
+                )
+            } else {
+                TriggerEnvelope(
+                    id = TriggerEventId("time:${eventFingerprint.value}:$eventAtMillis"),
+                    event = TriggerEvent.TimeFired(automationId, eventFingerprint),
+                )
+            },
             automationId = automationId,
             eventFingerprint = eventFingerprint,
             eventAtMillis = eventAtMillis,
@@ -514,7 +584,7 @@ class TimeAlarmCoordinator(
         disarmed -= automationId
 
         val latest = store.get(automationId)
-        val latestTrigger = latest?.trigger as? Trigger.Time
+        val latestTrigger = latest?.trigger?.takeIf { it.scheduledHere() }
         if (latest == null || latestTrigger == null || latest.status != AutomationStatus.ARMED ||
             !latest.enabled
         ) {
@@ -527,7 +597,7 @@ class TimeAlarmCoordinator(
                 else -> AlarmDeliveryResult.Delivered
             }
         }
-        if (latestTrigger.isOneShot()) {
+        if (latestTrigger is Trigger.Time && latestTrigger.isOneShot()) {
             val attempt = oneShotConsumptions.begin(envelope.id)
             var consumed = false
             try {
@@ -542,7 +612,7 @@ class TimeAlarmCoordinator(
                 return AlarmDeliveryResult.Delivered
             }
             val revised = store.get(automationId)
-            val revisedTrigger = revised?.trigger as? Trigger.Time
+            val revisedTrigger = revised?.trigger?.takeIf { it.scheduledHere() }
             if (revised == null || revisedTrigger == null ||
                 revised.status != AutomationStatus.ARMED || !revised.enabled
             ) {
@@ -557,7 +627,8 @@ class TimeAlarmCoordinator(
 
         val after = Instant.ofEpochMilli(maxOf(currentNow.toEpochMilli(), eventAtMillis))
         return when (scheduleLocked(latest, after, existing = recoveryRecord)) {
-            ScheduleResult.SCHEDULED, ScheduleResult.UNCHANGED -> AlarmDeliveryResult.Delivered
+            // IDLE: istanza della sveglia consegnata, la prossima arriva col suo cambio di sveglia.
+            ScheduleResult.SCHEDULED, ScheduleResult.UNCHANGED, ScheduleResult.IDLE -> AlarmDeliveryResult.Delivered
             ScheduleResult.EXPIRED -> deliveryFailed(automationId, "reschedule_expired")
             ScheduleResult.FAILED -> deliveryFailed(automationId, "reschedule_failed")
         }
@@ -582,7 +653,11 @@ class TimeAlarmCoordinator(
         force: Boolean = false,
     ): ScheduleResult {
         val registration = try {
-            TimeAlarmPlanner.next(automation, after, existing)
+            if (automation.trigger is Trigger.NextAlarm) {
+                TimeAlarmPlanner.nextAlarm(automation, after, nextAlarmAt)
+            } else {
+                TimeAlarmPlanner.next(automation, after, existing)
+            }
         } catch (error: CancellationException) {
             throw error
         } catch (_: Exception) {
@@ -597,7 +672,8 @@ class TimeAlarmCoordinator(
             return ScheduleResult.FAILED
         } ?: run {
             if (existing != null) cancelAndForget(automation.id)
-            return ScheduleResult.EXPIRED
+            // 0.8: una regola next_alarm senza sveglia futura non è scaduta: aspetta la prossima sveglia.
+            return if (automation.trigger is Trigger.NextAlarm) ScheduleResult.IDLE else ScheduleResult.EXPIRED
         }
 
         val desiredMode = if (
@@ -727,7 +803,10 @@ class TimeAlarmCoordinator(
         }
     }
 
-    private enum class ScheduleResult { SCHEDULED, UNCHANGED, EXPIRED, FAILED }
+    private enum class ScheduleResult { SCHEDULED, UNCHANGED, EXPIRED, FAILED, IDLE }
+
+    /** Trigger che questo coordinatore pianifica su AlarmManager: orari e, dalla 0.8, la prossima sveglia. */
+    private fun Trigger.scheduledHere(): Boolean = this is Trigger.Time || this is Trigger.NextAlarm
 
     private companion object {
         /** Ritardo della sveglia di riserva rispetto alla prossima sveglia exact. */
