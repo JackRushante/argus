@@ -4,6 +4,7 @@ import dev.argus.engine.model.*
 import dev.argus.engine.runtime.CronSchedule
 import dev.argus.engine.runtime.ProgramInterpreter
 import java.net.URI
+import java.time.Clock
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
@@ -32,6 +33,8 @@ class DraftValidator(
     private val knownTools: Set<String>,
     private val stateKeys: Set<String> = StateKeys.ALL.keys,
     private val deniedNotificationPackages: Set<String> = setOf(ARGUS_PACKAGE),
+    /** Solo per il controllo `cron_never_fires`: un cron deve avere uno scatto nell'orizzonte da adesso. */
+    private val clock: Clock = Clock.systemUTC(),
 ) {
     companion object {
         val FORBIDDEN_IN_INVOKE_LLM = setOf("shell.run", "app.install")
@@ -778,6 +781,14 @@ class DraftValidator(
                 trigger.cron?.let { cron ->
                     runCatching { CronSchedule.parse(cron) }
                         .onFailure { err("cron_invalid", "Cron '$cron' non valido: ${it.message}") }
+                        .onSuccess { schedule ->
+                            // Una data che non esiste (30 febbraio, 31 aprile) si armerebbe senza mai
+                            // scattare: stesso orizzonte di ricerca del motore. Con un fuso non valido
+                            // decide già tz_invalid.
+                            val zone = runCatching { ZoneId.of(trigger.tz) }.getOrNull()
+                            if (zone != null && schedule.nextFireAfter(clock.instant(), zone) == null)
+                                err("cron_never_fires", "Cron '$cron' non ha nessuno scatto: la data non esiste")
+                        }
                 }
                 trigger.at?.let { at ->
                     runCatching { LocalDateTime.parse(at) }

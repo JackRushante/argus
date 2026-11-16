@@ -100,6 +100,10 @@ object ValidationMessages {
         ),
         "tz_invalid" to t("The time zone is not valid.", "Il fuso orario non è valido."),
         "cron_invalid" to t("The schedule expression is not valid.", "L'espressione di pianificazione non è valida."),
+        "cron_never_fires" to t(
+            "The schedule never matches a real date (for example 30 February), so the rule would never run.",
+            "La pianificazione non corrisponde a nessuna data reale (per esempio il 30 febbraio): la regola non scatterebbe mai.",
+        ),
         "at_invalid" to t("The date and time are not valid.", "La data e l'ora non sono valide."),
         "after_ms_invalid" to t(
             "The delay must be between 1 second and 7 days.",
