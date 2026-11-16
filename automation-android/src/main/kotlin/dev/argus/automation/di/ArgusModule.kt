@@ -204,6 +204,14 @@ import dev.argus.engine.brain.CapabilityProbe
 import dev.argus.engine.brain.ContactWhitelistStore
 import dev.argus.automation.phone.PhoneEventIngress
 import dev.argus.automation.phone.PrefsCallStateStore
+import dev.argus.automation.calendar.AndroidCalendarAlarmScheduler
+import dev.argus.automation.calendar.AndroidCalendarInstanceSource
+import dev.argus.automation.calendar.CalendarInstanceSource
+import dev.argus.automation.calendar.CalendarTriggerCoordinator
+import dev.argus.automation.calendar.CalendarTriggerLifecycle
+import dev.argus.automation.calendar.CalendarTriggerRuntime
+import dev.argus.automation.calendar.PrefsCalendarFiredStore
+import dev.argus.automation.context.AndroidDeviceFactsReader
 import dev.argus.automation.connectivity.ConnectivityEventDispatcher
 import dev.argus.automation.connectivity.ConnectivityEventIngress
 import dev.argus.automation.connectivity.AndroidConnectivitySentinelBackend
@@ -583,6 +591,8 @@ object ArgusModule {
         location: CurrentLocationProvider,
         root: RootAccess,
         usageForeground: ForegroundAppSource,
+        @ApplicationContext context: Context,
+        calendarSource: CalendarInstanceSource,
         persistentState: dev.argus.automation.PersistentStateReader,
     ): LazyDeviceStateProvider = LazyDeviceStateProvider(
         reader,
@@ -595,9 +605,46 @@ object ArgusModule {
             gateway.status() == dev.argus.shizuku.ShizukuGatewayStatus.AUTHORIZED || root.isActive()
         },
         usageForeground = usageForeground,
+        // 0.8: condizioni di contesto (Wi-Fi, Bluetooth, cuffie, calendario) con le API pubbliche.
+        factsReader = AndroidDeviceFactsReader(context, calendarSource),
         // 0.8: valori conservati e modalità.
         persistentState = persistentState,
     )
+
+    /** 0.8: istanze del calendario del telefono (`READ_CALENDAR`), per calendar_busy e calendar_event. */
+    @Provides
+    @Singleton
+    fun calendarInstanceSource(@ApplicationContext context: Context): CalendarInstanceSource =
+        AndroidCalendarInstanceSource(context)
+
+    @Provides
+    @Singleton
+    fun calendarTriggerCoordinator(
+        @ApplicationContext context: Context,
+        store: AutomationStore,
+        source: CalendarInstanceSource,
+        engine: Engine,
+        state: LazyDeviceStateProvider,
+        frame: DispatchFrame,
+    ): CalendarTriggerCoordinator = CalendarTriggerCoordinator(
+        store = store,
+        source = source,
+        firedStore = PrefsCalendarFiredStore(context),
+        alarms = AndroidCalendarAlarmScheduler(context),
+        dispatch = { envelope -> frame.run { engine.onTrigger(envelope) { request -> state.current(request) } } },
+    )
+
+    @Provides
+    fun calendarTriggerRuntime(coordinator: CalendarTriggerCoordinator): CalendarTriggerRuntime = coordinator
+
+    @Provides
+    @Singleton
+    fun calendarTriggerLifecycle(
+        @ApplicationContext context: Context,
+        coordinator: CalendarTriggerCoordinator,
+        store: AutomationStore,
+        @ApplicationScope scope: CoroutineScope,
+    ): CalendarTriggerLifecycle = CalendarTriggerLifecycle(context, coordinator, store, scope)
 
     @Provides
     fun deviceStateSnapshotProvider(
@@ -955,6 +1002,10 @@ object ArgusModule {
             privilegedActions = privilegedActions,
             // 0.5.1: macro sullo schermo con il servizio di Accessibilità.
             uiSteps = uiSteps,
+            // 0.8: chiudi, posticipa o premi un pulsante della notifica, via il listener collegato.
+            notificationActions = dev.argus.automation.notification.ListenerNotificationActionGateway(
+                dev.argus.automation.notification.ConnectedNotificationListener,
+            ),
             // 0.8: set_stored e set_user_mode.
             storedModes = storedModes,
         )
@@ -1416,6 +1467,7 @@ object ArgusModule {
         audit: AuditSink,
         oneShotConsumptions: OneShotConsumptionRegistry,
         foregroundLauncher: ReceiverWorkLauncher,
+        calendar: CalendarTriggerRuntime,
     ): ArmedAutomationRegistrar = AndroidArmedAutomationRegistrar(
         coordinator,
         store,
@@ -1428,6 +1480,7 @@ object ArgusModule {
         audit,
         oneShotConsumptions,
         foregroundLauncher,
+        calendar,
     )
 
     /**

@@ -22,6 +22,8 @@ CONFIGS = ["shizuku_root", "shizuku_shell", "none"]
 TRIGGERS = [
     "time", "immediate", "manual", "geofence", "notification", "phone_state", "connectivity",
     "sensor", "screen", "battery", "audio_output", "mode_changed", "media", "app_event",
+    # 0.8: inizio/fine di un evento del calendario.
+    "calendar_event",
 ]
 
 # Classi di azioni: raggruppano i tipi per natura dell'effetto e per tier. `wait`, `if` e `while` non
@@ -29,12 +31,12 @@ TRIGGERS = [
 ACTION_CLASSES: Dict[str, List[str]] = {
     "local_ui": [
         "show_notification", "speak", "vibrate", "set_flashlight", "copy_text", "copy_to_clipboard",
-        "media_control",
+        "media_control", "notification_action",
     ],
     "audio_mode": ["set_volume", "set_ringer", "set_dnd"],
     "display": ["set_brightness", "set_rotation", "set_dark_mode"],
     "launch": ["launch_app", "open_url", "open_settings_screen", "set_alarm", "set_timer"],
-    "network_out": ["http_request"],
+    "network_out": ["http_request", "notification_reply"],
     "radios": [
         "set_wifi", "set_bluetooth", "set_mobile_data", "set_airplane", "set_location", "set_nfc",
         "set_battery_saver",
@@ -49,9 +51,9 @@ CONTROL_FLOW = ["wait", "if", "while"]
 # `not_available_yet`). Non entra nella copertura a coppie finche' e' spento; una regola della suite puo'
 # usarlo solo per provare quel rifiuto. Chi accende un tipo lo sposta in TRIGGERS o ACTION_CLASSES e
 # aggiunge le sue regole.
-NOT_YET_AVAILABLE_TRIGGERS = ["calendar_event", "nfc_tag", "next_alarm", "app_usage", "user_mode_changed"]
+NOT_YET_AVAILABLE_TRIGGERS = ["nfc_tag", "next_alarm", "app_usage", "user_mode_changed"]
 NOT_YET_AVAILABLE_ACTIONS = [
-    "ask", "set_stored", "set_user_mode", "notification_reply", "notification_action", "send_sms",
+    "ask", "set_stored", "set_user_mode", "send_sms",
     "call_number", "send_intent", "screen_call",
 ]
 NOT_YET_AVAILABLE_CODE = "not_available_yet"

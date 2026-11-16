@@ -13,6 +13,7 @@ import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireContext
 import dev.argus.engine.runtime.RuntimeDataBinding
 import dev.argus.engine.runtime.TriggerEvent
+import dev.argus.engine.safety.ReplyChannels
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonArray
@@ -47,7 +48,6 @@ internal object AgentMessageSupport {
     const val MIN_ACT_TIMEOUT_MILLIS = 1_000L
     const val MAX_ACT_TIMEOUT_MILLIS = 120_000L
 
-    val WHATSAPP_PACKAGES = setOf("com.whatsapp", "com.whatsapp.w4b")
     val ACT_CONTEXT_SOURCES = setOf("notification", "state")
 
     /** Sorgenti di contesto ammesse per il sink NOTIFICA #59: solo "state" (opzionale), MAI
@@ -123,10 +123,11 @@ internal object AgentMessageSupport {
         }
     }
 
-    fun requireWhatsAppNotification(context: FireContext): TriggerEvent.NotificationPosted {
+    /** Reply: un messaggio 1:1 in arrivo da WhatsApp o (0.8) da Telegram, Signal, Google Messaggi. */
+    fun requireReplyNotification(context: FireContext): TriggerEvent.NotificationPosted {
         val notification = context.event as? TriggerEvent.NotificationPosted
             ?: throw config("richiede un evento Notification")
-        if (notification.pkg !in WHATSAPP_PACKAGES || notification.isGroup != false) {
+        if (!ReplyChannels.isReplyPackage(notification.pkg) || notification.isGroup != false) {
             throw config("reply non autorizzata")
         }
         cleanUntrusted(notification.text, MAX_NOTIFICATION_TEXT_CHARS)
@@ -329,6 +330,10 @@ BINDING RULES:
         val sender = cleanUntrusted(notification.sender, MAX_NOTIFICATION_SENDER_CHARS)
         val text = cleanUntrusted(notification.text, MAX_NOTIFICATION_TEXT_CHARS).orEmpty()
         append("Message received")
+        // 0.8: fuori da WhatsApp il modello sa in quale app risponde (WhatsApp resta byte-identico).
+        if (!ReplyChannels.isWhatsApp(notification.pkg)) {
+            ReplyChannels.appName(notification.pkg)?.let { append(" on ").append(it) }
+        }
         if (sender != null) append(" from ").append(sender)
         append(": ").append(text)
         if (stateLines.isNotEmpty()) {
@@ -469,7 +474,7 @@ Same meaning as the @@META@@ line, same rule 8. Do not write @@META@@."""
                     manifest.whitelistedContacts.forEachIndexed { index, contact ->
                         addJsonObject {
                             put("alias", ContactAliasMapper.aliasFor(index))
-                            put("display_name", contact.displayName)
+                            put("display_name", ContactAliasMapper.modelDisplayName(contact))
                         }
                     }
                 }
@@ -540,6 +545,12 @@ BINDING RULES:
    minimum classification; allowedTools must be exactly ["whatsapp_reply"],
    replyTargetSender=true and an explicit timeoutMs;
    use a static whatsapp_reply only if the user dictates the exact text of the reply.
+   Telegram (org.telegram.messenger, org.telegram.messenger.web), Signal (org.thoughtcrime.securesms)
+   and Google Messages (com.google.android.apps.messaging) get the SAME replies under the same rules:
+   a whitelisted contact on one of them shows "(App, pkg <package>)" in its display_name and the
+   trigger pkg must be exactly that package. The static reply there is notification_reply (never
+   whatsapp_reply); a generated reply is invoke_llm/invoke_llm_v2 exactly as above, allowedTools
+   still ["whatsapp_reply"] (the reply tool of every app). No automatic replies on any other app.
 10. If manifest.available_triggers is present, use ONLY the listed triggers (empty list =
     no armable trigger):
     "time", "immediate" (run-once-on-activation), "notification", "geofence";
@@ -552,6 +563,7 @@ BINDING RULES:
     "phone_state.call" also covers MISSED_CALL; the SIM filter needs "phone_state.sim".
     "manual" (user-started: button, widget, shortcut, tile) is always listed.
     "app_event" (an app opened or closed) is usable only if listed.
+    "calendar_event" (start or end of a calendar event) is usable only if listed.
     A requested trigger that is not in the list must NOT be compiled: briefly point out the
     missing grant or mechanism in Settings and return draft null with error_code
     "unsupported_capability".
@@ -688,6 +700,11 @@ Trigger, discriminated by "type":
 - {"type":"media", "state":"PLAYING"|"STOPPED"}  // music/video playback started / finished
 - {"type":"app_event", "pkg":string, "event":"OPENED"|"CLOSED"}  // an app comes to the foreground / leaves it
   (pkg = the exact package, from installed_app_candidates; opening and closing are two rules, see rule 17)
+- {"type":"calendar_event", "phase":"START"|"END", "offsetMinutes":integer, "titleMatch":string|null,
+   "calendar":string|null}  // at the start or end of each matching event in the phone's calendar, shifted by
+  offsetMinutes (-120..120, negative = before). titleMatch = the title contains it (any case), calendar = the
+  calendar's exact name; null = any. All-day, declined and "free" events never count. Never with run_shell or
+  ui_steps (an invitation is written by others). The event title can be bound as trigger_payload field "TITLE".
 - {"type":"manual"}  // runs ONLY when the user starts it by hand, any number of times: a button, a widget,
   a Home-screen shortcut or a quick-settings tile. Use it ONLY when the user asks for one of those.
   Doing something now, or a request with no trigger at all, is "immediate", never "manual".
@@ -707,6 +724,17 @@ Condition, discriminated by "type":
   "GT" and the bare number as value: it needs no state reader family.
 - {"type":"app_in_foreground", "pkg":string}
 - {"type":"location_in", "lat":number, "lng":number, "radiusM":number}
+- {"type":"weekday", "days":["MON"|"TUE"|"WED"|"THU"|"FRI"|"SAT"|"SUN",...], "tz":string}  // today, in tz
+  (IANA id as for time_window), is one of the days; at least one day
+- {"type":"wifi_connected", "ssid":string|null}  // connected to Wi-Fi; ssid = the EXACT network name the user
+  mentions, null = any network. A name also needs "connectivity.wifi.identity" in available_triggers
+- {"type":"bluetooth_connected", "device":string|null}  // a Bluetooth device is connected; device = its exact
+  name (any case) or MAC address, null = any device. Needs "connectivity.bt" in available_triggers
+- {"type":"headset_connected", "kind":"WIRED"|"BLUETOOTH"|"ANY"}  // headphones or a headset are connected
+  (wired and USB are WIRED); never the phone's own speaker
+- {"type":"calendar_busy", "titleMatch":string|null, "calendar":string|null}  // an event of the phone's
+  calendar is in progress now; filters as calendar_event, same exclusions. Needs "calendar_event" in
+  available_triggers (same calendar permission)
 - {"type":"and", "all":[Condition,...]}
 - {"type":"or", "any":[Condition,...]}
 - {"type":"not", "cond":Condition}
@@ -725,6 +753,13 @@ Action, discriminated by "type":
 - {"type":"tap", "x":integer, "y":integer}
 - {"type":"input_text", "text":string}
 - {"type":"whatsapp_reply", "text":string}
+- {"type":"notification_reply", "text":string}  // like whatsapp_reply (rule 9) for Telegram, Signal and
+   // Google Messages: replies in the 1:1 chat whose notification started the rule
+- {"type":"notification_action", "op":"DISMISS"|"SNOOZE"|"CLICK", "label":string|null,
+   "snoozeMinutes":integer|null}  // acts on the notification that started the rule (notification
+   // trigger only): DISMISS clears it, SNOOZE hides it for snoozeMinutes (1-1440, only with SNOOZE),
+   // CLICK presses its button whose visible text is exactly label (literal, never ${'$'}{var}; only with
+   // CLICK). Never a button that asks for text: use a reply for that. Not on system apps or Argus
 - {"type":"run_shell", "cmd":string}  // flat v1: literal command; P4: ${'$'}{var} interpolation allowed;
   // max 8192 characters; only with
   time/geofence/connectivity/sensor triggers or with a whitelisted 1:1 WhatsApp chat;
@@ -854,7 +889,8 @@ VarBinding, discriminated by "type":
    // for builtin readers and NUMBER/BOOLEAN; TEXT from setting/system_property/sysfs/dumpsys_field is TAINTED
 - {"type":"trigger_payload", "name":string, "field":"TEXT"|"TITLE"|"SENDER"|"NUMBER",
    "extractionRegex":string|null, "confidentiality":"PUBLIC"|"PRIVATE"|"SECRET"}
-   // EXTERNAL payload of the trigger (SMS/notification): integrity TAINTED, confidentiality >= PRIVATE.
+   // EXTERNAL payload of the trigger (SMS/notification; calendar_event: only TITLE): integrity TAINTED,
+   // confidentiality >= PRIVATE.
    // extractionRegex = first non-empty capture group, or the whole match; null = full field.
 - {"type":"random_int", "name":string, "max":integer (1..1000000)}
    // ENGINE-generated random integer in [0, max) (i.e. 0..max-1). Integrity CLEAN (not tainted, not a

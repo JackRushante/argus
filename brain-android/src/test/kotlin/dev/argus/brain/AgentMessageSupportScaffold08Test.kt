@@ -9,6 +9,7 @@ import dev.argus.engine.model.Trigger
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /**
  * Vocabolario 0.8: finché un tipo è dietro un FeatureGate spento, il modello non lo deve mai vedere. Chi
@@ -19,9 +20,8 @@ class AgentMessageSupportScaffold08Test {
 
     /** Il discriminatore wire di ogni tipo spento, com'è scritto nelle righe di schema del prompt. */
     private val hiddenTypes = listOf(
-        "calendar_event", "nfc_tag", "next_alarm", "app_usage",
-        "weekday", "wifi_connected", "bluetooth_connected", "headset_connected", "calendar_busy",
-        "ask", "notification_reply", "notification_action", "send_sms",
+        "nfc_tag", "next_alarm", "app_usage",
+        "ask", "send_sms",
         "call_number", "send_intent", "screen_call",
     )
 
@@ -35,25 +35,35 @@ class AgentMessageSupportScaffold08Test {
             .forEach { assertFalse(it in prompt, "il prompt nomina $it") }
     }
 
+    /** Tipi accesi: il prompt ne ha la riga di schema. */
+    private val switchedOn = mapOf(
+        FeatureGate.CONDITION_WEEKDAY to "weekday",
+        FeatureGate.CONDITION_WIFI_CONNECTED to "wifi_connected",
+        FeatureGate.CONDITION_BLUETOOTH_CONNECTED to "bluetooth_connected",
+        FeatureGate.CONDITION_HEADSET_CONNECTED to "headset_connected",
+        FeatureGate.CONDITION_CALENDAR_BUSY to "calendar_busy",
+        FeatureGate.TRIGGER_CALENDAR_EVENT to "calendar_event",
+        FeatureGate.ACTION_NOTIFICATION_REPLY to "notification_reply",
+        FeatureGate.ACTION_NOTIFICATION_ACTION to "notification_action",
+        FeatureGate.VAR_STORED to "stored",
+        FeatureGate.CONDITION_STORED_COMPARE to "stored_compare",
+        FeatureGate.CONDITION_USER_MODE_IS to "user_mode_is",
+        FeatureGate.TRIGGER_USER_MODE_CHANGED to "user_mode_changed",
+        FeatureGate.ACTION_SET_STORED to "set_stored",
+        FeatureGate.ACTION_SET_USER_MODE to "set_user_mode",
+    )
+
     @Test
     fun `only the switched-on gates are on, so this test still describes the prompt`() {
         // Quando un engineer accende un tipo, aggiorna anche [hiddenTypes] e questo elenco.
-        val switchedOn = setOf(
-            // 0.8: valori conservati e modalità.
-            FeatureGate.VAR_STORED,
-            FeatureGate.CONDITION_STORED_COMPARE,
-            FeatureGate.CONDITION_USER_MODE_IS,
-            FeatureGate.TRIGGER_USER_MODE_CHANGED,
-            FeatureGate.ACTION_SET_STORED,
-            FeatureGate.ACTION_SET_USER_MODE,
-        )
-        assertEquals(switchedOn, FeatureGate.entries.filter { it.enabled }.toSet())
+        assertEquals(switchedOn.keys, FeatureGate.entries.filter { it.enabled }.toSet())
     }
 
     @Test
-    fun `stored values and modes are described to the model`() {
-        listOf("set_stored", "set_user_mode", "stored_compare", "user_mode_is", "user_mode_changed", "stored")
-            .forEach { type -> kotlin.test.assertTrue("\"type\":\"$type\"" in prompt, "il prompt non descrive $type") }
+    fun `every switched-on type has its schema line`() {
+        switchedOn.values.forEach { type ->
+            assertTrue("\"type\":\"$type\"" in prompt, "il prompt non descrive $type")
+        }
     }
 
     @Test

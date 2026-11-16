@@ -5,7 +5,6 @@ import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.notification.ParsedNotification
 import dev.argus.engine.runtime.TriggerEvent
-import dev.argus.engine.safety.DraftValidator
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
@@ -73,7 +72,7 @@ class NotificationTriggerDemand(
  * Cosa fare di una notifica già interpretata: il lavoro (servizio in primo piano più controllo
  * delle regole) parte solo se [demand] dice che una regola armata può riguardarla.
  *
- * Eccezione voluta: una conversazione WhatsApp osservata alimenta il selettore dei contatti
+ * Eccezione voluta: una conversazione osservata a cui si può rispondere (WhatsApp, Telegram, Signal, Google Messaggi) alimenta il selettore dei contatti
  * (whitelist) anche quando non esiste ancora nessuna regola, quindi in quel caso parte solo il
  * salvataggio della conversazione, senza controllo delle regole.
  */
@@ -91,7 +90,7 @@ class NotificationWorkGate(
             return
         }
         val observed = parsed.observedConversation
-        if (observed != null && observed.packageName in DraftValidator.WHATSAPP_PACKAGES) {
+        if (observed != null && observed.isReplyConversation()) {
             startWork { persistObserved(parsed) }
         }
     }

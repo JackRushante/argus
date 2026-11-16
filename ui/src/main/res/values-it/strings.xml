@@ -189,7 +189,7 @@
     <string name="log_filter_remove">Rimuovi filtro</string>
     <string name="log_expand">Espandi</string>
     <string name="log_collapse">Comprimi</string>
-    <string name="log_copy_and_open">Copia e apri WhatsApp</string>
+    <string name="log_copy_and_open">Copia e apri l\'app della chat</string>
     <string name="log_mark_sent">Segna come inviata</string>
     <string name="log_open_automation">Apri automazione</string>
     <string name="log_menu_open">Opzioni del log</string>
@@ -270,8 +270,8 @@
     <string name="settings_notifications_ok">consentite</string>
     <string name="settings_notifications_warn">non consentite — esiti e avvisi non saranno visibili</string>
     <string name="settings_listener_title">Lettura notifiche</string>
-    <string name="settings_listener_ok">attiva — trigger WhatsApp e risposte disponibili</string>
-    <string name="settings_listener_warn">non attiva — trigger WhatsApp e risposte non armabili</string>
+    <string name="settings_listener_ok">attiva — trigger notifica e risposte disponibili</string>
+    <string name="settings_listener_warn">non attiva — trigger notifica e risposte non armabili</string>
     <string name="settings_listener_restricted_hint">Se Android dice \"Impostazione con restrizioni\": Impostazioni › App › Argus › ⋮ › Consenti impostazioni con restrizioni, poi riprova.</string>
     <string name="settings_location_title">Posizione in background</string>
     <string name="settings_location_granted">sempre — i geofence sono affidabili</string>
@@ -287,6 +287,9 @@
     <string name="settings_bt_title">Trigger Bluetooth</string>
     <string name="settings_bt_on">attivi — connessione e disconnessione dei dispositivi sono armabili</string>
     <string name="settings_bt_off">non attivi — consenti Dispositivi nelle vicinanze per armare le regole</string>
+    <string name="settings_calendar_title">Regole del calendario</string>
+    <string name="settings_calendar_on">attive — le regole possono leggere gli eventi del calendario</string>
+    <string name="settings_calendar_off">non attive — consenti Calendario per armare le regole che usano i tuoi eventi</string>
     <string name="settings_sentinel_title">Sentinella connettività</string>
     <string name="settings_sentinel_active">attiva — monitora Wi-Fi e alimentazione per le regole armate</string>
     <string name="settings_clibridge_title">CliBridge · Hermes</string>

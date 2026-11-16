@@ -93,8 +93,16 @@ internal object ActionRows08 {
         val details = listOfNotNull(
             a.label?.let { l.pick("button ${quoted(it)}", "pulsante ${quoted(it)}") },
             a.snoozeMinutes?.let { l.pick("for $it minutes", "per $it minuti") },
+            // L'app è quella del trigger (riga «Quando»): il pulsante si preme solo lì.
+            if (a.op == NotificationActionOp.CLICK) {
+                l.pick("in the app of the trigger, on your behalf", "nell'app del trigger, al posto tuo")
+            } else {
+                null
+            },
         )
+        // Premere un pulsante di un'altra app è come un tocco: porta il segno «conferma dal vivo».
         return row("notify", label, details.joinToString(" · ").ifEmpty { null })
+            .copy(requiresLiveConfirm = a.op == NotificationActionOp.CLICK)
     }
 
     fun sendSms(a: Action.SendSms, l: RenderLanguage) = row(

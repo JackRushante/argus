@@ -416,15 +416,95 @@ class NotificationReplyGatewayTest {
         assertEquals(0, registry.size())
     }
 
+    @Test
+    fun `telegram signal and google messages get a reply channel and a picker row from the conversation shortcut`() = runTest {
+        listOf("org.telegram.messenger", "org.thoughtcrime.securesms", "com.google.android.apps.messaging").forEach { pkg ->
+            val registry = ActiveNotificationReplyRegistry()
+            val conversations = FakeObservedConversationStore()
+            val ingress = NotificationIngress(
+                snapshotFactory = AndroidNotificationSnapshotFactory(),
+                parser = NotificationEventParser(),
+                handleFactory = NotificationReplyHandleFactory(),
+                registry = registry,
+                observedConversations = conversations,
+                dispatcher = NotificationEventDispatcher { },
+                privacyAccepted = { true },
+            )
+            val parsed = assertNotNull(ingress.registerPosted(statusBarNotification(pendingIntent(), packageName = pkg)))
+            val event = parsed.envelope.event as TriggerEvent.NotificationPosted
+            assertTrue(event.conversationId.orEmpty().startsWith("shortcut:$pkg:"), pkg)
+            assertEquals(1, registry.size(), pkg)
+            ingress.persistAndDispatch(parsed)
+            assertEquals(listOf(pkg), conversations.values.value.map { it.packageName })
+
+            val gateway = AndroidNotificationReplyGateway(context, registry)
+            assertIs<NotificationReplyDelivery.Sent>(
+                gateway.send(
+                    NotificationReplyRequest(
+                        packageName = pkg,
+                        notificationKey = event.notificationKey.orEmpty(),
+                        conversationId = event.conversationId.orEmpty(),
+                        eventId = parsed.envelope.id,
+                        text = "arrivo",
+                    ),
+                ),
+                pkg,
+            )
+        }
+    }
+
+    @Test
+    fun `outside whatsapp a conversation without shortcut gets no reply channel and no picker row`() = runTest {
+        val registry = ActiveNotificationReplyRegistry()
+        val conversations = FakeObservedConversationStore()
+        val ingress = NotificationIngress(
+            snapshotFactory = AndroidNotificationSnapshotFactory(),
+            parser = NotificationEventParser(),
+            handleFactory = NotificationReplyHandleFactory(),
+            registry = registry,
+            observedConversations = conversations,
+            dispatcher = NotificationEventDispatcher { },
+            privacyAccepted = { true },
+        )
+        val notification = statusBarNotification(pendingIntent(), packageName = "org.telegram.messenger", shortcutId = null)
+        val parsed = assertNotNull(ingress.registerPosted(notification))
+        // La Person URI dà un id «person:», che per Telegram non identifica la chat.
+        val event = parsed.envelope.event as TriggerEvent.NotificationPosted
+        assertTrue(event.conversationId.orEmpty().startsWith("person:"))
+        assertEquals(0, registry.size())
+        ingress.persistAndDispatch(parsed)
+        assertEquals(0, conversations.values.value.size)
+        val gateway = AndroidNotificationReplyGateway(context, registry)
+        assertEquals(
+            "reply_package_untrusted",
+            assertIs<NotificationReplyDelivery.Failed>(
+                gateway.send(
+                    NotificationReplyRequest(
+                        packageName = "org.telegram.messenger",
+                        notificationKey = event.notificationKey.orEmpty(),
+                        conversationId = event.conversationId.orEmpty(),
+                        eventId = parsed.envelope.id,
+                        text = "arrivo",
+                    ),
+                ),
+            ).code,
+        )
+        // Samsung Messaggi resta fuori anche con lo shortcut.
+        val samsung = statusBarNotification(pendingIntent(requestCode = 4), packageName = "com.samsung.android.messaging")
+        assertNotNull(ingress.registerPosted(samsung))
+        assertEquals(0, registry.size())
+    }
+
     private fun statusBarNotification(
         replyIntent: PendingIntent,
         message: String = "messaggio",
         packageName: String = "com.whatsapp",
+        shortcutId: String? = "shortcut-42",
     ): StatusBarNotification {
         val sender = Person.Builder().setName("Moglie").setUri("tel:+39000").build()
         val notification = Notification.Builder(context, "test")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setShortcutId("shortcut-42")
+            .setShortcutId(shortcutId)
             .setStyle(
                 Notification.MessagingStyle(Person.Builder().setName("Io").build())
                     .addMessage(message, 10L, sender),

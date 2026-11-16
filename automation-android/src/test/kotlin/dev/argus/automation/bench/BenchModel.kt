@@ -135,8 +135,6 @@ internal object BenchVocab {
      */
     val NOT_YET_AVAILABLE_ACTION_TYPES: Set<String> = setOf(
         ActionTypeIds.ASK,
-        ActionTypeIds.NOTIFICATION_REPLY,
-        ActionTypeIds.NOTIFICATION_ACTION,
         ActionTypeIds.SEND_SMS,
         ActionTypeIds.CALL_NUMBER,
         ActionTypeIds.SEND_INTENT,
