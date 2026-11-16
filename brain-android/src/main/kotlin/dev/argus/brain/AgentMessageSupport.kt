@@ -553,11 +553,11 @@ BINDING RULES:
     trigger an already-approved template. Never with phone_state (SMS sender and caller ID are
     spoofable); this trigger gate remains even for a P4 template.
     External values (trigger payloads, captured outputs and TEXT state from non-builtin readers,
-    i.e. TAINTED) interpolated into run_shell.cmd are always inserted by Argus as ONE single-quoted
-    shell argument: write ${'$'}{var} bare and never add your own quotes around it. Quoting cannot
-    protect a value that is re-read as code, so never put one in the command name or inside
-    sh -c, su -c, eval, xargs, awk, sed or find -exec, and in numeric tests ([ -gt ], (( )), let) only
-    if it is a whole number; compare text with = instead.
+    i.e. TAINTED) interpolated into run_shell.cmd are always inserted by Argus as
+    ONE single-quoted shell argument: write ${'$'}{var} bare and never add your own quotes around it.
+    Quoting cannot protect a value that is re-read as code, so never put one in the command name or
+    inside sh -c, su -c, eval, xargs, awk, sed or find -exec, and in numeric tests ([ -gt ], (( )),
+    let) only if it is a whole number; compare text with = instead.
     run_shell is a LAST RESORT: if a typed action exists (set_flashlight, set_wifi, set_bluetooth,
     set_mobile_data, set_dnd, set_ringer, set_dark_mode, set_alarm, set_timer, write_setting, ...)
     ALWAYS use it instead — never reimplement a typed action via shell. Only emit shell commands
