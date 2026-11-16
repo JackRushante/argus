@@ -76,10 +76,14 @@ class PrivilegedActionRunnerTest {
 
     private class FakeEnvironment(
         private val nfc: Boolean = true,
-        private val launchers: Set<String> = setOf("com.example.launcher"),
+        private val protectedApps: () -> Set<String> = { setOf("com.example.launcher", "com.example.keyboard") },
     ) : PrivilegedActionEnvironment {
+        var reads = 0
         override fun hasNfc() = nfc
-        override fun launcherPackages() = launchers
+        override fun protectedPackages(): Set<String> {
+            reads++
+            return protectedApps()
+        }
     }
 
     private val noon = 1_793_188_800_000L // 2026-10-28 12:00:00 UTC
@@ -124,7 +128,10 @@ class PrivilegedActionRunnerTest {
         val tools = FakeTools()
         val runner = runner(tools)
 
-        listOf("dev.argus", "dev.argus.debug", "com.android.systemui", "com.google.android.gms", "com.example.launcher")
+        listOf(
+            "dev.argus", "dev.argus.debug", "com.android.systemui", "com.google.android.gms", "com.example.launcher",
+            "com.example.keyboard", "com.android.shell", "com.google.android.webview",
+        )
             .forEach { pkg ->
                 AppControlOp.entries.forEach { op ->
                     assertEquals(
@@ -136,6 +143,34 @@ class PrivilegedActionRunnerTest {
             }
         assertEquals(ActionResult.Failure("target_forbidden"), runner.execute(Action.AppPermission("dev.argus", mic, true), context))
         assertEquals(emptyList(), tools.calls)
+    }
+
+    @Test
+    fun `app control is refused when the phone cannot say which apps to protect`() = runTest {
+        val tools = FakeTools()
+        val env = FakeEnvironment(protectedApps = { error("no HOME handler visible") })
+        val runner = runner(tools, env = env)
+
+        AppControlOp.entries.forEach { op ->
+            assertEquals(
+                ActionResult.Failure("protected_apps_unknown"),
+                runner.execute(Action.AppControl(youtube, op), context),
+                op.toString(),
+            )
+        }
+        assertEquals(emptyList(), tools.calls)
+        // Le altre azioni privilegiate non dipendono da quell'elenco.
+        assertEquals(ActionResult.Success, runner.execute(Action.LockScreen, context))
+    }
+
+    @Test
+    fun `the fixed list is checked before reading the phone`() = runTest {
+        val env = FakeEnvironment(protectedApps = { error("unreadable") })
+        assertEquals(
+            ActionResult.Failure("target_forbidden"),
+            runner(FakeTools(), env = env).execute(Action.AppControl("com.android.shell", AppControlOp.FREEZE), context),
+        )
+        assertEquals(0, env.reads)
     }
 
     @Test

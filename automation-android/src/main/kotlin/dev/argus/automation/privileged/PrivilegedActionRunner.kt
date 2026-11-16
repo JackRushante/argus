@@ -5,6 +5,7 @@ import dev.argus.engine.model.Action
 import dev.argus.engine.model.PrivilegedActionPolicy
 import dev.argus.engine.runtime.ActionResult
 import dev.argus.engine.runtime.FireContext
+import kotlinx.coroutines.CancellationException
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -21,8 +22,12 @@ interface PrivilegedActionEnvironment {
     /** Il telefono ha l'NFC (`FEATURE_NFC`). */
     fun hasNfc(): Boolean
 
-    /** Package del launcher in uso (o, se non è determinabile, di tutti i launcher installati). */
-    fun launcherPackages(): Set<String>
+    /**
+     * Package che `app_control` non può toccare su questo telefono, oltre all'elenco fisso: tutti i
+     * launcher installati, la tastiera predefinita, il fornitore WebView in uso. Lancia se non si
+     * riescono a leggere: l'esecutore allora rifiuta l'azione (fallisce chiuso).
+     */
+    fun protectedPackages(): Set<String>
 }
 
 /**
@@ -41,14 +46,7 @@ class PrivilegedActionRunner(
     private val zone: () -> ZoneId = ZoneId::systemDefault,
 ) {
     suspend fun execute(action: Action, ctx: FireContext): ActionResult = when (action) {
-        is Action.AppControl -> when (PrivilegedActionPolicy.appControlTarget(action.pkg, environment.launcherPackages())) {
-            PrivilegedActionPolicy.TargetVerdict.PACKAGE_INVALID -> ActionResult.Failure(ACTION_INVALID)
-            PrivilegedActionPolicy.TargetVerdict.FORBIDDEN -> ActionResult.Failure(TARGET_FORBIDDEN)
-            PrivilegedActionPolicy.TargetVerdict.OK -> {
-                tools.appControl(action.pkg, action.op, ctx.executionId, ctx.priority)
-                ActionResult.Success
-            }
-        }
+        is Action.AppControl -> appControl(action, ctx)
         is Action.AppPermission -> when {
             !PrivilegedActionPolicy.isRuntimePermission(action.permission) -> ActionResult.Failure(ACTION_INVALID)
             else -> when (PrivilegedActionPolicy.appPermissionTarget(action.pkg)) {
@@ -96,11 +94,36 @@ class PrivilegedActionRunner(
         else -> ActionResult.Failure(ACTION_INVALID)
     }
 
+    /**
+     * Prima l'elenco fisso, poi quello letto sul telefono. Se il telefono non dice quali app proteggere
+     * l'azione non parte: meglio un rifiuto che congelare il launcher o la tastiera.
+     */
+    private suspend fun appControl(action: Action.AppControl, ctx: FireContext): ActionResult {
+        when (PrivilegedActionPolicy.appControlTarget(action.pkg)) {
+            PrivilegedActionPolicy.TargetVerdict.PACKAGE_INVALID -> return ActionResult.Failure(ACTION_INVALID)
+            PrivilegedActionPolicy.TargetVerdict.FORBIDDEN -> return ActionResult.Failure(TARGET_FORBIDDEN)
+            PrivilegedActionPolicy.TargetVerdict.OK -> Unit
+        }
+        val deviceProtected = try {
+            environment.protectedPackages()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            return ActionResult.Failure(PROTECTED_APPS_UNKNOWN)
+        }
+        if (PrivilegedActionPolicy.appControlTarget(action.pkg, deviceProtected) != PrivilegedActionPolicy.TargetVerdict.OK) {
+            return ActionResult.Failure(TARGET_FORBIDDEN)
+        }
+        tools.appControl(action.pkg, action.op, ctx.executionId, ctx.priority)
+        return ActionResult.Success
+    }
+
     companion object {
         /** Cartella visibile all'utente (MediaStore `Pictures/Argus`). */
         const val SCREENSHOT_FOLDER = "Argus"
 
         const val TARGET_FORBIDDEN = "target_forbidden"
+        const val PROTECTED_APPS_UNKNOWN = "protected_apps_unknown"
         const val NFC_UNAVAILABLE = "nfc_unavailable"
         const val SCREENSHOT_SAVE_FAILED = "screenshot_save_failed"
         private const val ACTION_INVALID = "action_invalid"

@@ -85,7 +85,7 @@ class ShizukuActionExecutorPrivileged051Test {
     private val store = ScreenshotStore { _, _ -> true }
     private val environment = object : PrivilegedActionEnvironment {
         override fun hasNfc() = true
-        override fun launcherPackages() = setOf("com.example.launcher")
+        override fun protectedPackages() = setOf("com.example.launcher")
     }
 
     private fun executor(

@@ -174,8 +174,12 @@ internal object LogReasonLabels {
         ),
         // --- 0.5.1: azioni privilegiate tipizzate ---
         "target_forbidden" to Label(
-            "Argus, the launcher and essential system apps cannot be changed by a rule",
-            "Argus, il launcher e le app di sistema essenziali non si possono modificare con una regola",
+            "Argus, the launcher, the keyboard, WebView and essential system apps cannot be changed by a rule",
+            "Argus, il launcher, la tastiera, WebView e le app di sistema essenziali non si possono modificare con una regola",
+        ),
+        "protected_apps_unknown" to Label(
+            "Argus could not read which apps this phone needs (launcher, keyboard, WebView), so it changed nothing",
+            "Argus non è riuscito a leggere quali app servono al telefono (launcher, tastiera, WebView), quindi non ha cambiato nulla",
         ),
         "nfc_unavailable" to Label("this phone has no NFC", "questo telefono non ha l'NFC"),
         "permission_not_applied" to Label(

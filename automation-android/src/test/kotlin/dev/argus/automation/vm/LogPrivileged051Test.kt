@@ -15,6 +15,7 @@ import kotlin.test.assertTrue
 class LogPrivileged051Test {
     private val codes = listOf(
         "target_forbidden",
+        "protected_apps_unknown",
         "nfc_unavailable",
         "permission_not_applied",
         "screenshot_save_failed",
