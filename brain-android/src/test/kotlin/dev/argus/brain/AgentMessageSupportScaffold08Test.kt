@@ -9,6 +9,7 @@ import dev.argus.engine.model.Trigger
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /**
  * Vocabolario 0.8: finché un tipo è dietro un FeatureGate spento, il modello non lo deve mai vedere. Chi
@@ -22,8 +23,7 @@ class AgentMessageSupportScaffold08Test {
         "calendar_event", "nfc_tag", "next_alarm", "app_usage", "user_mode_changed",
         "weekday", "wifi_connected", "bluetooth_connected", "headset_connected", "calendar_busy",
         "stored_compare", "user_mode_is", "stored",
-        "ask", "set_stored", "set_user_mode", "notification_reply", "notification_action", "send_sms",
-        "call_number", "send_intent", "screen_call",
+        "ask", "set_stored", "set_user_mode", "notification_reply", "notification_action",
     )
 
     @Test
@@ -39,7 +39,22 @@ class AgentMessageSupportScaffold08Test {
     @Test
     fun `every gate is still off, so this test still describes the prompt`() {
         // Quando un engineer accende un tipo, aggiorna anche [hiddenTypes] e questo elenco.
-        assertEquals(emptyList(), FeatureGate.entries.filter { it.enabled })
+        assertEquals(switchedOn.keys, FeatureGate.entries.filter { it.enabled }.toSet())
+    }
+
+    /** Tipi accesi: la loro riga di schema è nel prompt. */
+    private val switchedOn = mapOf(
+        FeatureGate.ACTION_SEND_SMS to "send_sms",
+        FeatureGate.ACTION_CALL_NUMBER to "call_number",
+        FeatureGate.ACTION_SEND_INTENT to "send_intent",
+        FeatureGate.ACTION_SCREEN_CALL to "screen_call",
+    )
+
+    @Test
+    fun `every switched-on type has its schema line in the compile prompt`() {
+        switchedOn.values.forEach { type ->
+            assertTrue("{\"type\":\"$type\"" in prompt, "il prompt non descrive $type")
+        }
     }
 
     @Test

@@ -825,6 +825,24 @@ Action, discriminated by "type":
    // wait_for when the app must load. Never on Argus, Settings, the installer or permission dialogs.
    // Same triggers as run_shell (never sms/call/media/app_event). Needs the Accessibility service:
    // it is in available_tools only when that service is on
+- {"type":"send_sms", "number":string, "text":string}  // sends an SMS. number = a literal "+" (optional)
+   // and 7-15 digits only (no spaces, short codes, * or #), OR exactly "${'$'}{v}" where v is a trigger_payload
+   // var with field "NUMBER" and extractionRegex null on a phone_state trigger ("text back whoever called").
+   // text max 480 characters once filled; ${'$'}{var} allowed. At most 10 SMS an hour, 3 per number
+- {"type":"call_number", "number":string}  // places a phone call to a LITERAL number ("+" and 7-15 digits,
+   // never ${'$'}{var}, no * # or pauses). At most 3 calls an hour
+- {"type":"send_intent", "kind":"BROADCAST"|"ACTIVITY"|"SERVICE", "action":string|null, "pkg":string|null,
+   "cls":string|null, "data":string|null, "mimeType":string|null,
+   "extras":[{"name":string, "type":"STRING"|"INT"|"LONG"|"BOOLEAN"|"FLOAT", "value":string},...]}
+   // sends an Android Intent to another app (e.g. Tasker, a home-automation app). action, or pkg + cls
+   // together, required; SERVICE needs pkg + cls. Everything is literal except STRING extra values,
+   // which may hold ${'$'}{var}. Max 16 extras. Never Argus itself, never CALL/INSTALL/UNINSTALL/DELETE/
+   // FACTORY_RESET actions, never file:, javascript: or intent: data. Prefer a typed action when one exists
+- {"type":"screen_call", "op":"REJECT"|"SILENCE", "onlyUnknownCallers":boolean}  // rejects or silences an
+   // incoming call BEFORE it rings. ONLY with trigger {"type":"phone_state","event":"INCOMING_CALL"}
+   // (optional number filter, no sim), as a top-level action (never inside if/while), at most one per
+   // rule; conditions may only be time_window (and/or/not of them). onlyUnknownCallers=true spares the
+   // callers in the contacts (a hidden number counts as unknown). Other actions of the rule run after
 
 Schema v2 (P4) — OPTIONAL Tasker-class program. A draft stays v1 (flat: trigger + conditions +
 actions, described above and UNCHANGED) unless it uses one of the P4 constructs below. Emit P4 only
