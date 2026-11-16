@@ -50,14 +50,16 @@ class FeatureGatesTest {
             .onEach { assertEquals(Severity.ERROR, it.severity) }
             .map { it.detail }
 
+    /** Interruttori già accesi: ognuno ha i suoi test veri altrove. */
+    private val switchedOn: Set<FeatureGate> = setOf(
+        // Trigger fisici (PhysicalTriggers08Test).
+        FeatureGate.TRIGGER_NFC_TAG, FeatureGate.TRIGGER_NEXT_ALARM, FeatureGate.TRIGGER_APP_USAGE,
+        FeatureGate.TRIGGER_SENSOR_SHAKE, FeatureGate.TRIGGER_SENSOR_FLIP_FACE_DOWN,
+    )
+
     private val newTriggers: Map<FeatureGate, Trigger> = linkedMapOf(
         FeatureGate.TRIGGER_CALENDAR_EVENT to Trigger.CalendarEvent(CalendarPhase.START, -10, "Riunione", "Lavoro"),
-        FeatureGate.TRIGGER_NFC_TAG to Trigger.NfcTag("04:A2:19", resolveTag = false),
-        FeatureGate.TRIGGER_NEXT_ALARM to Trigger.NextAlarm(15),
-        FeatureGate.TRIGGER_APP_USAGE to Trigger.AppUsage("com.example.game", 60),
         FeatureGate.TRIGGER_USER_MODE_CHANGED to Trigger.UserModeChanged("lavoro"),
-        FeatureGate.TRIGGER_SENSOR_SHAKE to Trigger.Sensor(SensorKind.SHAKE),
-        FeatureGate.TRIGGER_SENSOR_FLIP_FACE_DOWN to Trigger.Sensor(SensorKind.FLIP_FACE_DOWN),
     )
 
     private val newConditions: Map<FeatureGate, Condition> = linkedMapOf(
@@ -98,14 +100,15 @@ class FeatureGatesTest {
     )
 
     @Test
-    fun `every gate is off in this version`() {
-        assertEquals(emptyList(), FeatureGate.entries.filter { it.enabled })
+    fun `every gate not yet switched on is off in this version`() {
+        assertEquals(emptyList(), FeatureGate.entries.filter { it.enabled && it !in switchedOn })
+        switchedOn.forEach { assertTrue(it.enabled, it.wireName) }
         assertEquals(FeatureGate.entries.size, FeatureGate.entries.map { it.wireName }.toSet().size)
     }
 
     @Test
     fun `the tables above cover every gate`() {
-        val covered = newTriggers.keys + newConditions.keys + newActions.keys +
+        val covered = newTriggers.keys + newConditions.keys + newActions.keys + switchedOn +
             setOf(FeatureGate.CONFIRM, FeatureGate.EXIT, FeatureGate.VAR_STORED)
         assertEquals(FeatureGate.entries.toSet(), covered)
     }
@@ -135,7 +138,7 @@ class FeatureGatesTest {
         assertEquals(listOf(FeatureGate.EXIT.wireName), notAvailable(draft(exit = ExitSpec(Trigger.Manual))))
         // Un tipo spento nel trigger o nelle azioni d'uscita conta anche lui.
         assertEquals(
-            listOf(FeatureGate.EXIT.wireName, FeatureGate.TRIGGER_NFC_TAG.wireName, FeatureGate.ACTION_CALL_NUMBER.wireName),
+            listOf(FeatureGate.EXIT.wireName, FeatureGate.ACTION_CALL_NUMBER.wireName),
             notAvailable(draft(exit = ExitSpec(Trigger.NfcTag("04"), actions = listOf(Action.CallNumber("+39"))))),
         )
     }
@@ -178,7 +181,14 @@ class FeatureGatesTest {
 
     @Test
     fun `shell may start from an nfc tag, never from the next alarm or the other new triggers`() {
-        val allowed = newTriggers.filterValues { StaticShellSafety.allows(it, emptySet()) }.keys
+        val physical = mapOf(
+            FeatureGate.TRIGGER_NFC_TAG to Trigger.NfcTag("04:A2:19", resolveTag = false),
+            FeatureGate.TRIGGER_NEXT_ALARM to Trigger.NextAlarm(15),
+            FeatureGate.TRIGGER_APP_USAGE to Trigger.AppUsage("com.example.game", 60),
+            FeatureGate.TRIGGER_SENSOR_SHAKE to Trigger.Sensor(SensorKind.SHAKE),
+            FeatureGate.TRIGGER_SENSOR_FLIP_FACE_DOWN to Trigger.Sensor(SensorKind.FLIP_FACE_DOWN),
+        )
+        val allowed = (newTriggers + physical).filterValues { StaticShellSafety.allows(it, emptySet()) }.keys
         assertEquals(
             setOf(
                 FeatureGate.TRIGGER_NFC_TAG,
@@ -189,8 +199,9 @@ class FeatureGatesTest {
         )
         val fingerprint = ApprovalFingerprint("a".repeat(64))
         val id = AutomationId("r")
-        assertTrue(StaticShellSafety.allows(Trigger.NfcTag("04:A2"), TriggerEvent.NfcTagScanned("04:a2"), emptySet()))
-        assertFalse(StaticShellSafety.allows(Trigger.NfcTag("04:A2"), TriggerEvent.NfcTagScanned("FF"), emptySet()))
+        assertTrue(StaticShellSafety.allows(Trigger.NfcTag("04:A2"), TriggerEvent.NfcTagScanned("04:a2", verified = true), emptySet()))
+        assertFalse(StaticShellSafety.allows(Trigger.NfcTag("04:A2"), TriggerEvent.NfcTagScanned("04:a2", verified = false), emptySet()))
+        assertFalse(StaticShellSafety.allows(Trigger.NfcTag("04:A2"), TriggerEvent.NfcTagScanned("FF", verified = true), emptySet()))
         assertFalse(StaticShellSafety.allows(Trigger.NextAlarm(5), TriggerEvent.NextAlarmFired(id, fingerprint), emptySet()))
         assertFalse(StaticShellSafety.allows(TriggerEvent.CalendarEventFired(id, CalendarPhase.START, fingerprint), emptySet()))
         assertFalse(StaticShellSafety.allows(TriggerEvent.AppUsageChanged("com.example.game", 59, 60), emptySet()))

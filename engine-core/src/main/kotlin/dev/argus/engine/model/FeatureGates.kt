@@ -63,22 +63,22 @@ enum class FeatureGate(
     TRIGGER_CALENDAR_EVENT("calendar_event", enabled = false),
 
     /** Trigger `nfc_tag`. */
-    TRIGGER_NFC_TAG("nfc_tag", enabled = false),
+    TRIGGER_NFC_TAG("nfc_tag", enabled = true),
 
     /** Trigger `next_alarm`. */
-    TRIGGER_NEXT_ALARM("next_alarm", enabled = false),
+    TRIGGER_NEXT_ALARM("next_alarm", enabled = true),
 
     /** Trigger `app_usage`. */
-    TRIGGER_APP_USAGE("app_usage", enabled = false),
+    TRIGGER_APP_USAGE("app_usage", enabled = true),
 
     /** Trigger `user_mode_changed`. */
     TRIGGER_USER_MODE_CHANGED("user_mode_changed", enabled = false),
 
     /** Trigger `sensor` con `kind` = `shake`. */
-    TRIGGER_SENSOR_SHAKE("sensor.shake", enabled = false),
+    TRIGGER_SENSOR_SHAKE("sensor.shake", enabled = true),
 
     /** Trigger `sensor` con `kind` = `flip_face_down`. */
-    TRIGGER_SENSOR_FLIP_FACE_DOWN("sensor.flip_face_down", enabled = false),
+    TRIGGER_SENSOR_FLIP_FACE_DOWN("sensor.flip_face_down", enabled = true),
 
     // --- Azioni ----------------------------------------------------------------------------------
 
