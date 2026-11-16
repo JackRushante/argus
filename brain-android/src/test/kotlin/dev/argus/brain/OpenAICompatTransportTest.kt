@@ -1433,6 +1433,24 @@ class OpenAICompatTransportTest {
         assertEquals(2, server.requestCount)
     }
 
+    @Test fun `a transient 500 or a 4xx about something else makes only that compile fall back`(): Unit = runBlocking {
+        // 500 passeggero: si scende per questa richiesta, ma il compile dopo riparte da json_schema.
+        server.enqueue(jsonResponse("""{"error":{"message":"upstream hiccup"}}""").setResponseCode(500))
+        server.enqueue(jsonResponse(chatContent(envelope("Prima."))))
+        // 400 che non nomina il parametro: idem.
+        server.enqueue(jsonResponse("""{"error":{"message":"temporary validation glitch"}}""").setResponseCode(400))
+        server.enqueue(jsonResponse(chatContent(envelope("Seconda."))))
+        server.enqueue(jsonResponse(chatContent(envelope("Terza."))))
+        val t = transport(ProviderId.CUSTOM_OPENAI_COMPAT, model = "m")
+
+        assertEquals("Prima.", t.compile("crea", manifest(), deviceState()).reply)
+        assertEquals("Seconda.", t.compile("crea", manifest(), deviceState()).reply)
+        assertEquals("Terza.", t.compile("crea", manifest(), deviceState()).reply)
+
+        val types = List(5) { formatType(assertNotNull(server.takeRequest(2, TimeUnit.SECONDS))) }
+        assertEquals(listOf("json_schema", "json_object", "json_schema", "json_object", "json_schema"), types)
+    }
+
     @Test fun `a refusal that is not about the format is not remembered`(): Unit = runBlocking {
         // Tre rifiuti di fila (modello inesistente): l'errore e' quello del modello, non del formato.
         repeat(3) { server.enqueue(jsonResponse("""{"error":{"message":"x is not a valid model ID"}}""").setResponseCode(400)) }

@@ -149,9 +149,10 @@ class AnthropicMessagesTransport internal constructor(
             )
         } catch (error: TransportException) {
             if (!structured || !StructuredOutput.isRejection(error)) throw error
-            return compileAt(false, true, message, token, model, manifest, state)
+            return compileAt(false, StructuredOutput.isLastingRejection(error), message, token, model, manifest, state)
         }
-        // Il protocollo base ha risposto dopo un rifiuto: da ora questo modello parte da lì.
+        // Il protocollo base ha risposto dopo un rifiuto che nomina `output_config`: da ora questo modello
+        // parte da lì. Un errore passeggero del server fa ripiegare solo questa richiesta.
         if (fellBack) structuredRejected = true
         // B15: l'usage viaggia su TUTTI i rami (anche errori di formato e troncamenti): il turno è costato.
         val usage = response.toTurnUsage(fallbackModel = model)

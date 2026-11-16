@@ -147,7 +147,7 @@ class OpenAICompatTransport internal constructor(
         val cleanMessage = AgentMessageSupport.requireMessage(message)
         val token = resolveApiKey()
         val model = resolveModel()
-        return compileAt(structuredStart(), false, cleanMessage, token, model, manifest, state)
+        return compileAt(structuredStart(), NO_LATCH, cleanMessage, token, model, manifest, state)
     }
 
     /** Livello da cui parte il compile: quello del catalogo, alzato dai rifiuti già visti da questo server. */
@@ -158,9 +158,13 @@ class OpenAICompatTransport internal constructor(
             StructuredLevel.NONE
         }
 
+    /**
+     * [latchTo]: il livello da ricordare se questa richiesta riesce, cioè quello sotto l'ultimo rifiuto
+     * DUREVOLE ([StructuredOutput.isLastingRejection]); [NO_LATCH] se i rifiuti visti erano passeggeri.
+     */
     private suspend fun compileAt(
         level: StructuredLevel,
-        fellBack: Boolean,
+        latchTo: Int,
         message: String,
         token: String?,
         model: String,
@@ -182,10 +186,13 @@ class OpenAICompatTransport internal constructor(
             postChat(token, request, clientErrorsOnly = true)
         } catch (error: TransportException) {
             if (level == StructuredLevel.NONE || !StructuredOutput.isRejection(error)) throw error
-            return compileAt(level.next(), true, message, token, model, manifest, state)
+            val next = level.next()
+            val latch = if (StructuredOutput.isLastingRejection(error)) next.ordinal else latchTo
+            return compileAt(next, latch, message, token, model, manifest, state)
         }
-        // Un livello più basso ha risposto dopo un rifiuto: da ora questo server parte da lì.
-        if (fellBack) structuredFloor = maxOf(structuredFloor, level.ordinal)
+        // Un livello più basso ha risposto dopo un rifiuto che nomina il parametro: da ora questo server
+        // parte da lì. Un 5xx passeggero o un 4xx su altro non lasciano memoria.
+        if (latchTo != NO_LATCH) structuredFloor = maxOf(structuredFloor, latchTo)
         val usage = response.toTurnUsage(fallbackModel = model)
         val choice = response.choices.firstOrNull()
         val text = choice?.message?.content?.trim()
@@ -1042,6 +1049,9 @@ class OpenAICompatTransport internal constructor(
         const val GEMINI_MAX_OUTPUT_TOKENS = 2_048
         const val GEMINI_THINKING_BUDGET = 1_024
         const val REPLY_TOOL_MISSING = "reply_tool_missing"
+        const val RESPONSES_COMPLETED = "completed"
+        const val NO_LATCH = -1
+        const val GEMINI_STOP = "STOP"
 
         /** Tetto ai passi dei server tool di una richiesta OpenRouter (come le ricerche delle altre vie web). */
         const val OPENROUTER_MAX_TOOL_CALLS = 3
