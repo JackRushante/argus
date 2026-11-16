@@ -4,6 +4,7 @@ import dev.argus.engine.model.Action
 import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.Condition
 import dev.argus.engine.model.ConfidentialityLabel
+import dev.argus.engine.model.TelephonyActionPolicy
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.model.VarBinding
 
@@ -170,7 +171,12 @@ object PersonalDataStripper {
             headers = action.headers?.mapValues { REMOVED_HEADER_VALUE },
         )
         // 0.8: numeri di telefono e dati degli Intent (URI ed extra possono portare contatti o indirizzi).
-        is Action.SendSms -> action.copy(number = REMOVED_TEXT)
+        // Il segnaposto col numero di chi ha chiamato o scritto non è un dato personale: resta.
+        is Action.SendSms -> if (TelephonyActionPolicy.placeholder(action.number) != null) {
+            action
+        } else {
+            action.copy(number = REMOVED_TEXT)
+        }
         is Action.CallNumber -> action.copy(number = REMOVED_TEXT)
         is Action.SendIntent -> action.copy(
             data = removed(action.data),
