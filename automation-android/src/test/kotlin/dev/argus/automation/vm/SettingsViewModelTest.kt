@@ -2228,6 +2228,18 @@ private class FakeRulesBackup : RulesBackup {
         failure?.let { throw it }
         return importOutcome
     }
+
+    /** Passphrase ricevute, come testo: solo nel fake, per verificare cosa arriva al servizio. */
+    val passphrases = mutableListOf<String>()
+    var encryptedOutcome: ImportOutcome = ImportOutcome.Done(ImportSummary(imported = 2, discarded = emptyMap()))
+
+    override suspend fun importEncrypted(source: Uri, passphrase: CharArray): ImportOutcome {
+        imports += source
+        passphrases += String(passphrase)
+        gate?.await()
+        failure?.let { throw it }
+        return encryptedOutcome
+    }
 }
 
 private class FakeDeferredReplyStore : DeferredReplyStore {

@@ -10,6 +10,8 @@ import dev.argus.engine.safety.DraftId
 import dev.argus.engine.safety.DraftWriteResult
 import dev.argus.engine.safety.NewDraft
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
@@ -26,7 +28,24 @@ fun interface BulkDraftWriter {
 /** Esporta e importa le regole. Il confine usato da Impostazioni. */
 interface RulesBackup {
     suspend fun export(destination: Uri, stripPersonalData: Boolean): ExportOutcome
+
+    /** Un file cifrato risponde [BackupFailure.PASSPHRASE_REQUIRED]: si richiama [importEncrypted]. */
     suspend fun import(source: Uri): ImportOutcome
+
+    /**
+     * Import di un file cifrato (`.argusbackup`) con la passphrase dell'utente; poi tutto come [import].
+     * La passphrase non viene conservata; il chiamante azzera l'array dopo la chiamata.
+     */
+    suspend fun importEncrypted(source: Uri, passphrase: CharArray): ImportOutcome
+}
+
+/** Derivazione della chiave di un file cifrato: lenta (600 000 iterazioni), fuori dal thread principale. */
+fun interface BackupKeyDeriver {
+    suspend fun derive(passphrase: CharArray, salt: ByteArray): ByteArray
+}
+
+val DefaultBackupKeyDeriver = BackupKeyDeriver { passphrase, salt ->
+    withContext(Dispatchers.Default) { BackupKeyDerivation.derive(passphrase, salt) }
 }
 
 /**
@@ -47,20 +66,45 @@ class RulesBackupService(
     private val appVersion: () -> String?,
     private val nowMillis: () -> Long = System::currentTimeMillis,
     private val newId: () -> String = { UUID.randomUUID().toString() },
+    private val keyDeriver: BackupKeyDeriver = DefaultBackupKeyDeriver,
 ) : RulesBackup {
 
     override suspend fun export(destination: Uri, stripPersonalData: Boolean): ExportOutcome {
+        val built = when (val result = build(stripPersonalData)) {
+            is BuiltBackup.Failed -> return ExportOutcome.Failed(result.failure)
+            is BuiltBackup.Ready -> result
+        }
+        return try {
+            documents.write(destination, built.bytes)
+            ExportOutcome.Done(exported = built.exported, skipped = built.skipped)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: IOException) {
+            ExportOutcome.Failed(BackupFailure.WRITE_FAILED)
+        } catch (_: RuntimeException) {
+            // SecurityException / IllegalArgumentException di un provider di documenti.
+            ExportOutcome.Failed(BackupFailure.WRITE_FAILED)
+        }
+    }
+
+    /**
+     * Il testo dell'export COMPLETO (con i dati personali), lo stesso di «Esporta» senza l'opzione: è
+     * quello che il backup automatico cifra.
+     */
+    suspend fun buildFullBackup(): BuiltBackup = build(stripPersonalData = false)
+
+    private suspend fun build(stripPersonalData: Boolean): BuiltBackup {
         val all = try {
             automations.all()
         } catch (error: CancellationException) {
             throw error
         } catch (_: Exception) {
-            return ExportOutcome.Failed(BackupFailure.WRITE_FAILED)
+            return BuiltBackup.Failed(BackupFailure.WRITE_FAILED)
         }
         val exportable = all.filter { it.isBackupExportable() }
-        if (exportable.isEmpty()) return ExportOutcome.Failed(BackupFailure.NOTHING_TO_EXPORT)
+        if (exportable.isEmpty()) return BuiltBackup.Failed(BackupFailure.NOTHING_TO_EXPORT)
         if (exportable.size > RulesBackupFormat.MAX_RULES) {
-            return ExportOutcome.Failed(BackupFailure.EXPORT_TOO_LARGE)
+            return BuiltBackup.Failed(BackupFailure.EXPORT_TOO_LARGE)
         }
         // «Da rivedere» ma illeggibili (segnaposto senza azioni) non hanno nulla da esportare.
         val skipped = all.count { it.status in CANDIDATE_STATUSES } - exportable.size
@@ -78,33 +122,79 @@ class RulesBackupService(
             appVersion = appVersion() ?: "unknown",
         ).toByteArray(Charsets.UTF_8)
         if (bytes.size > RulesBackupFormat.MAX_FILE_BYTES) {
-            return ExportOutcome.Failed(BackupFailure.EXPORT_TOO_LARGE)
+            return BuiltBackup.Failed(BackupFailure.EXPORT_TOO_LARGE)
         }
-        return try {
-            documents.write(destination, bytes)
-            ExportOutcome.Done(exported = rules.size, skipped = skipped)
-        } catch (error: CancellationException) {
-            throw error
-        } catch (_: IOException) {
-            ExportOutcome.Failed(BackupFailure.WRITE_FAILED)
-        } catch (_: RuntimeException) {
-            // SecurityException / IllegalArgumentException di un provider di documenti.
-            ExportOutcome.Failed(BackupFailure.WRITE_FAILED)
-        }
+        return BuiltBackup.Ready(bytes, exported = rules.size, skipped = skipped)
     }
 
     override suspend fun import(source: Uri): ImportOutcome {
+        val bytes = when (val read = readImport(source)) {
+            is ImportRead.Failed -> return ImportOutcome.Failed(read.failure)
+            is ImportRead.Bytes -> read.bytes
+        }
+        if (EncryptedBackupFormat.hasMagic(bytes)) return ImportOutcome.Failed(BackupFailure.PASSPHRASE_REQUIRED)
+        return importPlain(bytes)
+    }
+
+    override suspend fun importEncrypted(source: Uri, passphrase: CharArray): ImportOutcome {
+        val bytes = when (val read = readImport(source)) {
+            is ImportRead.Failed -> return ImportOutcome.Failed(read.failure)
+            is ImportRead.Bytes -> read.bytes
+        }
+        val salt = when (val header = EncryptedBackupFormat.header(bytes)) {
+            // Non cifrato (il file è cambiato dopo la scelta): si importa come sempre.
+            EncryptedBackupFormat.Header.WrongMagic -> return importPlain(bytes)
+            EncryptedBackupFormat.Header.Truncated -> return ImportOutcome.Failed(BackupFailure.ENCRYPTED_DAMAGED)
+            is EncryptedBackupFormat.Header.Valid -> header.salt
+        }
+        val key = try {
+            keyDeriver.derive(passphrase, salt)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            return ImportOutcome.Failed(BackupFailure.WRONG_PASSPHRASE)
+        }
+        val opened = try {
+            EncryptedBackupFormat.open(bytes, key)
+        } finally {
+            key.fill(0)
+        }
+        return when (opened) {
+            is EncryptedBackupFormat.Opened.Plain -> importPlain(opened.bytes)
+            EncryptedBackupFormat.Opened.WrongKeyOrDamaged -> ImportOutcome.Failed(BackupFailure.WRONG_PASSPHRASE)
+            EncryptedBackupFormat.Opened.Truncated -> ImportOutcome.Failed(BackupFailure.ENCRYPTED_DAMAGED)
+            EncryptedBackupFormat.Opened.WrongMagic -> importPlain(bytes)
+        }
+    }
+
+    private sealed interface ImportRead {
+        class Bytes(val bytes: ByteArray) : ImportRead
+        data class Failed(val failure: BackupFailure) : ImportRead
+    }
+
+    /**
+     * Legge il file scelto. Il limite è quello di sempre per un file in chiaro; un file cifrato può
+     * superarlo solo dei byte dell'intestazione e del tag.
+     */
+    private suspend fun readImport(source: Uri): ImportRead {
         val read = try {
-            documents.read(source, RulesBackupFormat.MAX_FILE_BYTES)
+            documents.read(source, RulesBackupFormat.MAX_FILE_BYTES + EncryptedBackupFormat.OVERHEAD_BYTES)
         } catch (error: CancellationException) {
             throw error
         } catch (_: IOException) {
-            return ImportOutcome.Failed(BackupFailure.READ_FAILED)
+            return ImportRead.Failed(BackupFailure.READ_FAILED)
         } catch (_: RuntimeException) {
-            return ImportOutcome.Failed(BackupFailure.READ_FAILED)
+            return ImportRead.Failed(BackupFailure.READ_FAILED)
         }
-        val bytes = read ?: return ImportOutcome.Failed(BackupFailure.FILE_TOO_LARGE)
+        val bytes = read ?: return ImportRead.Failed(BackupFailure.FILE_TOO_LARGE)
+        if (!EncryptedBackupFormat.hasMagic(bytes) && bytes.size > RulesBackupFormat.MAX_FILE_BYTES) {
+            return ImportRead.Failed(BackupFailure.FILE_TOO_LARGE)
+        }
+        return ImportRead.Bytes(bytes)
+    }
 
+    private suspend fun importPlain(bytes: ByteArray): ImportOutcome {
+        if (bytes.size > RulesBackupFormat.MAX_FILE_BYTES) return ImportOutcome.Failed(BackupFailure.FILE_TOO_LARGE)
         val text = decodeUtf8(bytes) ?: return ImportOutcome.Failed(BackupFailure.NOT_JSON)
         val entries = when (val decoded = RulesBackupCodec.decode(text)) {
             is DecodedBackup.Rejected -> return ImportOutcome.Failed(decoded.failure)

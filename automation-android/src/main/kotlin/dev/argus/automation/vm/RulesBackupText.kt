@@ -89,6 +89,18 @@ internal object RulesBackupText {
             "The file is damaged or is not a JSON file.",
             "Il file è danneggiato o non è un file JSON.",
         )
+        BackupFailure.PASSPHRASE_REQUIRED -> language.pick(
+            "This backup is encrypted: enter its passphrase.",
+            "Questo backup è cifrato: inserisci la sua passphrase.",
+        )
+        BackupFailure.WRONG_PASSPHRASE -> language.pick(
+            "Wrong passphrase, or the file was changed after the backup. Nothing was imported.",
+            "Passphrase errata, oppure il file è stato modificato dopo il backup. Non è stato importato nulla.",
+        )
+        BackupFailure.ENCRYPTED_DAMAGED -> language.pick(
+            "The encrypted backup is incomplete: the file was cut short.",
+            "Il backup cifrato è incompleto: il file è stato troncato.",
+        )
         BackupFailure.WRONG_FORMAT -> language.pick(
             "This is not an Argus rules export.",
             "Non è un'esportazione di regole Argus.",
