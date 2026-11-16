@@ -177,12 +177,11 @@ class FeatureGatesTest {
     }
 
     @Test
-    fun `shell may start from an nfc tag or the next alarm, never from the other new triggers`() {
+    fun `shell may start from an nfc tag, never from the next alarm or the other new triggers`() {
         val allowed = newTriggers.filterValues { StaticShellSafety.allows(it, emptySet()) }.keys
         assertEquals(
             setOf(
                 FeatureGate.TRIGGER_NFC_TAG,
-                FeatureGate.TRIGGER_NEXT_ALARM,
                 FeatureGate.TRIGGER_SENSOR_SHAKE,
                 FeatureGate.TRIGGER_SENSOR_FLIP_FACE_DOWN,
             ),
