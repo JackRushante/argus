@@ -176,6 +176,22 @@ internal object LogReasonLabels {
             "external data in a JSON body must sit inside a quoted string",
             "un dato esterno in un body JSON deve stare dentro una stringa tra virgolette",
         ),
+        "shell_quote_context" to Label(
+            "external data sits where the shell command cannot keep it inert",
+            "un dato esterno è in un punto del comando shell dove non resta inerte",
+        ),
+        "shell_numeric_context" to Label(
+            "the shell command expected a whole number and the external data was not one",
+            "il comando shell si aspettava un numero intero e il dato esterno non lo era",
+        ),
+        "write_setting_key_interpolated" to Label(
+            "the setting name must be literal",
+            "il nome dell'impostazione deve essere scritto per esteso",
+        ),
+        "url_host_changed" to Label(
+            "the filled-in address pointed to a different site than the approved one",
+            "l'indirizzo completato portava a un sito diverso da quello approvato",
+        ),
         // --- 0.5.1: azioni privilegiate tipizzate ---
         "target_forbidden" to Label(
             "Argus, the launcher, the keyboard, WebView and essential system apps cannot be changed by a rule",

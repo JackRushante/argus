@@ -24,6 +24,10 @@ class LogReasonLabelsActions041Test {
         "http_redirect_blocked",
         "http_too_many_redirects",
         "json_quote_context",
+        "shell_quote_context",
+        "shell_numeric_context",
+        "write_setting_key_interpolated",
+        "url_host_changed",
     )
 
     @Test

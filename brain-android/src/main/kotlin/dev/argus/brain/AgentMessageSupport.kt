@@ -561,9 +561,12 @@ BINDING RULES:
     WhatsApp chat (isGroup=false) whose conversationId is whitelisted: a verified contact can
     trigger an already-approved template. Never with phone_state (SMS sender and caller ID are
     spoofable); this trigger gate remains even for a P4 template.
-    External values (trigger payloads and captured outputs, i.e. TAINTED) interpolated into
-    run_shell.cmd are always inserted by Argus as ONE single-quoted shell argument: write
-    ${'$'}{var} bare and never add your own quotes around it.
+    External values (trigger payloads, captured outputs and TEXT state from non-builtin readers,
+    i.e. TAINTED) interpolated into run_shell.cmd are always inserted by Argus as
+    ONE single-quoted shell argument: write ${'$'}{var} bare and never add your own quotes around it.
+    Quoting cannot protect a value that is re-read as code, so never put one in the command name or
+    inside sh -c, su -c, eval, xargs, awk, sed or find -exec, and in numeric tests ([ -gt ], (( )),
+    let) only if it is a whole number; compare text with = instead.
     run_shell is a LAST RESORT: if a typed action exists (set_flashlight, set_wifi, set_bluetooth,
     set_mobile_data, set_dnd, set_ringer, set_dark_mode, set_alarm, set_timer, write_setting, ...)
     ALWAYS use it instead — never reimplement a typed action via shell. Only emit shell commands
@@ -752,7 +755,8 @@ Action, discriminated by "type":
 - {"type":"write_setting", "namespace":"SYSTEM"|"SECURE"|"GLOBAL", "key":string, "value":string}
    // writes ANY Android setting by key (write-side counterpart of state.setting).
    // Requires Shizuku (appears in available_tools only when available). Flat v1 key/value are
-   // literal; P4 may interpolate ${'$'}{var} under the approved data-flow policy. The template is shown
+   // literal; P4 may interpolate ${'$'}{var} in value only (key is always literal) under the approved
+   // data-flow policy. The template is shown
    // in review. key without spaces/control chars; value non-empty,
    // <=1024 chars, no NUL/newline/control chars. Prefer a typed action when one
    // exists (e.g. set_dnd, set_alarm, set_dark_mode, set_brightness, set_rotation): use write_setting
@@ -832,7 +836,8 @@ VarBinding, discriminated by "type":
 - {"type":"literal", "name":string, "value":string, "varType":"TEXT"|"NUMBER"|"BOOLEAN",
    "confidentiality":"PUBLIC"|"PRIVATE"|"SECRET"}   // trusted constant, integrity CLEAN
 - {"type":"state", "name":string, "query":StateQuery, "valueType":"TEXT"|"NUMBER"|"BOOLEAN",
-   "policyVersion":1, "confidentiality":"PUBLIC"|"PRIVATE"|"SECRET"}   // local reader, integrity CLEAN
+   "policyVersion":1, "confidentiality":"PUBLIC"|"PRIVATE"|"SECRET"}   // local reader: integrity CLEAN
+   // for builtin readers and NUMBER/BOOLEAN; TEXT from setting/system_property/sysfs/dumpsys_field is TAINTED
 - {"type":"trigger_payload", "name":string, "field":"TEXT"|"TITLE"|"SENDER"|"NUMBER",
    "extractionRegex":string|null, "confidentiality":"PUBLIC"|"PRIVATE"|"SECRET"}
    // EXTERNAL payload of the trigger (SMS/notification): integrity TAINTED, confidentiality >= PRIVATE.

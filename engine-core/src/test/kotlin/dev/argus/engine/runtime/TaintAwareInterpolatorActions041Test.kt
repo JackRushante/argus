@@ -70,6 +70,19 @@ class TaintAwareInterpolatorActions041Test {
             "interpolation_too_long",
             blockedCode(interpolator.resolve(Action.Speak("\${x}"), scope("x" to clean("a".repeat(4_001))))),
         )
+        // Lo stesso limite di 1000 caratteri che il validatore applica al template.
+        assertEquals(
+            "interpolation_too_long",
+            blockedCode(interpolator.resolve(Action.Speak("\${x}"), scope("x" to tainted("a".repeat(1_001))))),
+        )
+        assertEquals(
+            "a".repeat(1_000),
+            assertIs<Action.Speak>(
+                assertIs<ActionResolution.Resolved>(
+                    interpolator.resolve(Action.Speak("\${x}"), scope("x" to tainted("a".repeat(1_000)))),
+                ).value.action,
+            ).text,
+        )
         assertEquals(
             "variable_unavailable",
             blockedCode(interpolator.resolve(Action.Speak("\${missing}"), scope())),

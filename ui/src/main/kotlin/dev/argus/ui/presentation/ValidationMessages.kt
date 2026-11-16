@@ -331,8 +331,24 @@ object ValidationMessages {
             "I dati esterni non sono ammessi in questo campo di comando o destinazione.",
         ),
         "interpolation_shell_context" to t(
-            "External data sits where a shell command cannot quote it safely (command substitution, backticks, here-document or comment): the action would be blocked when it runs.",
-            "Un dato esterno è in un punto del comando shell dove non si può quotare in sicurezza (sostituzione di comando, backtick, here-document o commento): l'azione verrebbe bloccata all'esecuzione.",
+            "External data sits where a shell command cannot quote it safely (command substitution, backticks, here-document, comment, a variable name, or a number with other text attached): the action would be blocked when it runs.",
+            "Un dato esterno è in un punto del comando shell dove non si può quotare in sicurezza (sostituzione di comando, backtick, here-document, commento, nome di variabile o numero con altro testo attaccato): l'azione verrebbe bloccata all'esecuzione.",
+        ),
+        "interpolation_shell_command_position" to t(
+            "External data is in the command name position: it would choose which program runs. Write the command name literally.",
+            "Un dato esterno è al posto del nome del comando: sceglierebbe quale programma parte. Scrivi il nome del comando per esteso.",
+        ),
+        "interpolation_shell_reevaluated" to t(
+            "External data goes to a command that reads it again as code (sh -c, eval, su, xargs, awk, sed, find -exec…): quotes cannot protect it, so the action could never run.",
+            "Un dato esterno va a un comando che lo rilegge come codice (sh -c, eval, su, xargs, awk, sed, find -exec…): gli apici non lo proteggono, quindi l'azione non potrebbe mai partire.",
+        ),
+        "interpolation_shell_numeric" to t(
+            "External data is used where the shell computes a number: when the rule runs it must be a whole number, otherwise the action is blocked.",
+            "Un dato esterno è usato dove la shell calcola un numero: quando la regola gira deve essere un numero intero, altrimenti l'azione si blocca.",
+        ),
+        "interpolation_shell_option" to t(
+            "External data starts a command argument with no \"--\" before it: a value starting with \"-\" would be read as an option.",
+            "Un dato esterno apre un argomento del comando senza \"--\" prima: un valore che inizia con \"-\" verrebbe letto come un'opzione.",
         ),
         "secret_interpolation_disclosure" to t(
             "A secret variable will be sent to the configured AI service.",
@@ -364,6 +380,10 @@ object ValidationMessages {
         "url_invalid" to t(
             "The URL is not valid or its scheme is not allowed.",
             "L'URL non è valido o lo schema non è consentito.",
+        ),
+        "url_userinfo" to t(
+            "The URL has a name or credentials before \"@\": the address would open a different site than the one it seems to show.",
+            "L'URL ha un nome o delle credenziali prima di \"@\": l'indirizzo aprirebbe un sito diverso da quello che sembra.",
         ),
         "title_invalid" to t("The title is missing or too long.", "Il titolo manca o è troppo lungo."),
         "text_invalid" to t("The text is missing or too long.", "Il testo manca o è troppo lungo."),
@@ -422,6 +442,10 @@ object ValidationMessages {
             "The setting name is not valid (shape or length).",
             "Il nome dell'impostazione non è valido (forma o lunghezza).",
         ),
+        "write_setting_key_interpolated" to t(
+            "The setting name must be written literally, without variables.",
+            "Il nome dell'impostazione va scritto per esteso, senza variabili.",
+        ),
         "write_setting_value_invalid" to t(
             "The setting value is empty, too long or contains control characters.",
             "Il valore dell'impostazione è vuoto, troppo lungo o contiene caratteri di controllo.",
@@ -431,12 +455,16 @@ object ValidationMessages {
             "L'impostazione viene scritta esattamente come mostrato nella regola: controlla namespace, nome e valore.",
         ),
         "write_setting_high_impact" to t(
-            "This rule changes a phone security setting (debugging, accessibility, keyboard or app verification). Only arm it if you know what it does.",
-            "Questa regola cambia un'impostazione di sicurezza del telefono (debug, accessibilità, tastiera o verifica delle app). Armala solo se sai cosa fa.",
+            "This rule changes a phone security setting (debugging, accessibility, keyboard, app verification, notification access, autofill, assistant, proxy or DNS). Only arm it if you know what it does.",
+            "Questa regola cambia un'impostazione di sicurezza del telefono (debug, accessibilità, tastiera, verifica delle app, accesso alle notifiche, compilazione automatica, assistente, proxy o DNS). Armala solo se sai cosa fa.",
         ),
         "write_setting_external_value" to t(
-            "The value written comes from external data (a message or notification).",
-            "Il valore scritto arriva da un dato esterno (messaggio o notifica).",
+            "The value written comes from external data (a message, a notification or text read from the phone).",
+            "Il valore scritto arriva da un dato esterno (messaggio, notifica o testo letto dal telefono).",
+        ),
+        "invisible_characters" to t(
+            "The command, address or setting contains invisible or text-direction characters: what you see may not be what runs.",
+            "Il comando, l'indirizzo o l'impostazione contiene caratteri invisibili o che cambiano la direzione del testo: quello che vedi può non essere quello che viene eseguito.",
         ),
 
         // --- Azioni generative ----------------------------------------------------------------

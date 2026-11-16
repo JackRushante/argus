@@ -254,6 +254,43 @@ class TaintAwareInterpolatorTest {
         assertEquals("interpolation_too_long", oversizedLiteral.code)
     }
 
+    @Test
+    fun `a resolved url with a name before the host is blocked`() {
+        val blocked = assertIs<ActionResolution.Blocked>(
+            interpolator.resolve(Action.OpenUrl("https://\${host}/x"), scope("host", tainted("bank.example@other.example"))),
+        )
+        assertEquals("resolved_action_invalid", blocked.code)
+    }
+
+    @Test
+    fun `a literal url host stays the approved host whatever the data`() {
+        listOf("@other.example/", "//other.example/", "x?y#z@other.example", "%40other.example").forEach { value ->
+            when (val resolution = interpolator.resolve(Action.OpenUrl("https://example.com/\${p}"), scope("p", tainted(value)))) {
+                is ActionResolution.Resolved ->
+                    assertEquals("example.com", java.net.URI(assertIs<Action.OpenUrl>(resolution.value.action).url).host, value)
+                is ActionResolution.Blocked -> assertTrue(resolution.code in setOf("resolved_action_invalid", "url_host_changed"), value)
+            }
+        }
+    }
+
+    @Test
+    fun `a write setting whose approved key is interpolated never runs`() {
+        val blocked = assertIs<ActionResolution.Blocked>(
+            interpolator.resolve(
+                Action.WriteSetting(dev.argus.engine.model.SettingNamespace.GLOBAL, "\${key}", "1"),
+                scope("key", clean("adb_enabled")),
+            ),
+        )
+        assertEquals("write_setting_key_interpolated", blocked.code)
+        val literal = assertIs<ActionResolution.Resolved>(
+            interpolator.resolve(
+                Action.WriteSetting(dev.argus.engine.model.SettingNamespace.SYSTEM, "screen_off_timeout", "\${v}"),
+                scope("v", tainted("30000")),
+            ),
+        )
+        assertEquals("30000", assertIs<Action.WriteSetting>(literal.value.action).value)
+    }
+
     private fun scope(name: String, value: VarValue) = VarScope(mapOf(name to value))
 
     private fun tainted(text: String) = VarValue(
