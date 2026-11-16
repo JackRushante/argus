@@ -48,6 +48,23 @@ class CronScheduleTest {
         // "giorno 1 del mese OPPURE lunedì": dopo mercoledì 1/7 sera viene lunedì 6/7, non il 1/8
         assertEquals(Instant.parse("2026-07-06T07:00:00Z"), next("0 9 1 * 1", "2026-07-01T12:00:00Z"))
     }
+    @Test fun `vixie - a day field starting with star is unrestricted so the two fields combine with AND`() {
+        // "*/2" nel giorno del mese comincia con '*': non è ristretto, quindi vale AND col lunedì.
+        // Lunedì di luglio 2026: 6, 13, 20, 27 -> il primo dispari è il 13 (non venerdì 3, dispari).
+        assertEquals(Instant.parse("2026-07-13T07:00:00Z"), next("0 9 */2 * 1", "2026-07-01T12:00:00Z"))
+        // Simmetrico: giorno 1 del mese ristretto, dow "*/2" (dom, mar, gio, sab) non ristretto -> AND.
+        // 1/8/2026 è sabato: il primo "giorno 1" che cade in dom/mar/gio/sab dopo il 1/7 (mercoledì).
+        assertEquals(Instant.parse("2026-08-01T07:00:00Z"), next("0 9 1 * */2", "2026-07-01T12:00:00Z"))
+        // Due campi entrambi a stella con passo: AND (giorni dispari che sono dom/mar/gio/sab).
+        // 2/7 giovedì (pari), 3/7 venerdì, 4/7 sabato (pari), 5/7 domenica (dispari) -> 5 luglio.
+        assertEquals(Instant.parse("2026-07-05T07:00:00Z"), next("0 9 */2 * */2", "2026-07-01T12:00:00Z"))
+    }
+    @Test fun `a date that never occurs has no fire time`() {
+        assertNull(next("0 9 30 2 *", "2026-07-01T12:00:00Z"))
+        assertNull(next("0 9 31 4,6,9,11 *", "2026-07-01T12:00:00Z"))
+        // Con un giorno della settimana ristretto vale l'OR: scatta comunque di lunedì.
+        assertNotNull(next("0 9 30 2 1", "2026-07-01T12:00:00Z"))
+    }
     @Test fun `leap day`() {
         assertEquals(Instant.parse("2028-02-29T11:00:00Z"), next("0 12 29 2 *", "2026-03-01T00:00:00Z"))
     }
