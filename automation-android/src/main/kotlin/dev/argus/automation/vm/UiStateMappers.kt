@@ -7,6 +7,8 @@ import dev.argus.data.entities.ActionResultEntity
 import dev.argus.data.entities.ScheduledTimeAlarmEntity
 import dev.argus.engine.model.ActionTier
 import dev.argus.engine.model.ActionTypeIds
+import dev.argus.engine.model.Action
+import dev.argus.engine.model.AppPackages
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.Trigger
@@ -19,6 +21,8 @@ import dev.argus.engine.runtime.TimeSpecs
 import dev.argus.engine.safety.PendingDraft
 import dev.argus.engine.safety.Severity
 import dev.argus.ui.model.AutomationRow
+import dev.argus.ui.model.ProgramNode
+import dev.argus.ui.model.RuleRender
 import dev.argus.ui.model.LogOutcome
 import dev.argus.ui.model.LogRow
 import dev.argus.ui.model.StatusBadge
@@ -48,6 +52,8 @@ internal fun Automation.toAutomationRow(
     pendingEditDraftId: String? = null,
     /** Sveglia persistita della regola: da qui si legge il vero «prossimo scatto» dei ritardi relativi. */
     scheduledAlarm: ScheduledTimeAlarmEntity? = null,
+    /** 0.7.2: nome delle app per package (dal telefono), per la ricerca. */
+    appLabels: Map<String, String> = emptyMap(),
 ): AutomationRow {
     val render = RuleRenderMapper.map(this, conversationLabels, language)
     val nextFireAt = nextFireAtMillis(this, nowMillis, scheduledAlarm)
@@ -64,6 +70,8 @@ internal fun Automation.toAutomationRow(
         nextFireLabel = nextFireAt?.let { dayTimeLabel(it, nowMillis, language) },
         pendingEditDraftId = pendingEditDraftId,
         nextFireAtMillis = nextFireAt,
+        actionSummary = render.actionSummary(),
+        appNames = appNamesOf(trigger, actions, appLabels),
     )
 }
 
@@ -71,6 +79,8 @@ internal fun PendingDraft.toAutomationRow(
     review: ApprovalFlowReview?,
     conversationLabels: Map<String, String> = emptyMap(),
     language: RenderLanguage = RenderLanguage.system(),
+    /** 0.7.2: nome delle app per package (dal telefono), per la ricerca. */
+    appLabels: Map<String, String> = emptyMap(),
 ): AutomationRow {
     val render = RuleRenderMapper.mapDraft(draft, conversationLabels, language)
     return AutomationRow(
@@ -86,7 +96,36 @@ internal fun PendingDraft.toAutomationRow(
             .isNotEmpty(),
         lastFiredLabel = null,
         nextFireLabel = null,
+        actionSummary = render.actionSummary(),
+        appNames = appNamesOf(draft.trigger, draft.actions, appLabels),
     )
+}
+
+/**
+ * 0.7.2: le azioni della regola in breve per la riga della lista, dai tipi ([RuleRender], mai dalla prosa del
+ * modello): le etichette delle azioni, senza doppioni, al più tre e poi «…». Per un programma P4 le foglie.
+ */
+internal fun RuleRender.actionSummary(): String? {
+    val labels = actions.map { it.label }.ifEmpty { program.flatMap(::leafLabels) }
+        .map(String::trim)
+        .filter(String::isNotEmpty)
+        .distinct()
+    if (labels.isEmpty()) return null
+    return labels.take(MAX_SUMMARY_ACTIONS).joinToString(", ") + if (labels.size > MAX_SUMMARY_ACTIONS) ", …" else ""
+}
+
+private const val MAX_SUMMARY_ACTIONS = 3
+
+private fun leafLabels(node: ProgramNode): List<String> = when (node) {
+    is ProgramNode.Leaf -> listOf(node.row.label)
+    is ProgramNode.IfNode -> node.then.flatMap(::leafLabels) + node.orElse.flatMap(::leafLabels)
+    is ProgramNode.WhileNode -> node.body.flatMap(::leafLabels)
+}
+
+/** 0.7.2: nomi delle app che la regola nomina (quelli che il telefono conosce), per la ricerca. */
+internal fun appNamesOf(trigger: Trigger, actions: List<Action>, appLabels: Map<String, String>): List<String> {
+    if (appLabels.isEmpty()) return emptyList()
+    return AppPackages.packagesToCheck(trigger, actions).mapNotNull(appLabels::get).distinct()
 }
 
 internal fun reviewWarnings(
