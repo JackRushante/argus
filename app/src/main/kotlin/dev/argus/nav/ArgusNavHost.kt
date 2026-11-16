@@ -85,6 +85,8 @@ import dev.argus.automation.vm.ExecutionLogViewModel
 import dev.argus.automation.vm.OnboardingEvent
 import dev.argus.automation.vm.OnboardingViewModel
 import dev.argus.automation.vm.SettingsViewModel
+import dev.argus.automation.vm.SecretsEvent
+import dev.argus.automation.vm.SecretsViewModel
 import dev.argus.automation.vm.TemplateGalleryEvent
 import dev.argus.automation.vm.TemplateGalleryViewModel
 import dev.argus.data.backup.RulesBackupFormat
@@ -104,6 +106,7 @@ import dev.argus.ui.model.ShizukuStatus
 import dev.argus.ui.model.StatusFilter
 import dev.argus.ui.model.StepKind
 import dev.argus.ui.model.TemplateCategoryUi
+import dev.argus.ui.model.SecretsCallbacks
 import dev.argus.ui.model.TemplateGalleryCallbacks
 import dev.argus.ui.presentation.ChatDictation
 import dev.argus.ui.screens.AutomationDetailScreen
@@ -112,6 +115,7 @@ import dev.argus.ui.screens.ChatScreen
 import dev.argus.ui.screens.ExecutionLogScreen
 import dev.argus.ui.screens.OnboardingScreen
 import dev.argus.ui.screens.SettingsScreen
+import dev.argus.ui.screens.SecretsScreen
 import dev.argus.ui.screens.TemplateGalleryScreen
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
@@ -125,6 +129,7 @@ private object Routes {
     const val DETAIL = "detail/{id}"
     const val ONBOARDING = "onboarding"
     const val TEMPLATES = "templates"
+    const val SECRETS = "secrets"
     const val LOG_PATTERN = "$LOG?automationId={automationId}&automationName={automationName}"
 
     fun detail(id: String): String = "detail/${Uri.encode(id)}"
@@ -476,6 +481,30 @@ fun ArgusNavHost() {
                     )
                 }
 
+                // 0.8: Sistema › Segreti. Nomi e conteggi soltanto: un valore va dal foglio alla cassaforte.
+                composable(Routes.SECRETS) {
+                    val viewModel: SecretsViewModel = hiltViewModel()
+                    val state by viewModel.state.collectAsStateWithLifecycle()
+                    LaunchedEffect(viewModel) {
+                        viewModel.events.collect { event ->
+                            when (event) {
+                                is SecretsEvent.Message -> showMessage(event.text)
+                            }
+                        }
+                    }
+                    SecretsScreen(
+                        state = state,
+                        callbacks = object : SecretsCallbacks {
+                            override fun onBack() {
+                                navController.popBackStack()
+                            }
+                            override fun onSave(name: String, value: String) = viewModel.onSave(name, value)
+                            override fun onDelete(name: String) = viewModel.onDelete(name)
+                        },
+                        modifier = Modifier.testTag("screen_secrets"),
+                    )
+                }
+
                 composable(
                     route = Routes.LOG_PATTERN,
                     arguments = listOf(
@@ -715,6 +744,9 @@ fun ArgusNavHost() {
                             override fun onRevokePrivacy() = settingsViewModel.revokePrivacy()
                             override fun onRerunOnboarding() {
                                 navController.navigate(Routes.ONBOARDING)
+                            }
+                            override fun onOpenSecrets() {
+                                navController.navigate(Routes.SECRETS) { launchSingleTop = true }
                             }
                             override fun onSelectProvider(providerId: String) =
                                 settingsViewModel.selectProvider(providerId)

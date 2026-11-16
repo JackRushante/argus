@@ -20,6 +20,8 @@ import dev.argus.engine.runtime.FireClaimRequest
 import dev.argus.engine.runtime.FireClaimResult
 import dev.argus.engine.secrets.SecretEntry
 import dev.argus.engine.secrets.SecretVault
+import dev.argus.automation.vm.secretRows
+import dev.argus.ui.model.SecretRowUi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
@@ -102,6 +104,22 @@ class SecretRuleLinksTest {
         assertEquals(listOf(AutomationId("armed"), AutomationId("off")), store.reviewed)
         assertEquals(listOf(AuditKind.RULE_NEEDS_REVIEW, AuditKind.RULE_NEEDS_REVIEW), events.map { it.kind })
         assertTrue(events.all { it.detail == "secret_deleted" && "ha_token" !in it.detail })
+    }
+
+    @Test
+    fun `the secrets screen counts the rules that use each name and never sees a value`() {
+        val rows = secretRows(
+            listOf(SecretEntry("ha_token", 5L), SecretEntry("meteo_api"), SecretEntry("unused")),
+            listOf(
+                rule("a", AutomationStatus.ARMED, "ha_token"),
+                rule("b", AutomationStatus.DISABLED, "ha_token"),
+                rule("c", AutomationStatus.NEEDS_REVIEW, "meteo_api"),
+            ),
+        )
+        assertEquals(
+            listOf(SecretRowUi("ha_token", 2, 5L), SecretRowUi("meteo_api", 1, null), SecretRowUi("unused", 0, null)),
+            rows,
+        )
     }
 
     @Test
