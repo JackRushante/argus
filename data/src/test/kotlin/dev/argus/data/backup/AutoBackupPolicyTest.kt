@@ -23,7 +23,7 @@ class AutoBackupPolicyTest {
 
     @Test
     fun `the file name carries the local date and time`() {
-        assertEquals("argus-rules-20261116-0310.argusbackup", AutoBackupRetention.fileName(at("2026-11-16T03:10:59")))
+        assertEquals("argus-rules-20261116-0310.argusbackup", AutoBackupRetention.fileName(at("2026-11-16T03:10:59"), rome))
         assertTrue(AutoBackupRetention.isAutoBackupName("argus-rules-20261116-0310.argusbackup"))
         assertFalse(AutoBackupRetention.isAutoBackupName("argus-rules-2026-11-16.json"))
         assertFalse(AutoBackupRetention.isAutoBackupName("argus-rules-20261116-0310 (1).argusbackup"))
