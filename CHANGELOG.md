@@ -2,6 +2,100 @@
 
 Release and engineering notes, newest first.
 
+## v0.7.2 (unreleased) — External data in shell commands, approval transparency, reliability
+
+This release closes the findings of a full code audit of 0.7.1. Some approved rules behave differently
+afterwards; those cases are listed under "Changed".
+
+### Security and privacy
+
+- Text read from the phone by a state reader (`setting`, `system_property`, `sysfs`, `dumpsys_field`:
+  network names, media titles, device names) is now external data, like the text of a message. In a
+  shell command it is quoted as one argument; before, it was inserted as written. Built-in states,
+  numbers and booleans stay trusted, and numbers are inserted in canonical form.
+- Quoting is no longer trusted where it cannot protect. External data is refused (an error at approval,
+  a block at run time) when it would be the name of the command, or an argument of a command that reads
+  its arguments again as code: `sh -c`, `su`, `eval`, `source`, `xargs`, `awk`, `sed`, `find -exec` and
+  the like, also behind `env`, `nohup`, `timeout`, `busybox` or a pipe.
+- Where the shell evaluates a number (`[ … -gt … ]`, `test`, `[[ ]]`, `(( ))`, `let`, integer
+  variables, array indexes) external data must be a whole number when the rule runs, or the action is
+  blocked: the Android shell evaluates those operands as expressions even when they are quoted. The same
+  holds for external data saved in a shell variable and read back without quotes.
+- New warning at approval when external data could be read as an option of the command (no `--` before it).
+- `write_setting`: the setting name must be written literally. More settings get the "security setting"
+  warning (notification listeners, autofill and credential services, assistant, proxy, private DNS,
+  mock location).
+- `open_url`: an address with a name before `@` is rejected, and external data can no longer move a
+  link away from the site written in the rule.
+- Screen macros stay on their app: every tap, typed text and scroll checks that the app of the macro is
+  still in front, and stops otherwise. They also refuse the system interface (USB-debugging and
+  screen-capture dialogs), Shizuku, root managers, the Play Store, VPN and certificate dialogs and
+  vendor security apps.
+- Freeze and force stop refuse the shell, the settings storage, permission controllers, WebView,
+  KernelSU Next, every installed launcher and the current keyboard; if the phone cannot tell which apps
+  to protect, the action is refused. Approval warns when a rule freezes a preinstalled app.
+- Changing the address of an AI server removes the saved key unless you enter a new one; the provider
+  sheet says so before saving and has a "Remove key" action.
+- Editing a rule in the chat no longer sends HTTP header values and secret variables to the AI.
+- Exports "without personal data" also remove secret values, Wi-Fi and Bluetooth names and notification
+  titles; the removed sender, chat and number must be filled in again before the imported rule can be
+  armed (before, the rule matched everyone).
+- More header names are masked at approval (cookie, session, signature, credentials). A root command
+  that times out no longer leaves child processes running, and a revoked Shizuku permission stops
+  commands at once.
+- Self-hosted bridge: bounded connections and output, child processes killed as a group, malformed
+  requests answered with a closed error.
+
+### Fixed
+
+- A "in N minutes" rule edited and approved again fired at the old time; it now counts from the new
+  approval, and switching it back on restarts the timer.
+- Switching between two Wi-Fi networks fires "disconnected" for the old one and "connected" for the
+  new one; before, the change could be dropped as a duplicate. Arming "when I connect to X" while
+  already connected no longer fires at once.
+- Long programs no longer stop after 70 minutes with the screen off, and an exact alarm in Doze runs
+  when it is due instead of at the next wake-up.
+- Location rules no longer fire "arrived" again when the app process restarts.
+- A missed call is no longer lost if the app dies while the "call ended" rule runs.
+- Time rules recover after "Alarms & reminders" is revoked. The persistent notification goes away when
+  nothing needs it any more.
+- AI replies to a burst of more than eight messages answer the whole burst, a second AI rule on the
+  same chat runs, and a failed reply no longer marks the other messages as answered.
+- A cut-off AI answer is never sent as a reply, shown as a notification or saved in a variable (OpenAI
+  and Gemini with web search did not notice the cut).
+- A model draft with a misspelled field is rejected and retried once; before, the field vanished and
+  the rule could be broader than the model had described.
+- "App in the foreground" without Shizuku no longer turns false when you change screen inside the app.
+- `not (x > 5)` with a non-numeric `x` is no longer true.
+- A schedule that can never fire (30 February) is rejected at approval.
+- The Log no longer shows a blocked program as fired, nor a rule switched off mid-run as an error;
+  "Why didn't it fire?" warns when the last run's actions failed.
+- Calls that time out count toward the hourly and daily AI caps; providers that report no usage show
+  estimated tokens ("≈") that count toward the token cap; budget alerts come back after you change the
+  limits; one odd usage field no longer hides a whole turn from the budget.
+- Log trimming keeps pending manual replies and the protection against duplicate events.
+- A temporary provider error no longer switches structured output off for the session, and provider
+  requests are not sent twice after a dropped connection.
+- The "Change app" sheet no longer spins forever after the app is killed in the background.
+
+### Changed
+
+- Approval shows the cooldown under WHEN, draws invisible and text-direction characters as visible
+  `⟨U+…⟩` markers, shows line breaks inside typed text and request bodies as `⏎`, writes the real host of
+  a link on its own line, reads loop conditions as "While…", marks rules that come from an imported
+  file, lists every unit of a delay ("1 day and 30 minutes"), says "about" for flexible times and shows
+  the volume as a percentage. Labels that were raw codes are translated.
+- A program stops at 30 AI calls in one run; approval warns about an AI call inside a loop and states
+  the worst case per run.
+- In a cron schedule, a day field that starts with `*` (such as `*/2`) no longer counts as a
+  restriction: `0 9 */2 * 1` fires on Mondays that fall on odd days, as in standard cron, not on every
+  odd day plus every Monday.
+- HTTP header values must be plain ASCII (they failed at every run before; now approval says so).
+- Read-aloud text is limited to 1000 characters after its variables are filled in.
+- Rules approved before this release that put external data in one of the positions now refused show
+  the error and must be rewritten. A screen macro that opens another app on purpose (a share sheet, a
+  browser tab) now stops there.
+
 ## v0.7.1 (2026-11-16) — AI servers on your network, response timeout, copyable chat
 
 ### Added
