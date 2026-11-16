@@ -59,6 +59,9 @@ class Engine(
             "remote_egress_blocked",
             "p4_invoke_llm_v2_unsupported",
         )
+
+        /** Programma fermato perché la regola è stata spenta, cancellata o modificata durante l'esecuzione. */
+        private const val PROGRAM_CANCELLED = "cancelled"
     }
 
     data class FireOutcome(
@@ -332,18 +335,19 @@ class Engine(
                         )
                     }
                     actionResults += result.steps.map { it.result }
-                    if (!result.completed) {
-                        val code = requireNotNull(result.stopCode)
+                    val stopCode = result.stopCode
+                    if (stopCode != null) {
                         recordAudit(
                             AuditEvent(
                                 automation.id,
-                                if (code in PROGRAM_POLICY_STOPS) {
-                                    AuditKind.BLOCKED_POLICY
-                                } else {
-                                    AuditKind.ERROR
+                                when (stopCode) {
+                                    // Regola spenta o cambiata a metà: non è un guasto (B11).
+                                    PROGRAM_CANCELLED -> AuditKind.SUPPRESSED_NOT_ELIGIBLE
+                                    in PROGRAM_POLICY_STOPS -> AuditKind.BLOCKED_POLICY
+                                    else -> AuditKind.ERROR
                                 },
                                 now().coerceAtLeast(0),
-                                detail = code,
+                                detail = stopCode,
                                 eventId = envelope.id,
                                 executionId = executionId,
                             ),
@@ -353,15 +357,22 @@ class Engine(
                         actionResults.completion(
                             executionId,
                             now().coerceAtLeast(0),
-                            forcedStatus = when {
-                                result.completed -> null
-                                result.stopCode == "cancelled" -> ExecutionStatus.CANCELLED
+                            forcedStatus = when (stopCode) {
+                                null -> null
+                                PROGRAM_CANCELLED -> ExecutionStatus.CANCELLED
                                 else -> ExecutionStatus.FAILED
                             },
                         ),
                     )
-                    if (result.stopCode == "cancelled") {
+                    if (stopCode == PROGRAM_CANCELLED) {
                         claimed = false
+                        continue
+                    }
+                    if (stopCode != null && stopCode in PROGRAM_POLICY_STOPS) {
+                        // B11: già registrato come BLOCKED_POLICY, mai anche come FIRED. L'esito resta
+                        // nei risultati (le azioni già eseguite contano per one-shot e Log).
+                        claimed = false
+                        outcomes += FireOutcome(automation, automation.actions, actionResults.toList(), envelope.id, executionId)
                         continue
                     }
                 } else {
