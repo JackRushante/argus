@@ -12,6 +12,7 @@ import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -253,6 +254,35 @@ class PhoneEventIngressTest {
         }
 
     @Test
+    fun `a process death during call ended still delivers the missed call on recovery`() = runTest {
+        val seen = mutableListOf<TriggerEnvelope>()
+        val dying = PhoneEventIngress(PhoneEventParser(), callState) { envelope ->
+            seen += envelope
+            if ((envelope.event as TriggerEvent.PhoneStateChanged).event == PhoneEvent.CALL_ENDED) {
+                error("process dies")
+            }
+        }
+        dying.onCallStateChanged("RINGING", "3932077480", 1_000L)
+        assertFailsWith<IllegalStateException> {
+            dying.onCallStateChanged("IDLE", null, 2_000L)
+        }
+        val endedId = seen.last().id
+
+        val retried = mutableListOf<TriggerEnvelope>()
+        val restarted = PhoneEventIngress(PhoneEventParser(), callState) { retried += it }
+        assertTrue(restarted.recoverPending())
+
+        assertEquals(
+            listOf(PhoneEvent.CALL_ENDED, PhoneEvent.MISSED_CALL),
+            retried.map { (it.event as TriggerEvent.PhoneStateChanged).event },
+        )
+        assertEquals(endedId, retried.first().id, "stesso id: il journal deduplica")
+        assertEquals("3932077480", (retried.last().event as TriggerEvent.PhoneStateChanged).number)
+        assertNull(callState.pending())
+        assertFalse(restarted.recoverPending())
+    }
+
+    @Test
     fun `failed call dispatch survives process death with the exact same event id`() = runTest {
         var failedId: String? = null
         val failing = PhoneEventIngress(PhoneEventParser(), callState) { envelope ->
@@ -276,14 +306,18 @@ class PhoneEventIngressTest {
 private class InMemoryCallStateStore : CallStateStore {
     private var value: CallStateSnapshot? = null
     private var pending: TriggerEnvelope? = null
+    private var next: TriggerEnvelope? = null
     override fun last(): CallStateSnapshot? = value
     override fun pending(): TriggerEnvelope? = pending
-    override fun record(snapshot: CallStateSnapshot, pending: TriggerEnvelope?) {
+    override fun record(snapshot: CallStateSnapshot, pending: TriggerEnvelope?, next: TriggerEnvelope?) {
+        require(next == null || pending != null)
         value = snapshot
         this.pending = pending
+        this.next = next
     }
     override fun complete(eventId: String) {
         require(pending?.id?.value == eventId)
-        pending = null
+        pending = next
+        next = null
     }
 }
