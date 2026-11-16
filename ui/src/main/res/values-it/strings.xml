@@ -499,6 +499,15 @@
     <string name="rda_ap_picker_current">in uso</string>
     <string name="rda_ap_picker_pick_cd">Usa %1$s</string>
     <string name="rda_ap_run_now_fallback">Esegui ora non è ancora disponibile.</string>
+    <!-- 0.7.2 · Cosa cambia quando approvi una modifica (prefisso diff_) -->
+    <string name="diff_title">Cosa cambia</string>
+    <string name="diff_subtitle">Rispetto alla versione approvata. La regola intera resta qui sotto.</string>
+    <string name="diff_nothing">Non cambia nulla di ciò che viene eseguito: cambiano solo il nome o la descrizione.</string>
+    <string name="diff_added">Aggiunto</string>
+    <string name="diff_removed">Tolto</string>
+    <string name="diff_changed">Cambiato</string>
+    <string name="diff_before">Prima</string>
+    <string name="diff_now">Ora</string>
     <!-- Issue #19: endpoint http:// sulla rete locale -->
     <string name="provider_unencrypted_lan_warning">Connessione non cifrata: la chiave e le tue richieste viaggiano in chiaro. Usala solo su una rete di cui ti fidi.</string>
     <!-- Issue #20: tempo massimo di risposta -->

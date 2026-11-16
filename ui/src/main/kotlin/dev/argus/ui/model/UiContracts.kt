@@ -4,6 +4,7 @@ import dev.argus.engine.model.ActionTypeIds
 import dev.argus.engine.runtime.AuditKind
 import dev.argus.engine.safety.Severity
 import dev.argus.ui.presentation.RenderLanguage
+import dev.argus.ui.presentation.RuleChangeRow
 
 // =============================================================================
 // Contratti di stato UI (handoff-frontend.md §6). Kotlin UI-layer: stringhe
@@ -340,6 +341,11 @@ data class AutomationDetailState(
     val appChoices: List<AppChoiceUi>? = null,
     /** 0.7.2 (S8): la bozza viene da un file importato (`createdBy = IMPORT`), non dalla chat: l'approvazione lo dice. */
     val imported: Boolean = false,
+    /**
+     * 0.7.2: la bozza sostituisce una regola già approvata (armata o disattivata): le righe rese che cambiano
+     * rispetto a quella, per la card «Cosa cambia». `null` = non è una modifica; vuota = nulla di eseguibile cambia.
+     */
+    val changes: List<RuleChangeRow>? = null,
 )
 
 /**

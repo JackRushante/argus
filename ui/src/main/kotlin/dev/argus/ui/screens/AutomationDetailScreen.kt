@@ -87,6 +87,7 @@ import dev.argus.ui.components.HealthBanner
 import dev.argus.ui.components.IconBadge
 import dev.argus.ui.components.ManualEntrySection
 import dev.argus.ui.components.ModelDescriptionNote
+import dev.argus.ui.components.RuleChangesCard
 import dev.argus.ui.components.SectionLabel
 import dev.argus.ui.components.StatusBadgeChip
 import dev.argus.ui.components.StatusChip
@@ -206,6 +207,9 @@ fun AutomationDetailScreen(
                     else stringResource(R.string.rda_ap_warnings_title),
                     warnings = state.warnings,
                 )
+
+                // 0.7.2: la bozza sostituisce una regola approvata: cosa cambia, sopra la regola intera.
+                state.changes?.let { RuleChangesCard(it) }
 
                 // Invariante 4: la verità visiva è SEMPRE RuleRender, resa dai tipi.
                 ApprovalRuleTimeline(
@@ -1172,6 +1176,27 @@ private object NoopDetailCallbacks : AutomationDetailCallbacks {
 @Composable
 private fun DetailPendingGenerativePreview() {
     ArgusTheme { AutomationDetailScreen(previewReplyDetail, NoopDetailCallbacks) }
+}
+
+/** 0.7.2: modifica di una regola armata, con la card «Cosa cambia» sopra la regola. */
+@DetailThemePreviews
+@Composable
+private fun DetailPendingEditPreview() {
+    ArgusTheme {
+        AutomationDetailScreen(
+            previewReplyDetail.copy(
+                changes = listOf(
+                    dev.argus.ui.presentation.RuleChangeRow(
+                        dev.argus.ui.presentation.RuleSection.ACTIONS,
+                        dev.argus.ui.presentation.RuleChangeKind.CHANGED,
+                        dev.argus.ui.presentation.RenderLine("Attiva Non disturbare (priorità)"),
+                        dev.argus.ui.presentation.RenderLine("Attiva Non disturbare (totale)"),
+                    ),
+                ),
+            ),
+            NoopDetailCallbacks,
+        )
+    }
 }
 
 @DetailThemePreviews

@@ -74,6 +74,7 @@ import dev.argus.ui.model.RuleDiagnosisUi
 import dev.argus.ui.model.RuleStatsUi
 import dev.argus.ui.model.StatusBadge
 import dev.argus.ui.model.UiWarning
+import dev.argus.ui.presentation.RuleRenderDiff
 import dev.argus.ui.presentation.RuleRenderMapper
 import dev.argus.ui.presentation.RenderLanguage
 import dev.argus.ui.presentation.ValidationMessages
@@ -344,6 +345,7 @@ class AutomationDetailViewModel @Inject constructor(
                         sources.actionsByExecution,
                         sources.conversationLabels,
                         sources.language,
+                        approved = sources.automation,
                     )
                     sources.automation != null -> automationState(
                         sources.automation,
@@ -750,9 +752,17 @@ class AutomationDetailViewModel @Inject constructor(
         actionsByExecution: Map<String, List<ActionResultEntity>>,
         conversationLabels: Map<String, String>,
         language: RenderLanguage,
+        approved: Automation? = null,
     ): DetailViewState {
         val review = cancellationSafeOrNull { approvals.review(snapshot.id) }
         val rule = RuleRenderMapper.mapDraft(snapshot.draft, conversationLabels, language)
+        // 0.7.2: la bozza sostituisce una regola già approvata: «Cosa cambia», confrontando le due rese.
+        val changes = approved
+            ?.takeIf {
+                it.id == snapshot.automationId &&
+                    (it.status == AutomationStatus.ARMED || it.status == AutomationStatus.DISABLED)
+            }
+            ?.let { RuleRenderDiff.diff(RuleRenderMapper.map(it, conversationLabels, language), rule) }
         val warnings = if (review == null) {
             listOf(
                 UiWarning(
@@ -806,6 +816,7 @@ class AutomationDetailViewModel @Inject constructor(
                 canChangeApp = snapshot.integrityError == null,
                 // S8: una bozza importata da file lo dice in approvazione.
                 imported = snapshot.createdBy == CreatedBy.IMPORT,
+                changes = changes,
             ),
             automationId = snapshot.automationId.value,
             loading = false,

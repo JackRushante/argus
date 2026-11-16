@@ -500,6 +500,15 @@
     <string name="rda_ap_picker_current">in use</string>
     <string name="rda_ap_picker_pick_cd">Use %1$s</string>
     <string name="rda_ap_run_now_fallback">Run now is not available yet.</string>
+    <!-- 0.7.2 · What changes when you approve an edit (prefix diff_) -->
+    <string name="diff_title">What changes</string>
+    <string name="diff_subtitle">Compared with the approved version. The whole rule stays below.</string>
+    <string name="diff_nothing">Nothing that runs changes: only the name or the description differ.</string>
+    <string name="diff_added">Added</string>
+    <string name="diff_removed">Removed</string>
+    <string name="diff_changed">Changed</string>
+    <string name="diff_before">Before</string>
+    <string name="diff_now">Now</string>
     <!-- Issue #19: http:// endpoint on the local network -->
     <string name="provider_unencrypted_lan_warning">Unencrypted connection: the key and your requests travel in clear text. Use it only on a network you trust.</string>
     <!-- Issue #20: response timeout -->
