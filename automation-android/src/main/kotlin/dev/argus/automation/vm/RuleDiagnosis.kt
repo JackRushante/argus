@@ -196,6 +196,26 @@ private fun causeText(cause: BlockCause, l: RenderLanguage): String = when (caus
         "The Argus Accessibility service is not turned on",
         "Il servizio di Accessibilità di Argus non è attivo",
     )
+    BlockCause.NO_TELEPHONY -> l.pick(
+        "This phone cannot send SMS or make calls",
+        "Questo telefono non può inviare SMS né fare chiamate",
+    )
+    BlockCause.SEND_SMS_PERMISSION -> l.pick(
+        "The permission to send SMS is missing",
+        "Manca il permesso per inviare SMS",
+    )
+    BlockCause.CALL_PHONE_PERMISSION -> l.pick(
+        "The permission to make phone calls is missing",
+        "Manca il permesso per fare chiamate",
+    )
+    BlockCause.CALL_SCREENING_ROLE -> l.pick(
+        "Argus is not the call screening app",
+        "Argus non è l'app di filtro chiamate",
+    )
+    BlockCause.CONTACTS_PERMISSION -> l.pick(
+        "The contacts permission is missing",
+        "Manca il permesso per leggere i contatti",
+    )
     BlockCause.NOT_AVAILABLE_YET -> l.pick(
         "This is not available in this version",
         "Non disponibile in questa versione",

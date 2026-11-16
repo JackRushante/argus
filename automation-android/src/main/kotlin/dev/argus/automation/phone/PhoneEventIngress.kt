@@ -154,6 +154,23 @@ class PhoneEventIngress(
         }
     }
 
+    /**
+     * 0.8: chiamata rifiutata dal filtro chiamate (`screen_call`). Android non la fa squillare, quindi non
+     * arriva RINGING: l'evento «chiamata in arrivo» si consegna da qui, nella stessa corsia, SENZA toccare lo
+     * stato della chiamata (non ci sarà nemmeno IDLE, e una chiamata rifiutata non è persa).
+     */
+    suspend fun onScreenedIncomingCall(number: String?, atMillis: Long) {
+        lanes.run(CALL_LANE) {
+            parser.parse(
+                PhoneEvent.INCOMING_CALL,
+                number,
+                smsText = null,
+                atMillis = atMillis.coerceAtLeast(0),
+                sim = null,
+            )?.let { dispatcher.dispatch(it) }
+        }
+    }
+
     /** Salta se una consegna è già in corso o accodata: chi occupa la corsia la recapita già. */
     suspend fun recoverPending(): Boolean = lanes.runIfIdle(CALL_LANE) {
         deliverQueued()

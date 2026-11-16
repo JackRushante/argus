@@ -223,6 +223,51 @@ internal object LogReasonLabels {
             "this is not available in this version",
             "non disponibile in questa versione",
         ),
+        // --- 0.8: SMS, chiamate, Intent, filtro chiamate ---
+        "sms_rate_limited" to Label(
+            "limit reached: at most 10 SMS an hour",
+            "limite raggiunto: al massimo 10 SMS l'ora",
+        ),
+        "sms_destination_rate_limited" to Label(
+            "limit reached: at most 3 SMS an hour to the same number",
+            "limite raggiunto: al massimo 3 SMS l'ora allo stesso numero",
+        ),
+        "call_rate_limited" to Label(
+            "limit reached: at most 3 calls an hour",
+            "limite raggiunto: al massimo 3 chiamate l'ora",
+        ),
+        "sms_number_not_sender" to Label(
+            "the SMS recipient is not the number that called or texted",
+            "il destinatario dell'SMS non è il numero che ha chiamato o scritto",
+        ),
+        "sms_number_invalid" to Label(
+            "the SMS recipient is not a valid phone number",
+            "il destinatario dell'SMS non è un numero valido",
+        ),
+        "telephony_unavailable" to Label(
+            "this phone cannot send SMS or make calls",
+            "questo telefono non può inviare SMS né fare chiamate",
+        ),
+        "sms_send_permission_missing" to Label(
+            "the permission to send SMS is missing",
+            "manca il permesso per inviare SMS",
+        ),
+        "call_permission_missing" to Label(
+            "the permission to make calls is missing",
+            "manca il permesso per fare chiamate",
+        ),
+        "intent_unresolved" to Label(
+            "no app on the phone accepts this Intent",
+            "nessuna app del telefono accetta questo Intent",
+        ),
+        "intent_target_forbidden" to Label(
+            "an Intent cannot be sent to Argus itself",
+            "un Intent non può essere rivolto ad Argus stesso",
+        ),
+        "screen_call_not_applied" to Label(
+            "the call screening did not decide this call",
+            "il filtro chiamate non ha deciso questa chiamata",
+        ),
         // --- 0.4.1: «Pausa automazioni» ---
         "paused" to Label(
             "automations are paused",

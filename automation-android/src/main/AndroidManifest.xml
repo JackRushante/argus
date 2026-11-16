@@ -20,6 +20,14 @@
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
     <!-- Connectivity BT (API 31+): grant runtime opt-in, separato da Wi-Fi/alimentazione. -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <!-- 0.8: SMS e chiamate in uscita, contatti per il filtro chiamate «solo sconosciuti». Runtime grant
+         richiesti SOLO quando una regola li usa (righe opt-in in Sistema). -->
+    <uses-permission android:name="android.permission.SEND_SMS" />
+    <uses-permission android:name="android.permission.CALL_PHONE" />
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!-- I permessi di telefonia la rendono implicitamente obbligatoria: Argus funziona anche senza
+         (SMS, chiamate e filtro chiamate risultano non disponibili). -->
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
     <!-- Tier base senza Shizuku (P3-3): DND/Ringer via NotificationManager/AudioManager.
          Grant «Accesso Non disturbare» concesso dall'utente, non runtime. -->
     <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
@@ -182,6 +190,17 @@
                 <action android:name="android.intent.action.PHONE_STATE" />
             </intent-filter>
         </receiver>
+
+        <!-- 0.8: filtro chiamate (`screen_call`). Android lo usa solo se Argus ha il ruolo «filtro
+             chiamate», chiesto quando una regola lo usa; BIND_SCREENING_SERVICE: solo il sistema si lega. -->
+        <service
+            android:name="dev.argus.automation.telephony.ArgusCallScreeningService"
+            android:exported="true"
+            android:permission="android.permission.BIND_SCREENING_SERVICE">
+            <intent-filter>
+                <action android:name="android.telecom.CallScreeningService" />
+            </intent-filter>
+        </service>
 
         <!-- ACL_CONNECTED/DISCONNECTED sono broadcast protetti di sistema ed esenti dai
              limiti sugli implicit receiver. Nessun receiver manifest per POWER: non è esente. -->

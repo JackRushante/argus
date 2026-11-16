@@ -173,6 +173,12 @@ internal class BenchWorld private constructor(
             nfcPresent = true,
             // 0.5.1: servizio di Accessibilita' acceso, quindi ui_steps si pubblica.
             accessibilityEnabled = true,
+            // 0.8: telefonia con SMS e chiamate concessi, Argus app di filtro chiamate, contatti leggibili.
+            telephonyPresent = true,
+            sendSmsGranted = true,
+            callPhoneGranted = true,
+            callScreeningRoleHeld = true,
+            readContactsGranted = true,
         )
 
         private val NO_SHIZUKU_STATE = FULL_STATE.copy(

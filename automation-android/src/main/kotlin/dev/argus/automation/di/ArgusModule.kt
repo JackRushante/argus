@@ -919,6 +919,8 @@ object ArgusModule {
         directSettings: DirectSettings,
         privilegedActions: PrivilegedActionRunner,
         uiSteps: UiStepsRunner,
+        telephony: dev.argus.automation.telephony.TelephonyActionRunner,
+        screenDecisions: dev.argus.automation.telephony.ScreenCallDecisionLog,
     ): ShizukuActionExecutor =
         ShizukuActionExecutor(
             tools,
@@ -948,6 +950,9 @@ object ArgusModule {
             privilegedActions = privilegedActions,
             // 0.5.1: macro sullo schermo con il servizio di Accessibilità.
             uiSteps = uiSteps,
+            // 0.8: SMS, chiamate e Intent; la foglia screen_call legge la decisione del filtro chiamate.
+            telephony = telephony,
+            screenDecisions = screenDecisions,
         )
 
     @Provides

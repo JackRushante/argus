@@ -8,6 +8,8 @@ import dev.argus.automation.notification.NotificationReplyGateway
 import dev.argus.automation.notification.NotificationReplyRequest
 import dev.argus.automation.privileged.PrivilegedActionRunner
 import dev.argus.automation.screen.UiStepsRunner
+import dev.argus.automation.telephony.ScreenCallDecisionLog
+import dev.argus.automation.telephony.TelephonyActionRunner
 import dev.argus.device.DeviceController
 import dev.argus.device.DeviceToolException
 import dev.argus.device.DirectSettings
@@ -111,6 +113,10 @@ class ShizukuActionExecutor(
      * `launch_app` (Shizuku, intent o notifica «Tocca per aprire»).
      */
     private val uiSteps: UiStepsRunner? = null,
+    /** 0.8: `send_sms`, `call_number`, `send_intent`. Default **null**: senza, `base_executor_unavailable`. */
+    private val telephony: TelephonyActionRunner? = null,
+    /** 0.8: decisioni del filtro chiamate, lette dalla foglia `screen_call`. */
+    private val screenDecisions: ScreenCallDecisionLog? = null,
 ) : ActionExecutor, ResolvedActionExecutor {
     override suspend fun execute(
         action: ResolvedProgramAction,
@@ -318,13 +324,33 @@ class ShizukuActionExecutor(
 
             is Action.NotificationAction -> ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
 
-            is Action.SendSms -> ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
+            // 0.8: SMS, chiamate e Intent ricontrollano tutto sul telefono (tetti orari compresi). La chiamata e
+            // l'activity seguono la regola degli avvii da background (privilegiato o «Tocca per …»).
+            is Action.SendSms -> if (FeatureGates.blocks(action)) {
+                ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
+            } else {
+                telephony?.sendSms(action, ctx) ?: ActionResult.Failure("base_executor_unavailable")
+            }
 
-            is Action.CallNumber -> ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
+            is Action.CallNumber -> if (FeatureGates.blocks(action)) {
+                ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
+            } else {
+                telephony?.callNumber(action, ctx, shizukuReady()) ?: ActionResult.Failure("base_executor_unavailable")
+            }
 
-            is Action.SendIntent -> ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
+            is Action.SendIntent -> if (FeatureGates.blocks(action)) {
+                ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
+            } else {
+                telephony?.sendIntent(action, ctx, shizukuReady()) ?: ActionResult.Failure("base_executor_unavailable")
+            }
 
-            is Action.ScreenCall -> ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
+            // La decisione l'ha già presa il filtro chiamate prima dello squillo: qui si dice solo se c'è stata.
+            is Action.ScreenCall -> if (FeatureGates.blocks(action)) {
+                ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
+            } else {
+                screenDecisions?.leafResult(ctx.automationId)
+                    ?: ActionResult.Failure(ScreenCallDecisionLog.SCREEN_CALL_NOT_APPLIED)
+            }
 
             // `invoke_llm.output` (0.8 scaffold) è dietro il suo FeatureGate.
             is Action.InvokeLlm -> if (FeatureGates.blocks(action)) {

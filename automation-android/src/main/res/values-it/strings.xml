@@ -41,6 +41,7 @@
     <string name="act41_open_dest_date">le impostazioni di data e ora</string>
     <string name="act41_open_dest_app_details">le impostazioni dell\'app %1$s</string>
     <string name="act41_open_dest_settings">le Impostazioni</string>
+    <string name="tel08_call_tap_title">Tocca per chiamare %1$s</string>
     <!-- 0.5.1 (F17): macro sullo schermo con il servizio di Accessibilità. -->
     <string name="a11y51_service_label">Argus (macro sullo schermo)</string>
     <string name="a11y51_service_description">Permette ad Argus di eseguire le macro sullo schermo che hai approvato: tocca, scrive e scorre nell\'app che scegli, un passo alla volta. Non legge e non registra niente quando nessuna macro è in corso.</string>

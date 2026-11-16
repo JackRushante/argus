@@ -1,6 +1,7 @@
 package dev.argus.nav
 
 import android.Manifest
+import android.app.role.RoleManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -236,6 +237,26 @@ fun ArgusNavHost() {
         openAppSettings = openAppDetailsSettings,
         showMessage = showMessage,
     )
+    // 0.8: SMS e chiamate in uscita, contatti (filtro «solo sconosciuti»): chiesti solo dal tocco in Sistema.
+    val requestOutgoingTelephonyPermission = rememberPermissionRequester(
+        onResult = afterPermissionResult,
+        openAppSettings = openAppDetailsSettings,
+        showMessage = showMessage,
+    )
+    // 0.8: il ruolo «filtro chiamate» si chiede col dialogo di sistema di RoleManager.
+    val requestRoleLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { afterPermissionResult() }
+    val requestCallScreeningRole = {
+        val roles = context.getSystemService(RoleManager::class.java)
+        val requested = roles != null &&
+            roles.isRoleAvailable(RoleManager.ROLE_CALL_SCREENING) &&
+            !roles.isRoleHeld(RoleManager.ROLE_CALL_SCREENING) &&
+            runCatching {
+                requestRoleLauncher.launch(roles.createRequestRoleIntent(RoleManager.ROLE_CALL_SCREENING))
+            }.isSuccess
+        if (!requested) afterPermissionResult()
+    }
     val requestNotificationAccess = {
         val runtimePermissionMissing = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(
@@ -630,6 +651,16 @@ fun ArgusNavHost() {
                                     permissionRefresh += 1
                                     settingsViewModel.refresh()
                                 }
+                            }
+                            override fun onRequestSendSmsPermission() {
+                                requestOutgoingTelephonyPermission(arrayOf(Manifest.permission.SEND_SMS))
+                            }
+                            override fun onRequestCallPhonePermission() {
+                                requestOutgoingTelephonyPermission(arrayOf(Manifest.permission.CALL_PHONE))
+                            }
+                            override fun onRequestCallScreeningRole() = requestCallScreeningRole()
+                            override fun onRequestContactsPermission() {
+                                requestOutgoingTelephonyPermission(arrayOf(Manifest.permission.READ_CONTACTS))
                             }
                             override fun onRemoveContact(conversationId: String) {
                                 settingsViewModel.removeContact(conversationId)

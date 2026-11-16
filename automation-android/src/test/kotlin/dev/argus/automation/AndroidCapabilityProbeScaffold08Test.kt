@@ -11,11 +11,9 @@ import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.CapabilityIds
 import dev.argus.engine.model.HttpMethod
-import dev.argus.engine.model.IntentKind
 import dev.argus.engine.model.NotificationActionOp
 import dev.argus.engine.model.OutputKind
 import dev.argus.engine.model.OutputSpec
-import dev.argus.engine.model.ScreenCallOp
 import dev.argus.engine.model.SensorKind
 import dev.argus.engine.model.StoredOp
 import dev.argus.engine.runtime.ActionResult
@@ -84,10 +82,6 @@ class AndroidCapabilityProbeScaffold08Test {
         ActionTypeIds.SET_USER_MODE,
         ActionTypeIds.NOTIFICATION_REPLY,
         ActionTypeIds.NOTIFICATION_ACTION,
-        ActionTypeIds.SEND_SMS,
-        ActionTypeIds.CALL_NUMBER,
-        ActionTypeIds.SEND_INTENT,
-        ActionTypeIds.SCREEN_CALL,
     )
 
     private val newTriggers = setOf(
@@ -149,10 +143,6 @@ class AndroidCapabilityProbeScaffold08Test {
             Action.SetUserMode("lavoro"),
             Action.NotificationReply("ok"),
             Action.NotificationAction(NotificationActionOp.DISMISS),
-            Action.SendSms("+393331112222", "ok"),
-            Action.CallNumber("+393331112222"),
-            Action.SendIntent(IntentKind.BROADCAST, action = "dev.example.PING"),
-            Action.ScreenCall(ScreenCallOp.REJECT),
             Action.HttpRequest(HttpMethod.GET, "https://example.org", captureAs = "body"),
             Action.InvokeLlm("g", emptyList(), emptyList(), false, output = OutputSpec(OutputKind.BOOLEAN)),
         )
