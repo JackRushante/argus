@@ -8,6 +8,7 @@ import dev.argus.data.backup.AutoBackupLastRun
 import dev.argus.data.backup.AutoBackupOutcome
 import dev.argus.data.backup.BackupKeyDerivation
 import dev.argus.data.backup.EncryptedBackupFormat
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -23,6 +24,7 @@ import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class AutoBackupCoordinatorTest {
     private val zone = ZoneId.of("Europe/Rome")
     private val plain = """{"format":"argus-rules"}""".toByteArray()
