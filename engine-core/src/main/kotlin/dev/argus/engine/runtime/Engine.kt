@@ -56,6 +56,12 @@ class Engine(
             "interpolation_too_long",
             "resolved_action_invalid",
             "taint_blocked",
+            // Blocchi dell'interpolatore: il dato esterno non può stare in quel punto (0.7.2).
+            "shell_quote_context",
+            "shell_numeric_context",
+            "json_quote_context",
+            "url_host_changed",
+            "write_setting_key_interpolated",
             "remote_egress_blocked",
             "p4_invoke_llm_v2_unsupported",
             ProgramInterpreter.GENERATIVE_CALL_LIMIT,
