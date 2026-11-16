@@ -194,6 +194,7 @@ import dev.argus.automation.connectivity.ConnectivitySentinelStatus
 import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
 import dev.argus.automation.connectivity.PrefsConnectivityStateStore
 import dev.argus.automation.geofence.AndroidGeofenceBackend
+import dev.argus.automation.geofence.AndroidGeofenceContinuity
 import dev.argus.automation.geofence.GeofenceBackend
 import dev.argus.automation.geofence.GeofenceCoordinator
 import dev.argus.automation.geofence.GeofenceEventDispatcher
@@ -1265,12 +1266,20 @@ object ArgusModule {
     @Provides
     @Singleton
     fun geofenceCoordinator(
+        @ApplicationContext context: Context,
         store: AutomationStore,
         state: GeofenceStateStore,
         backend: GeofenceBackend,
         location: CurrentLocationProvider,
         ingress: GeofenceEventIngress,
-    ): GeofenceCoordinator = GeofenceCoordinator(store, state, backend, location, ingress)
+    ): GeofenceCoordinator = GeofenceCoordinator(
+        store,
+        state,
+        backend,
+        location,
+        ingress,
+        continuity = AndroidGeofenceContinuity(context),
+    )
 
     @Provides
     fun geofenceTriggerRuntime(coordinator: GeofenceCoordinator): GeofenceTriggerRuntime =

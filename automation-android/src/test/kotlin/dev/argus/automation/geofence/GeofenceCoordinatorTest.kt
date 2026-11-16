@@ -154,6 +154,78 @@ class GeofenceCoordinatorTest {
         assertEquals(Transition.ENTER, requireNotNull(state.get(rule.id)).lastTransition)
     }
 
+    // --- B8 (0.7.2): un riavvio del solo processo non dimentica lo stato ------------------------
+
+    @Test
+    fun `a plain process restart keeps the known state even with an unreadable position`() = runTest {
+        val rule = rule("home")
+        val fingerprint = requireNotNull(rule.approvalFingerprint)
+        val state = persistedState(rule, Transition.ENTER)
+        val envelopes = mutableListOf<TriggerEnvelope>()
+        val ingress = GeofenceEventIngress(state, GeofenceEventDispatcher { envelopes += it })
+        var reads = 0
+        val continuity = FakeContinuity(lapsed = false)
+
+        val report = GeofenceCoordinator(
+            RulesStore(listOf(rule)),
+            state,
+            RecordingBackend(),
+            CurrentLocationProvider { reads += 1; null },
+            ingress,
+            continuity,
+        ).reconcile(recreateOsRegistrations = true)
+
+        assertEquals(listOf(rule.id), report.registered, "la registrazione OS si ricrea comunque")
+        assertEquals(emptyList(), report.markedUnknown)
+        assertEquals(0, reads, "nessuna lettura di posizione: i bordi non sono andati persi")
+        // L'ENTER iniziale della ri-registrazione resta un doppione: «arrivato a casa» non riscatta.
+        assertFalse(ingress.onTransition(rule.id, fingerprint, Transition.ENTER))
+        assertEquals(emptyList(), envelopes)
+    }
+
+    @Test
+    fun `after a reboot the state is forgotten once and continuity is restored`() = runTest {
+        val rule = rule("home")
+        val state = persistedState(rule, Transition.ENTER)
+        val continuity = FakeContinuity(lapsed = true)
+        val coordinator = GeofenceCoordinator(
+            RulesStore(listOf(rule)),
+            state,
+            RecordingBackend(),
+            CurrentLocationProvider { null },
+            GeofenceEventIngress(state, GeofenceEventDispatcher { }),
+            continuity,
+        )
+
+        assertEquals(listOf(rule.id), coordinator.reconcile(recreateOsRegistrations = true).markedUnknown)
+        assertEquals(1, continuity.marks)
+
+        // Un secondo reconcile di ricreazione nello stesso avvio (BOOT dopo APP_START) non ridimentica.
+        state.beginTransition(rule.id, requireNotNull(rule.approvalFingerprint), Transition.ENTER)!!.also {
+            state.completeTransition(rule.id, requireNotNull(rule.approvalFingerprint), it.sequence)
+        }
+        assertEquals(emptyList(), coordinator.reconcile(recreateOsRegistrations = true).markedUnknown)
+        assertEquals(Transition.ENTER, requireNotNull(state.get(rule.id)).lastTransition)
+    }
+
+    @Test
+    fun `a failed registration keeps continuity lapsed for the next start`() = runTest {
+        val rule = rule("home")
+        val continuity = FakeContinuity(lapsed = true)
+
+        GeofenceCoordinator(
+            RulesStore(listOf(rule)),
+            persistedState(rule, Transition.ENTER),
+            RecordingBackend(failRegister = true),
+            CurrentLocationProvider { null },
+            null,
+            continuity,
+        ).reconcile(recreateOsRegistrations = true)
+
+        assertEquals(0, continuity.marks)
+        assertTrue(continuity.lapsed)
+    }
+
     @Test
     fun `with a known inside state a repeated enter stays a duplicate`() = runTest {
         // Controprova del dedup: con lo stato noto «dentro» un secondo ENTER viene scartato.
@@ -359,6 +431,15 @@ class GeofenceCoordinatorTest {
             actions = listOf(Action.SetWifi(false)),
         )
         return unsigned.copy(approvalFingerprint = ApprovalFingerprints.of(unsigned))
+    }
+}
+
+private class FakeContinuity(var lapsed: Boolean) : GeofenceContinuity {
+    var marks = 0
+    override fun registrationsMayHaveLapsed(): Boolean = lapsed
+    override fun markRegistered() {
+        marks += 1
+        lapsed = false
     }
 }
 

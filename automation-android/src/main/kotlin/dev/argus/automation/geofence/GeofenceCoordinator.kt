@@ -232,6 +232,25 @@ object NoopGeofenceTriggerRuntime : GeofenceTriggerRuntime {
     override suspend fun reconcile(recreateOsRegistrations: Boolean) = GeofenceReconcileReport()
 }
 
+/**
+ * Dice se le fence registrate presso il sistema possono essere sparite mentre il processo non
+ * c'era (B8). Un semplice riavvio del PROCESSO non le tocca: il sistema continua a consegnare i
+ * bordi e risveglia l'app. Le perdono invece un riavvio del telefono e un arresto forzato.
+ */
+interface GeofenceContinuity {
+    /** `true` se dall'ultima registrazione riuscita i bordi possono essere andati persi. */
+    fun registrationsMayHaveLapsed(): Boolean
+
+    /** Le registrazioni sono state ricreate e lo stato riallineato: da qui nulla è perso. */
+    fun markRegistered()
+}
+
+/** Senza segnale affidabile si assume il caso peggiore (comportamento fino alla 0.7.1). */
+object AssumeLapsedGeofenceContinuity : GeofenceContinuity {
+    override fun registrationsMayHaveLapsed(): Boolean = true
+    override fun markRegistered() = Unit
+}
+
 /** Single-writer che mantiene Room, stato locale e LocationManager coerenti. */
 class GeofenceCoordinator(
     private val store: AutomationStore,
@@ -239,6 +258,7 @@ class GeofenceCoordinator(
     private val backend: GeofenceBackend,
     private val currentLocation: CurrentLocationProvider? = null,
     private val ingress: GeofenceEventIngress? = null,
+    private val continuity: GeofenceContinuity = AssumeLapsedGeofenceContinuity,
 ) : GeofenceTriggerRuntime {
     private val mutex = Mutex()
 
@@ -309,7 +329,15 @@ class GeofenceCoordinator(
             automation.id !in failed && state.get(automation.id)?.lastTransition != null
         }
         val markedUnknown = mutableListOf<AutomationId>()
-        if (recreateOsRegistrations && recoveryCandidates.isNotEmpty() && currentLocation != null) {
+        // Recupero e «dimentica l'ultimo stato» servono solo se le fence del sistema possono essere
+        // sparite (riavvio, arresto forzato). Dopo un semplice riavvio del processo i bordi sono
+        // stati consegnati: dimenticare lo stato farebbe riscattare «arrivato a casa» senza
+        // movimento al primo ENTER della ri-registrazione (B8).
+        val lapsed = recreateOsRegistrations && runCatching {
+            continuity.registrationsMayHaveLapsed()
+        }.getOrDefault(true)
+        var continuityRestored = recreateOsRegistrations && failed.isEmpty()
+        if (lapsed && recoveryCandidates.isNotEmpty() && currentLocation != null) {
             val location = try {
                 currentLocation.current()
             } catch (error: CancellationException) {
@@ -332,6 +360,7 @@ class GeofenceCoordinator(
                         throw error
                     } catch (_: Exception) {
                         // Stato non aggiornato: resta com'e', il prossimo riavvio ritenta.
+                        continuityRestored = false
                     }
                 }
             } else if (ingress != null) {
@@ -366,6 +395,15 @@ class GeofenceCoordinator(
                         )
                     ) recovered += automation.id
                 }
+            }
+        }
+        if (lapsed && continuityRestored) {
+            try {
+                continuity.markRegistered()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                // Resta «forse perse»: il prossimo avvio ripete il caso peggiore, mai il contrario.
             }
         }
 
