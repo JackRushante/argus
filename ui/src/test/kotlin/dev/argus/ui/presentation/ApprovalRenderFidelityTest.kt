@@ -113,6 +113,22 @@ class ApprovalRenderFidelityTest {
         assertEquals("1 ora e 30 minuti", detailOf(Action.SetTimer(seconds = 5_400), RenderLanguage.IT))
     }
 
+    // --- S8: URL ---------------------------------------------------------------------------------
+
+    @Test
+    fun `open url shows the host the link really opens on its own line`() {
+        val tricky = detailOf(Action.OpenUrl("https://banca.it@altro.example/login"), RenderLanguage.EN)
+        assertEquals(listOf("https://banca.it@altro.example/login", "Opens on: altro.example"), tricky.lines())
+        val it = detailOf(Action.OpenUrl("https://www.example.com:8443/a?b=c"), RenderLanguage.IT)
+        assertEquals("Si apre su: www.example.com", it.lines()[1])
+        // Un nome internazionalizzato mostra anche la forma ASCII: un sosia Unicode si tradisce.
+        val idn = detailOf(Action.OpenUrl("https://bаnca.it/"), RenderLanguage.EN) // «а» cirillica
+        val idnHost = idn.lines()[1]
+        assertTrue(idnHost.startsWith("Opens on: bаnca.it (xn--") && idnHost.endsWith(".it)"), idnHost)
+        // Interpolato: l'host si decide allo scatto, nessuna riga che pretenda di saperlo.
+        assertEquals("https://\${host}/x", detailOf(Action.OpenUrl("https://\${host}/x"), RenderLanguage.EN))
+    }
+
     // --- S8: a capo dentro un dato -----------------------------------------------------------------
 
     @Test

@@ -703,7 +703,8 @@ object RuleRenderMapper {
         is Action.OpenUrl -> row(
             iconKey = "open_url",
             label = l.pick("Open URL", "Apri URL"),
-            detail = a.url,
+            // S8: l'host che il link apre DAVVERO, su una riga sua (`https://banca.it@altro.example/` apre altro.example).
+            detail = a.url + (urlHostLine(a.url, l)?.let { "\n$it" } ?: ""),
         )
         is Action.ShowNotification -> row(
             iconKey = "notify",
@@ -948,6 +949,26 @@ object RuleRenderMapper {
             val joined = contextSources.joinToString(", ")
             l.pick(" · context: $joined", " · contesto: $joined")
         }
+
+    /**
+     * S8: per un URL letterale, la riga con l'host che il link apre davvero (dopo un eventuale `utente@`),
+     * con la forma ASCII se è un nome internazionalizzato (un sosia Unicode si tradisce). null se l'URL
+     * contiene `${…}` (l'host si decide allo scatto).
+     */
+    internal fun urlHostLine(url: String, l: RenderLanguage): String? {
+        if (InterpolationPolicy.containsInterpolation(url)) return null
+        val uri = runCatching { java.net.URI(url.trim()) }.getOrNull()
+        // `URI.host` è null per un host non ASCII: lo si ricava dall'autorità, dopo l'ultima `@`.
+        val host = (
+            uri?.host ?: uri?.rawAuthority?.substringAfterLast('@')?.let { authority ->
+                if (authority.startsWith("[")) authority.substringBefore(']') + "]" else authority.substringBefore(':')
+            }
+            )?.takeIf { it.isNotBlank() }
+            ?: return l.pick("Opens on: host not recognised", "Si apre su: host non riconosciuto")
+        val ascii = runCatching { java.net.IDN.toASCII(host) }.getOrNull()
+        val shown = if (ascii != null && !ascii.equals(host, ignoreCase = true)) "$host ($ascii)" else host
+        return l.pick("Opens on: $shown", "Si apre su: $shown")
+    }
 
     /** S1: la risposta è vincolata al mittente del trigger (non a un destinatario libero). */
     private fun replyBindingSuffix(replyTargetSender: Boolean, l: RenderLanguage): String =
