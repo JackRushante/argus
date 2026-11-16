@@ -75,6 +75,13 @@ class BudgetFormatTest {
         assertEquals("n/a · unlimited", BudgetFormat.tokensCapLabel(null, null, RenderLanguage.EN))
     }
 
+    @Test fun `estimated tokens carry the approximate mark and n-a stays plain`() {
+        assertEquals("≈ in 1,500 · out 300", BudgetFormat.tokensLabel(1_500, 300, RenderLanguage.EN, estimated = true))
+        assertEquals("n/a", BudgetFormat.tokensLabel(null, null, RenderLanguage.EN, estimated = true))
+        assertEquals("≈ 300 / 1.000", BudgetFormat.tokensCapLabel(300, 1_000, RenderLanguage.IT, estimated = true))
+        assertEquals("n/d / 1.000", BudgetFormat.tokensCapLabel(null, 1_000, RenderLanguage.IT, estimated = true))
+    }
+
     // B49: i token a sei o sette cifre senza separatori non si leggono (1450000).
     @Test fun `i numeri grandi usano il separatore delle migliaia della lingua`() {
         assertEquals("1,450,000", BudgetFormat.grouped(1_450_000, RenderLanguage.EN))

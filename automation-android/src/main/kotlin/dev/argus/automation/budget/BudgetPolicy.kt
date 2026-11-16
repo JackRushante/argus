@@ -148,7 +148,11 @@ open class BudgetPolicy(
     private fun costAll(aggregates: List<ProviderUsageAggregate>): Long =
         aggregates.sumOf { it.costMicros ?: 0L }
 
-    /** Token consumati = in + out; NULL (n/d) pesa 0, come per il costo. */
+    /**
+     * Token consumati = in + out. Quando il provider non riporta l'uso, MeteredBrain registra una stima
+     * dalle lunghezze (marcata TOKEN_ESTIMATE), così un tetto in token scatta anche lì; resta NULL (pesa
+     * 0) solo una chiamata senza risposta del modello o un evento precedente alla stima.
+     */
     private fun tokens(row: ProviderTokensAggregate): Long =
         (row.tokensIn ?: 0L) + (row.tokensOut ?: 0L)
 

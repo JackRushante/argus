@@ -21,6 +21,8 @@ data class ProviderUsageAggregate(
     val costMicros: Long?,
     val reasoningTokens: Long? = null,
     val lastFinishReason: String? = null,
+    /** Eventi della finestra con token stimati (provider senza usage): la UI li mostra con «≈». */
+    val estimatedCalls: Long = 0,
 )
 
 /**
@@ -52,6 +54,7 @@ interface UsageDao {
             "SUM(CASE WHEN outcome = 'BLOCKED_BUDGET' THEN 1 ELSE 0 END) AS blockedCalls, " +
             "SUM(tokensIn) AS tokensIn, SUM(tokensOut) AS tokensOut, SUM(costMicros) AS costMicros, " +
             "SUM(reasoningTokens) AS reasoningTokens, " +
+            "SUM(CASE WHEN pricingVersion = 'token_estimate' THEN 1 ELSE 0 END) AS estimatedCalls, " +
             "(SELECT d.finishReason FROM usage_events AS d " +
             "WHERE d.providerId = u.providerId AND d.finishReason IS NOT NULL " +
             "AND d.timestampMs >= :startMillis AND d.timestampMs < :endMillisExclusive " +

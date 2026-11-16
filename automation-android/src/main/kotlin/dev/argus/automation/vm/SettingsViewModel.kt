@@ -220,6 +220,8 @@ internal fun budgetUi(usage: BudgetUsageSnapshot, settings: BudgetSettings): Bud
             lastFinishReason = hourAgg?.lastFinishReason
                 ?: dayAgg?.lastFinishReason
                 ?: monthAgg?.lastFinishReason,
+            // Il mese contiene ora e giorno: basta guardare lì.
+            tokensEstimated = (monthAgg?.estimatedCalls ?: 0L) > 0L,
         )
     }
 
@@ -262,6 +264,7 @@ internal fun budgetUi(usage: BudgetUsageSnapshot, settings: BudgetSettings): Bud
         tokensInMonth = tokensInMonth,
         tokensOutMonth = tokensOutMonth,
         tokenLimitMonth = global.maxTokensPerMonth,
+        tokensMonthEstimated = tokenOnlyMonth.any { it.estimatedCalls > 0L },
         perProvider = perProvider,
         softWarningActive = softActive,
     )
