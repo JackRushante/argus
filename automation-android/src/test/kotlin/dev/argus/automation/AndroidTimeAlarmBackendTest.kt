@@ -136,4 +136,46 @@ class AndroidTimeAlarmBackendTest {
         )
         assertNull(reconcileReason("com.example.UNTRUSTED"))
     }
+
+    @Test
+    fun `the watchdog is one inexact allow while idle alarm that triggers a reconcile`() {
+        val alarmManager = context.getSystemService(AlarmManager::class.java)
+        val shadow = shadowOf(alarmManager)
+        val backend = AndroidTimeAlarmBackend(context)
+
+        backend.syncWatchdog(1_900_000_000_000)
+        backend.syncWatchdog(1_900_000_060_000)
+
+        val watchdog = shadow.scheduledAlarms.single()
+        assertEquals(1_900_000_060_000, watchdog.triggerAtMs)
+        assertTrue(watchdog.isAllowWhileIdle)
+        val fired = shadowOf(watchdog.operation).savedIntent
+        assertEquals(
+            ReconcileReason.EXACT_ALARM_PERMISSION_CHANGED,
+            reconcileReason(fired.action),
+        )
+
+        backend.syncWatchdog(null)
+        assertEquals(emptyList(), shadow.scheduledAlarms)
+    }
+
+    @Test
+    fun `the watchdog never replaces a rule alarm`() {
+        val alarmManager = context.getSystemService(AlarmManager::class.java)
+        val shadow = shadowOf(alarmManager)
+        val backend = AndroidTimeAlarmBackend(context)
+        backend.schedule(
+            TimeAlarmRegistration(
+                automationId = AutomationId("rule"),
+                approvalFingerprint = ApprovalFingerprint("d".repeat(64)),
+                eventAtMillis = 1_900_000_000_000,
+                requestedPrecision = TimePrecision.EXACT,
+            ),
+        )
+
+        backend.syncWatchdog(1_900_000_120_000)
+        backend.syncWatchdog(null)
+
+        assertEquals(1_900_000_000_000, shadow.scheduledAlarms.single().triggerAtMs)
+    }
 }

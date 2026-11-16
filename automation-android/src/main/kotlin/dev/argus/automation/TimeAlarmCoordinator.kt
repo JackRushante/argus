@@ -72,6 +72,13 @@ interface TimeAlarmBackend {
     fun canScheduleExact(): Boolean
     fun schedule(registration: TimeAlarmRegistration): ScheduledAlarmMode
     fun cancel(automationId: AutomationId)
+
+    /**
+     * Sveglia di riserva INEXACT (allow-while-idle) che rilancia la riconciliazione a [atMillis];
+     * `null` la toglie. Quando l'utente revoca «Sveglie e promemoria» Android cancella le sveglie
+     * exact senza alcun broadcast: questa sopravvive e fa riprogrammare tutto in inexact.
+     */
+    fun syncWatchdog(atMillis: Long?) = Unit
 }
 
 fun interface TimeEventDispatcher {
@@ -236,6 +243,10 @@ class TimeAlarmCoordinator(
      */
     private val disarmed = mutableSetOf<AutomationId>()
 
+    /** Ultimo istante passato a [TimeAlarmBackend.syncWatchdog] in questo processo; solo sotto [mutex]. */
+    private var watchdogAt: Long? = null
+    private var watchdogSynced = false
+
     suspend fun reconcile(reason: ReconcileReason): ReconcileReport {
         val scheduled = mutableListOf<AutomationId>()
         val cancelled = mutableListOf<AutomationId>()
@@ -310,6 +321,7 @@ class TimeAlarmCoordinator(
                     ScheduleResult.UNCHANGED -> Unit
                 }
             }
+            syncWatchdogLocked()
         }
 
         // Fuori dal lock: ogni recupero ripassa da prepare/dispatch/complete, quindi una regola nel
@@ -359,7 +371,9 @@ class TimeAlarmCoordinator(
     ): AlarmDeliveryResult {
         val prepared = when (
             val preparation = mutex.withLock {
-                prepareDelivery(automationId, eventAtMillis, now(), deliveredFingerprint)
+                val decided = prepareDelivery(automationId, eventAtMillis, now(), deliveredFingerprint)
+                syncWatchdogLocked()
+                decided
             }
         ) {
             is Preparation.Done -> return preparation.result
@@ -381,11 +395,13 @@ class TimeAlarmCoordinator(
             return mutex.withLock {
                 inFlight -= automationId
                 released = true
-                if (dispatchFailed) {
+                val result = if (dispatchFailed) {
                     deliveryFailed(automationId, "dispatch_failed")
                 } else {
                     completeDelivery(prepared)
                 }
+                syncWatchdogLocked()
+                result
             }
         } finally {
             if (!released) {
@@ -644,6 +660,33 @@ class TimeAlarmCoordinator(
         }
     }
 
+    /**
+     * Sotto lock: una sola sveglia di riserva, poco dopo la prossima sveglia EXACT futura (le
+     * inexact sopravvivono alla revoca del permesso, le dovute e quelle in volo hanno già il loro
+     * recupero). Se il permesso c'è ancora, a quell'ora la sveglia exact ha già riprogrammato e
+     * il reconcile non cambia nulla. Un guasto qui non cambia mai l'esito dell'operazione.
+     */
+    private suspend fun syncWatchdogLocked() {
+        try {
+            val currentNow = now().toEpochMilli()
+            val target = state.all()
+                .filter {
+                    it.scheduledMode == ScheduledAlarmMode.EXACT && it.automationId !in inFlight &&
+                        it.wakeAtMillis > currentNow
+                }
+                .minOfOrNull { it.wakeAtMillis }
+                ?.let { it + WATCHDOG_DELAY_MILLIS }
+            if (watchdogSynced && target == watchdogAt) return
+            backend.syncWatchdog(target)
+            watchdogAt = target
+            watchdogSynced = true
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            watchdogSynced = false
+        }
+    }
+
     /** Pulizia di una regola non più armata: se fallisce, il marker [disarmed] resta acceso. */
     private suspend fun forgetDisarmed(automationId: AutomationId) {
         disarmed += automationId
@@ -685,4 +728,9 @@ class TimeAlarmCoordinator(
     }
 
     private enum class ScheduleResult { SCHEDULED, UNCHANGED, EXPIRED, FAILED }
+
+    private companion object {
+        /** Ritardo della sveglia di riserva rispetto alla prossima sveglia exact. */
+        const val WATCHDOG_DELAY_MILLIS = 2L * 60 * 1_000
+    }
 }

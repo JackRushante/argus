@@ -59,6 +59,32 @@ class AndroidTimeAlarmBackend(context: Context) : TimeAlarmBackend {
         operation.cancel()
     }
 
+    override fun syncWatchdog(atMillis: Long?) {
+        if (atMillis == null) {
+            PendingIntent.getBroadcast(
+                appContext,
+                REQUEST_CODE,
+                watchdogIntent(appContext),
+                PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE,
+            )?.let { operation ->
+                alarmManager.cancel(operation)
+                operation.cancel()
+            }
+            return
+        }
+        // Sempre inexact: deve sopravvivere proprio alla revoca del permesso delle exact.
+        alarmManager.setAndAllowWhileIdle(
+            AlarmManager.RTC_WAKEUP,
+            atMillis,
+            PendingIntent.getBroadcast(
+                appContext,
+                REQUEST_CODE,
+                watchdogIntent(appContext),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            ),
+        )
+    }
+
     private fun operation(registration: TimeAlarmRegistration): PendingIntent =
         PendingIntent.getBroadcast(
             appContext,
@@ -77,6 +103,14 @@ class AndroidTimeAlarmBackend(context: Context) : TimeAlarmBackend {
         internal const val EXTRA_APPROVAL_FINGERPRINT = "approval_fingerprint"
         internal const val EXTRA_EVENT_AT_MILLIS = "event_at_millis"
         private const val REQUEST_CODE = 0
+
+        /** Sveglia di riserva interna: intent esplicito verso un receiver non esportato. */
+        internal const val ACTION_TIME_WATCHDOG = "dev.argus.automation.action.TIME_WATCHDOG"
+
+        internal fun watchdogIntent(context: Context): Intent =
+            Intent(context, TimeReconciliationReceiver::class.java).apply {
+                action = ACTION_TIME_WATCHDOG
+            }
 
         internal fun identityIntent(context: Context, automationId: AutomationId): Intent =
             Intent(context, TimeAlarmReceiver::class.java).apply {

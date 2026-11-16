@@ -846,6 +846,46 @@ class TimeAlarmCoordinatorTest {
         assertEquals(AutomationStatus.ARMED, store.get(armed.id)?.status)
     }
 
+    // --- 0.7.2: sveglia di riserva per la revoca di «Sveglie e promemoria» -------------------
+
+    @Test
+    fun `an inexact watchdog follows the earliest future exact alarm`() = runTest {
+        val soon = automation(Trigger.Time(at = "2026-07-13T21:00", tz = "UTC", precision = TimePrecision.EXACT), "soon")
+        val later = automation(Trigger.Time(at = "2026-07-13T23:00", tz = "UTC", precision = TimePrecision.EXACT), "later")
+        val flexible = automation(Trigger.Time(at = "2026-07-13T20:30", tz = "UTC"), "flex")
+        val store = FakeAutomationStore(soon, later, flexible)
+        val state = FakeTimeAlarmStateStore()
+        val backend = FakeTimeAlarmBackend(exactAllowed = true)
+        val coordinator = coordinator(store, state, backend)
+
+        coordinator.reconcile(ReconcileReason.APP_START)
+        val soonAt = Instant.parse("2026-07-13T21:00:00Z").toEpochMilli()
+        // La FLEXIBLE (20:30) è già inexact e sopravvive alla revoca: non conta.
+        assertEquals(listOf<Long?>(soonAt + 120_000), backend.watchdogs)
+
+        // Un reconcile senza cambiamenti non riprogramma la riserva.
+        coordinator.reconcile(ReconcileReason.CAPABILITY_CHANGED)
+        assertEquals(1, backend.watchdogs.size)
+
+        // Consumata la prima, la riserva passa alla successiva; senza exact viene tolta.
+        coordinator.onAlarm(soon.id, fingerprint(soon), soonAt)
+        assertEquals(Instant.parse("2026-07-13T23:00:00Z").toEpochMilli() + 120_000, backend.watchdogs.last())
+        store.disable(later.id)
+        coordinator.reconcile(ReconcileReason.CAPABILITY_CHANGED)
+        assertNull(backend.watchdogs.last())
+    }
+
+    @Test
+    fun `without exact access there is no watchdog`() = runTest {
+        val rule = automation(Trigger.Time(at = "2026-07-13T21:00", tz = "UTC", precision = TimePrecision.EXACT))
+        val backend = FakeTimeAlarmBackend(exactAllowed = false)
+
+        coordinator(FakeAutomationStore(rule), FakeTimeAlarmStateStore(), backend)
+            .reconcile(ReconcileReason.APP_START)
+
+        assertEquals(listOf<Long?>(null), backend.watchdogs)
+    }
+
     @Test
     fun `relative afterMs schedules exact by default when permitted`() = runTest {
         // Campo (2026-07-17): un "tra 3 minuti" INEXACT è scattato con +2m33s di batching OEM.
@@ -1380,6 +1420,12 @@ private class FakeTimeAlarmBackend(
 
     override fun cancel(automationId: AutomationId) {
         cancelled += automationId
+    }
+
+    val watchdogs = mutableListOf<Long?>()
+
+    override fun syncWatchdog(atMillis: Long?) {
+        watchdogs += atMillis
     }
 }
 
