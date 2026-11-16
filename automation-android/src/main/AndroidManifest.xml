@@ -149,6 +149,12 @@
             android:enabled="true"
             android:exported="false" />
 
+        <!-- 0.8: ricontrollo di una geofence DWELL dopo la sua attesa; intent esplicito, nessuna azione esterna. -->
+        <receiver
+            android:name="dev.argus.automation.geofence.GeofenceDwellReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
         <receiver
             android:name=".TimeReconciliationReceiver"
             android:enabled="true"

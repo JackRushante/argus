@@ -217,6 +217,10 @@ import dev.argus.automation.connectivity.ConnectivitySentinelStatus
 import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
 import dev.argus.automation.connectivity.PrefsConnectivityStateStore
 import dev.argus.automation.geofence.AndroidGeofenceBackend
+import dev.argus.automation.geofence.AndroidGeofenceDwellTimer
+import dev.argus.automation.geofence.GeofenceDwellSupport
+import dev.argus.automation.geofence.PrefsGeofenceDwellStore
+import dev.argus.engine.model.Transition
 import dev.argus.automation.geofence.AndroidGeofenceContinuity
 import dev.argus.automation.geofence.GeofenceBackend
 import dev.argus.automation.geofence.GeofenceCoordinator
@@ -1345,10 +1349,21 @@ object ArgusModule {
         dispatcher: GeofenceEventDispatcher,
         store: AutomationStore,
         location: CurrentLocationProvider,
+        @ApplicationContext context: Context,
     ): GeofenceEventIngress = GeofenceEventIngress(
         state,
         dispatcher,
         LocationBackedTransitionVerifier({ store.get(it)?.trigger }, location),
+        // 0.8: DWELL, ricontrollo persistito con la sua sveglia.
+        GeofenceDwellSupport(
+            delayOf = { id ->
+                (store.get(id)?.trigger as? Trigger.Geofence)
+                    ?.takeIf { it.transition == Transition.DWELL }
+                    ?.loiteringDelayMs
+            },
+            store = PrefsGeofenceDwellStore(context),
+            timer = AndroidGeofenceDwellTimer(context),
+        ),
     )
 
     @Provides
