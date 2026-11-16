@@ -724,6 +724,8 @@ class AndroidCapabilityProbeTest {
                 "audio_output",
                 "mode_changed",
                 "media",
+                // 0.8: la prossima sveglia, sempre armabile (AlarmManager, nessun permesso).
+                "next_alarm",
             ),
             manifest.availableTriggers,
         )
