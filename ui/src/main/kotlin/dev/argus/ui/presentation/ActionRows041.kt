@@ -84,6 +84,8 @@ internal object ActionRows041 {
                 .any { it.lowercase(Locale.ROOT) == HttpRequestPolicy.CONTENT_TYPE_HEADER }
             a.contentType?.takeIf { !alreadyListed }?.let { add("Content-Type: ${VisibleText.singleLine(it)}") }
             a.body?.let(VisibleText::singleLine)?.let { add(l.pick("Body: $it", "Corpo: $it")) }
+            // 0.8: valori dalla cassaforte (solo i nomi) e cattura della risposta.
+            addAll(ActionRows08.httpRequestExtras(a, l))
         }
         return ActionRow(
             iconKey = "cloud",

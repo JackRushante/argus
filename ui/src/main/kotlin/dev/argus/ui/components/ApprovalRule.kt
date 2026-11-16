@@ -142,6 +142,14 @@ fun ApprovalRuleTimeline(
             geofenceLabel?.let { GeofenceLabel(it, Modifier.padding(top = 10.dp)) }
             // S8: la pausa dopo ogni scatto scarta in silenzio gli eventi: si dichiara sotto QUANDO.
             rule.cooldownLine?.let { TriggerNote(Icons.Rounded.HourglassTop, it, Modifier.padding(top = 10.dp)) }
+            // 0.8: conferma prima di eseguire e fine della regola-intervallo, con le sue azioni di fine.
+            rule.confirmLine?.let { TriggerNote(Icons.Rounded.CheckCircle, it, Modifier.padding(top = 10.dp)) }
+            rule.exitLine?.let { TriggerNote(Icons.Rounded.SwapHoriz, it, Modifier.padding(top = 10.dp)) }
+            if (rule.exitProgram.isNotEmpty()) {
+                Box(Modifier.padding(top = ArgusSpacing.Small)) {
+                    ProgramLevel(rule.exitProgram, 0, ArgusTheme.surfaces.card, appInfo, onChangeApp)
+                }
+            }
         }
         if (hasConditions) {
             TimelineStep(

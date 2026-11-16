@@ -8,23 +8,36 @@ import dev.argus.engine.model.AudioOutputKind
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
+import dev.argus.engine.model.CalendarPhase
 import dev.argus.engine.model.CmpOp
 import dev.argus.engine.model.ConfidentialityLabel
 import dev.argus.engine.model.Condition
+import dev.argus.engine.model.ConfirmSpec
 import dev.argus.engine.model.ConnMedium
 import dev.argus.engine.model.ConnState
 import dev.argus.engine.model.CreatedBy
+import dev.argus.engine.model.Day
 import dev.argus.engine.model.DndMode
+import dev.argus.engine.model.ExitSpec
 import dev.argus.engine.model.GenerativeDeliverMode
 import dev.argus.engine.model.HttpMethod
 import dev.argus.engine.model.IntegrityLabel
+import dev.argus.engine.model.IntentExtra
+import dev.argus.engine.model.IntentExtraType
+import dev.argus.engine.model.IntentKind
 import dev.argus.engine.model.MediaPlayState
 import dev.argus.engine.model.ModeKind
 import dev.argus.engine.model.MediaCommand
 import dev.argus.engine.model.NightMode
+import dev.argus.engine.model.NotificationActionOp
+import dev.argus.engine.model.OutputKind
+import dev.argus.engine.model.OutputSpec
 import dev.argus.engine.model.PhoneEvent
+import dev.argus.engine.model.ScreenCallOp
 import dev.argus.engine.model.ScreenEvent
 import dev.argus.engine.model.ScrollDirection
+import dev.argus.engine.model.SecretRef
+import dev.argus.engine.model.StoredOp
 import dev.argus.engine.model.SensorKind
 import dev.argus.engine.model.SettingNamespace
 import dev.argus.engine.model.SettingsScreen
@@ -169,6 +182,10 @@ class RuleRenderCoverageTest {
             }
         }
         render.program.forEach(::node)
+        // 0.8: conferma prima di eseguire e fine della regola-intervallo con le sue azioni.
+        out += render.confirmLine
+        out += render.exitLine
+        render.exitProgram.forEach(::node)
         return out.filterNotNull().joinToString("\n")
     }
 
@@ -317,10 +334,16 @@ class RuleRenderCoverageTest {
                 ),
             ),
             "sensor" to case(
-                Trigger.Sensor(SensorKind.STEP_COUNTER, minimumEventCount = 317),
-                mapOf(
+                v(
+                    Trigger.Sensor(SensorKind.STEP_COUNTER, minimumEventCount = 317),
                     "kind" to ms(m("step counter", "contatore")),
                     "minimumEventCount" to ms("317"),
+                ),
+                // 0.8: gesti one-shot (spenti finché il loro FeatureGate è off).
+                v(Trigger.Sensor(SensorKind.SHAKE), "kind" to ms(m("you shake the phone", "scuoti il telefono"))),
+                v(
+                    Trigger.Sensor(SensorKind.FLIP_FACE_DOWN),
+                    "kind" to ms(m("you turn the phone face down", "giri il telefono a faccia in giù")),
                 ),
                 notRendered = mapOf(
                     "samplingPeriodUs" to "il validator rifiuta ogni valore non nullo (sampling continuo non supportato)",
@@ -374,6 +397,40 @@ class RuleRenderCoverageTest {
                     "pkg" to ms("org.example.xyzapp"),
                     "event" to ms(m("is closed", "viene chiusa")),
                 ),
+            ),
+            // --- 0.8 (spenti finché il loro FeatureGate è off, ma resi per intero) ---
+            "calendar_event" to case(
+                v(
+                    Trigger.CalendarEvent(CalendarPhase.START, -15, titleMatch = "XYZ-title", calendar = "XYZ-cal"),
+                    "phase" to ms(m("before a calendar event starts", "prima che inizi un evento del calendario")),
+                    "offsetMinutes" to ms(m("15 minutes", "15 minuti")),
+                    "titleMatch" to ms("XYZ-title"),
+                    "calendar" to ms("XYZ-cal"),
+                ),
+                v(
+                    Trigger.CalendarEvent(CalendarPhase.END, 20),
+                    "phase" to ms(m("after a calendar event ends", "dopo la fine di un evento del calendario")),
+                    "offsetMinutes" to ms(m("20 minutes", "20 minuti")),
+                ),
+            ),
+            "nfc_tag" to case(
+                v(Trigger.NfcTag("XYZ-tag"), "tagId" to ms("XYZ-tag"), "resolveTag" to none),
+                v(
+                    Trigger.NfcTag(resolveTag = true),
+                    "resolveTag" to ms(m("read when you turn on the rule", "letto quando attivi la regola")),
+                ),
+            ),
+            "next_alarm" to case(
+                Trigger.NextAlarm(25),
+                mapOf("offsetMinutes" to ms(m("25 minutes before your next alarm", "25 minuti prima della prossima sveglia"))),
+            ),
+            "app_usage" to case(
+                Trigger.AppUsage("org.example.xyzapp", 37),
+                mapOf("pkg" to ms("org.example.xyzapp"), "minutes" to ms(m("37 minutes", "37 minuti"))),
+            ),
+            "user_mode_changed" to case(
+                v(Trigger.UserModeChanged("XYZ-mode"), "to" to ms("XYZ-mode")),
+                v(Trigger.UserModeChanged(), "to" to ms(m("the user mode changes", "cambia la modalità utente"))),
             ),
         )
         check("Trigger", Trigger.serializer(), cases) { trigger -> automation(trigger = trigger) }
@@ -458,6 +515,44 @@ class RuleRenderCoverageTest {
                     "expectedVar" to ms("xyz_rhs"),
                 ),
             ),
+            // --- 0.8 (spente finché il loro FeatureGate è off, ma rese per intero) ---
+            "weekday" to case(
+                Condition.Weekday(setOf(Day.MON, Day.SAT), "XYZ/Zone"),
+                mapOf(
+                    "days" to ms(m("Monday", "lunedì"), m("Saturday", "sabato")),
+                    "tz" to ms("XYZ/Zone"),
+                ),
+            ),
+            "wifi_connected" to case(
+                v(Condition.WifiConnected("XYZ-ssid"), "ssid" to ms("XYZ-ssid")),
+                v(Condition.WifiConnected(), "ssid" to ms(m("any Wi-Fi network", "una rete Wi-Fi qualsiasi"))),
+            ),
+            "bluetooth_connected" to case(
+                v(Condition.BluetoothConnected("XYZ-device"), "device" to ms("XYZ-device")),
+                v(
+                    Condition.BluetoothConnected(),
+                    "device" to ms(m("any Bluetooth device", "un dispositivo Bluetooth qualsiasi")),
+                ),
+            ),
+            "headset_connected" to case(
+                v(Condition.HeadsetConnected(AudioOutputKind.WIRED), "kind" to ms(m("wired headphones", "cuffie con il filo"))),
+                v(Condition.HeadsetConnected(AudioOutputKind.BLUETOOTH), "kind" to ms(m("Bluetooth headphones", "cuffie Bluetooth"))),
+                v(Condition.HeadsetConnected(), "kind" to ms(m("wired or Bluetooth", "con il filo o Bluetooth"))),
+            ),
+            "calendar_busy" to case(
+                Condition.CalendarBusy(titleMatch = "XYZ-title", calendar = "XYZ-cal"),
+                mapOf("titleMatch" to ms("XYZ-title"), "calendar" to ms("XYZ-cal")),
+            ),
+            "stored_compare" to case(
+                Condition.StoredCompare("XYZ-skey", StateValueType.NUMBER, CmpOp.GT, "4242"),
+                mapOf(
+                    "key" to ms("XYZ-skey"),
+                    "valueType" to ms(m("number", "numero")),
+                    "op" to ms(">"),
+                    "expected" to ms("4242"),
+                ),
+            ),
+            "user_mode_is" to case(Condition.UserModeIs("XYZ-umode"), mapOf("mode" to ms("XYZ-umode"))),
         )
         check("Condition", Condition.serializer(), cases) { condition -> automation(conditions = condition) }
     }
@@ -543,6 +638,21 @@ class RuleRenderCoverageTest {
                     "tz" to ms(m("current time on the phone", "ora attuale del telefono")),
                     "pattern" to ms(m("format HH:mm", "formato HH:mm")),
                     "confidentiality" to ms(m("public", "pubblico")),
+                ),
+            ),
+            // 0.8: valore conservato fra le esecuzioni (spento finché il suo FeatureGate è off).
+            "stored" to case(
+                VarBinding.Stored(
+                    name = "xyz_stored",
+                    key = "XYZ-store-key",
+                    valueType = StateValueType.BOOLEAN,
+                    confidentiality = ConfidentialityLabel.PRIVATE,
+                ),
+                mapOf(
+                    "name" to ms("xyz_stored"),
+                    "key" to ms(m("stored value \"XYZ-store-key\"", "valore conservato \"XYZ-store-key\"")),
+                    "valueType" to ms(m("boolean", "booleano")),
+                    "confidentiality" to ms(m("private", "privato")),
                 ),
             ),
         )
@@ -717,6 +827,24 @@ class RuleRenderCoverageTest {
                     "deliver" to ms(m("Generate a value", "Genera un valore")),
                     "captureAs" to ms("xyz_cap"),
                 ),
+                // 0.8: uscita vincolata (spenta finché il suo FeatureGate è off).
+                v(
+                    llmReply.copy(
+                        replyTargetSender = false,
+                        deliver = GenerativeDeliverMode.CAPTURE_ONLY,
+                        captureAs = "xyz_cap",
+                        output = OutputSpec(OutputKind.NUMBER, choices = listOf("XYZ-c0"), min = 3, max = 77),
+                    ),
+                    "output" to ms(m("a whole number from 3 up to 77", "un numero intero da 3 fino a 77"), m("XYZ-c0")),
+                ),
+                v(
+                    llmReply.copy(output = OutputSpec(OutputKind.CHOICE, choices = listOf("XYZ-c1", "XYZ-c2"))),
+                    "output" to ms(m("one of \"XYZ-c1\", \"XYZ-c2\"", "una tra \"XYZ-c1\", \"XYZ-c2\"")),
+                ),
+                v(
+                    llmReply.copy(output = OutputSpec(OutputKind.BOOLEAN)),
+                    "output" to ms(m("yes or no", "sì o no")),
+                ),
                 notRendered = mapOf("timeoutMs" to timeoutReason),
             ),
             "invoke_llm_v2" to case(
@@ -799,20 +927,43 @@ class RuleRenderCoverageTest {
                 v(Action.SetRotation(false), "auto" to ms(m("off", "disattivata"))),
             ),
             "http_request" to case(
-                Action.HttpRequest(
-                    method = HttpMethod.PUT,
-                    url = "https://xyz.example.org/XYZ-path?q=1",
-                    headers = mapOf("X-XYZ-Key" to "secret-value-XYZ-wxyz", "X-XYZ-Plain" to "XYZ-plain-value"),
-                    body = "XYZ-body",
-                    contentType = "application/xyz",
-                ),
-                mapOf(
+                v(
+                    Action.HttpRequest(
+                        method = HttpMethod.PUT,
+                        url = "https://xyz.example.org/XYZ-path?q=1",
+                        headers = mapOf("X-XYZ-Key" to "secret-value-XYZ-wxyz", "X-XYZ-Plain" to "XYZ-plain-value"),
+                        body = "XYZ-body",
+                        contentType = "application/xyz",
+                    ),
                     "method" to ms("PUT"),
                     "url" to ms("https://xyz.example.org/XYZ-path?q=1"),
                     // Il valore di un'intestazione segreta compare mascherato, mai per intero.
                     "headers" to ms("X-XYZ-Key: ••••wxyz", "X-XYZ-Plain: XYZ-plain-value"),
                     "body" to ms(m("Body: XYZ-body", "Corpo: XYZ-body")),
                     "contentType" to ms("Content-Type: application/xyz"),
+                ),
+                // 0.8: cattura della risposta e valori dalla cassaforte (solo i nomi; spenti finché i
+                // loro FeatureGate sono off).
+                v(
+                    Action.HttpRequest(
+                        method = HttpMethod.GET,
+                        url = "https://xyz.example.org/data",
+                        captureAs = "xyz_resp",
+                        extract = "/xyz/ptr",
+                        secretHeaders = listOf(SecretRef("X-XYZ-Auth", "xyz_vault_token", "Bearer ")),
+                        secretQuery = listOf(SecretRef("xyz_q", "xyz_vault_q")),
+                    ),
+                    "captureAs" to ms(m("Response captured as xyz_resp", "Risposta catturata come xyz_resp")),
+                    "extract" to ms(m("JSON pointer /xyz/ptr", "puntatore JSON /xyz/ptr")),
+                    "secretHeaders" to ms(
+                        m("X-XYZ-Auth: Bearer [secret \"xyz_vault_token\"", "X-XYZ-Auth: Bearer [segreto \"xyz_vault_token\""),
+                    ),
+                    "secretQuery" to ms(
+                        m(
+                            "Query parameter xyz_q = [secret \"xyz_vault_q\"",
+                            "Parametro di query xyz_q = [segreto \"xyz_vault_q\"",
+                        ),
+                    ),
                 ),
             ),
             // --- 0.5.1 (azioni privilegiate tipizzate) ---
@@ -917,8 +1068,154 @@ class RuleRenderCoverageTest {
                     ),
                 ),
             ),
+            // --- 0.8 (spente finché il loro FeatureGate è off, ma rese per intero) ---
+            "ask" to case(
+                v(
+                    Action.Ask("XYZ-question", listOf("XYZ-yes", "XYZ-no"), "xyz_answer", 90_000, "XYZ-no"),
+                    "prompt" to ms("XYZ-question"),
+                    "choices" to ms("\"XYZ-yes\", \"XYZ-no\""),
+                    "captureAs" to ms("xyz_answer"),
+                    "timeoutMs" to ms(m("1 minute and 30 seconds", "1 minuto e 30 secondi")),
+                    "defaultChoice" to ms(
+                        m(
+                            "With no answer within 1 minute and 30 seconds: \"XYZ-no\"",
+                            "Senza risposta entro 1 minuto e 30 secondi: \"XYZ-no\"",
+                        ),
+                    ),
+                ),
+                v(
+                    Action.Ask("XYZ-question", listOf("XYZ-yes"), "xyz_answer"),
+                    "defaultChoice" to ms(m("the rule stops", "la regola si ferma")),
+                ),
+            ),
+            "set_stored" to case(
+                v(
+                    Action.SetStored("XYZ-key", StoredOp.SET, "XYZ-val"),
+                    "key" to ms("XYZ-key"),
+                    "op" to ms(m("Set \"XYZ-key\"", "Imposta \"XYZ-key\"")),
+                    "value" to ms("XYZ-val"),
+                ),
+                v(
+                    Action.SetStored("XYZ-key", StoredOp.INCREMENT),
+                    "op" to ms(m("Increase \"XYZ-key\"", "Aumenta \"XYZ-key\""), m("by 1", "di 1")),
+                ),
+                v(Action.SetStored("XYZ-key", StoredOp.TOGGLE), "op" to ms(m("Toggle \"XYZ-key\"", "Inverti \"XYZ-key\""))),
+                v(Action.SetStored("XYZ-key", StoredOp.CLEAR), "op" to ms(m("Delete \"XYZ-key\"", "Cancella \"XYZ-key\""))),
+            ),
+            "set_user_mode" to case(Action.SetUserMode("XYZ-mode"), mapOf("mode" to ms("XYZ-mode"))),
+            "notification_reply" to case(Action.NotificationReply("XYZ-nreply"), mapOf("text" to ms("XYZ-nreply"))),
+            "notification_action" to case(
+                v(
+                    Action.NotificationAction(NotificationActionOp.CLICK, label = "XYZ-button"),
+                    "op" to ms(m("Tap a button of the notification", "Tocca un pulsante della notifica")),
+                    "label" to ms("XYZ-button"),
+                    "snoozeMinutes" to none,
+                ),
+                v(
+                    Action.NotificationAction(NotificationActionOp.SNOOZE, snoozeMinutes = 47),
+                    "op" to ms(m("Snooze the notification", "Posticipa la notifica")),
+                    "snoozeMinutes" to ms(m("for 47 minutes", "per 47 minuti")),
+                ),
+                v(
+                    Action.NotificationAction(NotificationActionOp.DISMISS),
+                    "op" to ms(m("Dismiss the notification", "Chiudi la notifica")),
+                ),
+            ),
+            "send_sms" to case(
+                Action.SendSms("+39XYZ111", "XYZ-sms-text"),
+                mapOf("number" to ms("+39XYZ111"), "text" to ms("XYZ-sms-text")),
+            ),
+            "call_number" to case(Action.CallNumber("+39XYZ222"), mapOf("number" to ms("+39XYZ222"))),
+            "send_intent" to case(
+                v(
+                    Action.SendIntent(
+                        kind = IntentKind.ACTIVITY,
+                        action = "xyz.intent.ACTION",
+                        pkg = "com.xyz.intent",
+                        cls = "com.xyz.intent.XyzActivity",
+                        data = "xyz://data/1",
+                        mimeType = "xyz/type",
+                        extras = listOf(IntentExtra("xyz_extra", IntentExtraType.INT, "4242")),
+                    ),
+                    "kind" to ms(m("Start an activity", "Avvia un'activity")),
+                    "action" to ms("xyz.intent.ACTION"),
+                    "pkg" to ms("com.xyz.intent"),
+                    "cls" to ms("com.xyz.intent.XyzActivity"),
+                    "data" to ms("xyz://data/1"),
+                    "mimeType" to ms("xyz/type"),
+                    "extras" to ms("xyz_extra (INT): 4242"),
+                ),
+                v(
+                    Action.SendIntent(IntentKind.BROADCAST),
+                    "kind" to ms(m("Send a broadcast Intent", "Invia un Intent broadcast")),
+                ),
+                v(
+                    Action.SendIntent(IntentKind.SERVICE),
+                    "kind" to ms(m("Start a service", "Avvia un servizio")),
+                ),
+            ),
+            "screen_call" to case(
+                v(
+                    Action.ScreenCall(ScreenCallOp.REJECT),
+                    "op" to ms(m("Reject the incoming call", "Rifiuta la chiamata in arrivo")),
+                ),
+                v(
+                    Action.ScreenCall(ScreenCallOp.SILENCE),
+                    "op" to ms(m("Silence the incoming call", "Silenzia la chiamata in arrivo")),
+                ),
+            ),
         )
         check("Action", Action.serializer(), cases) { action -> automation(actions = listOf(action)) }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // 0.8: campi di regola (conferma prima di eseguire, regola-intervallo)
+    // ---------------------------------------------------------------------------------------------
+
+    @Test
+    fun `rule confirmation and exit span are rendered with every field`() {
+        assertEquals(
+            setOf("timeoutMs"),
+            ConfirmSpec.serializer().descriptor.elementNames.toSet(),
+            "ConfirmSpec ha un campo nuovo: rendilo in approvazione e aggiorna il test",
+        )
+        assertEquals(
+            setOf("trigger", "restore", "actions"),
+            ExitSpec.serializer().descriptor.elementNames.toSet(),
+            "ExitSpec ha un campo nuovo: rendilo in approvazione e aggiorna il test",
+        )
+        fun span(restore: Boolean) = Automation(
+            id = AutomationId("cov-span"),
+            name = "coverage",
+            createdBy = CreatedBy.LLM,
+            status = AutomationStatus.PENDING_APPROVAL,
+            trigger = immediate,
+            actions = listOf(noopAction),
+            confirm = ConfirmSpec(timeoutMs = 125_000),
+            exit = ExitSpec(Trigger.Screen(ScreenEvent.OFF), restore = restore, actions = listOf(Action.Vibrate(5151))),
+        )
+        val expected = listOf(
+            m("2 minutes and 5 seconds", "2 minuti e 5 secondi"),
+            m("Run / Cancel", "Esegui / Annulla"),
+            m("the screen turns off", "lo schermo si spegne"),
+            m("puts back the values", "rimette i valori"),
+            m("5151 ms"),
+        )
+        languages.forEach { language ->
+            val text = flatten(RuleRenderMapper.map(span(restore = true), language = language))
+            expected.forEach { marker ->
+                val wanted = if (language == RenderLanguage.IT) marker.it else marker.en
+                assertTrue(wanted in text, "confirm/exit: «$wanted» assente dal render $language:\n$text")
+            }
+            val noRestore = flatten(RuleRenderMapper.map(span(restore = false), language = language))
+            val wanted = if (language == RenderLanguage.IT) "non rimette" else "does not put back"
+            assertTrue(wanted in noRestore, "exit.restore=false: «$wanted» assente dal render $language:\n$noRestore")
+
+            val plain = RuleRenderMapper.map(automation(), language = language)
+            assertEquals(null, plain.confirmLine)
+            assertEquals(null, plain.exitLine)
+            assertTrue(plain.exitProgram.isEmpty())
+        }
     }
 
     @Test

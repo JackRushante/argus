@@ -30,6 +30,12 @@ data class RuleRender(
      * per 24 ore»), resa sotto QUANDO. null se la regola non ha pausa (cooldown effettivo 0).
      */
     val cooldownLine: String? = null,
+    /** 0.8: la regola chiede conferma prima di eseguire (con il tempo massimo di attesa); null se non la chiede. */
+    val confirmLine: String? = null,
+    /** 0.8: fine della regola-intervallo (trigger d'uscita e ripristino dei valori); null se la regola non ha fine. */
+    val exitLine: String? = null,
+    /** 0.8: azioni eseguite alla fine dell'intervallo, rese come [program]. Vuoto se non ce ne sono. */
+    val exitProgram: List<ProgramNode> = emptyList(),
 )
 
 /**
