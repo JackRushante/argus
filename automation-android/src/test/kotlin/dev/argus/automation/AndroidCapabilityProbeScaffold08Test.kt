@@ -91,7 +91,7 @@ class AndroidCapabilityProbeScaffold08Test {
     )
 
     private val newTriggers = setOf(
-        "calendar_event", "nfc_tag", "next_alarm", "app_usage", "user_mode_changed",
+        "nfc_tag", "next_alarm", "app_usage", "user_mode_changed",
         "sensor.${SensorKind.SHAKE.wireName}", "sensor.${SensorKind.FLIP_FACE_DOWN.wireName}",
     )
 

@@ -36,6 +36,8 @@ internal data class AndroidUiHealth(
     val usageAccessGranted: Boolean = true,
     /** 0.5.1: il servizio di Accessibilità di Argus è acceso (macro sullo schermo). */
     val accessibilityGranted: Boolean = true,
+    /** 0.8: READ_CALENDAR concesso (regole sul calendario). */
+    val readCalendarGranted: Boolean = false,
 )
 
 internal fun readAndroidUiHealth(context: Context): AndroidUiHealth {
@@ -72,6 +74,7 @@ internal fun readAndroidUiHealth(context: Context): AndroidUiHealth {
         // Stessa lettura reale che usa il probe: se non si riesce a leggere vale «non concesso».
         usageAccessGranted = PermanentGrantStatus.usageStats(app),
         accessibilityGranted = dev.argus.device.PermanentGrantStatus.accessibility(app),
+        readCalendarGranted = granted(Manifest.permission.READ_CALENDAR),
     )
 }
 
