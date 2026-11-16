@@ -429,6 +429,10 @@ object ValidationMessages {
             "The setting name is not valid (shape or length).",
             "Il nome dell'impostazione non è valido (forma o lunghezza).",
         ),
+        "write_setting_key_interpolated" to t(
+            "The setting name must be written literally, without variables.",
+            "Il nome dell'impostazione va scritto per esteso, senza variabili.",
+        ),
         "write_setting_value_invalid" to t(
             "The setting value is empty, too long or contains control characters.",
             "Il valore dell'impostazione è vuoto, troppo lungo o contiene caratteri di controllo.",
@@ -438,8 +442,8 @@ object ValidationMessages {
             "L'impostazione viene scritta esattamente come mostrato nella regola: controlla namespace, nome e valore.",
         ),
         "write_setting_high_impact" to t(
-            "This rule changes a phone security setting (debugging, accessibility, keyboard or app verification). Only arm it if you know what it does.",
-            "Questa regola cambia un'impostazione di sicurezza del telefono (debug, accessibilità, tastiera o verifica delle app). Armala solo se sai cosa fa.",
+            "This rule changes a phone security setting (debugging, accessibility, keyboard, app verification, notification access, autofill, assistant, proxy or DNS). Only arm it if you know what it does.",
+            "Questa regola cambia un'impostazione di sicurezza del telefono (debug, accessibilità, tastiera, verifica delle app, accesso alle notifiche, compilazione automatica, assistente, proxy o DNS). Armala solo se sai cosa fa.",
         ),
         "write_setting_external_value" to t(
             "The value written comes from external data (a message, a notification or text read from the phone).",

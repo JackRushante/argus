@@ -128,7 +128,10 @@ class TaintAwareInterpolator {
                 is Action.OpenSettingsScreen -> action.copy(
                     pkg = action.pkg?.let { accumulator.field("pkg", it, MAX_PACKAGE_CHARS) },
                 )
-                is Action.WriteSetting -> action.copy(
+                // S7: la chiave è sempre letterale; un template con la chiave interpolata non si esegue.
+                is Action.WriteSetting -> if (InterpolationPolicy.containsInterpolation(action.key)) {
+                    throw ResolutionException("write_setting_key_interpolated")
+                } else action.copy(
                     key = accumulator.field("key", action.key, WriteSettingPolicy.MAX_KEY_LENGTH),
                     value = accumulator.field("value", action.value, WriteSettingPolicy.MAX_VALUE_LENGTH),
                 )

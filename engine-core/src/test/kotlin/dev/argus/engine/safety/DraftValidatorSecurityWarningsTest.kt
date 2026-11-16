@@ -108,6 +108,37 @@ class DraftValidatorSecurityWarningsTest {
             vars = listOf(smsBody),
         )
         assertTrue("write_setting_external_value" in warnings(inKey))
+        assertTrue("write_setting_key_interpolated" in errors(inKey))
+    }
+
+    @Test
+    fun `the setting key must be literal even with a trusted variable`() {
+        val d = draft(
+            actions = listOf(Action.WriteSetting(SettingNamespace.SECURE, "\${fixed}", "1")),
+            vars = listOf(VarBinding.Literal("fixed", "adb_enabled", VarType.TEXT, ConfidentialityLabel.PUBLIC)),
+        )
+        assertTrue("write_setting_key_interpolated" in errors(d))
+        assertFalse("write_setting_key_invalid" in errors(d))
+    }
+
+    @Test
+    fun `keys that hand over notifications, autofill, the assistant or the network are high impact`() {
+        val keys = listOf(
+            SettingNamespace.SECURE to "enabled_notification_listeners",
+            SettingNamespace.SECURE to "autofill_service",
+            SettingNamespace.SECURE to "credential_service",
+            SettingNamespace.SECURE to "assistant",
+            SettingNamespace.SECURE to "voice_interaction_service",
+            SettingNamespace.SECURE to "mock_location",
+            SettingNamespace.GLOBAL to "http_proxy",
+            SettingNamespace.GLOBAL to "global_http_proxy_host",
+            SettingNamespace.GLOBAL to "global_http_proxy_port",
+            SettingNamespace.GLOBAL to "private_dns_mode",
+            SettingNamespace.GLOBAL to "private_dns_specifier",
+        )
+        for ((namespace, key) in keys) {
+            assertTrue("write_setting_high_impact" in warnings(draft(listOf(Action.WriteSetting(namespace, key, "x")))), key)
+        }
     }
 
     @Test

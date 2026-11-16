@@ -26,6 +26,7 @@ class LogReasonLabelsActions041Test {
         "json_quote_context",
         "shell_quote_context",
         "shell_numeric_context",
+        "write_setting_key_interpolated",
     )
 
     @Test

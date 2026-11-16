@@ -1155,7 +1155,10 @@ class DraftValidator(
             is Action.WriteSetting -> {
                 // PARAMETRICA (D0: nessuna allowlist di chiavi). Solo validazione di forma via
                 // WriteSettingPolicy: key stile QUERY_NAME, value bounded, control char rifiutati.
-                if (!InterpolationPolicy.containsInterpolation(action.key) && !WriteSettingPolicy.validKey(action.key))
+                // S7: la chiave è sempre letterale, così il controllo "alto impatto" vede quella vera.
+                if (InterpolationPolicy.containsInterpolation(action.key))
+                    err("write_setting_key_interpolated", "La chiave dell'impostazione deve essere letterale, senza variabili")
+                else if (!WriteSettingPolicy.validKey(action.key))
                     err("write_setting_key_invalid", "Chiave impostazione non valida (forma/limite)")
                 if (!InterpolationPolicy.containsInterpolation(action.value) && !WriteSettingPolicy.validValue(action.value))
                     err(
@@ -1172,7 +1175,8 @@ class DraftValidator(
                     warn(
                         "write_setting_high_impact",
                         "Questa regola cambia un'impostazione di sicurezza del telefono (debug, " +
-                            "accessibilità, tastiera o verifica delle app). Armala solo se sai cosa fa.",
+                            "accessibilità, tastiera, verifica delle app, accesso alle notifiche, " +
+                            "compilazione automatica, assistente, proxy o DNS). Armala solo se sai cosa fa.",
                     )
                 }
             }

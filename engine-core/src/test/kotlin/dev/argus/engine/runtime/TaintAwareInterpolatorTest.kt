@@ -254,6 +254,24 @@ class TaintAwareInterpolatorTest {
         assertEquals("interpolation_too_long", oversizedLiteral.code)
     }
 
+    @Test
+    fun `a write setting whose approved key is interpolated never runs`() {
+        val blocked = assertIs<ActionResolution.Blocked>(
+            interpolator.resolve(
+                Action.WriteSetting(dev.argus.engine.model.SettingNamespace.GLOBAL, "\${key}", "1"),
+                scope("key", clean("adb_enabled")),
+            ),
+        )
+        assertEquals("write_setting_key_interpolated", blocked.code)
+        val literal = assertIs<ActionResolution.Resolved>(
+            interpolator.resolve(
+                Action.WriteSetting(dev.argus.engine.model.SettingNamespace.SYSTEM, "screen_off_timeout", "\${v}"),
+                scope("v", tainted("30000")),
+            ),
+        )
+        assertEquals("30000", assertIs<Action.WriteSetting>(literal.value.action).value)
+    }
+
     private fun scope(name: String, value: VarValue) = VarScope(mapOf(name to value))
 
     private fun tainted(text: String) = VarValue(

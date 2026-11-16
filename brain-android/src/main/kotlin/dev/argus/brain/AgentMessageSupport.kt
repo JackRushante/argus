@@ -746,7 +746,8 @@ Action, discriminated by "type":
 - {"type":"write_setting", "namespace":"SYSTEM"|"SECURE"|"GLOBAL", "key":string, "value":string}
    // writes ANY Android setting by key (write-side counterpart of state.setting).
    // Requires Shizuku (appears in available_tools only when available). Flat v1 key/value are
-   // literal; P4 may interpolate ${'$'}{var} under the approved data-flow policy. The template is shown
+   // literal; P4 may interpolate ${'$'}{var} in value only (key is always literal) under the approved
+   // data-flow policy. The template is shown
    // in review. key without spaces/control chars; value non-empty,
    // <=1024 chars, no NUL/newline/control chars. Prefer a typed action when one
    // exists (e.g. set_dnd, set_alarm, set_dark_mode, set_brightness, set_rotation): use write_setting

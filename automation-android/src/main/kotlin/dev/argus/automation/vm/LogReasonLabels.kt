@@ -180,6 +180,10 @@ internal object LogReasonLabels {
             "the shell command expected a whole number and the external data was not one",
             "il comando shell si aspettava un numero intero e il dato esterno non lo era",
         ),
+        "write_setting_key_interpolated" to Label(
+            "the setting name must be literal",
+            "il nome dell'impostazione deve essere scritto per esteso",
+        ),
         // --- 0.5.1: azioni privilegiate tipizzate ---
         "target_forbidden" to Label(
             "Argus, the launcher and essential system apps cannot be changed by a rule",
