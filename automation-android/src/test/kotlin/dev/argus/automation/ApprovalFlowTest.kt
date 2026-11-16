@@ -9,6 +9,7 @@ import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
+import dev.argus.engine.model.AppControlOp
 import dev.argus.engine.model.AppEventKind
 import dev.argus.engine.model.CapabilityRequirements
 import dev.argus.engine.model.ApprovalFingerprint
@@ -733,6 +734,58 @@ class ApprovalFlowTest {
         ).review
 
         assertTrue(review.draft.issues.none { it.code == "app_not_installed" })
+    }
+
+    // --- 0.7.2: avviso «congeli un'app di sistema» (controllo fatto sul telefono) --------------------
+
+    /** Controllo finto: nessuna app mancante, di sistema quelle di [system]. */
+    private class SystemAppsCheck(private val system: () -> Set<String>) : InstalledPackageCheck {
+        var asked: Collection<String> = emptyList()
+        override suspend fun missing(packages: Collection<String>): Set<String> = emptySet()
+        override suspend fun systemApps(packages: Collection<String>): Set<String> {
+            asked = packages
+            return system()
+        }
+    }
+
+    @Test
+    fun `freezing a system app is a warning with the package, and the rule stays armable`() = runTest {
+        val draft = appsDraft(
+            actions = listOf(
+                Action.AppControl("com.oem.bloat", AppControlOp.FREEZE),
+                Action.AppControl("com.example.game", AppControlOp.FREEZE),
+                Action.AppControl("com.oem.bloat", AppControlOp.FREEZE),
+                // Fermare o scongelare un'app di sistema non è congelarla: nessun avviso.
+                Action.AppControl("com.oem.music", AppControlOp.FORCE_STOP),
+            ),
+        )
+        val check = SystemAppsCheck { setOf("com.oem.bloat", "com.oem.music") }
+        val review = assertIs<DraftSubmissionResult.Ready>(
+            appsFixture(draft, check).flow.submit(CompileResult("ok", draft, null)),
+        ).review
+
+        assertEquals(listOf("com.oem.bloat", "com.example.game"), check.asked.toList())
+        val issue = review.draft.issues.single { it.code == "app_control_freeze_system" }
+        assertEquals(Severity.WARNING, issue.severity)
+        assertEquals("com.oem.bloat", issue.detail)
+        assertTrue(review.canArm)
+    }
+
+    @Test
+    fun `no freeze or a failing system check adds no freeze warning`() = runTest {
+        val stop = appsDraft(actions = listOf(Action.AppControl("com.oem.bloat", AppControlOp.FORCE_STOP)))
+        val unasked = SystemAppsCheck { setOf("com.oem.bloat") }
+        val first = assertIs<DraftSubmissionResult.Ready>(
+            appsFixture(stop, unasked).flow.submit(CompileResult("ok", stop, null)),
+        ).review
+        assertTrue(first.draft.issues.none { it.code == "app_control_freeze_system" })
+        assertEquals(emptyList(), unasked.asked.toList())
+
+        val freeze = appsDraft(actions = listOf(Action.AppControl("com.oem.bloat", AppControlOp.FREEZE)))
+        val second = assertIs<DraftSubmissionResult.Ready>(
+            appsFixture(freeze, SystemAppsCheck { error("boom") }).flow.submit(CompileResult("ok", freeze, null)),
+        ).review
+        assertTrue(second.draft.issues.none { it.code == "app_control_freeze_system" })
     }
 
     private fun solarDraft(spec: SolarSpec = SolarSpec(SolarEvent.SUNSET, -30)) = AutomationDraft(

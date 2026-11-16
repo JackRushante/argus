@@ -28,6 +28,7 @@ object ValidationMessages {
         "state_query_unavailable",
         "state_query_type_mismatch",
         "app_not_installed",
+        "app_control_freeze_system",
     )
 
     /** Codici d'errore di un passo di macro: il [ValidationIssue.detail] è il numero del passo, che si antepone. */
@@ -699,6 +700,11 @@ object ValidationMessages {
         "app_control_freeze_review" to t(
             "Freezing disables the app: it disappears from the launcher and cannot start until it is unfrozen.",
             "Congelare disattiva l'app: sparisce dal launcher e non può partire finché non viene riattivata.",
+        ),
+        // 0.7.2: controllo fatto sul telefono all'approvazione; solo avviso, la regola resta armabile.
+        "app_control_freeze_system" to t(
+            "This rule freezes an app that came with the phone. That is fine for preinstalled apps you do not use, but some are needed by the system: freeze it only if you know it is safe.",
+            "Questa regola congela un'app preinstallata sul telefono. Va bene per le app del produttore che non usi, ma alcune servono al sistema: congelala solo se sai che si può.",
         ),
         "app_permission_revoke_review" to t(
             "Revoking a permission removes an access from the app, and Android may close it.",
