@@ -130,7 +130,7 @@ class AiBenchCasesTest {
                 case.covers.filter { it in BenchVocab.ACTION_TYPES }
             entries.toSet().forEach { covered[it] = (covered[it] ?: 0) + 1 }
         }
-        val thin = BenchVocab.ACTION_TYPES.filter { (covered[it] ?: 0) < 2 }
+        val thin = (BenchVocab.ACTION_TYPES - BenchVocab.NOT_YET_AVAILABLE_ACTION_TYPES).filter { (covered[it] ?: 0) < 2 }
         assertTrue(thin.isEmpty(), "azioni coperte meno di 2 volte: ${thin.map { it to (covered[it] ?: 0) }}")
         // invoke_llm con e senza web, invoke_llm_v2 con stato.
         val withWeb = cases.count { c -> c.draft.params.any { (k, v) -> k == "invoke_llm.allowedTools" && v.toString().contains("web.search") } }
