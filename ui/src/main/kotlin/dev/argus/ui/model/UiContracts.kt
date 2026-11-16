@@ -717,6 +717,9 @@ interface SettingsCallbacks {
         reasoningEffort: String? = null,
     ) {}
 
+    /** «Rimuovi chiave» del foglio del provider (S6): cancella la chiave salvata. Default no-op. */
+    fun onRemoveProviderKey(providerId: String) {}
+
     /**
      * Backup (0.4.0): «Esporta». [stripPersonalData] = opzione «Togli posizioni e contatti (per
      * condividere)». Il file lo sceglie il chiamante con il selettore di documenti. Default no-op.

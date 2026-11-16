@@ -58,6 +58,8 @@ import dev.argus.ui.theme.ArgusCodeSmall
 import dev.argus.ui.theme.ArgusRadius
 import dev.argus.ui.theme.ArgusSpacing
 import dev.argus.ui.theme.ArgusTheme
+import java.net.URI
+import java.util.Locale
 
 // =============================================================================
 // Foglio «Configura provider» (tavola «Configura provider (bottom sheet)», redesign A). Sostituisce i due dialoghi
@@ -81,6 +83,7 @@ import dev.argus.ui.theme.ArgusTheme
  * @param providerChoices i provider tra cui scegliere; vuoto = la scelta si fa altrove (onboarding) e qui non compare.
  * @param onSelectProvider cambia il provider selezionato (`id` = `ProviderId.wireName`); lo stato [transport] che
  *   arriva dall'host segue la scelta e il foglio mostra i campi del nuovo ramo.
+ * @param onRemoveKey «Rimuovi chiave» di un provider diretto con una chiave salvata (S6); null = l'azione non c'è.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -92,13 +95,14 @@ fun TransportConfigurationSheet(
     modifier: Modifier = Modifier,
     providerChoices: List<ProviderChoiceUi> = emptyList(),
     onSelectProvider: (String) -> Unit = {},
+    onRemoveKey: ((providerId: String) -> Unit)? = null,
 ) {
     val title = when (transport) {
         is TransportUi.CliBridge -> stringResource(R.string.bridge_dialog_title)
         is TransportUi.DirectProvider -> stringResource(R.string.provider_dialog_title, transport.providerLabel)
     }
     ArgusBottomSheet(onDismiss = onDismiss, title = title, modifier = modifier) {
-        TransportSheetContent(transport, onDismiss, onSaveBridge, onSaveProvider, providerChoices, onSelectProvider)
+        TransportSheetContent(transport, onDismiss, onSaveBridge, onSaveProvider, providerChoices, onSelectProvider, onRemoveKey)
     }
 }
 
@@ -111,6 +115,7 @@ internal fun ColumnScope.TransportSheetContent(
     onSaveProvider: (providerId: String, baseUrl: String?, model: String?, apiKey: String?, reasoningEffort: String?) -> Unit,
     providerChoices: List<ProviderChoiceUi>,
     onSelectProvider: (String) -> Unit,
+    onRemoveKey: ((providerId: String) -> Unit)? = null,
 ) {
     if (providerChoices.isNotEmpty()) ProviderChoiceGroup(providerChoices, onSelectProvider)
     when (transport) {
@@ -124,9 +129,32 @@ internal fun ColumnScope.TransportSheetContent(
                 onSave = { baseUrl, model, apiKey, reasoningEffort ->
                     onSaveProvider(transport.providerId, baseUrl, model, apiKey, reasoningEffort)
                 },
+                onRemoveKey = onRemoveKey?.let { remove -> { remove(transport.providerId) } },
             )
         }
     }
+}
+
+/**
+ * S6: true se i due indirizzi hanno la stessa origine (schema, host, porta effettiva). Una chiave salvata vale
+ * solo per la sua origine: con un indirizzo nuovo il foglio lo dice e il salvataggio la toglie. Un indirizzo che
+ * non si legge conta come un'origine diversa. Stessa regola dello store (`ProviderPrefsSchema.sameOrigin`).
+ */
+internal fun sameServerOrigin(first: String, second: String): Boolean {
+    fun origin(raw: String): Triple<String, String, Int>? {
+        val uri = runCatching { URI(raw.trim()) }.getOrNull() ?: return null
+        val scheme = uri.scheme?.lowercase(Locale.ROOT) ?: return null
+        val host = uri.host?.lowercase(Locale.ROOT)?.removeSurrounding("[", "]") ?: return null
+        val port = when {
+            uri.port != -1 -> uri.port
+            scheme == "https" -> 443
+            scheme == "http" -> 80
+            else -> return null
+        }
+        return Triple(scheme, host, port)
+    }
+    val a = origin(first) ?: return false
+    return a == origin(second)
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -164,10 +192,19 @@ private fun ColumnScope.BridgeForm(
     var attempted by rememberSaveable { mutableStateOf(false) }
     val cleanUrl = url.trim()
     val cleanToken = token.trim()
-    val problems = ConnectionFormValidation.bridgeForm(url, token, tokenConfigured)
+    // S6: il bearer salvato vale solo per il server di prima. Con un'altra origine va reinserito.
+    val originChanged = tokenConfigured && !sameServerOrigin(initialUrl, cleanUrl)
+    val keepsToken = tokenConfigured && !originChanged
+    val problems = ConnectionFormValidation.bridgeForm(url, token, keepsToken)
     val urlProblem = problems.url.takeIf { attempted }
     val tokenProblem = problems.token.takeIf { attempted }
-    val tokenHint = stringResource(if (tokenConfigured) R.string.bridge_token_keep_hint else R.string.bridge_token_required_hint)
+    val tokenHint = stringResource(
+        when {
+            originChanged -> R.string.bridge_token_origin_changed_hint
+            keepsToken -> R.string.bridge_token_keep_hint
+            else -> R.string.bridge_token_required_hint
+        },
+    )
 
     ArgusTextField(
         value = url,
@@ -184,7 +221,7 @@ private fun ColumnScope.BridgeForm(
         monospace = true,
         visualTransformation = PasswordVisualTransformation(),
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-        labelAccessory = if (tokenConfigured) {
+        labelAccessory = if (keepsToken) {
             { StatusChip(ArgusTheme.semantic.armed, Icons.Rounded.CheckCircle, stringResource(R.string.bridge_token_configured)) }
         } else {
             null
@@ -215,6 +252,7 @@ private fun ColumnScope.ProviderForm(
     provider: TransportUi.DirectProvider,
     onDismiss: () -> Unit,
     onSave: (baseUrl: String?, model: String?, apiKey: String?, reasoningEffort: String?) -> Unit,
+    onRemoveKey: (() -> Unit)? = null,
 ) {
     var baseUrl by rememberSaveable(provider.baseUrl) { mutableStateOf(provider.baseUrl) }
     var model by rememberSaveable(provider.model) { mutableStateOf(provider.model.orEmpty()) }
@@ -226,7 +264,11 @@ private fun ColumnScope.ProviderForm(
     val cleanBaseUrl = baseUrl.trim()
     val cleanModel = model.trim()
     val cleanKey = apiKey.trim()
-    val keyConfigured = provider.authState == AuthState.OK
+    val keySaved = provider.authState == AuthState.OK
+    // S6: la chiave salvata vale solo per il server di prima. Con un'altra origine il salvataggio la toglie,
+    // e il foglio lo dice prima.
+    val originChanged = keySaved && provider.baseUrlEditable && !sameServerOrigin(provider.baseUrl, cleanBaseUrl)
+    val keyConfigured = keySaved && !originChanged
     val presetMistyped = provider.modelPresetHint && ModelFieldHints.isMistypedPreset(model)
     // L'indirizzo si modifica solo per il provider Custom: e' anche l'unico che ammette http verso
     // il telefono o la rete locale e chiavi corte (endpoint locali).
@@ -249,6 +291,7 @@ private fun ColumnScope.ProviderForm(
     val keyProblem = problems.key.takeIf { attempted }
     val modelMissing = problems.modelMissing && attempted
     val keyHint = when {
+        originChanged -> stringResource(R.string.provider_key_origin_changed_hint)
         keyConfigured -> stringResource(R.string.provider_key_keep_hint)
         provider.apiKeyRequired -> stringResource(R.string.provider_key_required_hint)
         else -> stringResource(R.string.provider_key_optional_hint)
@@ -335,6 +378,19 @@ private fun ColumnScope.ProviderForm(
         errorText = keyProblem?.let { secretProblemText(it, minKeyLength, keyHint) },
         trailing = { KeyGlyph() },
     )
+    // S6: una chiave salvata si può togliere da qui (prima si poteva solo sostituire).
+    if (keySaved && onRemoveKey != null) {
+        ArgusButton(
+            text = stringResource(R.string.provider_key_remove),
+            onClick = {
+                apiKey = ""
+                onRemoveKey()
+                onDismiss()
+            },
+            style = ButtonStyle.Text,
+            modifier = Modifier.testTag("provider_remove_key"),
+        )
+    }
     if (provider.reasoningEffortEditable) {
         ReasoningChoice(selected = reasoningEffort, onSelect = { reasoningEffort = it })
     }

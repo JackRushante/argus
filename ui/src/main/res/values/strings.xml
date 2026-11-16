@@ -16,6 +16,7 @@
     <string name="bridge_token_label">Bearer token</string>
     <string name="bridge_token_keep_hint">Leave blank to keep the protected token</string>
     <string name="bridge_token_required_hint">Enter the bearer token</string>
+    <string name="bridge_token_origin_changed_hint">New server address: enter the bearer again. The saved one is never sent to another server.</string>
     <string name="bridge_token_configured">Protected token configured</string>
     <string name="bridge_token_missing">Token not configured</string>
 
@@ -30,6 +31,8 @@
     <string name="provider_key_keep_hint">Leave blank to keep the current key.</string>
     <string name="provider_key_required_hint">Required.</string>
     <string name="provider_key_optional_hint">Optional for endpoints without authentication.</string>
+    <string name="provider_key_origin_changed_hint">New server address: saving removes the saved key. Enter it again if the new server needs it.</string>
+    <string name="provider_key_remove">Remove key</string>
     <string name="provider_reasoning_label">Reasoning per request</string>
     <string name="provider_reasoning_default">Server default</string>
     <string name="provider_reasoning_none">Off</string>

@@ -15,6 +15,7 @@
     <string name="bridge_token_label">Bearer token</string>
     <string name="bridge_token_keep_hint">Lascia vuoto per conservare il token protetto</string>
     <string name="bridge_token_required_hint">Inserisci il bearer token</string>
+    <string name="bridge_token_origin_changed_hint">Nuovo indirizzo del server: inserisci di nuovo il bearer. Quello salvato non parte mai verso un altro server.</string>
     <string name="bridge_token_configured">Token protetto configurato</string>
     <string name="bridge_token_missing">Token non configurato</string>
 
@@ -29,6 +30,8 @@
     <string name="provider_key_keep_hint">Lascia vuoto per conservare la chiave attuale.</string>
     <string name="provider_key_required_hint">Obbligatoria.</string>
     <string name="provider_key_optional_hint">Opzionale per endpoint senza autenticazione.</string>
+    <string name="provider_key_origin_changed_hint">Nuovo indirizzo del server: salvando, la chiave salvata viene tolta. Inseriscila di nuovo se il nuovo server la richiede.</string>
+    <string name="provider_key_remove">Rimuovi chiave</string>
     <string name="provider_reasoning_label">Ragionamento per richiesta</string>
     <string name="provider_reasoning_default">Predefinito server</string>
     <string name="provider_reasoning_none">Disattivato</string>

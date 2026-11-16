@@ -205,6 +205,8 @@ internal object AgentMessageSupport {
         /** Il reply tool non è stato chiamato e il contenuto non è un ripiego ammesso. */
         data object ToolMissing : ReplyExtraction
         data object Empty : ReplyExtraction
+        /** B5: senza reply tool, il provider ha detto che il testo non è finito (tetto di output, filtro…). */
+        data object Truncated : ReplyExtraction
     }
 
     /**
@@ -216,12 +218,18 @@ internal object AgentMessageSupport {
      *   ([finishedNormally]: `finish_reason == "stop"`, `stop_reason == "end_turn"`) e non resta
      *   alcun `<think` (ragionamento troncato): altrimenti [ReplyExtraction.ToolMissing], per non
      *   spedire su WhatsApp un testo a metà o il ragionamento del modello.
+     * - B5: senza reply tool (notifica locale, cattura, percorsi web in testo semplice) il contenuto di
+     *   una risposta che il provider dichiara non finita ([truncated]: `finish_reason` diverso da `stop`,
+     *   `status` diverso da `completed`, `finishReason` diverso da `STOP`…) è [ReplyExtraction.Truncated]:
+     *   mezza frase non diventa una notifica né il valore di una variabile usata dalle azioni dopo. Un
+     *   motivo assente (server locali che non lo scrivono) non è un troncamento.
      */
     fun extractReply(
         toolText: String?,
         content: String?,
         useReplyTool: Boolean,
         finishedNormally: Boolean,
+        truncated: Boolean = false,
     ): ReplyExtraction {
         if (toolText != null) {
             val clean = cleanReply(ThinkBlocks.strip(toolText))
@@ -230,6 +238,7 @@ internal object AgentMessageSupport {
         if (content == null) return ReplyExtraction.Empty
         val stripped = ThinkBlocks.strip(content, dropUnclosed = false)
         if (stripped.isBlank()) return ReplyExtraction.Empty
+        if (!useReplyTool && truncated) return ReplyExtraction.Truncated
         if (ThinkBlocks.hasOpenBlock(stripped)) {
             return if (useReplyTool) ReplyExtraction.ToolMissing else ReplyExtraction.Empty
         }

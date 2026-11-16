@@ -31,7 +31,11 @@ interface ProviderConfigStore : BridgeConfigurationStore, ProviderSecrets {
     fun providerConfig(id: ProviderId): ProviderConfig
     fun selectedProviderConfig(): ProviderConfig = providerConfig(selectedProviderId())
 
-    /** Parametri null conservano il valore esistente (stesso pattern di saveConfiguration). */
+    /**
+     * Parametri null conservano il valore esistente (stesso pattern di saveConfiguration). Eccezione S6:
+     * un [baseUrl] con un'origine diversa da quella salvata e senza una chiave nuova cancella la chiave
+     * salvata, che non deve partire verso un altro server ([baseUrlChangesOrigin]).
+     */
     suspend fun saveProviderConfig(
         id: ProviderId,
         baseUrl: String? = null,
@@ -48,6 +52,17 @@ interface ProviderConfigStore : BridgeConfigurationStore, ProviderSecrets {
     suspend fun hasApiKey(id: ProviderId): Boolean
     suspend fun clearApiKey(id: ProviderId): Boolean
 
+    /**
+     * S6: true se salvare [baseUrl] per [id] porta a un'altra origine (schema, host, porta) rispetto
+     * all'indirizzo salvato. Una chiave salvata per un servizio cloud non deve partire verso l'indirizzo
+     * scritto dopo (per esempio `http://` su loopback o sulla rete locale): senza una chiave nuova, il
+     * salvataggio la cancella. Un indirizzo non valido non cambia nulla (il salvataggio lo rifiuta).
+     */
+    fun baseUrlChangesOrigin(id: ProviderId, baseUrl: String): Boolean {
+        val normalized = normalizeProviderBaseUrl(baseUrl, id) ?: return false
+        return !ProviderPrefsSchema.sameOrigin(providerConfig(id).baseUrl, normalized)
+    }
+
     // ---- Ponte legacy: BridgeConfigurationStore diventa la vista Hermes/selected ----
     override fun baseUrl(): String = providerConfig(ProviderId.HERMES).baseUrl
 
@@ -62,8 +77,10 @@ interface ProviderConfigStore : BridgeConfigurationStore, ProviderSecrets {
     override suspend fun clearBearerToken(): Boolean = clearApiKey(ProviderId.HERMES)
 
     override suspend fun saveConfiguration(baseUrl: String, bearerToken: String?): Boolean {
-        // Semantica legacy: token null è ammesso solo se ne esiste già uno valido cifrato.
+        // Semantica legacy: token null è ammesso solo se ne esiste già uno valido cifrato, e solo per lo
+        // stesso server (S6): verso un'altra origine il bearer va reinserito.
         if (bearerToken == null && !hasApiKey(ProviderId.HERMES)) return false
+        if (bearerToken == null && baseUrlChangesOrigin(ProviderId.HERMES, baseUrl)) return false
         return saveProviderConfig(ProviderId.HERMES, baseUrl = baseUrl, apiKey = bearerToken)
     }
 }

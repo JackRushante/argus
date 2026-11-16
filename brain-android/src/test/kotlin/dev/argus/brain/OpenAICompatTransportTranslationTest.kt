@@ -97,7 +97,7 @@ class OpenAICompatTransportTranslationTest {
 
     // --- I3: sentinel con il nome sbagliato ---
 
-    @Test fun `a draft under a wrongly named sentinel is a meta parse error that keeps the raw reply`(): Unit = runBlocking {
+    @Test fun `a draft under a wrongly named sentinel is a format error that keeps the raw reply`(): Unit = runBlocking {
         val body = "Imposto un'automazione immediata che disattiva la modalit\u00e0 Non disturbare non appena la attivi.\n\n" +
             "@@AUTOMATION_DRAFT@@ {\"draft\":{\"name\":\"Disattiva Non disturbare subito\"," +
             "\"trigger\":{\"type\":\"time\",\"instant\":true},\"actions\":[{\"type\":\"set_dnd\",\"mode\":\"OFF\"}]}," +
@@ -108,8 +108,9 @@ class OpenAICompatTransportTranslationTest {
             .compile("spegni subito il non disturbare", manifest(), DeviceState())
 
         assertNull(result.draft)
-        assertEquals("meta_parse_error", result.metaError)
-        assertTrue("tz" in assertNotNull(result.detail))
+        // S9: la chiave inventata `instant` è segnalata col suo percorso, per il ritentativo.
+        assertEquals("draft_invalid", result.metaError)
+        assertTrue("\"instant\" at $.draft.trigger" in assertNotNull(result.detail))
         // La risposta grezza resta (serve al ritentativo di MeteredBrain, che cerca "draft").
         assertTrue("\"draft\"" in assertNotNull(result.raw))
     }

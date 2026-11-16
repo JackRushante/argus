@@ -239,6 +239,7 @@ fun SettingsScreen(
             onSaveProvider = callbacks::onSaveProviderConfig,
             providerChoices = state.providerChoices,
             onSelectProvider = callbacks::onSelectProvider,
+            onRemoveKey = callbacks::onRemoveProviderKey,
         )
     }
     if (confirmPrivacyRevoke) {
