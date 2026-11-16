@@ -89,7 +89,7 @@ class AndroidCapabilityProbeScaffold08Test {
     )
 
     private val newTriggers = setOf(
-        "calendar_event", "nfc_tag", "next_alarm", "app_usage", "user_mode_changed",
+        "calendar_event", "user_mode_changed",
     )
 
     @Test

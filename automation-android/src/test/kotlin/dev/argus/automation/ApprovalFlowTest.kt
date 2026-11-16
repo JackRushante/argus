@@ -2,6 +2,9 @@ package dev.argus.automation
 
 import dev.argus.automation.apps.AssumeAllInstalled
 import dev.argus.automation.apps.InstalledPackageCheck
+import dev.argus.automation.nfc.NfcTagReadResult
+import dev.argus.automation.nfc.NfcTagReader
+import dev.argus.automation.nfc.NoNfcTagReader
 import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.ApprovedStateContext
@@ -788,6 +791,65 @@ class ApprovalFlowTest {
         assertTrue(second.draft.issues.none { it.code == "app_control_freeze_system" })
     }
 
+    // --- 0.8: tag NFC letto all'attivazione -------------------------------------------------------
+
+    private fun nfcDraft(actions: List<Action> = listOf(Action.SetWifi(false))) = AutomationDraft(
+        name = "Tag della scrivania",
+        trigger = Trigger.NfcTag(resolveTag = true),
+        actions = actions,
+    )
+
+    private val nfcCapabilities = setOf(CapabilityIds.TRIGGER_NFC_TAG, ActionCapabilities.SET_WIFI, ActionCapabilities.RUN_SHELL)
+
+    @Test
+    fun `the tag is read at arm and written into the signed rule`() = runTest {
+        var registered: Automation? = null
+        var reads = 0
+        val fixture = fixture(
+            available = nfcCapabilities,
+            registrar = ArmedAutomationRegistrar { registered = it; true },
+            nfcTags = NfcTagReader { reads++; NfcTagReadResult.Read("04:A2:19:B3") },
+        )
+        val ready = assertIs<DraftSubmissionResult.Ready>(fixture.flow.submit(CompileResult("ok", nfcDraft(), null))).review
+        // In approvazione il tag non è ancora letto: niente lettura prima di «Arma».
+        assertEquals(0, reads)
+
+        val armed = assertIs<FlowArmResult.Armed>(
+            fixture.flow.arm(ready.draft.snapshot.id, ready.draft.snapshot.revision, ready.draft.snapshot.fingerprint),
+        ).automation
+        assertEquals(1, reads)
+        assertEquals(Trigger.NfcTag("04:A2:19:B3", resolveTag = false), armed.trigger)
+        assertEquals(armed, registered)
+        assertEquals(armed.approvalFingerprint, ApprovalFingerprints.of(armed))
+    }
+
+    @Test
+    fun `a tag that is not read arms nothing and says why`() = runTest {
+        listOf(NfcTagReadResult.NfcOff, NfcTagReadResult.Cancelled, NfcTagReadResult.TimedOut).forEach { outcome ->
+            val fixture = fixture(available = nfcCapabilities, nfcTags = NfcTagReader { outcome })
+            val ready = assertIs<DraftSubmissionResult.Ready>(fixture.flow.submit(CompileResult("ok", nfcDraft(), null))).review
+            val result = fixture.flow.arm(ready.draft.snapshot.id, ready.draft.snapshot.revision, ready.draft.snapshot.fingerprint)
+            assertEquals(FlowArmResult.NfcTagNotRead(outcome), result)
+            assertEquals(emptyList(), fixture.store.all().filter { it.status == AutomationStatus.ARMED })
+        }
+    }
+
+    @Test
+    fun `before android 15 an nfc rule with shell arms with a warning`() = runTest {
+        val shell = nfcDraft(listOf(Action.RunShell("svc wifi disable")))
+        val old = fixture(available = nfcCapabilities, nfcScansVerifiable = false)
+        val warned = assertIs<DraftSubmissionResult.Ready>(old.flow.submit(CompileResult("ok", shell, null))).review
+        assertTrue(warned.canArm)
+        assertTrue(warned.draft.issues.any { it.code == "nfc_scan_unverifiable" && it.severity == Severity.WARNING })
+
+        val plain = assertIs<DraftSubmissionResult.Ready>(old.flow.submit(CompileResult("ok", nfcDraft(), null))).review
+        assertFalse(plain.draft.issues.any { it.code == "nfc_scan_unverifiable" })
+
+        val recent = fixture(available = nfcCapabilities, nfcScansVerifiable = true)
+        val clean = assertIs<DraftSubmissionResult.Ready>(recent.flow.submit(CompileResult("ok", shell, null))).review
+        assertFalse(clean.draft.issues.any { it.code == "nfc_scan_unverifiable" })
+    }
+
     private fun solarDraft(spec: SolarSpec = SolarSpec(SolarEvent.SUNSET, -30)) = AutomationDraft(
         name = "Luci al tramonto",
         trigger = Trigger.Time(tz = "Europe/Rome", solar = spec),
@@ -804,6 +866,8 @@ class ApprovalFlowTest {
         whitelisted: Set<String> = emptySet(),
         audit: ArmAuditRecorder = ArmAuditRecorder(),
         installedPackages: InstalledPackageCheck = AssumeAllInstalled,
+        nfcTags: NfcTagReader = NoNfcTagReader,
+        nfcScansVerifiable: Boolean = true,
     ): Fixture {
         val store = MemoryAutomationStore(initial)
         val repository = MemoryDraftRepository(store)
@@ -831,6 +895,8 @@ class ApprovalFlowTest {
             newDraftId = { DraftId("draft-${repository.count + 1}") },
             newAutomationId = { AutomationId("automation-${repository.count + 1}") },
             installedPackages = installedPackages,
+            nfcTags = nfcTags,
+            nfcScansVerifiable = { nfcScansVerifiable },
         )
         return Fixture(flow, store, repository, audit)
     }

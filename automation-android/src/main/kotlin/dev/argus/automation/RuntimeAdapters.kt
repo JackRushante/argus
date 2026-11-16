@@ -353,7 +353,9 @@ class AndroidArmedAutomationRegistrar(
         // implementa un trigger registra qui la sua sorgente al posto di `false`.
         is Trigger.CalendarEvent -> false
 
-        is Trigger.NfcTag -> false
+        // 0.8: il tag arriva dal trampolino NFC (receiver del sistema, sempre attivo): basta che la capability
+        // sia pubblicata (telefono con NFC) e che la regola sia armata. Niente da tenere acceso.
+        is Trigger.NfcTag -> registerBroadcastBacked(automation)
 
         // 0.8: la prossima sveglia passa dallo stesso coordinatore delle regole a orario.
         is Trigger.NextAlarm -> registerTime(automation)

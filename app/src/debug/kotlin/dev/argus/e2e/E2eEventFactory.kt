@@ -208,8 +208,11 @@ class E2eEventFactory(private val nowMillis: () -> Long = System::currentTimeMil
                 registered(automation, type, at) { TriggerEvent.CalendarEventFired(automation.id, phase, it) }
             }
 
+            // 0.8: una scansione sintetica è non verificata (come un'app che forgia il tag), salvo
+            // "verified": true per provare le regole con shell.
             "nfc_tag" -> devices.nfcTag(
                 payload.string("tagId") ?: (own as? Trigger.NfcTag)?.tagId?.takeIf { it.isNotEmpty() } ?: DEFAULT_TAG,
+                (payload["verified"] as? JsonPrimitive)?.booleanOrNull ?: false,
                 at,
             )
 

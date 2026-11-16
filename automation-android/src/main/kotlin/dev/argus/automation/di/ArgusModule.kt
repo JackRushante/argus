@@ -1,6 +1,7 @@
 package dev.argus.automation.di
 
 import android.content.Context
+import android.os.Build
 import android.os.SystemClock
 import dagger.Module
 import dagger.Provides
@@ -217,6 +218,9 @@ import dev.argus.automation.connectivity.ConnectivitySentinelStatus
 import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
 import dev.argus.automation.connectivity.PrefsConnectivityStateStore
 import dev.argus.automation.geofence.AndroidGeofenceBackend
+import dev.argus.automation.nfc.AndroidNfcTagReader
+import dev.argus.automation.nfc.NfcScanIngress
+import dev.argus.automation.nfc.NfcScanVerification
 import dev.argus.automation.geofence.AndroidGeofenceDwellTimer
 import dev.argus.automation.geofence.GeofenceDwellSupport
 import dev.argus.automation.geofence.PrefsGeofenceDwellStore
@@ -1136,6 +1140,17 @@ object ArgusModule {
         dispatcher = dispatcher,
     )
 
+    /** 0.8: scansioni dei tag NFC dall'activity trampolino, verso il motore. */
+    @Provides
+    @Singleton
+    fun nfcScanIngress(dispatcher: DeviceEventDispatcher): NfcScanIngress =
+        NfcScanIngress(DeviceEventParser(), dispatcher)
+
+    /** 0.8: lettura del tag all'attivazione di una regola `nfc_tag`, in primo piano. */
+    @Provides
+    @Singleton
+    fun nfcTagReader(@ApplicationContext context: Context): AndroidNfcTagReader = AndroidNfcTagReader(context)
+
     @Provides
     @Singleton
     fun connectivityEventDispatcher(
@@ -1507,6 +1522,7 @@ object ArgusModule {
         stateQueries: StateQueryProbe,
         audit: AuditSink,
         installedApps: InstalledAppCatalog,
+        nfcTags: AndroidNfcTagReader,
     ): ApprovalFlow = ApprovalFlow(
         drafts,
         approvals,
@@ -1517,6 +1533,8 @@ object ArgusModule {
         stateQueries,
         audit,
         installedPackages = installedApps,
+        nfcTags = nfcTags,
+        nfcScansVerifiable = { Build.VERSION.SDK_INT >= NfcScanVerification.FIRST_VERIFIABLE_API },
     )
 
     @Provides

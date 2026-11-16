@@ -202,6 +202,10 @@ private fun causeText(cause: BlockCause, l: RenderLanguage): String = when (caus
         "The required sensor is not available or the physical activity permission is missing",
         "Il sensore richiesto non è disponibile o manca il permesso attività fisica",
     )
+    BlockCause.NFC_UNAVAILABLE -> l.pick(
+        "This phone has no NFC, so it cannot read tags",
+        "Questo telefono non ha l'NFC, quindi non può leggere i tag",
+    )
     BlockCause.WRITE_SETTINGS_ACCESS -> l.pick(
         "The \"Modify system settings\" access is missing",
         "Manca l'accesso a \"Modifica impostazioni di sistema\"",

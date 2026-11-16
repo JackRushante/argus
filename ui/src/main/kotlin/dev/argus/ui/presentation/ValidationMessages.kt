@@ -149,6 +149,10 @@ object ValidationMessages {
             "The NFC tag id is not valid.",
             "L'identificativo del tag NFC non è valido.",
         ),
+        "nfc_scan_unverifiable" to t(
+            "Before Android 15 a tag scan cannot be proven to come from the phone: shell commands and screen macros of this rule will never run, the other actions will.",
+            "Prima di Android 15 non si può provare che una lettura del tag venga dal telefono: comandi shell e macro sullo schermo di questa regola non partiranno mai, le altre azioni sì.",
+        ),
         "nfc_tag_ambiguous" to t(
             "The NFC tag is already set: it cannot also be read again when you turn on the rule.",
             "Il tag NFC è già impostato: non si può anche rileggere quando attivi la regola.",
