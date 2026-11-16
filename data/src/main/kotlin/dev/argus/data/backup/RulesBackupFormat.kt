@@ -17,6 +17,16 @@ import java.time.LocalDate
  * chat): niente impronte, dati di approvazione, log, audit, impostazioni, chiavi API, whitelist dei
  * contatti, consumi. All'import ogni voce diventa una bozza da approvare: `enabled` è solo
  * informativo e non arma mai nulla.
+ *
+ * 0.7.2, etichette: una chiave FACOLTATIVA alla radice, scritta solo se almeno una regola ne ha,
+ * ```
+ *  "labels":[{"rule":<indice in rules>,"names":["Casa","Lavoro"]}]
+ * ```
+ * La versione resta 1, in entrambe le direzioni: le versioni precedenti leggono solo `format`, `version` e
+ * `rules` e ignorano le altre chiavi della radice, quindi importano tutte le regole senza etichette; un file
+ * senza `labels` (versioni precedenti) si importa come prima. La voce di una regola resta esattamente
+ * `{"enabled","draft"}`: una chiave in più lì farebbe scartare la regola alle versioni precedenti. Le
+ * etichette sono organizzazione: una sezione `labels` illeggibile si ignora e non scarta mai una regola.
  */
 object RulesBackupFormat {
     const val FORMAT = "argus-rules"
@@ -64,8 +74,13 @@ object RulesBackupFormat {
     private const val MAX_SLUG_CHARS = 40
 }
 
-/** Una voce del file: la bozza e se la regola era attiva al momento dell'export. */
-data class BackupRule(val enabled: Boolean, val draft: AutomationDraft)
+/** Una voce del file: la bozza, se la regola era attiva al momento dell'export e le sue etichette. */
+data class BackupRule(
+    val enabled: Boolean,
+    val draft: AutomationDraft,
+    /** 0.7.2: etichette della regola (organizzazione, fuori dalla bozza e dalla sua impronta). */
+    val labels: List<String> = emptyList(),
+)
 
 /** Perché un export o un import non è andato a buon fine. Vocabolario chiuso: il testo lo scrive la UI. */
 enum class BackupFailure {
@@ -86,6 +101,15 @@ enum class BackupFailure {
 
     /** Import: non è JSON (o non è UTF-8, o è annidato oltre il limite). */
     NOT_JSON,
+
+    /** Import: file cifrato (`.argusbackup`): serve la passphrase. Non è un errore da mostrare. */
+    PASSPHRASE_REQUIRED,
+
+    /** Import cifrato: la passphrase non apre il file (o il file è stato modificato). */
+    WRONG_PASSPHRASE,
+
+    /** Import cifrato: il file è troncato, manca anche l'intestazione. */
+    ENCRYPTED_DAMAGED,
 
     /** Import: JSON valido ma non un'esportazione Argus (`format`/struttura errati). */
     WRONG_FORMAT,
@@ -158,6 +182,12 @@ sealed interface ImportPreview {
     }
 
     data class Rejected(val failure: BackupFailure) : ImportPreview
+}
+
+/** Il testo dell'export completo, pronto da scrivere (in chiaro o cifrato). */
+sealed interface BuiltBackup {
+    class Ready(val bytes: ByteArray, val exported: Int, val skipped: Int) : BuiltBackup
+    data class Failed(val failure: BackupFailure) : BuiltBackup
 }
 
 /**

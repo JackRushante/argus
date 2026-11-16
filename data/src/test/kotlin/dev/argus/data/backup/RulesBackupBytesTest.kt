@@ -161,6 +161,17 @@ class RulesBackupBytesTest {
         // Stesso documento, con e senza spazi.
         assertEquals(Json.parseToJsonElement(texts.full.text), Json.parseToJsonElement(texts.full.compactText))
         assertTrue('\n' !in texts.full.compactText)
+        // Le etichette sono l'organizzazione di chi condivide: una regola condivisa non le porta, in nessuna versione.
+        listOf(texts.full.text, texts.stripped.text).forEach { assertTrue("\"labels\"" !in it) }
+    }
+
+    @Test
+    fun `an encrypted backup pasted or received is refused with its own reason`() = runTest {
+        val encrypted = "ARGUSBK1".toByteArray(Charsets.US_ASCII) + ByteArray(64)
+        assertTrue(EncryptedBackupFormat.hasMagic(encrypted))
+
+        assertEquals(ImportPreview.Rejected(BackupFailure.PASSPHRASE_REQUIRED), service().preview(encrypted))
+        assertEquals(ImportOutcome.Failed(BackupFailure.PASSPHRASE_REQUIRED), service().importBytes(encrypted))
     }
 
     @Test

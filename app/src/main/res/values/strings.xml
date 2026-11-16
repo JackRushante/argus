@@ -27,6 +27,7 @@
     <string name="share_copied">Rule copied</string>
     <string name="share_clip_label">Argus rule</string>
     <string name="import_activity_label">Import into Argus</string>
+    <string name="dictation_unavailable">No speech recognizer is available on this phone.</string>
     <!-- 0.4.1 (manuale): avvio manuale (F8) e Pausa automazioni (F21). -->
     <string name="manual_tile_label">Argus: run rule</string>
     <string name="manual_tile_none">Choose a rule in the app</string>

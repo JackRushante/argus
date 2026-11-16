@@ -207,6 +207,16 @@ fun OnboardingScreen(
                     HealthBanner(stringResource(R.string.onboarding_brain_unverified), BannerTone.Warning, Icons.Rounded.WarningAmber)
                 }
 
+                // BRAIN_CONFIG: il tetto di default delle chiamate AI, detto una volta (0.7.2).
+                val dailyAiCallLimit = state.defaultDailyAiCallLimit
+                if (step.kind == StepKind.BRAIN_CONFIG && dailyAiCallLimit != null) {
+                    Text(
+                        stringResource(R.string.onboarding_brain_budget_default, dailyAiCallLimit),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+
                 // SHIZUKU: lista onesta di cosa richiede/degrada senza Shizuku (task #54).
                 if (step.kind == StepKind.SHIZUKU && state.shizukuCapabilities.isNotEmpty()) {
                     ShizukuCapabilityList(state.shizukuCapabilities)
@@ -745,6 +755,7 @@ private fun PreviewFor(
                 providerChoices = previewChoices,
                 shizukuCapabilities = ShizukuCapabilityCatalog.rows(),
                 brainUnverified = brainUnverified,
+                defaultDailyAiCallLimit = 200,
                 transport = TransportUi.CliBridge(url = "https://hermes.example", reachable = null, lastLatencyLabel = null),
             ),
             NoopOnboardingCallbacks,

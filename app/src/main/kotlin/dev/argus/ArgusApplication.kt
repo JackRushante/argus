@@ -11,6 +11,7 @@ import dev.argus.automation.RenderLanguageSource
 import dev.argus.automation.TimeAlarmRuntime
 import dev.argus.automation.TimeAlarmRuntimeRegistry
 import dev.argus.automation.apps.AndroidAppLabelLookup
+import dev.argus.automation.backup.AutoBackupCoordinator
 import dev.argus.manual.ManualWidgetRefresher
 import dev.argus.ui.presentation.AppLabels
 import javax.inject.Inject
@@ -21,6 +22,7 @@ class ArgusApplication : Application(), DefaultLifecycleObserver {
     @Inject lateinit var runtimeController: ArgusRuntimeController
     @Inject lateinit var renderLanguage: RenderLanguageSource
     @Inject lateinit var manualWidgetRefresher: ManualWidgetRefresher
+    @Inject lateinit var autoBackup: AutoBackupCoordinator
 
     override fun onCreate() {
         super<Application>.onCreate()
@@ -31,6 +33,8 @@ class ArgusApplication : Application(), DefaultLifecycleObserver {
         runtimeController.start()
         // 0.4.1 (F8): il widget delle regole manuali segue le regole armate e la pausa.
         manualWidgetRefresher.start()
+        // 0.7.2: rimette la sveglia del backup automatico (un riavvio la cancella) e recupera un ritardo.
+        autoBackup.start()
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -41,5 +45,6 @@ class ArgusApplication : Application(), DefaultLifecycleObserver {
 
     override fun onStart(owner: LifecycleOwner) {
         runtimeController.onForeground()
+        autoBackup.onForeground()
     }
 }

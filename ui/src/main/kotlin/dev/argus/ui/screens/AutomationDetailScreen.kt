@@ -88,8 +88,10 @@ import dev.argus.ui.components.HealthBanner
 import dev.argus.ui.components.IconBadge
 import dev.argus.ui.components.ManualEntrySection
 import dev.argus.ui.components.ModelDescriptionNote
+import dev.argus.ui.components.AddLabelSheet
 import dev.argus.ui.components.ArgusIconButton
 import dev.argus.ui.components.RuleChangesCard
+import dev.argus.ui.components.RuleLabelsSection
 import dev.argus.ui.components.RuleShareSheet
 import dev.argus.ui.components.SectionLabel
 import dev.argus.ui.components.StatusBadgeChip
@@ -107,6 +109,8 @@ import dev.argus.ui.model.LogOutcome
 import dev.argus.ui.model.LogRow
 import dev.argus.ui.model.ProgramNode
 import dev.argus.ui.model.RuleDiagnosisUi
+import dev.argus.ui.model.RuleLabelUi
+import dev.argus.ui.model.RuleLabelsUi
 import dev.argus.ui.model.RuleRender
 import dev.argus.ui.model.RuleStatsUi
 import dev.argus.ui.model.RuleStatsWindow
@@ -173,6 +177,8 @@ fun AutomationDetailScreen(
     // «Cambia app»: lo slot e il package che si stanno cambiando (null = foglio chiuso).
     var pickerSlot by rememberSaveable { mutableStateOf<Int?>(null) }
     var pickerPackage by rememberSaveable { mutableStateOf<String?>(null) }
+    // 0.7.2: foglio «Aggiungi un'etichetta».
+    var showLabelSheet by rememberSaveable { mutableStateOf(false) }
     val changeApp: ((AppRef) -> Unit)? = if (canChangeApp(state)) {
         { ref ->
             // L'elenco lo carica il foglio quando compare (vedi sotto), non il tocco.
@@ -252,6 +258,15 @@ fun AutomationDetailScreen(
                 // Invariante 4: la prosa dell'LLM è un commento subordinato, dopo la regola.
                 state.rationale?.let { ModelDescriptionNote(it) }
 
+                // 0.7.2: etichette (solo regole salvate). Organizzazione: non toccano la regola né la sua approvazione.
+                state.labels?.let { labels ->
+                    RuleLabelsSection(
+                        labels = labels,
+                        onAdd = { showLabelSheet = true },
+                        onRemove = callbacks::onRemoveLabel,
+                    )
+                }
+
                 if (state.recentRuns.isNotEmpty()) {
                     RecentRunsSection(state.recentRuns, callbacks::onOpenFullLog)
                 }
@@ -305,6 +320,17 @@ fun AutomationDetailScreen(
             onShareAsText = callbacks::onShareAsText,
             onSaveFile = callbacks::onSaveShareFile,
             onCopy = callbacks::onCopyShare,
+        )
+    }
+    val ruleLabels = state.labels
+    if (showLabelSheet && ruleLabels != null) {
+        AddLabelSheet(
+            labels = ruleLabels,
+            onAdd = { label ->
+                showLabelSheet = false
+                callbacks.onAddLabel(label)
+            },
+            onDismiss = { showLabelSheet = false },
         )
     }
     if (confirmDelete) {
@@ -1244,7 +1270,17 @@ private fun DetailPendingAppsPreview() {
 @DetailThemePreviews
 @Composable
 private fun DetailArmedPreview() {
-    ArgusTheme { AutomationDetailScreen(previewArmedDetail, NoopDetailCallbacks) }
+    ArgusTheme {
+        AutomationDetailScreen(
+            previewArmedDetail.copy(
+                labels = RuleLabelsUi(
+                    labels = listOf(RuleLabelUi("Casa", paused = false), RuleLabelUi("Notte", paused = true)),
+                    existing = listOf("Casa", "Notte", "Lavoro"),
+                ),
+            ),
+            NoopDetailCallbacks,
+        )
+    }
 }
 
 @DetailThemePreviews

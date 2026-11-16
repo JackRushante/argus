@@ -97,7 +97,7 @@ class ReceivedImportViewModel @Inject constructor(
     }
 
     private fun rejected(failure: BackupFailure, text: Boolean) = ReceivedImportState.Rejected(
-        if (text) ImportPreviewText.textFailure(failure, language) else RulesBackupText.failure(failure, language),
+        if (text) ImportPreviewText.textFailure(failure, language) else ImportPreviewText.fileFailure(failure, language),
     )
 
     /** Conferma dell'utente: importa i byte mostrati, una volta sola. */

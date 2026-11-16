@@ -124,6 +124,7 @@
     <string name="chat_input_sending">In attesa della risposta…</string>
     <string name="chat_input_placeholder">Chiedi una regola…</string>
     <string name="chat_send">Invia</string>
+    <string name="chat_dictate">Detta</string>
 
     <!-- Lista automazioni -->
     <string name="list_title">Automazioni</string>
@@ -146,6 +147,22 @@
     <string name="detail_rationale_label">descrizione del modello</string>
     <string name="detail_recent_runs">Ultime esecuzioni</string>
     <string name="detail_see_all">Vedi tutte</string>
+    <!-- 0.7.2: etichette nel dettaglio della regola. -->
+    <string name="lbl_detail_title">Etichette</string>
+    <string name="lbl_detail_none">Nessuna etichetta.</string>
+    <string name="lbl_detail_note">Le etichette servono solo a organizzare: non cambiano cosa fa la regola e non richiedono una nuova approvazione.</string>
+    <string name="lbl_detail_add">Aggiungi etichetta</string>
+    <string name="lbl_detail_remove_cd">Togli l\'etichetta %1$s</string>
+    <string name="lbl_detail_full">Una regola può avere al massimo 5 etichette.</string>
+    <string name="lbl_sheet_title">Aggiungi un\'etichetta</string>
+    <string name="lbl_sheet_existing">Le tue etichette</string>
+    <string name="lbl_sheet_new">Nuova etichetta</string>
+    <string name="lbl_sheet_placeholder">Es. Casa</string>
+    <string name="lbl_sheet_hint">Da 1 a 24 caratteri.</string>
+    <string name="lbl_sheet_invalid">Da 1 a 24 caratteri, senza caratteri invisibili.</string>
+    <string name="lbl_sheet_already">La regola ha già questa etichetta.</string>
+    <string name="lbl_sheet_too_many">Hai già 20 etichette: usane una di quelle esistenti.</string>
+    <string name="lbl_sheet_add">Aggiungi</string>
     <string name="detail_arm_blocked">Arma bloccato: %1$s</string>
     <string name="detail_not_armable">Regola non armabile</string>
     <string name="detail_reject">Rifiuta</string>
@@ -259,6 +276,7 @@
     <string name="settings_budget_provider_finish">ultimo motivo di termine · %1$s</string>
     <string name="settings_budget_provider_cost">costo mese %1$s</string>
     <string name="settings_budget_footnote">Costi in dollari stimati dal listino pubblico solo per i provider a prezzo noto (stima indicativa, non fattura) · EUR a tasso fisso ≈ · Hermes/OpenRouter/Custom: solo token</string>
+    <string name="settings_budget_default_note">Limite predefinito: al massimo %1$d chiamate AI al giorno, così una regola finita in un ciclo non fa salire i costi. Puoi cambiarlo o toglierlo con Modifica limiti.</string>
     <string name="settings_budget_edit_limits">Modifica limiti</string>
     <string name="settings_rerun">Ripeti configurazione</string>
     <string name="settings_shizuku_unsupported">Shizuku troppo vecchio: aggiornalo</string>
@@ -300,6 +318,7 @@
     <string name="onboarding_shizuku_recommended_sub">Funzionano anche senza, ma solo con Argus aperto in primo piano.</string>
     <string name="onboarding_shizuku_not_required_sub">Sempre disponibili, con o senza Shizuku.</string>
     <string name="onboarding_brain_unverified">Connessione non ancora verificata: potrai controllarla da Sistema.</string>
+    <string name="onboarding_brain_budget_default">Per tenere sotto controllo i costi, Argus fa al massimo %1$d chiamate AI al giorno. Puoi cambiare o togliere questo limite in Sistema.</string>
     <string name="onboarding_battery_consequence">Senza l\'esclusione, Android o la gestione energetica del produttore può ritardare il lavoro in background. Gli allarmi restano event-driven e non usano un servizio persistente.</string>
 
     <!-- Backup delle regole (0.4.0, F1) -->
@@ -376,6 +395,41 @@
     <string name="tpl_blank_place">Il luogo lo scegli tu</string>
     <string name="tpl_blank_secret">I valori segreti li aggiungi tu</string>
     <string name="tpl_blank_current_location">Il luogo è dove la armi</string>
+    <!-- Import cifrato e backup automatico (0.7.2) -->
+    <string name="backup_import_encrypted_body">Questo backup è cifrato. Inserisci la passphrase con cui è stato fatto.</string>
+    <string name="backup_import_passphrase_field">Passphrase del backup</string>
+    <string name="backup_import_open">Apri</string>
+    <string name="backup_auto_title">Backup automatico</string>
+    <string name="backup_auto_body">Salva una copia cifrata delle regole in una cartella che scegli, per esempio quella che un\'app di sincronizzazione come Nextcloud carica. Parte di notte, senza di te.</string>
+    <string name="backup_auto_switch_on_cd">Attiva il backup automatico</string>
+    <string name="backup_auto_switch_off_cd">Disattiva il backup automatico</string>
+    <string name="backup_auto_needs_setup">Scegli una cartella e imposta una passphrase per attivarlo.</string>
+    <string name="backup_auto_folder_label">Cartella</string>
+    <string name="backup_auto_folder_none">Nessuna cartella scelta</string>
+    <string name="backup_auto_folder_choose">Scegli cartella</string>
+    <string name="backup_auto_folder_change">Cambia cartella</string>
+    <string name="backup_auto_frequency_label">Frequenza</string>
+    <string name="backup_auto_daily">Ogni giorno</string>
+    <string name="backup_auto_weekly">Ogni settimana</string>
+    <string name="backup_auto_passphrase_label">Passphrase</string>
+    <string name="backup_auto_passphrase_set">Impostata</string>
+    <string name="backup_auto_passphrase_missing">Non impostata</string>
+    <string name="backup_auto_passphrase_add">Imposta passphrase</string>
+    <string name="backup_auto_passphrase_change">Cambia passphrase</string>
+    <string name="backup_auto_passphrase_working">Preparazione della chiave…</string>
+    <string name="backup_auto_never">Nessun backup ancora.</string>
+    <string name="backup_auto_retention">Argus tiene gli ultimi 7 backup che ha scritto in quella cartella e non tocca gli altri file.</string>
+    <string name="backup_auto_run_now">Esegui backup ora</string>
+    <string name="backup_auto_running">Backup in corso…</string>
+    <string name="backup_passphrase_sheet_title">Passphrase del backup</string>
+    <string name="backup_passphrase_sheet_body">I backup sono cifrati con questa passphrase e ti serve per ripristinarli su un nuovo telefono. Argus non la conserva. Se la dimentichi nessuno può recuperarla e i backup non si possono più aprire.</string>
+    <string name="backup_passphrase_change_note">I backup già fatti restano leggibili con la passphrase con cui sono stati fatti.</string>
+    <string name="backup_passphrase_field">Nuova passphrase</string>
+    <string name="backup_passphrase_confirm_field">Ripeti la passphrase</string>
+    <string name="backup_passphrase_too_short">Almeno 8 caratteri.</string>
+    <string name="backup_passphrase_mismatch">Le due passphrase non coincidono.</string>
+    <string name="backup_passphrase_save">Salva</string>
+    <string name="backup_passphrase_cancel">Annulla</string>
 
     <!-- 0.4.0 blocco UI (prefisso ui40_) -->
     <string name="ui40_chat_clear_title">Svuotare la conversazione?</string>
@@ -428,6 +482,10 @@
     <string name="pause_setting_title">Pausa automazioni</string>
     <string name="pause_setting_on">Nessuna regola scatta, comprese quelle manuali. Le sveglie restano registrate; quello che viene saltato non si recupera alla ripresa.</string>
     <string name="pause_setting_off">Le regole scattano normalmente.</string>
+    <!-- 0.7.2: avvisi di salute delle regole. -->
+    <string name="health_alerts_setting_title">Avvisami quando una regola smette di funzionare</string>
+    <string name="health_alerts_setting_on">Una notifica quando una regola fallisce 3 volte di fila o perde qualcosa che le serve (Shizuku, accesso alle notifiche, Accessibilità, sveglie esatte, posizione). Mostra solo nomi di regole e conteggi.</string>
+    <string name="health_alerts_setting_off">Nessun avviso: una regola che smette di funzionare si vede solo nel Log.</string>
 
     <!-- 0.5.0 (privilegi): backend privilegiato, root su e permessi permanenti. -->
     <string name="priv50_section">Privilegi</string>
@@ -530,6 +588,30 @@
     <string name="rda_lc_row_open">Apri la regola</string>
     <string name="rda_lc_next_fire_cd">Prossimo scatto: %1$s</string>
     <string name="rda_lc_last_fire_cd">Ultimo scatto: %1$s</string>
+    <!-- 0.7.2: ricerca, etichette e pausa per gruppo nella lista Automazioni. -->
+    <string name="lbl_search_placeholder">Cerca per nome, app o azione</string>
+    <string name="lbl_search_clear">Cancella la ricerca</string>
+    <string name="lbl_search_empty_title">Nessuna regola per «%1$s»</string>
+    <string name="lbl_search_empty_body">Prova con un\'altra parola o con il nome di un\'app.</string>
+    <string name="lbl_filter_group">Filtra per etichetta</string>
+    <string name="lbl_chip_all">Tutte · %1$d</string>
+    <string name="lbl_chip_all_cd">Tutte le regole, %1$d</string>
+    <string name="lbl_chip_count">%1$s · %2$d</string>
+    <string name="lbl_chip_cd">Etichetta %1$s, %2$d regole</string>
+    <string name="lbl_chip_paused_cd">Etichetta %1$s, %2$d regole, gruppo in pausa</string>
+    <string name="lbl_group_title">Etichetta «%1$s»</string>
+    <string name="lbl_group_active_one">1 attiva</string>
+    <string name="lbl_group_active_many">%1$d attive</string>
+    <string name="lbl_group_waiting">%1$d da approvare</string>
+    <string name="lbl_group_none_active">Nessuna regola attiva</string>
+    <string name="lbl_group_paused_summary">In pausa · %1$s</string>
+    <string name="lbl_group_paused_state">Gruppo in pausa: le sue regole non scattano</string>
+    <string name="lbl_group_pause">Pausa gruppo</string>
+    <string name="lbl_group_resume">Riprendi gruppo</string>
+    <string name="lbl_row_paused">In pausa</string>
+    <string name="lbl_row_paused_cd">In pausa per il suo gruppo: non scatta</string>
+    <string name="lbl_label_paused_cd">gruppo in pausa</string>
+    <string name="lbl_list_note">Le etichette si scelgono nel dettaglio della regola. Non cambiano cosa fa la regola e non richiedono una nuova approvazione.</string>
     <string name="rda_lc_wait_cd">Argus sta pensando, %1$d secondi</string>
     <string name="rda_lc_wait_axis_start">0 s</string>
     <string name="rda_lc_wait_axis_band">%1$d-%2$d s</string>

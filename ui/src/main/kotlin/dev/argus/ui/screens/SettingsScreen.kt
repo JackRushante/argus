@@ -92,8 +92,10 @@ import dev.argus.ui.components.HealthTileLevel
 import dev.argus.ui.components.BannerTone
 import dev.argus.ui.components.IconBadge
 import dev.argus.ui.components.OutlineChip
+import dev.argus.ui.components.HealthAlertsSettingRow
 import dev.argus.ui.components.PauseSettingRow
 import dev.argus.ui.components.PrivilegesSection
+import dev.argus.ui.components.AutoBackupActions
 import dev.argus.ui.components.RulesBackupSection
 import dev.argus.ui.components.SectionLabel
 import dev.argus.ui.components.StatusChip
@@ -206,6 +208,7 @@ fun SettingsScreen(
                 HealthSection(healthItems, needsFix, Modifier.sectionAnchor(SECTION_HEALTH))
                 PrivilegesSection(state.privileged, callbacks::onSetRootEnabled, callbacks::onGrantPermanent)
                 PauseSettingRow(state.automationsPaused, callbacks::onSetAutomationsPaused)
+                HealthAlertsSettingRow(state.healthAlertsEnabled, callbacks::onSetHealthAlertsEnabled)
                 BrainSection(
                     transport = state.transport,
                     onTest = callbacks::onTestConnection,
@@ -226,6 +229,14 @@ fun SettingsScreen(
                     callbacks::onOpenImportedRules,
                     onImportTextChange = callbacks::onImportTextChange,
                     onImportText = callbacks::onImportText,
+                    onSubmitImportPassphrase = callbacks::onSubmitImportPassphrase,
+                    autoBackupActions = AutoBackupActions(
+                        onSetEnabled = callbacks::onSetAutoBackupEnabled,
+                        onChooseFolder = callbacks::onChooseAutoBackupFolder,
+                        onSetFrequency = callbacks::onSetAutoBackupFrequency,
+                        onSetPassphrase = callbacks::onSetAutoBackupPassphrase,
+                        onRunNow = callbacks::onRunAutoBackupNow,
+                    ),
                 )
                 RerunRow(callbacks::onRerunOnboarding)
                 VersionFooter(state.appVersionLabel)
@@ -1008,6 +1019,15 @@ private fun BudgetSection(budget: BudgetUi, callbacks: SettingsCallbacks, modifi
                 },
             )
         }
+        val defaultDayLimit = budget.limitDay
+        if (budget.defaultLimitActive && defaultDayLimit != null) {
+            Text(
+                stringResource(R.string.settings_budget_default_note, defaultDayLimit),
+                modifier = Modifier.padding(horizontal = ArgusSpacing.Unit),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
         Text(
             stringResource(R.string.settings_budget_footnote),
             modifier = Modifier.padding(horizontal = ArgusSpacing.Unit),
@@ -1279,6 +1299,15 @@ private fun SettingsBudgetMissingValuesPreview() = SettingsPreview(
                 ProviderUsageUi("openrouter", "OpenRouter", callsHour = 0, callsDay = 4, costMonthMicros = null, tokensInMonth = 1_200),
             ),
         ),
+    ),
+)
+
+/** Mai salvato limiti: il tetto di default di 200 chiamate al giorno, con la sua nota. */
+@ArgusThemePreviews
+@Composable
+private fun SettingsBudgetDefaultLimitPreview() = SettingsPreview(
+    Fixtures.settingsAllGreen.copy(
+        budget = BudgetUi(usedHour = 2, usedDay = 9, limitDay = 200, defaultLimitActive = true),
     ),
 )
 

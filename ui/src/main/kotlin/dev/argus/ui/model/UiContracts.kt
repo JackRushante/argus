@@ -150,6 +150,8 @@ data class ChatState(
      * norma, 0-180 s per un server locale). `null` = non noto: la barra usa l'asse standard.
      */
     val sendingTimeoutSec: Int? = null,
+    /** 0.7.2: c'è un riconoscitore vocale di sistema; senza, il microfono del campo non compare. */
+    val dictationAvailable: Boolean = false,
 )
 
 sealed interface ChatItem {
@@ -218,6 +220,11 @@ interface ChatCallbacks {
      * Default no-op per i vecchi host: il NavHost deve cablarla su `ChatViewModel.onCopyRawResponse()`.
      */
     fun onCopyRawResponse() {}
+    /**
+     * Microfono del campo (0.7.2): apre il riconoscitore vocale di sistema. Il testo riconosciuto torna
+     * nel campo tramite [onInputChange] e non viene mai inviato da solo. Default no-op per i vecchi host.
+     */
+    fun onDictate() {}
 }
 
 // --- 6.2 Automazioni · lista ---
@@ -236,6 +243,27 @@ data class AutomationListState(
      * caricamento o nessuna regola): il riepilogo non compare, mai un riepilogo di zeri.
      */
     val summary: ListSummary? = null,
+    /**
+     * 0.7.2: un chip per etichetta, con i conteggi sull'elenco COMPLETO (come il riepilogo). Vuoto = nessuna
+     * etichetta ancora: la fila mostra solo «Tutte».
+     */
+    val labels: List<LabelChipUi> = emptyList(),
+    /** 0.7.2: regole in tutto, per «Tutte · N». */
+    val totalCount: Int = 0,
+    /** 0.7.2: etichetta scelta (la sua grafia); `null` = «Tutte». Le righe arrivano già filtrate. */
+    val selectedLabel: String? = null,
+)
+
+/**
+ * 0.7.2: un'etichetta nella fila dei filtri. [activeCount]: regole armate e attive; [waitingCount]: in attesa
+ * di approvazione (bozze e modifiche in attesa). [paused]: il gruppo è in pausa (le sue regole non scattano).
+ */
+data class LabelChipUi(
+    val label: String,
+    val count: Int,
+    val activeCount: Int,
+    val waitingCount: Int,
+    val paused: Boolean,
 )
 
 data class AutomationRow(
@@ -257,6 +285,14 @@ data class AutomationRow(
     val pendingEditDraftId: String? = null,
     /** 0.7.0 (redesign A): istante (epoch ms) di [nextFireLabel], per ordinare «Prossimo scatto». `null` = senza prossimo scatto. */
     val nextFireAtMillis: Long? = null,
+    /** 0.7.2: le azioni in breve, dai tipi («Modalità Casa, Volume»); la riga le mostra dopo il trigger. */
+    val actionSummary: String? = null,
+    /** 0.7.2: nomi delle app che la regola nomina (dal telefono), solo per la ricerca. */
+    val appNames: List<String> = emptyList(),
+    /** 0.7.2: etichette della regola (organizzazione, fuori dall'impronta). */
+    val labels: List<String> = emptyList(),
+    /** 0.7.2: un gruppo (etichetta) della regola è in pausa: la regola non scatta. */
+    val groupPaused: Boolean = false,
 )
 
 enum class StatusFilter { ALL, ARMED, PENDING, DISABLED, NEEDS_REVIEW }
@@ -292,6 +328,8 @@ interface AutomationListCallbacks {
     fun onBannerTap() {}    // tap sul banner salute → Sistema; default no-op, host-owned
     fun onResumeAutomations() {}   // «Riprendi» sul banner della pausa (F21); default no-op
     fun onOpenLog() {}      // 0.7.0: riquadro «Oggi» del riepilogo → Log; default no-op, la nav reale è dell'host
+    fun onSelectLabel(label: String?) {}                    // 0.7.2: chip etichetta; null = «Tutte»
+    fun onSetLabelPaused(label: String, paused: Boolean) {} // 0.7.2: «Pausa gruppo» / «Riprendi gruppo»
     fun onOpenTemplates() {} // 0.7.2: «Modelli» → galleria dei modelli; default no-op, la nav reale è dell'host
 }
 
@@ -399,6 +437,11 @@ data class AutomationDetailState(
     /** 0.7.2 (S8): la bozza viene da un file importato (`createdBy = IMPORT`), non dalla chat: l'approvazione lo dice. */
     val imported: Boolean = false,
     /**
+     * 0.7.2: etichette della regola salvata, con aggiungi e togli. `null` per una bozza: si etichetta una
+     * regola salvata. Non cambiano la regola e non chiedono una nuova approvazione.
+     */
+    val labels: RuleLabelsUi? = null,
+    /**
      * 0.7.2: la bozza sostituisce una regola già approvata (armata o disattivata): le righe rese che cambiano
      * rispetto a quella, per la card «Cosa cambia». `null` = non è una modifica; vuota = nulla di eseguibile cambia.
      */
@@ -408,6 +451,16 @@ data class AutomationDetailState(
     /** 0.7.2: il foglio «Condividi regola» è aperto con questi testi; `null` = chiuso. */
     val share: RuleShareUi? = null,
 )
+
+/** 0.7.2: le etichette di una regola nel dettaglio e quelle già in uso, da proporre per prime. */
+data class RuleLabelsUi(
+    val labels: List<RuleLabelUi>,
+    /** Tutte le etichette in uso (anche su altre regole), una per etichetta. */
+    val existing: List<String>,
+)
+
+/** 0.7.2: un'etichetta della regola; [paused] = il suo gruppo è in pausa. */
+data class RuleLabelUi(val label: String, val paused: Boolean)
 
 /**
  * 0.7.2: una regola da condividere, nelle due versioni del foglio: senza dati personali ([stripped], la scelta
@@ -491,6 +544,8 @@ interface AutomationDetailCallbacks {
      * riapprovata; su una regola armata nasce una bozza di modifica, la regola resta com'è finché non la armi.
      */
     fun onChangeApp(slot: Int, packageName: String) {}
+    fun onAddLabel(label: String) {}         // 0.7.2: aggiunge un'etichetta (nessuna nuova approvazione)
+    fun onRemoveLabel(label: String) {}      // 0.7.2: toglie un'etichetta
     /** 0.7.2: «Condividi» apre il foglio: il ViewModel prepara i testi in `share`. Default no-op, host-owned. */
     fun onShare() {}
     fun onDismissShare() {}
@@ -625,6 +680,8 @@ data class SettingsState(
     val backup: RulesBackupUi = RulesBackupUi(),
     /** 0.4.1 (F21): interruttore globale «Pausa automazioni». */
     val automationsPaused: Boolean = false,
+    /** 0.7.2: «Avvisami quando una regola smette di funzionare» (acceso di default). */
+    val healthAlertsEnabled: Boolean = true,
     /** 0.5.0: backend privilegiato, root `su` e permessi permanenti. */
     val privileged: PrivilegedUi = PrivilegedUi(),
     /**
@@ -654,12 +711,20 @@ sealed interface RulesBackupStatus {
     ) : RulesBackupStatus
 
     data class Failed(val kind: RulesBackupKind, val message: String) : RulesBackupStatus
+
+    /**
+     * 0.7.2: il file scelto per l'import è cifrato (`.argusbackup`): la sezione chiede la passphrase.
+     * [error] = il tentativo precedente non l'ha aperto (testo già scritto). La passphrase non sta qui.
+     */
+    data class NeedsPassphrase(val error: String? = null) : RulesBackupStatus
 }
 
 data class RulesBackupUi(
     val status: RulesBackupStatus = RulesBackupStatus.Idle,
     /** Regole che finirebbero nel file: con 0 «Esporta» è disabilitato. */
     val exportableRules: Int = 0,
+    /** 0.7.2: card «Backup automatico»; null = non disponibile (la card non si mostra). */
+    val autoBackup: AutoBackupUi? = null,
     /** 0.7.2: anteprima del testo incollato in «Importa da testo». */
     val textPreview: TextImportPreview = TextImportPreview.Empty,
 )
@@ -713,6 +778,30 @@ interface ReceivedImportCallbacks {
     fun onConfirm()
     fun onCancel()
     fun onOpenArgus()
+}
+
+enum class AutoBackupFrequencyUi { DAILY, WEEKLY }
+
+/**
+ * 0.7.2: backup automatico cifrato in una cartella scelta dall'utente. Nessun segreto: della passphrase
+ * c'è solo se è impostata. I testi variabili arrivano già scritti dal ViewModel.
+ */
+data class AutoBackupUi(
+    val enabled: Boolean = false,
+    /** Nome della cartella scelta; null = nessuna. */
+    val folderLabel: String? = null,
+    val frequency: AutoBackupFrequencyUi = AutoBackupFrequencyUi.DAILY,
+    val passphraseSet: Boolean = false,
+    /** «Ultimo backup: ieri 03:10 · 12 regole» o il motivo del fallimento; null = mai eseguito. */
+    val lastRun: String? = null,
+    val lastRunFailed: Boolean = false,
+    /** Un backup sta girando: «Esegui backup ora» è disabilitato. */
+    val running: Boolean = false,
+    /** La chiave si sta derivando dalla passphrase (qualche secondo). */
+    val settingPassphrase: Boolean = false,
+) {
+    /** Cartella e passphrase ci sono: si può accendere e «Esegui backup ora» funziona. */
+    val ready: Boolean get() = folderLabel != null && passphraseSet
 }
 
 sealed interface TransportUi {
@@ -805,6 +894,8 @@ data class BudgetUi(
     val tokensMonthEstimated: Boolean = false, // parte dei token del mese è stimata: mostrata con «≈»
     val perProvider: List<ProviderUsageUi> = emptyList(),
     val softWarningActive: Boolean = false,
+    /** L'utente non ha mai salvato limiti: [limitDay] è il tetto di default, spiegato sotto i contatori. */
+    val defaultLimitActive: Boolean = false,
 )
 
 interface SettingsCallbacks {
@@ -851,6 +942,8 @@ interface SettingsCallbacks {
     fun onRerunOnboarding()
     /** «Pausa automazioni» (F21): true = nessuna regola scatta finché non si riprende. Default no-op. */
     fun onSetAutomationsPaused(paused: Boolean) {}
+    /** 0.7.2: accende o spegne gli avvisi di salute delle regole. Default no-op. */
+    fun onSetHealthAlertsEnabled(enabled: Boolean) {}
 
     /** #20: nuovo tempo massimo di risposta, in minuti (0 = automatico). */
     fun onSetResponseTimeout(minutes: Int) {}
@@ -889,6 +982,24 @@ interface SettingsCallbacks {
     /** Dopo un import: porta all'elenco delle automazioni, dove le bozze aspettano l'approvazione. Default no-op. */
     fun onOpenImportedRules() {}
 
+    /** 0.7.2: passphrase di un file cifrato scelto per l'import. Non torna mai nello stato. Default no-op. */
+    fun onSubmitImportPassphrase(passphrase: String) {}
+
+    /** 0.7.2: interruttore del backup automatico. Default no-op. */
+    fun onSetAutoBackupEnabled(enabled: Boolean) {}
+
+    /** 0.7.2: sceglie la cartella del backup automatico (selettore di cartelle del sistema). Default no-op. */
+    fun onChooseAutoBackupFolder() {}
+
+    /** 0.7.2: frequenza del backup automatico. Default no-op. */
+    fun onSetAutoBackupFrequency(frequency: AutoBackupFrequencyUi) {}
+
+    /** 0.7.2: imposta o cambia la passphrase (già validata dal foglio). Non torna mai nello stato. Default no-op. */
+    fun onSetAutoBackupPassphrase(passphrase: String) {}
+
+    /** 0.7.2: «Esegui backup ora». Default no-op. */
+    fun onRunAutoBackupNow() {}
+
     /** 0.5.0: interruttore «Usa root (su)». Acceso, il VM verifica `su -c id`. Default no-op. */
     fun onSetRootEnabled(enabled: Boolean) {}
 
@@ -917,6 +1028,8 @@ data class OnboardingState(
      * Brain mostra solo l'avviso e la verifica si rifà da Sistema.
      */
     val brainUnverified: Boolean = false,
+    /** Tetto di default delle chiamate AI al giorno, citato una volta nello step Brain; null = non citarlo. */
+    val defaultDailyAiCallLimit: Int? = null,
 )
 
 /**

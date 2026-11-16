@@ -91,6 +91,7 @@ import dev.argus.data.backup.RulesBackupFormat
 import dev.argus.shizuku.ShizukuGatewayStatus
 import dev.argus.ui.components.LocalShellPrivilege
 import dev.argus.ui.components.shellPrivilegeOf
+import dev.argus.ui.model.AutoBackupFrequencyUi
 import dev.argus.ui.model.AutomationDetailCallbacks
 import dev.argus.ui.model.AutomationListCallbacks
 import dev.argus.ui.model.ChatCallbacks
@@ -104,6 +105,7 @@ import dev.argus.ui.model.StatusFilter
 import dev.argus.ui.model.StepKind
 import dev.argus.ui.model.TemplateCategoryUi
 import dev.argus.ui.model.TemplateGalleryCallbacks
+import dev.argus.ui.presentation.ChatDictation
 import dev.argus.ui.screens.AutomationDetailScreen
 import dev.argus.ui.screens.AutomationListScreen
 import dev.argus.ui.screens.ChatScreen
@@ -307,6 +309,18 @@ fun ArgusNavHost() {
     val importRulesFile = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri -> settingsViewModel.importRules(uri) }
+    // Backup automatico (0.7.2): la cartella la sceglie l'utente; il permesso persistente lo prende il VM.
+    val chooseAutoBackupFolder = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree(),
+    ) { uri -> settingsViewModel.chooseAutoBackupFolder(uri) }
+    // Dettatura nella chat (0.7.2): il testo riconosciuto si accoda al campo, mai inviato da solo.
+    val dictationUnavailable = stringResource(R.string.dictation_unavailable)
+    val dictation = rememberSpeechDictation(
+        onRecognised = { text ->
+            chatViewModel.onInputChange(ChatDictation.merge(chatViewModel.state.value.input, text))
+        },
+        onUnavailable = { showMessage(dictationUnavailable) },
+    )
     val openShizukuDownload = {
         openIntent(Intent(Intent.ACTION_VIEW, Uri.parse(SHIZUKU_DOWNLOAD_URL)))
     }
@@ -330,6 +344,19 @@ fun ArgusNavHost() {
             // essere quello filtrato su una regola, arrivato dal Dettaglio.
             restoreState = '?' !in route && route != Routes.LOG
         }
+    }
+
+    // 0.7.2: tocco di un avviso di salute, passato dal trampolino non esportato dentro il processo (mai
+    // dall'intent di MainActivity). Resta in attesa finché l'onboarding non è concluso.
+    val healthAlertLink by HealthAlertNavigation.requests.collectAsStateWithLifecycle()
+    LaunchedEffect(healthAlertLink, onboardingCompleted) {
+        val link = healthAlertLink ?: return@LaunchedEffect
+        if (!onboardingCompleted) return@LaunchedEffect
+        when (link) {
+            is AppDeepLink.Rule -> navController.navigate(Routes.detail(link.id)) { launchSingleTop = true }
+            AppDeepLink.System -> switchTop(Routes.SETTINGS)
+        }
+        HealthAlertNavigation.consume(link)
     }
 
     MessageEffect(listViewModel.messages, snackbarHostState)
@@ -366,7 +393,7 @@ fun ArgusNavHost() {
             ) {
                 composable(Routes.CHAT) {
                     ChatScreen(
-                        state = chatState,
+                        state = chatState.copy(dictationAvailable = dictation.available),
                         callbacks = object : ChatCallbacks {
                             override fun onInputChange(text: String) = chatViewModel.onInputChange(text)
                             override fun onSend() = chatViewModel.onSend()
@@ -379,6 +406,7 @@ fun ArgusNavHost() {
                             override fun onCheckConnection() = chatViewModel.refreshHealth()
                             override fun onOpenSystem() = switchTop(Routes.SETTINGS)
                             override fun onCopyRawResponse() = chatViewModel.onCopyRawResponse()
+                            override fun onDictate() = dictation.launch()
                         },
                         modifier = Modifier.testTag("screen_chat"),
                     )
@@ -402,6 +430,9 @@ fun ArgusNavHost() {
                             override fun onOpenTemplates() {
                                 navController.navigate(Routes.TEMPLATES) { launchSingleTop = true }
                             }
+                            override fun onSelectLabel(label: String?) = listViewModel.onSelectLabel(label)
+                            override fun onSetLabelPaused(label: String, paused: Boolean) =
+                                listViewModel.onSetLabelPaused(label, paused)
                         },
                         modifier = Modifier.testTag("screen_list"),
                     )
@@ -658,8 +689,23 @@ fun ArgusNavHost() {
                                 settingsViewModel.dismissBackupResult()
                                 switchTop(Routes.LIST)
                             }
+                            override fun onSubmitImportPassphrase(passphrase: String) =
+                                settingsViewModel.submitImportPassphrase(passphrase)
+                            override fun onSetAutoBackupEnabled(enabled: Boolean) =
+                                settingsViewModel.setAutoBackupEnabled(enabled)
+                            override fun onChooseAutoBackupFolder() {
+                                runCatching { chooseAutoBackupFolder.launch(null) }
+                                    .onFailure { showMessage(backupPickerUnavailable) }
+                            }
+                            override fun onSetAutoBackupFrequency(frequency: AutoBackupFrequencyUi) =
+                                settingsViewModel.setAutoBackupFrequency(frequency)
+                            override fun onSetAutoBackupPassphrase(passphrase: String) =
+                                settingsViewModel.setAutoBackupPassphrase(passphrase)
+                            override fun onRunAutoBackupNow() = settingsViewModel.runAutoBackupNow()
                             override fun onSetAutomationsPaused(paused: Boolean) =
                                 settingsViewModel.setAutomationsPaused(paused)
+                            override fun onSetHealthAlertsEnabled(enabled: Boolean) =
+                                settingsViewModel.setHealthAlertsEnabled(enabled)
                             override fun onSetResponseTimeout(minutes: Int) =
                                 settingsViewModel.setResponseTimeout(minutes)
                             override fun onSetRootEnabled(enabled: Boolean) =
@@ -751,6 +797,8 @@ fun ArgusNavHost() {
                                     override fun onLoadAppChoices() = viewModel.onLoadAppChoices()
                                     override fun onChangeApp(slot: Int, packageName: String) =
                                         viewModel.onChangeApp(slot, packageName)
+                                    override fun onAddLabel(label: String) = viewModel.onAddLabel(label)
+                                    override fun onRemoveLabel(label: String) = viewModel.onRemoveLabel(label)
                                     override fun onOpenFullLog() {
                                         state.automationId?.let {
                                             switchTop(Routes.log(it, detail.name))

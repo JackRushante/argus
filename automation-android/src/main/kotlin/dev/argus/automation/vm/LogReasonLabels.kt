@@ -223,6 +223,11 @@ internal object LogReasonLabels {
             "automations are paused",
             "le automazioni sono in pausa",
         ),
+        // --- 0.7.2: pausa di un gruppo di regole (etichetta) ---
+        "paused_group" to Label(
+            "a label group of this rule is paused",
+            "un gruppo (etichetta) di questa regola è in pausa",
+        ),
         // --- 0.5.1: macro sullo schermo (Accessibilità) ---
         "ui_steps_external_trigger" to Label(
             "a screen macro cannot start from this trigger",

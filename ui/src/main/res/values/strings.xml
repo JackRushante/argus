@@ -125,6 +125,7 @@
     <string name="chat_input_sending">Waiting for the reply…</string>
     <string name="chat_input_placeholder">Ask for a rule…</string>
     <string name="chat_send">Send</string>
+    <string name="chat_dictate">Dictate</string>
 
     <!-- Lista automazioni -->
     <string name="list_title">Automations</string>
@@ -147,6 +148,22 @@
     <string name="detail_rationale_label">model description</string>
     <string name="detail_recent_runs">Recent runs</string>
     <string name="detail_see_all">See all</string>
+    <!-- 0.7.2: etichette nel dettaglio della regola. -->
+    <string name="lbl_detail_title">Labels</string>
+    <string name="lbl_detail_none">No labels yet.</string>
+    <string name="lbl_detail_note">Labels only organise your rules: they do not change what the rule does and need no new approval.</string>
+    <string name="lbl_detail_add">Add label</string>
+    <string name="lbl_detail_remove_cd">Remove label %1$s</string>
+    <string name="lbl_detail_full">A rule can have up to 5 labels.</string>
+    <string name="lbl_sheet_title">Add a label</string>
+    <string name="lbl_sheet_existing">Your labels</string>
+    <string name="lbl_sheet_new">New label</string>
+    <string name="lbl_sheet_placeholder">e.g. Home</string>
+    <string name="lbl_sheet_hint">1 to 24 characters.</string>
+    <string name="lbl_sheet_invalid">Use 1 to 24 characters, without invisible characters.</string>
+    <string name="lbl_sheet_already">This rule already has this label.</string>
+    <string name="lbl_sheet_too_many">You already have 20 labels: reuse one of them.</string>
+    <string name="lbl_sheet_add">Add</string>
     <string name="detail_arm_blocked">Arming blocked: %1$s</string>
     <string name="detail_not_armable">Rule not armable</string>
     <string name="detail_reject">Reject</string>
@@ -260,6 +277,7 @@
     <string name="settings_budget_provider_finish">last finish reason · %1$s</string>
     <string name="settings_budget_provider_cost">monthly cost %1$s</string>
     <string name="settings_budget_footnote">Dollar costs estimated from the public price list only for priced providers (indicative estimate, not an invoice) · EUR at fixed rate ≈ · Hermes/OpenRouter/Custom: tokens only</string>
+    <string name="settings_budget_default_note">Default limit: at most %1$d AI calls a day, so a rule stuck in a loop can\'t run up costs. Change or remove it with Edit limits.</string>
     <string name="settings_budget_edit_limits">Edit limits</string>
     <string name="settings_rerun">Repeat setup</string>
     <string name="settings_shizuku_unsupported">Shizuku is too old: update it</string>
@@ -301,6 +319,7 @@
     <string name="onboarding_shizuku_recommended_sub">They also work without it, but only with Argus open in the foreground.</string>
     <string name="onboarding_shizuku_not_required_sub">Always available, with or without Shizuku.</string>
     <string name="onboarding_brain_unverified">Connection not verified yet: you can check it from System.</string>
+    <string name="onboarding_brain_budget_default">To keep costs under control, Argus makes at most %1$d AI calls a day. You can change or remove this limit in System.</string>
     <string name="onboarding_battery_consequence">Without the exemption, Android or manufacturer power management may delay background work. Alarms stay event-driven and don\'t use a persistent service.</string>
 
     <!-- Rules backup (0.4.0, F1) -->
@@ -377,6 +396,41 @@
     <string name="tpl_blank_place">You choose the place</string>
     <string name="tpl_blank_secret">You add the secret values</string>
     <string name="tpl_blank_current_location">The place is where you arm it</string>
+    <!-- Encrypted import and automatic backup (0.7.2) -->
+    <string name="backup_import_encrypted_body">This backup is encrypted. Enter the passphrase it was made with.</string>
+    <string name="backup_import_passphrase_field">Backup passphrase</string>
+    <string name="backup_import_open">Open</string>
+    <string name="backup_auto_title">Automatic backup</string>
+    <string name="backup_auto_body">Saves an encrypted copy of your rules to a folder you choose, for example one that a sync app such as Nextcloud uploads. It runs at night, without you.</string>
+    <string name="backup_auto_switch_on_cd">Turn on automatic backup</string>
+    <string name="backup_auto_switch_off_cd">Turn off automatic backup</string>
+    <string name="backup_auto_needs_setup">Choose a folder and set a passphrase to turn it on.</string>
+    <string name="backup_auto_folder_label">Folder</string>
+    <string name="backup_auto_folder_none">No folder chosen</string>
+    <string name="backup_auto_folder_choose">Choose folder</string>
+    <string name="backup_auto_folder_change">Change folder</string>
+    <string name="backup_auto_frequency_label">How often</string>
+    <string name="backup_auto_daily">Every day</string>
+    <string name="backup_auto_weekly">Every week</string>
+    <string name="backup_auto_passphrase_label">Passphrase</string>
+    <string name="backup_auto_passphrase_set">Set</string>
+    <string name="backup_auto_passphrase_missing">Not set</string>
+    <string name="backup_auto_passphrase_add">Set passphrase</string>
+    <string name="backup_auto_passphrase_change">Change passphrase</string>
+    <string name="backup_auto_passphrase_working">Preparing the key…</string>
+    <string name="backup_auto_never">No backup yet.</string>
+    <string name="backup_auto_retention">Argus keeps the 7 newest backups it wrote in that folder and never touches other files.</string>
+    <string name="backup_auto_run_now">Back up now</string>
+    <string name="backup_auto_running">Backing up…</string>
+    <string name="backup_passphrase_sheet_title">Backup passphrase</string>
+    <string name="backup_passphrase_sheet_body">Your backups are encrypted with this passphrase, and you need it to restore them on a new phone. Argus does not keep it. If you forget it, nobody can recover it and the backups cannot be opened.</string>
+    <string name="backup_passphrase_change_note">Backups already made stay readable with the passphrase they were made with.</string>
+    <string name="backup_passphrase_field">New passphrase</string>
+    <string name="backup_passphrase_confirm_field">Repeat the passphrase</string>
+    <string name="backup_passphrase_too_short">At least 8 characters.</string>
+    <string name="backup_passphrase_mismatch">The two passphrases do not match.</string>
+    <string name="backup_passphrase_save">Save</string>
+    <string name="backup_passphrase_cancel">Cancel</string>
 
     <!-- 0.4.0 blocco UI (prefisso ui40_) -->
     <string name="ui40_chat_clear_title">Clear the conversation?</string>
@@ -429,6 +483,10 @@
     <string name="pause_setting_title">Pause automations</string>
     <string name="pause_setting_on">No rule runs, manual ones included. Alarms stay registered; what is skipped is not made up for when you resume.</string>
     <string name="pause_setting_off">Rules run as usual.</string>
+    <!-- 0.7.2: avvisi di salute delle regole. -->
+    <string name="health_alerts_setting_title">Tell me when a rule stops working</string>
+    <string name="health_alerts_setting_on">A notification when a rule fails 3 times in a row or loses something it needs (Shizuku, notification access, Accessibility, exact alarms, location). It shows only rule names and counts.</string>
+    <string name="health_alerts_setting_off">No alerts: a rule that stops working shows up only in the Log.</string>
 
     <!-- 0.5.0 (privilegi): backend privilegiato, root su e permessi permanenti. -->
     <string name="priv50_section">Privileges</string>
@@ -531,6 +589,30 @@
     <string name="rda_lc_row_open">Open the rule</string>
     <string name="rda_lc_next_fire_cd">Next firing: %1$s</string>
     <string name="rda_lc_last_fire_cd">Last firing: %1$s</string>
+    <!-- 0.7.2: ricerca, etichette e pausa per gruppo nella lista Automazioni. -->
+    <string name="lbl_search_placeholder">Search by name, app or action</string>
+    <string name="lbl_search_clear">Clear search</string>
+    <string name="lbl_search_empty_title">No rules match “%1$s”</string>
+    <string name="lbl_search_empty_body">Try another word, or the name of an app.</string>
+    <string name="lbl_filter_group">Filter by label</string>
+    <string name="lbl_chip_all">All · %1$d</string>
+    <string name="lbl_chip_all_cd">All rules, %1$d</string>
+    <string name="lbl_chip_count">%1$s · %2$d</string>
+    <string name="lbl_chip_cd">Label %1$s, %2$d rules</string>
+    <string name="lbl_chip_paused_cd">Label %1$s, %2$d rules, group paused</string>
+    <string name="lbl_group_title">Label “%1$s”</string>
+    <string name="lbl_group_active_one">1 active</string>
+    <string name="lbl_group_active_many">%1$d active</string>
+    <string name="lbl_group_waiting">%1$d waiting for approval</string>
+    <string name="lbl_group_none_active">No active rules</string>
+    <string name="lbl_group_paused_summary">Paused · %1$s</string>
+    <string name="lbl_group_paused_state">Group paused: its rules do not fire</string>
+    <string name="lbl_group_pause">Pause group</string>
+    <string name="lbl_group_resume">Resume group</string>
+    <string name="lbl_row_paused">Paused</string>
+    <string name="lbl_row_paused_cd">Paused by its label group: it does not fire</string>
+    <string name="lbl_label_paused_cd">group paused</string>
+    <string name="lbl_list_note">Labels are chosen in the rule details. They do not change what the rule does and need no new approval.</string>
     <string name="rda_lc_wait_cd">Argus is thinking, %1$d seconds</string>
     <string name="rda_lc_wait_axis_start">0 s</string>
     <string name="rda_lc_wait_axis_band">%1$d-%2$d s</string>

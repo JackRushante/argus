@@ -40,6 +40,7 @@ import dev.argus.engine.runtime.NoopAuditSink
 import kotlinx.coroutines.CancellationException
 import dev.argus.engine.safety.DraftValidator
 import dev.argus.engine.safety.Severity
+import dev.argus.automation.health.CapabilityHealthSnapshot
 import dev.argus.device.PermanentGrantStatus
 import dev.argus.shizuku.ShizukuGateway
 import dev.argus.shizuku.ShizukuGatewayStatus
@@ -345,6 +346,17 @@ class AndroidCapabilityProbe internal constructor(
             }
         }
         return causes
+    }
+
+    /**
+     * 0.7.2 (avvisi di salute): le cause di [blockCauses] per [required] più le sveglie esatte (che non
+     * sono una capability), da una sola lettura dello stato.
+     */
+    internal suspend fun healthSnapshot(required: Set<String>): CapabilityHealthSnapshot {
+        val resolved = resolve()
+        val causes = required.filter { it !in resolved.available }
+            .associateWith { causeOf(it, resolved.state) }
+        return CapabilityHealthSnapshot(causes, resolved.state.exactAlarmsGranted)
     }
 
     private fun causeOf(capability: String, state: AndroidCapabilityState): BlockCause = when {

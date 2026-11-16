@@ -3,6 +3,7 @@ package dev.argus.data
 import androidx.room.withTransaction
 import dev.argus.data.backup.BulkDraftWriter
 import dev.argus.data.entities.AutomationEntity
+import dev.argus.data.entities.AutomationLabelEntity
 import dev.argus.data.entities.PendingDraftEntity
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.ApprovalFingerprints
@@ -11,6 +12,7 @@ import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.AutomationSchema
+import dev.argus.engine.model.RuleLabels
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.safety.DraftArmResult
 import dev.argus.engine.safety.DraftDeleteResult
@@ -34,8 +36,12 @@ import kotlinx.coroutines.flow.map
 class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository, BulkDraftWriter {
     private val drafts = db.draftDao()
     private val automations = db.automationDao()
+    private val labels = db.labelDao()
 
-    override suspend fun create(newDraft: NewDraft): DraftWriteResult = db.withTransaction {
+    override suspend fun create(newDraft: NewDraft): DraftWriteResult = insertDraft(newDraft, labelsColumn = null)
+
+    /** [labelsColumn]: etichette di una bozza di regola NUOVA (0.7.2, import), già validate e ammesse. */
+    private suspend fun insertDraft(newDraft: NewDraft, labelsColumn: String?): DraftWriteResult = db.withTransaction {
         if (newDraft.automationId.value.isBlank())
             return@withTransaction DraftWriteResult.Rejected("automation_id_invalid")
         if (newDraft.atMillis < 0)
@@ -74,7 +80,8 @@ class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository, Bulk
         )
         // La regola esistente è stata appena verificata in sola lettura (integrità + impronta attesa)
         // dentro questa stessa transazione: nessuna scrittura sulla regola, che resta com'è.
-        if (drafts.insert(snapshot.toEntity()) != -1L) {
+        val entity = snapshot.toEntity().copy(labels = labelsColumn.takeIf { newDraft.expectedAutomationFingerprint == null })
+        if (drafts.insert(entity) != -1L) {
             return@withTransaction DraftWriteResult.Saved(snapshot)
         }
 
@@ -90,10 +97,33 @@ class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository, Bulk
      * altre proseguono; l'esito è nello stesso ordine dell'input.
      */
     override suspend fun createAll(newDrafts: List<NewDraft>): List<DraftWriteResult> =
+        createAll(newDrafts, emptyMap())
+
+    /**
+     * 0.7.2: le etichette di ogni bozza (import) entrano con gli stessi limiti di «aggiungi etichetta»: al più
+     * 5 per regola e 20 distinte in tutto, contando anche quelle già in uso; un'etichetta di troppo si perde,
+     * la regola no. Un'etichetta già in uso riprende la sua grafia.
+     */
+    override suspend fun createAll(
+        newDrafts: List<NewDraft>,
+        labels: Map<DraftId, List<String>>,
+    ): List<DraftWriteResult> =
         db.withTransaction {
+            val spellings = if (labels.isEmpty()) LinkedHashMap() else LinkedHashMap(labelSpellings(db))
             newDrafts.map { candidate ->
                 try {
-                    create(candidate)
+                    val requested = labels[candidate.id].orEmpty()
+                    val admitted = if (requested.isEmpty() || candidate.expectedAutomationFingerprint != null) {
+                        emptyList()
+                    } else {
+                        RuleLabels.admit(RuleLabels.sanitize(requested), spellings.keys)
+                            .map { spellings[RuleLabels.key(it)] ?: it }
+                    }
+                    insertDraft(candidate, DraftLabels.encode(admitted)).also { result ->
+                        if (result is DraftWriteResult.Saved) {
+                            admitted.forEach { spellings.putIfAbsent(RuleLabels.key(it), it) }
+                        }
+                    }
                 } catch (_: IllegalArgumentException) {
                     // Una bozza ostile che il dominio non sa nemmeno impronta non deve far fallire le altre.
                     DraftWriteResult.Rejected("draft_unprocessable")
@@ -189,6 +219,18 @@ class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository, Bulk
             if (existing != null) return@withTransaction DraftArmResult.AutomationConflict
             if (automations.insertAutomation(armed.toEntity()) == -1L)
                 return@withTransaction DraftArmResult.AutomationConflict
+            // 0.7.2: le etichette della bozza (import) passano alla regola. Sono già nei limiti: contavano
+            // come «in uso» da quando la bozza esiste.
+            DraftLabels.decode(row.labels).forEachIndexed { index, label ->
+                labels.insert(
+                    AutomationLabelEntity(
+                        automationId = snapshot.automationId.value,
+                        labelKey = RuleLabels.key(label),
+                        label = label,
+                        addedAtMillis = row.createdAtMillis + index,
+                    ),
+                )
+            }
         } else {
             if (existing == null) return@withTransaction DraftArmResult.AutomationConflict
             // D5: sostituibile se è ancora una regola approvata e ferma o in esecuzione; la riga

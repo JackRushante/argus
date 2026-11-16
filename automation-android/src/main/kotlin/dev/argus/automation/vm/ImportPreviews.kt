@@ -71,14 +71,29 @@ internal object ImportPreviewText {
             "The text is too large (limit 2 MB).",
             "Il testo è troppo grande (limite 2 MB).",
         )
+        BackupFailure.PASSPHRASE_REQUIRED -> encryptedElsewhere(language)
         else -> RulesBackupText.failure(failure, language)
     }
+
+    /**
+     * Un file ricevuto da un'altra app (o un modello). Un backup cifrato qui non si apre: la passphrase si
+     * inserisce solo da Sistema.
+     */
+    fun fileFailure(failure: BackupFailure, language: RenderLanguage): String = when (failure) {
+        BackupFailure.PASSPHRASE_REQUIRED -> encryptedElsewhere(language)
+        else -> RulesBackupText.failure(failure, language)
+    }
+
+    private fun encryptedElsewhere(language: RenderLanguage) = language.pick(
+        "This is an encrypted Argus backup: import it from System › Rules backup, with its passphrase.",
+        "Questo è un backup Argus cifrato: importalo da Sistema › Backup delle regole, con la sua passphrase.",
+    )
 
     /** L'esito di un import come (testo, bozze create); nessuna bozza = è un errore da mostrare come tale. */
     fun outcome(outcome: ImportOutcome, language: RenderLanguage, text: Boolean): Pair<String, Int> = when (outcome) {
         is ImportOutcome.Done -> RulesBackupText.importSummary(outcome.summary, language) to outcome.summary.imported
         is ImportOutcome.Failed ->
-            (if (text) textFailure(outcome.failure, language) else RulesBackupText.failure(outcome.failure, language)) to 0
+            (if (text) textFailure(outcome.failure, language) else fileFailure(outcome.failure, language)) to 0
     }
 }
 

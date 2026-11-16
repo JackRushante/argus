@@ -105,5 +105,6 @@ class ImportPreviewsTest {
         override suspend fun import(source: Uri): ImportOutcome = error("non usato")
         override suspend fun read(source: Uri): DocumentRead = error("non usato")
         override suspend fun importBytes(bytes: ByteArray): ImportOutcome = error("non usato")
+        override suspend fun importEncrypted(source: Uri, passphrase: CharArray): ImportOutcome = error("non usato")
     }
 }
