@@ -2,6 +2,7 @@ package dev.argus.automation
 
 import android.util.Log
 import dev.argus.automation.notification.ActiveNotificationReplyRegistry
+import dev.argus.automation.notification.NotificationListenerWatchdog
 import dev.argus.data.RoomJournalMaintenance
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.AuditEvent
@@ -63,6 +64,17 @@ class ArgusRuntimeController(
      * in primo piano: il sentinel può fermare un servizio ricreato senza più domande.
      */
     private val onStartupReconciled: suspend () -> Unit = {},
+    /**
+     * 0.7.2: avvisi «una regola armata ha perso qualcosa che le serve», valutati a ogni reconcile
+     * (avvio, primo piano, cambio di Shizuku/root, consenso): nessun ciclo di polling proprio.
+     */
+    private val capabilityHealth: (suspend () -> Unit)? = null,
+    /**
+     * 0.7.2: ricollegamento del listener notifiche scollegato dal sistema. Stesso schema della
+     * manutenzione: al ritorno in primo piano e a fine dispatch, al massimo una volta per intervallo.
+     */
+    listenerWatchdog: NotificationListenerWatchdog? = null,
+    listenerCheckIntervalMillis: Long = LISTENER_CHECK_INTERVAL_MILLIS,
 ) {
     private val started = AtomicBoolean(false)
     private val reconcileMutex = Mutex()
@@ -71,6 +83,13 @@ class ArgusRuntimeController(
         nowMillis = nowMillis,
         canRun = dispatchesIdle,
     )
+    private val listenerCheck = listenerWatchdog?.let { watchdog ->
+        PeriodicMaintenance(
+            run = { watchdog.check() },
+            nowMillis = nowMillis,
+            intervalMillis = listenerCheckIntervalMillis,
+        )
+    }
 
     /** Istante di avvio di QUESTO processo: ciò che è stato scattato prima è di un processo morto. */
     @Volatile
@@ -141,8 +160,21 @@ class ArgusRuntimeController(
      * background e non blocca chi la chiama: la usano `onForeground` e la fine di ogni dispatch.
      */
     fun maintenanceIfDue() {
+        listenerCheckIfDue()
         if (!periodicMaintenance.isDue()) return
         scope.launch { runMaintenanceIfDue() }
+    }
+
+    /** 0.7.2: controllo del listener notifiche, al massimo una volta ogni [LISTENER_CHECK_INTERVAL_MILLIS]. */
+    private fun listenerCheckIfDue() {
+        val check = listenerCheck ?: return
+        if (!check.isDue()) return
+        scope.launch {
+            runCatchingPreservingCancellation { check.runIfDue() }
+                .onFailure { error ->
+                    Log.w(TAG, "controllo listener fallito: ${error::class.java.simpleName}")
+                }
+        }
     }
 
     internal suspend fun runMaintenanceIfDue(): Boolean =
@@ -157,6 +189,12 @@ class ArgusRuntimeController(
             .onFailure { error ->
                 Log.w(TAG, "reconcile capability fallito: ${error::class.java.simpleName}")
             }
+        capabilityHealth?.let { check ->
+            runCatchingPreservingCancellation { check() }
+                .onFailure { error ->
+                    Log.w(TAG, "avvisi di salute falliti: ${error::class.java.simpleName}")
+                }
+        }
         if (reason == ReconcileReason.APP_START) {
             runCatchingPreservingCancellation { disarmInterruptedImmediates() }
                 .onFailure { error ->
@@ -261,8 +299,9 @@ class ArgusRuntimeController(
             Result.failure(error)
         }
 
-    private companion object {
-        const val TAG = "ArgusRuntime"
-        const val EXECUTION_INTERRUPTED = "execution_interrupted"
+    companion object {
+        private const val TAG = "ArgusRuntime"
+        private const val EXECUTION_INTERRUPTED = "execution_interrupted"
+        const val LISTENER_CHECK_INTERVAL_MILLIS = 15L * 60 * 1_000
     }
 }

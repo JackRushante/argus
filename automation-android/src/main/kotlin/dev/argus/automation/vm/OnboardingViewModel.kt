@@ -11,6 +11,7 @@ import dev.argus.automation.AppPreferencesStore
 import dev.argus.automation.BridgeHealthResult
 import dev.argus.automation.ConfiguredBridgeBrain
 import dev.argus.automation.RenderLanguageSource
+import dev.argus.automation.budget.BudgetSettings
 import dev.argus.brain.BridgeErrorKind
 import dev.argus.brain.ProviderCatalog
 import dev.argus.brain.ProviderConfigStore
@@ -471,6 +472,7 @@ class OnboardingViewModel @Inject constructor(
             providerChoices = providerChoices(),
             transport = transportUi(setup.configured),
             shizukuCapabilities = ShizukuCapabilityCatalog.rows(language),
+            defaultDailyAiCallLimit = BudgetSettings.DEFAULT_MAX_CALLS_PER_DAY,
         )
     }
 

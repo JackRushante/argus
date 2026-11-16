@@ -10,6 +10,21 @@
     <string name="argus_connectivity_notification_text">Running armed automations and monitoring required triggers</string>
     <string name="argus_budget_channel_name">LLM budget</string>
     <string name="argus_budget_channel_description">Alerts when the LLM call budget is almost or fully exhausted</string>
+    <!-- 0.7.2: avvisi di salute delle regole. Solo nomi di regola e conteggi, mai contenuti. -->
+    <string name="argus_health_channel_name">Rule health</string>
+    <string name="argus_health_channel_description">Alerts when a rule keeps failing or loses something it needs to work</string>
+    <string name="argus_health_rule_failed_title">Rule “%1$s” failed %2$d times in a row</string>
+    <string name="argus_health_rule_failed_text">Tap to see what went wrong.</string>
+    <string name="argus_health_lost_privileged">Shizuku, Sui or root is not available</string>
+    <string name="argus_health_lost_notification_listener">Notification access was turned off</string>
+    <string name="argus_health_lost_accessibility">The Argus Accessibility service is off</string>
+    <string name="argus_health_lost_exact_alarms">Exact alarms are no longer allowed</string>
+    <string name="argus_health_lost_location">The location permission was removed</string>
+    <plurals name="argus_health_capability_rules">
+        <item quantity="one">%d armed rule needs it. Fix it in System.</item>
+        <item quantity="other">%d armed rules need it. Fix it in System.</item>
+    </plurals>
+    <string name="argus_health_fix">Fix</string>
     <string name="argus_foreground_denied_title">Rules paused</string>
     <string name="argus_foreground_denied_text">Background rules (Wi-Fi, power, screen, battery, audio, modes) paused: open Argus to turn them back on</string>
     <!-- 0.7.2: backup automatico delle regole, dopo 3 fallimenti di fila. -->

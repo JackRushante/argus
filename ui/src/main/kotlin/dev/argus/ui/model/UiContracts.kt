@@ -149,6 +149,8 @@ data class ChatState(
      * norma, 0-180 s per un server locale). `null` = non noto: la barra usa l'asse standard.
      */
     val sendingTimeoutSec: Int? = null,
+    /** 0.7.2: c'è un riconoscitore vocale di sistema; senza, il microfono del campo non compare. */
+    val dictationAvailable: Boolean = false,
 )
 
 sealed interface ChatItem {
@@ -217,6 +219,11 @@ interface ChatCallbacks {
      * Default no-op per i vecchi host: il NavHost deve cablarla su `ChatViewModel.onCopyRawResponse()`.
      */
     fun onCopyRawResponse() {}
+    /**
+     * Microfono del campo (0.7.2): apre il riconoscitore vocale di sistema. Il testo riconosciuto torna
+     * nel campo tramite [onInputChange] e non viene mai inviato da solo. Default no-op per i vecchi host.
+     */
+    fun onDictate() {}
 }
 
 // --- 6.2 Automazioni · lista ---
@@ -533,6 +540,8 @@ data class SettingsState(
     val backup: RulesBackupUi = RulesBackupUi(),
     /** 0.4.1 (F21): interruttore globale «Pausa automazioni». */
     val automationsPaused: Boolean = false,
+    /** 0.7.2: «Avvisami quando una regola smette di funzionare» (acceso di default). */
+    val healthAlertsEnabled: Boolean = true,
     /** 0.5.0: backend privilegiato, root `su` e permessi permanenti. */
     val privileged: PrivilegedUi = PrivilegedUi(),
     /**
@@ -692,6 +701,8 @@ data class BudgetUi(
     val tokensMonthEstimated: Boolean = false, // parte dei token del mese è stimata: mostrata con «≈»
     val perProvider: List<ProviderUsageUi> = emptyList(),
     val softWarningActive: Boolean = false,
+    /** L'utente non ha mai salvato limiti: [limitDay] è il tetto di default, spiegato sotto i contatori. */
+    val defaultLimitActive: Boolean = false,
 )
 
 interface SettingsCallbacks {
@@ -738,6 +749,8 @@ interface SettingsCallbacks {
     fun onRerunOnboarding()
     /** «Pausa automazioni» (F21): true = nessuna regola scatta finché non si riprende. Default no-op. */
     fun onSetAutomationsPaused(paused: Boolean) {}
+    /** 0.7.2: accende o spegne gli avvisi di salute delle regole. Default no-op. */
+    fun onSetHealthAlertsEnabled(enabled: Boolean) {}
 
     /** #20: nuovo tempo massimo di risposta, in minuti (0 = automatico). */
     fun onSetResponseTimeout(minutes: Int) {}
@@ -816,6 +829,8 @@ data class OnboardingState(
      * Brain mostra solo l'avviso e la verifica si rifà da Sistema.
      */
     val brainUnverified: Boolean = false,
+    /** Tetto di default delle chiamate AI al giorno, citato una volta nello step Brain; null = non citarlo. */
+    val defaultDailyAiCallLimit: Int? = null,
 )
 
 /**

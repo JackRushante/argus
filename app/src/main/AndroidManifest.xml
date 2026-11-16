@@ -30,6 +30,11 @@
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>
+        <!-- 0.7.2: il riconoscitore vocale di sistema per la dettatura in chat. Registra la sua activity,
+             non Argus: nessun permesso RECORD_AUDIO. -->
+        <intent>
+            <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
+        </intent>
     </queries>
 
     <application
@@ -59,6 +64,16 @@
              lo avvia solo il sistema per conto di Argus, e ogni avvio verifica il token della regola. -->
         <activity
             android:name=".manual.ManualRunActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.Argus.Trampoline" />
+
+        <!-- 0.7.2: trampolino invisibile del tocco di un avviso di salute. NON esportato: lo avvia solo il
+             PendingIntent della notifica di Argus; passa la schermata alla navigazione dentro il processo. -->
+        <activity
+            android:name=".nav.HealthAlertOpenActivity"
             android:excludeFromRecents="true"
             android:exported="false"
             android:noHistory="true"

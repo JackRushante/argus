@@ -101,6 +101,7 @@ import dev.argus.ui.model.SettingsCallbacks
 import dev.argus.ui.model.ShizukuStatus
 import dev.argus.ui.model.StatusFilter
 import dev.argus.ui.model.StepKind
+import dev.argus.ui.presentation.ChatDictation
 import dev.argus.ui.screens.AutomationDetailScreen
 import dev.argus.ui.screens.AutomationListScreen
 import dev.argus.ui.screens.ChatScreen
@@ -304,6 +305,14 @@ fun ArgusNavHost() {
     val chooseAutoBackupFolder = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree(),
     ) { uri -> settingsViewModel.chooseAutoBackupFolder(uri) }
+    // Dettatura nella chat (0.7.2): il testo riconosciuto si accoda al campo, mai inviato da solo.
+    val dictationUnavailable = stringResource(R.string.dictation_unavailable)
+    val dictation = rememberSpeechDictation(
+        onRecognised = { text ->
+            chatViewModel.onInputChange(ChatDictation.merge(chatViewModel.state.value.input, text))
+        },
+        onUnavailable = { showMessage(dictationUnavailable) },
+    )
     val openShizukuDownload = {
         openIntent(Intent(Intent.ACTION_VIEW, Uri.parse(SHIZUKU_DOWNLOAD_URL)))
     }
@@ -327,6 +336,19 @@ fun ArgusNavHost() {
             // essere quello filtrato su una regola, arrivato dal Dettaglio.
             restoreState = '?' !in route && route != Routes.LOG
         }
+    }
+
+    // 0.7.2: tocco di un avviso di salute, passato dal trampolino non esportato dentro il processo (mai
+    // dall'intent di MainActivity). Resta in attesa finché l'onboarding non è concluso.
+    val healthAlertLink by HealthAlertNavigation.requests.collectAsStateWithLifecycle()
+    LaunchedEffect(healthAlertLink, onboardingCompleted) {
+        val link = healthAlertLink ?: return@LaunchedEffect
+        if (!onboardingCompleted) return@LaunchedEffect
+        when (link) {
+            is AppDeepLink.Rule -> navController.navigate(Routes.detail(link.id)) { launchSingleTop = true }
+            AppDeepLink.System -> switchTop(Routes.SETTINGS)
+        }
+        HealthAlertNavigation.consume(link)
     }
 
     MessageEffect(listViewModel.messages, snackbarHostState)
@@ -363,7 +385,7 @@ fun ArgusNavHost() {
             ) {
                 composable(Routes.CHAT) {
                     ChatScreen(
-                        state = chatState,
+                        state = chatState.copy(dictationAvailable = dictation.available),
                         callbacks = object : ChatCallbacks {
                             override fun onInputChange(text: String) = chatViewModel.onInputChange(text)
                             override fun onSend() = chatViewModel.onSend()
@@ -376,6 +398,7 @@ fun ArgusNavHost() {
                             override fun onCheckConnection() = chatViewModel.refreshHealth()
                             override fun onOpenSystem() = switchTop(Routes.SETTINGS)
                             override fun onCopyRawResponse() = chatViewModel.onCopyRawResponse()
+                            override fun onDictate() = dictation.launch()
                         },
                         modifier = Modifier.testTag("screen_chat"),
                     )
@@ -627,6 +650,8 @@ fun ArgusNavHost() {
                             override fun onRunAutoBackupNow() = settingsViewModel.runAutoBackupNow()
                             override fun onSetAutomationsPaused(paused: Boolean) =
                                 settingsViewModel.setAutomationsPaused(paused)
+                            override fun onSetHealthAlertsEnabled(enabled: Boolean) =
+                                settingsViewModel.setHealthAlertsEnabled(enabled)
                             override fun onSetResponseTimeout(minutes: Int) =
                                 settingsViewModel.setResponseTimeout(minutes)
                             override fun onSetRootEnabled(enabled: Boolean) =

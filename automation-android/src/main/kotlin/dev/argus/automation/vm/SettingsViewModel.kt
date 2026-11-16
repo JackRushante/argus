@@ -20,6 +20,7 @@ import dev.argus.automation.manual.AutomationPauseStore
 import dev.argus.automation.budget.BudgetLimits
 import dev.argus.automation.budget.BudgetSettings
 import dev.argus.automation.budget.BudgetSettingsStore
+import dev.argus.automation.health.HealthAlertStore
 import dev.argus.brain.ProviderCatalog
 import dev.argus.brain.ProviderConfigStore
 import dev.argus.brain.ProviderId
@@ -272,6 +273,7 @@ internal fun budgetUi(usage: BudgetUsageSnapshot, settings: BudgetSettings): Bud
         tokensMonthEstimated = tokenOnlyMonth.any { it.estimatedCalls > 0L },
         perProvider = perProvider,
         softWarningActive = softActive,
+        defaultLimitActive = settings.usingDefaults,
     )
 }
 
@@ -323,6 +325,8 @@ class SettingsViewModel @Inject constructor(
     private val privileged: PrivilegedAccessCenter? = null,
     /** 0.7.2: backup automatico cifrato. `null` solo nei test che non lo provano (la card non si mostra). */
     private val autoBackup: AutoBackupCoordinator? = null,
+    /** 0.7.2: interruttore degli avvisi di salute. `null` solo nei test che non lo provano. */
+    private val healthAlerts: HealthAlertStore? = null,
 ) : ViewModel() {
     /** Lingua corrente al momento in cui si produce un testo (messaggi, errori); segue il telefono. */
     private val language: RenderLanguage get() = languageSource.current
@@ -418,6 +422,7 @@ class SettingsViewModel @Inject constructor(
         backupSources,
         pause.paused,
         privilegedUi,
+        healthAlerts?.enabled ?: flowOf(true),
     ) { values: Array<Any?> ->
         val settingsSources = values[0] as SettingsSources
         val bridge = values[1] as BridgeUiHealth
@@ -434,6 +439,7 @@ class SettingsViewModel @Inject constructor(
         val autoBackupSnapshot = backupPair.second
         val automationsPaused = values[10] as Boolean
         val privilegedState = values[11] as PrivilegedUi
+        val healthAlertsEnabled = values[12] as Boolean
         val health = readAndroidUiHealth(context)
         SettingsState(
             transport = transportUi(bridge, hasToken, keySaved),
@@ -481,6 +487,7 @@ class SettingsViewModel @Inject constructor(
                 },
             ),
             automationsPaused = automationsPaused,
+            healthAlertsEnabled = healthAlertsEnabled,
             privileged = privilegedState,
         )
     }.stateIn(
@@ -1049,6 +1056,22 @@ class SettingsViewModel @Inject constructor(
 
     /** F21: accende o spegne "Pausa automazioni". */
     fun setAutomationsPaused(paused: Boolean) = pause.setPaused(paused)
+
+    /** 0.7.2: «Avvisami quando una regola smette di funzionare». */
+    fun setHealthAlertsEnabled(enabled: Boolean) {
+        val store = healthAlerts ?: return
+        viewModelScope.launch {
+            try {
+                if (!store.setEnabled(enabled)) {
+                    message(language.pick("Unable to save the setting.", "Impossibile salvare l'impostazione."))
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                message(language.pick("Unable to save the setting.", "Impossibile salvare l'impostazione."))
+            }
+        }
+    }
 
     fun revokePrivacy() {
         viewModelScope.launch {

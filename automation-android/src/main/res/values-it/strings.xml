@@ -9,6 +9,21 @@
     <string name="argus_connectivity_notification_text">Esecuzione automazioni armate e monitoraggio dei trigger necessari</string>
     <string name="argus_budget_channel_name">Budget LLM</string>
     <string name="argus_budget_channel_description">Avvisi quando il budget delle chiamate LLM è quasi o del tutto esaurito</string>
+    <!-- 0.7.2: avvisi di salute delle regole. Solo nomi di regola e conteggi, mai contenuti. -->
+    <string name="argus_health_channel_name">Salute delle regole</string>
+    <string name="argus_health_channel_description">Avvisi quando una regola continua a fallire o perde qualcosa che le serve per funzionare</string>
+    <string name="argus_health_rule_failed_title">La regola «%1$s» è fallita %2$d volte di fila</string>
+    <string name="argus_health_rule_failed_text">Tocca per vedere cosa non ha funzionato.</string>
+    <string name="argus_health_lost_privileged">Shizuku, Sui o root non è disponibile</string>
+    <string name="argus_health_lost_notification_listener">L\'accesso alle notifiche è stato disattivato</string>
+    <string name="argus_health_lost_accessibility">Il servizio di Accessibilità di Argus è spento</string>
+    <string name="argus_health_lost_exact_alarms">Le sveglie esatte non sono più consentite</string>
+    <string name="argus_health_lost_location">Il permesso di posizione è stato tolto</string>
+    <plurals name="argus_health_capability_rules">
+        <item quantity="one">Ne ha bisogno %d regola armata. Correggi da Sistema.</item>
+        <item quantity="other">Ne hanno bisogno %d regole armate. Correggi da Sistema.</item>
+    </plurals>
+    <string name="argus_health_fix">Correggi</string>
     <string name="argus_foreground_denied_title">Regole in pausa</string>
     <string name="argus_foreground_denied_text">Regole in background (Wi-Fi, alimentazione, schermo, batteria, audio, modalità) in pausa: apri Argus per riattivarle</string>
     <!-- 0.7.2: backup automatico delle regole, dopo 3 fallimenti di fila. -->

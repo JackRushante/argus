@@ -227,6 +227,20 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun `settings carry the health alerts switch, on by default, and flip it`() = runTest(dispatcher) {
+        val alerts = dev.argus.automation.health.FakeHealthAlertStore()
+        val vm = settingsViewModel(FakeProviderStore(), healthAlerts = alerts)
+        observe(vm)
+        advanceUntilIdle()
+        assertTrue(vm.state.value.healthAlertsEnabled)
+
+        vm.setHealthAlertsEnabled(false)
+        advanceUntilIdle()
+        assertFalse(alerts.enabled.value)
+        assertFalse(vm.state.value.healthAlertsEnabled)
+    }
+
+    @Test
     fun `english settings emits english runtime feedback`() = runTest(dispatcher) {
         val vm = settingsViewModel(FakeProviderStore(), language = RenderLanguage.EN)
         observe(vm)
@@ -1119,6 +1133,7 @@ class SettingsViewModelTest {
         pause: FakePauseStore = FakePauseStore(),
         privileged: dev.argus.automation.privileged.PrivilegedAccessCenter? = null,
         autoBackup: dev.argus.automation.backup.AutoBackupCoordinator? = null,
+        healthAlerts: dev.argus.automation.health.HealthAlertStore? = null,
     ): SettingsViewModel {
         val brain = ConfiguredBridgeBrain(store, privacyAccepted = { true }, factory = transportFactory)
         val preferences = FakePreferences(privacyAccepted = true)
@@ -1150,6 +1165,7 @@ class SettingsViewModelTest {
             pause = pause,
             privileged = privileged,
             autoBackup = autoBackup,
+            healthAlerts = healthAlerts,
         )
     }
 

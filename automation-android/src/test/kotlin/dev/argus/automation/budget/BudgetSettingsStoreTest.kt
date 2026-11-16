@@ -22,17 +22,70 @@ class BudgetSettingsStoreTest {
     @Before
     fun clear() {
         context = ApplicationProvider.getApplicationContext()
-        context.getSharedPreferences("argus_budget_private", Context.MODE_PRIVATE)
-            .edit().clear().commit()
+        // Cancella anche il file: un file vuoto vuol dire «salvato senza limiti» (utente legacy).
+        context.deleteSharedPreferences("argus_budget_private")
     }
 
     @Test
-    fun `default tutto illimitato e soglia 80`() = runTest {
+    fun `mai salvato vale il default di 200 chiamate al giorno e soglia 80`() = runTest {
         val store = AndroidBudgetSettingsStore(context)
         val settings = store.observe().value
-        assertEquals(BudgetLimits(), settings.global)
+        assertEquals(BudgetLimits(maxCallsPerDay = 200), settings.global)
+        assertTrue(settings.usingDefaults)
         assertTrue(settings.perProvider.isEmpty())
         assertEquals(80, settings.softThresholdPct)
+    }
+
+    @Test
+    fun `il default si toglie salvando illimitato e resta tolto`() = runTest {
+        val store = AndroidBudgetSettingsStore(context)
+        assertTrue(store.setGlobalLimits(BudgetLimits()))
+        assertEquals(BudgetLimits(), store.observe().value.global)
+        assertFalse(store.observe().value.usingDefaults)
+
+        val restored = AndroidBudgetSettingsStore(context).observe().value
+        assertEquals(BudgetLimits(), restored.global)
+        assertFalse(restored.usingDefaults)
+    }
+
+    @Test
+    fun `il default si cambia come ogni altro limite`() = runTest {
+        val store = AndroidBudgetSettingsStore(context)
+        assertTrue(store.setGlobalLimits(BudgetLimits(maxCallsPerDay = 50)))
+        assertEquals(BudgetLimits(maxCallsPerDay = 50), AndroidBudgetSettingsStore(context).observe().value.global)
+    }
+
+    @Test
+    fun `cambiare solo la soglia o un provider conserva il default giornaliero`() = runTest {
+        val store = AndroidBudgetSettingsStore(context)
+        assertTrue(store.setSoftThresholdPct(50))
+        val afterSoft = AndroidBudgetSettingsStore(context).observe().value
+        assertEquals(BudgetLimits(maxCallsPerDay = 200), afterSoft.global)
+        assertFalse(afterSoft.usingDefaults)
+
+        context.deleteSharedPreferences("argus_budget_private")
+        assertTrue(AndroidBudgetSettingsStore(context).setProviderLimits(ProviderId.OPENAI, BudgetLimits(maxCallsPerHour = 5)))
+        assertEquals(BudgetLimits(maxCallsPerDay = 200), AndroidBudgetSettingsStore(context).observe().value.global)
+    }
+
+    @Test
+    fun `chi aveva salvato limiti con una versione precedente li conserva tali e quali`() = runTest {
+        // Scrittura come la faceva 0.7.1: nessun marcatore, solo le chiavi dei limiti.
+        context.getSharedPreferences("argus_budget_private", Context.MODE_PRIVATE)
+            .edit().putInt("global.maxCallsPerHour", 20).commit()
+        val settings = AndroidBudgetSettingsStore(context).observe().value
+        assertEquals(BudgetLimits(maxCallsPerHour = 20), settings.global)
+        assertFalse(settings.usingDefaults)
+    }
+
+    @Test
+    fun `chi aveva salvato tutto illimitato con una versione precedente resta illimitato`() = runTest {
+        // 0.7.1 rimuoveva le chiavi a zero: resta solo il file, vuoto.
+        context.getSharedPreferences("argus_budget_private", Context.MODE_PRIVATE)
+            .edit().remove("global.maxCallsPerDay").commit()
+        val settings = AndroidBudgetSettingsStore(context).observe().value
+        assertEquals(BudgetLimits(), settings.global)
+        assertFalse(settings.usingDefaults)
     }
 
     @Test

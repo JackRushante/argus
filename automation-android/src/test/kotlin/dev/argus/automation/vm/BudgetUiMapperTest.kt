@@ -156,4 +156,14 @@ class BudgetUiMapperTest {
         val snapshot = BudgetUsageSnapshot(month = listOf(agg("hermes", calls = 2, tokensIn = 800, tokensOut = 0)))
         assertTrue(budgetUi(snapshot, settings).softWarningActive)
     }
+
+    @Test fun `il tetto di default appare come limite giornaliero corrente e si dichiara`() {
+        val defaults = BudgetSettings(global = BudgetSettings.DEFAULT_GLOBAL_LIMITS, usingDefaults = true)
+        val ui = budgetUi(BudgetUsageSnapshot(), defaults)
+        assertEquals(200, ui.limitDay)
+        assertTrue(ui.defaultLimitActive)
+
+        val saved = budgetUi(BudgetUsageSnapshot(), BudgetSettings(global = BudgetLimits(maxCallsPerDay = 200)))
+        assertFalse(saved.defaultLimitActive)
+    }
 }
