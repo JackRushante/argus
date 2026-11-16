@@ -41,7 +41,7 @@ class AgentMessageSupportActions041Test {
         assertTrue("ONLY with a URL the user gave you" in http, http)
         assertTrue("never invent or guess one" in http, http)
         assertTrue("url and headers are LITERAL" in http, http)
-        assertTrue("https only (http only for localhost)" in http, http)
+        assertTrue("http only towards this phone or the user's own" in http, http)
         assertTrue("at most 10 headers" in http, http)
         assertTrue("body max 16 KB" in http, http)
         // I dati esterni solo nel body, dentro una stringa JSON; nel prompt il dollaro è reso `$`.

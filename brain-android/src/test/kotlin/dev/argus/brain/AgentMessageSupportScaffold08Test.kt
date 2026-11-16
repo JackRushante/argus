@@ -32,14 +32,14 @@ class AgentMessageSupportScaffold08Test {
             assertFalse("\"type\":\"$type\"" in prompt, "il prompt nomina il tipo spento $type")
         }
         // Campi e valori nuovi di tipi esistenti.
-        listOf("\"shake\"", "\"flip_face_down\"", "secretHeaders", "secretQuery", "\"extract\"", "\"output\"", "\"confirm\"", "\"exit\"")
+        listOf("\"shake\"", "\"flip_face_down\"", "\"output\"", "\"confirm\"", "\"exit\"")
             .forEach { assertFalse(it in prompt, "il prompt nomina $it") }
     }
 
     @Test
     fun `every gate is still off, so this test still describes the prompt`() {
         // Quando un engineer accende un tipo, aggiorna anche [hiddenTypes] e questo elenco.
-        assertEquals(emptyList(), FeatureGate.entries.filter { it.enabled })
+        assertEquals(setOf(FeatureGate.HTTP_CAPTURE, FeatureGate.HTTP_SECRETS), FeatureGate.entries.filter { it.enabled }.toSet())
     }
 
     @Test

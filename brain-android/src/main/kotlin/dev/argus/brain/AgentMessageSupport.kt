@@ -473,6 +473,8 @@ Same meaning as the @@META@@ line, same rule 8. Do not write @@META@@."""
                         }
                     }
                 }
+                // 0.8: the NAMES of the secrets saved on the phone; their values never leave it.
+                putJsonArray("saved_secrets") { manifest.savedSecrets.forEach { add(JsonPrimitive(it)) } }
             }
             putJsonObject("state") {
                 putJsonObject("values") {
@@ -791,10 +793,20 @@ Action, discriminated by "type":
 - {"type":"http_request", "method":"GET"|"POST"|"PUT"|"DELETE", "url":string,
    "headers":{string:string}|null, "body":string|null, "contentType":string|null}
    // calls a web address. Use it ONLY with a URL the user gave you: never invent or guess one. url and
-   // headers are LITERAL (never ${'$'}{var}); https only (http only for localhost); at most 10 headers;
+   // headers are LITERAL (never ${'$'}{var}); https, or http only towards this phone or the user's own
+   // network (localhost, 192.168.x.x, 10.x.x.x, name.local); at most 10 headers;
    // body max 16 KB, none on GET. Variables, also external data, go ONLY in body; with contentType
    // "application/json" put them inside a quoted JSON string, e.g. "body":"{\"text\":\"${'$'}{sms}\"}".
    // A key or token the user dictates goes in a header exactly as dictated
+   // Optional "secretHeaders":[SecretRef,...] and "secretQuery":[SecretRef,...], SecretRef =
+   // {"name":string,"secret":string,"prefix":string}: a value from the phone's secrets vault, by NAME. name =
+   // header or query parameter, secret = a name from manifest.saved_secrets (never invent one), prefix =
+   // literal text before the value (e.g. "Bearer ", or ""). When the user names a saved secret ("with the
+   // secret ha_token") use it, e.g. "secretHeaders":[{"name":"Authorization","secret":"ha_token","prefix":"Bearer "}];
+   // never put a secret's name in headers. A secret never goes over http except to localhost
+   // Optional "captureAs":string (P4) puts the response body (status 2xx) in a new TEXT variable, at most
+   // 4096 characters; "extract":string = a JSON pointer like "/current/temp" to take one string, number or
+   // boolean of a JSON response instead of the whole body
 - {"type":"app_control", "pkg":string, "op":"FORCE_STOP"|"FREEZE"|"UNFREEZE"}  // stops, disables (FREEZE) or
    // re-enables an app. pkg is a literal package taken from installed_app_candidates, never ${'$'}{var}; never
    // Argus, the launcher or a system app
@@ -852,7 +864,7 @@ VarBinding, discriminated by "type":
    // Integrity CLEAN. Use it as ${'$'}{name} for the current time or date in any text.
 
 "captureAs":string (optional) — captures the action's OUTPUT into a new same-named variable. Allowed
-ONLY on run_shell and invoke_llm; the captured value is TAINTED. invoke_llm_v2 is flat-v1 only.
+ONLY on run_shell, invoke_llm and http_request; the captured value is TAINTED. invoke_llm_v2 is flat-v1 only.
 
 Control-flow actions (containers, NOT leaf actions; never eval, never goto). Nesting depth <= 4;
 at most 64 action nodes total across the whole program:
