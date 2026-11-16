@@ -15,6 +15,7 @@ import dev.argus.automation.AndroidArmedAutomationRegistrar
 import dev.argus.automation.AndroidGenerativeRuntimeReadiness
 import dev.argus.automation.AndroidStateQueryProbe
 import dev.argus.automation.GenerativeRuntimeReadiness
+import dev.argus.automation.AndroidNextAlarmClock
 import dev.argus.automation.AndroidTimeAlarmBackend
 import dev.argus.automation.AppPreferencesStore
 import dev.argus.automation.ApprovalFlow
