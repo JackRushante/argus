@@ -341,6 +341,8 @@ class RoomDraftRepository(private val db: ArgusDatabase) : DraftRepository, Bulk
             priority = priority,
             cooldownMs = draft.cooldownMs,
             schemaVersion = schemaVersion,
+            confirm = draft.confirm,
+            exit = draft.exit,
         )
         return PendingDraft(
             id = id,
