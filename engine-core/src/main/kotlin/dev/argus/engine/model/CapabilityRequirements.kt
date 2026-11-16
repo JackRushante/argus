@@ -110,7 +110,11 @@ object CapabilityIds {
     const val ACTION_SEND_SMS = "action.send_sms"
     const val ACTION_CALL_NUMBER = "action.call_number"
     const val ACTION_SEND_INTENT = "action.send_intent"
+    /** `send_intent` di tipo SERVICE: solo con un backend privilegiato (Shizuku, Sui o root). */
+    const val ACTION_SEND_INTENT_SERVICE = "action.send_intent.service"
     const val ACTION_SCREEN_CALL = "action.screen_call"
+    /** `screen_call` solo per chi non è nei contatti: serve leggere i contatti. */
+    const val ACTION_SCREEN_CALL_CONTACTS = "action.screen_call.contacts"
     /** `http_request` con intestazioni o parametri dalla cassaforte dei segreti. */
     const val ACTION_HTTP_REQUEST_SECRETS = "action.http_request.secrets"
 
@@ -282,8 +286,16 @@ object CapabilityRequirements {
         is Action.NotificationAction -> setOf(CapabilityIds.ACTION_NOTIFICATION_ACTION)
         is Action.SendSms -> setOf(CapabilityIds.ACTION_SEND_SMS)
         is Action.CallNumber -> setOf(CapabilityIds.ACTION_CALL_NUMBER)
-        is Action.SendIntent -> setOf(CapabilityIds.ACTION_SEND_INTENT)
-        is Action.ScreenCall -> setOf(CapabilityIds.ACTION_SCREEN_CALL)
+        is Action.SendIntent -> if (action.kind == IntentKind.SERVICE) {
+            setOf(CapabilityIds.ACTION_SEND_INTENT, CapabilityIds.ACTION_SEND_INTENT_SERVICE)
+        } else {
+            setOf(CapabilityIds.ACTION_SEND_INTENT)
+        }
+        is Action.ScreenCall -> if (action.onlyUnknownCallers) {
+            setOf(CapabilityIds.ACTION_SCREEN_CALL, CapabilityIds.ACTION_SCREEN_CALL_CONTACTS)
+        } else {
+            setOf(CapabilityIds.ACTION_SCREEN_CALL)
+        }
         // Pausa cooperativa interna all'interprete: nessuna capability OS.
         is Action.Wait -> emptySet()
         // Come i reader parametrici (che gatano sulla famiglia, non sul singolo canonicalId):

@@ -76,10 +76,6 @@ class FeatureGatesTest {
         FeatureGate.ACTION_SET_USER_MODE to Action.SetUserMode("lavoro"),
         FeatureGate.ACTION_NOTIFICATION_REPLY to Action.NotificationReply("Arrivo"),
         FeatureGate.ACTION_NOTIFICATION_ACTION to Action.NotificationAction(NotificationActionOp.DISMISS),
-        FeatureGate.ACTION_SEND_SMS to Action.SendSms("+393331112222", "Arrivo"),
-        FeatureGate.ACTION_CALL_NUMBER to Action.CallNumber("+393331112222"),
-        FeatureGate.ACTION_SEND_INTENT to Action.SendIntent(IntentKind.BROADCAST, action = "dev.example.PING"),
-        FeatureGate.ACTION_SCREEN_CALL to Action.ScreenCall(ScreenCallOp.REJECT),
         FeatureGate.HTTP_CAPTURE to Action.HttpRequest(HttpMethod.GET, "https://example.org", captureAs = "body"),
         FeatureGate.HTTP_SECRETS to Action.HttpRequest(
             HttpMethod.GET,
@@ -97,15 +93,23 @@ class FeatureGatesTest {
         ),
     )
 
+    /** Interruttori già accesi: le loro feature hanno test propri. */
+    private val switchedOn: Set<FeatureGate> = setOf(
+        FeatureGate.ACTION_SEND_SMS,
+        FeatureGate.ACTION_CALL_NUMBER,
+        FeatureGate.ACTION_SEND_INTENT,
+        FeatureGate.ACTION_SCREEN_CALL,
+    )
+
     @Test
-    fun `every gate is off in this version`() {
-        assertEquals(emptyList(), FeatureGate.entries.filter { it.enabled })
+    fun `every gate not yet implemented is off in this version`() {
+        assertEquals(switchedOn, FeatureGate.entries.filter { it.enabled }.toSet())
         assertEquals(FeatureGate.entries.size, FeatureGate.entries.map { it.wireName }.toSet().size)
     }
 
     @Test
     fun `the tables above cover every gate`() {
-        val covered = newTriggers.keys + newConditions.keys + newActions.keys +
+        val covered = newTriggers.keys + newConditions.keys + newActions.keys + switchedOn +
             setOf(FeatureGate.CONFIRM, FeatureGate.EXIT, FeatureGate.VAR_STORED)
         assertEquals(FeatureGate.entries.toSet(), covered)
     }
@@ -135,8 +139,8 @@ class FeatureGatesTest {
         assertEquals(listOf(FeatureGate.EXIT.wireName), notAvailable(draft(exit = ExitSpec(Trigger.Manual))))
         // Un tipo spento nel trigger o nelle azioni d'uscita conta anche lui.
         assertEquals(
-            listOf(FeatureGate.EXIT.wireName, FeatureGate.TRIGGER_NFC_TAG.wireName, FeatureGate.ACTION_CALL_NUMBER.wireName),
-            notAvailable(draft(exit = ExitSpec(Trigger.NfcTag("04"), actions = listOf(Action.CallNumber("+39"))))),
+            listOf(FeatureGate.EXIT.wireName, FeatureGate.TRIGGER_NFC_TAG.wireName, FeatureGate.ACTION_SET_USER_MODE.wireName),
+            notAvailable(draft(exit = ExitSpec(Trigger.NfcTag("04"), actions = listOf(Action.SetUserMode("casa"))))),
         )
     }
 
@@ -219,7 +223,7 @@ class FeatureGatesTest {
         assertTrue(CapabilityIds.TRIGGER_CALENDAR_EVENT in caps(draft(trigger = newTriggers.getValue(FeatureGate.TRIGGER_CALENDAR_EVENT))))
         assertTrue(CapabilityIds.triggerSensor(SensorKind.SHAKE) in caps(draft(trigger = Trigger.Sensor(SensorKind.SHAKE))))
         assertTrue(CapabilityIds.STATE_STORED in caps(draft(conditions = newConditions.getValue(FeatureGate.CONDITION_STORED_COMPARE))))
-        assertTrue(CapabilityIds.ACTION_SEND_SMS in caps(draft(actions = listOf(newActions.getValue(FeatureGate.ACTION_SEND_SMS)))))
+        assertTrue(CapabilityIds.ACTION_ASK in caps(draft(actions = listOf(newActions.getValue(FeatureGate.ACTION_ASK)))))
         assertTrue(CapabilityIds.ACTION_HTTP_REQUEST_SECRETS in caps(draft(actions = listOf(newActions.getValue(FeatureGate.HTTP_SECRETS)))))
         assertTrue(CapabilityIds.RULE_CONFIRM in caps(draft(confirm = ConfirmSpec())))
         val span = caps(draft(exit = ExitSpec(Trigger.NfcTag("04"), actions = listOf(Action.SetUserMode("casa")))))
