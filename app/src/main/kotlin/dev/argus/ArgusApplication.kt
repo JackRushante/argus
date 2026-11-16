@@ -12,6 +12,7 @@ import dev.argus.automation.TimeAlarmRuntime
 import dev.argus.automation.TimeAlarmRuntimeRegistry
 import dev.argus.automation.apps.AndroidAppLabelLookup
 import dev.argus.automation.backup.AutoBackupCoordinator
+import dev.argus.automation.prompt.UserPromptStartup
 import dev.argus.manual.ManualWidgetRefresher
 import dev.argus.ui.presentation.AppLabels
 import javax.inject.Inject
@@ -23,6 +24,7 @@ class ArgusApplication : Application(), DefaultLifecycleObserver {
     @Inject lateinit var renderLanguage: RenderLanguageSource
     @Inject lateinit var manualWidgetRefresher: ManualWidgetRefresher
     @Inject lateinit var autoBackup: AutoBackupCoordinator
+    @Inject lateinit var userPrompts: UserPromptStartup
 
     override fun onCreate() {
         super<Application>.onCreate()
@@ -35,6 +37,8 @@ class ArgusApplication : Application(), DefaultLifecycleObserver {
         manualWidgetRefresher.start()
         // 0.7.2: rimette la sveglia del backup automatico (un riavvio la cancella) e recupera un ritardo.
         autoBackup.start()
+        // 0.8: rimostra le conferme ancora valide dopo un riavvio, chiude le scadute.
+        userPrompts.start()
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {

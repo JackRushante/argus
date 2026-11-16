@@ -13,8 +13,6 @@ import dev.argus.engine.model.CapabilityIds
 import dev.argus.engine.model.HttpMethod
 import dev.argus.engine.model.IntentKind
 import dev.argus.engine.model.NotificationActionOp
-import dev.argus.engine.model.OutputKind
-import dev.argus.engine.model.OutputSpec
 import dev.argus.engine.model.ScreenCallOp
 import dev.argus.engine.model.SensorKind
 import dev.argus.engine.model.StoredOp
@@ -79,7 +77,6 @@ class AndroidCapabilityProbeScaffold08Test {
     )
 
     private val newActionTypes = setOf(
-        ActionTypeIds.ASK,
         ActionTypeIds.SET_STORED,
         ActionTypeIds.SET_USER_MODE,
         ActionTypeIds.NOTIFICATION_REPLY,
@@ -144,7 +141,6 @@ class AndroidCapabilityProbeScaffold08Test {
             shizukuReady = { true },
         )
         val actions = listOf(
-            Action.Ask("?", listOf("a"), "answer"),
             Action.SetStored("k", StoredOp.CLEAR),
             Action.SetUserMode("lavoro"),
             Action.NotificationReply("ok"),
@@ -154,7 +150,6 @@ class AndroidCapabilityProbeScaffold08Test {
             Action.SendIntent(IntentKind.BROADCAST, action = "dev.example.PING"),
             Action.ScreenCall(ScreenCallOp.REJECT),
             Action.HttpRequest(HttpMethod.GET, "https://example.org", captureAs = "body"),
-            Action.InvokeLlm("g", emptyList(), emptyList(), false, output = OutputSpec(OutputKind.BOOLEAN)),
         )
         actions.forEach { action ->
             assertEquals(ActionResult.Failure("not_available_yet"), executor.execute(action, context), "$action")

@@ -14,9 +14,11 @@ import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.ActionJournalOutcome
 import dev.argus.engine.runtime.AuditKind
+import dev.argus.engine.runtime.ConfirmationCodes
 import dev.argus.engine.runtime.ExecutionStatus
 import dev.argus.engine.runtime.OmittedSteps
 import dev.argus.engine.runtime.PauseCodes
+import dev.argus.engine.runtime.ProgramInterpreter
 import dev.argus.engine.runtime.TimeSpecs
 import dev.argus.engine.safety.PendingDraft
 import dev.argus.engine.safety.Severity
@@ -156,6 +158,9 @@ internal fun AuditLogRecord.toLogRow(
         // F21: uno scatto saltato per la pausa non e' un guasto: ambra, non rosso.
         // 0.7.2: lo stesso per la pausa di un gruppo.
         LogOutcome.PARTIAL
+    } else if (kind == AuditKind.SUPPRESSED_NOT_ELIGIBLE && detail in USER_PROMPT_CODES) {
+        // 0.8: una conferma in attesa, annullata o scaduta, una domanda senza risposta: ambra, non un guasto.
+        LogOutcome.PARTIAL
     } else {
         executionStatus.toLogOutcome(kind)
     }
@@ -258,10 +263,15 @@ private fun auditSummary(record: AuditLogRecord, l: RenderLanguage): String = wh
     } else {
         l.pick("blocked by the LLM budget", "bloccata dal budget LLM")
     }
-    AuditKind.SUPPRESSED_NOT_ELIGIBLE -> l.pick(
-        "rule is no longer eligible",
-        "regola non più idonea",
-    )
+    // 0.8: conferme e domande senza risposta hanno il loro codice chiuso, non sono un guasto.
+    AuditKind.SUPPRESSED_NOT_ELIGIBLE -> if (record.detail in USER_PROMPT_CODES) {
+        LogReasonLabels.text(record.detail, l).replaceFirstChar { it.uppercase() }
+    } else {
+        l.pick(
+            "rule is no longer eligible",
+            "regola non più idonea",
+        )
+    }
     AuditKind.CONDITIONS_NOT_MET -> when (record.detail) {
         "condition_state_unavailable" -> l.pick(
             "required state unavailable",
@@ -326,6 +336,9 @@ private fun auditSummary(record: AuditLogRecord, l: RenderLanguage): String = wh
         "Regola da rivedere (${record.detail.safeDiagnostic()})",
     )
 }
+
+/** 0.8: codici chiusi di «chiedimi prima» e delle domande senza risposta (audit SUPPRESSED_NOT_ELIGIBLE). */
+private val USER_PROMPT_CODES = ConfirmationCodes.ALL + ProgramInterpreter.ASK_TIMEOUT
 
 /** Codice con cui la lane chiude un evento già accorpato in una raffica (D8). */
 private const val COALESCED_REPLY_CODE = "coalesced"
