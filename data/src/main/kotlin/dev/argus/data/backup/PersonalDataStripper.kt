@@ -3,7 +3,9 @@ package dev.argus.data.backup
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.Condition
+import dev.argus.engine.model.ConfidentialityLabel
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.VarBinding
 
 /**
  * Opzione «Togli posizioni e contatti (per condividere)» dell'export.
@@ -15,8 +17,18 @@ import dev.argus.engine.model.Trigger
  *    intervallo: il [dev.argus.engine.safety.DraftValidator] la segnala (`location_invalid`) e la regola
  *    non si arma finché non viene rifatta. La condizione NON viene eliminata: toglierla renderebbe la
  *    regola più ampia di quella condivisa.
- *  - [Trigger.Notification]: `conversationId` e `sender`. Resta il package (e i filtri sul testo).
+ *  - [Trigger.Notification]: `conversationId`, `sender` e `titleMatch` (su WhatsApp il titolo è il nome
+ *    del contatto). Resta il package (e il filtro sul testo del messaggio).
  *  - [Trigger.PhoneState]: il `number`. Restano evento e filtro sul testo.
+ *  - [Trigger.Connectivity]: `match`, il nome della rete Wi-Fi o del dispositivo Bluetooth.
+ *  - Variabili [VarBinding.Literal] con riservatezza SECRET: il valore (token, password).
+ *
+ *  Un campo tolto NON diventa null: null vuol dire «chiunque» (qualunque mittente, qualunque rete) e la
+ *  regola importata sarebbe più larga di quella condivisa. Diventa [REMOVED_TEXT] (vuoto), che il
+ *  validatore rifiuta (`conversation_id_invalid`, `sender_invalid`, `title_match_invalid`,
+ *  `number_invalid`, `match_invalid`), oppure [REMOVED_SECRET] per un letterale (`var_literal_invalid`):
+ *  la regola non si arma finché chi la importa non la completa con i propri dati. Un campo che era già
+ *  null resta null.
  *  - [Trigger.Time] con `solar`: la posizione congelata all'arm. Chi importa la regola la arma con
  *    la posizione del proprio telefono, letta di nuovo all'arm.
  *  - [Action.HttpRequest]: i VALORI delle intestazioni (token, chiavi API, cookie): restano i nomi.
@@ -37,19 +49,46 @@ object PersonalDataStripper {
     /** Valore con cui si svuota un'intestazione HTTP: vuoto, quindi non valido finché non si rifà. */
     const val REMOVED_HEADER_VALUE = ""
 
+    /** Valore di un campo di identità tolto (contatto, numero, rete): vuoto, quindi non valido. */
+    const val REMOVED_TEXT = ""
+
+    /**
+     * Valore di un letterale SECRET tolto: un carattere di controllo, che il validatore rifiuta in ogni
+     * letterale (un TEXT vuoto sarebbe valido e la regola partirebbe con un segreto vuoto).
+     */
+    const val REMOVED_SECRET = "\u0000"
+
     fun strip(draft: AutomationDraft): AutomationDraft = draft.copy(
         trigger = stripTrigger(draft.trigger),
         conditions = draft.conditions?.let(::stripCondition),
         actions = draft.actions.map(::stripAction),
+        vars = draft.vars.map(::stripVar),
     )
+
+    private fun removed(value: String?): String? = value?.let { REMOVED_TEXT }
+
+    private fun stripVar(binding: VarBinding): VarBinding = when (binding) {
+        is VarBinding.Literal ->
+            if (binding.confidentiality == ConfidentialityLabel.SECRET) binding.copy(value = REMOVED_SECRET) else binding
+        // Nessun valore dentro: la query, il campo del trigger o il seme vengono dalla regola.
+        is VarBinding.TriggerPayload,
+        is VarBinding.State,
+        is VarBinding.RandomInt,
+        is VarBinding.ClockTime,
+        -> binding
+    }
 
     private fun stripTrigger(trigger: Trigger): Trigger = when (trigger) {
         is Trigger.Geofence -> trigger.copy(lat = 0.0, lng = 0.0, resolveCurrentLocation = true)
-        is Trigger.Notification -> trigger.copy(conversationId = null, sender = null)
-        is Trigger.PhoneState -> trigger.copy(number = null)
+        is Trigger.Notification -> trigger.copy(
+            conversationId = removed(trigger.conversationId),
+            sender = removed(trigger.sender),
+            titleMatch = removed(trigger.titleMatch),
+        )
+        is Trigger.PhoneState -> trigger.copy(number = removed(trigger.number))
+        is Trigger.Connectivity -> trigger.copy(match = removed(trigger.match))
         is Trigger.Time -> trigger.solar?.let { trigger.copy(solar = it.copy(lat = null, lng = null)) } ?: trigger
         Trigger.Immediate,
-        is Trigger.Connectivity,
         is Trigger.Sensor,
         // 0.4.1: nessun dato personale (stato di sistema, soglie, slot SIM).
         is Trigger.Screen,
