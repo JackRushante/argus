@@ -637,7 +637,7 @@ object ArgusModule {
         @ApplicationContext context: Context,
         coordinator: CalendarTriggerCoordinator,
         store: AutomationStore,
-        scope: CoroutineScope,
+        @ApplicationScope scope: CoroutineScope,
     ): CalendarTriggerLifecycle = CalendarTriggerLifecycle(context, coordinator, store, scope)
 
     @Provides
