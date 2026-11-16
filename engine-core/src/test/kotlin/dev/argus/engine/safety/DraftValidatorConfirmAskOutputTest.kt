@@ -150,6 +150,13 @@ class DraftValidatorConfirmAskOutputTest {
         assertTrue("llm_output_requires_capture" in errors(draft(actions = listOf(llm(boolean, deliver = GenerativeDeliverMode.LOCAL_NOTIFICATION)))))
     }
 
+    @Test fun `the goal leaves room for the shape instruction`() {
+        val boolean = OutputSpec(OutputKind.BOOLEAN)
+        val long = llm(boolean).copy(goal = "x".repeat(3_990))
+        assertEquals(listOf("goal_invalid"), errors(draft(actions = listOf(long))))
+        assertEquals(emptyList(), errors(draft(actions = listOf(long.copy(output = null)))))
+    }
+
     @Test fun `the captured answer has the type of its shape and can be compared`() {
         val number = draft(
             actions = listOf(

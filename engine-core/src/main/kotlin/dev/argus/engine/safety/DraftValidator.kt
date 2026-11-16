@@ -1724,8 +1724,11 @@ class DraftValidator(
 
         // 0.8: uscita vincolata, solo per una chiamata che cattura in una variabile.
         action.output?.let { output ->
-            LlmOutputPolicy.specProblem(output)?.let { code ->
-                err(code, "Forma della risposta non valida: scelte [a-z0-9_-] da 2 a 8, numero con min e max")
+            val problem = LlmOutputPolicy.specProblem(output)
+            if (problem != null) {
+                err(problem, "Forma della risposta non valida: scelte [a-z0-9_-] da 2 a 8, numero con min e max")
+            } else if (!LlmOutputPolicy.constrainedGoalFits(action.goal, output, MAX_TEXT_LENGTH)) {
+                err("goal_invalid", "Il goal con l'istruzione della forma supera $MAX_TEXT_LENGTH caratteri")
             }
             if (action.captureAs == null || action.deliver != GenerativeDeliverMode.CAPTURE_ONLY) {
                 err(

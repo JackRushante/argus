@@ -152,4 +152,11 @@ object LlmOutputPolicy {
             "Answer with exactly one integer between ${spec.min} and ${spec.max} and nothing else."
         OutputKind.BOOLEAN -> "Answer with exactly yes or no and nothing else."
     }
+
+    /** Goal approvato più l'istruzione della forma: quello che riceve un modello senza output strutturato. */
+    fun constrainedGoal(goal: String, spec: OutputSpec): String = "$goal\n\n${instruction(spec)}"
+
+    /** Il goal con l'istruzione deve stare nel limite del goal (4000 caratteri): il validator lo controlla. */
+    fun constrainedGoalFits(goal: String, spec: OutputSpec, maxGoalChars: Int): Boolean =
+        constrainedGoal(goal, spec).length <= maxGoalChars
 }
