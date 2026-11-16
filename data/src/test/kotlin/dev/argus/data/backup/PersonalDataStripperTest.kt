@@ -89,7 +89,7 @@ class PersonalDataStripperTest {
     }
 
     @Test
-    fun `a stripped identity never widens the trigger: the validator blocks the rule until it is completed`() {
+    fun `a stripped identity never widens the trigger and the validator blocks the rule until it is completed`() {
         mapOf(
             BackupFixtures.notification to setOf("conversation_id_invalid", "sender_invalid", "title_match_invalid"),
             BackupFixtures.phoneState to setOf("number_invalid"),
