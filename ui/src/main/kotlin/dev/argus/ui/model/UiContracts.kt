@@ -528,6 +528,12 @@ data class SettingsState(
     val automationsPaused: Boolean = false,
     /** 0.5.0: backend privilegiato, root `su` e permessi permanenti. */
     val privileged: PrivilegedUi = PrivilegedUi(),
+    /**
+     * #20: tempo massimo di risposta del modello, in minuti; 0 = automatico (65 s, 180 s per un server locale).
+     * [responseTimeoutChoices] sono i valori offerti, nell'ordine dei chip.
+     */
+    val responseTimeoutMinutes: Int = 0,
+    val responseTimeoutChoices: List<Int> = listOf(0, 2, 5, 10, 20),
 )
 
 /** Operazione del backup delle regole. */
@@ -690,6 +696,9 @@ interface SettingsCallbacks {
     fun onRerunOnboarding()
     /** «Pausa automazioni» (F21): true = nessuna regola scatta finché non si riprende. Default no-op. */
     fun onSetAutomationsPaused(paused: Boolean) {}
+
+    /** #20: nuovo tempo massimo di risposta, in minuti (0 = automatico). */
+    fun onSetResponseTimeout(minutes: Int) {}
     /** Selettore provider: id = ProviderId.wireName. Id sconosciuti = no-op lato VM. */
     fun onSelectProvider(providerId: String) {}
     /** apiKey null = conserva la chiave esistente (pattern onSaveBridge). La chiave NON torna mai nello stato. */

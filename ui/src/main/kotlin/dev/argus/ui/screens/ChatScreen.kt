@@ -1,6 +1,11 @@
 package dev.argus.ui.screens
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.res.Configuration
+import android.os.Build
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -61,11 +66,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -372,11 +380,19 @@ private fun bubbleShape(fromUser: Boolean): RoundedCornerShape = if (fromUser) {
     RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp, bottomEnd = 22.dp, bottomStart = ArgusRadius.Xs)
 }
 
+/**
+ * Un messaggio della conversazione. #21: il testo è selezionabile (pressione lunga: Copia, Seleziona tutto), così
+ * una richiesta si può riprendere e rimandare con qualche modifica; TalkBack ha l'azione «Copia messaggio», che
+ * copia il messaggio intero.
+ */
 @Composable
 private fun MessageBubble(text: String, timeLabel: String, fromUser: Boolean) {
     val scheme = MaterialTheme.colorScheme
     val bg = if (fromUser) scheme.primaryContainer else ArgusTheme.surfaces.card
     val fg = if (fromUser) scheme.onPrimaryContainer else scheme.onSurface
+    val context = LocalContext.current
+    val copyLabel = stringResource(R.string.chat_message_copy_action)
+    val copiedLabel = stringResource(R.string.chat_message_copied)
     Row(Modifier.fillMaxWidth()) {
         if (fromUser) Spacer(Modifier.weight(1f))
         Column(
@@ -388,9 +404,17 @@ private fun MessageBubble(text: String, timeLabel: String, fromUser: Boolean) {
                 Modifier
                     .clip(bubbleShape(fromUser))
                     .background(bg)
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                    .semantics {
+                        customActions = listOf(
+                            CustomAccessibilityAction(copyLabel) { copyChatMessage(context, text, copiedLabel) },
+                        )
+                    }
+                    .padding(horizontal = 14.dp, vertical = 10.dp)
+                    .testTag(if (fromUser) "chat_user_message" else "chat_assistant_message"),
             ) {
-                Text(text, color = fg, style = MaterialTheme.typography.bodyLarge)
+                SelectionContainer {
+                    Text(text, color = fg, style = MaterialTheme.typography.bodyLarge)
+                }
             }
             if (timeLabel.isNotBlank()) {
                 Text(
@@ -404,6 +428,20 @@ private fun MessageBubble(text: String, timeLabel: String, fromUser: Boolean) {
         }
         if (!fromUser) Spacer(Modifier.weight(1f))
     }
+}
+
+/**
+ * Copia un messaggio intero (azione di accessibilità «Copia messaggio»). Da Android 13 il sistema mostra già la
+ * sua conferma degli appunti; prima, un breve avviso. true se la copia è riuscita.
+ */
+private fun copyChatMessage(context: Context, text: String, confirmation: String): Boolean {
+    val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return false
+    return runCatching {
+        clipboard.setPrimaryClip(ClipData.newPlainText("Argus", text))
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            Toast.makeText(context, confirmation, Toast.LENGTH_SHORT).show()
+        }
+    }.isSuccess
 }
 
 /**

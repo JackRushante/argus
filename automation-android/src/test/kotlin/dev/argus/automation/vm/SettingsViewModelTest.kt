@@ -254,6 +254,31 @@ class SettingsViewModelTest {
         }
 
     @Test
+    fun `the response timeout is shown saved and refused when not offered`() = runTest(dispatcher) {
+        // #20: un'impostazione sola per tutti i provider; 0 = automatico.
+        val store = FakeProviderStore()
+        val vm = settingsViewModel(store)
+        observe(vm)
+        advanceUntilIdle()
+        assertEquals(0, vm.state.value.responseTimeoutMinutes)
+        assertEquals(listOf(0, 2, 5, 10, 20), vm.state.value.responseTimeoutChoices)
+
+        vm.setResponseTimeout(10)
+        advanceUntilIdle()
+        assertEquals(dev.argus.brain.ResponseTimeout.TEN_MINUTES, store.timeout)
+        assertEquals(10, vm.state.value.responseTimeoutMinutes)
+
+        vm.setResponseTimeout(7)
+        advanceUntilIdle()
+        assertEquals(dev.argus.brain.ResponseTimeout.TEN_MINUTES, store.timeout, "a value not offered is not saved")
+
+        vm.setResponseTimeout(0)
+        advanceUntilIdle()
+        assertEquals(dev.argus.brain.ResponseTimeout.AUTOMATIC, store.timeout)
+        assertEquals(0, vm.state.value.responseTimeoutMinutes)
+    }
+
+    @Test
     fun `saveProviderConfig con apiKey null conserva la chiave esistente`() = runTest(dispatcher) {
         val store = FakeProviderStore().apply {
             seed(ProviderId.OPENAI, key = "sk-existing-1234567890")
@@ -1922,6 +1947,14 @@ private class FakeProviderStore(
     private var selected = initialSelected
     private val slots = mutableMapOf<ProviderId, Slot>()
     val saveCalls = mutableListOf<SaveCall>()
+    var timeout: dev.argus.brain.ResponseTimeout = dev.argus.brain.ResponseTimeout.AUTOMATIC
+
+    override fun responseTimeout(): dev.argus.brain.ResponseTimeout = timeout
+
+    override suspend fun saveResponseTimeout(value: dev.argus.brain.ResponseTimeout): Boolean {
+        timeout = value
+        return true
+    }
 
     private fun slot(id: ProviderId) = slots.getOrPut(id) { Slot() }
 

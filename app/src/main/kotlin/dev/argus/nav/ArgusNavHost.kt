@@ -609,6 +609,8 @@ fun ArgusNavHost() {
                             }
                             override fun onSetAutomationsPaused(paused: Boolean) =
                                 settingsViewModel.setAutomationsPaused(paused)
+                            override fun onSetResponseTimeout(minutes: Int) =
+                                settingsViewModel.setResponseTimeout(minutes)
                             override fun onSetRootEnabled(enabled: Boolean) =
                                 settingsViewModel.setRootEnabled(enabled)
                             override fun onGrantPermanent(grants: Set<PermanentGrantUi>) =

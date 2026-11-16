@@ -1,0 +1,1 @@
+The Custom (OpenAI-compatible) provider can now use an AI server on your own network over http:// (for example 192.168.x.x or a .local name), with a warning that the connection is not encrypted. New "Response timeout" setting in System, Brain, for slow local models: Automatic, 2, 5, 10 or 20 minutes. Chat messages can be selected and copied with a long press.

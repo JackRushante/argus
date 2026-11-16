@@ -60,29 +60,74 @@ class ConnectionFormValidationTest {
     // ---- indirizzo del provider Custom ---------------------------------------------------------------
 
     @Test
-    fun `custom provider accepts http only towards a loopback host`() {
+    fun `custom provider accepts http only towards this phone or the local network`() {
         listOf(
             "http://localhost:11434/v1",
             "http://127.0.0.1:8080",
             "http://[::1]:8080/v1",
             "HTTP://LocalHost:1234",
             "https://llm.example/v1",
-        ).forEach { assertNull(ConnectionFormValidation.providerUrl(it, cleartextLoopbackAllowed = true), it) }
+            // #19: the user's own network.
+            "http://192.168.0.10:47832/v1",
+            "http://10.0.0.5:8080/v1",
+            "http://172.16.4.2/v1",
+            "http://100.101.102.103:11434/v1",
+            "http://[fd00::1]:8080/v1",
+            "http://[fe80::1]/v1",
+            "http://studio.local:11434/v1",
+            "http://nas.home.arpa/v1",
+            "http://gpu-box:8080/v1",
+            "Http://192.168.1.5:11434",
+        ).forEach { assertNull(ConnectionFormValidation.providerUrl(it, cleartextLocalAllowed = true), it) }
 
-        listOf("http://192.168.1.5:11434", "http://llm.example/v1", "http://localhost.evil.example").forEach {
+        listOf(
+            "http://llm.example/v1",
+            "http://localhost.evil.example",
+            "http://8.8.8.8:11434/v1",
+            "http://192.168.0.10.evil.com/v1",
+            "http://192.168.0.10./v1",
+            "http://nas./v1",
+            "http://010.0.0.1/v1",
+            "http://3232235530/v1",
+            "http://[2001:db8::1]/v1",
+        ).forEach {
             assertEquals(
-                UrlProblem.NOT_HTTPS_OR_LOOPBACK,
-                ConnectionFormValidation.providerUrl(it, cleartextLoopbackAllowed = true),
+                UrlProblem.NOT_HTTPS_OR_LOCAL,
+                ConnectionFormValidation.providerUrl(it, cleartextLocalAllowed = true),
                 it,
             )
         }
+        // User info is never accepted: the host would be evil.com.
+        assertEquals(
+            UrlProblem.INVALID,
+            ConnectionFormValidation.providerUrl("http://10.0.0.1@evil.com/v1", cleartextLocalAllowed = true),
+        )
+    }
+
+    @Test
+    fun `only an accepted http address off this phone gets the unencrypted warning`() {
+        listOf(
+            "http://192.168.0.10:47832/v1",
+            " http://studio.local:11434/v1 ",
+            "HTTP://[fd00::1]:8080/v1",
+            "http://gpu-box/v1",
+        ).forEach { assertTrue(ConnectionFormValidation.unencryptedLocalNetwork(it), it) }
+        listOf(
+            "http://127.0.0.1:11434/v1",
+            "http://localhost:1234/v1",
+            "https://192.168.0.10/v1",
+            "https://llm.example/v1",
+            "http://llm.example/v1",
+            "http://10.0.0.1@evil.com/v1",
+            "",
+        ).forEach { assertFalse(ConnectionFormValidation.unencryptedLocalNetwork(it), it) }
     }
 
     @Test
     fun `without the custom exception http towards localhost is not accepted`() {
         assertEquals(
             UrlProblem.NOT_HTTPS,
-            ConnectionFormValidation.providerUrl("http://localhost:11434", cleartextLoopbackAllowed = false),
+            ConnectionFormValidation.providerUrl("http://localhost:11434", cleartextLocalAllowed = false),
         )
     }
 
@@ -173,7 +218,7 @@ class ConnectionFormValidationTest {
             model = "gpt-model",
             apiKey = goodToken,
             baseUrlEditable = false,
-            cleartextLoopbackAllowed = false,
+            cleartextLocalAllowed = false,
             keyRequired = true,
             keyConfigured = false,
             minKeyLength = ConnectionFormValidation.MIN_SECRET_LENGTH,
@@ -181,17 +226,17 @@ class ConnectionFormValidationTest {
         assertTrue(fixed.accepted)
 
         val custom = ConnectionFormValidation.providerForm(
-            baseUrl = "http://192.168.1.5:11434",
+            baseUrl = "http://llm.example:11434",
             model = "llama",
             apiKey = "",
             baseUrlEditable = true,
-            cleartextLoopbackAllowed = true,
+            cleartextLocalAllowed = true,
             keyRequired = false,
             keyConfigured = false,
             minKeyLength = ConnectionFormValidation.MIN_CUSTOM_SECRET_LENGTH,
         )
         assertFalse(custom.accepted)
-        assertEquals(UrlProblem.NOT_HTTPS_OR_LOOPBACK, custom.url)
+        assertEquals(UrlProblem.NOT_HTTPS_OR_LOCAL, custom.url)
         assertNull(custom.key)
     }
 
@@ -202,7 +247,7 @@ class ConnectionFormValidationTest {
             model = "   ",
             apiKey = "",
             baseUrlEditable = false,
-            cleartextLoopbackAllowed = false,
+            cleartextLocalAllowed = false,
             keyRequired = true,
             keyConfigured = false,
             minKeyLength = ConnectionFormValidation.MIN_SECRET_LENGTH,
@@ -220,7 +265,7 @@ class ConnectionFormValidationTest {
             model = "gpt-model",
             apiKey = key,
             baseUrlEditable = false,
-            cleartextLoopbackAllowed = false,
+            cleartextLocalAllowed = false,
             keyRequired = true,
             keyConfigured = true,
             minKeyLength = ConnectionFormValidation.MIN_SECRET_LENGTH,

@@ -25,7 +25,7 @@ class DefaultTransportFactory(
         ProviderId.HERMES -> CliBridgeTransport(
             baseUrl = config.baseUrl,
             authProvider = BridgeAuthProvider { secrets.apiKey(ProviderId.HERMES) },
-            client = client,
+            client = clientFor(config),
         )
         // S5: i provider Chat Completions condividono un solo adapter, parametrizzato dal catalog.
         ProviderId.OPENAI,
@@ -43,25 +43,34 @@ class DefaultTransportFactory(
             spec = ProviderCatalog.spec(ProviderId.ANTHROPIC),
             config = config,
             apiKey = { secrets.apiKey(ProviderId.ANTHROPIC) },
-            client = client,
+            client = clientFor(config),
         )
     }
 
     /**
-     * Il client del provider. Un server locale (Custom su loopback o rete privata) ha il compile a 180 s
-     * ([CompileTimeoutPolicy]): il client di base scade a 125 s e taglierebbe la chiamata prima, quindi per
-     * lui i timeout HTTP si allungano a poco oltre il compile. Per gli altri provider il client non cambia
-     * (mai più corto di quello ricevuto, e un timeout assente resta assente).
+     * Il client del provider. Il compile può durare più dei 125 s del client di base: un server locale
+     * (Custom su loopback o rete privata, 180 s) o il timeout scelto in Impostazioni ([ResponseTimeout], #20).
+     * In quel caso i timeout HTTP si allungano a poco oltre il compile, così scade prima il compile con il suo
+     * messaggio e nessun limite nascosto taglia la chiamata. Mai più corto di quello ricevuto, e un timeout
+     * assente resta assente.
+     *
+     * Il cleartext (#19): solo il Custom ammette `http://` verso la rete locale ([CleartextGuard.LOCAL_NETWORK]);
+     * gli altri provider tengono la guardia del client di base (solo loopback, come la piattaforma prima).
      */
     internal fun clientFor(config: ProviderConfig): OkHttpClient {
-        val needed = CompileTimeoutPolicy.timeoutMillis(config.providerId, config.baseUrl) +
-            CompileTimeoutPolicy.HTTP_MARGIN_MILLIS
+        val needed = CompileTimeoutPolicy.timeoutMillis(config) + CompileTimeoutPolicy.HTTP_MARGIN_MILLIS
         val call = client.callTimeoutMillis
-        if (call == 0 || needed <= call) return client
-        return client.newBuilder()
-            .callTimeout(needed, TimeUnit.MILLISECONDS)
-            .readTimeout(maxOf(needed, client.readTimeoutMillis.toLong()), TimeUnit.MILLISECONDS)
-            .writeTimeout(maxOf(needed, client.writeTimeoutMillis.toLong()), TimeUnit.MILLISECONDS)
-            .build()
+        val longer = call != 0 && needed > call
+        val custom = config.providerId == ProviderId.CUSTOM_OPENAI_COMPAT
+        if (!longer && !custom) return client
+        val builder = client.newBuilder()
+        if (longer) {
+            builder
+                .callTimeout(needed, TimeUnit.MILLISECONDS)
+                .readTimeout(maxOf(needed, client.readTimeoutMillis.toLong()), TimeUnit.MILLISECONDS)
+                .writeTimeout(maxOf(needed, client.writeTimeoutMillis.toLong()), TimeUnit.MILLISECONDS)
+        }
+        if (custom) CleartextGuard.install(builder, CleartextGuard.LOCAL_NETWORK)
+        return builder.build()
     }
 }

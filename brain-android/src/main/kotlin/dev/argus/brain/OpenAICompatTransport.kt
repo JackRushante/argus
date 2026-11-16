@@ -33,6 +33,7 @@ import okhttp3.Callback
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
+import dev.argus.engine.model.LocalNetworkPolicy
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -112,10 +113,14 @@ class OpenAICompatTransport internal constructor(
     init {
         require(base.username.isEmpty() && base.password.isEmpty()) { "baseUrl non deve contenere credenziali" }
         require(base.query == null && base.fragment == null) { "baseUrl non deve contenere query o fragment" }
-        val loopbackCleartext = base.scheme == "http" && base.host in LOOPBACK_HTTP_HOSTS &&
-            (providerId == ProviderId.CUSTOM_OPENAI_COMPAT || allowCleartextForTests)
-        require(base.isHttps || loopbackCleartext) {
-            "Il provider OpenAI-compat richiede HTTPS o HTTP loopback per Custom"
+        // Custom: http verso il telefono o la rete locale (#19), la stessa regola dello store. I test degli
+        // altri provider usano un MockWebServer sul loopback.
+        val allowedCleartext = base.scheme == "http" && (
+            providerId == ProviderId.CUSTOM_OPENAI_COMPAT && LocalNetworkPolicy.allowsLlmCleartext(base.host) ||
+                allowCleartextForTests && base.host in LOOPBACK_HTTP_HOSTS
+            )
+        require(base.isHttps || allowedCleartext) {
+            "Il provider OpenAI-compat richiede HTTPS, o HTTP locale per Custom"
         }
     }
 

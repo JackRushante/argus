@@ -340,7 +340,7 @@
     <string name="ui40_stats_cell_cd">%1$s negli ultimi %2$s</string>
     <string name="ui40_url_error_empty">Inserisci l\'indirizzo</string>
     <string name="ui40_url_error_not_https">L\'indirizzo deve iniziare con https://</string>
-    <string name="ui40_url_error_not_https_or_local">Usa https://, oppure http:// solo per localhost</string>
+    <string name="ui40_url_error_not_https_or_local">Usa https://. http:// vale solo per questo telefono o per la tua rete locale (per esempio 192.168.x.x, 10.x.x.x o un nome .local)</string>
     <string name="ui40_url_error_invalid">Indirizzo non valido: usa https://host oppure https://host:porta/percorso, senza nome utente, ? né #</string>
     <string name="ui40_secret_error_short">Almeno %1$d caratteri</string>
     <string name="ui40_secret_error_long">Troppo lungo (al massimo %1$d caratteri)</string>
@@ -404,11 +404,11 @@
     <string name="app51_settings_usage_ok">concesso: le regole possono reagire all\'apertura e alla chiusura di un\'app</string>
     <string name="app51_settings_usage_warn">non concesso: le regole che reagiscono all\'apertura o alla chiusura di un\'app non possono partire. Con Shizuku o root basta \"Concedi i permessi permanenti\"</string>
     <string name="ai51_local_presets_label">Server locale</string>
-    <string name="ai51_local_note">Argus ha bisogno di un contesto di circa 16.000 token. Un modello locale può impiegare fino a 3 minuti per rispondere.</string>
+    <string name="ai51_local_note">Argus ha bisogno di un contesto di circa 16.000 token. Un modello locale può impiegare fino a 3 minuti per rispondere; per uno più lento, aumenta il Tempo massimo di risposta in Sistema.</string>
     <string name="ai51_local_hint_ollama">Ollama: imposta OLLAMA_CONTEXT_LENGTH ad almeno 16384.</string>
     <string name="ai51_local_hint_lmstudio">LM Studio: carica il modello con una lunghezza di contesto di almeno 16384.</string>
     <string name="ai51_local_hint_llamacpp">llama.cpp: avvia il server con -c 16384 o più.</string>
-    <string name="ai51_local_loopback_note">127.0.0.1 è questo telefono: il server deve girare qui. Per un altro computer usa un indirizzo https://.</string>
+    <string name="ai51_local_loopback_note">127.0.0.1 è questo telefono: il server deve girare qui. Per un computer della tua rete usa il suo indirizzo, per esempio http://192.168.1.20:11434/v1.</string>
     <!-- 0.5.1 (F17): macro sullo schermo con il servizio di Accessibilità. -->
     <string name="a11y51_settings_title">Controllo dello schermo (Accessibilità)</string>
     <string name="a11y51_settings_ok">attivo: le macro sullo schermo approvate possono toccare e scrivere nelle app</string>
@@ -494,4 +494,14 @@
     <string name="rda_ap_picker_current">in uso</string>
     <string name="rda_ap_picker_pick_cd">Usa %1$s</string>
     <string name="rda_ap_run_now_fallback">Esegui ora non è ancora disponibile.</string>
+    <!-- Issue #19: endpoint http:// sulla rete locale -->
+    <string name="provider_unencrypted_lan_warning">Connessione non cifrata: la chiave e le tue richieste viaggiano in chiaro. Usala solo su una rete di cui ti fidi.</string>
+    <!-- Issue #20: tempo massimo di risposta -->
+    <string name="settings_response_timeout_label">Tempo massimo di risposta</string>
+    <string name="settings_response_timeout_hint">Quanto Argus aspetta la risposta dell\'IA a una richiesta nella chat. Automatico: 65 s, 3 minuti per un server della tua rete.</string>
+    <string name="settings_response_timeout_auto">Automatico</string>
+    <string name="settings_response_timeout_minutes">%1$d min</string>
+    <!-- Issue #21: copia di un messaggio della chat -->
+    <string name="chat_message_copy_action">Copia messaggio</string>
+    <string name="chat_message_copied">Messaggio copiato</string>
 </resources>

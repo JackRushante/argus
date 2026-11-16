@@ -188,7 +188,7 @@ Tutti hanno `@ArgusThemePreviews` (chiaro e scuro) nel proprio file. Le firme so
 - `ChatBrandMark(size = 36.dp)`: l'occhio di Argus per l'intestazione (36) e lo stato vuoto (72) della chat. Artwork di marca,
   uguale nei due temi come l'icona sul launcher; decorativo.
 - `ChatWaitCard(elapsedSec, timeoutSec, expectedRangeLabel, onCancel)`: «Argus sta pensando… (12 s)» nel flusso della
-  conversazione, con la barra 0-timeout (65 s, 180 s per un server locale; `ChatState.sendingTimeoutSec`), la fascia «10-30 s» e
+  conversazione, con la barra 0-timeout (65 s, 180 s per un server locale, oppure il «Tempo massimo di risposta» scelto in Sistema; `ChatState.sendingTimeoutSec`), la fascia «10-30 s» e
   «Annulla». Il riempimento avanza di un secondo e non esce mai dalla barra. Regione viva per TalkBack.
 - `ChatDraftCard(draft, onOpenDraft)`: la card bozza (invariante 1: UN solo pulsante, «Rivedi e approva», che apre il Dettaglio).
   Linea del tempo QUANDO / SOLO SE / ALLORA dai tipi (`RuleRender`), chip `generativa` + `esce verso il cloud` se generativa,

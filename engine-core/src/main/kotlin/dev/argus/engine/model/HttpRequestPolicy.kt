@@ -45,7 +45,11 @@ object HttpRequestPolicy {
     val FORBIDDEN_HEADER_NAMES: Set<String> =
         setOf("host", "content-length", "transfer-encoding", "connection")
 
-    /** Host per cui il cleartext è ammesso (lo stesso insieme dei provider e della network security config). */
+    /**
+     * Host per cui il cleartext è ammesso nelle richieste web delle regole. Più stretto del provider Custom,
+     * che ammette anche la rete locale ([LocalNetworkPolicy], #19): qui resta il loopback esatto, e lo
+     * ripete la guardia OkHttp dell'esecutore.
+     */
     val LOOPBACK_HOSTS: Set<String> = setOf("localhost", "127.0.0.1", "::1")
 
     /** Frammenti del nome (minuscolo) che marcano un'intestazione come segreta nella review. */

@@ -915,14 +915,19 @@ class CliBridgeTransport internal constructor(
         // dell'azione. Il timeout del modello lato server NON lo alza nessun codice: lo decide
         // ARGUS_MODEL_TIMEOUT_SECONDS del bridge (default 90 s; 125 s nell'env di esempio), che per
         // le /act web va impostato di conseguenza.
-        fun defaultClient(timeoutSeconds: Long = 125): OkHttpClient = OkHttpClient.Builder()
-            .connectTimeout(timeoutSeconds, TimeUnit.SECONDS)
-            .readTimeout(timeoutSeconds, TimeUnit.SECONDS)
-            .writeTimeout(timeoutSeconds, TimeUnit.SECONDS)
-            .callTimeout(timeoutSeconds, TimeUnit.SECONDS)
-            .followRedirects(false)
-            .followSslRedirects(false)
-            .retryOnConnectionFailure(true)
-            .build()
+        // #19: la piattaforma ora ammette il cleartext (la network security config non sa esprimere le reti
+        // private); la regola la applica la guardia: qui solo loopback, come prima. Il Custom la sostituisce
+        // con quella della rete locale ([DefaultTransportFactory.clientFor]).
+        fun defaultClient(timeoutSeconds: Long = 125): OkHttpClient = CleartextGuard.install(
+            OkHttpClient.Builder()
+                .connectTimeout(timeoutSeconds, TimeUnit.SECONDS)
+                .readTimeout(timeoutSeconds, TimeUnit.SECONDS)
+                .writeTimeout(timeoutSeconds, TimeUnit.SECONDS)
+                .callTimeout(timeoutSeconds, TimeUnit.SECONDS)
+                .followRedirects(false)
+                .followSslRedirects(false)
+                .retryOnConnectionFailure(true),
+            CleartextGuard.LOOPBACK_ONLY,
+        ).build()
     }
 }

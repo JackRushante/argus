@@ -5,6 +5,7 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import dev.argus.engine.model.LocalNetworkPolicy
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
@@ -128,6 +129,7 @@ internal object BridgeKeystore {
     }
 }
 
+/** Gli host loopback esatti: il cleartext che la piattaforma ammetteva prima di #19 ([CleartextGuard.LOOPBACK_ONLY]). */
 internal val LOOPBACK_HTTP_HOSTS = setOf("localhost", "127.0.0.1", "::1")
 
 private fun normalizedUrl(raw: String): okhttp3.HttpUrl? {
@@ -143,11 +145,14 @@ internal fun normalizeBridgeBaseUrl(raw: String): String? {
     return url.toString().trimEnd('/')
 }
 
-/** HTTPS per tutti; HTTP è ammesso soltanto per Custom verso un host loopback esatto. */
+/**
+ * HTTPS per tutti; HTTP è ammesso soltanto per Custom verso questo telefono o la rete locale dell'utente
+ * ([LocalNetworkPolicy], issue #19): mai verso un host pubblico.
+ */
 internal fun normalizeProviderBaseUrl(raw: String, providerId: ProviderId): String? {
     val url = normalizedUrl(raw) ?: return null
     val allowedCleartext = providerId == ProviderId.CUSTOM_OPENAI_COMPAT &&
-        url.scheme == "http" && url.host in LOOPBACK_HTTP_HOSTS
+        url.scheme == "http" && LocalNetworkPolicy.allowsLlmCleartext(url.host)
     if (!url.isHttps && !allowedCleartext) return null
     return url.toString().trimEnd('/')
 }

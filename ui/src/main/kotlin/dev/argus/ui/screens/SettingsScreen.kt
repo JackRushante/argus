@@ -64,6 +64,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.res.stringResource
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.testTag
+import dev.argus.ui.components.ArgusChoiceChip
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -114,6 +121,7 @@ import dev.argus.ui.model.UiWarning
 import dev.argus.ui.preview.ArgusPreviewSurface
 import dev.argus.ui.preview.ArgusThemePreviews
 import dev.argus.ui.preview.Fixtures
+import dev.argus.ui.presentation.ConnectionFormValidation
 import dev.argus.ui.presentation.BudgetFormat
 import dev.argus.ui.presentation.SystemHealthLayout
 import dev.argus.ui.presentation.secondaryText
@@ -202,6 +210,9 @@ fun SettingsScreen(
                     transport = state.transport,
                     onTest = callbacks::onTestConnection,
                     onConfigure = { showTransportSheet = true },
+                    responseTimeoutMinutes = state.responseTimeoutMinutes,
+                    responseTimeoutChoices = state.responseTimeoutChoices,
+                    onSetResponseTimeout = callbacks::onSetResponseTimeout,
                     modifier = Modifier.sectionAnchor(SECTION_BRAIN),
                 )
                 PrivacySection(state.privacyAccepted, { confirmPrivacyRevoke = true }, Modifier.sectionAnchor(SECTION_PRIVACY))
@@ -252,6 +263,44 @@ private const val SECTION_WHITELIST = "whitelist"
 private const val SECTION_BUDGET = "budget"
 
 /** Gruppo di card con la forma del gruppo segmentato (angoli 24 in testa e in coda, 6 in mezzo, fessura 3). */
+/** #20: «Tempo massimo di risposta»: etichetta, spiegazione e i chip delle scelte (0 = automatico). */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ResponseTimeoutRow(selectedMinutes: Int, choices: List<Int>, onSelect: (Int) -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = ArgusSpacing.Medium),
+        verticalArrangement = Arrangement.spacedBy(ArgusSpacing.Small),
+    ) {
+        Text(
+            stringResource(R.string.settings_response_timeout_label),
+            modifier = Modifier.semantics { heading() },
+            color = MaterialTheme.colorScheme.onSurface,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Text(
+            stringResource(R.string.settings_response_timeout_hint),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        FlowRow(
+            modifier = Modifier.selectableGroup().testTag("settings_response_timeout"),
+            horizontalArrangement = Arrangement.spacedBy(ArgusSpacing.Small),
+        ) {
+            choices.forEach { minutes ->
+                ArgusChoiceChip(
+                    text = if (minutes == 0) {
+                        stringResource(R.string.settings_response_timeout_auto)
+                    } else {
+                        stringResource(R.string.settings_response_timeout_minutes, minutes)
+                    },
+                    selected = minutes == selectedMinutes,
+                    onClick = { if (minutes != selectedMinutes) onSelect(minutes) },
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun CardStack(parts: List<@Composable () -> Unit>, modifier: Modifier = Modifier) {
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(ArgusSpacing.GroupGap)) {
@@ -519,6 +568,9 @@ private fun BrainSection(
     onTest: () -> Unit,
     onConfigure: () -> Unit,
     modifier: Modifier = Modifier,
+    responseTimeoutMinutes: Int = 0,
+    responseTimeoutChoices: List<Int> = emptyList(),
+    onSetResponseTimeout: (Int) -> Unit = {},
 ) {
     val semantic = ArgusTheme.semantic
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
@@ -646,6 +698,12 @@ private fun BrainSection(
                         }
                     }
                 }
+                // #20: tempo massimo di risposta, uno per tutti i provider; un tocco lo salva.
+                if (responseTimeoutChoices.isNotEmpty()) {
+                    add {
+                        ResponseTimeoutRow(responseTimeoutMinutes, responseTimeoutChoices, onSetResponseTimeout)
+                    }
+                }
                 if (transport is TransportUi.DirectProvider && transport.unauthenticatedLoopback) {
                     add {
                         Box(Modifier.padding(ArgusSpacing.Small)) {
@@ -654,6 +712,22 @@ private fun BrainSection(
                                     Severity.WARNING,
                                     "unauthenticated_loopback",
                                     stringResource(R.string.settings_unauthenticated_loopback),
+                                ),
+                            )
+                        }
+                    }
+                }
+                // #19: endpoint Custom in http sulla rete locale: accettato, ma in chiaro.
+                if (transport is TransportUi.DirectProvider && transport.baseUrlEditable &&
+                    ConnectionFormValidation.unencryptedLocalNetwork(transport.baseUrl)
+                ) {
+                    add {
+                        Box(Modifier.padding(ArgusSpacing.Small)) {
+                            WarningBanner(
+                                UiWarning(
+                                    Severity.WARNING,
+                                    "unencrypted_local_network",
+                                    stringResource(R.string.provider_unencrypted_lan_warning),
                                 ),
                             )
                         }

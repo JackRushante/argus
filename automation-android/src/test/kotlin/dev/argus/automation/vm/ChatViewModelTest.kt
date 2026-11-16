@@ -741,6 +741,38 @@ class ChatViewModelTest {
         assertFalse(viewModel.state.value.sending)
     }
 
+    @Test
+    fun `a chosen response timeout replaces the automatic one in the chat`() = runTest(dispatcher) {
+        // #20: dieci minuti scelti in Sistema valgono anche per un provider cloud (65 s in automatico).
+        val brain = QueuedBrain()
+        val configuredBridge = ConfiguredBridgeBrain(
+            configuration = ViewModelBridgeConfiguration(
+                ProviderId.OPENAI,
+                "https://api.openai.com/v1",
+                dev.argus.brain.ResponseTimeout.TEN_MINUTES,
+            ),
+            privacyAccepted = { true },
+            elapsedRealtimeMillis = { 0L },
+        )
+        val viewModel = chatViewModel(brain, configuredBridge = configuredBridge)
+
+        viewModel.onInputChange("modello lento")
+        viewModel.onSend()
+        runCurrent()
+        brain.removeFirst()
+        assertEquals(600, viewModel.state.value.sendingTimeoutSec, "la barra arriva al timeout scelto")
+
+        advanceTimeBy(599_000L)
+        runCurrent()
+        assertTrue(viewModel.state.value.sending, "nessun limite nascosto prima dei 10 minuti")
+        assertEquals(null, viewModel.state.value.error)
+
+        advanceTimeBy(2_000L)
+        runCurrent()
+        assertEquals(ChatError.Timeout, viewModel.state.value.error)
+        assertFalse(viewModel.state.value.sending)
+    }
+
     // --- S4: le coordinate non partono mai verso il modello ---
 
     @Test
@@ -1446,11 +1478,13 @@ private class ViewModelWhitelistStore(vararg contacts: WhitelistedContact) : Con
 private class ViewModelBridgeConfiguration(
     private val selected: ProviderId = ProviderId.HERMES,
     private val baseUrl: String = "https://bridge.invalid",
+    private val timeout: dev.argus.brain.ResponseTimeout = dev.argus.brain.ResponseTimeout.AUTOMATIC,
 ) : ProviderConfigStore {
     override fun selectedProviderId(): ProviderId = selected
     override suspend fun selectProvider(id: ProviderId): Boolean = false
     override fun providerConfig(id: ProviderId): ProviderConfig =
-        ProviderConfig(providerId = id, baseUrl = baseUrl, model = null)
+        ProviderConfig(providerId = id, baseUrl = baseUrl, model = null, responseTimeout = timeout)
+    override fun responseTimeout(): dev.argus.brain.ResponseTimeout = timeout
     override suspend fun saveProviderConfig(
         id: ProviderId,
         baseUrl: String?,

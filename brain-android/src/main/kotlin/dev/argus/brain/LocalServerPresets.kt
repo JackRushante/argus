@@ -2,9 +2,9 @@ package dev.argus.brain
 
 /**
  * Preset per i server locali OpenAI-compatibili (0.5.1, F4), offerti nel dialogo del provider Custom.
- * Tutti sul loopback del telefono: la regola sul cleartext non cambia, `http` resta ammesso solo per un host
- * loopback esatto (`localhost`, `127.0.0.1`, `::1`), qui e nel transport. Nessun prompt compatto: i modelli
- * troppo piccoli non scrivono regole valide e non valgono lo sforzo (decisione del progetto).
+ * Tutti sul loopback del telefono; il Custom ammette `http` anche verso la rete locale
+ * ([dev.argus.engine.model.LocalNetworkPolicy], #19), mai verso un host pubblico. Nessun prompt compatto: i
+ * modelli troppo piccoli non scrivono regole valide e non valgono lo sforzo (decisione del progetto).
  *
  * Un preset compila solo l'indirizzo; il modello lo sceglie l'utente. Il timeout del compile più lungo per i
  * server locali è in [CompileTimeoutPolicy] (180 s invece di 65 s).

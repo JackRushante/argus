@@ -1,5 +1,6 @@
 package dev.argus.brain
 
+import dev.argus.engine.model.LocalNetworkPolicy
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 /** Limiti condivisi del compile, pubblici perché li usa anche il ViewModel prima di toccare la rete. */
@@ -12,9 +13,37 @@ object CompileLimits {
 }
 
 /**
+ * Response timeout chosen by the user in Settings (issue #20). [AUTOMATIC] keeps the historical limits of
+ * [CompileTimeoutPolicy]; any other value replaces them for every provider. [wireValue] is the on-disk
+ * contract (a rename is a migration).
+ */
+enum class ResponseTimeout(val wireValue: String, val millis: Long?) {
+    AUTOMATIC("auto", null),
+    TWO_MINUTES("2m", 2 * 60_000L),
+    FIVE_MINUTES("5m", 5 * 60_000L),
+    TEN_MINUTES("10m", 10 * 60_000L),
+    TWENTY_MINUTES("20m", 20 * 60_000L),
+    ;
+
+    /** Minutes shown in Settings; 0 = [AUTOMATIC]. */
+    val minutes: Int get() = ((millis ?: 0L) / 60_000L).toInt()
+
+    companion object {
+        /** Missing or unknown values fall back to [AUTOMATIC]: never a crash, never a shorter limit. */
+        fun fromWireValue(value: String?): ResponseTimeout =
+            entries.firstOrNull { it.wireValue == value } ?: AUTOMATIC
+
+        /** The choice with these [minutes] (0 = [AUTOMATIC]), or null for a value Settings does not offer. */
+        fun fromMinutes(minutes: Int): ResponseTimeout? = entries.firstOrNull { it.minutes == minutes }
+    }
+}
+
+/**
  * Timeout dell'intero compile per provider. Un modello locale (Ollama, llama.cpp) che carica i pesi
  * e valuta un prompt da ~12.000 token supera facilmente i 65 s del cloud; per gli altri provider il
- * limite resta quello storico.
+ * limite resta quello storico. Una scelta dell'utente ([ResponseTimeout], #20) sostituisce entrambi: la
+ * seguono il `withTimeout` della chat, la barra d'attesa e i timeout HTTP del client
+ * ([DefaultTransportFactory.clientFor]), così nessun limite nascosto scatta prima.
  */
 object CompileTimeoutPolicy {
     const val DEFAULT_MILLIS = 65_000L
@@ -26,39 +55,26 @@ object CompileTimeoutPolicy {
      */
     const val HTTP_MARGIN_MILLIS = 5_000L
 
-    fun timeoutMillis(providerId: ProviderId, baseUrl: String?): Long =
+    fun timeoutMillis(
+        providerId: ProviderId,
+        baseUrl: String?,
+        override: ResponseTimeout = ResponseTimeout.AUTOMATIC,
+    ): Long = override.millis ?: automaticMillis(providerId, baseUrl)
+
+    fun timeoutMillis(config: ProviderConfig): Long =
+        timeoutMillis(config.providerId, config.baseUrl, config.responseTimeout)
+
+    /** Il limite storico, senza scelta dell'utente. */
+    fun automaticMillis(providerId: ProviderId, baseUrl: String?): Long =
         if (providerId == ProviderId.CUSTOM_OPENAI_COMPAT && isLocalOrPrivateHost(baseUrl)) {
             LOCAL_CUSTOM_MILLIS
         } else {
             DEFAULT_MILLIS
         }
 
-    /** Solo analisi sintattica dell'host: nessuna risoluzione DNS (può bloccare e uscire in rete). */
+    /** Solo analisi sintattica dell'host ([LocalNetworkPolicy]): nessuna risoluzione DNS. */
     private fun isLocalOrPrivateHost(baseUrl: String?): Boolean {
-        val host = baseUrl?.trim()?.toHttpUrlOrNull()?.host?.lowercase() ?: return false
-        return host == "localhost" ||
-            host.endsWith(".localhost") ||
-            host.endsWith(".local") ||
-            isPrivateIpv4(host) ||
-            isPrivateIpv6(host)
+        val host = baseUrl?.trim()?.toHttpUrlOrNull()?.host ?: return false
+        return LocalNetworkPolicy.scopeOf(host) != LocalNetworkPolicy.HostScope.PUBLIC
     }
-
-    private fun isPrivateIpv4(host: String): Boolean {
-        val match = IPV4.matchEntire(host) ?: return false
-        val parts = match.groupValues.drop(1).map { it.toInt() }
-        if (parts.any { it > 255 }) return false
-        val (a, b) = parts
-        return a == 127 ||
-            a == 10 ||
-            (a == 172 && b in 16..31) ||
-            (a == 192 && b == 168) ||
-            (a == 169 && b == 254) ||
-            // CGNAT 100.64.0.0/10: gli indirizzi tailnet (Tailscale) di un LLM in rete privata.
-            (a == 100 && b in 64..127)
-    }
-
-    private fun isPrivateIpv6(host: String): Boolean =
-        ':' in host && (host == "::1" || host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80"))
-
-    private val IPV4 = Regex("(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})")
 }

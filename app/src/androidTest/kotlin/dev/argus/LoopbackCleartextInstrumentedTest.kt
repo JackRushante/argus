@@ -2,6 +2,7 @@ package dev.argus
 
 import android.security.NetworkSecurityPolicy
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import dev.argus.brain.CleartextGuard
 import java.net.HttpURLConnection
 import java.net.InetAddress
 import java.net.ServerSocket
@@ -13,20 +14,35 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Verifica l'eccezione cleartext minima usata dai server AI avviati sullo stesso device. */
+/**
+ * Cleartext on the device (#19): the platform permits it (a network security config cannot express the
+ * private ranges) and the app guards decide. Every client but the Custom provider keeps the exact loopback
+ * hosts; the Custom provider adds the local network; a public host is never reachable over http://.
+ */
 @RunWith(AndroidJUnit4::class)
 class LoopbackCleartextInstrumentedTest {
     private val policy = NetworkSecurityPolicy.getInstance()
 
     @Test
-    fun cleartextIsAllowedOnlyForExactLoopbackHosts() {
-        assertTrue(policy.isCleartextTrafficPermitted("localhost"))
+    fun platformPermitsCleartextAndTheAppGuardsDecide() {
         assertTrue(policy.isCleartextTrafficPermitted("127.0.0.1"))
-        assertTrue(policy.isCleartextTrafficPermitted("::1"))
+        assertTrue(policy.isCleartextTrafficPermitted("192.168.0.10"))
 
-        assertFalse(policy.isCleartextTrafficPermitted("localhost.example"))
-        assertFalse(policy.isCleartextTrafficPermitted("127.0.0.2"))
-        assertFalse(policy.isCleartextTrafficPermitted("example.com"))
+        val loopbackOnly = CleartextGuard.LOOPBACK_ONLY
+        assertTrue(loopbackOnly.permits("localhost"))
+        assertTrue(loopbackOnly.permits("127.0.0.1"))
+        assertTrue(loopbackOnly.permits("::1"))
+        assertFalse(loopbackOnly.permits("localhost.example"))
+        assertFalse(loopbackOnly.permits("127.0.0.2"))
+        assertFalse(loopbackOnly.permits("192.168.0.10"))
+        assertFalse(loopbackOnly.permits("example.com"))
+
+        val localNetwork = CleartextGuard.LOCAL_NETWORK
+        assertTrue(localNetwork.permits("192.168.0.10"))
+        assertTrue(localNetwork.permits("fd00::1"))
+        assertTrue(localNetwork.permits("studio.local"))
+        assertFalse(localNetwork.permits("192.168.0.10.example.com"))
+        assertFalse(localNetwork.permits("example.com"))
     }
 
     @Test

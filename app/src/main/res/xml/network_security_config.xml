@@ -1,10 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- HTTPS resta obbligatorio ovunque; eccezione stretta per un modello sullo stesso device. -->
-    <base-config cleartextTrafficPermitted="false" />
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="false">localhost</domain>
-        <domain includeSubdomains="false">127.0.0.1</domain>
-        <domain includeSubdomains="false">::1</domain>
-    </domain-config>
+    <!--
+        Issue #19: a Custom AI server on the user's own network (192.168.x.x, 10.x.x.x, fd00::/8, nas.local...)
+        must be reachable over http://. A network security config cannot express IP ranges, so cleartext is
+        permitted at platform level and the app enforces the rule itself: every OkHttp client carries a
+        CleartextGuard (brain-android). Only the Custom provider allows the local network
+        (LocalNetworkPolicy in engine-core); every other client, rule web requests included, allows http://
+        only to the exact loopback hosts, as this file did before. Public hosts are never reachable over http://.
+        Trust anchors stay the system ones (no user CAs).
+    -->
+    <base-config cleartextTrafficPermitted="true" />
 </network-security-config>

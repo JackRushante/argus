@@ -2,6 +2,27 @@
 
 Release and engineering notes, newest first.
 
+## v0.7.1 (2026-11-16) — AI servers on your network, response timeout, copyable chat
+
+### Added
+
+- System → Brain → "Response timeout" (#20): how long Argus waits for the AI to answer a request in the chat,
+  for every provider: Automatic (as before: 65 s, 3 minutes for a server on your network), 2, 5, 10 or 20
+  minutes. The chat's wait, its progress bar and the HTTP client all follow it, so no shorter limit fires first.
+- Chat messages can be copied (#21): a long press selects the text (Copy, Select all), so a request can be
+  sent again with small changes; TalkBack has a "Copy message" action that copies the whole message.
+
+### Fixed
+
+- The Custom (OpenAI-compat) provider accepts `http://` on your own network (#19): private IPv4, link-local,
+  CGNAT (VPN meshes), IPv6 ULA and link-local, and `.local`, `.lan`, `.home.arpa`, `.internal` or single-label
+  names; before, only this phone was allowed. A public host still needs `https://`, and the error now says
+  what is allowed. An `http://` address off the phone shows a warning (unencrypted connection), in the
+  provider sheet and in System. The rule is one pure function used by the form, the store, the transport and
+  an OkHttp guard on every client: the platform now permits cleartext (a network security config cannot list
+  IP ranges), while every client but Custom, rule web requests included, still allows `http://` only to the
+  exact loopback hosts, as before.
+
 ## v0.7.0 (2026-10-28) — Redesign A, light and dark
 
 ### Changed
