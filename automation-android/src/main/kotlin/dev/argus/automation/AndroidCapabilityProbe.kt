@@ -20,7 +20,6 @@ import dev.argus.engine.brain.StateReaderManifest
 import dev.argus.engine.brain.WhitelistedContact
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
-import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.ActionTypeIds
 import dev.argus.engine.model.CapabilityIds
 import dev.argus.engine.model.CapabilityRequirements
@@ -28,6 +27,7 @@ import dev.argus.engine.model.GenerativeContract
 import dev.argus.engine.model.SensorKind
 import dev.argus.engine.model.StateKeys
 import dev.argus.engine.model.StateQueryFamily
+import dev.argus.engine.model.toDraft
 import dev.argus.engine.runtime.ActionCapabilities
 import dev.argus.engine.runtime.AuditEvent
 import dev.argus.engine.runtime.AuditKind
@@ -219,6 +219,9 @@ enum class BlockCause {
     USAGE_ACCESS,
     /** 0.5.1: il servizio di Accessibilità di Argus non è acceso (macro sullo schermo). */
     ACCESSIBILITY_SERVICE,
+
+    /** 0.8 scaffold: la funzione è nel modello ma non in questa versione (vedi `FeatureGates`). */
+    NOT_AVAILABLE_YET,
     OTHER,
 }
 
@@ -360,6 +363,8 @@ class AndroidCapabilityProbe internal constructor(
     }
 
     private fun causeOf(capability: String, state: AndroidCapabilityState): BlockCause = when {
+        // 0.8 scaffold: prima di tutto, così un sensore nuovo non risulta «sensore non disponibile».
+        capability in NOT_YET_AVAILABLE_CAPABILITIES -> BlockCause.NOT_AVAILABLE_YET
         // Il Bluetooth e' l'unica chiave di stato pubblica che puo' mancare senza Shizuku: dipende dal
         // permesso (Android 12+). Le altre sette sono sempre leggibili e non risultano mai bloccate.
         capability == CapabilityIds.state(StateKeys.BLUETOOTH) ->
@@ -669,6 +674,40 @@ class AndroidCapabilityProbe internal constructor(
         val IMPLEMENTED_SENSOR_KINDS: Set<SensorKind> = setOf(SensorKind.SIGNIFICANT_MOTION)
         const val REASON_NOTIFICATION_LISTENER = "notification access not granted"
 
+        /**
+         * 0.8 scaffold: capability delle famiglie nuove. Il probe non le pubblica mai (né in `available`, né
+         * nel manifest: il modello non deve vederle) e ne riporta la causa [BlockCause.NOT_AVAILABLE_YET].
+         * Chi implementa una famiglia toglie la SUA riga da qui e la pubblica in `resolve()` alle sue
+         * condizioni (permesso, hardware), insieme all'interruttore in `FeatureGates`.
+         */
+        val NOT_YET_AVAILABLE_CAPABILITIES: Set<String> = setOf(
+            CapabilityIds.RULE_CONFIRM,
+            CapabilityIds.RULE_EXIT,
+            CapabilityIds.TRIGGER_CALENDAR_EVENT,
+            CapabilityIds.TRIGGER_NFC_TAG,
+            CapabilityIds.TRIGGER_NEXT_ALARM,
+            CapabilityIds.TRIGGER_APP_USAGE,
+            CapabilityIds.TRIGGER_USER_MODE_CHANGED,
+            CapabilityIds.triggerSensor(SensorKind.SHAKE),
+            CapabilityIds.triggerSensor(SensorKind.FLIP_FACE_DOWN),
+            CapabilityIds.STATE_WIFI_CONNECTED,
+            CapabilityIds.STATE_BLUETOOTH_CONNECTED,
+            CapabilityIds.STATE_HEADSET_CONNECTED,
+            CapabilityIds.STATE_CALENDAR_BUSY,
+            CapabilityIds.STATE_STORED,
+            CapabilityIds.STATE_USER_MODE,
+            CapabilityIds.ACTION_ASK,
+            CapabilityIds.ACTION_SET_STORED,
+            CapabilityIds.ACTION_SET_USER_MODE,
+            CapabilityIds.ACTION_NOTIFICATION_REPLY,
+            CapabilityIds.ACTION_NOTIFICATION_ACTION,
+            CapabilityIds.ACTION_SEND_SMS,
+            CapabilityIds.ACTION_CALL_NUMBER,
+            CapabilityIds.ACTION_SEND_INTENT,
+            CapabilityIds.ACTION_SCREEN_CALL,
+            CapabilityIds.ACTION_HTTP_REQUEST_SECRETS,
+        )
+
         /** Trigger di sistema senza Shizuku (0.4.1): schermo, batteria, uscita audio, modalità, media. */
         val DEVICE_EVENT_TRIGGER_CAPABILITIES: Set<String> = setOf(
             CapabilityIds.TRIGGER_SCREEN,
@@ -867,12 +906,7 @@ class CapabilityReconciler(
         store.armed().forEach { automation ->
             val missing = automation.requiredCapabilities - snapshot.availableCapabilities
             val validationFailed = validationFailed(automation, snapshot)
-            val requirementsChanged = automation.requiredCapabilities != CapabilityRequirements.derive(
-                automation.trigger,
-                automation.actions,
-                automation.conditions,
-                automation.vars,
-            )
+            val requirementsChanged = automation.requiredCapabilities != CapabilityRequirements.derive(automation)
             // D6: solo un draft non più valido o requisiti non più coerenti mandano la regola «da
             // rivedere». Una capability mancante (permesso revocato, Shizuku spento, runtime
             // generativo non pronto) è un blocco temporaneo: la regola resta com'è e al fire-time
@@ -915,14 +949,8 @@ class CapabilityReconciler(
         automation: Automation,
         snapshot: FirePolicySnapshot,
     ): Boolean = DraftValidator(snapshot.knownTools).validate(
-        AutomationDraft(
-            name = automation.name,
-            trigger = automation.trigger,
-            actions = automation.actions,
-            vars = automation.vars,
-            conditions = automation.conditions,
-            cooldownMs = automation.cooldownMs,
-        ),
+        // L'unica copia tipata regola → bozza: porta anche `confirm` ed `exit` (0.8).
+        automation.toDraft(),
         snapshot.whitelistedConversationIds,
     ).any { it.severity == Severity.ERROR }
 }

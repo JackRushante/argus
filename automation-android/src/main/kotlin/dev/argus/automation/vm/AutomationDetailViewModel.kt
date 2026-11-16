@@ -828,12 +828,7 @@ class AutomationDetailViewModel @Inject constructor(
                     readerProbeLabel(evidence.family, evidence.valueType, language)
                 },
                 usesShizuku = requiresShizuku(
-                    CapabilityRequirements.derive(
-                        snapshot.draft.trigger,
-                        snapshot.draft.actions,
-                        snapshot.draft.conditions,
-                        snapshot.draft.vars,
-                    ),
+                    CapabilityRequirements.derive(snapshot.draft),
                 ),
                 appInfo = appInfoFor(snapshot.draft.trigger, snapshot.draft.actions),
                 canChangeApp = snapshot.integrityError == null,

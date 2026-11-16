@@ -349,6 +349,17 @@ class AndroidArmedAutomationRegistrar(
         // 0.4.1: avvio manuale. Nessuna registrazione OS: parte solo da un gesto dell'utente. Basta che
         // la capability sia pubblicata e che la regola sia davvero armata nello store.
         is Trigger.Manual -> registerBroadcastBacked(automation)
+        // 0.8 scaffold: nessuna sorgente ancora (il validator li rifiuta con not_available_yet). Chi
+        // implementa un trigger registra qui la sua sorgente al posto di `false`.
+        is Trigger.CalendarEvent -> false
+
+        is Trigger.NfcTag -> false
+
+        is Trigger.NextAlarm -> false
+
+        is Trigger.AppUsage -> false
+
+        is Trigger.UserModeChanged -> false
     }
 
     private suspend fun registerTime(automation: Automation): Boolean = try {

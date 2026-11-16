@@ -218,6 +218,11 @@ internal object LogReasonLabels {
             "the screen capture was not a valid image",
             "la cattura dello schermo non è un'immagine valida",
         ),
+        // --- 0.8 scaffold: un tipo dietro un FeatureGate spento (interpolatore ed esecutore) ---
+        "not_available_yet" to Label(
+            "this is not available in this version",
+            "non disponibile in questa versione",
+        ),
         // --- 0.4.1: «Pausa automazioni» ---
         "paused" to Label(
             "automations are paused",

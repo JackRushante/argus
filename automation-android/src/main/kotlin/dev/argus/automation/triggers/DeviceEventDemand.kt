@@ -33,6 +33,11 @@ fun Trigger.deviceEventSource(): DeviceEventSource? = when (this) {
     }
     is Trigger.Media -> DeviceEventSource.MEDIA
     is Trigger.AppEvent -> DeviceEventSource.APP_EVENT
+    // 0.8 scaffold: nessuna sorgente della sentinella finché il trigger è spento. Se il trigger passa
+    // dalla sentinella, chi lo implementa aggiunge qui la sua DeviceEventSource.
+    is Trigger.AppUsage -> null
+    is Trigger.UserModeChanged -> null
+    is Trigger.NfcTag -> null
     else -> null
 }
 

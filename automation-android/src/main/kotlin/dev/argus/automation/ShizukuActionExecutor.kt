@@ -16,6 +16,7 @@ import dev.argus.device.RingerMode
 import dev.argus.engine.brain.ActResult
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.DndMode
+import dev.argus.engine.model.FeatureGates
 import dev.argus.engine.model.GenerativeAction
 import dev.argus.engine.model.SettingNamespace
 import dev.argus.engine.model.WriteSettingPolicy
@@ -271,8 +272,12 @@ class ShizukuActionExecutor(
                 ?: ActionResult.Failure("base_executor_unavailable")
             is Action.SetRotation -> systemActions?.setRotation(action.auto)
                 ?: ActionResult.Failure("base_executor_unavailable")
-            is Action.HttpRequest -> httpRequests?.execute(action)
-                ?: ActionResult.Failure("base_executor_unavailable")
+            // 0.8 scaffold: cattura, estrazione e segreti sono dietro i loro FeatureGate (fail-closed).
+            is Action.HttpRequest -> if (FeatureGates.blocks(action)) {
+                ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
+            } else {
+                httpRequests?.execute(action) ?: ActionResult.Failure("base_executor_unavailable")
+            }
 
             // 0.5.1: azioni privilegiate tipizzate. Solo con un backend privilegiato pronto (Shizuku, Sui
             // o root verificato); il runner ripete i controlli sul bersaglio e fa passare tutto da
@@ -301,7 +306,30 @@ class ShizukuActionExecutor(
                     ?: ActionResult.Failure("base_executor_unavailable")
             }
 
-            is Action.InvokeLlm -> if (generativeLane.trySubmit(ctx, action)) {
+            // 0.8 scaffold: azioni spente, falliscono chiuse con lo stesso codice del validator. Chi ne
+            // implementa una sostituisce la SUA riga con l'esecutore e accende il suo FeatureGate.
+            is Action.Ask -> ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
+
+            is Action.SetStored -> ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
+
+            is Action.SetUserMode -> ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
+
+            is Action.NotificationReply -> ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
+
+            is Action.NotificationAction -> ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
+
+            is Action.SendSms -> ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
+
+            is Action.CallNumber -> ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
+
+            is Action.SendIntent -> ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
+
+            is Action.ScreenCall -> ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
+
+            // `invoke_llm.output` (0.8 scaffold) è dietro il suo FeatureGate.
+            is Action.InvokeLlm -> if (FeatureGates.blocks(action)) {
+                ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
+            } else if (generativeLane.trySubmit(ctx, action)) {
                 ActionResult.Submitted
             } else {
                 ActionResult.Failure("generative_lane_unavailable")
