@@ -27,6 +27,21 @@ fun interface BulkDraftWriter {
 interface RulesBackup {
     suspend fun export(destination: Uri, stripPersonalData: Boolean): ExportOutcome
     suspend fun import(source: Uri): ImportOutcome
+
+    /**
+     * 0.7.2: legge un documento con il limite dell'import (oltre: [BackupFailure.FILE_TOO_LARGE], senza
+     * leggerlo tutto), per mostrarne l'anteprima prima di importare.
+     */
+    suspend fun read(source: Uri): DocumentRead
+
+    /**
+     * 0.7.2: importa byte già in memoria (testo incollato o ricevuto, file letto, modello): stesso limite,
+     * stessa decodifica stretta e stesse bozze `IMPORT` di [import]. Non arma nulla.
+     */
+    suspend fun importBytes(bytes: ByteArray): ImportOutcome
+
+    /** 0.7.2: cosa importerebbe [importBytes] con gli stessi byte, senza scrivere nulla. */
+    fun preview(bytes: ByteArray): ImportPreview
 }
 
 /**
@@ -93,34 +108,45 @@ class RulesBackupService(
         }
     }
 
-    override suspend fun import(source: Uri): ImportOutcome {
+    override suspend fun import(source: Uri): ImportOutcome = when (val read = read(source)) {
+        is DocumentRead.Failed -> ImportOutcome.Failed(read.failure)
+        is DocumentRead.Bytes -> importBytes(read.bytes)
+    }
+
+    override suspend fun read(source: Uri): DocumentRead {
         val read = try {
             documents.read(source, RulesBackupFormat.MAX_FILE_BYTES)
         } catch (error: CancellationException) {
             throw error
         } catch (_: IOException) {
-            return ImportOutcome.Failed(BackupFailure.READ_FAILED)
+            return DocumentRead.Failed(BackupFailure.READ_FAILED)
         } catch (_: RuntimeException) {
-            return ImportOutcome.Failed(BackupFailure.READ_FAILED)
+            return DocumentRead.Failed(BackupFailure.READ_FAILED)
         }
-        val bytes = read ?: return ImportOutcome.Failed(BackupFailure.FILE_TOO_LARGE)
+        return read?.let(DocumentRead::Bytes) ?: DocumentRead.Failed(BackupFailure.FILE_TOO_LARGE)
+    }
 
-        val text = decodeUtf8(bytes) ?: return ImportOutcome.Failed(BackupFailure.NOT_JSON)
-        val entries = when (val decoded = RulesBackupCodec.decode(text)) {
-            is DecodedBackup.Rejected -> return ImportOutcome.Failed(decoded.failure)
-            is DecodedBackup.Entries -> decoded.entries
+    override fun preview(bytes: ByteArray): ImportPreview {
+        val parsed = when (val outcome = parse(bytes)) {
+            is Parsed.Failed -> return ImportPreview.Rejected(outcome.failure)
+            is Parsed.Rules -> outcome
         }
+        return ImportPreview.Ready(
+            ruleNames = parsed.accepted.map { displayName(it.draft.name) },
+            discarded = parsed.discarded,
+            sizeBytes = bytes.size,
+        )
+    }
 
-        val discarded = linkedMapOf<RuleDiscardReason, Int>()
+    override suspend fun importBytes(bytes: ByteArray): ImportOutcome {
+        val parsed = when (val outcome = parse(bytes)) {
+            is Parsed.Failed -> return ImportOutcome.Failed(outcome.failure)
+            is Parsed.Rules -> outcome
+        }
+        val accepted = parsed.accepted
+        val discarded = LinkedHashMap(parsed.discarded)
         fun discard(reason: RuleDiscardReason) {
             discarded[reason] = (discarded[reason] ?: 0) + 1
-        }
-        val accepted = ArrayList<BackupRule>(entries.size)
-        for (entry in entries) {
-            when (entry) {
-                is DecodedEntry.Rule -> accepted += entry.rule
-                is DecodedEntry.Discarded -> discard(entry.reason)
-            }
         }
 
         val at = nowMillis()
@@ -146,11 +172,36 @@ class RulesBackupService(
                 return ImportOutcome.Failed(BackupFailure.SAVE_FAILED)
             }
         }
-        var imported = 0
+        val draftIds = ArrayList<String>(results.size)
         for (result in results) {
-            if (result is DraftWriteResult.Saved) imported++ else discard(RuleDiscardReason.NOT_SAVED)
+            if (result is DraftWriteResult.Saved) draftIds += result.snapshot.id.value else discard(RuleDiscardReason.NOT_SAVED)
         }
-        return ImportOutcome.Done(ImportSummary(imported = imported, discarded = discarded))
+        return ImportOutcome.Done(ImportSummary(imported = draftIds.size, discarded = discarded), draftIds)
+    }
+
+    private sealed interface Parsed {
+        data class Failed(val failure: BackupFailure) : Parsed
+        data class Rules(val accepted: List<BackupRule>, val discarded: Map<RuleDiscardReason, Int>) : Parsed
+    }
+
+    /** Limite, UTF-8 stretto e decodifica stretta: l'unica lettura del contenuto, per l'import e l'anteprima. */
+    private fun parse(bytes: ByteArray): Parsed {
+        // Il limite si controlla prima di guardare il contenuto, qualunque sia la provenienza dei byte.
+        if (bytes.size > RulesBackupFormat.MAX_FILE_BYTES) return Parsed.Failed(BackupFailure.FILE_TOO_LARGE)
+        val text = decodeUtf8(bytes) ?: return Parsed.Failed(BackupFailure.NOT_JSON)
+        val entries = when (val decoded = RulesBackupCodec.decode(text)) {
+            is DecodedBackup.Rejected -> return Parsed.Failed(decoded.failure)
+            is DecodedBackup.Entries -> decoded.entries
+        }
+        val discarded = linkedMapOf<RuleDiscardReason, Int>()
+        val accepted = ArrayList<BackupRule>(entries.size)
+        for (entry in entries) {
+            when (entry) {
+                is DecodedEntry.Rule -> accepted += entry.rule
+                is DecodedEntry.Discarded -> discarded[entry.reason] = (discarded[entry.reason] ?: 0) + 1
+            }
+        }
+        return Parsed.Rules(accepted, discarded)
     }
 
     private fun decodeUtf8(bytes: ByteArray): String? = try {
@@ -163,8 +214,32 @@ class RulesBackupService(
         null
     }
 
-    private companion object {
-        val CANDIDATE_STATUSES = setOf(
+    companion object {
+        /** Lunghezza massima di un nome mostrato in anteprima (come il limite del validatore). */
+        const val PREVIEW_NAME_CHARS = 120
+
+        /**
+         * Il nome di una regola ricevuta, per la sola anteprima: via i caratteri di controllo e quelli che
+         * invertono la direzione del testo (potrebbero far leggere un nome diverso), spazi compattati, al
+         * massimo [PREVIEW_NAME_CHARS] caratteri. Il nome della bozza resta quello del file.
+         */
+        fun displayName(name: String): String {
+            val clean = buildString(name.length) {
+                name.forEach { char ->
+                    when {
+                        char in BIDI_CONTROLS -> Unit
+                        char.isISOControl() -> append(' ')
+                        else -> append(char)
+                    }
+                }
+            }.replace(Regex("\\s+"), " ").trim()
+            return if (clean.length <= PREVIEW_NAME_CHARS) clean else clean.take(PREVIEW_NAME_CHARS - 1).trimEnd() + "…"
+        }
+
+        private val BIDI_CONTROLS: Set<Char> =
+            ('‪'..'‮').toSet() + ('⁦'..'⁩').toSet() + setOf('‎', '‏', '؜')
+
+        private val CANDIDATE_STATUSES = setOf(
             AutomationStatus.ARMED,
             AutomationStatus.DISABLED,
             AutomationStatus.NEEDS_REVIEW,

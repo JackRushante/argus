@@ -2228,6 +2228,22 @@ private class FakeRulesBackup : RulesBackup {
         failure?.let { throw it }
         return importOutcome
     }
+
+    val importedTexts = mutableListOf<String>()
+    var previewResult: dev.argus.data.backup.ImportPreview =
+        dev.argus.data.backup.ImportPreview.Ready(listOf("Regola"), emptyMap(), sizeBytes = 10)
+
+    override suspend fun read(source: Uri): dev.argus.data.backup.DocumentRead =
+        dev.argus.data.backup.DocumentRead.Failed(dev.argus.data.backup.BackupFailure.READ_FAILED)
+
+    override suspend fun importBytes(bytes: ByteArray): ImportOutcome {
+        importedTexts += bytes.toString(Charsets.UTF_8)
+        gate?.await()
+        failure?.let { throw it }
+        return importOutcome
+    }
+
+    override fun preview(bytes: ByteArray): dev.argus.data.backup.ImportPreview = previewResult
 }
 
 private class FakeDeferredReplyStore : DeferredReplyStore {
