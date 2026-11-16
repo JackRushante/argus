@@ -92,6 +92,7 @@ import dev.argus.ui.components.HealthTileLevel
 import dev.argus.ui.components.BannerTone
 import dev.argus.ui.components.IconBadge
 import dev.argus.ui.components.OutlineChip
+import dev.argus.ui.components.HealthAlertsSettingRow
 import dev.argus.ui.components.PauseSettingRow
 import dev.argus.ui.components.PrivilegesSection
 import dev.argus.ui.components.RulesBackupSection
@@ -206,6 +207,7 @@ fun SettingsScreen(
                 HealthSection(healthItems, needsFix, Modifier.sectionAnchor(SECTION_HEALTH))
                 PrivilegesSection(state.privileged, callbacks::onSetRootEnabled, callbacks::onGrantPermanent)
                 PauseSettingRow(state.automationsPaused, callbacks::onSetAutomationsPaused)
+                HealthAlertsSettingRow(state.healthAlertsEnabled, callbacks::onSetHealthAlertsEnabled)
                 BrainSection(
                     transport = state.transport,
                     onTest = callbacks::onTestConnection,

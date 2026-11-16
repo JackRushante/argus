@@ -141,7 +141,11 @@ private val TopDestinations = listOf(
 private val TopLevelRoutes = TopDestinations.mapTo(hashSetOf()) { it.route }
 
 @Composable
-fun ArgusNavHost() {
+fun ArgusNavHost(
+    /** 0.7.2: schermata chiesta dal tocco di un avviso di salute; si apre a onboarding concluso. */
+    deepLink: AppDeepLink? = null,
+    onDeepLinkHandled: () -> Unit = {},
+) {
     val context = LocalContext.current
     val systemSettingUnavailable = stringResource(R.string.system_setting_unavailable)
     val backupPickerUnavailable = stringResource(R.string.backup_picker_unavailable)
@@ -331,6 +335,17 @@ fun ArgusNavHost() {
             // essere quello filtrato su una regola, arrivato dal Dettaglio.
             restoreState = '?' !in route && route != Routes.LOG
         }
+    }
+
+    // 0.7.2: tocco di un avviso di salute. Resta in attesa finché l'onboarding non è concluso.
+    LaunchedEffect(deepLink, onboardingCompleted) {
+        val link = deepLink ?: return@LaunchedEffect
+        if (!onboardingCompleted) return@LaunchedEffect
+        when (link) {
+            is AppDeepLink.Rule -> navController.navigate(Routes.detail(link.id)) { launchSingleTop = true }
+            AppDeepLink.System -> switchTop(Routes.SETTINGS)
+        }
+        onDeepLinkHandled()
     }
 
     MessageEffect(listViewModel.messages, snackbarHostState)
@@ -619,6 +634,8 @@ fun ArgusNavHost() {
                             }
                             override fun onSetAutomationsPaused(paused: Boolean) =
                                 settingsViewModel.setAutomationsPaused(paused)
+                            override fun onSetHealthAlertsEnabled(enabled: Boolean) =
+                                settingsViewModel.setHealthAlertsEnabled(enabled)
                             override fun onSetResponseTimeout(minutes: Int) =
                                 settingsViewModel.setResponseTimeout(minutes)
                             override fun onSetRootEnabled(enabled: Boolean) =

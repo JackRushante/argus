@@ -368,6 +368,10 @@
     <string name="pause_setting_title">Pause automations</string>
     <string name="pause_setting_on">No rule runs, manual ones included. Alarms stay registered; what is skipped is not made up for when you resume.</string>
     <string name="pause_setting_off">Rules run as usual.</string>
+    <!-- 0.7.2: avvisi di salute delle regole. -->
+    <string name="health_alerts_setting_title">Tell me when a rule stops working</string>
+    <string name="health_alerts_setting_on">A notification when a rule fails 3 times in a row or loses something it needs (Shizuku, notification access, Accessibility, exact alarms, location). It shows only rule names and counts.</string>
+    <string name="health_alerts_setting_off">No alerts: a rule that stops working shows up only in the Log.</string>
 
     <!-- 0.5.0 (privilegi): backend privilegiato, root su e permessi permanenti. -->
     <string name="priv50_section">Privileges</string>

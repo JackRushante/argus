@@ -367,6 +367,10 @@
     <string name="pause_setting_title">Pausa automazioni</string>
     <string name="pause_setting_on">Nessuna regola scatta, comprese quelle manuali. Le sveglie restano registrate; quello che viene saltato non si recupera alla ripresa.</string>
     <string name="pause_setting_off">Le regole scattano normalmente.</string>
+    <!-- 0.7.2: avvisi di salute delle regole. -->
+    <string name="health_alerts_setting_title">Avvisami quando una regola smette di funzionare</string>
+    <string name="health_alerts_setting_on">Una notifica quando una regola fallisce 3 volte di fila o perde qualcosa che le serve (Shizuku, accesso alle notifiche, Accessibilità, sveglie esatte, posizione). Mostra solo nomi di regole e conteggi.</string>
+    <string name="health_alerts_setting_off">Nessun avviso: una regola che smette di funzionare si vede solo nel Log.</string>
 
     <!-- 0.5.0 (privilegi): backend privilegiato, root su e permessi permanenti. -->
     <string name="priv50_section">Privilegi</string>
