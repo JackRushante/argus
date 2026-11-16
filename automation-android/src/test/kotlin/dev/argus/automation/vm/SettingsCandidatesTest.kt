@@ -30,6 +30,28 @@ class SettingsCandidatesTest {
     }
 
     @Test
+    fun `picker also offers telegram signal and google messages chats with their app`() {
+        val hash = "a".repeat(64)
+        val observed = listOf(
+            conversation("shortcut:org.telegram.messenger:$hash", "Luca", false, "org.telegram.messenger"),
+            conversation("person:org.telegram.messenger:$hash", "Senza shortcut", false, "org.telegram.messenger"),
+            conversation("shortcut:org.thoughtcrime.securesms:$hash", "Anna", false, "org.thoughtcrime.securesms"),
+            conversation("shortcut:com.google.android.apps.messaging:$hash", "Papà", false, "com.google.android.apps.messaging"),
+            conversation("shortcut:com.samsung.android.messaging:$hash", "Samsung", false, "com.samsung.android.messaging"),
+            conversation("shortcut:com.whatsapp:aa", "Moglie", isGroup = false),
+        )
+
+        val candidates = observedWhitelistCandidates(observed, emptyList())
+
+        assertEquals(
+            listOf("Luca" to "Telegram", "Anna" to "Signal", "Papà" to "Google Messages", "Moglie" to "WhatsApp"),
+            candidates.map { it.displayName to it.app },
+        )
+        assertEquals("Telegram", whitelistApp("shortcut:org.telegram.messenger:$hash"))
+        assertEquals(null, whitelistApp("jid:42"))
+    }
+
+    @Test
     fun `picker keeps recency order and honours the limit`() {
         val observed = (1..30).map { index ->
             conversation("shortcut:com.whatsapp:$index", "Contatto $index", isGroup = false)

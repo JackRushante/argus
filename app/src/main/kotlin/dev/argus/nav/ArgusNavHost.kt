@@ -951,7 +951,8 @@ fun ArgusNavHost() {
 }
 
 /**
- * Picker whitelist (P1): propone le conversazioni WhatsApp 1:1 osservate dal listener.
+ * Picker whitelist (P1): propone le conversazioni 1:1 osservate dal listener (WhatsApp e, dalla 0.8,
+ * Telegram, Signal e Google Messaggi), ciascuna con la sua app.
  * I gruppi non compaiono mai; l'inserimento manuale dell'hash resta diagnostica avanzata.
  */
 @Composable
@@ -983,7 +984,7 @@ private fun ContactPickerDialog(
                                     .padding(vertical = 10.dp, horizontal = 4.dp),
                             ) {
                                 Text(
-                                    contact.displayName,
+                                    contact.app?.let { "${contact.displayName} · $it" } ?: contact.displayName,
                                     style = MaterialTheme.typography.bodyLarge,
                                 )
                                 Text(

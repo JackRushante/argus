@@ -3,6 +3,7 @@ package dev.argus.automation
 import dev.argus.automation.base.AndroidBaseActionExecutor
 import dev.argus.automation.base.AndroidSystemActionExecutor
 import dev.argus.automation.http.HttpRequestExecutor
+import dev.argus.automation.notification.NotificationActionGateway
 import dev.argus.automation.notification.NotificationReplyDelivery
 import dev.argus.automation.notification.NotificationReplyGateway
 import dev.argus.automation.notification.NotificationReplyRequest
@@ -18,6 +19,7 @@ import dev.argus.engine.model.Action
 import dev.argus.engine.model.DndMode
 import dev.argus.engine.model.FeatureGates
 import dev.argus.engine.model.GenerativeAction
+import dev.argus.engine.model.NotificationActionPolicy
 import dev.argus.engine.model.SettingNamespace
 import dev.argus.engine.model.WriteSettingPolicy
 import dev.argus.engine.runtime.ActionExecutor
@@ -28,6 +30,7 @@ import dev.argus.engine.runtime.ResolvedActionExecutor
 import dev.argus.engine.runtime.ResolvedProgramAction
 import dev.argus.engine.runtime.RuntimeDataBinding
 import dev.argus.engine.runtime.TriggerEvent
+import dev.argus.engine.safety.ReplyChannels
 import dev.argus.engine.safety.StaticShellSafety
 import dev.argus.shizuku.ShizukuShellException
 import kotlinx.coroutines.CancellationException
@@ -111,6 +114,11 @@ class ShizukuActionExecutor(
      * `launch_app` (Shizuku, intent o notifica «Tocca per aprire»).
      */
     private val uiSteps: UiStepsRunner? = null,
+    /**
+     * 0.8: `notification_action` (chiudi, posticipa, premi un pulsante) attraverso il listener delle
+     * notifiche. Default **null**: senza, `notification_action_unavailable`.
+     */
+    private val notificationActions: NotificationActionGateway? = null,
 ) : ActionExecutor, ResolvedActionExecutor {
     override suspend fun execute(
         action: ResolvedProgramAction,
@@ -212,7 +220,7 @@ class ShizukuActionExecutor(
             is Action.InputText,
             -> ActionResult.Failure("unsupported_phase")
 
-            is Action.WhatsAppReply -> staticReply(action, ctx)
+            is Action.WhatsAppReply -> staticReply(action.text, ctx, ReplyChannels::isWhatsApp)
 
             // Ultima linea dopo validator e FirePolicy: l'identità si verifica sull'evento
             // realmente arrivato, non su quella dichiarata nella regola.
@@ -314,9 +322,18 @@ class ShizukuActionExecutor(
 
             is Action.SetUserMode -> ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
 
-            is Action.NotificationReply -> ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
+            // 0.8: stessa reply di whatsapp_reply, sulle app di ReplyChannels.NOTIFICATION_REPLY_PACKAGES.
+            is Action.NotificationReply -> if (FeatureGates.blocks(action)) {
+                ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
+            } else {
+                staticReply(action.text, ctx, ReplyChannels::isNotificationReplyPackage)
+            }
 
-            is Action.NotificationAction -> ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
+            is Action.NotificationAction -> if (FeatureGates.blocks(action)) {
+                ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
+            } else {
+                notificationAction(action, ctx)
+            }
 
             is Action.SendSms -> ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
 
@@ -408,22 +425,35 @@ class ShizukuActionExecutor(
      * verificato. Il gateway ripete package trusted, key/conversation/event esatti, 1:1 e
      * consumo one-shot: gruppo, handle stale o canale scaduto restano fallimenti tipizzati.
      */
-    private fun staticReply(action: Action.WhatsAppReply, ctx: FireContext): ActionResult {
+    private fun staticReply(text: String, ctx: FireContext, packageAllowed: (String) -> Boolean): ActionResult {
         val notification = ctx.event as? TriggerEvent.NotificationPosted
             ?: return ActionResult.Failure("reply_event_unverified")
+        // whatsapp_reply solo su WhatsApp, notification_reply solo sulle altre app: ultima linea.
+        if (!packageAllowed(notification.pkg)) return ActionResult.Failure("reply_package_untrusted")
         val delivery = replies.send(
             NotificationReplyRequest(
                 packageName = notification.pkg,
                 notificationKey = notification.notificationKey.orEmpty(),
                 conversationId = notification.conversationId.orEmpty(),
                 eventId = ctx.eventId,
-                text = action.text,
+                text = text,
             ),
         )
         return when (delivery) {
             NotificationReplyDelivery.Sent -> ActionResult.Success
             is NotificationReplyDelivery.Failed -> ActionResult.Failure(delivery.code)
         }
+    }
+
+    /** `notification_action` sulla notifica dell'evento realmente arrivato, mai su un'altra. */
+    private fun notificationAction(action: Action.NotificationAction, ctx: FireContext): ActionResult {
+        val notification = ctx.event as? TriggerEvent.NotificationPosted
+            ?: return ActionResult.Failure(NotificationActionPolicy.CODE_EVENT_UNVERIFIED)
+        val key = notification.notificationKey?.takeIf(String::isNotBlank)
+            ?: return ActionResult.Failure(NotificationActionPolicy.CODE_EVENT_UNVERIFIED)
+        val gateway = notificationActions
+            ?: return ActionResult.Failure(NotificationActionPolicy.CODE_UNAVAILABLE)
+        return gateway.perform(notification.pkg, key, action)
     }
 
     /**
