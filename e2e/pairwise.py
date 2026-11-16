@@ -30,6 +30,8 @@ ACTION_CLASSES: Dict[str, List[str]] = {
     "local_ui": [
         "show_notification", "speak", "vibrate", "set_flashlight", "copy_text", "copy_to_clipboard",
         "media_control",
+        # 0.8: la domanda con pulsanti e' una notifica dell'app.
+        "ask",
     ],
     "audio_mode": ["set_volume", "set_ringer", "set_dnd"],
     "display": ["set_brightness", "set_rotation", "set_dark_mode"],
@@ -51,7 +53,7 @@ CONTROL_FLOW = ["wait", "if", "while"]
 # aggiunge le sue regole.
 NOT_YET_AVAILABLE_TRIGGERS = ["calendar_event", "nfc_tag", "next_alarm", "app_usage", "user_mode_changed"]
 NOT_YET_AVAILABLE_ACTIONS = [
-    "ask", "set_stored", "set_user_mode", "notification_reply", "notification_action", "send_sms",
+    "set_stored", "set_user_mode", "notification_reply", "notification_action", "send_sms",
     "call_number", "send_intent", "screen_call",
 ]
 NOT_YET_AVAILABLE_CODE = "not_available_yet"

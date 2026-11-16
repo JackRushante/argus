@@ -2610,5 +2610,30 @@
    "reply_mentions": ["simple"]
   },
   "note": "Come app70.twocalc.it.01, in inglese"
+ },
+ {
+  "id": "ask08.it.01",
+  "category": "p4",
+  "lang": "it",
+  "text": "Ogni sera alle 22 chiedimi se domani lavoro, con i pulsanti Sì e No: se rispondo Sì metti una sveglia alle 7",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "time", "cron": {"present": true}},
+   "actions_include": ["ask", "set_alarm"],
+   "control_flow": ["if"]
+  },
+  "note": "0.8: la domanda con pulsanti cattura la scelta e la regola ci ramifica sopra con var_compare"
+ },
+ {
+  "id": "ask08.en.01",
+  "category": "p4",
+  "lang": "en",
+  "text": "When I tap the shortcut, ask me Coffee or Tea with two buttons and show a notification with my answer",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "manual"},
+   "actions_include": ["ask", "show_notification"]
+  },
+  "note": "Come ask08.it.01, in inglese, senza ramo: la scelta va nel testo della notifica"
  }
 ]
