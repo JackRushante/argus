@@ -251,7 +251,8 @@ object RuleRenderMapper {
                 "Ripeti ${whileCountIt(a)}" +
                     (if (a.delayBetweenMs > 0) " · ${a.delayBetweenMs} ms tra le iterazioni" else ""),
             ),
-            conditionLines = flattenConditions(a.condition, 0, l),
+            // S8: l'engine rivaluta la condizione prima di OGNI giro: «finché», non il «solo se» di un cancello unico.
+            conditionLines = flattenConditions(a.condition, 0, l, ConditionLead.WHILE),
             body = programNodes(a.body, l, slots),
         )
         else -> ProgramNode.Leaf(withAppRef(actionRow(a, l), a, slots))
@@ -585,50 +586,66 @@ object RuleRenderMapper {
     // Condition tree — appiattito in righe indentate (§6)
     // ---------------------------------------------------------------------------------------------
 
-    private fun flattenConditions(c: Condition, depth: Int, l: RenderLanguage): List<String> {
+    /**
+     * Come si apre una riga di condizione: [ONLY_IF] per un cancello valutato una volta (condizioni della
+     * regola, `if`), [WHILE] per la condizione di un `while`, rivalutata prima di ogni giro (S8).
+     */
+    private enum class ConditionLead { ONLY_IF, WHILE }
+
+    private fun leadText(lead: ConditionLead, l: RenderLanguage): String = when (lead) {
+        ConditionLead.ONLY_IF -> l.pick("Only if", "Solo se")
+        ConditionLead.WHILE -> l.pick("While", "Finché")
+    }
+
+    private fun flattenConditions(
+        c: Condition,
+        depth: Int,
+        l: RenderLanguage,
+        lead: ConditionLead = ConditionLead.ONLY_IF,
+    ): List<String> {
         val pad = "  ".repeat(depth)
+        val first = leadText(lead, l)
         return when (c) {
             is Condition.TimeWindow -> listOf(
-                l.pick(
-                    "${pad}Only between ${c.startLocal} and ${c.endLocal} (${c.tz})",
-                    "${pad}Solo tra le ${c.startLocal} e le ${c.endLocal} (${c.tz})",
-                ),
+                when (lead) {
+                    ConditionLead.ONLY_IF -> l.pick(
+                        "${pad}Only between ${c.startLocal} and ${c.endLocal} (${c.tz})",
+                        "${pad}Solo tra le ${c.startLocal} e le ${c.endLocal} (${c.tz})",
+                    )
+                    ConditionLead.WHILE -> l.pick(
+                        "${pad}While it is between ${c.startLocal} and ${c.endLocal} (${c.tz})",
+                        "${pad}Finché è tra le ${c.startLocal} e le ${c.endLocal} (${c.tz})",
+                    )
+                },
             )
             is Condition.StateEquals -> listOf(
-                l.pick(
-                    "${pad}Only if ${c.key} ${opLabel(c.op, l)} ${c.value}",
-                    "${pad}Solo se ${c.key} ${opLabel(c.op, l)} ${c.value}",
-                ),
+                "$pad$first ${c.key} ${opLabel(c.op, l)} ${c.value}",
             )
             is Condition.StateCompare -> listOf(
-                l.pick(
-                    "${pad}Only if ${queryLabel(c.query, l)} [${valueTypeLabel(c.valueType, l)}] " +
-                        "${opLabel(c.op, l)} ${c.expected}",
-                    "${pad}Solo se ${queryLabel(c.query, l)} [${valueTypeLabel(c.valueType, l)}] " +
-                        "${opLabel(c.op, l)} ${c.expected}",
-                ),
+                "$pad$first ${queryLabel(c.query, l)} [${valueTypeLabel(c.valueType, l)}] " +
+                    "${opLabel(c.op, l)} ${c.expected}",
             )
             is Condition.AppInForeground -> listOf(
                 l.pick(
-                    "${pad}Only if ${appLabel(c.pkg)} is in the foreground",
-                    "${pad}Solo se ${appLabel(c.pkg)} è in primo piano",
+                    "$pad$first ${appLabel(c.pkg)} is in the foreground",
+                    "$pad$first ${appLabel(c.pkg)} è in primo piano",
                 ),
             )
             is Condition.LocationIn -> listOf(
                 l.pick(
-                    "${pad}Only if you are within ${fmtNum(c.radiusM)} m of ${c.lat},${c.lng}",
-                    "${pad}Solo se ti trovi entro ${fmtNum(c.radiusM)} m da ${c.lat},${c.lng}",
+                    "$pad$first you are within ${fmtNum(c.radiusM)} m of ${c.lat},${c.lng}",
+                    "$pad$first ti trovi entro ${fmtNum(c.radiusM)} m da ${c.lat},${c.lng}",
                 ),
             )
             is Condition.And ->
                 listOf(l.pick("${pad}All of the following:", "${pad}Tutte le seguenti:")) +
-                    c.all.flatMap { flattenConditions(it, depth + 1, l) }
+                    c.all.flatMap { flattenConditions(it, depth + 1, l, lead) }
             is Condition.Or ->
                 listOf(l.pick("${pad}At least one of the following:", "${pad}Almeno una delle seguenti:")) +
-                    c.any.flatMap { flattenConditions(it, depth + 1, l) }
+                    c.any.flatMap { flattenConditions(it, depth + 1, l, lead) }
             is Condition.Not ->
                 listOf(l.pick("${pad}Must not hold:", "${pad}Non deve valere:")) +
-                    flattenConditions(c.cond, depth + 1, l)
+                    flattenConditions(c.cond, depth + 1, l, lead)
             is Condition.BooleanLiteral ->
                 listOf("$pad${if (c.value) l.pick("Always", "Sempre") else l.pick("Never", "Mai")}")
             // P4: confronto su variabile di programma. La destra è un'altra variabile (${nome}) o un
@@ -636,13 +653,11 @@ object RuleRenderMapper {
             is Condition.VarCompare -> {
                 // IS_EVEN/IS_ODD sono UNARI: nessun operando destro da rendere.
                 val unary = c.op == CmpOp.IS_EVEN || c.op == CmpOp.IS_ODD
-                val right = if (unary) "" else " " + (c.expectedVar?.let { "\${$it}" } ?: c.expected ?: "<?>")
-                listOf(
-                    l.pick(
-                        "${pad}Only if \${${c.varName}} ${opLabel(c.op, l)}$right",
-                        "${pad}Solo se \${${c.varName}} ${opLabel(c.op, l)}$right",
-                    ),
-                )
+                // S8: il letterale va tra virgolette (un valore vuoto o di soli spazi resta visibile) e su
+                // una riga sola (un a capo diventa ⏎ e non imita una riga di condizione).
+                val literal = c.expected?.let { "\"${VisibleText.singleLine(it)}\"" }
+                val right = if (unary) "" else " " + (c.expectedVar?.let { "\${$it}" } ?: literal ?: "<?>")
+                listOf("$pad$first \${${c.varName}} ${opLabel(c.op, l)}$right")
             }
         }
     }

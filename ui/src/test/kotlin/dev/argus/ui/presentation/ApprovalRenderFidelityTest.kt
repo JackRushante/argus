@@ -113,6 +113,56 @@ class ApprovalRenderFidelityTest {
         assertEquals("1 ora e 30 minuti", detailOf(Action.SetTimer(seconds = 5_400), RenderLanguage.IT))
     }
 
+    // --- S8: while e letterali -------------------------------------------------------------------
+
+    @Test
+    fun `a while condition reads as a loop condition, an if condition as a gate`() {
+        val cond = Condition.And(
+            listOf(
+                Condition.VarCompare("n", CmpOp.LT, expected = "9"),
+                Condition.TimeWindow("08:00", "09:00", "UTC"),
+            ),
+        )
+        val a = rule(
+            listOf(
+                Action.While(cond, body = listOf(Action.Vibrate(100)), maxIterations = 5),
+                Action.If(cond, then = listOf(Action.Vibrate(100))),
+            ),
+        )
+        val en = render(a, RenderLanguage.EN).program
+        val loop = en[0] as ProgramNode.WhileNode
+        assertEquals(
+            listOf("All of the following:", "  While \${n} < \"9\"", "  While it is between 08:00 and 09:00 (UTC)"),
+            loop.conditionLines,
+        )
+        assertEquals(
+            listOf("All of the following:", "  Only if \${n} < \"9\"", "  Only between 08:00 and 09:00 (UTC)"),
+            (en[1] as ProgramNode.IfNode).conditionLines,
+        )
+        val it = render(a, RenderLanguage.IT).program[0] as ProgramNode.WhileNode
+        assertEquals("  Finché \${n} < \"9\"", it.conditionLines[1])
+        assertEquals("  Finché è tra le 08:00 e le 09:00 (UTC)", it.conditionLines[2])
+    }
+
+    @Test
+    fun `an empty or blank literal stays visible between quotes`() {
+        val lines = render(
+            rule(
+                conditions = Condition.Or(
+                    listOf(
+                        Condition.VarCompare("x", CmpOp.EQ, expected = ""),
+                        Condition.VarCompare("y", CmpOp.NEQ, expected = " "),
+                        Condition.VarCompare("z", CmpOp.EQ, expected = "a\nb"),
+                    ),
+                ),
+            ),
+            RenderLanguage.EN,
+        ).conditionLines
+        assertEquals("  Only if \${x} = \"\"", lines[1])
+        assertEquals("  Only if \${y} ≠ \" \"", lines[2])
+        assertEquals("  Only if \${z} = \"a⏎b\"", lines[3])
+    }
+
     // --- S8: URL ---------------------------------------------------------------------------------
 
     @Test
