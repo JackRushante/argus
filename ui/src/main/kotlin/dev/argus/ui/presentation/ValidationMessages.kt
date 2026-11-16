@@ -453,6 +453,10 @@ object ValidationMessages {
             "The value written comes from external data (a message, a notification or text read from the phone).",
             "Il valore scritto arriva da un dato esterno (messaggio, notifica o testo letto dal telefono).",
         ),
+        "invisible_characters" to t(
+            "The command, address or setting contains invisible or text-direction characters: what you see may not be what runs.",
+            "Il comando, l'indirizzo o l'impostazione contiene caratteri invisibili o che cambiano la direzione del testo: quello che vedi può non essere quello che viene eseguito.",
+        ),
 
         // --- Azioni generative ----------------------------------------------------------------
         "state_context_empty" to t(

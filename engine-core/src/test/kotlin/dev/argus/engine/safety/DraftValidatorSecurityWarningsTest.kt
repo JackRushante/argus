@@ -2,7 +2,10 @@ package dev.argus.engine.safety
 
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.AutomationDraft
+import dev.argus.engine.model.CmpOp
+import dev.argus.engine.model.Condition
 import dev.argus.engine.model.ConfidentialityLabel
+import dev.argus.engine.model.HttpMethod
 import dev.argus.engine.model.PhoneEvent
 import dev.argus.engine.model.SettingNamespace
 import dev.argus.engine.model.StateQuery
@@ -186,6 +189,35 @@ class DraftValidatorSecurityWarningsTest {
             assertFalse("url_userinfo" in errors(fine), url)
             assertFalse("url_invalid" in errors(fine), url)
         }
+    }
+
+    // --- caratteri invisibili ----------------------------------------------------------------------
+
+    @Test
+    fun `invisible or direction changing characters in authority fields raise a warning`() {
+        val hidden = listOf(
+            Action.RunShell("echo safe\u202E"),
+            Action.RunShell("echo a\u200Bb"),
+            Action.RunShell("echo a\rb"),
+            Action.OpenUrl("https://example.com/\u2066x"),
+            Action.HttpRequest(HttpMethod.GET, "https://example.com/\u00ADx"),
+            Action.HttpRequest(HttpMethod.GET, "https://example.com/x", headers = mapOf("X-Note" to "a\u2028b")),
+            Action.WriteSetting(SettingNamespace.SYSTEM, "screen_off_timeout", "30000\u2029"),
+        )
+        hidden.forEach { action ->
+            assertTrue("invisible_characters" in warnings(draft(listOf(action))), action.toString())
+        }
+        val visible = listOf(
+            Action.RunShell("echo a\tb\necho c"),
+            Action.RunShell("echo caffè €"),
+            Action.OpenUrl("https://example.com/x"),
+        )
+        visible.forEach { action ->
+            assertFalse("invisible_characters" in warnings(draft(listOf(action))), action.toString())
+        }
+        // Dentro un if annidato vale lo stesso.
+        val nested = Action.If(Condition.StateCompare(StateQuery.Builtin("wifi"), StateValueType.TEXT, CmpOp.EQ, "on"), then = listOf(Action.RunShell("echo \u202E")))
+        assertTrue("invisible_characters" in warnings(draft(listOf(nested))))
     }
 
     @Test

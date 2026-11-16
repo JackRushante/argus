@@ -619,6 +619,8 @@ class DraftValidator(
         err: (String, String) -> Unit,
         warn: (String, String) -> Unit,
     ) {
+        // Visita ogni azione (anche annidata) come questo controllo: qui anche i caratteri invisibili.
+        warnInvisibleCharacters(action, warn)
         for (field in InterpolationPolicy.textFields(action)) {
             if (!InterpolationPolicy.containsInterpolation(field.value)) continue
             val parsed = InterpolationPolicy.parse(field.value)
@@ -746,6 +748,37 @@ class DraftValidator(
                     "Il valore scritto arriva da un dato esterno (messaggio, notifica o testo letto dal telefono).",
                 )
             }
+        }
+    }
+
+    /**
+     * Caratteri che non si vedono o che cambiano la direzione del testo (categorie Cf, Zl, Zp e i
+     * controlli Cc) nei campi che danno autorità: la review mostrerebbe un comando, un indirizzo o
+     * un'impostazione diversi da quelli che girano. Nel comando shell tab e a capo sono normali.
+     */
+    private fun warnInvisibleCharacters(action: Action, warn: (String, String) -> Unit) {
+        val fields: List<Pair<String, Boolean>> = when (action) {
+            is Action.RunShell -> listOf(action.cmd to true)
+            is Action.OpenUrl -> listOf(action.url to false)
+            is Action.HttpRequest -> listOf(action.url to false) + action.headers.orEmpty().values.map { it to false }
+            is Action.WriteSetting -> listOf(action.key to false, action.value to false)
+            else -> emptyList()
+        }
+        val hidden = fields.any { (text, shell) ->
+            text.codePoints().anyMatch { code ->
+                when (Character.getType(code).toByte()) {
+                    Character.FORMAT, Character.LINE_SEPARATOR, Character.PARAGRAPH_SEPARATOR -> true
+                    Character.CONTROL -> !(shell && (code == '\t'.code || code == '\n'.code))
+                    else -> false
+                }
+            }
+        }
+        if (hidden) {
+            warn(
+                "invisible_characters",
+                "Il comando, l'indirizzo o l'impostazione contiene caratteri invisibili o che cambiano " +
+                    "la direzione del testo: quello che vedi può non essere quello che viene eseguito",
+            )
         }
     }
 
