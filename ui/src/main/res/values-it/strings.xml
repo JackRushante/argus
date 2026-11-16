@@ -305,8 +305,8 @@
     <!-- Backup delle regole (0.4.0, F1) -->
     <string name="backup_section">BACKUP DELLE REGOLE</string>
     <string name="backup_body">Salva le regole in un file o portale su un altro telefono. Il backup di Android resta disattivato, per la tua privacy.</string>
-    <string name="backup_strip_label">Togli posizioni e contatti (per condividere)</string>
-    <string name="backup_strip_hint">Coordinate, ID delle conversazioni, nomi dei mittenti e numeri di telefono vengono tolti, e i geofence chiedono la posizione corrente quando li armi. I filtri sul testo restano: rileggi il file prima di condividerlo.</string>
+    <string name="backup_strip_label">Togli i dati personali (per condividere)</string>
+    <string name="backup_strip_hint">Coordinate, ID delle conversazioni, nomi dei mittenti, numeri di telefono, nomi di reti e dispositivi, titoli delle notifiche e valori segreti vengono tolti; i geofence chiedono la posizione corrente quando li armi. Chi importa la regola li completa prima di armarla. I filtri sul testo restano: rileggi il file prima di condividerlo.</string>
     <string name="backup_export">Esporta</string>
     <string name="backup_import">Importa</string>
     <string name="backup_import_hint">Le regole importate arrivano come bozze da approvare: nessuna si arma da sola.</string>

@@ -283,8 +283,8 @@ object ValidationMessages {
             "Una variabile orologio ha un formato dell'ora non valido o più lungo di 40 caratteri (per esempio HH:mm o EEEE d MMMM).",
         ),
         "var_literal_invalid" to t(
-            "A fixed value is too long or contains control characters.",
-            "Un valore fisso è troppo lungo o contiene caratteri di controllo.",
+            "A fixed value is too long, contains control characters, or was removed when the rule was shared: write it again.",
+            "Un valore fisso è troppo lungo, contiene caratteri di controllo oppure è stato tolto quando la regola è stata condivisa: riscrivilo.",
         ),
         "var_literal_type_invalid" to t(
             "A fixed value does not match its declared type.",
