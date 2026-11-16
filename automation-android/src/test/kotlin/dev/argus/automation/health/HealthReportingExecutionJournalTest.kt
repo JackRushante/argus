@@ -32,8 +32,7 @@ class HealthReportingExecutionJournalTest {
             setOf("SUCCEEDED", "FAILED", "PARTIAL", "INTERRUPTED").map(::ExecutionId).toSet(),
             concluded.toSet(),
         )
-        assertEquals(4, concluded.size
-        )
+        assertEquals(4, concluded.size)
     }
 
     @Test
