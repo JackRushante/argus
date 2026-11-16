@@ -18,20 +18,32 @@ object PrivilegedActionPolicy {
     /**
      * Package di sistema essenziali (lista chiusa) su cui `app_control` è vietato: framework, interfaccia
      * di sistema, telefono, impostazioni e i provider dei servizi Google di base (servizi Play, framework
-     * dei servizi, Play Store). Il launcher di default si aggiunge sul telefono (v. esecutore).
+     * dei servizi, Play Store). Sul telefono l'esecutore aggiunge i launcher installati, la tastiera
+     * predefinita e il fornitore WebView in uso (v. esecutore).
      */
     val PROTECTED_SYSTEM_PACKAGES: Set<String> = setOf(
         "android",
         "com.android.systemui",
         "com.android.phone",
         "com.android.settings",
+        // Dove vivono le impostazioni di sistema: senza, il telefono non si avvia correttamente.
+        "com.android.providers.settings",
+        // L'uid shell su cui gira Shizuku (adb).
+        "com.android.shell",
+        // I dialoghi dei permessi: congelati, nessuna app può più chiedere un permesso.
+        "com.android.permissioncontroller",
+        "com.google.android.permissioncontroller",
+        // WebView: congelata, si rompono tutte le app che mostrano pagine web.
+        "com.google.android.webview",
+        "com.android.webview",
         "com.google.android.gms",
         "com.google.android.gsf",
         "com.android.vending",
         // Il backend privilegiato stesso: fermarlo o congelarlo toglierebbe ad Argus Shizuku.
         "moe.shizuku.privileged.api",
-        // I gestori root: congelarli toglierebbe il backend `su` (KernelSU, Magisk).
+        // I gestori root: congelarli toglierebbe il backend `su` (KernelSU, KernelSU Next, Magisk).
         "me.weishu.kernelsu",
+        "com.rifsxd.ksunext",
         "com.topjohnwu.magisk",
     )
 
@@ -41,12 +53,13 @@ object PrivilegedActionPolicy {
     fun isValidPackage(pkg: String): Boolean = pkg.length <= MAX_PACKAGE_CHARS && PACKAGE_NAME.matches(pkg)
 
     /**
-     * Esito del controllo di un bersaglio. [launcher] sono i package launcher noti all'esecutore
-     * (il validator statico passa l'insieme vuoto).
+     * Esito del controllo di un bersaglio. [deviceProtected] sono i package protetti noti solo
+     * all'esecutore sul telefono: launcher, tastiera predefinita, WebView in uso (il validator statico
+     * passa l'insieme vuoto).
      */
-    fun appControlTarget(pkg: String, launcher: Set<String> = emptySet()): TargetVerdict = when {
+    fun appControlTarget(pkg: String, deviceProtected: Set<String> = emptySet()): TargetVerdict = when {
         !isValidPackage(pkg) -> TargetVerdict.PACKAGE_INVALID
-        isArgus(pkg) || pkg in PROTECTED_SYSTEM_PACKAGES || pkg in launcher -> TargetVerdict.FORBIDDEN
+        isArgus(pkg) || pkg in PROTECTED_SYSTEM_PACKAGES || pkg in deviceProtected -> TargetVerdict.FORBIDDEN
         else -> TargetVerdict.OK
     }
 

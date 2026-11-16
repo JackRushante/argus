@@ -689,8 +689,8 @@ object ValidationMessages {
             "Il package dell'app manca, non è valido o è una \${variabile}: va scritto per intero, come com.example.app.",
         ),
         "priv_target_forbidden" to t(
-            "A rule cannot change Argus, the launcher or an essential system app (system UI, phone, Settings, Google services).",
-            "Una regola non può modificare Argus, il launcher o un'app di sistema essenziale (interfaccia di sistema, telefono, Impostazioni, servizi Google).",
+            "A rule cannot change Argus, the launcher, the keyboard, WebView or an essential system app (system UI, phone, Settings, permissions, Google services, Shizuku, root managers).",
+            "Una regola non può modificare Argus, il launcher, la tastiera, WebView o un'app di sistema essenziale (interfaccia di sistema, telefono, Impostazioni, permessi, servizi Google, Shizuku, gestori root).",
         ),
         "priv_permission_invalid" to t(
             "Only runtime permissions of the allowed list can be granted or revoked (location, camera, microphone, contacts, SMS, phone, calendar, files and media, notifications, body sensors, nearby devices).",
