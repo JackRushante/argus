@@ -321,6 +321,8 @@ class AndroidCapabilityProbe internal constructor(
         if (state.usageStatsGranted) add("app_event")
         // 0.8: la prossima sveglia, sempre (AlarmManager, nessun permesso).
         add("next_alarm")
+        // 0.8: il tempo d'uso legge gli stessi dati di utilizzo di app_event.
+        if (state.usageStatsGranted) add("app_usage")
         // Il filtro SIM vale solo su un telefono con più slot e dove SMS o chiamate sono armabili.
         if (state.multiSim && (state.receiveSmsGranted || (state.readPhoneStateGranted && state.readCallLogGranted))) {
             add("phone_state.sim")
@@ -400,6 +402,7 @@ class AndroidCapabilityProbe internal constructor(
             capability == GenerativeContract.TOOL_WEB_SEARCH -> BlockCause.AI_NOT_READY
         capability.startsWith(SENSOR_TRIGGER_PREFIX) -> BlockCause.SENSOR_UNAVAILABLE
         capability == CapabilityIds.TRIGGER_APP_EVENT -> BlockCause.USAGE_ACCESS
+        capability == CapabilityIds.TRIGGER_APP_USAGE -> BlockCause.USAGE_ACCESS
         else -> BlockCause.OTHER
     }
 
@@ -487,6 +490,7 @@ class AndroidCapabilityProbe internal constructor(
             // con l'accesso ai dati di utilizzo l'app in primo piano si legge da UsageStatsManager.
             // 0.8: la prossima sveglia, vedi availableTriggers.
             add(CapabilityIds.TRIGGER_NEXT_ALARM)
+            if (state.usageStatsGranted) add(CapabilityIds.TRIGGER_APP_USAGE)
             if (state.secureSettingsGranted) add(ActionCapabilities.WRITE_SETTING)
             if (state.usageStatsGranted) add(CapabilityIds.STATE_FOREGROUND_APP)
             // 0.5.1: «app aperta/chiusa» legge gli stessi eventi di utilizzo: stesso permesso, nessuno shell.
@@ -694,7 +698,6 @@ class AndroidCapabilityProbe internal constructor(
             CapabilityIds.RULE_EXIT,
             CapabilityIds.TRIGGER_CALENDAR_EVENT,
             CapabilityIds.TRIGGER_NFC_TAG,
-            CapabilityIds.TRIGGER_APP_USAGE,
             CapabilityIds.TRIGGER_USER_MODE_CHANGED,
             CapabilityIds.STATE_WIFI_CONNECTED,
             CapabilityIds.STATE_BLUETOOTH_CONNECTED,

@@ -25,6 +25,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.launch
+import java.time.ZoneId
 
 /**
  * Registra sulla sentinella in primo piano le sorgenti di eventi di sistema che una regola armata
@@ -43,6 +44,8 @@ class AndroidDeviceEventSources(
     private val nowMillis: () -> Long = System::currentTimeMillis,
     /** 0.5.1: package delle app osservate da una regola armata `app_event` (letto a ogni consegna). */
     private val appPackages: () -> Set<String> = { emptySet() },
+    /** 0.8: regole armate `app_usage` (letto a ogni controllo del tempo d'uso). */
+    private val appUsageWatches: () -> List<AppUsageWatch> = { emptyList() },
 ) {
     private val appContext = context.applicationContext
     private val lock = Any()
@@ -97,6 +100,7 @@ class AndroidDeviceEventSources(
         DeviceEventSource.MODE_RINGER -> registerRinger()
         DeviceEventSource.MEDIA -> registerMedia()
         DeviceEventSource.APP_EVENT -> registerAppEvents()
+        DeviceEventSource.APP_USAGE -> registerAppUsage()
     }
 
     /** Una consegna: parte sul thread del callback, nell'ordine di arrivo, e prosegue sul dispatcher. */
@@ -333,6 +337,58 @@ class AndroidDeviceEventSources(
             unregister = {
                 appContext.unregisterReceiver(receiver)
                 poller.close()
+            },
+        )
+    }
+
+    // --- Tempo d'uso di un'app (0.8) ----------------------------------------------------------------
+
+    /**
+     * Controlla il tempo in primo piano di oggi delle app con una regola `app_usage` SOLO a schermo acceso
+     * (vedi [AppUsageMonitor]); a schermo spento resta solo il receiver acceso/spento. Nessun wakelock.
+     */
+    private fun registerAppUsage(): Registration {
+        val power = appContext.getSystemService(PowerManager::class.java)
+        val monitor = AppUsageMonitor(
+            scope = scope,
+            source = AndroidUsageEventsSource(appContext),
+            nowMillis = nowMillis,
+            zone = ZoneId::systemDefault,
+            watches = appUsageWatches,
+            store = PrefsAppUsageFiredStore(appContext),
+            emit = { pkg, previous, current, at ->
+                try {
+                    ingress.onAppUsage(pkg, previous, current, at)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    Log.w(TAG, "dispatch app_usage fallito: ${error::class.java.simpleName}")
+                }
+            },
+        )
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                when (intent.action) {
+                    Intent.ACTION_SCREEN_ON -> monitor.onScreenOn()
+                    Intent.ACTION_SCREEN_OFF -> monitor.onScreenOff()
+                }
+            }
+        }
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_SCREEN_OFF)
+        }
+        try {
+            ContextCompat.registerReceiver(appContext, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+        } catch (error: RuntimeException) {
+            monitor.close()
+            throw error
+        }
+        monitor.start(screenOn = power?.isInteractive == true)
+        return Registration(
+            unregister = {
+                appContext.unregisterReceiver(receiver)
+                monitor.close()
             },
         )
     }

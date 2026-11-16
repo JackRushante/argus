@@ -161,6 +161,7 @@ class ConnectivitySentinelService : Service() {
             scope,
             recoverMissed,
             appPackages = { demand.appPackages.value },
+            appUsageWatches = { demand.appUsage.value },
         )
         deviceSources = sources
         deviceDemandJob = scope.launch {

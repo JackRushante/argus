@@ -77,6 +77,14 @@ class DeviceEventIngress(
         parser.appEvent(pkg, event, atMillis)?.let { dispatcher.dispatch(it) }
     }
 
+    /**
+     * Tempo d'uso di oggi (0.8): [currentMinutes] ha raggiunto la soglia. [atMillis] è l'inizio del giorno
+     * locale, così la stessa soglia nello stesso giorno ha sempre lo stesso id e il motore non la riesegue.
+     */
+    suspend fun onAppUsage(pkg: String, previousMinutes: Int, currentMinutes: Int, atMillis: Long) {
+        parser.appUsage(pkg, previousMinutes, currentMinutes, atMillis)?.let { dispatcher.dispatch(it) }
+    }
+
     /** Il valore di partenza di [what]: nessun evento. Da chiamare prima di registrare il receiver. */
     fun setModeBaseline(what: ModeKind, value: String) {
         if (value in what.allowedValues) modes[what] = value else modes.remove(what)

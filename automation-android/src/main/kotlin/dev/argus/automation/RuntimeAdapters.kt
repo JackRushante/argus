@@ -358,7 +358,8 @@ class AndroidArmedAutomationRegistrar(
         // 0.8: la prossima sveglia passa dallo stesso coordinatore delle regole a orario.
         is Trigger.NextAlarm -> registerTime(automation)
 
-        is Trigger.AppUsage -> false
+        // 0.8: tempo d'uso di un'app, letto dalla sentinella condivisa come app_event.
+        is Trigger.AppUsage -> registerDeviceEvent(automation)
 
         is Trigger.UserModeChanged -> false
     }
