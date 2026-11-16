@@ -47,6 +47,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -170,9 +171,9 @@ fun AutomationDetailScreen(
     var pickerPackage by rememberSaveable { mutableStateOf<String?>(null) }
     val changeApp: ((AppRef) -> Unit)? = if (canChangeApp(state)) {
         { ref ->
+            // L'elenco lo carica il foglio quando compare (vedi sotto), non il tocco.
             pickerSlot = ref.slot
             pickerPackage = ref.packageName
-            callbacks.onLoadAppChoices()
         }
     } else {
         null
@@ -265,6 +266,9 @@ fun AutomationDetailScreen(
     }
     val slot = pickerSlot
     if (slot != null) {
+        // Lo slot sopravvive alla morte del processo (rememberSaveable), l'elenco no: il foglio lo carica
+        // ogni volta che compare, sia dopo un tocco su «Cambia app» sia quando si riapre da solo.
+        LaunchedEffect(slot) { callbacks.onLoadAppChoices() }
         ApprovalAppPickerSheet(
             choices = state.appChoices,
             currentPackage = pickerPackage,
