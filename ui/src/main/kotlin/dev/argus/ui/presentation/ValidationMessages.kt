@@ -718,8 +718,8 @@ object ValidationMessages {
             "L'app da aprire non è un nome di package valido (è fisso: niente \${variabile}).",
         ),
         "ui_pkg_forbidden" to t(
-            "A screen macro cannot act on Argus, on Settings, on the package installer or on permission dialogs.",
-            "Una macro sullo schermo non può agire su Argus, sulle Impostazioni, sull'installatore di pacchetti né sui dialoghi dei permessi.",
+            "A screen macro cannot act on Argus, Settings, the system interface, the package installer, the Play Store, permission, VPN or certificate dialogs, Shizuku, root managers or the phone maker's security apps.",
+            "Una macro sullo schermo non può agire su Argus, Impostazioni, interfaccia di sistema, installatore di pacchetti, Play Store, dialoghi dei permessi, della VPN o dei certificati, Shizuku, gestori root né sulle app di sicurezza del produttore.",
         ),
         // Un errore per passo (0.7.0): il numero del passo sta nel `detail` e si antepone al testo.
         "ui_step_wait_no_target" to t(
