@@ -3,6 +3,7 @@ package dev.argus.brain
 import dev.argus.engine.brain.ActResult
 import dev.argus.engine.brain.CapabilityManifest
 import dev.argus.engine.brain.CliBridgeParser
+import dev.argus.engine.brain.CompileMetaError
 import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.GenerativeContract
@@ -433,8 +434,19 @@ class OpenAICompatTransport internal constructor(
                 ActResult(text = null, metaError = REPLY_TOOL_MISSING, usage = usage)
             AgentMessageSupport.ReplyExtraction.Empty ->
                 ActResult(text = null, metaError = "empty_response", usage = usage)
+            AgentMessageSupport.ReplyExtraction.Truncated ->
+                ActResult(text = null, metaError = CompileMetaError.OUTPUT_TRUNCATED, usage = usage)
         }
     }
+
+    /** Esito dei percorsi web in testo semplice (Responses, Gemini nativo): mai un testo tagliato. */
+    private fun plainActResult(extraction: AgentMessageSupport.ReplyExtraction, usage: TurnUsage?): ActResult =
+        when (extraction) {
+            is AgentMessageSupport.ReplyExtraction.Text -> ActResult(text = extraction.value, metaError = null, usage = usage)
+            AgentMessageSupport.ReplyExtraction.Truncated ->
+                ActResult(text = null, metaError = CompileMetaError.OUTPUT_TRUNCATED, usage = usage)
+            else -> ActResult(text = null, metaError = "empty_response", usage = usage)
+        }
 
     /**
      * Web OpenAI via Responses API (`POST {base}/responses`, es. `https://api.openai.com/v1/responses`),
@@ -482,9 +494,7 @@ class OpenAICompatTransport internal constructor(
             ResponsesResponse.serializer(),
         )
         val usage = response.toTurnUsage(fallbackModel = baseModel)
-        val text = response.replyText()
-            ?: return ActResult(text = null, metaError = "empty_response", usage = usage)
-        return ActResult(text = text, metaError = null, usage = usage)
+        return plainActResult(response.replyText(), usage)
     }
 
     /**
@@ -540,9 +550,7 @@ class OpenAICompatTransport internal constructor(
             GeminiNativeResponse.serializer(),
         )
         val usage = response.toTurnUsage(fallbackModel = baseModel)
-        val text = response.replyText()
-            ?: return ActResult(text = null, metaError = "empty_response", usage = usage)
-        return ActResult(text = text, metaError = null, usage = usage)
+        return plainActResult(response.replyText(), usage)
     }
 
     /**
@@ -659,6 +667,7 @@ class OpenAICompatTransport internal constructor(
             content = message.content,
             useReplyTool = useReplyTool,
             finishedNormally = choice.finishReason == "stop",
+            truncated = choice.finishReason != null && choice.finishReason != "stop",
         )
     }
 
@@ -667,19 +676,19 @@ class OpenAICompatTransport internal constructor(
         val input = u.promptTokens ?: return null
         val output = u.completionTokens ?: return null
         if (input < 0 || output < 0) return null
-        return runCatching {
-            TurnUsage(
-                inputTokens = input,
-                outputTokens = output,
-                cachedInputTokens = u.promptTokensDetails?.cachedTokens?.takeIf { it >= 0 },
-                reasoningTokens = u.completionTokensDetails?.reasoningTokens?.takeIf { it >= 0 },
-                model = model?.takeIf { it.isNotBlank() } ?: fallbackModel,
-                finishReason = choices.firstOrNull()?.finishReason,
-                webSearches = u.serverToolUse?.webSearchRequests
-                    ?.takeIf { it in 1..TurnUsage.MAX_WEB_SEARCHES }
-                    ?.toInt(),
-            )
-        }.getOrNull()
+        // Un campo facoltativo anomalo si scarta da solo: il turno resta contato (input e output).
+        return TurnUsages.build(
+            inputTokens = input,
+            outputTokens = output,
+            model = model,
+            fallbackModel = fallbackModel,
+            cachedInputTokens = u.promptTokensDetails?.cachedTokens?.takeIf { it >= 0 },
+            reasoningTokens = u.completionTokensDetails?.reasoningTokens?.takeIf { it >= 0 },
+            finishReason = choices.firstOrNull()?.finishReason,
+            webSearches = u.serverToolUse?.webSearchRequests
+                ?.takeIf { it in 1..TurnUsage.MAX_WEB_SEARCHES }
+                ?.toInt(),
+        )
     }
 
     private fun parseChatResponse(body: String): ChatResponse = parseJson(body, ChatResponse.serializer())
@@ -694,8 +703,12 @@ class OpenAICompatTransport internal constructor(
             throw TransportException(TransportErrorKind.PROTOCOL, "risposta provider non valida", cause = error)
         }
 
-    /** Testo Responses: item `type=message` → `content[]` `type=output_text` concatenati (il resto si ignora). */
-    private fun ResponsesResponse.replyText(): String? {
+    /**
+     * Testo Responses: item `type=message` → `content[]` `type=output_text` concatenati (il resto si ignora).
+     * B5: `status` diverso da `completed` (es. `incomplete` per `max_output_tokens`) o un
+     * `incomplete_details` presente = testo tagliato, mai spedito né notificato.
+     */
+    private fun ResponsesResponse.replyText(): AgentMessageSupport.ReplyExtraction {
         val raw = output.asSequence()
             .filter { it.type == "message" }
             .flatMap { (it.content ?: emptyList()).asSequence() }
@@ -703,7 +716,8 @@ class OpenAICompatTransport internal constructor(
             .mapNotNull { it.text }
             .joinToString(separator = "")
             .takeIf { it.isNotEmpty() }
-        return plainReply(raw)
+        val truncated = status != null && status != RESPONSES_COMPLETED || incompleteDetails != null
+        return plainReply(raw, truncated)
     }
 
     private fun ResponsesResponse.toTurnUsage(fallbackModel: String): TurnUsage? {
@@ -711,30 +725,33 @@ class OpenAICompatTransport internal constructor(
         val input = u.inputTokens ?: return null
         val output = u.outputTokens ?: return null
         if (input < 0 || output < 0) return null
-        return runCatching {
-            TurnUsage(
-                inputTokens = input,
-                outputTokens = output,
-                model = model?.takeIf { it.isNotBlank() } ?: fallbackModel,
-                webSearches = this.output.count { it.type == "web_search_call" }.takeIf { it > 0 },
-            )
-        }.getOrNull()
+        return TurnUsages.build(
+            inputTokens = input,
+            outputTokens = output,
+            model = model,
+            fallbackModel = fallbackModel,
+            webSearches = this.output.count { it.type == "web_search_call" }.takeIf { it > 0 },
+        )
     }
 
-    /** Testo Gemini nativo: `candidates[0].content.parts[].text` concatenati. */
-    private fun GeminiNativeResponse.replyText(): String? {
-        val raw = candidates.firstOrNull()?.content?.parts.orEmpty()
+    /**
+     * Testo Gemini nativo: `candidates[0].content.parts[].text` concatenati. B5: un `finishReason` diverso
+     * da `STOP` (`MAX_TOKENS`, `SAFETY`, `RECITATION`…) = testo tagliato.
+     */
+    private fun GeminiNativeResponse.replyText(): AgentMessageSupport.ReplyExtraction {
+        val candidate = candidates.firstOrNull()
+        val raw = candidate?.content?.parts.orEmpty()
             .asSequence()
             .mapNotNull { it.text }
             .joinToString(separator = "")
             .takeIf { it.isNotEmpty() }
-        return plainReply(raw)
+        val reason = candidate?.finishReason
+        return plainReply(raw, truncated = reason != null && reason != GEMINI_STOP)
     }
 
-    /** Testo dei percorsi senza reply tool: senza `<think>`, e mai un ragionamento rimasto aperto. */
-    private fun plainReply(raw: String?): String? =
-        (AgentMessageSupport.extractReply(null, raw, useReplyTool = false, finishedNormally = true)
-            as? AgentMessageSupport.ReplyExtraction.Text)?.value
+    /** Testo dei percorsi senza reply tool: senza `<think>`, mai un ragionamento rimasto aperto né un testo tagliato. */
+    private fun plainReply(raw: String?, truncated: Boolean): AgentMessageSupport.ReplyExtraction =
+        AgentMessageSupport.extractReply(null, raw, useReplyTool = false, finishedNormally = !truncated, truncated = truncated)
 
     private fun GeminiNativeResponse.toTurnUsage(fallbackModel: String): TurnUsage? {
         val u = usageMetadata ?: return null
@@ -743,15 +760,14 @@ class OpenAICompatTransport internal constructor(
         if (input < 0 || candidates < 0) return null
         // I token di "pensiero" sono FATTURATI come output ma `candidatesTokenCount` non li include:
         // sommarli qui tiene allineati costo stimato e token contati.
-        val thoughts = u.thoughtsTokenCount?.takeIf { it > 0 } ?: 0L
-        return runCatching {
-            TurnUsage(
-                inputTokens = input,
-                outputTokens = candidates + thoughts,
-                reasoningTokens = thoughts.takeIf { it > 0 },
-                model = modelVersion?.takeIf { it.isNotBlank() } ?: fallbackModel,
-            )
-        }.getOrNull()
+        val thoughts = u.thoughtsTokenCount?.takeIf { it in 1..TurnUsage.MAX_TOKENS_PER_TURN } ?: 0L
+        return TurnUsages.build(
+            inputTokens = input,
+            outputTokens = candidates + thoughts,
+            model = modelVersion,
+            fallbackModel = fallbackModel,
+            reasoningTokens = thoughts.takeIf { it > 0 },
+        )
     }
 
     /**
@@ -907,6 +923,9 @@ class OpenAICompatTransport internal constructor(
         val output: List<ResponsesOutputItem> = emptyList(),
         val usage: ResponsesUsage? = null,
         val model: String? = null,
+        /** `completed`, `incomplete`, `failed`, … (B5). */
+        val status: String? = null,
+        @SerialName("incomplete_details") val incompleteDetails: JsonObject? = null,
     )
 
     @Serializable
@@ -963,7 +982,11 @@ class OpenAICompatTransport internal constructor(
     )
 
     @Serializable
-    private data class GeminiCandidate(val content: GeminiResponseContent? = null)
+    private data class GeminiCandidate(
+        val content: GeminiResponseContent? = null,
+        /** `STOP` = finito; `MAX_TOKENS`, `SAFETY`, … = tagliato (B5). */
+        val finishReason: String? = null,
+    )
 
     @Serializable
     private data class GeminiResponseContent(val parts: List<GeminiResponsePart> = emptyList())

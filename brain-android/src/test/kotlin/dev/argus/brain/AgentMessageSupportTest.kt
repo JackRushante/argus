@@ -297,6 +297,29 @@ class AgentMessageSupportTest {
     }
 
     @Test
+    fun `extractReply without the reply tool never returns a text the provider says is cut`() {
+        assertEquals(
+            AgentMessageSupport.ReplyExtraction.Truncated,
+            AgentMessageSupport.extractReply(null, "Il cambio di oggi e", false, false, truncated = true),
+        )
+        // Con il reply tool resta il comportamento di prima: contenuto mai usato come ripiego.
+        assertEquals(
+            AgentMessageSupport.ReplyExtraction.ToolMissing,
+            AgentMessageSupport.extractReply(null, "Va bene, ci", true, false, truncated = true),
+        )
+        // Il testo del reply tool è completo (argomenti JSON chiusi): resta valido.
+        assertEquals(
+            AgentMessageSupport.ReplyExtraction.Text("Ciao!"),
+            AgentMessageSupport.extractReply("Ciao!", null, false, false, truncated = true),
+        )
+        // Contenuto vuoto: è una risposta vuota.
+        assertEquals(
+            AgentMessageSupport.ReplyExtraction.Empty,
+            AgentMessageSupport.extractReply(null, " ", false, false, truncated = true),
+        )
+    }
+
+    @Test
     fun `truncation is detected only with a plausible signal and context truncation wins`() {
         // 40.000 caratteri ~ 10.000 token stimati; il server ne riporta 3.000 (< 60%).
         assertEquals(

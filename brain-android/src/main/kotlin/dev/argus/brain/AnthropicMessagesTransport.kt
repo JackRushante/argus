@@ -336,6 +336,8 @@ class AnthropicMessagesTransport internal constructor(
                 ActResult(text = null, metaError = REPLY_TOOL_MISSING, usage = usage)
             AgentMessageSupport.ReplyExtraction.Empty ->
                 ActResult(text = null, metaError = "empty_response", usage = usage)
+            AgentMessageSupport.ReplyExtraction.Truncated ->
+                ActResult(text = null, metaError = CompileMetaError.OUTPUT_TRUNCATED, usage = usage)
         }
     }
 
@@ -397,6 +399,8 @@ class AnthropicMessagesTransport internal constructor(
             content = textAfterLastSearchResult().takeIf { it.isNotEmpty() },
             useReplyTool = useReplyTool,
             finishedNormally = stopReason == "end_turn",
+            // B5: `max_tokens`, `pause_turn` (ricerca web interrotta), `refusal`… = testo non finito.
+            truncated = stopReason != null && stopReason !in COMPLETE_STOP_REASONS,
         )
     }
 
@@ -422,18 +426,18 @@ class AnthropicMessagesTransport internal constructor(
         val input = u.inputTokens ?: return null
         val output = u.outputTokens ?: return null
         if (input < 0 || output < 0) return null
-        return runCatching {
-            TurnUsage(
-                inputTokens = input,
-                outputTokens = output,
-                cachedInputTokens = u.cacheReadInputTokens?.takeIf { it >= 0 },
-                model = model?.takeIf { it.isNotBlank() } ?: fallbackModel,
-                finishReason = stopReason?.takeIf(FINISH_REASON::matches),
-                webSearches = u.serverToolUse?.webSearchRequests
-                    ?.takeIf { it in 1..TurnUsage.MAX_WEB_SEARCHES }
-                    ?.toInt(),
-            )
-        }.getOrNull()
+        // Un campo facoltativo anomalo si scarta da solo: il turno resta contato (input e output).
+        return TurnUsages.build(
+            inputTokens = input,
+            outputTokens = output,
+            model = model,
+            fallbackModel = fallbackModel,
+            cachedInputTokens = u.cacheReadInputTokens?.takeIf { it >= 0 },
+            finishReason = stopReason?.takeIf(FINISH_REASON::matches),
+            webSearches = u.serverToolUse?.webSearchRequests
+                ?.takeIf { it in 1..TurnUsage.MAX_WEB_SEARCHES }
+                ?.toInt(),
+        )
     }
 
     private fun parseResponse(body: String): MessagesResponse =
@@ -613,6 +617,9 @@ class AnthropicMessagesTransport internal constructor(
         const val COMPILE_MAX_TOKENS = 8_192
         const val WEB_SEARCH_MAX_USES = 3
         const val REPLY_TOOL_MISSING = "reply_tool_missing"
+
+        /** I `stop_reason` di un testo finito; ogni altro motivo (B5) vuol dire testo tagliato. */
+        val COMPLETE_STOP_REASONS = setOf("end_turn", "stop_sequence")
         val FINISH_REASON = Regex("^[A-Za-z0-9_.:-]{1,64}$")
         const val MAX_RESPONSE_BYTES = 512L * 1024L
         const val MAX_ERROR_BODY_BYTES = 16L * 1024L
