@@ -650,6 +650,8 @@ data class BudgetUi(
     val tokenLimitMonth: Long? = null,   // tetto TOKEN mensile globale (token-only); null = illimitato
     val perProvider: List<ProviderUsageUi> = emptyList(),
     val softWarningActive: Boolean = false,
+    /** L'utente non ha mai salvato limiti: [limitDay] è il tetto di default, spiegato sotto i contatori. */
+    val defaultLimitActive: Boolean = false,
 )
 
 interface SettingsCallbacks {
@@ -753,6 +755,8 @@ data class OnboardingState(
      * Brain mostra solo l'avviso e la verifica si rifà da Sistema.
      */
     val brainUnverified: Boolean = false,
+    /** Tetto di default delle chiamate AI al giorno, citato una volta nello step Brain; null = non citarlo. */
+    val defaultDailyAiCallLimit: Int? = null,
 )
 
 /**

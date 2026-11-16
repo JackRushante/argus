@@ -264,6 +264,7 @@ internal fun budgetUi(usage: BudgetUsageSnapshot, settings: BudgetSettings): Bud
         tokenLimitMonth = global.maxTokensPerMonth,
         perProvider = perProvider,
         softWarningActive = softActive,
+        defaultLimitActive = settings.usingDefaults,
     )
 }
 
