@@ -55,8 +55,10 @@ sealed interface ActionResolution {
  *
  * Nel comando shell (`run_shell.cmd`, [InterpolationPolicy.TemplateField.shellQuoted]) un valore
  * TAINTED non viene mai inserito grezzo: lo si rende inerte con [ShellQuoting] secondo il contesto
- * del segnaposto nel template; se il contesto non è quotabile in sicurezza l'azione è bloccata con
- * `shell_quote_context`. I valori CLEAN restano come sono.
+ * del segnaposto nel template; se il contesto non è quotabile in sicurezza (posizione del comando,
+ * comando che rilegge gli argomenti, costrutti non modellati) l'azione è bloccata con
+ * `shell_quote_context`, e un valore non intero dove la shell valuta un numero con
+ * `shell_numeric_context`. I valori CLEAN restano come sono.
  */
 class TaintAwareInterpolator {
     fun resolve(action: Action, scope: VarScope): ActionResolution {
@@ -231,10 +233,13 @@ class TaintAwareInterpolator {
                         }
                         append("{{").append(binding.token).append("}}")
                     } else if (shellContext != null && value.integrity == IntegrityLabel.TAINTED) {
-                        // D1: un dato esterno entra nel comando solo come argomento inerte.
+                        // D1: un dato esterno entra nel comando solo come argomento inerte. Dove la
+                        // shell lo valuta come numero (S2) gli apici non bastano: deve essere un intero.
                         append(
-                            ShellQuoting.render(value.text, shellContext)
-                                ?: throw ResolutionException("shell_quote_context"),
+                            ShellQuoting.render(value.text, shellContext) ?: throw ResolutionException(
+                                if (shellContext == ShellQuoting.Context.NUMERIC) "shell_numeric_context"
+                                else "shell_quote_context",
+                            ),
                         )
                     } else if (jsonInString != null) {
                         // Body JSON: dentro una stringa il valore entra come contenuto con escape (non può

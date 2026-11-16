@@ -5,6 +5,9 @@ import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.ConfidentialityLabel
 import dev.argus.engine.model.PhoneEvent
 import dev.argus.engine.model.SettingNamespace
+import dev.argus.engine.model.StateQuery
+import dev.argus.engine.model.StateQueryPolicy
+import dev.argus.engine.model.StateValueType
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.model.TriggerField
 import dev.argus.engine.model.VarBinding
@@ -108,6 +111,29 @@ class DraftValidatorSecurityWarningsTest {
     }
 
     @Test
+    fun `text read from a parametric state reader counts as external data`() {
+        val ssid = VarBinding.State(
+            "ssid",
+            StateQuery.DumpsysField("wifi", "SSID"),
+            StateValueType.TEXT,
+            StateQueryPolicy.VERSION,
+            ConfidentialityLabel.SECRET,
+        )
+        val written = draft(
+            actions = listOf(Action.WriteSetting(SettingNamespace.GLOBAL, "device_name", "\${ssid}")),
+            vars = listOf(ssid),
+        )
+        assertTrue("write_setting_external_value" in warnings(written))
+        val shell = draft(actions = listOf(Action.RunShell("sh -c \"log \${ssid}\"")), vars = listOf(ssid))
+        assertTrue("interpolation_shell_reevaluated" in errors(shell))
+        // Un numero letto dallo stesso reader resta fidato: niente avvisi sul comando.
+        val level = ssid.copy(name = "level", valueType = StateValueType.NUMBER)
+        val numeric = draft(actions = listOf(Action.RunShell("[ \${level} -gt 3 ] && sh -c \"log \${level}\"")), vars = listOf(level))
+        assertTrue(errors(numeric).none { it.startsWith("interpolation_") }, errors(numeric).toString())
+        assertFalse("interpolation_shell_numeric" in warnings(numeric))
+    }
+
+    @Test
     fun `captured shell output counts as external data for a setting`() {
         val d = draft(
             actions = listOf(
@@ -185,5 +211,47 @@ class DraftValidatorSecurityWarningsTest {
             vars = listOf(literal),
         )
         assertFalse("interpolation_shell_context" in warnings(d))
+    }
+
+    // --- S2/S3: numeri, posizione del comando, comandi che rileggono --------------------------------
+
+    @Test
+    fun `external data in command position or in a reevaluating command is an error`() {
+        for (command in listOf("\${out}", "echo hi; \${out} -x", "env \${out}")) {
+            val d = shellDraft(command)
+            assertTrue("interpolation_shell_command_position" in errors(d), command)
+        }
+        for (command in listOf("sh -c \"echo \${out}\"", "su -c '\${out}'", "eval echo \${out}", "echo \${out} | sh")) {
+            val d = shellDraft(command)
+            assertTrue("interpolation_shell_reevaluated" in errors(d), command)
+            assertFalse("interpolation_shell_context" in warnings(d), command)
+        }
+    }
+
+    @Test
+    fun `a trusted variable in command position or inside sh -c raises nothing`() {
+        val d = draft(
+            actions = listOf(Action.RunShell("\${fixed} 5; sh -c \"sleep \${fixed}\"")),
+            vars = listOf(literal),
+        )
+        assertTrue(errors(d).none { it.startsWith("interpolation_shell") }, errors(d).toString())
+        assertTrue(warnings(d).none { it.startsWith("interpolation_shell") }, warnings(d).toString())
+    }
+
+    @Test
+    fun `external data where the shell computes a number raises a whole number warning`() {
+        for (command in listOf("[ \${out} -gt 5 ] && echo big", "(( \${out} > 5 ))", "let n=\${out}")) {
+            val d = shellDraft(command)
+            assertTrue("interpolation_shell_numeric" in warnings(d), command)
+            assertTrue(errors(d).none { it.startsWith("interpolation_shell") }, command)
+        }
+        assertTrue("interpolation_shell_context" in warnings(shellDraft("[ x\${out} -eq 1 ]")))
+    }
+
+    @Test
+    fun `external data that may be read as an option raises a warning unless a double dash precedes it`() {
+        assertTrue("interpolation_shell_option" in warnings(shellDraft("rm \${out}")))
+        assertFalse("interpolation_shell_option" in warnings(shellDraft("rm -- \${out}")))
+        assertFalse("interpolation_shell_option" in warnings(shellDraft("echo x\${out}")))
     }
 }

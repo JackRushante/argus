@@ -667,18 +667,48 @@ class DraftValidator(
             // del template non è quotabile in sicurezza l'azione verrebbe bloccata: meglio dirlo ora.
             if (field.shellQuoted && !parsed.malformed) {
                 val references = InterpolationPolicy.references(field.value)
-                val contexts = ShellQuoting.contexts(field.value, references.map { it.range })
-                val unquotable = references.indices.any { index ->
+                val placements = ShellQuoting.placements(field.value, references.map { it.range })
+                val external = references.indices.filter { index ->
                     val name = references[index].name
-                    contexts[index] == ShellQuoting.Context.UNSAFE && name in knownVars &&
-                        declaredIntegrity[name] != IntegrityLabel.CLEAN
+                    name in knownVars && declaredIntegrity[name] != IntegrityLabel.CLEAN
+                }.map { placements[it] }
+                val contexts = external.mapTo(mutableSetOf()) { it.context }
+                // S3: il dato sceglierebbe il programma, o il comando lo rilegge come codice: l'azione
+                // non potrebbe mai partire, quindi è un errore.
+                if (ShellQuoting.Context.COMMAND_POSITION in contexts) {
+                    err(
+                        "interpolation_shell_command_position",
+                        "Un dato esterno è nella posizione del nome del comando: sceglierebbe quale programma parte",
+                    )
                 }
-                if (unquotable) {
+                if (ShellQuoting.Context.REEVALUATED in contexts) {
+                    err(
+                        "interpolation_shell_reevaluated",
+                        "Un dato esterno è passato a un comando che lo rilegge come codice " +
+                            "(sh -c, eval, su, xargs, awk, sed, find -exec…): gli apici non lo proteggono",
+                    )
+                }
+                if (ShellQuoting.Context.UNSAFE in contexts) {
                     warn(
                         "interpolation_shell_context",
                         "Un dato esterno è usato in un punto del comando shell che non si può quotare " +
-                            "in sicurezza (sostituzione di comando, backtick, here-doc o commento): " +
-                            "a runtime l'azione sarebbe bloccata",
+                            "in sicurezza (sostituzione di comando, backtick, here-doc, commento, nome di " +
+                            "variabile o numero con altro testo attaccato): a runtime l'azione sarebbe bloccata",
+                    )
+                }
+                // S2: dove la shell valuta un numero, solo un intero passa a runtime.
+                if (ShellQuoting.Context.NUMERIC in contexts) {
+                    warn(
+                        "interpolation_shell_numeric",
+                        "Un dato esterno è usato dove la shell calcola un numero: a runtime deve essere " +
+                            "un numero intero, altrimenti l'azione si blocca",
+                    )
+                }
+                if (external.any { it.optionLike }) {
+                    warn(
+                        "interpolation_shell_option",
+                        "Un dato esterno apre un argomento del comando senza un `--` prima: un valore che " +
+                            "inizia con `-` sarebbe letto come un'opzione",
                     )
                 }
             }

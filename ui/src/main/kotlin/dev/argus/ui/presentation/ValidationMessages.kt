@@ -322,8 +322,24 @@ object ValidationMessages {
             "I dati esterni non sono ammessi in questo campo di comando o destinazione.",
         ),
         "interpolation_shell_context" to t(
-            "External data sits where a shell command cannot quote it safely (command substitution, backticks, here-document or comment): the action would be blocked when it runs.",
-            "Un dato esterno è in un punto del comando shell dove non si può quotare in sicurezza (sostituzione di comando, backtick, here-document o commento): l'azione verrebbe bloccata all'esecuzione.",
+            "External data sits where a shell command cannot quote it safely (command substitution, backticks, here-document, comment, a variable name, or a number with other text attached): the action would be blocked when it runs.",
+            "Un dato esterno è in un punto del comando shell dove non si può quotare in sicurezza (sostituzione di comando, backtick, here-document, commento, nome di variabile o numero con altro testo attaccato): l'azione verrebbe bloccata all'esecuzione.",
+        ),
+        "interpolation_shell_command_position" to t(
+            "External data is in the command name position: it would choose which program runs. Write the command name literally.",
+            "Un dato esterno è al posto del nome del comando: sceglierebbe quale programma parte. Scrivi il nome del comando per esteso.",
+        ),
+        "interpolation_shell_reevaluated" to t(
+            "External data goes to a command that reads it again as code (sh -c, eval, su, xargs, awk, sed, find -exec…): quotes cannot protect it, so the action could never run.",
+            "Un dato esterno va a un comando che lo rilegge come codice (sh -c, eval, su, xargs, awk, sed, find -exec…): gli apici non lo proteggono, quindi l'azione non potrebbe mai partire.",
+        ),
+        "interpolation_shell_numeric" to t(
+            "External data is used where the shell computes a number: when the rule runs it must be a whole number, otherwise the action is blocked.",
+            "Un dato esterno è usato dove la shell calcola un numero: quando la regola gira deve essere un numero intero, altrimenti l'azione si blocca.",
+        ),
+        "interpolation_shell_option" to t(
+            "External data starts a command argument with no \"--\" before it: a value starting with \"-\" would be read as an option.",
+            "Un dato esterno apre un argomento del comando senza \"--\" prima: un valore che inizia con \"-\" verrebbe letto come un'opzione.",
         ),
         "secret_interpolation_disclosure" to t(
             "A secret variable will be sent to the configured AI service.",
