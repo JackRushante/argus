@@ -1,0 +1,243 @@
+[
+ {
+  "id": "X01-intent-broadcast",
+  "title": "send_intent: un broadcast con azione ed extra parte dall'app",
+  "cond": "none",
+  "rule": {
+   "name": "X01-intent-broadcast",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "send_intent",
+     "kind": "BROADCAST",
+     "action": "dev.example.e2e.PING",
+     "extras": [
+      {
+       "name": "run",
+       "type": "STRING",
+       "value": "e2e X01"
+      },
+      {
+       "name": "count",
+       "type": "INT",
+       "value": "1"
+      }
+     ]
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "status": "SUCCEEDED",
+    "actions": [
+     "send_intent:SUCCEEDED"
+    ]
+   }
+  }
+ },
+ {
+  "id": "X02-intent-to-argus",
+  "title": "send_intent: un Intent rivolto ad Argus stesso e' rifiutato in approvazione",
+  "cond": "none",
+  "rule": {
+   "name": "X02-intent-to-argus",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "send_intent",
+     "kind": "ACTIVITY",
+     "pkg": "dev.argus",
+     "cls": "dev.argus.MainActivity"
+    }
+   ]
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "intent_target_forbidden"
+    }
+   }
+  }
+ },
+ {
+  "id": "X03-intent-call-action",
+  "title": "send_intent: l'azione CALL e' vietata (niente chiamate da un Intent)",
+  "cond": "none",
+  "rule": {
+   "name": "X03-intent-call-action",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "send_intent",
+     "kind": "ACTIVITY",
+     "action": "android.intent.action.CALL",
+     "data": "tel:+393331112222"
+    }
+   ]
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "intent_action_forbidden"
+    }
+   }
+  }
+ },
+ {
+  "id": "X07-sms-needs-permission",
+  "title": "send_sms: senza il permesso SMS concesso la regola non si arma (permesso solo su richiesta)",
+  "cond": "none",
+  "rule": {
+   "name": "X07-sms-needs-permission",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "send_sms",
+     "number": "+15555215554",
+     "text": "e2e X07"
+    }
+   ]
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "capability_unavailable",
+     "detail": "action.send_sms"
+    }
+   }
+  }
+ },
+ {
+  "id": "X08-sms-to-text-variable",
+  "title": "send_sms: il destinatario non puo' venire dal testo di un SMS, solo dal numero di chi scrive",
+  "cond": "none",
+  "rule": {
+   "name": "X08-sms-to-text-variable",
+   "trigger": {
+    "type": "phone_state",
+    "event": "SMS_RECEIVED"
+   },
+   "vars": [
+    {
+     "type": "trigger_payload",
+     "name": "body",
+     "field": "TEXT",
+     "extractionRegex": null,
+     "confidentiality": "PRIVATE"
+    }
+   ],
+   "actions": [
+    {
+     "type": "send_sms",
+     "number": "${body}",
+     "text": "ok"
+    }
+   ]
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "sms_number_not_sender"
+    }
+   }
+  }
+ },
+ {
+  "id": "X09-call-ussd",
+  "title": "call_number: codici * e # (USSD, deviazione) rifiutati",
+  "cond": "none",
+  "rule": {
+   "name": "X09-call-ussd",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "call_number",
+     "number": "*21*3331112222#"
+    }
+   ]
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "call_number_invalid"
+    }
+   }
+  }
+ },
+ {
+  "id": "X10-call-needs-permission",
+  "title": "call_number: senza il permesso chiamate la regola non si arma",
+  "cond": "none",
+  "rule": {
+   "name": "X10-call-needs-permission",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "call_number",
+     "number": "+15555215554"
+    }
+   ]
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "capability_unavailable",
+     "detail": "action.call_number"
+    }
+   }
+  }
+ },
+ {
+  "id": "X12-screen-needs-role",
+  "title": "screen_call: senza il ruolo di filtro chiamate la regola non si arma",
+  "cond": "none",
+  "rule": {
+   "name": "X12-screen-needs-role",
+   "trigger": {
+    "type": "phone_state",
+    "event": "INCOMING_CALL"
+   },
+   "conditions": {
+    "type": "time_window",
+    "startLocal": "00:00",
+    "endLocal": "23:59",
+    "tz": "Europe/Rome"
+   },
+   "actions": [
+    {
+     "type": "screen_call",
+     "op": "SILENCE",
+     "onlyUnknownCallers": false
+    }
+   ]
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "capability_unavailable",
+     "detail": "action.screen_call"
+    }
+   }
+  }
+ }
+]

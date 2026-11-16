@@ -108,7 +108,7 @@ class ValidationTest(unittest.TestCase):
     def test_switched_off_types_only_prove_their_rejection(self):
         rule = self.valid()
         rule["rule"]["trigger"] = {"type": "nfc_tag", "tagId": "04:AA"}
-        rule["rule"]["actions"] = [{"type": "send_sms", "number": "+39", "text": "x"}]
+        rule["rule"]["actions"] = [{"type": "notification_action", "op": "DISMISS"}]
         problems = suite.validate([rule])
         self.assertTrue(any("trigger spento" in p for p in problems))
         self.assertTrue(any("azione spenta" in p for p in problems))
