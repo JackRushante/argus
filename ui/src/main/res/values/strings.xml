@@ -316,6 +316,41 @@
     <string name="backup_working_import">Importing…</string>
     <string name="backup_open_rules">See the rules</string>
     <string name="backup_dismiss">Close</string>
+    <!-- Encrypted import and automatic backup (0.7.2) -->
+    <string name="backup_import_encrypted_body">This backup is encrypted. Enter the passphrase it was made with.</string>
+    <string name="backup_import_passphrase_field">Backup passphrase</string>
+    <string name="backup_import_open">Open</string>
+    <string name="backup_auto_title">Automatic backup</string>
+    <string name="backup_auto_body">Saves an encrypted copy of your rules to a folder you choose, for example one that a sync app such as Nextcloud uploads. It runs at night, without you.</string>
+    <string name="backup_auto_switch_on_cd">Turn on automatic backup</string>
+    <string name="backup_auto_switch_off_cd">Turn off automatic backup</string>
+    <string name="backup_auto_needs_setup">Choose a folder and set a passphrase to turn it on.</string>
+    <string name="backup_auto_folder_label">Folder</string>
+    <string name="backup_auto_folder_none">No folder chosen</string>
+    <string name="backup_auto_folder_choose">Choose folder</string>
+    <string name="backup_auto_folder_change">Change folder</string>
+    <string name="backup_auto_frequency_label">How often</string>
+    <string name="backup_auto_daily">Every day</string>
+    <string name="backup_auto_weekly">Every week</string>
+    <string name="backup_auto_passphrase_label">Passphrase</string>
+    <string name="backup_auto_passphrase_set">Set</string>
+    <string name="backup_auto_passphrase_missing">Not set</string>
+    <string name="backup_auto_passphrase_add">Set passphrase</string>
+    <string name="backup_auto_passphrase_change">Change passphrase</string>
+    <string name="backup_auto_passphrase_working">Preparing the key…</string>
+    <string name="backup_auto_never">No backup yet.</string>
+    <string name="backup_auto_retention">Argus keeps the 7 newest backups it wrote in that folder and never touches other files.</string>
+    <string name="backup_auto_run_now">Back up now</string>
+    <string name="backup_auto_running">Backing up…</string>
+    <string name="backup_passphrase_sheet_title">Backup passphrase</string>
+    <string name="backup_passphrase_sheet_body">Your backups are encrypted with this passphrase, and you need it to restore them on a new phone. Argus does not keep it. If you forget it, nobody can recover it and the backups cannot be opened.</string>
+    <string name="backup_passphrase_change_note">Backups already made stay readable with the passphrase they were made with.</string>
+    <string name="backup_passphrase_field">New passphrase</string>
+    <string name="backup_passphrase_confirm_field">Repeat the passphrase</string>
+    <string name="backup_passphrase_too_short">At least 8 characters.</string>
+    <string name="backup_passphrase_mismatch">The two passphrases do not match.</string>
+    <string name="backup_passphrase_save">Save</string>
+    <string name="backup_passphrase_cancel">Cancel</string>
 
     <!-- 0.4.0 blocco UI (prefisso ui40_) -->
     <string name="ui40_chat_clear_title">Clear the conversation?</string>

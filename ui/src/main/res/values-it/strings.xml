@@ -315,6 +315,41 @@
     <string name="backup_working_import">Importazione in corso…</string>
     <string name="backup_open_rules">Vedi le regole</string>
     <string name="backup_dismiss">Chiudi</string>
+    <!-- Import cifrato e backup automatico (0.7.2) -->
+    <string name="backup_import_encrypted_body">Questo backup è cifrato. Inserisci la passphrase con cui è stato fatto.</string>
+    <string name="backup_import_passphrase_field">Passphrase del backup</string>
+    <string name="backup_import_open">Apri</string>
+    <string name="backup_auto_title">Backup automatico</string>
+    <string name="backup_auto_body">Salva una copia cifrata delle regole in una cartella che scegli, per esempio quella che un\'app di sincronizzazione come Nextcloud carica. Parte di notte, senza di te.</string>
+    <string name="backup_auto_switch_on_cd">Attiva il backup automatico</string>
+    <string name="backup_auto_switch_off_cd">Disattiva il backup automatico</string>
+    <string name="backup_auto_needs_setup">Scegli una cartella e imposta una passphrase per attivarlo.</string>
+    <string name="backup_auto_folder_label">Cartella</string>
+    <string name="backup_auto_folder_none">Nessuna cartella scelta</string>
+    <string name="backup_auto_folder_choose">Scegli cartella</string>
+    <string name="backup_auto_folder_change">Cambia cartella</string>
+    <string name="backup_auto_frequency_label">Frequenza</string>
+    <string name="backup_auto_daily">Ogni giorno</string>
+    <string name="backup_auto_weekly">Ogni settimana</string>
+    <string name="backup_auto_passphrase_label">Passphrase</string>
+    <string name="backup_auto_passphrase_set">Impostata</string>
+    <string name="backup_auto_passphrase_missing">Non impostata</string>
+    <string name="backup_auto_passphrase_add">Imposta passphrase</string>
+    <string name="backup_auto_passphrase_change">Cambia passphrase</string>
+    <string name="backup_auto_passphrase_working">Preparazione della chiave…</string>
+    <string name="backup_auto_never">Nessun backup ancora.</string>
+    <string name="backup_auto_retention">Argus tiene gli ultimi 7 backup che ha scritto in quella cartella e non tocca gli altri file.</string>
+    <string name="backup_auto_run_now">Esegui backup ora</string>
+    <string name="backup_auto_running">Backup in corso…</string>
+    <string name="backup_passphrase_sheet_title">Passphrase del backup</string>
+    <string name="backup_passphrase_sheet_body">I backup sono cifrati con questa passphrase e ti serve per ripristinarli su un nuovo telefono. Argus non la conserva. Se la dimentichi nessuno può recuperarla e i backup non si possono più aprire.</string>
+    <string name="backup_passphrase_change_note">I backup già fatti restano leggibili con la passphrase con cui sono stati fatti.</string>
+    <string name="backup_passphrase_field">Nuova passphrase</string>
+    <string name="backup_passphrase_confirm_field">Ripeti la passphrase</string>
+    <string name="backup_passphrase_too_short">Almeno 8 caratteri.</string>
+    <string name="backup_passphrase_mismatch">Le due passphrase non coincidono.</string>
+    <string name="backup_passphrase_save">Salva</string>
+    <string name="backup_passphrase_cancel">Annulla</string>
 
     <!-- 0.4.0 blocco UI (prefisso ui40_) -->
     <string name="ui40_chat_clear_title">Svuotare la conversazione?</string>
