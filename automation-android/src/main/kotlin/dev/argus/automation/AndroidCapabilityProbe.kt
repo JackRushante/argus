@@ -671,7 +671,12 @@ class AndroidCapabilityProbe internal constructor(
          * quindi il probe può pubblicare SIGNIFICANT_MOTION quando hardware e mode combaciano. Gli
          * altri kind restano fuori finché non hanno un backend proprio (P3-2C).
          */
-        val IMPLEMENTED_SENSOR_KINDS: Set<SensorKind> = setOf(SensorKind.SIGNIFICANT_MOTION)
+        val IMPLEMENTED_SENSOR_KINDS: Set<SensorKind> = setOf(
+            SensorKind.SIGNIFICANT_MOTION,
+            // 0.8: gesti dall'accelerometro ([dev.argus.automation.sensor.AndroidGestureSensorBackend]).
+            SensorKind.SHAKE,
+            SensorKind.FLIP_FACE_DOWN,
+        )
         const val REASON_NOTIFICATION_LISTENER = "notification access not granted"
 
         /**
@@ -688,8 +693,6 @@ class AndroidCapabilityProbe internal constructor(
             CapabilityIds.TRIGGER_NEXT_ALARM,
             CapabilityIds.TRIGGER_APP_USAGE,
             CapabilityIds.TRIGGER_USER_MODE_CHANGED,
-            CapabilityIds.triggerSensor(SensorKind.SHAKE),
-            CapabilityIds.triggerSensor(SensorKind.FLIP_FACE_DOWN),
             CapabilityIds.STATE_WIFI_CONNECTED,
             CapabilityIds.STATE_BLUETOOTH_CONNECTED,
             CapabilityIds.STATE_HEADSET_CONNECTED,

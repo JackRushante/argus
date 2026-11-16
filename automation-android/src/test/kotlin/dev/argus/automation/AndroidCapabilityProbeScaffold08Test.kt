@@ -9,14 +9,12 @@ import dev.argus.engine.model.Action
 import dev.argus.engine.model.ActionTypeIds
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.AutomationId
-import dev.argus.engine.model.CapabilityIds
 import dev.argus.engine.model.HttpMethod
 import dev.argus.engine.model.IntentKind
 import dev.argus.engine.model.NotificationActionOp
 import dev.argus.engine.model.OutputKind
 import dev.argus.engine.model.OutputSpec
 import dev.argus.engine.model.ScreenCallOp
-import dev.argus.engine.model.SensorKind
 import dev.argus.engine.model.StoredOp
 import dev.argus.engine.runtime.ActionResult
 import dev.argus.engine.runtime.DeviceState
@@ -92,7 +90,6 @@ class AndroidCapabilityProbeScaffold08Test {
 
     private val newTriggers = setOf(
         "calendar_event", "nfc_tag", "next_alarm", "app_usage", "user_mode_changed",
-        "sensor.${SensorKind.SHAKE.wireName}", "sensor.${SensorKind.FLIP_FACE_DOWN.wireName}",
     )
 
     @Test
@@ -114,7 +111,6 @@ class AndroidCapabilityProbeScaffold08Test {
             AndroidCapabilityProbe.NOT_YET_AVAILABLE_CAPABILITIES.associateWith { BlockCause.NOT_AVAILABLE_YET },
             probe.blockCauses(AndroidCapabilityProbe.NOT_YET_AVAILABLE_CAPABILITIES),
         )
-        assertTrue(CapabilityIds.triggerSensor(SensorKind.SHAKE) in AndroidCapabilityProbe.NOT_YET_AVAILABLE_CAPABILITIES)
     }
 
     @Test

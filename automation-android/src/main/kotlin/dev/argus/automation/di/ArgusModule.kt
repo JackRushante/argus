@@ -121,6 +121,8 @@ import dev.argus.automation.triggers.EngineDeviceEventDispatcher
 import dev.argus.automation.triggers.PrefsBatteryLevelStore
 import dev.argus.engine.device.DeviceEventParser
 import dev.argus.automation.sensor.AndroidSignificantMotionBackend
+import dev.argus.automation.sensor.AndroidGestureSensorBackend
+import dev.argus.automation.sensor.CompositeSensorTriggerBackend
 import dev.argus.automation.sensor.EligibleSensorRule
 import dev.argus.automation.sensor.PrefsSensorDetectionStore
 import dev.argus.automation.sensor.SensorDetectionStore
@@ -129,6 +131,7 @@ import dev.argus.automation.sensor.SensorEventIngress
 import dev.argus.automation.sensor.SensorTriggerBackend
 import dev.argus.automation.sensor.SensorTriggerCoordinator
 import dev.argus.automation.sensor.SensorTriggerRuntime
+import dev.argus.engine.model.SensorKind
 import dev.argus.engine.model.Trigger
 import dev.argus.automation.ShizukuStaticShellRunner
 import dev.argus.automation.StateQueryProbe
@@ -1232,8 +1235,28 @@ object ArgusModule {
     ): AndroidSignificantMotionBackend =
         AndroidSignificantMotionBackend(context, scope) { kind -> ingress.get().onSensorTriggered(kind) }
 
+    /** 0.8: doppia scossa e faccia in giù, dall'accelerometro e solo a schermo acceso. */
     @Provides
-    fun sensorTriggerBackendBoundary(backend: AndroidSignificantMotionBackend): SensorTriggerBackend = backend
+    @Singleton
+    fun gestureSensorBackend(
+        @ApplicationContext context: Context,
+        @ApplicationScope scope: CoroutineScope,
+        ingress: Provider<SensorEventIngress>,
+    ): AndroidGestureSensorBackend =
+        AndroidGestureSensorBackend(context, scope) { kind -> ingress.get().onSensorTriggered(kind) }
+
+    @Provides
+    @Singleton
+    fun sensorTriggerBackendBoundary(
+        backend: AndroidSignificantMotionBackend,
+        gestures: AndroidGestureSensorBackend,
+    ): SensorTriggerBackend = CompositeSensorTriggerBackend(
+        mapOf(
+            SensorKind.SIGNIFICANT_MOTION to backend,
+            SensorKind.SHAKE to gestures,
+            SensorKind.FLIP_FACE_DOWN to gestures,
+        ),
+    )
 
     @Provides
     @Singleton
