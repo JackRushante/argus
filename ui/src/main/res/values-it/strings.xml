@@ -121,6 +121,7 @@
     <string name="chat_input_sending">In attesa della risposta…</string>
     <string name="chat_input_placeholder">Chiedi una regola…</string>
     <string name="chat_send">Invia</string>
+    <string name="chat_dictate">Detta</string>
 
     <!-- Lista automazioni -->
     <string name="list_title">Automazioni</string>

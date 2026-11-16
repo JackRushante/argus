@@ -144,6 +144,8 @@ data class ChatState(
      * norma, 0-180 s per un server locale). `null` = non noto: la barra usa l'asse standard.
      */
     val sendingTimeoutSec: Int? = null,
+    /** 0.7.2: c'è un riconoscitore vocale di sistema; senza, il microfono del campo non compare. */
+    val dictationAvailable: Boolean = false,
 )
 
 sealed interface ChatItem {
@@ -212,6 +214,11 @@ interface ChatCallbacks {
      * Default no-op per i vecchi host: il NavHost deve cablarla su `ChatViewModel.onCopyRawResponse()`.
      */
     fun onCopyRawResponse() {}
+    /**
+     * Microfono del campo (0.7.2): apre il riconoscitore vocale di sistema. Il testo riconosciuto torna
+     * nel campo tramite [onInputChange] e non viene mai inviato da solo. Default no-op per i vecchi host.
+     */
+    fun onDictate() {}
 }
 
 // --- 6.2 Automazioni · lista ---

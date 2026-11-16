@@ -30,6 +30,11 @@
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>
+        <!-- 0.7.2: il riconoscitore vocale di sistema per la dettatura in chat. Registra la sua activity,
+             non Argus: nessun permesso RECORD_AUDIO. -->
+        <intent>
+            <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
+        </intent>
     </queries>
 
     <application

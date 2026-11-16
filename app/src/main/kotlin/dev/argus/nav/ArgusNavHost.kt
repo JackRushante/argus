@@ -100,6 +100,7 @@ import dev.argus.ui.model.SettingsCallbacks
 import dev.argus.ui.model.ShizukuStatus
 import dev.argus.ui.model.StatusFilter
 import dev.argus.ui.model.StepKind
+import dev.argus.ui.presentation.ChatDictation
 import dev.argus.ui.screens.AutomationDetailScreen
 import dev.argus.ui.screens.AutomationListScreen
 import dev.argus.ui.screens.ChatScreen
@@ -299,6 +300,14 @@ fun ArgusNavHost() {
     val importRulesFile = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri -> settingsViewModel.importRules(uri) }
+    // Dettatura nella chat (0.7.2): il testo riconosciuto si accoda al campo, mai inviato da solo.
+    val dictationUnavailable = stringResource(R.string.dictation_unavailable)
+    val dictation = rememberSpeechDictation(
+        onRecognised = { text ->
+            chatViewModel.onInputChange(ChatDictation.merge(chatViewModel.state.value.input, text))
+        },
+        onUnavailable = { showMessage(dictationUnavailable) },
+    )
     val openShizukuDownload = {
         openIntent(Intent(Intent.ACTION_VIEW, Uri.parse(SHIZUKU_DOWNLOAD_URL)))
     }
@@ -358,7 +367,7 @@ fun ArgusNavHost() {
             ) {
                 composable(Routes.CHAT) {
                     ChatScreen(
-                        state = chatState,
+                        state = chatState.copy(dictationAvailable = dictation.available),
                         callbacks = object : ChatCallbacks {
                             override fun onInputChange(text: String) = chatViewModel.onInputChange(text)
                             override fun onSend() = chatViewModel.onSend()
@@ -371,6 +380,7 @@ fun ArgusNavHost() {
                             override fun onCheckConnection() = chatViewModel.refreshHealth()
                             override fun onOpenSystem() = switchTop(Routes.SETTINGS)
                             override fun onCopyRawResponse() = chatViewModel.onCopyRawResponse()
+                            override fun onDictate() = dictation.launch()
                         },
                         modifier = Modifier.testTag("screen_chat"),
                     )
