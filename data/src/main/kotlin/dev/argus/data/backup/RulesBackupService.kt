@@ -4,6 +4,7 @@ import android.net.Uri
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.CreatedBy
+import dev.argus.engine.model.IntegrityLabel
 import dev.argus.engine.model.toDraft
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.safety.DraftId
@@ -64,6 +65,15 @@ interface RulesBackup {
     fun preview(bytes: ByteArray): ImportPreview
 }
 
+/** 0.8: modalità e valori conservati per il backup (Room in produzione). */
+interface BackupStateAccess {
+    /** Lo stato completo: tutte le modalità, quella attiva e tutti i valori con le loro etichette. */
+    suspend fun export(): BackupState
+
+    /** Ripristino additivo (vedi `RoomUserModeStore.restore` e `RoomStoredValueStore.restore`). */
+    suspend fun restore(state: BackupState)
+}
+
 /** Derivazione della chiave di un file cifrato: lenta (600 000 iterazioni), fuori dal thread principale. */
 fun interface BackupKeyDeriver {
     suspend fun derive(passphrase: CharArray, salt: ByteArray): ByteArray
@@ -97,6 +107,14 @@ class RulesBackupService(
      * versione da condividere senza dati personali non le scrive (un'etichetta può dire «Moglie»).
      */
     private val labels: suspend () -> Map<String, List<String>> = { emptyMap() },
+    /**
+     * 0.8: modalità e valori conservati. L'export completo li scrive; quello senza dati personali solo i nomi
+     * delle modalità. Si ripristinano soltanto da [import] e [importEncrypted] (file scelto in Sistema), mai da
+     * [importBytes] (testo incollato o ricevuto da un'altra app). Da un file in chiaro, che chiunque può
+     * modificare, ogni valore torna TAINTED; da un backup cifrato con la passphrase dell'utente le etichette
+     * restano quelle salvate. Null = nessuno stato (test e caller precedenti).
+     */
+    private val state: BackupStateAccess? = null,
 ) : RulesBackup {
 
     override suspend fun export(destination: Uri, stripPersonalData: Boolean): ExportOutcome {
@@ -159,10 +177,20 @@ class RulesBackupService(
                 labels = labelsById[automation.id.value].orEmpty(),
             )
         }
+        // 0.8: come le etichette, uno stato illeggibile non impedisce il backup delle regole.
+        val fullState = try {
+            state?.export() ?: BackupState()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            BackupState()
+        }
+        val exportedState = if (stripPersonalData) BackupState(modes = fullState.modes) else fullState
         val bytes = RulesBackupCodec.encode(
             rules = rules,
             exportedAt = Instant.ofEpochMilli(nowMillis()).toString(),
             appVersion = appVersion() ?: "unknown",
+            state = exportedState,
         ).toByteArray(Charsets.UTF_8)
         if (bytes.size > RulesBackupFormat.MAX_FILE_BYTES) {
             return BuiltBackup.Failed(BackupFailure.EXPORT_TOO_LARGE)
@@ -176,7 +204,7 @@ class RulesBackupService(
             is ImportRead.Bytes -> read.bytes
         }
         if (EncryptedBackupFormat.hasMagic(bytes)) return ImportOutcome.Failed(BackupFailure.PASSPHRASE_REQUIRED)
-        return importBytes(bytes)
+        return importParsed(bytes, StateRestore.UNTRUSTED_LABELS)
     }
 
     override suspend fun read(source: Uri): DocumentRead = when (val read = readImport(source)) {
@@ -191,7 +219,7 @@ class RulesBackupService(
         }
         val salt = when (val header = EncryptedBackupFormat.header(bytes)) {
             // Non cifrato (il file è cambiato dopo la scelta): si importa come sempre.
-            EncryptedBackupFormat.Header.WrongMagic -> return importBytes(bytes)
+            EncryptedBackupFormat.Header.WrongMagic -> return importParsed(bytes, StateRestore.UNTRUSTED_LABELS)
             EncryptedBackupFormat.Header.Truncated -> return ImportOutcome.Failed(BackupFailure.ENCRYPTED_DAMAGED)
             is EncryptedBackupFormat.Header.Valid -> header.salt
         }
@@ -208,12 +236,16 @@ class RulesBackupService(
             key.fill(0)
         }
         return when (opened) {
-            is EncryptedBackupFormat.Opened.Plain -> importBytes(opened.bytes)
+            // Il file si è aperto con la passphrase dell'utente (AEAD): le etichette salvate valgono.
+            is EncryptedBackupFormat.Opened.Plain -> importParsed(opened.bytes, StateRestore.TRUSTED_LABELS)
             EncryptedBackupFormat.Opened.WrongKeyOrDamaged -> ImportOutcome.Failed(BackupFailure.WRONG_PASSPHRASE)
             EncryptedBackupFormat.Opened.Truncated -> ImportOutcome.Failed(BackupFailure.ENCRYPTED_DAMAGED)
-            EncryptedBackupFormat.Opened.WrongMagic -> importBytes(bytes)
+            EncryptedBackupFormat.Opened.WrongMagic -> importParsed(bytes, StateRestore.UNTRUSTED_LABELS)
         }
     }
+
+    /** 0.8: se e come ripristinare modalità e valori conservati di un file importato. */
+    private enum class StateRestore { NONE, UNTRUSTED_LABELS, TRUSTED_LABELS }
 
     private sealed interface ImportRead {
         class Bytes(val bytes: ByteArray) : ImportRead
@@ -253,11 +285,15 @@ class RulesBackupService(
         )
     }
 
-    override suspend fun importBytes(bytes: ByteArray): ImportOutcome {
+    /** Testo incollato o ricevuto da un'altra app: solo regole, mai modalità o valori conservati. */
+    override suspend fun importBytes(bytes: ByteArray): ImportOutcome = importParsed(bytes, StateRestore.NONE)
+
+    private suspend fun importParsed(bytes: ByteArray, restore: StateRestore): ImportOutcome {
         val parsed = when (val outcome = parse(bytes)) {
             is Parsed.Failed -> return ImportOutcome.Failed(outcome.failure)
             is Parsed.Rules -> outcome
         }
+        restoreState(parsed.state, restore)
         val accepted = parsed.accepted
         val discarded = LinkedHashMap(parsed.discarded)
         fun discard(reason: RuleDiscardReason) {
@@ -298,9 +334,31 @@ class RulesBackupService(
         return ImportOutcome.Done(ImportSummary(imported = draftIds.size, discarded = discarded), draftIds)
     }
 
+    /** Modalità e valori sono un'aggiunta: se il ripristino non riesce, le bozze delle regole restano. */
+    private suspend fun restoreState(fileState: BackupState, restore: StateRestore) {
+        val target = state ?: return
+        if (restore == StateRestore.NONE || fileState.isEmpty) return
+        val restored = if (restore == StateRestore.TRUSTED_LABELS) {
+            fileState
+        } else {
+            fileState.copy(values = fileState.values.map { it.copy(integrity = IntegrityLabel.TAINTED) })
+        }
+        try {
+            target.restore(restored)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            Unit
+        }
+    }
+
     private sealed interface Parsed {
         data class Failed(val failure: BackupFailure) : Parsed
-        data class Rules(val accepted: List<BackupRule>, val discarded: Map<RuleDiscardReason, Int>) : Parsed
+        data class Rules(
+            val accepted: List<BackupRule>,
+            val discarded: Map<RuleDiscardReason, Int>,
+            val state: BackupState = BackupState(),
+        ) : Parsed
     }
 
     /** Limite, UTF-8 stretto e decodifica stretta: l'unica lettura del contenuto, per l'import e l'anteprima. */
@@ -310,10 +368,11 @@ class RulesBackupService(
         // Un backup cifrato non si legge senza passphrase: lo si dice, non lo si scambia per un file rovinato.
         if (EncryptedBackupFormat.hasMagic(bytes)) return Parsed.Failed(BackupFailure.PASSPHRASE_REQUIRED)
         val text = decodeUtf8(bytes) ?: return Parsed.Failed(BackupFailure.NOT_JSON)
-        val entries = when (val decoded = RulesBackupCodec.decode(text)) {
-            is DecodedBackup.Rejected -> return Parsed.Failed(decoded.failure)
-            is DecodedBackup.Entries -> decoded.entries
+        val decoded = when (val result = RulesBackupCodec.decode(text)) {
+            is DecodedBackup.Rejected -> return Parsed.Failed(result.failure)
+            is DecodedBackup.Entries -> result
         }
+        val entries = decoded.entries
         val discarded = linkedMapOf<RuleDiscardReason, Int>()
         val accepted = ArrayList<BackupRule>(entries.size)
         for (entry in entries) {
@@ -322,7 +381,7 @@ class RulesBackupService(
                 is DecodedEntry.Discarded -> discarded[entry.reason] = (discarded[entry.reason] ?: 0) + 1
             }
         }
-        return Parsed.Rules(accepted, discarded)
+        return Parsed.Rules(accepted, discarded, decoded.state)
     }
 
     private fun decodeUtf8(bytes: ByteArray): String? = try {

@@ -19,7 +19,8 @@ import kotlinx.serialization.json.put
 /** Esito della lettura del file: o un rifiuto dell'intero file, o una voce per ogni regola. */
 sealed interface DecodedBackup {
     data class Rejected(val failure: BackupFailure) : DecodedBackup
-    data class Entries(val entries: List<DecodedEntry>) : DecodedBackup
+    /** [state] (0.8): modalità e valori conservati del file, se ne ha (vedi [BackupState]). */
+    data class Entries(val entries: List<DecodedEntry>, val state: BackupState = BackupState()) : DecodedBackup
 }
 
 sealed interface DecodedEntry {
@@ -43,7 +44,13 @@ object RulesBackupCodec {
      * [pretty] = false (0.7.2) scrive lo stesso documento senza spazi né a capo: è la forma del codice QR
      * di una regola condivisa, che ogni import legge come il file indentato.
      */
-    fun encode(rules: List<BackupRule>, exportedAt: String, appVersion: String, pretty: Boolean = true): String {
+    fun encode(
+        rules: List<BackupRule>,
+        exportedAt: String,
+        appVersion: String,
+        pretty: Boolean = true,
+        state: BackupState = BackupState(),
+    ): String {
         val root = buildJsonObject {
             put("format", RulesBackupFormat.FORMAT)
             put("version", RulesBackupFormat.VERSION)
@@ -81,6 +88,8 @@ object RulesBackupCodec {
                     },
                 )
             }
+            // 0.8: modalità e valori conservati, chiavi omesse se vuote (vedi BackupState).
+            BackupStateCodec.encodeInto(this, state)
         }
         return (if (pretty) prettyJson else compactJson).encodeToString(JsonElement.serializer(), root)
     }
@@ -142,6 +151,7 @@ object RulesBackupCodec {
                     is DecodedEntry.Discarded -> entry
                 }
             },
+            state = BackupStateCodec.decode(obj),
         )
     }
 
