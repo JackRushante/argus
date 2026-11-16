@@ -92,7 +92,11 @@ sealed interface VarBinding {
         override val confidentiality: ConfidentialityLabel,
     ) : VarBinding
 
-    /** Reader locale approvato: integrità CLEAN, tipo/versione/floor P3 espliciti. */
+    /**
+     * Reader locale approvato, tipo/versione/floor P3 espliciti. L'integrità dipende da cosa si legge
+     * (v. [integrity]): il testo dei lettori parametrici può venire da altri (nome della rete, titolo
+     * del brano, nome di un dispositivo Bluetooth) ed è TAINTED.
+     */
     @Serializable
     @SerialName("state")
     data class State(
@@ -148,9 +152,18 @@ sealed interface VarBinding {
     }
 }
 
+/**
+ * Integrità calcolata dal binding approvato, mai serializzata: cambiarla non tocca le impronte.
+ * Uno stato è CLEAN solo se il suo valore non può portare testo scelto da altri: un reader `builtin`
+ * (valori enumerati) oppure un tipo NUMBER/BOOLEAN, che l'interprete inserisce in forma canonica.
+ * Il testo di `setting`, `system_property`, `sysfs` e `dumpsys_field` è TAINTED.
+ */
 val VarBinding.integrity: IntegrityLabel
     get() = when (this) {
-        is VarBinding.Literal, is VarBinding.State, is VarBinding.RandomInt -> IntegrityLabel.CLEAN
+        is VarBinding.Literal, is VarBinding.RandomInt -> IntegrityLabel.CLEAN
+        is VarBinding.State ->
+            if (query is StateQuery.Builtin || valueType != StateValueType.TEXT) IntegrityLabel.CLEAN
+            else IntegrityLabel.TAINTED
         is VarBinding.TriggerPayload -> IntegrityLabel.TAINTED
         is VarBinding.ClockTime -> IntegrityLabel.CLEAN
     }

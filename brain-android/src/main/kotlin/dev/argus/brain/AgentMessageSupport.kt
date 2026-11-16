@@ -823,7 +823,8 @@ VarBinding, discriminated by "type":
 - {"type":"literal", "name":string, "value":string, "varType":"TEXT"|"NUMBER"|"BOOLEAN",
    "confidentiality":"PUBLIC"|"PRIVATE"|"SECRET"}   // trusted constant, integrity CLEAN
 - {"type":"state", "name":string, "query":StateQuery, "valueType":"TEXT"|"NUMBER"|"BOOLEAN",
-   "policyVersion":1, "confidentiality":"PUBLIC"|"PRIVATE"|"SECRET"}   // local reader, integrity CLEAN
+   "policyVersion":1, "confidentiality":"PUBLIC"|"PRIVATE"|"SECRET"}   // local reader: integrity CLEAN
+   // for builtin readers and NUMBER/BOOLEAN; TEXT from setting/system_property/sysfs/dumpsys_field is TAINTED
 - {"type":"trigger_payload", "name":string, "field":"TEXT"|"TITLE"|"SENDER"|"NUMBER",
    "extractionRegex":string|null, "confidentiality":"PUBLIC"|"PRIVATE"|"SECRET"}
    // EXTERNAL payload of the trigger (SMS/notification): integrity TAINTED, confidentiality >= PRIVATE.

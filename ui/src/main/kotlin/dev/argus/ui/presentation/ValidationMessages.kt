@@ -426,8 +426,8 @@ object ValidationMessages {
             "Questa regola cambia un'impostazione di sicurezza del telefono (debug, accessibilità, tastiera o verifica delle app). Armala solo se sai cosa fa.",
         ),
         "write_setting_external_value" to t(
-            "The value written comes from external data (a message or notification).",
-            "Il valore scritto arriva da un dato esterno (messaggio o notifica).",
+            "The value written comes from external data (a message, a notification or text read from the phone).",
+            "Il valore scritto arriva da un dato esterno (messaggio, notifica o testo letto dal telefono).",
         ),
 
         // --- Azioni generative ----------------------------------------------------------------

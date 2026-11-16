@@ -704,7 +704,8 @@ class DraftValidator(
                 }
             }
         }
-        // D2: la scrittura di un'impostazione guidata da un dato esterno (messaggio o notifica).
+        // D2: la scrittura di un'impostazione guidata da un dato esterno (messaggio, notifica, testo
+        // letto dal telefono, uscita catturata).
         if (action is Action.WriteSetting) {
             val external = InterpolationPolicy.textFields(action)
                 .flatMap { InterpolationPolicy.parse(it.value).refs }
@@ -712,7 +713,7 @@ class DraftValidator(
             if (external) {
                 warn(
                     "write_setting_external_value",
-                    "Il valore scritto arriva da un dato esterno (messaggio o notifica).",
+                    "Il valore scritto arriva da un dato esterno (messaggio, notifica o testo letto dal telefono).",
                 )
             }
         }
