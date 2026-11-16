@@ -344,7 +344,7 @@ class RuleRenderMapperTest {
 
         assertTrue(render.privacyNote.orEmpty().contains("reader di stato"))
         assertTrue(render.actions.single().detail.orEmpty().contains("dumpsys battery · campo voltage"))
-        assertTrue(render.actions.single().detail.orEmpty().contains("CLEAN, SECRET"))
+        assertTrue(render.actions.single().detail.orEmpty().contains("attendibile, segreto"))
     }
 
     @Test fun `nested generative v2 receives the state disclosure privacy note`() {
@@ -387,7 +387,7 @@ class RuleRenderMapperTest {
         )
         val r = RuleRenderMapper.map(a, language = RenderLanguage.IT)
         assertEquals("time", r.triggerIconKey)
-        assertTrue(r.triggerLine.startsWith("Cron '"), r.triggerLine)
+        assertTrue(r.triggerLine.startsWith("Pianificazione cron '"), r.triggerLine)
         assertTrue(r.triggerLine.contains("*/15 9-17 * * 1-5"), r.triggerLine)
     }
 
@@ -444,13 +444,13 @@ class RuleRenderMapperTest {
         )
         val it = RuleRenderMapper.map(rule, language = RenderLanguage.IT).actions.single()
         assertEquals("Imposta modalità scura", it.label)
-        assertEquals("on", it.detail)
+        assertEquals("attivata", it.detail)
         val en = RuleRenderMapper.map(
             rule.copy(actions = listOf(Action.SetDarkMode(NightMode.AUTO))),
             language = RenderLanguage.EN,
         ).actions.single()
         assertEquals("Set dark mode", en.label)
-        assertEquals("auto", en.detail)
+        assertEquals("automatic", en.detail)
     }
 
     @Test fun `sms trigger renders its text filter integrally`() {

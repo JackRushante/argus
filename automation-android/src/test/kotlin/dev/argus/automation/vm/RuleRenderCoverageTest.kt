@@ -493,7 +493,7 @@ class RuleRenderCoverageTest {
                 ),
                 mapOf(
                     "name" to ms("xyz_st"),
-                    "query" to ms("GLOBAL:xyz_setting_key"),
+                    "query" to ms("global:xyz_setting_key"),
                     "valueType" to ms(m("boolean", "booleano")),
                     "confidentiality" to ms(m("private", "privato")),
                 ),
@@ -580,7 +580,7 @@ class RuleRenderCoverageTest {
             "builtin" to case(StateQuery.Builtin("XYZ-bk"), mapOf("key" to ms("XYZ-bk"))),
             "setting" to case(
                 StateQuery.Setting(SettingNamespace.SECURE, "XYZ-sk"),
-                mapOf("namespace" to ms("SECURE"), "key" to ms("XYZ-sk")),
+                mapOf("namespace" to ms("secure"), "key" to ms("XYZ-sk")),
             ),
             "system_property" to case(StateQuery.SystemProperty("XYZ-prop"), mapOf("name" to ms("XYZ-prop"))),
             "sysfs" to case(StateQuery.Sysfs("/sys/xyz/node"), mapOf("path" to ms("/sys/xyz/node"))),
@@ -670,16 +670,16 @@ class RuleRenderCoverageTest {
             ),
             "set_volume" to case(
                 Action.SetVolume(VolumeStream.ALARM, 73),
-                mapOf("stream" to ms("alarm"), "level" to ms("73")),
+                mapOf("stream" to ms(m("alarm", "sveglia")), "level" to ms("73%")),
             ),
             "set_flashlight" to case(
                 v(Action.SetFlashlight(true), "on" to ms(m("Turn on flashlight", "Accendi torcia"))),
                 v(Action.SetFlashlight(false), "on" to ms(m("Turn off flashlight", "Spegni torcia"))),
             ),
-            "set_dark_mode" to case(Action.SetDarkMode(NightMode.AUTO), mapOf("mode" to ms("auto"))),
+            "set_dark_mode" to case(Action.SetDarkMode(NightMode.AUTO), mapOf("mode" to ms(m("automatic", "automatica")))),
             "open_settings_screen" to case(
                 Action.OpenSettingsScreen(SettingsScreen.APP_DETAILS, "com.xyz.settings"),
-                mapOf("screen" to ms("app_details"), "pkg" to ms("com.xyz.settings")),
+                mapOf("screen" to ms(m("App info", "Informazioni app")), "pkg" to ms("com.xyz.settings")),
             ),
             "vibrate" to case(Action.Vibrate(4242), mapOf("durationMs" to ms("4242 ms"))),
             "write_setting" to case(
@@ -738,7 +738,7 @@ class RuleRenderCoverageTest {
                 ),
                 mapOf(
                     "goal" to ms("XYZ-goal2"),
-                    "stateContext" to ms("XYZ-ctxkey", "CLEAN", "SECRET"),
+                    "stateContext" to ms(m("XYZ-ctxkey"), m("trusted", "attendibile"), m("secret", "segreto")),
                     "allowedTools" to ms("xyz.tool2"),
                     "replyTargetSender" to ms(m("reply bound to the sender", "risposta vincolata al mittente")),
                     "captureAs" to ms("xyz_cap2"),

@@ -18,6 +18,8 @@ import dev.argus.engine.model.InterpolationPolicy
 import dev.argus.engine.model.NightMode
 import dev.argus.engine.model.PhoneEvent
 import dev.argus.engine.model.SensorKind
+import dev.argus.engine.model.SettingsScreen
+import dev.argus.engine.model.VolumeStream
 import dev.argus.engine.model.StateQuery
 import dev.argus.engine.model.StateValueType
 import dev.argus.engine.model.TimePrecision
@@ -708,7 +710,7 @@ object RuleRenderMapper {
         )
         is Action.SetRinger -> row(
             iconKey = "ringer",
-            label = l.pick("Set ringer (${a.mode})", "Imposta suoneria (${a.mode})"),
+            label = l.pick("Set ringer mode: ", "Imposta la suoneria: ") + ringerModeLabel(a.mode, l),
         )
         is Action.LaunchApp -> row(
             iconKey = "launch_app",
@@ -790,27 +792,28 @@ object RuleRenderMapper {
         is Action.SetVolume -> row(
             iconKey = "volume",
             label = l.pick("Set volume", "Imposta volume"),
-            detail = "${a.stream.name.lowercase()} · ${l.pick("level", "livello")} ${a.level}",
+            // B14: il livello è una percentuale del massimo dello stream.
+            detail = "${volumeStreamLabel(a.stream, l)} · ${a.level}%",
         )
         is Action.SetFlashlight -> row(
             iconKey = "flashlight",
             label = if (a.on) l.pick("Turn on flashlight", "Accendi torcia")
             else l.pick("Turn off flashlight", "Spegni torcia"),
-            detail = if (a.on) "on" else "off",
+            detail = if (a.on) l.pick("on", "accesa") else l.pick("off", "spenta"),
         )
         is Action.SetDarkMode -> row(
             iconKey = "settings",
             label = l.pick("Set dark mode", "Imposta modalità scura"),
             detail = when (a.mode) {
-                NightMode.OFF -> l.pick("off", "off")
-                NightMode.ON -> l.pick("on", "on")
-                NightMode.AUTO -> l.pick("auto", "auto")
+                NightMode.OFF -> l.pick("off", "disattivata")
+                NightMode.ON -> l.pick("on", "attivata")
+                NightMode.AUTO -> l.pick("automatic", "automatica")
             },
         )
         is Action.OpenSettingsScreen -> row(
             iconKey = "settings",
             label = l.pick("Open Settings", "Apri Impostazioni"),
-            detail = a.screen.name.lowercase() +
+            detail = settingsScreenLabel(a.screen, l) +
                 (a.pkg?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""),
         )
         is Action.Vibrate -> row(
@@ -871,7 +874,7 @@ object RuleRenderMapper {
                 append(
                     a.stateContext.joinToString("; ") { context ->
                         "${queryLabel(context.query, l)} [${valueTypeLabel(context.valueType, l)}, " +
-                            "${context.integrity.name}, ${context.confidentiality.name}]"
+                            "${integrityLabel(context.integrity, l)}, ${confidentialityLabel(context.confidentiality, l)}]"
                     },
                 )
                 append(l.pick(" · tools: ", " · tool: "))
@@ -961,9 +964,43 @@ object RuleRenderMapper {
         if (contextSources.isEmpty()) {
             ""
         } else {
-            val joined = contextSources.joinToString(", ")
+            val joined = contextSources.joinToString(", ") { contextSourceLabel(it, l) }
             l.pick(" · context: $joined", " · contesto: $joined")
         }
+
+    /** B14: le fonti note hanno un nome nella lingua dell'utente; una sconosciuta resta com'è scritta. */
+    private fun contextSourceLabel(source: String, l: RenderLanguage): String = when (source) {
+        GenerativeContract.CONTEXT_NOTIFICATION -> l.pick("notification text", "testo della notifica")
+        GenerativeContract.CONTEXT_STATE -> l.pick("device state", "stato del dispositivo")
+        else -> source
+    }
+
+    /** B14: modalità della suoneria per nome; un valore fuori elenco (il validator lo rifiuta) resta tra virgolette. */
+    private fun ringerModeLabel(mode: String, l: RenderLanguage): String = when (mode) {
+        "normal" -> l.pick("sound", "suono")
+        "vibrate" -> l.pick("vibrate", "vibrazione")
+        "silent" -> l.pick("silent", "silenzioso")
+        else -> "\"$mode\""
+    }
+
+    private fun volumeStreamLabel(stream: VolumeStream, l: RenderLanguage): String = when (stream) {
+        VolumeStream.MEDIA -> l.pick("media", "contenuti multimediali")
+        VolumeStream.RING -> l.pick("ringtone", "suoneria")
+        VolumeStream.ALARM -> l.pick("alarm", "sveglia")
+        VolumeStream.NOTIFICATION -> l.pick("notifications", "notifiche")
+    }
+
+    private fun settingsScreenLabel(screen: SettingsScreen, l: RenderLanguage): String = when (screen) {
+        SettingsScreen.WIFI -> "Wi-Fi"
+        SettingsScreen.BLUETOOTH -> "Bluetooth"
+        SettingsScreen.DISPLAY -> l.pick("Display", "Schermo")
+        SettingsScreen.SOUND -> l.pick("Sound", "Suoni")
+        SettingsScreen.LOCATION -> l.pick("Location", "Posizione")
+        SettingsScreen.BATTERY -> l.pick("Battery", "Batteria")
+        SettingsScreen.DATE -> l.pick("Date and time", "Data e ora")
+        SettingsScreen.APP_DETAILS -> l.pick("App info", "Informazioni app")
+        SettingsScreen.SETTINGS -> l.pick("Main settings", "Impostazioni principali")
+    }
 
     /**
      * S8: per un URL letterale, la riga con l'host che il link apre davvero (dopo un eventuale `utente@`),
@@ -1028,7 +1065,7 @@ object RuleRenderMapper {
                 }
             }
         }
-        return "Cron '$expr' ($tz)"
+        return l.pick("Cron schedule '$expr' ($tz)", "Pianificazione cron '$expr' ($tz)")
     }
 
     private fun weekdayName(dow: String, l: RenderLanguage): String? = when (dow.toIntOrNull()) {
@@ -1059,8 +1096,11 @@ object RuleRenderMapper {
 
     private fun queryLabel(query: StateQuery, l: RenderLanguage): String = when (query) {
         is StateQuery.Builtin -> l.pick("state ${query.key}", "stato ${query.key}")
-        is StateQuery.Setting -> "setting ${query.namespace.name}:${query.key}"
-        is StateQuery.SystemProperty -> "property ${query.name}"
+        is StateQuery.Setting -> l.pick(
+            "setting ${query.namespace.name.lowercase()}:${query.key}",
+            "impostazione ${query.namespace.name.lowercase()}:${query.key}",
+        )
+        is StateQuery.SystemProperty -> l.pick("system property ${query.name}", "proprietà di sistema ${query.name}")
         is StateQuery.Sysfs -> "sysfs ${query.path}"
         is StateQuery.DumpsysField -> l.pick(
             "dumpsys ${query.service} · field ${query.field}",

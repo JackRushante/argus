@@ -128,6 +128,67 @@ class ApprovalRenderFidelityTest {
         assertEquals("1 ora e 30 minuti", detailOf(Action.SetTimer(seconds = 5_400), RenderLanguage.IT))
     }
 
+    @Test
+    fun `volume is a percentage of a named stream`() {
+        assertEquals("media · 7%", detailOf(Action.SetVolume(VolumeStream.MEDIA, 7), RenderLanguage.EN))
+        assertEquals("suoneria · 40%", detailOf(Action.SetVolume(VolumeStream.RING, 40), RenderLanguage.IT))
+    }
+
+    @Test
+    fun `no raw wire names reach the italian approval`() {
+        val it = RenderLanguage.IT
+        assertEquals("Imposta la suoneria: vibrazione", labelOf(Action.SetRinger("vibrate"), it))
+        assertEquals("Set ringer mode: silent", labelOf(Action.SetRinger("silent"), RenderLanguage.EN))
+        assertEquals("accesa", detailOf(Action.SetFlashlight(true), it))
+        assertEquals("spenta", detailOf(Action.SetFlashlight(false), it))
+        assertEquals("automatica", detailOf(Action.SetDarkMode(NightMode.AUTO), it))
+        assertEquals(
+            "Informazioni app · com.example.app",
+            detailOf(Action.OpenSettingsScreen(SettingsScreen.APP_DETAILS, "com.example.app"), it),
+        )
+        assertEquals("App info", detailOf(Action.OpenSettingsScreen(SettingsScreen.APP_DETAILS), RenderLanguage.EN))
+
+        val context = detailOf(
+            Action.InvokeLlm("riassumi", listOf("notification", "state"), emptyList(), false),
+            it,
+        )
+        assertTrue(context.contains("contesto: testo della notifica, stato del dispositivo"), context)
+
+        val v2 = detailOf(
+            Action.InvokeLlmV2(
+                goal = "rispondi",
+                stateContext = listOf(
+                    ApprovedStateContext(
+                        StateQuery.Setting(SettingNamespace.GLOBAL, "airplane_mode_on"),
+                        StateValueType.BOOLEAN,
+                        StateQueryPolicy.VERSION,
+                        IntegrityLabel.CLEAN,
+                        ConfidentialityLabel.SECRET,
+                    ),
+                    ApprovedStateContext(
+                        StateQuery.SystemProperty("ro.build.version.sdk"),
+                        StateValueType.NUMBER,
+                        StateQueryPolicy.VERSION,
+                        IntegrityLabel.TAINTED,
+                        ConfidentialityLabel.PUBLIC,
+                    ),
+                ),
+                allowedTools = emptyList(),
+                replyTargetSender = true,
+                timeoutMs = 60_000,
+            ),
+            it,
+        )
+        assertTrue(v2.contains("impostazione global:airplane_mode_on [booleano, attendibile, segreto]"), v2)
+        assertTrue(v2.contains("proprietà di sistema ro.build.version.sdk [numero, esterno, pubblico]"), v2)
+        listOf("CLEAN", "TAINTED", "SECRET", "PUBLIC", "GLOBAL", "setting ", "property ").forEach { raw ->
+            assertFalse(v2.contains(raw), "«$raw» grezzo in: $v2")
+        }
+
+        val cron = render(rule(trigger = Trigger.Time(cron = "*/15 9-17 * * 1-5", tz = "Europe/Rome")), it).triggerLine
+        assertTrue(cron.startsWith("Pianificazione cron '*/15 9-17 * * 1-5' (Europe/Rome)"), cron)
+    }
+
     // --- S8: while e letterali -------------------------------------------------------------------
 
     @Test
