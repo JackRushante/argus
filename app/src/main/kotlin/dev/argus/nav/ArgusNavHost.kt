@@ -89,6 +89,7 @@ import dev.argus.data.backup.RulesBackupFormat
 import dev.argus.shizuku.ShizukuGatewayStatus
 import dev.argus.ui.components.LocalShellPrivilege
 import dev.argus.ui.components.shellPrivilegeOf
+import dev.argus.ui.model.AutoBackupFrequencyUi
 import dev.argus.ui.model.AutomationDetailCallbacks
 import dev.argus.ui.model.AutomationListCallbacks
 import dev.argus.ui.model.ChatCallbacks
@@ -299,6 +300,10 @@ fun ArgusNavHost() {
     val importRulesFile = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri -> settingsViewModel.importRules(uri) }
+    // Backup automatico (0.7.2): la cartella la sceglie l'utente; il permesso persistente lo prende il VM.
+    val chooseAutoBackupFolder = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree(),
+    ) { uri -> settingsViewModel.chooseAutoBackupFolder(uri) }
     val openShizukuDownload = {
         openIntent(Intent(Intent.ACTION_VIEW, Uri.parse(SHIZUKU_DOWNLOAD_URL)))
     }
@@ -607,6 +612,19 @@ fun ArgusNavHost() {
                                 settingsViewModel.dismissBackupResult()
                                 switchTop(Routes.LIST)
                             }
+                            override fun onSubmitImportPassphrase(passphrase: String) =
+                                settingsViewModel.submitImportPassphrase(passphrase)
+                            override fun onSetAutoBackupEnabled(enabled: Boolean) =
+                                settingsViewModel.setAutoBackupEnabled(enabled)
+                            override fun onChooseAutoBackupFolder() {
+                                runCatching { chooseAutoBackupFolder.launch(null) }
+                                    .onFailure { showMessage(backupPickerUnavailable) }
+                            }
+                            override fun onSetAutoBackupFrequency(frequency: AutoBackupFrequencyUi) =
+                                settingsViewModel.setAutoBackupFrequency(frequency)
+                            override fun onSetAutoBackupPassphrase(passphrase: String) =
+                                settingsViewModel.setAutoBackupPassphrase(passphrase)
+                            override fun onRunAutoBackupNow() = settingsViewModel.runAutoBackupNow()
                             override fun onSetAutomationsPaused(paused: Boolean) =
                                 settingsViewModel.setAutomationsPaused(paused)
                             override fun onSetResponseTimeout(minutes: Int) =
