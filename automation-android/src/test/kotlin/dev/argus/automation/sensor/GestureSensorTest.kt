@@ -1,6 +1,7 @@
 package dev.argus.automation.sensor
 
 import dev.argus.engine.model.SensorKind
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
@@ -119,7 +120,7 @@ class GestureSensorTest {
     fun `sensors run only while a rule wants them and the screen is on`() = runTest {
         val driver = FakeDriver(screenOn = false)
         val fired = mutableListOf<SensorKind>()
-        val backend = AndroidGestureSensorBackend(driver, this + UnconfinedTestDispatcher(testScheduler)) { fired += it }
+        val backend = AndroidGestureSensorBackend(driver, CoroutineScope(UnconfinedTestDispatcher(testScheduler))) { fired += it }
 
         assertEquals(SensorRegistrationOutcome.Registered, backend.register(SensorKind.SHAKE))
         // Schermo spento: solo il receiver, nessun sensore.
