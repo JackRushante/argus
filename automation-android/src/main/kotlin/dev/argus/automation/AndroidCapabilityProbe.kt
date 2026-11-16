@@ -301,6 +301,8 @@ class AndroidCapabilityProbe internal constructor(
         add("immediate")
         // 0.4.1: avvio manuale, sempre armabile (nessuna dipendenza OS o grant).
         add("manual")
+        // 0.8: cambio di modalità utente, evento interno all'app (nessun grant).
+        add("user_mode_changed")
         if (state.notificationListenerGranted) add("notification")
         if (state.locationUsable) add("geofence")
         if (state.receiveSmsGranted) add("phone_state.sms")
@@ -446,6 +448,8 @@ class AndroidCapabilityProbe internal constructor(
             add(CapabilityIds.TRIGGER_IMMEDIATE)
             // 0.4.1: avvio manuale, stesso regime dell'immediato: nessun grant, parte da un gesto.
             add(CapabilityIds.TRIGGER_MANUAL)
+            // 0.8: valori conservati e modalità vivono nel database di Argus: nessun grant, sempre disponibili.
+            addAll(STORED_MODE_CAPABILITIES)
             // Geofence e SSID richiedono permessi E servizi di localizzazione accesi: con la
             // posizione spenta dalle impostazioni rapide non funzionano (blocco temporaneo, D6).
             if (state.locationUsable) add(CapabilityIds.TRIGGER_GEOFENCE)
@@ -543,6 +547,9 @@ class AndroidCapabilityProbe internal constructor(
             add(ActionTypeIds.WHILE)
             add(ActionTypeIds.COPY_TO_CLIPBOARD)
             add(ActionTypeIds.COPY_TEXT)
+            // 0.8: valori conservati e modalità, sempre disponibili.
+            add(ActionTypeIds.SET_STORED)
+            add(ActionTypeIds.SET_USER_MODE)
             addAll(BASE_ALARM_ACTION_TYPES)
             addAll(BASE_MANAGER_ACTION_TYPES)
             addAll(BASE_ACTIONS_041_TYPES)
@@ -687,18 +694,13 @@ class AndroidCapabilityProbe internal constructor(
             CapabilityIds.TRIGGER_NFC_TAG,
             CapabilityIds.TRIGGER_NEXT_ALARM,
             CapabilityIds.TRIGGER_APP_USAGE,
-            CapabilityIds.TRIGGER_USER_MODE_CHANGED,
             CapabilityIds.triggerSensor(SensorKind.SHAKE),
             CapabilityIds.triggerSensor(SensorKind.FLIP_FACE_DOWN),
             CapabilityIds.STATE_WIFI_CONNECTED,
             CapabilityIds.STATE_BLUETOOTH_CONNECTED,
             CapabilityIds.STATE_HEADSET_CONNECTED,
             CapabilityIds.STATE_CALENDAR_BUSY,
-            CapabilityIds.STATE_STORED,
-            CapabilityIds.STATE_USER_MODE,
             CapabilityIds.ACTION_ASK,
-            CapabilityIds.ACTION_SET_STORED,
-            CapabilityIds.ACTION_SET_USER_MODE,
             CapabilityIds.ACTION_NOTIFICATION_REPLY,
             CapabilityIds.ACTION_NOTIFICATION_ACTION,
             CapabilityIds.ACTION_SEND_SMS,
@@ -706,6 +708,15 @@ class AndroidCapabilityProbe internal constructor(
             CapabilityIds.ACTION_SEND_INTENT,
             CapabilityIds.ACTION_SCREEN_CALL,
             CapabilityIds.ACTION_HTTP_REQUEST_SECRETS,
+        )
+
+        /** 0.8: valori conservati e modalità utente (database di Argus, nessun permesso). */
+        val STORED_MODE_CAPABILITIES: Set<String> = setOf(
+            CapabilityIds.TRIGGER_USER_MODE_CHANGED,
+            CapabilityIds.STATE_STORED,
+            CapabilityIds.STATE_USER_MODE,
+            CapabilityIds.ACTION_SET_STORED,
+            CapabilityIds.ACTION_SET_USER_MODE,
         )
 
         /** Trigger di sistema senza Shizuku (0.4.1): schermo, batteria, uscita audio, modalità, media. */

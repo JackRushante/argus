@@ -43,4 +43,11 @@
     <string name="pause_tile_label">Pausa automazioni</string>
     <string name="pause_tile_on">In pausa</string>
     <string name="pause_tile_off">Attive</string>
+    <!-- 0.8: modalità sul riquadro rapido e sul widget -->
+    <string name="mode_tile_label">Argus: modalità</string>
+    <string name="mode_tile_none">Nessuna modalità</string>
+    <string name="mode_tile_empty">Aggiungi le modalità in Argus</string>
+    <string name="mode_widget_active">✓ %1$s</string>
+    <string name="mode_toast_switched">Modalità: %1$s</string>
+    <string name="mode_toast_unavailable">Questa modalità non è più disponibile.</string>
 </resources>

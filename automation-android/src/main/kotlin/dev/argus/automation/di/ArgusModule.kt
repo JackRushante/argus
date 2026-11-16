@@ -324,12 +324,15 @@ object ArgusModule {
         repository: RoomDraftRepository,
         installInfo: AppInstallInfo,
         labelStore: RoomRuleLabelStore,
+        backupState: dev.argus.data.RoomBackupState,
     ): RulesBackupService = RulesBackupService(
         automations = store,
         drafts = repository,
         documents = ContentResolverDocumentIo(context),
         appVersion = { installInfo.versionName },
         labels = { labelStore.snapshot() },
+        // 0.8: modalità e valori conservati nel backup completo.
+        state = backupState,
     )
 
     /** 0.7.2: modelli di regola negli asset dell'app (galleria «Modelli»). */
@@ -580,6 +583,7 @@ object ArgusModule {
         location: CurrentLocationProvider,
         root: RootAccess,
         usageForeground: ForegroundAppSource,
+        persistentState: dev.argus.automation.PersistentStateReader,
     ): LazyDeviceStateProvider = LazyDeviceStateProvider(
         reader,
         gateway,
@@ -591,6 +595,8 @@ object ArgusModule {
             gateway.status() == dev.argus.shizuku.ShizukuGatewayStatus.AUTHORIZED || root.isActive()
         },
         usageForeground = usageForeground,
+        // 0.8: valori conservati e modalità.
+        persistentState = persistentState,
     )
 
     @Provides
@@ -919,6 +925,7 @@ object ArgusModule {
         directSettings: DirectSettings,
         privilegedActions: PrivilegedActionRunner,
         uiSteps: UiStepsRunner,
+        storedModes: dev.argus.engine.runtime.StoredModeActions,
     ): ShizukuActionExecutor =
         ShizukuActionExecutor(
             tools,
@@ -948,6 +955,8 @@ object ArgusModule {
             privilegedActions = privilegedActions,
             // 0.5.1: macro sullo schermo con il servizio di Accessibilità.
             uiSteps = uiSteps,
+            // 0.8: set_stored e set_user_mode.
+            storedModes = storedModes,
         )
 
     @Provides
@@ -1465,6 +1474,7 @@ object ArgusModule {
         stateQueries: StateQueryProbe,
         audit: AuditSink,
         installedApps: InstalledAppCatalog,
+        userModes: dev.argus.data.RoomUserModeStore,
     ): ApprovalFlow = ApprovalFlow(
         drafts,
         approvals,
@@ -1475,6 +1485,8 @@ object ArgusModule {
         stateQueries,
         audit,
         installedPackages = installedApps,
+        // 0.8: le modalità nominate da una regola devono esistere all'approvazione.
+        userModes = { userModes.snapshot().modes },
     )
 
     @Provides

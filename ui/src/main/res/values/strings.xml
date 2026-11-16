@@ -204,6 +204,49 @@
 
     <!-- Sistema (settings) -->
     <string name="settings_title">System</string>
+    <!-- 0.8: System › Modes (modes and saved variables) -->
+    <string name="settings_modes_title">Modes and variables</string>
+    <string name="settings_modes_subtitle">Active mode, your modes and the variables rules keep between runs</string>
+    <string name="modes_title">Modes</string>
+    <string name="modes_active_label">Active mode</string>
+    <string name="modes_none_active">No mode is active.</string>
+    <string name="modes_switch_hint">You can also change it from the quick settings tile and the widget.</string>
+    <string name="modes_switch_cd">Switch to the mode %1$s</string>
+    <string name="modes_list_label">Your modes</string>
+    <string name="modes_empty">Add your first mode, for example Home or Work.</string>
+    <string name="modes_condition_rules_none">No rule uses it as a condition</string>
+    <plurals name="modes_condition_rules">
+        <item quantity="one">%1$d rule uses it as a condition</item>
+        <item quantity="other">%1$d rules use it as a condition</item>
+    </plurals>
+    <string name="modes_edit_cd">Edit the mode %1$s</string>
+    <string name="modes_add">Add mode</string>
+    <string name="modes_add_limit">You can have at most 12 modes.</string>
+    <string name="modes_add_title">New mode</string>
+    <string name="modes_edit_title">Edit mode</string>
+    <string name="modes_name_label">Name</string>
+    <string name="modes_name_hint">1 to 24 characters, for example Home, Work, Night.</string>
+    <plurals name="modes_review_warning">
+        <item quantity="one">%1$d rule that uses it will go to “needs review”.</item>
+        <item quantity="other">%1$d rules that use it will go to “needs review”.</item>
+    </plurals>
+    <string name="modes_delete">Delete mode</string>
+    <string name="modes_delete_title">Delete the mode %1$s?</string>
+    <string name="modes_delete_unused">No rule uses it.</string>
+    <string name="modes_values_label">Saved variables</string>
+    <string name="modes_values_empty">No saved variables. Rules that keep a value between runs show it here.</string>
+    <string name="modes_value_hidden">Hidden value</string>
+    <string name="modes_value_open_cd">Correct or delete %1$s</string>
+    <string name="modes_value_title">Variable %1$s</string>
+    <string name="modes_value_label">Value</string>
+    <string name="modes_value_secret_hint">The current value is hidden: type a new one to replace it.</string>
+    <string name="modes_value_clean_hint">A value you type counts as trusted.</string>
+    <string name="modes_value_true">true</string>
+    <string name="modes_value_false">false</string>
+    <string name="modes_value_delete">Delete variable</string>
+    <string name="modes_value_delete_title">Delete %1$s?</string>
+    <string name="modes_value_delete_body">Rules that read it will find it missing and stop.</string>
+    <string name="modes_footer">A rule reads or changes modes and variables only if the rule you approved says so. Tap a variable to correct its value or delete it.</string>
     <string name="settings_section_health">HEALTH</string>
     <string name="settings_section_transport">BRAIN · TRANSPORT</string>
     <string name="settings_section_privacy">PRIVACY</string>

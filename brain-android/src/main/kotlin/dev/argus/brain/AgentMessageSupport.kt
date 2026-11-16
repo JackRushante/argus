@@ -691,9 +691,16 @@ Trigger, discriminated by "type":
 - {"type":"manual"}  // runs ONLY when the user starts it by hand, any number of times: a button, a widget,
   a Home-screen shortcut or a quick-settings tile. Use it ONLY when the user asks for one of those.
   Doing something now, or a request with no trigger at all, is "immediate", never "manual".
+- {"type":"user_mode_changed", "to":string|null}  // the user's mode (e.g. Home, Work, Night) changes to
+  "to" (the mode name as the user says it, 1-24 chars; null = any change); fires once per real change.
+  It can never start run_shell or ui_steps.
 
 Condition, discriminated by "type":
 - {"type":"time_window", "startLocal":"HH:mm", "endLocal":"HH:mm", "tz":string}
+- {"type":"stored_compare", "key":string, "valueType":"TEXT"|"NUMBER"|"BOOLEAN",
+   "op":"EQ"|"NEQ"|"GT"|"LT"|"CONTAINS", "expected":string}  // a value kept between runs (see set_stored);
+   // TEXT: EQ/NEQ/CONTAINS, NUMBER: EQ/NEQ/GT/LT, BOOLEAN: EQ/NEQ with "true"/"false". Missing = not met.
+- {"type":"user_mode_is", "mode":string}  // the user's active mode is this one (name as the user says it)
 - {"type":"state_equals", "key":string, "op":"EQ"|"NEQ"|"GT"|"LT"|"CONTAINS",
    "value":string}
   A battery threshold ("below 30%", "above 80%") is state_equals with key "battery", op "LT" or
@@ -736,6 +743,13 @@ Action, discriminated by "type":
    text; for OTPs use "(?:^|[^+0-9])([0-9]{4,8})(?:[^0-9]|${'$'})")}
 - {"type":"copy_text", "text":string}  // copies a LITERAL approved string to the clipboard; unlike
   copy_to_clipboard it needs no textual trigger. text supports ${'$'}{var} interpolation
+- {"type":"set_stored", "key":string, "op":"SET"|"INCREMENT"|"TOGGLE"|"CLEAR", "value":string|null,
+   "valueType":"TEXT"|"NUMBER"|"BOOLEAN"|null}  // keeps a value BETWEEN runs (a counter, a last date).
+   // key: [a-z][a-z0-9_]{0,31}. SET writes value (max 1024 chars, supports ${'$'}{var}) as valueType (null =
+   // TEXT); INCREMENT adds the literal integer value (null = 1) starting from 0; TOGGLE flips a boolean starting
+   // from false; CLEAR deletes it. TOGGLE/CLEAR take no value; only SET takes valueType.
+- {"type":"set_user_mode", "mode":string}  // switches the user's mode (e.g. Home, Work): the literal name
+   // as the user says it, 1-24 chars; the mode must exist in the app
 - {"type":"set_alarm", "hour":integer 0-23, "minute":integer 0-59, "label":string|null,
    "skipUi":boolean}  // sets the clock's real ALARM (not a notification); skipUi=true
    normally so the clock app is not opened
@@ -850,6 +864,10 @@ VarBinding, discriminated by "type":
    // TEXT with the time AT FIRE TIME, in tz (IANA id like "Asia/Makassar"; null = the phone's zone),
    // formatted by pattern (Java DateTimeFormatter, max 40 chars; null = "HH:mm"; "d MMMM yyyy" = date).
    // Integrity CLEAN. Use it as ${'$'}{name} for the current time or date in any text.
+- {"type":"stored", "name":string, "key":string, "valueType":"TEXT"|"NUMBER"|"BOOLEAN",
+   "confidentiality":"PUBLIC"|"PRIVATE"|"SECRET"}
+   // the value kept between runs under key (written by set_stored), read ONCE at the start of the run with the
+   // labels it was saved with (a value that came from outside stays TAINTED). Missing key = the rule stops.
 
 "captureAs":string (optional) — captures the action's OUTPUT into a new same-named variable. Allowed
 ONLY on run_shell and invoke_llm; the captured value is TAINTED. invoke_llm_v2 is flat-v1 only.

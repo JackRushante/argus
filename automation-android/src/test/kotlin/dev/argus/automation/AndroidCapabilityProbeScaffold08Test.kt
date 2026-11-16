@@ -17,7 +17,6 @@ import dev.argus.engine.model.OutputKind
 import dev.argus.engine.model.OutputSpec
 import dev.argus.engine.model.ScreenCallOp
 import dev.argus.engine.model.SensorKind
-import dev.argus.engine.model.StoredOp
 import dev.argus.engine.runtime.ActionResult
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.ExecutionId
@@ -80,8 +79,6 @@ class AndroidCapabilityProbeScaffold08Test {
 
     private val newActionTypes = setOf(
         ActionTypeIds.ASK,
-        ActionTypeIds.SET_STORED,
-        ActionTypeIds.SET_USER_MODE,
         ActionTypeIds.NOTIFICATION_REPLY,
         ActionTypeIds.NOTIFICATION_ACTION,
         ActionTypeIds.SEND_SMS,
@@ -91,7 +88,7 @@ class AndroidCapabilityProbeScaffold08Test {
     )
 
     private val newTriggers = setOf(
-        "calendar_event", "nfc_tag", "next_alarm", "app_usage", "user_mode_changed",
+        "calendar_event", "nfc_tag", "next_alarm", "app_usage",
         "sensor.${SensorKind.SHAKE.wireName}", "sensor.${SensorKind.FLIP_FACE_DOWN.wireName}",
     )
 
@@ -145,8 +142,6 @@ class AndroidCapabilityProbeScaffold08Test {
         )
         val actions = listOf(
             Action.Ask("?", listOf("a"), "answer"),
-            Action.SetStored("k", StoredOp.CLEAR),
-            Action.SetUserMode("lavoro"),
             Action.NotificationReply("ok"),
             Action.NotificationAction(NotificationActionOp.DISMISS),
             Action.SendSms("+393331112222", "ok"),

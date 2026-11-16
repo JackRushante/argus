@@ -34,6 +34,10 @@ import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.CapabilityIds
 import dev.argus.engine.model.CapabilityRequirements
+import dev.argus.engine.model.StoredValue
+import dev.argus.engine.model.UserModeSnapshot
+import dev.argus.engine.runtime.StoredValueStore
+import dev.argus.engine.runtime.UserModeStore
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.AuditEvent
 import dev.argus.engine.runtime.AuditKind
@@ -90,6 +94,8 @@ class LazyDeviceStateProvider(
      * nessun backend privilegiato è disponibile: con Shizuku attivo il comportamento non cambia.
      */
     private val usageForeground: ForegroundAppSource? = null,
+    /** 0.8: valori conservati e modalità. `null` = assenti, quindi UNKNOWN (fallisce chiuso). */
+    private val persistentState: PersistentStateReader? = null,
 ) : DeviceStateSnapshotProvider {
     constructor(
         reader: StateReader,
@@ -99,6 +105,7 @@ class LazyDeviceStateProvider(
         publicReader: PublicStateReader? = null,
         privilegedReady: (() -> Boolean)? = null,
         usageForeground: ForegroundAppSource? = null,
+        persistentState: PersistentStateReader? = null,
     ) : this(
         reader,
         shizuku::status,
@@ -107,6 +114,7 @@ class LazyDeviceStateProvider(
         publicReader,
         privilegedReady,
         usageForeground,
+        persistentState,
     )
 
     override suspend fun current(): DeviceState = current(StateReadRequest.LEGACY_GENERATIVE)
@@ -175,6 +183,8 @@ class LazyDeviceStateProvider(
                 values = publicValues + privileged.values,
                 location = point,
                 queryValues = queryValues,
+                stored = persistentState?.stored(request.storedKeys).orEmpty(),
+                userMode = if (request.includeUserMode) persistentState?.userMode() else null,
             ),
         )
     }
@@ -188,6 +198,34 @@ class LazyDeviceStateProvider(
         } catch (_: Exception) {
             emptyMap()
         }
+    }
+}
+
+/**
+ * 0.8: lettura di valori conservati e modalità per lo snapshot dell'Engine. Un errore del database equivale a
+ * «non leggibile»: valore assente, quindi UNKNOWN, mai un default.
+ */
+class PersistentStateReader(
+    private val stored: StoredValueStore,
+    private val modes: UserModeStore,
+) {
+    suspend fun stored(keys: Set<String>): Map<String, StoredValue> {
+        if (keys.isEmpty()) return emptyMap()
+        return try {
+            stored.read(keys)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            emptyMap()
+        }
+    }
+
+    suspend fun userMode(): UserModeSnapshot? = try {
+        modes.snapshot()
+    } catch (error: CancellationException) {
+        throw error
+    } catch (_: Exception) {
+        null
     }
 }
 
@@ -359,7 +397,9 @@ class AndroidArmedAutomationRegistrar(
 
         is Trigger.AppUsage -> false
 
-        is Trigger.UserModeChanged -> false
+        // 0.8: la sorgente è UserModeSwitcher (schermata, riquadro, widget, set_user_mode): nessuna
+        // registrazione OS, come l'avvio manuale.
+        is Trigger.UserModeChanged -> registerBroadcastBacked(automation)
     }
 
     private suspend fun registerTime(automation: Automation): Boolean = try {

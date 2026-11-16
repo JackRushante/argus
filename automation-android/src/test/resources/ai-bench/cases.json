@@ -2610,5 +2610,55 @@
    "reply_mentions": ["simple"]
   },
   "note": "Come app70.twocalc.it.01, in inglese"
+ },
+ {
+  "id": "stored80.coffee.it.01",
+  "category": "action",
+  "lang": "it",
+  "text": "Fammi un pulsante che conta i caffè di oggi",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "manual"},
+   "actions_include": ["set_stored"],
+   "params": {"set_stored.op": "INCREMENT"}
+  },
+  "note": "Un contatore che resta fra un tocco e l'altro: set_stored INCREMENT su una chiave"
+ },
+ {
+  "id": "stored80.gym.en.01",
+  "category": "action",
+  "lang": "en",
+  "text": "When I connect to the gym Wi-Fi, remember today as my last gym day",
+  "expect": {
+   "outcome": ["draft", "clarification"],
+   "actions_include": ["set_stored"],
+   "params": {"set_stored.op": "SET"}
+  },
+  "note": "Un valore scritto da una regola e conservato fra le esecuzioni"
+ },
+ {
+  "id": "mode80.home.it.01",
+  "category": "action",
+  "lang": "it",
+  "text": "Quando arrivo a casa metti la modalità Casa",
+  "expect": {
+   "outcome": ["draft", "clarification"],
+   "actions_include": ["set_user_mode"],
+   "params": {"set_user_mode.mode": {"contains": "Casa"}}
+  },
+  "note": "La modalità è un letterale dell'elenco dell'utente"
+ },
+ {
+  "id": "mode80.work.en.01",
+  "category": "trigger.manual",
+  "lang": "en",
+  "text": "Add a home screen button that switches to Work mode",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "manual"},
+   "actions_include": ["set_user_mode"],
+   "params": {"set_user_mode.mode": {"contains": "Work"}}
+  },
+  "note": "Cambio di modalità da un pulsante"
  }
 ]

@@ -948,6 +948,8 @@ interface SettingsCallbacks {
     fun onRerunOnboarding()
     /** «Pausa automazioni» (F21): true = nessuna regola scatta finché non si riprende. Default no-op. */
     fun onSetAutomationsPaused(paused: Boolean) {}
+    /** 0.8: apre Sistema › Modalità (modalità e variabili salvate). Default no-op. */
+    fun onOpenModes() {}
     /** 0.7.2: accende o spegne gli avvisi di salute delle regole. Default no-op. */
     fun onSetHealthAlertsEnabled(enabled: Boolean) {}
 

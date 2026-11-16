@@ -25,6 +25,9 @@ object ManualIntents {
     const val EXTRA_RULE_ID = "dev.argus.extra.MANUAL_RULE_ID"
     const val EXTRA_TOKEN = "dev.argus.extra.MANUAL_TOKEN"
 
+    /** 0.8: pulsante modalità del widget: il nome della modalità (col token dei pulsanti modalità in [EXTRA_TOKEN]). */
+    const val EXTRA_MODE = "dev.argus.extra.USER_MODE"
+
     /** Classe dell'attività trampolino (modulo app): il manifest la dichiara non esportata. */
     const val RUN_ACTIVITY_CLASS = "dev.argus.manual.ManualRunActivity"
 
