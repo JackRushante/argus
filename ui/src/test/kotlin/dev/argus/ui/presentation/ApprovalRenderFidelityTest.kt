@@ -108,6 +108,21 @@ class ApprovalRenderFidelityTest {
     }
 
     @Test
+    fun `a flexible time reads as approximate and an exact one as exact`() {
+        val flexible = Trigger.Time(cron = "0 23 * * *", tz = "Europe/Rome")
+        assertEquals(
+            "Every day at 23:00 (Europe/Rome) · about (Android may delay it)",
+            render(rule(trigger = flexible), RenderLanguage.EN).triggerLine,
+        )
+        assertEquals(
+            "Ogni giorno alle 23:00 (Europe/Rome) · circa (Android può ritardarlo)",
+            render(rule(trigger = flexible), RenderLanguage.IT).triggerLine,
+        )
+        val exact = flexible.copy(precision = TimePrecision.EXACT)
+        assertEquals("Every day at 23:00 (Europe/Rome) · exact time", render(rule(trigger = exact), RenderLanguage.EN).triggerLine)
+    }
+
+    @Test
     fun `a timer reads in hours and minutes, not seconds`() {
         assertEquals("1 hour and 30 minutes", detailOf(Action.SetTimer(seconds = 5_400), RenderLanguage.EN))
         assertEquals("1 ora e 30 minuti", detailOf(Action.SetTimer(seconds = 5_400), RenderLanguage.IT))

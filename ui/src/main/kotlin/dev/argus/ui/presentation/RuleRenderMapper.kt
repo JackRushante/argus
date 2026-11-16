@@ -454,13 +454,13 @@ object RuleRenderMapper {
                 "Una volta, tra ${humanizeDuration(afterMs, l)}",
             )
             solar != null -> SolarTriggerRender.line(solar, l)
-            else -> l.pick("Time not specified (${t.tz})", "Orario non specificato (${t.tz})")
+            else -> return l.pick("Time not specified (${t.tz})", "Orario non specificato (${t.tz})")
         }
-        // S1: la puntualità richiesta (allarme esatto) cambia l'esecuzione e va dichiarata.
-        return if (t.precision == TimePrecision.EXACT) {
-            line + l.pick(" · exact time", " · orario esatto")
-        } else {
-            line
+        // S1: la puntualità cambia l'esecuzione e va dichiarata. B14: FLEXIBLE (il default) è una sveglia
+        // inesatta che Android può ritardare: non si legge come un orario puntuale.
+        return line + when (t.precision) {
+            TimePrecision.EXACT -> l.pick(" · exact time", " · orario esatto")
+            TimePrecision.FLEXIBLE -> l.pick(" · about (Android may delay it)", " · circa (Android può ritardarlo)")
         }
     }
 
