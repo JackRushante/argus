@@ -170,10 +170,11 @@ internal object ActionRows08 {
         }
     }
 
+    /** Come nella tavola approvata: `Bearer ⟨segreto ha_token⟩`. Il nome, mai il valore. */
     private fun secretValue(ref: SecretRef, l: RenderLanguage): String =
         VisibleText.singleLine(ref.prefix) + l.pick(
-            "[secret ${quoted(ref.secret)} from the phone's vault]",
-            "[segreto ${quoted(ref.secret)} dalla cassaforte del telefono]",
+            "⟨secret ${VisibleText.singleLine(ref.secret)}⟩",
+            "⟨segreto ${VisibleText.singleLine(ref.secret)}⟩",
         )
 
     /** Suffisso del dettaglio di `invoke_llm` con l'uscita vincolata; vuoto se l'uscita è testo libero. */
