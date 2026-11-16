@@ -562,13 +562,45 @@ sealed interface RulesBackupStatus {
     ) : RulesBackupStatus
 
     data class Failed(val kind: RulesBackupKind, val message: String) : RulesBackupStatus
+
+    /**
+     * 0.7.2: il file scelto per l'import è cifrato (`.argusbackup`): la sezione chiede la passphrase.
+     * [error] = il tentativo precedente non l'ha aperto (testo già scritto). La passphrase non sta qui.
+     */
+    data class NeedsPassphrase(val error: String? = null) : RulesBackupStatus
 }
 
 data class RulesBackupUi(
     val status: RulesBackupStatus = RulesBackupStatus.Idle,
     /** Regole che finirebbero nel file: con 0 «Esporta» è disabilitato. */
     val exportableRules: Int = 0,
+    /** 0.7.2: card «Backup automatico»; null = non disponibile (la card non si mostra). */
+    val autoBackup: AutoBackupUi? = null,
 )
+
+enum class AutoBackupFrequencyUi { DAILY, WEEKLY }
+
+/**
+ * 0.7.2: backup automatico cifrato in una cartella scelta dall'utente. Nessun segreto: della passphrase
+ * c'è solo se è impostata. I testi variabili arrivano già scritti dal ViewModel.
+ */
+data class AutoBackupUi(
+    val enabled: Boolean = false,
+    /** Nome della cartella scelta; null = nessuna. */
+    val folderLabel: String? = null,
+    val frequency: AutoBackupFrequencyUi = AutoBackupFrequencyUi.DAILY,
+    val passphraseSet: Boolean = false,
+    /** «Ultimo backup: ieri 03:10 · 12 regole» o il motivo del fallimento; null = mai eseguito. */
+    val lastRun: String? = null,
+    val lastRunFailed: Boolean = false,
+    /** Un backup sta girando: «Esegui backup ora» è disabilitato. */
+    val running: Boolean = false,
+    /** La chiave si sta derivando dalla passphrase (qualche secondo). */
+    val settingPassphrase: Boolean = false,
+) {
+    /** Cartella e passphrase ci sono: si può accendere e «Esegui backup ora» funziona. */
+    val ready: Boolean get() = folderLabel != null && passphraseSet
+}
 
 sealed interface TransportUi {
     data class CliBridge(
@@ -737,6 +769,24 @@ interface SettingsCallbacks {
 
     /** Dopo un import: porta all'elenco delle automazioni, dove le bozze aspettano l'approvazione. Default no-op. */
     fun onOpenImportedRules() {}
+
+    /** 0.7.2: passphrase di un file cifrato scelto per l'import. Non torna mai nello stato. Default no-op. */
+    fun onSubmitImportPassphrase(passphrase: String) {}
+
+    /** 0.7.2: interruttore del backup automatico. Default no-op. */
+    fun onSetAutoBackupEnabled(enabled: Boolean) {}
+
+    /** 0.7.2: sceglie la cartella del backup automatico (selettore di cartelle del sistema). Default no-op. */
+    fun onChooseAutoBackupFolder() {}
+
+    /** 0.7.2: frequenza del backup automatico. Default no-op. */
+    fun onSetAutoBackupFrequency(frequency: AutoBackupFrequencyUi) {}
+
+    /** 0.7.2: imposta o cambia la passphrase (già validata dal foglio). Non torna mai nello stato. Default no-op. */
+    fun onSetAutoBackupPassphrase(passphrase: String) {}
+
+    /** 0.7.2: «Esegui backup ora». Default no-op. */
+    fun onRunAutoBackupNow() {}
 
     /** 0.5.0: interruttore «Usa root (su)». Acceso, il VM verifica `su -c id`. Default no-op. */
     fun onSetRootEnabled(enabled: Boolean) {}

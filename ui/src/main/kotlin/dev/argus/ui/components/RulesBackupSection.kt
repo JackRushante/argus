@@ -23,9 +23,14 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import dev.argus.ui.model.AutoBackupUi
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,6 +63,8 @@ fun RulesBackupSection(
     onDismissResult: () -> Unit,
     onOpenImported: () -> Unit,
     modifier: Modifier = Modifier,
+    onSubmitImportPassphrase: (String) -> Unit = {},
+    autoBackupActions: AutoBackupActions = AutoBackupActions(),
 ) {
     var stripPersonalData by rememberSaveable { mutableStateOf(false) }
     val working = state.status is RulesBackupStatus.Working
@@ -130,9 +137,10 @@ fun RulesBackupSection(
                     style = MaterialTheme.typography.bodyMedium,
                 )
 
-                BackupStatusRow(state.status, onDismissResult, onOpenImported)
+                BackupStatusRow(state.status, onDismissResult, onOpenImported, onSubmitImportPassphrase)
             }
         }
+        state.autoBackup?.let { auto -> AutoBackupCard(auto, autoBackupActions) }
     }
 }
 
@@ -141,9 +149,11 @@ private fun BackupStatusRow(
     status: RulesBackupStatus,
     onDismiss: () -> Unit,
     onOpenImported: () -> Unit,
+    onSubmitPassphrase: (String) -> Unit,
 ) {
     when (status) {
         RulesBackupStatus.Idle -> Unit
+        is RulesBackupStatus.NeedsPassphrase -> ImportPassphrasePrompt(status, onSubmitPassphrase, onDismiss)
         is RulesBackupStatus.Working -> Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -200,6 +210,52 @@ private fun BackupStatusRow(
                 )
             }
             ArgusButton(stringResource(R.string.backup_dismiss), onDismiss, style = ButtonStyle.Text)
+        }
+    }
+}
+
+/**
+ * 0.7.2: il file scelto è cifrato. La passphrase resta in questo campo (`remember`, mai salvata né
+ * precompilata): dopo un tentativo sbagliato il campo riparte vuoto con il motivo sotto.
+ */
+@Composable
+private fun ImportPassphrasePrompt(
+    status: RulesBackupStatus.NeedsPassphrase,
+    onSubmit: (String) -> Unit,
+    onCancel: () -> Unit,
+) {
+    var passphrase by remember(status) { mutableStateOf("") }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics { liveRegion = LiveRegionMode.Polite },
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            stringResource(R.string.backup_import_encrypted_body),
+            color = MaterialTheme.colorScheme.onSurface,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        ArgusTextField(
+            value = passphrase,
+            onValueChange = { passphrase = it },
+            label = stringResource(R.string.backup_import_passphrase_field),
+            errorText = status.error,
+            visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            ArgusButton(
+                text = stringResource(R.string.backup_import_open),
+                onClick = {
+                    val chosen = passphrase
+                    passphrase = ""
+                    onSubmit(chosen)
+                },
+                style = ButtonStyle.Tonal,
+                enabled = passphrase.isNotEmpty(),
+            )
+            ArgusButton(stringResource(R.string.backup_passphrase_cancel), onCancel, style = ButtonStyle.Text)
         }
     }
 }
@@ -290,6 +346,39 @@ private fun RulesBackupFailedPreview() {
                 message = "Il file non è un file di regole Argus valido.",
             ),
             exportableRules = 7,
+        ),
+    )
+}
+
+@Preview(name = "Backup · passphrase errata · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+
+@Preview(name = "Backup · passphrase errata · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO)
+@Composable
+private fun RulesBackupNeedsPassphrasePreview() {
+    BackupPreview(
+        RulesBackupUi(
+            RulesBackupStatus.NeedsPassphrase(
+                error = "Passphrase errata, oppure il file è stato modificato dopo il backup. Non è stato importato nulla.",
+            ),
+            exportableRules = 7,
+        ),
+    )
+}
+
+@Preview(name = "Backup · con backup automatico · scuro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+
+@Preview(name = "Backup · con backup automatico · chiaro", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO)
+@Composable
+private fun RulesBackupWithAutoBackupPreview() {
+    BackupPreview(
+        RulesBackupUi(
+            exportableRules = 7,
+            autoBackup = AutoBackupUi(
+                enabled = true,
+                folderLabel = "Nextcloud/Argus",
+                passphraseSet = true,
+                lastRun = "Ultimo backup: ieri 03:10 · 12 regole",
+            ),
         ),
     )
 }

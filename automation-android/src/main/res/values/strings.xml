@@ -12,6 +12,9 @@
     <string name="argus_budget_channel_description">Alerts when the LLM call budget is almost or fully exhausted</string>
     <string name="argus_foreground_denied_title">Rules paused</string>
     <string name="argus_foreground_denied_text">Background rules (Wi-Fi, power, screen, battery, audio, modes) paused: open Argus to turn them back on</string>
+    <!-- 0.7.2: backup automatico delle regole, dopo 3 fallimenti di fila. -->
+    <string name="auto_backup_failed_title">Automatic backup failed</string>
+    <string name="auto_backup_failed_text">The last 3 automatic backups of your rules failed. Open Argus › System to see why.</string>
     <!-- 0.4.1 (azioni): aperture dal background trasformate in una notifica «Tocca per aprire». -->
     <string name="act41_open_tap_title">Tap to open %1$s</string>
     <string name="act41_open_tap_text">Android does not let Argus open it by itself from the background.</string>

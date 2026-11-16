@@ -159,7 +159,14 @@ import dev.argus.data.RoomAuditSink
 import dev.argus.data.RoomAutomationStore
 import dev.argus.data.RoomContactWhitelistStore
 import dev.argus.data.RoomDraftRepository
+import dev.argus.automation.backup.AndroidAutoBackupAlarm
+import dev.argus.automation.backup.AndroidAutoBackupFailureNotice
+import dev.argus.automation.backup.AndroidAutoBackupKeys
+import dev.argus.automation.backup.AutoBackupCoordinator
+import dev.argus.automation.backup.SharedPreferencesAutoBackupStateStore
+import dev.argus.data.backup.AutoBackupRunner
 import dev.argus.data.backup.ContentResolverDocumentIo
+import dev.argus.data.backup.DocumentTreeBackupFolder
 import dev.argus.data.backup.RulesBackup
 import dev.argus.data.backup.RulesBackupService
 import dev.argus.data.RoomExecutionJournal
@@ -299,17 +306,40 @@ object ArgusModule {
 
     @Provides
     @Singleton
-    fun rulesBackup(
+    fun rulesBackupService(
         @ApplicationContext context: Context,
         store: AutomationStore,
         repository: RoomDraftRepository,
         installInfo: AppInstallInfo,
-    ): RulesBackup = RulesBackupService(
+    ): RulesBackupService = RulesBackupService(
         automations = store,
         drafts = repository,
         documents = ContentResolverDocumentIo(context),
         appVersion = { installInfo.versionName },
     )
+
+    @Provides
+    fun rulesBackup(service: RulesBackupService): RulesBackup = service
+
+    /** 0.7.2: backup automatico cifrato in una cartella scelta dall'utente (export completo). */
+    @Provides
+    @Singleton
+    fun autoBackupCoordinator(
+        @ApplicationContext context: Context,
+        @ApplicationScope scope: CoroutineScope,
+        service: RulesBackupService,
+    ): AutoBackupCoordinator {
+        val folder = DocumentTreeBackupFolder(context)
+        return AutoBackupCoordinator(
+            scope = scope,
+            store = SharedPreferencesAutoBackupStateStore(context),
+            keys = AndroidAutoBackupKeys(context),
+            folder = folder,
+            runner = AutoBackupRunner(build = service::buildFullBackup, folder = folder),
+            alarm = AndroidAutoBackupAlarm(context),
+            notice = AndroidAutoBackupFailureNotice(context),
+        )
+    }
 
     @Provides
     @Singleton

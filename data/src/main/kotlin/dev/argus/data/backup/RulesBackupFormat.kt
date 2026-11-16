@@ -60,6 +60,15 @@ enum class BackupFailure {
     /** Import: non è JSON (o non è UTF-8, o è annidato oltre il limite). */
     NOT_JSON,
 
+    /** Import: file cifrato (`.argusbackup`): serve la passphrase. Non è un errore da mostrare. */
+    PASSPHRASE_REQUIRED,
+
+    /** Import cifrato: la passphrase non apre il file (o il file è stato modificato). */
+    WRONG_PASSPHRASE,
+
+    /** Import cifrato: il file è troncato, manca anche l'intestazione. */
+    ENCRYPTED_DAMAGED,
+
     /** Import: JSON valido ma non un'esportazione Argus (`format`/struttura errati). */
     WRONG_FORMAT,
 
@@ -108,6 +117,12 @@ sealed interface ExportOutcome {
 sealed interface ImportOutcome {
     data class Done(val summary: ImportSummary) : ImportOutcome
     data class Failed(val failure: BackupFailure) : ImportOutcome
+}
+
+/** Il testo dell'export completo, pronto da scrivere (in chiaro o cifrato). */
+sealed interface BuiltBackup {
+    class Ready(val bytes: ByteArray, val exported: Int, val skipped: Int) : BuiltBackup
+    data class Failed(val failure: BackupFailure) : BuiltBackup
 }
 
 /**

@@ -94,6 +94,7 @@ import dev.argus.ui.components.IconBadge
 import dev.argus.ui.components.OutlineChip
 import dev.argus.ui.components.PauseSettingRow
 import dev.argus.ui.components.PrivilegesSection
+import dev.argus.ui.components.AutoBackupActions
 import dev.argus.ui.components.RulesBackupSection
 import dev.argus.ui.components.SectionLabel
 import dev.argus.ui.components.StatusChip
@@ -224,6 +225,14 @@ fun SettingsScreen(
                     callbacks::onImportRules,
                     callbacks::onDismissBackupResult,
                     callbacks::onOpenImportedRules,
+                    onSubmitImportPassphrase = callbacks::onSubmitImportPassphrase,
+                    autoBackupActions = AutoBackupActions(
+                        onSetEnabled = callbacks::onSetAutoBackupEnabled,
+                        onChooseFolder = callbacks::onChooseAutoBackupFolder,
+                        onSetFrequency = callbacks::onSetAutoBackupFrequency,
+                        onSetPassphrase = callbacks::onSetAutoBackupPassphrase,
+                        onRunNow = callbacks::onRunAutoBackupNow,
+                    ),
                 )
                 RerunRow(callbacks::onRerunOnboarding)
                 VersionFooter(state.appVersionLabel)
