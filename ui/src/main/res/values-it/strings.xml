@@ -476,6 +476,8 @@
     <!-- 0.7.0 · Approvazione e dettaglio (redesign A, blocco rda_ap_). -->
     <string name="rda_ap_risks_title">Prima di armare</string>
     <string name="rda_ap_warnings_title">Avvisi</string>
+    <string name="rda_ap_imported">Regola importata</string>
+    <string name="rda_ap_imported_note">Viene da un file importato, non dalla chat: controlla ogni passo prima di armarla.</string>
     <string name="rda_ap_errors_one">1 errore</string>
     <string name="rda_ap_errors_many">%1$d errori</string>
     <string name="rda_ap_warnings_one">1 avviso</string>

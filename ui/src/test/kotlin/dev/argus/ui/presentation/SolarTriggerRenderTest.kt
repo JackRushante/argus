@@ -33,31 +33,35 @@ class SolarTriggerRenderTest {
     private val here = "at the phone's position, read when you activate the rule"
     private val qui = "alla posizione del telefono, letta quando attivi la regola"
 
+    // B14: senza EXACT la sveglia è inesatta e la resa lo dice.
+    private val about = " · about (Android may delay it)"
+    private val circa = " · circa (Android può ritardarlo)"
+
     @Test
     fun `thirty minutes before sunset`() {
         val spec = SolarSpec(SolarEvent.SUNSET, -30)
-        assertEquals("Every day, 30 min before sunset · $here", line(spec, RenderLanguage.EN))
-        assertEquals("Ogni giorno, 30 min prima del tramonto · $qui", line(spec, RenderLanguage.IT))
+        assertEquals("Every day, 30 min before sunset · $here$about", line(spec, RenderLanguage.EN))
+        assertEquals("Ogni giorno, 30 min prima del tramonto · $qui$circa", line(spec, RenderLanguage.IT))
     }
 
     @Test
     fun `after sunrise and exactly at sunrise or sunset`() {
         assertEquals(
-            "Every day, 1 h 30 min after sunrise · $here",
+            "Every day, 1 h 30 min after sunrise · $here$about",
             line(SolarSpec(SolarEvent.SUNRISE, 90), RenderLanguage.EN),
         )
         assertEquals(
-            "Ogni giorno, 2 h dopo l'alba · $qui",
+            "Ogni giorno, 2 h dopo l'alba · $qui$circa",
             line(SolarSpec(SolarEvent.SUNRISE, 120), RenderLanguage.IT),
         )
-        assertEquals("Every day at sunrise · $here", line(SolarSpec(SolarEvent.SUNRISE, 0), RenderLanguage.EN))
-        assertEquals("Ogni giorno al tramonto · $qui", line(SolarSpec(SolarEvent.SUNSET, 0), RenderLanguage.IT))
+        assertEquals("Every day at sunrise · $here$about", line(SolarSpec(SolarEvent.SUNRISE, 0), RenderLanguage.EN))
+        assertEquals("Ogni giorno al tramonto · $qui$circa", line(SolarSpec(SolarEvent.SUNSET, 0), RenderLanguage.IT))
         assertEquals(
-            "Every day, 12 h before sunrise · $here",
+            "Every day, 12 h before sunrise · $here$about",
             line(SolarSpec(SolarEvent.SUNRISE, -720), RenderLanguage.EN),
         )
         assertEquals(
-            "Ogni giorno, 1 min dopo il tramonto · $qui",
+            "Ogni giorno, 1 min dopo il tramonto · $qui$circa",
             line(SolarSpec(SolarEvent.SUNSET, 1), RenderLanguage.IT),
         )
     }
@@ -65,8 +69,8 @@ class SolarTriggerRenderTest {
     @Test
     fun `an armed rule shows the frozen position`() {
         val spec = SolarSpec(SolarEvent.SUNSET, -30, lat = 45.5, lng = -9.0)
-        assertEquals("Every day, 30 min before sunset · near 45.5, -9.0", line(spec, RenderLanguage.EN))
-        assertEquals("Ogni giorno, 30 min prima del tramonto · vicino a 45.5, -9.0", line(spec, RenderLanguage.IT))
+        assertEquals("Every day, 30 min before sunset · near 45.5, -9.0$about", line(spec, RenderLanguage.EN))
+        assertEquals("Ogni giorno, 30 min prima del tramonto · vicino a 45.5, -9.0$circa", line(spec, RenderLanguage.IT))
     }
 
     @Test

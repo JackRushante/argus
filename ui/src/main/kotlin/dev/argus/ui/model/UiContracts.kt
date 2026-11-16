@@ -25,6 +25,11 @@ data class RuleRender(
     val program: List<ProgramNode> = emptyList(), // P4: albero azioni ricorsivo (if/while/wait/foglie)
     /** 0.7.0: package d'app del trigger `app_event` (cambiabile in approvazione); null per ogni altro trigger. */
     val triggerAppRef: AppRef? = null,
+    /**
+     * 0.7.2 (S8): pausa EFFETTIVA dopo ogni scatto, in unità umane («Dopo ogni scatto ignora i nuovi eventi
+     * per 24 ore»), resa sotto QUANDO. null se la regola non ha pausa (cooldown effettivo 0).
+     */
+    val cooldownLine: String? = null,
 )
 
 /**
@@ -333,6 +338,8 @@ data class AutomationDetailState(
     val canChangeApp: Boolean = false,
     /** 0.7.0: app avviabili installate, per l'elenco di «Cambia app». `null` = non ancora caricato. */
     val appChoices: List<AppChoiceUi>? = null,
+    /** 0.7.2 (S8): la bozza viene da un file importato (`createdBy = IMPORT`), non dalla chat: l'approvazione lo dice. */
+    val imported: Boolean = false,
 )
 
 /**

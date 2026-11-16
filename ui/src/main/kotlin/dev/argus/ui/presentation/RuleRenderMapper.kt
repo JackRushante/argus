@@ -18,6 +18,8 @@ import dev.argus.engine.model.InterpolationPolicy
 import dev.argus.engine.model.NightMode
 import dev.argus.engine.model.PhoneEvent
 import dev.argus.engine.model.SensorKind
+import dev.argus.engine.model.SettingsScreen
+import dev.argus.engine.model.VolumeStream
 import dev.argus.engine.model.StateQuery
 import dev.argus.engine.model.StateValueType
 import dev.argus.engine.model.TimePrecision
@@ -32,6 +34,7 @@ import dev.argus.engine.model.ValueProvenance
 import dev.argus.engine.model.integrity
 import dev.argus.engine.model.declaredType
 import dev.argus.engine.model.provenance
+import dev.argus.engine.runtime.Engine
 import dev.argus.ui.model.ActionRow
 import dev.argus.ui.model.AppRef
 import dev.argus.ui.model.ProgramNode
@@ -162,23 +165,30 @@ object RuleRenderMapper {
         a: Automation,
         conversationLabels: Map<String, String> = emptyMap(),
         language: RenderLanguage = RenderLanguage.system(),
-    ): RuleRender = render(a.trigger, a.actions, a.conditions, a.vars, conversationLabels, language)
+    ): RuleRender = render(a.trigger, a.actions, a.conditions, a.vars, a.cooldownMs, conversationLabels, language)
 
     fun mapDraft(
         d: AutomationDraft,
         conversationLabels: Map<String, String> = emptyMap(),
         language: RenderLanguage = RenderLanguage.system(),
-    ): RuleRender = render(d.trigger, d.actions, d.conditions, d.vars, conversationLabels, language)
+    ): RuleRender = render(d.trigger, d.actions, d.conditions, d.vars, d.cooldownMs, conversationLabels, language)
 
     private fun render(
         trigger: Trigger,
         actions: List<Action>,
         conditions: Condition?,
         vars: List<VarBinding>,
+        cooldownMs: Long,
         conversationLabels: Map<String, String>,
         l: RenderLanguage,
     ): RuleRender {
         val isGenerative = actions.any { it.tier == ActionTier.GENERATIVE }
+        // S8: la pausa che l'engine applica davvero (Engine.effectiveCooldown: almeno 60 s se generativa).
+        val effectiveCooldownMs = if (isGenerative) {
+            maxOf(cooldownMs, Engine.MIN_GENERATIVE_COOLDOWN_MS)
+        } else {
+            cooldownMs
+        }
         // 0.7.0: i package sostituibili portano il loro slot («Cambia app»); l'ordine è quello di AppPackages.
         val slots = AppPackages.slotsByAction(trigger, actions)
         return RuleRender(
@@ -193,6 +203,16 @@ object RuleRenderMapper {
             triggerAppRef = (trigger as? Trigger.AppEvent)?.let { event ->
                 AppPackages.triggerSlot(event)?.let { AppRef(it, event.pkg) }
             },
+            cooldownLine = effectiveCooldownMs.takeIf { it > 0 }?.let { cooldownLine(it, l) },
+        )
+    }
+
+    /** S8: dopo uno scatto gli eventi entro la pausa si scartano; con un ritardo lungo va detto chiaro. */
+    private fun cooldownLine(ms: Long, l: RenderLanguage): String {
+        val span = humanizeDuration(ms, l)
+        return l.pick(
+            "After it fires, it ignores new events for $span",
+            "Dopo ogni scatto ignora i nuovi eventi per $span",
         )
     }
 
@@ -233,7 +253,8 @@ object RuleRenderMapper {
                 "Ripeti ${whileCountIt(a)}" +
                     (if (a.delayBetweenMs > 0) " · ${a.delayBetweenMs} ms tra le iterazioni" else ""),
             ),
-            conditionLines = flattenConditions(a.condition, 0, l),
+            // S8: l'engine rivaluta la condizione prima di OGNI giro: «finché», non il «solo se» di un cancello unico.
+            conditionLines = flattenConditions(a.condition, 0, l, ConditionLead.WHILE),
             body = programNodes(a.body, l, slots),
         )
         else -> ProgramNode.Leaf(withAppRef(actionRow(a, l), a, slots))
@@ -431,46 +452,42 @@ object RuleRenderMapper {
             // Ritardo relativo one-shot (ri-armabile): nessun orario assoluto da mostrare, solo la
             // durata umanizzata (l'ancora reale è congelata a runtime nel ScheduledTimeAlarm).
             afterMs != null -> l.pick(
-                "Once, in ${humanizeDelay(afterMs, l)}",
-                "Una volta, tra ${humanizeDelay(afterMs, l)}",
+                "Once, in ${humanizeDuration(afterMs, l)}",
+                "Una volta, tra ${humanizeDuration(afterMs, l)}",
             )
             solar != null -> SolarTriggerRender.line(solar, l)
-            else -> l.pick("Time not specified (${t.tz})", "Orario non specificato (${t.tz})")
+            else -> return l.pick("Time not specified (${t.tz})", "Orario non specificato (${t.tz})")
         }
-        // S1: la puntualità richiesta (allarme esatto) cambia l'esecuzione e va dichiarata.
-        return if (t.precision == TimePrecision.EXACT) {
-            line + l.pick(" · exact time", " · orario esatto")
-        } else {
-            line
+        // S1: la puntualità cambia l'esecuzione e va dichiarata. B14: FLEXIBLE (il default) è una sveglia
+        // inesatta che Android può ritardare: non si legge come un orario puntuale.
+        return line + when (t.precision) {
+            TimePrecision.EXACT -> l.pick(" · exact time", " · orario esatto")
+            TimePrecision.FLEXIBLE -> l.pick(" · about (Android may delay it)", " · circa (Android può ritardarlo)")
         }
     }
 
     /**
-     * Umanizza un ritardo relativo: unità più significativa più, se presente, quella immediatamente
-     * inferiore (es. 5_400_000 → "1 ora e 30 minuti" / "1 hour and 30 minutes"), con singolare e
-     * plurale corretti per lingua. Le unità sotto la seconda scelta vengono troncate.
+     * Umanizza una durata con TUTTE le unità non nulle, dalla più grande ai millisecondi (B14: «1 giorno e
+     * 30 minuti», mai «1 giorno»), con singolare e plurale per lingua: 5_400_000 → «1 ora e 30 minuti»,
+     * 90_061_000 → «1 giorno, 1 ora, 1 minuto e 1 secondo». Zero → «0 secondi».
      */
-    private fun humanizeDelay(ms: Long, l: RenderLanguage): String {
+    internal fun humanizeDuration(ms: Long, l: RenderLanguage): String {
         val totalSeconds = ms / 1_000
         val units = listOf(
-            Triple(totalSeconds / 86_400, l.pick("day", "giorno") to l.pick("days", "giorni"), Unit),
-            Triple((totalSeconds % 86_400) / 3_600, l.pick("hour", "ora") to l.pick("hours", "ore"), Unit),
-            Triple((totalSeconds % 3_600) / 60, l.pick("minute", "minuto") to l.pick("minutes", "minuti"), Unit),
-            Triple(totalSeconds % 60, l.pick("second", "secondo") to l.pick("seconds", "secondi"), Unit),
+            totalSeconds / 86_400 to (l.pick("day", "giorno") to l.pick("days", "giorni")),
+            (totalSeconds % 86_400) / 3_600 to (l.pick("hour", "ora") to l.pick("hours", "ore")),
+            (totalSeconds % 3_600) / 60 to (l.pick("minute", "minuto") to l.pick("minutes", "minuti")),
+            totalSeconds % 60 to (l.pick("second", "secondo") to l.pick("seconds", "secondi")),
+            ms % 1_000 to (l.pick("millisecond", "millisecondo") to l.pick("milliseconds", "millisecondi")),
         )
-        fun render(value: Long, names: Pair<String, String>) =
-            "$value ${if (value == 1L) names.first else names.second}"
-
-        val primaryIndex = units.indexOfFirst { it.first != 0L }
-        // Difensivo: afterMs >= 1s.
-        if (primaryIndex == -1) return render(0, l.pick("second", "secondo") to l.pick("seconds", "secondi"))
-        val (pv, pn, _) = units[primaryIndex]
-        val primary = render(pv, pn)
-        val secondary = units.getOrNull(primaryIndex + 1)
-            ?.takeIf { it.first != 0L }
-            ?.let { (sv, sn, _) -> render(sv, sn) }
-        val joiner = l.pick(" and ", " e ")
-        return if (secondary != null) "$primary$joiner$secondary" else primary
+        val parts = units
+            .filter { (value, _) -> value != 0L }
+            .map { (value, names) -> "$value ${if (value == 1L) names.first else names.second}" }
+        return when (parts.size) {
+            0 -> l.pick("0 seconds", "0 secondi")
+            1 -> parts.single()
+            else -> parts.dropLast(1).joinToString(", ") + l.pick(" and ", " e ") + parts.last()
+        }
     }
 
     private fun geofenceLine(t: Trigger.Geofence, l: RenderLanguage): String {
@@ -571,50 +588,66 @@ object RuleRenderMapper {
     // Condition tree — appiattito in righe indentate (§6)
     // ---------------------------------------------------------------------------------------------
 
-    private fun flattenConditions(c: Condition, depth: Int, l: RenderLanguage): List<String> {
+    /**
+     * Come si apre una riga di condizione: [ONLY_IF] per un cancello valutato una volta (condizioni della
+     * regola, `if`), [WHILE] per la condizione di un `while`, rivalutata prima di ogni giro (S8).
+     */
+    private enum class ConditionLead { ONLY_IF, WHILE }
+
+    private fun leadText(lead: ConditionLead, l: RenderLanguage): String = when (lead) {
+        ConditionLead.ONLY_IF -> l.pick("Only if", "Solo se")
+        ConditionLead.WHILE -> l.pick("While", "Finché")
+    }
+
+    private fun flattenConditions(
+        c: Condition,
+        depth: Int,
+        l: RenderLanguage,
+        lead: ConditionLead = ConditionLead.ONLY_IF,
+    ): List<String> {
         val pad = "  ".repeat(depth)
+        val first = leadText(lead, l)
         return when (c) {
             is Condition.TimeWindow -> listOf(
-                l.pick(
-                    "${pad}Only between ${c.startLocal} and ${c.endLocal} (${c.tz})",
-                    "${pad}Solo tra le ${c.startLocal} e le ${c.endLocal} (${c.tz})",
-                ),
+                when (lead) {
+                    ConditionLead.ONLY_IF -> l.pick(
+                        "${pad}Only between ${c.startLocal} and ${c.endLocal} (${c.tz})",
+                        "${pad}Solo tra le ${c.startLocal} e le ${c.endLocal} (${c.tz})",
+                    )
+                    ConditionLead.WHILE -> l.pick(
+                        "${pad}While it is between ${c.startLocal} and ${c.endLocal} (${c.tz})",
+                        "${pad}Finché è tra le ${c.startLocal} e le ${c.endLocal} (${c.tz})",
+                    )
+                },
             )
             is Condition.StateEquals -> listOf(
-                l.pick(
-                    "${pad}Only if ${c.key} ${opLabel(c.op, l)} ${c.value}",
-                    "${pad}Solo se ${c.key} ${opLabel(c.op, l)} ${c.value}",
-                ),
+                "$pad$first ${c.key} ${opLabel(c.op, l)} ${c.value}",
             )
             is Condition.StateCompare -> listOf(
-                l.pick(
-                    "${pad}Only if ${queryLabel(c.query, l)} [${valueTypeLabel(c.valueType, l)}] " +
-                        "${opLabel(c.op, l)} ${c.expected}",
-                    "${pad}Solo se ${queryLabel(c.query, l)} [${valueTypeLabel(c.valueType, l)}] " +
-                        "${opLabel(c.op, l)} ${c.expected}",
-                ),
+                "$pad$first ${queryLabel(c.query, l)} [${valueTypeLabel(c.valueType, l)}] " +
+                    "${opLabel(c.op, l)} ${c.expected}",
             )
             is Condition.AppInForeground -> listOf(
                 l.pick(
-                    "${pad}Only if ${appLabel(c.pkg)} is in the foreground",
-                    "${pad}Solo se ${appLabel(c.pkg)} è in primo piano",
+                    "$pad$first ${appLabel(c.pkg)} is in the foreground",
+                    "$pad$first ${appLabel(c.pkg)} è in primo piano",
                 ),
             )
             is Condition.LocationIn -> listOf(
                 l.pick(
-                    "${pad}Only if you are within ${fmtNum(c.radiusM)} m of ${c.lat},${c.lng}",
-                    "${pad}Solo se ti trovi entro ${fmtNum(c.radiusM)} m da ${c.lat},${c.lng}",
+                    "$pad$first you are within ${fmtNum(c.radiusM)} m of ${c.lat},${c.lng}",
+                    "$pad$first ti trovi entro ${fmtNum(c.radiusM)} m da ${c.lat},${c.lng}",
                 ),
             )
             is Condition.And ->
                 listOf(l.pick("${pad}All of the following:", "${pad}Tutte le seguenti:")) +
-                    c.all.flatMap { flattenConditions(it, depth + 1, l) }
+                    c.all.flatMap { flattenConditions(it, depth + 1, l, lead) }
             is Condition.Or ->
                 listOf(l.pick("${pad}At least one of the following:", "${pad}Almeno una delle seguenti:")) +
-                    c.any.flatMap { flattenConditions(it, depth + 1, l) }
+                    c.any.flatMap { flattenConditions(it, depth + 1, l, lead) }
             is Condition.Not ->
                 listOf(l.pick("${pad}Must not hold:", "${pad}Non deve valere:")) +
-                    flattenConditions(c.cond, depth + 1, l)
+                    flattenConditions(c.cond, depth + 1, l, lead)
             is Condition.BooleanLiteral ->
                 listOf("$pad${if (c.value) l.pick("Always", "Sempre") else l.pick("Never", "Mai")}")
             // P4: confronto su variabile di programma. La destra è un'altra variabile (${nome}) o un
@@ -622,13 +655,11 @@ object RuleRenderMapper {
             is Condition.VarCompare -> {
                 // IS_EVEN/IS_ODD sono UNARI: nessun operando destro da rendere.
                 val unary = c.op == CmpOp.IS_EVEN || c.op == CmpOp.IS_ODD
-                val right = if (unary) "" else " " + (c.expectedVar?.let { "\${$it}" } ?: c.expected ?: "<?>")
-                listOf(
-                    l.pick(
-                        "${pad}Only if \${${c.varName}} ${opLabel(c.op, l)}$right",
-                        "${pad}Solo se \${${c.varName}} ${opLabel(c.op, l)}$right",
-                    ),
-                )
+                // S8: il letterale va tra virgolette (un valore vuoto o di soli spazi resta visibile) e su
+                // una riga sola (un a capo diventa ⏎ e non imita una riga di condizione).
+                val literal = c.expected?.let { "\"${VisibleText.singleLine(it)}\"" }
+                val right = if (unary) "" else " " + (c.expectedVar?.let { "\${$it}" } ?: literal ?: "<?>")
+                listOf("$pad$first \${${c.varName}} ${opLabel(c.op, l)}$right")
             }
         }
     }
@@ -679,7 +710,7 @@ object RuleRenderMapper {
         )
         is Action.SetRinger -> row(
             iconKey = "ringer",
-            label = l.pick("Set ringer (${a.mode})", "Imposta suoneria (${a.mode})"),
+            label = l.pick("Set ringer mode: ", "Imposta la suoneria: ") + ringerModeLabel(a.mode, l),
         )
         is Action.LaunchApp -> row(
             iconKey = "launch_app",
@@ -689,7 +720,8 @@ object RuleRenderMapper {
         is Action.OpenUrl -> row(
             iconKey = "open_url",
             label = l.pick("Open URL", "Apri URL"),
-            detail = a.url,
+            // S8: l'host che il link apre DAVVERO, su una riga sua (`https://banca.it@altro.example/` apre altro.example).
+            detail = a.url + (urlHostLine(a.url, l)?.let { "\n$it" } ?: ""),
         )
         is Action.ShowNotification -> row(
             iconKey = "notify",
@@ -713,7 +745,8 @@ object RuleRenderMapper {
         is Action.InputText -> row(
             iconKey = "input_text",
             label = l.pick("Type text", "Digita testo"),
-            detail = a.text,
+            // S8: un a capo nel testo da digitare si vede come ⏎.
+            detail = VisibleText.singleLine(a.text),
             requiresLiveConfirm = true,
         )
         is Action.WhatsAppReply -> row(
@@ -752,34 +785,35 @@ object RuleRenderMapper {
         is Action.SetTimer -> row(
             iconKey = "timer",
             label = l.pick("Start timer", "Avvia timer"),
-            detail = "${a.seconds}s" +
+            detail = humanizeDuration(a.seconds * 1_000L, l) +
                 (a.label?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: "") +
                 clockUiSuffix(a.skipUi, l),
         )
         is Action.SetVolume -> row(
             iconKey = "volume",
             label = l.pick("Set volume", "Imposta volume"),
-            detail = "${a.stream.name.lowercase()} · ${l.pick("level", "livello")} ${a.level}",
+            // B14: il livello è una percentuale del massimo dello stream.
+            detail = "${volumeStreamLabel(a.stream, l)} · ${a.level}%",
         )
         is Action.SetFlashlight -> row(
             iconKey = "flashlight",
             label = if (a.on) l.pick("Turn on flashlight", "Accendi torcia")
             else l.pick("Turn off flashlight", "Spegni torcia"),
-            detail = if (a.on) "on" else "off",
+            detail = if (a.on) l.pick("on", "accesa") else l.pick("off", "spenta"),
         )
         is Action.SetDarkMode -> row(
             iconKey = "settings",
             label = l.pick("Set dark mode", "Imposta modalità scura"),
             detail = when (a.mode) {
-                NightMode.OFF -> l.pick("off", "off")
-                NightMode.ON -> l.pick("on", "on")
-                NightMode.AUTO -> l.pick("auto", "auto")
+                NightMode.OFF -> l.pick("off", "disattivata")
+                NightMode.ON -> l.pick("on", "attivata")
+                NightMode.AUTO -> l.pick("automatic", "automatica")
             },
         )
         is Action.OpenSettingsScreen -> row(
             iconKey = "settings",
             label = l.pick("Open Settings", "Apri Impostazioni"),
-            detail = a.screen.name.lowercase() +
+            detail = settingsScreenLabel(a.screen, l) +
                 (a.pkg?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""),
         )
         is Action.Vibrate -> row(
@@ -840,7 +874,7 @@ object RuleRenderMapper {
                 append(
                     a.stateContext.joinToString("; ") { context ->
                         "${queryLabel(context.query, l)} [${valueTypeLabel(context.valueType, l)}, " +
-                            "${context.integrity.name}, ${context.confidentiality.name}]"
+                            "${integrityLabel(context.integrity, l)}, ${confidentialityLabel(context.confidentiality, l)}]"
                     },
                 )
                 append(l.pick(" · tools: ", " · tool: "))
@@ -930,9 +964,63 @@ object RuleRenderMapper {
         if (contextSources.isEmpty()) {
             ""
         } else {
-            val joined = contextSources.joinToString(", ")
+            val joined = contextSources.joinToString(", ") { contextSourceLabel(it, l) }
             l.pick(" · context: $joined", " · contesto: $joined")
         }
+
+    /** B14: le fonti note hanno un nome nella lingua dell'utente; una sconosciuta resta com'è scritta. */
+    private fun contextSourceLabel(source: String, l: RenderLanguage): String = when (source) {
+        GenerativeContract.CONTEXT_NOTIFICATION -> l.pick("notification text", "testo della notifica")
+        GenerativeContract.CONTEXT_STATE -> l.pick("device state", "stato del dispositivo")
+        else -> source
+    }
+
+    /** B14: modalità della suoneria per nome; un valore fuori elenco (il validator lo rifiuta) resta tra virgolette. */
+    private fun ringerModeLabel(mode: String, l: RenderLanguage): String = when (mode) {
+        "normal" -> l.pick("sound", "suono")
+        "vibrate" -> l.pick("vibrate", "vibrazione")
+        "silent" -> l.pick("silent", "silenzioso")
+        else -> "\"$mode\""
+    }
+
+    private fun volumeStreamLabel(stream: VolumeStream, l: RenderLanguage): String = when (stream) {
+        VolumeStream.MEDIA -> l.pick("media", "contenuti multimediali")
+        VolumeStream.RING -> l.pick("ringtone", "suoneria")
+        VolumeStream.ALARM -> l.pick("alarm", "sveglia")
+        VolumeStream.NOTIFICATION -> l.pick("notifications", "notifiche")
+    }
+
+    private fun settingsScreenLabel(screen: SettingsScreen, l: RenderLanguage): String = when (screen) {
+        SettingsScreen.WIFI -> "Wi-Fi"
+        SettingsScreen.BLUETOOTH -> "Bluetooth"
+        SettingsScreen.DISPLAY -> l.pick("Display", "Schermo")
+        SettingsScreen.SOUND -> l.pick("Sound", "Suoni")
+        SettingsScreen.LOCATION -> l.pick("Location", "Posizione")
+        SettingsScreen.BATTERY -> l.pick("Battery", "Batteria")
+        SettingsScreen.DATE -> l.pick("Date and time", "Data e ora")
+        SettingsScreen.APP_DETAILS -> l.pick("App info", "Informazioni app")
+        SettingsScreen.SETTINGS -> l.pick("Main settings", "Impostazioni principali")
+    }
+
+    /**
+     * S8: per un URL letterale, la riga con l'host che il link apre davvero (dopo un eventuale `utente@`),
+     * con la forma ASCII se è un nome internazionalizzato (un sosia Unicode si tradisce). null se l'URL
+     * contiene `${…}` (l'host si decide allo scatto).
+     */
+    internal fun urlHostLine(url: String, l: RenderLanguage): String? {
+        if (InterpolationPolicy.containsInterpolation(url)) return null
+        val uri = runCatching { java.net.URI(url.trim()) }.getOrNull()
+        // `URI.host` è null per un host non ASCII: lo si ricava dall'autorità, dopo l'ultima `@`.
+        val host = (
+            uri?.host ?: uri?.rawAuthority?.substringAfterLast('@')?.let { authority ->
+                if (authority.startsWith("[")) authority.substringBefore(']') + "]" else authority.substringBefore(':')
+            }
+            )?.takeIf { it.isNotBlank() }
+            ?: return l.pick("Opens on: host not recognised", "Si apre su: host non riconosciuto")
+        val ascii = runCatching { java.net.IDN.toASCII(host) }.getOrNull()
+        val shown = if (ascii != null && !ascii.equals(host, ignoreCase = true)) "$host ($ascii)" else host
+        return l.pick("Opens on: $shown", "Si apre su: $shown")
+    }
 
     /** S1: la risposta è vincolata al mittente del trigger (non a un destinatario libero). */
     private fun replyBindingSuffix(replyTargetSender: Boolean, l: RenderLanguage): String =
@@ -977,7 +1065,7 @@ object RuleRenderMapper {
                 }
             }
         }
-        return "Cron '$expr' ($tz)"
+        return l.pick("Cron schedule '$expr' ($tz)", "Pianificazione cron '$expr' ($tz)")
     }
 
     private fun weekdayName(dow: String, l: RenderLanguage): String? = when (dow.toIntOrNull()) {
@@ -1008,8 +1096,11 @@ object RuleRenderMapper {
 
     private fun queryLabel(query: StateQuery, l: RenderLanguage): String = when (query) {
         is StateQuery.Builtin -> l.pick("state ${query.key}", "stato ${query.key}")
-        is StateQuery.Setting -> "setting ${query.namespace.name}:${query.key}"
-        is StateQuery.SystemProperty -> "property ${query.name}"
+        is StateQuery.Setting -> l.pick(
+            "setting ${query.namespace.name.lowercase()}:${query.key}",
+            "impostazione ${query.namespace.name.lowercase()}:${query.key}",
+        )
+        is StateQuery.SystemProperty -> l.pick("system property ${query.name}", "proprietà di sistema ${query.name}")
         is StateQuery.Sysfs -> "sysfs ${query.path}"
         is StateQuery.DumpsysField -> l.pick(
             "dumpsys ${query.service} · field ${query.field}",

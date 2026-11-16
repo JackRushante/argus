@@ -220,10 +220,10 @@ class RuleRenderPrivacyNoteTest {
             replyTargetSender = true,
         )
         val en = render(whatsapp, action, language = RenderLanguage.EN).actions.single().detail.orEmpty()
-        assertTrue(en.contains("context: notification, state"), en)
+        assertTrue(en.contains("context: notification text, device state"), en)
         assertTrue(en.contains("reply bound to the sender"), en)
         val it = render(whatsapp, action, language = RenderLanguage.IT).actions.single().detail.orEmpty()
-        assertTrue(it.contains("contesto: notification, state"), it)
+        assertTrue(it.contains("contesto: testo della notifica, stato del dispositivo"), it)
         assertTrue(it.contains("risposta vincolata al mittente"), it)
     }
 }

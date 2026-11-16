@@ -188,12 +188,12 @@ class RuleRenderMapperTest {
             ),
             language = RenderLanguage.IT,
         ).triggerLine
-        assertEquals("Una volta, tra 2 minuti", line(120_000))
-        assertEquals("Una volta, tra 1 minuto", line(60_000))
-        assertEquals("Una volta, tra 1 ora", line(3_600_000))
-        assertEquals("Una volta, tra 30 secondi", line(30_000))
-        assertEquals("Una volta, tra 2 giorni", line(2L * 24 * 60 * 60 * 1_000))
-        assertEquals("Una volta, tra 1 ora e 30 minuti", line(5_400_000))
+        assertEquals("Una volta, tra 2 minuti · circa (Android può ritardarlo)", line(120_000))
+        assertEquals("Una volta, tra 1 minuto · circa (Android può ritardarlo)", line(60_000))
+        assertEquals("Una volta, tra 1 ora · circa (Android può ritardarlo)", line(3_600_000))
+        assertEquals("Una volta, tra 30 secondi · circa (Android può ritardarlo)", line(30_000))
+        assertEquals("Una volta, tra 2 giorni · circa (Android può ritardarlo)", line(2L * 24 * 60 * 60 * 1_000))
+        assertEquals("Una volta, tra 1 ora e 30 minuti · circa (Android può ritardarlo)", line(5_400_000))
     }
 
     @Test fun `immediate trigger renders the on-arm one-shot line`() {
@@ -344,7 +344,7 @@ class RuleRenderMapperTest {
 
         assertTrue(render.privacyNote.orEmpty().contains("reader di stato"))
         assertTrue(render.actions.single().detail.orEmpty().contains("dumpsys battery · campo voltage"))
-        assertTrue(render.actions.single().detail.orEmpty().contains("CLEAN, SECRET"))
+        assertTrue(render.actions.single().detail.orEmpty().contains("attendibile, segreto"))
     }
 
     @Test fun `nested generative v2 receives the state disclosure privacy note`() {
@@ -387,7 +387,7 @@ class RuleRenderMapperTest {
         )
         val r = RuleRenderMapper.map(a, language = RenderLanguage.IT)
         assertEquals("time", r.triggerIconKey)
-        assertTrue(r.triggerLine.startsWith("Cron '"), r.triggerLine)
+        assertTrue(r.triggerLine.startsWith("Pianificazione cron '"), r.triggerLine)
         assertTrue(r.triggerLine.contains("*/15 9-17 * * 1-5"), r.triggerLine)
     }
 
@@ -444,13 +444,13 @@ class RuleRenderMapperTest {
         )
         val it = RuleRenderMapper.map(rule, language = RenderLanguage.IT).actions.single()
         assertEquals("Imposta modalità scura", it.label)
-        assertEquals("on", it.detail)
+        assertEquals("attivata", it.detail)
         val en = RuleRenderMapper.map(
             rule.copy(actions = listOf(Action.SetDarkMode(NightMode.AUTO))),
             language = RenderLanguage.EN,
         ).actions.single()
         assertEquals("Set dark mode", en.label)
-        assertEquals("auto", en.detail)
+        assertEquals("automatic", en.detail)
     }
 
     @Test fun `sms trigger renders its text filter integrally`() {
@@ -582,7 +582,7 @@ class RuleRenderMapperTest {
         )
         val r = RuleRenderMapper.map(a, language = RenderLanguage.EN)
         assertEquals("time", r.triggerIconKey)
-        assertEquals("Every day at 23:00 (Europe/Rome)", r.triggerLine)
+        assertEquals("Every day at 23:00 (Europe/Rome) · about (Android may delay it)", r.triggerLine)
     }
 
     @Test fun `EN sms trigger renders the english text filter integrally`() {
@@ -625,9 +625,9 @@ class RuleRenderMapperTest {
             ),
             language = RenderLanguage.EN,
         ).triggerLine
-        assertEquals("Once, in 2 minutes", line(120_000))
-        assertEquals("Once, in 1 minute", line(60_000))
-        assertEquals("Once, in 1 hour and 30 minutes", line(5_400_000))
+        assertEquals("Once, in 2 minutes · about (Android may delay it)", line(120_000))
+        assertEquals("Once, in 1 minute · about (Android may delay it)", line(60_000))
+        assertEquals("Once, in 1 hour and 30 minutes · about (Android may delay it)", line(5_400_000))
     }
 
     @Test fun `EN immediate trigger renders the english on-arm one-shot line`() {
