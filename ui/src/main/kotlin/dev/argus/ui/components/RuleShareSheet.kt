@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.PrivacyTip
 import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -57,6 +58,7 @@ private val QrSide = 208.dp
 /** Margine chiaro attorno al codice, in moduli (lo standard ne chiede 4). */
 private const val QR_QUIET_MODULES = 4
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RuleShareSheet(
     share: RuleShareUi,
