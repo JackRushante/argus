@@ -62,6 +62,20 @@ class ConditionEvaluator(private val clock: Clock) {
         // Senza resolver siamo nel gate trigger-time: le variabili non esistono e falliscono
         // chiuso. L'interprete P4 passa invece lo scope della singola esecuzione.
         is Condition.VarCompare -> variable?.let { compareVariables(c, it) } ?: Truth.UNKNOWN
+        // 0.8 scaffold: non ancora valutabili ⇒ UNKNOWN, che fallisce chiuso anche sotto `not`.
+        is Condition.Weekday -> Truth.UNKNOWN
+
+        is Condition.WifiConnected -> Truth.UNKNOWN
+
+        is Condition.BluetoothConnected -> Truth.UNKNOWN
+
+        is Condition.HeadsetConnected -> Truth.UNKNOWN
+
+        is Condition.CalendarBusy -> Truth.UNKNOWN
+
+        is Condition.StoredCompare -> Truth.UNKNOWN
+
+        is Condition.UserModeIs -> Truth.UNKNOWN
     }
 
     private fun compareVariables(

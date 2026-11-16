@@ -71,6 +71,17 @@ object ActionPrivileges {
         is Action.HttpRequest,
         // 0.5.1: la macro sull'interfaccia passa dal servizio di Accessibilità di Argus, non da uno shell.
         is Action.UiSteps,
+        // 0.8 scaffold: notifiche, store locale, NotificationListener, SmsManager, Intent,
+        // CallScreeningService. Nessuna passa dallo shell privilegiato.
+        is Action.Ask,
+        is Action.SetStored,
+        is Action.SetUserMode,
+        is Action.NotificationReply,
+        is Action.NotificationAction,
+        is Action.SendSms,
+        is Action.CallNumber,
+        is Action.SendIntent,
+        is Action.ScreenCall,
         is Action.InvokeLlm,
         is Action.InvokeLlmV2,
         -> ActionPrivilege.BASE

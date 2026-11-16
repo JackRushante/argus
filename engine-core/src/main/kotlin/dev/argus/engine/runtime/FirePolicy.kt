@@ -2,11 +2,11 @@ package dev.argus.engine.runtime
 
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.Automation
-import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.AutomationSchema
 import dev.argus.engine.model.ApprovalFingerprints
 import dev.argus.engine.model.CapabilityIds
 import dev.argus.engine.model.CapabilityRequirements
+import dev.argus.engine.model.toDraft
 import dev.argus.engine.safety.DraftValidator
 import dev.argus.engine.safety.Severity
 import dev.argus.engine.safety.StaticShellSafety
@@ -109,14 +109,8 @@ class RevalidatingFirePolicy(
             !StaticShellSafety.allows(automation.trigger, snapshot.whitelistedConversationIds)
         ) return FirePolicyDecision.Block("ui_steps_external_trigger", needsReview = true)
 
-        val draft = AutomationDraft(
-            name = automation.name,
-            trigger = automation.trigger,
-            actions = automation.actions,
-            vars = automation.vars,
-            conditions = automation.conditions,
-            cooldownMs = automation.cooldownMs,
-        )
+        // L'unica copia tipata regola → bozza: porta anche `confirm` ed `exit` (0.8) al validator.
+        val draft = automation.toDraft()
         val validationErrors = DraftValidator(snapshot.knownTools)
             .validate(draft, snapshot.whitelistedConversationIds)
             .any { it.severity == Severity.ERROR }
@@ -144,12 +138,7 @@ class RevalidatingFirePolicy(
         )
             return FirePolicyDecision.Block("ui_steps_external_trigger", needsReview = false)
 
-        val derivedRequirements = CapabilityRequirements.derive(
-            automation.trigger,
-            automation.actions,
-            automation.conditions,
-            automation.vars,
-        )
+        val derivedRequirements = CapabilityRequirements.derive(automation)
         if (automation.requiredCapabilities != derivedRequirements)
             return FirePolicyDecision.Block("capability_requirements_mismatch", needsReview = true)
 

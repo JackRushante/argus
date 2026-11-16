@@ -533,6 +533,8 @@ class Engine(
         is Action.RunShell -> captureAs
         is Action.InvokeLlm -> captureAs
         is Action.InvokeLlmV2 -> captureAs
+        is Action.Ask -> captureAs
+        is Action.HttpRequest -> captureAs
         else -> null
     }
 

@@ -111,6 +111,16 @@ object ActionTypeIds {
     const val APP_PERMISSION = "app_permission"
     // 0.5.1: computer-use lento via Accessibilità (macro di passi su controlli, senza AI allo scatto).
     const val UI_STEPS = "ui_steps"
+    // 0.8 scaffold: azioni nuove, spente finché il loro FeatureGate è off (vedi FeatureGates).
+    const val ASK = "ask"
+    const val SET_STORED = "set_stored"
+    const val SET_USER_MODE = "set_user_mode"
+    const val NOTIFICATION_REPLY = "notification_reply"
+    const val NOTIFICATION_ACTION = "notification_action"
+    const val SEND_SMS = "send_sms"
+    const val CALL_NUMBER = "call_number"
+    const val SEND_INTENT = "send_intent"
+    const val SCREEN_CALL = "screen_call"
     // Control-flow strutturato P4 §2.3: contenitori, non azioni foglia.
     const val IF = "if"
     const val WHILE = "while"
@@ -206,6 +216,16 @@ sealed interface Action {
             is Screenshot,
             is AppPermission,
             is UiSteps,
+            // 0.8 scaffold: tutte deterministiche (nessuna chiamata al modello).
+            is Ask,
+            is SetStored,
+            is SetUserMode,
+            is NotificationReply,
+            is NotificationAction,
+            is SendSms,
+            is CallNumber,
+            is SendIntent,
+            is ScreenCall,
             -> ActionTier.DETERMINISTIC
         }
 
@@ -346,6 +366,12 @@ sealed interface Action {
         // TAINTED). @EncodeDefault(NEVER): assente ⇒ i fingerprint v1 già approvati restano stabili.
         @EncodeDefault(EncodeDefault.Mode.NEVER)
         val captureAs: String? = null,
+        /**
+         * 0.8 scaffold ([FeatureGate.LLM_OUTPUT]): forma vincolata dell'uscita (una scelta, un numero,
+         * un booleano). null = testo libero, come prima. @EncodeDefault(NEVER): assente ⇒ byte stabili.
+         */
+        @EncodeDefault(EncodeDefault.Mode.NEVER)
+        val output: OutputSpec? = null,
     ) : Action, GenerativeAction
 
     /**
@@ -445,6 +471,27 @@ sealed interface Action {
         val headers: Map<String, String>? = null,
         val body: String? = null,
         val contentType: String? = null,
+        /**
+         * 0.8 scaffold ([FeatureGate.HTTP_CAPTURE]): nome della variabile P4 che riceve la risposta.
+         * Con [captureAs] l'azione è P4 e il valore catturato è TAINTED (viene da un server esterno).
+         */
+        @EncodeDefault(EncodeDefault.Mode.NEVER)
+        val captureAs: String? = null,
+        /**
+         * 0.8 scaffold ([FeatureGate.HTTP_CAPTURE]): JSON pointer (RFC 6901) nella risposta da catturare;
+         * null = il corpo intero. Ha senso solo con [captureAs].
+         */
+        @EncodeDefault(EncodeDefault.Mode.NEVER)
+        val extract: String? = null,
+        /**
+         * 0.8 scaffold ([FeatureGate.HTTP_SECRETS]): intestazioni il cui valore viene dalla cassaforte
+         * dei segreti del telefono. La regola porta solo i nomi; il valore non entra mai in una variabile.
+         */
+        @EncodeDefault(EncodeDefault.Mode.NEVER)
+        val secretHeaders: List<SecretRef>? = null,
+        /** 0.8 scaffold ([FeatureGate.HTTP_SECRETS]): come [secretHeaders], per i parametri di query. */
+        @EncodeDefault(EncodeDefault.Mode.NEVER)
+        val secretQuery: List<SecretRef>? = null,
     ) : Action
 
     /**
@@ -500,6 +547,101 @@ sealed interface Action {
         val pkg: String? = null,
         val steps: List<UiStep>,
     ) : Action
+
+    // ---------------------------------------------------------------------------------------------
+    // 0.8 scaffold. Ogni tipo qui sotto è nel modello, nel fingerprint e nella resa, ma è SPENTO: il
+    // validator lo rifiuta con `not_available_yet` finché il suo [FeatureGate] è off, e l'esecutore e
+    // l'interpolatore falliscono chiusi con lo stesso codice. Chi lo implementa accende il suo gate.
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Chiede all'utente con una notifica che ha un pulsante per ogni scelta ([FeatureGate.ACTION_ASK]).
+     * [prompt] è il testo della domanda, un template SINK. [choices] sono le etichette letterali dei
+     * pulsanti; la scelta toccata viene catturata come testo nella variabile P4 [captureAs]. Senza
+     * risposta entro [timeoutMs] vale [defaultChoice] (che deve essere una delle [choices]); se è null
+     * la variabile resta non assegnata e il programma si ferma. P4 (cattura).
+     */
+    @Serializable @SerialName(ActionTypeIds.ASK)
+    data class Ask(
+        val prompt: String,
+        val choices: List<String>,
+        val captureAs: String,
+        val timeoutMs: Long = 120_000,
+        val defaultChoice: String? = null,
+    ) : Action
+
+    /**
+     * Cambia un valore conservato fra le esecuzioni ([FeatureGate.ACTION_SET_STORED]). [key] è il nome
+     * letterale del valore; [op] SET scrive [value], INCREMENT lo somma (numerico, default 1), TOGGLE
+     * inverte un booleano, CLEAR lo cancella. [value] è un template SINK; null per TOGGLE e CLEAR. P4.
+     */
+    @Serializable @SerialName(ActionTypeIds.SET_STORED)
+    data class SetStored(
+        val key: String,
+        val op: StoredOp,
+        val value: String? = null,
+    ) : Action
+
+    /**
+     * Imposta la modalità utente corrente (per esempio «lavoro», «casa») ([FeatureGate.ACTION_SET_USER_MODE]).
+     * [mode] è letterale. Il cambio è un evento per i trigger `user_mode_changed`.
+     */
+    @Serializable @SerialName(ActionTypeIds.SET_USER_MODE)
+    data class SetUserMode(val mode: String) : Action
+
+    /**
+     * Risponde alla notifica che ha fatto scattare la regola, per le app di messaggi diverse da WhatsApp
+     * ([FeatureGate.ACTION_NOTIFICATION_REPLY]), con il RemoteInput della notifica. [text] è un template
+     * SINK, come in [WhatsAppReply].
+     */
+    @Serializable @SerialName(ActionTypeIds.NOTIFICATION_REPLY)
+    data class NotificationReply(val text: String) : Action
+
+    /**
+     * Agisce sulla notifica che ha fatto scattare la regola ([FeatureGate.ACTION_NOTIFICATION_ACTION]):
+     * DISMISS la toglie, SNOOZE la rimanda di [snoozeMinutes], CLICK tocca il pulsante della notifica il
+     * cui testo è esattamente [label] (letterale).
+     */
+    @Serializable @SerialName(ActionTypeIds.NOTIFICATION_ACTION)
+    data class NotificationAction(
+        val op: NotificationActionOp,
+        val label: String? = null,
+        val snoozeMinutes: Int? = null,
+    ) : Action
+
+    /**
+     * Invia un SMS ([FeatureGate.ACTION_SEND_SMS]). [number] è letterale (mai `${'$'}{var}`); [text] è un
+     * template SINK.
+     */
+    @Serializable @SerialName(ActionTypeIds.SEND_SMS)
+    data class SendSms(val number: String, val text: String) : Action
+
+    /** Avvia una chiamata al numero letterale [number] ([FeatureGate.ACTION_CALL_NUMBER]). */
+    @Serializable @SerialName(ActionTypeIds.CALL_NUMBER)
+    data class CallNumber(val number: String) : Action
+
+    /**
+     * Invia un Intent Android ([FeatureGate.ACTION_SEND_INTENT]): [kind] dice se come broadcast, activity
+     * o service. [action], [pkg], [cls], [data] (URI) e [mimeType] sono letterali; negli [extras] solo il
+     * valore degli extra STRING è un template AUTHORITY.
+     */
+    @Serializable @SerialName(ActionTypeIds.SEND_INTENT)
+    data class SendIntent(
+        val kind: IntentKind,
+        val action: String? = null,
+        val pkg: String? = null,
+        val cls: String? = null,
+        val data: String? = null,
+        val mimeType: String? = null,
+        val extras: List<IntentExtra> = emptyList(),
+    ) : Action
+
+    /**
+     * Decide in modo sincrono una chiamata in arrivo ([FeatureGate.ACTION_SCREEN_CALL]): REJECT la
+     * rifiuta, SILENCE la silenzia. Ha senso solo con un trigger di chiamata in arrivo.
+     */
+    @Serializable @SerialName(ActionTypeIds.SCREEN_CALL)
+    data class ScreenCall(val op: ScreenCallOp) : Action
 }
 
 /** Visita iterativa: il tier non può causare stack overflow su un albero non ancora validato. */

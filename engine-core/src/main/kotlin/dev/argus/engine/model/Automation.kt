@@ -20,11 +20,11 @@ object AutomationSchema {
     val supportedVersions: Set<Int> = setOf(AUTOMATION_SCHEMA_VERSION_V1, AUTOMATION_SCHEMA_VERSION_P4)
 
     fun versionFor(draft: AutomationDraft): Int =
-        if (requiresP4(draft.vars, draft.actions, draft.conditions)) AUTOMATION_SCHEMA_VERSION_P4
+        if (requiresP4(draft.vars, draft.actions, draft.conditions, draft.exit)) AUTOMATION_SCHEMA_VERSION_P4
         else AUTOMATION_SCHEMA_VERSION_V1
 
     fun isCompatible(automation: Automation): Boolean {
-        val needsP4 = requiresP4(automation.vars, automation.actions, automation.conditions)
+        val needsP4 = requiresP4(automation)
         return when (automation.schemaVersion) {
             AUTOMATION_SCHEMA_VERSION_V1 -> !needsP4
             AUTOMATION_SCHEMA_VERSION_P4 -> needsP4
@@ -35,16 +35,19 @@ object AutomationSchema {
     fun isSupportedVersion(version: Int): Boolean = version in supportedVersions
 
     fun requiresP4(automation: Automation): Boolean =
-        requiresP4(automation.vars, automation.actions, automation.conditions)
+        requiresP4(automation.vars, automation.actions, automation.conditions, automation.exit)
 
     private fun requiresP4(
         vars: List<VarBinding>,
         actions: List<Action>,
         conditions: Condition?,
+        exit: ExitSpec? = null,
     ): Boolean {
         if (vars.isNotEmpty() || conditions?.containsP4Condition() == true) return true
         val pending = ArrayDeque<Action>()
         actions.forEach(pending::addLast)
+        // 0.8 scaffold: le azioni di uscita di una regola-intervallo sono parte del programma.
+        exit?.actions?.forEach(pending::addLast)
         while (pending.isNotEmpty()) {
             when (val action = pending.removeFirst()) {
                 is Action.Wait -> return true
@@ -57,6 +60,10 @@ object AutomationSchema {
                 is Action.RunShell -> if (action.captureAs != null) return true
                 is Action.InvokeLlm -> if (action.captureAs != null) return true
                 is Action.InvokeLlmV2 -> if (action.captureAs != null) return true
+                // 0.8 scaffold: catturano o scrivono valori di programma.
+                is Action.Ask -> return true
+                is Action.SetStored -> return true
+                is Action.HttpRequest -> if (action.captureAs != null) return true
                 else -> Unit
             }
         }
@@ -100,10 +107,40 @@ data class Automation(
     val priority: Int = 0,
     val cooldownMs: Long = 0,
     val schemaVersion: Int = AUTOMATION_SCHEMA_VERSION_V1,
+    /**
+     * 0.8 scaffold ([FeatureGate.CONFIRM]): prima di eseguire, chiedi all'utente. Prima dei requisiti
+     * perché la loro derivazione lo legge; @EncodeDefault(NEVER) ⇒ assente dal wire quando null, così i
+     * byte (e le impronte) delle regole esistenti non cambiano.
+     */
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val confirm: ConfirmSpec? = null,
+    /** 0.8 scaffold ([FeatureGate.EXIT]): fine della regola-intervallo. Stesse regole di [confirm]. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val exit: ExitSpec? = null,
     /** Snapshot derivato e fingerprintato di trigger, condizioni, azioni e variabili richiesti a runtime. */
-    val requiredCapabilities: Set<String> = CapabilityRequirements.derive(trigger, actions, conditions, vars),
+    val requiredCapabilities: Set<String> =
+        CapabilityRequirements.derive(trigger, actions, conditions, vars, confirm, exit),
     /** Hash dei dati eseguibili approvati; ogni edit lo rende non più corrispondente. */
     val approvalFingerprint: ApprovalFingerprint? = null,
+)
+
+/**
+ * 0.8 scaffold ([FeatureGate.CONFIRM]): prima di eseguire una regola scattata, il motore chiede
+ * all'utente con una notifica (Esegui / Annulla). Nessuna risposta entro [timeoutMs] annulla.
+ */
+@Serializable
+data class ConfirmSpec(val timeoutMs: Long = 300_000)
+
+/**
+ * 0.8 scaffold ([FeatureGate.EXIT]): la regola diventa un intervallo. Comincia col suo trigger e finisce
+ * con [trigger]; con [restore] il motore rimette i valori che le azioni d'inizio avevano cambiato, poi
+ * esegue [actions].
+ */
+@Serializable
+data class ExitSpec(
+    val trigger: Trigger,
+    val restore: Boolean = true,
+    val actions: List<Action> = emptyList(),
 )
 
 /** Bozza proposta dall'LLM: come Automation ma senza id/status (li assegna l'app all'approvazione). */
@@ -119,6 +156,12 @@ data class AutomationDraft(
     val conditions: Condition? = null,
     val rationale: String = "",
     val cooldownMs: Long = 0,
+    /** 0.8 scaffold: come [Automation.confirm]. @EncodeDefault(NEVER): un draft senza resta byte-identico. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val confirm: ConfirmSpec? = null,
+    /** 0.8 scaffold: come [Automation.exit]. @EncodeDefault(NEVER): un draft senza resta byte-identico. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val exit: ExitSpec? = null,
 )
 
 /**
@@ -134,4 +177,6 @@ fun Automation.toDraft(): AutomationDraft = AutomationDraft(
     vars = vars,
     conditions = conditions,
     cooldownMs = cooldownMs,
+    confirm = confirm,
+    exit = exit,
 )

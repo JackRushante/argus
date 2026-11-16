@@ -17,6 +17,8 @@ class ConflictDetector {
         is Action.SetDnd -> Setting("dnd", a.mode.name)
         is Action.SetRinger -> Setting("ringer", a.mode)
         is Action.SetDarkMode -> Setting("dark_mode", a.mode.name)
+        // 0.8: due regole che impostano modalità utente diverse.
+        is Action.SetUserMode -> Setting("user_mode", a.mode)
         else -> null
     }
 
@@ -36,6 +38,11 @@ class ConflictDetector {
             t1.what == t2.what && t1.to != null && t2.to != null && t1.to != t2.to
         // 0.5.1: aperta/chiusa della stessa app è la coppia classica («apro: spegni, chiudo: riaccendi»).
         t1 is Trigger.AppEvent && t2 is Trigger.AppEvent -> t1.pkg == t2.pkg && t1.event != t2.event
+        // 0.8: inizio/fine dello stesso evento di calendario e cambi verso modalità diverse.
+        t1 is Trigger.CalendarEvent && t2 is Trigger.CalendarEvent ->
+            t1.titleMatch == t2.titleMatch && t1.calendar == t2.calendar && t1.phase != t2.phase
+        t1 is Trigger.UserModeChanged && t2 is Trigger.UserModeChanged ->
+            t1.to != null && t2.to != null && t1.to != t2.to
         else -> false
     }
 

@@ -101,6 +101,12 @@ class DraftValidator(
         if (d.actions.isEmpty()) err("no_actions", "Il draft non contiene azioni")
         if (d.cooldownMs < 0) err("cooldown_invalid", "Cooldown non può essere negativo")
 
+        // 0.8 scaffold: un tipo o un campo dietro un FeatureGate spento non si arma mai. Un errore per
+        // interruttore, col suo nome nel dettaglio (vedi FeatureGates).
+        FeatureGates.disabledIn(d).forEach { gate ->
+            errDetail("not_available_yet", "Non disponibile in questa versione", gate.wireName)
+        }
+
         validateTrigger(d.trigger, ::err, ::warn)
         if (d.trigger is Trigger.Sensor &&
             d.cooldownMs !in SensorTriggerPolicy.MIN_COOLDOWN_MS..SensorTriggerPolicy.MAX_COOLDOWN_MS
@@ -295,6 +301,8 @@ class DraftValidator(
                         }
                     }
                 }
+                // 0.8 scaffold: spento (not_available_yet). Chi lo accende valida qui chiave e riservatezza.
+                is VarBinding.Stored -> Unit
             }
         }
     }
@@ -379,6 +387,14 @@ class DraftValidator(
             CaptureDeclaration(it, confidentiality = ConfidentialityLabel.SECRET)
         }
         is Action.InvokeLlmV2 -> action.captureAs?.let {
+            CaptureDeclaration(it, confidentiality = ConfidentialityLabel.SECRET)
+        }
+        // 0.8 scaffold: la scelta dell'utente è una delle etichette approvate, ma finché `ask` è spento
+        // resta TAINTED (default fail-closed); chi la accende decide se può essere CLEAN.
+        is Action.Ask -> CaptureDeclaration(action.captureAs, confidentiality = ConfidentialityLabel.PRIVATE)
+        // 0.8 scaffold: la risposta di un server esterno è TAINTED; SECRET come l'output shell, perché la
+        // richiesta può portare intestazioni segrete.
+        is Action.HttpRequest -> action.captureAs?.let {
             CaptureDeclaration(it, confidentiality = ConfidentialityLabel.SECRET)
         }
         else -> null
@@ -810,6 +826,8 @@ class DraftValidator(
         is Action.HttpRequest -> HTTP_ACTION_BUDGET_MS
         is Action.Speak -> SPEAK_ACTION_BUDGET_MS
         is Action.UiSteps -> UiStepsPolicy.budgetMs(action)
+        // 0.8 scaffold: la domanda aspetta la risposta fino al suo timeout.
+        is Action.Ask -> action.timeoutMs.coerceAtLeast(0)
         is Action.Wait -> action.durationMs.coerceAtLeast(0)
         is Action.If -> maxOf(worstCaseBudgetMs(action.then), worstCaseBudgetMs(action.orElse))
         // Con maxIterationsVar il conteggio è ignoto a compile-time: worst-case = MAX_WHILE_ITERATIONS
@@ -991,6 +1009,17 @@ class DraftValidator(
                 if (trigger.pkg.length > AppPackagePolicy.MAX_LENGTH)
                     err("package_invalid", "Package troppo lungo (massimo ${AppPackagePolicy.MAX_LENGTH})")
             }
+            // 0.8 scaffold: spenti (not_available_yet, vedi validate). Chi accende un trigger scrive qui i
+            // suoi limiti; i sensori shake e flip_face_down passano già dal ramo Sensor.
+            is Trigger.CalendarEvent -> Unit
+
+            is Trigger.NfcTag -> Unit
+
+            is Trigger.NextAlarm -> Unit
+
+            is Trigger.AppUsage -> Unit
+
+            is Trigger.UserModeChanged -> Unit
         }
     }
 
@@ -1057,6 +1086,21 @@ class DraftValidator(
                 if (!condition.radiusM.isFinite() || condition.radiusM <= 0 || condition.radiusM > MAX_GEOFENCE_RADIUS_M)
                     err("radius_invalid", "Raggio condizione non valido")
             }
+            // 0.8 scaffold: spente (not_available_yet, vedi validate). Chi accende una condizione scrive
+            // qui i suoi limiti (un campo personale svuotato dall'export è "" e va rifiutato).
+            is Condition.Weekday -> Unit
+
+            is Condition.WifiConnected -> Unit
+
+            is Condition.BluetoothConnected -> Unit
+
+            is Condition.HeadsetConnected -> Unit
+
+            is Condition.CalendarBusy -> Unit
+
+            is Condition.StoredCompare -> Unit
+
+            is Condition.UserModeIs -> Unit
         }
     }
 
@@ -1272,6 +1316,25 @@ class DraftValidator(
             // Contenitori control-flow: bound (while), rami non vuoti, condizione di flusso e
             // ricorsione sono gestiti da walkActions (che ha lo scope var). Qui nessun campo foglia.
             is Action.If, is Action.While -> Unit
+            // 0.8 scaffold: spente (not_available_yet, vedi validate). Chi accende un'azione scrive qui
+            // i suoi limiti; i campi letterali (numeri, chiavi, etichette) non devono contenere `${'$'}{`.
+            is Action.Ask -> Unit
+
+            is Action.SetStored -> Unit
+
+            is Action.SetUserMode -> Unit
+
+            is Action.NotificationReply -> Unit
+
+            is Action.NotificationAction -> Unit
+
+            is Action.SendSms -> Unit
+
+            is Action.CallNumber -> Unit
+
+            is Action.SendIntent -> Unit
+
+            is Action.ScreenCall -> Unit
         }
     }
 
