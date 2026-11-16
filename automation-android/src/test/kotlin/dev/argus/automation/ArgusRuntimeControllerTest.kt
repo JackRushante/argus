@@ -283,7 +283,7 @@ class ArgusRuntimeControllerTest {
 
         override fun last(): CallStateSnapshot? = null
         override fun pending(): TriggerEnvelope? = pending
-        override fun record(snapshot: CallStateSnapshot, pending: TriggerEnvelope?) {
+        override fun record(snapshot: CallStateSnapshot, pending: TriggerEnvelope?, next: TriggerEnvelope?) {
             this.pending = pending
         }
 
