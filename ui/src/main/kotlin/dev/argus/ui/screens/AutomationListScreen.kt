@@ -45,8 +45,10 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.argus.ui.R
+import dev.argus.ui.components.ArgusButton
 import dev.argus.ui.components.ArgusCard
 import dev.argus.ui.components.ArgusLargeTopBar
+import dev.argus.ui.components.ButtonStyle
 import dev.argus.ui.components.ArgusListRow
 import dev.argus.ui.components.ArgusSegmentedFilter
 import dev.argus.ui.components.ArgusSwitch
@@ -206,7 +208,14 @@ fun AutomationListScreen(
 ) {
     Surface(color = MaterialTheme.colorScheme.background, modifier = modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            ArgusLargeTopBar(stringResource(R.string.list_title))
+            ArgusLargeTopBar(stringResource(R.string.list_title)) {
+                // 0.7.2: la galleria dei modelli parte da qui (tavola «Modelli»: si torna ad Automazioni).
+                ArgusButton(
+                    text = stringResource(R.string.tpl_open),
+                    onClick = callbacks::onOpenTemplates,
+                    style = ButtonStyle.Text,
+                )
+            }
 
             // Banner salute persistente e tappabile → Sistema (nav host-owned via onBannerTap).
             EngineBannerBar(

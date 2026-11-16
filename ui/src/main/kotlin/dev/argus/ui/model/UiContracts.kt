@@ -292,6 +292,63 @@ interface AutomationListCallbacks {
     fun onBannerTap() {}    // tap sul banner salute → Sistema; default no-op, host-owned
     fun onResumeAutomations() {}   // «Riprendi» sul banner della pausa (F21); default no-op
     fun onOpenLog() {}      // 0.7.0: riquadro «Oggi» del riepilogo → Log; default no-op, la nav reale è dell'host
+    fun onOpenTemplates() {} // 0.7.2: «Modelli» → galleria dei modelli; default no-op, la nav reale è dell'host
+}
+
+// --- 0.7.2 · Galleria dei modelli ---
+
+enum class TemplateCategoryUi { HOME, WORK, BATTERY, MESSAGES }
+
+/** Cosa chiede un modello per funzionare, derivato dalle capacità della sua regola (mai dichiarato a mano). */
+enum class TemplateNeedUi {
+    PRIVILEGED,
+    DND_ACCESS,
+    WRITE_SETTINGS,
+    LOCATION,
+    NOTIFICATION_ACCESS,
+    NOTIFICATIONS,
+    SMS,
+    CALLS,
+    BLUETOOTH,
+    USAGE_ACCESS,
+    ACCESSIBILITY,
+}
+
+/** Un dato che il modello lascia a chi lo usa (i valori «da completare»), o il luogo preso all'arm. */
+enum class TemplateBlankUi { CHAT, SENDER, PHONE_NUMBER, NETWORK, PLACE, SECRET, CURRENT_LOCATION }
+
+data class TemplateCardUi(
+    val id: String,
+    val category: TemplateCategoryUi,
+    val title: String,
+    val description: String,
+    /** Icona e forma del contenitore dal trigger della regola, come nella lista. */
+    val triggerIconKey: String,
+    /** Regola generativa: la card porta la coppia di chip «generativa» + «esce verso il cloud» (invariante 5). */
+    val isGenerative: Boolean,
+    val needs: List<TemplateNeedUi>,
+    val blanks: List<TemplateBlankUi> = emptyList(),
+)
+
+data class TemplateGalleryState(
+    val templates: List<TemplateCardUi> = emptyList(),
+    /** Categoria scelta; `null` = «Tutti». */
+    val filter: TemplateCategoryUi? = null,
+    val loading: Boolean = true,
+    /** Il modello che si sta importando: i pulsanti non rispondono a un secondo tocco. */
+    val busyTemplateId: String? = null,
+    /** Anteprima di «Importa da testo» aperto dalla galleria. */
+    val textPreview: TextImportPreview = TextImportPreview.Empty,
+)
+
+interface TemplateGalleryCallbacks {
+    fun onBack()
+    fun onFilter(category: TemplateCategoryUi?)
+    /** «Usa questo modello»: diventa una bozza importata da leggere e approvare. */
+    fun onUseTemplate(id: String)
+    fun onImportFile()
+    fun onImportTextChange(text: String)
+    fun onImportText(text: String)
 }
 
 // --- 6.3 Automazione · dettaglio / approvazione ---

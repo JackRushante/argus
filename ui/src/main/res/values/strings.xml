@@ -346,6 +346,37 @@
     <string name="import_received_working">Importing…</string>
     <string name="import_received_open">Open Argus</string>
     <string name="import_received_close">Close</string>
+    <!-- 0.7.2 · Template gallery (prefix tpl_) -->
+    <string name="tpl_open">Templates</string>
+    <string name="tpl_title">Templates</string>
+    <string name="tpl_intro">Ready-made rules to adapt. A template arrives as a draft: you read it and approve it like any other.</string>
+    <string name="tpl_filter_cd">Template category</string>
+    <string name="tpl_filter_all">All</string>
+    <string name="tpl_filter_home">Home</string>
+    <string name="tpl_filter_work">Work</string>
+    <string name="tpl_filter_battery">Battery</string>
+    <string name="tpl_filter_messages">Messages</string>
+    <string name="tpl_use">Use this template</string>
+    <string name="tpl_import_row">Import a rule from a file or from text</string>
+    <string name="tpl_empty">No templates available.</string>
+    <string name="tpl_need_privileged">Needs Shizuku or root</string>
+    <string name="tpl_need_dnd">Asks for Do Not Disturb access</string>
+    <string name="tpl_need_write_settings">Asks to modify system settings</string>
+    <string name="tpl_need_location">Asks for your location</string>
+    <string name="tpl_need_notification_access">Asks for notification access</string>
+    <string name="tpl_need_notifications">Shows notifications</string>
+    <string name="tpl_need_sms">Asks to receive SMS</string>
+    <string name="tpl_need_calls">Asks for call access</string>
+    <string name="tpl_need_bluetooth">Asks for Bluetooth access</string>
+    <string name="tpl_need_usage">Asks for usage access</string>
+    <string name="tpl_need_accessibility">Uses the Accessibility service</string>
+    <string name="tpl_blank_chat">You choose the chat</string>
+    <string name="tpl_blank_sender">You choose the sender</string>
+    <string name="tpl_blank_number">You choose the number</string>
+    <string name="tpl_blank_network">You choose the network</string>
+    <string name="tpl_blank_place">You choose the place</string>
+    <string name="tpl_blank_secret">You add the secret values</string>
+    <string name="tpl_blank_current_location">The place is where you arm it</string>
 
     <!-- 0.4.0 blocco UI (prefisso ui40_) -->
     <string name="ui40_chat_clear_title">Clear the conversation?</string>

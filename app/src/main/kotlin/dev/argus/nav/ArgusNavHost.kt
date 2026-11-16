@@ -85,6 +85,8 @@ import dev.argus.automation.vm.ExecutionLogViewModel
 import dev.argus.automation.vm.OnboardingEvent
 import dev.argus.automation.vm.OnboardingViewModel
 import dev.argus.automation.vm.SettingsViewModel
+import dev.argus.automation.vm.TemplateGalleryEvent
+import dev.argus.automation.vm.TemplateGalleryViewModel
 import dev.argus.data.backup.RulesBackupFormat
 import dev.argus.shizuku.ShizukuGatewayStatus
 import dev.argus.ui.components.LocalShellPrivilege
@@ -100,12 +102,15 @@ import dev.argus.ui.model.SettingsCallbacks
 import dev.argus.ui.model.ShizukuStatus
 import dev.argus.ui.model.StatusFilter
 import dev.argus.ui.model.StepKind
+import dev.argus.ui.model.TemplateCategoryUi
+import dev.argus.ui.model.TemplateGalleryCallbacks
 import dev.argus.ui.screens.AutomationDetailScreen
 import dev.argus.ui.screens.AutomationListScreen
 import dev.argus.ui.screens.ChatScreen
 import dev.argus.ui.screens.ExecutionLogScreen
 import dev.argus.ui.screens.OnboardingScreen
 import dev.argus.ui.screens.SettingsScreen
+import dev.argus.ui.screens.TemplateGalleryScreen
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -117,6 +122,7 @@ private object Routes {
     const val SETTINGS = "settings"
     const val DETAIL = "detail/{id}"
     const val ONBOARDING = "onboarding"
+    const val TEMPLATES = "templates"
     const val LOG_PATTERN = "$LOG?automationId={automationId}&automationName={automationName}"
 
     fun detail(id: String): String = "detail/${Uri.encode(id)}"
@@ -393,8 +399,49 @@ fun ArgusNavHost() {
                             override fun onBannerTap() = switchTop(Routes.SETTINGS)
                             override fun onResumeAutomations() = listViewModel.onResumeAutomations()
                             override fun onOpenLog() = switchTop(Routes.LOG)
+                            override fun onOpenTemplates() {
+                                navController.navigate(Routes.TEMPLATES) { launchSingleTop = true }
+                            }
                         },
                         modifier = Modifier.testTag("screen_list"),
+                    )
+                }
+
+                // 0.7.2: galleria dei modelli. Ogni modello entra come bozza importata e si apre l'approvazione.
+                composable(Routes.TEMPLATES) {
+                    val viewModel: TemplateGalleryViewModel = hiltViewModel()
+                    val state by viewModel.state.collectAsStateWithLifecycle()
+                    val importTemplateFile = rememberLauncherForActivityResult(
+                        ActivityResultContracts.OpenDocument(),
+                    ) { uri -> viewModel.onImportFile(uri) }
+                    LaunchedEffect(viewModel) {
+                        viewModel.events.collect { event ->
+                            when (event) {
+                                is TemplateGalleryEvent.Message -> showMessage(event.text)
+                                is TemplateGalleryEvent.OpenDraft -> navController.navigate(Routes.detail(event.draftId))
+                                TemplateGalleryEvent.OpenList -> switchTop(Routes.LIST)
+                            }
+                        }
+                    }
+                    TemplateGalleryScreen(
+                        state = state,
+                        callbacks = object : TemplateGalleryCallbacks {
+                            override fun onBack() {
+                                navController.popBackStack()
+                            }
+                            override fun onFilter(category: TemplateCategoryUi?) = viewModel.onFilter(category)
+                            override fun onUseTemplate(id: String) = viewModel.onUseTemplate(id)
+                            override fun onImportFile() {
+                                runCatching {
+                                    importTemplateFile.launch(
+                                        arrayOf(RulesBackupFormat.MIME_TYPE, "text/plain", "application/octet-stream"),
+                                    )
+                                }.onFailure { showMessage(backupPickerUnavailable) }
+                            }
+                            override fun onImportTextChange(text: String) = viewModel.onImportTextChange(text)
+                            override fun onImportText(text: String) = viewModel.onImportText(text)
+                        },
+                        modifier = Modifier.testTag("screen_templates"),
                     )
                 }
 

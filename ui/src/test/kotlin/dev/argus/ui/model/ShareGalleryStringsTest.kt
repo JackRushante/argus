@@ -54,10 +54,24 @@ class ShareGalleryStringsTest {
         assertEquals("Copia", italian.getValue("share_copy"))
         assertEquals("Cosa cambia", italian.getValue("diff_title"))
         assertEquals("What changes", english.getValue("diff_title"))
+        assertEquals("Modelli", italian.getValue("tpl_title"))
+        assertEquals("Usa questo modello", italian.getValue("tpl_use"))
+        assertEquals("Importa una regola da file o da testo", italian.getValue("tpl_import_row"))
+        assertEquals("Serve Shizuku o root", italian.getValue("tpl_need_privileged"))
+        assertEquals(listOf("Tutti", "Casa", "Lavoro", "Batteria", "Messaggi"),
+            listOf("all", "home", "work", "battery", "messages").map { italian.getValue("tpl_filter_$it") })
+    }
+
+    @Test
+    fun `every template need and blank has its label`() {
+        val source = File("src/main/kotlin/dev/argus/ui/screens/TemplateGalleryScreen.kt").readText()
+        Regex("""R\.string\.(tpl_(?:need|blank)_\w+)""").findAll(source).forEach {
+            assertTrue(it.groupValues[1] in english, it.groupValues[1])
+        }
     }
 
     private companion object {
-        val PREFIXES = listOf("share_", "diff_", "import_")
+        val PREFIXES = listOf("share_", "diff_", "import_", "tpl_")
         val STRING = Regex("""<string name="([^"]+)">(.*?)</string>""", RegexOption.DOT_MATCHES_ALL)
         val PLACEHOLDER = Regex("""%\d+\$[sd]""")
     }
