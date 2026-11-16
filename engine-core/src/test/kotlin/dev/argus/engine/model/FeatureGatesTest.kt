@@ -192,7 +192,7 @@ class FeatureGatesTest {
         val id = AutomationId("r")
         assertTrue(StaticShellSafety.allows(Trigger.NfcTag("04:A2"), TriggerEvent.NfcTagScanned("04:a2"), emptySet()))
         assertFalse(StaticShellSafety.allows(Trigger.NfcTag("04:A2"), TriggerEvent.NfcTagScanned("FF"), emptySet()))
-        assertTrue(StaticShellSafety.allows(Trigger.NextAlarm(5), TriggerEvent.NextAlarmFired(id, fingerprint), emptySet()))
+        assertFalse(StaticShellSafety.allows(Trigger.NextAlarm(5), TriggerEvent.NextAlarmFired(id, fingerprint), emptySet()))
         assertFalse(StaticShellSafety.allows(TriggerEvent.CalendarEventFired(id, CalendarPhase.START, fingerprint), emptySet()))
         assertFalse(StaticShellSafety.allows(TriggerEvent.AppUsageChanged("com.example.game", 59, 60), emptySet()))
         assertFalse(StaticShellSafety.allows(TriggerEvent.UserModeChanged("lavoro", null), emptySet()))
