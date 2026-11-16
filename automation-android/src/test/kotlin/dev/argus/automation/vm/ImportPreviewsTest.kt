@@ -11,7 +11,10 @@ import dev.argus.data.backup.RulesBackup
 import dev.argus.data.backup.RulesBackupFormat
 import dev.argus.ui.model.TextImportPreview
 import dev.argus.ui.presentation.RenderLanguage
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -67,29 +70,27 @@ class ImportPreviewsTest {
     @Test
     fun `the live preview follows the text and refuses too large text before reading it`() = runTest {
         val backup = PreviewOnlyBackup()
-        val previewer = TextImportPreviewer(
-            backup,
-            backgroundScope,
-            { RenderLanguage.EN },
-            UnconfinedTestDispatcher(testScheduler),
-        )
-        testScheduler.advanceUntilIdle()
-        assertEquals(TextImportPreview.Empty, previewer.preview.value)
+        // Tutto in un dispatcher immediato: ogni cambio del testo produce subito la sua anteprima.
+        val unconfined = UnconfinedTestDispatcher(testScheduler)
+        val scope = CoroutineScope(unconfined + Job())
+        try {
+            val previewer = TextImportPreviewer(backup, scope, { RenderLanguage.EN }, unconfined)
+            assertEquals(TextImportPreview.Empty, previewer.preview.value)
 
-        previewer.onTextChange("{\"format\":\"argus-rules\"}")
-        testScheduler.advanceUntilIdle()
-        val ready = assertIs<TextImportPreview.Ready>(previewer.preview.value)
-        assertEquals(listOf("Notte"), ready.preview.ruleNames)
-        assertEquals(1, backup.previews)
+            previewer.onTextChange("{\"format\":\"argus-rules\"}")
+            val ready = assertIs<TextImportPreview.Ready>(previewer.preview.value)
+            assertEquals(listOf("Notte"), ready.preview.ruleNames)
+            assertEquals(1, backup.previews)
 
-        previewer.onTextChange("x".repeat(RulesBackupFormat.MAX_FILE_BYTES + 1))
-        testScheduler.advanceUntilIdle()
-        assertEquals(TextImportPreview.Invalid("The text is too large (limit 2 MB)."), previewer.preview.value)
-        assertEquals(1, backup.previews, "il testo troppo grande non arriva alla lettura")
+            previewer.onTextChange("x".repeat(RulesBackupFormat.MAX_FILE_BYTES + 1))
+            assertEquals(TextImportPreview.Invalid("The text is too large (limit 2 MB)."), previewer.preview.value)
+            assertEquals(1, backup.previews, "il testo troppo grande non arriva alla lettura")
 
-        previewer.clear()
-        testScheduler.advanceUntilIdle()
-        assertEquals(TextImportPreview.Empty, previewer.preview.value)
+            previewer.clear()
+            assertEquals(TextImportPreview.Empty, previewer.preview.value)
+        } finally {
+            scope.cancel()
+        }
     }
 
     private class PreviewOnlyBackup : RulesBackup {
