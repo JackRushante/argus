@@ -6,6 +6,7 @@ import dev.argus.engine.model.ClockVariable
 import dev.argus.engine.model.Condition
 import dev.argus.engine.model.IntegrityLabel
 import dev.argus.engine.model.LiveSystemClock
+import dev.argus.engine.model.LlmOutputPolicy
 import dev.argus.engine.model.PhoneEvent
 import dev.argus.engine.model.StateValueCoercion
 import dev.argus.engine.model.Trigger
@@ -94,6 +95,64 @@ object NoopProgramExecutionJournal : ProgramExecutionJournal {
     override suspend fun record(entry: ProgramJournalEntry) = Unit
 }
 
+/**
+ * Una domanda `ask` già risolta (0.8): il testo approvato con i segnaposto riempiti, le etichette
+ * letterali e l'attesa massima. Il [path] la distingue dalle altre domande della stessa esecuzione.
+ */
+class ProgramQuestion(
+    val path: ActionPath,
+    val prompt: String,
+    val choices: List<String>,
+    val timeoutMs: Long,
+) {
+    override fun toString(): String =
+        "ProgramQuestion(path=${path.value}, prompt=<redacted>, choices=${choices.size}, timeoutMs=$timeoutMs)"
+}
+
+sealed interface QuestionOutcome {
+    /** L'utente ha toccato un pulsante: [choice] è l'etichetta del pulsante (l'interprete la ricontrolla). */
+    data class Answered(val choice: String) : QuestionOutcome
+
+    /** Nessuna risposta entro l'attesa approvata. */
+    data object TimedOut : QuestionOutcome
+
+    /** La domanda non si può porre (notifiche spente, archivio non scrivibile…): codice chiuso. */
+    data class Unavailable(val code: String) : QuestionOutcome
+}
+
+/**
+ * Porta delle domande `ask`. L'attesa è cooperativa: chi la implementa sospende senza tenere il
+ * processore sveglio (come `wait`) e torna al primo fra risposta e scadenza.
+ */
+fun interface ProgramQuestions {
+    suspend fun ask(question: ProgramQuestion): QuestionOutcome
+
+    companion object {
+        const val UNAVAILABLE_CODE = "ask_unavailable"
+
+        /** Default senza runtime: nessuna domanda si pone, il programma si ferma chiuso. */
+        val UNAVAILABLE = ProgramQuestions { QuestionOutcome.Unavailable(UNAVAILABLE_CODE) }
+    }
+}
+
+/** Di quale regola ed esecuzione è una domanda: la notifica e il suo token sono per questa esecuzione. */
+class QuestionContext(
+    val automationId: dev.argus.engine.model.AutomationId,
+    val ruleName: String,
+    val approvalFingerprint: dev.argus.engine.model.ApprovalFingerprint,
+    val executionId: ExecutionId,
+    val eventId: TriggerEventId,
+)
+
+/** Porta Android di `ask` a livello di motore: l'Engine la lega a regola ed esecuzione. */
+fun interface QuestionAsker {
+    suspend fun ask(context: QuestionContext, question: ProgramQuestion): QuestionOutcome
+
+    companion object {
+        val UNAVAILABLE = QuestionAsker { _, _ -> QuestionOutcome.Unavailable(ProgramQuestions.UNAVAILABLE_CODE) }
+    }
+}
+
 data class ProgramStep(
     val path: ActionPath,
     val actionType: String,
@@ -127,6 +186,8 @@ class ProgramInterpreter(
     // System.currentTimeMillis diretto. Il default è l'orologio vivo del telefono.
     private val clock: Clock = LiveSystemClock,
     private val locale: () -> Locale = ClockVariable::appLocale,
+    /** 0.8: le domande `ask` (notifica con un pulsante per scelta). */
+    private val questions: ProgramQuestions = ProgramQuestions.UNAVAILABLE,
 ) {
     suspend fun execute(
         trigger: Trigger,
@@ -273,6 +334,7 @@ class ProgramInterpreter(
                         currentPath = null
                         record(path, action, ActionResult.Success)
                     }
+                    is Action.Ask -> if (!runAsk(action, path)) return false
                     else -> if (!runLeaf(action, path)) return false
                 }
             }
@@ -315,7 +377,24 @@ class ProgramInterpreter(
                     record(path, action, result)
                     return stop("capture_missing", path)
                 }
-                val captured = capturedValue(action, resolved, executed.capturedText)
+                // 0.8: una risposta vincolata si ricontrolla qui, l'ultima difesa prima della variabile CLEAN.
+                val output = (action as? Action.InvokeLlm)?.output
+                val captured = if (output != null) {
+                    val canonical = LlmOutputPolicy.normalize(output, executed.capturedText)
+                    if (canonical == null) {
+                        record(path, action, ActionResult.Failure(LlmOutputPolicy.OUTPUT_INVALID))
+                        return stop(LlmOutputPolicy.OUTPUT_INVALID, path)
+                    }
+                    VarValue(
+                        text = canonical,
+                        type = LlmOutputPolicy.varType(output),
+                        integrity = IntegrityLabel.CLEAN,
+                        confidentiality = ConfidentialityLabel.PRIVATE,
+                        provenance = resolved.inputProvenance + ValueProvenance.MODEL,
+                    )
+                } else {
+                    capturedValue(action, resolved, executed.capturedText)
+                }
                 try {
                     scope.assign(captureName, captured)
                 } catch (_: IllegalArgumentException) {
@@ -326,6 +405,71 @@ class ProgramInterpreter(
             }
             record(path, action, result)
             return true // D7: un fallimento foglia non impedisce le successive.
+        }
+
+        /**
+         * `ask` (0.8): pone la domanda risolta e aspetta la risposta senza passare dal runner. Il valore
+         * catturato è sempre una delle etichette APPROVATE (quelle del template, non quelle risolte), quindi
+         * CLEAN e PUBLIC; una risposta fuori elenco ferma il programma. Senza risposta vale la scelta
+         * predefinita, altrimenti il programma si ferma con [ASK_TIMEOUT].
+         */
+        private suspend fun runAsk(action: Action.Ask, path: ActionPath): Boolean {
+            val resolved = when (val resolution = interpolator.resolve(action, scope)) {
+                is ActionResolution.Blocked -> {
+                    record(path, action, ActionResult.Failure(resolution.code))
+                    return stop(resolution.code, path)
+                }
+                is ActionResolution.Resolved -> resolution.value.action as? Action.Ask
+                    ?: return stop("resolved_action_invalid", path)
+            }
+            currentPath = path
+            val outcome = try {
+                questions.ask(ProgramQuestion(path, resolved.prompt, action.choices, action.timeoutMs))
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                QuestionOutcome.Unavailable(ASK_FAILED)
+            }
+            currentPath = null
+            val (choice, result) = when (outcome) {
+                is QuestionOutcome.Answered -> {
+                    if (outcome.choice !in action.choices) {
+                        record(path, action, ActionResult.Failure(ASK_ANSWER_INVALID))
+                        return stop(ASK_ANSWER_INVALID, path)
+                    }
+                    outcome.choice to ActionResult.Success
+                }
+                QuestionOutcome.TimedOut -> {
+                    val default = action.defaultChoice?.takeIf { it in action.choices }
+                    if (default == null) {
+                        record(path, action, ActionResult.Failure(ASK_TIMEOUT))
+                        return stop(ASK_TIMEOUT, path)
+                    }
+                    default to ActionResult.SuccessWithDetail(ASK_TIMEOUT_DEFAULT)
+                }
+                is QuestionOutcome.Unavailable -> {
+                    val code = journalErrorCode(outcome.code)
+                    record(path, action, ActionResult.Failure(code))
+                    return stop(code, path)
+                }
+            }
+            try {
+                scope.assign(
+                    action.captureAs,
+                    VarValue(
+                        text = choice,
+                        type = VarType.TEXT,
+                        integrity = IntegrityLabel.CLEAN,
+                        confidentiality = ConfidentialityLabel.PUBLIC,
+                        provenance = setOf(ValueProvenance.USER),
+                    ),
+                )
+            } catch (_: IllegalArgumentException) {
+                record(path, action, ActionResult.Failure("capture_too_long"))
+                return stop("capture_too_long", path)
+            }
+            record(path, action, result)
+            return true
         }
 
         private suspend fun evaluate(
@@ -602,6 +746,18 @@ class ProgramInterpreter(
          */
         const val MAX_GENERATIVE_CALLS_PER_EXECUTION = 30
         const val GENERATIVE_CALL_LIMIT = "generative_call_limit"
+
+        /** 0.8 `ask`: nessuna risposta e nessuna scelta predefinita. Non è un guasto: l'utente non ha risposto. */
+        const val ASK_TIMEOUT = "ask_timeout"
+
+        /** 0.8 `ask`: nessuna risposta, vale la scelta predefinita approvata. */
+        const val ASK_TIMEOUT_DEFAULT = "ask_timeout_default"
+
+        /** 0.8 `ask`: la risposta arrivata non è una delle etichette approvate. */
+        const val ASK_ANSWER_INVALID = "ask_answer_invalid"
+
+        /** 0.8 `ask`: la porta delle domande ha lanciato un errore. */
+        const val ASK_FAILED = "ask_failed"
         private const val MAX_CANONICAL_NUMBER_CHARS = 64
         private val CANONICAL_NUMBER = Regex("^-?[0-9]+(?:\\.[0-9]+)?$")
     }
