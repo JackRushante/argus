@@ -1205,16 +1205,24 @@ class DraftValidator(
             err("http_header_interpolated", "Le intestazioni sono letterali: niente \${…}")
         } else {
             val lowerNames = headers.keys.map { it.lowercase(java.util.Locale.ROOT) }
+            // I caratteri non ASCII hanno un codice loro (0.7.2): il client HTTP li rifiuta a ogni scatto.
+            val notAscii = headers.values.any(HttpRequestPolicy::hasNonAsciiChars)
             val invalid = headers.any { (name, value) ->
                 !HttpRequestPolicy.isHeaderNameValid(name) ||
                     HttpRequestPolicy.isHeaderNameForbidden(name) ||
-                    !HttpRequestPolicy.isHeaderValueValid(value)
+                    (!HttpRequestPolicy.isHeaderValueValid(value) && !HttpRequestPolicy.hasNonAsciiChars(value))
             }
             if (invalid || lowerNames.size != lowerNames.toSet().size) {
                 err(
                     "http_header_invalid",
                     "Intestazione non valida (nome, valore vuoto o con caratteri di controllo, " +
                         "duplicata, o vietata: Host, Content-Length, Transfer-Encoding, Connection)",
+                )
+            }
+            if (notAscii) {
+                err(
+                    "http_header_not_ascii",
+                    "Valore di intestazione con caratteri non ASCII (lettere accentate, virgolette tipografiche, emoji)",
                 )
             }
         }

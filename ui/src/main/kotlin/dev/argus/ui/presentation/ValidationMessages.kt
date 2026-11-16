@@ -663,6 +663,10 @@ object ValidationMessages {
             "A header is not valid: check its name and value (not empty, no line breaks, no duplicates; Host, Content-Length, Transfer-Encoding and Connection are not allowed).",
             "Un'intestazione non è valida: controlla nome e valore (non vuoto, senza a capo, senza duplicati; Host, Content-Length, Transfer-Encoding e Connection non sono ammessi).",
         ),
+        "http_header_not_ascii" to t(
+            "A header value can only use plain ASCII characters: no accented letters, curly quotes or emoji. The request would fail every time.",
+            "Il valore di un'intestazione può usare solo caratteri ASCII semplici: niente lettere accentate, virgolette tipografiche o emoji. La richiesta fallirebbe ogni volta.",
+        ),
         "http_content_type_invalid" to t(
             "The content type is not valid or differs from the Content-Type header.",
             "Il content type non è valido o è diverso dall'intestazione Content-Type.",
