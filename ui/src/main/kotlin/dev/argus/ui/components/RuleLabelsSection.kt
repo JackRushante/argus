@@ -10,6 +10,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -96,7 +97,7 @@ fun RuleLabelsSection(
  * Foglio «Aggiungi un'etichetta»: prima le etichette già in uso che la regola non ha (un tocco le aggiunge),
  * poi una nuova. Il campo dice subito perché un'etichetta non va (stesse regole del database).
  */
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun AddLabelSheet(
     labels: RuleLabelsUi,
