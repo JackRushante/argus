@@ -384,6 +384,7 @@ object RuleRenderMapper {
         ValueProvenance.STORED -> l.pick("stored value", "valore conservato")
         ValueProvenance.USER -> l.pick("your answer", "la tua risposta")
         ValueProvenance.NETWORK -> l.pick("web response", "risposta web")
+        ValueProvenance.CALENDAR -> l.pick("calendar event", "evento del calendario")
     }
 
     // ---------------------------------------------------------------------------------------------
