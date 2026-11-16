@@ -74,8 +74,6 @@ class FeatureGatesTest {
         FeatureGate.ACTION_ASK to Action.Ask("Esco?", listOf("Sì", "No"), "answer", defaultChoice = "No"),
         FeatureGate.ACTION_SET_STORED to Action.SetStored("count", StoredOp.INCREMENT),
         FeatureGate.ACTION_SET_USER_MODE to Action.SetUserMode("lavoro"),
-        FeatureGate.ACTION_NOTIFICATION_REPLY to Action.NotificationReply("Arrivo"),
-        FeatureGate.ACTION_NOTIFICATION_ACTION to Action.NotificationAction(NotificationActionOp.DISMISS),
         FeatureGate.ACTION_SEND_SMS to Action.SendSms("+393331112222", "Arrivo"),
         FeatureGate.ACTION_CALL_NUMBER to Action.CallNumber("+393331112222"),
         FeatureGate.ACTION_SEND_INTENT to Action.SendIntent(IntentKind.BROADCAST, action = "dev.example.PING"),
@@ -97,16 +95,23 @@ class FeatureGatesTest {
         ),
     )
 
+    /** Gate già accesi: hanno i loro test di feature e non stanno più nelle tabelle qui sopra. */
+    private val switchedOn: Set<FeatureGate> = setOf(
+        FeatureGate.ACTION_NOTIFICATION_REPLY,
+        FeatureGate.ACTION_NOTIFICATION_ACTION,
+    )
+
     @Test
     fun `every gate is off in this version`() {
-        assertEquals(emptyList(), FeatureGate.entries.filter { it.enabled })
+        assertEquals(emptyList(), FeatureGate.entries.filter { it.enabled && it !in switchedOn })
+        assertTrue(switchedOn.all { it.enabled })
         assertEquals(FeatureGate.entries.size, FeatureGate.entries.map { it.wireName }.toSet().size)
     }
 
     @Test
     fun `the tables above cover every gate`() {
         val covered = newTriggers.keys + newConditions.keys + newActions.keys +
-            setOf(FeatureGate.CONFIRM, FeatureGate.EXIT, FeatureGate.VAR_STORED)
+            setOf(FeatureGate.CONFIRM, FeatureGate.EXIT, FeatureGate.VAR_STORED) + switchedOn
         assertEquals(FeatureGate.entries.toSet(), covered)
     }
 
