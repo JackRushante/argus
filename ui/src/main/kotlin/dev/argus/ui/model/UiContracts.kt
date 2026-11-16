@@ -338,6 +338,8 @@ data class AutomationDetailState(
     val canChangeApp: Boolean = false,
     /** 0.7.0: app avviabili installate, per l'elenco di «Cambia app». `null` = non ancora caricato. */
     val appChoices: List<AppChoiceUi>? = null,
+    /** 0.7.2 (S8): la bozza viene da un file importato (`createdBy = IMPORT`), non dalla chat: l'approvazione lo dice. */
+    val imported: Boolean = false,
 )
 
 /**

@@ -252,6 +252,23 @@ class AutomationDetailViewModelTest {
     }
 
     @Test
+    fun `an imported draft is marked as imported and a chat draft is not`() = runTest {
+        val repository = RoomDraftRepository(db)
+        assertIs<DraftWriteResult.Saved>(
+            repository.create(newDraft("d-imp", "importata").copy(createdBy = CreatedBy.IMPORT)),
+        )
+        assertIs<DraftWriteResult.Saved>(repository.create(newDraft("d-chat", "dalla chat")))
+        val imported = viewModel("draft-d-imp", RoomAutomationStore(db.automationDao()), DetailAuditRecorder())
+        awaitUntil("bozza importata caricata") { imported.state.value.detail != null }
+        assertTrue(imported.state.value.detail!!.imported)
+        imported.viewModelScope.coroutineContext[Job]?.cancelAndJoin()
+
+        val chat = viewModel("draft-d-chat", RoomAutomationStore(db.automationDao()), DetailAuditRecorder())
+        awaitUntil("bozza della chat caricata") { chat.state.value.detail != null }
+        assertEquals(false, chat.state.value.detail!!.imported)
+    }
+
+    @Test
     fun `a short log retention narrows the long stats window instead of showing a false zero`() = runTest {
         val automation = seedArmedAutomation("short")
         val now = System.currentTimeMillis()

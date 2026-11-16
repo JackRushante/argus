@@ -800,6 +800,8 @@ class AutomationDetailViewModel @Inject constructor(
                 ),
                 appInfo = appInfoFor(snapshot.draft.trigger, snapshot.draft.actions),
                 canChangeApp = snapshot.integrityError == null,
+                // S8: una bozza importata da file lo dice in approvazione.
+                imported = snapshot.createdBy == CreatedBy.IMPORT,
             ),
             automationId = snapshot.automationId.value,
             loading = false,

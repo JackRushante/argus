@@ -27,6 +27,7 @@ import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Error
+import androidx.compose.material.icons.rounded.FileDownload
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.FilterAltOff
@@ -87,6 +88,7 @@ import dev.argus.ui.components.ManualEntrySection
 import dev.argus.ui.components.ModelDescriptionNote
 import dev.argus.ui.components.SectionLabel
 import dev.argus.ui.components.StatusBadgeChip
+import dev.argus.ui.components.StatusChip
 import dev.argus.ui.model.ActionRow
 import dev.argus.ui.model.AppInfoUi
 import dev.argus.ui.model.AppRef
@@ -339,6 +341,22 @@ private fun TitleAndBadges(state: AutomationDetailState) {
                 GenerativeTag(size = ChipSize.Regular)
                 CloudTag(size = ChipSize.Regular)
             }
+            // S8: una bozza importata non nasce dalla chat dell'utente: si dice chiaro.
+            if (state.imported) {
+                StatusChip(
+                    ArgusTheme.semantic.pending,
+                    Icons.Rounded.FileDownload,
+                    stringResource(R.string.rda_ap_imported),
+                    size = ChipSize.Regular,
+                )
+            }
+        }
+        if (state.imported) {
+            Text(
+                stringResource(R.string.rda_ap_imported_note),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+            )
         }
     }
 }
