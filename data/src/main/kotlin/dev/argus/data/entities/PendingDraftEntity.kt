@@ -26,4 +26,9 @@ data class PendingDraftEntity(
     val baseAutomationFingerprint: String? = null,
     val quarantineCode: String? = null,
     val draftJson: String,
+    /**
+     * 0.7.2: etichette di una bozza di regola NUOVA (oggi solo dall'import di un backup), una per riga; null =
+     * nessuna. Fuori da [draftJson] e dall'impronta: all'arm passano alla regola. Vedi `DraftLabels`.
+     */
+    val labels: String? = null,
 )
