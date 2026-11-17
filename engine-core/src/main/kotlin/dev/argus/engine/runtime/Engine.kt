@@ -151,6 +151,47 @@ class Engine(
         )
     }
 
+    /**
+     * 0.8 `ask`: la risposta (o la scadenza) di una domanda è arrivata dopo la morte del processo che la
+     * poneva. Il programma prosegue da quella domanda solo se la regola è ancora armata con la STESSA
+     * impronta; trigger, policy e capacità si ricontrollano, pausa e condizioni no (il programma le aveva
+     * già passate, come uno vivo). Un'esecuzione nuova (id evento della domanda: un doppio tocco è un
+     * duplicato), senza cooldown né conferma.
+     */
+    suspend fun onQuestionResumed(
+        resumed: ResumedQuestion,
+        stateProvider: suspend (StateReadRequest) -> DeviceState,
+    ): FireOutcome? {
+        val batchNow = now()
+        val automation = store.get(resumed.automationId)
+        if (automation == null ||
+            automation.status != AutomationStatus.ARMED ||
+            !automation.enabled ||
+            automation.approvalFingerprint != resumed.approvalFingerprint ||
+            !AutomationSchema.requiresP4(automation)
+        ) {
+            recordAudit(
+                AuditEvent(
+                    automationId = resumed.automationId,
+                    kind = AuditKind.SUPPRESSED_NOT_ELIGIBLE,
+                    atMillis = batchNow,
+                    detail = ProgramInterpreter.ASK_RESUME_STALE,
+                    eventId = resumed.runEventId,
+                ),
+            )
+            return null
+        }
+        return fireCandidate(
+            automation = automation,
+            envelope = resumed.envelope,
+            batchNow = batchNow,
+            state = BatchState(stateProvider),
+            stateProvider = stateProvider,
+            confirmed = null,
+            resumed = resumed,
+        )
+    }
+
     /** 0.8 `confirm`: Annulla o nessuna risposta in tempo. Solo un codice chiuso nel Log, mai un errore. */
     suspend fun onConfirmationClosed(automationId: AutomationId, reason: ConfirmationClosed) {
         recordAudit(
@@ -197,7 +238,8 @@ class Engine(
     /**
      * Uno scatto di [automation] per [envelope]. Con [confirmed] è l'esecuzione che l'utente ha
      * confermato: l'evento di claim è quello della domanda, il cooldown non si riprende e non si chiede di
-     * nuovo. Null se la regola non ha eseguito azioni da riportare.
+     * nuovo. Con [resumed] è il programma ripreso a una domanda dopo un riavvio: niente pausa né condizioni
+     * (già passate), niente cooldown né conferma. Null se la regola non ha eseguito azioni da riportare.
      */
     private suspend fun fireCandidate(
         automation: Automation,
@@ -206,10 +248,12 @@ class Engine(
         state: BatchState,
         stateProvider: suspend (StateReadRequest) -> DeviceState,
         confirmed: ConfirmedFire?,
+        resumed: ResumedQuestion? = null,
     ): FireOutcome? {
         val event = envelope.event
-        // L'esecuzione confermata ha un'identità propria (claim, journal, Log), distinta dallo scatto che ha chiesto.
-        val runEventId = confirmed?.runEventId ?: envelope.id
+        // L'esecuzione confermata o ripresa ha un'identità propria (claim, journal, Log), distinta dallo
+        // scatto che l'ha preceduta.
+        val runEventId = confirmed?.runEventId ?: resumed?.runEventId ?: envelope.id
         var executionId: ExecutionId? = null
         var claimed = false
         val actionResults = mutableListOf<ActionResult>()
@@ -234,7 +278,8 @@ class Engine(
             // sarebbero davvero scattate; prima di policy, condizioni e claim, così lo scatto
             // saltato non consuma cooldown né deduplica e alla ripresa non si recupera.
             // 0.7.2: decisa per regola, così la pausa di un gruppo (etichetta) segue la stessa strada.
-            val pauseCode = firingPause.pauseCodeFor(automation.id)
+            // Un programma ripreso a una domanda era già partito: come uno vivo, la pausa non lo ferma.
+            val pauseCode = if (resumed == null) firingPause.pauseCodeFor(automation.id) else null
             if (pauseCode != null) {
                 recordAudit(
                     AuditEvent(
@@ -282,7 +327,7 @@ class Engine(
                 }
             }
 
-            if (automation.conditions != null) {
+            if (resumed == null && automation.conditions != null) {
                 val conditionState = state.read(StateReadPlanner.forCondition(automation.conditions))
                 val conditionResult = evaluator.result(automation.conditions, conditionState)
                 when (conditionResult) {
@@ -318,8 +363,8 @@ class Engine(
                         eventId = runEventId,
                         executionId = executionId,
                         atMillis = batchNow,
-                        // Il cooldown lo ha già preso lo scatto che ha chiesto conferma.
-                        cooldownMs = if (confirmed != null) 0 else effectiveCooldown(automation),
+                        // Il cooldown lo ha già preso lo scatto che ha chiesto conferma o posto la domanda.
+                        cooldownMs = if (confirmed != null || resumed != null) 0 else effectiveCooldown(automation),
                     ),
                 )
             ) {
@@ -383,7 +428,7 @@ class Engine(
 
             // 0.8 `confirm`: lo scatto è valido e ha preso cooldown e deduplica; ora si chiede invece di eseguire.
             val confirm = automation.confirm
-            if (confirm != null && confirmed == null) {
+            if (confirm != null && confirmed == null && resumed == null) {
                 val requested = try {
                     confirmations.request(
                         ConfirmationRequest(
@@ -442,6 +487,8 @@ class Engine(
                     approvalFingerprint = approvalFingerprint,
                     executionId = executionId,
                     eventId = runEventId,
+                    // L'evento originale: con lui una domanda può far proseguire il programma dopo un riavvio.
+                    envelope = envelope,
                 )
                 val program = ProgramInterpreter(
                     runner = ProgramActionRunner { resolved, path ->
@@ -495,12 +542,23 @@ class Engine(
                     questions = ProgramQuestions { question -> questions.ask(questionContext, question) },
                 )
                 val result = runWhileApproved(automation, approvalFingerprint) {
-                    program.execute(
-                        trigger = automation.trigger,
-                        event = event,
-                        bindings = automation.vars,
-                        actions = automation.actions,
-                    )
+                    if (resumed == null) {
+                        program.execute(
+                            trigger = automation.trigger,
+                            event = event,
+                            bindings = automation.vars,
+                            actions = automation.actions,
+                        )
+                    } else {
+                        program.resume(
+                            trigger = automation.trigger,
+                            event = event,
+                            bindings = automation.vars,
+                            actions = automation.actions,
+                            continuation = resumed.continuation,
+                            outcome = resumed.outcome,
+                        )
+                    }
                 }
                 actionResults += result.steps.map { it.result }
                 val stopCode = result.stopCode

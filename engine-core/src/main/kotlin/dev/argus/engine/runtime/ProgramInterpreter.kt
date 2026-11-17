@@ -41,6 +41,16 @@ value class ActionPath(val value: String) {
     internal fun iteration(iteration: Int, index: Int): ActionPath =
         ActionPath("$value.while[$iteration].${index + 1}")
 
+    /** true se questo percorso è [ancestor] o sta dentro di lui. */
+    internal fun isWithin(ancestor: ActionPath): Boolean =
+        value == ancestor.value || value.startsWith(ancestor.value + ".")
+
+    /** Il segmento subito sotto [ancestor] (`then`, `else`, `while[3]`), o null. */
+    internal fun segmentAfter(ancestor: ActionPath): String? {
+        if (!value.startsWith(ancestor.value + ".")) return null
+        return value.substring(ancestor.value.length + 1).substringBefore('.')
+    }
+
     /** Risolve il path nell'albero approvato; il numero d'iterazione non modifica la struttura. */
     fun resolve(actions: List<Action>): Action? {
         val rootText = value.substringBefore('.')
@@ -104,6 +114,11 @@ class ProgramQuestion(
     val prompt: String,
     val choices: List<String>,
     val timeoutMs: Long,
+    /**
+     * Dove il programma si è fermato e con quali variabili: chi pone la domanda la conserva (cifrata) per
+     * farlo proseguire con [ProgramInterpreter.resume] se il processo muore prima della risposta.
+     */
+    val continuation: ProgramContinuation? = null,
 ) {
     override fun toString(): String =
         "ProgramQuestion(path=${path.value}, prompt=<redacted>, choices=${choices.size}, timeoutMs=$timeoutMs)"
@@ -142,7 +157,12 @@ class QuestionContext(
     val approvalFingerprint: dev.argus.engine.model.ApprovalFingerprint,
     val executionId: ExecutionId,
     val eventId: TriggerEventId,
-)
+    /** L'evento che ha fatto scattare la regola: serve per riprendere il programma dopo un riavvio. */
+    val envelope: TriggerEnvelope? = null,
+) {
+    override fun toString(): String =
+        "QuestionContext(automationId=${automationId.value}, executionId=${executionId.value}, event=<redacted>)"
+}
 
 /** Porta Android di `ask` a livello di motore: l'Engine la lega a regola ed esecuzione. */
 fun interface QuestionAsker {
@@ -201,27 +221,63 @@ class ProgramInterpreter(
         if (!TriggerMatcher().matches(trigger, event)) {
             return ProgramExecutionResult(emptyList(), stopCode = "trigger_mismatch")
         }
-        val runtime = Runtime(trigger, event)
-        val completed = try {
-            withTimeoutOrNull(MAX_EXECUTION_MILLIS) {
-                runtime.initialize(bindings) && runtime.runActions(actions, ActionPath::root, depth = 0)
-            }
-        } finally {
-            // Anche se l'esecuzione si ferma o viene cancellata, il Log deve dire quante voci mancano.
-            withContext(NonCancellable) { runtime.flushOmittedSummary() }
+        val runtime = Runtime(trigger, event, startedAtMillis = clock.millis())
+        return runtime.run(MAX_EXECUTION_MILLIS) {
+            runtime.initialize(bindings) && runtime.runActions(actions, ActionPath::root, depth = 0)
         }
-        return when {
-            completed == null -> runtime.result("deadline_exceeded", runtime.currentPath)
-            runtime.stopCode != null -> runtime.result(runtime.stopCode, runtime.stopPath)
-            else -> runtime.result(null, null)
+    }
+
+    /**
+     * 0.8 `ask`: riprende un programma fermo a una domanda il cui processo è morto. [continuation] deve
+     * puntare a un `ask` di QUESTO programma approvato e portare solo variabili che il programma dichiara;
+     * altrimenti si ferma con [ASK_RESUME_INVALID] senza eseguire nulla. Le azioni prima della domanda non
+     * si ripetono, i rami e i giri attraversati non si rivalutano; poi la risposta ([outcome]) vale come se
+     * fosse arrivata al programma vivo e il resto prosegue normalmente, entro le sei ore dall'inizio originale.
+     */
+    suspend fun resume(
+        trigger: Trigger,
+        event: TriggerEvent,
+        bindings: List<VarBinding>,
+        actions: List<Action>,
+        continuation: ProgramContinuation,
+        outcome: QuestionOutcome,
+    ): ProgramExecutionResult {
+        if (!validProgram(bindings, actions)) {
+            return ProgramExecutionResult(emptyList(), stopCode = "invalid_program")
+        }
+        if (!TriggerMatcher().matches(trigger, event)) {
+            return ProgramExecutionResult(emptyList(), stopCode = "trigger_mismatch")
+        }
+        val declared = bindings.map { it.name }.toSet() + captureNames(actions)
+        if (continuation.askPath.resolve(actions) !is Action.Ask ||
+            !declared.containsAll(continuation.variables.keys) ||
+            outcome is QuestionOutcome.Unavailable
+        ) {
+            return ProgramExecutionResult(emptyList(), stopCode = ASK_RESUME_INVALID, stopPath = continuation.askPath)
+        }
+        val remaining = MAX_EXECUTION_MILLIS - (clock.millis() - continuation.startedAtMillis)
+        if (remaining <= 0) {
+            return ProgramExecutionResult(emptyList(), stopCode = "deadline_exceeded", stopPath = continuation.askPath)
+        }
+        val runtime = Runtime(trigger, event, startedAtMillis = continuation.startedAtMillis)
+        return runtime.run(remaining) {
+            runtime.restore(continuation, outcome) && runtime.runActions(actions, ActionPath::root, depth = 0)
         }
     }
 
     private inner class Runtime(
         private val trigger: Trigger,
         private val event: TriggerEvent,
+        private val startedAtMillis: Long,
     ) {
         private val scope = VarScope()
+
+        /** I `while` in corso, dal più esterno: entrano nella continuazione di una domanda. */
+        private val activeLoops = LinkedHashMap<String, LoopPosition>()
+
+        /** Ripresa ([resume]): la domanda a cui tornare e la sua risposta; null quando il programma è ripartito. */
+        private var resumeTarget: ProgramContinuation? = null
+        private var resumeOutcome: QuestionOutcome? = null
         private val steps = mutableListOf<ProgramStep>()
         var stopCode: String? = null
             private set
@@ -238,6 +294,33 @@ class ProgramInterpreter(
 
         /** Chiamate AI già partite in questa esecuzione (tetto [MAX_GENERATIVE_CALLS_PER_EXECUTION]). */
         private var generativeCalls = 0
+
+        suspend fun run(timeoutMillis: Long, body: suspend () -> Boolean): ProgramExecutionResult {
+            val completed = try {
+                withTimeoutOrNull(timeoutMillis) { body() }
+            } finally {
+                // Anche se l'esecuzione si ferma o viene cancellata, il Log deve dire quante voci mancano.
+                withContext(NonCancellable) { flushOmittedSummary() }
+            }
+            return when {
+                completed == null -> result("deadline_exceeded", currentPath)
+                stopCode != null -> result(stopCode, stopPath)
+                else -> result(null, null)
+            }
+        }
+
+        /** Ripresa: le variabili con le loro label, i giri e le chiamate AI già contate. */
+        fun restore(continuation: ProgramContinuation, outcome: QuestionOutcome): Boolean {
+            try {
+                continuation.variables.forEach(scope::assign)
+            } catch (_: IllegalArgumentException) {
+                return stop(ASK_RESUME_INVALID, continuation.askPath)
+            }
+            generativeCalls = continuation.generativeCalls
+            resumeTarget = continuation
+            resumeOutcome = outcome
+            return true
+        }
 
         suspend fun initialize(bindings: List<VarBinding>): Boolean {
             if (bindings.size > MAX_VARIABLES) return stop("invalid_program", null)
@@ -274,14 +357,25 @@ class ProgramInterpreter(
             }
             for ((index, action) in actions.withIndex()) {
                 val path = pathFor(index)
+                // Ripresa: le azioni prima della domanda le ha già eseguite il programma originale.
+                val resuming = resumeTarget?.askPath
+                if (resuming != null && !resuming.isWithin(path)) continue
                 when (action) {
                     is Action.If -> {
-                        val result = evaluate(action.condition, path)
-                        val branch = when (result) {
-                            ConditionEvaluator.Result.MET -> action.then to "then"
-                            ConditionEvaluator.Result.NOT_MET -> action.orElse to "else"
-                            ConditionEvaluator.Result.STATE_UNAVAILABLE ->
-                                return stop("condition_state_unavailable", path)
+                        val branch = if (resuming != null) {
+                            // Dentro il ramo già scelto: la condizione non si rivaluta.
+                            when (resuming.segmentAfter(path)) {
+                                "then" -> action.then to "then"
+                                "else" -> action.orElse to "else"
+                                else -> return stop(ASK_RESUME_INVALID, path)
+                            }
+                        } else {
+                            when (evaluate(action.condition, path)) {
+                                ConditionEvaluator.Result.MET -> action.then to "then"
+                                ConditionEvaluator.Result.NOT_MET -> action.orElse to "else"
+                                ConditionEvaluator.Result.STATE_UNAVAILABLE ->
+                                    return stop("condition_state_unavailable", path)
+                            }
                         }
                         if (!runActions(branch.first, { child -> path.branch(branch.second, child) }, depth + 1)) {
                             return false
@@ -295,37 +389,57 @@ class ProgramInterpreter(
                         }
                         // Conteggio effettivo: letterale, oppure variabile NUMBER letta a runtime e
                         // clampata in 1..1000. Variabile assente/non coercibile ⇒ fail-closed (nessuna
-                        // iterazione con conteggio ignoto).
-                        val effective: Int = action.maxIterationsVar?.let { varName ->
+                        // iterazione con conteggio ignoto). In ripresa: quello deciso all'ingresso originale.
+                        val resumedLoop = resuming?.let { target ->
+                            val position = resumeTarget?.loops?.get(path.value)
+                            if (position == null || position.effective > MAX_WHILE_ITERATIONS ||
+                                target.segmentAfter(path) != "while[${position.iteration}]"
+                            ) {
+                                return stop(ASK_RESUME_INVALID, path)
+                            }
+                            position
+                        }
+                        val effective: Int = resumedLoop?.effective ?: action.maxIterationsVar?.let { varName ->
                             val n = scope.get(varName)?.text?.let(StateValueCoercion::integer)
                                 ?: return stop("while_count_unavailable", path)
                             n.coerceIn(1L, MAX_WHILE_ITERATIONS.toLong()).toInt()
                         } ?: action.maxIterations ?: return stop("invalid_program", path)
-                        var iteration = 1
-                        while (iteration <= effective) {
-                            when (evaluate(action.condition, path)) {
-                                ConditionEvaluator.Result.NOT_MET -> break
-                                ConditionEvaluator.Result.STATE_UNAVAILABLE ->
-                                    return stop("condition_state_unavailable", path)
-                                ConditionEvaluator.Result.MET -> Unit
+                        var iteration = resumedLoop?.iteration ?: 1
+                        // Il giro della domanda era già cominciato: la sua condizione non si rivaluta.
+                        var skipCheck = resumedLoop != null
+                        try {
+                            while (iteration <= effective) {
+                                if (!skipCheck) {
+                                    when (evaluate(action.condition, path)) {
+                                        ConditionEvaluator.Result.NOT_MET -> break
+                                        ConditionEvaluator.Result.STATE_UNAVAILABLE ->
+                                            return stop("condition_state_unavailable", path)
+                                        ConditionEvaluator.Result.MET -> Unit
+                                    }
+                                }
+                                skipCheck = false
+                                activeLoops[path.value] = LoopPosition(iteration, effective)
+                                if (!runActions(
+                                        action.body,
+                                        { child -> path.iteration(iteration, child) },
+                                        depth + 1,
+                                    )
+                                ) {
+                                    return false
+                                }
+                                if (iteration < effective && action.delayBetweenMs > 0) {
+                                    currentPath = path
+                                    pause(action.delayBetweenMs)
+                                    currentPath = null
+                                }
+                                iteration += 1
                             }
-                            if (!runActions(
-                                    action.body,
-                                    { child -> path.iteration(iteration, child) },
-                                    depth + 1,
-                                )
-                            ) {
-                                return false
-                            }
-                            if (iteration < effective && action.delayBetweenMs > 0) {
-                                currentPath = path
-                                pause(action.delayBetweenMs)
-                                currentPath = null
-                            }
-                            iteration += 1
+                        } finally {
+                            activeLoops.remove(path.value)
                         }
                     }
                     is Action.Wait -> {
+                        if (resuming != null) return stop(ASK_RESUME_INVALID, path)
                         if (action.durationMs !in 1..MAX_PAUSE_MILLIS) {
                             return stop("invalid_program", path)
                         }
@@ -334,8 +448,21 @@ class ProgramInterpreter(
                         currentPath = null
                         record(path, action, ActionResult.Success)
                     }
-                    is Action.Ask -> if (!runAsk(action, path)) return false
-                    else -> if (!runLeaf(action, path)) return false
+                    is Action.Ask -> if (resuming != null) {
+                        // La domanda a cui torna la ripresa: la risposta è già arrivata.
+                        if (resuming != path) return stop(ASK_RESUME_INVALID, path)
+                        val outcome = resumeOutcome ?: return stop(ASK_RESUME_INVALID, path)
+                        resumeTarget = null
+                        resumeOutcome = null
+                        if (!applyAnswer(action, path, outcome)) return false
+                    } else if (!runAsk(action, path)) {
+                        return false
+                    }
+                    else -> if (resuming != null) {
+                        return stop(ASK_RESUME_INVALID, path)
+                    } else if (!runLeaf(action, path)) {
+                        return false
+                    }
                 }
             }
             return true
@@ -423,14 +550,26 @@ class ProgramInterpreter(
                     ?: return stop("resolved_action_invalid", path)
             }
             currentPath = path
+            val continuation = ProgramContinuation(
+                askPath = path,
+                variables = scope.snapshot(),
+                loops = LinkedHashMap(activeLoops),
+                generativeCalls = generativeCalls,
+                startedAtMillis = startedAtMillis,
+            )
             val outcome = try {
-                questions.ask(ProgramQuestion(path, resolved.prompt, action.choices, action.timeoutMs))
+                questions.ask(ProgramQuestion(path, resolved.prompt, action.choices, action.timeoutMs, continuation))
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
                 QuestionOutcome.Unavailable(ASK_FAILED)
             }
             currentPath = null
+            return applyAnswer(action, path, outcome)
+        }
+
+        /** La risposta di una domanda (dal programma vivo o da una ripresa) diventa la variabile approvata. */
+        private suspend fun applyAnswer(action: Action.Ask, path: ActionPath, outcome: QuestionOutcome): Boolean {
             val (choice, result) = when (outcome) {
                 is QuestionOutcome.Answered -> {
                     if (outcome.choice !in action.choices) {
@@ -660,6 +799,23 @@ class ProgramInterpreter(
         else -> null
     }
 
+    /** Le variabili prodotte dalle azioni del programma, in ogni ramo e ciclo. */
+    private fun captureNames(actions: List<Action>): Set<String> = buildSet {
+        val pending = ArrayDeque(actions)
+        while (pending.isNotEmpty()) {
+            val action = pending.removeFirst()
+            captureName(action)?.let(::add)
+            when (action) {
+                is Action.If -> {
+                    pending.addAll(action.then)
+                    pending.addAll(action.orElse)
+                }
+                is Action.While -> pending.addAll(action.body)
+                else -> Unit
+            }
+        }
+    }
+
     /** Defense in depth iterativa: anche un ramo non scelto deve rispettare tutti i bound. */
     private fun validProgram(bindings: List<VarBinding>, actions: List<Action>): Boolean {
         if (bindings.size > MAX_VARIABLES) return false
@@ -761,6 +917,12 @@ class ProgramInterpreter(
 
         /** 0.8 `ask`: la porta delle domande ha lanciato un errore. */
         const val ASK_FAILED = "ask_failed"
+
+        /** 0.8 `ask`: la continuazione salvata non corrisponde al programma approvato. Fallisce chiuso. */
+        const val ASK_RESUME_INVALID = "ask_resume_invalid"
+
+        /** 0.8 `ask`: dopo un riavvio la regola non è più quella armata della domanda: non si prosegue. */
+        const val ASK_RESUME_STALE = "ask_resume_stale"
         private const val MAX_CANONICAL_NUMBER_CHARS = 64
         private val CANONICAL_NUMBER = Regex("^-?[0-9]+(?:\\.[0-9]+)?$")
     }
