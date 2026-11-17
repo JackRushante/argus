@@ -45,6 +45,8 @@ class Engine(
     private val confirmations: ConfirmationGate = ConfirmationGate.UNAVAILABLE,
     /** 0.8 `ask`: domande con pulsanti dentro un programma. Default: nessuna domanda ⇒ il programma si ferma. */
     private val questions: QuestionAsker = QuestionAsker.UNAVAILABLE,
+    /** 0.8 `screen_call` con `onlyUnknownCallers`: chi chiama è nel perimetro? Default: non si sa ⇒ non esegue. */
+    private val callerScope: CallerScopeGate = CallerScopeGate.UNAVAILABLE,
     private val now: () -> Long,
 ) {
     companion object {
@@ -357,6 +359,30 @@ class Engine(
                         )
                         return null
                     }
+                }
+            }
+
+            // 0.8: `onlyUnknownCallers` vale per tutta la regola: un contatto, o un'appartenenza che non si è
+            // potuta stabilire, la ferma prima di qualunque azione (anche un SMS messo prima del filtro).
+            if (resumed == null && CallerScopeGate.appliesTo(automation)) {
+                val scopeCode = try {
+                    callerScope.closedCode(automation, event)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (_: Exception) {
+                    CallerScopeGate.CALLER_UNVERIFIED
+                }
+                if (scopeCode != null) {
+                    recordAudit(
+                        AuditEvent(
+                            automation.id,
+                            AuditKind.CONDITIONS_NOT_MET,
+                            batchNow,
+                            detail = scopeCode,
+                            eventId = runEventId,
+                        ),
+                    )
+                    return null
                 }
             }
 

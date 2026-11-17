@@ -132,6 +132,22 @@ class CallScreeningDeciderTest {
     }
 
     @Test
+    fun `every rule with the option says whether the caller is in its scope`() {
+        val unknownOnly = rule("u", unknownOnly = true)
+        val everyone = rule("e")
+        assertEquals(mapOf(AutomationId("u") to CallerScope.IN_SCOPE), decide(unknownOnly, everyone, contact = false).scopes)
+        assertEquals(mapOf(AutomationId("u") to CallerScope.KNOWN_CALLER), decide(unknownOnly, everyone, contact = true).scopes)
+        assertEquals(mapOf(AutomationId("u") to CallerScope.UNVERIFIED), decide(unknownOnly, contact = null).scopes)
+        assertEquals(mapOf(AutomationId("u") to CallerScope.IN_SCOPE), decide(unknownOnly, number = null, contact = null).scopes)
+        // Una rubrica che si rompe non è una risposta: nel dubbio fuori perimetro.
+        val broken = decider.decide(listOf(unknownOnly), "+393331112222", all, { false }) { error("rubrica") }
+        assertEquals(mapOf(AutomationId("u") to CallerScope.UNVERIFIED), broken.scopes)
+        assertNull(broken.op)
+        // Fuori dalla fascia oraria la regola non vale: nessun perimetro da dire.
+        assertEquals(emptyMap(), decide(rule("d", unknownOnly = true, conditions = day)).scopes)
+    }
+
+    @Test
     fun `contacts are looked up once and only when a rule asks`() {
         var lookups = 0
         val counting: (String) -> Boolean? = { lookups++; false }

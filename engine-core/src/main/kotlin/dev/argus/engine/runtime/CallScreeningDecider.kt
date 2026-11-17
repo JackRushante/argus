@@ -36,9 +36,17 @@ class CallScreeningDecider(
     /** Una regola che ha deciso: la sua operazione. */
     data class RuleDecision(val automationId: AutomationId, val op: ScreenCallOp)
 
-    /** [op] è la risposta da dare alla chiamata (null = lasciala squillare); [rules] le regole che hanno deciso. */
-    data class Decision(val op: ScreenCallOp?, val rules: List<RuleDecision>) {
-        override fun toString(): String = "Decision(op=$op, rules=${rules.size})"
+    /**
+     * [op] è la risposta da dare alla chiamata (null = lasciala squillare); [rules] le regole che hanno deciso;
+     * [scopes] per ogni regola con `onlyUnknownCallers` che vale per questa chiamata (trigger e condizioni) se
+     * chi chiama è nel suo perimetro: lo legge il motore ([CallerScopeGate]) prima di eseguire le altre azioni.
+     */
+    data class Decision(
+        val op: ScreenCallOp?,
+        val rules: List<RuleDecision>,
+        val scopes: Map<AutomationId, CallerScope> = emptyMap(),
+    ) {
+        override fun toString(): String = "Decision(op=$op, rules=${rules.size}, scopes=${scopes.size})"
     }
 
     /**
@@ -54,13 +62,25 @@ class CallScreeningDecider(
         isContact: (String) -> Boolean?,
     ): Decision {
         val event = TriggerEvent.PhoneStateChanged(PhoneEvent.INCOMING_CALL, number?.takeIf { it.isNotBlank() })
-        val contact by lazy(LazyThreadSafetyMode.NONE) { event.number?.let(isContact) }
+        val contact by lazy(LazyThreadSafetyMode.NONE) {
+            event.number?.let { number -> runCatching { isContact(number) }.getOrNull() }
+        }
+        val scopes = linkedMapOf<AutomationId, CallerScope>()
         val decided = rules.mapNotNull { rule ->
             val screen = screenCallOf(rule) ?: return@mapNotNull null
             if (!eligible(rule, availableCapabilities) || isPaused(rule)) return@mapNotNull null
             if (!matcher.matches(rule.trigger, event)) return@mapNotNull null
             if (evaluator.result(rule.conditions, DeviceState()) != ConditionEvaluator.Result.MET) return@mapNotNull null
-            if (screen.onlyUnknownCallers && event.number != null && contact != false) return@mapNotNull null
+            if (screen.onlyUnknownCallers) {
+                val scope = when {
+                    event.number == null -> CallerScope.IN_SCOPE
+                    contact == false -> CallerScope.IN_SCOPE
+                    contact == true -> CallerScope.KNOWN_CALLER
+                    else -> CallerScope.UNVERIFIED
+                }
+                scopes[rule.id] = scope
+                if (scope != CallerScope.IN_SCOPE) return@mapNotNull null
+            }
             RuleDecision(rule.id, screen.op)
         }
         val op = when {
@@ -68,7 +88,7 @@ class CallScreeningDecider(
             decided.isNotEmpty() -> ScreenCallOp.SILENCE
             else -> null
         }
-        return Decision(op, decided)
+        return Decision(op, decided, scopes)
     }
 
     /** Le regole armate e accese che filtrano le chiamate (anche quelle che ora non decidono). */
