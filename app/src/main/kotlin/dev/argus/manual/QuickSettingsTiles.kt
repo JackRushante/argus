@@ -191,7 +191,7 @@ class ModeTileService : TileService() {
         tile.label = spec?.activeMode ?: base
         tile.subtitle = when {
             spec == null || spec.state == TileUiState.UNAVAILABLE -> getString(R.string.mode_tile_empty)
-            spec.activeMode == null -> getString(R.string.mode_tile_none)
+            spec?.activeMode == null -> getString(R.string.mode_tile_none)
             else -> base
         }
         tile.state = (spec?.state ?: TileUiState.UNAVAILABLE).toTileState()
