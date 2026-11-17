@@ -1,5 +1,6 @@
 package dev.argus.device
 
+import android.annotation.SuppressLint
 import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.Context
@@ -29,6 +30,10 @@ fun interface UsageEventsSource {
 class AndroidUsageEventsSource(context: Context) : UsageEventsSource {
     private val appContext = context.applicationContext
 
+    // PACKAGE_USAGE_STATS is a special access the user grants in Settings, not a runtime permission: the app
+    // manifest declares it and the grant is checked on the line below before the query, which lint cannot see
+    // from this library module.
+    @SuppressLint("MissingPermission")
     override fun read(fromMillis: Long, toMillis: Long): List<UsageActivityEvent>? = runCatching {
         if (!PermanentGrantStatus.usageStats(appContext)) return@runCatching null
         val manager = appContext.getSystemService(UsageStatsManager::class.java) ?: return@runCatching null
