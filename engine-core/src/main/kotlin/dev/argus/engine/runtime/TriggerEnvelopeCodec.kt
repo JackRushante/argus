@@ -137,6 +137,8 @@ object TriggerEnvelopeCodec {
             is TriggerEvent.NfcTagScanned -> {
                 put("type", "nfc")
                 put("tagId", event.tagId)
+                // 0.8: una scansione provata dal servizio NFC resta tale, e solo lei (vedi decodeEvent).
+                put("verified", event.verified)
             }
             is TriggerEvent.AppUsageChanged -> {
                 put("type", "app_usage")
@@ -215,7 +217,16 @@ object TriggerEnvelopeCodec {
                 o.string("pkg") ?: return null,
                 o.enum<AppEventKind>("event") ?: return null,
             )
-            "nfc" -> TriggerEvent.NfcTagScanned(o.string("tagId") ?: return null)
+            // Solo un `true` JSON (quello che scrive encode) rende verificata la scansione; assente o null = non
+            // verificata; qualunque altro valore rifiuta l'evento. Chi conserva il testo lo tiene cifrato e
+            // autenticato (AES-GCM, chiave del Keystore) nei file privati di Argus.
+            "nfc" -> TriggerEvent.NfcTagScanned(
+                o.string("tagId") ?: return null,
+                verified = when (val flag = o["verified"]) {
+                    null, JsonNull -> false
+                    else -> (flag as? JsonPrimitive)?.takeUnless { it.isString }?.booleanOrNull ?: return null
+                },
+            )
             "app_usage" -> TriggerEvent.AppUsageChanged(
                 o.string("pkg") ?: return null,
                 o.int("previousMinutes") ?: return null,

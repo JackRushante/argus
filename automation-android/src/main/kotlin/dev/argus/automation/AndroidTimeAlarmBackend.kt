@@ -16,6 +16,20 @@ data class TimeAlarmSignal(
     val eventAtMillis: Long,
 )
 
+/**
+ * 0.8: la prossima sveglia del telefono (`AlarmManager.getNextAlarmClock`), per i trigger `next_alarm`.
+ * Argus non usa mai `setAlarmClock`, quindi le sue sveglie interne non compaiono qui. Nessun permesso.
+ */
+class AndroidNextAlarmClock(context: Context) {
+    private val alarmManager = context.applicationContext.getSystemService(AlarmManager::class.java)
+
+    fun nextAlarmAt(): Long? = try {
+        alarmManager?.nextAlarmClock?.triggerTime?.takeIf { it > 0 }
+    } catch (_: RuntimeException) {
+        null
+    }
+}
+
 /** AlarmManager RTC_WAKEUP: le specifiche Argus sono orari civili, non elapsed realtime. */
 class AndroidTimeAlarmBackend(context: Context) : TimeAlarmBackend {
     private val appContext = context.applicationContext

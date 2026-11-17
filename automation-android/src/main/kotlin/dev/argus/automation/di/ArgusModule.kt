@@ -1,6 +1,7 @@
 package dev.argus.automation.di
 
 import android.content.Context
+import android.os.Build
 import android.os.SystemClock
 import dagger.Module
 import dagger.Provides
@@ -15,6 +16,7 @@ import dev.argus.automation.AndroidArmedAutomationRegistrar
 import dev.argus.automation.AndroidGenerativeRuntimeReadiness
 import dev.argus.automation.AndroidStateQueryProbe
 import dev.argus.automation.GenerativeRuntimeReadiness
+import dev.argus.automation.AndroidNextAlarmClock
 import dev.argus.automation.AndroidTimeAlarmBackend
 import dev.argus.automation.AppPreferencesStore
 import dev.argus.automation.ApprovalFlow
@@ -127,6 +129,8 @@ import dev.argus.automation.triggers.EngineDeviceEventDispatcher
 import dev.argus.automation.triggers.PrefsBatteryLevelStore
 import dev.argus.engine.device.DeviceEventParser
 import dev.argus.automation.sensor.AndroidSignificantMotionBackend
+import dev.argus.automation.sensor.AndroidGestureSensorBackend
+import dev.argus.automation.sensor.CompositeSensorTriggerBackend
 import dev.argus.automation.sensor.EligibleSensorRule
 import dev.argus.automation.sensor.PrefsSensorDetectionStore
 import dev.argus.automation.sensor.SensorDetectionStore
@@ -135,6 +139,7 @@ import dev.argus.automation.sensor.SensorEventIngress
 import dev.argus.automation.sensor.SensorTriggerBackend
 import dev.argus.automation.sensor.SensorTriggerCoordinator
 import dev.argus.automation.sensor.SensorTriggerRuntime
+import dev.argus.engine.model.SensorKind
 import dev.argus.engine.model.Trigger
 import dev.argus.automation.ShizukuStaticShellRunner
 import dev.argus.automation.StateQueryProbe
@@ -227,6 +232,13 @@ import dev.argus.automation.connectivity.ConnectivitySentinelStatus
 import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
 import dev.argus.automation.connectivity.PrefsConnectivityStateStore
 import dev.argus.automation.geofence.AndroidGeofenceBackend
+import dev.argus.automation.nfc.AndroidNfcTagReader
+import dev.argus.automation.nfc.NfcScanIngress
+import dev.argus.automation.nfc.NfcScanVerification
+import dev.argus.automation.geofence.AndroidGeofenceDwellTimer
+import dev.argus.automation.geofence.GeofenceDwellSupport
+import dev.argus.automation.geofence.PrefsGeofenceDwellStore
+import dev.argus.engine.model.Transition
 import dev.argus.automation.geofence.AndroidGeofenceContinuity
 import dev.argus.automation.geofence.GeofenceBackend
 import dev.argus.automation.geofence.GeofenceCoordinator
@@ -1252,6 +1264,17 @@ object ArgusModule {
         dispatcher = dispatcher,
     )
 
+    /** 0.8: scansioni dei tag NFC dall'activity trampolino, verso il motore. */
+    @Provides
+    @Singleton
+    fun nfcScanIngress(dispatcher: DeviceEventDispatcher): NfcScanIngress =
+        NfcScanIngress(DeviceEventParser(), dispatcher)
+
+    /** 0.8: lettura del tag all'attivazione di una regola `nfc_tag`, in primo piano. */
+    @Provides
+    @Singleton
+    fun nfcTagReader(@ApplicationContext context: Context): AndroidNfcTagReader = AndroidNfcTagReader(context)
+
     @Provides
     @Singleton
     fun connectivityEventDispatcher(
@@ -1356,8 +1379,28 @@ object ArgusModule {
     ): AndroidSignificantMotionBackend =
         AndroidSignificantMotionBackend(context, scope) { kind -> ingress.get().onSensorTriggered(kind) }
 
+    /** 0.8: doppia scossa e faccia in giù, dall'accelerometro e solo a schermo acceso. */
     @Provides
-    fun sensorTriggerBackendBoundary(backend: AndroidSignificantMotionBackend): SensorTriggerBackend = backend
+    @Singleton
+    fun gestureSensorBackend(
+        @ApplicationContext context: Context,
+        @ApplicationScope scope: CoroutineScope,
+        ingress: Provider<SensorEventIngress>,
+    ): AndroidGestureSensorBackend =
+        AndroidGestureSensorBackend(context, scope) { kind -> ingress.get().onSensorTriggered(kind) }
+
+    @Provides
+    @Singleton
+    fun sensorTriggerBackendBoundary(
+        backend: AndroidSignificantMotionBackend,
+        gestures: AndroidGestureSensorBackend,
+    ): SensorTriggerBackend = CompositeSensorTriggerBackend(
+        mapOf(
+            SensorKind.SIGNIFICANT_MOTION to backend,
+            SensorKind.SHAKE to gestures,
+            SensorKind.FLIP_FACE_DOWN to gestures,
+        ),
+    )
 
     @Provides
     @Singleton
@@ -1445,10 +1488,21 @@ object ArgusModule {
         dispatcher: GeofenceEventDispatcher,
         store: AutomationStore,
         location: CurrentLocationProvider,
+        @ApplicationContext context: Context,
     ): GeofenceEventIngress = GeofenceEventIngress(
         state,
         dispatcher,
         LocationBackedTransitionVerifier({ store.get(it)?.trigger }, location),
+        // 0.8: DWELL, ricontrollo persistito con la sua sveglia.
+        GeofenceDwellSupport(
+            delayOf = { id ->
+                (store.get(id)?.trigger as? Trigger.Geofence)
+                    ?.takeIf { it.transition == Transition.DWELL }
+                    ?.loiteringDelayMs
+            },
+            store = PrefsGeofenceDwellStore(context),
+            timer = AndroidGeofenceDwellTimer(context),
+        ),
     )
 
     @Provides
@@ -1499,6 +1553,7 @@ object ArgusModule {
         audit: AuditSink,
         oneShotConsumptions: OneShotConsumptionRegistry,
         launcher: ReceiverWorkLauncher,
+        @ApplicationContext context: Context,
     ): TimeAlarmCoordinator =
         TimeAlarmCoordinator(
             store,
@@ -1511,6 +1566,8 @@ object ArgusModule {
             // I recuperi dovuti partono in background e tengono la lease del servizio in primo
             // piano per tutta la loro durata: il reconcile non aspetta un programma lungo (B3).
             recoveryLauncher = RecoveryLauncher { block -> launcher.launch("time_recovery", block) },
+            // 0.8: le regole next_alarm leggono la prossima sveglia a ogni pianificazione.
+            nextAlarmAt = AndroidNextAlarmClock(context)::nextAlarmAt,
         )
 
     @Provides
@@ -1591,6 +1648,7 @@ object ArgusModule {
         stateQueries: StateQueryProbe,
         audit: AuditSink,
         installedApps: InstalledAppCatalog,
+        nfcTags: AndroidNfcTagReader,
         userModes: dev.argus.data.RoomUserModeStore,
         secrets: dev.argus.engine.secrets.SecretVault,
     ): ApprovalFlow = ApprovalFlow(
@@ -1603,6 +1661,8 @@ object ArgusModule {
         stateQueries,
         audit,
         installedPackages = installedApps,
+        nfcTags = nfcTags,
+        nfcScansVerifiable = { Build.VERSION.SDK_INT >= NfcScanVerification.FIRST_VERIFIABLE_API },
         // 0.8: le modalità nominate da una regola devono esistere all'approvazione.
         userModes = { userModes.snapshot().modes },
         // 0.8: una regola che nomina un segreto non salvato non si arma (solo i nomi, mai i valori).

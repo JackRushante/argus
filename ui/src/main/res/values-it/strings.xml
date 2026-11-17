@@ -168,6 +168,9 @@
     <string name="detail_reject">Rifiuta</string>
     <string name="detail_edit">Modifica</string>
     <string name="detail_arm">Arma</string>
+    <!-- 0.8: lettura del tag NFC di una regola che si sta armando -->
+    <string name="nfc_read_title">Avvicina il tag</string>
+    <string name="nfc_read_body">Appoggia il retro del telefono sul tag NFC a cui deve reagire la regola.</string>
     <string name="detail_disable">Disattiva automazione</string>
     <string name="detail_enable">Riattiva automazione</string>
     <string name="detail_edit_in_chat">Modifica in chat</string>

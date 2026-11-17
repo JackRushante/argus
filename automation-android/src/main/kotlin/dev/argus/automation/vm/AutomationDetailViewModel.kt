@@ -14,6 +14,7 @@ import dev.argus.automation.AutomationEnablementCoordinator
 import dev.argus.automation.BlockCause
 import dev.argus.automation.EnablementResult
 import dev.argus.automation.FlowArmResult
+import dev.argus.automation.nfc.NfcTagReadResult
 import dev.argus.automation.LogRetentionStore
 import dev.argus.automation.ReconcileReason
 import dev.argus.automation.RenderLanguageSource
@@ -487,6 +488,24 @@ class AutomationDetailViewModel @Inject constructor(
                             "Current location is unavailable.",
                             "Posizione attuale non disponibile.",
                         ),
+                    )
+                    // 0.8: il tag della regola si legge all'attivazione, in primo piano.
+                    is FlowArmResult.NfcTagNotRead -> stayWith(
+                        when (result.reason) {
+                            NfcTagReadResult.NoNfc -> language.pick(
+                                "This phone has no NFC.",
+                                "Questo telefono non ha l'NFC.",
+                            )
+                            NfcTagReadResult.NfcOff -> language.pick(
+                                "NFC is off: turn it on and arm the rule again.",
+                                "L'NFC è spento: accendilo e arma di nuovo la regola.",
+                            )
+                            NfcTagReadResult.TimedOut -> language.pick(
+                                "No tag was read: hold it to the phone when you arm the rule.",
+                                "Nessun tag letto: avvicinalo al telefono quando armi la regola.",
+                            )
+                            else -> language.pick("The tag was not read.", "Tag non letto.")
+                        },
                     )
                     FlowArmResult.IntegrityFailure -> stayWith(
                         language.pick("Invalid draft integrity.", "Integrità della bozza non valida."),

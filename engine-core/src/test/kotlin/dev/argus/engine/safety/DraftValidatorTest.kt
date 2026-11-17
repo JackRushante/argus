@@ -513,7 +513,7 @@ class DraftValidatorTest {
         assertTrue("no_actions" in errors(issues))
         assertTrue(issues.any { it.severity == Severity.WARNING && it.code == "radius_small" })
     }
-    @Test fun `dwell and loitering stay fail closed while framework geofence only supports enter exit`() {
+    @Test fun `dwell needs its delay and enter exit never have one`() {
         val dwell = AutomationDraft(
             "dwell",
             Trigger.Geofence(
@@ -524,9 +524,10 @@ class DraftValidatorTest {
             ),
             listOf(Action.SetWifi(false)),
         )
-        val dwellErrors = errors(v.validate(dwell, emptySet()))
-        assertTrue("geofence_transition_unsupported" in dwellErrors)
-        assertTrue("geofence_loitering_unsupported" in dwellErrors)
+        // 0.8: DWELL è disponibile (1..120 minuti); i dettagli in PhysicalTriggers08Test.
+        assertEquals(emptyList(), errors(v.validate(dwell, emptySet())))
+        val noDelay = dwell.copy(trigger = (dwell.trigger as Trigger.Geofence).copy(loiteringDelayMs = 0))
+        assertEquals(listOf("loitering_invalid"), errors(v.validate(noDelay, emptySet())))
 
         val enterWithFakeLoitering = dwell.copy(
             trigger = (dwell.trigger as Trigger.Geofence).copy(

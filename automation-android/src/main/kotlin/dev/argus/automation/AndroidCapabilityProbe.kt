@@ -232,6 +232,9 @@ enum class BlockCause {
     AI_NOT_READY,
     SENSOR_UNAVAILABLE,
 
+    /** 0.8: il telefono non ha l'NFC (regole «tag NFC»): nessuna impostazione lo rimedia. */
+    NFC_UNAVAILABLE,
+
     /** 0.4.1: manca «Modifica impostazioni di sistema» (luminosità, rotazione). */
     WRITE_SETTINGS_ACCESS,
 
@@ -354,6 +357,11 @@ class AndroidCapabilityProbe internal constructor(
         // 0.5.1: app aperta/chiusa, solo con l'accesso ai dati di utilizzo concesso (altrimenti il modello
         // proporrebbe una regola che l'app non può armare).
         if (state.usageStatsGranted) add("app_event")
+        // 0.8: la prossima sveglia, sempre (AlarmManager, nessun permesso); il tag solo con l'NFC sul telefono.
+        add("next_alarm")
+        if (state.nfcPresent) add("nfc_tag")
+        // 0.8: il tempo d'uso legge gli stessi dati di utilizzo di app_event.
+        if (state.usageStatsGranted) add("app_usage")
         // 0.8: inizio/fine degli eventi del calendario, solo col permesso di lettura del calendario.
         if (state.readCalendarGranted) add("calendar_event")
         // Il filtro SIM vale solo su un telefono con più slot e dove SMS o chiamate sono armabili.
@@ -446,6 +454,8 @@ class AndroidCapabilityProbe internal constructor(
         capability.startsWith(SENSOR_TRIGGER_PREFIX) -> BlockCause.SENSOR_UNAVAILABLE
         capability == CapabilityIds.TRIGGER_APP_EVENT -> BlockCause.USAGE_ACCESS
         capability in TELEPHONY_ACTION_CAPABILITIES -> telephonyCause(capability, state)
+        capability == CapabilityIds.TRIGGER_APP_USAGE -> BlockCause.USAGE_ACCESS
+        capability == CapabilityIds.TRIGGER_NFC_TAG -> BlockCause.NFC_UNAVAILABLE
         else -> BlockCause.OTHER
     }
 
@@ -569,6 +579,10 @@ class AndroidCapabilityProbe internal constructor(
             // 0.5.0, permessi permanenti: con `WRITE_SECURE_SETTINGS` la scrittura parametrica passa dal
             // ContentResolver (SECURE/GLOBAL; SYSTEM resta legato a «Modifica impostazioni di sistema»),
             // con l'accesso ai dati di utilizzo l'app in primo piano si legge da UsageStatsManager.
+            // 0.8: la prossima sveglia, vedi availableTriggers.
+            add(CapabilityIds.TRIGGER_NEXT_ALARM)
+            if (state.nfcPresent) add(CapabilityIds.TRIGGER_NFC_TAG)
+            if (state.usageStatsGranted) add(CapabilityIds.TRIGGER_APP_USAGE)
             if (state.secureSettingsGranted) add(ActionCapabilities.WRITE_SETTING)
             if (state.usageStatsGranted) add(CapabilityIds.STATE_FOREGROUND_APP)
             // 0.5.1: «app aperta/chiusa» legge gli stessi eventi di utilizzo: stesso permesso, nessuno shell.
@@ -797,7 +811,12 @@ class AndroidCapabilityProbe internal constructor(
          * quindi il probe può pubblicare SIGNIFICANT_MOTION quando hardware e mode combaciano. Gli
          * altri kind restano fuori finché non hanno un backend proprio (P3-2C).
          */
-        val IMPLEMENTED_SENSOR_KINDS: Set<SensorKind> = setOf(SensorKind.SIGNIFICANT_MOTION)
+        val IMPLEMENTED_SENSOR_KINDS: Set<SensorKind> = setOf(
+            SensorKind.SIGNIFICANT_MOTION,
+            // 0.8: gesti dall'accelerometro ([dev.argus.automation.sensor.AndroidGestureSensorBackend]).
+            SensorKind.SHAKE,
+            SensorKind.FLIP_FACE_DOWN,
+        )
         const val REASON_NOTIFICATION_LISTENER = "notification access not granted"
 
         /** 0.8: `notification_reply` e `notification_action`, pubblicati col listener delle notifiche. */
@@ -812,11 +831,6 @@ class AndroidCapabilityProbe internal constructor(
          */
         val NOT_YET_AVAILABLE_CAPABILITIES: Set<String> = setOf(
             CapabilityIds.RULE_EXIT,
-            CapabilityIds.TRIGGER_NFC_TAG,
-            CapabilityIds.TRIGGER_NEXT_ALARM,
-            CapabilityIds.TRIGGER_APP_USAGE,
-            CapabilityIds.triggerSensor(SensorKind.SHAKE),
-            CapabilityIds.triggerSensor(SensorKind.FLIP_FACE_DOWN),
         )
 
         /** 0.8: valori conservati e modalità utente (database di Argus, nessun permesso). */

@@ -101,6 +101,7 @@ class E2eOperations(
             FlowArmResult.Missing -> failure("arm", "missing")
             FlowArmResult.PolicyUnavailable -> failure("arm", "policy_unavailable")
             FlowArmResult.LocationUnavailable -> failure("arm", "location_unavailable")
+            is FlowArmResult.NfcTagNotRead -> failure("arm", "nfc_tag_not_read")
             FlowArmResult.IntegrityFailure -> failure("arm", "integrity_failure")
             FlowArmResult.AutomationConflict -> failure("arm", "automation_conflict")
         }

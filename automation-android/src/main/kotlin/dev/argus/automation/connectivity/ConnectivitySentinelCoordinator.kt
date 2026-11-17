@@ -1,6 +1,7 @@
 package dev.argus.automation.connectivity
 
 import dev.argus.automation.triggers.DeviceEventDemand
+import dev.argus.automation.triggers.AppUsageWatch
 import dev.argus.automation.triggers.deviceEventSource
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.ConnMedium
@@ -83,6 +84,14 @@ class ConnectivitySentinelCoordinator(
         // Prima dei package: chi registra la sorgente app legge già l'insieme aggiornato.
         deviceEvents.updateAppPackages(
             armed.mapNotNullTo(linkedSetOf()) { (it.trigger as? Trigger.AppEvent)?.pkg },
+        )
+        // 0.8: regole app_usage con la loro impronta (il giorno dello scatto è legato alla revisione).
+        deviceEvents.updateAppUsage(
+            armed.mapNotNull { automation ->
+                val trigger = automation.trigger as? Trigger.AppUsage ?: return@mapNotNull null
+                val fingerprint = automation.approvalFingerprint ?: return@mapNotNull null
+                AppUsageWatch(automation.id, fingerprint, trigger.pkg, trigger.minutes)
+            },
         )
         deviceEvents.update(armed.mapNotNullTo(linkedSetOf()) { it.trigger.deviceEventSource() })
         val required = armed

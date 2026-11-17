@@ -82,14 +82,18 @@ class DeviceEventParser {
     // --- 0.8 scaffold: eventi dei trigger nuovi (nessuna sorgente reale li produce ancora). ---
 
     /**
-     * Tag NFC letto. L'identificativo entra solo nel digest dell'id, mai in chiaro. `null` se vuoto, troppo
-     * lungo o con caratteri di controllo (mai un valore inventato).
+     * Tag NFC letto. L'identificativo entra solo nel digest dell'id, mai in chiaro; anche [verified] ci entra,
+     * così una scansione forgiata non condivide l'id con quella vera. `null` se vuoto, troppo lungo o con
+     * caratteri di controllo (mai un valore inventato).
      */
-    fun nfcTag(tagId: String, atMillis: Long): TriggerEnvelope? {
+    fun nfcTag(tagId: String, verified: Boolean, atMillis: Long): TriggerEnvelope? {
         val id = tagId.takeIf {
             it.isNotBlank() && it.length <= MAX_SOURCE_IDENTITY_CHARS && it.none(Char::isISOControl)
         } ?: return null
-        return envelope(TriggerEvent.NfcTagScanned(id), "nfc_tag", id, instant(atMillis))
+        return envelope(
+            TriggerEvent.NfcTagScanned(id, verified),
+            "nfc_tag", id, if (verified) "verified" else "unverified", instant(atMillis),
+        )
     }
 
     /** Tempo d'uso di oggi di un'app, in minuti. `null` con un package non valido o minuti negativi. */

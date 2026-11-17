@@ -62,9 +62,9 @@ internal class SystemAndroidSensorCapabilitySource(context: Context) : AndroidSe
             SensorKind.MOTION_DETECT -> Sensor.TYPE_MOTION_DETECT
             SensorKind.STEP_DETECTOR -> Sensor.TYPE_STEP_DETECTOR
             SensorKind.STEP_COUNTER -> Sensor.TYPE_STEP_COUNTER
-            // 0.8 scaffold: gesti dall'accelerometro; chi li implementa decide qui come rilevarli.
-            SensorKind.SHAKE -> null
-            SensorKind.FLIP_FACE_DOWN -> null
+            // 0.8: gesti dall'accelerometro (la prossimità, se c'è, aiuta solo il faccia in giù).
+            SensorKind.SHAKE -> Sensor.TYPE_ACCELEROMETER
+            SensorKind.FLIP_FACE_DOWN -> Sensor.TYPE_ACCELEROMETER
         }
 
     private val SensorKind.requiresActivityRecognition: Boolean
@@ -102,8 +102,9 @@ internal object SensorCapabilityPolicy {
         -> reportingMode == SensorReportingMode.ONE_SHOT
         SensorKind.STEP_DETECTOR -> reportingMode == SensorReportingMode.SPECIAL_TRIGGER
         SensorKind.STEP_COUNTER -> reportingMode == SensorReportingMode.ON_CHANGE
-        // 0.8 scaffold: nessun backend, mai armabili.
-        SensorKind.SHAKE -> false
-        SensorKind.FLIP_FACE_DOWN -> false
+        // 0.8: gesti ricavati dall'accelerometro continuo (AndroidGestureSensorBackend).
+        SensorKind.SHAKE,
+        SensorKind.FLIP_FACE_DOWN,
+        -> reportingMode == SensorReportingMode.CONTINUOUS
     }
 }

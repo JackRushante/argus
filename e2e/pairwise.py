@@ -22,6 +22,8 @@ CONFIGS = ["shizuku_root", "shizuku_shell", "none"]
 TRIGGERS = [
     "time", "immediate", "manual", "geofence", "notification", "phone_state", "connectivity",
     "sensor", "screen", "battery", "audio_output", "mode_changed", "media", "app_event",
+    # 0.8, trigger fisici.
+    "nfc_tag", "next_alarm", "app_usage",
     # 0.8: inizio/fine di un evento del calendario.
     "calendar_event",
     # 0.8: la modalità dell'utente cambia (schermata, riquadro, widget o set_user_mode).
@@ -57,7 +59,7 @@ CONTROL_FLOW = ["wait", "if", "while"]
 # `not_available_yet`). Non entra nella copertura a coppie finche' e' spento; una regola della suite puo'
 # usarlo solo per provare quel rifiuto. Chi accende un tipo lo sposta in TRIGGERS o ACTION_CLASSES e
 # aggiunge le sue regole.
-NOT_YET_AVAILABLE_TRIGGERS = ["nfc_tag", "next_alarm", "app_usage"]
+NOT_YET_AVAILABLE_TRIGGERS = []
 NOT_YET_AVAILABLE_ACTIONS = [
 ]
 NOT_YET_AVAILABLE_CODE = "not_available_yet"
@@ -131,6 +133,9 @@ def features(record: dict) -> Dict[str, Set[str]]:
 INFEASIBLE: Set[Pair] = {
     frozenset({("trigger", "sensor"), ("cond", "true")}),
     frozenset({("trigger", "sensor"), ("cond", "false")}),
+    # 0.8: l'emulatore non ha l'NFC: una regola nfc_tag non si arma mai (capability_unavailable).
+    frozenset({("trigger", "nfc_tag"), ("cond", "true")}),
+    frozenset({("trigger", "nfc_tag"), ("cond", "false")}),
 }
 
 

@@ -9,8 +9,6 @@ import dev.argus.engine.model.Action
 import dev.argus.engine.model.ActionTypeIds
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.AutomationId
-import dev.argus.engine.model.CapabilityIds
-import dev.argus.engine.model.SensorKind
 import dev.argus.engine.runtime.ActionResult
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.ExecutionId
@@ -74,10 +72,8 @@ class AndroidCapabilityProbeScaffold08Test {
     /** Ogni azione 0.8 è ormai accesa: chi aggiunge un'azione spenta la elenca qui. */
     private val newActionTypes = emptySet<String>()
 
-    private val newTriggers = setOf(
-        "nfc_tag", "next_alarm", "app_usage",
-        "sensor.${SensorKind.SHAKE.wireName}", "sensor.${SensorKind.FLIP_FACE_DOWN.wireName}",
-    )
+    /** Tutti i trigger 0.8 sono accesi: l'insieme resta per chi ne aggiungerà altri spenti. */
+    private val newTriggers = emptySet<String>()
 
     @Test
     fun `nothing new is announced to the model, not even as unavailable`() = runTest {
@@ -98,7 +94,6 @@ class AndroidCapabilityProbeScaffold08Test {
             AndroidCapabilityProbe.NOT_YET_AVAILABLE_CAPABILITIES.associateWith { BlockCause.NOT_AVAILABLE_YET },
             probe.blockCauses(AndroidCapabilityProbe.NOT_YET_AVAILABLE_CAPABILITIES),
         )
-        assertTrue(CapabilityIds.triggerSensor(SensorKind.SHAKE) in AndroidCapabilityProbe.NOT_YET_AVAILABLE_CAPABILITIES)
     }
 
     @Test

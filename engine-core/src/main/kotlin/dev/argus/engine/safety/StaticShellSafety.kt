@@ -74,8 +74,9 @@ object StaticShellSafety {
         -> true
         is TriggerEvent.MediaPlaybackChanged -> false
         is TriggerEvent.AppForegroundChanged -> false
-        // 0.8: stesse decisioni dei trigger corrispondenti (vedi sopra).
-        is TriggerEvent.NfcTagScanned -> true
+        // 0.8: stesse decisioni dei trigger corrispondenti (vedi sopra). Il tag solo se la scansione viene
+        // provatamente dal servizio NFC: l'activity dei tag è esportata e un'app può forgiarne una.
+        is TriggerEvent.NfcTagScanned -> event.verified
         is TriggerEvent.NextAlarmFired -> false
         is TriggerEvent.CalendarEventFired -> false
         is TriggerEvent.AppUsageChanged -> false
