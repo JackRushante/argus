@@ -249,6 +249,14 @@ internal object LogReasonLabels {
         "ask_answer_invalid" to Label("the answer was not one of the choices", "la risposta non era una delle scelte"),
         "ask_failed" to Label("the question failed", "la domanda non è riuscita"),
         "ask_outside_program" to Label("a question can only run inside its rule", "una domanda funziona solo dentro la sua regola"),
+        "ask_resume_stale" to Label(
+            "the rule changed or was switched off before the answer, it did not go on",
+            "la regola è cambiata o è stata spenta prima della risposta, non è proseguita",
+        ),
+        "ask_resume_invalid" to Label(
+            "the saved question did not match the rule, it did not go on",
+            "la domanda salvata non corrispondeva alla regola, non è proseguita",
+        ),
         "llm_output_invalid" to Label(
             "the AI did not answer with one of the allowed answers",
             "l'AI non ha risposto con una delle risposte ammesse",

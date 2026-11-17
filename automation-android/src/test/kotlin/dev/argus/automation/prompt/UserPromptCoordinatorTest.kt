@@ -8,11 +8,20 @@ import dev.argus.engine.runtime.ConfirmationClosed
 import dev.argus.engine.runtime.ConfirmationRequest
 import dev.argus.engine.runtime.ConfirmationRequestResult
 import dev.argus.engine.runtime.ConfirmedFire
+import dev.argus.engine.model.ConfidentialityLabel
+import dev.argus.engine.model.IntegrityLabel
+import dev.argus.engine.model.ValueProvenance
+import dev.argus.engine.model.VarType
+import dev.argus.engine.model.VarValue
 import dev.argus.engine.runtime.ExecutionId
+import dev.argus.engine.runtime.ProgramContinuation
+import dev.argus.engine.runtime.ProgramContinuationCodec
 import dev.argus.engine.runtime.ProgramQuestion
 import dev.argus.engine.runtime.QuestionContext
 import dev.argus.engine.runtime.QuestionOutcome
+import dev.argus.engine.runtime.ResumedQuestion
 import dev.argus.engine.runtime.TriggerEnvelope
+import dev.argus.engine.runtime.TriggerEnvelopeCodec
 import dev.argus.engine.runtime.TriggerEvent
 import dev.argus.engine.runtime.TriggerEventId
 import kotlinx.coroutines.CompletableDeferred
@@ -201,6 +210,102 @@ class UserPromptCoordinatorTest {
         assertTrue(runs.closed.isEmpty())
     }
 
+    private val secret = VarValue("il codice è 4242", VarType.TEXT, IntegrityLabel.TAINTED, ConfidentialityLabel.PRIVATE, setOf(ValueProvenance.NOTIFICATION))
+    private val continuation = ProgramContinuation(ActionPath("2"), mapOf("msg" to secret), emptyMap(), 1, 900)
+    private val envelope = TriggerEnvelope(TriggerEventId("n:1"), message)
+
+    private fun resumableQuestion() = ProgramQuestion(ActionPath("2"), "Esco?", listOf("Sì", "No"), 60_000, continuation)
+
+    private val resumableContext = QuestionContext(
+        AutomationId("r1"),
+        "Uscita",
+        fingerprint,
+        ExecutionId("x1"),
+        TriggerEventId("n:1"),
+        envelope,
+    )
+
+    /** La domanda che un processo morto ha lasciato, con la sua continuazione. */
+    private fun orphan(expiresAt: Long = now + 60_000): PendingPrompt {
+        val created = store.create(
+            PromptKind.ASK, "r1", "Uscita", fingerprint.value, "x1", now, expiresAt,
+            envelope = TriggerEnvelopeCodec.encode(envelope),
+            prompt = "Esco?",
+            choices = listOf("Sì", "No"),
+            continuation = ProgramContinuationCodec.encode(continuation),
+        )
+        return assertIs<PendingPromptStore.Creation.Created>(created).prompt
+    }
+
+    @Test
+    fun `a question keeps its continuation encrypted and an expiry alarm`() = runTest {
+        val coordinator = coordinator()
+        val outcome = async { coordinator.ask(resumableContext, resumableQuestion()) }
+        while (surface.shown.isEmpty()) yield()
+        val prompt = surface.shown.single()
+
+        assertTrue(prompt.continuation != null && prompt.envelope != null)
+        assertEquals(61_000L, surface.expiries.getValue(prompt.id))
+        assertTrue(blobs.values.values.none { "4242" in it || "Anna" in it || prompt.token in it })
+
+        assertTrue(coordinator.handle(prompt.id, prompt.token, PromptAnswer.Choice(0)))
+        assertEquals(QuestionOutcome.Answered("Sì"), outcome.await())
+        // Il programma vivo ha avuto la risposta: nessuna ripresa, nessuna sveglia rimasta.
+        assertTrue(runs.resumed.isEmpty())
+        assertTrue(surface.expiries.isEmpty())
+    }
+
+    @Test
+    fun `after a restart the answer makes the program go on from the question`() = runTest {
+        val prompt = orphan()
+
+        val restarted = coordinator()
+        assertTrue(restarted.handle(prompt.id, prompt.token, PromptAnswer.Choice(1)))
+
+        val resumed = runs.resumed.single()
+        assertEquals(prompt.id, resumed.questionId)
+        assertEquals(AutomationId("r1"), resumed.automationId)
+        assertEquals(fingerprint, resumed.approvalFingerprint)
+        assertEquals(message, resumed.envelope.event)
+        assertEquals("2", resumed.continuation.askPath.value)
+        assertEquals(secret, resumed.continuation.variables.getValue("msg"))
+        assertEquals(QuestionOutcome.Answered("No"), resumed.outcome)
+        assertNull(store.get(prompt.id))
+
+        assertFalse(restarted.handle(prompt.id, prompt.token, PromptAnswer.Choice(1)))
+        assertEquals(1, runs.resumed.size)
+    }
+
+    @Test
+    fun `after a restart a valid question is shown again, an expired one goes on unanswered once`() = runTest {
+        val valid = orphan()
+        val expired = orphan(expiresAt = now + 10_000)
+        now += 20_000
+
+        val restarted = coordinator()
+        restarted.sweep(repost = true)
+        restarted.sweep(repost = false)
+
+        assertEquals(listOf(valid.id), surface.shown.map { it.id })
+        assertEquals(valid.expiresAtMillis, surface.expiries.getValue(valid.id))
+        val resumed = runs.resumed.single()
+        assertEquals(expired.id, resumed.questionId)
+        assertEquals(QuestionOutcome.TimedOut, resumed.outcome)
+        assertNull(store.get(expired.id))
+        assertTrue(store.get(valid.id) != null)
+    }
+
+    @Test
+    fun `a question too large to keep still works while the program lives`() = runTest {
+        val huge = VarValue("x".repeat(UserPromptCoordinator.MAX_RESUME_CHARS), VarType.TEXT, IntegrityLabel.CLEAN, ConfidentialityLabel.PUBLIC, emptySet())
+        val big = ProgramQuestion(ActionPath("1"), "Esco?", listOf("Sì", "No"), 60_000, ProgramContinuation(ActionPath("1"), mapOf("v" to huge), emptyMap(), 0, 0))
+        val outcome = coordinator(pause = {}).ask(resumableContext, big)
+
+        assertEquals(QuestionOutcome.TimedOut, outcome)
+        assertNull(surface.shown.single().continuation)
+        assertTrue(surface.expiries.isEmpty())
+    }
+
     @Test
     fun `a tampered blob is dropped, never half read`() = runTest {
         coordinator().request(request())
@@ -250,6 +355,7 @@ class UserPromptCoordinatorTest {
     private class FakeRuns : ConfirmedRuns {
         val confirmed = mutableListOf<ConfirmedFire>()
         val closed = mutableListOf<Pair<AutomationId, ConfirmationClosed>>()
+        val resumed = mutableListOf<ResumedQuestion>()
         val done = CompletableDeferred<Unit>()
 
         override suspend fun run(confirmed: ConfirmedFire) {
@@ -258,6 +364,10 @@ class UserPromptCoordinatorTest {
 
         override suspend fun closed(automationId: AutomationId, reason: ConfirmationClosed) {
             closed += automationId to reason
+        }
+
+        override suspend fun resume(resumed: ResumedQuestion) {
+            this.resumed += resumed
         }
     }
 }

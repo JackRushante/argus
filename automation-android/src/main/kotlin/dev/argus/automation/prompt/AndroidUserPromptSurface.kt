@@ -29,6 +29,7 @@ import dev.argus.engine.model.AutomationId
 import dev.argus.engine.runtime.ConfirmationClosed
 import dev.argus.engine.runtime.ConfirmedFire
 import dev.argus.engine.runtime.Engine
+import dev.argus.engine.runtime.ResumedQuestion
 import javax.inject.Provider
 
 /**
@@ -273,5 +274,9 @@ class EngineConfirmedRuns(
 
     override suspend fun closed(automationId: AutomationId, reason: ConfirmationClosed) {
         engine.get().onConfirmationClosed(automationId, reason)
+    }
+
+    override suspend fun resume(resumed: ResumedQuestion) {
+        frame.run { engine.get().onQuestionResumed(resumed) { request -> state.current(request) } }
     }
 }

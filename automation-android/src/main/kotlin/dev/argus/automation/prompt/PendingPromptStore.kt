@@ -39,11 +39,19 @@ class PendingPrompt internal constructor(
     val executionId: String,
     val createdAtMillis: Long,
     val expiresAtMillis: Long,
-    /** CONFIRM: l'evento in forma [dev.argus.engine.runtime.TriggerEnvelopeCodec]. */
+    /**
+     * L'evento in forma [dev.argus.engine.runtime.TriggerEnvelopeCodec]: CONFIRM sempre, ASK quando il
+     * programma si può riprendere dopo la morte del processo.
+     */
     val envelope: String? = null,
     /** ASK: il testo risolto della domanda e le etichette approvate. */
     val prompt: String? = null,
     val choices: List<String> = emptyList(),
+    /**
+     * ASK: dove il programma si è fermato, in forma [dev.argus.engine.runtime.ProgramContinuationCodec]
+     * (variabili con le loro label). Null se non si riprende: la domanda vive solo col programma.
+     */
+    val continuation: String? = null,
 ) {
     fun expired(nowMillis: Long): Boolean = nowMillis >= expiresAtMillis
 
@@ -66,6 +74,7 @@ class PendingPrompt internal constructor(
                 "envelope" to (envelope?.let(::JsonPrimitive) ?: JsonNull),
                 "prompt" to (prompt?.let(::JsonPrimitive) ?: JsonNull),
                 "choices" to JsonArray(choices.map(::JsonPrimitive)),
+                "continuation" to (continuation?.let(::JsonPrimitive) ?: JsonNull),
             ),
         ),
     )
@@ -105,6 +114,7 @@ class PendingPrompt internal constructor(
                     envelope = string("envelope"),
                     prompt = string("prompt"),
                     choices = o["choices"]?.jsonArray?.map { it.jsonPrimitive.content } ?: return null,
+                    continuation = string("continuation"),
                 )
             }
         }
@@ -171,6 +181,7 @@ class PendingPromptStore(
         envelope: String? = null,
         prompt: String? = null,
         choices: List<String> = emptyList(),
+        continuation: String? = null,
     ): Creation = synchronized(lock) {
         try {
             val open = readAll()
@@ -194,6 +205,7 @@ class PendingPromptStore(
                 envelope = envelope,
                 prompt = prompt,
                 choices = choices,
+                continuation = continuation,
             )
             if (blobs.put(KEY_PREFIX + created.id, cipher.encrypt(created.toJson()))) {
                 Creation.Created(created)

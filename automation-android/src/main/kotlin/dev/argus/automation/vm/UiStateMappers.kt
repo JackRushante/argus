@@ -338,7 +338,8 @@ private fun auditSummary(record: AuditLogRecord, l: RenderLanguage): String = wh
 }
 
 /** 0.8: codici chiusi di «chiedimi prima» e delle domande senza risposta (audit SUPPRESSED_NOT_ELIGIBLE). */
-private val USER_PROMPT_CODES = ConfirmationCodes.ALL + ProgramInterpreter.ASK_TIMEOUT
+private val USER_PROMPT_CODES =
+    ConfirmationCodes.ALL + ProgramInterpreter.ASK_TIMEOUT + ProgramInterpreter.ASK_RESUME_STALE
 
 /** Codice con cui la lane chiude un evento già accorpato in una raffica (D8). */
 private const val COALESCED_REPLY_CODE = "coalesced"
