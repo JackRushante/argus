@@ -23,6 +23,7 @@ import dev.argus.automation.foreground.launchReceiverWork
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.listenedTriggers
 import dev.argus.engine.runtime.AutomationStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -159,7 +160,7 @@ class CalendarTriggerLifecycle(
         scope.launch {
             store.observeAll()
                 .map { rules ->
-                    rules.filter { it.enabled && it.trigger is Trigger.CalendarEvent }
+                    rules.filter { rule -> rule.enabled && rule.listenedTriggers.any { it is Trigger.CalendarEvent } }
                         .map { Triple(it.id, it.status, it.approvalFingerprint) }
                         .toSet()
                 }
@@ -181,7 +182,7 @@ class CalendarTriggerLifecycle(
     }
 
     private suspend fun observerWanted(): Boolean = runCatching {
-        store.armed().any { it.trigger is Trigger.CalendarEvent }
+        store.armed().any { rule -> rule.listenedTriggers.any { it is Trigger.CalendarEvent } }
     }.getOrDefault(false)
 
     private fun syncObserver(wanted: Boolean): Unit = synchronized(observerLock) {

@@ -6,6 +6,7 @@ import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.Transition
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.listenedTrigger
 import dev.argus.engine.runtime.AutomationStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
@@ -27,7 +28,8 @@ data class GeofenceRegistration(
 
     companion object {
         fun from(automation: Automation): GeofenceRegistration {
-            val trigger = automation.trigger as? Trigger.Geofence
+            // 0.8: l'area della regola, d'inizio o di fine (una regola-intervallo ne ha al più una: validator).
+            val trigger = automation.listenedTrigger<Trigger.Geofence>()
                 ?: throw IllegalArgumentException("trigger_not_geofence")
             // 0.8: un DWELL si registra come un'area normale; l'attesa la gestisce l'ingress.
             require(trigger.transition in setOf(Transition.ENTER, Transition.EXIT, Transition.DWELL)) {
@@ -269,7 +271,7 @@ class GeofenceCoordinator(
         recreateOsRegistrations: Boolean,
     ): GeofenceReconcileReport = mutex.withLock {
         val desired = store.armed()
-            .filter { it.trigger is Trigger.Geofence }
+            .filter { it.listenedTrigger<Trigger.Geofence>() != null }
             .associateBy { it.id }
         val registered = mutableListOf<AutomationId>()
         val unregistered = mutableListOf<AutomationId>()
@@ -369,7 +371,7 @@ class GeofenceCoordinator(
                 }
             } else if (ingress != null) {
                 recoveryCandidates.sortedBy { it.id.value }.forEach { automation ->
-                    val trigger = automation.trigger as Trigger.Geofence
+                    val trigger = automation.listenedTrigger<Trigger.Geofence>() ?: return@forEach
                     val persisted = state.get(automation.id) ?: return@forEach
                     val distance = distanceMeters(
                         trigger.lat,

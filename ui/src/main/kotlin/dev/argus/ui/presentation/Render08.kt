@@ -1,11 +1,15 @@
 package dev.argus.ui.presentation
 
+import dev.argus.engine.model.Action
 import dev.argus.engine.model.AudioOutputKind
 import dev.argus.engine.model.CalendarPhase
 import dev.argus.engine.model.ConfirmSpec
 import dev.argus.engine.model.Day
 import dev.argus.engine.model.ExitSpec
+import dev.argus.engine.model.SpanPolicy
+import dev.argus.engine.model.SpanSlot
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.VolumeStream
 
 /**
  * Resa di approvazione dei trigger, delle condizioni e dei campi di regola del vocabolario 0.8 (ancora
@@ -183,23 +187,75 @@ internal object RuleSpanRender {
         )
     }
 
-    /** [triggerLine] è la riga del trigger d'uscita già resa dal mapper. */
-    fun exitLine(exit: ExitSpec, triggerLine: String, l: RenderLanguage): String {
+    /**
+     * La regola-intervallo resa come una regola sola: fino a quando dura (il trigger di fine, [triggerLine] già reso
+     * dal mapper) e che cosa fa alla fine. I valori che rimette si elencano dai TIPI delle azioni d'inizio
+     * ([startActions]), mai dalla prosa del modello (invariante 4), e si dice che un valore cambiato a mano nel
+     * frattempo torna comunque com'era.
+     */
+    fun exitLine(exit: ExitSpec, triggerLine: String, startActions: List<Action>, l: RenderLanguage): String {
         val text = listOf(RuleRenderMapper.whenPrefix(RenderLanguage.EN), RuleRenderMapper.whenPrefix(RenderLanguage.IT))
             .firstOrNull { triggerLine.startsWith(it) }?.let { triggerLine.removePrefix(it) } ?: triggerLine
-        val restore = if (exit.restore) {
+        val until = l.pick("Until this happens: ", "Finché non succede questo: ") + text
+        val end = if (exit.restore) {
+            val values = restoredValues(startActions, l)
+            val listed = if (values.isEmpty()) "" else " (${values.joinToString(", ")})"
             l.pick(
-                " · then it puts back the values that the start actions changed",
-                " · poi rimette i valori che le azioni d'inizio avevano cambiato",
+                " · At the end: it puts back the values the start changed$listed. " +
+                    "A value you change by hand in the meantime is still put back as it was",
+                " · Alla fine: rimette com'era i valori cambiati dall'inizio$listed. " +
+                    "Anche un valore cambiato a mano nel frattempo torna com'era",
             )
         } else {
-            l.pick(" · it does not put back the previous values", " · non rimette i valori di prima")
+            l.pick(" · At the end: it does not put back the previous values", " · Alla fine: non rimette i valori di prima")
         }
         val actions = if (exit.actions.isEmpty()) {
             ""
         } else {
             l.pick(" · then it runs the end actions below", " · poi esegue le azioni di fine qui sotto")
         }
-        return l.pick("The rule ends: ", "La regola finisce: ") + text + restore + actions
+        return until + end + actions
     }
+
+    /** I valori, uno per tipo e nell'ordine delle azioni (anche annidate), che la fine rimette. */
+    private fun restoredValues(actions: List<Action>, l: RenderLanguage): List<String> {
+        val pending = ArrayDeque(actions)
+        val slots = linkedMapOf<String, SpanSlot>()
+        var visited = 0
+        while (pending.isNotEmpty() && visited++ < MAX_VISITED) {
+            // In profondità e in ordine: le azioni annidate contano dove stanno nella regola.
+            when (val action = pending.removeFirst()) {
+                is Action.If -> pending.addAll(0, action.then + action.orElse)
+                is Action.While -> pending.addAll(0, action.body)
+                else -> SpanPolicy.slotOf(action)?.let { slots.putIfAbsent(it.key, it) }
+            }
+        }
+        return slots.values.map { slotLabel(it, l) }
+    }
+
+    private fun slotLabel(slot: SpanSlot, l: RenderLanguage): String = when (slot) {
+        is SpanSlot.Volume -> when (slot.stream) {
+            VolumeStream.MEDIA -> l.pick("media volume", "volume multimediale")
+            VolumeStream.RING -> l.pick("ring volume", "volume della suoneria")
+            VolumeStream.ALARM -> l.pick("alarm volume", "volume della sveglia")
+            VolumeStream.NOTIFICATION -> l.pick("notification volume", "volume delle notifiche")
+        }
+        SpanSlot.Ringer -> l.pick("ringer mode", "modalità della suoneria")
+        SpanSlot.Dnd -> l.pick("Do Not Disturb", "Non disturbare")
+        SpanSlot.Brightness -> l.pick("brightness", "luminosità")
+        SpanSlot.Rotation -> l.pick("auto-rotate", "rotazione automatica")
+        SpanSlot.Wifi -> "Wi-Fi"
+        SpanSlot.Bluetooth -> "Bluetooth"
+        SpanSlot.MobileData -> l.pick("mobile data", "dati mobili")
+        SpanSlot.Airplane -> l.pick("airplane mode", "modalità aereo")
+        SpanSlot.Location -> l.pick("location", "localizzazione")
+        SpanSlot.Nfc -> "NFC"
+        SpanSlot.BatterySaver -> l.pick("battery saver", "risparmio energetico")
+        SpanSlot.DarkMode -> l.pick("dark theme", "tema scuro")
+        SpanSlot.Flashlight -> l.pick("flashlight", "torcia")
+        is SpanSlot.Setting -> l.pick("the setting ", "l'impostazione ") + Trigger08Render.quoted(slot.name)
+        SpanSlot.UserMode -> l.pick("the mode", "la modalità")
+    }
+
+    private const val MAX_VISITED = 4_096
 }

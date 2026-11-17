@@ -2873,5 +2873,32 @@
    "actions_include": ["ask", "show_notification"]
   },
   "note": "Come ask08.it.01, in inglese, senza ramo: la scelta va nel testo della notifica"
+ },
+ {
+  "id": "span08.car.it.01",
+  "category": "trigger.connectivity",
+  "lang": "it",
+  "text": "Quando mi collego al Bluetooth dell'auto metti il volume dei media al massimo, e quando mi scollego rimettilo com'era",
+  "expect": {
+   "outcome": ["draft", "clarification"],
+   "trigger": {"type": "connectivity", "medium": "BT", "state": "CONNECTED"},
+   "actions_include": ["set_volume"],
+   "params": {"set_volume.stream": "MEDIA", "set_volume.level": 100},
+   "exit_trigger": {"type": "connectivity", "medium": "BT", "state": "DISCONNECTED"}
+  },
+  "note": "0.8: una regola-intervallo, l'esempio della spec: exit col trigger opposto e restore, non una seconda regola"
+ },
+ {
+  "id": "span08.night.en.01",
+  "category": "trigger.time",
+  "lang": "en",
+  "text": "From 10 pm to 7 am every night turn on Do Not Disturb, then put it back as it was",
+  "expect": {
+   "outcome": "draft",
+   "trigger": {"type": "time", "cron": {"present": true}},
+   "actions_include": ["set_dnd"],
+   "exit_trigger": {"type": "time", "cron": {"present": true}}
+  },
+  "note": "0.8: inizio e fine a orario: due cron, la fine rimette il Non disturbare com'era"
  }
 ]

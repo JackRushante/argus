@@ -4,6 +4,7 @@ import dev.argus.automation.connectivity.ConnectivitySentinelBackend
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.SensorKind
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.listenedTriggers
 import dev.argus.engine.runtime.AutomationStore
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -105,9 +106,13 @@ class SensorTriggerCoordinator(
     }
 
     override suspend fun reconcile(): SensorReconcileReport = mutex.withLock {
-        val eligible = store.armed().mapNotNull { automation ->
-            val kind = (automation.trigger as? Trigger.Sensor)?.kind ?: return@mapNotNull null
-            if (kind !in implementedKinds) null else automation.id to kind
+        // 0.8: anche il sensore della fine di una regola-intervallo (una coppia per tipo di sensore).
+        val eligible = store.armed().flatMap { automation ->
+            automation.listenedTriggers.filterIsInstance<Trigger.Sensor>()
+                .map { it.kind }
+                .distinct()
+                .filter { it in implementedKinds }
+                .map { automation.id to it }
         }
         val desiredKinds = eligible.map { it.second }.toSet()
 
@@ -154,12 +159,13 @@ class SensorTriggerCoordinator(
         val requiredBy = eligible
             .filter { it.second in registeredKinds }
             .map { it.first }
+            .distinct()
             .sortedBy { it.value }
 
         SensorReconcileReport(
             requiredBy = requiredBy,
             registeredKinds = registeredKinds.toSet(),
-            needsReview = needsReview.sortedBy { it.value },
+            needsReview = needsReview.distinct().sortedBy { it.value },
             failed = failed.distinct().sortedBy { it.value },
             cleanupSucceeded = cleanupSucceeded,
         )

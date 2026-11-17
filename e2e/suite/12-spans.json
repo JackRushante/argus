@@ -1,0 +1,317 @@
+[
+ {
+  "id": "S01-span-volume-back",
+  "title": "0.8 exit: a schermo spento volume al massimo, alla riaccensione torna com'era",
+  "cond": "none",
+  "rule": {
+   "name": "S01-span-volume-back",
+   "trigger": {
+    "type": "screen",
+    "event": "OFF"
+   },
+   "actions": [
+    {
+     "type": "set_volume",
+     "stream": "MEDIA",
+     "level": 100
+    }
+   ],
+   "exit": {
+    "trigger": {
+     "type": "screen",
+     "event": "ON"
+    },
+    "restore": true,
+    "actions": []
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "executions": 2,
+    "audit_detail": {
+     "FIRED": "span_exit"
+    }
+   }
+  },
+  "pre": [
+   "cmd media_session volume --stream 3 --set 3",
+   "input keyevent KEYCODE_WAKEUP"
+  ],
+  "fire": {
+   "real": [
+    "input keyevent KEYCODE_SLEEP",
+    4,
+    "input keyevent KEYCODE_WAKEUP",
+    4
+   ]
+  },
+  "checks": [
+   {
+    "shell": "cmd media_session volume --stream 3 --get | tail -1",
+    "contains": "volume is 3 in",
+    "wait_s": 4
+   }
+  ],
+  "cleanup": [
+   "input keyevent KEYCODE_WAKEUP",
+   "wm dismiss-keyguard",
+   "cmd media_session volume --stream 3 --set 7"
+  ]
+ },
+ {
+  "id": "S02-span-end-actions",
+  "title": "0.8 exit: senza ripristino, alla fine partono le azioni di fine",
+  "cond": "none",
+  "rule": {
+   "name": "S02-span-end-actions",
+   "trigger": {
+    "type": "screen",
+    "event": "OFF"
+   },
+   "actions": [
+    {
+     "type": "vibrate",
+     "durationMs": 100
+    }
+   ],
+   "exit": {
+    "trigger": {
+     "type": "screen",
+     "event": "ON"
+    },
+    "restore": false,
+    "actions": [
+     {
+      "type": "show_notification",
+      "title": "e2e S02 {{RUN}}",
+      "text": "fine"
+     }
+    ]
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "executions": 2,
+    "audit_detail": {
+     "FIRED": "span_exit"
+    }
+   }
+  },
+  "pre": [
+   "input keyevent KEYCODE_WAKEUP"
+  ],
+  "fire": {
+   "real": [
+    "input keyevent KEYCODE_SLEEP",
+    4,
+    "input keyevent KEYCODE_WAKEUP",
+    4
+   ]
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e S02 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ],
+  "cleanup": [
+   "input keyevent KEYCODE_WAKEUP",
+   "wm dismiss-keyguard"
+  ]
+ },
+ {
+  "id": "S03-span-night-dnd",
+  "title": "0.8 exit: dalle 22 alle 7 Non disturbare, poi com'era (si arma: due sveglie, inizio e fine)",
+  "cond": "none",
+  "rule": {
+   "name": "S03-span-night-dnd",
+   "trigger": {
+    "type": "time",
+    "cron": "0 22 * * *",
+    "tz": "Europe/Rome"
+   },
+   "actions": [
+    {
+     "type": "set_dnd",
+     "mode": "PRIORITY"
+    }
+   ],
+   "exit": {
+    "trigger": {
+     "type": "time",
+     "cron": "0 7 * * *",
+     "tz": "Europe/Rome"
+    }
+   }
+  },
+  "expect": {
+   "load": "ok"
+  },
+  "checks": []
+ },
+ {
+  "id": "S04-span-one-shot-start",
+  "title": "0.8 exit: rifiutata su un inizio che scatta una volta sola",
+  "cond": "none",
+  "rule": {
+   "name": "S04-span-one-shot-start",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "set_volume",
+     "stream": "MEDIA",
+     "level": 100
+    }
+   ],
+   "exit": {
+    "trigger": {
+     "type": "screen",
+     "event": "ON"
+    }
+   }
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "exit_start_one_shot"
+    }
+   }
+  },
+  "checks": []
+ },
+ {
+  "id": "S05-span-manual-end",
+  "title": "0.8 exit: una fine manuale non e' ammessa",
+  "cond": "none",
+  "rule": {
+   "name": "S05-span-manual-end",
+   "trigger": {
+    "type": "screen",
+    "event": "OFF"
+   },
+   "actions": [
+    {
+     "type": "set_volume",
+     "stream": "MEDIA",
+     "level": 100
+    }
+   ],
+   "exit": {
+    "trigger": {
+     "type": "manual"
+    }
+   }
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "exit_trigger_unsupported"
+    }
+   }
+  },
+  "checks": []
+ },
+ {
+  "id": "S06-span-shell-next-alarm",
+  "title": "0.8 exit: la shell fra le azioni di fine risponde al trigger di fine (prossima sveglia: mai)",
+  "cond": "none",
+  "rule": {
+   "name": "S06-span-shell-next-alarm",
+   "trigger": {
+    "type": "time",
+    "cron": "0 22 * * *",
+    "tz": "Europe/Rome"
+   },
+   "actions": [
+    {
+     "type": "set_dnd",
+     "mode": "TOTAL"
+    }
+   ],
+   "exit": {
+    "trigger": {
+     "type": "next_alarm",
+     "offsetMinutes": 10
+    },
+    "actions": [
+     {
+      "type": "if",
+      "condition": {
+       "type": "boolean_literal",
+       "value": true
+      },
+      "then": [
+       {
+        "type": "run_shell",
+        "cmd": "svc wifi enable"
+       }
+      ]
+     }
+    ]
+   }
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "shell_external_trigger"
+    }
+   }
+  },
+  "checks": []
+ },
+ {
+  "id": "S07-span-ask-at-end",
+  "title": "0.8 exit: le azioni di fine non fanno domande",
+  "cond": "none",
+  "rule": {
+   "name": "S07-span-ask-at-end",
+   "trigger": {
+    "type": "screen",
+    "event": "OFF"
+   },
+   "actions": [
+    {
+     "type": "set_volume",
+     "stream": "MEDIA",
+     "level": 100
+    }
+   ],
+   "exit": {
+    "trigger": {
+     "type": "screen",
+     "event": "ON"
+    },
+    "actions": [
+     {
+      "type": "ask",
+      "prompt": "e2e S07?",
+      "choices": [
+       "Si",
+       "No"
+      ],
+      "captureAs": "answer",
+      "timeoutMs": 10000,
+      "defaultChoice": "No"
+     }
+    ]
+   }
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "exit_ask_unsupported"
+    }
+   }
+  },
+  "checks": []
+ }
+]

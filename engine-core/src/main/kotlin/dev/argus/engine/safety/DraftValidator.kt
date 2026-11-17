@@ -202,12 +202,18 @@ class DraftValidator(
                 )
         }
 
+        // 0.8: la fine di una regola-intervallo, con le sue azioni, si controlla come l'inizio (vedi validateSpan).
+        val exitTree = d.exit?.let { exit ->
+            validateSpan(d, exit, whitelistedIds, tree.totalActions, ::countCondition, ::err, ::warn, ::errDetail)
+        }
+
         if (conditionCount > MAX_CONDITIONS)
             err("conditions_too_many", "Massimo $MAX_CONDITIONS condizioni per regola")
 
-        if (tree.hasGenerative && d.cooldownMs < 60_000)
+        // Un'AI fra le azioni di fine conta come una d'inizio: pausa minima e avviso sui cicli.
+        if ((tree.hasGenerative || exitTree?.hasGenerative == true) && d.cooldownMs < 60_000)
             warn("cooldown_raised", "Cooldown sotto 60 s su regola generativa: l'engine imporrà 60 s")
-        if (tree.hasGenerativeInLoop)
+        if (tree.hasGenerativeInLoop || exitTree?.hasGenerativeInLoop == true)
             warn(
                 "generative_in_loop",
                 "Chiamata AI dentro un ciclo: può ripetersi a ogni giro, fino a " +
@@ -330,6 +336,149 @@ class DraftValidator(
                 is VarBinding.Stored -> validateStoredKey(binding.key, err)
             }
         }
+    }
+
+    /**
+     * 0.8 regola-intervallo ([AutomationDraft.exit]). Il trigger di fine ha gli stessi limiti di un trigger d'inizio;
+     * le azioni di fine sono un programma a sé (le variabili dichiarate si legano all'evento di FINE, le catture
+     * dell'inizio non esistono) e si validano come quelle d'inizio, ma rispetto al trigger di FINE: è lui che preme
+     * l'interruttore di shell, macro e risposte. Le forme che il motore non saprebbe distinguere o riprendere sono
+     * rifiutate qui: inizio che si consuma da solo, fine immediata/manuale/a ora singola/DWELL, fine uguale
+     * all'inizio, due aree diverse, due trigger della stessa fase del calendario o dello stesso sensore, tag da
+     * leggere all'attivazione nella fine, domande (`ask`) fra le azioni di fine.
+     */
+    private fun validateSpan(
+        d: AutomationDraft,
+        exit: ExitSpec,
+        whitelistedIds: Set<String>,
+        startTotalActions: Int,
+        countCondition: () -> Int,
+        err: (String, String) -> Unit,
+        warn: (String, String) -> Unit,
+        errDetail: (String, String, String) -> Unit,
+    ): ActionTreeSummary? {
+        val end = exit.trigger
+        if (!SpanPolicy.supportsStartTrigger(d.trigger)) {
+            err(
+                "exit_start_one_shot",
+                "Una regola che scatta una volta sola non può avere una fine: si spegnerebbe subito dopo l'inizio",
+            )
+        }
+        if (!SpanPolicy.supportsExitTrigger(end)) {
+            err(
+                "exit_trigger_unsupported",
+                "La fine non può essere immediata, manuale, a un'ora singola o un'attesa in un'area",
+            )
+        }
+        if (end == d.trigger) err("exit_trigger_same_as_start", "La fine deve avere un trigger diverso dall'inizio")
+        validateTrigger(end, err, warn)
+        if (end is Trigger.Sensor && d.trigger !is Trigger.Sensor &&
+            d.cooldownMs !in SensorTriggerPolicy.MIN_COOLDOWN_MS..SensorTriggerPolicy.MAX_COOLDOWN_MS
+        ) {
+            err(
+                "sensor_cooldown_invalid",
+                "I trigger sensore richiedono un cooldown tra " +
+                    "${SensorTriggerPolicy.MIN_COOLDOWN_MS} e ${SensorTriggerPolicy.MAX_COOLDOWN_MS} ms",
+            )
+        }
+        val start = d.trigger
+        if (start is Trigger.Geofence && end is Trigger.Geofence) {
+            val sameArea = start.lat == end.lat && start.lng == end.lng && start.radiusM == end.radiusM &&
+                start.resolveCurrentLocation == end.resolveCurrentLocation
+            val edges = end.transition != start.transition &&
+                (start.transition != Transition.DWELL || end.transition == Transition.EXIT)
+            if (!sameArea || !edges) {
+                err(
+                    "exit_geofence_mismatch",
+                    "Inizio e fine su un'area devono usare la stessa area, uno l'ingresso (o l'attesa) e l'altra l'uscita",
+                )
+            }
+        }
+        if (start is Trigger.CalendarEvent && end is Trigger.CalendarEvent && start.phase == end.phase) {
+            err("exit_calendar_same_phase", "Inizio e fine sul calendario devono essere uno l'inizio e l'altra la fine")
+        }
+        if (start is Trigger.Sensor && end is Trigger.Sensor && start.kind == end.kind) {
+            err("exit_sensor_same_kind", "Inizio e fine sui sensori devono usare due gesti diversi")
+        }
+        // Il giorno dello scatto di app_usage è uno per regola: inizio e fine non possono condividerlo.
+        if (start is Trigger.AppUsage && end is Trigger.AppUsage) {
+            err("exit_app_usage_twice", "Inizio e fine non possono essere entrambi tempi d'uso di un'app")
+        }
+        if (end is Trigger.NfcTag && end.resolveTag) {
+            err("exit_nfc_resolve_unsupported", "Il tag della fine deve essere già noto: non si legge all'attivazione")
+        }
+        if (!exit.restore && exit.actions.isEmpty()) {
+            err("exit_nothing_to_do", "La fine non rimette i valori e non ha azioni: non farebbe nulla")
+        }
+        if (exit.restore && flattenForTelephony(d.actions).none { SpanPolicy.slotOf(it) != null }) {
+            warn("exit_nothing_to_restore", "Nessuna azione d'inizio cambia un valore che la fine possa rimettere")
+        }
+        if (flattenForTelephony(exit.actions).any { it is Action.Ask }) {
+            err("exit_ask_unsupported", "Le azioni di fine non possono fare domande: la fine non aspetta risposte")
+        }
+        if (exit.actions.isEmpty()) return null
+
+        // Il programma di fine lega le variabili dichiarate all'evento di fine: un campo che quel trigger non ha
+        // fermerebbe sempre le azioni di fine.
+        val endFields = triggerPayloadFields(end)
+        d.vars.filterIsInstance<VarBinding.TriggerPayload>().filter { it.field !in endFields }.forEach { binding ->
+            err(
+                "exit_var_trigger_payload_unsupported",
+                "La variabile '${binding.name}' legge il messaggio d'inizio, che alla fine non c'è",
+            )
+        }
+        val tree = preflightActions(exit.actions, err).let { summary ->
+            summary.copy(captures = resolveInheritedConfidentiality(summary.captures, d.vars))
+        }
+        if (AutomationSchema.versionFor(d) == AUTOMATION_SCHEMA_VERSION_P4 && tree.hasInvokeLlmV2) {
+            err(
+                "p4_invoke_llm_v2_unsupported",
+                "InvokeLlm v2 non è ancora ammesso nei programmi P4; usa invoke_llm o una regola flat",
+            )
+        }
+        validateCaptureNames(tree.captures, d.vars, err)
+        if (d.vars.size + tree.captures.size > MAX_VARS) {
+            err("too_many_vars", "Massimo $MAX_VARS variabili per regola, inclusi i captureAs")
+        }
+        if (startTotalActions + tree.totalActions > MAX_TOTAL_ACTIONS) {
+            err("too_many_actions_total", "Massimo $MAX_TOTAL_ACTIONS azioni totali nell'albero appiattito")
+        }
+        val knownVars = d.vars.mapTo(mutableSetOf()) { it.name }.apply { addAll(tree.captures.map { it.name }) }
+        val declaredTypes = buildMap<String, VarType> {
+            d.vars.forEach { put(it.name, it.declaredType) }
+            tree.captures.forEach { putIfAbsent(it.name, it.type) }
+        }
+        val declaredIntegrity = buildMap<String, IntegrityLabel> {
+            d.vars.forEach { put(it.name, it.integrity) }
+            tree.captures.forEach { putIfAbsent(it.name, it.integrity) }
+        }
+        val declaredConfidentiality = buildMap<String, ConfidentialityLabel> {
+            d.vars.forEach { put(it.name, it.confidentiality) }
+            tree.captures.forEach { putIfAbsent(it.name, it.confidentiality) }
+        }
+        if (!tree.tooDeep && tree.totalActions <= MAX_TOTAL_ACTIONS) {
+            walkActions(
+                actions = exit.actions,
+                trigger = end,
+                whitelist = whitelistedIds,
+                knownVars = knownVars,
+                declaredTypes = declaredTypes,
+                declaredIntegrity = declaredIntegrity,
+                declaredConfidentiality = declaredConfidentiality,
+                availableVars = d.vars.mapTo(mutableSetOf()) { it.name },
+                depth = 0,
+                countCondition = countCondition,
+                err = err,
+                warn = warn,
+                errDetail = errDetail,
+            )
+            if (worstCaseBudgetMs(exit.actions) > MAX_TIME_BUDGET_MS)
+                err(
+                    "time_budget_exceeded",
+                    "Budget tempo worst-case oltre 6 ore: riduci maxIterations/delay o le azioni lunghe",
+                )
+        }
+        return tree
     }
 
     private fun triggerPayloadFields(trigger: Trigger): Set<TriggerField> = when (trigger) {
@@ -1632,11 +1781,15 @@ class DraftValidator(
     ) {
         val all = flattenForTelephony(d.actions + d.exit?.actions.orEmpty())
         val bindings = d.vars.associateBy { it.name }
-        all.filterIsInstance<Action.SendSms>().forEach { sms ->
+        // 0.8: un SMS fra le azioni di fine risponde a chi ha fatto scattare la FINE: conta il trigger di fine.
+        val byTrigger = listOf(d.trigger to flattenForTelephony(d.actions)) +
+            listOfNotNull(d.exit?.let { it.trigger to flattenForTelephony(it.actions) })
+        byTrigger.flatMap { (trigger, actions) -> actions.filterIsInstance<Action.SendSms>().map { trigger to it } }
+            .forEach { (trigger, sms) ->
             val name = TelephonyActionPolicy.placeholder(sms.number) ?: return@forEach
             val binding = bindings[name] as? VarBinding.TriggerPayload
             if (binding == null || binding.field != TriggerField.NUMBER || binding.extractionRegex != null ||
-                d.trigger !is Trigger.PhoneState
+                trigger !is Trigger.PhoneState
             ) {
                 err(
                     "sms_number_not_sender",

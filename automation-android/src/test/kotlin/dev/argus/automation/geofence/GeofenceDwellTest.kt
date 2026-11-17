@@ -92,7 +92,12 @@ class GeofenceDwellTest {
         assertNull(world.timer.scheduled[id])
         world.now += delay
         assertFalse(world.ingress.onDwellDue(id))
-        assertTrue(world.delivered.isEmpty())
+        // 0.8: niente DWELL; l'uscita va al motore solo come possibile FINE di una regola-intervallo (una regola
+        // DWELL senza fine non combacia con un EXIT).
+        assertEquals(
+            listOf(Transition.EXIT),
+            world.delivered.map { (it.event as TriggerEvent.GeofenceTransitioned).transition },
+        )
     }
 
     @Test

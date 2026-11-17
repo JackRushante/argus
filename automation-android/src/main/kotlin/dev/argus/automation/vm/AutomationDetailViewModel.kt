@@ -60,9 +60,11 @@ import dev.argus.engine.model.StateQueryFamily
 import dev.argus.engine.model.StateValueType
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.model.toDraft
+import dev.argus.engine.runtime.ActiveSpan
 import dev.argus.engine.runtime.AuditEvent
 import dev.argus.engine.runtime.AuditKind
 import dev.argus.engine.runtime.AuditSink
+import dev.argus.engine.runtime.SpanStore
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.safety.DraftDeleteResult
 import dev.argus.engine.safety.DraftId
@@ -161,6 +163,8 @@ private data class DiagnosisSnapshot(
     val alarm: ScheduledTimeAlarmEntity?,
     val geofence: PersistedGeofenceRegistration?,
     val checkedAtMillis: Long,
+    /** 0.8: l'intervallo in corso della regola, se ce n'è uno. */
+    val span: ActiveSpan? = null,
 )
 
 private data class DetailTarget(
@@ -210,6 +214,8 @@ class AutomationDetailViewModel @Inject constructor(
     private val ruleLabels: RuleLabelDirectory = NoRuleLabelDirectory,
     /** 0.7.2: testi e file di «Condividi». `null` solo nei test che non lo provano: «Condividi» non compare. */
     private val sharing: RuleSharing? = null,
+    /** 0.8: regole-intervallo in corso, per «Perché non è scattata?». `null` nei test che non lo provano. */
+    private val spans: SpanStore? = null,
 ) : ViewModel() {
     private val routeId = requireNotNull(savedStateHandle.get<String>("id")) {
         "Dettaglio senza id"
@@ -676,6 +682,12 @@ class AutomationDetailViewModel @Inject constructor(
                         geofenceState.get(automation.id)
                 }
                 val alarm = database.scheduledTimeAlarmDao().get(automation.id.value)
+                // 0.8: una regola-intervallo dice se è in corso (e quanti valori rimetterà).
+                val span = if (automation.exit != null) {
+                    runCatching { spans?.get(automation.id) }.getOrNull()
+                } else {
+                    null
+                }
                 diagnosisInputs.value = DiagnosisSnapshot(
                     automationId = automation.id,
                     fingerprint = automation.approvalFingerprint,
@@ -683,6 +695,7 @@ class AutomationDetailViewModel @Inject constructor(
                     alarm = alarm,
                     geofence = registration,
                     checkedAtMillis = System.currentTimeMillis(),
+                    span = span,
                 )
             } catch (error: CancellationException) {
                 throw error
@@ -972,7 +985,7 @@ class AutomationDetailViewModel @Inject constructor(
             return null
         }
         return buildRuleDiagnosis(
-            DiagnosisInputs(automation, snapshot.blockCauses, snapshot.alarm, snapshot.geofence, records),
+            DiagnosisInputs(automation, snapshot.blockCauses, snapshot.alarm, snapshot.geofence, records, snapshot.span),
             snapshot.checkedAtMillis,
             language,
         )

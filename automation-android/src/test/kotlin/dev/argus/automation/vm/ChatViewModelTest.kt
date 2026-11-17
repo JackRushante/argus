@@ -449,6 +449,28 @@ class ChatViewModelTest {
         assertEquals("other", (restoreConversationId(changedContact, base).trigger as Trigger.Notification).conversationId)
     }
 
+    @Test
+    fun `the end contact of a span never leaves the phone either`() {
+        val startId = "shortcut:com.whatsapp:start111"
+        val endId = "shortcut:com.whatsapp:end222"
+        val base = AutomationDraft(
+            name = "Silenzio finché scrive Anna",
+            trigger = Trigger.Notification("com.whatsapp", conversationId = startId, isGroup = false),
+            actions = listOf(Action.SetDnd(dev.argus.engine.model.DndMode.PRIORITY)),
+            exit = dev.argus.engine.model.ExitSpec(
+                Trigger.Notification("com.whatsapp", conversationId = endId, isGroup = false),
+            ),
+        )
+
+        val prompt = composeEditPrompt("anche il sabato", base)
+
+        assertFalse(prompt.contains(startId))
+        assertFalse(prompt.contains(endId))
+        assertTrue(prompt.contains(CURRENT_EXIT_CONTACT_PLACEHOLDER))
+        val restored = restoreConversationId(redactConversationId(base), base)
+        assertEquals(base, restored)
+    }
+
     // --- B2: un provider diretto restituisce error_code nel meta ---
 
     @Test

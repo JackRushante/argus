@@ -216,25 +216,35 @@ class GeofenceEventIngress(
         val dwellDelay = support?.delayOf?.invoke(automationId)
         if (support != null && dwellDelay != null) {
             holdForDwell(support, dwellDelay, automationId, approvalFingerprint, pending)
+            // 0.8: l'uscita da un'area DWELL può essere la FINE di una regola-intervallo: va al motore, che la
+            // usa solo se la regola è in corso (per una regola DWELL senza fine non combacia con nulla).
+            if (pending.transition == Transition.EXIT) {
+                dispatcher.dispatch(transitionEnvelope(automationId, approvalFingerprint, pending))
+            }
             mutex.withLock {
                 state.completeTransition(automationId, approvalFingerprint, pending.sequence)
             }
             return
         }
-        dispatcher.dispatch(
-            TriggerEnvelope(
-                id = TriggerEventId(
-                    "geofence:${approvalFingerprint.value}:${pending.sequence}",
-                ),
-                event = TriggerEvent.GeofenceTransitioned(
-                    automationId = automationId,
-                    transition = pending.transition,
-                    approvalFingerprint = approvalFingerprint,
-                ),
-            ),
-        )
+        dispatcher.dispatch(transitionEnvelope(automationId, approvalFingerprint, pending))
         mutex.withLock {
             state.completeTransition(automationId, approvalFingerprint, pending.sequence)
         }
     }
+
+    private fun transitionEnvelope(
+        automationId: AutomationId,
+        approvalFingerprint: ApprovalFingerprint,
+        pending: PendingGeofenceTransition,
+    ): TriggerEnvelope =
+        TriggerEnvelope(
+            id = TriggerEventId(
+                "geofence:${approvalFingerprint.value}:${pending.sequence}",
+            ),
+            event = TriggerEvent.GeofenceTransitioned(
+                automationId = automationId,
+                transition = pending.transition,
+                approvalFingerprint = approvalFingerprint,
+            ),
+        )
 }

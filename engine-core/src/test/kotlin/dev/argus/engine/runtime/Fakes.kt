@@ -128,6 +128,8 @@ class FakeAutomationStore(seed: List<Automation> = emptyList()) : AutomationStor
         val automation = map[request.automationId]
         if (automation == null || automation.status != AutomationStatus.ARMED || !automation.enabled)
             return@withLock FireClaimResult.NotEligible
+        // 0.8: la fine di un intervallo deduplica soltanto; la pausa dell'inizio non la vede né la consuma.
+        if (request.phase == SpanPhase.EXIT) return@withLock FireClaimResult.Claimed
 
         val last = fired[request.automationId]
         // Un lastFiredAt nel futuro (orologio tornato indietro) e' un cooldown gia' scaduto.
@@ -147,6 +149,13 @@ class FakeAutomationStore(seed: List<Automation> = emptyList()) : AutomationStor
     }
 
     override suspend fun lastFiredAt(id: AutomationId) = mutex.withLock { fired[id] }
+
+    /** Una revisione riapprovata (impronta nuova) prende il posto della regola, come una riapprovazione in app. */
+    suspend fun upsert(automation: Automation): Unit = mutex.withLock {
+        map[automation.id] = automation
+        publish()
+        Unit
+    }
 
     private fun saturatingAdd(left: Long, right: Long): Long =
         if (left > Long.MAX_VALUE - right) Long.MAX_VALUE else left + right

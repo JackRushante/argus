@@ -141,10 +141,13 @@ import dev.argus.automation.sensor.SensorTriggerCoordinator
 import dev.argus.automation.sensor.SensorTriggerRuntime
 import dev.argus.engine.model.SensorKind
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.listenedTrigger
+import dev.argus.engine.model.listenedTriggers
 import dev.argus.automation.ShizukuStaticShellRunner
 import dev.argus.automation.StateQueryProbe
 import dev.argus.automation.TimeAlarmBackend
 import dev.argus.automation.TimeAlarmCoordinator
+import dev.argus.automation.SpanExitTimeAlarms
 import dev.argus.automation.TimeAlarmRuntime
 import dev.argus.automation.TimeAlarmStateStore
 import dev.argus.automation.TimeEventDispatcher
@@ -263,6 +266,7 @@ import dev.argus.engine.runtime.FirePolicy
 import dev.argus.engine.runtime.FirePolicySnapshotProvider
 import dev.argus.engine.runtime.RevalidatingFirePolicy
 import dev.argus.engine.runtime.SubmittedActionJournal
+import dev.argus.engine.runtime.SpanPhase
 import dev.argus.engine.runtime.TriggerMatcher
 import dev.argus.engine.safety.ApprovalService
 import dev.argus.engine.safety.ApprovalWhitelistProvider
@@ -1099,6 +1103,8 @@ object ArgusModule {
         automationPause: LabelAwarePause,
         prompts: UserPromptCoordinator,
         callerScope: dev.argus.automation.telephony.CallerScopeLog,
+        spans: dev.argus.automation.span.PrefsSpanStore,
+        spanDevice: dev.argus.automation.span.AndroidSpanDevice,
     ): Engine = Engine(
         store = store,
         executor = executor,
@@ -1117,8 +1123,30 @@ object ArgusModule {
         questions = prompts,
         // 0.8: `screen_call` «solo chi non è nei contatti» vale per tutta la regola (perimetro dal filtro chiamate).
         callerScope = callerScope,
+        // 0.8: regole-intervallo («finché…, poi rimetti com'era»): stato persistito e lettura dei valori di prima.
+        spans = spans,
+        spanDevice = spanDevice,
         now = System::currentTimeMillis,
     )
+
+    /** 0.8: regole-intervallo in corso, in preferenze (nessuna tabella nuova). */
+    @Provides
+    @Singleton
+    fun spanStore(@ApplicationContext context: Context): dev.argus.automation.span.PrefsSpanStore =
+        dev.argus.automation.span.PrefsSpanStore(context)
+
+    @Provides
+    fun spanStoreBoundary(store: dev.argus.automation.span.PrefsSpanStore): dev.argus.engine.runtime.SpanStore = store
+
+    /** 0.8: la modalità si rimette col commutatore unico; Lazy rompe il giro motore → modalità → motore. */
+    @Provides
+    @Singleton
+    fun spanDevice(
+        @ApplicationContext context: Context,
+        state: DeviceStateSnapshotProvider,
+        modes: dagger.Lazy<dev.argus.engine.runtime.UserModeSwitcher>,
+    ): dev.argus.automation.span.AndroidSpanDevice =
+        dev.argus.automation.span.AndroidSpanDevice(context, state) { modes.get() }
 
     /** 0.8: domande in attesa (confirm, ask), cifrate con la chiave delle risposte differite. */
     @Provides
@@ -1444,8 +1472,9 @@ object ArgusModule {
         rearmer = coordinator,
         eligibleRules = { kind ->
             store.armed().mapNotNull { automation ->
-                val trigger = automation.trigger as? Trigger.Sensor ?: return@mapNotNull null
-                if (trigger.kind != kind) return@mapNotNull null
+                // 0.8: il sensore d'inizio o quello di fine (sono di tipi diversi: validator).
+                val trigger = automation.listenedTriggers.filterIsInstance<Trigger.Sensor>()
+                    .firstOrNull { it.kind == kind } ?: return@mapNotNull null
                 val fingerprint = automation.approvalFingerprint ?: return@mapNotNull null
                 EligibleSensorRule(automation.id, fingerprint, trigger.kind)
             }
@@ -1492,7 +1521,8 @@ object ArgusModule {
     ): GeofenceEventIngress = GeofenceEventIngress(
         state,
         dispatcher,
-        LocationBackedTransitionVerifier({ store.get(it)?.trigger }, location),
+        // 0.8: l'area della regola, d'inizio o di fine.
+        LocationBackedTransitionVerifier({ store.get(it)?.listenedTrigger<Trigger.Geofence>() }, location),
         // 0.8: DWELL, ricontrollo persistito con la sua sveglia.
         GeofenceDwellSupport(
             delayOf = { id ->
@@ -1570,10 +1600,38 @@ object ArgusModule {
             nextAlarmAt = AndroidNextAlarmClock(context)::nextAlarmAt,
         )
 
+    /**
+     * 0.8: le sveglie di FINE delle regole-intervallo, con un coordinatore, uno stato (preferenze) e un backend
+     * propri: una regola può avere la sveglia d'inizio e quella di fine insieme.
+     */
     @Provides
     @Singleton
-    fun timeAlarmRuntime(coordinator: TimeAlarmCoordinator): TimeAlarmRuntime =
-        CoordinatorTimeAlarmRuntime(coordinator)
+    fun spanExitTimeAlarms(
+        store: AutomationStore,
+        dispatcher: TimeEventDispatcher,
+        audit: AuditSink,
+        oneShotConsumptions: OneShotConsumptionRegistry,
+        launcher: ReceiverWorkLauncher,
+        @ApplicationContext context: Context,
+    ): SpanExitTimeAlarms = SpanExitTimeAlarms(
+        TimeAlarmCoordinator(
+            store,
+            dev.argus.automation.PrefsTimeAlarmStateStore(context),
+            AndroidTimeAlarmBackend(context, SpanPhase.EXIT),
+            dispatcher,
+            Instant::now,
+            audit,
+            oneShotConsumptions,
+            recoveryLauncher = RecoveryLauncher { block -> launcher.launch("time_recovery", block) },
+            nextAlarmAt = AndroidNextAlarmClock(context)::nextAlarmAt,
+            phase = SpanPhase.EXIT,
+        ),
+    )
+
+    @Provides
+    @Singleton
+    fun timeAlarmRuntime(coordinator: TimeAlarmCoordinator, exit: SpanExitTimeAlarms): TimeAlarmRuntime =
+        CoordinatorTimeAlarmRuntime(coordinator, exit.coordinator)
 
     @Provides
     @Singleton
@@ -1589,6 +1647,7 @@ object ArgusModule {
         oneShotConsumptions: OneShotConsumptionRegistry,
         foregroundLauncher: ReceiverWorkLauncher,
         calendar: CalendarTriggerRuntime,
+        exitTimeAlarms: SpanExitTimeAlarms,
     ): ArmedAutomationRegistrar = AndroidArmedAutomationRegistrar(
         coordinator,
         store,
@@ -1602,6 +1661,7 @@ object ArgusModule {
         oneShotConsumptions,
         foregroundLauncher,
         calendar,
+        exitTimeAlarms = exitTimeAlarms.coordinator,
     )
 
     /**
@@ -1692,6 +1752,7 @@ object ArgusModule {
         sentinel: SharedForegroundSentinel,
         capabilityHealth: CapabilityHealthMonitor,
         listenerWatchdog: NotificationListenerWatchdog,
+        engine: dagger.Lazy<Engine>,
     ): ArgusRuntimeController = ArgusRuntimeController(
         scope,
         scheduler,
@@ -1717,6 +1778,9 @@ object ArgusModule {
         onStartupReconciled = { sentinel.settle() },
         capabilityHealth = capabilityHealth::check,
         listenerWatchdog = listenerWatchdog,
+        // 0.8: un intervallo la cui regola è stata spenta, cancellata, modificata o messa da rivedere rimette i
+        // valori di prima, dentro la cornice di dispatch (wake lock) come ogni esecuzione.
+        spanReconciler = { frame.run { engine.get().reconcileSpans() } },
     )
 
     // --- 0.4.1 (manuale): avvio manuale delle regole (F8) e «Pausa automazioni» (F21) ---

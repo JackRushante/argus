@@ -254,8 +254,10 @@ internal object CompileEvaluator {
             )
         }
         // 2. Capability: la revisione dell'app segna ERRORE quelle non disponibili sul telefono.
-        val missing = CapabilityRequirements.derive(draft.trigger, draft.actions, draft.conditions, draft.vars) -
-            world.availableCapabilities(case.manifest)
+        // 0.8: anche il trigger e le azioni di fine di una regola-intervallo.
+        val exitNeeds = draft.exit?.let { CapabilityRequirements.derive(it.trigger, it.actions) }.orEmpty()
+        val missing = CapabilityRequirements.derive(draft.trigger, draft.actions, draft.conditions, draft.vars) +
+            exitNeeds - world.availableCapabilities(case.manifest)
         if (missing.isNotEmpty()) {
             failures += Failure(
                 FailureCategory.CAPABILITY,
@@ -264,9 +266,29 @@ internal object CompileEvaluator {
         }
         val expect = case.draft
         checkTrigger(expect, draft, world, today, failures)
+        checkExit(expect, draft, failures)
         checkActions(expect, draft, failures)
         checkVarsAndFlow(expect, draft, failures)
         checkConditions(expect, draft, failures)
+    }
+
+    /** 0.8: la fine attesa di una regola-intervallo («poi rimettilo com'era», «fino alle 7»). */
+    private fun checkExit(expect: DraftExpectation, draft: AutomationDraft, failures: MutableList<Failure>) {
+        if (expect.exitTrigger.isEmpty()) return
+        val exit = draft.exit
+        if (exit == null) {
+            failures += Failure(FailureCategory.WRONG_TRIGGER, "manca la fine (exit) della regola-intervallo")
+            return
+        }
+        val trigger = DraftTree.triggerJson(exit.trigger)
+        for ((field, matcher) in expect.exitTrigger) {
+            if (!JsonMatch.matches(trigger[field], matcher)) {
+                failures += Failure(
+                    FailureCategory.WRONG_TRIGGER,
+                    "exit.trigger.$field = ${describe(trigger[field])}, atteso ${describe(matcher)}",
+                )
+            }
+        }
     }
 
     // --- lingua ----------------------------------------------------------------------------------

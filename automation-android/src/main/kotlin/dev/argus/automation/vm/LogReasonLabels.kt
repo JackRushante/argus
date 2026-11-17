@@ -350,6 +350,25 @@ internal object LogReasonLabels {
             "a mode used by this rule was deleted",
             "una modalità usata da questa regola è stata eliminata",
         ),
+        // --- 0.8: regole-intervallo («finché…, poi rimetti com'era») ---
+        "span_exit" to Label("the rule ended and put the values back", "la regola è finita e ha rimesso i valori"),
+        "span_value_unreadable" to Label(
+            "a value could not be read before the change: it will not be put back",
+            "un valore non si è potuto leggere prima del cambio: non verrà rimesso",
+        ),
+        "span_restore_failed" to Label("a value could not be put back", "un valore non si è potuto rimettere"),
+        "span_restore_capability_unavailable" to Label(
+            "a value was not put back: what it needs is not available",
+            "un valore non è stato rimesso: manca ciò che serve per farlo",
+        ),
+        "span_restored_rule_changed" to Label(
+            "the rule was switched off, deleted or changed while in progress: values put back",
+            "la regola è stata spenta, eliminata o modificata mentre era in corso: valori rimessi",
+        ),
+        "span_exit_actions_cooldown" to Label(
+            "values put back; the end actions were skipped by the pause",
+            "valori rimessi; le azioni di fine saltate per la pausa",
+        ),
         // --- 0.8: «chiedimi prima di eseguire», domande con pulsanti, risposte AI vincolate ---
         "confirmation_requested" to Label("waiting for your confirmation", "in attesa della tua conferma"),
         "confirmation_pending" to Label(

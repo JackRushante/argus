@@ -22,10 +22,16 @@ internal object SolarTriggerLocation {
 
     /** La bozza senza le coordinate di alba/tramonto che il modello può aver scritto. */
     fun withoutModelLocation(draft: AutomationDraft): AutomationDraft {
-        val time = draft.trigger as? Trigger.Time ?: return draft
-        val solar = time.solar ?: return draft
-        if (solar.lat == null && solar.lng == null) return draft
-        return draft.copy(trigger = time.copy(solar = solar.copy(lat = null, lng = null)))
+        // 0.8: anche il trigger di fine di una regola-intervallo.
+        val exit = draft.exit?.let { it.copy(trigger = stripLocation(it.trigger)) }
+        return draft.copy(trigger = stripLocation(draft.trigger), exit = exit)
+    }
+
+    private fun stripLocation(trigger: Trigger): Trigger {
+        val time = trigger as? Trigger.Time ?: return trigger
+        val solar = time.solar ?: return trigger
+        if (solar.lat == null && solar.lng == null) return trigger
+        return time.copy(solar = solar.copy(lat = null, lng = null))
     }
 
     /** Il trigger con la posizione del telefono, arrotondata. */

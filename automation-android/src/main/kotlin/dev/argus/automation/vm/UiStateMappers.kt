@@ -20,6 +20,7 @@ import dev.argus.engine.runtime.ExecutionStatus
 import dev.argus.engine.runtime.OmittedSteps
 import dev.argus.engine.runtime.PauseCodes
 import dev.argus.engine.runtime.ProgramInterpreter
+import dev.argus.engine.runtime.SpanCodes
 import dev.argus.engine.runtime.TimeSpecs
 import dev.argus.engine.safety.PendingDraft
 import dev.argus.engine.safety.Severity
@@ -171,7 +172,10 @@ internal fun AuditLogRecord.toLogRow(
         automationName = automationName ?: language.pick("Deleted automation", "Automazione rimossa"),
         kind = kind,
         outcome = outcome,
-        summary = auditSummary(this, language),
+        // 0.8: la fine di una regola-intervallo (valori rimessi e azioni di fine) si distingue dall'inizio.
+        summary = auditSummary(this, language).let { text ->
+            if (kind == AuditKind.FIRED && detail == SpanCodes.EXIT) language.pick("End: ", "Fine: ") + text else text
+        },
         expandedDetail = actions.takeIf(List<ActionResultEntity>::isNotEmpty)
             ?.map { actionDetail(it, language) },
         automationId = automationId.takeIf { automationName != null },

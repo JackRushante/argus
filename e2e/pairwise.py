@@ -101,10 +101,25 @@ def _walk_actions(actions: Iterable[dict]) -> Iterable[dict]:
             yield from _walk_actions(action.get("body", []))
 
 
+def rule_actions(rule: dict) -> List[dict]:
+    """Tutte le azioni della regola, annidate comprese: quelle d'inizio e (0.8) quelle di fine di un intervallo."""
+    exit_actions = (rule.get("exit") or {}).get("actions", [])
+    return list(_walk_actions(rule.get("actions", []))) + list(_walk_actions(exit_actions))
+
+
+def rule_triggers(rule: dict) -> List[str]:
+    """Il tipo del trigger d'inizio e, per una regola-intervallo (0.8, `exit`), quello di fine."""
+    types = [rule["trigger"]["type"]]
+    exit_trigger = (rule.get("exit") or {}).get("trigger")
+    if exit_trigger:
+        types.append(exit_trigger.get("type"))
+    return types
+
+
 def features(record: dict) -> Dict[str, Set[str]]:
     """Punto del modello occupato da una regola della suite (record = voce del file JSON)."""
     rule = record["rule"]
-    actions = list(_walk_actions(rule.get("actions", [])))
+    actions = rule_actions(rule)
     types = {a["type"] for a in actions}
     flow: Set[str] = set()
     vars_ = rule.get("vars", [])
@@ -119,7 +134,7 @@ def features(record: dict) -> Dict[str, Set[str]]:
         if name in types:
             flow.add(name)
     return {
-        "trigger": {rule["trigger"]["type"]},
+        "trigger": set(rule_triggers(rule)),
         "klass": {ACTION_CLASS_OF[t] for t in types if t in ACTION_CLASS_OF},
         "cond": {record.get("cond", "none")},
         "flow": flow,

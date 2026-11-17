@@ -76,13 +76,16 @@ object RuleRenderMapper {
      * (contesto `state` o invoke_llm_v2), valori delle variabili usate nell'obiettivo (`${…}`).
      * invoke_llm_v2 risponde sempre a una notifica e ne riceve il testo come contesto implicito.
      */
-    private fun privacyNote(trigger: Trigger, actions: List<Action>, l: RenderLanguage): String? {
+    /** 0.8: ogni gruppo di azioni con il trigger che le fa partire (inizio, e fine di una regola-intervallo). */
+    private fun privacyNote(phases: List<Pair<Trigger, List<Action>>>, l: RenderLanguage): String? {
         val parts = java.util.EnumSet.noneOf(PrivacyPart::class.java)
         val results = java.util.EnumSet.noneOf(PrivacyResult::class.java)
-        val pending = ArrayDeque<Action>()
-        actions.forEach(pending::addLast)
+        val pending = ArrayDeque<Pair<Trigger, Action>>()
+        phases.forEach { (trigger, actions) -> actions.forEach { pending.addLast(trigger to it) } }
         while (pending.isNotEmpty()) {
-            when (val action = pending.removeFirst()) {
+            val (trigger, next) = pending.removeFirst()
+            fun enqueue(children: List<Action>) = children.forEach { pending.addLast(trigger to it) }
+            when (val action = next) {
                 is Action.InvokeLlm -> {
                     if (trigger is Trigger.Notification &&
                         GenerativeContract.CONTEXT_NOTIFICATION in action.contextSources
@@ -108,10 +111,10 @@ object RuleRenderMapper {
                     results += PrivacyResult.REPLY
                 }
                 is Action.If -> {
-                    action.then.forEach(pending::addLast)
-                    action.orElse.forEach(pending::addLast)
+                    enqueue(action.then)
+                    enqueue(action.orElse)
                 }
-                is Action.While -> action.body.forEach(pending::addLast)
+                is Action.While -> enqueue(action.body)
                 else -> Unit
             }
         }
@@ -190,7 +193,9 @@ object RuleRenderMapper {
         conversationLabels: Map<String, String>,
         l: RenderLanguage,
     ): RuleRender {
-        val isGenerative = actions.any { it.tier == ActionTier.GENERATIVE }
+        // 0.8: un'AI fra le azioni di fine di una regola-intervallo conta come una d'inizio (avviso, pausa, privacy).
+        val allActions = actions + exit?.actions.orEmpty()
+        val isGenerative = allActions.any { it.tier == ActionTier.GENERATIVE }
         // S8: la pausa che l'engine applica davvero (Engine.effectiveCooldown: almeno 60 s se generativa).
         val effectiveCooldownMs = if (isGenerative) {
             maxOf(cooldownMs, Engine.MIN_GENERATIVE_COOLDOWN_MS)
@@ -205,7 +210,11 @@ object RuleRenderMapper {
             conditionLines = conditions?.let { flattenConditions(it, 0, l) } ?: emptyList(),
             actions = actions.map { withAppRef(actionRow(it, l), it, slots) },
             isGenerative = isGenerative,
-            privacyNote = if (isGenerative) privacyNote(trigger, actions, l) else null,
+            privacyNote = if (isGenerative) {
+                privacyNote(listOf(trigger to actions) + listOfNotNull(exit?.let { it.trigger to it.actions }), l)
+            } else {
+                null
+            },
             vars = vars.map { varRow(it, trigger, l) },
             program = programNodes(actions, l, slots),
             triggerAppRef = triggerPackage(trigger)?.let { pkg ->
@@ -215,7 +224,7 @@ object RuleRenderMapper {
             // 0.8: conferma prima di eseguire e regola-intervallo, resi dai tipi come il resto.
             confirmLine = confirm?.let { RuleSpanRender.confirmLine(it, l) },
             exitLine = exit?.let {
-                RuleSpanRender.exitLine(it, triggerLine(it.trigger, conversationLabels, l), l)
+                RuleSpanRender.exitLine(it, triggerLine(it.trigger, conversationLabels, l), actions, l)
             },
             // Nessuno slot «Cambia app» per le azioni di fine: AppPackages numera solo trigger e azioni d'inizio.
             exitProgram = exit?.let { programNodes(it.actions, l, emptyMap()) }.orEmpty(),
