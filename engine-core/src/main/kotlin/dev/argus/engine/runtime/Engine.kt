@@ -322,7 +322,7 @@ class Engine(
     /** Un trigger combacia con l'evento per [phase]: un evento programmato per l'altra fase non conta. */
     private fun matchesPhase(spec: Trigger, event: TriggerEvent, phase: SpanPhase): Boolean {
         if (!matcher.matches(spec, event)) return false
-        val scheduled = (event as? TriggerEvent.Registered)?.phase ?: return true
+        val scheduled = (event as? TriggerEvent.Registered)?.spanPhase ?: return true
         return scheduled == phase
     }
 

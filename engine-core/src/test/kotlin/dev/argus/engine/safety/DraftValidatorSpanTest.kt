@@ -274,7 +274,7 @@ class DraftValidatorSpanTest {
         val event = TriggerEvent.TimeFired(rule.id, requireNotNull(rule.approvalFingerprint), SpanPhase.EXIT)
         val withoutAirplane = all - CapabilityIds.ACTION_SET_AIRPLANE
         // L'inizio chiede tutto, la fine solo il suo trigger: il volume si rimette anche senza Shizuku.
-        assertIs<FirePolicyDecision.Block>(policy(withoutAirplane).evaluate(rule, event.copy(phase = SpanPhase.START), SpanPhase.START))
+        assertIs<FirePolicyDecision.Block>(policy(withoutAirplane).evaluate(rule, event.copy(spanPhase = SpanPhase.START), SpanPhase.START))
         assertEquals(FirePolicyDecision.Allow, policy(withoutAirplane).evaluate(rule, event, SpanPhase.EXIT))
         val restore = policy(withoutAirplane)
         val airplane = restore.evaluateRestore(Action.SetAirplane(false))

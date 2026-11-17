@@ -25,7 +25,7 @@ sealed interface TriggerEvent {
          * tipo dell'evento da solo non la dice (una sveglia d'inizio e una di fine sono entrambe [TimeFired]).
          * null = la decide il matcher (transizione del geofence, fase del calendario, tipo di sensore).
          */
-        val phase: SpanPhase? get() = null
+        val spanPhase: SpanPhase? get() = null
     }
 
     /** Trigger schedulati per-automazione: portano l'id. */
@@ -33,7 +33,7 @@ sealed interface TriggerEvent {
         override val automationId: AutomationId,
         override val approvalFingerprint: ApprovalFingerprint,
         /** 0.8: la sveglia d'inizio o quella di fine di una regola-intervallo. */
-        override val phase: SpanPhase = SpanPhase.START,
+        override val spanPhase: SpanPhase = SpanPhase.START,
     ) : Registered
 
     /** Fire una-tantum all'arm della regola immediate: mirror esatto di [TimeFired], porta l'id
@@ -149,8 +149,8 @@ sealed interface TriggerEvent {
     data class NextAlarmFired(
         override val automationId: AutomationId,
         override val approvalFingerprint: ApprovalFingerprint,
-        /** 0.8: come [TimeFired.phase]. */
-        override val phase: SpanPhase = SpanPhase.START,
+        /** 0.8: come [TimeFired.spanPhase]. */
+        override val spanPhase: SpanPhase = SpanPhase.START,
     ) : Registered
 
     /**
