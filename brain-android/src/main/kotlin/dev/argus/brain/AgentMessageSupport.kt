@@ -480,6 +480,11 @@ Same meaning as the @@META@@ line, same rule 8. Do not write @@META@@."""
                 }
                 // 0.8: the NAMES of the secrets saved on the phone; their values never leave it.
                 putJsonArray("saved_secrets") { manifest.savedSecrets.forEach { add(JsonPrimitive(it)) } }
+                // 0.8: the NAMES of the user's modes, so a rule never names one that does not exist.
+                // Absent when there are none or the list could not be read.
+                if (manifest.userModes.isNotEmpty()) {
+                    putJsonArray("user_modes") { manifest.userModes.forEach { add(JsonPrimitive(it)) } }
+                }
             }
             putJsonObject("state") {
                 putJsonObject("values") {
@@ -790,8 +795,8 @@ Action, discriminated by "type":
    // TEXT); INCREMENT adds the literal integer value (null = 1) starting from 0; TOGGLE flips a boolean starting
    // from false; CLEAR deletes it. TOGGLE/CLEAR take no value; only SET takes valueType.
 - {"type":"set_user_mode", "mode":string}  // switches the user's mode (e.g. Home, Work): the literal name
-   // as the user says it, 1-24 chars; the mode must exist in the app: when the request carries user_modes,
-   // every mode name (here, in user_mode_is and user_mode_changed) is one of those, as written
+   // as the user says it, 1-24 chars; the mode must exist in the app: every mode name (here, in user_mode_is
+   // and user_mode_changed) is one of manifest.user_modes, as written; never invent one
 - {"type":"set_alarm", "hour":integer 0-23, "minute":integer 0-59, "label":string|null,
    "skipUi":boolean}  // sets the clock's real ALARM (not a notification); skipUi=true
    normally so the clock app is not opened

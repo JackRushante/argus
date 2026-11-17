@@ -166,6 +166,33 @@ class UserModesTest {
     }
 
     @Test
+    fun `the compile manifest carries the mode names, or none if the list cannot be read`() = runTest {
+        val base = dev.argus.engine.brain.CapabilityManifest(
+            deviceModel = "Pixel",
+            androidVersion = 16,
+            androidApi = 36,
+            shizukuAvailable = false,
+            grantedPermissions = emptyList(),
+            availableTools = emptyList(),
+            unavailableTools = emptyMap(),
+            whitelistedContacts = emptyList(),
+            savedSecrets = listOf("ha_token"),
+        )
+        val probe = object : dev.argus.engine.brain.CapabilityProbe {
+            override suspend fun probe(currentState: dev.argus.engine.runtime.DeviceState) = base
+        }
+        val named = UserModeNamesCapabilityProbe(probe, dev.argus.automation.UserModeNames { listOf("Casa", "Lavoro") })
+            .probe(dev.argus.engine.runtime.DeviceState())
+        assertEquals(listOf("Casa", "Lavoro"), named.userModes)
+        // Il resto del manifest (per esempio i nomi dei segreti) resta com'era.
+        assertEquals(listOf("ha_token"), named.savedSecrets)
+
+        val unreadable = UserModeNamesCapabilityProbe(probe, dev.argus.automation.UserModeNames { error("db") })
+            .probe(dev.argus.engine.runtime.DeviceState())
+        assertEquals(emptyList(), unreadable.userModes)
+    }
+
+    @Test
     fun `the dispatcher hands the change to the engine outside the caller`() = runTest {
         val launched = mutableListOf<suspend () -> Unit>()
         val dispatcher = EngineUserModeEventDispatcher(

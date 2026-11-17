@@ -2,6 +2,10 @@ package dev.argus.automation.modes
 
 import dev.argus.automation.DeviceStateSnapshotProvider
 import dev.argus.automation.DispatchFrame
+import dev.argus.automation.UserModeNames
+import dev.argus.engine.brain.CapabilityManifest
+import dev.argus.engine.brain.CapabilityProbe
+import dev.argus.engine.runtime.DeviceState
 import dev.argus.automation.manual.ManualTokenStore
 import dev.argus.automation.manual.TileUiState
 import dev.argus.data.ModeEditResult
@@ -98,6 +102,28 @@ class UserModeEditor(
     companion object {
         const val REASON_RENAMED = "user_mode_renamed"
         const val REASON_DELETED = "user_mode_deleted"
+    }
+}
+
+/**
+ * 0.8: il manifest di compile porta i NOMI delle modalità dell'utente, come i nomi dei segreti, così il modello
+ * non ne indovina uno. Se l'elenco non si legge il manifest resta senza: l'approvazione rifiuta comunque un
+ * nome che non esiste.
+ */
+class UserModeNamesCapabilityProbe(
+    private val probe: CapabilityProbe,
+    private val modes: UserModeNames,
+) : CapabilityProbe {
+    override suspend fun probe(currentState: DeviceState): CapabilityManifest {
+        val manifest = probe.probe(currentState)
+        val names = try {
+            modes.names()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            emptyList()
+        }
+        return manifest.copy(userModes = names)
     }
 }
 

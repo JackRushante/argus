@@ -688,7 +688,11 @@ object ArgusModule {
     fun capabilityProbeBoundary(
         probe: AndroidCapabilityProbe,
         secrets: dev.argus.engine.secrets.SecretVault,
-    ): CapabilityProbe = dev.argus.automation.secrets.SecretNamesCapabilityProbe(probe, secrets)
+        userModes: dev.argus.automation.UserModeNames,
+    ): CapabilityProbe = dev.argus.automation.modes.UserModeNamesCapabilityProbe(
+        dev.argus.automation.secrets.SecretNamesCapabilityProbe(probe, secrets),
+        userModes,
+    )
 
     @Provides
     fun firePolicySnapshotProvider(probe: AndroidCapabilityProbe): FirePolicySnapshotProvider = probe

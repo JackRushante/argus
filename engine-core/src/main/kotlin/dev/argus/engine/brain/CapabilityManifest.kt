@@ -78,6 +78,11 @@ data class CapabilityManifest(
      * `secretHeaders`/`secretQuery`. Mai i valori: il manifest non li conosce. Entra nel prompt di compile.
      */
     val savedSecrets: List<String> = emptyList(),
+    /**
+     * 0.8: i NOMI delle modalità che l'utente ha definito, perché `set_user_mode`, `user_mode_is` e
+     * `user_mode_changed` usino un nome che esiste. Entra nel prompt di compile; vuoto se l'elenco non si legge.
+     */
+    val userModes: List<String> = emptyList(),
 ) {
     init {
         require(replyLanguage == REPLY_LANGUAGE_EN || replyLanguage == REPLY_LANGUAGE_IT) {

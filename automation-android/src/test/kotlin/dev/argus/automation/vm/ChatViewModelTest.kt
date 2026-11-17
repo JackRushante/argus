@@ -156,37 +156,6 @@ class ChatViewModelTest {
     }
 
     @Test
-    fun `the compile request carries the names of the user's modes`() = runTest(dispatcher) {
-        val brain = QueuedBrain()
-        val viewModel = chatViewModel(brain, userModes = dev.argus.automation.UserModeNames { listOf("Casa", "Lavoro") })
-
-        viewModel.onInputChange("quando arrivo metti la modalità casa")
-        viewModel.onSend()
-        runCurrent()
-        val prompt = brain.removeFirst().prompt
-
-        assertTrue("user_modes=[\"Casa\",\"Lavoro\"]" in prompt, prompt)
-        assertTrue(prompt.endsWith("User request:\nquando arrivo metti la modalità casa"), prompt)
-        viewModel.onCancelPending()
-    }
-
-    @Test
-    fun `without modes, or when the list cannot be read, the request goes as it is`() = runTest(dispatcher) {
-        listOf(
-            dev.argus.automation.UserModeNames { emptyList() },
-            dev.argus.automation.UserModeNames { error("db") },
-        ).forEach { names ->
-            val brain = QueuedBrain()
-            val viewModel = chatViewModel(brain, userModes = names)
-            viewModel.onInputChange("accendi la torcia")
-            viewModel.onSend()
-            runCurrent()
-            assertEquals("accendi la torcia", brain.removeFirst().prompt)
-            viewModel.onCancelPending()
-        }
-    }
-
-    @Test
     fun `while waiting the state carries the timeout of the wait bar and drops it afterwards`() = runTest(dispatcher) {
         val brain = QueuedBrain()
         val viewModel = chatViewModel(brain)
@@ -1414,7 +1383,6 @@ class ChatViewModelTest {
         clipboard: RecordingClipboard = RecordingClipboard(),
         installInfo: AppInstallInfo = AppInstallInfo(versionName = "0.3.6", installerPackage = null, sdkInt = 34),
         probedManifest: CapabilityManifest = TEST_MANIFEST,
-        userModes: dev.argus.automation.UserModeNames = dev.argus.automation.UserModeNames { emptyList() },
     ): ChatViewModel {
         val policy = FirePolicySnapshot(
             knownTools = AndroidCapabilityProbe.KNOWN_TOOLS,
@@ -1462,7 +1430,6 @@ class ChatViewModelTest {
             languageSource = languageSource,
             clipboard = clipboard,
             installInfo = installInfo,
-            userModes = userModes,
         )
     }
 
