@@ -70,6 +70,8 @@ class PersonalDataStripper08Test {
     @Test
     fun `phone numbers and intent data are removed, secret references are kept`() {
         assertEquals(Action.SendSms(number = "", text = "arrivo"), stripAction(Action.SendSms("+393331112222", "arrivo")))
+        // Il numero di chi ha chiamato o scritto è un segnaposto, non un dato personale: resta.
+        assertEquals(Action.SendSms("\${caller}", "ok"), stripAction(Action.SendSms("\${caller}", "ok")))
         assertEquals(Action.CallNumber(number = ""), stripAction(Action.CallNumber("+393331112222")))
 
         val intent = stripAction(

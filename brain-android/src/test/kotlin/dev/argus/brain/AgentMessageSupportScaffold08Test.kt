@@ -19,10 +19,8 @@ class AgentMessageSupportScaffold08Test {
     private val prompt = AgentMessageSupport.compileSystemText()
 
     /** Il discriminatore wire di ogni tipo spento, com'è scritto nelle righe di schema del prompt. */
-    private val hiddenTypes = listOf(
-        "send_sms",
-        "call_number", "send_intent", "screen_call",
-    )
+    /** Ogni tipo 0.8 è ormai acceso: chi aggiunge un tipo spento lo elenca qui. */
+    private val hiddenTypes = emptyList<String>()
 
     @Test
     fun `no switched-off type appears in the compile prompt`() {
@@ -51,6 +49,10 @@ class AgentMessageSupportScaffold08Test {
         FeatureGate.ACTION_SET_STORED to "set_stored",
         FeatureGate.ACTION_SET_USER_MODE to "set_user_mode",
         FeatureGate.ACTION_ASK to "ask",
+        FeatureGate.ACTION_SEND_SMS to "send_sms",
+        FeatureGate.ACTION_CALL_NUMBER to "call_number",
+        FeatureGate.ACTION_SEND_INTENT to "send_intent",
+        FeatureGate.ACTION_SCREEN_CALL to "screen_call",
         // Trigger fisici (AgentMessageSupportPhysical08Test).
         FeatureGate.TRIGGER_NFC_TAG to "nfc_tag",
         FeatureGate.TRIGGER_NEXT_ALARM to "next_alarm",

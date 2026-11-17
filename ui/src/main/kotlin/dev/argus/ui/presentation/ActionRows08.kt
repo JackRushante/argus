@@ -9,6 +9,7 @@ import dev.argus.engine.model.ScreenCallOp
 import dev.argus.engine.model.SecretRef
 import dev.argus.engine.model.StateValueType
 import dev.argus.engine.model.StoredOp
+import dev.argus.engine.model.TelephonyActionPolicy
 import dev.argus.ui.model.ActionRow
 
 /**
@@ -105,12 +106,20 @@ internal object ActionRows08 {
             .copy(requiresLiveConfirm = a.op == NotificationActionOp.CLICK)
     }
 
-    fun sendSms(a: Action.SendSms, l: RenderLanguage) = row(
-        "sms",
-        l.pick("Send an SMS", "Invia un SMS"),
-        l.pick("To: ", "A: ") + VisibleText.singleLine(a.number) + "\n" +
-            l.pick("Text: ", "Testo: ") + VisibleText.singleLine(a.text),
-    )
+    /** Un destinatario `${'$'}{var}` è il numero di chi ha chiamato o scritto: lo si dice, col segnaposto. */
+    fun sendSms(a: Action.SendSms, l: RenderLanguage): ActionRow {
+        val number = VisibleText.singleLine(a.number)
+        val to = if (TelephonyActionPolicy.placeholder(a.number) != null) {
+            l.pick("To: whoever called or texted ($number)", "A: chi ha chiamato o scritto ($number)")
+        } else {
+            l.pick("To: ", "A: ") + number
+        }
+        return row(
+            "sms",
+            l.pick("Send an SMS", "Invia un SMS"),
+            to + "\n" + l.pick("Text: ", "Testo: ") + VisibleText.singleLine(a.text),
+        )
+    }
 
     fun callNumber(a: Action.CallNumber, l: RenderLanguage) = row(
         "phone",
@@ -145,6 +154,14 @@ internal object ActionRows08 {
         when (a.op) {
             ScreenCallOp.REJECT -> l.pick("Reject the incoming call", "Rifiuta la chiamata in arrivo")
             ScreenCallOp.SILENCE -> l.pick("Silence the incoming call", "Silenzia la chiamata in arrivo")
+        },
+        if (a.onlyUnknownCallers) {
+            l.pick(
+                "Only callers not in your contacts (a hidden number counts as unknown)",
+                "Solo chi non è nei tuoi contatti (un numero nascosto conta come sconosciuto)",
+            )
+        } else {
+            l.pick("Every caller, contacts included", "Chiunque chiami, contatti compresi")
         },
     )
 

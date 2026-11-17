@@ -9,8 +9,6 @@ import dev.argus.engine.model.Action
 import dev.argus.engine.model.ActionTypeIds
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.AutomationId
-import dev.argus.engine.model.IntentKind
-import dev.argus.engine.model.ScreenCallOp
 import dev.argus.engine.runtime.ActionResult
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.ExecutionId
@@ -71,12 +69,8 @@ class AndroidCapabilityProbeScaffold08Test {
         baseTierActive = true,
     )
 
-    private val newActionTypes = setOf(
-        ActionTypeIds.SEND_SMS,
-        ActionTypeIds.CALL_NUMBER,
-        ActionTypeIds.SEND_INTENT,
-        ActionTypeIds.SCREEN_CALL,
-    )
+    /** Ogni azione 0.8 è ormai accesa: chi aggiunge un'azione spenta la elenca qui. */
+    private val newActionTypes = emptySet<String>()
 
     /** Tutti i trigger 0.8 sono accesi: l'insieme resta per chi ne aggiungerà altri spenti. */
     private val newTriggers = emptySet<String>()
@@ -128,12 +122,8 @@ class AndroidCapabilityProbeScaffold08Test {
             },
             shizukuReady = { true },
         )
-        val actions = listOf(
-            Action.SendSms("+393331112222", "ok"),
-            Action.CallNumber("+393331112222"),
-            Action.SendIntent(IntentKind.BROADCAST, action = "dev.example.PING"),
-            Action.ScreenCall(ScreenCallOp.REJECT),
-        )
+        // Ogni azione 0.8 è ormai accesa: chi aggiunge un'azione spenta la elenca qui.
+        val actions = emptyList<Action>()
         actions.forEach { action ->
             assertEquals(ActionResult.Failure("not_available_yet"), executor.execute(action, context), "$action")
         }

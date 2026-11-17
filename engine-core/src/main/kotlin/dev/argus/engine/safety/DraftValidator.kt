@@ -145,6 +145,8 @@ class DraftValidator(
 
         // --- P4 §2.5: variabili, capture, control-flow, interpolazione, budget ---
         validateVars(d.vars, d.trigger, ::err)
+        // 0.8: destinatario SMS legato al chiamante/mittente e forma delle regole che filtrano le chiamate.
+        validateTelephonyRule(d, ::err, ::warn)
         val tree = preflightActions(d.actions, ::err).let { summary ->
             summary.copy(captures = resolveInheritedConfidentiality(summary.captures, d.vars))
         }
@@ -1536,14 +1538,167 @@ class DraftValidator(
 
             is Action.NotificationAction -> validateNotificationAction(action, trigger, err, warn)
 
-            is Action.SendSms -> Unit
+            is Action.SendSms -> validateSendSms(action, err, warn)
 
-            is Action.CallNumber -> Unit
+            is Action.CallNumber -> validateCallNumber(action, err, warn)
 
-            is Action.SendIntent -> Unit
+            is Action.SendIntent -> validateSendIntent(action, err)
 
+            // Trigger, posizione e condizioni ammesse: validateTelephonyRule (serve la regola intera).
             is Action.ScreenCall -> Unit
         }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // 0.8: send_sms, call_number, send_intent, screen_call (TelephonyActionPolicy)
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Numero letterale valido oppure UN segnaposto (il legame col chiamante/mittente lo controlla
+     * [validateTelephonyRule]); testo non vuoto e al massimo 480 caratteri. Sempre l'avviso sul costo; uno
+     * più forte quando il destinatario viene da chi ha chiamato o scritto.
+     */
+    private fun validateSendSms(action: Action.SendSms, err: (String, String) -> Unit, warn: (String, String) -> Unit) {
+        val fromSender = TelephonyActionPolicy.placeholder(action.number) != null
+        when {
+            fromSender -> Unit
+            InterpolationPolicy.containsInterpolation(action.number) ->
+                err(
+                    "sms_number_template_invalid",
+                    "Il destinatario dell'SMS è un numero oppure solo \${variabile} col numero di chi ha chiamato o scritto",
+                )
+            !TelephonyActionPolicy.isValidNumber(action.number) ->
+                err("sms_number_invalid", "Numero dell'SMS non valido: + facoltativo e da 7 a 15 cifre")
+        }
+        if (action.text.isBlank() || action.text.length > TelephonyActionPolicy.MAX_SMS_CHARS) {
+            err("sms_text_invalid", "Testo dell'SMS vuoto o oltre ${TelephonyActionPolicy.MAX_SMS_CHARS} caratteri")
+        }
+        warn("sms_cost", "Inviare SMS può costare. Al massimo 10 SMS l'ora in tutto e 3 l'ora allo stesso numero")
+        if (fromSender) {
+            warn(
+                "sms_to_caller",
+                "Il destinatario è chi ha chiamato o scritto: il numero si può falsificare, quindi un estraneo può " +
+                    "far mandare SMS al numero che sceglie",
+            )
+        }
+    }
+
+    private fun validateCallNumber(action: Action.CallNumber, err: (String, String) -> Unit, warn: (String, String) -> Unit) {
+        if (!TelephonyActionPolicy.isValidNumber(action.number)) {
+            err("call_number_invalid", "Numero da chiamare non valido: solo + facoltativo e da 7 a 15 cifre, letterale")
+        }
+        warn("call_cost", "Una chiamata può costare. Al massimo 3 chiamate l'ora")
+    }
+
+    private fun validateSendIntent(action: Action.SendIntent, err: (String, String) -> Unit) {
+        TelephonyActionPolicy.intentProblems(action).forEach { code ->
+            when (code) {
+                TelephonyActionPolicy.INTENT_TARGET_MISSING ->
+                    err("intent_target_missing", "Serve l'azione dell'Intent oppure pacchetto e classe insieme")
+                TelephonyActionPolicy.INTENT_SERVICE_NEEDS_COMPONENT ->
+                    err("intent_service_needs_component", "Per avviare un servizio servono pacchetto e classe")
+                TelephonyActionPolicy.INTENT_NAME_INVALID ->
+                    err("intent_name_invalid", "Azione, pacchetto, classe o tipo MIME non validi o con caratteri di controllo")
+                TelephonyActionPolicy.INTENT_TARGET_FORBIDDEN ->
+                    err("intent_target_forbidden", "Un Intent non può essere rivolto ad Argus stesso")
+                TelephonyActionPolicy.INTENT_ACTION_FORBIDDEN ->
+                    err("intent_action_forbidden", "Azione vietata: chiamare, installare, disinstallare, cancellare o resettare")
+                TelephonyActionPolicy.INTENT_DATA_INVALID ->
+                    err("intent_data_invalid", "Dati (URI) dell'Intent vuoti, non validi, troppo lunghi o con variabili")
+                TelephonyActionPolicy.INTENT_DATA_SCHEME_FORBIDDEN ->
+                    err("intent_data_scheme_forbidden", "Schema dei dati vietato: file, javascript o intent")
+                TelephonyActionPolicy.INTENT_TOO_MANY_EXTRAS ->
+                    err("intent_too_many_extras", "Al massimo ${TelephonyActionPolicy.MAX_INTENT_EXTRAS} extra")
+                else ->
+                    err("intent_extra_invalid", "Extra con nome non valido o doppio, oppure valore vuoto o non del suo tipo")
+            }
+        }
+    }
+
+    /**
+     * Controlli che vedono la regola intera:
+     *  - il destinatario `${'$'}{var}` di un SMS è una variabile `trigger_payload` sul campo NUMBER, senza regex (il
+     *    numero di chi ha chiamato o scritto, così com'è);
+     *  - un extra STRING di un Intent riempito con un dato esterno: avviso;
+     *  - `screen_call` (al più una, fra le azioni principali, mai in if/while o tra le azioni d'uscita) richiede
+     *    il trigger «chiamata in arrivo» senza filtro SIM, niente conferma né uscita, e condizioni che si
+     *    calcolano con il solo orologio ([TelephonyActionPolicy.isScreeningCondition]): la decisione va data
+     *    prima che il telefono squilli.
+     */
+    private fun validateTelephonyRule(
+        d: AutomationDraft,
+        err: (String, String) -> Unit,
+        warn: (String, String) -> Unit,
+    ) {
+        val all = flattenForTelephony(d.actions + d.exit?.actions.orEmpty())
+        val bindings = d.vars.associateBy { it.name }
+        all.filterIsInstance<Action.SendSms>().forEach { sms ->
+            val name = TelephonyActionPolicy.placeholder(sms.number) ?: return@forEach
+            val binding = bindings[name] as? VarBinding.TriggerPayload
+            if (binding == null || binding.field != TriggerField.NUMBER || binding.extractionRegex != null ||
+                d.trigger !is Trigger.PhoneState
+            ) {
+                err(
+                    "sms_number_not_sender",
+                    "Il destinatario \${$name} deve essere il numero di chi ha chiamato o scritto (trigger_payload NUMBER)",
+                )
+            }
+        }
+        val cleanVars = d.vars.filter { it.integrity == IntegrityLabel.CLEAN }.mapTo(mutableSetOf()) { it.name }
+        val externalExtra = all.filterIsInstance<Action.SendIntent>().any { intent ->
+            intent.extras.any { extra ->
+                extra.type == IntentExtraType.STRING &&
+                    InterpolationPolicy.parse(extra.value).refs.any { it !in cleanVars }
+            }
+        }
+        if (externalExtra) {
+            warn(
+                "intent_extra_external_value",
+                "Un extra dell'Intent arriva da un dato esterno (messaggio, notifica o testo letto dal telefono)",
+            )
+        }
+
+        val topLevel = d.actions.count { it is Action.ScreenCall }
+        val total = all.count { it is Action.ScreenCall }
+        if (total == 0) return
+        if (total > topLevel) {
+            err("screen_call_nested", "Il filtro chiamate va tra le azioni principali, non in if/while o nell'uscita")
+        }
+        if (topLevel > 1) err("screen_call_duplicate", "Al massimo un filtro chiamate per regola")
+        val trigger = d.trigger
+        if (trigger !is Trigger.PhoneState || trigger.event != PhoneEvent.INCOMING_CALL) {
+            err("screen_call_trigger", "Il filtro chiamate richiede il trigger «chiamata in arrivo»")
+        } else if (trigger.sim != null) {
+            err("screen_call_sim_filter", "Il filtro chiamate non ammette il filtro SIM")
+        }
+        if (d.confirm != null || d.exit != null) {
+            err("screen_call_confirm_exit", "Il filtro chiamate decide subito: niente conferma né regola-intervallo")
+        }
+        if (d.conditions?.let(TelephonyActionPolicy::isScreeningCondition) == false) {
+            err(
+                "screen_call_condition_slow",
+                "Con il filtro chiamate sono ammesse solo condizioni di orario e giorno della settimana",
+            )
+        }
+    }
+
+    /** Tutte le azioni, annidate comprese, con un tetto: l'albero non è ancora validato. */
+    private fun flattenForTelephony(actions: List<Action>): List<Action> {
+        val out = mutableListOf<Action>()
+        val pending = ArrayDeque(actions)
+        while (pending.isNotEmpty() && out.size <= MAX_TOTAL_ACTIONS * 4) {
+            val action = pending.removeFirst()
+            out += action
+            when (action) {
+                is Action.If -> {
+                    pending.addAll(action.then)
+                    pending.addAll(action.orElse)
+                }
+                is Action.While -> pending.addAll(action.body)
+                else -> Unit
+            }
+        }
+        return out
     }
 
     /**

@@ -660,6 +660,15 @@ data class SettingsState(
     /** 0.8: READ_CALENDAR concesso: regole «evento in corso» e «inizio/fine di un evento». Opt-in come gli SMS. */
     val calendarGranted: Boolean = false,
     /**
+     * 0.8: righe opt-in come i trigger telefonia. [telephonyAvailable] false (telefono senza telefonia) nasconde
+     * le righe di SMS, chiamate e filtro chiamate.
+     */
+    val telephonyAvailable: Boolean = false,
+    val sendSmsGranted: Boolean = false,
+    val callPhoneGranted: Boolean = false,
+    val callScreeningGranted: Boolean = false,
+    val contactsGranted: Boolean = false,
+    /**
      * 0.5.1: «Accesso ai dati di utilizzo» concesso (`PACKAGE_USAGE_STATS`): serve alle regole «quando
      * apro/chiudo un'app». Si concede dalle impostazioni di sistema, oppure con Shizuku o root da
      * «Concedi i permessi permanenti». Default `true`: un fixture non deve avvisare per caso.
@@ -931,6 +940,11 @@ interface SettingsCallbacks {
     fun onRequestSmsPermission() {}
     fun onRequestCallPermissions() {}
     fun onRequestBluetoothPermission() {}
+    /** 0.8: SEND_SMS, CALL_PHONE, ruolo «filtro chiamate» e READ_CONTACTS, chiesti solo dal tocco. */
+    fun onRequestSendSmsPermission() {}
+    fun onRequestCallPhonePermission() {}
+    fun onRequestCallScreeningRole() {}
+    fun onRequestContactsPermission() {}
     /** 0.8: READ_CALENDAR per le regole sul calendario (condizione e trigger). */
     fun onRequestCalendarPermission() {}
     fun onRemoveContact(conversationId: String); fun onAddContact()   // picker → risoluzione conversationId

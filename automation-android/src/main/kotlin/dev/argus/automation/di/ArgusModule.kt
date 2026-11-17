@@ -999,6 +999,8 @@ object ArgusModule {
         directSettings: DirectSettings,
         privilegedActions: PrivilegedActionRunner,
         uiSteps: UiStepsRunner,
+        telephony: dev.argus.automation.telephony.TelephonyActionRunner,
+        screenDecisions: dev.argus.automation.telephony.ScreenCallDecisionLog,
         storedModes: dev.argus.engine.runtime.StoredModeActions,
     ): ShizukuActionExecutor =
         ShizukuActionExecutor(
@@ -1029,6 +1031,9 @@ object ArgusModule {
             privilegedActions = privilegedActions,
             // 0.5.1: macro sullo schermo con il servizio di Accessibilità.
             uiSteps = uiSteps,
+            // 0.8: SMS, chiamate e Intent; la foglia screen_call legge la decisione del filtro chiamate.
+            telephony = telephony,
+            screenDecisions = screenDecisions,
             // 0.8: chiudi, posticipa o premi un pulsante della notifica, via il listener collegato.
             notificationActions = dev.argus.automation.notification.ListenerNotificationActionGateway(
                 dev.argus.automation.notification.ConnectedNotificationListener,
@@ -1093,6 +1098,7 @@ object ArgusModule {
         wakeAwarePause: WakeAwarePause,
         automationPause: LabelAwarePause,
         prompts: UserPromptCoordinator,
+        callerScope: dev.argus.automation.telephony.CallerScopeLog,
     ): Engine = Engine(
         store = store,
         executor = executor,
@@ -1109,6 +1115,8 @@ object ArgusModule {
         // 0.8: «chiedimi prima di eseguire» e le domande con pulsanti.
         confirmations = prompts,
         questions = prompts,
+        // 0.8: `screen_call` «solo chi non è nei contatti» vale per tutta la regola (perimetro dal filtro chiamate).
+        callerScope = callerScope,
         now = System::currentTimeMillis,
     )
 

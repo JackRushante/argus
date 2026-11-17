@@ -28,6 +28,8 @@ import androidx.compose.material.icons.rounded.BatterySaver
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.Call
+import androidx.compose.material.icons.rounded.CallEnd
+import androidx.compose.material.icons.rounded.Contacts
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
@@ -476,6 +478,42 @@ private fun buildHealthItems(state: SettingsState, callbacks: SettingsCallbacks)
                 stringResource(if (state.bluetoothTriggerGranted) R.string.settings_bt_on else R.string.settings_bt_off),
                 okOrOptIn(state.bluetoothTriggerGranted), callbacks::onRequestBluetoothPermission,
                 actionLabel = enable.takeIf { !state.bluetoothTriggerGranted },
+            ),
+        )
+        // 0.8: SMS e chiamate in uscita, filtro chiamate e contatti: opt-in come i trigger telefonia, il tocco
+        // chiede il permesso (o il ruolo). Senza telefonia le righe di SMS, chiamate e filtro non servono.
+        if (state.telephonyAvailable) {
+            add(
+                HealthSpec(
+                    Icons.Rounded.Sms, stringResource(R.string.tel08_settings_send_sms_title),
+                    stringResource(if (state.sendSmsGranted) R.string.tel08_settings_send_sms_on else R.string.tel08_settings_send_sms_off),
+                    okOrOptIn(state.sendSmsGranted), callbacks::onRequestSendSmsPermission,
+                    actionLabel = enable.takeIf { !state.sendSmsGranted },
+                ),
+            )
+            add(
+                HealthSpec(
+                    Icons.Rounded.Call, stringResource(R.string.tel08_settings_call_phone_title),
+                    stringResource(if (state.callPhoneGranted) R.string.tel08_settings_call_phone_on else R.string.tel08_settings_call_phone_off),
+                    okOrOptIn(state.callPhoneGranted), callbacks::onRequestCallPhonePermission,
+                    actionLabel = enable.takeIf { !state.callPhoneGranted },
+                ),
+            )
+            add(
+                HealthSpec(
+                    Icons.Rounded.CallEnd, stringResource(R.string.tel08_settings_screening_title),
+                    stringResource(if (state.callScreeningGranted) R.string.tel08_settings_screening_on else R.string.tel08_settings_screening_off),
+                    okOrOptIn(state.callScreeningGranted), callbacks::onRequestCallScreeningRole,
+                    actionLabel = enable.takeIf { !state.callScreeningGranted },
+                ),
+            )
+        }
+        add(
+            HealthSpec(
+                Icons.Rounded.Contacts, stringResource(R.string.tel08_settings_contacts_title),
+                stringResource(if (state.contactsGranted) R.string.tel08_settings_contacts_on else R.string.tel08_settings_contacts_off),
+                okOrOptIn(state.contactsGranted), callbacks::onRequestContactsPermission,
+                actionLabel = enable.takeIf { !state.contactsGranted },
             ),
         )
         // 0.8: calendario, stesso opt-in degli SMS: il tocco chiede READ_CALENDAR.

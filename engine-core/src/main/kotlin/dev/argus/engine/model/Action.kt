@@ -614,8 +614,9 @@ sealed interface Action {
     ) : Action
 
     /**
-     * Invia un SMS ([FeatureGate.ACTION_SEND_SMS]). [number] è letterale (mai `${'$'}{var}`); [text] è un
-     * template SINK.
+     * Invia un SMS ([FeatureGate.ACTION_SEND_SMS]). [number] è un numero letterale oppure ESATTAMENTE un
+     * segnaposto `${'$'}{var}` legato al numero di chi ha chiamato o scritto (trigger `phone_state`), ricontrollato
+     * dopo la sostituzione ([TelephonyActionPolicy]); [text] è un template SINK.
      */
     @Serializable @SerialName(ActionTypeIds.SEND_SMS)
     data class SendSms(val number: String, val text: String) : Action
@@ -642,10 +643,16 @@ sealed interface Action {
 
     /**
      * Decide in modo sincrono una chiamata in arrivo ([FeatureGate.ACTION_SCREEN_CALL]): REJECT la
-     * rifiuta, SILENCE la silenzia. Ha senso solo con un trigger di chiamata in arrivo.
+     * rifiuta, SILENCE la silenzia. Ha senso solo con un trigger di chiamata in arrivo. Con
+     * [onlyUnknownCallers] vale solo per chi non è nei contatti (un numero nascosto conta come sconosciuto).
      */
     @Serializable @SerialName(ActionTypeIds.SCREEN_CALL)
-    data class ScreenCall(val op: ScreenCallOp) : Action
+    data class ScreenCall(
+        val op: ScreenCallOp,
+        // Assente = tutti i chiamanti: i byte (e l'impronta) di `{"type":"screen_call","op":…}` non cambiano.
+        @EncodeDefault(EncodeDefault.Mode.NEVER)
+        val onlyUnknownCallers: Boolean = false,
+    ) : Action
 }
 
 /** Visita iterativa: il tier non può causare stack overflow su un albero non ancora validato. */

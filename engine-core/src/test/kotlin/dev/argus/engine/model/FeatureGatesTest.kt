@@ -56,12 +56,8 @@ class FeatureGatesTest {
     /** Tutte le condizioni 0.8 sono accese: la tabella resta per chi ne aggiungerà altre spente. */
     private val newConditions: Map<FeatureGate, Condition> = linkedMapOf()
 
-    private val newActions: Map<FeatureGate, Action> = linkedMapOf(
-        FeatureGate.ACTION_SEND_SMS to Action.SendSms("+393331112222", "Arrivo"),
-        FeatureGate.ACTION_CALL_NUMBER to Action.CallNumber("+393331112222"),
-        FeatureGate.ACTION_SEND_INTENT to Action.SendIntent(IntentKind.BROADCAST, action = "dev.example.PING"),
-        FeatureGate.ACTION_SCREEN_CALL to Action.ScreenCall(ScreenCallOp.REJECT),
-    )
+    /** Tutte le azioni 0.8 sono accese: la tabella resta per chi ne aggiungerà altre spente. */
+    private val newActions: Map<FeatureGate, Action> = linkedMapOf()
 
     /** Interruttori già accesi: i loro test stanno con la feature. */
     private val switchedOn: Set<FeatureGate> = setOf(
@@ -89,6 +85,11 @@ class FeatureGatesTest {
         // Risposta HTTP in una variabile e segreti (HttpCapture08Test, HttpSecrets08Test).
         FeatureGate.HTTP_CAPTURE,
         FeatureGate.HTTP_SECRETS,
+        // SMS, chiamate, Intent e filtro chiamate (DraftValidatorTelephonyTest, TelephonyActionPolicyTest).
+        FeatureGate.ACTION_SEND_SMS,
+        FeatureGate.ACTION_CALL_NUMBER,
+        FeatureGate.ACTION_SEND_INTENT,
+        FeatureGate.ACTION_SCREEN_CALL,
         // Trigger fisici (PhysicalTriggers08Test).
         FeatureGate.TRIGGER_NFC_TAG, FeatureGate.TRIGGER_NEXT_ALARM, FeatureGate.TRIGGER_APP_USAGE,
         FeatureGate.TRIGGER_SENSOR_SHAKE, FeatureGate.TRIGGER_SENSOR_FLIP_FACE_DOWN,
@@ -136,10 +137,10 @@ class FeatureGatesTest {
             assertTrue(gate.wireName in notAvailable(draft(actions = listOf(nested))), "azione annidata $action")
         }
         assertEquals(listOf(FeatureGate.EXIT.wireName), notAvailable(draft(exit = ExitSpec(Trigger.Manual))))
-        // Un tipo spento nel trigger o nelle azioni d'uscita conta anche lui.
+        // Trigger e azioni d'uscita 0.8 sono tutti accesi: resta solo l'interruttore exit.
         assertEquals(
-            listOf(FeatureGate.EXIT.wireName, FeatureGate.ACTION_CALL_NUMBER.wireName),
-            notAvailable(draft(exit = ExitSpec(Trigger.NfcTag("04"), actions = listOf(Action.CallNumber("+39"))))),
+            listOf(FeatureGate.EXIT.wireName),
+            notAvailable(draft(exit = ExitSpec(Trigger.NfcTag("04"), actions = listOf(Action.CallNumber("+393331112222"))))),
         )
     }
 
@@ -230,7 +231,7 @@ class FeatureGatesTest {
         assertTrue(CapabilityIds.TRIGGER_CALENDAR_EVENT in caps(draft(trigger = Trigger.CalendarEvent(CalendarPhase.START, -10, "Riunione", "Lavoro"))))
         assertTrue(CapabilityIds.triggerSensor(SensorKind.SHAKE) in caps(draft(trigger = Trigger.Sensor(SensorKind.SHAKE))))
         assertTrue(CapabilityIds.STATE_STORED in caps(draft(conditions = Condition.StoredCompare("count", StateValueType.NUMBER, CmpOp.GT, "3"))))
-        assertTrue(CapabilityIds.ACTION_SEND_SMS in caps(draft(actions = listOf(newActions.getValue(FeatureGate.ACTION_SEND_SMS)))))
+        assertTrue(CapabilityIds.ACTION_SEND_SMS in caps(draft(actions = listOf(Action.SendSms("+393331112222", "Arrivo")))))
         assertTrue(CapabilityIds.ACTION_HTTP_REQUEST_SECRETS in caps(draft(actions = listOf(httpSecrets))))
         assertTrue(CapabilityIds.RULE_CONFIRM in caps(draft(confirm = ConfirmSpec())))
         val span = caps(draft(exit = ExitSpec(Trigger.NfcTag("04"), actions = listOf(Action.SetUserMode("casa")))))

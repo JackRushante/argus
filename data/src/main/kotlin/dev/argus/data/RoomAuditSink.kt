@@ -58,6 +58,9 @@ class RoomAuditSink(private val dao: AuditDao) : AuditSink {
             event.detail.takeIf { it in RULE_DELETED_REASONS } ?: "rule_deleted"
         dev.argus.engine.runtime.AuditKind.RULE_NEEDS_REVIEW ->
             event.detail.takeIf { it in RULE_NEEDS_REVIEW_REASONS } ?: "rule_needs_review"
+        // 0.8: solo l'esito del filtro chiamate, mai il numero.
+        dev.argus.engine.runtime.AuditKind.CALL_SCREENED ->
+            event.detail.takeIf { it in CALL_SCREENED_DETAILS } ?: ""
         dev.argus.engine.runtime.AuditKind.FIRED,
         dev.argus.engine.runtime.AuditKind.SUPPRESSED_DUPLICATE,
         dev.argus.engine.runtime.AuditKind.SUPPRESSED_NOT_ELIGIBLE -> ""
@@ -73,6 +76,7 @@ class RoomAuditSink(private val dao: AuditDao) : AuditSink {
         const val CONDITION_STATE_UNAVAILABLE = "condition_state_unavailable"
         /** Codice snake_case a vocabolario chiuso (ValidationIssue.code o reason interno). */
         val REASON_CODE = Regex("^[a-z][a-z0-9_]{0,63}$")
+        val CALL_SCREENED_DETAILS = setOf("screen_call_rejected", "screen_call_silenced", "screen_call_failed_open")
         const val MAX_VALIDATION_CODES = 8
         // --- Lifecycle riuscito (task #31-B): un set chiuso per kind, fallback generico. ---
         /** Unico ingresso in ARMED: l'approvazione utente (submit o edit passano di lì). */

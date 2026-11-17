@@ -218,6 +218,26 @@ private fun causeText(cause: BlockCause, l: RenderLanguage): String = when (caus
         "The Argus Accessibility service is not turned on",
         "Il servizio di Accessibilità di Argus non è attivo",
     )
+    BlockCause.NO_TELEPHONY -> l.pick(
+        "This phone cannot send SMS or make calls",
+        "Questo telefono non può inviare SMS né fare chiamate",
+    )
+    BlockCause.SEND_SMS_PERMISSION -> l.pick(
+        "The permission to send SMS is missing: turn on \"Send SMS\" in System",
+        "Manca il permesso per inviare SMS: attiva \"Invio SMS\" in Sistema",
+    )
+    BlockCause.CALL_PHONE_PERMISSION -> l.pick(
+        "The permission to make phone calls is missing: turn on \"Phone calls\" in System",
+        "Manca il permesso per fare chiamate: attiva \"Chiamate\" in Sistema",
+    )
+    BlockCause.CALL_SCREENING_ROLE -> l.pick(
+        "Argus is not the call screening app: turn on \"Call screening\" in System",
+        "Argus non è l'app di filtro chiamate: attiva \"Filtro chiamate\" in Sistema",
+    )
+    BlockCause.CONTACTS_PERMISSION -> l.pick(
+        "The contacts permission is missing: turn on \"Contacts\" in System",
+        "Manca il permesso per leggere i contatti: attiva \"Contatti\" in Sistema",
+    )
     BlockCause.CALENDAR_PERMISSION -> l.pick(
         "The calendar permission is missing: turn on \"Calendar rules\" in System",
         "Manca il permesso del calendario: attiva \"Regole del calendario\" in Sistema",

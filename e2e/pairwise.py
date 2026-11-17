@@ -41,10 +41,10 @@ ACTION_CLASSES: Dict[str, List[str]] = {
         # 0.8: la domanda con pulsanti e' una notifica dell'app.
         "ask",
     ],
-    "audio_mode": ["set_volume", "set_ringer", "set_dnd"],
+    "audio_mode": ["set_volume", "set_ringer", "set_dnd", "screen_call"],
     "display": ["set_brightness", "set_rotation", "set_dark_mode"],
-    "launch": ["launch_app", "open_url", "open_settings_screen", "set_alarm", "set_timer"],
-    "network_out": ["http_request", "notification_reply"],
+    "launch": ["launch_app", "open_url", "open_settings_screen", "set_alarm", "set_timer", "send_intent"],
+    "network_out": ["http_request", "notification_reply", "send_sms", "call_number"],
     "radios": [
         "set_wifi", "set_bluetooth", "set_mobile_data", "set_airplane", "set_location", "set_nfc",
         "set_battery_saver",
@@ -61,8 +61,6 @@ CONTROL_FLOW = ["wait", "if", "while"]
 # aggiunge le sue regole.
 NOT_YET_AVAILABLE_TRIGGERS = []
 NOT_YET_AVAILABLE_ACTIONS = [
-    "send_sms",
-    "call_number", "send_intent", "screen_call",
 ]
 NOT_YET_AVAILABLE_CODE = "not_available_yet"
 ACTION_CLASS_OF: Dict[str, str] = {a: c for c, items in ACTION_CLASSES.items() for a in items}

@@ -22,6 +22,8 @@ enum class AuditKind {
     RULE_ENABLED,
     RULE_DELETED,
     RULE_NEEDS_REVIEW,
+    // 0.8: decisione del filtro chiamate (`screen_call`) presa prima dello squillo; mai il numero.
+    CALL_SCREENED,
 }
 data class AuditEvent(
     val automationId: AutomationId,

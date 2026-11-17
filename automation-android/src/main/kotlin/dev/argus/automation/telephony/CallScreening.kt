@@ -1,0 +1,250 @@
+package dev.argus.automation.telephony
+
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.provider.ContactsContract
+import androidx.core.content.ContextCompat
+import dev.argus.engine.model.AutomationId
+import dev.argus.engine.model.ScreenCallOp
+import dev.argus.engine.runtime.ActionResult
+import dev.argus.engine.runtime.AuditEvent
+import dev.argus.engine.runtime.AuditKind
+import dev.argus.engine.runtime.AuditSink
+import dev.argus.engine.runtime.AutomationPause
+import dev.argus.engine.model.Automation
+import dev.argus.engine.runtime.CallScreeningDecider
+import dev.argus.engine.runtime.CallerScope
+import dev.argus.engine.runtime.CallerScopeGate
+import dev.argus.engine.runtime.TriggerEvent
+import dev.argus.engine.runtime.FirePolicySnapshotProvider
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.coroutines.CoroutineContext
+
+/**
+ * Le decisioni di `screen_call` prese dal servizio di filtro chiamate, in memoria e per poco: quando poi il
+ * motore esegue la regola (le altre azioni girano dopo la decisione), la foglia `screen_call` trova qui la
+ * decisione già applicata invece di fare qualcosa. Niente numeri: solo l'id della regola e l'istante.
+ */
+class ScreenCallDecisionLog(private val now: () -> Long = System::currentTimeMillis) {
+    private val decisions = LinkedHashMap<AutomationId, Pair<ScreenCallOp, Long>>()
+
+    @Synchronized
+    fun record(automationId: AutomationId, op: ScreenCallOp) {
+        decisions[automationId] = op to now()
+        val oldest = now() - MAX_AGE_MILLIS
+        decisions.entries.removeAll { it.value.second < oldest }
+    }
+
+    /** La decisione presa per la regola nell'ultimo paio di minuti, consumata (una sola esecuzione la trova). */
+    @Synchronized
+    fun consume(automationId: AutomationId): ScreenCallOp? {
+        val (op, at) = decisions.remove(automationId) ?: return null
+        return op.takeIf { now() - at <= MAX_AGE_MILLIS }
+    }
+
+    /** Esito della foglia `screen_call` nell'esecuzione della regola. */
+    fun leafResult(automationId: AutomationId): ActionResult =
+        if (consume(automationId) != null) ActionResult.Success else ActionResult.Failure(SCREEN_CALL_NOT_APPLIED)
+
+    companion object {
+        const val MAX_AGE_MILLIS = 2 * 60 * 1_000L
+        const val SCREEN_CALL_NOT_APPLIED = "screen_call_not_applied"
+    }
+}
+
+/**
+ * 0.8: il perimetro di chi chiama per le regole `screen_call` con `onlyUnknownCallers`, calcolato dal filtro
+ * chiamate e letto dal motore ([CallerScopeGate]) prima di eseguire le altre azioni della regola, qualunque sia
+ * la strada da cui arriva la chiamata (rifiutata dal filtro, o squillo normale). Una valutazione in corso si
+ * aspetta al più [waitMillis] (il budget del filtro più un margine); poi, senza una risposta per la regola, la
+ * regola non esegue. Ogni risposta vale una volta sola e per poco: una chiamata successiva non la riusa.
+ * Niente numeri: solo l'id della regola.
+ */
+class CallerScopeLog(
+    private val now: () -> Long = System::currentTimeMillis,
+    private val waitMillis: Long = CallScreeningCoordinator.BUDGET_MILLIS + 500,
+) : CallerScopeGate {
+    private val scopes = HashMap<AutomationId, Pair<CallerScope, Long>>()
+    private var pending: CompletableDeferred<Unit>? = null
+
+    /** Una chiamata nuova: le risposte della precedente non valgono più e chi legge aspetta questa. */
+    @Synchronized
+    fun begin() {
+        scopes.clear()
+        pending?.complete(Unit)
+        pending = CompletableDeferred()
+    }
+
+    /** Il perimetro di ogni regola con l'opzione (vuoto = non si è saputo: tempo scaduto, errore). */
+    @Synchronized
+    fun finish(results: Map<AutomationId, CallerScope>) {
+        val at = now()
+        results.forEach { (id, scope) -> scopes[id] = scope to at }
+        pending?.complete(Unit)
+        pending = null
+    }
+
+    override suspend fun closedCode(automation: Automation, event: TriggerEvent): String? {
+        synchronized(this) { pending }?.let { waiting -> withTimeoutOrNull(waitMillis) { waiting.await() } }
+        val scope = synchronized(this) {
+            scopes.remove(automation.id)?.takeIf { (_, at) -> now() - at in 0..MAX_AGE_MILLIS }?.first
+        }
+        return CallerScopeGate.codeFor(scope)
+    }
+
+    companion object {
+        const val MAX_AGE_MILLIS = ScreenCallDecisionLog.MAX_AGE_MILLIS
+    }
+}
+
+/** Se un numero è nei contatti: true, false, null = non si sa (permesso mancante, errore). */
+fun interface ContactLookup {
+    fun isContact(number: String): Boolean?
+}
+
+class AndroidContactLookup(context: Context) : ContactLookup {
+    private val appContext = context.applicationContext
+
+    override fun isContact(number: String): Boolean? {
+        if (ContextCompat.checkSelfPermission(appContext, Manifest.permission.READ_CONTACTS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            return null
+        }
+        return try {
+            val uri = Uri.withAppendedPath(ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(number))
+            appContext.contentResolver.query(uri, arrayOf(ContactsContract.PhoneLookup._ID), null, null, null)
+                ?.use { it.count > 0 }
+        } catch (_: Exception) {
+            null
+        }
+    }
+}
+
+/**
+ * Cosa risponde il servizio di filtro chiamate (0.8). Legge le regole armate, le capacità e le pause, chiede al
+ * [CallScreeningDecider] e registra ogni decisione nel Log SENZA il numero. Tutto entro [budgetMillis]: oltre
+ * (o su qualunque errore) la risposta è «lascia squillare» e il Log lo dice per ogni regola di filtro.
+ *
+ * Il lavoro gira su [worker], a parte: una lettura che blocca il thread (la rubrica, il database) non trattiene la
+ * risposta oltre il budget, e il suo risultato tardivo si scarta. Il Log e il registro delle decisioni dicono
+ * ciò che è stato APPLICATO: se la risposta non arriva più in tempo ad Android (`respond` = false) la chiamata
+ * ha squillato e per le regole risulta «lasciata squillare».
+ *
+ * Una chiamata rifiutata non squilla, quindi Android non manda lo stato RINGING da cui partono le regole
+ * «chiamata in arrivo»: dopo aver risposto il servizio la consegna al motore (le altre azioni della regola, e
+ * le altre regole sulla chiamata in arrivo, girano come sempre). Una chiamata silenziata squilla senza suono
+ * e arriva al motore dal solito broadcast.
+ */
+class CallScreeningCoordinator(
+    /** Le regole armate (`AutomationStore.armed`). */
+    private val armed: suspend () -> List<Automation>,
+    private val snapshots: FirePolicySnapshotProvider,
+    private val pause: AutomationPause,
+    private val contacts: ContactLookup,
+    private val decider: CallScreeningDecider,
+    private val decisions: ScreenCallDecisionLog,
+    private val audit: AuditSink,
+    /** Il perimetro di chi chiama per le regole con `onlyUnknownCallers`, letto poi dal motore. */
+    private val scopes: CallerScopeLog = CallerScopeLog(),
+    private val now: () -> Long = System::currentTimeMillis,
+    private val budgetMillis: Long = BUDGET_MILLIS,
+    private val worker: CoroutineContext = Dispatchers.IO,
+) {
+    private val detached = CoroutineScope(SupervisorJob())
+
+    /**
+     * Decide la chiamata e la consegna a [respond], che risponde ad Android e dice se la risposta è stata
+     * applicata (false = era già partita quella di riserva). Restituisce l'operazione applicata, null = squilla.
+     */
+    suspend fun decide(number: String?, respond: (ScreenCallOp?) -> Boolean = { true }): ScreenCallOp? {
+        scopes.begin()
+        val work = detached.async(worker) { evaluate(number) }
+        val decision = try {
+            withTimeoutOrNull(budgetMillis) { work.await() }
+        } catch (error: CancellationException) {
+            work.cancel()
+            scopes.finish(emptyMap())
+            throw error
+        } catch (_: Exception) {
+            null
+        }
+        if (decision == null) work.cancel()
+        // Prima della risposta: il motore può leggere il perimetro appena la chiamata gli arriva.
+        scopes.finish(decision?.scopes.orEmpty())
+        if (decision == null) {
+            respondSafely(respond, null)
+            auditFailOpen(null)
+            return null
+        }
+        val applied = respondSafely(respond, decision.op)
+        val op = decision.op ?: return null
+        if (!applied) {
+            auditFailOpen(decision.rules.mapTo(mutableSetOf()) { it.automationId })
+            return null
+        }
+        decision.rules.forEach { rule ->
+            decisions.record(rule.automationId, op)
+            record(rule.automationId, detailFor(op))
+        }
+        return op
+    }
+
+    private fun respondSafely(respond: (ScreenCallOp?) -> Boolean, op: ScreenCallOp?): Boolean = try {
+        respond(op)
+    } catch (_: Exception) {
+        false
+    }
+
+    private suspend fun evaluate(number: String?): CallScreeningDecider.Decision {
+        val rules = decider.screeningRules(armed())
+        if (rules.isEmpty()) return CallScreeningDecider.Decision(null, emptyList())
+        val available = snapshots.current().availableCapabilities
+        val paused = rules.filter { pause.pauseCodeFor(it.id) != null }.mapTo(mutableSetOf()) { it.id }
+        return decider.decide(rules, number, available, { it.id in paused }, contacts::isContact)
+    }
+
+    /** «Lasciata squillare» per [ids], o per ogni regola di filtro quando non si sa quali avrebbero deciso. */
+    private suspend fun auditFailOpen(ids: Set<AutomationId>?) {
+        val targets = ids ?: try {
+            withTimeoutOrNull(budgetMillis) { decider.screeningRules(armed()).mapTo(mutableSetOf()) { it.id } }
+                .orEmpty()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            emptySet()
+        }
+        targets.forEach { record(it, SCREEN_CALL_FAILED_OPEN) }
+    }
+
+    private suspend fun record(id: AutomationId, detail: String) {
+        try {
+            audit.record(AuditEvent(id, AuditKind.CALL_SCREENED, now(), detail = detail))
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            // Il Log non cambia la risposta alla chiamata.
+        }
+    }
+
+    companion object {
+        /** Android aspetta la risposta per circa 5 secondi: si risponde ben prima. */
+        const val BUDGET_MILLIS = 2_500L
+        const val SCREEN_CALL_REJECTED = "screen_call_rejected"
+        const val SCREEN_CALL_SILENCED = "screen_call_silenced"
+        const val SCREEN_CALL_FAILED_OPEN = "screen_call_failed_open"
+
+        fun detailFor(op: ScreenCallOp): String = when (op) {
+            ScreenCallOp.REJECT -> SCREEN_CALL_REJECTED
+            ScreenCallOp.SILENCE -> SCREEN_CALL_SILENCED
+        }
+    }
+}

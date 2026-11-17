@@ -133,11 +133,17 @@ object InterpolationPolicy {
         is Action.SetStored -> listOfNotNull(action.value?.let { TemplateField("value", it, FieldClass.SINK) })
 
         // Risposta a una notifica e SMS: il testo esce verso un'altra persona, come whatsapp_reply; un
-        // valore con provenienza di credenziale non può uscire. Numero e destinatario restano letterali.
+        // valore con provenienza di credenziale non può uscire.
         is Action.NotificationReply ->
             listOf(TemplateField("text", action.text, FieldClass.SINK, remoteEgress = true))
 
-        is Action.SendSms -> listOf(TemplateField("text", action.text, FieldClass.SINK, remoteEgress = true))
+        // Il destinatario può essere SOLO `${'$'}{var}` legato al numero di chi ha chiamato o scritto (vincolato
+        // al mittente del trigger, come la reply: validator e interpolatore lo verificano e ricontrollano la
+        // forma del numero risolto), per questo non è un campo di autorità.
+        is Action.SendSms -> listOf(
+            TemplateField("number", action.number, FieldClass.SINK),
+            TemplateField("text", action.text, FieldClass.SINK, remoteEgress = true),
+        )
 
         // Intent: solo il valore degli extra STRING è un template, ed è autorità (routing verso un'altra app).
         is Action.SendIntent -> action.extras.mapIndexedNotNull { index, extra ->

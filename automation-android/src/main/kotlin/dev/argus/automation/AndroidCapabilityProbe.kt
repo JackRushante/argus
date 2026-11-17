@@ -41,6 +41,8 @@ import kotlinx.coroutines.CancellationException
 import dev.argus.engine.safety.DraftValidator
 import dev.argus.engine.safety.Severity
 import dev.argus.automation.health.CapabilityHealthSnapshot
+import dev.argus.automation.telephony.AndroidTelephonySurface
+import dev.argus.automation.telephony.callScreeningRoleHeld
 import dev.argus.device.PermanentGrantStatus
 import dev.argus.shizuku.ShizukuGateway
 import dev.argus.shizuku.ShizukuGatewayStatus
@@ -96,6 +98,16 @@ internal data class AndroidCapabilityState(
      * `ui_steps`; da solo non basta (serve anche il permesso di notifica, per l'indicatore e «Ferma»).
      */
     val accessibilityEnabled: Boolean = false,
+    /** 0.8: il telefono ha la telefonia (`FEATURE_TELEPHONY`): senza, niente SMS, chiamate e filtro chiamate. */
+    val telephonyPresent: Boolean = false,
+    /** 0.8: `SEND_SMS` concesso (azione `send_sms`). */
+    val sendSmsGranted: Boolean = false,
+    /** 0.8: `CALL_PHONE` concesso (azione `call_number`). */
+    val callPhoneGranted: Boolean = false,
+    /** 0.8: Argus ha il ruolo «filtro chiamate» (azione `screen_call`). */
+    val callScreeningRoleHeld: Boolean = false,
+    /** 0.8: `READ_CONTACTS` concesso (`screen_call` solo per chi non è nei contatti). */
+    val readContactsGranted: Boolean = false,
     /** 0.8: `READ_CALENDAR` concesso: condizione `calendar_busy` e trigger `calendar_event`. */
     val readCalendarGranted: Boolean = false,
 ) {
@@ -183,6 +195,11 @@ internal class SystemAndroidCapabilityStateSource(
             appContext.packageManager.hasSystemFeature(PackageManager.FEATURE_NFC)
         }.getOrDefault(false),
         accessibilityEnabled = PermanentGrantStatus.accessibility(appContext),
+        telephonyPresent = AndroidTelephonySurface.hasTelephony(appContext),
+        sendSmsGranted = granted(Manifest.permission.SEND_SMS),
+        callPhoneGranted = granted(Manifest.permission.CALL_PHONE),
+        callScreeningRoleHeld = callScreeningRoleHeld(appContext),
+        readContactsGranted = granted(Manifest.permission.READ_CONTACTS),
         readCalendarGranted = granted(Manifest.permission.READ_CALENDAR),
     )
 
@@ -226,6 +243,16 @@ enum class BlockCause {
     /** 0.5.1: il servizio di Accessibilità di Argus non è acceso (macro sullo schermo). */
     ACCESSIBILITY_SERVICE,
 
+    /** 0.8: il telefono non ha la telefonia (SMS, chiamate, filtro chiamate). */
+    NO_TELEPHONY,
+    /** 0.8: manca il permesso di inviare SMS. */
+    SEND_SMS_PERMISSION,
+    /** 0.8: manca il permesso di avviare chiamate. */
+    CALL_PHONE_PERMISSION,
+    /** 0.8: Argus non è l'app di filtro chiamate. */
+    CALL_SCREENING_ROLE,
+    /** 0.8: manca il permesso di leggere i contatti. */
+    CONTACTS_PERMISSION,
     /** 0.8: manca il permesso di lettura del calendario (regole sul calendario). */
     CALENDAR_PERMISSION,
 
@@ -426,9 +453,44 @@ class AndroidCapabilityProbe internal constructor(
             capability == GenerativeContract.TOOL_WEB_SEARCH -> BlockCause.AI_NOT_READY
         capability.startsWith(SENSOR_TRIGGER_PREFIX) -> BlockCause.SENSOR_UNAVAILABLE
         capability == CapabilityIds.TRIGGER_APP_EVENT -> BlockCause.USAGE_ACCESS
+        capability in TELEPHONY_ACTION_CAPABILITIES -> telephonyCause(capability, state)
         capability == CapabilityIds.TRIGGER_APP_USAGE -> BlockCause.USAGE_ACCESS
         capability == CapabilityIds.TRIGGER_NFC_TAG -> BlockCause.NFC_UNAVAILABLE
         else -> BlockCause.OTHER
+    }
+
+    /** 0.8: capability di SMS, chiamate, Intent e filtro chiamate disponibili ORA. */
+    private fun telephonyActionCapabilities(state: AndroidCapabilityState, privileged: Boolean): Set<String> = buildSet {
+        add(CapabilityIds.ACTION_SEND_INTENT)
+        if (privileged) add(CapabilityIds.ACTION_SEND_INTENT_SERVICE)
+        if (state.telephonyPresent && state.sendSmsGranted) add(CapabilityIds.ACTION_SEND_SMS)
+        if (state.telephonyPresent && state.callPhoneGranted) add(CapabilityIds.ACTION_CALL_NUMBER)
+        if (state.telephonyPresent && state.callScreeningRoleHeld) add(CapabilityIds.ACTION_SCREEN_CALL)
+        if (state.readContactsGranted) add(CapabilityIds.ACTION_SCREEN_CALL_CONTACTS)
+    }
+
+    private fun telephonyCause(capability: String, state: AndroidCapabilityState): BlockCause = when (capability) {
+        CapabilityIds.ACTION_SEND_INTENT_SERVICE -> shizukuCause(state.shizukuStatus)
+        CapabilityIds.ACTION_SCREEN_CALL_CONTACTS -> BlockCause.CONTACTS_PERMISSION
+        else -> when {
+            !state.telephonyPresent -> BlockCause.NO_TELEPHONY
+            capability == CapabilityIds.ACTION_SEND_SMS -> BlockCause.SEND_SMS_PERMISSION
+            capability == CapabilityIds.ACTION_CALL_NUMBER -> BlockCause.CALL_PHONE_PERMISSION
+            capability == CapabilityIds.ACTION_SCREEN_CALL -> BlockCause.CALL_SCREENING_ROLE
+            else -> BlockCause.OTHER
+        }
+    }
+
+    /** Motivi (in inglese, vanno al modello) per le azioni di telefonia non disponibili: cosa manca e dove. */
+    private fun telephonyUnavailableReasons(state: AndroidCapabilityState): Map<String, String> = buildMap {
+        if (!state.telephonyPresent) {
+            listOf(ActionTypeIds.SEND_SMS, ActionTypeIds.CALL_NUMBER, ActionTypeIds.SCREEN_CALL)
+                .forEach { put(it, REASON_NO_TELEPHONY) }
+            return@buildMap
+        }
+        if (!state.sendSmsGranted) put(ActionTypeIds.SEND_SMS, REASON_SEND_SMS)
+        if (!state.callPhoneGranted) put(ActionTypeIds.CALL_NUMBER, REASON_CALL_PHONE)
+        if (!state.callScreeningRoleHeld) put(ActionTypeIds.SCREEN_CALL, REASON_CALL_SCREENING)
     }
 
     private fun shizukuCause(status: ShizukuGatewayStatus): BlockCause = when (status) {
@@ -558,6 +620,8 @@ class AndroidCapabilityProbe internal constructor(
             }
             // Telefonia (P2-2): grant runtime distinti per evento.
             if (state.receiveSmsGranted) add(CapabilityIds.TRIGGER_PHONE_SMS)
+            // 0.8: SMS e chiamate in uscita, filtro chiamate (ruolo) e contatti, ognuno col suo permesso.
+            addAll(telephonyActionCapabilities(state, shizukuAvailable))
             if (state.readPhoneStateGranted && state.readCallLogGranted) {
                 add(CapabilityIds.TRIGGER_PHONE_CALL)
             }
@@ -622,6 +686,11 @@ class AndroidCapabilityProbe internal constructor(
             // 0.8: la domanda con pulsanti è una notifica dell'app.
             if (state.notificationsGranted) add(ActionTypeIds.ASK)
             if (state.accessibilityEnabled && state.notificationsGranted) add(ActionTypeIds.UI_STEPS)
+            // 0.8: send_intent non chiede permessi (il servizio solo col backend privilegiato, v. capability).
+            add(ActionTypeIds.SEND_INTENT)
+            if (state.telephonyPresent && state.sendSmsGranted) add(ActionTypeIds.SEND_SMS)
+            if (state.telephonyPresent && state.callPhoneGranted) add(ActionTypeIds.CALL_NUMBER)
+            if (state.telephonyPresent && state.callScreeningRoleHeld) add(ActionTypeIds.SCREEN_CALL)
             if (listenerGranted) add(GenerativeContract.TOOL_WHATSAPP_REPLY)
             if (listenerGranted) addAll(NOTIFICATION_08_ACTION_TYPES)
             // Il compilatore usa SOLO manifest.available_tools: invoke_llm deve comparire qui,
@@ -675,6 +744,8 @@ class AndroidCapabilityProbe internal constructor(
             unavailableTools[GenerativeContract.TOOL_WEB_SEARCH] = REASON_GENERATIVE_RUNTIME
         }
         PHASE_UNAVAILABLE_TOOLS.forEach { (tool, reason) -> unavailableTools[tool] = reason }
+        // 0.8: SMS, chiamate e filtro chiamate dicono al modello cosa manca e dove si concede.
+        telephonyUnavailableReasons(state).forEach { (tool, reason) -> unavailableTools[tool] = reason }
         // Permessi di posizione concessi ma servizi spenti: la causa del blocco e' questa, e il
         // modello deve saperlo (con i permessi mancanti il trigger e' gia' assente dal manifest).
         val blockDetails = linkedMapOf<String, String>()
@@ -713,6 +784,10 @@ class AndroidCapabilityProbe internal constructor(
         if (state.secureSettingsGranted) add("write_secure_settings")
         if (state.usageStatsGranted) add("usage_stats")
         if (state.accessibilityEnabled) add("accessibility")
+        if (state.sendSmsGranted) add("send_sms")
+        if (state.callPhoneGranted) add("call_phone")
+        if (state.callScreeningRoleHeld) add("call_screening")
+        if (state.readContactsGranted) add("read_contacts")
         if (state.readCalendarGranted) add("read_calendar")
     }
 
@@ -756,10 +831,6 @@ class AndroidCapabilityProbe internal constructor(
          */
         val NOT_YET_AVAILABLE_CAPABILITIES: Set<String> = setOf(
             CapabilityIds.RULE_EXIT,
-            CapabilityIds.ACTION_SEND_SMS,
-            CapabilityIds.ACTION_CALL_NUMBER,
-            CapabilityIds.ACTION_SEND_INTENT,
-            CapabilityIds.ACTION_SCREEN_CALL,
         )
 
         /** 0.8: valori conservati e modalità utente (database di Argus, nessun permesso). */
@@ -845,6 +916,23 @@ class AndroidCapabilityProbe internal constructor(
 
         /** Motivo (in inglese, va al modello) per `set_nfc` su un telefono senza NFC. */
         const val REASON_NO_NFC = "this phone has no NFC"
+
+        /** 0.8: motivi (in inglese, vanno al modello) per SMS, chiamate e filtro chiamate. */
+        const val REASON_NO_TELEPHONY = "this phone has no telephony"
+        const val REASON_SEND_SMS = "SMS sending permission not granted: the user can turn it on in Argus System > Send SMS"
+        const val REASON_CALL_PHONE = "phone call permission not granted: the user can turn it on in Argus System > Phone calls"
+        const val REASON_CALL_SCREENING =
+            "Argus is not the call screening app: the user can turn it on in Argus System > Call screening"
+
+        /** 0.8: capability di SMS, chiamate, Intent e filtro chiamate (cause di blocco proprie). */
+        val TELEPHONY_ACTION_CAPABILITIES = setOf(
+            CapabilityIds.ACTION_SEND_SMS,
+            CapabilityIds.ACTION_CALL_NUMBER,
+            CapabilityIds.ACTION_SEND_INTENT,
+            CapabilityIds.ACTION_SEND_INTENT_SERVICE,
+            CapabilityIds.ACTION_SCREEN_CALL,
+            CapabilityIds.ACTION_SCREEN_CALL_CONTACTS,
+        )
 
         /** 0.5.1: `set_nfc` richiede un backend privilegiato e l'NFC sul telefono. */
         val NFC_ACTION_TYPES = setOf(ActionTypeIds.SET_NFC)

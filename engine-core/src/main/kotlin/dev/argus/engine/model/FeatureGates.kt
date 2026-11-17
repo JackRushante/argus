@@ -98,16 +98,16 @@ enum class FeatureGate(
     ACTION_NOTIFICATION_ACTION("notification_action", enabled = true),
 
     /** Azione `send_sms`. */
-    ACTION_SEND_SMS("send_sms", enabled = false),
+    ACTION_SEND_SMS("send_sms", enabled = true),
 
     /** Azione `call_number`. */
-    ACTION_CALL_NUMBER("call_number", enabled = false),
+    ACTION_CALL_NUMBER("call_number", enabled = true),
 
     /** Azione `send_intent`. */
-    ACTION_SEND_INTENT("send_intent", enabled = false),
+    ACTION_SEND_INTENT("send_intent", enabled = true),
 
     /** Azione `screen_call`. */
-    ACTION_SCREEN_CALL("screen_call", enabled = false),
+    ACTION_SCREEN_CALL("screen_call", enabled = true),
 
     // --- Campi nuovi di azioni esistenti ---------------------------------------------------------
 

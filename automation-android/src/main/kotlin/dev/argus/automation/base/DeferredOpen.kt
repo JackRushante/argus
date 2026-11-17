@@ -13,6 +13,9 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import dev.argus.automation.R
+import dev.argus.automation.telephony.callIntent
+import dev.argus.automation.telephony.toAndroidIntent
+import dev.argus.engine.model.Action
 import dev.argus.engine.model.SettingsScreen
 
 /**
@@ -28,6 +31,12 @@ sealed interface DeferredOpenTarget {
     data class App(val pkg: String) : DeferredOpenTarget
     data class Url(val url: String) : DeferredOpenTarget
     data class SettingsPage(val screen: SettingsScreen, val pkg: String?) : DeferredOpenTarget
+
+    /** 0.8: una chiamata (`call_number`): il tocco la avvia. */
+    data class Call(val number: String) : DeferredOpenTarget
+
+    /** 0.8: l'activity di un `send_intent` approvato. */
+    data class IntentActivity(val intent: Action.SendIntent) : DeferredOpenTarget
 }
 
 /**
@@ -61,7 +70,13 @@ class AndroidDeferredOpenNotifier(context: Context) : DeferredOpenNotifier {
         val text = appContext.getString(R.string.act41_open_tap_text)
         val notification = NotificationCompat.Builder(appContext, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_argus_notification)
-            .setContentTitle(appContext.getString(R.string.act41_open_tap_title, destinationLabel(target)))
+            .setContentTitle(
+                if (target is DeferredOpenTarget.Call) {
+                    appContext.getString(R.string.tel08_call_tap_title, target.number)
+                } else {
+                    appContext.getString(R.string.act41_open_tap_title, destinationLabel(target))
+                },
+            )
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setAutoCancel(true)
@@ -93,6 +108,9 @@ class AndroidDeferredOpenNotifier(context: Context) : DeferredOpenNotifier {
                 appContext.getString(R.string.act41_open_dest_app_details, appLabel(target.pkg.orEmpty()))
             SettingsScreen.SETTINGS -> appContext.getString(R.string.act41_open_dest_settings)
         }
+        is DeferredOpenTarget.Call -> target.number
+        is DeferredOpenTarget.IntentActivity ->
+            target.intent.pkg?.let(::appLabel) ?: target.intent.action.orEmpty()
     }
 
     /** Etichetta dell'app se il sistema la rivela, altrimenti il nome del pacchetto. */
@@ -134,6 +152,8 @@ internal fun deferredOpenIntent(target: DeferredOpenTarget): Intent = when (targ
         .setPackage(target.pkg)
     is DeferredOpenTarget.Url -> Intent(Intent.ACTION_VIEW, Uri.parse(target.url))
     is DeferredOpenTarget.SettingsPage -> settingsIntent(target.screen, target.pkg)
+    is DeferredOpenTarget.Call -> callIntent(target.number)
+    is DeferredOpenTarget.IntentActivity -> target.intent.toAndroidIntent()
 }
 
 /** Id stabile per destinazione: la stessa destinazione aggiorna la sua notifica, un'altra ne aggiunge una. */

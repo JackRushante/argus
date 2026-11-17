@@ -18,6 +18,7 @@ import dev.argus.engine.model.StoredOp
 import dev.argus.engine.model.StoredValuePolicy
 import dev.argus.engine.model.UserModePolicy
 import dev.argus.engine.model.TaintPolicy
+import dev.argus.engine.model.TelephonyActionPolicy
 import dev.argus.engine.model.UiStep
 import dev.argus.engine.model.UiStepsPolicy
 import dev.argus.engine.model.ValueProvenance
@@ -200,9 +201,22 @@ class TaintAwareInterpolator {
                     text = accumulator.field("text", action.text, MAX_TEXT_CHARS),
                 )
 
-                is Action.SendSms -> action.copy(
-                    text = accumulator.field("text", action.text, MAX_TEXT_CHARS),
-                )
+                is Action.SendSms -> {
+                    // Il numero viene da fuori solo come `${'$'}{var}` col numero di chi ha chiamato o scritto:
+                    // si ricontrolla la provenienza del valore e la forma del numero risolto.
+                    TelephonyActionPolicy.placeholder(action.number)?.let { name ->
+                        val provenance = scope[name]?.provenance
+                        if (provenance != null && (provenance.isEmpty() || !SENDER_PROVENANCE.containsAll(provenance))) {
+                            throw ResolutionException("sms_number_not_sender")
+                        }
+                    }
+                    val number = accumulator.field("number", action.number, MAX_SHORT_TEXT)
+                    if (!TelephonyActionPolicy.isValidNumber(number)) throw ResolutionException("sms_number_invalid")
+                    action.copy(
+                        number = number,
+                        text = accumulator.field("text", action.text, TelephonyActionPolicy.MAX_SMS_CHARS),
+                    )
+                }
 
                 is Action.SendIntent -> action.copy(
                     extras = action.extras.mapIndexed { index, extra ->
@@ -358,6 +372,9 @@ class TaintAwareInterpolator {
 
         val PACKAGE_NAME = Regex("^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+$")
 
+        /** Provenienze del numero di chi ha chiamato o scritto: le sole ammesse come destinatario di un SMS. */
+        val SENDER_PROVENANCE = setOf(ValueProvenance.PHONE, ValueProvenance.SMS)
+
         /**
          * Host del template `open_url` quando è letterale: ogni segnaposto viene dopo il `/`, `?` o `#`
          * che chiude l'autorità. Null se l'host dipende da un segnaposto o il template non ha forma URL.
@@ -450,13 +467,14 @@ class TaintAwareInterpolator {
 
             is Action.NotificationAction -> NotificationActionPolicy.isShapeValid(action)
 
-            is Action.SendSms -> false
+            is Action.SendSms -> TelephonyActionPolicy.isValidNumber(action.number) && action.text.isNotBlank() &&
+                action.text.length <= TelephonyActionPolicy.MAX_SMS_CHARS
 
-            is Action.CallNumber -> false
+            is Action.CallNumber -> TelephonyActionPolicy.isValidNumber(action.number)
 
-            is Action.SendIntent -> false
+            is Action.SendIntent -> TelephonyActionPolicy.intentProblems(action, resolved = true).isEmpty()
 
-            is Action.ScreenCall -> false
+            is Action.ScreenCall -> true
         }
     }
 }

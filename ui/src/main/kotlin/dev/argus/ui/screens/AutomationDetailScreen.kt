@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Block
+import androidx.compose.material.icons.rounded.CallEnd
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.Delete
@@ -534,6 +535,8 @@ private fun runVisual(row: LogRow): Pair<ImageVector, Pair<Color, Color>> {
         AuditKind.RULE_ARMED, AuditKind.RULE_ENABLED -> Icons.Rounded.CheckCircle to (s.armed.bg to s.armed.fg)
         AuditKind.RULE_DISABLED, AuditKind.RULE_DELETED -> Icons.Rounded.Block to neutral
         AuditKind.RULE_NEEDS_REVIEW -> Icons.Rounded.SyncProblem to (s.needsReview.bg to s.needsReview.fg)
+        // 0.8: decisione del filtro chiamate.
+        AuditKind.CALL_SCREENED -> Icons.Rounded.CallEnd to neutral
         AuditKind.FIRED -> when (row.outcome) {
             LogOutcome.SUCCESS -> Icons.Rounded.CheckCircle to (s.armed.bg to s.armed.fg)
             LogOutcome.PARTIAL -> Icons.Rounded.CheckCircle to (s.pending.bg to s.pending.fg)

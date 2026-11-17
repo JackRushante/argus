@@ -258,6 +258,63 @@ internal object LogReasonLabels {
             "this is not available in this version",
             "non disponibile in questa versione",
         ),
+        // --- 0.8: SMS, chiamate, Intent, filtro chiamate ---
+        "sms_rate_limited" to Label(
+            "limit reached: at most 10 SMS an hour",
+            "limite raggiunto: al massimo 10 SMS l'ora",
+        ),
+        "sms_destination_rate_limited" to Label(
+            "limit reached: at most 3 SMS an hour to the same number",
+            "limite raggiunto: al massimo 3 SMS l'ora allo stesso numero",
+        ),
+        "call_rate_limited" to Label(
+            "limit reached: at most 3 calls an hour",
+            "limite raggiunto: al massimo 3 chiamate l'ora",
+        ),
+        "telephony_rate_ledger_unavailable" to Label(
+            "not sent: the hourly SMS and call count could not be saved",
+            "non inviato: non si è potuto salvare il conteggio orario di SMS e chiamate",
+        ),
+        "sms_number_not_sender" to Label(
+            "the SMS recipient is not the number that called or texted",
+            "il destinatario dell'SMS non è il numero che ha chiamato o scritto",
+        ),
+        "sms_number_invalid" to Label(
+            "the SMS recipient is not a valid phone number",
+            "il destinatario dell'SMS non è un numero valido",
+        ),
+        "telephony_unavailable" to Label(
+            "this phone cannot send SMS or make calls",
+            "questo telefono non può inviare SMS né fare chiamate",
+        ),
+        "sms_send_permission_missing" to Label(
+            "the permission to send SMS is missing",
+            "manca il permesso per inviare SMS",
+        ),
+        "call_permission_missing" to Label(
+            "the permission to make calls is missing",
+            "manca il permesso per fare chiamate",
+        ),
+        "intent_unresolved" to Label(
+            "no app on the phone accepts this Intent",
+            "nessuna app del telefono accetta questo Intent",
+        ),
+        "intent_target_forbidden" to Label(
+            "an Intent cannot be sent to Argus itself",
+            "un Intent non può essere rivolto ad Argus stesso",
+        ),
+        "screen_call_known_caller" to Label(
+            "the caller is in your contacts: the rule is only for unknown callers",
+            "chi chiama è nei tuoi contatti: la regola vale solo per gli sconosciuti",
+        ),
+        "screen_call_caller_unverified" to Label(
+            "it was not possible to check whether the caller is in your contacts, so the rule did not run",
+            "non si è potuto verificare se chi chiama è nei tuoi contatti, quindi la regola non è partita",
+        ),
+        "screen_call_not_applied" to Label(
+            "the call screening did not decide this call",
+            "il filtro chiamate non ha deciso questa chiamata",
+        ),
         // --- 0.8: valori conservati e modalità ---
         "stored_type_mismatch" to Label(
             "the saved variable has a different type",

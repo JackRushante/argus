@@ -1130,8 +1130,15 @@ class RuleRenderCoverageTest {
                 ),
             ),
             "send_sms" to case(
-                Action.SendSms("+39XYZ111", "XYZ-sms-text"),
-                mapOf("number" to ms("+39XYZ111"), "text" to ms("XYZ-sms-text")),
+                v(
+                    Action.SendSms("+39XYZ111", "XYZ-sms-text"),
+                    "number" to ms("+39XYZ111"),
+                    "text" to ms("XYZ-sms-text"),
+                ),
+                v(
+                    Action.SendSms("\${xyzcaller}", "x"),
+                    "number" to ms(m("whoever called or texted", "chi ha chiamato o scritto"), m("\${xyzcaller}")),
+                ),
             ),
             "call_number" to case(Action.CallNumber("+39XYZ222"), mapOf("number" to ms("+39XYZ222"))),
             "send_intent" to case(
@@ -1166,10 +1173,12 @@ class RuleRenderCoverageTest {
                 v(
                     Action.ScreenCall(ScreenCallOp.REJECT),
                     "op" to ms(m("Reject the incoming call", "Rifiuta la chiamata in arrivo")),
+                    "onlyUnknownCallers" to ms(m("Every caller", "Chiunque chiami")),
                 ),
                 v(
-                    Action.ScreenCall(ScreenCallOp.SILENCE),
+                    Action.ScreenCall(ScreenCallOp.SILENCE, onlyUnknownCallers = true),
                     "op" to ms(m("Silence the incoming call", "Silenzia la chiamata in arrivo")),
+                    "onlyUnknownCallers" to ms(m("not in your contacts", "non è nei tuoi contatti")),
                 ),
             ),
         )
