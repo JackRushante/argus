@@ -390,50 +390,67 @@ class AndroidArmedAutomationRegistrar(
     private val foregroundLauncher: ReceiverWorkLauncher? = null,
     /** 0.8: sveglie per regola del trigger `calendar_event`. */
     private val calendar: CalendarTriggerRuntime = NoopCalendarTriggerRuntime,
+    /** 0.8: le sveglie di fine delle regole-intervallo (orario o prossima sveglia come trigger di fine). */
+    private val exitTimeAlarms: TimeAlarmCoordinator? = null,
 ) : ArmedAutomationRegistrar {
-    override suspend fun register(automation: Automation): Boolean = when (automation.trigger) {
+    /**
+     * 0.8: una regola-intervallo è armata solo se anche la sua FINE è registrata: un intervallo che non può finire
+     * lascerebbe i valori cambiati. Il trigger di fine non è mai immediato né manuale (validator).
+     */
+    override suspend fun register(automation: Automation): Boolean {
+        if (!register(automation, automation.trigger)) return false
+        val end = automation.exit?.trigger ?: return true
+        return when (end) {
+            is Trigger.Immediate, is Trigger.Manual -> false
+            else -> register(automation, end)
+        }
+    }
+
+    private suspend fun register(automation: Automation, trigger: Trigger): Boolean = when (trigger) {
         is Trigger.Time -> registerTime(automation)
         is Trigger.Immediate -> registerImmediate(automation)
         is Trigger.Notification -> registerNotification(automation)
         // I receiver manifest sono sempre attivi: la registrazione OS è il grant runtime
         // stesso, verificato qui con la capability granulare dell'evento (sms vs call).
-        is Trigger.PhoneState -> registerBroadcastBacked(automation)
-        is Trigger.Connectivity -> registerConnectivity(automation)
-        is Trigger.Geofence -> registerGeofence(automation)
-        is Trigger.Sensor -> registerSensor(automation)
+        is Trigger.PhoneState -> registerBroadcastBacked(automation, trigger)
+        is Trigger.Connectivity -> registerConnectivity(automation, trigger)
+        is Trigger.Geofence -> registerGeofence(automation, trigger)
+        is Trigger.Sensor -> registerSensor(automation, trigger)
         // 0.4.1: eventi di sistema senza Shizuku, registrati dalla sentinella condivisa.
         is Trigger.Screen, is Trigger.Battery, is Trigger.AudioOutput, is Trigger.ModeChanged,
         is Trigger.Media,
         // 0.5.1: app aperta/chiusa, letta dalla sentinella condivisa (serve l'accesso ai dati di utilizzo).
         is Trigger.AppEvent,
-        -> registerDeviceEvent(automation)
+        -> registerDeviceEvent(automation, trigger)
         // 0.4.1: avvio manuale. Nessuna registrazione OS: parte solo da un gesto dell'utente. Basta che
         // la capability sia pubblicata e che la regola sia davvero armata nello store.
-        is Trigger.Manual -> registerBroadcastBacked(automation)
+        is Trigger.Manual -> registerBroadcastBacked(automation, trigger)
         // 0.8 scaffold: nessuna sorgente ancora (il validator li rifiuta con not_available_yet). Chi
         // implementa un trigger registra qui la sua sorgente al posto di `false`.
-        is Trigger.CalendarEvent -> registerCalendar(automation)
+        is Trigger.CalendarEvent -> registerCalendar(automation, trigger)
 
         // 0.8: il tag arriva dal trampolino NFC (receiver del sistema, sempre attivo): basta che la capability
         // sia pubblicata (telefono con NFC) e che la regola sia armata. Niente da tenere acceso.
-        is Trigger.NfcTag -> registerBroadcastBacked(automation)
+        is Trigger.NfcTag -> registerBroadcastBacked(automation, trigger)
 
         // 0.8: la prossima sveglia passa dallo stesso coordinatore delle regole a orario.
         is Trigger.NextAlarm -> registerTime(automation)
 
         // 0.8: tempo d'uso di un'app, letto dalla sentinella condivisa come app_event.
-        is Trigger.AppUsage -> registerDeviceEvent(automation)
+        is Trigger.AppUsage -> registerDeviceEvent(automation, trigger)
 
         // 0.8: la sorgente è UserModeSwitcher (schermata, riquadro, widget, set_user_mode): nessuna
         // registrazione OS, come l'avvio manuale.
-        is Trigger.UserModeChanged -> registerBroadcastBacked(automation)
+        is Trigger.UserModeChanged -> registerBroadcastBacked(automation, trigger)
     }
 
+    /** Orari e prossima sveglia: i due coordinatori (inizio e fine) si riallineano insieme. */
     private suspend fun registerTime(automation: Automation): Boolean = try {
         val report = coordinator.reconcile(ReconcileReason.CAPABILITY_CHANGED)
+        val exitReport = exitTimeAlarms?.reconcile(ReconcileReason.CAPABILITY_CHANGED)
         val persisted = store.get(automation.id)
-        automation.id !in report.failed && persisted?.status == AutomationStatus.ARMED &&
-            persisted.enabled
+        automation.id !in report.failed && automation.id !in exitReport?.failed.orEmpty() &&
+            persisted?.status == AutomationStatus.ARMED && persisted.enabled
     } catch (error: CancellationException) {
         throw error
     } catch (_: Exception) {
@@ -509,10 +526,10 @@ class AndroidArmedAutomationRegistrar(
         false
     }
 
-    private suspend fun registerBroadcastBacked(automation: Automation): Boolean = try {
+    private suspend fun registerBroadcastBacked(automation: Automation, trigger: Trigger): Boolean = try {
         val snapshot = snapshots.current()
         val persisted = store.get(automation.id)
-        val required = CapabilityRequirements.derive(automation.trigger, emptyList())
+        val required = CapabilityRequirements.derive(trigger, emptyList())
         required.all { it in snapshot.availableCapabilities } &&
             persisted?.status == AutomationStatus.ARMED && persisted.enabled
     } catch (error: CancellationException) {
@@ -521,9 +538,9 @@ class AndroidArmedAutomationRegistrar(
         false
     }
 
-    private suspend fun registerConnectivity(automation: Automation): Boolean {
-        if (!registerBroadcastBacked(automation)) return false
-        val medium = (automation.trigger as Trigger.Connectivity).medium
+    private suspend fun registerConnectivity(automation: Automation, trigger: Trigger.Connectivity): Boolean {
+        if (!registerBroadcastBacked(automation, trigger)) return false
+        val medium = trigger.medium
         if (medium == ConnMedium.BT) return true
         return try {
             val report = connectivity.reconcile()
@@ -540,8 +557,8 @@ class AndroidArmedAutomationRegistrar(
      * del trigger deve essere pubblicata, poi il reconcile della sentinella accende il servizio e
      * registra la sorgente. Armata solo se la sentinella è davvero attiva.
      */
-    private suspend fun registerDeviceEvent(automation: Automation): Boolean {
-        if (!registerBroadcastBacked(automation)) return false
+    private suspend fun registerDeviceEvent(automation: Automation, trigger: Trigger): Boolean {
+        if (!registerBroadcastBacked(automation, trigger)) return false
         return try {
             val report = connectivity.reconcile()
             report.active && automation.id in report.requiredBy && automation.id !in report.failed
@@ -552,8 +569,8 @@ class AndroidArmedAutomationRegistrar(
         }
     }
 
-    private suspend fun registerGeofence(automation: Automation): Boolean {
-        if (!registerBroadcastBacked(automation)) return false
+    private suspend fun registerGeofence(automation: Automation, trigger: Trigger): Boolean {
+        if (!registerBroadcastBacked(automation, trigger)) return false
         return try {
             val report = geofence.reconcile(recreateOsRegistrations = false)
             automation.id in report.requiredBy && automation.id !in report.failed
@@ -564,10 +581,10 @@ class AndroidArmedAutomationRegistrar(
         }
     }
 
-    private suspend fun registerSensor(automation: Automation): Boolean {
+    private suspend fun registerSensor(automation: Automation, trigger: Trigger): Boolean {
         // Il pre-check verifica la capability granulare `trigger.sensor.<kind>`, pubblicata dal
         // probe solo quando hardware, grant e backend collegato coincidono.
-        if (!registerBroadcastBacked(automation)) return false
+        if (!registerBroadcastBacked(automation, trigger)) return false
         return try {
             val report = sensor.reconcile()
             automation.id in report.requiredBy &&
@@ -584,8 +601,8 @@ class AndroidArmedAutomationRegistrar(
      * 0.8, calendario: capability pubblicata (permesso `READ_CALENDAR`), poi il reconcile legge il
      * calendario e programma la prossima istanza. Armata solo se il calendario si è letto davvero.
      */
-    private suspend fun registerCalendar(automation: Automation): Boolean {
-        if (!registerBroadcastBacked(automation)) return false
+    private suspend fun registerCalendar(automation: Automation, trigger: Trigger): Boolean {
+        if (!registerBroadcastBacked(automation, trigger)) return false
         return try {
             val report = calendar.reconcile()
             automation.id in report.requiredBy && automation.id !in report.failed

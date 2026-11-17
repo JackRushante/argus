@@ -5,6 +5,7 @@ import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.listenedTriggers
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.runtime.CalendarOccurrence
 import dev.argus.engine.runtime.CalendarTriggerPlanner
@@ -73,15 +74,19 @@ class CalendarTriggerCoordinator(
     suspend fun onAlarm(automationId: AutomationId, fingerprint: ApprovalFingerprint) {
         val toDeliver = mutex.withLock {
             val rule = store.get(automationId)
-            val trigger = rule?.trigger as? Trigger.CalendarEvent
-            val due = if (rule != null && trigger != null && rule.isArmedCalendar() &&
+            // 0.8: l'inizio e, per una regola-intervallo, la fine (fasi diverse: validator); la deduplica è per fase.
+            val triggers = rule?.calendarTriggers().orEmpty()
+            val due = if (rule != null && triggers.isNotEmpty() && rule.isArmedCalendar() &&
                 rule.approvalFingerprint == fingerprint
             ) {
                 val now = nowMillis()
                 val (from, to) = CalendarTriggerPlanner.queryWindow(now)
                 source.read(from, to)
                     ?.let { instances ->
-                        CalendarTriggerPlanner.due(trigger, instances, now, firedStore.fired(automationId))
+                        val fired = firedStore.fired(automationId)
+                        triggers.flatMap { trigger -> CalendarTriggerPlanner.due(trigger, instances, now, fired) }
+                            .distinctBy { it.key }
+                            .sortedBy { it.fireAtMillis }
                     }
                     .orEmpty()
                     // Prima si persiste lo scatto, poi si consegna: al più una volta per istanza e fase.
@@ -137,9 +142,12 @@ class CalendarTriggerCoordinator(
         }
         val failed = linkedSetOf<AutomationId>()
         rules.forEach { rule ->
-            val trigger = rule.trigger as Trigger.CalendarEvent
             val fingerprint = requireNotNull(rule.approvalFingerprint)
-            val next = CalendarTriggerPlanner.next(trigger, instances, now, firedStore.fired(rule.id))
+            val fired = firedStore.fired(rule.id)
+            // Una sveglia per regola: la prima istanza dovuta fra inizio e fine.
+            val next = rule.calendarTriggers()
+                .mapNotNull { trigger -> CalendarTriggerPlanner.next(trigger, instances, now, fired) }
+                .minByOrNull { it.fireAtMillis }
             val replanAt = now + REPLAN_INTERVAL_MILLIS
             try {
                 if (next != null && next.fireAtMillis <= replanAt) {
@@ -158,7 +166,10 @@ class CalendarTriggerCoordinator(
     }
 
     private fun Automation.isArmedCalendar(): Boolean =
-        status == AutomationStatus.ARMED && enabled && trigger is Trigger.CalendarEvent && approvalFingerprint != null
+        status == AutomationStatus.ARMED && enabled && calendarTriggers().isNotEmpty() && approvalFingerprint != null
+
+    private fun Automation.calendarTriggers(): List<Trigger.CalendarEvent> =
+        listenedTriggers.filterIsInstance<Trigger.CalendarEvent>()
 
     companion object {
         /** Ricontrollo quando non c'è niente da programmare entro un giorno. */

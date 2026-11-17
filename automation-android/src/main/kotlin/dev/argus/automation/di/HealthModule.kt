@@ -22,6 +22,7 @@ import dev.argus.data.ArgusDatabase
 import dev.argus.data.RoomExecutionJournal
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.listenedTriggers
 import dev.argus.engine.runtime.AutomationStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -119,7 +120,7 @@ object HealthModule {
         @ApplicationContext context: Context,
         store: AutomationStore,
     ): NotificationListenerWatchdog = NotificationListenerWatchdog(
-        notificationRulesArmed = { store.armed().any { it.trigger is Trigger.Notification } },
+        notificationRulesArmed = { store.armed().any { rule -> rule.listenedTriggers.any { it is Trigger.Notification } } },
         accessGranted = {
             runCatching {
                 context.packageName in NotificationManagerCompat.getEnabledListenerPackages(context)

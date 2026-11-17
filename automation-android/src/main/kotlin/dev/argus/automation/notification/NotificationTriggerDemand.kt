@@ -3,6 +3,7 @@ package dev.argus.automation.notification
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.listenedTriggers
 import dev.argus.engine.notification.ParsedNotification
 import dev.argus.engine.runtime.TriggerEvent
 import kotlinx.coroutines.CancellationException
@@ -58,9 +59,11 @@ class NotificationTriggerDemand(
                 val packages = linkedSetOf<String>()
                 for (rule in rules) {
                     if (rule.status != AutomationStatus.ARMED || !rule.enabled) continue
-                    val trigger = rule.trigger as? Trigger.Notification ?: continue
-                    if (trigger.pkg.isBlank()) return Everything
-                    packages += trigger.pkg
+                    // 0.8: anche la notifica che chiude una regola-intervallo.
+                    for (trigger in rule.listenedTriggers.filterIsInstance<Trigger.Notification>()) {
+                        if (trigger.pkg.isBlank()) return Everything
+                        packages += trigger.pkg
+                    }
                 }
                 return Packages(packages)
             }

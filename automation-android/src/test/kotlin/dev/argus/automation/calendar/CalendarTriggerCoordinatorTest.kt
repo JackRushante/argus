@@ -84,6 +84,35 @@ class CalendarTriggerCoordinatorTest {
     }
 
     @Test
+    fun `a span on the calendar plans its start and then its end, each phase once`() = runTest {
+        // 0.8: «durante le riunioni Non disturbare, poi com'era»: inizio START, fine END dello stesso evento.
+        val unsigned = rule("span", Trigger.CalendarEvent(CalendarPhase.START)).copy(
+            exit = dev.argus.engine.model.ExitSpec(Trigger.CalendarEvent(CalendarPhase.END)),
+            approvalFingerprint = null,
+        )
+        val span = unsigned.copy(approvalFingerprint = ApprovalFingerprints.of(unsigned))
+        val harness = Harness(listOf(span), listOf(meeting)) { now }
+
+        assertEquals(listOf(span.id), harness.coordinator.reconcile().requiredBy)
+        assertEquals(Scheduled(meeting.beginMillis, exact = true), harness.alarms.scheduled[span.id])
+
+        now = meeting.beginMillis + 1_000
+        harness.coordinator.onAlarm(span.id, span.approvalFingerprint!!)
+        assertEquals(CalendarPhase.START, assertIs<TriggerEvent.CalendarEventFired>(harness.delivered.single().event).phase)
+        // Dopo l'inizio la sveglia della regola va alla fine dello stesso evento.
+        assertEquals(Scheduled(meeting.endMillis, exact = true), harness.alarms.scheduled[span.id])
+
+        now = meeting.endMillis + 1_000
+        harness.coordinator.onAlarm(span.id, span.approvalFingerprint!!)
+        assertEquals(
+            listOf(CalendarPhase.START, CalendarPhase.END),
+            harness.delivered.map { assertIs<TriggerEvent.CalendarEventFired>(it.event).phase },
+        )
+        harness.coordinator.onAlarm(span.id, span.approvalFingerprint!!)
+        assertEquals(2, harness.delivered.size)
+    }
+
+    @Test
     fun `without an instance within a day it schedules an inexact recheck`() = runTest {
         val start = rule("start", Trigger.CalendarEvent(CalendarPhase.START))
         val harness = Harness(listOf(start), listOf(meeting.copy(beginMillis = now + 3 * day, endMillis = now + 3 * day + minute))) { now }

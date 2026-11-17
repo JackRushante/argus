@@ -46,6 +46,7 @@ import dev.argus.engine.brain.WhitelistedContact
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.CapabilityRequirements
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.listenedTriggers
 import dev.argus.engine.notification.ObservedConversation
 import dev.argus.engine.notification.ObservedConversationStore
 import dev.argus.engine.runtime.AutomationStore
@@ -393,8 +394,8 @@ class SettingsViewModel @Inject constructor(
         @Suppress("UNCHECKED_CAST")
         val observed = values[5] as List<ObservedConversation>
         val shizukuIdentity = values[6] as ShizukuIdentity?
-        val geofenceNeeded = rules.any { it.trigger is Trigger.Geofence } ||
-            pending.any { it.draft.trigger is Trigger.Geofence }
+        val geofenceNeeded = rules.any { rule -> rule.listenedTriggers.any { it is Trigger.Geofence } } ||
+            pending.any { snapshot -> snapshot.draft.listenedTriggers.any { it is Trigger.Geofence } }
         val shizukuNeeded = rules.any { rule ->
             rule.requiredCapabilities.any(AndroidCapabilityProbe.SHIZUKU_CAPABILITIES::contains)
         } || pending.any { snapshot ->

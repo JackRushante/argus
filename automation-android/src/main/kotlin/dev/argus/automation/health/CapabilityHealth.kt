@@ -4,6 +4,7 @@ import dev.argus.automation.BlockCause
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.TimePrecision
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.listenedTriggers
 
 /**
  * Le cose di cui una regola armata può restare senza da un momento all'altro (0.7.2): ognuna ha il suo
@@ -52,8 +53,11 @@ object CapabilityHealth {
         }
         // Solo le regole a orario che hanno chiesto la puntualità usano la sveglia esatta: le altre
         // sono inesatte di proposito e non perdono nulla.
-        val trigger = rule.trigger
-        if (!snapshot.exactAlarmsGranted && trigger is Trigger.Time && trigger.precision == TimePrecision.EXACT) {
+        // 0.8: anche l'orario di fine di una regola-intervallo.
+        val exact = rule.listenedTriggers.any { trigger ->
+            trigger is Trigger.Time && trigger.precision == TimePrecision.EXACT
+        }
+        if (!snapshot.exactAlarmsGranted && exact) {
             add(HealthCapability.EXACT_ALARMS)
         }
     }

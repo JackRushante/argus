@@ -1,6 +1,7 @@
 package dev.argus.automation.phone
 
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.listenedTriggers
 import dev.argus.engine.runtime.AuditEvent
 import dev.argus.engine.runtime.AuditKind
 import dev.argus.engine.runtime.AuditSink
@@ -37,10 +38,12 @@ class SimAuditingPhoneEventDispatcher(
     private suspend fun recordUnknownSim(envelope: TriggerEnvelope, event: TriggerEvent.PhoneStateChanged) {
         try {
             store.armed().forEach { automation ->
-                val trigger = automation.trigger as? Trigger.PhoneState ?: return@forEach
-                if (trigger.sim == null) return@forEach
-                // Scatterebbe se lo slot fosse noto: solo allora il filtro SIM è la causa.
-                if (!matcher.matches(trigger.copy(sim = null), event)) return@forEach
+                // 0.8: anche la telefonata o l'SMS che chiude una regola-intervallo.
+                val blockedBySim = automation.listenedTriggers.filterIsInstance<Trigger.PhoneState>().any { trigger ->
+                    // Scatterebbe se lo slot fosse noto: solo allora il filtro SIM è la causa.
+                    trigger.sim != null && matcher.matches(trigger.copy(sim = null), event)
+                }
+                if (!blockedBySim) return@forEach
                 audit.record(
                     AuditEvent(
                         automationId = automation.id,

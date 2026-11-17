@@ -313,10 +313,21 @@ class ApprovalFlow(
         var snapshot = currentReview.draft.snapshot
         // Geofence «qui» e alba/tramonto (0.4.1) si risolvono allo stesso modo: la posizione del
         // telefono si legge ora, si scrive nella bozza e l'impronta approvata la include.
+        // 0.8: anche il trigger di fine di una regola-intervallo (stessa lettura: inizio e fine sulla stessa area).
         val locationTrigger = snapshot.draft.trigger
-        if (needsCurrentLocation(locationTrigger)) {
+        val exitLocationTrigger = snapshot.draft.exit?.trigger
+        if (needsCurrentLocation(locationTrigger) || exitLocationTrigger?.let(::needsCurrentLocation) == true) {
             val resolved = currentLocation() ?: return FlowArmResult.LocationUnavailable
-            val revisedDraft = snapshot.draft.copy(trigger = withCurrentLocation(locationTrigger, resolved))
+            val revisedDraft = snapshot.draft.copy(
+                trigger = if (needsCurrentLocation(locationTrigger)) {
+                    withCurrentLocation(locationTrigger, resolved)
+                } else {
+                    locationTrigger
+                },
+                exit = snapshot.draft.exit?.let { exit ->
+                    if (needsCurrentLocation(exit.trigger)) exit.copy(trigger = withCurrentLocation(exit.trigger, resolved)) else exit
+                },
+            )
             when (
                 val revised = drafts.revise(
                     id = snapshot.id,
@@ -467,8 +478,13 @@ class ApprovalFlow(
      * WARNING `nfc_scan_unverifiable`. Le altre azioni partono normalmente.
      */
     private fun unverifiableNfcIssues(snapshot: PendingDraft): List<ValidationIssue> {
-        if (snapshot.draft.trigger !is Trigger.NfcTag) return emptyList()
-        val gated = snapshot.draft.actions.any { action -> action.containsShellOrMacro() }
+        // 0.8: un tag che chiude una regola-intervallo vale per le azioni di fine.
+        val draft = snapshot.draft
+        val startGated = draft.trigger is Trigger.NfcTag && draft.actions.any { it.containsShellOrMacro() }
+        val endGated = draft.exit?.let { exit ->
+            exit.trigger is Trigger.NfcTag && exit.actions.any { it.containsShellOrMacro() }
+        } == true
+        val gated = startGated || endGated
         if (!gated) return emptyList()
         if (runCatching(nfcScansVerifiable).getOrDefault(false)) {
             // Android 15+: la prova c'è solo se il servizio NFC condivide la sua identità con l'activity

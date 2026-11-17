@@ -540,6 +540,9 @@ class AndroidCapabilityProbe internal constructor(
             add(CapabilityIds.TRIGGER_MANUAL)
             // 0.8: valori conservati e modalità vivono nel database di Argus: nessun grant, sempre disponibili.
             addAll(STORED_MODE_CAPABILITIES)
+            // 0.8: le regole-intervallo tengono il loro stato nelle preferenze di Argus: nessun grant. Rimettere un
+            // valore chiede, valore per valore, le capacità che servono a impostarlo (controllate alla fine).
+            add(CapabilityIds.RULE_EXIT)
             // Geofence e SSID richiedono permessi E servizi di localizzazione accesi: con la
             // posizione spenta dalle impostazioni rapide non funzionano (blocco temporaneo, D6).
             if (state.locationUsable) add(CapabilityIds.TRIGGER_GEOFENCE)
@@ -829,9 +832,7 @@ class AndroidCapabilityProbe internal constructor(
          * Chi implementa una famiglia toglie la SUA riga da qui e la pubblica in `resolve()` alle sue
          * condizioni (permesso, hardware), insieme all'interruttore in `FeatureGates`.
          */
-        val NOT_YET_AVAILABLE_CAPABILITIES: Set<String> = setOf(
-            CapabilityIds.RULE_EXIT,
-        )
+        val NOT_YET_AVAILABLE_CAPABILITIES: Set<String> = emptySet()
 
         /** 0.8: valori conservati e modalità utente (database di Argus, nessun permesso). */
         val STORED_MODE_CAPABILITIES: Set<String> = setOf(
