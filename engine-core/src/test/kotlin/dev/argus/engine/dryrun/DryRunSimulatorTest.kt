@@ -196,7 +196,7 @@ class DryRunSimulatorTest {
         val flow = no.steps.filterIsInstance<DryRunStep.Flow>().single()
         assertEquals(ConditionEvaluator.Result.NOT_MET, flow.result)
         assertIs<Action.ShowNotification>(no.leaves().last().action)
-        assertEquals("1.else.1", no.leaves().last().path.value)
+        assertEquals("2.else.1", no.leaves().last().path.value)
 
         // Validated like a real answer: anything but yes/no is a closed failure, never coerced.
         val invalid = simulator().simulate(request(automation, answers = mapOf(key to DryRunAnswer.Text("forse"))))
