@@ -18,8 +18,9 @@ class SuiteFilesTest(unittest.TestCase):
 
     def test_size_is_in_the_expected_range(self):
         # «circa 100 automazioni»: ne servono abbastanza da coprire le coppie, non una per ogni combinazione.
+        # 0.8: i tipi nuovi (calendario, notifiche, valori conservati e modalità) portano le loro regole.
         self.assertGreaterEqual(len(self.records), 90)
-        self.assertLessEqual(len(self.records), 170)
+        self.assertLessEqual(len(self.records), 200)
 
     def test_every_required_pair_is_covered(self):
         self.assertEqual([], [pairwise.describe(p) for p in pairwise.missing_pairs(self.records)])

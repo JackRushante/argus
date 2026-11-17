@@ -16,6 +16,7 @@ import dev.argus.engine.model.SecretPolicy
 import dev.argus.engine.model.StateQueryFamily
 import dev.argus.engine.model.StateValueType
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.UserModePolicy
 import dev.argus.engine.model.stateComparisons
 import dev.argus.engine.runtime.AuditEvent
 import dev.argus.engine.runtime.AuditKind
@@ -62,6 +63,11 @@ data class DeviceLocation(
     companion object {
         const val MAX_CONTRADICTION_FIX_AGE_MILLIS = 30_000L
     }
+}
+
+/** 0.8: i nomi delle modalità definite adesso (Room in produzione). */
+fun interface UserModeNames {
+    suspend fun names(): List<String>
 }
 
 fun interface CurrentLocationProvider {
@@ -124,6 +130,11 @@ class ApprovalFlow(
     },
     /** 0.7.0: controllo fatto SUL TELEFONO all'approvazione: un package non installato è un avviso, mai un errore. */
     private val installedPackages: InstalledPackageCheck = AssumeAllInstalled,
+    /**
+     * 0.8: i nomi delle modalità definite adesso. Una regola che ne nomina una che non esiste non si arma
+     * (ERROR `user_mode_unknown`). Default: nessuna modalità, quindi fail-closed.
+     */
+    private val userModes: UserModeNames = UserModeNames { emptyList() },
     /**
      * 0.8: i nomi dei segreti salvati nella cassaforte del telefono (mai i valori). Default: nessuno, quindi
      * una regola che nomina un segreto non si arma finché il caller non cabla la cassaforte.
@@ -241,7 +252,7 @@ class ApprovalFlow(
         val base = approvals.review(id) ?: return null
         val capabilityIssues = capabilityIssues(base.snapshot)
         val appIssues = missingAppIssues(base.snapshot) + systemFreezeIssues(base.snapshot) +
-            missingSecretIssues(base.snapshot)
+            userModeIssues(base.snapshot) + missingSecretIssues(base.snapshot)
         val queryReport = if (capabilityIssues.any { it.severity == Severity.ERROR }) {
             StateQueryProbeReport()
         } else {
@@ -447,6 +458,34 @@ class ApprovalFlow(
                 detail = pkg,
             )
         }
+    }
+
+    /**
+     * 0.8: ogni modalità nominata dalla regola (trigger, condizioni, `set_user_mode`) deve esistere adesso,
+     * senza maiuscole. Una per nome mancante, con il nome in `detail`. Se l'elenco non si legge: ERROR anche lì.
+     */
+    private suspend fun userModeIssues(snapshot: PendingDraft): List<ValidationIssue> {
+        val used = UserModePolicy.modesUsedBy(snapshot.draft)
+        if (used.isEmpty()) return emptyList()
+        val existing = try {
+            userModes.names()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            return listOf(
+                ValidationIssue(Severity.ERROR, "user_mode_unavailable", "Impossibile leggere l'elenco delle modalità"),
+            )
+        }
+        return used.filter { name -> existing.none { UserModePolicy.same(it, name) } }
+            .distinctBy(UserModePolicy::key)
+            .map { name ->
+                ValidationIssue(
+                    Severity.ERROR,
+                    "user_mode_unknown",
+                    "Modalità inesistente: $name",
+                    detail = name,
+                )
+            }
     }
 
     private suspend fun stateQueryReport(snapshot: PendingDraft): StateQueryProbeReport {

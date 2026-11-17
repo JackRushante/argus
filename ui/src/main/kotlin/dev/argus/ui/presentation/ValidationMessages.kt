@@ -31,6 +31,8 @@ object ValidationMessages {
         "app_control_freeze_system",
         "secret_missing",
         "not_available_yet",
+        // 0.8: il dettaglio è il nome della modalità che manca.
+        "user_mode_unknown",
     )
 
     /** Codici d'errore di un passo di macro: il [ValidationIssue.detail] è il numero del passo, che si antepone. */
@@ -870,6 +872,31 @@ object ValidationMessages {
         "conflict_user_mode" to t(
             "Another active rule sets the user mode to a different value on triggers that may overlap.",
             "Un'altra regola attiva imposta la modalità utente su un valore diverso con trigger che possono sovrapporsi.",
+        ),
+        // --- 0.8 · valori conservati e modalità ---
+        "stored_key_invalid" to t(
+            "A saved variable name uses lowercase letters, digits and _, starts with a letter, at most 32 characters.",
+            "Il nome di una variabile salvata usa lettere minuscole, cifre e _, inizia con una lettera, al massimo 32 caratteri.",
+        ),
+        "set_stored_invalid" to t(
+            "Saving a variable needs a value of at most 1024 characters to set, at most a whole number to add, and nothing to toggle or delete.",
+            "Salvare una variabile richiede un valore di al massimo 1024 caratteri da impostare, al più un numero intero da aggiungere e nessun valore per invertire o cancellare.",
+        ),
+        "stored_compare_invalid" to t(
+            "The comparison on a saved variable does not fit its type.",
+            "Il confronto su una variabile salvata non è adatto al suo tipo.",
+        ),
+        "user_mode_name_invalid" to t(
+            "A mode name is written as is, 1 to 24 characters.",
+            "Il nome di una modalità è scritto per intero, da 1 a 24 caratteri.",
+        ),
+        "user_mode_unknown" to t(
+            "This rule uses a mode that does not exist: add it in System › Modes, or change the rule.",
+            "Questa regola usa una modalità che non esiste: aggiungila in Sistema › Modalità oppure cambia la regola.",
+        ),
+        "user_mode_unavailable" to t(
+            "The list of modes could not be read.",
+            "Non è stato possibile leggere l'elenco delle modalità.",
         ),
 
         // --- 0.4.1 · azioni senza Shizuku e richiesta HTTP --------------------------------------

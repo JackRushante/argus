@@ -43,4 +43,11 @@
     <string name="pause_tile_label">Pause automations</string>
     <string name="pause_tile_on">Paused</string>
     <string name="pause_tile_off">Active</string>
+    <!-- 0.8: user modes on the quick settings tile and the widget -->
+    <string name="mode_tile_label">Argus: mode</string>
+    <string name="mode_tile_none">No mode</string>
+    <string name="mode_tile_empty">Add modes in Argus</string>
+    <string name="mode_widget_active">✓ %1$s</string>
+    <string name="mode_toast_switched">Mode: %1$s</string>
+    <string name="mode_toast_unavailable">This mode is no longer available.</string>
 </resources>

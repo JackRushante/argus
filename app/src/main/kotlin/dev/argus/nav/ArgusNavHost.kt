@@ -90,6 +90,7 @@ import dev.argus.automation.vm.SecretsEvent
 import dev.argus.automation.vm.SecretsViewModel
 import dev.argus.automation.vm.TemplateGalleryEvent
 import dev.argus.automation.vm.TemplateGalleryViewModel
+import dev.argus.automation.vm.ModesViewModel
 import dev.argus.data.backup.RulesBackupFormat
 import dev.argus.shizuku.ShizukuGatewayStatus
 import dev.argus.ui.components.LocalShellPrivilege
@@ -118,6 +119,8 @@ import dev.argus.ui.screens.OnboardingScreen
 import dev.argus.ui.screens.SettingsScreen
 import dev.argus.ui.screens.SecretsScreen
 import dev.argus.ui.screens.TemplateGalleryScreen
+import dev.argus.ui.screens.ModesScreen
+import dev.argus.ui.model.ModesCallbacks
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -130,6 +133,7 @@ private object Routes {
     const val DETAIL = "detail/{id}"
     const val ONBOARDING = "onboarding"
     const val TEMPLATES = "templates"
+    const val MODES = "modes"
     const val SECRETS = "secrets"
     const val LOG_PATTERN = "$LOG?automationId={automationId}&automationName={automationName}"
 
@@ -508,6 +512,28 @@ fun ArgusNavHost() {
                     )
                 }
 
+                // 0.8: System › Modes (modalità e variabili salvate).
+                composable(Routes.MODES) {
+                    val viewModel: ModesViewModel = hiltViewModel()
+                    val state by viewModel.state.collectAsStateWithLifecycle()
+                    LaunchedEffect(viewModel) { viewModel.messages.collect { showMessage(it) } }
+                    ModesScreen(
+                        state = state,
+                        callbacks = object : ModesCallbacks {
+                            override fun onBack() {
+                                navController.popBackStack()
+                            }
+                            override fun onSwitchMode(name: String) = viewModel.onSwitchMode(name)
+                            override fun onAddMode(name: String) = viewModel.onAddMode(name)
+                            override fun onRenameMode(from: String, to: String) = viewModel.onRenameMode(from, to)
+                            override fun onDeleteMode(name: String) = viewModel.onDeleteMode(name)
+                            override fun onEditValue(key: String, value: String) = viewModel.onEditValue(key, value)
+                            override fun onDeleteValue(key: String) = viewModel.onDeleteValue(key)
+                        },
+                        modifier = Modifier.testTag("screen_modes"),
+                    )
+                }
+
                 // 0.8: System › Secrets. Nomi e conteggi soltanto: un valore va dal foglio alla cassaforte.
                 composable(Routes.SECRETS) {
                     val viewModel: SecretsViewModel = hiltViewModel()
@@ -773,6 +799,9 @@ fun ArgusNavHost() {
                             override fun onRunAutoBackupNow() = settingsViewModel.runAutoBackupNow()
                             override fun onSetAutomationsPaused(paused: Boolean) =
                                 settingsViewModel.setAutomationsPaused(paused)
+                            override fun onOpenModes() {
+                                navController.navigate(Routes.MODES) { launchSingleTop = true }
+                            }
                             override fun onSetHealthAlertsEnabled(enabled: Boolean) =
                                 settingsViewModel.setHealthAlertsEnabled(enabled)
                             override fun onSetResponseTimeout(minutes: Int) =

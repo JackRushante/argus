@@ -47,6 +47,8 @@ class TriggerEnvelopeCodecTest {
         TriggerEvent.NfcTagScanned("04:A2"),
         TriggerEvent.AppUsageChanged("com.example.game", 59, 60),
         TriggerEvent.UserModeChanged("casa", "lavoro"),
+        // 0.8: un cambio fatto da una regola di modalità resta concatenato anche dopo il riavvio.
+        TriggerEvent.UserModeChanged("casa", null, chained = true),
     )
 
     @Test

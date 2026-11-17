@@ -7,6 +7,7 @@ import dev.argus.engine.model.OutputKind
 import dev.argus.engine.model.OutputSpec
 import dev.argus.engine.model.ScreenCallOp
 import dev.argus.engine.model.SecretRef
+import dev.argus.engine.model.StateValueType
 import dev.argus.engine.model.StoredOp
 import dev.argus.engine.model.TelephonyActionPolicy
 import dev.argus.ui.model.ActionRow
@@ -53,7 +54,13 @@ internal object ActionRows08 {
         }
         val value = a.value?.let { l.pick(" · value: ${quoted(it)}", " · valore: ${quoted(it)}") }
             ?: if (a.op == StoredOp.INCREMENT) l.pick(" · by 1", " · di 1") else ""
-        return row("stored", l.pick("Change a stored value", "Cambia un valore conservato"), what + value)
+        // 0.8: il tipo che SET scrive (testo se assente).
+        val type = when (a.valueType) {
+            null, StateValueType.TEXT -> ""
+            StateValueType.NUMBER -> l.pick(" · as a number", " · come numero")
+            StateValueType.BOOLEAN -> l.pick(" · as true/false", " · come vero/falso")
+        }
+        return row("stored", l.pick("Change a stored value", "Cambia un valore conservato"), what + value + type)
     }
 
     fun setUserMode(a: Action.SetUserMode, l: RenderLanguage) = row(

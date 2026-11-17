@@ -307,6 +307,41 @@ internal object LogReasonLabels {
             "the call screening did not decide this call",
             "il filtro chiamate non ha deciso questa chiamata",
         ),
+        // --- 0.8: valori conservati e modalità ---
+        "stored_type_mismatch" to Label(
+            "the saved variable has a different type",
+            "la variabile salvata è di un altro tipo",
+        ),
+        "stored_value_invalid" to Label(
+            "the value to save is not valid (too long or not a number)",
+            "il valore da salvare non è valido (troppo lungo o non numerico)",
+        ),
+        "stored_key_limit" to Label(
+            "there are already 64 saved variables",
+            "ci sono già 64 variabili salvate",
+        ),
+        "stored_key_invalid" to Label("the variable name is not valid", "il nome della variabile non è valido"),
+        "stored_unavailable" to Label(
+            "the saved variables could not be read or written",
+            "non è stato possibile leggere o scrivere le variabili salvate",
+        ),
+        "stored_unresolved" to Label(
+            "the value to save was not prepared by the program",
+            "il valore da salvare non è stato preparato dal programma",
+        ),
+        "user_mode_unknown" to Label("the mode no longer exists", "la modalità non esiste più"),
+        "user_mode_unavailable" to Label(
+            "the modes could not be read or changed",
+            "non è stato possibile leggere o cambiare la modalità",
+        ),
+        "user_mode_renamed" to Label(
+            "a mode used by this rule was renamed",
+            "una modalità usata da questa regola è stata rinominata",
+        ),
+        "user_mode_deleted" to Label(
+            "a mode used by this rule was deleted",
+            "una modalità usata da questa regola è stata eliminata",
+        ),
         // --- 0.8: «chiedimi prima di eseguire», domande con pulsanti, risposte AI vincolate ---
         "confirmation_requested" to Label("waiting for your confirmation", "in attesa della tua conferma"),
         "confirmation_pending" to Label(

@@ -574,12 +574,16 @@ sealed interface Action {
      * Cambia un valore conservato fra le esecuzioni ([FeatureGate.ACTION_SET_STORED]). [key] è il nome
      * letterale del valore; [op] SET scrive [value], INCREMENT lo somma (numerico, default 1), TOGGLE
      * inverte un booleano, CLEAR lo cancella. [value] è un template SINK; null per TOGGLE e CLEAR. P4.
+     * [valueType] è il tipo che SET scrive (null = testo); per le altre operazioni resta null.
+     * La semantica delle operazioni è in [StoredValueOps.plan].
      */
     @Serializable @SerialName(ActionTypeIds.SET_STORED)
     data class SetStored(
         val key: String,
         val op: StoredOp,
         val value: String? = null,
+        @EncodeDefault(EncodeDefault.Mode.NEVER)
+        val valueType: StateValueType? = null,
     ) : Action
 
     /**

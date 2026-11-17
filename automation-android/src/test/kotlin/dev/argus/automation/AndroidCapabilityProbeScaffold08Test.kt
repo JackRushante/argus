@@ -11,7 +11,6 @@ import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.CapabilityIds
 import dev.argus.engine.model.SensorKind
-import dev.argus.engine.model.StoredOp
 import dev.argus.engine.runtime.ActionResult
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.ExecutionId
@@ -72,13 +71,11 @@ class AndroidCapabilityProbeScaffold08Test {
         baseTierActive = true,
     )
 
-    private val newActionTypes = setOf(
-        ActionTypeIds.SET_STORED,
-        ActionTypeIds.SET_USER_MODE,
-    )
+    /** Ogni azione 0.8 è ormai accesa: chi aggiunge un'azione spenta la elenca qui. */
+    private val newActionTypes = emptySet<String>()
 
     private val newTriggers = setOf(
-        "nfc_tag", "next_alarm", "app_usage", "user_mode_changed",
+        "nfc_tag", "next_alarm", "app_usage",
         "sensor.${SensorKind.SHAKE.wireName}", "sensor.${SensorKind.FLIP_FACE_DOWN.wireName}",
     )
 
@@ -130,10 +127,8 @@ class AndroidCapabilityProbeScaffold08Test {
             },
             shizukuReady = { true },
         )
-        val actions = listOf(
-            Action.SetStored("k", StoredOp.CLEAR),
-            Action.SetUserMode("lavoro"),
-        )
+        // Ogni azione 0.8 è ormai accesa: chi aggiunge un'azione spenta la elenca qui.
+        val actions = emptyList<Action>()
         actions.forEach { action ->
             assertEquals(ActionResult.Failure("not_available_yet"), executor.execute(action, context), "$action")
         }

@@ -838,6 +838,61 @@ class ApprovalFlowTest {
         assertTrue(second.draft.issues.none { it.code == "app_control_freeze_system" })
     }
 
+    // --- 0.8: le modalità nominate da una regola devono esistere sul telefono --------------------------
+
+    private fun modesDraft() = AutomationDraft(
+        name = "Arrivo a casa",
+        trigger = Trigger.UserModeChanged("Lavoro"),
+        conditions = Condition.Not(Condition.UserModeIs("notte")),
+        actions = listOf(Action.SetUserMode("casa")),
+    )
+
+    private fun modesFixture(draft: AutomationDraft, names: UserModeNames) = fixture(
+        available = CapabilityRequirements.derive(draft),
+        userModes = names,
+    )
+
+    @Test
+    fun `a rule that names a mode that does not exist cannot be armed, one error per missing name`() = runTest {
+        val draft = modesDraft()
+        val review = assertIs<DraftSubmissionResult.Ready>(
+            modesFixture(draft, UserModeNames { listOf("lavoro") }).flow.submit(CompileResult("ok", draft, null)),
+        ).review
+
+        val missing = review.draft.issues.filter { it.code == "user_mode_unknown" }
+        assertEquals(listOf("notte", "casa"), missing.map { it.detail })
+        assertTrue(missing.all { it.severity == Severity.ERROR })
+        assertFalse(review.canArm)
+    }
+
+    @Test
+    fun `existing modes match ignoring case and an unreadable list fails closed`() = runTest {
+        val draft = modesDraft()
+        val ok = assertIs<DraftSubmissionResult.Ready>(
+            modesFixture(draft, UserModeNames { listOf("LAVORO", "Notte", "CASA") }).flow.submit(CompileResult("ok", draft, null)),
+        ).review
+        assertTrue(ok.draft.issues.none { it.code.startsWith("user_mode") }, "${ok.draft.issues}")
+        assertTrue(ok.canArm, "${ok.draft.issues}")
+
+        val unreadable = assertIs<DraftSubmissionResult.Ready>(
+            modesFixture(draft, UserModeNames { error("db") }).flow.submit(CompileResult("ok", draft, null)),
+        ).review
+        assertEquals(Severity.ERROR, unreadable.draft.issues.single { it.code == "user_mode_unavailable" }.severity)
+        assertFalse(unreadable.canArm)
+    }
+
+    @Test
+    fun `a rule without modes never reads the mode list`() = runTest {
+        val draft = appsDraft(actions = listOf(Action.SetWifi(false)))
+        val review = assertIs<DraftSubmissionResult.Ready>(
+            fixture(
+                available = CapabilityRequirements.derive(draft.trigger, draft.actions),
+                userModes = UserModeNames { error("non va letta") },
+            ).flow.submit(CompileResult("ok", draft, null)),
+        ).review
+        assertTrue(review.draft.issues.none { it.code.startsWith("user_mode") })
+    }
+
     private fun solarDraft(spec: SolarSpec = SolarSpec(SolarEvent.SUNSET, -30)) = AutomationDraft(
         name = "Luci al tramonto",
         trigger = Trigger.Time(tz = "Europe/Rome", solar = spec),
@@ -854,6 +909,7 @@ class ApprovalFlowTest {
         whitelisted: Set<String> = emptySet(),
         audit: ArmAuditRecorder = ArmAuditRecorder(),
         installedPackages: InstalledPackageCheck = AssumeAllInstalled,
+        userModes: UserModeNames = UserModeNames { emptyList() },
         savedSecrets: suspend () -> Set<String> = { emptySet() },
     ): Fixture {
         val store = MemoryAutomationStore(initial)
@@ -882,6 +938,7 @@ class ApprovalFlowTest {
             newDraftId = { DraftId("draft-${repository.count + 1}") },
             newAutomationId = { AutomationId("automation-${repository.count + 1}") },
             installedPackages = installedPackages,
+            userModes = userModes,
             savedSecrets = savedSecrets,
         )
         return Fixture(flow, store, repository, audit)

@@ -1101,6 +1101,14 @@ class RuleRenderCoverageTest {
                 ),
                 v(Action.SetStored("XYZ-key", StoredOp.TOGGLE), "op" to ms(m("Toggle \"XYZ-key\"", "Inverti \"XYZ-key\""))),
                 v(Action.SetStored("XYZ-key", StoredOp.CLEAR), "op" to ms(m("Delete \"XYZ-key\"", "Cancella \"XYZ-key\""))),
+                v(
+                    Action.SetStored("XYZ-key", StoredOp.SET, "4242", StateValueType.NUMBER),
+                    "valueType" to ms(m("as a number", "come numero")),
+                ),
+                v(
+                    Action.SetStored("XYZ-key", StoredOp.SET, "true", StateValueType.BOOLEAN),
+                    "valueType" to ms(m("as true/false", "come vero/falso")),
+                ),
             ),
             "set_user_mode" to case(Action.SetUserMode("XYZ-mode"), mapOf("mode" to ms("XYZ-mode"))),
             "notification_reply" to case(Action.NotificationReply("XYZ-nreply"), mapOf("text" to ms("XYZ-nreply"))),

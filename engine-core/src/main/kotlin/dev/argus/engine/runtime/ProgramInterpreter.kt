@@ -337,11 +337,18 @@ class ProgramInterpreter(
         suspend fun initialize(bindings: List<VarBinding>): Boolean {
             if (bindings.size > MAX_VARIABLES) return stop("invalid_program", null)
             val stateBindings = bindings.filterIsInstance<VarBinding.State>()
-            val state = if (stateBindings.isEmpty()) {
+            // 0.8: i valori conservati si leggono nella stessa lettura, una volta sola a inizio esecuzione.
+            val storedKeys = bindings.filterIsInstance<VarBinding.Stored>().mapTo(linkedSetOf()) { it.key }
+            val state = if (stateBindings.isEmpty() && storedKeys.isEmpty()) {
                 DeviceState()
             } else {
                 try {
-                    stateProvider(StateReadRequest(queries = stateBindings.mapTo(linkedSetOf()) { it.query }))
+                    stateProvider(
+                        StateReadRequest(
+                            queries = stateBindings.mapTo(linkedSetOf()) { it.query },
+                            storedKeys = storedKeys,
+                        ),
+                    )
                 } catch (error: CancellationException) {
                     throw error
                 } catch (_: Exception) {
@@ -646,6 +653,11 @@ class ProgramInterpreter(
         }
 
         private fun resolveBinding(binding: VarBinding, state: DeviceState): VarValue? {
+            // 0.8: un valore conservato porta le etichette che aveva quando è stato scritto. Una chiave
+            // assente o di un altro tipo rende la variabile non disponibile, come uno stato illeggibile.
+            val saved = (binding as? VarBinding.Stored)?.let { stored ->
+                state.stored[stored.key]?.takeIf { it.type == stored.valueType } ?: return null
+            }
             val raw = when (binding) {
                 is VarBinding.Literal -> binding.value
                 // Intero casuale generato dal motore in [0, max). Difesa in profondità: max < 1 non
@@ -655,8 +667,7 @@ class ProgramInterpreter(
                 is VarBinding.State -> state.queryValues[binding.query.canonicalId]
                     ?.takeIf { StateValueCoercion.compatible(it, binding.valueType) }
                 is VarBinding.ClockTime -> ClockVariable.format(binding, clock, locale())
-                // 0.8 scaffold: lo store dei valori conservati non esiste ancora ⇒ binding_unavailable.
-                is VarBinding.Stored -> null
+                is VarBinding.Stored -> saved?.text
                 is VarBinding.TriggerPayload -> triggerValue(binding.field)?.let { payload ->
                     val pattern = binding.extractionRegex
                     if (pattern == null) {
@@ -675,8 +686,9 @@ class ProgramInterpreter(
             return VarValue(
                 text = normalize(raw, binding.declaredType) ?: return null,
                 type = binding.declaredType,
-                integrity = binding.integrity,
-                confidentiality = binding.confidentiality,
+                integrity = saved?.integrity ?: binding.integrity,
+                confidentiality = saved?.let { joinConfidentiality(binding.confidentiality, it.confidentiality) }
+                    ?: binding.confidentiality,
                 provenance = binding.provenance(trigger),
             )
         }

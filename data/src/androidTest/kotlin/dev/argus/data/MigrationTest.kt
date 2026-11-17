@@ -367,7 +367,27 @@ class MigrationTest {
         }
     }
 
+    @Test
+    fun migrate_v13_to_v14_adds_stored_values_and_modes() {
+        helper.createDatabase(TEST_DB_V13, 13).close()
+
+        helper.runMigrationsAndValidate(
+            TEST_DB_V13,
+            14,
+            true,
+            ArgusDatabase.MIGRATION_13_14,
+        ).use { db ->
+            listOf("stored_values", "user_modes", "user_mode_state").forEach { table ->
+                db.query("SELECT COUNT(*) FROM $table").use { cursor ->
+                    cursor.moveToFirst()
+                    assertEquals(0, cursor.getInt(0))
+                }
+            }
+        }
+    }
+
     private companion object {
+        const val TEST_DB_V13 = "argus-migration-v13-test.db"
         const val TEST_DB_V12 = "argus-migration-v12-test.db"
         const val TEST_DB_V1 = "argus-migration-v1-test.db"
         const val TEST_DB_V2 = "argus-migration-v2-test.db"

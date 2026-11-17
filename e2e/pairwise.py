@@ -24,6 +24,8 @@ TRIGGERS = [
     "sensor", "screen", "battery", "audio_output", "mode_changed", "media", "app_event",
     # 0.8: inizio/fine di un evento del calendario.
     "calendar_event",
+    # 0.8: la modalità dell'utente cambia (schermata, riquadro, widget o set_user_mode).
+    "user_mode_changed",
 ]
 
 # Classi di azioni: raggruppano i tipi per natura dell'effetto e per tier. `wait`, `if` e `while` non
@@ -32,6 +34,8 @@ ACTION_CLASSES: Dict[str, List[str]] = {
     "local_ui": [
         "show_notification", "speak", "vibrate", "set_flashlight", "copy_text", "copy_to_clipboard",
         "media_control", "notification_action",
+        # 0.8: valori conservati e modalità, stato locale di Argus.
+        "set_stored", "set_user_mode",
         # 0.8: la domanda con pulsanti e' una notifica dell'app.
         "ask",
     ],
@@ -53,9 +57,8 @@ CONTROL_FLOW = ["wait", "if", "while"]
 # `not_available_yet`). Non entra nella copertura a coppie finche' e' spento; una regola della suite puo'
 # usarlo solo per provare quel rifiuto. Chi accende un tipo lo sposta in TRIGGERS o ACTION_CLASSES e
 # aggiunge le sue regole.
-NOT_YET_AVAILABLE_TRIGGERS = ["nfc_tag", "next_alarm", "app_usage", "user_mode_changed"]
+NOT_YET_AVAILABLE_TRIGGERS = ["nfc_tag", "next_alarm", "app_usage"]
 NOT_YET_AVAILABLE_ACTIONS = [
-    "set_stored", "set_user_mode",
 ]
 NOT_YET_AVAILABLE_CODE = "not_available_yet"
 ACTION_CLASS_OF: Dict[str, str] = {a: c for c, items in ACTION_CLASSES.items() for a in items}

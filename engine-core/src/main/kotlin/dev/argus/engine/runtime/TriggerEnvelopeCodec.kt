@@ -148,6 +148,8 @@ object TriggerEnvelopeCodec {
                 put("type", "user_mode")
                 put("to", event.to)
                 put("from", event.from)
+                // Solo se vero: un cambio non concatenato conserva la forma di prima.
+                if (event.chained) put("chained", true)
             }
         }
         return JsonObject(fields)
@@ -219,7 +221,11 @@ object TriggerEnvelopeCodec {
                 o.int("previousMinutes") ?: return null,
                 o.int("currentMinutes") ?: return null,
             )
-            "user_mode" -> TriggerEvent.UserModeChanged(o.string("to") ?: return null, o.string("from"))
+            "user_mode" -> TriggerEvent.UserModeChanged(
+                o.string("to") ?: return null,
+                o.string("from"),
+                chained = o.bool("chained") == true,
+            )
             else -> null
         }
     }

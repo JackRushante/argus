@@ -10,6 +10,8 @@ import dev.argus.automation.manual.ManualRuleCatalog
 import dev.argus.automation.manual.ManualRuleRunner
 import dev.argus.automation.manual.ManualTileSelection
 import dev.argus.automation.manual.QuickTileController
+import dev.argus.automation.modes.ModeEntryPoints
+import dev.argus.data.RoomUserModeStore
 
 /**
  * Accesso Hilt per i componenti che il sistema istanzia da sé (riquadri, widget, attività
@@ -24,6 +26,10 @@ internal interface ManualEntryPoint {
     fun tiles(): QuickTileController
     fun pause(): AutomationPauseStore
     fun tileSelection(): ManualTileSelection
+
+    // 0.8: modalità sul riquadro e sul widget.
+    fun modes(): ModeEntryPoints
+    fun modeStore(): RoomUserModeStore
 }
 
 internal fun Context.manualEntryPoint(): ManualEntryPoint =

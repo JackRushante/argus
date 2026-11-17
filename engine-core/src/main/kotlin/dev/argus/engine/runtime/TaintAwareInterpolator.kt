@@ -14,6 +14,9 @@ import dev.argus.engine.model.PrivilegedActionPolicy
 import dev.argus.engine.model.RemoteEgressPolicy
 import dev.argus.engine.model.SettingsScreen
 import dev.argus.engine.model.ShellQuoting
+import dev.argus.engine.model.StoredOp
+import dev.argus.engine.model.StoredValuePolicy
+import dev.argus.engine.model.UserModePolicy
 import dev.argus.engine.model.TaintPolicy
 import dev.argus.engine.model.TelephonyActionPolicy
 import dev.argus.engine.model.UiStep
@@ -187,9 +190,12 @@ class TaintAwareInterpolator {
                     prompt = accumulator.field("prompt", action.prompt, AskPolicy.MAX_PROMPT_CHARS),
                 )
 
-                is Action.SetStored -> action.copy(
-                    value = action.value?.let { accumulator.field("value", it, MAX_TEXT_CHARS) },
-                )
+                // Solo SET riempie un template; l'incremento resta il letterale approvato (mai una variabile).
+                is Action.SetStored -> if (action.op == StoredOp.SET) {
+                    action.copy(value = action.value?.let { accumulator.field("value", it, MAX_TEXT_CHARS) })
+                } else {
+                    action
+                }
 
                 is Action.NotificationReply -> action.copy(
                     text = accumulator.field("text", action.text, MAX_TEXT_CHARS),
@@ -446,9 +452,16 @@ class TaintAwareInterpolator {
             // 0.8: domanda risolta entro 120 caratteri, scelte e attesa approvate (gli stessi limiti del validator).
             is Action.Ask -> AskPolicy.validResolved(action)
 
-            is Action.SetStored -> false
+            // 0.8: chiave letterale valida; SET con un valore di al massimo 1024 caratteri, le altre senza
+            // valore (INCREMENT: solo un intero letterale). Il tipo lo ricontrolla StoredValueOps.
+            is Action.SetStored -> StoredValuePolicy.validKey(action.key) && when (action.op) {
+                StoredOp.SET -> action.value != null && action.value.length <= StoredValuePolicy.MAX_VALUE_CHARS
+                StoredOp.INCREMENT -> action.valueType == null &&
+                    (action.value == null || StoredValuePolicy.INCREMENT_LITERAL.matches(action.value))
+                StoredOp.TOGGLE, StoredOp.CLEAR -> action.value == null && action.valueType == null
+            }
 
-            is Action.SetUserMode -> false
+            is Action.SetUserMode -> UserModePolicy.validLiteral(action.mode)
 
             is Action.NotificationReply -> action.text.isNotBlank() && action.text.length <= MAX_TEXT_CHARS
 

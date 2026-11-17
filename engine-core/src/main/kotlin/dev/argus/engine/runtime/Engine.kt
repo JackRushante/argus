@@ -235,6 +235,8 @@ class Engine(
             location = other.location ?: location,
             queryValues = queryValues + other.queryValues,
             facts = facts.merge(other.facts),
+            stored = stored + other.stored,
+            userMode = other.userMode ?: userMode,
         )
     }
 

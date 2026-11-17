@@ -80,9 +80,18 @@ class ConditionEvaluator(private val clock: Clock) {
             ?.let { Truth.of(CalendarMatching.busy(it, clock.millis(), c.titleMatch, c.calendar)) }
             ?: Truth.UNKNOWN
 
-        is Condition.StoredCompare -> Truth.UNKNOWN
+        // 0.8: valore conservato assente o di un altro tipo ⇒ UNKNOWN (fallisce chiuso anche sotto `not`).
+        is Condition.StoredCompare -> compareTyped(
+            state.stored[c.key]?.takeIf { it.type == c.valueType }?.text,
+            c.valueType,
+            c.op,
+            c.expected,
+        )
 
-        is Condition.UserModeIs -> Truth.UNKNOWN
+        // 0.8: senza snapshot (store non leggibile) UNKNOWN; nessuna modalità attiva è un FALSE certo.
+        is Condition.UserModeIs -> state.userMode
+            ?.let { Truth.of(it.active?.equals(c.mode, ignoreCase = true) == true) }
+            ?: Truth.UNKNOWN
     }
 
     private fun compareVariables(
