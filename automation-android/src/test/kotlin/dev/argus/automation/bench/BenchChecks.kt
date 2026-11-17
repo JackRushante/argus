@@ -8,6 +8,7 @@ import dev.argus.engine.model.ArgusJson
 import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.CapabilityRequirements
 import dev.argus.engine.model.Condition
+import dev.argus.engine.model.ConfirmSpec
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.model.VarBinding
 import dev.argus.engine.runtime.CronSchedule
@@ -267,6 +268,7 @@ internal object CompileEvaluator {
         val expect = case.draft
         checkTrigger(expect, draft, world, today, failures)
         checkExit(expect, draft, failures)
+        checkConfirm(expect, draft, failures)
         checkActions(expect, draft, failures)
         checkVarsAndFlow(expect, draft, failures)
         checkConditions(expect, draft, failures)
@@ -288,6 +290,15 @@ internal object CompileEvaluator {
                     "exit.trigger.$field = ${describe(trigger[field])}, atteso ${describe(matcher)}",
                 )
             }
+        }
+    }
+
+    /** 0.8: la conferma prima di eseguire («chiedimi prima»), come oggetto `confirm` della bozza. */
+    private fun checkConfirm(expect: DraftExpectation, draft: AutomationDraft, failures: MutableList<Failure>) {
+        val matcher = expect.confirm ?: return
+        val actual = draft.confirm?.let { ArgusJson.encodeToJsonElement(ConfirmSpec.serializer(), it) }
+        if (!JsonMatch.matches(actual, matcher)) {
+            failures += Failure(FailureCategory.WRONG_TRIGGER, "confirm = ${describe(actual)}, atteso ${describe(matcher)}")
         }
     }
 
