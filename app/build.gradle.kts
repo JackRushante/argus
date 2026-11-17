@@ -63,7 +63,6 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
     // ABI split (richiesta maintainer linsui, MR fdroiddata!43234): l'APK universale imbarcava
     // libandroidx.graphics.path.so per tutte e 4 le ABI. Produciamo un APK per ABI, niente
@@ -171,3 +170,8 @@ dependencies {
 }
 
 tasks.withType<Test>().configureEach { useJUnitPlatform() }
+
+// Kotlin 2.4 rifiuta kotlinOptions { jvmTarget = "17" }: stesso target 17 con il DSL compilerOptions.
+kotlin {
+    compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
+}

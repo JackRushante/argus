@@ -15,7 +15,6 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
     // Compose OFF: modulo di trasporto HTTP puro, nessuna UI.
     testOptions {
         targetSdk = 36
@@ -46,3 +45,8 @@ dependencies {
 
 // I test (HermesBrainTest) girano su JUnit5, come engine-core.
 tasks.withType<Test>().configureEach { useJUnitPlatform() }
+
+// Kotlin 2.4 rifiuta kotlinOptions { jvmTarget = "17" }: stesso target 17 con il DSL compilerOptions.
+kotlin {
+    compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
+}
