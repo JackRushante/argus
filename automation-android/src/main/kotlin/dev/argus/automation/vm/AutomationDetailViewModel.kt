@@ -23,7 +23,12 @@ import dev.argus.automation.connectivity.ConnectivityTriggerRuntime
 import dev.argus.automation.di.ApplicationScope
 import dev.argus.automation.apps.EmptyInstalledAppCatalog
 import dev.argus.automation.apps.InstalledAppCatalog
+import dev.argus.automation.directboot.BeforeUnlockOptInStore
+import dev.argus.automation.directboot.NoBeforeUnlockOptIns
 import dev.argus.automation.labels.LabelsSnapshot
+import dev.argus.engine.directboot.DirectBootCopy
+import dev.argus.engine.directboot.DirectBootPolicy
+import dev.argus.ui.model.BeforeUnlockUi
 import dev.argus.automation.labels.NoRuleLabelDirectory
 import dev.argus.automation.labels.RuleLabelDirectory
 import dev.argus.data.LabelAddResult
@@ -216,6 +221,8 @@ class AutomationDetailViewModel @Inject constructor(
     private val sharing: RuleSharing? = null,
     /** 0.8: regole-intervallo in corso, per «Perché non è scattata?». `null` nei test che non lo provano. */
     private val spans: SpanStore? = null,
+    /** 0.8: «Attiva anche prima dello sblocco» (organisation: never a new approval). */
+    private val beforeUnlock: BeforeUnlockOptInStore = NoBeforeUnlockOptIns,
 ) : ViewModel() {
     private val routeId = requireNotNull(savedStateHandle.get<String>("id")) {
         "Dettaglio senza id"
@@ -289,6 +296,10 @@ class AutomationDetailViewModel @Inject constructor(
                     labelSnapshot.value = snapshot
                     mutableState.update { it.withLiveExtras() }
                 }
+        }
+        // 0.8: the option «active before unlock» changes outside the rule's flow: only its card is refreshed.
+        viewModelScope.launch {
+            beforeUnlock.optIns.collect { mutableState.update { it.withLiveExtras() } }
         }
         // F8/F21: la pausa e il riquadro scelto cambiano fuori dal flusso della regola: si aggiorna
         // solo la parte "avvio manuale" dello stato mostrato, senza rifare il resto.
@@ -1030,8 +1041,9 @@ class AutomationDetailViewModel @Inject constructor(
         }
         // Il foglio «Condividi» vale solo per la regola per cui è stato aperto e finché si può condividere.
         val share = shareTexts.value?.takeIf { current.canShare }
+        val option = beforeUnlockUi()
         return if (current.banner == banner && current.appChoices == choices && current.labels == labels &&
-            current.manual == manualEntry && current.share == share
+            current.manual == manualEntry && current.share == share && current.beforeUnlock == option
         ) {
             this
         } else {
@@ -1042,9 +1054,50 @@ class AutomationDetailViewModel @Inject constructor(
                     labels = labels,
                     manual = manualEntry,
                     share = share,
+                    beforeUnlock = option,
                 ),
             )
         }
+    }
+
+    // --- 0.8: «Attiva anche prima dello sblocco» -------------------------------------------------------
+
+    /**
+     * Offered only for the SAVED rule on screen (armed or disabled, never a draft) when it qualifies. On = opted in
+     * for exactly this approved revision.
+     */
+    private fun beforeUnlockUi(): BeforeUnlockUi? {
+        val automation = displayedAutomation ?: return null
+        if (displayedDraft != null) return null
+        if (automation.status != AutomationStatus.ARMED && automation.status != AutomationStatus.DISABLED) return null
+        if (!DirectBootPolicy.qualifies(automation)) return null
+        val fingerprint = automation.approvalFingerprint ?: return null
+        return BeforeUnlockUi(enabled = beforeUnlock.optIns.value[automation.id] == fingerprint)
+    }
+
+    /** Switches the option on (for the revision on screen) or off. No new revision, fingerprint or approval. */
+    fun onSetBeforeUnlock(enabled: Boolean) {
+        val automation = displayedAutomation ?: return
+        if (displayedDraft != null) return
+        if (!enabled) {
+            beforeUnlock.remove(automation.id)
+            return
+        }
+        val fingerprint = automation.approvalFingerprint ?: return
+        if (!DirectBootPolicy.qualifies(automation)) return
+        val others = beforeUnlock.optIns.value.keys - automation.id
+        if (others.size >= DirectBootCopy.MAX_RULES) {
+            mutableEvents.tryEmit(
+                DetailEvent.Message(
+                    language.pick(
+                        "At most ${DirectBootCopy.MAX_RULES} rules can be active before unlock.",
+                        "Al massimo ${DirectBootCopy.MAX_RULES} regole possono essere attive prima dello sblocco.",
+                    ),
+                ),
+            )
+            return
+        }
+        beforeUnlock.set(automation.id, fingerprint)
     }
 
     /**
