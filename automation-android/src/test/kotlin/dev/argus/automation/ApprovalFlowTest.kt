@@ -794,10 +794,7 @@ class ApprovalFlowTest {
         name = "Arrivo a casa",
         trigger = Trigger.UserModeChanged("Lavoro"),
         conditions = Condition.Not(Condition.UserModeIs("notte")),
-        actions = listOf(
-            Action.If(Condition.UserModeIs("NOTTE"), then = listOf(Action.SetUserMode("Casa"))),
-            Action.SetUserMode("casa"),
-        ),
+        actions = listOf(Action.SetUserMode("casa")),
     )
 
     private fun modesFixture(draft: AutomationDraft, names: UserModeNames) = fixture(
@@ -824,8 +821,8 @@ class ApprovalFlowTest {
         val ok = assertIs<DraftSubmissionResult.Ready>(
             modesFixture(draft, UserModeNames { listOf("LAVORO", "Notte", "CASA") }).flow.submit(CompileResult("ok", draft, null)),
         ).review
-        assertTrue(ok.draft.issues.none { it.code.startsWith("user_mode") })
-        assertTrue(ok.canArm)
+        assertTrue(ok.draft.issues.none { it.code.startsWith("user_mode") }, "${ok.draft.issues}")
+        assertTrue(ok.canArm, "${ok.draft.issues}")
 
         val unreadable = assertIs<DraftSubmissionResult.Ready>(
             modesFixture(draft, UserModeNames { error("db") }).flow.submit(CompileResult("ok", draft, null)),

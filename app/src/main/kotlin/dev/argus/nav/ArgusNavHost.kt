@@ -486,7 +486,7 @@ fun ArgusNavHost() {
                     )
                 }
 
-                // 0.8: Sistema › Modalità (modalità e variabili salvate).
+                // 0.8: System › Modes (modalità e variabili salvate).
                 composable(Routes.MODES) {
                     val viewModel: ModesViewModel = hiltViewModel()
                     val state by viewModel.state.collectAsStateWithLifecycle()

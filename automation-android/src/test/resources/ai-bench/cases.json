@@ -2695,6 +2695,7 @@
   "text": "When I connect to the gym Wi-Fi, remember today as my last gym day",
   "expect": {
    "outcome": ["draft", "clarification"],
+   "trigger": {"type": "connectivity", "medium": "WIFI", "state": "CONNECTED"},
    "actions_include": ["set_stored"],
    "params": {"set_stored.op": "SET"}
   },
@@ -2707,6 +2708,7 @@
   "text": "Quando arrivo a casa metti la modalità Casa",
   "expect": {
    "outcome": ["draft", "clarification"],
+   "trigger": {"type": "geofence"},
    "actions_include": ["set_user_mode"],
    "params": {"set_user_mode.mode": {"contains": "Casa"}}
   },
