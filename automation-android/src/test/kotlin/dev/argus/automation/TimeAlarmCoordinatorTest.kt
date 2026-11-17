@@ -1485,6 +1485,57 @@ class TimeAlarmCoordinatorTest {
         assertEquals(SolarSchedule.nextFire(romeSunset, clock)!!.toEpochMilli(), registration.eventAtMillis)
     }
 
+    @Test
+    fun `a span plans its start and its end with two coordinators that never see each other`() = runTest {
+        // Dalle 22 alle 7 (UTC): inizio con il coordinatore di sempre, fine con quello della fase EXIT.
+        val unsigned = automation(Trigger.Time(cron = "0 22 * * *", tz = "UTC")).copy(
+            exit = dev.argus.engine.model.ExitSpec(Trigger.Time(cron = "0 7 * * *", tz = "UTC")),
+            approvalFingerprint = null,
+        )
+        val span = unsigned.copy(approvalFingerprint = ApprovalFingerprints.of(unsigned))
+        val fingerprint = requireNotNull(span.approvalFingerprint)
+        val store = FakeAutomationStore(span)
+        val startState = FakeTimeAlarmStateStore()
+        val exitState = FakeTimeAlarmStateStore()
+        val dispatched = mutableListOf<TriggerEnvelope>()
+        val start = TimeAlarmCoordinator(store, startState, FakeTimeAlarmBackend(), TimeEventDispatcher { dispatched += it }, { now })
+        val exit = TimeAlarmCoordinator(
+            store, exitState, FakeTimeAlarmBackend(), TimeEventDispatcher { dispatched += it }, { now },
+            phase = dev.argus.engine.runtime.SpanPhase.EXIT,
+        )
+        val runtime = CoordinatorTimeAlarmRuntime(start, exit)
+
+        val report = runtime.reconcile(ReconcileReason.APP_START)
+        assertEquals(listOf(span.id), report.scheduled)
+        val startAt = Instant.parse("2026-07-13T22:00:00Z").toEpochMilli()
+        val endAt = Instant.parse("2026-07-14T07:00:00Z").toEpochMilli()
+        assertEquals(startAt, startState.get(span.id)?.eventAtMillis)
+        assertEquals(endAt, exitState.get(span.id)?.eventAtMillis)
+
+        // La sveglia di fine porta la sua fase e un id suo; quella d'inizio resta com'era.
+        assertIs<AlarmDeliveryResult.Delivered>(
+            runtime.onAlarm(span.id, fingerprint, endAt, dev.argus.engine.runtime.SpanPhase.EXIT),
+        )
+        assertEquals("time-exit:${fingerprint.value}:$endAt", dispatched.single().id.value)
+        assertEquals(
+            TriggerEvent.TimeFired(span.id, fingerprint, dev.argus.engine.runtime.SpanPhase.EXIT),
+            dispatched.single().event,
+        )
+        assertEquals(startAt, startState.get(span.id)?.eventAtMillis, "la fine non tocca la sveglia d'inizio")
+
+        assertIs<AlarmDeliveryResult.Delivered>(runtime.onAlarm(span.id, fingerprint, startAt, dev.argus.engine.runtime.SpanPhase.START))
+        assertEquals("time:${fingerprint.value}:$startAt", dispatched.last().id.value)
+        assertEquals(TriggerEvent.TimeFired(span.id, fingerprint), dispatched.last().event)
+
+        // Una regola senza fine non ha mai una sveglia di fine.
+        val plain = automation(Trigger.Time(cron = "0 9 * * *", tz = "UTC"), id = "plain")
+        val onlyStart = TimeAlarmCoordinator(
+            FakeAutomationStore(plain), FakeTimeAlarmStateStore(), FakeTimeAlarmBackend(), TimeEventDispatcher { }, { now },
+            phase = dev.argus.engine.runtime.SpanPhase.EXIT,
+        )
+        assertTrue(onlyStart.reconcile(ReconcileReason.APP_START).scheduled.isEmpty())
+    }
+
     private fun coordinator(
         store: FakeAutomationStore,
         state: FakeTimeAlarmStateStore,

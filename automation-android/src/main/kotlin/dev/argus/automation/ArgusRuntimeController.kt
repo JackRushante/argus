@@ -5,6 +5,7 @@ import dev.argus.automation.notification.ActiveNotificationReplyRegistry
 import dev.argus.automation.notification.NotificationListenerWatchdog
 import dev.argus.data.RoomJournalMaintenance
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.model.listenedTriggers
 import dev.argus.engine.runtime.AuditEvent
 import dev.argus.engine.runtime.AuditKind
 import dev.argus.engine.runtime.AuditSink
@@ -75,6 +76,12 @@ class ArgusRuntimeController(
      */
     listenerWatchdog: NotificationListenerWatchdog? = null,
     listenerCheckIntervalMillis: Long = LISTENER_CHECK_INTERVAL_MILLIS,
+    /**
+     * 0.8 regole-intervallo: rimette i valori degli intervalli la cui regola non li può più chiudere (spenta,
+     * cancellata, riapprovata, da rivedere). Parte a ogni reconcile (avvio compreso: un processo morto a metà
+     * non lascia un intervallo stantio) e a ogni cambio dello stato delle regole.
+     */
+    private val spanReconciler: (suspend () -> Unit)? = null,
 ) {
     private val started = AtomicBoolean(false)
     private val reconcileMutex = Mutex()
@@ -133,7 +140,8 @@ class ArgusRuntimeController(
                 rules.observeAll()
                     .map { automations ->
                         automations
-                            .filter { it.enabled && it.trigger is Trigger.Sensor }
+                            // 0.8: anche il sensore della fine di una regola-intervallo.
+                            .filter { it.enabled && it.listenedTriggers.any { trigger -> trigger is Trigger.Sensor } }
                             .map { it.id }
                             .toSet()
                     }
@@ -146,7 +154,36 @@ class ArgusRuntimeController(
                             }
                     }
             }
+            spanReconciler?.let { reconcileSpans ->
+                scope.launch {
+                    // 0.8: spegnere, cancellare, riapprovare o mettere da rivedere una regola in corso la chiude:
+                    // i valori tornano com'erano subito dopo il cambio, da qualunque schermata o sorgente arrivi.
+                    rules.observeAll()
+                        .map { automations ->
+                            automations.map { SpanOwner(it.id, it.status, it.enabled, it.approvalFingerprint, it.exit != null) }
+                                .toSet()
+                        }
+                        .distinctUntilChanged()
+                        .collect { reconcileSpansQuietly(reconcileSpans) }
+                }
+            }
         }
+    }
+
+    /** Ciò che decide se un intervallo appartiene ancora alla sua regola. */
+    private data class SpanOwner(
+        val id: dev.argus.engine.model.AutomationId,
+        val status: dev.argus.engine.model.AutomationStatus,
+        val enabled: Boolean,
+        val fingerprint: dev.argus.engine.model.ApprovalFingerprint?,
+        val span: Boolean,
+    )
+
+    private suspend fun reconcileSpansQuietly(reconcileSpans: suspend () -> Unit) {
+        runCatchingPreservingCancellation { reconcileSpans() }
+            .onFailure { error ->
+                Log.w(TAG, "ripristino intervalli fallito: ${error::class.java.simpleName}")
+            }
     }
 
     fun onForeground() {
@@ -201,6 +238,8 @@ class ArgusRuntimeController(
                     Log.w(TAG, "recupero regole immediate fallito: ${error::class.java.simpleName}")
                 }
         }
+        // 0.8: dopo le capacità (servono per rimettere i valori) e prima delle sorgenti.
+        spanReconciler?.let { reconcileSpansQuietly(it) }
         // I recuperi dovuti del coordinator partono in background (RecoveryLauncher): il reconcile
         // non aspetta un programma che può durare un'ora.
         runCatchingPreservingCancellation { scheduler.reconcile(reason) }

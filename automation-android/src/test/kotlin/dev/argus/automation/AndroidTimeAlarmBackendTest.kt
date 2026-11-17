@@ -115,6 +115,28 @@ class AndroidTimeAlarmBackendTest {
     }
 
     @Test
+    fun `the end alarm of a span has its own uri and comes back with its phase`() {
+        val id = AutomationId("span")
+        val fingerprint = ApprovalFingerprint("b".repeat(64))
+        val start = AndroidTimeAlarmBackend.identityIntent(context, id)
+        val end = AndroidTimeAlarmBackend.identityIntent(context, id, dev.argus.engine.runtime.SpanPhase.EXIT).apply {
+            putExtra(AndroidTimeAlarmBackend.EXTRA_AUTOMATION_ID, id.value)
+            putExtra(AndroidTimeAlarmBackend.EXTRA_APPROVAL_FINGERPRINT, fingerprint.value)
+            putExtra(AndroidTimeAlarmBackend.EXTRA_EVENT_AT_MILLIS, 99L)
+        }
+        // URI diverso ⇒ PendingIntent diverso: la sveglia di fine non sostituisce quella d'inizio.
+        assertTrue(!start.filterEquals(end))
+        assertEquals(
+            TimeAlarmSignal(id, fingerprint, 99L, dev.argus.engine.runtime.SpanPhase.EXIT),
+            AndroidTimeAlarmBackend.parseSignal(end),
+        )
+        assertEquals(
+            ReconcileReason.EXACT_ALARM_PERMISSION_CHANGED,
+            reconcileReason(AndroidTimeAlarmBackend.ACTION_TIME_WATCHDOG_EXIT),
+        )
+    }
+
+    @Test
     fun `alarm intent is flagged foreground so a frozen process cannot defer delivery`() {
         // Campo #63 (2026-07-17): con setExactAndAllowWhileIdle + permesso + battery whitelist,
         // gli scatti arrivavano comunque +37s/+56s tardi. Android 14+ accoda i broadcast verso

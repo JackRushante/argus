@@ -13,6 +13,7 @@ import dev.argus.engine.runtime.AuditSink
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.runtime.NoopAuditSink
 import dev.argus.engine.runtime.SolarSchedule
+import dev.argus.engine.runtime.SpanPhase
 import dev.argus.engine.runtime.TimeSpecs
 import dev.argus.engine.runtime.TriggerEnvelope
 import dev.argus.engine.runtime.TriggerEvent
@@ -25,6 +26,9 @@ import kotlinx.coroutines.withContext
 import java.time.Instant
 
 enum class ScheduledAlarmMode { INEXACT, EXACT }
+
+/** 0.8: il coordinatore delle sveglie di FINE delle regole-intervallo (distinto da quello d'inizio nel grafo DI). */
+class SpanExitTimeAlarms(val coordinator: TimeAlarmCoordinator)
 
 data class TimeAlarmRegistration(
     val automationId: AutomationId,
@@ -169,9 +173,11 @@ object TimeAlarmPlanner {
         automation: Automation,
         after: Instant,
         nextAlarmAt: () -> Long?,
+        /** 0.8: il trigger da pianificare (quello d'inizio, o quello di fine di una regola-intervallo). */
+        planned: Trigger? = automation.trigger,
     ): TimeAlarmRegistration? {
         if (automation.status != AutomationStatus.ARMED || !automation.enabled) return null
-        val trigger = automation.trigger as? Trigger.NextAlarm ?: return null
+        val trigger = planned as? Trigger.NextAlarm ?: return null
         val approvalFingerprint = requireNotNull(automation.approvalFingerprint) {
             "Automazione ARMED priva di fingerprint"
         }
@@ -200,9 +206,11 @@ object TimeAlarmPlanner {
         automation: Automation,
         after: Instant,
         existing: ScheduledTimeAlarm? = null,
+        /** 0.8: il trigger da pianificare (quello d'inizio, o quello di fine di una regola-intervallo). */
+        planned: Trigger? = automation.trigger,
     ): TimeAlarmRegistration? {
         if (automation.status != AutomationStatus.ARMED || !automation.enabled) return null
-        val trigger = automation.trigger as? Trigger.Time ?: return null
+        val trigger = planned as? Trigger.Time ?: return null
         val approvalFingerprint = requireNotNull(automation.approvalFingerprint) {
             "Automazione ARMED priva di fingerprint"
         }
@@ -275,7 +283,19 @@ class TimeAlarmCoordinator(
      * `next_alarm`; `null` = nessuna sveglia. Letto a ogni pianificazione, mai conservato.
      */
     private val nextAlarmAt: () -> Long? = { null },
+    /**
+     * 0.8 regole-intervallo: [SpanPhase.EXIT] = questo coordinatore pianifica il trigger di FINE delle regole
+     * (con il suo stato, il suo backend e i suoi id evento), mentre quello d'inizio resta com'era. I due non si
+     * vedono: ogni regola ha al più una sveglia per fase.
+     */
+    private val phase: SpanPhase = SpanPhase.START,
 ) {
+    /** Il trigger che questo coordinatore pianifica per [automation], se è suo. */
+    private fun triggerOf(automation: Automation): Trigger? =
+        (if (phase == SpanPhase.START) automation.trigger else automation.exit?.trigger)?.takeIf { it.scheduledHere() }
+
+    private val idPrefix: String = if (phase == SpanPhase.START) "" else "-exit"
+
     private val mutex = Mutex()
 
     /** Coda sequenziale dei recuperi in background: l'ordine per sorgente (id) si preserva. */
@@ -313,7 +333,7 @@ class TimeAlarmCoordinator(
         mutex.withLock {
             val currentNow = now()
             val desired = store.armed()
-                .filter { it.trigger.scheduledHere() }
+                .filter { triggerOf(it) != null }
                 .associateBy { it.id }
 
             state.all().sortedBy { it.automationId.value }.forEach { persisted ->
@@ -339,7 +359,7 @@ class TimeAlarmCoordinator(
                 if (persisted != null && persisted.eventAtMillis <= currentNow.toEpochMilli()) {
                     // 0.8: «prima della sveglia» dopo che la sveglia è suonata non ha più senso.
                     val dueAt = persisted.eventAtMillis
-                    val stale = (automation.trigger as? Trigger.NextAlarm)?.let { trigger ->
+                    val stale = (triggerOf(automation) as? Trigger.NextAlarm)?.let { trigger ->
                         !TimeAlarmPlanner.nextAlarmStillDue(trigger, dueAt, currentNow.toEpochMilli())
                     } == true
                     if (reason.recoverDueAlarm && !stale) {
@@ -366,7 +386,8 @@ class TimeAlarmCoordinator(
                     }
                     ScheduleResult.EXPIRED -> {
                         if (persisted != null) cancelled += automation.id
-                        if ((automation.trigger as? Trigger.Time)?.isOneShot() == true) {
+                        // Solo l'inizio si consuma: una fine non è mai a ora singola (validator).
+                        if (phase == SpanPhase.START && (triggerOf(automation) as? Trigger.Time)?.isOneShot() == true) {
                             val disabled = store.disableIfApproved(
                                 automation.id,
                                 requireNotNull(automation.approvalFingerprint),
@@ -493,7 +514,7 @@ class TimeAlarmCoordinator(
             ?: return Preparation.Done(AlarmDeliveryResult.Ignored)
 
         val automation = store.get(automationId)
-        val trigger = automation?.trigger?.takeIf { it.scheduledHere() }
+        val trigger = automation?.let(::triggerOf)
         if (automation == null || trigger == null || automation.status != AutomationStatus.ARMED ||
             !automation.enabled
         ) {
@@ -552,13 +573,13 @@ class TimeAlarmCoordinator(
             envelope = if (trigger is Trigger.NextAlarm) {
                 // 0.8: un id per istanza della sveglia (l'istante deriva dalla sveglia e dall'offset approvato).
                 TriggerEnvelope(
-                    id = TriggerEventId("next_alarm:${eventFingerprint.value}:$eventAtMillis"),
-                    event = TriggerEvent.NextAlarmFired(automationId, eventFingerprint),
+                    id = TriggerEventId("next_alarm$idPrefix:${eventFingerprint.value}:$eventAtMillis"),
+                    event = TriggerEvent.NextAlarmFired(automationId, eventFingerprint, spanPhase = phase),
                 )
             } else {
                 TriggerEnvelope(
-                    id = TriggerEventId("time:${eventFingerprint.value}:$eventAtMillis"),
-                    event = TriggerEvent.TimeFired(automationId, eventFingerprint),
+                    id = TriggerEventId("time$idPrefix:${eventFingerprint.value}:$eventAtMillis"),
+                    event = TriggerEvent.TimeFired(automationId, eventFingerprint, spanPhase = phase),
                 )
             },
             automationId = automationId,
@@ -584,7 +605,7 @@ class TimeAlarmCoordinator(
         disarmed -= automationId
 
         val latest = store.get(automationId)
-        val latestTrigger = latest?.trigger?.takeIf { it.scheduledHere() }
+        val latestTrigger = latest?.let(::triggerOf)
         if (latest == null || latestTrigger == null || latest.status != AutomationStatus.ARMED ||
             !latest.enabled
         ) {
@@ -612,7 +633,7 @@ class TimeAlarmCoordinator(
                 return AlarmDeliveryResult.Delivered
             }
             val revised = store.get(automationId)
-            val revisedTrigger = revised?.trigger?.takeIf { it.scheduledHere() }
+            val revisedTrigger = revised?.let(::triggerOf)
             if (revised == null || revisedTrigger == null ||
                 revised.status != AutomationStatus.ARMED || !revised.enabled
             ) {
@@ -652,11 +673,12 @@ class TimeAlarmCoordinator(
         existing: ScheduledTimeAlarm?,
         force: Boolean = false,
     ): ScheduleResult {
+        val planned = triggerOf(automation)
         val registration = try {
-            if (automation.trigger is Trigger.NextAlarm) {
-                TimeAlarmPlanner.nextAlarm(automation, after, nextAlarmAt)
+            if (planned is Trigger.NextAlarm) {
+                TimeAlarmPlanner.nextAlarm(automation, after, nextAlarmAt, planned)
             } else {
-                TimeAlarmPlanner.next(automation, after, existing)
+                TimeAlarmPlanner.next(automation, after, existing, planned)
             }
         } catch (error: CancellationException) {
             throw error
@@ -673,7 +695,7 @@ class TimeAlarmCoordinator(
         } ?: run {
             if (existing != null) cancelAndForget(automation.id)
             // 0.8: una regola next_alarm senza sveglia futura non è scaduta: aspetta la prossima sveglia.
-            return if (automation.trigger is Trigger.NextAlarm) ScheduleResult.IDLE else ScheduleResult.EXPIRED
+            return if (planned is Trigger.NextAlarm) ScheduleResult.IDLE else ScheduleResult.EXPIRED
         }
 
         val desiredMode = if (
