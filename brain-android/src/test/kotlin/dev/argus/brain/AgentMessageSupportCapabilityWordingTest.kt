@@ -89,7 +89,13 @@ class AgentMessageSupportCapabilityWordingTest {
     }
 
     @Test
+    fun `an unknown sender is matched by name, never refused or asked`() {
+        assertTrue("instead of refusing or asking: conversationId null, sender \"X\"" in flat)
+    }
+
+    @Test
     fun `a captured name is never declared twice`() {
-        assertTrue("never also declare it in \"vars\"" in flat)
+        assertTrue("the captureAs outputs, which are NEVER listed in \"vars\" (captureAs declares them)" in flat)
+        assertTrue("16 variables" in flat)
     }
 }

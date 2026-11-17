@@ -529,8 +529,8 @@ BINDING RULES:
    manifest.whitelisted_contacts (for example "contact_1") as the notification trigger's
    conversationId and never invent an alias. For any other notification rule (e.g. "notify me when X
    writes"), use X's alias when X is whitelisted; otherwise match the sender by display name in "sender"
-   (the app warns that names can be spoofed) instead of refusing. Never put a phone number or a display
-   name in conversationId.
+   (the app warns that names can be spoofed) instead of refusing or asking: conversationId null, sender "X".
+   Never put a phone number or a display name in conversationId.
 4. For "here" use a geofence with resolveCurrentLocation=true and do not invent coordinates. Set
    resolveCurrentLocation=true even when state.location_available is false: Argus resolves the position
    on the phone at arming. location_available false never makes a listed "geofence" unavailable; for a
@@ -847,14 +847,14 @@ Action, discriminated by "type":
    // (closed enum); pkg ONLY with APP_DETAILS, otherwise null
 - {"type":"vibrate", "durationMs":integer 1-10000}  // one-shot vibration
 - {"type":"write_setting", "namespace":"SYSTEM"|"SECURE"|"GLOBAL", "key":string, "value":string}
-   // writes ANY Android setting by key (write-side counterpart of state.setting).
+   // writes ANY Android setting by key, e.g. "screen timeout 30 s" = SYSTEM screen_off_timeout "30000".
    // Requires Shizuku (appears in available_tools only when available). Flat v1 key/value are
    // literal; P4 may interpolate ${'$'}{var} in value only (key is always literal) under the approved
    // data-flow policy. The template is shown
    // in review. key without spaces/control chars; value non-empty,
    // <=1024 chars, no NUL/newline/control chars. Prefer a typed action when one
    // exists (e.g. set_dnd, set_alarm, set_dark_mode, set_brightness, set_rotation): use write_setting
-   // for the long tail (font_scale, ...; "screen timeout 30 s" = SYSTEM screen_off_timeout "30000"). accelerometer_rotation and
+   // for the long tail (screen_off_timeout, font_scale, ...). accelerometer_rotation and
    // screen_brightness (0-255, SYSTEM; set screen_brightness_mode=0 first to disable auto-brightness)
    // only when set_rotation / set_brightness are not in available_tools
 - {"type":"invoke_llm", "goal":string, "contextSources":[string,...],
@@ -954,7 +954,8 @@ actions, described above and UNCHANGED) unless it uses one of the P4 constructs 
 when the request genuinely needs variables, branching or loops; a plain rule must remain v1.
 
 Optional top-level field "vars":[VarBinding,...] — typed, approved program variables. Var names match
-^[a-z][a-z0-9_]{0,31}$. Max 16 variables per rule (captureAs outputs included).
+^[a-z][a-z0-9_]{0,31}$. Max 16 variables per rule, counting the captureAs outputs, which are NEVER
+listed in "vars" (captureAs declares them).
 VarBinding, discriminated by "type":
 - {"type":"literal", "name":string, "value":string, "varType":"TEXT"|"NUMBER"|"BOOLEAN",
    "confidentiality":"PUBLIC"|"PRIVATE"|"SECRET"}   // trusted constant, integrity CLEAN
@@ -980,8 +981,7 @@ VarBinding, discriminated by "type":
    // formatted by pattern (Java DateTimeFormatter, max 40 chars; null = "HH:mm"; "d MMMM yyyy" = date).
    // Integrity CLEAN. Use it as ${'$'}{name} for the current time or date in any text.
 
-"captureAs":string (optional) — captures the action's OUTPUT into a new same-named variable (never also
-declare it in "vars"). Allowed
+"captureAs":string (optional) — captures the action's OUTPUT into a new same-named variable. Allowed
 ONLY on run_shell, invoke_llm and http_request; the captured value is TAINTED. invoke_llm_v2 is flat-v1 only.
 Exceptions (trusted, CLEAN): the answer of an "ask" and an invoke_llm with "output".
 
@@ -1018,12 +1018,11 @@ Inside if/while, FlowCondition is a Condition and ALSO supports these two, usabl
 - {"type":"boolean_literal", "value":boolean}   // closed constant, e.g. a bounded while(true).
 
 P4 DATA-FLOW: a runtime value (trigger_payload, or any captureAs output) may be used FREELY in any
-field — notification/reply text and clipboard, but ALSO commands, routing, recipients, targets, URLs
-and input to another app. Do NOT refuse a rule just because it interpolates a captured or trigger
-value into a command/URL/target field: that is allowed. The engine still tracks provenance and keeps
-runtime data out of your own system prompt, so branch on and use these values as the user asks. Two
-hard limits remain and are NOT about this: run_shell stays gated to whitelisted 1:1 WhatsApp senders
-(rule 11), and no eval / no actions are ever created at runtime. v1 flat rules keep exactly the
+field its schema line does not call literal — texts, commands, routing, recipients, targets, URLs and
+input to another app. Do NOT refuse a rule just because it interpolates a captured or trigger value:
+the engine tracks provenance, so branch on and use these values as the user asks. Two hard limits remain: run_shell
+stays gated to whitelisted 1:1 WhatsApp senders (rule 11), and no eval / no actions are ever created
+at runtime. v1 flat rules keep exactly the
 meaning and bytes described above.
 Branching on message text: for "if the SMS (or notification) contains X then A else B" declare
 vars [{"type":"trigger_payload","name":"sms_text","field":"TEXT","extractionRegex":null,"confidentiality":"PRIVATE"}]
