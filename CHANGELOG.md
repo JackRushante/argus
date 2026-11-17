@@ -2,10 +2,11 @@
 
 Release and engineering notes, newest first.
 
-## v0.7.2 (unreleased) — External data in shell commands, approval transparency, reliability
+## v0.7.2 (unreleased) — Spans, secrets, SMS and calls, new triggers, dry run; the fixes of a full audit
 
-This release closes the findings of a full code audit of 0.7.1. Some approved rules behave differently
-afterwards; those cases are listed under "Changed".
+This release closes the findings of a full code audit of 0.7.1 (prepared as 0.7.2, never released on its
+own) and adds the features listed under "Added". Some approved rules behave differently afterwards; those
+cases are listed under "Changed".
 
 ### Security and privacy
 
@@ -45,6 +46,73 @@ afterwards; those cases are listed under "Changed".
   commands at once.
 - Self-hosted bridge: bounded connections and output, child processes killed as a group, malformed
   requests answered with a closed error.
+
+### Added
+
+- Spans, "while … then put it back" (`exit` on a rule): the rule starts on its trigger and ends on a
+  second one ("when I connect to the car, media volume to maximum; when I disconnect, put it back"). At the
+  start Argus records each value it is about to change (volume per stream, ringer, Do Not Disturb,
+  brightness, rotation, Wi-Fi, Bluetooth, mobile data, airplane mode, location, NFC, battery saver, dark
+  mode, flashlight, a written setting, the mode); at the end it puts them back in reverse order, then runs
+  the end actions. A value you changed by hand in the meantime is restored too, and approval says so.
+  Disabling, deleting or editing a rule in progress restores first. Approval shows the span as one rule.
+- Ask before running (`confirm`): when the rule fires, a notification asks "Run" or "Cancel"; no answer
+  within the time set (30 seconds to 60 minutes, 5 by default) means it does not run. A pending question
+  survives a restart within its time. On a span it applies to the start only.
+- Questions with buttons (`ask`): 2 to 4 answers, the one you tap goes into a variable the rule can test;
+  without an answer the default one, or the program stops. A program waiting for an answer resumes after
+  the app is killed. Not allowed among the end actions of a span.
+- Constrained AI answers (`invoke_llm.output`): one of 2 to 8 labels, a whole number between two limits,
+  or yes/no. Anything else is retried once and then stops the run (`llm_output_invalid`); free text is
+  never coerced. The answer is a trusted value for `if`, and approval lists the allowed answers.
+- Values kept between runs and modes: `set_stored` (set, increment, toggle, clear), the `stored` variable
+  and the `stored_compare` condition; your own modes (at most 12, one active) with `set_user_mode`,
+  `user_mode_is` and the `user_mode_changed` trigger, which never starts shell or screen macros. New
+  screen System → Modes and variables, a Quick Settings tile "Argus: mode" and mode buttons on the widget.
+  Renaming or deleting a mode that rules use sends them to review.
+- Secrets vault, System → Secrets: tokens and passwords that HTTP requests use by name
+  (`secretHeaders`, `secretQuery`). Stored encrypted, write-only (replace or delete, never shown again),
+  sent only to the approved host of the request; the AI gets their names only. Deleting one sends the
+  rules that use it to review.
+- HTTP requests: the response, or one field of a JSON response (`extract`, a JSON pointer), goes into a
+  variable (`captureAs`, at most 4,096 characters; external data). Plain `http://` is allowed towards your
+  own network, with a warning at approval; never with a secret, except towards this phone.
+- SMS and calls: `send_sms` (a fixed number, or the number that just called or wrote), `call_number`
+  (`+` and digits only, no USSD or forwarding codes), with hard caps of 10 SMS an hour, 3 an hour to the
+  same number and 3 calls an hour, saved before sending; approval warns that they may cost money.
+  `send_intent` (broadcast, activity or a service through Shizuku), every field shown at approval; it
+  refuses Argus itself, calls, installs, uninstalls and resets, and `file:`, `javascript:` and `intent:`
+  data. `screen_call` rejects or silences incoming calls through Android's call screening, optionally only
+  from numbers not in your contacts; on any doubt or delay the call rings.
+- Replies on Telegram, Signal and Google Messages (`notification_reply`, also written by the AI), with the
+  same rules as WhatsApp: 1:1 chats you whitelisted, recipient = who wrote. `notification_action`
+  dismisses, snoozes or presses a button of the notification that fired the rule. The self-hosted bridge
+  accepts AI replies for these apps.
+- Triggers: start or end of a calendar event (`calendar_event`, with an offset of up to two hours and
+  title or calendar filters), an NFC tag (`nfc_tag`, read when you arm the rule), minutes before the next
+  alarm (`next_alarm`), daily time in an app (`app_usage`), shaking the phone or laying it face down
+  (`sensor` `shake` and `flip_face_down`), staying in a place for 1 to 120 minutes (geofence `DWELL`).
+- Conditions: day of the week, connected to Wi-Fi (any or a named network), a Bluetooth device
+  connected, headphones connected, a calendar event in progress.
+- Dry run, from the rule's detail: simulates one run on a sample event you edit and shows step by step
+  what would happen, with the final shell command, URL and body and the external parts marked. Nothing is
+  executed, nothing goes to the Log, the cooldown is not used; secrets appear by name.
+- Rules before the first unlock (opt-in, "Also active before unlock" on the rule's detail): after a
+  restart a qualifying rule runs before you unlock the phone, from a copy kept with weaker protection.
+- Automatic encrypted backup of the rules to a folder you choose, daily or weekly, keeping the last 7
+  files (AES-256-GCM, key derived from your passphrase with PBKDF2, 600,000 rounds). Encrypted files are
+  imported with their passphrase.
+- Share a rule as text, as a file or as a QR code, with personal data removed by default; import from
+  pasted text or from another app; a gallery of 12 ready-made templates. Every imported rule is a draft to
+  approve. When an edit replaces an approved rule, approval shows what changes. The QR code is drawn
+  with the encoder of ZXing core (Apache-2.0, the only new library; licence in `docs/third-party/zxing/`).
+- Labels (up to 5 per rule), search on the Automations screen and pause of a whole label group.
+- Health alerts: a notification when a rule fails three times in a row or loses something it needs
+  (Shizuku, notification access, Accessibility, exact alarms, location); a switch in System. Argus asks
+  Android to reconnect the notification listener when it drops.
+- Dictation in the chat through the phone's speech recognizer (Argus does not ask for the microphone).
+- A global limit of 200 AI calls a day until you set your own limits.
+- Continuous integration on GitHub Actions (unit tests, lint, the Python tests) and Dependabot.
 
 ### Fixed
 
@@ -95,6 +163,33 @@ afterwards; those cases are listed under "Changed".
 - Rules approved before this release that put external data in one of the positions now refused show
   the error and must be rewritten. A screen macro that opens another app on purpose (a share sheet, a
   browser tab) now stops there.
+- Database version 14: 12→13 adds rule labels, 13→14 stored values and modes. Both migrations run by
+  themselves and change no existing rule; approved rules keep their fingerprints.
+- The end-to-end suite has 216 rules.
+
+### Permissions
+
+- `READ_CALENDAR`, `SEND_SMS`, `CALL_PHONE`, `READ_CONTACTS` and `NFC`, plus the call screening role; each
+  is asked for only when a rule needs it. NFC and telephony are optional hardware.
+
+### Known limits
+
+- NFC: shell commands and screen macros run only for a scan proven to come from the system's NFC service,
+  which Android allows to check from Android 15 on. Phones may not share that identity, so an NFC rule may
+  never start shell or a macro; its other actions run. Nothing fires while the phone is locked.
+- "Also active before unlock" accepts only repeating clock rules (cron) whose actions are Do Not Disturb,
+  ringer, volume, flashlight or vibration and whose conditions are clock-only: no battery, charger or
+  screen triggers.
+- `screen_call` with "only numbers not in my contacts" applies to the whole rule: a contact calling runs
+  nothing, and when Argus cannot tell (no contacts permission, an error) the call rings and nothing else
+  runs.
+- Stored values marked secret go only into the encrypted automatic backup, never into a plain export;
+  vault secrets are in no backup at all and must be entered again on a new phone.
+- Shake and face down work only while the screen is on.
+- The dry run does not simulate the SMS and call caps, the AI budget or a cooldown in progress, and it
+  does not take readings that need Shizuku or root: those conditions count as unknown, so not met.
+- The Hermes bridge's compile prompt does not describe the vocabulary added in this release yet: compile
+  the new triggers, conditions and actions with a direct provider.
 
 ## v0.7.1 (2026-11-16) — AI servers on your network, response timeout, copyable chat
 
