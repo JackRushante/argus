@@ -1216,7 +1216,7 @@ class RuleRenderCoverageTest {
             m("Asks for confirmation before running (within 2", "Chiede conferma prima di eseguire (entro 2"),
             m("the screen turns off", "lo schermo si spegne"),
             m("Until this happens", "Finché non succede questo"),
-            m("puts back the values", "rimette com'era i valori"),
+            m("puts back the values", "rimette com'erano i valori"),
             m("by hand in the meantime", "a mano nel frattempo"),
             m("5151 ms"),
         )
