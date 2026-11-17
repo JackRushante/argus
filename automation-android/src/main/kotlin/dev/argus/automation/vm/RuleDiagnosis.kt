@@ -10,6 +10,7 @@ import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.TimePrecision
 import dev.argus.engine.model.Transition
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.runtime.ActiveSpan
 import dev.argus.engine.runtime.AuditKind
 import dev.argus.engine.runtime.ExecutionStatus
 import dev.argus.ui.model.DiagnosisFix
@@ -37,6 +38,8 @@ internal data class DiagnosisInputs(
     val geofence: PersistedGeofenceRegistration?,
     /** Eventi della regola già caricati dal Dettaglio, dal più recente. */
     val log: List<AuditLogRecord>,
+    /** 0.8: l'intervallo in corso della regola (`SpanStore.get(id)`), null se non è in corso. */
+    val span: ActiveSpan? = null,
 )
 
 /** Eventi che raccontano un tentativo fallito o soppresso: candidati alla riga «Ultimo tentativo». */
@@ -91,6 +94,11 @@ internal fun buildRuleDiagnosis(
             }
             else -> Unit
         }
+        // 0.8: una regola-intervallo dice se è in corso; quella di un'altra versione approvata non conta.
+        automation.exit?.let { exit ->
+            val span = inputs.span?.takeIf { it.approvalFingerprint == automation.approvalFingerprint }
+            add(spanRow(span, exit.restore, language))
+        }
         add(lastEventRow(inputs.log, nowMillis, language))
     }
     return RuleDiagnosisUi(
@@ -100,6 +108,32 @@ internal fun buildRuleDiagnosis(
             "Controllato alle ${clock(nowMillis)}",
         ),
     )
+}
+
+/** 0.8: in corso (con quanti valori rimetterà alla fine) o in attesa dell'inizio. */
+internal fun spanRow(span: ActiveSpan?, restore: Boolean, language: RenderLanguage): DiagnosisRow {
+    if (span == null) {
+        return DiagnosisRow(
+            DiagnosisLevel.OK,
+            language.pick(
+                "Not in progress: it starts with its trigger",
+                "Non in corso: comincia col suo trigger",
+            ),
+        )
+    }
+    val count = span.records.size
+    val text = when {
+        !restore -> language.pick("In progress: it waits for its end", "In corso: aspetta la sua fine")
+        count == 1 -> language.pick(
+            "In progress: at the end it puts back 1 value",
+            "In corso: alla fine rimette 1 valore",
+        )
+        else -> language.pick(
+            "In progress: at the end it puts back $count values",
+            "In corso: alla fine rimette $count valori",
+        )
+    }
+    return DiagnosisRow(DiagnosisLevel.INFO, text)
 }
 
 private fun statusRow(automation: Automation, language: RenderLanguage): DiagnosisRow = when {

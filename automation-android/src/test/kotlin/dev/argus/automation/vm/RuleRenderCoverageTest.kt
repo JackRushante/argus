@@ -1215,7 +1215,9 @@ class RuleRenderCoverageTest {
             m("2 minutes and 5 seconds", "2 minuti e 5 secondi"),
             m("Asks for confirmation before running (within 2", "Chiede conferma prima di eseguire (entro 2"),
             m("the screen turns off", "lo schermo si spegne"),
-            m("puts back the values", "rimette i valori"),
+            m("Until this happens", "Finché non succede questo"),
+            m("puts back the values", "rimette com'era i valori"),
+            m("by hand in the meantime", "a mano nel frattempo"),
             m("5151 ms"),
         )
         languages.forEach { language ->
