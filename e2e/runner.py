@@ -248,7 +248,8 @@ class Needs:
 
 
 def action_types(rec: dict) -> List[str]:
-    return sorted({a["type"] for a in pairwise._walk_actions(rec["rule"].get("actions", []))})
+    # 0.8: anche le azioni di fine di una regola-intervallo.
+    return sorted({a["type"] for a in pairwise.rule_actions(rec["rule"])})
 
 
 def run_rule(emu: Emulator, rec: dict, config: str, needs: Needs, verbose: bool, run_id: str) -> Result:

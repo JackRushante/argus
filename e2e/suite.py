@@ -31,7 +31,8 @@ from pairwise import (
     NOT_YET_AVAILABLE_CODE,
     NOT_YET_AVAILABLE_TRIGGERS,
     TRIGGERS,
-    _walk_actions,
+    rule_actions,
+    rule_triggers,
 )
 
 SUITE_DIR = Path(__file__).resolve().parent / "suite"
@@ -118,13 +119,18 @@ def validate(records: Iterable[dict]) -> List[str]:
         load = record.get("expect", {}).get("load", "ok")
         fail = load.get("fail") if isinstance(load, dict) else None
         expects_not_available = isinstance(fail, dict) and fail.get("code") == NOT_YET_AVAILABLE_CODE
-        trigger_type = rule["trigger"].get("type")
-        if trigger_type in NOT_YET_AVAILABLE_TRIGGERS:
-            if not expects_not_available:
-                problems.append(f"{rid}: trigger spento {trigger_type!r}: ammesso solo per provare {NOT_YET_AVAILABLE_CODE}")
-        elif trigger_type not in TRIGGERS:
-            problems.append(f"{rid}: trigger sconosciuto {trigger_type!r}")
-        for action in _walk_actions(rule.get("actions", [])):
+        exit_spec = rule.get("exit")
+        if exit_spec is not None and (not isinstance(exit_spec, dict) or "trigger" not in exit_spec):
+            problems.append(f"{rid}: exit deve avere un trigger")
+            continue
+        # 0.8: il trigger e le azioni di fine di una regola-intervallo seguono le stesse regole dell'inizio.
+        for trigger_type in rule_triggers(rule):
+            if trigger_type in NOT_YET_AVAILABLE_TRIGGERS:
+                if not expects_not_available:
+                    problems.append(f"{rid}: trigger spento {trigger_type!r}: ammesso solo per provare {NOT_YET_AVAILABLE_CODE}")
+            elif trigger_type not in TRIGGERS:
+                problems.append(f"{rid}: trigger sconosciuto {trigger_type!r}")
+        for action in rule_actions(rule):
             if action.get("type") in NOT_YET_AVAILABLE_ACTIONS:
                 if not expects_not_available:
                     problems.append(f"{rid}: azione spenta {action.get('type')!r}: ammessa solo per provare {NOT_YET_AVAILABLE_CODE}")
