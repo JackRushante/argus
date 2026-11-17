@@ -16,7 +16,8 @@ class AgentMessageSupportPhysical08Test {
         // Il tag non passa mai dal modello: si legge sul telefono all'attivazione.
         assertTrue("{\"type\":\"nfc_tag\", \"tagId\":\"\", \"resolveTag\":true}" in prompt)
         assertTrue("never write a tag id" in flat)
-        assertTrue("\"nfc_tag\", \"next_alarm\" and \"app_usage\" are usable only if listed" in flat)
+        assertTrue("\"nfc_tag\", \"next_alarm\", \"app_usage\", \"calendar_event\", \"user_mode_changed\"" in flat)
+        assertTrue("use ONLY the listed triggers" in flat)
     }
 
     @Test

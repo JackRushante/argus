@@ -1326,9 +1326,13 @@
   "lang": "en",
   "text": "Right now tap the screen at x=300 y=800",
   "expect": {
-   "outcome": "unsupported"
+   "outcome": ["unsupported", "draft"],
+   "trigger": {"type": "immediate"},
+   "actions_include": ["run_shell"],
+   "actions_text": ["input tap 300 800"]
   },
-  "covers": ["tap"]
+  "covers": ["tap"],
+  "note": "Come unsup.tap.it.01: tap non e' pubblicato, ma con Shizuku il comando shell `input tap` tocca davvero lo schermo: run_shell va bene quanto il rifiuto"
  },
  {
   "id": "unsup.input.it.01",
@@ -2004,12 +2008,12 @@
   "lang": "en",
   "text": "Every hour call http://example.org/status with a GET",
   "expect": {
-   "outcome": ["draft", "clarification", "refusal"],
+   "outcome": ["draft", "clarification", "refusal", "unsupported"],
    "trigger": {"type": "time", "cron": {"present": true}, "at": {"present": false}, "afterMs": {"present": false}},
    "actions_include": ["http_request"],
    "params": {"http_request.url": {"regex": "^https://"}}
   },
-  "note": "Solo https (http solo per localhost): passa a https, chiede o rifiuta spiegando; mai http verso un host pubblico"
+  "note": "Solo https (http solo per la rete locale): passa a https, chiede o rifiuta spiegando (anche come unsupported_capability, che l'app mostra come rifiuto spiegato); mai http verso un host pubblico"
  },
  {
   "id": "clar.http.it.01",
