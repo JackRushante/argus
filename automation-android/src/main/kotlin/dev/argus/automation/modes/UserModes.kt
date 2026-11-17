@@ -5,7 +5,7 @@ import dev.argus.automation.DispatchFrame
 import dev.argus.automation.manual.ManualTokenStore
 import dev.argus.automation.manual.TileUiState
 import dev.argus.data.ModeEditResult
-import dev.argus.data.RoomUserModeStore
+import dev.argus.data.UserModeList
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.ChangeAuthor
@@ -53,7 +53,7 @@ class EngineUserModeEventDispatcher(
  * riscrive mai da sola, e una regola armata non resta legata a un nome che non esiste più.
  */
 class UserModeEditor(
-    private val modes: RoomUserModeStore,
+    private val modes: UserModeList,
     private val automations: AutomationStore,
     private val audit: AuditSink,
     private val nowMillis: () -> Long = System::currentTimeMillis,

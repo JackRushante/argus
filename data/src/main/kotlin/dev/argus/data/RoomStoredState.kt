@@ -143,11 +143,20 @@ sealed interface ModeEditResult {
     data class Refused(val issue: UserModeListIssue) : ModeEditResult
 }
 
+/** Modifiche all'elenco delle modalità fatte dall'utente nella schermata (0.8). */
+interface UserModeList {
+    suspend fun add(raw: String): ModeEditResult
+
+    suspend fun rename(from: String, rawTo: String): ModeEditResult
+
+    suspend fun delete(name: String): ModeEditResult
+}
+
 /** Modalità dell'utente e modalità attiva (0.8), in Room. Ogni cambio è una transazione. */
 class RoomUserModeStore(
     private val db: ArgusDatabase,
     private val nowMillis: () -> Long = System::currentTimeMillis,
-) : UserModeStore {
+) : UserModeStore, UserModeList {
     private val dao = db.storedStateDao()
 
     fun observe(): Flow<UserModeSnapshot> =
@@ -178,7 +187,7 @@ class RoomUserModeStore(
             ModeSwitch.Changed(before.active, target?.name)
         }
 
-    suspend fun add(raw: String): ModeEditResult = db.withTransaction {
+    override suspend fun add(raw: String): ModeEditResult = db.withTransaction {
         val modes = dao.allModes()
         UserModePolicy.checkAdd(modes.map { it.name }, raw)?.let { return@withTransaction ModeEditResult.Refused(it) }
         val name = requireNotNull(UserModePolicy.normalize(raw))
@@ -187,7 +196,7 @@ class RoomUserModeStore(
     }
 
     /** Rinomina tenendo posizione e, se era attiva, la modalità attiva. */
-    suspend fun rename(from: String, rawTo: String): ModeEditResult = db.withTransaction {
+    override suspend fun rename(from: String, rawTo: String): ModeEditResult = db.withTransaction {
         val modes = dao.allModes()
         UserModePolicy.checkRename(modes.map { it.name }, from, rawTo)?.let { return@withTransaction ModeEditResult.Refused(it) }
         val old = modes.first { it.nameKey == UserModePolicy.key(from) }
@@ -202,7 +211,7 @@ class RoomUserModeStore(
     }
 
     /** Elimina; se era attiva, non resta nessuna modalità attiva (cambio fatto dall'utente). */
-    suspend fun delete(name: String): ModeEditResult = db.withTransaction {
+    override suspend fun delete(name: String): ModeEditResult = db.withTransaction {
         val key = UserModePolicy.key(name)
         val existing = dao.allModes().firstOrNull { it.nameKey == key }
             ?: return@withTransaction ModeEditResult.Refused(UserModeListIssue.UNKNOWN)
