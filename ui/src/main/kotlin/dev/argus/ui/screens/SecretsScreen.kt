@@ -33,6 +33,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -224,6 +225,8 @@ private fun SecretRow(
         title = row.name,
         subtitle = subtitle,
         titleColor = if (unused) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+        // The name is an identifier the rules quote: monospace, like a saved variable's key (mockup «Segreti»).
+        titleStyle = ArgusCode.copy(fontWeight = FontWeight.W500),
         leading = {
             IconBadge(
                 icon = Icons.Rounded.Key,
