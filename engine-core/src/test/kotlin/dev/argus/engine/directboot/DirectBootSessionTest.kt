@@ -248,8 +248,34 @@ class DirectBootSessionTest {
             ),
             plan,
         )
-        assertEquals(mapOf(("a" to fp) to 3_000L), DirectBootImport.handledUpTo(plan))
+        assertEquals(
+            setOf(Triple("a", fp, 1_000L), Triple("a", fp, 2_000L), Triple("a", fp, 3_000L)),
+            DirectBootImport.handled(plan),
+        )
         assertEquals("time:$fp:1000", DirectBootRecords.eventId(fp, 1_000).value)
+    }
+
+    @Test
+    fun `the saved alarm resumes from the occurrence the session was still waiting for`() {
+        val fp = rule("a").approvalFingerprint!!.value
+        val other = rule("a", actions = listOf(Action.Vibrate(5))).approvalFingerprint!!.value
+        val handled = setOf(Triple("a", fp, 1_000L))
+        val waiting = listOf(DirectBootSlot("a", fp, 2_000))
+
+        // Stood down before 2_000 (the user unlocked): the normal runtime resumes from it, whatever it had saved.
+        assertEquals(DirectBootAlarmHandover.Resume(2_000), DirectBootImport.alarmHandover("a", fp, fp to 500L, handled, waiting))
+        assertEquals(DirectBootAlarmHandover.Resume(2_000), DirectBootImport.alarmHandover("a", fp, null, handled, waiting))
+        // No session slot: drop the saved alarm only if the session took exactly that occurrence.
+        assertEquals(DirectBootAlarmHandover.Drop, DirectBootImport.alarmHandover("a", fp, fp to 1_000L, handled, emptyList()))
+        assertEquals(DirectBootAlarmHandover.Keep, DirectBootImport.alarmHandover("a", fp, fp to 500L, handled, emptyList()))
+        // A slot already taken never resumes.
+        assertEquals(
+            DirectBootAlarmHandover.Drop,
+            DirectBootImport.alarmHandover("a", fp, fp to 1_000L, handled, listOf(DirectBootSlot("a", fp, 1_000))),
+        )
+        // Another revision (the copy was stale, or the rule changed since): the normal runtime keeps its own alarm.
+        assertEquals(DirectBootAlarmHandover.Keep, DirectBootImport.alarmHandover("a", other, other to 500L, handled, waiting))
+        assertEquals(DirectBootAlarmHandover.Keep, DirectBootImport.alarmHandover("a", fp, other to 500L, handled, waiting))
     }
 
     private fun signed(rule: Automation): Automation =
