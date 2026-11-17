@@ -179,6 +179,34 @@ internal object StructuredOutput {
         return answer.content.takeIf { it.isNotBlank() } ?: text
     }
 
+    /**
+     * `output_config` della risposta vincolata su Anthropic (0.8): `{"answer": …}` chiuso. Lo schema di
+     * Anthropic non accetta i limiti numerici (`minimum`/`maximum`): per NUMBER resta un intero, i limiti
+     * stanno nell'istruzione del goal e nella validazione della lane.
+     */
+    fun anthropicAnswerConfig(spec: OutputSpec): JsonObject = buildJsonObject {
+        putJsonObject("format") {
+            put("type", "json_schema")
+            putJsonObject("schema") {
+                put("type", "object")
+                putJsonObject("properties") {
+                    putJsonObject("answer") {
+                        when (spec.kind) {
+                            OutputKind.CHOICE -> {
+                                put("type", "string")
+                                putJsonArray("enum") { spec.choices.forEach { add(JsonPrimitive(it)) } }
+                            }
+                            OutputKind.NUMBER -> put("type", "integer")
+                            OutputKind.BOOLEAN -> put("type", "boolean")
+                        }
+                    }
+                }
+                putJsonArray("required") { add(JsonPrimitive("answer")) }
+                put("additionalProperties", false)
+            }
+        }
+    }
+
     /** `output_config` della Messages API di Anthropic: `format` di tipo `json_schema`, GA e senza header beta. */
     val ANTHROPIC_OUTPUT_CONFIG: JsonObject = buildJsonObject {
         putJsonObject("format") {
