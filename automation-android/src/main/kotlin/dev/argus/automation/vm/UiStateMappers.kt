@@ -14,6 +14,7 @@ import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.ActionJournalOutcome
 import dev.argus.engine.runtime.AuditKind
+import dev.argus.engine.runtime.CallerScopeGate
 import dev.argus.engine.runtime.ConfirmationCodes
 import dev.argus.engine.runtime.ExecutionStatus
 import dev.argus.engine.runtime.OmittedSteps
@@ -279,6 +280,9 @@ private fun auditSummary(record: AuditLogRecord, l: RenderLanguage): String = wh
             "required state unavailable",
             "stato necessario non disponibile",
         )
+        // 0.8: `screen_call` «solo chi non è nei contatti»: la regola non vale per questa chiamata.
+        CallerScopeGate.KNOWN_CALLER, CallerScopeGate.CALLER_UNVERIFIED ->
+            LogReasonLabels.text(record.detail, l).replaceFirstChar { it.uppercase() }
         else -> l.pick("conditions not met", "condizioni non soddisfatte")
     }
     AuditKind.BLOCKED_POLICY -> when (record.detail) {

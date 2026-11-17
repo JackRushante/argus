@@ -1086,6 +1086,7 @@ object ArgusModule {
         wakeAwarePause: WakeAwarePause,
         automationPause: LabelAwarePause,
         prompts: UserPromptCoordinator,
+        callerScope: dev.argus.automation.telephony.CallerScopeLog,
     ): Engine = Engine(
         store = store,
         executor = executor,
@@ -1102,6 +1103,8 @@ object ArgusModule {
         // 0.8: «chiedimi prima di eseguire» e le domande con pulsanti.
         confirmations = prompts,
         questions = prompts,
+        // 0.8: `screen_call` «solo chi non è nei contatti» vale per tutta la regola (perimetro dal filtro chiamate).
+        callerScope = callerScope,
         now = System::currentTimeMillis,
     )
 

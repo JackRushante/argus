@@ -15,8 +15,12 @@ import dev.argus.engine.runtime.AuditSink
 import dev.argus.engine.runtime.AutomationPause
 import dev.argus.engine.model.Automation
 import dev.argus.engine.runtime.CallScreeningDecider
+import dev.argus.engine.runtime.CallerScope
+import dev.argus.engine.runtime.CallerScopeGate
+import dev.argus.engine.runtime.TriggerEvent
 import dev.argus.engine.runtime.FirePolicySnapshotProvider
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -53,6 +57,51 @@ class ScreenCallDecisionLog(private val now: () -> Long = System::currentTimeMil
     companion object {
         const val MAX_AGE_MILLIS = 2 * 60 * 1_000L
         const val SCREEN_CALL_NOT_APPLIED = "screen_call_not_applied"
+    }
+}
+
+/**
+ * 0.8: il perimetro di chi chiama per le regole `screen_call` con `onlyUnknownCallers`, calcolato dal filtro
+ * chiamate e letto dal motore ([CallerScopeGate]) prima di eseguire le altre azioni della regola, qualunque sia
+ * la strada da cui arriva la chiamata (rifiutata dal filtro, o squillo normale). Una valutazione in corso si
+ * aspetta al più [waitMillis] (il budget del filtro più un margine); poi, senza una risposta per la regola, la
+ * regola non esegue. Ogni risposta vale una volta sola e per poco: una chiamata successiva non la riusa.
+ * Niente numeri: solo l'id della regola.
+ */
+class CallerScopeLog(
+    private val now: () -> Long = System::currentTimeMillis,
+    private val waitMillis: Long = CallScreeningCoordinator.BUDGET_MILLIS + 500,
+) : CallerScopeGate {
+    private val scopes = HashMap<AutomationId, Pair<CallerScope, Long>>()
+    private var pending: CompletableDeferred<Unit>? = null
+
+    /** Una chiamata nuova: le risposte della precedente non valgono più e chi legge aspetta questa. */
+    @Synchronized
+    fun begin() {
+        scopes.clear()
+        pending?.complete(Unit)
+        pending = CompletableDeferred()
+    }
+
+    /** Il perimetro di ogni regola con l'opzione (vuoto = non si è saputo: tempo scaduto, errore). */
+    @Synchronized
+    fun finish(results: Map<AutomationId, CallerScope>) {
+        val at = now()
+        results.forEach { (id, scope) -> scopes[id] = scope to at }
+        pending?.complete(Unit)
+        pending = null
+    }
+
+    override suspend fun closedCode(automation: Automation, event: TriggerEvent): String? {
+        synchronized(this) { pending }?.let { waiting -> withTimeoutOrNull(waitMillis) { waiting.await() } }
+        val scope = synchronized(this) {
+            scopes.remove(automation.id)?.takeIf { (_, at) -> now() - at in 0..MAX_AGE_MILLIS }?.first
+        }
+        return CallerScopeGate.codeFor(scope)
+    }
+
+    companion object {
+        const val MAX_AGE_MILLIS = ScreenCallDecisionLog.MAX_AGE_MILLIS
     }
 }
 
@@ -104,6 +153,8 @@ class CallScreeningCoordinator(
     private val decider: CallScreeningDecider,
     private val decisions: ScreenCallDecisionLog,
     private val audit: AuditSink,
+    /** Il perimetro di chi chiama per le regole con `onlyUnknownCallers`, letto poi dal motore. */
+    private val scopes: CallerScopeLog = CallerScopeLog(),
     private val now: () -> Long = System::currentTimeMillis,
     private val budgetMillis: Long = BUDGET_MILLIS,
     private val worker: CoroutineContext = Dispatchers.IO,
@@ -115,16 +166,20 @@ class CallScreeningCoordinator(
      * applicata (false = era già partita quella di riserva). Restituisce l'operazione applicata, null = squilla.
      */
     suspend fun decide(number: String?, respond: (ScreenCallOp?) -> Boolean = { true }): ScreenCallOp? {
+        scopes.begin()
         val work = detached.async(worker) { evaluate(number) }
         val decision = try {
             withTimeoutOrNull(budgetMillis) { work.await() }
         } catch (error: CancellationException) {
             work.cancel()
+            scopes.finish(emptyMap())
             throw error
         } catch (_: Exception) {
             null
         }
         if (decision == null) work.cancel()
+        // Prima della risposta: il motore può leggere il perimetro appena la chiamata gli arriva.
+        scopes.finish(decision?.scopes.orEmpty())
         if (decision == null) {
             respondSafely(respond, null)
             auditFailOpen(null)

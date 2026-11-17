@@ -303,6 +303,14 @@ internal object LogReasonLabels {
             "an Intent cannot be sent to Argus itself",
             "un Intent non può essere rivolto ad Argus stesso",
         ),
+        "screen_call_known_caller" to Label(
+            "the caller is in your contacts: the rule is only for unknown callers",
+            "chi chiama è nei tuoi contatti: la regola vale solo per gli sconosciuti",
+        ),
+        "screen_call_caller_unverified" to Label(
+            "it was not possible to check whether the caller is in your contacts, so the rule did not run",
+            "non si è potuto verificare se chi chiama è nei tuoi contatti, quindi la regola non è partita",
+        ),
         "screen_call_not_applied" to Label(
             "the call screening did not decide this call",
             "il filtro chiamate non ha deciso questa chiamata",

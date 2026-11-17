@@ -12,6 +12,7 @@ import dev.argus.automation.telephony.AndroidContactLookup
 import dev.argus.automation.telephony.AndroidTelephonyClock
 import dev.argus.automation.telephony.AndroidTelephonySurface
 import dev.argus.automation.telephony.CallScreeningCoordinator
+import dev.argus.automation.telephony.CallerScopeLog
 import dev.argus.automation.telephony.ContactLookup
 import dev.argus.automation.telephony.PrefsTelephonyLedgerStore
 import dev.argus.automation.telephony.ScreenCallDecisionLog
@@ -59,6 +60,10 @@ object TelephonyModule {
 
     @Provides
     @Singleton
+    fun callerScopeLog(): CallerScopeLog = CallerScopeLog()
+
+    @Provides
+    @Singleton
     fun contactLookup(@ApplicationContext context: Context): ContactLookup = AndroidContactLookup(context)
 
     @Provides
@@ -70,6 +75,7 @@ object TelephonyModule {
         contacts: ContactLookup,
         decisions: ScreenCallDecisionLog,
         audit: AuditSink,
+        scopes: CallerScopeLog,
     ): CallScreeningCoordinator = CallScreeningCoordinator(
         armed = store::armed,
         snapshots = snapshots,
@@ -78,5 +84,6 @@ object TelephonyModule {
         decider = CallScreeningDecider(Clock.systemDefaultZone()),
         decisions = decisions,
         audit = audit,
+        scopes = scopes,
     )
 }
