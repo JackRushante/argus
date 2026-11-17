@@ -177,12 +177,14 @@ internal data class DraftExpectation(
     val conditionsInclude: List<String> = emptyList(),
     val conditionsParams: Map<String, JsonElement> = emptyMap(),
     val conditionsText: List<String> = emptyList(),
+    /** 0.8: matcher per campo del trigger di FINE di una regola-intervallo (`exit.trigger`); vuoto = nessuna attesa. */
+    val exitTrigger: Map<String, JsonElement> = emptyMap(),
 ) {
     val isEmpty: Boolean
         get() = trigger.isEmpty() && contact == null && cronFires.isEmpty() && cronSilent.isEmpty() &&
             at == null && actionsInclude.isEmpty() && actionsExclude.isEmpty() && actionsText.isEmpty() &&
             params.isEmpty() && vars.isEmpty() && varsExclude.isEmpty() && controlFlow.isEmpty() && conditionsInclude.isEmpty() &&
-            conditionsParams.isEmpty() && conditionsText.isEmpty()
+            conditionsParams.isEmpty() && conditionsText.isEmpty() && exitTrigger.isEmpty()
 }
 
 internal data class BenchCase(
@@ -234,6 +236,8 @@ internal object BenchCases {
         "outcome", "trigger", "contact", "cron_fires", "cron_silent", "at_datetime", "actions_include",
         "actions_exclude", "actions_text", "params", "vars", "vars_exclude", "control_flow", "conditions_include",
         "conditions_params", "conditions_text", "validator_errors", "reply_mentions",
+        // 0.8: la fine di una regola-intervallo.
+        "exit_trigger",
     )
     private val AT_KEYS = setOf("days_from_today", "month_day", "time")
 
@@ -371,6 +375,13 @@ internal object BenchCases {
                 throw BenchException("$at: expect.trigger.type '${type.content}' non e' un trigger del dominio")
             }
         }
+        val exitTrigger = (expect["exit_trigger"] as? JsonObject).orEmptyObject(expect, "exit_trigger", at)
+        exitTrigger.forEach { (key, matcher) -> JsonMatch.validate(matcher, "$at.expect.exit_trigger.$key") }
+        (exitTrigger["type"] as? JsonPrimitive)?.let { type ->
+            if (!type.isString || type.content !in BenchVocab.TRIGGER_TYPES) {
+                throw BenchException("$at: expect.exit_trigger.type '${type.content}' non e' un trigger del dominio")
+            }
+        }
         val params = matcherMap(expect, "params", at)
         params.keys.forEach { path -> requireRoot(path, BenchVocab.ACTION_TYPES, "$at.expect.params") }
         val conditionsParams = matcherMap(expect, "conditions_params", at)
@@ -393,6 +404,7 @@ internal object BenchCases {
             conditionsInclude = expect.strList("conditions_include", at),
             conditionsParams = conditionsParams,
             conditionsText = expect.strList("conditions_text", at),
+            exitTrigger = exitTrigger,
         )
         checkAlternatives(draft.actionsInclude, BenchVocab.ACTION_TYPES, "$at.expect.actions_include")
         checkAlternatives(draft.actionsExclude, BenchVocab.ACTION_TYPES, "$at.expect.actions_exclude")
