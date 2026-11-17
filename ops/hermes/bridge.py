@@ -113,6 +113,9 @@ AVAILABLE_TRIGGER_IDS = (
     "sensor.step_detector",
     "sensor.step_counter",
 )
+# Shape of a trigger id a client may announce, known or not, and how many: bounds the input only.
+TRIGGER_ID_RE = re.compile(r"[a-z][a-z0-9_]{0,31}(?:\.[a-z][a-z0-9_]{0,31}){0,2}\Z")
+MAX_MANIFEST_TRIGGERS = 64
 ACT_STATE_KEYS = frozenset({
     "ringer", "wifi", "bluetooth", "dnd", "battery", "charging", "airplane", "screen",
 })
@@ -808,11 +811,19 @@ def validate_manifest(value: Any, schema_version: int) -> None:
     triggers = value.get("available_triggers", [])
     if (
         not isinstance(triggers, list)
-        or len(triggers) > len(AVAILABLE_TRIGGER_IDS)
-        or not all(isinstance(item, str) and item in AVAILABLE_TRIGGER_IDS for item in triggers)
-        or triggers != [item for item in AVAILABLE_TRIGGER_IDS if item in triggers]
+        or len(triggers) > MAX_MANIFEST_TRIGGERS
+        or not all(isinstance(item, str) and TRIGGER_ID_RE.fullmatch(item) for item in triggers)
+        or len(triggers) != len(set(triggers))
     ):
         raise RequestError(400, "invalid_manifest")
+    # A newer app may announce triggers this bridge does not know: they are dropped (never offered to
+    # the model, so a draft using them fails trigger_allowed) instead of rejecting the whole manifest.
+    # The known ones keep the canonical order of the contract.
+    known = [item for item in triggers if item in AVAILABLE_TRIGGER_IDS]
+    if known != [item for item in AVAILABLE_TRIGGER_IDS if item in known]:
+        raise RequestError(400, "invalid_manifest")
+    if "available_triggers" in value:
+        value["available_triggers"] = known
     if not _string(value["device_model"], 256) or not _is_int(value["android_api"]):
         raise RequestError(400, "invalid_manifest")
     if not isinstance(value["shizuku_available"], bool):

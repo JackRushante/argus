@@ -1374,6 +1374,18 @@ class BridgeTest(unittest.TestCase):
             0, set(), allow_flow=True, known_vars={"x"},
         ))
 
+    def test_the_shared_android_manifest_golden_is_accepted_with_the_bridge_triggers(self):
+        # Scritto da CliBridgeTransportTest con un manifest 0.8 completo: il telefono offre al bridge solo
+        # i trigger del suo elenco, nello stesso ordine, e il resto della busta passa la validazione.
+        golden_path = shared_contract_path("hermes-compile-v2-manifest.json")
+        manifest = json.loads(golden_path.read_text(encoding="utf-8"))
+        self.assertEqual(list(bridge.AVAILABLE_TRIGGER_IDS), manifest["available_triggers"])
+        request = self.request_v2()
+        request["manifest"] = manifest
+        request["state"]["values"] = {"dnd": "off"}
+        self.assertIs(request, bridge.validate_request(request, "req-test-1"))
+        self.assertEqual(list(bridge.AVAILABLE_TRIGGER_IDS), request["manifest"]["available_triggers"])
+
     def test_manifest_available_triggers_is_optional_and_bounded(self):
         # Client pre-P2: campo assente, accettato (retrocompatibilita').
         legacy = self.request()
@@ -1398,6 +1410,27 @@ class BridgeTest(unittest.TestCase):
             ["phone_state.sms", "time"],
         ):
             broken = self.request()
+            broken["manifest"]["available_triggers"] = bad
+            with self.assertRaises(bridge.RequestError):
+                bridge.validate_request(broken, "req-test-1")
+
+        # Trigger ben formati ma sconosciuti (app piu' nuove: manual, screen, 0.8...): tolti, non rifiutati.
+        newer = self.request_v2()
+        newer["manifest"]["available_triggers"] = [
+            "time", "immediate", "manual", "user_mode_changed", "notification", "sensor.significant_motion",
+            "sensor.shake", "screen", "nfc_tag", "calendar_event", "phone_state.sim",
+        ]
+        self.assertIs(newer, bridge.validate_request(newer, "req-test-1"))
+        self.assertEqual(
+            ["time", "immediate", "notification", "sensor.significant_motion"],
+            newer["manifest"]["available_triggers"],
+        )
+        prompt = bridge.build_prompt(newer)
+        for dropped in ("user_mode_changed", "sensor.shake", "nfc_tag", "calendar_event", "phone_state.sim"):
+            self.assertNotIn(dropped, prompt)
+        self.assertFalse(bridge.trigger_allowed({"type": "manual"}, set(newer["manifest"]["available_triggers"])))
+        for bad in (["time", "Manual"], ["time", 3], ["time", "manual", "manual"], [f"t{i}" for i in range(65)]):
+            broken = self.request_v2()
             broken["manifest"]["available_triggers"] = bad
             with self.assertRaises(bridge.RequestError):
                 bridge.validate_request(broken, "req-test-1")
