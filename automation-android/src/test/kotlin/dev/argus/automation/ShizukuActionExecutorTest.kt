@@ -17,6 +17,7 @@ import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.DndMode
 import dev.argus.engine.model.PhoneEvent
 import dev.argus.engine.model.SettingsScreen
+import dev.argus.engine.model.UiStep
 import dev.argus.engine.model.VolumeStream
 import dev.argus.engine.runtime.ActionResult
 import dev.argus.engine.runtime.ActionResolution
@@ -343,6 +344,29 @@ class ShizukuActionExecutorTest {
                 .execute(Action.RunShell("id"), sms),
         )
         assertEquals(emptyList(), calls)
+    }
+
+    /**
+     * 0.8: l'activity dei tag è esportata, quindi una scansione non verificata può essere forgiata. Le sue
+     * foglie shell e macro falliscono qui, sull'evento arrivato davvero; la scansione verificata passa.
+     */
+    @Test
+    fun `only a verified nfc scan runs the shell and the screen macro`() = runTest {
+        val calls = mutableListOf<String>()
+        val runner = StaticShellRunner { command, _ -> calls += command; ActionResult.Success }
+        val forged = context.copy(event = TriggerEvent.NfcTagScanned("04:A2:19", verified = false))
+        val verified = context.copy(event = TriggerEvent.NfcTagScanned("04:A2:19", verified = true))
+        val macro = Action.UiSteps(steps = listOf(UiStep.Back))
+
+        val gated = executor(staticShell = runner, shizukuReady = { true })
+        assertEquals(ActionResult.Failure("shell_external_trigger"), gated.execute(Action.RunShell("id"), forged))
+        assertEquals(ActionResult.Failure("ui_steps_external_trigger"), gated.execute(macro, forged))
+        assertEquals(emptyList(), calls)
+
+        assertEquals(ActionResult.Success, gated.execute(Action.RunShell("id"), verified))
+        assertEquals(listOf("id"), calls)
+        // Senza esecutore delle macro collegato fallisce per quello, non più per l'identità.
+        assertEquals(ActionResult.Failure("base_executor_unavailable"), gated.execute(macro, verified))
     }
 
     /**

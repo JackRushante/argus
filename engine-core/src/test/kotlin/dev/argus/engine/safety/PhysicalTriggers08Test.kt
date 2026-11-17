@@ -9,6 +9,7 @@ import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.AutomationSchema
 import dev.argus.engine.model.AutomationStatus
 import dev.argus.engine.model.CapabilityIds
+import dev.argus.engine.model.Condition
 import dev.argus.engine.model.CreatedBy
 import dev.argus.engine.model.FeatureGate
 import dev.argus.engine.model.FeatureGates
@@ -140,23 +141,37 @@ class PhysicalTriggers08Test {
     ).evaluate(automation, event)
 
     @Test
-    fun `an unverified scan cannot run a shell or screen macro rule but runs the others`() = runTest {
+    fun `an unverified scan of the approved tag fires the rule, a scan of another tag never`() = runTest {
+        // La regola scatta; le sue foglie shell e macro (anche annidate) le ferma l'esecutore sull'evento
+        // vero (ShizukuActionExecutorTest), le altre azioni partono.
         val tag = Trigger.NfcTag("04:A2:19")
         val verified = TriggerEvent.NfcTagScanned("04:A2:19", verified = true)
-        val forged = TriggerEvent.NfcTagScanned("04:A2:19", verified = false)
+        val forged = TriggerEvent.NfcTagScanned("04:a2:19", verified = false)
+        val otherTag = TriggerEvent.NfcTagScanned("04:A2:18", verified = true)
+        val otherForged = TriggerEvent.NfcTagScanned("04:A2:18", verified = false)
+        val nested = Action.If(
+            Condition.BooleanLiteral(true),
+            then = listOf(Action.While(Condition.BooleanLiteral(true), listOf(Action.RunShell("svc wifi disable")), maxIterations = 1)),
+        )
+
+        listOf(
+            armed(tag, listOf(Action.Vibrate(200), Action.RunShell("svc wifi disable"))),
+            armed(tag, listOf(nested)),
+            armed(tag, listOf(Action.UiSteps(steps = listOf(UiStep.Back)))),
+            armed(tag, listOf(Action.Vibrate(200))),
+        ).forEach { rule ->
+            assertEquals(FirePolicyDecision.Allow, evaluate(rule, verified), "${rule.actions}")
+            assertEquals(FirePolicyDecision.Allow, evaluate(rule, forged), "${rule.actions}")
+        }
 
         val shell = armed(tag, listOf(Action.RunShell("svc wifi disable")))
-        assertEquals(FirePolicyDecision.Allow, evaluate(shell, verified))
-        val blocked = assertIs<FirePolicyDecision.Block>(evaluate(shell, forged))
-        assertEquals("shell_external_trigger", blocked.code)
-        assertFalse(blocked.needsReview)
-
+        listOf(otherTag, otherForged).forEach { scan ->
+            val blocked = assertIs<FirePolicyDecision.Block>(evaluate(shell, scan))
+            assertEquals("shell_external_trigger", blocked.code)
+            assertFalse(blocked.needsReview)
+        }
         val macro = armed(tag, listOf(Action.UiSteps(steps = listOf(UiStep.Back))))
-        assertEquals(FirePolicyDecision.Allow, evaluate(macro, verified))
-        assertEquals("ui_steps_external_trigger", assertIs<FirePolicyDecision.Block>(evaluate(macro, forged)).code)
-
-        val plain = armed(tag, listOf(Action.Vibrate(200)))
-        assertEquals(FirePolicyDecision.Allow, evaluate(plain, forged))
+        assertEquals("ui_steps_external_trigger", assertIs<FirePolicyDecision.Block>(evaluate(macro, otherTag)).code)
     }
 
     @Test
@@ -183,6 +198,25 @@ class PhysicalTriggers08Test {
         assertEquals(listOf("next_alarm_offset_invalid"), errors(draft(Trigger.NextAlarm(181))))
         // Qualunque app può impostare la sveglia: niente shell.
         assertTrue("shell_external_trigger" in errors(draft(Trigger.NextAlarm(10), listOf(Action.RunShell("true")))))
+    }
+
+    @Test
+    fun `next alarm and app usage never start shell or macros, also nested and at fire time`() = runTest {
+        val id = AutomationId("n1")
+        val fingerprint = dev.argus.engine.model.ApprovalFingerprint("a".repeat(64))
+        val nestedShell = Action.If(Condition.BooleanLiteral(true), then = listOf(Action.RunShell("true")))
+        val macro = Action.UiSteps(steps = listOf(UiStep.Back))
+        mapOf<Trigger, TriggerEvent>(
+            Trigger.NextAlarm(10) to TriggerEvent.NextAlarmFired(id, fingerprint),
+            Trigger.AppUsage("com.example.game", 30) to TriggerEvent.AppUsageChanged("com.example.game", 29, 30),
+        ).forEach { (trigger, event) ->
+            assertTrue("shell_external_trigger" in errors(draft(trigger, listOf(nestedShell))), "$trigger")
+            assertTrue("ui_steps_external_trigger" in errors(draft(trigger, listOf(macro))), "$trigger")
+            // Una regola armata che li contenesse lo stesso (archivio manomesso) si ferma allo scatto.
+            val shellBlock = assertIs<FirePolicyDecision.Block>(evaluate(armed(trigger, listOf(nestedShell)), event))
+            assertEquals("shell_external_trigger", shellBlock.code)
+            assertEquals("ui_steps_external_trigger", assertIs<FirePolicyDecision.Block>(evaluate(armed(trigger, listOf(macro)), event)).code)
+        }
     }
 
     // --- app_usage ------------------------------------------------------------------------------
