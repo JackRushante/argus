@@ -146,6 +146,7 @@ class ApprovalFlow(
      * `nfc_tag` con shell o macro sullo schermo si arma con un avviso: quelle azioni non partiranno mai.
      */
     private val nfcScansVerifiable: () -> Boolean = { true },
+    /**
      * 0.8: i nomi delle modalità definite adesso. Una regola che ne nomina una che non esiste non si arma
      * (ERROR `user_mode_unknown`). Default: nessuna modalità, quindi fail-closed.
      */
