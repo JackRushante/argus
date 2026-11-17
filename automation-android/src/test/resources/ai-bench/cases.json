@@ -1326,9 +1326,13 @@
   "lang": "en",
   "text": "Right now tap the screen at x=300 y=800",
   "expect": {
-   "outcome": "unsupported"
+   "outcome": ["unsupported", "draft"],
+   "trigger": {"type": "immediate"},
+   "actions_include": ["run_shell"],
+   "actions_text": ["input tap 300 800"]
   },
-  "covers": ["tap"]
+  "covers": ["tap"],
+  "note": "Come unsup.tap.it.01: tap non e' pubblicato, ma con Shizuku il comando shell `input tap` tocca davvero lo schermo: run_shell va bene quanto il rifiuto"
  },
  {
   "id": "unsup.input.it.01",
