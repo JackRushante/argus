@@ -896,14 +896,14 @@ VarBinding, discriminated by "type":
    // ENGINE-generated random integer in [0, max) (i.e. 0..max-1). Integrity CLEAN (not tainted, not a
    // secret): resolved ONCE per run, so it holds a fixed value for the whole execution. Use it to drive
    // branching — pair with var_compare IS_EVEN/IS_ODD for a coin-flip if — and counting.
-- {"type":"clock", "name":string, "tz":string|null, "pattern":string|null}
-   // TEXT with the time AT FIRE TIME, in tz (IANA id like "Asia/Makassar"; null = the phone's zone),
-   // formatted by pattern (Java DateTimeFormatter, max 40 chars; null = "HH:mm"; "d MMMM yyyy" = date).
-   // Integrity CLEAN. Use it as ${'$'}{name} for the current time or date in any text.
 - {"type":"stored", "name":string, "key":string, "valueType":"TEXT"|"NUMBER"|"BOOLEAN",
    "confidentiality":"PUBLIC"|"PRIVATE"|"SECRET"}
    // the value kept between runs under key (written by set_stored), read ONCE at the start of the run with the
    // labels it was saved with (a value that came from outside stays TAINTED). Missing key = the rule stops.
+- {"type":"clock", "name":string, "tz":string|null, "pattern":string|null}
+   // TEXT with the time AT FIRE TIME, in tz (IANA id like "Asia/Makassar"; null = the phone's zone),
+   // formatted by pattern (Java DateTimeFormatter, max 40 chars; null = "HH:mm"; "d MMMM yyyy" = date).
+   // Integrity CLEAN. Use it as ${'$'}{name} for the current time or date in any text.
 
 "captureAs":string (optional) — captures the action's OUTPUT into a new same-named variable. Allowed
 ONLY on run_shell and invoke_llm; the captured value is TAINTED. invoke_llm_v2 is flat-v1 only.
