@@ -14,7 +14,7 @@ import java.util.Locale
  */
 object RuleSearch {
     private val MARKS = Regex("\\p{Mn}+")
-    // Unicode White_Space written out: the `(?U)` flag does not exist on Android (ICU) and crashes at class init.
+    // Unicode White_Space written out: the Unicode-classes regex flag does not exist on Android (ICU) and crashes at class init.
     private val SPACES = Regex("[\\s\\p{Z}\\u0085]+")
 
     fun normalize(text: String): String =
