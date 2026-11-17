@@ -18,7 +18,8 @@ object RuleLabels {
     const val MAX_CHARS = 24
     const val MAX_DISTINCT = 20
 
-    private val WHITESPACE_RUN = Regex("(?U)\\s+")
+    // Unicode White_Space written out: the `(?U)` flag does not exist on Android (ICU) and crashes at class init.
+    private val WHITESPACE_RUN = Regex("[\\s\\p{Z}\\u0085]+")
     private const val ZERO_WIDTH_JOINER = 0x200D
     private val FORBIDDEN_TYPES = setOf(
         Character.CONTROL.toInt(),
