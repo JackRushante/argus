@@ -82,6 +82,56 @@ class HttpCaptureRuntime08Test {
     }
 
     @Test
+    fun `a captured response waiting on an ask keeps its labels through the stored continuation`() = runTest {
+        val seen = mutableListOf<ResolvedProgramAction>()
+        val asked = mutableListOf<ProgramQuestion>()
+        fun interpreter(questions: ProgramQuestions = ProgramQuestions.UNAVAILABLE) = ProgramInterpreter(
+            runner = ProgramActionRunner { action, _ ->
+                seen += action
+                if (action.action is Action.HttpRequest) {
+                    ProgramActionResult(ActionResult.Success, capturedText = "21.5")
+                } else {
+                    ProgramActionResult(ActionResult.Success)
+                }
+            },
+            stateProvider = { DeviceState() },
+            conditionEvaluator = evaluator,
+            pause = {},
+            questions = questions,
+        )
+        val program = listOf(
+            Action.HttpRequest(HttpMethod.GET, "https://example.org/t", captureAs = "temp", secretHeaders = listOf(bearer)),
+            Action.Ask("Avviso?", listOf("Sì", "No"), "answer", timeoutMs = 60_000),
+            Action.ShowNotification("Casa", "\${temp} gradi"),
+        )
+        interpreter(
+            ProgramQuestions { question ->
+                asked += question
+                QuestionOutcome.Answered("Sì")
+            },
+        ).execute(trigger, event, emptyList(), program)
+
+        // What the prompt store encrypts and reads back after a restart.
+        val stored = ProgramContinuationCodec.encode(checkNotNull(asked.single().continuation))
+        val restored = checkNotNull(ProgramContinuationCodec.decode(stored))
+        val temp = restored.variables.getValue("temp")
+        assertEquals(IntegrityLabel.TAINTED, temp.integrity)
+        assertEquals(ConfidentialityLabel.SECRET, temp.confidentiality)
+        assertTrue(ValueProvenance.NETWORK in temp.provenance)
+        // The continuation holds the response, never the vault value: the request carried the name only.
+        assertFalse("Bearer" in stored)
+
+        seen.clear()
+        val resumed = interpreter().resume(trigger, event, emptyList(), program, restored, QuestionOutcome.Answered("No"))
+        assertTrue(resumed.completed, "${resumed.stopCode}")
+        val notification = seen.single()
+        assertEquals("21.5 gradi", assertIs<Action.ShowNotification>(notification.action).text)
+        assertEquals(IntegrityLabel.TAINTED, notification.inputIntegrity)
+        assertEquals(ConfidentialityLabel.SECRET, notification.inputConfidentiality)
+        assertTrue(ValueProvenance.NETWORK in notification.inputProvenance)
+    }
+
+    @Test
     fun `the interpolator resolves capture and secret fields but never a secret over the local network`() {
         val interpreter = TaintAwareInterpolator()
         val ok = Action.HttpRequest(
