@@ -18,9 +18,10 @@ class SuiteFilesTest(unittest.TestCase):
 
     def test_size_is_in_the_expected_range(self):
         # «circa 100 automazioni»: ne servono abbastanza da coprire le coppie, non una per ogni combinazione.
-        # 0.8: i tipi nuovi (calendario, notifiche, valori conservati e modalità) portano le loro regole.
+        # 0.8: i tipi nuovi (calendario, notifiche, valori conservati e modalità, trigger fisici) portano le
+        # loro regole.
         self.assertGreaterEqual(len(self.records), 90)
-        self.assertLessEqual(len(self.records), 200)
+        self.assertLessEqual(len(self.records), 230)
 
     def test_every_required_pair_is_covered(self):
         self.assertEqual([], [pairwise.describe(p) for p in pairwise.missing_pairs(self.records)])
@@ -108,10 +109,10 @@ class ValidationTest(unittest.TestCase):
 
     def test_switched_off_types_only_prove_their_rejection(self):
         rule = self.valid()
-        rule["rule"]["trigger"] = {"type": "calendar_event", "phase": "START"}
+        # 0.8: ogni trigger e' acceso; resta da provare il rifiuto di un'azione spenta.
+        self.assertEqual([], pairwise.NOT_YET_AVAILABLE_TRIGGERS)
         rule["rule"]["actions"] = [{"type": "send_sms", "number": "+39", "text": "x"}]
         problems = suite.validate([rule])
-        self.assertTrue(any("trigger spento" in p for p in problems))
         self.assertTrue(any("azione spenta" in p for p in problems))
         rule["expect"] = {"load": {"fail": {"stage": "review", "code": "not_available_yet"}}}
         self.assertEqual([], suite.validate([rule]))
