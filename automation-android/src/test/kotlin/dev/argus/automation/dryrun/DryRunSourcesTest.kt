@@ -52,6 +52,34 @@ class DryRunSourcesTest {
         ).forEach { code -> assertTrue("\"$code\"" in executor, code) }
     }
 
+    @Test
+    fun `the dry run wiring is never handed anything that acts`() {
+        val acting = listOf(
+            dev.argus.automation.ShizukuActionExecutor::class.java,
+            dev.argus.automation.GenerativeLane::class.java,
+            dev.argus.automation.http.HttpRequestExecutor::class.java,
+            dev.argus.automation.telephony.TelephonyActionRunner::class.java,
+            dev.argus.automation.telephony.TelephonyRateLimiter::class.java,
+            dev.argus.automation.telephony.CallerScopeLog::class.java,
+            dev.argus.automation.prompt.UserPromptCoordinator::class.java,
+            dev.argus.shizuku.PrivilegedShell::class.java,
+            dev.argus.engine.runtime.Engine::class.java,
+            dev.argus.engine.runtime.ActionExecutor::class.java,
+            dev.argus.engine.runtime.ResolvedActionExecutor::class.java,
+            dev.argus.engine.runtime.AuditSink::class.java,
+            dev.argus.engine.runtime.ExecutionJournal::class.java,
+            dev.argus.engine.runtime.SpanStore::class.java,
+            dev.argus.engine.runtime.SpanDevice::class.java,
+            dev.argus.engine.runtime.StoredModeActions::class.java,
+            dev.argus.engine.runtime.UserModeSwitcher::class.java,
+            dev.argus.engine.brain.Brain::class.java,
+        )
+        val handed = dev.argus.automation.di.DryRunModule::class.java.declaredMethods.flatMap { it.parameterTypes.toList() } +
+            listOf(AndroidDryRunFacts::class.java, ContactScopeGate::class.java, DryRunRuleReader::class.java)
+                .flatMap { type -> type.declaredFields.map { it.type } }
+        assertEquals(emptyList(), handed.filter { type -> acting.any { it.isAssignableFrom(type) } })
+    }
+
     private fun automation(status: AutomationStatus) =
         Automation(AutomationId("rule"), "Salvata", CreatedBy.USER, status, Trigger.Manual, listOf(Action.Vibrate(1)))
 
