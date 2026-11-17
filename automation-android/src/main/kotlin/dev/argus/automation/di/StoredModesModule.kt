@@ -8,6 +8,7 @@ import dagger.hilt.components.SingletonComponent
 import dev.argus.automation.DeviceStateSnapshotProvider
 import dev.argus.automation.DispatchFrame
 import dev.argus.automation.PersistentStateReader
+import dev.argus.automation.UserModeNames
 import dev.argus.automation.foreground.ReceiverWorkLauncher
 import dev.argus.automation.manual.ManualTokenStore
 import dev.argus.automation.modes.EngineUserModeEventDispatcher
@@ -37,6 +38,10 @@ object StoredModesModule {
     @Provides
     @Singleton
     fun userModeStore(database: ArgusDatabase): RoomUserModeStore = RoomUserModeStore(database)
+
+    /** I nomi delle modalità, per l'approvazione e per la richiesta di compile. */
+    @Provides
+    fun userModeNames(modes: RoomUserModeStore): UserModeNames = UserModeNames { modes.snapshot().modes }
 
     @Provides
     @Singleton
