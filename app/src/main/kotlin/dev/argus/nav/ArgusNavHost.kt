@@ -487,7 +487,7 @@ fun ArgusNavHost() {
                     )
                 }
 
-                // 0.8: Sistema › Segreti. Nomi e conteggi soltanto: un valore va dal foglio alla cassaforte.
+                // 0.8: System › Secrets. Nomi e conteggi soltanto: un valore va dal foglio alla cassaforte.
                 composable(Routes.SECRETS) {
                     val viewModel: SecretsViewModel = hiltViewModel()
                     val state by viewModel.state.collectAsStateWithLifecycle()
