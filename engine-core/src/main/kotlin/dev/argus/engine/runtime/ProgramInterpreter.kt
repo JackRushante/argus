@@ -221,9 +221,11 @@ class ProgramInterpreter(
         if (!TriggerMatcher().matches(trigger, event)) {
             return ProgramExecutionResult(emptyList(), stopCode = "trigger_mismatch")
         }
-        val runtime = Runtime(trigger, event, startedAtMillis = clock.millis())
+        val runtime = Runtime(trigger, event)
         return runtime.run(MAX_EXECUTION_MILLIS) {
-            runtime.initialize(bindings) && runtime.runActions(actions, ActionPath::root, depth = 0)
+            // L'inizio si legge dopo i binding: la variabile `clock` resta la prima lettura dell'orologio.
+            runtime.initialize(bindings) && runtime.markStarted() &&
+                runtime.runActions(actions, ActionPath::root, depth = 0)
         }
     }
 
@@ -259,7 +261,7 @@ class ProgramInterpreter(
         if (remaining <= 0) {
             return ProgramExecutionResult(emptyList(), stopCode = "deadline_exceeded", stopPath = continuation.askPath)
         }
-        val runtime = Runtime(trigger, event, startedAtMillis = continuation.startedAtMillis)
+        val runtime = Runtime(trigger, event)
         return runtime.run(remaining) {
             runtime.restore(continuation, outcome) && runtime.runActions(actions, ActionPath::root, depth = 0)
         }
@@ -268,9 +270,11 @@ class ProgramInterpreter(
     private inner class Runtime(
         private val trigger: Trigger,
         private val event: TriggerEvent,
-        private val startedAtMillis: Long,
     ) {
         private val scope = VarScope()
+
+        /** Inizio dell'esecuzione sull'orologio del programma (quello originale in una ripresa). */
+        private var startedAtMillis = 0L
 
         /** I `while` in corso, dal più esterno: entrano nella continuazione di una domanda. */
         private val activeLoops = LinkedHashMap<String, LoopPosition>()
@@ -309,6 +313,11 @@ class ProgramInterpreter(
             }
         }
 
+        fun markStarted(): Boolean {
+            startedAtMillis = clock.millis()
+            return true
+        }
+
         /** Ripresa: le variabili con le loro label, i giri e le chiamate AI già contate. */
         fun restore(continuation: ProgramContinuation, outcome: QuestionOutcome): Boolean {
             try {
@@ -317,6 +326,7 @@ class ProgramInterpreter(
                 return stop(ASK_RESUME_INVALID, continuation.askPath)
             }
             generativeCalls = continuation.generativeCalls
+            startedAtMillis = continuation.startedAtMillis
             resumeTarget = continuation
             resumeOutcome = outcome
             return true
