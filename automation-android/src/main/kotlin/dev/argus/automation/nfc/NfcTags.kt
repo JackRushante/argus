@@ -23,10 +23,19 @@ import java.lang.ref.WeakReference
  * Da dove viene una scansione (0.8). L'activity che riceve i tag è esportata per forza (i filtri NFC del
  * sistema), quindi qualunque app può avviarla con un id inventato: una scansione è **verificata** solo se il
  * chiamante iniziale dell'activity è il servizio NFC del sistema. Android lo dice solo dalla 15 (API 35,
- * `Activity.getInitialCaller()`); prima una scansione non si può verificare e resta non verificata.
+ * `Activity.getInitialCaller().getUid()`); prima una scansione non si può verificare e resta non verificata.
+ *
+ * `ComponentCaller.getUid()` dà l'uid vero solo se chi avvia ha scelto di condividere la sua identità
+ * (`ActivityOptions.setShareIdentityEnabled(true)`), altrimenti `Process.INVALID_UID` (-1): in quel caso,
+ * come per ogni dubbio, la scansione resta non verificata. Il dispatcher NFC di AOSP oggi non la condivide,
+ * quindi su molti telefoni anche dalla 15 le scansioni risultano non verificate: si sbaglia solo dal lato
+ * sicuro (shell e macro non partono, le altre azioni sì).
  */
 object NfcScanVerification {
-    /** Uid (app id) del servizio NFC di sistema: `android.uid.nfc`, `Process.NFC_UID`. */
+    /**
+     * App id del servizio NFC di sistema: `AID_NFC` = 1027, lo shared uid `android.uid.nfc` del pacchetto NFC
+     * (`Process.NFC_UID`, costante nascosta dell'SDK). Si confronta l'app id, così vale in ogni utente.
+     */
     const val NFC_SERVICE_APP_ID = 1027
 
     /** Il primo livello di Android che dice chi ha avviato l'activity. */
@@ -49,6 +58,16 @@ object NfcTagIntents {
             IntentCompat.getParcelableExtra(intent, NfcAdapter.EXTRA_TAG, Tag::class.java)?.id
         }.getOrNull() ?: runCatching { intent.getByteArrayExtra(NfcAdapter.EXTRA_ID) }.getOrNull()
         return bytes?.let(NfcTagPolicy::format)
+    }
+
+    /**
+     * L'id da consegnare al motore per un avvio del trampolino, o `null`: un'azione che non è una scoperta NFC,
+     * il telefono bloccato o in uno stato ignoto ([keyguardLocked] `null`), un tag assente o malformato.
+     */
+    fun deliverable(intent: Intent?, keyguardLocked: Boolean?): String? {
+        if (intent?.action !in DISCOVERY_ACTIONS) return null
+        if (keyguardLocked != false) return null
+        return tagId(intent)
     }
 
     val DISCOVERY_ACTIONS: Set<String> = setOf(

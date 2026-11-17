@@ -50,9 +50,8 @@ class NfcTagActivity : ComponentActivity() {
     }
 
     private fun handOver(request: Intent?) {
-        if (request?.action !in NfcTagIntents.DISCOVERY_ACTIONS) return
-        if (getSystemService(KeyguardManager::class.java)?.isKeyguardLocked != false) return
-        val tagId = NfcTagIntents.tagId(request) ?: return
+        val locked = getSystemService(KeyguardManager::class.java)?.isKeyguardLocked
+        val tagId = NfcTagIntents.deliverable(request, locked) ?: return
         val verified = NfcScanVerification.verified(Build.VERSION.SDK_INT, initialCallerUid())
         val entry = nfcEntryPoint()
         // Il motore lavora nello scope dell'app con la lease del servizio in primo piano: qui non si aspetta.

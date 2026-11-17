@@ -48,6 +48,19 @@ class NfcScansTest {
     }
 
     @Test
+    fun `a scan is handed over only with the phone unlocked and a real discovery`() {
+        val tag = Intent(NfcAdapter.ACTION_TECH_DISCOVERED).putExtra(NfcAdapter.EXTRA_ID, byteArrayOf(0x04, 0xA2.toByte()))
+        assertEquals("04:A2", NfcTagIntents.deliverable(tag, keyguardLocked = false))
+        // Bloccato, o stato del blocco illeggibile: niente.
+        assertNull(NfcTagIntents.deliverable(tag, keyguardLocked = true))
+        assertNull(NfcTagIntents.deliverable(tag, keyguardLocked = null))
+        // Un avvio qualunque dell'activity esportata (nessuna azione NFC) non porta nulla al motore.
+        assertNull(NfcTagIntents.deliverable(Intent(Intent.ACTION_MAIN).putExtra(NfcAdapter.EXTRA_ID, byteArrayOf(0x04)), false))
+        assertNull(NfcTagIntents.deliverable(Intent().putExtra(NfcAdapter.EXTRA_ID, byteArrayOf(0x04)), false))
+        assertNull(NfcTagIntents.deliverable(null, false))
+    }
+
+    @Test
     fun `a scan reaches the engine with its origin and only a verified one may start shell`() = runTest {
         val delivered = mutableListOf<TriggerEnvelope>()
         val ingress = NfcScanIngress(DeviceEventParser(), DeviceEventDispatcher { delivered += it }) { 1_000L }
