@@ -15,6 +15,7 @@ import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.AutomationStore
 import dev.argus.engine.runtime.FireClaimRequest
 import dev.argus.engine.runtime.FireClaimResult
+import dev.argus.engine.runtime.SpanPhase
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -127,17 +128,19 @@ class RoomAutomationStore(private val dao: AutomationDao) : AutomationStore {
     override suspend fun lastFiredAt(id: AutomationId): Long? =
         dao.lastFiredAt(id.value)
 
-    override suspend fun claimFire(request: FireClaimRequest): FireClaimResult =
-        dao.claimFire(
-            claim = FireClaimEntity(
-                automationId = request.automationId.value,
-                eventIdHash = identifierHash(request.eventId.value),
-                executionId = request.executionId.value,
-                claimedAtMillis = request.atMillis,
-            ),
-            atMillis = request.atMillis,
-            cooldownMs = request.cooldownMs,
+    override suspend fun claimFire(request: FireClaimRequest): FireClaimResult {
+        val claim = FireClaimEntity(
+            automationId = request.automationId.value,
+            eventIdHash = identifierHash(request.eventId.value),
+            executionId = request.executionId.value,
+            claimedAtMillis = request.atMillis,
         )
+        // 0.8: la fine di una regola-intervallo deduplica ma non tocca `lastFiredAt` (la pausa dell'inizio).
+        return when (request.phase) {
+            SpanPhase.START -> dao.claimFire(claim = claim, atMillis = request.atMillis, cooldownMs = request.cooldownMs)
+            SpanPhase.EXIT -> dao.claimEventOnly(claim = claim, atMillis = request.atMillis)
+        }
+    }
 
     // --- mapping -------------------------------------------------------------
 

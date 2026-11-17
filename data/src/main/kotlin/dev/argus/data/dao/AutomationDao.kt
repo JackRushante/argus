@@ -220,4 +220,31 @@ interface AutomationDao {
         ) { "Claim non eleggibile non finalizzato" }
         return FireClaimResult.NotEligible
     }
+
+    /**
+     * 0.8: claim della fine di una regola-intervallo. Deduplica ed eleggibilità come [claimFire], ma senza
+     * leggere né aggiornare `lastFiredAt`: la pausa dell'inizio non ferma la fine e la fine non la consuma.
+     */
+    @Transaction
+    suspend fun claimEventOnly(claim: FireClaimEntity, atMillis: Long): FireClaimResult {
+        if (runtimeState(claim.automationId) == null) return FireClaimResult.NotEligible
+
+        if (insertFireClaim(claim) == -1L) {
+            val existing = requireNotNull(claimedExecutionId(claim.automationId, claim.eventIdHash)) {
+                "Collisione executionId senza claim corrispondente"
+            }
+            return FireClaimResult.Duplicate(ExecutionId(existing))
+        }
+
+        val current = runtimeState(claim.automationId)
+        if (current?.status == AutomationStatus.ARMED && current.enabled) return FireClaimResult.Claimed
+        check(
+            finishSuppressedClaim(
+                claim.executionId,
+                ExecutionStatus.SUPPRESSED_NOT_ELIGIBLE,
+                atMillis,
+            ) == 1,
+        ) { "Claim non eleggibile non finalizzato" }
+        return FireClaimResult.NotEligible
+    }
 }
