@@ -757,4 +757,35 @@
     <!-- Issue #21: copia di un messaggio della chat -->
     <string name="chat_message_copy_action">Copia messaggio</string>
     <string name="chat_message_copied">Messaggio copiato</string>
+    <!-- 0.8: prova a secco -->
+    <string name="dry_run_title">Prova a secco</string>
+    <string name="dry_run_action">Prova a secco</string>
+    <string name="dry_run_action_hint">Mostra passo per passo cosa farebbe un\'esecuzione, senza eseguire nulla.</string>
+    <string name="dry_run_banner">Simulazione: non viene eseguito nulla. Le condizioni si leggono dal telefono in questo momento.</string>
+    <string name="dry_run_event_header">Evento di prova</string>
+    <string name="dry_run_field_sender">Mittente</string>
+    <string name="dry_run_field_title">Titolo</string>
+    <string name="dry_run_field_text">Testo del messaggio</string>
+    <string name="dry_run_field_number">Numero</string>
+    <string name="dry_run_field_name">Rete o dispositivo</string>
+    <string name="dry_run_field_mode">Nuova modalità</string>
+    <string name="dry_run_no_fields">Questo trigger non porta dati da scrivere: la prova usa il suo evento così com\'è.</string>
+    <string name="dry_run_verified_scan">Scansione verificata</string>
+    <string name="dry_run_phase_label">Cosa simulare</string>
+    <string name="dry_run_phase_start">L\'inizio</string>
+    <string name="dry_run_phase_end">La fine</string>
+    <string name="dry_run_run_again">Prova di nuovo</string>
+    <string name="dry_run_steps_header">Cosa succederebbe</string>
+    <string name="dry_run_shell_label">comando shell, integrale</string>
+    <string name="dry_run_answer_label">Risposta simulata</string>
+    <string name="dry_run_footer">Nel Log questa prova non compare: non conta come esecuzione e non consuma il cooldown.</string>
+    <string name="dry_run_not_simulated">Non simulati: i tetti orari di SMS e chiamate, il budget dell\'AI, chi riceverebbe un Intent implicito.</string>
+    <string name="dry_run_missing">Questa regola non è più disponibile.</string>
+    <string name="dry_run_tone_ok">Succederebbe</string>
+    <string name="dry_run_tone_ai">Passo con l\'AI</string>
+    <string name="dry_run_tone_ask">Aspetta te</string>
+    <string name="dry_run_tone_blocked">Bloccato</string>
+    <string name="dry_run_tone_stopped">Si ferma</string>
+    <string name="dry_run_tone_skipped">Non succede</string>
+    <string name="dry_run_tone_info">Passo del programma</string>
 </resources>

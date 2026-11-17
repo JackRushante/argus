@@ -46,6 +46,12 @@ class ResolvedProgramAction internal constructor(
     val inputIntegrity: IntegrityLabel,
     val inputConfidentiality: ConfidentialityLabel,
     val inputProvenance: Set<ValueProvenance>,
+    /**
+     * 0.8 «Prova a secco»: per ogni campo template (etichetta di [InterpolationPolicy.textFields]) le parti
+     * del testo risolto che vengono da un valore TAINTED, nella forma in cui sono entrate (tra apici, con
+     * escape). Solo osservabilità: nessun esecutore la legge.
+     */
+    val taintedRanges: Map<String, List<IntRange>> = emptyMap(),
 ) {
     override fun toString(): String =
         "ResolvedProgramAction(type=${action::class.simpleName}, runtimeData=${runtimeData.size}, values=<redacted>)"
@@ -252,6 +258,7 @@ class TaintAwareInterpolator {
     ) {
         private val inputs = mutableListOf<VarValue>()
         private val runtimeByVariable = linkedMapOf<String, RuntimeDataBinding>()
+        private val tainted = linkedMapOf<String, MutableList<IntRange>>()
 
         fun field(
             label: String,
@@ -298,6 +305,7 @@ class TaintAwareInterpolator {
                         throw ResolutionException("taint_blocked")
                     }
                     inputs += value
+                    val valueStart = length
                     if (frameTaintedForBrain && value.integrity == IntegrityLabel.TAINTED) {
                         val binding = runtimeByVariable.getOrPut(name) {
                             val token = "ARGUS_RUNTIME_DATA_${runtimeByVariable.size + 1}"
@@ -331,6 +339,9 @@ class TaintAwareInterpolator {
                     } else {
                         append(value.text)
                     }
+                    if (value.integrity == IntegrityLabel.TAINTED && length > valueStart) {
+                        tainted.getOrPut(label) { mutableListOf() } += valueStart until length
+                    }
                     cursor = match.range.last + 1
                 }
                 append(template, cursor, template.length)
@@ -352,6 +363,7 @@ class TaintAwareInterpolator {
                 inputIntegrity = integrity,
                 inputConfidentiality = confidentiality,
                 inputProvenance = inputs.flatMapTo(linkedSetOf()) { it.provenance },
+                taintedRanges = tainted.mapValues { (_, ranges) -> ranges.toList() },
             )
         }
     }

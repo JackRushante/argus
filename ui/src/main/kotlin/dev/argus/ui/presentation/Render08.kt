@@ -233,7 +233,7 @@ internal object RuleSpanRender {
         return slots.values.map { slotLabel(it, l) }
     }
 
-    private fun slotLabel(slot: SpanSlot, l: RenderLanguage): String = when (slot) {
+    internal fun slotLabel(slot: SpanSlot, l: RenderLanguage): String = when (slot) {
         is SpanSlot.Volume -> when (slot.stream) {
             VolumeStream.MEDIA -> l.pick("media volume", "volume multimediale")
             VolumeStream.RING -> l.pick("ring volume", "volume della suoneria")

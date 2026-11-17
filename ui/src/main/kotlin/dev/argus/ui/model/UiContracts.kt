@@ -456,6 +456,8 @@ data class AutomationDetailState(
     val canShare: Boolean = false,
     /** 0.7.2: il foglio «Condividi regola» è aperto con questi testi; `null` = chiuso. */
     val share: RuleShareUi? = null,
+    /** 0.8: «Prova a secco» si offre (bozza o regola salvata leggibile). */
+    val dryRunAvailable: Boolean = false,
 )
 
 /** 0.7.2: le etichette di una regola nel dettaglio e quelle già in uso, da proporre per prime. */
@@ -561,6 +563,8 @@ interface AutomationDetailCallbacks {
     fun onSaveShareFile(stripPersonalData: Boolean) {}
     /** 0.7.2: copia il testo negli appunti. */
     fun onCopyShare(stripPersonalData: Boolean) {}
+    /** 0.8: apre «Prova a secco». Default no-op, host-owned. */
+    fun onDryRun() {}
 }
 
 // --- 6.4 Log esecuzioni ---
