@@ -200,3 +200,14 @@ object DirectBootPolicy {
         else -> null
     }.takeIf { allowsAction(action) }
 }
+
+/** Closed codes the feature writes into the Log. */
+object BeforeUnlockCodes {
+    /** FIRED detail: the rule ran before the first unlock (imported into the Log after unlock). */
+    const val FIRED = "before_unlock"
+
+    /** BEFORE_UNLOCK_OFF details: why the option switched itself off. */
+    const val OFF_RULE_CHANGED = "rule_changed"
+    const val OFF_NOT_QUALIFYING = "not_qualifying"
+    val OFF_DETAILS: Set<String> = setOf(OFF_RULE_CHANGED, OFF_NOT_QUALIFYING)
+}

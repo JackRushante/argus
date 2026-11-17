@@ -482,6 +482,35 @@ internal object LogReasonLabels {
             "Android did not accept the Back or Home press",
             "Android non ha accettato il tasto Indietro o Home",
         ),
+        // --- 0.8: the copy of a rule kept to run before the first unlock, refused before unlock ---
+        "before_unlock_copy_corrupt" to Label(
+            "the copy kept to run before unlock was damaged",
+            "la copia per lo scatto prima dello sblocco era danneggiata",
+        ),
+        "before_unlock_not_armed" to Label(
+            "the copy kept to run before unlock was not of an armed rule",
+            "la copia per lo scatto prima dello sblocco non era di una regola armata",
+        ),
+        "before_unlock_not_qualifying" to Label(
+            "the rule cannot run before unlock",
+            "la regola non può scattare prima dello sblocco",
+        ),
+        "before_unlock_invalid" to Label(
+            "the copy kept to run before unlock no longer passes validation",
+            "la copia per lo scatto prima dello sblocco non supera più la validazione",
+        ),
+        "before_unlock_duplicate" to Label(
+            "the copy kept to run before unlock held the rule twice",
+            "la copia per lo scatto prima dello sblocco conteneva la regola due volte",
+        ),
+        "before_unlock_too_many" to Label(
+            "too many rules to run before unlock",
+            "troppe regole da far scattare prima dello sblocco",
+        ),
+        "before_unlock_not_allowed" to Label(
+            "this action cannot run before unlock",
+            "questa azione non può essere eseguita prima dello sblocco",
+        ),
         // --- Codici generici (nessun motivo più preciso disponibile) ---
         "execution_error" to Label("unspecified error", "errore non specificato"),
         "policy_blocked" to Label("unspecified policy", "policy non specificata"),
