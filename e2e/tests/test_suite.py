@@ -20,7 +20,8 @@ class SuiteFilesTest(unittest.TestCase):
         # «circa 100 automazioni»: ne servono abbastanza da coprire le coppie, non una per ogni combinazione.
         # 0.8: i tipi nuovi (calendario, notifiche, valori conservati e modalità) portano le loro regole.
         self.assertGreaterEqual(len(self.records), 90)
-        self.assertLessEqual(len(self.records), 200)
+        # 0.8: SMS, chiamate, Intent e filtro chiamate portano anche le loro.
+        self.assertLessEqual(len(self.records), 240)
 
     def test_every_required_pair_is_covered(self):
         self.assertEqual([], [pairwise.describe(p) for p in pairwise.missing_pairs(self.records)])
@@ -109,10 +110,13 @@ class ValidationTest(unittest.TestCase):
     def test_switched_off_types_only_prove_their_rejection(self):
         rule = self.valid()
         rule["rule"]["trigger"] = {"type": "nfc_tag", "tagId": "04:AA"}
-        rule["rule"]["actions"] = [{"type": "notification_action", "op": "DISMISS"}]
         problems = suite.validate([rule])
         self.assertTrue(any("trigger spento" in p for p in problems))
-        self.assertTrue(any("azione spenta" in p for p in problems))
+        # 0.8: ogni azione nuova e' accesa; quando ne arrivera' una spenta si prova anche il suo rifiuto.
+        for off in pairwise.NOT_YET_AVAILABLE_ACTIONS:
+            with_action = self.valid()
+            with_action["rule"]["actions"] = [{"type": off}]
+            self.assertTrue(any("azione spenta" in p for p in suite.validate([with_action])), off)
         rule["expect"] = {"load": {"fail": {"stage": "review", "code": "not_available_yet"}}}
         self.assertEqual([], suite.validate([rule]))
 
