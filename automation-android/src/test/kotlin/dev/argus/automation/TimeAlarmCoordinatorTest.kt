@@ -1122,6 +1122,156 @@ class TimeAlarmCoordinatorTest {
         tz = "Europe/Rome",
         solar = SolarSpec(SolarEvent.SUNSET, -30, lat = 41.9, lng = 12.5),
     )
+    // --- 0.8: next_alarm -------------------------------------------------------------------------
+
+    private fun nextAlarmRule(offsetMinutes: Int, id: String = "na"): Automation {
+        val unsigned = Automation(
+            id = AutomationId(id),
+            name = "prima della sveglia",
+            createdBy = CreatedBy.USER,
+            status = AutomationStatus.ARMED,
+            trigger = Trigger.NextAlarm(offsetMinutes),
+            actions = listOf(Action.ShowNotification("Argus", "sveglia")),
+            enabled = true,
+        )
+        return unsigned.copy(approvalFingerprint = ApprovalFingerprints.of(unsigned))
+    }
+
+    private fun nextAlarmCoordinator(
+        store: FakeAutomationStore,
+        state: FakeTimeAlarmStateStore,
+        alarmAt: () -> Long?,
+        clock: () -> Instant = { now },
+        backend: FakeTimeAlarmBackend = FakeTimeAlarmBackend(),
+        audit: AuditSink = ScheduleAuditRecorder(),
+        dispatcher: TimeEventDispatcher = TimeEventDispatcher { },
+    ) = TimeAlarmCoordinator(
+        store = store,
+        state = state,
+        backend = backend,
+        dispatcher = dispatcher,
+        now = clock,
+        audit = audit,
+        nextAlarmAt = alarmAt,
+    )
+
+    @Test
+    fun `next alarm is planned offset minutes before the phone alarm, exact when allowed`() = runTest {
+        val rule = nextAlarmRule(30)
+        val alarm = now.plus(Duration.ofHours(8)).toEpochMilli()
+        val state = FakeTimeAlarmStateStore()
+        val backend = FakeTimeAlarmBackend()
+
+        val report = nextAlarmCoordinator(FakeAutomationStore(rule), state, { alarm }, backend = backend)
+            .reconcile(ReconcileReason.APP_START)
+
+        assertEquals(listOf(rule.id), report.scheduled)
+        assertEquals(alarm - 30 * 60_000L, state.get(rule.id)?.eventAtMillis)
+        assertEquals(TimePrecision.EXACT, state.get(rule.id)?.requestedPrecision)
+        assertEquals(ScheduledAlarmMode.EXACT, state.get(rule.id)?.scheduledMode)
+    }
+
+    @Test
+    fun `without an alarm the rule waits quietly and follows the alarm when it changes`() = runTest {
+        val rule = nextAlarmRule(15)
+        val state = FakeTimeAlarmStateStore()
+        val audit = ScheduleAuditRecorder()
+        val store = FakeAutomationStore(rule)
+        var alarm: Long? = null
+        val coordinator = nextAlarmCoordinator(store, state, { alarm }, audit = audit)
+
+        val idle = coordinator.reconcile(ReconcileReason.APP_START)
+        assertEquals(emptyList(), idle.scheduled)
+        assertEquals(emptyList(), idle.failed)
+        assertNull(state.get(rule.id))
+        assertEquals(emptyList(), audit.events.map { it.detail }, "nessuna sveglia non è un guasto")
+        assertEquals(AutomationStatus.ARMED, store.get(rule.id)?.status)
+
+        alarm = now.plus(Duration.ofHours(2)).toEpochMilli()
+        coordinator.reconcile(ReconcileReason.NEXT_ALARM_CHANGED)
+        assertEquals(alarm!! - 15 * 60_000L, state.get(rule.id)?.eventAtMillis)
+
+        // L'utente toglie la sveglia: il record se ne va, la regola resta armata.
+        alarm = null
+        coordinator.reconcile(ReconcileReason.NEXT_ALARM_CHANGED)
+        assertNull(state.get(rule.id))
+        assertEquals(AutomationStatus.ARMED, store.get(rule.id)?.status)
+    }
+
+    @Test
+    fun `an alarm closer than the offset is skipped, not fired late`() = runTest {
+        val rule = nextAlarmRule(60)
+        val state = FakeTimeAlarmStateStore()
+        val alarm = now.plus(Duration.ofMinutes(20)).toEpochMilli()
+        nextAlarmCoordinator(FakeAutomationStore(rule), state, { alarm }).reconcile(ReconcileReason.NEXT_ALARM_CHANGED)
+        assertNull(state.get(rule.id))
+    }
+
+    @Test
+    fun `each alarm instance fires once with its own event id`() = runTest {
+        val rule = nextAlarmRule(10)
+        val fingerprint = requireNotNull(rule.approvalFingerprint)
+        val alarm = Instant.parse("2026-07-14T06:30:00Z").toEpochMilli()
+        val dueAt = alarm - 10 * 60_000L
+        var clock = Instant.ofEpochMilli(dueAt)
+        val dispatched = mutableListOf<TriggerEnvelope>()
+        val state = FakeTimeAlarmStateStore(record(rule, dueAt))
+        val coordinator = nextAlarmCoordinator(
+            FakeAutomationStore(rule),
+            state,
+            { alarm },
+            clock = { clock },
+            dispatcher = TimeEventDispatcher { dispatched += it },
+        )
+
+        assertIs<AlarmDeliveryResult.Delivered>(coordinator.onAlarm(rule.id, fingerprint, dueAt))
+        assertEquals("next_alarm:${fingerprint.value}:$dueAt", dispatched.single().id.value)
+        assertEquals(TriggerEvent.NextAlarmFired(rule.id, fingerprint), dispatched.single().event)
+        // La stessa sveglia non si ripianifica: nessun secondo scatto per questa istanza.
+        assertNull(state.get(rule.id))
+        clock = clock.plusSeconds(60)
+        coordinator.reconcile(ReconcileReason.NEXT_ALARM_CHANGED)
+        assertNull(state.get(rule.id))
+        assertEquals(1, dispatched.size)
+    }
+
+    @Test
+    fun `a due instance is recovered after a restart only until its alarm has rung`() = runTest {
+        val rule = nextAlarmRule(30)
+        val alarm = Instant.parse("2026-07-14T07:00:00Z").toEpochMilli()
+        val dueAt = alarm - 30 * 60_000L
+        val dispatched = mutableListOf<TriggerEnvelope>()
+
+        val soon = FakeTimeAlarmStateStore(record(rule, dueAt))
+        nextAlarmCoordinator(
+            FakeAutomationStore(rule),
+            soon,
+            { alarm },
+            clock = { Instant.ofEpochMilli(dueAt + 5 * 60_000L) },
+            dispatcher = TimeEventDispatcher { dispatched += it },
+        ).reconcile(ReconcileReason.APP_START)
+        assertEquals(1, dispatched.size)
+
+        val late = FakeTimeAlarmStateStore(record(rule, dueAt))
+        nextAlarmCoordinator(
+            FakeAutomationStore(rule),
+            late,
+            { null },
+            clock = { Instant.ofEpochMilli(alarm + 3 * 60 * 60_000L) },
+            dispatcher = TimeEventDispatcher { dispatched += it },
+        ).reconcile(ReconcileReason.BOOT)
+        assertEquals(1, dispatched.size, "la sveglia è suonata da ore: niente recupero")
+        assertNull(late.get(rule.id))
+    }
+
+    @Test
+    fun `the next alarm changed broadcast reconciles`() {
+        assertEquals(
+            ReconcileReason.NEXT_ALARM_CHANGED,
+            reconcileReason(android.app.AlarmManager.ACTION_NEXT_ALARM_CLOCK_CHANGED),
+        )
+    }
+
     private val tromsoSunrise = Trigger.Time(
         tz = "Europe/Oslo",
         solar = SolarSpec(SolarEvent.SUNRISE, 0, lat = 69.6, lng = 19.0),

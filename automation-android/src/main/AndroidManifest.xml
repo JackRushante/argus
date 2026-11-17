@@ -160,6 +160,12 @@
             android:enabled="true"
             android:exported="false" />
 
+        <!-- 0.8: ricontrollo di una geofence DWELL dopo la sua attesa; intent esplicito, nessuna azione esterna. -->
+        <receiver
+            android:name="dev.argus.automation.geofence.GeofenceDwellReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
         <receiver
             android:name=".TimeReconciliationReceiver"
             android:enabled="true"
@@ -170,6 +176,9 @@
                 <action android:name="android.intent.action.TIMEZONE_CHANGED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
                 <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+                <!-- 0.8: la prossima sveglia è cambiata (trigger next_alarm). Broadcast di sistema esente dai
+                     limiti sugli implicit receiver; senza regole next_alarm il reconcile non cambia nulla. -->
+                <action android:name="android.app.action.NEXT_ALARM_CLOCK_CHANGED" />
             </intent-filter>
         </receiver>
 

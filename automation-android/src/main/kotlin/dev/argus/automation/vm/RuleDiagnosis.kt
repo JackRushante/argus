@@ -71,6 +71,24 @@ internal fun buildRuleDiagnosis(
                 addAll(alarmRows(automation, trigger, inputs.alarm, nowMillis, language))
             }
             is Trigger.Geofence -> if (active) add(areaRow(automation, inputs.geofence, language))
+            // 0.8: senza una sveglia sul telefono la regola aspetta, e non è un guasto.
+            is Trigger.NextAlarm -> if (active) {
+                val alarm = inputs.alarm?.takeIf { it.approvalFingerprint == automation.approvalFingerprint?.value }
+                add(
+                    if (alarm == null) {
+                        DiagnosisRow(
+                            DiagnosisLevel.INFO,
+                            language.pick(
+                                "No upcoming phone alarm to anticipate: it waits for the next one you set",
+                                "Nessuna sveglia in arrivo da anticipare: aspetta la prossima che imposti",
+                            ),
+                        )
+                    } else {
+                        val due = dayTimeLabel(alarm.eventAtMillis, nowMillis, language)
+                        DiagnosisRow(DiagnosisLevel.OK, language.pick("Runs $due", "Scatta $due"))
+                    },
+                )
+            }
             else -> Unit
         }
         add(lastEventRow(inputs.log, nowMillis, language))
@@ -183,6 +201,10 @@ private fun causeText(cause: BlockCause, l: RenderLanguage): String = when (caus
     BlockCause.SENSOR_UNAVAILABLE -> l.pick(
         "The required sensor is not available or the physical activity permission is missing",
         "Il sensore richiesto non è disponibile o manca il permesso attività fisica",
+    )
+    BlockCause.NFC_UNAVAILABLE -> l.pick(
+        "This phone has no NFC, so it cannot read tags",
+        "Questo telefono non ha l'NFC, quindi non può leggere i tag",
     )
     BlockCause.WRITE_SETTINGS_ACCESS -> l.pick(
         "The \"Modify system settings\" access is missing",

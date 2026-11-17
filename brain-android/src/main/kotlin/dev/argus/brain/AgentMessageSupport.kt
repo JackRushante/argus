@@ -570,13 +570,14 @@ BINDING RULES:
     "phone_state.call" also covers MISSED_CALL; the SIM filter needs "phone_state.sim".
     "manual" (user-started: button, widget, shortcut, tile) is always listed.
     "app_event" (an app opened or closed) is usable only if listed.
+    "nfc_tag", "next_alarm" and "app_usage" are usable only if listed.
     "calendar_event" (start or end of a calendar event) is usable only if listed.
     A requested trigger that is not in the list must NOT be compiled: briefly point out the
     missing grant or mechanism in Settings and return draft null with error_code
     "unsupported_capability".
 11. run_shell is an autonomous shell whose approved template is shown in review. In flat v1 the
     command is literal; in P4 it may interpolate declared variables under the DATA-FLOW rules below.
-    Use it with time, immediate, geofence, connectivity or sensor triggers, or with notification if it is a 1:1
+    Use it with time, immediate, geofence, connectivity, sensor or nfc_tag triggers, or with notification if it is a 1:1
     WhatsApp chat (isGroup=false) whose conversationId is whitelisted: a verified contact can
     trigger an already-approved template. Never with phone_state (SMS sender and caller ID are
     spoofable); this trigger gate remains even for a P4 template.
@@ -590,8 +591,8 @@ BINDING RULES:
     set_mobile_data, set_dnd, set_ringer, set_dark_mode, set_alarm, set_timer, write_setting, ...)
     ALWAYS use it instead — never reimplement a typed action via shell. Only emit shell commands
     that really exist on Android; never invent cmd/svc subcommands (there is NO `cmd flashlight`).
-12. Geofences support only ENTER/EXIT and loiteringDelayMs must be 0: do not propose
-    DWELL, which the current framework runtime cannot implement honestly.
+12. Geofences: ENTER or EXIT fire at the edge and need loiteringDelayMs 0. "When I have been at <place>
+    for N minutes" is DWELL with loiteringDelayMs = N minutes in ms, 60000..7200000 (1 to 120 minutes).
 13. state_compare conditions are only available in schema v2. Use exclusively a family listed
     in manifest.state_readers.families and honor the manifest's policy_version/limits. If the
     family or the threshold's unit is missing, ask for clarification: do not retrofit
@@ -683,7 +684,7 @@ Trigger, discriminated by "type":
   For "set an alarm/a timer right now" use this trigger and put the time in the
   set_alarm/set_timer action, never a time trigger at an instant already past.
 - {"type":"geofence", "lat":number, "lng":number, "radiusM":number,
-   "transition":"ENTER"|"EXIT", "loiteringDelayMs":0,
+   "transition":"ENTER"|"EXIT"|"DWELL", "loiteringDelayMs":integer (0, or 60000..7200000 with DWELL),
    "resolveCurrentLocation":boolean}
 - {"type":"notification", "pkg":string, "conversationId":string|null,
    "sender":string|null, "isGroup":boolean|null, "titleMatch":string|null,
@@ -695,9 +696,10 @@ Trigger, discriminated by "type":
    "state":"CONNECTED"|"DISCONNECTED", "match":string|null (the EXACT Wi-Fi network name or
    Bluetooth device name the user mentions; null = any network or device)}
 - {"type":"sensor", "kind":"significant_motion"|"stationary_detect"|"motion_detect"|
-   "step_detector"|"step_counter", "minimumEventCount":integer,
+   "step_detector"|"step_counter"|"shake"|"flip_face_down", "minimumEventCount":integer,
    "samplingPeriodUs":null, "maxReportLatencyUs":null}
-  minimumEventCount must be 1 for the three motion kinds and 1..100000 for the step kinds. The
+  "shake" = a clear double shake, "flip_face_down" = the phone laid face down; both work only while the
+  screen is on. minimumEventCount must be 1 for the motion, shake and flip kinds and 1..100000 for the step kinds. The
   draft's cooldown must be 60000..604800000 ms. Raw sensors and high-rate sampling are not allowed.
   Use a kind ONLY if "sensor.<kind>" is in available_triggers (often only significant_motion): a
   step goal ("when I reach 10000 steps") without "sensor.step_counter" is unsupported.
@@ -711,6 +713,12 @@ Trigger, discriminated by "type":
 - {"type":"media", "state":"PLAYING"|"STOPPED"}  // music/video playback started / finished
 - {"type":"app_event", "pkg":string, "event":"OPENED"|"CLOSED"}  // an app comes to the foreground / leaves it
   (pkg = the exact package, from installed_app_candidates; opening and closing are two rules, see rule 17)
+- {"type":"nfc_tag", "tagId":"", "resolveTag":true}  // the user touches an NFC tag with the phone unlocked.
+  ALWAYS exactly this: Argus reads the tag when the rule is armed; never write a tag id.
+- {"type":"next_alarm", "offsetMinutes":integer 0..180}  // that many minutes before the phone's next alarm
+  (0 = when it rings), once per alarm. Not with run_shell or ui_steps (any app can set an alarm).
+- {"type":"app_usage", "pkg":string, "minutes":integer 1..1440}  // today's time in the app reaches minutes,
+  at most once a day (pkg from installed_app_candidates). Not with run_shell or ui_steps.
 - {"type":"calendar_event", "phase":"START"|"END", "offsetMinutes":integer, "titleMatch":string|null,
    "calendar":string|null}  // at the start or end of each matching event in the phone's calendar, shifted by
   offsetMinutes (-120..120, negative = before). titleMatch = the title contains it (any case), calendar = the

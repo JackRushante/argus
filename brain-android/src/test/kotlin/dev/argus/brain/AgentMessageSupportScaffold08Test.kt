@@ -20,7 +20,6 @@ class AgentMessageSupportScaffold08Test {
 
     /** Il discriminatore wire di ogni tipo spento, com'è scritto nelle righe di schema del prompt. */
     private val hiddenTypes = listOf(
-        "nfc_tag", "next_alarm", "app_usage",
         "send_sms",
         "call_number", "send_intent", "screen_call",
     )
@@ -31,7 +30,7 @@ class AgentMessageSupportScaffold08Test {
             assertFalse("\"type\":\"$type\"" in prompt, "il prompt nomina il tipo spento $type")
         }
         // Campi e valori nuovi di tipi esistenti.
-        listOf("\"shake\"", "\"flip_face_down\"", "\"exit\"")
+        listOf("\"exit\"")
             .forEach { assertFalse(it in prompt, "il prompt nomina $it") }
     }
 
@@ -52,6 +51,10 @@ class AgentMessageSupportScaffold08Test {
         FeatureGate.ACTION_SET_STORED to "set_stored",
         FeatureGate.ACTION_SET_USER_MODE to "set_user_mode",
         FeatureGate.ACTION_ASK to "ask",
+        // Trigger fisici (AgentMessageSupportPhysical08Test).
+        FeatureGate.TRIGGER_NFC_TAG to "nfc_tag",
+        FeatureGate.TRIGGER_NEXT_ALARM to "next_alarm",
+        FeatureGate.TRIGGER_APP_USAGE to "app_usage",
     )
 
     /** Interruttori accesi che non sono un tipo: il prompt ne descrive il campo. */
@@ -60,6 +63,8 @@ class AgentMessageSupportScaffold08Test {
         FeatureGate.LLM_OUTPUT to "\"output\":{\"kind\":\"CHOICE\"|\"NUMBER\"|\"BOOLEAN\"",
         FeatureGate.HTTP_CAPTURE to "\"extract\":string = a JSON pointer",
         FeatureGate.HTTP_SECRETS to "\"secretHeaders\":[SecretRef,...] and \"secretQuery\":[SecretRef,...]",
+        FeatureGate.TRIGGER_SENSOR_SHAKE to "\"shake\"",
+        FeatureGate.TRIGGER_SENSOR_FLIP_FACE_DOWN to "\"flip_face_down\"",
     )
 
     @Test

@@ -29,7 +29,8 @@ data class GeofenceRegistration(
         fun from(automation: Automation): GeofenceRegistration {
             val trigger = automation.trigger as? Trigger.Geofence
                 ?: throw IllegalArgumentException("trigger_not_geofence")
-            require(trigger.transition in setOf(Transition.ENTER, Transition.EXIT)) {
+            // 0.8: un DWELL si registra come un'area normale; l'attesa la gestisce l'ingress.
+            require(trigger.transition in setOf(Transition.ENTER, Transition.EXIT, Transition.DWELL)) {
                 "transition_unsupported"
             }
             require(!trigger.resolveCurrentLocation) { "coordinates_unresolved" }
@@ -324,7 +325,10 @@ class GeofenceCoordinator(
 
         if (recreateOsRegistrations && ingress != null) {
             recovered += ingress.recoverPending(desired.keys)
+            // 0.8: i DWELL in attesa sopravvivono al riavvio: quelli dovuti si ricontrollano ora.
+            recovered += ingress.recoverDwells(desired.keys)
         }
+        ingress?.pruneDwells(desired.keys)
         val recoveryCandidates = desired.values.filter { automation ->
             automation.id !in failed && state.get(automation.id)?.lastTransition != null
         }

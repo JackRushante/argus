@@ -119,10 +119,17 @@ class RevalidatingFirePolicy(
         if (validationErrors)
             return FirePolicyDecision.Block("validation_failed", needsReview = true)
 
+        // 0.8: una scansione NON verificata del tag approvato (l'activity dei tag è esportata, quindi
+        // forgiabile) fa scattare la regola, ma solo per le altre azioni: ogni foglia shell o macro, anche
+        // dentro if/while, fallisce all'esecutore sull'evento arrivato davvero (`shell_external_trigger`,
+        // `ui_steps_external_trigger`). Un tag diverso resta bloccato qui sotto.
+        val unverifiedScanOfApprovedTag = event is TriggerEvent.NfcTagScanned && !event.verified &&
+            StaticShellSafety.allows(automation.trigger, event.copy(verified = true), snapshot.whitelistedConversationIds)
+
         // Difesa sul dato live oltre al trigger approvato: l'identità va verificata sull'evento
         // realmente arrivato, non solo su quella dichiarata nella regola. Una regressione di
         // routing non deve mai far innescare la shell da un mittente non verificato.
-        if (hasStaticShell &&
+        if (hasStaticShell && !unverifiedScanOfApprovedTag &&
             !StaticShellSafety.allows(
                 automation.trigger,
                 event,
@@ -131,7 +138,7 @@ class RevalidatingFirePolicy(
         )
             return FirePolicyDecision.Block("shell_external_trigger", needsReview = false)
 
-        if (hasUiSteps &&
+        if (hasUiSteps && !unverifiedScanOfApprovedTag &&
             !StaticShellSafety.allows(
                 automation.trigger,
                 event,

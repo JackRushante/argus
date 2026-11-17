@@ -385,7 +385,8 @@ class GeofenceCoordinatorTest {
     }
 
     @Test
-    fun `unsupported dwell and backend failure remain fail closed and recoverable`() = runTest {
+    fun `a dwell area registers like the others and a backend failure stays fail closed and recoverable`() = runTest {
+        // 0.8: DWELL è un'area normale per il sistema; l'attesa la gestisce l'ingress.
         val dwell = rule("dwell", Transition.DWELL)
         val normal = rule("normal")
         val state = MemoryGeofenceStateStore()
@@ -399,8 +400,8 @@ class GeofenceCoordinatorTest {
 
         assertEquals(setOf(dwell.id, normal.id), report.failed.toSet())
         assertFalse(requireNotNull(state.get(normal.id)).active)
-        assertEquals(listOf(normal.id), failedBackend.registered.map { it.automationId })
-        assertFalse(dwell.id in state.knownIds())
+        assertFalse(requireNotNull(state.get(dwell.id)).active)
+        assertEquals(listOf(dwell.id, normal.id), failedBackend.registered.map { it.automationId })
     }
 
     @Test

@@ -185,16 +185,41 @@ object ValidationMessages {
             "Raggio sotto i 100 m: lo scatto in background può arrivare con minuti di ritardo.",
         ),
         "loitering_invalid" to t(
-            "The loitering delay is out of range.",
-            "L'attesa di permanenza è fuori intervallo.",
-        ),
-        "geofence_transition_unsupported" to t(
-            "Only entering or leaving a place is supported, not dwelling.",
-            "Sono supportati solo l'ingresso e l'uscita da un luogo, non la permanenza.",
+            "Staying in a place must last from 1 to 120 minutes.",
+            "La permanenza in un luogo deve durare da 1 a 120 minuti.",
         ),
         "geofence_loitering_unsupported" to t(
-            "The loitering delay needs dwell detection, which is not available.",
-            "L'attesa di permanenza richiede il rilevamento della sosta, non disponibile.",
+            "A waiting time only applies to staying in a place, not to entering or leaving it.",
+            "Un'attesa vale solo per la permanenza in un luogo, non per l'ingresso o l'uscita.",
+        ),
+        // 0.8: trigger fisici.
+        "nfc_tag_missing" to t(
+            "The NFC tag is missing: it is read when you turn on the rule.",
+            "Manca il tag NFC: si legge quando attivi la regola.",
+        ),
+        "nfc_tag_invalid" to t(
+            "The NFC tag id is not valid.",
+            "L'identificativo del tag NFC non è valido.",
+        ),
+        "nfc_scan_unverifiable" to t(
+            "Before Android 15 a tag scan cannot be proven to come from the phone: shell commands and screen macros of this rule will never run, the other actions will.",
+            "Prima di Android 15 non si può provare che una lettura del tag venga dal telefono: comandi shell e macro sullo schermo di questa regola non partiranno mai, le altre azioni sì.",
+        ),
+        "nfc_scan_verified_only" to t(
+            "Shell commands and screen macros of this rule run only when the phone proves the tag scan came from its NFC service; otherwise only the other actions run.",
+            "Comandi shell e macro sullo schermo di questa regola partono solo se il telefono prova che la lettura del tag viene dal suo servizio NFC; altrimenti partono solo le altre azioni.",
+        ),
+        "nfc_tag_ambiguous" to t(
+            "The NFC tag is already set: it cannot also be read again when you turn on the rule.",
+            "Il tag NFC è già impostato: non si può anche rileggere quando attivi la regola.",
+        ),
+        "next_alarm_offset_invalid" to t(
+            "The time before the next alarm must be 0 to 180 minutes.",
+            "Il tempo prima della prossima sveglia deve essere da 0 a 180 minuti.",
+        ),
+        "app_usage_minutes_invalid" to t(
+            "The time of use must be 1 to 1440 minutes.",
+            "Il tempo d'uso deve essere da 1 a 1440 minuti.",
         ),
         "geofence_coords" to t(
             "The coordinates are missing or out of range.",

@@ -23,6 +23,12 @@
     <uses-permission
         android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
+    <!-- 0.8: trigger «tag NFC» (permesso normal, auto-concesso). L'NFC è facoltativo: senza, Argus si installa
+         lo stesso e il trigger risulta non disponibile con il suo motivo. -->
+    <uses-permission android:name="android.permission.NFC" />
+    <uses-feature
+        android:name="android.hardware.nfc"
+        android:required="false" />
 
     <!-- 0.4.1: package visibility per i motori di sintesi vocale (azione «leggi ad alta voce»);
          senza, da Android 11 TextToSpeech non vede nessun motore. -->
@@ -96,6 +102,29 @@
             android:noHistory="true"
             android:taskAffinity=""
             android:theme="@style/Theme.Argus.Trampoline" />
+
+        <!-- 0.8: trampolino invisibile dei tag NFC. ESPORTATO per forza (i filtri NFC del sistema): qualunque app
+             può avviarlo con un id inventato, quindi una scansione è «verificata» solo se il chiamante iniziale è
+             il servizio NFC (Android 15+); solo le verificate possono avviare shell o macro sullo schermo. Passa
+             la scansione al motore e si chiude senza mostrare nulla. -->
+        <activity
+            android:name=".nfc.NfcTagActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.Argus.Trampoline">
+            <intent-filter>
+                <action android:name="android.nfc.action.TECH_DISCOVERED" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.nfc.action.TAG_DISCOVERED" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <meta-data
+                android:name="android.nfc.action.TECH_DISCOVERED"
+                android:resource="@xml/nfc_tech_filter" />
+        </activity>
 
         <!-- 0.7.2: trampolino invisibile del tocco di un avviso di salute. NON esportato: lo avvia solo il
              PendingIntent della notifica di Argus; passa la schermata alla navigazione dentro il processo. -->

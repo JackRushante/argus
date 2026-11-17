@@ -48,9 +48,8 @@ class LocationBackedTransitionVerifier(
             // Veto solo se l'intero disco d'incertezza è dentro/fuori oltre l'isteresi.
             // Se il disco tocca la zona ambigua, il framework conserva l'ultima parola.
             Transition.EXIT -> distance + accuracy > trigger.radiusM - HYSTERESIS_METERS
-            Transition.ENTER -> distance - accuracy < trigger.radiusM + HYSTERESIS_METERS
-            // DWELL non è supportato dal runtime: non inventiamo un giudizio.
-            Transition.DWELL -> true
+            // 0.8: il ricontrollo di un DWELL chiede «ancora dentro?», la stessa domanda dell'ENTER.
+            Transition.ENTER, Transition.DWELL -> distance - accuracy < trigger.radiusM + HYSTERESIS_METERS
         }
     }
 

@@ -50,13 +50,8 @@ class FeatureGatesTest {
             .onEach { assertEquals(Severity.ERROR, it.severity) }
             .map { it.detail }
 
-    private val newTriggers: Map<FeatureGate, Trigger> = linkedMapOf(
-        FeatureGate.TRIGGER_NFC_TAG to Trigger.NfcTag("04:A2:19", resolveTag = false),
-        FeatureGate.TRIGGER_NEXT_ALARM to Trigger.NextAlarm(15),
-        FeatureGate.TRIGGER_APP_USAGE to Trigger.AppUsage("com.example.game", 60),
-        FeatureGate.TRIGGER_SENSOR_SHAKE to Trigger.Sensor(SensorKind.SHAKE),
-        FeatureGate.TRIGGER_SENSOR_FLIP_FACE_DOWN to Trigger.Sensor(SensorKind.FLIP_FACE_DOWN),
-    )
+    /** Tutti i trigger 0.8 sono accesi: la tabella resta per chi ne aggiungerà altri spenti. */
+    private val newTriggers: Map<FeatureGate, Trigger> = linkedMapOf()
 
     /** Tutte le condizioni 0.8 sono accese: la tabella resta per chi ne aggiungerà altre spente. */
     private val newConditions: Map<FeatureGate, Condition> = linkedMapOf()
@@ -94,6 +89,9 @@ class FeatureGatesTest {
         // Risposta HTTP in una variabile e segreti (HttpCapture08Test, HttpSecrets08Test).
         FeatureGate.HTTP_CAPTURE,
         FeatureGate.HTTP_SECRETS,
+        // Trigger fisici (PhysicalTriggers08Test).
+        FeatureGate.TRIGGER_NFC_TAG, FeatureGate.TRIGGER_NEXT_ALARM, FeatureGate.TRIGGER_APP_USAGE,
+        FeatureGate.TRIGGER_SENSOR_SHAKE, FeatureGate.TRIGGER_SENSOR_FLIP_FACE_DOWN,
     )
 
     private val ask = Action.Ask("Esco?", listOf("Sì", "No"), "answer", defaultChoice = "No")
@@ -140,7 +138,7 @@ class FeatureGatesTest {
         assertEquals(listOf(FeatureGate.EXIT.wireName), notAvailable(draft(exit = ExitSpec(Trigger.Manual))))
         // Un tipo spento nel trigger o nelle azioni d'uscita conta anche lui.
         assertEquals(
-            listOf(FeatureGate.EXIT.wireName, FeatureGate.TRIGGER_NFC_TAG.wireName, FeatureGate.ACTION_CALL_NUMBER.wireName),
+            listOf(FeatureGate.EXIT.wireName, FeatureGate.ACTION_CALL_NUMBER.wireName),
             notAvailable(draft(exit = ExitSpec(Trigger.NfcTag("04"), actions = listOf(Action.CallNumber("+39"))))),
         )
     }
@@ -183,7 +181,14 @@ class FeatureGatesTest {
 
     @Test
     fun `shell may start from an nfc tag, never from the next alarm or the other new triggers`() {
-        val allowed = newTriggers.filterValues { StaticShellSafety.allows(it, emptySet()) }.keys
+        val physical = mapOf(
+            FeatureGate.TRIGGER_NFC_TAG to Trigger.NfcTag("04:A2:19", resolveTag = false),
+            FeatureGate.TRIGGER_NEXT_ALARM to Trigger.NextAlarm(15),
+            FeatureGate.TRIGGER_APP_USAGE to Trigger.AppUsage("com.example.game", 60),
+            FeatureGate.TRIGGER_SENSOR_SHAKE to Trigger.Sensor(SensorKind.SHAKE),
+            FeatureGate.TRIGGER_SENSOR_FLIP_FACE_DOWN to Trigger.Sensor(SensorKind.FLIP_FACE_DOWN),
+        )
+        val allowed = (newTriggers + physical).filterValues { StaticShellSafety.allows(it, emptySet()) }.keys
         assertEquals(
             setOf(
                 FeatureGate.TRIGGER_NFC_TAG,
@@ -194,8 +199,9 @@ class FeatureGatesTest {
         )
         val fingerprint = ApprovalFingerprint("a".repeat(64))
         val id = AutomationId("r")
-        assertTrue(StaticShellSafety.allows(Trigger.NfcTag("04:A2"), TriggerEvent.NfcTagScanned("04:a2"), emptySet()))
-        assertFalse(StaticShellSafety.allows(Trigger.NfcTag("04:A2"), TriggerEvent.NfcTagScanned("FF"), emptySet()))
+        assertTrue(StaticShellSafety.allows(Trigger.NfcTag("04:A2"), TriggerEvent.NfcTagScanned("04:a2", verified = true), emptySet()))
+        assertFalse(StaticShellSafety.allows(Trigger.NfcTag("04:A2"), TriggerEvent.NfcTagScanned("04:a2", verified = false), emptySet()))
+        assertFalse(StaticShellSafety.allows(Trigger.NfcTag("04:A2"), TriggerEvent.NfcTagScanned("FF", verified = true), emptySet()))
         assertFalse(StaticShellSafety.allows(Trigger.NextAlarm(5), TriggerEvent.NextAlarmFired(id, fingerprint), emptySet()))
         assertFalse(StaticShellSafety.allows(TriggerEvent.CalendarEventFired(id, CalendarPhase.START, fingerprint), emptySet()))
         assertFalse(StaticShellSafety.allows(TriggerEvent.AppUsageChanged("com.example.game", 59, 60), emptySet()))

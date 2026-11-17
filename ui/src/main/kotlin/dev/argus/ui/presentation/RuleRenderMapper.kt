@@ -545,6 +545,8 @@ object RuleRenderMapper {
 
     private fun geofenceLine(t: Trigger.Geofence, l: RenderLanguage): String {
         val r = fmtNum(t.radiusM)
+        // 0.8: l'attesa del DWELL si mostra intera, come ogni valore che decide quando la regola scatta.
+        val stay = humanizeDuration(t.loiteringDelayMs, l)
         return if (t.resolveCurrentLocation) {
             when (t.transition) {
                 Transition.ENTER -> l.pick(
@@ -556,8 +558,8 @@ object RuleRenderMapper {
                     "Quando esci dalla posizione attuale (±$r m)",
                 )
                 Transition.DWELL -> l.pick(
-                    "When you dwell at the current location (±$r m)",
-                    "Quando ti trattieni nella posizione attuale (±$r m)",
+                    "When you have been at the current location (±$r m) for $stay",
+                    "Quando sei nella posizione attuale (±$r m) da $stay",
                 )
             }
         } else {
@@ -572,8 +574,8 @@ object RuleRenderMapper {
                     "Quando esci da $loc (±$r m)",
                 )
                 Transition.DWELL -> l.pick(
-                    "When you dwell at $loc (±$r m)",
-                    "Quando ti trattieni presso $loc (±$r m)",
+                    "When you have been at $loc (±$r m) for $stay",
+                    "Quando sei in $loc (±$r m) da $stay",
                 )
             }
         }

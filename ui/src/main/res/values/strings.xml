@@ -169,6 +169,9 @@
     <string name="detail_reject">Reject</string>
     <string name="detail_edit">Edit</string>
     <string name="detail_arm">Arm</string>
+    <!-- 0.8: lettura del tag NFC di una regola che si sta armando -->
+    <string name="nfc_read_title">Hold the tag to the phone</string>
+    <string name="nfc_read_body">Hold the back of the phone against the NFC tag this rule should react to.</string>
     <string name="detail_disable">Disable automation</string>
     <string name="detail_enable">Re-enable automation</string>
     <string name="detail_edit_in_chat">Edit in chat</string>

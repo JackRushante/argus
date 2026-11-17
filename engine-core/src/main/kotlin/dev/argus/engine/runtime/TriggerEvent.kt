@@ -124,9 +124,16 @@ sealed interface TriggerEvent {
                 "approvalFingerprint=$approvalFingerprint, title=${title?.let { "<redacted>" }})"
     }
 
-    /** Un tag NFC letto dal telefono. [tagId] vive solo in RAM per il match: mai persistito né loggato. */
-    data class NfcTagScanned(val tagId: String) : TriggerEvent {
-        override fun toString(): String = "NfcTagScanned(tagId=<redacted>)"
+    /**
+     * Un tag NFC letto dal telefono. [tagId] vive solo in RAM per il match: mai persistito né loggato.
+     *
+     * [verified] = la scansione viene provatamente dal servizio NFC di sistema (Android 15+: uid del chiamante
+     * iniziale dell'activity dei tag). Quell'activity è esportata: qualunque app può avviarla con un id
+     * inventato, quindi una scansione non verificata non preme mai l'interruttore della shell né delle macro
+     * sullo schermo (vedi `StaticShellSafety`). Il default è il caso peggiore.
+     */
+    data class NfcTagScanned(val tagId: String, val verified: Boolean = false) : TriggerEvent {
+        override fun toString(): String = "NfcTagScanned(tagId=<redacted>, verified=$verified)"
     }
 
     /** L'istante «offset minuti prima della prossima sveglia» della regola: programmato per regola. */

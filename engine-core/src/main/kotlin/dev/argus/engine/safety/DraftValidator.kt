@@ -53,7 +53,6 @@ class DraftValidator(
         private const val MAX_COMMAND_LENGTH = 8_192
         private const val MAX_TOOL_COUNT = 32
         private const val MAX_GEOFENCE_RADIUS_M = 100_000.0
-        private const val MAX_LOITERING_MS = 86_400_000L
         private const val MAX_LLM_TIMEOUT_MS = 120_000L
 
         // 0.8: condizioni di contesto e calendario. Un SSID è al massimo 32 byte, un nome Bluetooth 248.
@@ -994,18 +993,21 @@ class DraftValidator(
                             "lo scatto in background può arrivare con minuti di ritardo",
                     )
 
-                if (trigger.loiteringDelayMs < 0 || trigger.loiteringDelayMs > MAX_LOITERING_MS)
-                    err("loitering_invalid", "Loitering delay fuori intervallo")
-                if (trigger.transition == Transition.DWELL)
-                    err(
-                        "geofence_transition_unsupported",
-                        "Il runtime geofence supporta ENTER/EXIT; DWELL non è disponibile",
-                    )
-                if (trigger.loiteringDelayMs != 0L)
+                // 0.8: DWELL = ingresso verificato e ancora dentro dopo l'attesa (1..120 minuti); ENTER ed
+                // EXIT scattano al bordo, senza attesa.
+                if (trigger.transition == Transition.DWELL) {
+                    if (!GeofenceDwellPolicy.validDelay(trigger.loiteringDelayMs))
+                        err(
+                            "loitering_invalid",
+                            "L'attesa di un DWELL va da ${GeofenceDwellPolicy.MIN_DELAY_MS / 60_000} a " +
+                                "${GeofenceDwellPolicy.MAX_DELAY_MS / 60_000} minuti",
+                        )
+                } else if (trigger.loiteringDelayMs != 0L) {
                     err(
                         "geofence_loitering_unsupported",
-                        "Il loitering delay richiede DWELL, non disponibile nel runtime corrente",
+                        "L'attesa (loiteringDelayMs) vale solo con DWELL",
                     )
+                }
 
                 if (!trigger.resolveCurrentLocation) {
                     val valid = trigger.lat.isFinite() && trigger.lng.isFinite() &&
@@ -1107,11 +1109,35 @@ class DraftValidator(
                 validateCalendarFilters(trigger.titleMatch, trigger.calendar, err)
             }
 
-            is Trigger.NfcTag -> Unit
+            // 0.8: un id letto, oppure la lettura all'arm (resolveTag, come la posizione «qui»). Il vuoto «da
+            // completare» del backup condiviso senza lettura all'arm non si arma mai.
+            is Trigger.NfcTag -> when {
+                trigger.resolveTag && trigger.tagId.isNotEmpty() ->
+                    err("nfc_tag_ambiguous", "Un tag NFC già scritto non si rilegge all'attivazione")
+                trigger.resolveTag -> Unit
+                trigger.tagId.isBlank() -> err("nfc_tag_missing", "Tag NFC mancante: va letto all'attivazione")
+                NfcTagPolicy.normalize(trigger.tagId) == null ->
+                    err("nfc_tag_invalid", "Identificativo del tag NFC non valido")
+                else -> Unit
+            }
 
-            is Trigger.NextAlarm -> Unit
+            is Trigger.NextAlarm -> if (!NextAlarmTriggerPolicy.validOffset(trigger.offsetMinutes))
+                err(
+                    "next_alarm_offset_invalid",
+                    "Minuti prima della sveglia fra ${NextAlarmTriggerPolicy.MIN_OFFSET_MINUTES} e " +
+                        "${NextAlarmTriggerPolicy.MAX_OFFSET_MINUTES}",
+                )
 
-            is Trigger.AppUsage -> Unit
+            is Trigger.AppUsage -> {
+                validatePackage(trigger.pkg, "pkg_blank", err)
+                if (trigger.pkg.length > AppPackagePolicy.MAX_LENGTH)
+                    err("package_invalid", "Package troppo lungo (massimo ${AppPackagePolicy.MAX_LENGTH})")
+                if (!AppUsageTriggerPolicy.validMinutes(trigger.minutes))
+                    err(
+                        "app_usage_minutes_invalid",
+                        "Minuti d'uso fra ${AppUsageTriggerPolicy.MIN_MINUTES} e ${AppUsageTriggerPolicy.MAX_MINUTES}",
+                    )
+            }
 
             // 0.8: modalità letterale (che esista lo controlla la revisione sul telefono).
             is Trigger.UserModeChanged -> trigger.to?.let { validateModeName(it, err) }

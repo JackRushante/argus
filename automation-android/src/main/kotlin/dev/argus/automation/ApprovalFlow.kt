@@ -2,6 +2,9 @@ package dev.argus.automation
 
 import dev.argus.automation.apps.AssumeAllInstalled
 import dev.argus.automation.apps.InstalledPackageCheck
+import dev.argus.automation.nfc.NfcTagReadResult
+import dev.argus.automation.nfc.NfcTagReader
+import dev.argus.automation.nfc.NoNfcTagReader
 import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.model.Automation
 import dev.argus.engine.model.AutomationId
@@ -108,6 +111,9 @@ sealed interface FlowArmResult {
     data class ValidationFailed(val issues: List<ValidationIssue>) : FlowArmResult
     data object PolicyUnavailable : FlowArmResult
     data object LocationUnavailable : FlowArmResult
+
+    /** 0.8: la regola `nfc_tag` va letta all'attivazione e il tag non è stato letto ([reason]). */
+    data class NfcTagNotRead(val reason: NfcTagReadResult) : FlowArmResult
     data object IntegrityFailure : FlowArmResult
     data object AutomationConflict : FlowArmResult
     data class RegistrationFailed(val automation: Automation) : FlowArmResult
@@ -130,6 +136,16 @@ class ApprovalFlow(
     },
     /** 0.7.0: controllo fatto SUL TELEFONO all'approvazione: un package non installato è un avviso, mai un errore. */
     private val installedPackages: InstalledPackageCheck = AssumeAllInstalled,
+    /**
+     * 0.8: legge il tag di una regola `nfc_tag` con `resolveTag` all'attivazione, in primo piano, come la
+     * posizione «qui» di una geofence. Il default non legge nulla: la regola non si arma.
+     */
+    private val nfcTags: NfcTagReader = NoNfcTagReader,
+    /**
+     * 0.8: `true` se su questo telefono una scansione NFC si può verificare (Android 15+). Altrimenti una regola
+     * `nfc_tag` con shell o macro sullo schermo si arma con un avviso: quelle azioni non partiranno mai.
+     */
+    private val nfcScansVerifiable: () -> Boolean = { true },
     /**
      * 0.8: i nomi delle modalità definite adesso. Una regola che ne nomina una che non esiste non si arma
      * (ERROR `user_mode_unknown`). Default: nessuna modalità, quindi fail-closed.
@@ -252,7 +268,7 @@ class ApprovalFlow(
         val base = approvals.review(id) ?: return null
         val capabilityIssues = capabilityIssues(base.snapshot)
         val appIssues = missingAppIssues(base.snapshot) + systemFreezeIssues(base.snapshot) +
-            userModeIssues(base.snapshot) + missingSecretIssues(base.snapshot)
+            unverifiableNfcIssues(base.snapshot) + userModeIssues(base.snapshot) + missingSecretIssues(base.snapshot)
         val queryReport = if (capabilityIssues.any { it.severity == Severity.ERROR }) {
             StateQueryProbeReport()
         } else {
@@ -301,6 +317,45 @@ class ApprovalFlow(
         if (needsCurrentLocation(locationTrigger)) {
             val resolved = currentLocation() ?: return FlowArmResult.LocationUnavailable
             val revisedDraft = snapshot.draft.copy(trigger = withCurrentLocation(locationTrigger, resolved))
+            when (
+                val revised = drafts.revise(
+                    id = snapshot.id,
+                    expectedRevision = snapshot.revision,
+                    draft = revisedDraft,
+                    priority = snapshot.priority,
+                    atMillis = nowMillis(),
+                )
+            ) {
+                is DraftWriteResult.Saved -> snapshot = revised.snapshot
+                is DraftWriteResult.Conflict -> return revised.currentRevision?.let(FlowArmResult::Stale)
+                    ?: FlowArmResult.Missing
+                is DraftWriteResult.Rejected -> return FlowArmResult.IntegrityFailure
+            }
+            currentReview = review(id) ?: return FlowArmResult.Missing
+            if (currentReview.draft.snapshot.revision != snapshot.revision ||
+                currentReview.draft.snapshot.fingerprint != snapshot.fingerprint
+            ) return FlowArmResult.IntegrityFailure
+            currentReview.validationFailure()?.let {
+                return rejectValidation(
+                    currentReview.draft.snapshot.automationId,
+                    it.issues,
+                )
+            }
+        }
+
+        // 0.8: tag NFC «da leggere all'attivazione»: stesso percorso della posizione. Il tag letto entra nella
+        // bozza e nell'impronta approvata; il modello non lo vede mai.
+        val tagTrigger = snapshot.draft.trigger
+        if (tagTrigger is Trigger.NfcTag && tagTrigger.resolveTag) {
+            val read = try {
+                nfcTags.read()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                NfcTagReadResult.Cancelled
+            }
+            val tagId = (read as? NfcTagReadResult.Read)?.tagId ?: return FlowArmResult.NfcTagNotRead(read)
+            val revisedDraft = snapshot.draft.copy(trigger = tagTrigger.copy(tagId = tagId, resolveTag = false))
             when (
                 val revised = drafts.revise(
                     id = snapshot.id,
@@ -404,6 +459,42 @@ class ApprovalFlow(
                 detail = pkg,
             )
         }
+    }
+
+    /**
+     * 0.8: prima di Android 15 una scansione NFC non si può verificare (vedi `NfcScanVerification`), quindi una
+     * regola `nfc_tag` non avvierà mai shell né macro sullo schermo: lo si dice prima dell'attivazione, come
+     * WARNING `nfc_scan_unverifiable`. Le altre azioni partono normalmente.
+     */
+    private fun unverifiableNfcIssues(snapshot: PendingDraft): List<ValidationIssue> {
+        if (snapshot.draft.trigger !is Trigger.NfcTag) return emptyList()
+        val gated = snapshot.draft.actions.any { action -> action.containsShellOrMacro() }
+        if (!gated) return emptyList()
+        if (runCatching(nfcScansVerifiable).getOrDefault(false)) {
+            // Android 15+: la prova c'è solo se il servizio NFC condivide la sua identità con l'activity
+            // (`ComponentCaller.getUid`); se non lo fa la scansione resta non verificata. Lo si dice.
+            return listOf(
+                ValidationIssue(
+                    Severity.WARNING,
+                    "nfc_scan_verified_only",
+                    "Shell e macro partono solo se il telefono prova che la lettura viene dal suo servizio NFC",
+                ),
+            )
+        }
+        return listOf(
+            ValidationIssue(
+                Severity.WARNING,
+                "nfc_scan_unverifiable",
+                "Su questo telefono una scansione NFC non si verifica: shell e macro non partiranno",
+            ),
+        )
+    }
+
+    private fun Action.containsShellOrMacro(): Boolean = when (this) {
+        is Action.RunShell, is Action.UiSteps -> true
+        is Action.If -> then.any { it.containsShellOrMacro() } || orElse.any { it.containsShellOrMacro() }
+        is Action.While -> body.any { it.containsShellOrMacro() }
+        else -> false
     }
 
     /**

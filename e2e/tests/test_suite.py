@@ -18,9 +18,10 @@ class SuiteFilesTest(unittest.TestCase):
 
     def test_size_is_in_the_expected_range(self):
         # «circa 100 automazioni»: ne servono abbastanza da coprire le coppie, non una per ogni combinazione.
-        # 0.8: i tipi nuovi (calendario, notifiche, valori conservati e modalità) portano le loro regole.
+        # 0.8: i tipi nuovi (calendario, notifiche, valori conservati e modalità, trigger fisici) portano le
+        # loro regole.
         self.assertGreaterEqual(len(self.records), 90)
-        self.assertLessEqual(len(self.records), 200)
+        self.assertLessEqual(len(self.records), 230)
 
     def test_every_required_pair_is_covered(self):
         self.assertEqual([], [pairwise.describe(p) for p in pairwise.missing_pairs(self.records)])
@@ -36,8 +37,8 @@ class SuiteFilesTest(unittest.TestCase):
 
     def test_every_trigger_type_appears_in_a_runnable_rule(self):
         runnable = {r["rule"]["trigger"]["type"] for r in self.records if r["expect"].get("load") == "ok"}
-        # il sensore di movimento significativo non c'e' sull'emulatore: solo il rifiuto all'arm
-        self.assertEqual([], sorted(set(pairwise.TRIGGERS) - runnable - {"sensor"}))
+        # il sensore di movimento significativo e l'NFC non ci sono sull'emulatore: solo il rifiuto all'arm
+        self.assertEqual([], sorted(set(pairwise.TRIGGERS) - runnable - {"sensor", "nfc_tag"}))
 
     def test_every_config_has_runnable_rules(self):
         for config in pairwise.CONFIGS:
@@ -108,10 +109,10 @@ class ValidationTest(unittest.TestCase):
 
     def test_switched_off_types_only_prove_their_rejection(self):
         rule = self.valid()
-        rule["rule"]["trigger"] = {"type": "nfc_tag", "tagId": "04:AA"}
+        # 0.8: ogni trigger e' acceso; resta da provare il rifiuto di un'azione spenta.
+        self.assertEqual([], pairwise.NOT_YET_AVAILABLE_TRIGGERS)
         rule["rule"]["actions"] = [{"type": "send_sms", "number": "+39", "text": "x"}]
         problems = suite.validate([rule])
-        self.assertTrue(any("trigger spento" in p for p in problems))
         self.assertTrue(any("azione spenta" in p for p in problems))
         rule["expect"] = {"load": {"fail": {"stage": "review", "code": "not_available_yet"}}}
         self.assertEqual([], suite.validate([rule]))

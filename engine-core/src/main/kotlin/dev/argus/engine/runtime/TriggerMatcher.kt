@@ -41,9 +41,8 @@ class TriggerMatcher {
         // Calendario e prossima sveglia sono programmati per regola: id e impronta li verifica l'Engine.
         spec is Trigger.CalendarEvent && event is TriggerEvent.CalendarEventFired -> spec.phase == event.phase
 
-        // Un tagId vuoto (non ancora letto all'arm) non combacia con nessun tag.
-        spec is Trigger.NfcTag && event is TriggerEvent.NfcTagScanned ->
-            spec.tagId.isNotEmpty() && spec.tagId.equals(event.tagId, ignoreCase = true)
+        // Un tagId vuoto (non ancora letto all'arm) non combacia con nessun tag; conta la sequenza di byte.
+        spec is Trigger.NfcTag && event is TriggerEvent.NfcTagScanned -> NfcTagPolicy.sameTag(spec.tagId, event.tagId)
 
         spec is Trigger.NextAlarm && event is TriggerEvent.NextAlarmFired -> true
 
