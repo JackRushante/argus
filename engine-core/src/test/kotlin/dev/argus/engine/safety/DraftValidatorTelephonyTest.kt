@@ -76,6 +76,28 @@ class DraftValidatorTelephonyTest {
     }
 
     @Test
+    fun `a captured answer, response or stored value is never the destination`() {
+        val captures = listOf(
+            Action.Ask("Chi?", listOf("Io", "Tu"), "caller", defaultChoice = "Io"),
+            Action.HttpRequest(HttpMethod.GET, "https://example.org", captureAs = "caller"),
+        )
+        captures.forEach { capture ->
+            assertTrue(
+                "sms_number_not_sender" in errors(issues(capture, Action.SendSms("\${caller}", "x"), trigger = sms)),
+                capture.toString(),
+            )
+        }
+        val stored = VarBinding.Stored("caller", "caller", StateValueType.TEXT, ConfidentialityLabel.PRIVATE)
+        assertTrue("sms_number_not_sender" in errors(issues(Action.SendSms("\${caller}", "x"), trigger = sms, vars = listOf(stored))))
+        // Il numero di chi chiama, ma senza un trigger di chiamata o SMS: niente.
+        assertTrue(
+            "sms_number_not_sender" in errors(
+                issues(Action.SendSms("\${caller}", "x"), trigger = Trigger.Manual, vars = listOf(payload("caller", TriggerField.NUMBER))),
+            ),
+        )
+    }
+
+    @Test
     fun `bad numbers, empty or long texts and the stripped export value are refused`() {
         listOf("", "4242", "*21*3331112222#", "+39 333 1112222", "#31#").forEach { number ->
             assertTrue("sms_number_invalid" in errors(issues(Action.SendSms(number, "x"))), number)
