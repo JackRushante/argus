@@ -504,7 +504,7 @@ class AutomationDetailViewModel @Inject constructor(
                                 "No tag was read: hold it to the phone when you arm the rule.",
                                 "Nessun tag letto: avvicinalo al telefono quando armi la regola.",
                             )
-                            else -> language.pick("The tag was not read.", "Tag non letto."),
+                            else -> language.pick("The tag was not read.", "Tag non letto.")
                         },
                     )
                     FlowArmResult.IntegrityFailure -> stayWith(
