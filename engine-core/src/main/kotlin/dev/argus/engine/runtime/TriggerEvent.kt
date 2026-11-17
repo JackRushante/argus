@@ -145,6 +145,10 @@ sealed interface TriggerEvent {
         val currentMinutes: Int,
     ) : TriggerEvent
 
-    /** La modalità utente è passata da [from] (null = nessuna o ignota) a [to]. */
-    data class UserModeChanged(val to: String, val from: String?) : TriggerEvent
+    /**
+     * La modalità utente è passata da [from] (null = nessuna o ignota) a [to]. [chained] = il cambio l'ha
+     * fatto una regola scattata a sua volta da un cambio di modalità: nessuna regola `user_mode_changed`
+     * lo riceve (il [TriggerMatcher] lo rifiuta), così due regole non si rimbalzano la modalità all'infinito.
+     */
+    data class UserModeChanged(val to: String, val from: String?, val chained: Boolean = false) : TriggerEvent
 }

@@ -212,6 +212,7 @@ fun SettingsScreen(
                 HealthSection(healthItems, needsFix, Modifier.sectionAnchor(SECTION_HEALTH))
                 PrivilegesSection(state.privileged, callbacks::onSetRootEnabled, callbacks::onGrantPermanent)
                 PauseSettingRow(state.automationsPaused, callbacks::onSetAutomationsPaused)
+                ModesEntryRow(callbacks::onOpenModes)
                 HealthAlertsSettingRow(state.healthAlertsEnabled, callbacks::onSetHealthAlertsEnabled)
                 BrainSection(
                     transport = state.transport,
@@ -1228,6 +1229,27 @@ private fun RerunRow(onRerun: () -> Unit) {
             )
             Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp))
         }
+    }
+}
+
+/** 0.8: riga che apre Sistema › Modalità (modalità attiva, elenco, variabili salvate). */
+@Composable
+private fun ModesEntryRow(onOpen: () -> Unit) {
+    ArgusCard(Modifier.fillMaxWidth().testTag("settings_modes"), contentPadding = PaddingValues(0.dp)) {
+        ArgusListRow(
+            title = stringResource(R.string.settings_modes_title),
+            subtitle = stringResource(R.string.settings_modes_subtitle),
+            onClick = onOpen,
+            trailing = {
+                Icon(
+                    Icons.Rounded.ChevronRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(22.dp),
+                )
+            },
+            contentPadding = PaddingValues(start = 14.dp, top = ArgusSpacing.Medium, bottom = ArgusSpacing.Medium),
+        )
     }
 }
 

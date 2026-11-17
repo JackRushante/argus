@@ -100,6 +100,88 @@ class LazyDeviceStateProviderTest {
             cancelled.current(StateReadRequest(includeLocation = true))
         }
     }
+
+    // --- 0.8: valori conservati e modalità ------------------------------------------------------------
+
+    private class MemoryPersistentState(
+        private val fail: Boolean = false,
+    ) : dev.argus.engine.runtime.StoredValueStore, dev.argus.engine.runtime.UserModeStore {
+        val askedKeys = mutableListOf<Set<String>>()
+        var snapshots = 0
+
+        override suspend fun read(keys: Set<String>): Map<String, dev.argus.engine.model.StoredValue> {
+            askedKeys += keys
+            if (fail) error("db")
+            return keys.filter { it == "caffe_oggi" }.associateWith {
+                dev.argus.engine.model.StoredValue(
+                    it, dev.argus.engine.model.StateValueType.NUMBER, "2",
+                    dev.argus.engine.model.IntegrityLabel.TAINTED, dev.argus.engine.model.ConfidentialityLabel.PRIVATE,
+                    dev.argus.engine.model.ChangeAuthor.User, 1L,
+                )
+            }
+        }
+
+        override suspend fun apply(
+            action: dev.argus.engine.model.Action.SetStored,
+            integrity: dev.argus.engine.model.IntegrityLabel,
+            confidentiality: dev.argus.engine.model.ConfidentialityLabel,
+            author: dev.argus.engine.model.ChangeAuthor,
+            atMillis: Long,
+        ): dev.argus.engine.model.StoredWrite = error("not used")
+
+        override suspend fun snapshot(): dev.argus.engine.model.UserModeSnapshot {
+            snapshots++
+            if (fail) error("db")
+            return dev.argus.engine.model.UserModeSnapshot(listOf("Casa"), "Casa")
+        }
+
+        override suspend fun activate(
+            mode: String?,
+            author: dev.argus.engine.model.ChangeAuthor,
+            atMillis: Long,
+        ): dev.argus.engine.model.ModeSwitch = error("not used")
+    }
+
+    @Test
+    fun `stored values and the mode are read without Shizuku, only when asked, with their labels`() = runTest {
+        val shell = RecordingStateShell()
+        val memory = MemoryPersistentState()
+        val provider = LazyDeviceStateProvider(
+            StateReader(shell),
+            { ShizukuGatewayStatus.NOT_INSTALLED },
+            CurrentLocationProvider { error("non va letta") },
+            persistentState = PersistentStateReader(memory, memory),
+        )
+
+        val state = provider.current(StateReadRequest(storedKeys = setOf("caffe_oggi", "assente"), includeUserMode = true))
+
+        val saved = state.stored.getValue("caffe_oggi")
+        assertEquals("2", saved.text)
+        assertEquals(dev.argus.engine.model.IntegrityLabel.TAINTED, saved.integrity)
+        // Una chiave che non c'è resta assente: UNKNOWN, mai un valore vuoto.
+        assertEquals(setOf("caffe_oggi"), state.stored.keys)
+        assertEquals("Casa", state.userMode?.active)
+        assertEquals(emptyList(), shell.calls)
+
+        provider.current(StateReadRequest(keys = emptySet(), includeLocation = false, storedKeys = emptySet()))
+        provider.current(StateReadRequest(storedKeys = setOf("caffe_oggi")))
+        assertEquals(listOf(setOf("caffe_oggi", "assente"), setOf("caffe_oggi")), memory.askedKeys)
+        assertEquals(1, memory.snapshots)
+    }
+
+    @Test
+    fun `an unreadable store is unknown, never a default`() = runTest {
+        val memory = MemoryPersistentState(fail = true)
+        val provider = LazyDeviceStateProvider(
+            StateReader(RecordingStateShell()),
+            { ShizukuGatewayStatus.AUTHORIZED },
+            CurrentLocationProvider { null },
+            persistentState = PersistentStateReader(memory, memory),
+        )
+        val state = provider.current(StateReadRequest(storedKeys = setOf("caffe_oggi"), includeUserMode = true))
+        assertEquals(emptyMap(), state.stored)
+        assertEquals(null, state.userMode)
+    }
 }
 
 private class RecordingStateShell : PrivilegedShell {

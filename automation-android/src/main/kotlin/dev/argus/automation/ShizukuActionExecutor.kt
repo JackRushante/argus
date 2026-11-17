@@ -29,6 +29,7 @@ import dev.argus.engine.runtime.ProgramActionResult
 import dev.argus.engine.runtime.ResolvedActionExecutor
 import dev.argus.engine.runtime.ResolvedProgramAction
 import dev.argus.engine.runtime.RuntimeDataBinding
+import dev.argus.engine.runtime.StoredModeActions
 import dev.argus.engine.runtime.TriggerEvent
 import dev.argus.engine.safety.ReplyChannels
 import dev.argus.engine.safety.StaticShellSafety
@@ -122,6 +123,11 @@ class ShizukuActionExecutor(
      * notifiche. Default **null**: senza, `notification_action_unavailable`.
      */
     private val notificationActions: NotificationActionGateway? = null,
+    /**
+     * 0.8: `set_stored` e `set_user_mode` (database di Argus, nessun privilegio). Default **null**: senza,
+     * falliscono con `base_executor_unavailable`.
+     */
+    private val storedModes: StoredModeActions? = null,
 ) : ActionExecutor, ResolvedActionExecutor {
     override suspend fun execute(
         action: ResolvedProgramAction,
@@ -150,6 +156,10 @@ class ShizukuActionExecutor(
             // contratto actResolvedV2. Questa è l'ultima difesa per snapshot legacy/manomessi.
             is Action.InvokeLlmV2 ->
                 ProgramActionResult(ActionResult.Failure("p4_invoke_llm_v2_unsupported"))
+            // 0.8: SET conserva le etichette del template riempito, che solo la foglia risolta conosce.
+            is Action.SetStored -> ProgramActionResult(
+                storedModes?.setStored(action, context) ?: ActionResult.Failure("base_executor_unavailable"),
+            )
             // 0.8: la risposta catturata torna all'interprete, che la etichetta TAINTED (mai nel journal).
             is Action.HttpRequest -> if (leaf.captureAs != null && !FeatureGates.blocks(leaf)) {
                 httpRequests?.run(leaf)
@@ -330,9 +340,12 @@ class ShizukuActionExecutor(
             // 0.8: `ask` la pone l'interprete del programma (ProgramQuestions), mai l'esecutore delle foglie.
             is Action.Ask -> ActionResult.Failure(ASK_OUTSIDE_PROGRAM)
 
-            is Action.SetStored -> ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
+            // 0.8: `set_stored` è sempre un programma P4 e passa dalla foglia risolta (sopra): senza le
+            // etichette del valore non si scrive niente.
+            is Action.SetStored -> ActionResult.Failure("stored_unresolved")
 
-            is Action.SetUserMode -> ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
+            is Action.SetUserMode -> storedModes?.setUserMode(action, ctx)
+                ?: ActionResult.Failure("base_executor_unavailable")
 
             // 0.8: stessa reply di whatsapp_reply, sulle app di ReplyChannels.NOTIFICATION_REPLY_PACKAGES.
             is Action.NotificationReply -> if (FeatureGates.blocks(action)) {

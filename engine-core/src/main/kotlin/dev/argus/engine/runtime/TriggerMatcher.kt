@@ -51,8 +51,9 @@ class TriggerMatcher {
         spec is Trigger.AppUsage && event is TriggerEvent.AppUsageChanged ->
             spec.pkg == event.pkg && event.previousMinutes < spec.minutes && event.currentMinutes >= spec.minutes
 
+        // Un cambio fatto da una regola `user_mode_changed` non riaccende le regole `user_mode_changed`.
         spec is Trigger.UserModeChanged && event is TriggerEvent.UserModeChanged ->
-            spec.to == null || spec.to == event.to
+            !event.chained && (spec.to == null || spec.to.equals(event.to, ignoreCase = true))
 
         else -> false
     }

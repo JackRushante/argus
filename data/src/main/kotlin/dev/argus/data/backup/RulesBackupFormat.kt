@@ -74,6 +74,26 @@ object RulesBackupFormat {
     private const val MAX_SLUG_CHARS = 40
 }
 
+/**
+ * 0.8: modalità e valori conservati, in due chiavi FACOLTATIVE alla radice (le versioni precedenti le ignorano):
+ * ```
+ *  "modes":{"names":["Casa","Lavoro"],"active":"Casa"},
+ *  "storedValues":[{"key":"caffe_oggi","type":"NUMBER","value":"2","integrity":"CLEAN",
+ *                   "confidentiality":"PUBLIC","writerRule":"<id>"|null,"updatedAt":<ms>}]
+ * ```
+ * L'export completo le scrive entrambe, ma un valore SECRET solo nel backup cifrato con la passphrase (in un
+ * file in chiaro manca, chiave compresa); quello senza dati personali tiene solo i nomi delle modalità (niente
+ * modalità attiva, niente valori). Lettura tollerante come per le etichette: una voce malformata si salta e
+ * non scarta mai una regola. Si ripristinano solo dall'import di Sistema (file scelto dall'utente).
+ */
+data class BackupState(
+    val modes: List<String> = emptyList(),
+    val activeMode: String? = null,
+    val values: List<dev.argus.engine.model.StoredValue> = emptyList(),
+) {
+    val isEmpty: Boolean get() = modes.isEmpty() && activeMode == null && values.isEmpty()
+}
+
 /** Una voce del file: la bozza, se la regola era attiva al momento dell'export e le sue etichette. */
 data class BackupRule(
     val enabled: Boolean,

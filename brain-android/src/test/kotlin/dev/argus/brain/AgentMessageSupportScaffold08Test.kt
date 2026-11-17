@@ -20,9 +20,8 @@ class AgentMessageSupportScaffold08Test {
 
     /** Il discriminatore wire di ogni tipo spento, com'è scritto nelle righe di schema del prompt. */
     private val hiddenTypes = listOf(
-        "nfc_tag", "next_alarm", "app_usage", "user_mode_changed",
-        "stored_compare", "user_mode_is", "stored",
-        "set_stored", "set_user_mode", "send_sms",
+        "nfc_tag", "next_alarm", "app_usage",
+        "send_sms",
         "call_number", "send_intent", "screen_call",
     )
 
@@ -46,6 +45,12 @@ class AgentMessageSupportScaffold08Test {
         FeatureGate.TRIGGER_CALENDAR_EVENT to "calendar_event",
         FeatureGate.ACTION_NOTIFICATION_REPLY to "notification_reply",
         FeatureGate.ACTION_NOTIFICATION_ACTION to "notification_action",
+        FeatureGate.VAR_STORED to "stored",
+        FeatureGate.CONDITION_STORED_COMPARE to "stored_compare",
+        FeatureGate.CONDITION_USER_MODE_IS to "user_mode_is",
+        FeatureGate.TRIGGER_USER_MODE_CHANGED to "user_mode_changed",
+        FeatureGate.ACTION_SET_STORED to "set_stored",
+        FeatureGate.ACTION_SET_USER_MODE to "set_user_mode",
         FeatureGate.ACTION_ASK to "ask",
     )
 

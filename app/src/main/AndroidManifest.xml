@@ -130,6 +130,18 @@
             </intent-filter>
         </service>
 
+        <!-- 0.8: riquadro «Argus: modalità», scorre le modalità dell'utente. -->
+        <service
+            android:name=".manual.ModeTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_mode"
+            android:label="@string/mode_tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
         <!-- Widget: esportato solo perche' il sistema deve poterlo aggiornare. Non esegue regole: i
              pulsanti aprono il trampolino non esportato con id e token. -->
         <receiver

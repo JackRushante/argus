@@ -203,6 +203,49 @@
 
     <!-- Sistema (settings) -->
     <string name="settings_title">Sistema</string>
+    <!-- 0.8: Sistema › Modalità (modalità e variabili salvate) -->
+    <string name="settings_modes_title">Modalità e variabili</string>
+    <string name="settings_modes_subtitle">Modalità attiva, le tue modalità e le variabili che le regole conservano</string>
+    <string name="modes_title">Modalità</string>
+    <string name="modes_active_label">Modalità attiva</string>
+    <string name="modes_none_active">Nessuna modalità attiva.</string>
+    <string name="modes_switch_hint">Puoi cambiarla anche dal riquadro rapido e dal widget.</string>
+    <string name="modes_switch_cd">Passa alla modalità %1$s</string>
+    <string name="modes_list_label">Le tue modalità</string>
+    <string name="modes_empty">Aggiungi la prima modalità, per esempio Casa o Lavoro.</string>
+    <string name="modes_condition_rules_none">Nessuna regola la usa come condizione</string>
+    <plurals name="modes_condition_rules">
+        <item quantity="one">%1$d regola la usa come condizione</item>
+        <item quantity="other">%1$d regole la usano come condizione</item>
+    </plurals>
+    <string name="modes_edit_cd">Modifica la modalità %1$s</string>
+    <string name="modes_add">Aggiungi modalità</string>
+    <string name="modes_add_limit">Puoi avere al massimo 12 modalità.</string>
+    <string name="modes_add_title">Nuova modalità</string>
+    <string name="modes_edit_title">Modifica modalità</string>
+    <string name="modes_name_label">Nome</string>
+    <string name="modes_name_hint">Da 1 a 24 caratteri, per esempio Casa, Lavoro, Notte.</string>
+    <plurals name="modes_review_warning">
+        <item quantity="one">%1$d regola che la usa andrà in «da rivedere».</item>
+        <item quantity="other">%1$d regole che la usano andranno in «da rivedere».</item>
+    </plurals>
+    <string name="modes_delete">Elimina modalità</string>
+    <string name="modes_delete_title">Eliminare la modalità %1$s?</string>
+    <string name="modes_delete_unused">Nessuna regola la usa.</string>
+    <string name="modes_values_label">Variabili salvate</string>
+    <string name="modes_values_empty">Nessuna variabile salvata. Le regole che conservano un valore fra un\'esecuzione e l\'altra lo mostrano qui.</string>
+    <string name="modes_value_hidden">Valore nascosto</string>
+    <string name="modes_value_open_cd">Correggi o elimina %1$s</string>
+    <string name="modes_value_title">Variabile %1$s</string>
+    <string name="modes_value_label">Valore</string>
+    <string name="modes_value_secret_hint">Il valore attuale è nascosto: scrivine uno nuovo per sostituirlo.</string>
+    <string name="modes_value_clean_hint">Un valore scritto da te è considerato attendibile.</string>
+    <string name="modes_value_true">vero</string>
+    <string name="modes_value_false">falso</string>
+    <string name="modes_value_delete">Elimina variabile</string>
+    <string name="modes_value_delete_title">Eliminare %1$s?</string>
+    <string name="modes_value_delete_body">Le regole che la leggono la troveranno assente e si fermeranno.</string>
+    <string name="modes_footer">Una regola legge o cambia modalità e variabili solo se è scritto nella regola che hai approvato. Tocca una variabile per correggerne il valore o eliminarla.</string>
     <string name="settings_section_health">SALUTE</string>
     <string name="settings_section_transport">BRAIN · TRANSPORT</string>
     <string name="settings_section_privacy">PRIVACY</string>

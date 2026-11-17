@@ -138,3 +138,68 @@ class PauseTileService : TileService() {
         tile.updateTile()
     }
 }
+
+/**
+ * Riquadro «Argus: modalità» (0.8): l'etichetta è la modalità attiva, il tocco passa alla successiva dell'elenco
+ * (dopo l'ultima torna alla prima). Come gli altri riquadri, a telefono bloccato il gesto aspetta lo sblocco. Il
+ * cambio passa da `UserModeSwitcher`, come dalla schermata: le regole «la modalità cambia» scattano una volta.
+ */
+class ModeTileService : TileService() {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var listening: Job? = null
+
+    override fun onStartListening() {
+        super.onStartListening()
+        val store = manualEntryPoint().modeStore()
+        listening?.cancel()
+        // L'elenco o la modalità attiva cambiano mentre il pannello è aperto: si ridisegna.
+        listening = scope.launch { store.observe().collect { render() } }
+    }
+
+    override fun onStopListening() {
+        listening?.cancel()
+        listening = null
+        super.onStopListening()
+    }
+
+    override fun onDestroy() {
+        scope.cancel()
+        super.onDestroy()
+    }
+
+    override fun onClick() {
+        super.onClick()
+        unlockAndRun {
+            scope.launch {
+                val result = runCatching { manualEntryPoint().modes().onTileClick() }.getOrNull()
+                when (result) {
+                    null -> toast(getString(R.string.mode_tile_empty))
+                    is dev.argus.engine.model.ModeSwitch.Changed ->
+                        result.to?.let { toast(getString(R.string.mode_toast_switched, it)) }
+                    else -> Unit
+                }
+                render()
+            }
+        }
+    }
+
+    private suspend fun render() {
+        val tile = qsTile ?: return
+        val entry = manualEntryPoint().modes()
+        val spec = runCatching { entry.tileSpec(entry.snapshot()) }.getOrNull()
+        val base = getString(R.string.mode_tile_label)
+        tile.label = spec?.activeMode ?: base
+        tile.subtitle = when {
+            spec == null || spec.state == TileUiState.UNAVAILABLE -> getString(R.string.mode_tile_empty)
+            spec?.activeMode == null -> getString(R.string.mode_tile_none)
+            else -> base
+        }
+        tile.state = (spec?.state ?: TileUiState.UNAVAILABLE).toTileState()
+        tile.icon = Icon.createWithResource(this, R.drawable.ic_tile_mode)
+        tile.updateTile()
+    }
+
+    private fun toast(text: String) {
+        Toast.makeText(applicationContext, text, Toast.LENGTH_SHORT).show()
+    }
+}

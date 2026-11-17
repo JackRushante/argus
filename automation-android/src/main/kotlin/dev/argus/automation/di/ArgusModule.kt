@@ -338,12 +338,15 @@ object ArgusModule {
         repository: RoomDraftRepository,
         installInfo: AppInstallInfo,
         labelStore: RoomRuleLabelStore,
+        backupState: dev.argus.data.RoomBackupState,
     ): RulesBackupService = RulesBackupService(
         automations = store,
         drafts = repository,
         documents = ContentResolverDocumentIo(context),
         appVersion = { installInfo.versionName },
         labels = { labelStore.snapshot() },
+        // 0.8: modalità e valori conservati nel backup completo.
+        state = backupState,
     )
 
     /** 0.7.2: modelli di regola negli asset dell'app (galleria «Modelli»). */
@@ -596,6 +599,7 @@ object ArgusModule {
         usageForeground: ForegroundAppSource,
         @ApplicationContext context: Context,
         calendarSource: CalendarInstanceSource,
+        persistentState: dev.argus.automation.PersistentStateReader,
     ): LazyDeviceStateProvider = LazyDeviceStateProvider(
         reader,
         gateway,
@@ -609,6 +613,8 @@ object ArgusModule {
         usageForeground = usageForeground,
         // 0.8: condizioni di contesto (Wi-Fi, Bluetooth, cuffie, calendario) con le API pubbliche.
         factsReader = AndroidDeviceFactsReader(context, calendarSource),
+        // 0.8: valori conservati e modalità.
+        persistentState = persistentState,
     )
 
     /** 0.8: istanze del calendario del telefono (`READ_CALENDAR`), per calendar_busy e calendar_event. */
@@ -682,7 +688,11 @@ object ArgusModule {
     fun capabilityProbeBoundary(
         probe: AndroidCapabilityProbe,
         secrets: dev.argus.engine.secrets.SecretVault,
-    ): CapabilityProbe = dev.argus.automation.secrets.SecretNamesCapabilityProbe(probe, secrets)
+        userModes: dev.argus.automation.UserModeNames,
+    ): CapabilityProbe = dev.argus.automation.modes.UserModeNamesCapabilityProbe(
+        dev.argus.automation.secrets.SecretNamesCapabilityProbe(probe, secrets),
+        userModes,
+    )
 
     @Provides
     fun firePolicySnapshotProvider(probe: AndroidCapabilityProbe): FirePolicySnapshotProvider = probe
@@ -977,6 +987,7 @@ object ArgusModule {
         directSettings: DirectSettings,
         privilegedActions: PrivilegedActionRunner,
         uiSteps: UiStepsRunner,
+        storedModes: dev.argus.engine.runtime.StoredModeActions,
     ): ShizukuActionExecutor =
         ShizukuActionExecutor(
             tools,
@@ -1010,6 +1021,8 @@ object ArgusModule {
             notificationActions = dev.argus.automation.notification.ListenerNotificationActionGateway(
                 dev.argus.automation.notification.ConnectedNotificationListener,
             ),
+            // 0.8: set_stored e set_user_mode.
+            storedModes = storedModes,
         )
 
     @Provides
@@ -1570,6 +1583,7 @@ object ArgusModule {
         stateQueries: StateQueryProbe,
         audit: AuditSink,
         installedApps: InstalledAppCatalog,
+        userModes: dev.argus.data.RoomUserModeStore,
         secrets: dev.argus.engine.secrets.SecretVault,
     ): ApprovalFlow = ApprovalFlow(
         drafts,
@@ -1581,6 +1595,8 @@ object ArgusModule {
         stateQueries,
         audit,
         installedPackages = installedApps,
+        // 0.8: le modalità nominate da una regola devono esistere all'approvazione.
+        userModes = { userModes.snapshot().modes },
         // 0.8: una regola che nomina un segreto non salvato non si arma (solo i nomi, mai i valori).
         savedSecrets = { secrets.names() },
     )
