@@ -30,6 +30,8 @@ class TriggerEnvelopeCodecTest {
         TriggerEvent.GeofenceTransitioned(id, Transition.DWELL, fp),
         TriggerEvent.SensorChanged(id, SensorKind.SHAKE, fp),
         TriggerEvent.CalendarEventFired(id, CalendarPhase.END, fp),
+        // Il titolo dell'evento alimenta il payload TITLE: un'esecuzione confermata lo deve ritrovare.
+        TriggerEvent.CalendarEventFired(id, CalendarPhase.START, fp, title = "Riunione \"Q4\""),
         TriggerEvent.NotificationPosted("com.whatsapp", "jid@s", "Anna", "Anna", "Ci vediamo \"alle\" 8\n", false, "0|k"),
         TriggerEvent.NotificationPosted("com.example"),
         TriggerEvent.PhoneStateChanged(PhoneEvent.SMS_RECEIVED, "+39333", "Codice 123", sim = 1),

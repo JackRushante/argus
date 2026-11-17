@@ -80,6 +80,7 @@ object TriggerEnvelopeCodec {
             is TriggerEvent.CalendarEventFired -> {
                 registered("calendar", event)
                 put("phase", event.phase.name)
+                put("title", event.title)
             }
             is TriggerEvent.NotificationPosted -> {
                 put("type", "notification")
@@ -174,6 +175,7 @@ object TriggerEnvelopeCodec {
                 id() ?: return null,
                 o.enum<CalendarPhase>("phase") ?: return null,
                 fp() ?: return null,
+                title = o.string("title"),
             )
             "notification" -> TriggerEvent.NotificationPosted(
                 pkg = o.string("pkg") ?: return null,
