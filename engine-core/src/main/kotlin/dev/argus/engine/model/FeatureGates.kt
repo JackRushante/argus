@@ -27,7 +27,7 @@ enum class FeatureGate(
     CONFIRM("confirm", enabled = true),
 
     /** `exit`: la regola-intervallo finisce col suo trigger d'uscita. */
-    EXIT("exit", enabled = false),
+    EXIT("exit", enabled = true),
 
     // --- Variabili -------------------------------------------------------------------------------
 

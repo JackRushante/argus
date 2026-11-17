@@ -146,7 +146,26 @@ object CapabilityRequirements {
             add(CapabilityIds.RULE_EXIT)
             addAll(forTrigger(span.trigger))
             span.actions.forEach { addAll(forAction(it)) }
+            // Un'impostazione scritta all'inizio si rilegge col lettore di stato prima di cambiarla, per rimetterla.
+            if (span.restore && writesSetting(actions)) add(CapabilityIds.STATE_READER_SETTING)
         }
+    }
+
+    private fun writesSetting(actions: List<Action>): Boolean {
+        val pending = ArrayDeque(actions)
+        var visited = 0
+        while (pending.isNotEmpty() && visited++ < 4_096) {
+            when (val action = pending.removeFirst()) {
+                is Action.WriteSetting -> return true
+                is Action.If -> {
+                    pending.addAll(action.then)
+                    pending.addAll(action.orElse)
+                }
+                is Action.While -> pending.addAll(action.body)
+                else -> Unit
+            }
+        }
+        return false
     }
 
     /** Requisiti di una bozza, con tutti i suoi campi eseguibili. */

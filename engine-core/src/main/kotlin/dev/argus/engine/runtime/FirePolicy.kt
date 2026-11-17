@@ -7,6 +7,8 @@ import dev.argus.engine.model.ApprovalFingerprints
 import dev.argus.engine.model.CapabilityIds
 import dev.argus.engine.model.CapabilityRequirements
 import dev.argus.engine.model.NotificationActionPolicy
+import dev.argus.engine.model.SpanPolicy
+import dev.argus.engine.model.Trigger
 import dev.argus.engine.model.toDraft
 import dev.argus.engine.safety.DraftValidator
 import dev.argus.engine.safety.ReplyChannels
@@ -22,6 +24,20 @@ sealed interface FirePolicyDecision {
 /** Gate obbligatorio e senza default permissivo, eseguito per ogni regola al fire-time. */
 fun interface FirePolicy {
     suspend fun evaluate(automation: Automation, event: TriggerEvent): FirePolicyDecision
+
+    /**
+     * 0.8: lo scatto di [phase] di una regola-intervallo. La fine ricontrolla tutto ciò che è strutturale (impronta,
+     * validazione) e, sul trigger di FINE e sull'evento arrivato, la shell e le macro delle azioni di fine.
+     * Default: come [evaluate] (i fake dei test); la produzione ([RevalidatingFirePolicy]) distingue le fasi.
+     */
+    suspend fun evaluate(automation: Automation, event: TriggerEvent, phase: SpanPhase): FirePolicyDecision =
+        evaluate(automation, event)
+
+    /**
+     * 0.8: si può rimettere ora un valore registrato con [action]? Servono le stesse capacità che servono per
+     * impostarlo. Default: sì (i fake dei test); la produzione controlla le capacità correnti.
+     */
+    suspend fun evaluateRestore(action: Action): FirePolicyDecision = FirePolicyDecision.Allow
 }
 
 data class FirePolicySnapshot(
@@ -85,7 +101,19 @@ class RevalidatingFirePolicy(
     private val snapshots: FirePolicySnapshotProvider,
 ) : FirePolicy {
 
-    override suspend fun evaluate(automation: Automation, event: TriggerEvent): FirePolicyDecision {
+    override suspend fun evaluate(automation: Automation, event: TriggerEvent): FirePolicyDecision =
+        evaluate(automation, event, SpanPhase.START)
+
+    /**
+     * 0.8: per la fine di una regola-intervallo il trigger che «preme l'interruttore» è quello di FINE e le azioni
+     * che partono sono quelle di fine: shell, macro, risposte e capacità si controllano su quella coppia. Impronta,
+     * schema, validazione e requisiti restano della regola intera.
+     */
+    override suspend fun evaluate(
+        automation: Automation,
+        event: TriggerEvent,
+        phase: SpanPhase,
+    ): FirePolicyDecision {
         val snapshot = try {
             snapshots.current()
         } catch (e: CancellationException) {
@@ -100,15 +128,21 @@ class RevalidatingFirePolicy(
             automation.approvalFingerprint != ApprovalFingerprints.of(automation)
         ) return FirePolicyDecision.Block("approval_fingerprint_mismatch", needsReview = true)
 
-        val hasStaticShell = containsStaticShell(automation.actions)
+        val exit = automation.exit
+        if (phase == SpanPhase.EXIT && exit == null)
+            return FirePolicyDecision.Block("trigger_mismatch", needsReview = false)
+        val phaseTrigger = if (phase == SpanPhase.EXIT) requireNotNull(exit).trigger else automation.trigger
+        val phaseActions = if (phase == SpanPhase.EXIT) requireNotNull(exit).actions else automation.actions
+
+        val hasStaticShell = containsStaticShell(phaseActions)
         if (hasStaticShell &&
-            !StaticShellSafety.allows(automation.trigger, snapshot.whitelistedConversationIds)
+            !StaticShellSafety.allows(phaseTrigger, snapshot.whitelistedConversationIds)
         ) return FirePolicyDecision.Block("shell_external_trigger", needsReview = true)
 
         // 0.5.1: una macro sull'interfaccia ha lo stesso confine della shell: chi preme l'interruttore.
-        val hasUiSteps = containsUiSteps(automation.actions)
+        val hasUiSteps = containsUiSteps(phaseActions)
         if (hasUiSteps &&
-            !StaticShellSafety.allows(automation.trigger, snapshot.whitelistedConversationIds)
+            !StaticShellSafety.allows(phaseTrigger, snapshot.whitelistedConversationIds)
         ) return FirePolicyDecision.Block("ui_steps_external_trigger", needsReview = true)
 
         // L'unica copia tipata regola → bozza: porta anche `confirm` ed `exit` (0.8) al validator.
@@ -124,14 +158,14 @@ class RevalidatingFirePolicy(
         // dentro if/while, fallisce all'esecutore sull'evento arrivato davvero (`shell_external_trigger`,
         // `ui_steps_external_trigger`). Un tag diverso resta bloccato qui sotto.
         val unverifiedScanOfApprovedTag = event is TriggerEvent.NfcTagScanned && !event.verified &&
-            StaticShellSafety.allows(automation.trigger, event.copy(verified = true), snapshot.whitelistedConversationIds)
+            StaticShellSafety.allows(phaseTrigger, event.copy(verified = true), snapshot.whitelistedConversationIds)
 
         // Difesa sul dato live oltre al trigger approvato: l'identità va verificata sull'evento
         // realmente arrivato, non solo su quella dichiarata nella regola. Una regressione di
         // routing non deve mai far innescare la shell da un mittente non verificato.
         if (hasStaticShell && !unverifiedScanOfApprovedTag &&
             !StaticShellSafety.allows(
-                automation.trigger,
+                phaseTrigger,
                 event,
                 snapshot.whitelistedConversationIds,
             )
@@ -140,7 +174,7 @@ class RevalidatingFirePolicy(
 
         if (hasUiSteps && !unverifiedScanOfApprovedTag &&
             !StaticShellSafety.allows(
-                automation.trigger,
+                phaseTrigger,
                 event,
                 snapshot.whitelistedConversationIds,
             )
@@ -151,7 +185,15 @@ class RevalidatingFirePolicy(
         if (automation.requiredCapabilities != derivedRequirements)
             return FirePolicyDecision.Block("capability_requirements_mismatch", needsReview = true)
 
-        val required = automation.requiredCapabilities
+        // L'inizio chiede tutto ciò che la regola usa (anche la fine deve poter arrivare). La fine chiede solo ciò
+        // che le serve per partire: il suo trigger, le sue azioni e le variabili; ogni valore da rimettere ha il
+        // suo controllo ([evaluateRestore]), così una capacità mancante ferma solo quel valore.
+        val required = if (phase == SpanPhase.EXIT) {
+            CapabilityRequirements.derive(phaseTrigger, phaseActions, conditions = null, vars = automation.vars) +
+                CapabilityIds.RULE_EXIT
+        } else {
+            automation.requiredCapabilities
+        }
         val missing = required - snapshot.availableCapabilities
         if (missing.isNotEmpty()) {
             // D6: una capability mancante (permesso revocato, Shizuku spento, runtime generativo
@@ -160,11 +202,11 @@ class RevalidatingFirePolicy(
             return FirePolicyDecision.Block("capability_unavailable", needsReview = false)
         }
 
-        val replyPackageAllowed = replyPackageCheck(automation.actions)
+        val replyPackageAllowed = replyPackageCheck(phaseActions)
         if (replyPackageAllowed != null) {
             val notification = event as? TriggerEvent.NotificationPosted
                 ?: return FirePolicyDecision.Block("reply_event_unverified", needsReview = false)
-            val configured = automation.trigger as? dev.argus.engine.model.Trigger.Notification
+            val configured = phaseTrigger as? dev.argus.engine.model.Trigger.Notification
                 ?: return FirePolicyDecision.Block("reply_event_unverified", needsReview = true)
             val verified = replyPackageAllowed(notification.pkg) &&
                 notification.pkg == configured.pkg &&
@@ -180,9 +222,9 @@ class RevalidatingFirePolicy(
         }
 
         // 0.8 notification_action: agisce solo sulla notifica viva dell'app approvata.
-        if (contains(automation.actions) { it is Action.NotificationAction }) {
+        if (contains(phaseActions) { it is Action.NotificationAction }) {
             val notification = event as? TriggerEvent.NotificationPosted
-            val configured = automation.trigger as? dev.argus.engine.model.Trigger.Notification
+            val configured = phaseTrigger as? dev.argus.engine.model.Trigger.Notification
             val verified = notification != null && configured != null &&
                 notification.pkg == configured.pkg &&
                 !notification.notificationKey.isNullOrBlank()
@@ -191,6 +233,29 @@ class RevalidatingFirePolicy(
         }
 
         return FirePolicyDecision.Allow
+    }
+
+    /**
+     * 0.8: rimettere un valore usa le capacità che servono a impostarlo (lo stesso tipo d'azione). Un'azione che
+     * esegue codice o parla con l'esterno non è mai un ripristino.
+     */
+    override suspend fun evaluateRestore(action: Action): FirePolicyDecision {
+        if (SpanPolicy.slotOf(action) == null)
+            return FirePolicyDecision.Block(SpanCodes.RESTORE_FAILED, needsReview = false)
+        val snapshot = try {
+            snapshots.current()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            return FirePolicyDecision.Block("capability_snapshot_unavailable", needsReview = false)
+        }
+        val required = CapabilityRequirements.derive(Trigger.Manual, listOf(action)) -
+            CapabilityRequirements.derive(Trigger.Manual, emptyList())
+        return if ((required - snapshot.availableCapabilities).isEmpty()) {
+            FirePolicyDecision.Allow
+        } else {
+            FirePolicyDecision.Block(SpanCodes.RESTORE_CAPABILITY_UNAVAILABLE, needsReview = false)
+        }
     }
 
     /**

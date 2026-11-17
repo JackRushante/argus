@@ -27,9 +27,6 @@ class AgentMessageSupportScaffold08Test {
         hiddenTypes.forEach { type ->
             assertFalse("\"type\":\"$type\"" in prompt, "il prompt nomina il tipo spento $type")
         }
-        // Campi e valori nuovi di tipi esistenti.
-        listOf("\"exit\"")
-            .forEach { assertFalse(it in prompt, "il prompt nomina $it") }
     }
 
     /** Tipi accesi: il prompt ne ha la riga di schema. */
@@ -62,6 +59,7 @@ class AgentMessageSupportScaffold08Test {
     /** Interruttori accesi che non sono un tipo: il prompt ne descrive il campo. */
     private val switchedOnFields = mapOf(
         FeatureGate.CONFIRM to "\"confirm\": {\"timeoutMs\":integer}",
+        FeatureGate.EXIT to "\"exit\": {\"trigger\":Trigger, \"restore\":boolean, \"actions\":[Action, ...]}",
         FeatureGate.LLM_OUTPUT to "\"output\":{\"kind\":\"CHOICE\"|\"NUMBER\"|\"BOOLEAN\"",
         FeatureGate.HTTP_CAPTURE to "\"extract\":string = a JSON pointer",
         FeatureGate.HTTP_SECRETS to "\"secretHeaders\":[SecretRef,...] and \"secretQuery\":[SecretRef,...]",

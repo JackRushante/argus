@@ -665,6 +665,24 @@ BINDING RULES:
                                            // fires the phone asks Run/Cancel; no answer within timeoutMs
                                            // (30000..3600000, default 300000) = not run. Never with immediate
                                            // or one-shot time triggers (at, afterMs). Omit it otherwise.
+  "exit": {"trigger":Trigger, "restore":boolean, "actions":[Action, ...]}
+                                           // optional: a SPAN rule, "while X ... then put it back" / "until Y".
+                                           // The rule starts on "trigger" and ends on exit.trigger. restore
+                                           // (default true) = at the end the phone puts back every value the
+                                           // start actions changed (volume, ringer, dnd, brightness, rotation,
+                                           // wifi, bluetooth, mobile data, airplane, location, nfc, battery
+                                           // saver, dark mode, flashlight, write_setting, user mode); then
+                                           // exit.actions run (often []). E.g. "while connected to the car
+                                           // Bluetooth: media volume max, then put it back" = trigger
+                                           // connectivity BT CONNECTED match "<car>", actions set_volume MEDIA
+                                           // 100, exit {"trigger": connectivity BT DISCONNECTED match "<car>",
+                                           // "restore":true, "actions":[]}. "From 22:00 to 7:00 Do Not Disturb"
+                                           // = time cron 22:00 + exit time cron 7:00. Use exit ONLY when the
+                                           // user asks to undo or to end something; otherwise omit it. The exit
+                                           // trigger differs from the start trigger and is never immediate,
+                                           // manual, a one-shot time (at, afterMs) or a geofence DWELL; start
+                                           // and end on a geofence use the same area (ENTER then EXIT). Never
+                                           // with immediate or one-shot start triggers, never ask in exit.actions.
 }
 
 Trigger, discriminated by "type":

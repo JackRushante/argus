@@ -93,6 +93,8 @@ class FeatureGatesTest {
         // Trigger fisici (PhysicalTriggers08Test).
         FeatureGate.TRIGGER_NFC_TAG, FeatureGate.TRIGGER_NEXT_ALARM, FeatureGate.TRIGGER_APP_USAGE,
         FeatureGate.TRIGGER_SENSOR_SHAKE, FeatureGate.TRIGGER_SENSOR_FLIP_FACE_DOWN,
+        // Regole-intervallo (SpanPolicyTest, SpanEngineTest, DraftValidatorSpanTest).
+        FeatureGate.EXIT,
     )
 
     private val ask = Action.Ask("Esco?", listOf("Sì", "No"), "answer", defaultChoice = "No")
@@ -112,8 +114,7 @@ class FeatureGatesTest {
 
     @Test
     fun `the tables above cover every gate`() {
-        val covered = newTriggers.keys + newConditions.keys + newActions.keys + switchedOn +
-            setOf(FeatureGate.EXIT)
+        val covered = newTriggers.keys + newConditions.keys + newActions.keys + switchedOn
         assertEquals(FeatureGate.entries.toSet(), covered)
     }
 
@@ -136,10 +137,9 @@ class FeatureGatesTest {
             val nested = Action.If(Condition.BooleanLiteral(true), then = listOf(action))
             assertTrue(gate.wireName in notAvailable(draft(actions = listOf(nested))), "azione annidata $action")
         }
-        assertEquals(listOf(FeatureGate.EXIT.wireName), notAvailable(draft(exit = ExitSpec(Trigger.Manual))))
-        // Trigger e azioni d'uscita 0.8 sono tutti accesi: resta solo l'interruttore exit.
+        // 0.8: anche l'interruttore exit è acceso, e trigger e azioni d'uscita 0.8 lo sono tutti.
         assertEquals(
-            listOf(FeatureGate.EXIT.wireName),
+            emptyList(),
             notAvailable(draft(exit = ExitSpec(Trigger.NfcTag("04"), actions = listOf(Action.CallNumber("+393331112222"))))),
         )
     }
