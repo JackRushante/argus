@@ -450,6 +450,14 @@ Same meaning as the @@META@@ line, same rule 8. Do not write @@META@@."""
 
     private fun dayName(day: DayOfWeek): String = day.getDisplayName(TextStyle.FULL, Locale.ENGLISH)
 
+    /**
+     * Il compile vede solo i nomi che una bozza può usare: i tipi di azione e `web.search`. Gli alias raw
+     * col punto (`shell.run`, `screen.tap`, `notify.show`…) non sono vocabolario del draft: con la regola 1
+     * («un tool in unavailable_tools è spento») il modello leggeva `shell.run: live confirmation not
+     * implemented` come «run_shell non c'è» e rifiutava regole valide. Il validatore resta invariato.
+     */
+    private fun draftVocabulary(tool: String): Boolean = '.' !in tool || tool == GenerativeContract.TOOL_WEB_SEARCH
+
     /** Contesto compatto `{"manifest":..,"state":..}`: solo metadati, valori di stato filtrati e safe. */
     private fun compileContext(manifest: CapabilityManifest, state: DeviceState): String {
         val context = buildJsonObject {
@@ -460,8 +468,12 @@ Same meaning as the @@META@@ line, same rule 8. Do not write @@META@@."""
                 put("android_api", manifest.androidApi)
                 put("shizuku_available", manifest.shizukuAvailable)
                 putJsonArray("granted_permissions") { manifest.grantedPermissions.forEach { add(JsonPrimitive(it)) } }
-                putJsonArray("available_tools") { manifest.availableTools.forEach { add(JsonPrimitive(it)) } }
-                putJsonObject("unavailable_tools") { manifest.unavailableTools.forEach { (k, v) -> put(k, v) } }
+                putJsonArray("available_tools") {
+                    manifest.availableTools.filter(::draftVocabulary).forEach { add(JsonPrimitive(it)) }
+                }
+                putJsonObject("unavailable_tools") {
+                    manifest.unavailableTools.filterKeys(::draftVocabulary).forEach { (k, v) -> put(k, v) }
+                }
                 putJsonArray("available_triggers") { manifest.availableTriggers.forEach { add(JsonPrimitive(it)) } }
                 putJsonObject("state_keys") { manifest.stateKeys.forEach { (k, v) -> put(k, v) } }
                 putJsonObject("state_readers") {
@@ -507,11 +519,11 @@ AutomationDraft, but do not execute actions and do not invent capabilities.
 BINDING RULES:
 1. Use only action types present in manifest.available_tools.
    Before answering that an action is unavailable, look for its exact type name in available_tools:
-   if it is listed (vibrate, set_flashlight, set_volume and the others), it IS available: use it.
-   A tool in manifest.unavailable_tools is off right now and the value says why: never say the function
-   does not exist or is not available in this version; tell the user that reason in one short sentence and
-   how to turn it on (ui_steps: switch on Argus's Accessibility service in Android Settings), and return
-   draft null with error_code "unsupported_capability".
+   if it is listed (vibrate, set_flashlight, run_shell, write_setting, ui_steps and the others), it IS
+   available right now: use it, and never claim it needs a permission, Shizuku or a service.
+   Only a tool in manifest.unavailable_tools is off right now, and the value says why: never say the function
+   does not exist or is not available in this version; tell the user that reason and how to turn it on in one
+   short sentence, and return draft null with error_code "unsupported_capability".
 2. Use only keys present in manifest.state_keys in state_equals conditions.
 3. Contacts: a WhatsApp generative reply or run_shell needs a whitelisted contact: use the alias of
    manifest.whitelisted_contacts (for example "contact_1") as the notification trigger's
@@ -522,7 +534,8 @@ BINDING RULES:
 4. For "here" use a geofence with resolveCurrentLocation=true and do not invent coordinates. Set
    resolveCurrentLocation=true even when state.location_available is false: Argus resolves the position
    on the phone at arming.
-5. If a required piece of data is missing or the request is ambiguous, ask a short question and return draft null.
+5. If a required piece of data is missing or the request is ambiguous, ask a short question and return draft null
+   with error_code "clarification_required".
    Exception, for exactly these four details: do not ask, use the default (vibrate durationMs 1000,
    set_dnd mode "PRIORITY", geofence radiusM 150, sensor cooldownMs 60000). Any other missing value
    (a level, a time, a person, an app, a place, a text) still needs a short question.
@@ -559,19 +572,15 @@ BINDING RULES:
    whatsapp_reply); a generated reply is invoke_llm/invoke_llm_v2 exactly as above, allowedTools
    still ["whatsapp_reply"] (the reply tool of every app). No automatic replies on any other app.
 10. If manifest.available_triggers is present, use ONLY the listed triggers (empty list =
-    no armable trigger):
-    "time", "immediate" (run-once-on-activation), "notification", "geofence";
-    "phone_state.sms" = SMS_RECEIVED;
-    "phone_state.call" = INCOMING_CALL/CALL_ENDED; "connectivity.wifi",
-    "connectivity.bt" and "connectivity.power" map exactly to the corresponding medium;
-    a Wi-Fi SSID match also requires "connectivity.wifi.identity". Sensor triggers are
-    "sensor.<kind>" and must be used only if that exact kind appears in the list.
-    "screen", "battery", "audio_output", "mode_changed" and "media" are usable only if listed;
-    "phone_state.call" also covers MISSED_CALL; the SIM filter needs "phone_state.sim".
-    "manual" (user-started: button, widget, shortcut, tile) is always listed.
-    "app_event" (an app opened or closed) is usable only if listed.
-    "nfc_tag", "next_alarm" and "app_usage" are usable only if listed.
-    "calendar_event" (start or end of a calendar event) is usable only if listed.
+    no armable trigger); every listed trigger IS armable right now, so never claim it is missing.
+    Names: "time", "immediate" (run-once-on-activation), "manual" (user-started: button, widget,
+    shortcut, tile), "notification", "geofence"; "phone_state.sms" = SMS_RECEIVED;
+    "phone_state.call" = INCOMING_CALL/CALL_ENDED; "phone_state.call" also covers MISSED_CALL; the SIM
+    filter needs "phone_state.sim"; "connectivity.wifi", "connectivity.bt" and "connectivity.power" map
+    exactly to the corresponding medium, CONNECTED and DISCONNECTED; a Wi-Fi SSID match also requires
+    "connectivity.wifi.identity"; "sensor.<kind>" only for that exact kind. Every other trigger is listed
+    by its type name: "screen", "battery", "audio_output", "mode_changed" and "media", "app_event",
+    "nfc_tag", "next_alarm", "app_usage", "calendar_event", "user_mode_changed".
     A requested trigger that is not in the list must NOT be compiled: briefly point out the
     missing grant or mechanism in Settings and return draft null with error_code
     "unsupported_capability".
@@ -580,7 +589,8 @@ BINDING RULES:
     Use it with time, immediate, geofence, connectivity, sensor or nfc_tag triggers, or with notification if it is a 1:1
     WhatsApp chat (isGroup=false) whose conversationId is whitelisted: a verified contact can
     trigger an already-approved template. Never with phone_state (SMS sender and caller ID are
-    spoofable); this trigger gate remains even for a P4 template.
+    spoofable); this trigger gate remains even for a P4 template. It binds ONLY run_shell and ui_steps:
+    other actions (send_sms, call_number, http_request, notifications...) may follow an SMS or a call.
     External values (trigger payloads, captured outputs and TEXT state from non-builtin readers,
     i.e. TAINTED) interpolated into run_shell.cmd are always inserted by Argus as
     ONE single-quoted shell argument: write ${'$'}{var} bare and never add your own quotes around it.
@@ -637,7 +647,8 @@ BINDING RULES:
     - "CAPTURE_ONLY": P4 only and "captureAs" is REQUIRED. The generated text stays inside the
       approved program as that variable and is never delivered directly. allowedTools=[] or
       ["web.search"], replyTargetSender=false, contextSources=[] or ["state"], and
-      notificationTitle=null. Use trigger-payload vars for notification/SMS text.
+      notificationTitle=null. For the text of the SMS or notification, put a trigger_payload var in the
+      goal as ${'$'}{var} (contextSources never "notification").
     "show_notification" is NEVER a generative tool (never in allowedTools); invoke_llm_v2 stays reply-only.
 17. One compile response can contain exactly ONE AutomationDraft. Never offer to create two drafts
     in one response. If independent triggers require separate automations, ask which one to create
@@ -798,9 +809,8 @@ Action, discriminated by "type":
    // CLICK presses its button whose visible text is exactly label (literal, never ${'$'}{var}; only with
    // CLICK). Never a button that asks for text: use a reply for that. Not on system apps or Argus
 - {"type":"run_shell", "cmd":string}  // flat v1: literal command; P4: ${'$'}{var} interpolation allowed;
-  // max 8192 characters; only with
-  time/geofence/connectivity/sensor triggers or with a whitelisted 1:1 WhatsApp chat;
-  never phone_state. LAST RESORT only: prefer a typed action whenever one exists.
+  // max 8192 characters; triggers as in rule 11 (never phone_state). LAST RESORT only: prefer a typed
+  // action whenever one exists.
   // run_shell cookbook (REAL Android commands only): svc wifi|data|bluetooth enable|disable;
   // settings put <system|secure|global> <key> <value>; cmd uimode night yes|no|auto;
   // input keyevent <KEYCODE>; am start -a <action>; am broadcast -a <action>;
@@ -860,13 +870,7 @@ Action, discriminated by "type":
    // BOOLEAN = yes/no, captured as true/false. PREFER a constrained output whenever the rule only needs
    // a decision ("is this urgent?" -> BOOLEAN, "urgent, normal or low?" -> CHOICE, "rate 1 to 5" ->
    // NUMBER) and then branch with var_compare: the captured value is trusted, free text is not.
-   // deliver defaults to WHATSAPP_REPLY (reply to an incoming notification). LOCAL_NOTIFICATION =
-   // posts a local notification with the generated text (any trigger): allowedTools without
-   // whatsapp_reply, replyTargetSender=false, contextSources []/["state"], notificationTitle
-   // required (short title).
-   // CAPTURE_ONLY = P4 only, captureAs required; keeps the generated text inside the program:
-   // allowedTools []/["web.search"], replyTargetSender=false, contextSources []/["state"],
-   // notificationTitle null.
+   // deliver and its fields: rule 16. The goal may use ${'$'}{var}.
 - {"type":"invoke_llm_v2", "goal":string, "stateContext":[ApprovedStateContext,...],
    "allowedTools":["whatsapp_reply"] or ["whatsapp_reply","web.search"],
    "replyTargetSender":true, "timeoutMs":integer}
@@ -931,9 +935,10 @@ Action, discriminated by "type":
 - {"type":"send_sms", "number":string, "text":string}  // sends an SMS. number = a literal "+" (optional)
    // and 7-15 digits only (no spaces, short codes, * or #), OR exactly "${'$'}{v}" where v is a trigger_payload
    // var with field "NUMBER" and extractionRegex null on a phone_state trigger ("text back whoever called").
-   // text max 480 characters once filled; ${'$'}{var} allowed. At most 10 SMS an hour, 3 per number
+   // text max 480 characters once filled; ${'$'}{var} allowed. Argus caps it at run time (10 SMS an hour,
+   // 3 per number): never refuse a rule for that
 - {"type":"call_number", "number":string}  // places a phone call to a LITERAL number ("+" and 7-15 digits,
-   // never ${'$'}{var}, no * # or pauses). At most 3 calls an hour
+   // never ${'$'}{var}, no * # or pauses). Argus caps it at run time (3 calls an hour): a scheduled call is fine
 - {"type":"send_intent", "kind":"BROADCAST"|"ACTIVITY"|"SERVICE", "action":string|null, "pkg":string|null,
    "cls":string|null, "data":string|null, "mimeType":string|null,
    "extras":[{"name":string, "type":"STRING"|"INT"|"LONG"|"BOOLEAN"|"FLOAT", "value":string},...]}
@@ -977,7 +982,8 @@ VarBinding, discriminated by "type":
    // formatted by pattern (Java DateTimeFormatter, max 40 chars; null = "HH:mm"; "d MMMM yyyy" = date).
    // Integrity CLEAN. Use it as ${'$'}{name} for the current time or date in any text.
 
-"captureAs":string (optional) — captures the action's OUTPUT into a new same-named variable. Allowed
+"captureAs":string (optional) — captures the action's OUTPUT into a new same-named variable (never also
+declare it in "vars"). Allowed
 ONLY on run_shell, invoke_llm and http_request; the captured value is TAINTED. invoke_llm_v2 is flat-v1 only.
 Exceptions (trusted, CLEAN): the answer of an "ask" and an invoke_llm with "output".
 
@@ -990,6 +996,8 @@ at most 64 action nodes total across the whole program:
    // BOUNDED loop: provide EXACTLY ONE of maxIterations / maxIterationsVar (a counter plus a time
    // deadline forbid infinite loops). maxIterationsVar names a NUMBER variable (e.g. a random_int)
    // read at run time and clamped to 1..1000 — use it to repeat a dynamic number of times.
+   // "From now, every 5 s while Wi-Fi is off / until it charges" = immediate trigger + while whose
+   // condition is a state_equals on that key: the loop condition is not a trigger.
 - {"type":"wait", "durationMs":integer 1..3600000}   // cooperative pause, <= 1 hour.
 - {"type":"ask", "prompt":string, "choices":[string,...], "captureAs":string, "timeoutMs":integer,
    "defaultChoice":string|null}   // asks the user with a notification, one button per choice, and waits.
