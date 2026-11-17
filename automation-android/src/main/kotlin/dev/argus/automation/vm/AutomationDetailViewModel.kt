@@ -877,6 +877,8 @@ class AutomationDetailViewModel @Inject constructor(
                         )
                     },
                 runNowBlockedReason = runNowBlockedReason(language),
+                // 0.8: una bozza si prova a secco prima di armarla.
+                dryRunAvailable = true,
                 verifiedStateReaders = review?.verifiedStateQueries.orEmpty().map { evidence ->
                     readerProbeLabel(evidence.family, evidence.valueType, language)
                 },
@@ -961,6 +963,8 @@ class AutomationDetailViewModel @Inject constructor(
                 canChangeApp = automation.status == AutomationStatus.ARMED ||
                     automation.status == AutomationStatus.DISABLED,
                 canShare = sharing != null && automation.isBackupExportable(),
+                // 0.8: «Prova a secco» simula senza eseguire, anche una regola da rivedere.
+                dryRunAvailable = true,
             ),
             automationId = automation.id.value,
             loading = false,
