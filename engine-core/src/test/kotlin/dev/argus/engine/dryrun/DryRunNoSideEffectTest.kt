@@ -332,7 +332,7 @@ class DryRunNoSideEffectTest {
     }
 
     @Test
-    fun `the fakes do fail when something acts: the real engine on the same world`() = runTest {
+    fun `the fakes do fail when something acts, as the real engine on the same world shows`() = runTest {
         val world = World()
         val engine = Engine(
             store = world.store,
