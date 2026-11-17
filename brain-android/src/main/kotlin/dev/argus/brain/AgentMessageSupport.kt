@@ -533,7 +533,8 @@ BINDING RULES:
    name in conversationId.
 4. For "here" use a geofence with resolveCurrentLocation=true and do not invent coordinates. Set
    resolveCurrentLocation=true even when state.location_available is false: Argus resolves the position
-   on the phone at arming.
+   on the phone at arming. location_available false never makes a listed "geofence" unavailable; for a
+   named place without coordinates (home, the office) ask where it is.
 5. If a required piece of data is missing or the request is ambiguous, ask a short question and return draft null
    with error_code "clarification_required".
    Exception, for exactly these four details: do not ask, use the default (vibrate durationMs 1000,
@@ -659,7 +660,8 @@ BINDING RULES:
     A candidate with "default":true is the user's default app for a kind of app (calculator, calendar,
     contacts, email, gallery, maps, messages, music, browser, camera): when the request names only that
     kind, use it. If several candidates fit the request and none is the default, ask which one (a short
-    clarification naming them) and return draft null. Never pick one of them yourself.
+    clarification naming them) and return draft null. Never pick one of them yourself, not even the one
+    whose label equals the word in the request ("Calculator" and "Simple Calculator" both fit "the calculator").
 19. Rule texts are frozen when you write them. A value that changes (current time or date, battery
     level, weather...) is never written as fixed text but read at fire time: a clock variable for
     time and date, a state variable for phone values, invoke_llm for web data; otherwise say it cannot be done."""
@@ -700,11 +702,8 @@ Trigger, discriminated by "type":
 - {"type":"time", "cron":string|null, "at":string|null, "afterMs":integer|null, "tz":string,
    "precision":"FLEXIBLE"|"EXACT"}
   Exactly one of cron, at and afterMs. cron is a standard 5-field expression "minute hour day-of-month month day-of-week" (no seconds), e.g. "30 22 * * *".
-  at is local ISO, e.g. 2026-07-15T23:00.
-  afterMs = one-shot relative delay in milliseconds (1000..604800000), anchored to activation and
-  re-armable ("in 2 minutes" -> afterMs=120000). Omit afterMs when you use cron or at, and vice versa.
-  Omit precision or use FLEXIBLE normally; EXACT only if the user explicitly
-  asks for exact punctuality.
+  at is local ISO, e.g. 2026-07-15T23:00. afterMs = one-shot relative delay in ms (rule 15).
+  Omit precision or use FLEXIBLE normally; EXACT only if the user explicitly asks for exact punctuality.
   solar = {"event":"SUNRISE"|"SUNSET", "offsetMinutes":integer -720..720 (negative = before)} replaces
   cron, at and afterMs (still exactly one of the four; tz still required): every day at sunrise/sunset
   plus the offset, computed on the phone. Never write coordinates: Argus reads the phone's position when
@@ -815,7 +814,7 @@ Action, discriminated by "type":
   // settings put <system|secure|global> <key> <value>; cmd uimode night yes|no|auto;
   // input keyevent <KEYCODE>; am start -a <action>; am broadcast -a <action>;
   // pm disable-user|enable <pkg>; monkey -p <pkg> 1; dumpsys <service> (pair with captureAs);
-  // media dispatch play|pause; wm size; cmd statusbar expand-notifications.
+  // media dispatch play|pause; wm size; cmd statusbar expand-notifications; log -t <tag> <message>.
   // NOTE: the flashlight is the set_flashlight action (there is NO `cmd flashlight`); radio toggles
   // are set_wifi/set_bluetooth/set_mobile_data; the theme is set_dark_mode; brightness is
   // set_brightness (write_setting screen_brightness only if set_brightness is not available); media
@@ -857,7 +856,7 @@ Action, discriminated by "type":
    // in review. key without spaces/control chars; value non-empty,
    // <=1024 chars, no NUL/newline/control chars. Prefer a typed action when one
    // exists (e.g. set_dnd, set_alarm, set_dark_mode, set_brightness, set_rotation): use write_setting
-   // for the long tail (screen_off_timeout, font_scale, ...). accelerometer_rotation and
+   // for the long tail (font_scale, ...; "screen timeout 30 s" = SYSTEM screen_off_timeout "30000"). accelerometer_rotation and
    // screen_brightness (0-255, SYSTEM; set screen_brightness_mode=0 first to disable auto-brightness)
    // only when set_rotation / set_brightness are not in available_tools
 - {"type":"invoke_llm", "goal":string, "contextSources":[string,...],
@@ -946,8 +945,8 @@ Action, discriminated by "type":
    // together, required; SERVICE needs pkg + cls. Everything is literal except STRING extra values,
    // which may hold ${'$'}{var}. Max 16 extras. Never Argus itself, never CALL/INSTALL/UNINSTALL/DELETE/
    // FACTORY_RESET actions, never file:, javascript: or intent: data. Prefer a typed action when one exists
-- {"type":"screen_call", "op":"REJECT"|"SILENCE", "onlyUnknownCallers":boolean}  // rejects or silences an
-   // incoming call BEFORE it rings. ONLY with trigger {"type":"phone_state","event":"INCOMING_CALL"}
+- {"type":"screen_call", "op":"REJECT"|"SILENCE", "onlyUnknownCallers":boolean}  // rejects (hangs up) or
+   // silences (no ring, the call stays) an incoming call BEFORE it rings. ONLY with trigger {"type":"phone_state","event":"INCOMING_CALL"}
    // (optional number filter, no sim), as a top-level action (never inside if/while), at most one per
    // rule; conditions may only be time_window or weekday (and/or/not of them). onlyUnknownCallers=true spares the
    // callers in the contacts (a hidden number counts as unknown). Other actions of the rule run after

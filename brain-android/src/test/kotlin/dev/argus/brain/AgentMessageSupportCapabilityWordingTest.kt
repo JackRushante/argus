@@ -71,6 +71,17 @@ class AgentMessageSupportCapabilityWordingTest {
     }
 
     @Test
+    fun `no position fix never hides a listed geofence and a named place is asked`() {
+        assertTrue("location_available false never makes a listed \"geofence\" unavailable" in flat)
+        assertTrue("for a named place without coordinates (home, the office) ask where it is" in flat)
+    }
+
+    @Test
+    fun `two fitting apps are asked even when one label is exact`() {
+        assertTrue("not even the one whose label equals the word in the request" in flat)
+    }
+
+    @Test
     fun `a captured name is never declared twice`() {
         assertTrue("never also declare it in \"vars\"" in flat)
     }
