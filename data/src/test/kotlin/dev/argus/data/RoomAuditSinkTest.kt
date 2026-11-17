@@ -96,6 +96,21 @@ class RoomAuditSinkTest {
     }
 
     @Test
+    fun `the end of a span and the closed reasons of a skipped run reach the Log`() = runTest {
+        assertEquals("span_exit", stored(AuditKind.FIRED, "span_exit"))
+        assertEquals("", stored(AuditKind.FIRED, "anything_else"))
+        assertEquals("", stored(AuditKind.FIRED, ""))
+        listOf("span_restored_rule_changed", "span_value_unreadable", "confirmation_requested", "cancelled").forEach {
+            assertEquals(it, stored(AuditKind.SUPPRESSED_NOT_ELIGIBLE, it))
+        }
+        assertEquals("", stored(AuditKind.SUPPRESSED_NOT_ELIGIBLE, "Casa di Mario"))
+        assertEquals("span_exit_actions_cooldown", stored(AuditKind.SUPPRESSED_COOLDOWN, "span_exit_actions_cooldown"))
+        assertEquals("retry_at=42", stored(AuditKind.SUPPRESSED_COOLDOWN, "retry_at=42"))
+        assertEquals("", stored(AuditKind.SUPPRESSED_COOLDOWN, "other_code"))
+        assertEquals("", stored(AuditKind.SUPPRESSED_DUPLICATE, "span_exit"))
+    }
+
+    @Test
     fun `budget keeps the unpriced model detail as MeteredBrain emits it`() = runTest {
         assertEquals("unpriced_model:openrouter", stored(AuditKind.SUPPRESSED_BUDGET, "unpriced_model:openrouter"))
         assertEquals(

@@ -4,6 +4,7 @@ import dev.argus.data.dao.AuditDao
 import dev.argus.data.entities.AuditEntity
 import dev.argus.engine.runtime.AuditEvent
 import dev.argus.engine.runtime.AuditSink
+import dev.argus.engine.runtime.SpanCodes
 
 /** [AuditSink] su Room (spec §10.6). Insert append-only via DAO suspend. */
 class RoomAuditSink(private val dao: AuditDao) : AuditSink {
@@ -21,8 +22,9 @@ class RoomAuditSink(private val dao: AuditDao) : AuditSink {
     }
 
     private fun redactedDetail(event: AuditEvent): String = when (event.kind) {
+        // 0.8: anche la pausa delle sole azioni di fine di una regola-intervallo (i valori sono già rimessi).
         dev.argus.engine.runtime.AuditKind.SUPPRESSED_COOLDOWN ->
-            event.detail.takeIf { RETRY_AT.matches(it) } ?: ""
+            event.detail.takeIf { RETRY_AT.matches(it) || it == SpanCodes.EXIT_ACTIONS_COOLDOWN } ?: ""
         dev.argus.engine.runtime.AuditKind.SUPPRESSED_BUDGET ->
             event.detail.takeIf { BUDGET_DETAIL.matches(it) || UNPRICED_MODEL_DETAIL.matches(it) } ?: ""
         // Il Log deve mostrare il vero motivo: un reason code snake_case di forma chiusa passa
@@ -61,9 +63,14 @@ class RoomAuditSink(private val dao: AuditDao) : AuditSink {
         // 0.8: solo l'esito del filtro chiamate, mai il numero.
         dev.argus.engine.runtime.AuditKind.CALL_SCREENED ->
             event.detail.takeIf { it in CALL_SCREENED_DETAILS } ?: ""
-        dev.argus.engine.runtime.AuditKind.FIRED,
-        dev.argus.engine.runtime.AuditKind.SUPPRESSED_DUPLICATE,
-        dev.argus.engine.runtime.AuditKind.SUPPRESSED_NOT_ELIGIBLE -> ""
+        // 0.8: la fine di una regola-intervallo si distingue dall'inizio nel Log (codice chiuso, unico ammesso).
+        dev.argus.engine.runtime.AuditKind.FIRED ->
+            event.detail.takeIf { it == SpanCodes.EXIT } ?: ""
+        // 0.8: conferme, domande, programmi annullati e ripristini degli intervalli hanno un motivo chiuso che il
+        // Log mostra (i produttori emettono solo costanti); qualunque altra forma cade nel vuoto, come prima.
+        dev.argus.engine.runtime.AuditKind.SUPPRESSED_NOT_ELIGIBLE ->
+            event.detail.takeIf(::isReasonCode) ?: ""
+        dev.argus.engine.runtime.AuditKind.SUPPRESSED_DUPLICATE -> ""
     }
 
     private fun isReasonCode(value: String): Boolean = REASON_CODE.matches(value)
