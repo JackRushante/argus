@@ -258,6 +258,44 @@ internal object LogReasonLabels {
             "this is not available in this version",
             "non disponibile in questa versione",
         ),
+        // --- 0.8: «chiedimi prima di eseguire», domande con pulsanti, risposte AI vincolate ---
+        "confirmation_requested" to Label("waiting for your confirmation", "in attesa della tua conferma"),
+        "confirmation_pending" to Label(
+            "a confirmation for this rule is already waiting",
+            "c'è già una conferma in attesa per questa regola",
+        ),
+        "confirmation_unavailable" to Label(
+            "could not ask for confirmation (notifications are off)",
+            "impossibile chiedere conferma (notifiche spente)",
+        ),
+        "confirmation_cancelled" to Label("you cancelled it", "l'hai annullata"),
+        "confirmation_expired" to Label("no answer in time, not run", "nessuna risposta in tempo, non eseguita"),
+        "confirmation_stale" to Label(
+            "the rule changed or was switched off before you confirmed",
+            "la regola è cambiata o è stata spenta prima della conferma",
+        ),
+        "ask_timeout" to Label("no answer to the question in time", "nessuna risposta alla domanda in tempo"),
+        "ask_timeout_default" to Label("no answer, the default choice was used", "nessuna risposta, usata la scelta predefinita"),
+        "ask_unavailable" to Label("the question could not be asked", "la domanda non si è potuta porre"),
+        "ask_notification_unavailable" to Label(
+            "the question could not be shown (notifications are off)",
+            "la domanda non si è potuta mostrare (notifiche spente)",
+        ),
+        "ask_answer_invalid" to Label("the answer was not one of the choices", "la risposta non era una delle scelte"),
+        "ask_failed" to Label("the question failed", "la domanda non è riuscita"),
+        "ask_outside_program" to Label("a question can only run inside its rule", "una domanda funziona solo dentro la sua regola"),
+        "ask_resume_stale" to Label(
+            "the rule changed or was switched off before the answer, it did not go on",
+            "la regola è cambiata o è stata spenta prima della risposta, non è proseguita",
+        ),
+        "ask_resume_invalid" to Label(
+            "the saved question did not match the rule, it did not go on",
+            "la domanda salvata non corrispondeva alla regola, non è proseguita",
+        ),
+        "llm_output_invalid" to Label(
+            "the AI did not answer with one of the allowed answers",
+            "l'AI non ha risposto con una delle risposte ammesse",
+        ),
         // --- 0.4.1: «Pausa automazioni» ---
         "paused" to Label(
             "automations are paused",

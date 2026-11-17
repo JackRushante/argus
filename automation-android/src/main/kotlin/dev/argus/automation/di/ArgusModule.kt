@@ -27,6 +27,12 @@ import dev.argus.automation.power.ExecutionWakeLock
 import dev.argus.automation.power.WaitWakeSignals
 import dev.argus.automation.power.WakeAlarmBackend
 import dev.argus.automation.power.WakeAwarePause
+import dev.argus.automation.prompt.AndroidUserPromptSurface
+import dev.argus.automation.prompt.EngineConfirmedRuns
+import dev.argus.automation.prompt.PendingPromptStore
+import dev.argus.automation.prompt.PrefsPromptBlobs
+import dev.argus.automation.prompt.UserPromptCoordinator
+import dev.argus.automation.prompt.UserPromptStartup
 import dev.argus.automation.RecoveryLauncher
 import dev.argus.automation.ArgusRuntimeController
 import dev.argus.automation.AutomationNotifier
@@ -204,6 +210,14 @@ import dev.argus.engine.brain.CapabilityProbe
 import dev.argus.engine.brain.ContactWhitelistStore
 import dev.argus.automation.phone.PhoneEventIngress
 import dev.argus.automation.phone.PrefsCallStateStore
+import dev.argus.automation.calendar.AndroidCalendarAlarmScheduler
+import dev.argus.automation.calendar.AndroidCalendarInstanceSource
+import dev.argus.automation.calendar.CalendarInstanceSource
+import dev.argus.automation.calendar.CalendarTriggerCoordinator
+import dev.argus.automation.calendar.CalendarTriggerLifecycle
+import dev.argus.automation.calendar.CalendarTriggerRuntime
+import dev.argus.automation.calendar.PrefsCalendarFiredStore
+import dev.argus.automation.context.AndroidDeviceFactsReader
 import dev.argus.automation.connectivity.ConnectivityEventDispatcher
 import dev.argus.automation.connectivity.ConnectivityEventIngress
 import dev.argus.automation.connectivity.AndroidConnectivitySentinelBackend
@@ -580,6 +594,8 @@ object ArgusModule {
         location: CurrentLocationProvider,
         root: RootAccess,
         usageForeground: ForegroundAppSource,
+        @ApplicationContext context: Context,
+        calendarSource: CalendarInstanceSource,
     ): LazyDeviceStateProvider = LazyDeviceStateProvider(
         reader,
         gateway,
@@ -591,7 +607,44 @@ object ArgusModule {
             gateway.status() == dev.argus.shizuku.ShizukuGatewayStatus.AUTHORIZED || root.isActive()
         },
         usageForeground = usageForeground,
+        // 0.8: condizioni di contesto (Wi-Fi, Bluetooth, cuffie, calendario) con le API pubbliche.
+        factsReader = AndroidDeviceFactsReader(context, calendarSource),
     )
+
+    /** 0.8: istanze del calendario del telefono (`READ_CALENDAR`), per calendar_busy e calendar_event. */
+    @Provides
+    @Singleton
+    fun calendarInstanceSource(@ApplicationContext context: Context): CalendarInstanceSource =
+        AndroidCalendarInstanceSource(context)
+
+    @Provides
+    @Singleton
+    fun calendarTriggerCoordinator(
+        @ApplicationContext context: Context,
+        store: AutomationStore,
+        source: CalendarInstanceSource,
+        engine: Engine,
+        state: LazyDeviceStateProvider,
+        frame: DispatchFrame,
+    ): CalendarTriggerCoordinator = CalendarTriggerCoordinator(
+        store = store,
+        source = source,
+        firedStore = PrefsCalendarFiredStore(context),
+        alarms = AndroidCalendarAlarmScheduler(context),
+        dispatch = { envelope -> frame.run { engine.onTrigger(envelope) { request -> state.current(request) } } },
+    )
+
+    @Provides
+    fun calendarTriggerRuntime(coordinator: CalendarTriggerCoordinator): CalendarTriggerRuntime = coordinator
+
+    @Provides
+    @Singleton
+    fun calendarTriggerLifecycle(
+        @ApplicationContext context: Context,
+        coordinator: CalendarTriggerCoordinator,
+        store: AutomationStore,
+        @ApplicationScope scope: CoroutineScope,
+    ): CalendarTriggerLifecycle = CalendarTriggerLifecycle(context, coordinator, store, scope)
 
     @Provides
     fun deviceStateSnapshotProvider(
@@ -953,6 +1006,10 @@ object ArgusModule {
             privilegedActions = privilegedActions,
             // 0.5.1: macro sullo schermo con il servizio di Accessibilità.
             uiSteps = uiSteps,
+            // 0.8: chiudi, posticipa o premi un pulsante della notifica, via il listener collegato.
+            notificationActions = dev.argus.automation.notification.ListenerNotificationActionGateway(
+                dev.argus.automation.notification.ConnectedNotificationListener,
+            ),
         )
 
     @Provides
@@ -1010,6 +1067,7 @@ object ArgusModule {
         resolvedExecutor: ResolvedActionExecutor,
         wakeAwarePause: WakeAwarePause,
         automationPause: LabelAwarePause,
+        prompts: UserPromptCoordinator,
     ): Engine = Engine(
         store = store,
         executor = executor,
@@ -1023,7 +1081,47 @@ object ArgusModule {
         // 0.4.1 (F21): «Pausa automazioni», letta dal motore a ogni scatto.
         // 0.7.2: decisa per regola, con la pausa dei gruppi (etichette).
         firingPause = automationPause,
+        // 0.8: «chiedimi prima di eseguire» e le domande con pulsanti.
+        confirmations = prompts,
+        questions = prompts,
         now = System::currentTimeMillis,
+    )
+
+    /** 0.8: domande in attesa (confirm, ask), cifrate con la chiave delle risposte differite. */
+    @Provides
+    @Singleton
+    fun pendingPromptStore(
+        @ApplicationContext context: Context,
+        cipher: DeferredReplyCipher,
+    ): PendingPromptStore = PendingPromptStore(PrefsPromptBlobs(context), cipher)
+
+    @Provides
+    @Singleton
+    fun userPromptCoordinator(
+        @ApplicationContext context: Context,
+        store: PendingPromptStore,
+        engine: Provider<Engine>,
+        state: LazyDeviceStateProvider,
+        frame: DispatchFrame,
+        wakeAwarePause: WakeAwarePause,
+    ): UserPromptCoordinator = UserPromptCoordinator(
+        store = store,
+        surface = AndroidUserPromptSurface(context),
+        // Il motore dipende dal coordinatore: lo si risolve al primo Esegui.
+        runs = EngineConfirmedRuns(engine, state, frame),
+        pause = { millis -> wakeAwarePause.pause(millis) },
+    )
+
+    @Provides
+    @Singleton
+    fun userPromptStartup(
+        @ApplicationScope scope: CoroutineScope,
+        coordinator: UserPromptCoordinator,
+        preferences: AppPreferencesStore,
+    ): UserPromptStartup = UserPromptStartup(
+        scope,
+        coordinator,
+        preferences.observe().map { it.privacyAccepted },
     )
 
     @Provides
@@ -1412,6 +1510,7 @@ object ArgusModule {
         audit: AuditSink,
         oneShotConsumptions: OneShotConsumptionRegistry,
         foregroundLauncher: ReceiverWorkLauncher,
+        calendar: CalendarTriggerRuntime,
     ): ArmedAutomationRegistrar = AndroidArmedAutomationRegistrar(
         coordinator,
         store,
@@ -1424,6 +1523,7 @@ object ArgusModule {
         audit,
         oneShotConsumptions,
         foregroundLauncher,
+        calendar,
     )
 
     /**

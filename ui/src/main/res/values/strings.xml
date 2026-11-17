@@ -190,7 +190,7 @@
     <string name="log_filter_remove">Remove filter</string>
     <string name="log_expand">Expand</string>
     <string name="log_collapse">Collapse</string>
-    <string name="log_copy_and_open">Copy and open WhatsApp</string>
+    <string name="log_copy_and_open">Copy and open the chat app</string>
     <string name="log_mark_sent">Mark as sent</string>
     <string name="log_open_automation">Open automation</string>
     <string name="log_menu_open">Log options</string>
@@ -228,8 +228,8 @@
     <string name="settings_notifications_ok">allowed</string>
     <string name="settings_notifications_warn">not allowed — outcomes and alerts won\'t be visible</string>
     <string name="settings_listener_title">Notification access</string>
-    <string name="settings_listener_ok">active — WhatsApp triggers and replies available</string>
-    <string name="settings_listener_warn">not active — WhatsApp triggers and replies not armable</string>
+    <string name="settings_listener_ok">active — notification triggers and replies available</string>
+    <string name="settings_listener_warn">not active — notification triggers and replies not armable</string>
     <string name="settings_listener_restricted_hint">If Android says \"Restricted setting\": Settings › Apps › Argus › ⋮ › Allow restricted settings, then try again.</string>
     <string name="settings_location_title">Background location</string>
     <string name="settings_location_granted">always — geofences are reliable</string>
@@ -245,6 +245,9 @@
     <string name="settings_bt_title">Bluetooth triggers</string>
     <string name="settings_bt_on">active — device connections and disconnections are armable</string>
     <string name="settings_bt_off">not active — allow Nearby devices to arm the rules</string>
+    <string name="settings_calendar_title">Calendar rules</string>
+    <string name="settings_calendar_on">active — rules can read the events in your calendar</string>
+    <string name="settings_calendar_off">not active — allow Calendar to arm the rules that use your events</string>
     <string name="settings_sentinel_title">Connectivity sentinel</string>
     <string name="settings_sentinel_active">active — monitors Wi-Fi and power for armed rules</string>
     <string name="settings_clibridge_title">CliBridge · Hermes</string>

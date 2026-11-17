@@ -11,7 +11,6 @@ import dev.argus.automation.foreground.ReceiverWorkLauncher
 import dev.argus.engine.notification.NotificationEventParser
 import dev.argus.engine.notification.ObservedConversationStore
 import dev.argus.engine.notification.ParsedNotification
-import dev.argus.engine.safety.DraftValidator
 import kotlinx.coroutines.CancellationException
 import javax.inject.Inject
 
@@ -89,7 +88,7 @@ class NotificationIngress(
 
     private suspend fun recordObserved(parsed: ParsedNotification) {
         parsed.observedConversation
-            ?.takeIf { it.packageName in DraftValidator.WHATSAPP_PACKAGES }
+            ?.takeIf { it.isReplyConversation() }
             ?.let { conversation ->
                 try {
                     observedConversations.record(conversation)
@@ -133,6 +132,8 @@ class ArgusNotificationListenerService : NotificationListenerService() {
     override fun onListenerConnected() {
         super.onListenerConnected()
         NotificationListenerConnection.onConnected()
+        // 0.8: notification_action agisce sulle notifiche attive attraverso questo listener.
+        ConnectedNotificationListener.attach(this)
         val active = try {
             activeNotifications?.toList() ?: emptyList<StatusBarNotification>()
         } catch (_: RuntimeException) {
@@ -156,6 +157,7 @@ class ArgusNotificationListenerService : NotificationListenerService() {
 
     override fun onListenerDisconnected() {
         NotificationListenerConnection.onDisconnected()
+        ConnectedNotificationListener.detach(this)
         ingress.clear()
         super.onListenerDisconnected()
         // 0.7.2: il sistema (o il gestore batteria del produttore) ci ha scollegati senza revocare

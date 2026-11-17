@@ -10,6 +10,7 @@ import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
+import dev.argus.automation.context.BluetoothConnectionTracker
 import dev.argus.automation.foreground.launchReceiverWork
 import dev.argus.engine.model.ConnMedium
 import dev.argus.engine.model.ConnState
@@ -44,6 +45,8 @@ class BluetoothConnectivityReceiver : BroadcastReceiver() {
             null
         }
         Log.d(TAG, "bluetooth ACL: state=$state named=${name != null}")
+        // 0.8: la condizione `bluetooth_connected` legge anche i collegamenti visti qui (solo RAM).
+        BluetoothConnectionTracker.observe(identity, name, state)
 
         val entry = entryPoint(context)
         launchReceiverWork(context, "bluetooth_acl") {

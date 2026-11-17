@@ -110,13 +110,19 @@ sealed interface TriggerEvent {
     /**
      * Inizio o fine (spostati dell'offset approvato) di un evento di calendario che combacia coi filtri
      * della regola: lo programma la sorgente per la regola, come una sveglia, quindi porta id e impronta.
-     * Titolo e calendario dell'evento non entrano nel core.
+     * Il calendario dell'evento non entra nel core; il [title] sì, solo in RAM, per il payload `TITLE`
+     * della regola (dato esterno, TAINTED: un invito lo scrive un altro). Mai nei log.
      */
     data class CalendarEventFired(
         override val automationId: AutomationId,
         val phase: CalendarPhase,
         override val approvalFingerprint: ApprovalFingerprint,
-    ) : Registered
+        val title: String? = null,
+    ) : Registered {
+        override fun toString(): String =
+            "CalendarEventFired(automationId=$automationId, phase=$phase, " +
+                "approvalFingerprint=$approvalFingerprint, title=${title?.let { "<redacted>" }})"
+    }
 
     /** Un tag NFC letto dal telefono. [tagId] vive solo in RAM per il match: mai persistito né loggato. */
     data class NfcTagScanned(val tagId: String) : TriggerEvent {

@@ -838,6 +838,40 @@ class BridgeTest(unittest.TestCase):
         self.assertIn("run_shell", prompt)
         self.assertIn("Never with phone_state", prompt)
 
+    def test_ai_replies_cover_telegram_signal_and_google_messages_but_shell_stays_whatsapp(self):
+        def act(package, is_group=False):
+            return {
+                "schema_version": 1,
+                "request_id": "act-test-1",
+                "goal": "rispondi",
+                "context_sources": ["notification"],
+                "allowed_tools": ["whatsapp_reply"],
+                "context": {
+                    "notification": {
+                        "package": package,
+                        "sender": None,
+                        "title": None,
+                        "text": "ciao",
+                        "is_group": is_group,
+                    },
+                    "state": None,
+                },
+            }
+
+        for package in ("org.telegram.messenger", "org.thoughtcrime.securesms", "com.google.android.apps.messaging"):
+            bridge.validate_act_request(act(package), "act-test-1")
+        for package, is_group in (("com.samsung.android.messaging", False), ("org.telegram.messenger", True)):
+            with self.assertRaises(bridge.RequestError):
+                bridge.validate_act_request(act(package, is_group), "act-test-1")
+
+        chat = "shortcut:org.telegram.messenger:luca"
+        trigger = {
+            "type": "notification", "pkg": "org.telegram.messenger", "conversationId": chat,
+            "sender": None, "isGroup": False, "titleMatch": None, "textMatch": "esegui",
+        }
+        self.assertTrue(bridge._reply_trigger_allowed(trigger, {chat}))
+        self.assertFalse(bridge._shell_trigger_allowed(trigger, {chat}))
+
     def test_whitelisted_whatsapp_contact_can_trigger_static_shell(self):
         """Decisione Lorenzo 2026-07-15: un contatto verificato puo' innescare un comando gia'
         approvato. Il cmd resta statico, quindi nessuna injection: cambia solo chi preme
