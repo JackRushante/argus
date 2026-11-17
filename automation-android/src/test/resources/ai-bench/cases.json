@@ -1380,14 +1380,14 @@
   "covers": ["tool:send_email"]
  },
  {
-  "id": "unsup.sms.it.01",
-  "category": "unsupported",
+  "id": "clar.sms.it.01",
+  "category": "clarification",
   "lang": "it",
   "text": "Quando esco da qui manda un SMS a Marco con scritto 'sto arrivando'",
   "expect": {
-   "outcome": "unsupported"
+   "outcome": ["clarification", "no_draft"]
   },
-  "covers": ["tool:send_sms"]
+  "note": "0.8: send_sms vuole un numero scritto e Argus non cerca i nomi in rubrica: serve il numero di Marco"
  },
  {
   "id": "screen.on.en.01",
@@ -1410,7 +1410,7 @@
    "outcome": ["unsupported", "clarification"]
   },
   "covers": ["tool:place_call"],
-  "note": "Nessuna azione di chiamata; un chiarimento sul numero e' accettabile"
+  "note": "0.8: call_number vuole un numero scritto e Argus non cerca i nomi in rubrica: un chiarimento sul numero e' la risposta giusta"
  },
  {
   "id": "limit.delay.it.01",

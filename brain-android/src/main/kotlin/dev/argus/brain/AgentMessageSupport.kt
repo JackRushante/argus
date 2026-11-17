@@ -898,7 +898,7 @@ Action, discriminated by "type":
 - {"type":"screen_call", "op":"REJECT"|"SILENCE", "onlyUnknownCallers":boolean}  // rejects or silences an
    // incoming call BEFORE it rings. ONLY with trigger {"type":"phone_state","event":"INCOMING_CALL"}
    // (optional number filter, no sim), as a top-level action (never inside if/while), at most one per
-   // rule; conditions may only be time_window (and/or/not of them). onlyUnknownCallers=true spares the
+   // rule; conditions may only be time_window or weekday (and/or/not of them). onlyUnknownCallers=true spares the
    // callers in the contacts (a hidden number counts as unknown). Other actions of the rule run after
 
 Schema v2 (P4) — OPTIONAL Tasker-class program. A draft stays v1 (flat: trigger + conditions +
