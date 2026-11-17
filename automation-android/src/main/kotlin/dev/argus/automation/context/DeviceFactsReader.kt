@@ -135,6 +135,12 @@ class AndroidDeviceFactsReader(
             devices[address] = BluetoothLink(address, runCatching { device.name }.getOrNull())
         }
         PROFILES.forEach { profile ->
+            // Lo stato del profilo dice già «nessun dispositivo collegato» senza aprire il proxy. Serve: su un
+            // telefono che non attiva un profilo (LE Audio, apparecchi acustici) il proxy non risponde mai e il
+            // fatto restava UNKNOWN anche senza nessun dispositivo collegato. Ogni altro stato chiede al proxy.
+            if (runCatching { adapter.getProfileConnectionState(profile) }.getOrNull() ==
+                BluetoothProfile.STATE_DISCONNECTED
+            ) return@forEach
             val connected = profileDevices(adapter, profile)
             if (connected == null) complete = false else connected.forEach(::add)
         }
