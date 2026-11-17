@@ -20,6 +20,7 @@ import dev.argus.engine.model.StateQueryFamily
 import dev.argus.engine.model.StateValueType
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.model.UserModePolicy
+import dev.argus.engine.model.allActions
 import dev.argus.engine.model.stateComparisons
 import dev.argus.engine.runtime.AuditEvent
 import dev.argus.engine.runtime.AuditKind
@@ -602,7 +603,8 @@ class ApprovalFlow(
             snapshot.draft.conditions?.stateComparisons().orEmpty().forEach { condition ->
                 add(StateQueryProbeRequest(condition.query, condition.valueType))
             }
-            snapshot.draft.actions.filterIsInstance<Action.InvokeLlmV2>().forEach { action ->
+            // 0.8: anche le azioni di fine di una regola-intervallo.
+            snapshot.draft.allActions.filterIsInstance<Action.InvokeLlmV2>().forEach { action ->
                 action.stateContext.forEach { context ->
                     add(StateQueryProbeRequest(context.query, context.valueType))
                 }

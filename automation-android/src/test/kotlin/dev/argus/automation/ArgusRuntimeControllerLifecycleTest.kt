@@ -203,6 +203,26 @@ class ArgusRuntimeControllerLifecycleTest {
     }
 
     @Test
+    fun `spans are reconciled at every reconcile and after a rule change`() = withFixture { env ->
+        // 0.8: spegnere o cancellare una regola in corso rimette i valori; l'avvio ripulisce gli intervalli stantii.
+        val rule = sensorRule()
+        val rules = FakeRules(listOf(rule))
+        val calls = AtomicInteger()
+        val controller = env.controller(store = rules, spanReconciler = { calls.incrementAndGet() })
+
+        controller.reconcile(ReconcileReason.APP_START)
+        assertEquals(1, calls.get())
+        controller.start()
+        awaitUntil("intervalli riconciliati all'avvio") { calls.get() >= 2 }
+        delay(300)
+        val before = calls.get()
+
+        rules.remove(rule.id)
+
+        awaitUntil("intervalli riconciliati dopo l'eliminazione") { calls.get() > before }
+    }
+
+    @Test
     fun `every reconcile runs the capability health check`() = withFixture { env ->
         val checks = AtomicInteger()
         val controller = env.controller(capabilityHealth = { checks.incrementAndGet() })
@@ -267,6 +287,7 @@ class ArgusRuntimeControllerLifecycleTest {
             audit: AuditSink = RecordingAudit(),
             capabilityHealth: (suspend () -> Unit)? = null,
             listenerWatchdog: NotificationListenerWatchdog? = null,
+            spanReconciler: (suspend () -> Unit)? = null,
         ) = ArgusRuntimeController(
             scope = scope,
             scheduler = scheduler,
@@ -286,6 +307,7 @@ class ArgusRuntimeControllerLifecycleTest {
             audit = audit,
             capabilityHealth = capabilityHealth,
             listenerWatchdog = listenerWatchdog,
+            spanReconciler = spanReconciler,
         )
     }
 
