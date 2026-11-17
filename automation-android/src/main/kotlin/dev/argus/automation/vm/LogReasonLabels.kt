@@ -172,6 +172,41 @@ internal object LogReasonLabels {
             "il server ha rimandato a un altro indirizzo",
         ),
         "http_too_many_redirects" to Label("too many redirects", "troppi reindirizzamenti"),
+        // --- 0.8: risposta catturata e segreti della cassaforte (mai il valore, mai il nome) ---
+        "http_cleartext_secret" to Label(
+            "a secret cannot travel unencrypted",
+            "un segreto non può viaggiare senza cifratura",
+        ),
+        "http_secret_missing" to Label(
+            "a secret the rule uses is no longer saved",
+            "un segreto usato dalla regola non è più salvato",
+        ),
+        "http_secret_invalid" to Label(
+            "a secret cannot be sent in a header (only plain ASCII characters)",
+            "un segreto non si può inviare in un'intestazione (solo caratteri ASCII semplici)",
+        ),
+        "http_capture_not_json" to Label("the response is not JSON", "la risposta non è JSON"),
+        "http_capture_path_missing" to Label(
+            "the response has nothing at the requested path",
+            "la risposta non ha nulla nel percorso richiesto",
+        ),
+        "http_capture_not_scalar" to Label(
+            "the requested part of the response is not a text, a number or yes/no",
+            "la parte richiesta della risposta non è un testo, un numero o sì/no",
+        ),
+        "http_capture_too_long" to Label(
+            "the response to keep is over 4096 characters",
+            "la risposta da conservare supera 4096 caratteri",
+        ),
+        "http_capture_invalid_chars" to Label(
+            "the response contains control characters",
+            "la risposta contiene caratteri di controllo",
+        ),
+        "http_capture_response_too_large" to Label(
+            "the response is over 64 KB",
+            "la risposta supera 64 KB",
+        ),
+        "secret_deleted" to Label("a secret it uses was deleted", "un segreto che usa è stato eliminato"),
         "json_quote_context" to Label(
             "external data in a JSON body must sit inside a quoted string",
             "un dato esterno in un body JSON deve stare dentro una stringa tra virgolette",

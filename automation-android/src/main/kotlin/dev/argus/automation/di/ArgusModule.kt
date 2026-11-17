@@ -679,7 +679,10 @@ object ArgusModule {
     )
 
     @Provides
-    fun capabilityProbeBoundary(probe: AndroidCapabilityProbe): CapabilityProbe = probe
+    fun capabilityProbeBoundary(
+        probe: AndroidCapabilityProbe,
+        secrets: dev.argus.engine.secrets.SecretVault,
+    ): CapabilityProbe = dev.argus.automation.secrets.SecretNamesCapabilityProbe(probe, secrets)
 
     @Provides
     fun firePolicySnapshotProvider(probe: AndroidCapabilityProbe): FirePolicySnapshotProvider = probe
@@ -911,7 +914,9 @@ object ArgusModule {
 
     @Provides
     @Singleton
-    fun httpRequestExecutor(): HttpRequestExecutor = HttpRequestExecutor()
+    fun httpRequestExecutor(secrets: dev.argus.engine.secrets.SecretVault): HttpRequestExecutor =
+        // 0.8: i valori della cassaforte si leggono solo qui, allo scatto.
+        HttpRequestExecutor(secrets = secrets)
 
     // --- 0.5.1: azioni privilegiate tipizzate (controllo app, aereo, posizione, NFC, ...) ---
 
@@ -1565,6 +1570,7 @@ object ArgusModule {
         stateQueries: StateQueryProbe,
         audit: AuditSink,
         installedApps: InstalledAppCatalog,
+        secrets: dev.argus.engine.secrets.SecretVault,
     ): ApprovalFlow = ApprovalFlow(
         drafts,
         approvals,
@@ -1575,6 +1581,8 @@ object ArgusModule {
         stateQueries,
         audit,
         installedPackages = installedApps,
+        // 0.8: una regola che nomina un segreto non salvato non si arma (solo i nomi, mai i valori).
+        savedSecrets = { secrets.names() },
     )
 
     @Provides

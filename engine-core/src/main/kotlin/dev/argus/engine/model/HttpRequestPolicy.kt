@@ -13,7 +13,9 @@ import java.util.Locale
  *
  * Regole di sicurezza, in sintesi:
  *  - URL e intestazioni sono LETTERALI e fingerprintati: nessun `${…}` (solo il body interpola);
- *  - `https://` obbligatorio; `http://` solo verso un host loopback esatto; mai userinfo;
+ *  - `https://` obbligatorio; `http://` solo verso questo telefono o la rete dell'utente
+ *    ([LocalNetworkPolicy], 0.8: mai un host pubblico, mai DNS); mai userinfo;
+ *  - i valori della cassaforte ([SecretRef]) vanno solo all'host approvato, mai in chiaro fuori dal loopback;
  *  - i dati esterni (anche TAINTED) entrano solo nel body, in JSON come contenuto di una stringa
  *    con escape, in `application/x-www-form-urlencoded` percent-encoded;
  *  - body ≤ 16 KB, ≤ 10 intestazioni con nomi validi, vietate `Host`, `Content-Length`,
@@ -45,12 +47,16 @@ object HttpRequestPolicy {
     val FORBIDDEN_HEADER_NAMES: Set<String> =
         setOf("host", "content-length", "transfer-encoding", "connection")
 
-    /**
-     * Host per cui il cleartext è ammesso nelle richieste web delle regole. Più stretto del provider Custom,
-     * che ammette anche la rete locale ([LocalNetworkPolicy], #19): qui resta il loopback esatto, e lo
-     * ripete la guardia OkHttp dell'esecutore.
-     */
+    /** Gli host loopback esatti che le regole usavano prima della 0.8 (oggi vale tutto [LocalNetworkPolicy]). */
     val LOOPBACK_HOSTS: Set<String> = setOf("localhost", "127.0.0.1", "::1")
+
+    /** Intestazioni e parametri segreti per richiesta (0.8): le intestazioni contano anche in [MAX_HEADERS]. */
+    const val MAX_SECRET_QUERY = 10
+    const val MAX_SECRET_PREFIX_CHARS = 64
+    const val MAX_QUERY_NAME_CHARS = 64
+
+    /** Nome di un parametro di query segreto: caratteri non riservati (RFC 3986) più le quadre. */
+    private val QUERY_NAME = Regex("^[A-Za-z0-9._~\\-\\[\\]]{1,$MAX_QUERY_NAME_CHARS}$")
 
     /**
      * Frammenti del nome (minuscolo) che marcano un'intestazione come segreta nella review. Meglio
@@ -78,9 +84,10 @@ object HttpRequestPolicy {
     fun isLoopbackHost(host: String): Boolean = host.lowercase(Locale.ROOT) in LOOPBACK_HOSTS
 
     /**
-     * true se [url] è ammesso: https con host, oppure http verso un loopback esatto; mai userinfo,
-     * mai spazi o caratteri di controllo, lunghezza limitata, porta valida. Un `${…}` non è un URL
-     * valido: l'interpolazione è vietata qui e il chiamante la segnala con un codice suo.
+     * true se [url] è ammesso: https con host, oppure http verso questo telefono o la rete dell'utente
+     * ([LocalNetworkPolicy.scopeOf], solo dal testo dell'host); mai userinfo, mai spazi o caratteri di
+     * controllo, lunghezza limitata, porta valida. Un `${…}` non è un URL valido: l'interpolazione è
+     * vietata qui e il chiamante la segnala con un codice suo.
      */
     fun isUrlAllowed(url: String): Boolean {
         if (url.isEmpty() || url.length > MAX_URL_CHARS) return false
@@ -93,7 +100,7 @@ object HttpRequestPolicy {
             if (uri.port != -1 && uri.port !in 1..65_535) return@runCatching false
             when (scheme) {
                 "https" -> true
-                "http" -> isLoopbackHost(host)
+                "http" -> LocalNetworkPolicy.scopeOf(host) != LocalNetworkPolicy.HostScope.PUBLIC
                 else -> false
             }
         }.getOrDefault(false)
@@ -103,6 +110,59 @@ object HttpRequestPolicy {
     fun sameHost(a: String, b: String): Boolean {
         val first = hostOf(a) ?: return false
         return first == hostOf(b)
+    }
+
+    private fun schemeOf(url: String): String? =
+        runCatching { URI(url).scheme?.lowercase(Locale.ROOT) }.getOrNull()
+
+    private fun effectivePort(url: String): Int? = runCatching {
+        val uri = URI(url)
+        when {
+            uri.port != -1 -> uri.port
+            uri.scheme.equals("https", ignoreCase = true) -> 443
+            uri.scheme.equals("http", ignoreCase = true) -> 80
+            else -> null
+        }
+    }.getOrNull()
+
+    /**
+     * Dove va in chiaro una richiesta `http://` (0.8): [LocalNetworkPolicy.HostScope.LOOPBACK] o
+     * [LocalNetworkPolicy.HostScope.LOCAL_NETWORK]; null se l'URL non è `http://` (https, o non analizzabile).
+     */
+    fun cleartextScope(url: String): LocalNetworkPolicy.HostScope? {
+        if (schemeOf(url) != "http") return null
+        val host = hostOf(url) ?: return null
+        return LocalNetworkPolicy.scopeOf(host)
+    }
+
+    /** `http://` verso la rete dell'utente (non loopback): la richiesta viaggia senza cifratura. */
+    fun isCleartextOnLocalNetwork(url: String): Boolean =
+        cleartextScope(url) == LocalNetworkPolicy.HostScope.LOCAL_NETWORK
+
+    /** Un valore della cassaforte può viaggiare verso [url] solo cifrato, o in chiaro solo su questo telefono. */
+    fun secretsAllowedTo(url: String): Boolean = when (schemeOf(url)) {
+        "https" -> true
+        "http" -> cleartextScope(url) == LocalNetworkPolicy.HostScope.LOOPBACK
+        else -> false
+    }
+
+    /**
+     * Un redirect da [from] a [to] si segue solo se [to] è ammesso, sullo STESSO host, e mai verso uno
+     * schema meno protetto (https → http solo sul loopback, come prima della 0.8). Con valori della
+     * cassaforte ([carriesSecrets]) il salto deve restare sulla stessa origine (schema, host, porta): un
+     * segreto non cambia mai porta né passa in chiaro.
+     */
+    fun isRedirectAllowed(from: String, to: String, carriesSecrets: Boolean): Boolean {
+        if (!isUrlAllowed(to) || !sameHost(from, to)) return false
+        val fromScheme = schemeOf(from) ?: return false
+        val toScheme = schemeOf(to) ?: return false
+        val loopback = hostOf(to)?.let(LocalNetworkPolicy::isLoopback) == true
+        if (fromScheme == "https" && toScheme == "http" && !loopback) return false
+        if (carriesSecrets) {
+            if (fromScheme != toScheme || effectivePort(from) != effectivePort(to)) return false
+            if (!secretsAllowedTo(to)) return false
+        }
+        return true
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -177,6 +237,63 @@ object HttpRequestPolicy {
             isFormContentType(contentType) -> InterpolationPolicy.ValueEncoding.FORM
             else -> InterpolationPolicy.ValueEncoding.RAW
         }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Valori della cassaforte (0.8)
+    // ---------------------------------------------------------------------------------------------
+
+    /** Prefisso letterale (`Bearer `): può essere vuoto; caratteri da intestazione, niente `${'$'}{…}`. */
+    fun isSecretPrefixValid(prefix: String): Boolean =
+        prefix.length <= MAX_SECRET_PREFIX_CHARS && prefix.all(::isHeaderValueChar) &&
+            !InterpolationPolicy.containsInterpolation(prefix)
+
+    /**
+     * Un'intestazione segreta: nome del segreto valido, nome dell'intestazione con le stesse regole di
+     * quelle letterali (e mai `Content-Type`, che decide il body), prefisso letterale valido.
+     */
+    fun isSecretHeaderValid(ref: SecretRef): Boolean =
+        SecretPolicy.isNameValid(ref.secret) && isHeaderNameValid(ref.name) && !isHeaderNameForbidden(ref.name) &&
+            ref.name.lowercase(Locale.ROOT) != CONTENT_TYPE_HEADER && isSecretPrefixValid(ref.prefix)
+
+    /** Un parametro di query segreto: nome del segreto valido, nome del parametro non riservato, prefisso valido. */
+    fun isSecretQueryValid(ref: SecretRef): Boolean =
+        SecretPolicy.isNameValid(ref.secret) && QUERY_NAME.matches(ref.name) && isSecretPrefixValid(ref.prefix)
+
+    /**
+     * true se un'intestazione segreta ha lo stesso nome di un'intestazione letterale o di un'altra segreta
+     * (senza badare alle maiuscole): chi vince non deve deciderlo il client HTTP.
+     */
+    fun secretHeaderConflicts(action: Action.HttpRequest): Boolean {
+        val secretNames = action.secretHeaders.orEmpty().map { it.name.lowercase(Locale.ROOT) }
+        if (secretNames.size != secretNames.toSet().size) return true
+        val literal = action.headers.orEmpty().keys.mapTo(HashSet()) { it.lowercase(Locale.ROOT) }
+        return secretNames.any { it in literal }
+    }
+
+    /** Lo stesso parametro di query segreto due volte. */
+    fun secretQueryDuplicates(action: Action.HttpRequest): Boolean {
+        val names = action.secretQuery.orEmpty().map { it.name }
+        return names.size != names.toSet().size
+    }
+
+    /** Forma dei riferimenti alla cassaforte, senza messaggi (validatore, interpolatore, esecutore). */
+    fun isSecretShapeValid(action: Action.HttpRequest): Boolean {
+        val secretHeaders = action.secretHeaders.orEmpty()
+        val secretQuery = action.secretQuery.orEmpty()
+        if (action.headers.orEmpty().size + secretHeaders.size > MAX_HEADERS) return false
+        if (secretQuery.size > MAX_SECRET_QUERY) return false
+        if (!secretHeaders.all(::isSecretHeaderValid) || !secretQuery.all(::isSecretQueryValid)) return false
+        if (secretHeaderConflicts(action) || secretQueryDuplicates(action)) return false
+        if (SecretPolicy.carriesSecrets(action) && !secretsAllowedTo(action.url)) return false
+        return true
+    }
+
+    /** `captureAs` ed `extract`: nome di variabile valido; il puntatore solo con la cattura, e ben formato. */
+    fun isCaptureShapeValid(action: Action.HttpRequest): Boolean {
+        action.captureAs?.let { if (!VarBinding.NAME_REGEX.matches(it)) return false }
+        val extract = action.extract ?: return true
+        return action.captureAs != null && HttpCapturePolicy.isPointerValid(extract)
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -293,6 +410,6 @@ object HttpRequestPolicy {
             if (action.method == HttpMethod.GET) return false
             if (bodyBytes(body) > MAX_BODY_BYTES) return false
         }
-        return true
+        return isSecretShapeValid(action) && isCaptureShapeValid(action)
     }
 }

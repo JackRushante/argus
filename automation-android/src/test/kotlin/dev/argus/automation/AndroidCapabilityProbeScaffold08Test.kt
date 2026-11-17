@@ -10,7 +10,6 @@ import dev.argus.engine.model.ActionTypeIds
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.CapabilityIds
-import dev.argus.engine.model.HttpMethod
 import dev.argus.engine.model.IntentKind
 import dev.argus.engine.model.ScreenCallOp
 import dev.argus.engine.model.SensorKind
@@ -144,7 +143,6 @@ class AndroidCapabilityProbeScaffold08Test {
             Action.CallNumber("+393331112222"),
             Action.SendIntent(IntentKind.BROADCAST, action = "dev.example.PING"),
             Action.ScreenCall(ScreenCallOp.REJECT),
-            Action.HttpRequest(HttpMethod.GET, "https://example.org", captureAs = "body"),
         )
         actions.forEach { action ->
             assertEquals(ActionResult.Failure("not_available_yet"), executor.execute(action, context), "$action")

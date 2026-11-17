@@ -29,6 +29,7 @@ object ValidationMessages {
         "state_query_type_mismatch",
         "app_not_installed",
         "app_control_freeze_system",
+        "secret_missing",
         "not_available_yet",
     )
 
@@ -794,8 +795,8 @@ object ValidationMessages {
             "Il livello di luminosità deve essere tra 0 e 100.",
         ),
         "http_url_invalid" to t(
-            "The request address must start with https:// (http:// is allowed only for localhost) and cannot contain a user name or password.",
-            "L'indirizzo della richiesta deve iniziare con https:// (http:// è ammesso solo per localhost) e non può contenere nome utente o password.",
+            "The request address must start with https:// (http:// only towards this phone or your own network) and cannot contain a user name or password.",
+            "L'indirizzo della richiesta deve iniziare con https:// (http:// solo verso questo telefono o la tua rete) e non può contenere nome utente o password.",
         ),
         "http_url_interpolated" to t(
             "The request address is fixed: it cannot contain a \${variable}.",
@@ -836,6 +837,43 @@ object ValidationMessages {
         "interpolation_json_context" to t(
             "External data sits in the JSON body outside a quoted string: the action would be blocked when it runs.",
             "Un dato esterno è nel body JSON fuori da una stringa tra virgolette: l'azione verrebbe bloccata all'esecuzione.",
+        ),
+        // --- 0.8 · risposta catturata, segreti della cassaforte, http sulla rete locale ---------------
+        "http_cleartext_local" to t(
+            "The request travels unencrypted on your network.",
+            "La richiesta viaggia senza cifratura sulla tua rete.",
+        ),
+        "http_cleartext_secret" to t(
+            "A secret never travels unencrypted: on your network the request needs https:// (http:// only towards this phone).",
+            "Un segreto non viaggia mai senza cifratura: sulla tua rete la richiesta deve usare https:// (http:// solo verso questo telefono).",
+        ),
+        "http_extract_without_capture" to t(
+            "The part of the response to take only makes sense when the response is kept in a variable.",
+            "La parte della risposta da prendere ha senso solo se la risposta viene conservata in una variabile.",
+        ),
+        "http_extract_invalid" to t(
+            "The JSON pointer is not valid: it starts with / (for example /current/temp) and is written out in full.",
+            "Il puntatore JSON non è valido: inizia con / (per esempio /current/temp) ed è scritto per intero.",
+        ),
+        "http_secrets_too_many" to t(
+            "At most 10 headers in all, secret ones included, and 10 secret query parameters.",
+            "Al massimo 10 intestazioni in tutto, segrete comprese, e 10 parametri di query segreti.",
+        ),
+        "secret_name_invalid" to t(
+            "A secret's name has lowercase letters, digits and _ only, starts with a letter and is at most 32 characters.",
+            "Il nome di un segreto ha solo lettere minuscole, cifre e _, inizia con una lettera ed è lungo al massimo 32 caratteri.",
+        ),
+        "http_secret_ref_invalid" to t(
+            "A secret header or query parameter is not valid (name, repeated, Content-Type, or a prefix that is too long or has a \${variable}).",
+            "Un'intestazione o un parametro segreto non è valido (nome, ripetuto, Content-Type, o un prefisso troppo lungo o con una \${variabile}).",
+        ),
+        "http_secret_header_conflict" to t(
+            "A secret header has the same name as another header.",
+            "Un'intestazione segreta ha lo stesso nome di un'altra intestazione.",
+        ),
+        "secret_missing" to t(
+            "This rule uses a secret that is not saved on this phone: add it in System › Secrets.",
+            "Questa regola usa un segreto non salvato su questo telefono: aggiungilo in Sistema › Segreti.",
         ),
 
         // --- 0.5.1 · azioni privilegiate tipizzate ----------------------------------------------
