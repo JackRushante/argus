@@ -203,7 +203,7 @@ internal object RuleSpanRender {
             l.pick(
                 " · At the end: it puts back the values the start changed$listed. " +
                     "A value you change by hand in the meantime is still put back as it was",
-                " · Alla fine: rimette com'era i valori cambiati dall'inizio$listed. " +
+                " · Alla fine: rimette com'erano i valori cambiati dall'inizio$listed. " +
                     "Anche un valore cambiato a mano nel frattempo torna com'era",
             )
         } else {
