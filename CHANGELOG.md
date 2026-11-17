@@ -2,7 +2,7 @@
 
 Release and engineering notes, newest first.
 
-## v0.7.2 (unreleased) — Spans, secrets, SMS and calls, new triggers, dry run; the fixes of a full audit
+## v0.8.0 (2026-11-17) — Spans, secrets, SMS and calls, new triggers, dry run; the fixes of a full audit
 
 This release closes the findings of a full code audit of 0.7.1 (prepared as 0.7.2, never released on its
 own) and adds the features listed under "Added". Some approved rules behave differently afterwards; those
@@ -189,6 +189,12 @@ cases are listed under "Changed".
   runs.
 - Stored values marked secret go only into the encrypted automatic backup, never into a plain export;
   vault secrets are in no backup at all and must be entered again on a new phone.
+- Not yet exercised on real hardware: NFC tags, call screening and a real SMS or call. The emulator used
+  for this release has no NFC and no SIM, so these are covered by unit tests only; when in doubt they do
+  not act (an unverified scan starts no shell, a call that cannot be judged rings).
+- `send_sms` reports success once the message is handed to the phone's SMS service; it does not wait for
+  the network's delivery result.
+- A clock rule can miss the one occurrence that falls while the phone is shutting down or restarting.
 - Shake and face down work only while the screen is on.
 - The dry run does not simulate the SMS and call caps, the AI budget or a cooldown in progress, and it
   does not take readings that need Shizuku or root: those conditions count as unknown, so not met.
