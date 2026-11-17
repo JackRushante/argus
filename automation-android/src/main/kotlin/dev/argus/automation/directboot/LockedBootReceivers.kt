@@ -6,6 +6,7 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.UserManager
 import android.provider.Settings
 import android.util.Log
@@ -105,7 +106,8 @@ class AndroidLockedAlarms(context: Context) : LockedAlarms {
             intent(appContext),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        if (exact && manager.canScheduleExactAlarms()) {
+        val exactAllowed = Build.VERSION.SDK_INT < Build.VERSION_CODES.S || manager.canScheduleExactAlarms()
+        if (exact && exactAllowed) {
             try {
                 manager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMillis, operation)
                 return
