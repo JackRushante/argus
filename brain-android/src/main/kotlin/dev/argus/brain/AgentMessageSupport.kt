@@ -864,7 +864,8 @@ Action, discriminated by "type":
    "output":{"kind":"CHOICE"|"NUMBER"|"BOOLEAN","choices":[string,...],"min":integer,"max":integer}|null}
    // output (only with CAPTURE_ONLY + captureAs) constrains the answer: CHOICE = exactly one of 2-8
    // labels matching [a-z0-9_-]{1,24}; NUMBER = an integer between min and max (both required);
-   // BOOLEAN = yes/no, captured as true/false. PREFER a constrained output whenever the rule only needs
+   // BOOLEAN = yes/no, captured as true/false. Write only the fields of the kind: min/max ONLY with
+   // NUMBER, choices ONLY with CHOICE (e.g. {"kind":"BOOLEAN"}). PREFER a constrained output whenever the rule only needs
    // a decision ("is this urgent?" -> BOOLEAN, "urgent, normal or low?" -> CHOICE, "rate 1 to 5" ->
    // NUMBER) and then branch with var_compare: the captured value is trusted, free text is not.
    // deliver and its fields: rule 16. The goal may use ${'$'}{var}.
@@ -958,7 +959,8 @@ Optional top-level field "vars":[VarBinding,...] — typed, approved program var
 listed in "vars" (captureAs declares them).
 VarBinding, discriminated by "type":
 - {"type":"literal", "name":string, "value":string, "varType":"TEXT"|"NUMBER"|"BOOLEAN",
-   "confidentiality":"PUBLIC"|"PRIVATE"|"SECRET"}   // trusted constant, integrity CLEAN
+   "confidentiality":"PUBLIC"|"PRIVATE"|"SECRET"}   // trusted constant, integrity CLEAN; never a
+   // placeholder for a captureAs or ask answer (those need no declaration)
 - {"type":"state", "name":string, "query":StateQuery, "valueType":"TEXT"|"NUMBER"|"BOOLEAN",
    "policyVersion":1, "confidentiality":"PUBLIC"|"PRIVATE"|"SECRET"}   // local reader: integrity CLEAN
    // for builtin readers and NUMBER/BOOLEAN; TEXT from setting/system_property/sysfs/dumpsys_field is TAINTED
