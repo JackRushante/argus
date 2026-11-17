@@ -18,6 +18,8 @@ import dev.argus.engine.model.GenerativeContract
 import dev.argus.engine.model.GenerativeAction
 import dev.argus.engine.model.GenerativeDeliverMode
 import dev.argus.engine.model.IntegrityLabel
+import dev.argus.engine.model.LlmOutputPolicy
+import dev.argus.engine.model.OutputSpec
 import dev.argus.engine.model.StateContextClassification
 import dev.argus.engine.model.StateQueryPolicy
 import dev.argus.engine.model.StateValueCoercion
@@ -216,9 +218,12 @@ class AndroidGenerativeLane(
             return ActResult(text = null, metaError = "action_contract_invalid")
         }
 
+        val output = action.output
         val act = try {
             withTimeout(action.timeoutMs) {
-                if (request.runtimeData.isEmpty()) {
+                if (output != null) {
+                    constrainedAct(queued, action, request, output)
+                } else if (request.runtimeData.isEmpty()) {
                     brain.act(
                         context = queued.context,
                         goal = action.goal,
@@ -252,6 +257,35 @@ class AndroidGenerativeLane(
         validateResolved(queued, request)?.let { return ActResult(text = null, metaError = it) }
         if (action.captureAs != null) return act
         return deliverResolved(queued, action, text)
+    }
+
+    /**
+     * 0.8 `invoke_llm.output`: chiede la forma approvata (output strutturato dove il transport lo sa
+     * fare) e ricontrolla SEMPRE il testo con [LlmOutputPolicy.normalize]. Una risposta fuori forma vale
+     * un solo nuovo tentativo, poi [LlmOutputPolicy.OUTPUT_INVALID]; mai una coercizione del testo libero.
+     * Un errore di trasporto o di budget non si ritenta: torna così com'è.
+     */
+    private suspend fun constrainedAct(
+        queued: QueuedAction,
+        action: Action.InvokeLlm,
+        request: ResolvedRequest,
+        output: OutputSpec,
+    ): ActResult {
+        repeat(CONSTRAINED_ATTEMPTS) {
+            val result = brain.actConstrained(
+                context = queued.context,
+                goal = action.goal,
+                contextSources = action.contextSources,
+                allowedTools = action.allowedTools,
+                runtimeData = request.runtimeData,
+                output = output,
+            )
+            val text = result.text ?: return result
+            LlmOutputPolicy.normalize(output, text)?.let { canonical ->
+                return ActResult(text = canonical, metaError = null, usage = result.usage)
+            }
+        }
+        return ActResult(text = null, metaError = LlmOutputPolicy.OUTPUT_INVALID)
     }
 
     /** Consegna sincrona P4. Il testo restituito segnala successo all'executor ma non viene catturato. */
@@ -739,6 +773,9 @@ class AndroidGenerativeLane(
 
     private companion object {
         const val DEFAULT_CAPACITY = 8
+
+        /** 0.8: una risposta fuori dalla forma approvata vale un solo nuovo tentativo. */
+        const val CONSTRAINED_ATTEMPTS = 2
         const val DEFAULT_HANDSHAKE_TIMEOUT_MILLIS = 5_000L
 
         /** D8: silenzio che chiude una raffica e tetto massimo dal primo messaggio. */

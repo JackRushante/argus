@@ -60,6 +60,55 @@ object ValidationMessages {
             "This is not available in this version.",
             "Non disponibile in questa versione.",
         ),
+        // 0.8: «chiedimi prima», domande con pulsanti, risposte AI vincolate.
+        "confirm_timeout_invalid" to t(
+            "The confirmation must wait between 30 seconds and 60 minutes.",
+            "La conferma deve aspettare fra 30 secondi e 60 minuti.",
+        ),
+        "confirm_one_shot_unsupported" to t(
+            "A rule that runs only once cannot ask for confirmation: it switches off before you answer.",
+            "Una regola che scatta una volta sola non può chiedere conferma: si spegne prima della risposta.",
+        ),
+        "ask_prompt_invalid" to t(
+            "The question is required and can be at most 120 characters, on one line.",
+            "La domanda è obbligatoria, al massimo 120 caratteri su una riga.",
+        ),
+        "ask_choices_invalid" to t(
+            "A question needs 2 to 4 different choices of 1 to 24 characters.",
+            "Una domanda vuole da 2 a 4 scelte diverse, da 1 a 24 caratteri.",
+        ),
+        "ask_timeout_invalid" to t(
+            "A question can wait from 10 seconds to 60 minutes.",
+            "Una domanda può aspettare da 10 secondi a 60 minuti.",
+        ),
+        "ask_default_invalid" to t(
+            "The default answer must be one of the choices.",
+            "La risposta predefinita deve essere una delle scelte.",
+        ),
+        "llm_output_requires_capture" to t(
+            "A constrained AI answer must be saved in a variable.",
+            "Una risposta AI vincolata va salvata in una variabile.",
+        ),
+        "llm_output_choices_invalid" to t(
+            "The AI answer needs 2 to 8 different labels (a-z, 0-9, _ and -, up to 24 characters).",
+            "La risposta AI vuole da 2 a 8 etichette diverse (a-z, 0-9, _ e -, al massimo 24 caratteri).",
+        ),
+        "llm_output_choices_forbidden" to t(
+            "Only a choice answer has labels.",
+            "Solo una risposta a scelta ha etichette.",
+        ),
+        "llm_output_bounds_required" to t(
+            "A numeric AI answer needs both a minimum and a maximum.",
+            "Una risposta AI numerica vuole sia un minimo sia un massimo.",
+        ),
+        "llm_output_bounds_invalid" to t(
+            "The minimum must not exceed the maximum, within ±10^15.",
+            "Il minimo non può superare il massimo, entro ±10^15.",
+        ),
+        "llm_output_bounds_forbidden" to t(
+            "Only a numeric answer has a minimum and a maximum.",
+            "Solo una risposta numerica ha un minimo e un massimo.",
+        ),
         "cooldown_invalid" to t("The cooldown cannot be negative.", "Il cooldown non può essere negativo."),
         "cooldown_raised" to t(
             "Cooldown below 60 s on an AI rule: Argus will enforce 60 s.",

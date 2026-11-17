@@ -19,6 +19,7 @@ import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.brain.TurnUsage
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.AutomationDraft
+import dev.argus.engine.model.OutputSpec
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.runtime.AuditEvent
 import dev.argus.engine.runtime.AuditKind
@@ -373,6 +374,22 @@ class MeteredBrain(
             context,
             action.goal.length.toLong() + context.state.queryValues.values.sumOf { it.length.toLong() },
         ) { it.actV2(context, action) }
+
+    /** 0.8: la risposta vincolata passa dallo stesso budget di [actResolved]; ogni tentativo conta. */
+    override suspend fun actConstrained(
+        context: FireContext,
+        goal: String,
+        contextSources: List<String>,
+        allowedTools: List<String>,
+        runtimeData: List<RuntimeDataBinding>,
+        output: OutputSpec,
+    ): ActResult = meteredAct(
+        UsageEventKind.ACT,
+        context,
+        goal.length.toLong() + runtimeData.sumOf { it.value.text.length.toLong() },
+    ) {
+        it.actConstrained(context, goal, contextSources, allowedTools, runtimeData, output)
+    }
 
     private suspend fun meteredAct(
         kind: UsageEventKind,

@@ -36,6 +36,9 @@ import dev.argus.engine.safety.StaticShellSafety
 import dev.argus.shizuku.ShizukuShellException
 import kotlinx.coroutines.CancellationException
 
+/** 0.8: un `ask` arrivato all'esecutore delle foglie (fuori dal programma che lo pone): mai eseguito. */
+internal const val ASK_OUTSIDE_PROGRAM = "ask_outside_program"
+
 /** Boundary Android per le notifiche prodotte da una regola. */
 fun interface AutomationNotifier {
     suspend fun show(title: String, text: String, context: FireContext)
@@ -326,7 +329,8 @@ class ShizukuActionExecutor(
 
             // 0.8 scaffold: azioni spente, falliscono chiuse con lo stesso codice del validator. Chi ne
             // implementa una sostituisce la SUA riga con l'esecutore e accende il suo FeatureGate.
-            is Action.Ask -> ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
+            // 0.8: `ask` la pone l'interprete del programma (ProgramQuestions), mai l'esecutore delle foglie.
+            is Action.Ask -> ActionResult.Failure(ASK_OUTSIDE_PROGRAM)
 
             // 0.8: `set_stored` è sempre un programma P4 e passa dalla foglia risolta (sopra): senza le
             // etichette del valore non si scrive niente.

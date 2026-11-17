@@ -1,6 +1,8 @@
 package dev.argus.engine.brain
 import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.Action
+import dev.argus.engine.model.LlmOutputPolicy
+import dev.argus.engine.model.OutputSpec
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireContext
 import dev.argus.engine.runtime.RuntimeDataBinding
@@ -141,4 +143,27 @@ interface Brain {
         allowedTools: List<String>,
         runtimeData: List<RuntimeDataBinding>,
     ): ActResult = ActResult(text = null, metaError = "act_resolved_unsupported")
+
+    /**
+     * 0.8 `invoke_llm.output`: una chiamata che deve rispondere con una forma chiusa ([output]). Default
+     * per ogni brain: l'istruzione fissa dell'app ([LlmOutputPolicy.instruction]) in coda al goal, poi il
+     * normale [act]/[actResolved] (così budget e consenso dei decorator restano gli stessi). I transport
+     * che sanno chiedere un output strutturato (enum, intero, booleano) lo sovrascrivono. In ogni caso il
+     * chiamante ricontrolla la risposta con [LlmOutputPolicy.normalize]: questa è solo una richiesta.
+     */
+    suspend fun actConstrained(
+        context: FireContext,
+        goal: String,
+        contextSources: List<String>,
+        allowedTools: List<String>,
+        runtimeData: List<RuntimeDataBinding>,
+        output: OutputSpec,
+    ): ActResult {
+        val constrainedGoal = LlmOutputPolicy.constrainedGoal(goal, output)
+        return if (runtimeData.isEmpty()) {
+            act(context, constrainedGoal, contextSources, allowedTools)
+        } else {
+            actResolved(context, constrainedGoal, contextSources, allowedTools, runtimeData)
+        }
+    }
 }

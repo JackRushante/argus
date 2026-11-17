@@ -7,6 +7,8 @@ import dev.argus.engine.brain.CompileMetaError
 import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.GenerativeContract
+import dev.argus.engine.model.LlmOutputPolicy
+import dev.argus.engine.model.OutputSpec
 import dev.argus.engine.model.StateContextClassification
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireContext
@@ -231,6 +233,52 @@ class AnthropicMessagesTransport internal constructor(
         )
     }
 
+    /**
+     * 0.8 `invoke_llm.output`: il goal porta l'istruzione fissa della forma e, dove il catalogo prevede
+     * `output_config`, la richiesta chiede `{"answer": …}` chiuso. Un modello che rifiuta lo schema riceve la
+     * richiesta senza `output_config`. La lane ricontrolla sempre il testo: questa è solo una richiesta.
+     */
+    override suspend fun actConstrained(
+        context: FireContext,
+        goal: String,
+        contextSources: List<String>,
+        allowedTools: List<String>,
+        runtimeData: List<RuntimeDataBinding>,
+        output: OutputSpec,
+    ): ActResult {
+        val cleanGoal = AgentMessageSupport.requireGoal(LlmOutputPolicy.constrainedGoal(goal, output))
+        val useReplyTool = AgentMessageSupport.requireGenerativeToolset(allowedTools)
+        if (useReplyTool) throw config("una risposta vincolata non è una reply")
+        AgentMessageSupport.requireGenerativeContextSources(contextSources, useReplyTool)
+        val stateLines = if ("state" in contextSources) AgentMessageSupport.safeStateLines(context.state) else emptyList()
+        val webRequested = GenerativeContract.TOOL_WEB_SEARCH in allowedTools
+        if (spec.quirks.structuredOutput == StructuredOutputMode.OUTPUT_CONFIG && !structuredRejected) {
+            try {
+                val structured = generate(
+                    goal = cleanGoal,
+                    notification = null,
+                    stateLines = stateLines,
+                    webRequested = webRequested,
+                    useReplyTool = false,
+                    runtimeData = runtimeData,
+                    outputConfig = StructuredOutput.anthropicAnswerConfig(output),
+                )
+                val text = structured.text ?: return structured
+                return structured.copy(text = StructuredOutput.unwrapAnswer(text))
+            } catch (error: TransportException) {
+                if (!StructuredOutput.isRejection(error)) throw error
+            }
+        }
+        return generate(
+            goal = cleanGoal,
+            notification = null,
+            stateLines = stateLines,
+            webRequested = webRequested,
+            useReplyTool = false,
+            runtimeData = runtimeData,
+        )
+    }
+
     override suspend fun actV2(context: FireContext, action: Action.InvokeLlmV2): ActResult {
         val cleanGoal = AgentMessageSupport.requireGoal(action.goal)
         if (!GenerativeContract.isAllowedToolset(action.allowedTools) || !action.replyTargetSender) {
@@ -280,6 +328,8 @@ class AnthropicMessagesTransport internal constructor(
         webRequested: Boolean,
         useReplyTool: Boolean,
         runtimeData: List<RuntimeDataBinding> = emptyList(),
+        /** 0.8: solo la risposta vincolata (senza reply tool). */
+        outputConfig: JsonObject? = null,
     ): ActResult {
         val token = requireKey()
         val model = resolveModel()
@@ -324,6 +374,7 @@ class AnthropicMessagesTransport internal constructor(
                 applyWeb || spec.quirks.forceToolChoiceAuto -> AUTO_TOOL_CHOICE
                 else -> FORCED_REPLY_CHOICE
             },
+            outputConfig = outputConfig.takeIf { !useReplyTool },
         )
         val response = parseResponse(
             execute(buildRequest(token, json.encodeToString(request)), ErrorDiagnostics(listOf(token), clientErrorsOnly = true)),

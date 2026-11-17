@@ -21,7 +21,7 @@ class AgentMessageSupportScaffold08Test {
     /** Il discriminatore wire di ogni tipo spento, com'è scritto nelle righe di schema del prompt. */
     private val hiddenTypes = listOf(
         "nfc_tag", "next_alarm", "app_usage",
-        "ask", "send_sms",
+        "send_sms",
         "call_number", "send_intent", "screen_call",
     )
 
@@ -31,7 +31,7 @@ class AgentMessageSupportScaffold08Test {
             assertFalse("\"type\":\"$type\"" in prompt, "il prompt nomina il tipo spento $type")
         }
         // Campi e valori nuovi di tipi esistenti.
-        listOf("\"shake\"", "\"flip_face_down\"", "secretHeaders", "secretQuery", "\"extract\"", "\"output\"", "\"confirm\"", "\"exit\"")
+        listOf("\"shake\"", "\"flip_face_down\"", "secretHeaders", "secretQuery", "\"extract\"", "\"exit\"")
             .forEach { assertFalse(it in prompt, "il prompt nomina $it") }
     }
 
@@ -51,18 +51,28 @@ class AgentMessageSupportScaffold08Test {
         FeatureGate.TRIGGER_USER_MODE_CHANGED to "user_mode_changed",
         FeatureGate.ACTION_SET_STORED to "set_stored",
         FeatureGate.ACTION_SET_USER_MODE to "set_user_mode",
+        FeatureGate.ACTION_ASK to "ask",
+    )
+
+    /** Interruttori accesi che non sono un tipo: il prompt ne descrive il campo. */
+    private val switchedOnFields = mapOf(
+        FeatureGate.CONFIRM to "\"confirm\": {\"timeoutMs\":integer}",
+        FeatureGate.LLM_OUTPUT to "\"output\":{\"kind\":\"CHOICE\"|\"NUMBER\"|\"BOOLEAN\"",
     )
 
     @Test
     fun `only the switched-on gates are on, so this test still describes the prompt`() {
         // Quando un engineer accende un tipo, aggiorna anche [hiddenTypes] e questo elenco.
-        assertEquals(switchedOn.keys, FeatureGate.entries.filter { it.enabled }.toSet())
+        assertEquals(switchedOn.keys + switchedOnFields.keys, FeatureGate.entries.filter { it.enabled }.toSet())
     }
 
     @Test
     fun `every switched-on type has its schema line`() {
         switchedOn.values.forEach { type ->
             assertTrue("\"type\":\"$type\"" in prompt, "il prompt non descrive $type")
+        }
+        switchedOnFields.values.forEach { field ->
+            assertTrue(field in prompt, "il prompt non descrive $field")
         }
     }
 

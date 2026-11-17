@@ -62,7 +62,6 @@ class FeatureGatesTest {
     private val newConditions: Map<FeatureGate, Condition> = linkedMapOf()
 
     private val newActions: Map<FeatureGate, Action> = linkedMapOf(
-        FeatureGate.ACTION_ASK to Action.Ask("Esco?", listOf("Sì", "No"), "answer", defaultChoice = "No"),
         FeatureGate.ACTION_SEND_SMS to Action.SendSms("+393331112222", "Arrivo"),
         FeatureGate.ACTION_CALL_NUMBER to Action.CallNumber("+393331112222"),
         FeatureGate.ACTION_SEND_INTENT to Action.SendIntent(IntentKind.BROADCAST, action = "dev.example.PING"),
@@ -72,15 +71,6 @@ class FeatureGatesTest {
             HttpMethod.GET,
             "https://example.org",
             secretHeaders = listOf(SecretRef("Authorization", "home_token", "Bearer ")),
-        ),
-        FeatureGate.LLM_OUTPUT to Action.InvokeLlm(
-            "Piove?",
-            emptyList(),
-            listOf("web.search"),
-            false,
-            deliver = GenerativeDeliverMode.LOCAL_NOTIFICATION,
-            notificationTitle = "Meteo",
-            output = OutputSpec(OutputKind.BOOLEAN),
         ),
     )
 
@@ -103,7 +93,13 @@ class FeatureGatesTest {
         FeatureGate.TRIGGER_USER_MODE_CHANGED,
         FeatureGate.ACTION_SET_STORED,
         FeatureGate.ACTION_SET_USER_MODE,
+        // Conferma, domanda con pulsanti e risposte vincolate dell'AI.
+        FeatureGate.CONFIRM,
+        FeatureGate.ACTION_ASK,
+        FeatureGate.LLM_OUTPUT,
     )
+
+    private val ask = Action.Ask("Esco?", listOf("Sì", "No"), "answer", defaultChoice = "No")
 
     @Test
     fun `every gate not yet switched on is off in this version`() {
@@ -114,7 +110,7 @@ class FeatureGatesTest {
     @Test
     fun `the tables above cover every gate`() {
         val covered = newTriggers.keys + newConditions.keys + newActions.keys + switchedOn +
-            setOf(FeatureGate.CONFIRM, FeatureGate.EXIT)
+            setOf(FeatureGate.EXIT)
         assertEquals(FeatureGate.entries.toSet(), covered)
     }
 
@@ -137,7 +133,6 @@ class FeatureGatesTest {
             val nested = Action.If(Condition.BooleanLiteral(true), then = listOf(action))
             assertTrue(gate.wireName in notAvailable(draft(actions = listOf(nested))), "azione annidata $action")
         }
-        assertEquals(listOf(FeatureGate.CONFIRM.wireName), notAvailable(draft(confirm = ConfirmSpec())))
         assertEquals(listOf(FeatureGate.EXIT.wireName), notAvailable(draft(exit = ExitSpec(Trigger.Manual))))
         // Un tipo spento nel trigger o nelle azioni d'uscita conta anche lui.
         assertEquals(
@@ -239,7 +234,7 @@ class FeatureGatesTest {
     @Test
     fun `capturing and stored-value actions make the rule a p4 program`() {
         listOf(
-            newActions.getValue(FeatureGate.ACTION_ASK),
+            ask,
             Action.SetStored("count", StoredOp.INCREMENT),
             newActions.getValue(FeatureGate.HTTP_CAPTURE),
         ).forEach { action ->
@@ -266,7 +261,7 @@ class FeatureGatesTest {
         }
         assertEquals(
             """{"type":"ask","prompt":"Esco?","choices":["Sì","No"],"captureAs":"answer","timeoutMs":120000,"defaultChoice":"No"}""",
-            json.encodeToString(Action.serializer(), newActions.getValue(FeatureGate.ACTION_ASK)),
+            json.encodeToString(Action.serializer(), ask),
         )
         assertEquals(
             """{"type":"weekday","days":["MON","TUE"],"tz":"Europe/Rome"}""",

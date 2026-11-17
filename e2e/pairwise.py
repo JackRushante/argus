@@ -36,6 +36,8 @@ ACTION_CLASSES: Dict[str, List[str]] = {
         "media_control", "notification_action",
         # 0.8: valori conservati e modalità, stato locale di Argus.
         "set_stored", "set_user_mode",
+        # 0.8: la domanda con pulsanti e' una notifica dell'app.
+        "ask",
     ],
     "audio_mode": ["set_volume", "set_ringer", "set_dnd"],
     "display": ["set_brightness", "set_rotation", "set_dark_mode"],
@@ -57,7 +59,7 @@ CONTROL_FLOW = ["wait", "if", "while"]
 # aggiunge le sue regole.
 NOT_YET_AVAILABLE_TRIGGERS = ["nfc_tag", "next_alarm", "app_usage"]
 NOT_YET_AVAILABLE_ACTIONS = [
-    "ask", "send_sms",
+    "send_sms",
     "call_number", "send_intent", "screen_call",
 ]
 NOT_YET_AVAILABLE_CODE = "not_available_yet"

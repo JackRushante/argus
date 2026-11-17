@@ -27,6 +27,12 @@ import dev.argus.automation.power.ExecutionWakeLock
 import dev.argus.automation.power.WaitWakeSignals
 import dev.argus.automation.power.WakeAlarmBackend
 import dev.argus.automation.power.WakeAwarePause
+import dev.argus.automation.prompt.AndroidUserPromptSurface
+import dev.argus.automation.prompt.EngineConfirmedRuns
+import dev.argus.automation.prompt.PendingPromptStore
+import dev.argus.automation.prompt.PrefsPromptBlobs
+import dev.argus.automation.prompt.UserPromptCoordinator
+import dev.argus.automation.prompt.UserPromptStartup
 import dev.argus.automation.RecoveryLauncher
 import dev.argus.automation.ArgusRuntimeController
 import dev.argus.automation.AutomationNotifier
@@ -1065,6 +1071,7 @@ object ArgusModule {
         resolvedExecutor: ResolvedActionExecutor,
         wakeAwarePause: WakeAwarePause,
         automationPause: LabelAwarePause,
+        prompts: UserPromptCoordinator,
     ): Engine = Engine(
         store = store,
         executor = executor,
@@ -1078,7 +1085,47 @@ object ArgusModule {
         // 0.4.1 (F21): «Pausa automazioni», letta dal motore a ogni scatto.
         // 0.7.2: decisa per regola, con la pausa dei gruppi (etichette).
         firingPause = automationPause,
+        // 0.8: «chiedimi prima di eseguire» e le domande con pulsanti.
+        confirmations = prompts,
+        questions = prompts,
         now = System::currentTimeMillis,
+    )
+
+    /** 0.8: domande in attesa (confirm, ask), cifrate con la chiave delle risposte differite. */
+    @Provides
+    @Singleton
+    fun pendingPromptStore(
+        @ApplicationContext context: Context,
+        cipher: DeferredReplyCipher,
+    ): PendingPromptStore = PendingPromptStore(PrefsPromptBlobs(context), cipher)
+
+    @Provides
+    @Singleton
+    fun userPromptCoordinator(
+        @ApplicationContext context: Context,
+        store: PendingPromptStore,
+        engine: Provider<Engine>,
+        state: LazyDeviceStateProvider,
+        frame: DispatchFrame,
+        wakeAwarePause: WakeAwarePause,
+    ): UserPromptCoordinator = UserPromptCoordinator(
+        store = store,
+        surface = AndroidUserPromptSurface(context),
+        // Il motore dipende dal coordinatore: lo si risolve al primo Esegui.
+        runs = EngineConfirmedRuns(engine, state, frame),
+        pause = { millis -> wakeAwarePause.pause(millis) },
+    )
+
+    @Provides
+    @Singleton
+    fun userPromptStartup(
+        @ApplicationScope scope: CoroutineScope,
+        coordinator: UserPromptCoordinator,
+        preferences: AppPreferencesStore,
+    ): UserPromptStartup = UserPromptStartup(
+        scope,
+        coordinator,
+        preferences.observe().map { it.privacyAccepted },
     )
 
     @Provides

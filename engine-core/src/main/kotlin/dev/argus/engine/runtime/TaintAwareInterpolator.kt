@@ -1,6 +1,8 @@
 package dev.argus.engine.runtime
 
 import dev.argus.engine.model.Action
+import dev.argus.engine.model.AskPolicy
+import dev.argus.engine.model.LlmOutputPolicy
 import dev.argus.engine.model.ConfidentialityLabel
 import dev.argus.engine.model.FeatureGates
 import dev.argus.engine.model.HttpRequestPolicy
@@ -184,7 +186,7 @@ class TaintAwareInterpolator {
                 // 0.8 scaffold: i campi template si risolvono come gli altri sink/autorità; la forma
                 // risolta di questi tipi è rifiutata da validResolvedShape finché non è implementata.
                 is Action.Ask -> action.copy(
-                    prompt = accumulator.field("prompt", action.prompt, MAX_TEXT_CHARS),
+                    prompt = accumulator.field("prompt", action.prompt, AskPolicy.MAX_PROMPT_CHARS),
                 )
 
                 // Solo SET riempie un template; l'incremento resta il letterale approvato (mai una variabile).
@@ -395,7 +397,8 @@ class TaintAwareInterpolator {
             }
             is Action.WriteSetting -> WriteSettingPolicy.valid(action)
             is Action.InvokeLlm -> action.goal.isNotBlank() && action.goal.length <= MAX_TEXT_CHARS &&
-                (action.notificationTitle == null || action.notificationTitle.isNotBlank())
+                (action.notificationTitle == null || action.notificationTitle.isNotBlank()) &&
+                (action.output == null || LlmOutputPolicy.validSpec(action.output))
             is Action.InvokeLlmV2 -> action.goal.isNotBlank() && action.goal.length <= MAX_TEXT_CHARS
             is Action.CopyToClipboard -> action.extractionRegex == null ||
                 SafeExtractionRegex.isValid(action.extractionRegex)
@@ -429,7 +432,8 @@ class TaintAwareInterpolator {
             is Action.If, is Action.While -> false
             // 0.8 scaffold: forma risolta non ancora definita ⇒ fail-closed anche a interruttore acceso.
             // Chi implementa il tipo scrive qui il suo controllo (gli stessi limiti del validator).
-            is Action.Ask -> false
+            // 0.8: domanda risolta entro 120 caratteri, scelte e attesa approvate (gli stessi limiti del validator).
+            is Action.Ask -> AskPolicy.validResolved(action)
 
             // 0.8: chiave letterale valida; SET con un valore di al massimo 1024 caratteri, le altre senza
             // valore (INCREMENT: solo un intero letterale). Il tipo lo ricontrolla StoredValueOps.

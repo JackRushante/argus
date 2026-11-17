@@ -134,7 +134,6 @@ internal object BenchVocab {
      * non le vede. Chi accende un'azione la toglie da qui e aggiunge i suoi casi.
      */
     val NOT_YET_AVAILABLE_ACTION_TYPES: Set<String> = setOf(
-        ActionTypeIds.ASK,
         ActionTypeIds.SEND_SMS,
         ActionTypeIds.CALL_NUMBER,
         ActionTypeIds.SEND_INTENT,

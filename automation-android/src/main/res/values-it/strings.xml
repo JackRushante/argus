@@ -49,4 +49,12 @@
     <string name="a11y51_notification_title">Argus sta usando lo schermo</string>
     <string name="a11y51_notification_text">Una macro approvata sta toccando e scrivendo in un\'app. Tocca Ferma per interromperla subito.</string>
     <string name="a11y51_notification_stop">Ferma</string>
+    <!-- 0.8: «chiedimi prima di eseguire» (confirm) e domande con pulsanti (ask). -->
+    <string name="prompt08_channel_name">Domande e conferme</string>
+    <string name="prompt08_channel_description">Una regola chiede prima di eseguire, o ti chiede di scegliere</string>
+    <string name="prompt08_confirm_title">Eseguire «%1$s»?</string>
+    <string name="prompt08_confirm_text">La regola è scattata e aspetta te. Senza risposta non viene eseguita.</string>
+    <string name="prompt08_run">Esegui</string>
+    <string name="prompt08_cancel">Annulla</string>
+    <string name="prompt08_public_title">Argus aspetta una tua risposta</string>
 </resources>

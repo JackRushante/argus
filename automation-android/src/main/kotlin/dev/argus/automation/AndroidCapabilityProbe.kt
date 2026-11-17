@@ -404,6 +404,8 @@ class AndroidCapabilityProbe internal constructor(
             capability == CapabilityIds.ACTION_NOTIFICATION_REPLY ||
             capability == CapabilityIds.ACTION_NOTIFICATION_ACTION -> BlockCause.NOTIFICATION_ACCESS
         capability == ActionCapabilities.SHOW_NOTIFICATION -> BlockCause.NOTIFICATIONS_PERMISSION
+        capability == CapabilityIds.RULE_CONFIRM || capability == CapabilityIds.ACTION_ASK ->
+            BlockCause.NOTIFICATIONS_PERMISSION
         capability == CapabilityIds.TRIGGER_PHONE_SMS -> BlockCause.SMS_PERMISSION
         capability == CapabilityIds.TRIGGER_PHONE_CALL -> BlockCause.CALL_PERMISSION
         capability == CapabilityIds.TRIGGER_CONNECTIVITY_BT -> BlockCause.BLUETOOTH_PERMISSION
@@ -508,6 +510,11 @@ class AndroidCapabilityProbe internal constructor(
             // 0.5.1: «app aperta/chiusa» legge gli stessi eventi di utilizzo: stesso permesso, nessuno shell.
             if (state.usageStatsGranted) add(CapabilityIds.TRIGGER_APP_EVENT)
             if (state.notificationsGranted) add(ActionCapabilities.SHOW_NOTIFICATION)
+            // 0.8: «chiedimi prima» e le domande con pulsanti sono notifiche dell'app con i loro pulsanti.
+            if (state.notificationsGranted) {
+                add(CapabilityIds.RULE_CONFIRM)
+                add(CapabilityIds.ACTION_ASK)
+            }
             // 0.5.1: le macro sullo schermo servono col servizio di Accessibilità acceso E con le notifiche
             // concesse: la notifica «Argus sta usando lo schermo» con «Ferma» è il loro indicatore.
             if (state.accessibilityEnabled && state.notificationsGranted) add(ActionCapabilities.UI_STEPS)
@@ -596,6 +603,8 @@ class AndroidCapabilityProbe internal constructor(
                 add(ActionTypeIds.SHOW_NOTIFICATION)
                 add(TOOL_NOTIFY_SHOW)
             }
+            // 0.8: la domanda con pulsanti è una notifica dell'app.
+            if (state.notificationsGranted) add(ActionTypeIds.ASK)
             if (state.accessibilityEnabled && state.notificationsGranted) add(ActionTypeIds.UI_STEPS)
             if (listenerGranted) add(GenerativeContract.TOOL_WHATSAPP_REPLY)
             if (listenerGranted) addAll(NOTIFICATION_08_ACTION_TYPES)
@@ -639,6 +648,7 @@ class AndroidCapabilityProbe internal constructor(
             unavailableTools[ActionTypeIds.SHOW_NOTIFICATION] = "notification permission missing"
             unavailableTools[TOOL_NOTIFY_SHOW] = "notification permission missing"
         }
+        if (!state.notificationsGranted) unavailableTools[ActionTypeIds.ASK] = "notification permission missing"
         if (!listenerGranted) {
             unavailableTools[GenerativeContract.TOOL_WHATSAPP_REPLY] = REASON_NOTIFICATION_LISTENER
             NOTIFICATION_08_ACTION_TYPES.forEach { unavailableTools[it] = REASON_NOTIFICATION_LISTENER }
@@ -724,14 +734,12 @@ class AndroidCapabilityProbe internal constructor(
          * condizioni (permesso, hardware), insieme all'interruttore in `FeatureGates`.
          */
         val NOT_YET_AVAILABLE_CAPABILITIES: Set<String> = setOf(
-            CapabilityIds.RULE_CONFIRM,
             CapabilityIds.RULE_EXIT,
             CapabilityIds.TRIGGER_NFC_TAG,
             CapabilityIds.TRIGGER_NEXT_ALARM,
             CapabilityIds.TRIGGER_APP_USAGE,
             CapabilityIds.triggerSensor(SensorKind.SHAKE),
             CapabilityIds.triggerSensor(SensorKind.FLIP_FACE_DOWN),
-            CapabilityIds.ACTION_ASK,
             CapabilityIds.ACTION_SEND_SMS,
             CapabilityIds.ACTION_CALL_NUMBER,
             CapabilityIds.ACTION_SEND_INTENT,

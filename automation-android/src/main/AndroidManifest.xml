@@ -141,6 +141,14 @@
             android:enabled="true"
             android:exported="false" />
 
+        <!-- 0.8: pulsanti di «chiedimi prima» e delle domande, sveglia di scadenza. Non esportato e senza
+             intent-filter: lo raggiungono solo i PendingIntent immutabili ed espliciti di Argus, con il
+             token casuale della domanda. -->
+        <receiver
+            android:name="dev.argus.automation.prompt.UserPromptReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
         <!-- 0.7.2: sveglia inexact del backup automatico delle regole; intent esplicito, nessuna azione esterna. -->
         <receiver
             android:name="dev.argus.automation.backup.AutoBackupAlarmReceiver"
