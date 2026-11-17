@@ -62,7 +62,10 @@ class CallerScopeEngineTest {
                 firePolicy = FirePolicy { _, _ -> FirePolicyDecision.Allow },
                 audit = audit,
                 journal = journal,
-                callerScope = CallerScopeGate { automation, _ -> asked += automation.id.value; gate.closedCode(automation, call) },
+                callerScope = CallerScopeGate { automation, event ->
+                    asked += automation.id.value
+                    gate.closedCode(automation, event)
+                },
                 now = { 1_000 },
             )
         }

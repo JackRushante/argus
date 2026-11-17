@@ -43,7 +43,7 @@ class OwnRuntimeReceiversTest {
     fun `every runtime receiver is in a known file`() {
         val withReceivers = sources.filter { RECEIVER.containsMatchIn(it.readText()) }.map { it.name }.toSet()
         assertEquals(
-            setOf("AndroidDeviceEventSources.kt", "ConnectivitySentinelService.kt"),
+            RECEIVER_FILES,
             withReceivers,
             "un registerReceiver nuovo: aggiungi le sue azioni a AndroidTelephonySurface.OWN_RUNTIME_RECEIVER_ACTIONS",
         )
@@ -51,7 +51,7 @@ class OwnRuntimeReceiversTest {
 
     @Test
     fun `every action registered at runtime is refused as a broadcast without package`() {
-        val files = sources.filter { it.name in setOf("AndroidDeviceEventSources.kt", "ConnectivitySentinelService.kt") }
+        val files = sources.filter { it.name in RECEIVER_FILES }
         val names = files.flatMap { file -> ACTION_ARG.findAll(file.readText()).map { it.groupValues[1] } }.toSet()
         assertTrue(names.isNotEmpty())
         names.forEach { name ->
@@ -85,6 +85,13 @@ class OwnRuntimeReceiversTest {
     }
 
     private companion object {
+        /** I file che oggi registrano receiver a runtime. */
+        val RECEIVER_FILES = setOf(
+            "AndroidDeviceEventSources.kt",
+            "ConnectivitySentinelService.kt",
+            "AndroidGestureSensorBackend.kt",
+        )
+
         /** `registerReceiver(` con un receiver vero (non la lettura del broadcast sticky con `null`). */
         val RECEIVER = Regex("""(?<![A-Za-z])registerReceiver\(\s*(?!null\b)""")
 
