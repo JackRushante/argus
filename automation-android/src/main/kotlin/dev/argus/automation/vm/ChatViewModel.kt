@@ -825,15 +825,35 @@ internal fun composeEditPrompt(userRequest: String, baseDraft: AutomationDraft):
 /** Segnaposto del contatto nella modifica in chat: l'id reale della conversazione non lascia il telefono (D4). */
 internal const val CURRENT_CONTACT_PLACEHOLDER = "contact_current"
 
-/** Sostituisce il conversationId reale del trigger notifica con [CURRENT_CONTACT_PLACEHOLDER]. */
+/** 0.8: il segnaposto del contatto del trigger di FINE di una regola-intervallo (può essere un altro contatto). */
+internal const val CURRENT_EXIT_CONTACT_PLACEHOLDER = "contact_current_exit"
+
+/**
+ * Sostituisce il conversationId reale del trigger notifica con [CURRENT_CONTACT_PLACEHOLDER] e, per una
+ * regola-intervallo, quello del trigger di fine con [CURRENT_EXIT_CONTACT_PLACEHOLDER].
+ */
 internal fun redactConversationId(draft: AutomationDraft): AutomationDraft {
-    val trigger = draft.trigger as? Trigger.Notification ?: return draft
-    if (trigger.conversationId == null) return draft
-    return draft.copy(trigger = trigger.copy(conversationId = CURRENT_CONTACT_PLACEHOLDER))
+    val exit = draft.exit?.let { exit ->
+        val end = exit.trigger as? Trigger.Notification
+        if (end?.conversationId == null) exit else exit.copy(trigger = end.copy(conversationId = CURRENT_EXIT_CONTACT_PLACEHOLDER))
+    }
+    val trigger = draft.trigger as? Trigger.Notification
+    val start = if (trigger?.conversationId == null) draft.trigger else trigger.copy(conversationId = CURRENT_CONTACT_PLACEHOLDER)
+    if (start == draft.trigger && exit == draft.exit) return draft
+    return draft.copy(trigger = start, exit = exit)
 }
 
-/** Rimette l'id reale di [base] dove il modello ha lasciato il segnaposto del contatto. */
+/** Rimette l'id reale di [base] dove il modello ha lasciato il segnaposto del contatto (inizio e fine). */
 internal fun restoreConversationId(fromModel: AutomationDraft, base: AutomationDraft): AutomationDraft {
+    val withStart = restoreStart(fromModel, base)
+    val exit = withStart.exit ?: return withStart
+    val end = exit.trigger as? Trigger.Notification ?: return withStart
+    if (end.conversationId != CURRENT_EXIT_CONTACT_PLACEHOLDER) return withStart
+    val original = (base.exit?.trigger as? Trigger.Notification)?.conversationId ?: return withStart
+    return withStart.copy(exit = exit.copy(trigger = end.copy(conversationId = original)))
+}
+
+private fun restoreStart(fromModel: AutomationDraft, base: AutomationDraft): AutomationDraft {
     val trigger = fromModel.trigger as? Trigger.Notification ?: return fromModel
     if (trigger.conversationId != CURRENT_CONTACT_PLACEHOLDER) return fromModel
     val original = (base.trigger as? Trigger.Notification)?.conversationId ?: return fromModel

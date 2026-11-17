@@ -260,6 +260,10 @@ class MeteredBrain(
         val draft = first.draft ?: return first
         // In modifica il contatto è ancora il segnaposto: la chat lo ripristina DOPO, il validatore qui no.
         if ((draft.trigger as? Trigger.Notification)?.conversationId == CURRENT_CONTACT_PLACEHOLDER) return first
+        // 0.8: lo stesso per il contatto del trigger di fine di una regola-intervallo.
+        if ((draft.exit?.trigger as? Trigger.Notification)?.conversationId ==
+            dev.argus.automation.vm.CURRENT_EXIT_CONTACT_PLACEHOLDER
+        ) return first
         val errors = try {
             source.errors(draft).filter { it.severity == Severity.ERROR }
         } catch (error: CancellationException) {
