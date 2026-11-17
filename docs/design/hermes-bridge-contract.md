@@ -146,9 +146,27 @@ negoziata nei requisiti/reader, non è un'azione wire. Alias raw senza esecutore
 `unavailable_tools` con una ragione chiusa. Il probe Android deriva tutto dallo stesso snapshot:
 un'azione non disponibile non deve mai apparire compilabile.
 
-In v2 `available_triggers` è obbligatorio, univoco e in ordine canonico. Nel solo v1 legacy può
-essere omesso per i client pre-P2. Quando è presente, il prompt e il validator del bridge rifiutano
-fail-closed ogni draft il cui trigger non è nella lista. PhoneState è distinto in `.sms`/`.call`; Connectivity in `.wifi`,
+In v2 `available_triggers` è obbligatorio e univoco. Nel solo v1 legacy può essere omesso per i
+client pre-P2. Il vocabolario del bridge è l'elenco chiuso `AVAILABLE_TRIGGER_IDS` (`time`, `immediate`,
+`notification`, `geofence`, `phone_state.sms|call`, `connectivity.wifi|wifi.identity|bt|power`,
+`sensor.<kind>` dei cinque kind di base); le voci note stanno nel suo ordine canonico. Una voce ben
+formata ma sconosciuta (un'app più nuova: `manual`, `screen`, i trigger 0.8…) viene tolta, non fa
+rifiutare il manifest; una voce malformata, duplicata o fuori ordine sì (`invalid_manifest`). Dal lato
+Android `CliBridgeTransport` invia comunque solo le voci di questo elenco, così anche un bridge già
+installato e mai aggiornato accetta il manifest; il contratto condiviso è
+`brain-android/src/test/resources/contracts/hermes-compile-v2-manifest.json`, letto dai test dei due
+lati. Fino alla 0.7.1 il telefono inviava l'elenco intero e ogni compile v2 finiva in `invalid_manifest`.
+Il prompt e il validator del bridge rifiutano fail-closed ogni draft il cui trigger non è nella lista.
+
+Cosa compila il bridge: i trigger qui sopra (geofence solo ENTER/EXIT); le condizioni `time_window`,
+`state_equals`, `state_compare`, `app_in_foreground`, `location_in`, `var_compare`, `boolean_literal` e
+`and`/`or`/`not`; le azioni `set_wifi`, `set_bluetooth`, `set_mobile_data`, `set_dnd`, `set_ringer`,
+`set_volume`, `set_flashlight`, `set_dark_mode`, `vibrate`, `launch_app`, `open_url`,
+`open_settings_screen`, `show_notification`, `set_alarm`, `set_timer`, `copy_to_clipboard`, `copy_text`,
+`whatsapp_reply`, `run_shell`, `write_setting`, `invoke_llm`, `invoke_llm_v2`, più `wait`/`if`/`while`.
+Il resto del vocabolario dell'app (dalla 0.4.1 in poi: avvio manuale, schermo, batteria, app, lettura ad
+alta voce, richieste HTTP, azioni privilegiate, macro, e tutto il vocabolario 0.8) si compila solo con un
+provider diretto. PhoneState è distinto in `.sms`/`.call`; Connectivity in `.wifi`,
 `.bt`, `.power`. Un filtro SSID (`Connectivity.match`) richiede inoltre
 `connectivity.wifi.identity`, pubblicato solo con location foreground+background. Il controllo
 server non sostituisce la rivalidazione delle capability sul telefono.

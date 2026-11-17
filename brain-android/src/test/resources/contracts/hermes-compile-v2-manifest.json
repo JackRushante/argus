@@ -1,0 +1,72 @@
+{
+  "device_model": "OnePlus CPH2747",
+  "android_api": 36,
+  "shizuku_available": true,
+  "granted_permissions": [
+    "android.permission.INTERNET"
+  ],
+  "available_tools": [
+    "set_dnd",
+    "set_wifi",
+    "http_request",
+    "whatsapp_reply",
+    "web.search",
+    "send_sms",
+    "call_number",
+    "send_intent",
+    "screen_call",
+    "ask",
+    "set_stored",
+    "set_user_mode",
+    "notification_reply",
+    "notification_action"
+  ],
+  "unavailable_tools": {
+    "tap": "reserved"
+  },
+  "whitelisted_contacts": [
+    {
+      "alias": "contact_1",
+      "display_name": "Moglie"
+    }
+  ],
+  "state_keys": {
+    "dnd": "off|priority|total",
+    "ringer": "normal|vibrate|silent"
+  },
+  "available_triggers": [
+    "time",
+    "immediate",
+    "notification",
+    "geofence",
+    "phone_state.sms",
+    "phone_state.call",
+    "connectivity.wifi",
+    "connectivity.wifi.identity",
+    "connectivity.bt",
+    "connectivity.power",
+    "sensor.significant_motion",
+    "sensor.stationary_detect",
+    "sensor.motion_detect",
+    "sensor.step_detector",
+    "sensor.step_counter"
+  ],
+  "state_readers": {
+    "policy_version": 1,
+    "families": [
+      "builtin",
+      "setting",
+      "system_property",
+      "sysfs",
+      "dumpsys_field"
+    ],
+    "limits": {
+      "max_query_name_length": 96,
+      "max_sysfs_path_length": 256,
+      "max_expected_length": 1024,
+      "timeout_millis": 10000,
+      "max_output_bytes": 65536,
+      "max_scalar_chars": 4096
+    }
+  }
+}
