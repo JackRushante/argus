@@ -205,6 +205,10 @@ object ValidationMessages {
             "Before Android 15 a tag scan cannot be proven to come from the phone: shell commands and screen macros of this rule will never run, the other actions will.",
             "Prima di Android 15 non si può provare che una lettura del tag venga dal telefono: comandi shell e macro sullo schermo di questa regola non partiranno mai, le altre azioni sì.",
         ),
+        "nfc_scan_verified_only" to t(
+            "Shell commands and screen macros of this rule run only when the phone proves the tag scan came from its NFC service; otherwise only the other actions run.",
+            "Comandi shell e macro sullo schermo di questa regola partono solo se il telefono prova che la lettura del tag viene dal suo servizio NFC; altrimenti partono solo le altre azioni.",
+        ),
         "nfc_tag_ambiguous" to t(
             "The NFC tag is already set: it cannot also be read again when you turn on the rule.",
             "Il tag NFC è già impostato: non si può anche rileggere quando attivi la regola.",

@@ -468,7 +468,18 @@ class ApprovalFlow(
     private fun unverifiableNfcIssues(snapshot: PendingDraft): List<ValidationIssue> {
         if (snapshot.draft.trigger !is Trigger.NfcTag) return emptyList()
         val gated = snapshot.draft.actions.any { action -> action.containsShellOrMacro() }
-        if (!gated || runCatching(nfcScansVerifiable).getOrDefault(false)) return emptyList()
+        if (!gated) return emptyList()
+        if (runCatching(nfcScansVerifiable).getOrDefault(false)) {
+            // Android 15+: la prova c'è solo se il servizio NFC condivide la sua identità con l'activity
+            // (`ComponentCaller.getUid`); se non lo fa la scansione resta non verificata. Lo si dice.
+            return listOf(
+                ValidationIssue(
+                    Severity.WARNING,
+                    "nfc_scan_verified_only",
+                    "Shell e macro partono solo se il telefono prova che la lettura viene dal suo servizio NFC",
+                ),
+            )
+        }
         return listOf(
             ValidationIssue(
                 Severity.WARNING,

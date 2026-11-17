@@ -898,6 +898,14 @@ class ApprovalFlowTest {
         val recent = fixture(available = nfcCapabilities, nfcScansVerifiable = true)
         val clean = assertIs<DraftSubmissionResult.Ready>(recent.flow.submit(CompileResult("ok", shell, null))).review
         assertFalse(clean.draft.issues.any { it.code == "nfc_scan_unverifiable" })
+        // Dalla 15 la prova dipende dal servizio NFC: un avviso più lieve, mai un blocco.
+        assertTrue(clean.canArm)
+        assertEquals(Severity.WARNING, clean.draft.issues.single { it.code == "nfc_scan_verified_only" }.severity)
+        val nested = nfcDraft(listOf(Action.If(Condition.BooleanLiteral(true), then = listOf(Action.RunShell("svc wifi disable")))))
+        val nestedReview = assertIs<DraftSubmissionResult.Ready>(old.flow.submit(CompileResult("ok", nested, null))).review
+        assertTrue(nestedReview.draft.issues.any { it.code == "nfc_scan_unverifiable" })
+        val plainRecent = assertIs<DraftSubmissionResult.Ready>(recent.flow.submit(CompileResult("ok", nfcDraft(), null))).review
+        assertFalse(plainRecent.draft.issues.any { it.code.startsWith("nfc_scan") })
     // --- 0.8: le modalità nominate da una regola devono esistere sul telefono --------------------------
 
     private fun modesDraft() = AutomationDraft(
