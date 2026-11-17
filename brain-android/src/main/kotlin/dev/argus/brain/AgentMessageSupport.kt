@@ -630,10 +630,8 @@ BINDING RULES:
       at HH:MM" -> the matching cron. The rule re-fires and (if generative) re-generates every time.
     - "time" with "solar" for EVERY DAY at sunrise/sunset ("30 minutes before sunset" -> event SUNSET,
       offsetMinutes -30; "at sunrise" -> SUNRISE, 0). Not for a one-off day: use "at" for that.
-    For real alarms/timers the time goes in the set_alarm/set_timer ACTION, not in the trigger. Examples:
-    "notify me the exchange rate in 2 minutes" -> time afterMs=120000 (NOT immediate, NOT at);
-    "alert me at 14:30" -> time at=2026-07-17T14:30; "send me the BTC price every 24 hours" ->
-    time cron every 24h; "alert me right away" -> immediate.
+    For real alarms/timers the time goes in the set_alarm/set_timer ACTION, not in the trigger.
+    "notify me the exchange rate in 2 minutes" -> time afterMs=120000 (NOT immediate, NOT at).
 16. The generative delivery of invoke_llm has THREE modes ("deliver" field):
     - "WHATSAPP_REPLY" (default): replies to an incoming notification (notification trigger, whitelisted
       1:1 chat), contextSources ["notification"], allowedTools ["whatsapp_reply"] (+ optional
@@ -643,8 +641,7 @@ BINDING RULES:
       "send me/notify me <X>", including RECURRING requests ("the BTC price every 24 hours",
       "the Milan result every week" -> time.cron): allowedTools=[] or ["web.search"] (NEVER
       whatsapp_reply), replyTargetSender=false, contextSources=[] (or ["state"] if state is needed), and
-      "notificationTitle"=a short synthetic title. The trigger is chosen with rule 15
-      (in N -> time.afterMs, at HH:MM -> time.at, every N -> time.cron).
+      "notificationTitle"=a short synthetic title. The trigger is chosen with rule 15.
     - "CAPTURE_ONLY": P4 only and "captureAs" is REQUIRED. The generated text stays inside the
       approved program as that variable and is never delivered directly. allowedTools=[] or
       ["web.search"], replyTargetSender=false, contextSources=[] or ["state"], and
@@ -660,7 +657,7 @@ BINDING RULES:
     A candidate with "default":true is the user's default app for a kind of app (calculator, calendar,
     contacts, email, gallery, maps, messages, music, browser, camera): when the request names only that
     kind, use it. If several candidates fit the request and none is the default, ask which one (a short
-    clarification naming them) and return draft null. Never pick one of them yourself, not even the one
+    clarification naming them) and return draft null, error_code "clarification_required". Never pick one of them yourself, not even the one
     whose label equals the word in the request ("Calculator" and "Simple Calculator" both fit "the calculator").
 19. Rule texts are frozen when you write them. A value that changes (current time or date, battery
     level, weather...) is never written as fixed text but read at fire time: a clock variable for
@@ -789,8 +786,7 @@ Condition, discriminated by "type":
 Action, discriminated by "type":
 - {"type":"set_wifi", "on":boolean}
 - {"type":"set_bluetooth", "on":boolean}
-- {"type":"set_mobile_data", "on":boolean}  // toggles mobile data; requires Shizuku (appears in
-  available_tools only when available), like set_wifi/set_bluetooth
+- {"type":"set_mobile_data", "on":boolean}  // toggles mobile data
 - {"type":"set_dnd", "mode":"OFF"|"PRIORITY"|"TOTAL"}
 - {"type":"set_ringer", "mode":"normal"|"vibrate"|"silent"}
 - {"type":"launch_app", "pkg":string}
@@ -841,17 +837,15 @@ Action, discriminated by "type":
    // silences and may require "Do Not Disturb" access
 - {"type":"set_flashlight", "on":boolean}  // flashlight on/off
 - {"type":"set_dark_mode", "mode":"off"|"on"|"auto"}  // switches the system dark/light theme
-   // (cmd uimode night). Requires Shizuku (appears in available_tools only when available).
+   // (cmd uimode night).
 - {"type":"open_settings_screen", "screen":"WIFI"|"BLUETOOTH"|"DISPLAY"|"SOUND"|"LOCATION"|
    "BATTERY"|"DATE"|"APP_DETAILS"|"SETTINGS", "pkg":string|null}  // opens a Settings screen
    // (closed enum); pkg ONLY with APP_DETAILS, otherwise null
 - {"type":"vibrate", "durationMs":integer 1-10000}  // one-shot vibration
 - {"type":"write_setting", "namespace":"SYSTEM"|"SECURE"|"GLOBAL", "key":string, "value":string}
    // writes ANY Android setting by key, e.g. "screen timeout 30 s" = SYSTEM screen_off_timeout "30000".
-   // Requires Shizuku (appears in available_tools only when available). Flat v1 key/value are
-   // literal; P4 may interpolate ${'$'}{var} in value only (key is always literal) under the approved
-   // data-flow policy. The template is shown
-   // in review. key without spaces/control chars; value non-empty,
+   // Flat v1 key/value are literal; P4 may interpolate ${'$'}{var} in value only (key is always
+   // literal); the template is shown in review. key without spaces/control chars; value non-empty,
    // <=1024 chars, no NUL/newline/control chars. Prefer a typed action when one
    // exists (e.g. set_dnd, set_alarm, set_dark_mode, set_brightness, set_rotation): use write_setting
    // for the long tail (screen_off_timeout, font_scale, ...). accelerometer_rotation and
@@ -959,8 +953,7 @@ Optional top-level field "vars":[VarBinding,...] — typed, approved program var
 listed in "vars" (captureAs declares them).
 VarBinding, discriminated by "type":
 - {"type":"literal", "name":string, "value":string, "varType":"TEXT"|"NUMBER"|"BOOLEAN",
-   "confidentiality":"PUBLIC"|"PRIVATE"|"SECRET"}   // trusted constant, integrity CLEAN; never a
-   // placeholder for a captureAs or ask answer (those need no declaration)
+   "confidentiality":"PUBLIC"|"PRIVATE"|"SECRET"}   // trusted constant, integrity CLEAN
 - {"type":"state", "name":string, "query":StateQuery, "valueType":"TEXT"|"NUMBER"|"BOOLEAN",
    "policyVersion":1, "confidentiality":"PUBLIC"|"PRIVATE"|"SECRET"}   // local reader: integrity CLEAN
    // for builtin readers and NUMBER/BOOLEAN; TEXT from setting/system_property/sysfs/dumpsys_field is TAINTED
@@ -994,7 +987,7 @@ at most 64 action nodes total across the whole program:
    "maxIterations":integer 1..1000 | "maxIterationsVar":string,
    "delayBetweenMs":integer 0..3600000 (optional)}
    // BOUNDED loop: provide EXACTLY ONE of maxIterations / maxIterationsVar (a counter plus a time
-   // deadline forbid infinite loops). A fixed count ("at most 20 times") is maxIterations; a random count
+   // deadline forbid infinite loops). A fixed count ("at most 20 times") is maxIterations, never a literal var; a random count
    // is a random_int var in maxIterationsVar with condition boolean_literal true (set_stored never changes
    // a variable). maxIterationsVar names a NUMBER variable (e.g. a random_int)
    // read at run time and clamped to 1..1000 — use it to repeat a dynamic number of times.
@@ -1017,6 +1010,7 @@ Inside if/while, FlowCondition is a Condition and ALSO supports these two, usabl
    "expected":string | "expectedVar":string}   // EQ/NEQ/GT/LT/CONTAINS compare a var to a literal
    // OR to another var: provide EXACTLY ONE of expected / expectedVar. IS_EVEN / IS_ODD are UNARY
    // (no expected and no expectedVar): they test whether the variable's numeric value is even / odd.
+   // varName is a "vars" name or a captureAs name (a captured value needs no "vars" entry).
 - {"type":"boolean_literal", "value":boolean}   // closed constant, e.g. a bounded while(true).
 
 P4 DATA-FLOW: a runtime value (trigger_payload, or any captureAs output) may be used FREELY in any
