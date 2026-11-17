@@ -906,6 +906,8 @@ class ApprovalFlowTest {
         assertTrue(nestedReview.draft.issues.any { it.code == "nfc_scan_unverifiable" })
         val plainRecent = assertIs<DraftSubmissionResult.Ready>(recent.flow.submit(CompileResult("ok", nfcDraft(), null))).review
         assertFalse(plainRecent.draft.issues.any { it.code.startsWith("nfc_scan") })
+    }
+
     // --- 0.8: le modalità nominate da una regola devono esistere sul telefono --------------------------
 
     private fun modesDraft() = AutomationDraft(
