@@ -140,6 +140,55 @@ class CliBridgeTransportTest {
         assertFalse(raw.contains("15.456"))
     }
 
+    @Test fun `a full 0_8 manifest reaches the bridge with only the triggers its contract knows`(): Unit = runBlocking {
+        server.enqueue(validNoDraftResponse())
+        val full = CapabilityManifest(
+            deviceModel = "OnePlus CPH2747",
+            androidVersion = 16,
+            androidApi = 36,
+            shizukuAvailable = true,
+            grantedPermissions = listOf("android.permission.INTERNET"),
+            availableTools = listOf(
+                "set_dnd", "set_wifi", "http_request", "whatsapp_reply", "web.search", "send_sms", "call_number",
+                "send_intent", "screen_call", "ask", "set_stored", "set_user_mode", "notification_reply",
+                "notification_action",
+            ),
+            unavailableTools = mapOf("tap" to "reserved"),
+            whitelistedContacts = listOf(WhitelistedContact("Moglie", "jid:42")),
+            stateKeys = mapOf("dnd" to "off|priority|total", "ringer" to "normal|vibrate|silent"),
+            // Tutto ciò che il probe può pubblicare, nel suo ordine: anche i trigger che il bridge non conosce.
+            availableTriggers = listOf(
+                "time", "immediate", "manual", "user_mode_changed", "notification", "geofence",
+                "phone_state.sms", "phone_state.call", "connectivity.wifi", "connectivity.wifi.identity",
+                "connectivity.bt", "connectivity.power", "sensor.significant_motion", "sensor.stationary_detect",
+                "sensor.motion_detect", "sensor.step_detector", "sensor.step_counter", "sensor.shake",
+                "sensor.flip_face_down", "screen", "battery", "audio_output", "mode_changed", "media", "app_event",
+                "next_alarm", "nfc_tag", "app_usage", "calendar_event", "phone_state.sim",
+            ),
+            stateReaders = StateReaderManifest(families = StateQueryFamily.entries.toList()),
+            savedSecrets = listOf("ha_token"),
+            userModes = listOf("Home", "Work"),
+        )
+
+        transport().compile("dopo le 23 metti DND", full, DeviceState(values = mapOf("dnd" to "off")))
+
+        val raw = assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8()
+        val sent = Json.parseToJsonElement(raw).jsonObject.getValue("manifest")
+        // Lo stesso file lo legge ops/hermes/test_bridge.py: il bridge lo accetta e il suo elenco coincide.
+        val golden = Json.parseToJsonElement(
+            javaClass.classLoader!!.getResourceAsStream("contracts/hermes-compile-v2-manifest.json")!!
+                .readBytes().toString(Charsets.UTF_8),
+        )
+        assertEquals(golden, sent)
+        assertEquals(
+            CliBridgeTransport.BRIDGE_COMPILE_TRIGGERS,
+            sent.jsonObject.getValue("available_triggers").jsonArray.map { it.jsonPrimitive.content },
+        )
+        // I nomi dei segreti e delle modalità non fanno parte della busta del bridge.
+        assertFalse("ha_token" in raw)
+        assertFalse("\"Work\"" in raw)
+    }
+
     @Test fun `health uses the same authenticated strict boundary`(): Unit = runBlocking {
         server.enqueue(jsonResponse(
             """{"schema_version":2,"status":"ok","model":"gpt-5.5","compile_schema_versions":[1,2],"act_schema_versions":[1,2,3],"source_sha256":"${"a".repeat(64)}"}""",
