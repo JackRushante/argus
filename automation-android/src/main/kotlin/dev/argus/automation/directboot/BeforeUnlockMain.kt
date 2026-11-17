@@ -5,8 +5,15 @@ import dev.argus.automation.AlarmDeliveryResult
 import dev.argus.automation.ReconcileReason
 import dev.argus.automation.ReconcileReport
 import dev.argus.automation.TimeAlarmRuntime
+import dev.argus.automation.ScheduledAlarmMode
+import dev.argus.automation.ScheduledTimeAlarm
+import dev.argus.automation.TimeAlarmPlanner
 import dev.argus.automation.TimeAlarmStateStore
 import dev.argus.engine.directboot.BeforeUnlockCodes
+import dev.argus.engine.directboot.DirectBootAlarmHandover
+import dev.argus.engine.directboot.DirectBootSlot
+import dev.argus.engine.model.AutomationStatus
+import dev.argus.engine.model.Trigger
 import dev.argus.engine.directboot.DirectBootActionRecord
 import dev.argus.engine.directboot.DirectBootCopy
 import dev.argus.engine.directboot.DirectBootCopyEntry
@@ -128,6 +135,7 @@ class BeforeUnlockHandover(
     private val alarms: LockedAlarms,
     private val bootCount: () -> Int?,
     private val executionIds: ExecutionIdFactory = StableExecutionIdFactory,
+    private val now: () -> Long = System::currentTimeMillis,
 ) {
     private val mutex = Mutex()
 
@@ -151,23 +159,62 @@ class BeforeUnlockHandover(
     }
 
     private suspend fun importAll() {
-        val records = storage.locked {
-            bootCount()?.let { boot -> markHandedOver(boot) }
-            records()
+        // One snapshot under the lock that the locked path also holds while it claims and acts: after the mark it
+        // takes nothing more, so the records and the occurrences it still waited for are final.
+        val (records, slots) = storage.locked {
+            val boot = bootCount()
+            boot?.let { markHandedOver(it) }
+            records() to readSession()?.takeIf { boot != null && it.bootCount == boot }?.slots.orEmpty()
         }
         alarms.cancel()
         val items = DirectBootImport.plan(records)
+        // Claims first: from here the journal refuses a second run of any occurrence the locked path took.
         items.forEach { item -> importItem(item) }
-        DirectBootImport.handledUpTo(items).forEach { (key, handledEventAt) ->
-            val id = AutomationId(key.first)
-            val persisted = timeAlarms.get(id) ?: return@forEach
-            if (persisted.approvalFingerprint.value == key.second && persisted.eventAtMillis <= handledEventAt) {
-                timeAlarms.delete(id)
-            }
+        val handled = DirectBootImport.handled(items)
+        (slots.map { it.id } + handled.map { it.first }).toSet().forEach { key ->
+            handOverAlarm(AutomationId(key), handled, slots)
         }
         storage.locked {
             clearRecords()
             writeSession(null)
+        }
+    }
+
+    /**
+     * The normal runtime's saved time alarm for [id]: resumed from the occurrence the locked session was still
+     * waiting for (an occurrence between the unlock and the takeover then runs once, here, recovered as due), dropped
+     * only when the session took exactly that occurrence, otherwise left to the normal recovery.
+     */
+    private suspend fun handOverAlarm(
+        id: AutomationId,
+        handled: Set<Triple<String, String, Long>>,
+        slots: List<DirectBootSlot>,
+    ) {
+        val rule = store.get(id)?.takeIf { it.status == AutomationStatus.ARMED && it.enabled }
+        val trigger = rule?.trigger as? Trigger.Time
+        val persisted = timeAlarms.get(id)
+        val decision = DirectBootImport.alarmHandover(
+            id = id.value,
+            ruleFingerprint = rule?.approvalFingerprint?.value.takeIf { trigger != null },
+            persisted = persisted?.let { it.approvalFingerprint.value to it.eventAtMillis },
+            handled = handled,
+            slots = slots,
+        )
+        when (decision) {
+            is DirectBootAlarmHandover.Resume -> timeAlarms.upsert(
+                ScheduledTimeAlarm(
+                    automationId = id,
+                    approvalFingerprint = requireNotNull(rule?.approvalFingerprint),
+                    eventAtMillis = decision.eventAt,
+                    wakeAtMillis = decision.eventAt,
+                    requestedPrecision = TimeAlarmPlanner.effectivePrecision(requireNotNull(trigger)),
+                    // Re-registered with the right mode by the reconcile that follows (or recovered if due).
+                    scheduledMode = ScheduledAlarmMode.INEXACT,
+                    updatedAtMillis = now(),
+                ),
+            )
+            DirectBootAlarmHandover.Drop -> timeAlarms.delete(id)
+            DirectBootAlarmHandover.Keep -> Unit
         }
     }
 

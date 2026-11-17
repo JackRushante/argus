@@ -280,19 +280,55 @@ object DirectBootImport {
         }
     }
 
-    /**
-     * The latest occurrence the locked path handled (ran or evaluated) for each rule and revision. A due time alarm
-     * the normal runtime kept from before the restart and that is not later than this is superseded: it must not
-     * be recovered after unlock, or the rule would run again for an occurrence already handled.
-     */
-    fun handledUpTo(items: List<DirectBootImportItem>): Map<Pair<String, String>, Long> = buildMap {
-        items.forEach { item ->
-            val (key, eventAt) = when (item) {
-                is DirectBootImportItem.Fired -> (item.id to item.fingerprint) to item.eventAt
-                is DirectBootImportItem.NotMet -> (item.id to item.fingerprint) to item.eventAt
-                is DirectBootImportItem.Rejected -> return@forEach
-            }
-            put(key, maxOf(get(key) ?: Long.MIN_VALUE, eventAt))
+    /** The exact occurrences (id, fingerprint, eventAt) the locked path took: ran (claimed) or evaluated. */
+    fun handled(items: List<DirectBootImportItem>): Set<Triple<String, String, Long>> = items.mapNotNull { item ->
+        when (item) {
+            is DirectBootImportItem.Fired -> Triple(item.id, item.fingerprint, item.eventAt)
+            is DirectBootImportItem.NotMet -> Triple(item.id, item.fingerprint, item.eventAt)
+            is DirectBootImportItem.Rejected -> null
         }
+    }.toSet()
+
+    /**
+     * What becomes of the time alarm the normal runtime saved for rule [id] before the restart ([persisted]:
+     * fingerprint and occurrence, null = none), given what the locked session did ([handled]) and the occurrence it
+     * was still waiting for when it stood down ([slots]). [ruleFingerprint] is the rule's approved revision now.
+     *
+     * - The session's pending occurrence was never taken (the user unlocked first, or the locked path never got to
+     *   it): the normal runtime resumes from it, so an occurrence between the unlock and the takeover runs once,
+     *   there, with the same event id `time:<fp>:<eventAt>` (the journal deduplicates any race).
+     * - Otherwise the saved alarm is dropped only if the locked session took exactly that occurrence; anything else
+     *   is left to the normal runtime's recovery.
+     */
+    fun alarmHandover(
+        id: String,
+        ruleFingerprint: String?,
+        persisted: Pair<String, Long>?,
+        handled: Set<Triple<String, String, Long>>,
+        slots: List<DirectBootSlot>,
+    ): DirectBootAlarmHandover {
+        val slot = slots.firstOrNull { it.id == id }
+        if (slot != null && slot.fingerprint == ruleFingerprint &&
+            Triple(id, slot.fingerprint, slot.nextEventAt) !in handled &&
+            (persisted == null || persisted.first == slot.fingerprint)
+        ) {
+            return DirectBootAlarmHandover.Resume(slot.nextEventAt)
+        }
+        if (persisted != null && Triple(id, persisted.first, persisted.second) in handled) {
+            return DirectBootAlarmHandover.Drop
+        }
+        return DirectBootAlarmHandover.Keep
     }
+}
+
+/** What the handover does with the time alarm the normal runtime saved before the restart. */
+sealed interface DirectBootAlarmHandover {
+    /** The saved alarm becomes the occurrence the locked session was waiting for (recovered if already due). */
+    data class Resume(val eventAt: Long) : DirectBootAlarmHandover
+
+    /** The locked session took exactly that occurrence: it must not run again. */
+    data object Drop : DirectBootAlarmHandover
+
+    /** Not the locked session's business: the normal recovery decides. */
+    data object Keep : DirectBootAlarmHandover
 }
