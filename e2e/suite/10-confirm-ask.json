@@ -1,0 +1,213 @@
+[
+ {
+  "id": "Q01-confirm-asks",
+  "title": "0.8 confirm: la regola chiede Esegui/Annulla invece di eseguire",
+  "cond": "none",
+  "rule": {
+   "name": "Q01-confirm-asks",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e Q01 {{RUN}}",
+     "text": "x"
+    }
+   ],
+   "confirm": {
+    "timeoutMs": 30000
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "executions": 1,
+    "status": "SUPPRESSED_NOT_ELIGIBLE",
+    "audit_has": [
+     "SUPPRESSED_NOT_ELIGIBLE"
+    ],
+    "audit_lacks": [
+     "FIRED"
+    ]
+   }
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'argus_user_prompts'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   },
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e Q01 {{RUN}})'",
+    "equals": "0",
+    "wait_s": 1
+   }
+  ]
+ },
+ {
+  "id": "Q02-confirm-one-shot",
+  "title": "0.8 confirm: rifiutata su una regola che scatta una volta sola",
+  "cond": "none",
+  "rule": {
+   "name": "Q02-confirm-one-shot",
+   "trigger": {
+    "type": "immediate"
+   },
+   "actions": [
+    {
+     "type": "vibrate",
+     "durationMs": 100
+    }
+   ],
+   "confirm": {
+    "timeoutMs": 60000
+   }
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "confirm_one_shot_unsupported"
+    }
+   }
+  },
+  "checks": []
+ },
+ {
+  "id": "Q03-ask-default",
+  "title": "0.8 ask: senza risposta vale la scelta predefinita, catturata nella variabile",
+  "cond": "none",
+  "rule": {
+   "name": "Q03-ask-default",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "ask",
+     "prompt": "e2e Q03 {{RUN}}?",
+     "choices": [
+      "Si",
+      "No"
+     ],
+     "captureAs": "answer",
+     "timeoutMs": 10000,
+     "defaultChoice": "No"
+    },
+    {
+     "type": "show_notification",
+     "title": "e2e Q03 {{RUN}} ${answer}",
+     "text": "x"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "wait_s": 14,
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e Q03 {{RUN}} No)'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "Q04-ask-no-answer",
+  "title": "0.8 ask: senza risposta e senza predefinita il programma si ferma (annullato, non un errore)",
+  "cond": "none",
+  "rule": {
+   "name": "Q04-ask-no-answer",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "ask",
+     "prompt": "e2e Q04?",
+     "choices": [
+      "A",
+      "B",
+      "C",
+      "D"
+     ],
+     "captureAs": "answer",
+     "timeoutMs": 10000
+    },
+    {
+     "type": "show_notification",
+     "title": "e2e Q04 {{RUN}} ${answer}",
+     "text": "x"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "executions": 1,
+    "status": "CANCELLED",
+    "audit_has": [
+     "SUPPRESSED_NOT_ELIGIBLE"
+    ],
+    "audit_lacks": [
+     "ERROR"
+    ]
+   }
+  },
+  "fire": {
+   "payload": {}
+  },
+  "wait_s": 14,
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e Q04 {{RUN}}'",
+    "equals": "0",
+    "wait_s": 1
+   }
+  ]
+ },
+ {
+  "id": "Q05-ask-bounds",
+  "title": "0.8 ask: cinque scelte sono troppe",
+  "cond": "none",
+  "rule": {
+   "name": "Q05-ask-bounds",
+   "trigger": {
+    "type": "manual"
+   },
+   "actions": [
+    {
+     "type": "ask",
+     "prompt": "e2e Q05?",
+     "choices": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E"
+     ],
+     "captureAs": "answer",
+     "timeoutMs": 10000
+    }
+   ]
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "ask_choices_invalid"
+    }
+   }
+  },
+  "checks": []
+ }
+]

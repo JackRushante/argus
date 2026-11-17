@@ -50,4 +50,12 @@
     <string name="a11y51_notification_title">Argus is using the screen</string>
     <string name="a11y51_notification_text">An approved macro is tapping and typing in an app. Tap Stop to end it now.</string>
     <string name="a11y51_notification_stop">Stop</string>
+    <!-- 0.8: «chiedimi prima di eseguire» (confirm) e domande con pulsanti (ask). -->
+    <string name="prompt08_channel_name">Questions and confirmations</string>
+    <string name="prompt08_channel_description">A rule asks before running, or asks you to choose</string>
+    <string name="prompt08_confirm_title">Run “%1$s”?</string>
+    <string name="prompt08_confirm_text">The rule fired and is waiting for you. Without an answer it does not run.</string>
+    <string name="prompt08_run">Run</string>
+    <string name="prompt08_cancel">Cancel</string>
+    <string name="prompt08_public_title">Argus is waiting for your answer</string>
 </resources>

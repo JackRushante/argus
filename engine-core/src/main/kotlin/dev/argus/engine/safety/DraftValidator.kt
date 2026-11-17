@@ -113,6 +113,20 @@ class DraftValidator(
         FeatureGates.disabledIn(d).forEach { gate ->
             errDetail("not_available_yet", "Non disponibile in questa versione", gate.wireName)
         }
+        d.confirm?.let { confirm ->
+            if (!ConfirmPolicy.validTimeout(confirm.timeoutMs)) {
+                err(
+                    "confirm_timeout_invalid",
+                    "La conferma aspetta fra ${ConfirmPolicy.MIN_TIMEOUT_MS} e ${ConfirmPolicy.MAX_TIMEOUT_MS} ms",
+                )
+            }
+            if (!ConfirmPolicy.supportsTrigger(d.trigger)) {
+                err(
+                    "confirm_one_shot_unsupported",
+                    "Una regola che scatta una volta sola non può chiedere conferma: si spegne prima della risposta",
+                )
+            }
+        }
 
         validateTrigger(d.trigger, ::err, ::warn)
         if (d.trigger is Trigger.Sensor &&
@@ -391,16 +405,32 @@ class DraftValidator(
             CaptureDeclaration(it, confidentiality = ConfidentialityLabel.SECRET)
         }
         is Action.InvokeLlm -> action.captureAs?.let {
-            // Il goal può interpolare qualunque sink, incluso un valore SECRET: fino al join
-            // runtime P4-B il floor statico conservativo dell'output del modello è SECRET.
-            CaptureDeclaration(it, confidentiality = ConfidentialityLabel.SECRET)
+            val output = action.output
+            if (output != null) {
+                // 0.8: una risposta vincolata è una delle etichette approvate o un intero limitato, mai
+                // testo libero del modello: CLEAN, col tipo della forma. PRIVATE come una decisione personale.
+                CaptureDeclaration(
+                    it,
+                    type = LlmOutputPolicy.varType(output),
+                    integrity = IntegrityLabel.CLEAN,
+                    confidentiality = ConfidentialityLabel.PRIVATE,
+                )
+            } else {
+                // Il goal può interpolare qualunque sink, incluso un valore SECRET: fino al join
+                // runtime P4-B il floor statico conservativo dell'output del modello è SECRET.
+                CaptureDeclaration(it, confidentiality = ConfidentialityLabel.SECRET)
+            }
         }
         is Action.InvokeLlmV2 -> action.captureAs?.let {
             CaptureDeclaration(it, confidentiality = ConfidentialityLabel.SECRET)
         }
-        // 0.8 scaffold: la scelta dell'utente è una delle etichette approvate, ma finché `ask` è spento
-        // resta TAINTED (default fail-closed); chi la accende decide se può essere CLEAN.
-        is Action.Ask -> CaptureDeclaration(action.captureAs, confidentiality = ConfidentialityLabel.PRIVATE)
+        // 0.8: la scelta dell'utente è sempre una delle etichette approvate (letterali nel fingerprint),
+        // quindi CLEAN e PUBLIC: si confronta e si usa anche nei campi di autorità.
+        is Action.Ask -> CaptureDeclaration(
+            action.captureAs,
+            integrity = IntegrityLabel.CLEAN,
+            confidentiality = ConfidentialityLabel.PUBLIC,
+        )
         // 0.8 scaffold: la risposta di un server esterno è TAINTED; SECRET come l'output shell, perché la
         // richiesta può portare intestazioni segrete.
         is Action.HttpRequest -> action.captureAs?.let {
@@ -1360,7 +1390,7 @@ class DraftValidator(
             is Action.If, is Action.While -> Unit
             // 0.8 scaffold: spente (not_available_yet, vedi validate). Chi accende un'azione scrive qui
             // i suoi limiti; i campi letterali (numeri, chiavi, etichette) non devono contenere `${'$'}{`.
-            is Action.Ask -> Unit
+            is Action.Ask -> validateAsk(action, err)
 
             is Action.SetStored -> Unit
 
@@ -1737,6 +1767,31 @@ class DraftValidator(
                 validateInvokeLlmCaptureOnly(action, err)
         }
 
+        // 0.8: uscita vincolata, solo per una chiamata che cattura in una variabile.
+        action.output?.let { output ->
+            // Codici letterali (li legge la copertura dei testi della UI), uno per problema della forma.
+            when (LlmOutputPolicy.specProblem(output)) {
+                null -> if (!LlmOutputPolicy.constrainedGoalFits(action.goal, output, MAX_TEXT_LENGTH)) {
+                    err("goal_invalid", "Il goal con l'istruzione della forma supera $MAX_TEXT_LENGTH caratteri")
+                }
+                "llm_output_choices_invalid" ->
+                    err("llm_output_choices_invalid", "Da 2 a 8 etichette uniche [a-z0-9_-]{1,24}")
+                "llm_output_choices_forbidden" ->
+                    err("llm_output_choices_forbidden", "Solo una risposta CHOICE ha etichette")
+                "llm_output_bounds_required" ->
+                    err("llm_output_bounds_required", "Una risposta NUMBER richiede min e max")
+                "llm_output_bounds_invalid" ->
+                    err("llm_output_bounds_invalid", "min non oltre max, entro ±${LlmOutputPolicy.MAX_ABS_NUMBER}")
+                else -> err("llm_output_bounds_forbidden", "Solo una risposta NUMBER ha min e max")
+            }
+            if (action.captureAs == null || action.deliver != GenerativeDeliverMode.CAPTURE_ONLY) {
+                err(
+                    "llm_output_requires_capture",
+                    "Una risposta vincolata si cattura in una variabile (CAPTURE_ONLY con captureAs)",
+                )
+            }
+        }
+
         // Difesa in profondità per-tool + timeout: valgono per tutti i sink (web.search è in
         // knownTools; shell.run/automation.* restano vietati e i tool ignoti respinti).
         if (action.allowedTools.size > MAX_TOOL_COUNT) err("too_many_tools", "Troppi tool in InvokeLlm")
@@ -1950,6 +2005,30 @@ class DraftValidator(
     private fun validateOptionalText(value: String?, code: String, err: (String, String) -> Unit) {
         if (value != null && (value.isBlank() || value.length > MAX_TEXT_LENGTH))
             err(code, "Campo testuale vuoto o troppo lungo")
+    }
+
+    /**
+     * `ask` (0.8): domanda di al massimo [AskPolicy.MAX_PROMPT_CHARS] caratteri (anche dopo
+     * l'interpolazione, ricontrollata a runtime), da 2 a 4 scelte letterali uniche di 1..24 caratteri,
+     * attesa da 10 s a 60 min, scelta predefinita fra quelle approvate.
+     */
+    private fun validateAsk(action: Action.Ask, err: (String, String) -> Unit) {
+        if (!AskPolicy.validResolvedPrompt(action.prompt)) {
+            err("ask_prompt_invalid", "Domanda obbligatoria, al massimo ${AskPolicy.MAX_PROMPT_CHARS} caratteri")
+        }
+        if (!AskPolicy.validChoices(action.choices)) {
+            err(
+                "ask_choices_invalid",
+                "Da ${AskPolicy.MIN_CHOICES} a ${AskPolicy.MAX_CHOICES} scelte uniche di 1..${AskPolicy.MAX_CHOICE_CHARS} " +
+                    "caratteri, senza caratteri di controllo né segnaposto",
+            )
+        }
+        if (!AskPolicy.validTimeout(action.timeoutMs)) {
+            err("ask_timeout_invalid", "L'attesa della risposta va da 10 secondi a 60 minuti")
+        }
+        if (!AskPolicy.validDefault(action)) {
+            err("ask_default_invalid", "La scelta predefinita deve essere una delle scelte")
+        }
     }
 
     private fun validateRequiredText(value: String, max: Int, code: String, err: (String, String) -> Unit) {

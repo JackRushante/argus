@@ -17,6 +17,7 @@ import dev.argus.engine.brain.ActResult
 import dev.argus.engine.brain.CapabilityManifest
 import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.model.Action
+import dev.argus.engine.model.OutputSpec
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireContext
 import dev.argus.engine.runtime.RuntimeDataBinding
@@ -75,6 +76,15 @@ class ConfiguredBridgeBrain(
         runtimeData: List<RuntimeDataBinding>,
     ): ActResult = selected().actResolved(context, goal, contextSources, allowedTools, runtimeData)
 
+    override suspend fun actConstrained(
+        context: FireContext,
+        goal: String,
+        contextSources: List<String>,
+        allowedTools: List<String>,
+        runtimeData: List<RuntimeDataBinding>,
+        output: OutputSpec,
+    ): ActResult = selected().actConstrained(context, goal, contextSources, allowedTools, runtimeData, output)
+
     /** Senza consenso privacy non si legge nemmeno la configurazione del provider. */
     private fun selected(): Brain {
         requirePrivacyConsent()
@@ -120,6 +130,19 @@ class ConfiguredBridgeBrain(
             requirePrivacyConsent()
             return TransportBackedBrain(transportFor(config))
                 .actResolved(context, goal, contextSources, allowedTools, runtimeData)
+        }
+
+        override suspend fun actConstrained(
+            context: FireContext,
+            goal: String,
+            contextSources: List<String>,
+            allowedTools: List<String>,
+            runtimeData: List<RuntimeDataBinding>,
+            output: OutputSpec,
+        ): ActResult {
+            requirePrivacyConsent()
+            return TransportBackedBrain(transportFor(config))
+                .actConstrained(context, goal, contextSources, allowedTools, runtimeData, output)
         }
     }
 

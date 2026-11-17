@@ -24,7 +24,7 @@ enum class FeatureGate(
     // --- Regola ----------------------------------------------------------------------------------
 
     /** `confirm`: chiedi all'utente prima di eseguire. */
-    CONFIRM("confirm", enabled = false),
+    CONFIRM("confirm", enabled = true),
 
     /** `exit`: la regola-intervallo finisce col suo trigger d'uscita. */
     EXIT("exit", enabled = false),
@@ -83,7 +83,7 @@ enum class FeatureGate(
     // --- Azioni ----------------------------------------------------------------------------------
 
     /** Azione `ask`. */
-    ACTION_ASK("ask", enabled = false),
+    ACTION_ASK("ask", enabled = true),
 
     /** Azione `set_stored`. */
     ACTION_SET_STORED("set_stored", enabled = false),
@@ -118,7 +118,7 @@ enum class FeatureGate(
     HTTP_SECRETS("http_request.secretHeaders", enabled = false),
 
     /** `invoke_llm.output`: uscita del modello vincolata. */
-    LLM_OUTPUT("invoke_llm.output", enabled = false),
+    LLM_OUTPUT("invoke_llm.output", enabled = true),
 }
 
 /**
