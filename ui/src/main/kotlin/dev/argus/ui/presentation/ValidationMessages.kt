@@ -152,6 +152,55 @@ object ValidationMessages {
             "With call screening only time-of-day and day-of-week conditions are allowed: the answer must be immediate.",
             "Con il filtro chiamate sono ammesse solo condizioni di orario e giorno della settimana: la risposta deve essere immediata.",
         ),
+        // 0.8: regole-intervallo («finché…, poi rimetti com'era»).
+        "exit_start_one_shot" to t(
+            "A rule that runs only once cannot have an end: it would switch off right after it starts.",
+            "Una regola che scatta una volta sola non può avere una fine: si spegnerebbe subito dopo l'inizio.",
+        ),
+        "exit_trigger_unsupported" to t(
+            "The end cannot be immediate, manual, a single time or a wait in an area.",
+            "La fine non può essere immediata, manuale, a un'ora singola o un'attesa in un'area.",
+        ),
+        "exit_trigger_same_as_start" to t(
+            "The end needs a different trigger from the start.",
+            "La fine deve avere un trigger diverso dall'inizio.",
+        ),
+        "exit_geofence_mismatch" to t(
+            "Start and end on a place must use the same area: arriving (or staying) at the start, leaving at the end.",
+            "Inizio e fine su un luogo devono usare la stessa area: l'arrivo (o la sosta) all'inizio, l'uscita alla fine.",
+        ),
+        "exit_calendar_same_phase" to t(
+            "Start and end on the calendar must be one the start of an event and the other its end.",
+            "Inizio e fine sul calendario devono essere uno l'inizio di un evento e l'altra la sua fine.",
+        ),
+        "exit_sensor_same_kind" to t(
+            "Start and end on the sensors must use two different gestures.",
+            "Inizio e fine sui sensori devono usare due gesti diversi.",
+        ),
+        "exit_nfc_resolve_unsupported" to t(
+            "The tag that ends the rule must already be known: it cannot be read at activation.",
+            "Il tag che chiude la regola deve essere già noto: non si legge all'attivazione.",
+        ),
+        "exit_app_usage_twice" to t(
+            "Start and end cannot both be app usage times.",
+            "Inizio e fine non possono essere entrambi tempi d'uso di un'app.",
+        ),
+        "exit_nothing_to_do" to t(
+            "The end neither puts values back nor runs actions: it would do nothing.",
+            "La fine non rimette i valori e non ha azioni: non farebbe nulla.",
+        ),
+        "exit_nothing_to_restore" to t(
+            "No start action changes a value that the end can put back.",
+            "Nessuna azione d'inizio cambia un valore che la fine possa rimettere.",
+        ),
+        "exit_ask_unsupported" to t(
+            "The end actions cannot ask questions: the end does not wait for answers.",
+            "Le azioni di fine non possono fare domande: la fine non aspetta risposte.",
+        ),
+        "exit_var_trigger_payload_unsupported" to t(
+            "A variable reads the start message, which is not there at the end: the end actions could never run.",
+            "Una variabile legge il messaggio d'inizio, che alla fine non c'è: le azioni di fine non partirebbero mai.",
+        ),
         // 0.8: «chiedimi prima», domande con pulsanti, risposte AI vincolate.
         "confirm_timeout_invalid" to t(
             "The confirmation must wait between 30 seconds and 60 minutes.",

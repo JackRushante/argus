@@ -400,6 +400,10 @@ class DraftValidator(
         if (start is Trigger.Sensor && end is Trigger.Sensor && start.kind == end.kind) {
             err("exit_sensor_same_kind", "Inizio e fine sui sensori devono usare due gesti diversi")
         }
+        // Il giorno dello scatto di app_usage è uno per regola: inizio e fine non possono condividerlo.
+        if (start is Trigger.AppUsage && end is Trigger.AppUsage) {
+            err("exit_app_usage_twice", "Inizio e fine non possono essere entrambi tempi d'uso di un'app")
+        }
         if (end is Trigger.NfcTag && end.resolveTag) {
             err("exit_nfc_resolve_unsupported", "Il tag della fine deve essere già noto: non si legge all'attivazione")
         }
