@@ -81,6 +81,32 @@ class TelephonyActionPolicyTest {
     }
 
     @Test
+    fun `argus is recognised in any case and as the owner of a content address`() {
+        listOf(
+            Action.SendIntent(IntentKind.BROADCAST, action = "DEV.ARGUS.ACTION_RUN"),
+            Action.SendIntent(IntentKind.ACTIVITY, pkg = "Dev.Argus", cls = "com.example.A"),
+            Action.SendIntent(IntentKind.ACTIVITY, pkg = "com.example.app", cls = "Dev.Argus.Main"),
+            Action.SendIntent(IntentKind.ACTIVITY, action = "android.intent.action.VIEW", data = "content://dev.argus.files/x"),
+            Action.SendIntent(IntentKind.ACTIVITY, action = "android.intent.action.VIEW", data = "CONTENT://u@Dev.Argus.Debug:1/x"),
+        ).forEach { assertTrue("intent_target_forbidden" in problems(it), it.toString()) }
+        assertEquals(
+            emptyList(),
+            problems(Action.SendIntent(IntentKind.ACTIVITY, action = "android.intent.action.VIEW", data = "content://dev.argusx/x")),
+        )
+    }
+
+    @Test
+    fun `an android package type is an install and is forbidden`() {
+        listOf("application/vnd.android.package-archive", "Application/VND.Android.Package-Archive").forEach { mime ->
+            assertEquals(
+                listOf("intent_action_forbidden"),
+                problems(Action.SendIntent(IntentKind.ACTIVITY, action = "android.intent.action.VIEW", mimeType = mime)),
+                mime,
+            )
+        }
+    }
+
+    @Test
     fun `actions that call, install, uninstall, delete or reset are forbidden in any case`() {
         listOf(
             "android.intent.action.CALL", "android.intent.action.CALL_PRIVILEGED", "android.intent.action.CALL_EMERGENCY",
@@ -100,6 +126,9 @@ class TelephonyActionPolicyTest {
             .forEach { assertEquals(listOf("intent_data_scheme_forbidden"), data(it), it) }
         listOf("", " ", "no-scheme", "https://example.org/\${x}", "https://example.org/\na", "x".repeat(3_000))
             .forEach { assertEquals(listOf("intent_data_invalid"), data(it), it) }
+        // Spazi o caratteri di controllo davanti a uno schema vietato: mai accettati.
+        listOf(" file:///x", "\tjavascript:x", "\u0000intent:#Intent;end", "​file:/x", "\nFILE:/x")
+            .forEach { assertTrue(data(it).isNotEmpty(), it) }
         listOf("https://example.org/a?b=c", "tel:+393331112222", "content://media/external/images/1", "mailto:a@b.c")
             .forEach { assertEquals(emptyList(), data(it), it) }
     }
@@ -160,6 +189,18 @@ class TelephonyActionPolicyTest {
             IntentExtra("f", IntentExtraType.FLOAT, "NaN"),
             IntentExtra("s", IntentExtraType.STRING, "\${broken"),
         ).forEach { assertEquals(listOf("intent_extra_invalid"), with(it), it.toString()) }
+    }
+
+    @Test
+    fun `screen call omits the default caller filter on the wire`() {
+        assertEquals(
+            """{"type":"screen_call","op":"REJECT"}""",
+            ArgusJson.encodeToString(Action.serializer(), Action.ScreenCall(ScreenCallOp.REJECT)),
+        )
+        val unknownOnly = Action.ScreenCall(ScreenCallOp.SILENCE, onlyUnknownCallers = true)
+        val wire = ArgusJson.encodeToString(Action.serializer(), unknownOnly)
+        assertEquals("""{"type":"screen_call","op":"SILENCE","onlyUnknownCallers":true}""", wire)
+        assertEquals(unknownOnly, ArgusJson.decodeFromString(Action.serializer(), wire))
     }
 
     @Test

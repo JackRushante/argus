@@ -643,7 +643,12 @@ sealed interface Action {
      * [onlyUnknownCallers] vale solo per chi non è nei contatti (un numero nascosto conta come sconosciuto).
      */
     @Serializable @SerialName(ActionTypeIds.SCREEN_CALL)
-    data class ScreenCall(val op: ScreenCallOp, val onlyUnknownCallers: Boolean = false) : Action
+    data class ScreenCall(
+        val op: ScreenCallOp,
+        // Assente = tutti i chiamanti: i byte (e l'impronta) di `{"type":"screen_call","op":…}` non cambiano.
+        @EncodeDefault(EncodeDefault.Mode.NEVER)
+        val onlyUnknownCallers: Boolean = false,
+    ) : Action
 }
 
 /** Visita iterativa: il tier non può causare stack overflow su un albero non ancora validato. */

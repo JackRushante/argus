@@ -1,5 +1,7 @@
 package dev.argus.engine.model
 
+import java.util.Locale
+
 /**
  * Regole chiuse di `send_sms`, `call_number`, `send_intent` e `screen_call` (0.8). Le usano il validator
  * (statico), l'interpolatore (forma risolta) e l'esecutore Android (ultima difesa al momento dello scatto).
@@ -82,8 +84,14 @@ object TelephonyActionPolicy {
         }
     }
 
-    /** Argus stesso (varianti comprese): pacchetto, classe o azione nel suo spazio di nomi. */
-    fun isArgusName(name: String): Boolean = PrivilegedActionPolicy.isArgus(name)
+    /**
+     * Argus stesso (varianti comprese): pacchetto, classe o azione nel suo spazio di nomi, senza badare a
+     * maiuscole e minuscole (nel dubbio si rifiuta anche una grafia che Android tratterebbe come diversa).
+     */
+    fun isArgusName(name: String): Boolean = PrivilegedActionPolicy.isArgus(name.lowercase(Locale.ROOT))
+
+    /** Tipo MIME di un pacchetto Android: un Intent con questo tipo apre l'installazione di un'app. */
+    const val APK_MIME_TYPE = "application/vnd.android.package-archive"
 
     /**
      * Problemi di un `send_intent`, nell'ordine dei campi, senza doppioni (vuoto = valido). Con
@@ -113,13 +121,18 @@ object TelephonyActionPolicy {
             if (!validName(it, CLASS_NAME)) problems += INTENT_NAME_INVALID
             if (isArgusName(it)) problems += INTENT_TARGET_FORBIDDEN
         }
-        intent.mimeType?.let { if (!validName(it, MIME_TYPE)) problems += INTENT_NAME_INVALID }
+        intent.mimeType?.let {
+            if (!validName(it, MIME_TYPE)) problems += INTENT_NAME_INVALID
+            if (it.equals(APK_MIME_TYPE, ignoreCase = true)) problems += INTENT_ACTION_FORBIDDEN
+        }
         intent.data?.let { data ->
             val scheme = URI_SCHEME.matchEntire(data)?.groupValues?.get(1)?.lowercase()
             when {
                 data.isBlank() || data.length > MAX_INTENT_DATA_CHARS || hasControlCharacters(data) ||
                     InterpolationPolicy.containsInterpolation(data) || scheme == null -> problems += INTENT_DATA_INVALID
                 scheme in FORBIDDEN_DATA_SCHEMES -> problems += INTENT_DATA_SCHEME_FORBIDDEN
+                // Un contenuto di Argus (`content://dev.argus…`) non si passa a un'altra app.
+                scheme == "content" && isArgusName(contentAuthority(data)) -> problems += INTENT_TARGET_FORBIDDEN
             }
         }
         if (intent.extras.size > MAX_INTENT_EXTRAS) problems += INTENT_TOO_MANY_EXTRAS
@@ -130,6 +143,11 @@ object TelephonyActionPolicy {
         }
         return problems.toList()
     }
+
+    /** L'autorità di un URI `content://autorità/…` (senza utente e porta), vuota se manca. */
+    private fun contentAuthority(data: String): String =
+        data.substringAfter(':').removePrefix("//").substringBefore('/').substringBefore('?').substringBefore('#')
+            .substringAfterLast('@').substringBefore(':')
 
     private fun validName(value: String, shape: Regex): Boolean =
         value.length in 1..MAX_INTENT_NAME_CHARS && !hasControlCharacters(value) && shape.matches(value)
