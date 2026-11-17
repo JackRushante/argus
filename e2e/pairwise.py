@@ -112,7 +112,8 @@ def features(record: dict) -> Dict[str, Set[str]]:
         flow.add("vars")
     if any(v.get("type") == "clock" for v in vars_):
         flow.add("clock")
-    if any(a.get("type") == "run_shell" and a.get("captureAs") for a in actions):
+    # 0.8: anche la risposta di una richiesta web catturata (`http_request.captureAs`).
+    if any(a.get("type") in ("run_shell", "http_request") and a.get("captureAs") for a in actions):
         flow.add("capture")
     for name in CONTROL_FLOW:
         if name in types:

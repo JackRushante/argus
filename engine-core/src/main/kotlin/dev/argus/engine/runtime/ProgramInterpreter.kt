@@ -8,6 +8,7 @@ import dev.argus.engine.model.IntegrityLabel
 import dev.argus.engine.model.LiveSystemClock
 import dev.argus.engine.model.LlmOutputPolicy
 import dev.argus.engine.model.PhoneEvent
+import dev.argus.engine.model.SecretPolicy
 import dev.argus.engine.model.StateValueCoercion
 import dev.argus.engine.model.Trigger
 import dev.argus.engine.model.TriggerField
@@ -807,11 +808,25 @@ class ProgramInterpreter(
             text = if (action is Action.RunShell) text.removeSuffix("\n").removeSuffix("\r") else text,
             type = VarType.TEXT,
             integrity = IntegrityLabel.TAINTED,
-            // Floor conservativo P4-A: output shell/model può riflettere qualunque input segreto.
-            confidentiality = ConfidentialityLabel.SECRET,
+            confidentiality = capturedConfidentiality(action, resolved),
             provenance = provenance,
         )
     }
+
+    /**
+     * Floor conservativo P4-A: output shell/model può riflettere qualunque input segreto. 0.8: la risposta
+     * di un server è SECRET solo se la richiesta ha portato un valore della cassaforte o una variabile
+     * SECRET, altrimenti PRIVATE (resta sempre almeno PRIVATE: è un dato esterno).
+     */
+    private fun capturedConfidentiality(action: Action, resolved: ResolvedProgramAction): ConfidentialityLabel =
+        when (action) {
+            is Action.HttpRequest -> if (SecretPolicy.carriesSecrets(action)) {
+                ConfidentialityLabel.SECRET
+            } else {
+                joinConfidentiality(ConfidentialityLabel.PRIVATE, resolved.inputConfidentiality)
+            }
+            else -> ConfidentialityLabel.SECRET
+        }
 
     private fun captureName(action: Action): String? = when (action) {
         is Action.RunShell -> action.captureAs

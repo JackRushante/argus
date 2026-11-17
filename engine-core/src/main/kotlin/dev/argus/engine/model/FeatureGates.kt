@@ -112,10 +112,10 @@ enum class FeatureGate(
     // --- Campi nuovi di azioni esistenti ---------------------------------------------------------
 
     /** `http_request.captureAs` ed `http_request.extract`: cattura della risposta. */
-    HTTP_CAPTURE("http_request.captureAs", enabled = false),
+    HTTP_CAPTURE("http_request.captureAs", enabled = true),
 
     /** `http_request.secretHeaders` e `http_request.secretQuery`: valori dalla cassaforte. */
-    HTTP_SECRETS("http_request.secretHeaders", enabled = false),
+    HTTP_SECRETS("http_request.secretHeaders", enabled = true),
 
     /** `invoke_llm.output`: uscita del modello vincolata. */
     LLM_OUTPUT("invoke_llm.output", enabled = true),

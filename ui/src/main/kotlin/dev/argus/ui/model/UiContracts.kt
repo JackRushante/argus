@@ -955,6 +955,8 @@ interface SettingsCallbacks {
     ) {}
     fun onRevokePrivacy()
     fun onRerunOnboarding()
+    /** 0.8: apre Sistema › Segreti. Default no-op. */
+    fun onOpenSecrets() {}
     /** «Pausa automazioni» (F21): true = nessuna regola scatta finché non si riprende. Default no-op. */
     fun onSetAutomationsPaused(paused: Boolean) {}
     /** 0.8: apre Sistema › Modalità (modalità e variabili salvate). Default no-op. */

@@ -160,6 +160,14 @@ class ShizukuActionExecutor(
             is Action.SetStored -> ProgramActionResult(
                 storedModes?.setStored(action, context) ?: ActionResult.Failure("base_executor_unavailable"),
             )
+            // 0.8: la risposta catturata torna all'interprete, che la etichetta TAINTED (mai nel journal).
+            is Action.HttpRequest -> if (leaf.captureAs != null && !FeatureGates.blocks(leaf)) {
+                httpRequests?.run(leaf)
+                    ?.let { ProgramActionResult(it.result, capturedText = it.captured) }
+                    ?: ProgramActionResult(ActionResult.Failure("base_executor_unavailable"))
+            } else {
+                ProgramActionResult(execute(leaf, context))
+            }
             else -> ProgramActionResult(execute(leaf, context))
         }
     } catch (error: CancellationException) {
@@ -293,7 +301,7 @@ class ShizukuActionExecutor(
                 ?: ActionResult.Failure("base_executor_unavailable")
             is Action.SetRotation -> systemActions?.setRotation(action.auto)
                 ?: ActionResult.Failure("base_executor_unavailable")
-            // 0.8 scaffold: cattura, estrazione e segreti sono dietro i loro FeatureGate (fail-closed).
+            // 0.8: cattura, estrazione e segreti sono dietro i loro FeatureGate (fail-closed se spenti).
             is Action.HttpRequest -> if (FeatureGates.blocks(action)) {
                 ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
             } else {

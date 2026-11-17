@@ -956,12 +956,12 @@ class RuleRenderCoverageTest {
                     "captureAs" to ms(m("Response captured as xyz_resp", "Risposta catturata come xyz_resp")),
                     "extract" to ms(m("JSON pointer /xyz/ptr", "puntatore JSON /xyz/ptr")),
                     "secretHeaders" to ms(
-                        m("X-XYZ-Auth: Bearer [secret \"xyz_vault_token\"", "X-XYZ-Auth: Bearer [segreto \"xyz_vault_token\""),
+                        m("X-XYZ-Auth: Bearer ⟨secret xyz_vault_token⟩", "X-XYZ-Auth: Bearer ⟨segreto xyz_vault_token⟩"),
                     ),
                     "secretQuery" to ms(
                         m(
-                            "Query parameter xyz_q = [secret \"xyz_vault_q\"",
-                            "Parametro di query xyz_q = [segreto \"xyz_vault_q\"",
+                            "Query parameter xyz_q = ⟨secret xyz_vault_q⟩",
+                            "Parametro di query xyz_q = ⟨segreto xyz_vault_q⟩",
                         ),
                     ),
                 ),

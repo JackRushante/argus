@@ -48,6 +48,8 @@ import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -223,6 +225,7 @@ fun SettingsScreen(
                 )
                 PrivacySection(state.privacyAccepted, { confirmPrivacyRevoke = true }, Modifier.sectionAnchor(SECTION_PRIVACY))
                 WhitelistSection(state.whitelist, callbacks, Modifier.sectionAnchor(SECTION_WHITELIST))
+                SecretsEntryRow(callbacks::onOpenSecrets)
                 BudgetSection(state.budget, callbacks, Modifier.sectionAnchor(SECTION_BUDGET))
                 RulesBackupSection(
                     state.backup,
@@ -927,6 +930,35 @@ private fun WhitelistSection(contacts: List<ContactRow>, callbacks: SettingsCall
                     }
                 }
             },
+        )
+    }
+}
+
+/** 0.8: la voce «Segreti» di Sistema, che apre la sua schermata. */
+@Composable
+private fun SecretsEntryRow(onOpen: () -> Unit) {
+    ArgusCard(contentPadding = PaddingValues(0.dp)) {
+        ArgusListRow(
+            title = stringResource(R.string.settings_secrets_title),
+            subtitle = stringResource(R.string.settings_secrets_subtitle),
+            leading = {
+                IconBadge(
+                    icon = Icons.Rounded.Key,
+                    container = MaterialTheme.colorScheme.primaryContainer,
+                    content = MaterialTheme.colorScheme.onPrimaryContainer,
+                    size = 40.dp,
+                    iconSize = 20.dp,
+                )
+            },
+            trailing = {
+                Icon(
+                    Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            },
+            onClick = onOpen,
+            contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 10.dp),
         )
     }
 }

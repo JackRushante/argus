@@ -501,6 +501,8 @@ class AndroidCapabilityProbe internal constructor(
             // concedere (TextToSpeech, AudioManager, rete). Luminosità e rotazione solo col permesso
             // speciale «Modifica impostazioni di sistema».
             addAll(BASE_ACTIONS_041_CAPABILITIES)
+            // 0.8: la cassaforte dei segreti sta sul telefono e non chiede permessi: sempre disponibile.
+            add(CapabilityIds.ACTION_HTTP_REQUEST_SECRETS)
             if (state.writeSettingsGranted) addAll(WRITE_SETTINGS_CAPABILITIES)
             // 0.5.0, permessi permanenti: con `WRITE_SECURE_SETTINGS` la scrittura parametrica passa dal
             // ContentResolver (SECURE/GLOBAL; SYSTEM resta legato a «Modifica impostazioni di sistema»),
@@ -744,7 +746,6 @@ class AndroidCapabilityProbe internal constructor(
             CapabilityIds.ACTION_CALL_NUMBER,
             CapabilityIds.ACTION_SEND_INTENT,
             CapabilityIds.ACTION_SCREEN_CALL,
-            CapabilityIds.ACTION_HTTP_REQUEST_SECRETS,
         )
 
         /** 0.8: valori conservati e modalità utente (database di Argus, nessun permesso). */

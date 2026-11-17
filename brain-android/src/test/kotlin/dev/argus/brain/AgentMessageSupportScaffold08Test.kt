@@ -31,7 +31,7 @@ class AgentMessageSupportScaffold08Test {
             assertFalse("\"type\":\"$type\"" in prompt, "il prompt nomina il tipo spento $type")
         }
         // Campi e valori nuovi di tipi esistenti.
-        listOf("\"shake\"", "\"flip_face_down\"", "secretHeaders", "secretQuery", "\"extract\"", "\"exit\"")
+        listOf("\"shake\"", "\"flip_face_down\"", "\"exit\"")
             .forEach { assertFalse(it in prompt, "il prompt nomina $it") }
     }
 
@@ -58,6 +58,8 @@ class AgentMessageSupportScaffold08Test {
     private val switchedOnFields = mapOf(
         FeatureGate.CONFIRM to "\"confirm\": {\"timeoutMs\":integer}",
         FeatureGate.LLM_OUTPUT to "\"output\":{\"kind\":\"CHOICE\"|\"NUMBER\"|\"BOOLEAN\"",
+        FeatureGate.HTTP_CAPTURE to "\"extract\":string = a JSON pointer",
+        FeatureGate.HTTP_SECRETS to "\"secretHeaders\":[SecretRef,...] and \"secretQuery\":[SecretRef,...]",
     )
 
     @Test
