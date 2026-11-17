@@ -178,8 +178,8 @@ sample resta fuori da wire, log e fingerprint. La condizione approvata include i
 tipo, operatore, soglia e `policyVersion`, così un cambio semantico invalida il fingerprint.
 
 `geofence` viene pubblicato soltanto con posizione **precisa** e accesso in background. Nel
-contratto corrente accetta esclusivamente `transition=ENTER|EXIT` e `loiteringDelayMs=0`: il backend
-framework Android non offre DWELL e il bridge non deve prometterlo.
+contratto corrente accetta esclusivamente `transition=ENTER|EXIT` e `loiteringDelayMs=0`. L'app arma anche DWELL
+(dalla 0.8, con un proprio ricontrollo dopo l'ingresso), ma il prompt e il validator del bridge non lo conoscono ancora.
 
 `phone_state.sms` indica soltanto SMS telephony, non RCS/MMS. `copy_to_clipboard.extractionRegex`
 deve usare il sottoinsieme RE2 a tempo lineare, perché viene applicata a testo controllato dal
@@ -359,7 +359,8 @@ Invarianti comuni e v1:
 - `context_sources` accetta soltanto `notification` e `state`; `notification` è obbligatorio;
 - `state` deve essere `null` se la regola non lo ha richiesto;
 - in P1 l'unico `allowed_tools` accettato è esattamente `whatsapp_reply`;
-- package ammessi: WhatsApp e WhatsApp Business; `is_group` deve essere `false` esplicito;
+- package ammessi: WhatsApp e WhatsApp Business e, dalla 0.8, Telegram (`org.telegram.messenger`,
+  `org.telegram.messenger.web`), Signal e Google Messaggi; `is_group` deve essere `false` esplicito;
 - `conversationId`, `StatusBarNotification.key`, fingerprint, coordinate e handle `RemoteInput`
   non attraversano mai il bridge;
 - il server tratta goal e contesto come dati delimitati; il contenuto della notifica non può
