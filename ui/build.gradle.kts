@@ -12,7 +12,6 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
     testOptions { unitTests.isReturnDefaultValues = true }
 }
@@ -32,3 +31,8 @@ dependencies {
 }
 
 tasks.withType<Test> { useJUnitPlatform() }
+
+// Kotlin 2.4 rifiuta kotlinOptions { jvmTarget = "17" }: stesso target 17 con il DSL compilerOptions.
+kotlin {
+    compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
+}

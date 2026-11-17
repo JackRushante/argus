@@ -1,24 +1,24 @@
 [versions]
 agp = "8.13.2"
-kotlin = "2.1.0"
-composeBom = "2025.05.01"
-coreKtx = "1.15.0"
+kotlin = "2.4.21"
+composeBom = "2026.06.01"
+coreKtx = "1.18.0"
 lifecycle = "2.8.7"
 activityCompose = "1.9.3"
-navigationCompose = "2.8.5"
+navigationCompose = "2.9.8"
 material3 = "1.3.1"
 # data module (Room persistence)
-ksp = "2.1.0-1.0.29"
-room = "2.6.1"
-kotlinxSerialization = "1.7.3"
-kotlinxCoroutines = "1.9.0"
-robolectric = "4.14.1"
+ksp = "2.3.14"
+room = "2.8.5"
+kotlinxSerialization = "1.13.0"
+kotlinxCoroutines = "1.11.0"
+robolectric = "4.18"
 junit4 = "4.13.2"
 androidxTestCore = "1.6.1"
 androidxTestExtJunit = "1.2.1"
 androidxTestRunner = "1.6.2"
 shizuku = "13.1.5"
-hilt = "2.57.1"
+hilt = "2.58"
 hiltJetpack = "1.3.0"
 # QR code of a shared rule (0.7.2): ZXing core, encoder only (Apache-2.0, pure Java)
 zxing = "3.5.4"
@@ -56,6 +56,8 @@ shizuku-api = { module = "dev.rikka.shizuku:api", version.ref = "shizuku" }
 shizuku-provider = { module = "dev.rikka.shizuku:provider", version.ref = "shizuku" }
 hilt-android = { module = "com.google.dagger:hilt-android", version.ref = "hilt" }
 hilt-compiler = { module = "com.google.dagger:hilt-compiler", version.ref = "hilt" }
+# Lettore dei metadati Kotlin per hilt-compiler: quello di Hilt 2.58 legge fino ai metadati 2.3.
+kotlin-metadata-jvm = { module = "org.jetbrains.kotlin:kotlin-metadata-jvm", version.ref = "kotlin" }
 hilt-lifecycle-viewmodel-compose = { module = "androidx.hilt:hilt-lifecycle-viewmodel-compose", version.ref = "hiltJetpack" }
 zxing-core = { module = "com.google.zxing:core", version.ref = "zxing" }
 

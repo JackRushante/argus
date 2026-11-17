@@ -15,7 +15,6 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
     // Compose OFF: questo modulo è persistenza pura, nessuna UI.
     testOptions {
         unitTests.isReturnDefaultValues = true
@@ -60,4 +59,9 @@ dependencies {
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.room.testing)
     androidTestImplementation(libs.kotlinx.coroutines.test)
+}
+
+// Kotlin 2.4 rifiuta kotlinOptions { jvmTarget = "17" }: stesso target 17 con il DSL compilerOptions.
+kotlin {
+    compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
 }
