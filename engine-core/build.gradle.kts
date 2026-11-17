@@ -4,13 +4,13 @@ plugins {
 }
 repositories { mavenCentral() }
 dependencies {
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.13.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
     // Pattern controllati dall'utente/LLM su testo non fidato: RE2/J garantisce matching lineare.
     implementation("com.google.re2j:re2j:1.8")
     testImplementation(kotlin("test"))
     testImplementation("org.junit.jupiter:junit-jupiter:5.11.3")
-    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
 }
 tasks.test { useJUnitPlatform() }
 // jvmTarget 17 esplicito invece di jvmToolchain(17): quest'ultimo tira il
