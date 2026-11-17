@@ -1,6 +1,6 @@
 # Argus end-to-end suite
 
-About 160 rules (the number follows from the pairwise model below) run on an Android 16 x86_64 emulator, in three configurations:
+About 220 rules (the number follows from the pairwise model below) run on an Android 16 x86_64 emulator, in three configurations:
 
 | Configuration | Shizuku | What it proves |
 |---|---|---|
@@ -99,13 +99,13 @@ The emulator container is started with 10 GB (`MEM=10g`): with the default 6 GB 
 
 | Parameter | Values |
 |---|---|
-| trigger | `time`, `immediate`, `manual`, `geofence`, `notification`, `phone_state`, `connectivity`, `sensor`, `screen`, `battery`, `audio_output`, `mode_changed`, `media`, `app_event` |
+| trigger | `time`, `immediate`, `manual`, `geofence`, `notification`, `phone_state`, `connectivity`, `sensor`, `screen`, `battery`, `audio_output`, `mode_changed`, `media`, `app_event`, `nfc_tag`, `next_alarm`, `app_usage`, `calendar_event`, `user_mode_changed` |
 | action class | `local_ui`, `audio_mode`, `display`, `launch`, `network_out`, `radios`, `device_control`, `shell`, `screen_macro` |
 | condition | `none`, `true`, `false` |
 | P4 feature | `vars`, `clock`, `capture`, `if`, `while`, `wait` |
 | configuration | the three above: every rule runs in all three (or says why not) |
 
-Required pairs: trigger x class, trigger x condition, class x condition, P4 feature x condition, P4 feature x class (265 in total). The `sensor` trigger cannot be armed on the emulator (no significant-motion sensor), so its two condition pairs are declared infeasible; its class pairs are covered by rules that must be refused with `capability_unavailable`. A shell or screen macro started by an SMS, a notification, the music or an app opening is covered by rules that must be refused (`shell_external_trigger`, `ui_steps_external_trigger`).
+Required pairs: trigger x class, trigger x condition, class x condition, P4 feature x condition, P4 feature x class (323 in total). The `sensor` and `nfc_tag` triggers cannot be armed on the emulator (no significant-motion sensor, no NFC), so their condition pairs are declared infeasible; their class pairs are covered by rules that must be refused with `capability_unavailable`. A shell or screen macro started by an SMS, a notification, the music or an app opening is covered by rules that must be refused (`shell_external_trigger`, `ui_steps_external_trigger`).
 
 Action x configuration is covered by running every rule in every configuration; the report lists the pairs that did not run (skipped rules).
 
