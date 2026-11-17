@@ -141,6 +141,10 @@ dependencies {
     implementation(libs.hilt.android)
     implementation(libs.hilt.lifecycle.viewmodel.compose)
     ksp(libs.hilt.compiler)
+    // Hilt 2.58 porta kotlin-metadata-jvm 2.2, che rifiuta i metadati Kotlin 2.4 nel task
+    // hiltJavaCompile (aggregazione via javac). Il lettore allineato a Kotlin li legge; il plugin
+    // Hilt include la configurazione ksp nel classpath dei processori di quel task.
+    ksp(libs.kotlin.metadata.jvm)
     debugImplementation(libs.compose.ui.tooling)
     debugImplementation(libs.compose.ui.test.manifest)
     // 0.6.0 (E2E): l'aggancio di debug `dev.argus.e2e` legge il journal con SQL e parla JSON. Solo debug:
