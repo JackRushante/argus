@@ -185,6 +185,41 @@ class HttpRequestExecutor08Test {
         repeat(2) { assertFalse(server.takeRequest().path.orEmpty().contains("leak")) }
     }
 
+    @Test
+    fun `with a secret the approved url and the sent url must name the same origin`() = runTest {
+        assertTrue(HttpRequestExecutor.parsersAgree("$base/api"))
+        assertTrue(HttpRequestExecutor.parsersAgree("https://Example.ORG/x?y=1"))
+        assertTrue(HttpRequestExecutor.parsersAgree("https://example.org:443/x"))
+        // OkHttp rewrites this loopback address as ::1: the text that was approved is not what it would
+        // connect to, so the vault is not read and nothing leaves.
+        val rewritten = "http://[0:0:0:0:0:0:0:1]:${server.port}/api"
+        assertFalse(HttpRequestExecutor.parsersAgree(rewritten))
+        assertEquals(
+            ActionResult.Failure("http_request_invalid"),
+            HttpRequestExecutor(secrets = vault).execute(request(url = rewritten, secretHeaders = listOf(bearer))),
+        )
+        assertTrue(reads.isEmpty())
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun `nothing the executor returns or prints carries the secret value`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(500).setBody("boom"))
+        val failed = HttpRequestExecutor(secrets = vault).run(
+            request(captureAs = "v", secretHeaders = listOf(bearer), secretQuery = listOf(SecretRef("key", "q_key"))),
+        )
+        assertEquals(ActionResult.Failure("http_status_500"), failed.result)
+        listOf(token, "a b&c=d", "a%20b").forEach { assertFalse(it in failed.toString(), it) }
+        listOf(
+            "http://127.0.0.1:1/closed",
+            "http://192.168.1.20/lan",
+        ).forEach { url ->
+            val outcome = HttpRequestExecutor(secrets = vault, timeoutMs = 2_000).run(request(url = url, secretHeaders = listOf(bearer)))
+            assertFalse(token in outcome.toString(), url)
+            assertFalse(token in outcome.result.toString(), url)
+        }
+    }
+
     // --- Plain http on the local network ----------------------------------------------------------
 
     @Test

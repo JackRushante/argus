@@ -22,6 +22,7 @@ import okhttp3.Response
 import okio.Buffer
 import java.io.IOException
 import java.io.InterruptedIOException
+import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.util.Locale
 import java.util.concurrent.TimeUnit
@@ -85,6 +86,9 @@ class HttpRequestExecutor(
             return failure(CLEARTEXT_SECRET)
         }
         if (!HttpRequestPolicy.isResolvedShapeValid(action)) return failure(REQUEST_INVALID)
+        // L'approvazione e la policy leggono l'URL con java.net.URI, la richiesta parte con l'HttpUrl di
+        // OkHttp: con un segreto i due devono vedere la stessa origine, altrimenti non si legge la cassaforte.
+        if (carriesSecrets && !parsersAgree(action.url)) return failure(REQUEST_INVALID)
 
         val secretHeaders = mutableListOf<Pair<String, String>>()
         for (ref in action.secretHeaders.orEmpty()) {
@@ -274,5 +278,22 @@ class HttpRequestExecutor(
 
         private val REDIRECT_STATUSES = setOf(301, 302, 303, 307, 308)
         private const val READ_CHUNK_BYTES = 8_192L
+
+        /**
+         * true se OkHttp e [java.net.URI] leggono in [url] lo stesso schema, host e porta: l'origine
+         * approvata (e mostrata) è quella a cui partirebbe la richiesta. Un dubbio vale «non d'accordo».
+         */
+        internal fun parsersAgree(url: String): Boolean {
+            val okhttp = url.toHttpUrlOrNull() ?: return false
+            val uri = runCatching { URI(url) }.getOrNull() ?: return false
+            val scheme = uri.scheme?.lowercase(Locale.ROOT) ?: return false
+            val port = when {
+                uri.port != -1 -> uri.port
+                scheme == "https" -> 443
+                scheme == "http" -> 80
+                else -> return false
+            }
+            return okhttp.scheme == scheme && okhttp.host == HttpRequestPolicy.hostOf(url) && okhttp.port == port
+        }
     }
 }
