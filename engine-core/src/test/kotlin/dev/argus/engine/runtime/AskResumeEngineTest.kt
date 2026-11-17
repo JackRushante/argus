@@ -13,7 +13,6 @@ import java.time.Instant
 import java.time.ZoneOffset
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertSame
@@ -151,8 +150,8 @@ class AskResumeEngineTest {
         rig.engine.onQuestionResumed(resumed(rule, continuation = wrong)) { DeviceState() }
 
         assertTrue(rig.executor.executed.isEmpty())
-        assertEquals(ProgramInterpreter.ASK_RESUME_INVALID, rig.audit.events.last().detail)
-        assertIs<ExecutionStatus>(rig.journal.completions.last().status)
+        val error = rig.audit.events.single { it.kind == AuditKind.ERROR }
+        assertEquals(ProgramInterpreter.ASK_RESUME_INVALID, error.detail)
         assertEquals(ExecutionStatus.FAILED, rig.journal.completions.last().status)
     }
 }
