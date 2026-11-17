@@ -82,6 +82,8 @@ import dev.argus.automation.vm.AutomationDetailViewModel
 import dev.argus.automation.vm.AutomationListViewModel
 import dev.argus.automation.vm.ChatViewModel
 import dev.argus.automation.vm.DetailEvent
+import dev.argus.automation.vm.DryRunViewModel
+import dev.argus.engine.dryrun.DryRunField
 import dev.argus.automation.vm.ExecutionLogViewModel
 import dev.argus.automation.vm.OnboardingEvent
 import dev.argus.automation.vm.OnboardingViewModel
@@ -99,6 +101,7 @@ import dev.argus.ui.model.AutoBackupFrequencyUi
 import dev.argus.ui.model.AutomationDetailCallbacks
 import dev.argus.ui.model.AutomationListCallbacks
 import dev.argus.ui.model.ChatCallbacks
+import dev.argus.ui.model.DryRunCallbacks
 import dev.argus.ui.model.PermanentGrantUi
 import dev.argus.ui.model.ContactRow
 import dev.argus.ui.model.ExecutionLogCallbacks
@@ -114,6 +117,7 @@ import dev.argus.ui.presentation.ChatDictation
 import dev.argus.ui.screens.AutomationDetailScreen
 import dev.argus.ui.screens.AutomationListScreen
 import dev.argus.ui.screens.ChatScreen
+import dev.argus.ui.screens.DryRunScreen
 import dev.argus.ui.screens.ExecutionLogScreen
 import dev.argus.ui.screens.OnboardingScreen
 import dev.argus.ui.screens.SettingsScreen
@@ -135,9 +139,12 @@ private object Routes {
     const val TEMPLATES = "templates"
     const val MODES = "modes"
     const val SECRETS = "secrets"
+    const val DRY_RUN = "dryRun/{id}"
     const val LOG_PATTERN = "$LOG?automationId={automationId}&automationName={automationName}"
 
     fun detail(id: String): String = "detail/${Uri.encode(id)}"
+
+    fun dryRun(id: String): String = "dryRun/${Uri.encode(id)}"
 
     fun log(automationId: String, automationName: String): String =
         "$LOG?automationId=${Uri.encode(automationId)}&automationName=${Uri.encode(automationName)}"
@@ -929,6 +936,10 @@ fun ArgusNavHost() {
                                         runCatching { saveShareFile.launch(name) }
                                             .onFailure { showMessage(backupPickerUnavailable) }
                                     }
+                                    // 0.8: dry run of this rule (or draft); nothing is executed.
+                                    override fun onDryRun() {
+                                        navController.navigate(Routes.dryRun(detail.id)) { launchSingleTop = true }
+                                    }
                                     override fun onCopyShare(stripPersonalData: Boolean) {
                                         val text = viewModel.shareText(stripPersonalData) ?: return
                                         if (copySharedRule(context, shareClipLabel, text, sensitive = !stripPersonalData)) {
@@ -943,6 +954,31 @@ fun ArgusNavHost() {
                             )
                         }
                     }
+                }
+
+                // 0.8: dry run. Sample event and answers live only in the view model's memory.
+                composable(
+                    route = Routes.DRY_RUN,
+                    arguments = listOf(navArgument("id") { type = NavType.StringType }),
+                ) {
+                    val viewModel: DryRunViewModel = hiltViewModel()
+                    val state by viewModel.state.collectAsStateWithLifecycle()
+                    DryRunScreen(
+                        state = state,
+                        callbacks = object : DryRunCallbacks {
+                            override fun onBack() {
+                                navController.popBackStack()
+                            }
+                            override fun onFieldChange(field: DryRunField, value: String) =
+                                viewModel.onFieldChange(field, value)
+                            override fun onVerifiedScanChange(verified: Boolean) = viewModel.onVerifiedScanChange(verified)
+                            override fun onSimulateEndChange(end: Boolean) = viewModel.onSimulateEndChange(end)
+                            override fun onRun() = viewModel.onRun()
+                            override fun onAnswer(key: String, value: String) = viewModel.onAnswer(key, value)
+                            override fun onNoAnswer(key: String) = viewModel.onNoAnswer(key)
+                        },
+                        modifier = Modifier.testTag("screen_dry_run"),
+                    )
                 }
 
                 composable(Routes.ONBOARDING) {
