@@ -271,6 +271,10 @@ internal object LogReasonLabels {
             "limit reached: at most 3 calls an hour",
             "limite raggiunto: al massimo 3 chiamate l'ora",
         ),
+        "telephony_rate_ledger_unavailable" to Label(
+            "not sent: the hourly SMS and call count could not be saved",
+            "non inviato: non si è potuto salvare il conteggio orario di SMS e chiamate",
+        ),
         "sms_number_not_sender" to Label(
             "the SMS recipient is not the number that called or texted",
             "il destinatario dell'SMS non è il numero che ha chiamato o scritto",

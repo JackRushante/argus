@@ -9,6 +9,7 @@ import dagger.hilt.components.SingletonComponent
 import dev.argus.automation.base.DeferredOpenNotifier
 import dev.argus.automation.labels.LabelAwarePause
 import dev.argus.automation.telephony.AndroidContactLookup
+import dev.argus.automation.telephony.AndroidTelephonyClock
 import dev.argus.automation.telephony.AndroidTelephonySurface
 import dev.argus.automation.telephony.CallScreeningCoordinator
 import dev.argus.automation.telephony.ContactLookup
@@ -32,7 +33,9 @@ object TelephonyModule {
     @Provides
     @Singleton
     fun telephonyRateLimiter(@ApplicationContext context: Context): TelephonyRateLimiter =
-        TelephonyRateLimiter(PrefsTelephonyLedgerStore(context))
+        AndroidTelephonyClock(context).let { clock ->
+            TelephonyRateLimiter(PrefsTelephonyLedgerStore(context, clock), clock)
+        }
 
     @Provides
     @Singleton
