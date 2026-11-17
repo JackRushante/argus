@@ -225,7 +225,12 @@ object CapabilityRequirements {
         is Condition.VarCompare -> emptySet()
         // Il giorno lo dà l'orologio del motore, come per time_window.
         is Condition.Weekday -> emptySet()
-        is Condition.WifiConnected -> setOf(CapabilityIds.STATE_WIFI_CONNECTED)
+        // Con il nome della rete serve anche l'identità Wi-Fi del trigger connectivity: stessi permessi di posizione.
+        is Condition.WifiConnected -> if (condition.ssid == null) {
+            setOf(CapabilityIds.STATE_WIFI_CONNECTED)
+        } else {
+            setOf(CapabilityIds.STATE_WIFI_CONNECTED, CapabilityIds.TRIGGER_CONNECTIVITY_WIFI_IDENTITY)
+        }
         is Condition.BluetoothConnected -> setOf(CapabilityIds.STATE_BLUETOOTH_CONNECTED)
         is Condition.HeadsetConnected -> setOf(CapabilityIds.STATE_HEADSET_CONNECTED)
         is Condition.CalendarBusy -> setOf(CapabilityIds.STATE_CALENDAR_BUSY)

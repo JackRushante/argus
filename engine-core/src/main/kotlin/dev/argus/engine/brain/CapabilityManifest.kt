@@ -1,4 +1,5 @@
 package dev.argus.engine.brain
+import dev.argus.engine.model.SecretPolicy
 import dev.argus.engine.model.StateKeys
 import dev.argus.engine.model.StateQueryFamily
 import dev.argus.engine.model.StateQueryPolicy
@@ -72,11 +73,17 @@ data class CapabilityManifest(
      * contesto. Solo `en` o `it`. Entra nel prompt di compile; la busta del bridge Hermes non la porta.
      */
     val replyLanguage: String = REPLY_LANGUAGE_EN,
+    /**
+     * 0.8: i NOMI dei segreti salvati nella cassaforte del telefono, perché il modello li usi in
+     * `secretHeaders`/`secretQuery`. Mai i valori: il manifest non li conosce. Entra nel prompt di compile.
+     */
+    val savedSecrets: List<String> = emptyList(),
 ) {
     init {
         require(replyLanguage == REPLY_LANGUAGE_EN || replyLanguage == REPLY_LANGUAGE_IT) {
             "Lingua di risposta non valida"
         }
+        require(savedSecrets.all(SecretPolicy::isNameValid)) { "Nome di segreto non valido" }
     }
 
     companion object {

@@ -209,6 +209,64 @@ class AnthropicStructuredOutputTest {
         }
     }
 
+    // --- 0.8 invoke_llm.output: risposta vincolata ---
+
+    private fun spec(kind: dev.argus.engine.model.OutputKind, choices: List<String> = emptyList(), min: Long? = null, max: Long? = null) =
+        dev.argus.engine.model.OutputSpec(kind, choices, min, max)
+
+    @Test fun `a constrained answer asks for a closed answer schema and unwraps it`(): Unit = runBlocking {
+        server.enqueue(jsonResponse(text("""{"answer":"urgent"}""")))
+
+        val result = transport().actConstrained(
+            timerContext(), "È urgente?", emptyList(), emptyList(), emptyList(),
+            spec(dev.argus.engine.model.OutputKind.CHOICE, listOf("urgent", "normal")),
+        )
+
+        assertEquals("urgent", result.text)
+        val body = root(assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)))
+        val schema = body.getValue("output_config").jsonObject.getValue("format").jsonObject.getValue("schema").jsonObject
+        assertEquals(listOf("answer"), schema.getValue("required").jsonArray.map { it.jsonPrimitive.content })
+        assertEquals("false", schema.getValue("additionalProperties").toString())
+        val answer = schema.getValue("properties").jsonObject.getValue("answer").jsonObject
+        assertEquals(listOf("urgent", "normal"), answer.getValue("enum").jsonArray.map { it.jsonPrimitive.content })
+        val system = body.getValue("system").jsonPrimitive.content
+        assertTrue("Answer with exactly one of these labels and nothing else: urgent, normal." in system)
+        assertFalse("tools" in body)
+    }
+
+    @Test fun `a constrained number keeps its bounds in the instruction, not in the schema`(): Unit = runBlocking {
+        server.enqueue(jsonResponse(text("""{"answer":4}""")))
+
+        val result = transport().actConstrained(
+            timerContext(), "Quanto è urgente?", emptyList(), emptyList(), emptyList(),
+            spec(dev.argus.engine.model.OutputKind.NUMBER, min = 1, max = 5),
+        )
+
+        assertEquals("4", result.text)
+        val body = root(assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)))
+        val answer = body.getValue("output_config").jsonObject.getValue("format").jsonObject.getValue("schema")
+            .jsonObject.getValue("properties").jsonObject.getValue("answer").jsonObject
+        assertEquals("integer", answer.getValue("type").jsonPrimitive.content)
+        assertEquals(setOf("type"), answer.keys)
+        assertTrue("between 1 and 5" in body.getValue("system").jsonPrimitive.content)
+    }
+
+    @Test fun `a model without output_config gets the plain instruction`(): Unit = runBlocking {
+        server.enqueue(rejected())
+        server.enqueue(jsonResponse(text("yes")))
+        val boolean = spec(dev.argus.engine.model.OutputKind.BOOLEAN)
+
+        val result = transport().actConstrained(timerContext(), "Piove?", emptyList(), emptyList(), emptyList(), boolean)
+        assertEquals("yes", result.text)
+        val requests = List(2) { root(assertNotNull(server.takeRequest(2, TimeUnit.SECONDS))) }
+        assertEquals(listOf(true, false), requests.map { "output_config" in it })
+
+        server.enqueue(jsonResponse(text("no")))
+        transport(structuredOutput = StructuredOutputMode.NONE)
+            .actConstrained(timerContext(), "Piove?", emptyList(), emptyList(), emptyList(), boolean)
+        assertFalse("output_config" in root(assertNotNull(server.takeRequest(2, TimeUnit.SECONDS))))
+    }
+
     private fun timerContext() = dev.argus.engine.runtime.FireContext(
         event = dev.argus.engine.runtime.TriggerEvent.TimeFired(
             automationId = dev.argus.engine.model.AutomationId("automation-1"),

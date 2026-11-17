@@ -42,6 +42,8 @@ internal data class AndroidUiHealth(
     val callPhoneGranted: Boolean = false,
     val callScreeningRoleHeld: Boolean = false,
     val readContactsGranted: Boolean = false,
+    /** 0.8: READ_CALENDAR concesso (regole sul calendario). */
+    val readCalendarGranted: Boolean = false,
 )
 
 internal fun readAndroidUiHealth(context: Context): AndroidUiHealth {
@@ -83,6 +85,7 @@ internal fun readAndroidUiHealth(context: Context): AndroidUiHealth {
         callPhoneGranted = granted(Manifest.permission.CALL_PHONE),
         callScreeningRoleHeld = dev.argus.automation.telephony.callScreeningRoleHeld(app),
         readContactsGranted = granted(Manifest.permission.READ_CONTACTS),
+        readCalendarGranted = granted(Manifest.permission.READ_CALENDAR),
     )
 }
 

@@ -657,6 +657,8 @@ data class SettingsState(
     val callTriggerGranted: Boolean = false,
     /** Trigger ACL Bluetooth (P2-3): runtime grant NEARBY_DEVICES su Android 12+. */
     val bluetoothTriggerGranted: Boolean = false,
+    /** 0.8: READ_CALENDAR concesso: regole «evento in corso» e «inizio/fine di un evento». Opt-in come gli SMS. */
+    val calendarGranted: Boolean = false,
     /**
      * 0.8: righe opt-in come i trigger telefonia. [telephonyAvailable] false (telefono senza telefonia) nasconde
      * le righe di SMS, chiamate e filtro chiamate.
@@ -864,7 +866,12 @@ enum class AuthState { OK, EXPIRED, NOT_CONFIGURED }
 data class ProviderChoiceUi(val id: String, val label: String, val selected: Boolean)
 enum class BgLocationState { GRANTED, WHILE_IN_USE, DENIED, NOT_NEEDED }
 
-data class ContactRow(val displayName: String, val conversationId: String)   // id in monospace, azione rimuovi
+data class ContactRow(
+    val displayName: String,
+    val conversationId: String,   // id in monospace, azione rimuovi
+    /** 0.8: app della conversazione (WhatsApp, Telegram, Signal, Google Messages); null se non nota. */
+    val app: String? = null,
+)
 
 /**
  * Riga per-provider del breakdown budget. Metrica primaria: TOKEN in/out per finestra (null = "n/d",
@@ -938,6 +945,8 @@ interface SettingsCallbacks {
     fun onRequestCallPhonePermission() {}
     fun onRequestCallScreeningRole() {}
     fun onRequestContactsPermission() {}
+    /** 0.8: READ_CALENDAR per le regole sul calendario (condizione e trigger). */
+    fun onRequestCalendarPermission() {}
     fun onRemoveContact(conversationId: String); fun onAddContact()   // picker → risoluzione conversationId
     /** Selezione dal picker delle conversazioni 1:1 osservate. */
     fun onAddObservedContact(contact: ContactRow) {}
@@ -960,6 +969,8 @@ interface SettingsCallbacks {
     ) {}
     fun onRevokePrivacy()
     fun onRerunOnboarding()
+    /** 0.8: apre Sistema › Segreti. Default no-op. */
+    fun onOpenSecrets() {}
     /** «Pausa automazioni» (F21): true = nessuna regola scatta finché non si riprende. Default no-op. */
     fun onSetAutomationsPaused(paused: Boolean) {}
     /** 0.7.2: accende o spegne gli avvisi di salute delle regole. Default no-op. */

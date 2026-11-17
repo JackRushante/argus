@@ -5,6 +5,7 @@ import dev.argus.engine.brain.Brain
 import dev.argus.engine.brain.CapabilityManifest
 import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.model.Action
+import dev.argus.engine.model.OutputSpec
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireContext
 import dev.argus.engine.runtime.RuntimeDataBinding
@@ -65,6 +66,19 @@ class TransportBackedBrain(
         runtimeData: List<RuntimeDataBinding>,
     ): ActResult = try {
         transport.actResolved(context, goal, contextSources, allowedTools, runtimeData)
+    } catch (e: TransportException) {
+        ActResult(text = null, metaError = metaErrorOf(e))
+    }
+
+    override suspend fun actConstrained(
+        context: FireContext,
+        goal: String,
+        contextSources: List<String>,
+        allowedTools: List<String>,
+        runtimeData: List<RuntimeDataBinding>,
+        output: OutputSpec,
+    ): ActResult = try {
+        transport.actConstrained(context, goal, contextSources, allowedTools, runtimeData, output)
     } catch (e: TransportException) {
         ActResult(text = null, metaError = metaErrorOf(e))
     }

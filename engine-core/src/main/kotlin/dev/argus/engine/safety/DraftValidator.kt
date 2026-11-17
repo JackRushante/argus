@@ -1,6 +1,7 @@
 package dev.argus.engine.safety
 
 import dev.argus.engine.model.*
+import dev.argus.engine.runtime.CalendarTriggerPlanner
 import dev.argus.engine.runtime.CronSchedule
 import dev.argus.engine.runtime.ProgramInterpreter
 import java.net.URI
@@ -41,7 +42,7 @@ class DraftValidator(
         const val FORBIDDEN_PREFIX = "automation."
         const val FORBIDDEN_PREFIX_BARE = "automation"
 
-        val WHATSAPP_PACKAGES = setOf("com.whatsapp", "com.whatsapp.w4b")
+        val WHATSAPP_PACKAGES = ReplyChannels.WHATSAPP_PACKAGES
         val REPLY_TOOLS = setOf("whatsapp_reply")
         const val ARGUS_PACKAGE = "dev.argus"
 
@@ -54,6 +55,12 @@ class DraftValidator(
         private const val MAX_GEOFENCE_RADIUS_M = 100_000.0
         private const val MAX_LOITERING_MS = 86_400_000L
         private const val MAX_LLM_TIMEOUT_MS = 120_000L
+
+        // 0.8: condizioni di contesto e calendario. Un SSID è al massimo 32 byte, un nome Bluetooth 248.
+        private const val MAX_ZONE_ID_CHARS = 64
+        private const val MAX_SSID_CHARS = 32
+        private const val MAX_BLUETOOTH_DEVICE_CHARS = 248
+        private const val MAX_CALENDAR_FILTER_CHARS = 200
 
         /** Ritardo relativo one-shot (Trigger.Time.afterMs): da 1 secondo a 7 giorni. */
         const val MIN_DELAY_MS = 1_000L
@@ -106,6 +113,20 @@ class DraftValidator(
         FeatureGates.disabledIn(d).forEach { gate ->
             errDetail("not_available_yet", "Non disponibile in questa versione", gate.wireName)
         }
+        d.confirm?.let { confirm ->
+            if (!ConfirmPolicy.validTimeout(confirm.timeoutMs)) {
+                err(
+                    "confirm_timeout_invalid",
+                    "La conferma aspetta fra ${ConfirmPolicy.MIN_TIMEOUT_MS} e ${ConfirmPolicy.MAX_TIMEOUT_MS} ms",
+                )
+            }
+            if (!ConfirmPolicy.supportsTrigger(d.trigger)) {
+                err(
+                    "confirm_one_shot_unsupported",
+                    "Una regola che scatta una volta sola non può chiedere conferma: si spegne prima della risposta",
+                )
+            }
+        }
 
         validateTrigger(d.trigger, ::err, ::warn)
         if (d.trigger is Trigger.Sensor &&
@@ -127,7 +148,9 @@ class DraftValidator(
         validateVars(d.vars, d.trigger, ::err)
         // 0.8: destinatario SMS legato al chiamante/mittente e forma delle regole che filtrano le chiamate.
         validateTelephonyRule(d, ::err, ::warn)
-        val tree = preflightActions(d.actions, ::err)
+        val tree = preflightActions(d.actions, ::err).let { summary ->
+            summary.copy(captures = resolveInheritedConfidentiality(summary.captures, d.vars))
+        }
         if (AutomationSchema.versionFor(d) == AUTOMATION_SCHEMA_VERSION_P4 && tree.hasInvokeLlmV2) {
             err(
                 "p4_invoke_llm_v2_unsupported",
@@ -315,6 +338,8 @@ class DraftValidator(
             PhoneEvent.SMS_RECEIVED -> setOf(TriggerField.TEXT, TriggerField.NUMBER)
             PhoneEvent.INCOMING_CALL, PhoneEvent.CALL_ENDED, PhoneEvent.MISSED_CALL -> setOf(TriggerField.NUMBER)
         }
+        // 0.8: il titolo dell'evento (dato esterno: un invito lo scrive un altro).
+        is Trigger.CalendarEvent -> setOf(TriggerField.TITLE)
         else -> emptySet()
     }
 
@@ -323,7 +348,43 @@ class DraftValidator(
         val type: VarType = VarType.TEXT,
         val integrity: IntegrityLabel = IntegrityLabel.TAINTED,
         val confidentiality: ConfidentialityLabel,
+        /**
+         * 0.8: variabili da cui la cattura eredita la riservatezza (il body di una richiesta HTTP): se una
+         * è SECRET, o è un'altra cattura, la cattura diventa SECRET (vedi [resolveInheritedConfidentiality]).
+         */
+        val inheritsFrom: Set<String> = emptySet(),
     )
+
+    /**
+     * Floor statico della riservatezza delle catture che ereditano dagli input (0.8, `http_request`): SECRET
+     * se un input è un binding SECRET o una cattura SECRET. Punto fisso sulle catture (al massimo una
+     * passata per cattura): l'ordine dell'albero non conta e il risultato non è mai sotto il runtime.
+     */
+    private fun resolveInheritedConfidentiality(
+        captures: List<CaptureDeclaration>,
+        vars: List<VarBinding>,
+    ): List<CaptureDeclaration> {
+        val bindings = vars.associate { it.name to it.confidentiality }
+        var current = captures
+        repeat(captures.size) {
+            val secretCaptures = current.filter { it.confidentiality == ConfidentialityLabel.SECRET }
+                .mapTo(HashSet()) { it.name }
+            var changed = false
+            current = current.map { capture ->
+                val secretInput = capture.inheritsFrom.any {
+                    bindings[it] == ConfidentialityLabel.SECRET || it in secretCaptures
+                }
+                if (secretInput && capture.confidentiality != ConfidentialityLabel.SECRET) {
+                    changed = true
+                    capture.copy(confidentiality = ConfidentialityLabel.SECRET)
+                } else {
+                    capture
+                }
+            }
+            if (!changed) return current
+        }
+        return current
+    }
 
     private data class ActionFrame(val action: Action, val depth: Int, val inLoop: Boolean = false)
     private data class ActionTreeSummary(
@@ -384,20 +445,44 @@ class DraftValidator(
             CaptureDeclaration(it, confidentiality = ConfidentialityLabel.SECRET)
         }
         is Action.InvokeLlm -> action.captureAs?.let {
-            // Il goal può interpolare qualunque sink, incluso un valore SECRET: fino al join
-            // runtime P4-B il floor statico conservativo dell'output del modello è SECRET.
-            CaptureDeclaration(it, confidentiality = ConfidentialityLabel.SECRET)
+            val output = action.output
+            if (output != null) {
+                // 0.8: una risposta vincolata è una delle etichette approvate o un intero limitato, mai
+                // testo libero del modello: CLEAN, col tipo della forma. PRIVATE come una decisione personale.
+                CaptureDeclaration(
+                    it,
+                    type = LlmOutputPolicy.varType(output),
+                    integrity = IntegrityLabel.CLEAN,
+                    confidentiality = ConfidentialityLabel.PRIVATE,
+                )
+            } else {
+                // Il goal può interpolare qualunque sink, incluso un valore SECRET: fino al join
+                // runtime P4-B il floor statico conservativo dell'output del modello è SECRET.
+                CaptureDeclaration(it, confidentiality = ConfidentialityLabel.SECRET)
+            }
         }
         is Action.InvokeLlmV2 -> action.captureAs?.let {
             CaptureDeclaration(it, confidentiality = ConfidentialityLabel.SECRET)
         }
-        // 0.8 scaffold: la scelta dell'utente è una delle etichette approvate, ma finché `ask` è spento
-        // resta TAINTED (default fail-closed); chi la accende decide se può essere CLEAN.
-        is Action.Ask -> CaptureDeclaration(action.captureAs, confidentiality = ConfidentialityLabel.PRIVATE)
-        // 0.8 scaffold: la risposta di un server esterno è TAINTED; SECRET come l'output shell, perché la
-        // richiesta può portare intestazioni segrete.
+        // 0.8: la scelta dell'utente è sempre una delle etichette approvate (letterali nel fingerprint),
+        // quindi CLEAN e PUBLIC: si confronta e si usa anche nei campi di autorità.
+        is Action.Ask -> CaptureDeclaration(
+            action.captureAs,
+            integrity = IntegrityLabel.CLEAN,
+            confidentiality = ConfidentialityLabel.PUBLIC,
+        )
+        // 0.8: la risposta di un server esterno è TAINTED. SECRET se la richiesta porta un valore della
+        // cassaforte o una variabile SECRET nel body, altrimenti PRIVATE (come il join del runtime).
         is Action.HttpRequest -> action.captureAs?.let {
-            CaptureDeclaration(it, confidentiality = ConfidentialityLabel.SECRET)
+            CaptureDeclaration(
+                it,
+                confidentiality = if (SecretPolicy.carriesSecrets(action)) {
+                    ConfidentialityLabel.SECRET
+                } else {
+                    ConfidentialityLabel.PRIVATE
+                },
+                inheritsFrom = action.body?.let { body -> InterpolationPolicy.parse(body).refs.toSet() }.orEmpty(),
+            )
         }
         else -> null
     }
@@ -1013,7 +1098,15 @@ class DraftValidator(
             }
             // 0.8 scaffold: spenti (not_available_yet, vedi validate). Chi accende un trigger scrive qui i
             // suoi limiti; i sensori shake e flip_face_down passano già dal ramo Sensor.
-            is Trigger.CalendarEvent -> Unit
+            is Trigger.CalendarEvent -> {
+                if (trigger.offsetMinutes !in -CalendarTriggerPlanner.MAX_OFFSET_MINUTES..CalendarTriggerPlanner.MAX_OFFSET_MINUTES)
+                    err(
+                        "calendar_offset_invalid",
+                        "Offset calendario fuori da -${CalendarTriggerPlanner.MAX_OFFSET_MINUTES}.." +
+                            "${CalendarTriggerPlanner.MAX_OFFSET_MINUTES} minuti",
+                    )
+                validateCalendarFilters(trigger.titleMatch, trigger.calendar, err)
+            }
 
             is Trigger.NfcTag -> Unit
 
@@ -1090,20 +1183,45 @@ class DraftValidator(
             }
             // 0.8 scaffold: spente (not_available_yet, vedi validate). Chi accende una condizione scrive
             // qui i suoi limiti (un campo personale svuotato dall'export è "" e va rifiutato).
-            is Condition.Weekday -> Unit
+            is Condition.Weekday ->
+                if (condition.days.isEmpty() || !validZoneId(condition.tz))
+                    err("weekday_invalid", "Giorni della settimana: almeno un giorno e un fuso IANA valido")
 
-            is Condition.WifiConnected -> Unit
+            is Condition.WifiConnected -> condition.ssid?.let { ssid ->
+                if (!validContextText(ssid, MAX_SSID_CHARS))
+                    err("wifi_ssid_invalid", "Nome della rete Wi-Fi vuoto, troppo lungo o con caratteri di controllo")
+            }
 
-            is Condition.BluetoothConnected -> Unit
+            is Condition.BluetoothConnected -> condition.device?.let { device ->
+                if (!validContextText(device, MAX_BLUETOOTH_DEVICE_CHARS))
+                    err("bluetooth_device_invalid", "Dispositivo Bluetooth vuoto, troppo lungo o con caratteri di controllo")
+            }
 
             is Condition.HeadsetConnected -> Unit
 
-            is Condition.CalendarBusy -> Unit
+            is Condition.CalendarBusy -> validateCalendarFilters(condition.titleMatch, condition.calendar, err)
 
             is Condition.StoredCompare -> Unit
 
             is Condition.UserModeIs -> Unit
         }
+    }
+
+    // --- 0.8: condizioni di contesto e trigger del calendario ---------------------------------------
+
+    private fun validZoneId(tz: String): Boolean =
+        tz.length <= MAX_ZONE_ID_CHARS && runCatching { ZoneId.of(tz) }.isSuccess
+
+    /**
+     * Un filtro di testo letterale: non vuoto (il PersonalDataStripper lascia "" da completare), limitato,
+     * senza caratteri di controllo.
+     */
+    private fun validContextText(value: String, maxChars: Int): Boolean =
+        value.isNotBlank() && value.length <= maxChars && value.none(Char::isISOControl)
+
+    private fun validateCalendarFilters(titleMatch: String?, calendar: String?, err: (String, String) -> Unit) {
+        if (listOfNotNull(titleMatch, calendar).any { !validContextText(it, MAX_CALENDAR_FILTER_CHARS) })
+            err("calendar_filter_invalid", "Filtro del calendario vuoto, troppo lungo o con caratteri di controllo")
     }
 
     private fun validateStateCondition(c: Condition.StateEquals, err: (String, String) -> Unit) {
@@ -1177,7 +1295,7 @@ class DraftValidator(
             is Action.InputText -> validateRequiredText(action.text, MAX_TEXT_LENGTH, "text_invalid", err)
             is Action.WhatsAppReply -> {
                 validateRequiredText(action.text, MAX_TEXT_LENGTH, "text_invalid", err)
-                validateReplyTarget(trigger, whitelist, err)
+                validateReplyTarget(trigger, whitelist, err, ReplyKind.WHATSAPP)
             }
             is Action.RunShell -> {
                 validateRequiredText(action.cmd, MAX_COMMAND_LENGTH, "shell_invalid", err)
@@ -1301,7 +1419,7 @@ class DraftValidator(
                 }
             }
             is Action.SetRotation -> Unit // solo booleano, nulla da validare
-            is Action.HttpRequest -> validateHttpRequest(action, err)
+            is Action.HttpRequest -> validateHttpRequest(action, err, warn)
             // 0.5.1: azioni privilegiate tipizzate. Solo booleani/nessun campo: nulla da validare.
             is Action.SetAirplane,
             is Action.SetLocation,
@@ -1320,15 +1438,18 @@ class DraftValidator(
             is Action.If, is Action.While -> Unit
             // 0.8 scaffold: spente (not_available_yet, vedi validate). Chi accende un'azione scrive qui
             // i suoi limiti; i campi letterali (numeri, chiavi, etichette) non devono contenere `${'$'}{`.
-            is Action.Ask -> Unit
+            is Action.Ask -> validateAsk(action, err)
 
             is Action.SetStored -> Unit
 
             is Action.SetUserMode -> Unit
 
-            is Action.NotificationReply -> Unit
+            is Action.NotificationReply -> {
+                validateRequiredText(action.text, MAX_TEXT_LENGTH, "text_invalid", err)
+                validateReplyTarget(trigger, whitelist, err, ReplyKind.NOTIFICATION)
+            }
 
-            is Action.NotificationAction -> Unit
+            is Action.NotificationAction -> validateNotificationAction(action, trigger, err, warn)
 
             is Action.SendSms -> validateSendSms(action, err, warn)
 
@@ -1495,18 +1616,22 @@ class DraftValidator(
 
     /**
      * `http_request` (0.4.1). URL e intestazioni sono LETTERALI: un segnaposto lì è un errore, perché i
-     * dati esterni possono entrare solo nel body. https obbligatorio (http solo verso loopback),
+     * dati esterni possono entrare solo nel body. https obbligatorio (http solo loopback o rete locale, 0.8),
      * nessun userinfo; al massimo 10 intestazioni con nomi validi, senza `Host`, `Content-Length`,
      * `Transfer-Encoding`, `Connection`; body fino a 16 KB. Le stesse regole valgono a runtime
      * ([HttpRequestPolicy.isResolvedShapeValid]).
      */
-    private fun validateHttpRequest(action: Action.HttpRequest, err: (String, String) -> Unit) {
+    private fun validateHttpRequest(
+        action: Action.HttpRequest,
+        err: (String, String) -> Unit,
+        warn: (String, String) -> Unit,
+    ) {
         if (InterpolationPolicy.containsInterpolation(action.url)) {
             err("http_url_interpolated", "L'URL della richiesta HTTP è letterale: niente \${…}")
         } else if (!HttpRequestPolicy.isUrlAllowed(action.url)) {
             err(
                 "http_url_invalid",
-                "URL non valido: serve https:// (http:// solo per localhost), senza utente:password",
+                "URL non valido: serve https:// (http:// solo su questo telefono o sulla rete locale), senza utente:password",
             )
         }
 
@@ -1562,6 +1687,81 @@ class DraftValidator(
             if (HttpRequestPolicy.bodyBytes(body) > HttpRequestPolicy.MAX_BODY_BYTES) {
                 err("http_body_too_large", "Body oltre ${HttpRequestPolicy.MAX_BODY_BYTES} byte")
             }
+        }
+        validateHttpCapture(action, err)
+        validateHttpSecrets(action, err)
+        // 0.8: `http://` sulla rete dell'utente è ammesso ma viaggia in chiaro. Con un valore della
+        // cassaforte è un errore (fuori dal loopback il segreto non viaggia mai in chiaro).
+        if (!InterpolationPolicy.containsInterpolation(action.url) &&
+            HttpRequestPolicy.isUrlAllowed(action.url) &&
+            HttpRequestPolicy.isCleartextOnLocalNetwork(action.url)
+        ) {
+            if (SecretPolicy.carriesSecrets(action)) {
+                err(
+                    "http_cleartext_secret",
+                    "Un segreto non viaggia senza cifratura: per la rete locale serve https://",
+                )
+            } else {
+                warn("http_cleartext_local", "La richiesta viaggia senza cifratura sulla tua rete")
+            }
+        }
+    }
+
+    /** 0.8: `captureAs` (nome di variabile) ed `extract` (puntatore JSON letterale, solo con la cattura). */
+    private fun validateHttpCapture(action: Action.HttpRequest, err: (String, String) -> Unit) {
+        val extract = action.extract ?: return
+        if (action.captureAs == null) {
+            err("http_extract_without_capture", "extract serve solo con captureAs")
+        }
+        if (!HttpCapturePolicy.isPointerValid(extract)) {
+            err(
+                "http_extract_invalid",
+                "Puntatore JSON non valido: inizia con /, al massimo ${HttpCapturePolicy.MAX_POINTER_CHARS} " +
+                    "caratteri, ~ solo come ~0 o ~1, niente \${…}",
+            )
+        }
+    }
+
+    /**
+     * 0.8: intestazioni e parametri dalla cassaforte. La regola porta solo nomi: nome del segreto
+     * `[a-z][a-z0-9_]{0,31}`, nome dell'intestazione con le regole di quelle letterali, prefisso letterale.
+     * Che il segreto esista lo controlla l'approvazione sul telefono (`secret_missing`), non il validatore.
+     */
+    private fun validateHttpSecrets(action: Action.HttpRequest, err: (String, String) -> Unit) {
+        val secretHeaders = action.secretHeaders.orEmpty()
+        val secretQuery = action.secretQuery.orEmpty()
+        if (secretHeaders.isEmpty() && secretQuery.isEmpty()) return
+        if (action.headers.orEmpty().size + secretHeaders.size > HttpRequestPolicy.MAX_HEADERS ||
+            secretQuery.size > HttpRequestPolicy.MAX_SECRET_QUERY
+        ) {
+            err(
+                "http_secrets_too_many",
+                "Massimo ${HttpRequestPolicy.MAX_HEADERS} intestazioni in tutto e " +
+                    "${HttpRequestPolicy.MAX_SECRET_QUERY} parametri segreti",
+            )
+        }
+        val refs = secretHeaders + secretQuery
+        if (refs.any { !SecretPolicy.isNameValid(it.secret) }) {
+            err("secret_name_invalid", "Nome del segreto non valido: [a-z][a-z0-9_]{0,31}")
+        }
+        val badHeader = secretHeaders.any { ref ->
+            !HttpRequestPolicy.isHeaderNameValid(ref.name) || HttpRequestPolicy.isHeaderNameForbidden(ref.name) ||
+                ref.name.lowercase(java.util.Locale.ROOT) == HttpRequestPolicy.CONTENT_TYPE_HEADER
+        }
+        val badQuery = secretQuery.any { !HttpRequestPolicy.isSecretQueryValid(it.copy(secret = "x")) }
+        val badPrefix = refs.any { !HttpRequestPolicy.isSecretPrefixValid(it.prefix) }
+        if (badHeader || badQuery || badPrefix || HttpRequestPolicy.secretQueryDuplicates(action)) {
+            err(
+                "http_secret_ref_invalid",
+                "Intestazione o parametro segreto non valido (nome, duplicato, Content-Type, o prefisso " +
+                    "oltre ${HttpRequestPolicy.MAX_SECRET_PREFIX_CHARS} caratteri o con \${…})",
+            )
+        }
+        if (HttpRequestPolicy.secretHeaderConflicts(action)) {
+            err(
+                "http_secret_header_conflict",
+                "Un'intestazione segreta ha lo stesso nome di un'altra intestazione",
+            )
         }
     }
 
@@ -1822,7 +2022,7 @@ class DraftValidator(
         }
         if (replyTargetSender) {
             if (!hasReplyTool) err("reply_target_without_tool", "replyTargetSender senza tool di reply")
-            validateReplyTarget(trigger, whitelist, err)
+            validateReplyTarget(trigger, whitelist, err, ReplyKind.GENERATIVE)
         }
     }
 
@@ -1845,6 +2045,31 @@ class DraftValidator(
                 validateInvokeLlmNotificationDeliver(action, err)
             GenerativeDeliverMode.CAPTURE_ONLY ->
                 validateInvokeLlmCaptureOnly(action, err)
+        }
+
+        // 0.8: uscita vincolata, solo per una chiamata che cattura in una variabile.
+        action.output?.let { output ->
+            // Codici letterali (li legge la copertura dei testi della UI), uno per problema della forma.
+            when (LlmOutputPolicy.specProblem(output)) {
+                null -> if (!LlmOutputPolicy.constrainedGoalFits(action.goal, output, MAX_TEXT_LENGTH)) {
+                    err("goal_invalid", "Il goal con l'istruzione della forma supera $MAX_TEXT_LENGTH caratteri")
+                }
+                "llm_output_choices_invalid" ->
+                    err("llm_output_choices_invalid", "Da 2 a 8 etichette uniche [a-z0-9_-]{1,24}")
+                "llm_output_choices_forbidden" ->
+                    err("llm_output_choices_forbidden", "Solo una risposta CHOICE ha etichette")
+                "llm_output_bounds_required" ->
+                    err("llm_output_bounds_required", "Una risposta NUMBER richiede min e max")
+                "llm_output_bounds_invalid" ->
+                    err("llm_output_bounds_invalid", "min non oltre max, entro ±${LlmOutputPolicy.MAX_ABS_NUMBER}")
+                else -> err("llm_output_bounds_forbidden", "Solo una risposta NUMBER ha min e max")
+            }
+            if (action.captureAs == null || action.deliver != GenerativeDeliverMode.CAPTURE_ONLY) {
+                err(
+                    "llm_output_requires_capture",
+                    "Una risposta vincolata si cattura in una variabile (CAPTURE_ONLY con captureAs)",
+                )
+            }
         }
 
         // Difesa in profondità per-tool + timeout: valgono per tutti i sink (web.search è in
@@ -1927,7 +2152,7 @@ class DraftValidator(
             err("reply_target_unbound", "Un tool di reply deve essere vincolato al mittente del trigger")
         if (action.replyTargetSender) {
             if (!hasReplyTool) err("reply_target_without_tool", "replyTargetSender senza tool di reply")
-            validateReplyTarget(trigger, whitelist, err)
+            validateReplyTarget(trigger, whitelist, err, ReplyKind.GENERATIVE)
         }
 
         if (action.allowedTools.any { it.startsWith("screen.") || it == "state.read" } && hasReplyTool)
@@ -1964,18 +2189,35 @@ class DraftValidator(
             err("context_sources_duplicated", "Context sources duplicate in InvokeLlm")
     }
 
+    /** Chi risponde: `whatsapp_reply`, `notification_reply` (0.8) o l'AI (entrambe le famiglie). */
+    private enum class ReplyKind { WHATSAPP, NOTIFICATION, GENERATIVE }
+
     private fun validateReplyTarget(
         trigger: Trigger,
         whitelist: Set<String>,
         err: (String, String) -> Unit,
+        kind: ReplyKind,
     ) {
         val notification = trigger as? Trigger.Notification
         if (notification == null) {
             err("reply_target_no_notification", "Reply richiede un trigger Notification")
             return
         }
-        if (notification.pkg !in WHATSAPP_PACKAGES)
-            err("reply_wrong_package", "WhatsAppReply richiede un package WhatsApp riconosciuto")
+        val pkg = notification.pkg
+        val packageAllowed = when (kind) {
+            ReplyKind.WHATSAPP -> ReplyChannels.isWhatsApp(pkg)
+            ReplyKind.NOTIFICATION -> ReplyChannels.isNotificationReplyPackage(pkg)
+            ReplyKind.GENERATIVE -> ReplyChannels.isReplyPackage(pkg)
+        }
+        when {
+            packageAllowed -> Unit
+            kind != ReplyKind.WHATSAPP && pkg in ReplyChannels.REFUSED_PACKAGES ->
+                err("reply_app_unsupported", "App di messaggi senza una chiave di conversazione affidabile")
+            kind == ReplyKind.NOTIFICATION ->
+                err("reply_wrong_package", "notification_reply richiede Telegram, Signal o Google Messaggi (WhatsApp usa whatsapp_reply)")
+            else ->
+                err("reply_wrong_package", "WhatsAppReply richiede un package WhatsApp riconosciuto")
+        }
         if (notification.isGroup != false)
             err("reply_target_group", "Reply automatiche solo su chat 1:1 verificata")
         val conversationId = notification.conversationId
@@ -1983,6 +2225,56 @@ class DraftValidator(
             err("reply_needs_conversation_id", "Reply automatiche richiedono conversationId")
         else if (conversationId !in whitelist)
             err("target_not_whitelisted", "Conversazione non in whitelist")
+        // Fuori da WhatsApp la chat è solo lo shortcut di conversazione della STESSA app (ReplyChannels).
+        if (packageAllowed && !conversationId.isNullOrBlank() &&
+            !ReplyChannels.isStableConversation(pkg, conversationId)
+        ) err("reply_conversation_unstable", "La conversazione non è lo shortcut di conversazione dell'app")
+    }
+
+    /**
+     * `notification_action` (0.8): agisce sulla notifica del trigger. CLICK preme il pulsante col testo
+     * approvato: mai su Argus né sulle app vietate alle macro, ed è sempre segnalato in revisione.
+     */
+    private fun validateNotificationAction(
+        action: Action.NotificationAction,
+        trigger: Trigger,
+        err: (String, String) -> Unit,
+        warn: (String, String) -> Unit,
+    ) {
+        val notification = trigger as? Trigger.Notification
+        if (notification == null)
+            err("notification_action_no_notification", "notification_action richiede un trigger Notification")
+        NotificationActionPolicy.problems(action).forEach { problem ->
+            when (problem) {
+                NotificationActionPolicy.Problem.LABEL_MISSING,
+                NotificationActionPolicy.Problem.LABEL_UNEXPECTED,
+                NotificationActionPolicy.Problem.LABEL_INVALID,
+                -> err(
+                    "notification_action_label_invalid",
+                    "CLICK richiede il testo del pulsante (1..${NotificationActionPolicy.MAX_LABEL_CHARS} " +
+                        "caratteri, una riga); DISMISS e SNOOZE non ne hanno",
+                )
+                NotificationActionPolicy.Problem.LABEL_INTERPOLATED ->
+                    err("notification_action_label_interpolated", "Il testo del pulsante è letterale, senza variabili")
+                NotificationActionPolicy.Problem.SNOOZE_MISSING,
+                NotificationActionPolicy.Problem.SNOOZE_UNEXPECTED,
+                NotificationActionPolicy.Problem.SNOOZE_RANGE,
+                -> err(
+                    "notification_action_snooze_invalid",
+                    "SNOOZE richiede snoozeMinutes tra ${NotificationActionPolicy.MIN_SNOOZE_MINUTES} e " +
+                        "${NotificationActionPolicy.MAX_SNOOZE_MINUTES}; le altre operazioni non lo usano",
+                )
+            }
+        }
+        if (action.op == NotificationActionOp.CLICK) {
+            if (notification != null && NotificationActionPolicy.isForbiddenTarget(notification.pkg))
+                err("notification_action_forbidden_app", "Non si premono pulsanti nelle notifiche di questa app")
+            warn(
+                "notification_click_review",
+                "Argus premerà per te il pulsante «${action.label.orEmpty()}» della notifica di " +
+                    "${notification?.pkg.orEmpty()}",
+            )
+        }
     }
 
     private fun validatePackage(value: String, blankCode: String, err: (String, String) -> Unit) {
@@ -1993,6 +2285,30 @@ class DraftValidator(
     private fun validateOptionalText(value: String?, code: String, err: (String, String) -> Unit) {
         if (value != null && (value.isBlank() || value.length > MAX_TEXT_LENGTH))
             err(code, "Campo testuale vuoto o troppo lungo")
+    }
+
+    /**
+     * `ask` (0.8): domanda di al massimo [AskPolicy.MAX_PROMPT_CHARS] caratteri (anche dopo
+     * l'interpolazione, ricontrollata a runtime), da 2 a 4 scelte letterali uniche di 1..24 caratteri,
+     * attesa da 10 s a 60 min, scelta predefinita fra quelle approvate.
+     */
+    private fun validateAsk(action: Action.Ask, err: (String, String) -> Unit) {
+        if (!AskPolicy.validResolvedPrompt(action.prompt)) {
+            err("ask_prompt_invalid", "Domanda obbligatoria, al massimo ${AskPolicy.MAX_PROMPT_CHARS} caratteri")
+        }
+        if (!AskPolicy.validChoices(action.choices)) {
+            err(
+                "ask_choices_invalid",
+                "Da ${AskPolicy.MIN_CHOICES} a ${AskPolicy.MAX_CHOICES} scelte uniche di 1..${AskPolicy.MAX_CHOICE_CHARS} " +
+                    "caratteri, senza caratteri di controllo né segnaposto",
+            )
+        }
+        if (!AskPolicy.validTimeout(action.timeoutMs)) {
+            err("ask_timeout_invalid", "L'attesa della risposta va da 10 secondi a 60 minuti")
+        }
+        if (!AskPolicy.validDefault(action)) {
+            err("ask_default_invalid", "La scelta predefinita deve essere una delle scelte")
+        }
     }
 
     private fun validateRequiredText(value: String, max: Int, code: String, err: (String, String) -> Unit) {

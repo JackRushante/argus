@@ -5,6 +5,7 @@ import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.brain.WhitelistedContact
 import dev.argus.engine.model.AutomationDraft
 import dev.argus.engine.model.Trigger
+import dev.argus.engine.safety.ReplyChannels
 
 /**
  * Alias dei contatti in whitelist (D4). Al modello (cloud o bridge) non viaggia mai l'id reale della
@@ -18,6 +19,18 @@ object ContactAliasMapper {
     private const val PREFIX = "contact_"
 
     fun aliasFor(index: Int): String = "$PREFIX${index + 1}"
+
+    /**
+     * Nome del contatto mostrato al modello. 0.8: la whitelist vale per (app, conversazione), quindi
+     * fuori da WhatsApp il nome porta l'app e il package, così il trigger usa il package giusto. Per
+     * WhatsApp e per gli id inseriti a mano resta il solo nome, come prima. Mai l'id reale.
+     */
+    fun modelDisplayName(contact: WhitelistedContact): String {
+        val pkg = ReplyChannels.packageOf(contact.id) ?: return contact.displayName
+        if (ReplyChannels.isWhatsApp(pkg)) return contact.displayName
+        val app = ReplyChannels.appName(pkg) ?: return contact.displayName
+        return "${contact.displayName} ($app, pkg $pkg)"
+    }
 
     /** alias -> id reale, nell'ordine della whitelist del manifest. */
     fun aliasMap(contacts: List<WhitelistedContact>): Map<String, String> =

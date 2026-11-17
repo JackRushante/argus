@@ -361,11 +361,7 @@ class ConnectivitySentinelService : Service() {
     private fun ssidOf(network: Network): String? =
         connectivityManager.getNetworkCapabilities(network)?.let(::ssidFrom)
 
-    private fun ssidFrom(capabilities: NetworkCapabilities): String? =
-        (capabilities.transportInfo as? WifiInfo)?.ssid
-            ?.removeSurrounding("\"")
-            ?.trim()
-            ?.takeIf { it.isNotEmpty() && it != WifiManager.UNKNOWN_SSID }
+    private fun ssidFrom(capabilities: NetworkCapabilities): String? = wifiSsidFrom(capabilities)
 
     private fun observeWifi(state: ConnState, name: String?, initial: Boolean) {
         dispatchObservation(
@@ -462,6 +458,16 @@ internal class WifiInitialReference {
         return true
     }
 }
+
+/**
+ * Il nome della rete Wi-Fi da capability lette con `FLAG_INCLUDE_LOCATION_INFO`; null se redatto o ignoto.
+ * Lo usano la sentinella del trigger e la condizione `wifi_connected`.
+ */
+internal fun wifiSsidFrom(capabilities: NetworkCapabilities): String? =
+    (capabilities.transportInfo as? WifiInfo)?.ssid
+        ?.removeSurrounding("\"")
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() && it != WifiManager.UNKNOWN_SSID }
 
 /** Uno sticky snapshot assente/incompleto è ignoto: non va inventato come DISCONNECTED. */
 internal fun powerConnectionState(battery: Intent?): ConnState? {

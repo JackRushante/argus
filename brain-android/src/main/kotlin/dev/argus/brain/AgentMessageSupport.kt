@@ -13,6 +13,7 @@ import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireContext
 import dev.argus.engine.runtime.RuntimeDataBinding
 import dev.argus.engine.runtime.TriggerEvent
+import dev.argus.engine.safety.ReplyChannels
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonArray
@@ -47,7 +48,6 @@ internal object AgentMessageSupport {
     const val MIN_ACT_TIMEOUT_MILLIS = 1_000L
     const val MAX_ACT_TIMEOUT_MILLIS = 120_000L
 
-    val WHATSAPP_PACKAGES = setOf("com.whatsapp", "com.whatsapp.w4b")
     val ACT_CONTEXT_SOURCES = setOf("notification", "state")
 
     /** Sorgenti di contesto ammesse per il sink NOTIFICA #59: solo "state" (opzionale), MAI
@@ -123,10 +123,11 @@ internal object AgentMessageSupport {
         }
     }
 
-    fun requireWhatsAppNotification(context: FireContext): TriggerEvent.NotificationPosted {
+    /** Reply: un messaggio 1:1 in arrivo da WhatsApp o (0.8) da Telegram, Signal, Google Messaggi. */
+    fun requireReplyNotification(context: FireContext): TriggerEvent.NotificationPosted {
         val notification = context.event as? TriggerEvent.NotificationPosted
             ?: throw config("richiede un evento Notification")
-        if (notification.pkg !in WHATSAPP_PACKAGES || notification.isGroup != false) {
+        if (!ReplyChannels.isReplyPackage(notification.pkg) || notification.isGroup != false) {
             throw config("reply non autorizzata")
         }
         cleanUntrusted(notification.text, MAX_NOTIFICATION_TEXT_CHARS)
@@ -329,6 +330,10 @@ BINDING RULES:
         val sender = cleanUntrusted(notification.sender, MAX_NOTIFICATION_SENDER_CHARS)
         val text = cleanUntrusted(notification.text, MAX_NOTIFICATION_TEXT_CHARS).orEmpty()
         append("Message received")
+        // 0.8: fuori da WhatsApp il modello sa in quale app risponde (WhatsApp resta byte-identico).
+        if (!ReplyChannels.isWhatsApp(notification.pkg)) {
+            ReplyChannels.appName(notification.pkg)?.let { append(" on ").append(it) }
+        }
         if (sender != null) append(" from ").append(sender)
         append(": ").append(text)
         if (stateLines.isNotEmpty()) {
@@ -469,10 +474,12 @@ Same meaning as the @@META@@ line, same rule 8. Do not write @@META@@."""
                     manifest.whitelistedContacts.forEachIndexed { index, contact ->
                         addJsonObject {
                             put("alias", ContactAliasMapper.aliasFor(index))
-                            put("display_name", contact.displayName)
+                            put("display_name", ContactAliasMapper.modelDisplayName(contact))
                         }
                     }
                 }
+                // 0.8: the NAMES of the secrets saved on the phone; their values never leave it.
+                putJsonArray("saved_secrets") { manifest.savedSecrets.forEach { add(JsonPrimitive(it)) } }
             }
             putJsonObject("state") {
                 putJsonObject("values") {
@@ -540,6 +547,12 @@ BINDING RULES:
    minimum classification; allowedTools must be exactly ["whatsapp_reply"],
    replyTargetSender=true and an explicit timeoutMs;
    use a static whatsapp_reply only if the user dictates the exact text of the reply.
+   Telegram (org.telegram.messenger, org.telegram.messenger.web), Signal (org.thoughtcrime.securesms)
+   and Google Messages (com.google.android.apps.messaging) get the SAME replies under the same rules:
+   a whitelisted contact on one of them shows "(App, pkg <package>)" in its display_name and the
+   trigger pkg must be exactly that package. The static reply there is notification_reply (never
+   whatsapp_reply); a generated reply is invoke_llm/invoke_llm_v2 exactly as above, allowedTools
+   still ["whatsapp_reply"] (the reply tool of every app). No automatic replies on any other app.
 10. If manifest.available_triggers is present, use ONLY the listed triggers (empty list =
     no armable trigger):
     "time", "immediate" (run-once-on-activation), "notification", "geofence";
@@ -552,6 +565,7 @@ BINDING RULES:
     "phone_state.call" also covers MISSED_CALL; the SIM filter needs "phone_state.sim".
     "manual" (user-started: button, widget, shortcut, tile) is always listed.
     "app_event" (an app opened or closed) is usable only if listed.
+    "calendar_event" (start or end of a calendar event) is usable only if listed.
     A requested trigger that is not in the list must NOT be compiled: briefly point out the
     missing grant or mechanism in Settings and return draft null with error_code
     "unsupported_capability".
@@ -640,7 +654,11 @@ BINDING RULES:
   "actions": [Action, ...],
   "conditions": Condition | null,          // optional
   "rationale": string,                     // optional
-  "cooldownMs": integer >= 0               // optional
+  "cooldownMs": integer >= 0,              // optional
+  "confirm": {"timeoutMs":integer}         // optional: "ask me first / before running it". When the rule
+                                           // fires the phone asks Run/Cancel; no answer within timeoutMs
+                                           // (30000..3600000, default 300000) = not run. Never with immediate
+                                           // or one-shot time triggers (at, afterMs). Omit it otherwise.
 }
 
 Trigger, discriminated by "type":
@@ -688,6 +706,11 @@ Trigger, discriminated by "type":
 - {"type":"media", "state":"PLAYING"|"STOPPED"}  // music/video playback started / finished
 - {"type":"app_event", "pkg":string, "event":"OPENED"|"CLOSED"}  // an app comes to the foreground / leaves it
   (pkg = the exact package, from installed_app_candidates; opening and closing are two rules, see rule 17)
+- {"type":"calendar_event", "phase":"START"|"END", "offsetMinutes":integer, "titleMatch":string|null,
+   "calendar":string|null}  // at the start or end of each matching event in the phone's calendar, shifted by
+  offsetMinutes (-120..120, negative = before). titleMatch = the title contains it (any case), calendar = the
+  calendar's exact name; null = any. All-day, declined and "free" events never count. Never with run_shell or
+  ui_steps (an invitation is written by others). The event title can be bound as trigger_payload field "TITLE".
 - {"type":"manual"}  // runs ONLY when the user starts it by hand, any number of times: a button, a widget,
   a Home-screen shortcut or a quick-settings tile. Use it ONLY when the user asks for one of those.
   Doing something now, or a request with no trigger at all, is "immediate", never "manual".
@@ -700,6 +723,17 @@ Condition, discriminated by "type":
   "GT" and the bare number as value: it needs no state reader family.
 - {"type":"app_in_foreground", "pkg":string}
 - {"type":"location_in", "lat":number, "lng":number, "radiusM":number}
+- {"type":"weekday", "days":["MON"|"TUE"|"WED"|"THU"|"FRI"|"SAT"|"SUN",...], "tz":string}  // today, in tz
+  (IANA id as for time_window), is one of the days; at least one day
+- {"type":"wifi_connected", "ssid":string|null}  // connected to Wi-Fi; ssid = the EXACT network name the user
+  mentions, null = any network. A name also needs "connectivity.wifi.identity" in available_triggers
+- {"type":"bluetooth_connected", "device":string|null}  // a Bluetooth device is connected; device = its exact
+  name (any case) or MAC address, null = any device. Needs "connectivity.bt" in available_triggers
+- {"type":"headset_connected", "kind":"WIRED"|"BLUETOOTH"|"ANY"}  // headphones or a headset are connected
+  (wired and USB are WIRED); never the phone's own speaker
+- {"type":"calendar_busy", "titleMatch":string|null, "calendar":string|null}  // an event of the phone's
+  calendar is in progress now; filters as calendar_event, same exclusions. Needs "calendar_event" in
+  available_triggers (same calendar permission)
 - {"type":"and", "all":[Condition,...]}
 - {"type":"or", "any":[Condition,...]}
 - {"type":"not", "cond":Condition}
@@ -718,6 +752,13 @@ Action, discriminated by "type":
 - {"type":"tap", "x":integer, "y":integer}
 - {"type":"input_text", "text":string}
 - {"type":"whatsapp_reply", "text":string}
+- {"type":"notification_reply", "text":string}  // like whatsapp_reply (rule 9) for Telegram, Signal and
+   // Google Messages: replies in the 1:1 chat whose notification started the rule
+- {"type":"notification_action", "op":"DISMISS"|"SNOOZE"|"CLICK", "label":string|null,
+   "snoozeMinutes":integer|null}  // acts on the notification that started the rule (notification
+   // trigger only): DISMISS clears it, SNOOZE hides it for snoozeMinutes (1-1440, only with SNOOZE),
+   // CLICK presses its button whose visible text is exactly label (literal, never ${'$'}{var}; only with
+   // CLICK). Never a button that asks for text: use a reply for that. Not on system apps or Argus
 - {"type":"run_shell", "cmd":string}  // flat v1: literal command; P4: ${'$'}{var} interpolation allowed;
   // max 8192 characters; only with
   time/geofence/connectivity/sensor triggers or with a whitelisted 1:1 WhatsApp chat;
@@ -766,7 +807,13 @@ Action, discriminated by "type":
 - {"type":"invoke_llm", "goal":string, "contextSources":[string,...],
    "allowedTools":[string,...], "replyTargetSender":boolean, "timeoutMs":integer,
    "deliver":"WHATSAPP_REPLY"|"LOCAL_NOTIFICATION"|"CAPTURE_ONLY",
-   "notificationTitle":string|null}
+   "notificationTitle":string|null,
+   "output":{"kind":"CHOICE"|"NUMBER"|"BOOLEAN","choices":[string,...],"min":integer,"max":integer}|null}
+   // output (only with CAPTURE_ONLY + captureAs) constrains the answer: CHOICE = exactly one of 2-8
+   // labels matching [a-z0-9_-]{1,24}; NUMBER = an integer between min and max (both required);
+   // BOOLEAN = yes/no, captured as true/false. PREFER a constrained output whenever the rule only needs
+   // a decision ("is this urgent?" -> BOOLEAN, "urgent, normal or low?" -> CHOICE, "rate 1 to 5" ->
+   // NUMBER) and then branch with var_compare: the captured value is trusted, free text is not.
    // deliver defaults to WHATSAPP_REPLY (reply to an incoming notification). LOCAL_NOTIFICATION =
    // posts a local notification with the generated text (any trigger): allowedTools without
    // whatsapp_reply, replyTargetSender=false, contextSources []/["state"], notificationTitle
@@ -791,10 +838,20 @@ Action, discriminated by "type":
 - {"type":"http_request", "method":"GET"|"POST"|"PUT"|"DELETE", "url":string,
    "headers":{string:string}|null, "body":string|null, "contentType":string|null}
    // calls a web address. Use it ONLY with a URL the user gave you: never invent or guess one. url and
-   // headers are LITERAL (never ${'$'}{var}); https only (http only for localhost); at most 10 headers;
+   // headers are LITERAL (never ${'$'}{var}); https, or http only towards this phone or the user's own
+   // network (localhost, 192.168.x.x, 10.x.x.x, name.local); at most 10 headers;
    // body max 16 KB, none on GET. Variables, also external data, go ONLY in body; with contentType
    // "application/json" put them inside a quoted JSON string, e.g. "body":"{\"text\":\"${'$'}{sms}\"}".
    // A key or token the user dictates goes in a header exactly as dictated
+   // Optional "secretHeaders":[SecretRef,...] and "secretQuery":[SecretRef,...], SecretRef =
+   // {"name":string,"secret":string,"prefix":string}: a value from the phone's secrets vault, by NAME. name =
+   // header or query parameter, secret = a name from manifest.saved_secrets (never invent one), prefix =
+   // literal text before the value (e.g. "Bearer ", or ""). When the user names a saved secret ("with the
+   // secret ha_token") use it, e.g. "secretHeaders":[{"name":"Authorization","secret":"ha_token","prefix":"Bearer "}];
+   // never put a secret's name in headers. A secret never goes over http except to localhost
+   // Optional "captureAs":string (P4) puts the response body (status 2xx) in a new TEXT variable, at most
+   // 4096 characters; "extract":string = a JSON pointer like "/current/temp" to take one string, number or
+   // boolean of a JSON response instead of the whole body
 - {"type":"app_control", "pkg":string, "op":"FORCE_STOP"|"FREEZE"|"UNFREEZE"}  // stops, disables (FREEZE) or
    // re-enables an app. pkg is a literal package taken from installed_app_candidates, never ${'$'}{var}; never
    // Argus, the launcher or a system app
@@ -858,7 +915,8 @@ VarBinding, discriminated by "type":
    // for builtin readers and NUMBER/BOOLEAN; TEXT from setting/system_property/sysfs/dumpsys_field is TAINTED
 - {"type":"trigger_payload", "name":string, "field":"TEXT"|"TITLE"|"SENDER"|"NUMBER",
    "extractionRegex":string|null, "confidentiality":"PUBLIC"|"PRIVATE"|"SECRET"}
-   // EXTERNAL payload of the trigger (SMS/notification): integrity TAINTED, confidentiality >= PRIVATE.
+   // EXTERNAL payload of the trigger (SMS/notification; calendar_event: only TITLE): integrity TAINTED,
+   // confidentiality >= PRIVATE.
    // extractionRegex = first non-empty capture group, or the whole match; null = full field.
 - {"type":"random_int", "name":string, "max":integer (1..1000000)}
    // ENGINE-generated random integer in [0, max) (i.e. 0..max-1). Integrity CLEAN (not tainted, not a
@@ -870,7 +928,8 @@ VarBinding, discriminated by "type":
    // Integrity CLEAN. Use it as ${'$'}{name} for the current time or date in any text.
 
 "captureAs":string (optional) — captures the action's OUTPUT into a new same-named variable. Allowed
-ONLY on run_shell and invoke_llm; the captured value is TAINTED. invoke_llm_v2 is flat-v1 only.
+ONLY on run_shell, invoke_llm and http_request; the captured value is TAINTED. invoke_llm_v2 is flat-v1 only.
+Exceptions (trusted, CLEAN): the answer of an "ask" and an invoke_llm with "output".
 
 Control-flow actions (containers, NOT leaf actions; never eval, never goto). Nesting depth <= 4;
 at most 64 action nodes total across the whole program:
@@ -882,6 +941,11 @@ at most 64 action nodes total across the whole program:
    // deadline forbid infinite loops). maxIterationsVar names a NUMBER variable (e.g. a random_int)
    // read at run time and clamped to 1..1000 — use it to repeat a dynamic number of times.
 - {"type":"wait", "durationMs":integer 1..3600000}   // cooperative pause, <= 1 hour.
+- {"type":"ask", "prompt":string, "choices":[string,...], "captureAs":string, "timeoutMs":integer,
+   "defaultChoice":string|null}   // asks the user with a notification, one button per choice, and waits.
+   // 2-4 unique choices of 1-24 characters; prompt <= 120 characters after ${'$'}{var} filling; timeoutMs
+   // 10000..3600000. No answer: defaultChoice (one of the choices) if set, otherwise the program stops.
+   // The captured value is ALWAYS one of the choices: branch on it with var_compare EQ.
 The worst-case time budget of the whole program must stay <= 6 hours (reduce maxIterations/delays).
 If the user asks for a value beyond any of these bounds, do not silently clamp it and do not ask a
 generic question: return draft null with error_code "limit_exceeded" and state the exact limit (rule 5).

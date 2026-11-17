@@ -1,0 +1,365 @@
+[
+ {
+  "id": "K01-calendar-start-title",
+  "title": "Calendario: inizio di un evento, il titolo nel testo della notifica",
+  "cond": "none",
+  "rule": {
+   "name": "K01-calendar-start-title",
+   "trigger": {
+    "type": "calendar_event",
+    "phase": "START",
+    "offsetMinutes": -10,
+    "titleMatch": "dentista"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e K01 {{RUN}}",
+     "text": "${evento}"
+    }
+   ],
+   "vars": [
+    {
+     "type": "trigger_payload",
+     "name": "evento",
+     "field": "TITLE",
+     "extractionRegex": null,
+     "confidentiality": "PRIVATE"
+    }
+   ]
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {
+    "title": "Dentista {{RUN}}"
+   }
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.text=String (Dentista {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "K02-calendar_event-true-audio_mode+display+launch",
+  "title": "Copertura a coppie: calendar_event / condizione true (ogni giorno) / audio_mode, display, launch",
+  "cond": "true",
+  "rule": {
+   "name": "K02-calendar_event-true-audio_mode+display+launch",
+   "trigger": {
+    "type": "calendar_event",
+    "phase": "END",
+    "offsetMinutes": 0
+   },
+   "actions": [
+    {
+     "type": "set_volume",
+     "stream": "MEDIA",
+     "level": 30
+    },
+    {
+     "type": "set_rotation",
+     "auto": true
+    },
+    {
+     "type": "set_timer",
+     "seconds": 600,
+     "label": "e2e fill",
+     "skipUi": true
+    },
+    {
+     "type": "show_notification",
+     "title": "e2e K02 {{RUN}}",
+     "text": "e2e body"
+    }
+   ],
+   "conditions": {
+    "type": "weekday",
+    "days": ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"],
+    "tz": "Europe/Rome"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {
+    "phase": "END"
+   }
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e K02 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ],
+  "cleanup": [
+   "cmd media_session volume --stream 3 --set 7"
+  ]
+ },
+ {
+  "id": "K03-calendar_event-false-radios+device_control+network_out",
+  "title": "Copertura a coppie: calendar_event / condizione false (cuffie) / radios, device_control, network_out",
+  "cond": "false",
+  "rule": {
+   "name": "K03-calendar_event-false-radios+device_control+network_out",
+   "trigger": {
+    "type": "calendar_event",
+    "phase": "START"
+   },
+   "actions": [
+    {
+     "type": "set_wifi",
+     "on": true
+    },
+    {
+     "type": "screenshot"
+    },
+    {
+     "type": "http_request",
+     "method": "GET",
+     "url": "https://example.com/"
+    }
+   ],
+   "conditions": {
+    "type": "headset_connected",
+    "kind": "WIRED"
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "executions": 0,
+    "audit_has": [
+     "CONDITIONS_NOT_MET"
+    ]
+   }
+  },
+  "fire": {
+   "payload": {}
+  },
+  "per_config": {
+   "none": {
+    "expect": {
+     "load": {
+      "fail": {
+       "stage": "review",
+       "code": "capability_unavailable"
+      }
+     }
+    },
+    "fire": null
+   }
+  }
+ },
+ {
+  "id": "K04-shell-from-calendar-refused",
+  "title": "Una shell o una macro sullo schermo non possono partire da un evento del calendario",
+  "cond": "none",
+  "rule": {
+   "name": "K04-shell-from-calendar-refused",
+   "trigger": {
+    "type": "calendar_event",
+    "phase": "START",
+    "titleMatch": "invito"
+   },
+   "actions": [
+    {
+     "type": "run_shell",
+     "cmd": "true"
+    },
+    {
+     "type": "ui_steps",
+     "pkg": "com.google.android.deskclock",
+     "steps": [
+      {
+       "op": "home"
+      }
+     ]
+    }
+   ]
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "shell_external_trigger"
+    }
+   }
+  }
+ },
+ {
+  "id": "K05-shared-calendar-filter-refused",
+  "title": "Un filtro del calendario svuotato da una regola condivisa va completato",
+  "cond": "none",
+  "rule": {
+   "name": "K05-shared-calendar-filter-refused",
+   "trigger": {
+    "type": "calendar_event",
+    "phase": "START",
+    "titleMatch": ""
+   },
+   "actions": [
+    {
+     "type": "vibrate",
+     "durationMs": 100
+    }
+   ]
+  },
+  "expect": {
+   "load": {
+    "fail": {
+     "stage": "review",
+     "code": "calendar_filter_invalid"
+    }
+   }
+  }
+ },
+ {
+  "id": "K10-weekday-false",
+  "title": "Condizione: nessun giorno della settimana (falsa)",
+  "cond": "false",
+  "rule": {
+   "name": "K10-weekday-false",
+   "trigger": {
+    "type": "screen",
+    "event": "ON"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e K10 {{RUN}}",
+     "text": "e2e body"
+    }
+   ],
+   "conditions": {
+    "type": "not",
+    "cond": {
+     "type": "weekday",
+     "days": ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"],
+     "tz": "UTC"
+    }
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": {
+    "executions": 0,
+    "audit_has": [
+     "CONDITIONS_NOT_MET"
+    ]
+   }
+  },
+  "fire": {
+   "payload": {}
+  }
+ },
+ {
+  "id": "K11-wifi-connected-true",
+  "title": "Condizione: collegato a una rete Wi-Fi (vera)",
+  "cond": "true",
+  "rule": {
+   "name": "K11-wifi-connected-true",
+   "trigger": {
+    "type": "screen",
+    "event": "ON"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e K11 {{RUN}}",
+     "text": "e2e body"
+    }
+   ],
+   "conditions": {
+    "type": "wifi_connected",
+    "ssid": null
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "pre": [
+   "svc wifi enable"
+  ],
+  "fire": {
+   "payload": {},
+   "delay_s": 5
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e K11 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ },
+ {
+  "id": "K12-no-headset-no-bluetooth-device-not-busy",
+  "title": "Condizione: niente cuffie, nessun dispositivo Bluetooth di nome, nessun evento in corso (vera)",
+  "cond": "true",
+  "rule": {
+   "name": "K12-no-headset-no-bluetooth-device-not-busy",
+   "trigger": {
+    "type": "screen",
+    "event": "ON"
+   },
+   "actions": [
+    {
+     "type": "show_notification",
+     "title": "e2e K12 {{RUN}}",
+     "text": "e2e body"
+    }
+   ],
+   "conditions": {
+    "type": "and",
+    "all": [
+     {
+      "type": "not",
+      "cond": {
+       "type": "headset_connected",
+       "kind": "ANY"
+      }
+     },
+     {
+      "type": "not",
+      "cond": {
+       "type": "bluetooth_connected",
+       "device": "e2e-car-{{RUN}}"
+      }
+     },
+     {
+      "type": "not",
+      "cond": {
+       "type": "calendar_busy",
+       "titleMatch": "e2e-busy-{{RUN}}",
+       "calendar": null
+      }
+     }
+    ]
+   }
+  },
+  "expect": {
+   "load": "ok",
+   "run": "SUCCEEDED"
+  },
+  "fire": {
+   "payload": {}
+  },
+  "checks": [
+   {
+    "shell": "dumpsys notification --noredact | grep -c 'android.title=String (e2e K12 {{RUN}})'",
+    "matches": "^[1-9]",
+    "wait_s": 4
+   }
+  ]
+ }
+]

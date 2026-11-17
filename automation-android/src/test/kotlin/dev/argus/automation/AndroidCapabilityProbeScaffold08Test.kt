@@ -10,10 +10,6 @@ import dev.argus.engine.model.ActionTypeIds
 import dev.argus.engine.model.ApprovalFingerprint
 import dev.argus.engine.model.AutomationId
 import dev.argus.engine.model.CapabilityIds
-import dev.argus.engine.model.HttpMethod
-import dev.argus.engine.model.NotificationActionOp
-import dev.argus.engine.model.OutputKind
-import dev.argus.engine.model.OutputSpec
 import dev.argus.engine.model.SensorKind
 import dev.argus.engine.model.StoredOp
 import dev.argus.engine.runtime.ActionResult
@@ -77,15 +73,12 @@ class AndroidCapabilityProbeScaffold08Test {
     )
 
     private val newActionTypes = setOf(
-        ActionTypeIds.ASK,
         ActionTypeIds.SET_STORED,
         ActionTypeIds.SET_USER_MODE,
-        ActionTypeIds.NOTIFICATION_REPLY,
-        ActionTypeIds.NOTIFICATION_ACTION,
     )
 
     private val newTriggers = setOf(
-        "calendar_event", "nfc_tag", "next_alarm", "app_usage", "user_mode_changed",
+        "nfc_tag", "next_alarm", "app_usage", "user_mode_changed",
         "sensor.${SensorKind.SHAKE.wireName}", "sensor.${SensorKind.FLIP_FACE_DOWN.wireName}",
     )
 
@@ -138,13 +131,8 @@ class AndroidCapabilityProbeScaffold08Test {
             shizukuReady = { true },
         )
         val actions = listOf(
-            Action.Ask("?", listOf("a"), "answer"),
             Action.SetStored("k", StoredOp.CLEAR),
             Action.SetUserMode("lavoro"),
-            Action.NotificationReply("ok"),
-            Action.NotificationAction(NotificationActionOp.DISMISS),
-            Action.HttpRequest(HttpMethod.GET, "https://example.org", captureAs = "body"),
-            Action.InvokeLlm("g", emptyList(), emptyList(), false, output = OutputSpec(OutputKind.BOOLEAN)),
         )
         actions.forEach { action ->
             assertEquals(ActionResult.Failure("not_available_yet"), executor.execute(action, context), "$action")

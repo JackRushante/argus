@@ -51,6 +51,7 @@ BASE_GRANTS = [
     f"pm grant {PACKAGE} android.permission.READ_PHONE_STATE",
     f"pm grant {PACKAGE} android.permission.READ_CALL_LOG",
     f"pm grant {PACKAGE} android.permission.BLUETOOTH_CONNECT",
+    f"pm grant {PACKAGE} android.permission.READ_CALENDAR",
     f"pm grant {PACKAGE} android.permission.ACTIVITY_RECOGNITION",
     f"appops set {PACKAGE} SCHEDULE_EXACT_ALARM allow",
     f"appops set {PACKAGE} WRITE_SETTINGS allow",

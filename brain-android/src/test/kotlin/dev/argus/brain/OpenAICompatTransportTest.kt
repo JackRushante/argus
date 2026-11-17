@@ -1449,6 +1449,51 @@ class OpenAICompatTransportTest {
         assertTrue(system.startsWith(AgentMessageSupport.COMPILE_RULES), "le regole restano quelle di sempre")
     }
 
+    // --- 0.8 invoke_llm.output: risposta vincolata ---
+
+    @Test fun `a constrained answer asks for an enum schema and unwraps the answer`(): Unit = runBlocking {
+        server.enqueue(jsonResponse(chatContent("""{"answer":"urgent"}""")))
+        val t = transport(ProviderId.OPENAI, model = "gpt-5.5")
+        val spec = dev.argus.engine.model.OutputSpec(
+            dev.argus.engine.model.OutputKind.CHOICE,
+            choices = listOf("urgent", "normal"),
+        )
+
+        val result = t.actConstrained(timerContext(), "È urgente?", emptyList(), emptyList(), emptyList(), spec)
+
+        assertEquals("urgent", result.text)
+        val root = requestRoot(assertNotNull(server.takeRequest(2, TimeUnit.SECONDS)))
+        val schema = root.getValue("response_format").jsonObject.getValue("json_schema").jsonObject
+        assertEquals("argus_answer", schema.getValue("name").jsonPrimitive.content)
+        val answer = schema.getValue("schema").jsonObject.getValue("properties").jsonObject.getValue("answer").jsonObject
+        assertEquals(listOf("urgent", "normal"), answer.getValue("enum").jsonArray.map { it.jsonPrimitive.content })
+        val system = root.getValue("messages").jsonArray.first().jsonObject.getValue("content").jsonPrimitive.content
+        assertTrue("Answer with exactly one of these labels and nothing else: urgent, normal." in system)
+        assertFalse("tools" in root)
+    }
+
+    @Test fun `a server that rejects the answer schema gets the plain instruction`(): Unit = runBlocking {
+        server.enqueue(rejected())
+        server.enqueue(jsonResponse(chatContent("yes")))
+        val t = transport(ProviderId.CUSTOM_OPENAI_COMPAT, model = "local")
+
+        val result = t.actConstrained(
+            timerContext(), "Piove?", emptyList(), emptyList(), emptyList(),
+            dev.argus.engine.model.OutputSpec(dev.argus.engine.model.OutputKind.BOOLEAN),
+        )
+
+        assertEquals("yes", result.text)
+        assertEquals("json_schema", formatType(assertNotNull(server.takeRequest(2, TimeUnit.SECONDS))))
+        assertNull(formatType(assertNotNull(server.takeRequest(2, TimeUnit.SECONDS))))
+    }
+
+    @Test fun `a structured boolean or number comes back as plain text`() {
+        assertEquals("true", StructuredOutput.unwrapAnswer("""{"answer":true}"""))
+        assertEquals("4", StructuredOutput.unwrapAnswer("""{"answer":4}"""))
+        assertEquals("maybe", StructuredOutput.unwrapAnswer("maybe"))
+        assertEquals("""{"other":1}""", StructuredOutput.unwrapAnswer("""{"other":1}"""))
+    }
+
     @Test fun `a structured clarification keeps the question and the error code`(): Unit = runBlocking {
         server.enqueue(jsonResponse(chatContent(envelope("A che ora?", draft = null, errorCode = "clarification_required"))))
         val t = transport(ProviderId.OPENAI, model = "gpt-5.5")

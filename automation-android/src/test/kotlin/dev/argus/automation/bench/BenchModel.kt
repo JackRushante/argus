@@ -135,11 +135,8 @@ internal object BenchVocab {
      * non le vede. Chi accende un'azione la toglie da qui e aggiunge i suoi casi.
      */
     val NOT_YET_AVAILABLE_ACTION_TYPES: Set<String> = setOf(
-        ActionTypeIds.ASK,
         ActionTypeIds.SET_STORED,
         ActionTypeIds.SET_USER_MODE,
-        ActionTypeIds.NOTIFICATION_REPLY,
-        ActionTypeIds.NOTIFICATION_ACTION,
     )
 
     val VAR_TYPES: Set<String> = setOf("literal", "state", "trigger_payload", "random_int", "clock", "stored")

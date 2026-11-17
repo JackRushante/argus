@@ -3,6 +3,7 @@ package dev.argus.automation
 import dev.argus.automation.base.AndroidBaseActionExecutor
 import dev.argus.automation.base.AndroidSystemActionExecutor
 import dev.argus.automation.http.HttpRequestExecutor
+import dev.argus.automation.notification.NotificationActionGateway
 import dev.argus.automation.notification.NotificationReplyDelivery
 import dev.argus.automation.notification.NotificationReplyGateway
 import dev.argus.automation.notification.NotificationReplyRequest
@@ -20,6 +21,7 @@ import dev.argus.engine.model.Action
 import dev.argus.engine.model.DndMode
 import dev.argus.engine.model.FeatureGates
 import dev.argus.engine.model.GenerativeAction
+import dev.argus.engine.model.NotificationActionPolicy
 import dev.argus.engine.model.SettingNamespace
 import dev.argus.engine.model.WriteSettingPolicy
 import dev.argus.engine.runtime.ActionExecutor
@@ -30,9 +32,13 @@ import dev.argus.engine.runtime.ResolvedActionExecutor
 import dev.argus.engine.runtime.ResolvedProgramAction
 import dev.argus.engine.runtime.RuntimeDataBinding
 import dev.argus.engine.runtime.TriggerEvent
+import dev.argus.engine.safety.ReplyChannels
 import dev.argus.engine.safety.StaticShellSafety
 import dev.argus.shizuku.ShizukuShellException
 import kotlinx.coroutines.CancellationException
+
+/** 0.8: un `ask` arrivato all'esecutore delle foglie (fuori dal programma che lo pone): mai eseguito. */
+internal const val ASK_OUTSIDE_PROGRAM = "ask_outside_program"
 
 /** Boundary Android per le notifiche prodotte da una regola. */
 fun interface AutomationNotifier {
@@ -117,6 +123,11 @@ class ShizukuActionExecutor(
     private val telephony: TelephonyActionRunner? = null,
     /** 0.8: decisioni del filtro chiamate, lette dalla foglia `screen_call`. */
     private val screenDecisions: ScreenCallDecisionLog? = null,
+    /**
+     * 0.8: `notification_action` (chiudi, posticipa, premi un pulsante) attraverso il listener delle
+     * notifiche. Default **null**: senza, `notification_action_unavailable`.
+     */
+    private val notificationActions: NotificationActionGateway? = null,
 ) : ActionExecutor, ResolvedActionExecutor {
     override suspend fun execute(
         action: ResolvedProgramAction,
@@ -145,6 +156,14 @@ class ShizukuActionExecutor(
             // contratto actResolvedV2. Questa è l'ultima difesa per snapshot legacy/manomessi.
             is Action.InvokeLlmV2 ->
                 ProgramActionResult(ActionResult.Failure("p4_invoke_llm_v2_unsupported"))
+            // 0.8: la risposta catturata torna all'interprete, che la etichetta TAINTED (mai nel journal).
+            is Action.HttpRequest -> if (leaf.captureAs != null && !FeatureGates.blocks(leaf)) {
+                httpRequests?.run(leaf)
+                    ?.let { ProgramActionResult(it.result, capturedText = it.captured) }
+                    ?: ProgramActionResult(ActionResult.Failure("base_executor_unavailable"))
+            } else {
+                ProgramActionResult(execute(leaf, context))
+            }
             else -> ProgramActionResult(execute(leaf, context))
         }
     } catch (error: CancellationException) {
@@ -218,7 +237,7 @@ class ShizukuActionExecutor(
             is Action.InputText,
             -> ActionResult.Failure("unsupported_phase")
 
-            is Action.WhatsAppReply -> staticReply(action, ctx)
+            is Action.WhatsAppReply -> staticReply(action.text, ctx, ReplyChannels::isWhatsApp)
 
             // Ultima linea dopo validator e FirePolicy: l'identità si verifica sull'evento
             // realmente arrivato, non su quella dichiarata nella regola.
@@ -278,7 +297,7 @@ class ShizukuActionExecutor(
                 ?: ActionResult.Failure("base_executor_unavailable")
             is Action.SetRotation -> systemActions?.setRotation(action.auto)
                 ?: ActionResult.Failure("base_executor_unavailable")
-            // 0.8 scaffold: cattura, estrazione e segreti sono dietro i loro FeatureGate (fail-closed).
+            // 0.8: cattura, estrazione e segreti sono dietro i loro FeatureGate (fail-closed se spenti).
             is Action.HttpRequest -> if (FeatureGates.blocks(action)) {
                 ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
             } else {
@@ -314,15 +333,25 @@ class ShizukuActionExecutor(
 
             // 0.8 scaffold: azioni spente, falliscono chiuse con lo stesso codice del validator. Chi ne
             // implementa una sostituisce la SUA riga con l'esecutore e accende il suo FeatureGate.
-            is Action.Ask -> ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
+            // 0.8: `ask` la pone l'interprete del programma (ProgramQuestions), mai l'esecutore delle foglie.
+            is Action.Ask -> ActionResult.Failure(ASK_OUTSIDE_PROGRAM)
 
             is Action.SetStored -> ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
 
             is Action.SetUserMode -> ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
 
-            is Action.NotificationReply -> ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
+            // 0.8: stessa reply di whatsapp_reply, sulle app di ReplyChannels.NOTIFICATION_REPLY_PACKAGES.
+            is Action.NotificationReply -> if (FeatureGates.blocks(action)) {
+                ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
+            } else {
+                staticReply(action.text, ctx, ReplyChannels::isNotificationReplyPackage)
+            }
 
-            is Action.NotificationAction -> ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
+            is Action.NotificationAction -> if (FeatureGates.blocks(action)) {
+                ActionResult.Failure(FeatureGates.NOT_AVAILABLE_YET)
+            } else {
+                notificationAction(action, ctx)
+            }
 
             // 0.8: SMS, chiamate e Intent ricontrollano tutto sul telefono (tetti orari compresi). La chiamata e
             // l'activity seguono la regola degli avvii da background (privilegiato o «Tocca per …»).
@@ -434,22 +463,35 @@ class ShizukuActionExecutor(
      * verificato. Il gateway ripete package trusted, key/conversation/event esatti, 1:1 e
      * consumo one-shot: gruppo, handle stale o canale scaduto restano fallimenti tipizzati.
      */
-    private fun staticReply(action: Action.WhatsAppReply, ctx: FireContext): ActionResult {
+    private fun staticReply(text: String, ctx: FireContext, packageAllowed: (String) -> Boolean): ActionResult {
         val notification = ctx.event as? TriggerEvent.NotificationPosted
             ?: return ActionResult.Failure("reply_event_unverified")
+        // whatsapp_reply solo su WhatsApp, notification_reply solo sulle altre app: ultima linea.
+        if (!packageAllowed(notification.pkg)) return ActionResult.Failure("reply_package_untrusted")
         val delivery = replies.send(
             NotificationReplyRequest(
                 packageName = notification.pkg,
                 notificationKey = notification.notificationKey.orEmpty(),
                 conversationId = notification.conversationId.orEmpty(),
                 eventId = ctx.eventId,
-                text = action.text,
+                text = text,
             ),
         )
         return when (delivery) {
             NotificationReplyDelivery.Sent -> ActionResult.Success
             is NotificationReplyDelivery.Failed -> ActionResult.Failure(delivery.code)
         }
+    }
+
+    /** `notification_action` sulla notifica dell'evento realmente arrivato, mai su un'altra. */
+    private fun notificationAction(action: Action.NotificationAction, ctx: FireContext): ActionResult {
+        val notification = ctx.event as? TriggerEvent.NotificationPosted
+            ?: return ActionResult.Failure(NotificationActionPolicy.CODE_EVENT_UNVERIFIED)
+        val key = notification.notificationKey?.takeIf(String::isNotBlank)
+            ?: return ActionResult.Failure(NotificationActionPolicy.CODE_EVENT_UNVERIFIED)
+        val gateway = notificationActions
+            ?: return ActionResult.Failure(NotificationActionPolicy.CODE_UNAVAILABLE)
+        return gateway.perform(notification.pkg, key, action)
     }
 
     /**

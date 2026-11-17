@@ -102,6 +102,8 @@ internal class BenchWorld private constructor(
             WhitelistedContact("Mamma", "bench-jid-mamma"),
             WhitelistedContact("Marco Bianchi", "bench-jid-marco"),
             WhitelistedContact("Giulia", "bench-jid-giulia"),
+            // 0.8: una chat Telegram, identificata dallo shortcut di conversazione dell'app.
+            WhitelistedContact("Luca", "shortcut:org.telegram.messenger:" + "1".repeat(64)),
         )
 
         val CONTACT_NAMES: Set<String> = CONTACTS.mapTo(LinkedHashSet()) { it.displayName }

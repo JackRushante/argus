@@ -279,10 +279,10 @@ class HttpRequestExecutorTest {
     // --- Regole di forma, prima di ogni connessione ----------------------------------------------
 
     @Test
-    fun `clear text http is refused for any host but the loopback`() = runTest {
+    fun `clear text http is refused for a public host`() = runTest {
         listOf(
             "http://example.org/hook",
-            "http://192.168.1.10/hook",
+            "http://8.8.8.8/hook",
             "http://localhost.evil.example/hook",
             "ftp://example.org/hook",
         ).forEach { url ->

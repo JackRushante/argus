@@ -6,8 +6,10 @@ import dev.argus.engine.model.AutomationSchema
 import dev.argus.engine.model.ApprovalFingerprints
 import dev.argus.engine.model.CapabilityIds
 import dev.argus.engine.model.CapabilityRequirements
+import dev.argus.engine.model.NotificationActionPolicy
 import dev.argus.engine.model.toDraft
 import dev.argus.engine.safety.DraftValidator
+import dev.argus.engine.safety.ReplyChannels
 import dev.argus.engine.safety.Severity
 import dev.argus.engine.safety.StaticShellSafety
 import kotlinx.coroutines.CancellationException
@@ -151,24 +153,82 @@ class RevalidatingFirePolicy(
             return FirePolicyDecision.Block("capability_unavailable", needsReview = false)
         }
 
-        if (containsReply(automation.actions)) {
+        val replyPackageAllowed = replyPackageCheck(automation.actions)
+        if (replyPackageAllowed != null) {
             val notification = event as? TriggerEvent.NotificationPosted
                 ?: return FirePolicyDecision.Block("reply_event_unverified", needsReview = false)
             val configured = automation.trigger as? dev.argus.engine.model.Trigger.Notification
                 ?: return FirePolicyDecision.Block("reply_event_unverified", needsReview = true)
-            val verified = notification.pkg in DraftValidator.WHATSAPP_PACKAGES &&
+            val verified = replyPackageAllowed(notification.pkg) &&
                 notification.pkg == configured.pkg &&
                 notification.isGroup == false &&
                 notification.conversationId != null &&
                 notification.conversationId == configured.conversationId &&
-                notification.conversationId in snapshot.whitelistedConversationIds
+                notification.conversationId in snapshot.whitelistedConversationIds &&
+                ReplyChannels.isStableConversation(notification.pkg, notification.conversationId)
             if (!verified)
                 return FirePolicyDecision.Block("reply_event_unverified", needsReview = false)
             if (notification.notificationKey.isNullOrBlank())
                 return FirePolicyDecision.Block("reply_notification_unavailable", needsReview = false)
         }
 
+        // 0.8 notification_action: agisce solo sulla notifica viva dell'app approvata.
+        if (contains(automation.actions) { it is Action.NotificationAction }) {
+            val notification = event as? TriggerEvent.NotificationPosted
+            val configured = automation.trigger as? dev.argus.engine.model.Trigger.Notification
+            val verified = notification != null && configured != null &&
+                notification.pkg == configured.pkg &&
+                !notification.notificationKey.isNullOrBlank()
+            if (!verified)
+                return FirePolicyDecision.Block(NotificationActionPolicy.CODE_EVENT_UNVERIFIED, needsReview = false)
+        }
+
         return FirePolicyDecision.Allow
+    }
+
+    /**
+     * I package a cui le risposte della regola possono andare, o null se la regola non risponde. Ogni
+     * azione di risposta restringe: `whatsapp_reply` solo WhatsApp, `notification_reply` solo le altre
+     * app di [ReplyChannels], l'AI entrambe.
+     */
+    private fun replyPackageCheck(actions: List<Action>): ((String) -> Boolean)? {
+        var any = false
+        var whatsAppOnly = false
+        var notificationOnly = false
+        visitLeaves(actions) { action ->
+            when (action) {
+                is Action.WhatsAppReply -> { any = true; whatsAppOnly = true }
+                is Action.NotificationReply -> { any = true; notificationOnly = true }
+                else -> if (canReply(action)) any = true
+            }
+        }
+        if (!any) return null
+        return { pkg ->
+            ReplyChannels.isReplyPackage(pkg) &&
+                (!whatsAppOnly || ReplyChannels.isWhatsApp(pkg)) &&
+                (!notificationOnly || ReplyChannels.isNotificationReplyPackage(pkg))
+        }
+    }
+
+    private fun contains(actions: List<Action>, predicate: (Action) -> Boolean): Boolean {
+        var found = false
+        visitLeaves(actions) { if (predicate(it)) found = true }
+        return found
+    }
+
+    private fun visitLeaves(actions: List<Action>, visit: (Action) -> Unit) {
+        val pending = ArrayDeque<Action>()
+        actions.forEach(pending::addLast)
+        while (pending.isNotEmpty()) {
+            when (val action = pending.removeFirst()) {
+                is Action.If -> {
+                    action.then.forEach(pending::addLast)
+                    action.orElse.forEach(pending::addLast)
+                }
+                is Action.While -> action.body.forEach(pending::addLast)
+                else -> visit(action)
+            }
+        }
     }
 
     private fun containsStaticShell(actions: List<Action>): Boolean {
@@ -210,21 +270,5 @@ class RevalidatingFirePolicy(
         is Action.InvokeLlm -> action.allowedTools.any { it.equals("whatsapp_reply", ignoreCase = true) }
         is Action.InvokeLlmV2 -> action.allowedTools.any { it.equals("whatsapp_reply", ignoreCase = true) }
         else -> false
-    }
-
-    private fun containsReply(actions: List<Action>): Boolean {
-        val pending = ArrayDeque<Action>()
-        actions.forEach(pending::addLast)
-        while (pending.isNotEmpty()) {
-            when (val action = pending.removeFirst()) {
-                is Action.If -> {
-                    action.then.forEach(pending::addLast)
-                    action.orElse.forEach(pending::addLast)
-                }
-                is Action.While -> action.body.forEach(pending::addLast)
-                else -> if (canReply(action)) return true
-            }
-        }
-        return false
     }
 }

@@ -29,6 +29,7 @@ object ValidationMessages {
         "state_query_type_mismatch",
         "app_not_installed",
         "app_control_freeze_system",
+        "secret_missing",
         "not_available_yet",
     )
 
@@ -148,6 +149,55 @@ object ValidationMessages {
         "screen_call_condition_slow" to t(
             "With call screening only time-of-day and day-of-week conditions are allowed: the answer must be immediate.",
             "Con il filtro chiamate sono ammesse solo condizioni di orario e giorno della settimana: la risposta deve essere immediata.",
+        ),
+        // 0.8: «chiedimi prima», domande con pulsanti, risposte AI vincolate.
+        "confirm_timeout_invalid" to t(
+            "The confirmation must wait between 30 seconds and 60 minutes.",
+            "La conferma deve aspettare fra 30 secondi e 60 minuti.",
+        ),
+        "confirm_one_shot_unsupported" to t(
+            "A rule that runs only once cannot ask for confirmation: it switches off before you answer.",
+            "Una regola che scatta una volta sola non può chiedere conferma: si spegne prima della risposta.",
+        ),
+        "ask_prompt_invalid" to t(
+            "The question is required and can be at most 120 characters, on one line.",
+            "La domanda è obbligatoria, al massimo 120 caratteri su una riga.",
+        ),
+        "ask_choices_invalid" to t(
+            "A question needs 2 to 4 different choices of 1 to 24 characters.",
+            "Una domanda vuole da 2 a 4 scelte diverse, da 1 a 24 caratteri.",
+        ),
+        "ask_timeout_invalid" to t(
+            "A question can wait from 10 seconds to 60 minutes.",
+            "Una domanda può aspettare da 10 secondi a 60 minuti.",
+        ),
+        "ask_default_invalid" to t(
+            "The default answer must be one of the choices.",
+            "La risposta predefinita deve essere una delle scelte.",
+        ),
+        "llm_output_requires_capture" to t(
+            "A constrained AI answer must be saved in a variable.",
+            "Una risposta AI vincolata va salvata in una variabile.",
+        ),
+        "llm_output_choices_invalid" to t(
+            "The AI answer needs 2 to 8 different labels (a-z, 0-9, _ and -, up to 24 characters).",
+            "La risposta AI vuole da 2 a 8 etichette diverse (a-z, 0-9, _ e -, al massimo 24 caratteri).",
+        ),
+        "llm_output_choices_forbidden" to t(
+            "Only a choice answer has labels.",
+            "Solo una risposta a scelta ha etichette.",
+        ),
+        "llm_output_bounds_required" to t(
+            "A numeric AI answer needs both a minimum and a maximum.",
+            "Una risposta AI numerica vuole sia un minimo sia un massimo.",
+        ),
+        "llm_output_bounds_invalid" to t(
+            "The minimum must not exceed the maximum, within ±10^15.",
+            "Il minimo non può superare il massimo, entro ±10^15.",
+        ),
+        "llm_output_bounds_forbidden" to t(
+            "Only a numeric answer has a minimum and a maximum.",
+            "Solo una risposta numerica ha un minimo e un massimo.",
         ),
         "cooldown_invalid" to t("The cooldown cannot be negative.", "Il cooldown non può essere negativo."),
         "cooldown_raised" to t(
@@ -291,6 +341,27 @@ object ValidationMessages {
         "time_window_invalid" to t(
             "The time window is not valid: use HH:mm and a time zone.",
             "La finestra oraria non è valida: usa HH:mm e un fuso orario.",
+        ),
+        // 0.8: condizioni di contesto e trigger del calendario.
+        "weekday_invalid" to t(
+            "The days condition needs at least one day and a valid time zone.",
+            "La condizione sui giorni ha bisogno di almeno un giorno e di un fuso orario valido.",
+        ),
+        "wifi_ssid_invalid" to t(
+            "Write the Wi-Fi network name (up to 32 characters).",
+            "Scrivi il nome della rete Wi-Fi (al massimo 32 caratteri).",
+        ),
+        "bluetooth_device_invalid" to t(
+            "Write the Bluetooth device name or address.",
+            "Scrivi il nome o l'indirizzo del dispositivo Bluetooth.",
+        ),
+        "calendar_filter_invalid" to t(
+            "Write the event title or the calendar name, or leave the filter out.",
+            "Scrivi il titolo dell'evento o il nome del calendario, oppure togli il filtro.",
+        ),
+        "calendar_offset_invalid" to t(
+            "The calendar offset must be between -120 and 120 minutes.",
+            "Lo spostamento rispetto all'evento deve essere tra -120 e 120 minuti.",
         ),
         "state_key_unknown" to t(
             "The device state used in a condition is not known.",
@@ -674,8 +745,17 @@ object ValidationMessages {
             "Una risposta richiede un trigger di notifica.",
         ),
         "reply_wrong_package" to t(
-            "A WhatsApp reply needs a recognized WhatsApp package.",
-            "Una risposta WhatsApp richiede un package WhatsApp riconosciuto.",
+            "This reply does not work with the app of the trigger: WhatsApp uses the WhatsApp reply; Telegram, Signal and Google Messages use the notification reply.",
+            "Questa risposta non vale per l'app del trigger: WhatsApp usa la risposta WhatsApp; Telegram, Signal e Google Messaggi la risposta alla notifica.",
+        ),
+        // 0.8: risposte su Telegram, Signal e Google Messaggi.
+        "reply_app_unsupported" to t(
+            "Automatic replies are not available for this app: its notifications do not identify the chat reliably.",
+            "Le risposte automatiche non sono disponibili per questa app: le sue notifiche non identificano la chat in modo affidabile.",
+        ),
+        "reply_conversation_unstable" to t(
+            "Pick the chat from the whitelist: outside WhatsApp only a chat the app itself identifies can receive replies.",
+            "Scegli la chat dalla whitelist: fuori da WhatsApp solo una chat che l'app stessa identifica può ricevere risposte.",
         ),
         "reply_target_group" to t(
             "Automatic replies are only allowed in verified one-to-one chats.",
@@ -688,6 +768,31 @@ object ValidationMessages {
         "target_not_whitelisted" to t(
             "The conversation is not in the whitelist.",
             "La conversazione non è in whitelist.",
+        ),
+        // 0.8: azioni sulla notifica che ha avviato la regola.
+        "notification_action_no_notification" to t(
+            "Acting on a notification needs a notification trigger.",
+            "Per agire su una notifica serve un trigger di notifica.",
+        ),
+        "notification_action_label_invalid" to t(
+            "Pressing a button needs its visible text (one line, up to 100 characters); dismiss and snooze have none.",
+            "Per premere un pulsante serve il suo testo visibile (una riga, al massimo 100 caratteri); chiudi e posticipa non ne hanno.",
+        ),
+        "notification_action_label_interpolated" to t(
+            "The button text must be written out, without variables.",
+            "Il testo del pulsante va scritto per intero, senza variabili.",
+        ),
+        "notification_action_snooze_invalid" to t(
+            "Snooze needs a duration from 1 to 1440 minutes; the other operations have none.",
+            "Posticipa richiede una durata da 1 a 1440 minuti; le altre operazioni non ne hanno.",
+        ),
+        "notification_action_forbidden_app" to t(
+            "Argus never presses buttons on notifications of this app (system, permissions, store or Argus).",
+            "Argus non preme mai pulsanti nelle notifiche di questa app (sistema, permessi, store o Argus).",
+        ),
+        "notification_click_review" to t(
+            "Argus will press this button for you, in the app of the trigger, every time the rule fires.",
+            "Argus premerà questo pulsante al posto tuo, nell'app del trigger, ogni volta che la regola scatta.",
         ),
 
         // --- Approvazione e arm ---------------------------------------------------------------
@@ -781,8 +886,8 @@ object ValidationMessages {
             "Il livello di luminosità deve essere tra 0 e 100.",
         ),
         "http_url_invalid" to t(
-            "The request address must start with https:// (http:// is allowed only for localhost) and cannot contain a user name or password.",
-            "L'indirizzo della richiesta deve iniziare con https:// (http:// è ammesso solo per localhost) e non può contenere nome utente o password.",
+            "The request address must start with https:// (http:// only towards this phone or your own network) and cannot contain a user name or password.",
+            "L'indirizzo della richiesta deve iniziare con https:// (http:// solo verso questo telefono o la tua rete) e non può contenere nome utente o password.",
         ),
         "http_url_interpolated" to t(
             "The request address is fixed: it cannot contain a \${variable}.",
@@ -823,6 +928,43 @@ object ValidationMessages {
         "interpolation_json_context" to t(
             "External data sits in the JSON body outside a quoted string: the action would be blocked when it runs.",
             "Un dato esterno è nel body JSON fuori da una stringa tra virgolette: l'azione verrebbe bloccata all'esecuzione.",
+        ),
+        // --- 0.8 · risposta catturata, segreti della cassaforte, http sulla rete locale ---------------
+        "http_cleartext_local" to t(
+            "The request travels unencrypted on your network.",
+            "La richiesta viaggia senza cifratura sulla tua rete.",
+        ),
+        "http_cleartext_secret" to t(
+            "A secret never travels unencrypted: on your network the request needs https:// (http:// only towards this phone).",
+            "Un segreto non viaggia mai senza cifratura: sulla tua rete la richiesta deve usare https:// (http:// solo verso questo telefono).",
+        ),
+        "http_extract_without_capture" to t(
+            "The part of the response to take only makes sense when the response is kept in a variable.",
+            "La parte della risposta da prendere ha senso solo se la risposta viene conservata in una variabile.",
+        ),
+        "http_extract_invalid" to t(
+            "The JSON pointer is not valid: it starts with / (for example /current/temp) and is written out in full.",
+            "Il puntatore JSON non è valido: inizia con / (per esempio /current/temp) ed è scritto per intero.",
+        ),
+        "http_secrets_too_many" to t(
+            "At most 10 headers in all, secret ones included, and 10 secret query parameters.",
+            "Al massimo 10 intestazioni in tutto, segrete comprese, e 10 parametri di query segreti.",
+        ),
+        "secret_name_invalid" to t(
+            "A secret's name has lowercase letters, digits and _ only, starts with a letter and is at most 32 characters.",
+            "Il nome di un segreto ha solo lettere minuscole, cifre e _, inizia con una lettera ed è lungo al massimo 32 caratteri.",
+        ),
+        "http_secret_ref_invalid" to t(
+            "A secret header or query parameter is not valid (name, repeated, Content-Type, or a prefix that is too long or has a \${variable}).",
+            "Un'intestazione o un parametro segreto non è valido (nome, ripetuto, Content-Type, o un prefisso troppo lungo o con una \${variabile}).",
+        ),
+        "http_secret_header_conflict" to t(
+            "A secret header has the same name as another header.",
+            "Un'intestazione segreta ha lo stesso nome di un'altra intestazione.",
+        ),
+        "secret_missing" to t(
+            "This rule uses a secret that is not saved on this phone: add it in System › Secrets.",
+            "Questa regola usa un segreto non salvato su questo telefono: aggiungilo in Sistema › Segreti.",
         ),
 
         // --- 0.5.1 · azioni privilegiate tipizzate ----------------------------------------------

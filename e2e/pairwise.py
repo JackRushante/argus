@@ -22,6 +22,8 @@ CONFIGS = ["shizuku_root", "shizuku_shell", "none"]
 TRIGGERS = [
     "time", "immediate", "manual", "geofence", "notification", "phone_state", "connectivity",
     "sensor", "screen", "battery", "audio_output", "mode_changed", "media", "app_event",
+    # 0.8: inizio/fine di un evento del calendario.
+    "calendar_event",
 ]
 
 # Classi di azioni: raggruppano i tipi per natura dell'effetto e per tier. `wait`, `if` e `while` non
@@ -29,12 +31,14 @@ TRIGGERS = [
 ACTION_CLASSES: Dict[str, List[str]] = {
     "local_ui": [
         "show_notification", "speak", "vibrate", "set_flashlight", "copy_text", "copy_to_clipboard",
-        "media_control",
+        "media_control", "notification_action",
+        # 0.8: la domanda con pulsanti e' una notifica dell'app.
+        "ask",
     ],
     "audio_mode": ["set_volume", "set_ringer", "set_dnd", "screen_call"],
     "display": ["set_brightness", "set_rotation", "set_dark_mode"],
     "launch": ["launch_app", "open_url", "open_settings_screen", "set_alarm", "set_timer", "send_intent"],
-    "network_out": ["http_request", "send_sms", "call_number"],
+    "network_out": ["http_request", "notification_reply", "send_sms", "call_number"],
     "radios": [
         "set_wifi", "set_bluetooth", "set_mobile_data", "set_airplane", "set_location", "set_nfc",
         "set_battery_saver",
@@ -49,9 +53,9 @@ CONTROL_FLOW = ["wait", "if", "while"]
 # `not_available_yet`). Non entra nella copertura a coppie finche' e' spento; una regola della suite puo'
 # usarlo solo per provare quel rifiuto. Chi accende un tipo lo sposta in TRIGGERS o ACTION_CLASSES e
 # aggiunge le sue regole.
-NOT_YET_AVAILABLE_TRIGGERS = ["calendar_event", "nfc_tag", "next_alarm", "app_usage", "user_mode_changed"]
+NOT_YET_AVAILABLE_TRIGGERS = ["nfc_tag", "next_alarm", "app_usage", "user_mode_changed"]
 NOT_YET_AVAILABLE_ACTIONS = [
-    "ask", "set_stored", "set_user_mode", "notification_reply", "notification_action",
+    "set_stored", "set_user_mode",
 ]
 NOT_YET_AVAILABLE_CODE = "not_available_yet"
 ACTION_CLASS_OF: Dict[str, str] = {a: c for c, items in ACTION_CLASSES.items() for a in items}
@@ -103,7 +107,8 @@ def features(record: dict) -> Dict[str, Set[str]]:
         flow.add("vars")
     if any(v.get("type") == "clock" for v in vars_):
         flow.add("clock")
-    if any(a.get("type") == "run_shell" and a.get("captureAs") for a in actions):
+    # 0.8: anche la risposta di una richiesta web catturata (`http_request.captureAs`).
+    if any(a.get("type") in ("run_shell", "http_request") and a.get("captureAs") for a in actions):
         flow.add("capture")
     for name in CONTROL_FLOW:
         if name in types:

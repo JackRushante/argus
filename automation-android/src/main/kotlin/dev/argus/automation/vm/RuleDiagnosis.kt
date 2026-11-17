@@ -216,6 +216,10 @@ private fun causeText(cause: BlockCause, l: RenderLanguage): String = when (caus
         "The contacts permission is missing",
         "Manca il permesso per leggere i contatti",
     )
+    BlockCause.CALENDAR_PERMISSION -> l.pick(
+        "The calendar permission is missing: turn on \"Calendar rules\" in System",
+        "Manca il permesso del calendario: attiva \"Regole del calendario\" in Sistema",
+    )
     BlockCause.NOT_AVAILABLE_YET -> l.pick(
         "This is not available in this version",
         "Non disponibile in questa versione",

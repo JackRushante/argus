@@ -956,12 +956,12 @@ class RuleRenderCoverageTest {
                     "captureAs" to ms(m("Response captured as xyz_resp", "Risposta catturata come xyz_resp")),
                     "extract" to ms(m("JSON pointer /xyz/ptr", "puntatore JSON /xyz/ptr")),
                     "secretHeaders" to ms(
-                        m("X-XYZ-Auth: Bearer [secret \"xyz_vault_token\"", "X-XYZ-Auth: Bearer [segreto \"xyz_vault_token\""),
+                        m("X-XYZ-Auth: Bearer ⟨secret xyz_vault_token⟩", "X-XYZ-Auth: Bearer ⟨segreto xyz_vault_token⟩"),
                     ),
                     "secretQuery" to ms(
                         m(
-                            "Query parameter xyz_q = [secret \"xyz_vault_q\"",
-                            "Parametro di query xyz_q = [segreto \"xyz_vault_q\"",
+                            "Query parameter xyz_q = ⟨secret xyz_vault_q⟩",
+                            "Parametro di query xyz_q = ⟨segreto xyz_vault_q⟩",
                         ),
                     ),
                 ),
@@ -1205,7 +1205,7 @@ class RuleRenderCoverageTest {
         )
         val expected = listOf(
             m("2 minutes and 5 seconds", "2 minuti e 5 secondi"),
-            m("Run / Cancel", "Esegui / Annulla"),
+            m("Asks for confirmation before running (within 2", "Chiede conferma prima di eseguire (entro 2"),
             m("the screen turns off", "lo schermo si spegne"),
             m("puts back the values", "rimette i valori"),
             m("5151 ms"),

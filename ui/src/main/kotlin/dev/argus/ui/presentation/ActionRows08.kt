@@ -87,8 +87,16 @@ internal object ActionRows08 {
         val details = listOfNotNull(
             a.label?.let { l.pick("button ${quoted(it)}", "pulsante ${quoted(it)}") },
             a.snoozeMinutes?.let { l.pick("for $it minutes", "per $it minuti") },
+            // L'app è quella del trigger (riga «Quando»): il pulsante si preme solo lì.
+            if (a.op == NotificationActionOp.CLICK) {
+                l.pick("in the app of the trigger, on your behalf", "nell'app del trigger, al posto tuo")
+            } else {
+                null
+            },
         )
+        // Premere un pulsante di un'altra app è come un tocco: porta il segno «conferma dal vivo».
         return row("notify", label, details.joinToString(" · ").ifEmpty { null })
+            .copy(requiresLiveConfirm = a.op == NotificationActionOp.CLICK)
     }
 
     /** Un destinatario `${'$'}{var}` è il numero di chi ha chiamato o scritto: lo si dice, col segnaposto. */
@@ -187,10 +195,11 @@ internal object ActionRows08 {
         }
     }
 
+    /** Come nella tavola approvata: `Bearer ⟨segreto ha_token⟩`. Il nome, mai il valore. */
     private fun secretValue(ref: SecretRef, l: RenderLanguage): String =
         VisibleText.singleLine(ref.prefix) + l.pick(
-            "[secret ${quoted(ref.secret)} from the phone's vault]",
-            "[segreto ${quoted(ref.secret)} dalla cassaforte del telefono]",
+            "⟨secret ${VisibleText.singleLine(ref.secret)}⟩",
+            "⟨segreto ${VisibleText.singleLine(ref.secret)}⟩",
         )
 
     /** Suffisso del dettaglio di `invoke_llm` con l'uscita vincolata; vuoto se l'uscita è testo libero. */

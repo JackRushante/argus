@@ -7,6 +7,8 @@ import dev.argus.engine.brain.CompileMetaError
 import dev.argus.engine.brain.CompileResult
 import dev.argus.engine.model.Action
 import dev.argus.engine.model.GenerativeContract
+import dev.argus.engine.model.LlmOutputPolicy
+import dev.argus.engine.model.OutputSpec
 import dev.argus.engine.model.StateContextClassification
 import dev.argus.engine.runtime.DeviceState
 import dev.argus.engine.runtime.FireContext
@@ -193,7 +195,7 @@ class AnthropicMessagesTransport internal constructor(
         // Reply: esige una notifica WhatsApp 1:1 in arrivo. Sink NOTIFICA #59 (da timer/immediate):
         // nessuna notifica, il testo nasce dal solo goal (+ web/state).
         val notification =
-            if (useReplyTool) AgentMessageSupport.requireWhatsAppNotification(context) else null
+            if (useReplyTool) AgentMessageSupport.requireReplyNotification(context) else null
         val stateLines = if ("state" in contextSources) AgentMessageSupport.safeStateLines(context.state) else emptyList()
         val webRequested = GenerativeContract.TOOL_WEB_SEARCH in allowedTools
         return generate(
@@ -218,7 +220,7 @@ class AnthropicMessagesTransport internal constructor(
         val useReplyTool = AgentMessageSupport.requireGenerativeToolset(allowedTools)
         AgentMessageSupport.requireGenerativeContextSources(contextSources, useReplyTool)
         val notification =
-            if (useReplyTool) AgentMessageSupport.requireWhatsAppNotification(context) else null
+            if (useReplyTool) AgentMessageSupport.requireReplyNotification(context) else null
         val stateLines = if ("state" in contextSources) AgentMessageSupport.safeStateLines(context.state) else emptyList()
         val webRequested = GenerativeContract.TOOL_WEB_SEARCH in allowedTools
         return generate(
@@ -227,6 +229,52 @@ class AnthropicMessagesTransport internal constructor(
             stateLines = stateLines,
             webRequested = webRequested,
             useReplyTool = useReplyTool,
+            runtimeData = runtimeData,
+        )
+    }
+
+    /**
+     * 0.8 `invoke_llm.output`: il goal porta l'istruzione fissa della forma e, dove il catalogo prevede
+     * `output_config`, la richiesta chiede `{"answer": …}` chiuso. Un modello che rifiuta lo schema riceve la
+     * richiesta senza `output_config`. La lane ricontrolla sempre il testo: questa è solo una richiesta.
+     */
+    override suspend fun actConstrained(
+        context: FireContext,
+        goal: String,
+        contextSources: List<String>,
+        allowedTools: List<String>,
+        runtimeData: List<RuntimeDataBinding>,
+        output: OutputSpec,
+    ): ActResult {
+        val cleanGoal = AgentMessageSupport.requireGoal(LlmOutputPolicy.constrainedGoal(goal, output))
+        val useReplyTool = AgentMessageSupport.requireGenerativeToolset(allowedTools)
+        if (useReplyTool) throw config("una risposta vincolata non è una reply")
+        AgentMessageSupport.requireGenerativeContextSources(contextSources, useReplyTool)
+        val stateLines = if ("state" in contextSources) AgentMessageSupport.safeStateLines(context.state) else emptyList()
+        val webRequested = GenerativeContract.TOOL_WEB_SEARCH in allowedTools
+        if (spec.quirks.structuredOutput == StructuredOutputMode.OUTPUT_CONFIG && !structuredRejected) {
+            try {
+                val structured = generate(
+                    goal = cleanGoal,
+                    notification = null,
+                    stateLines = stateLines,
+                    webRequested = webRequested,
+                    useReplyTool = false,
+                    runtimeData = runtimeData,
+                    outputConfig = StructuredOutput.anthropicAnswerConfig(output),
+                )
+                val text = structured.text ?: return structured
+                return structured.copy(text = StructuredOutput.unwrapAnswer(text))
+            } catch (error: TransportException) {
+                if (!StructuredOutput.isRejection(error)) throw error
+            }
+        }
+        return generate(
+            goal = cleanGoal,
+            notification = null,
+            stateLines = stateLines,
+            webRequested = webRequested,
+            useReplyTool = false,
             runtimeData = runtimeData,
         )
     }
@@ -245,7 +293,7 @@ class AnthropicMessagesTransport internal constructor(
         ) {
             throw config("state context act v2 non valido")
         }
-        val notification = AgentMessageSupport.requireWhatsAppNotification(context)
+        val notification = AgentMessageSupport.requireReplyNotification(context)
         val stateLines = action.stateContext.map { approved -> AgentMessageSupport.toStateLine(approved, context.state) }
         val webRequested = GenerativeContract.TOOL_WEB_SEARCH in action.allowedTools
         // act v2 è sempre un reply (allowedTools include whatsapp_reply): reply tool sempre attivo.
@@ -280,6 +328,8 @@ class AnthropicMessagesTransport internal constructor(
         webRequested: Boolean,
         useReplyTool: Boolean,
         runtimeData: List<RuntimeDataBinding> = emptyList(),
+        /** 0.8: solo la risposta vincolata (senza reply tool). */
+        outputConfig: JsonObject? = null,
     ): ActResult {
         val token = requireKey()
         val model = resolveModel()
@@ -324,6 +374,7 @@ class AnthropicMessagesTransport internal constructor(
                 applyWeb || spec.quirks.forceToolChoiceAuto -> AUTO_TOOL_CHOICE
                 else -> FORCED_REPLY_CHOICE
             },
+            outputConfig = outputConfig.takeIf { !useReplyTool },
         )
         val response = parseResponse(
             execute(buildRequest(token, json.encodeToString(request)), ErrorDiagnostics(listOf(token), clientErrorsOnly = true)),

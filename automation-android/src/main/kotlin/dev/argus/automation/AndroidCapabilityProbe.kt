@@ -108,6 +108,8 @@ internal data class AndroidCapabilityState(
     val callScreeningRoleHeld: Boolean = false,
     /** 0.8: `READ_CONTACTS` concesso (`screen_call` solo per chi non è nei contatti). */
     val readContactsGranted: Boolean = false,
+    /** 0.8: `READ_CALENDAR` concesso: condizione `calendar_busy` e trigger `calendar_event`. */
+    val readCalendarGranted: Boolean = false,
 ) {
     /** Uno shell privilegiato è disponibile ORA: Shizuku autorizzato (Sui compreso) o root verificato. */
     val privilegedBackendAvailable: Boolean
@@ -198,6 +200,7 @@ internal class SystemAndroidCapabilityStateSource(
         callPhoneGranted = granted(Manifest.permission.CALL_PHONE),
         callScreeningRoleHeld = callScreeningRoleHeld(appContext),
         readContactsGranted = granted(Manifest.permission.READ_CONTACTS),
+        readCalendarGranted = granted(Manifest.permission.READ_CALENDAR),
     )
 
     private fun granted(permission: String): Boolean =
@@ -247,6 +250,8 @@ enum class BlockCause {
     CALL_SCREENING_ROLE,
     /** 0.8: manca il permesso di leggere i contatti. */
     CONTACTS_PERMISSION,
+    /** 0.8: manca il permesso di lettura del calendario (regole sul calendario). */
+    CALENDAR_PERMISSION,
 
     /** 0.8 scaffold: la funzione è nel modello ma non in questa versione (vedi `FeatureGates`). */
     NOT_AVAILABLE_YET,
@@ -347,6 +352,8 @@ class AndroidCapabilityProbe internal constructor(
         // 0.5.1: app aperta/chiusa, solo con l'accesso ai dati di utilizzo concesso (altrimenti il modello
         // proporrebbe una regola che l'app non può armare).
         if (state.usageStatsGranted) add("app_event")
+        // 0.8: inizio/fine degli eventi del calendario, solo col permesso di lettura del calendario.
+        if (state.readCalendarGranted) add("calendar_event")
         // Il filtro SIM vale solo su un telefono con più slot e dove SMS o chiamate sono armabili.
         if (state.multiSim && (state.receiveSmsGranted || (state.readPhoneStateGranted && state.readCallLogGranted))) {
             add("phone_state.sim")
@@ -417,11 +424,21 @@ class AndroidCapabilityProbe internal constructor(
         capability == CapabilityIds.STATE_LOCATION -> BlockCause.LOCATION_PERMISSION
         capability == CapabilityIds.TRIGGER_NOTIFICATION ||
             capability == GenerativeContract.TOOL_WHATSAPP_REPLY ||
-            capability == ActionCapabilities.WHATSAPP_REPLY -> BlockCause.NOTIFICATION_ACCESS
+            capability == ActionCapabilities.WHATSAPP_REPLY ||
+            // 0.8: risposta e azione sulla notifica passano dallo stesso listener.
+            capability == CapabilityIds.ACTION_NOTIFICATION_REPLY ||
+            capability == CapabilityIds.ACTION_NOTIFICATION_ACTION -> BlockCause.NOTIFICATION_ACCESS
         capability == ActionCapabilities.SHOW_NOTIFICATION -> BlockCause.NOTIFICATIONS_PERMISSION
+        capability == CapabilityIds.RULE_CONFIRM || capability == CapabilityIds.ACTION_ASK ->
+            BlockCause.NOTIFICATIONS_PERMISSION
         capability == CapabilityIds.TRIGGER_PHONE_SMS -> BlockCause.SMS_PERMISSION
         capability == CapabilityIds.TRIGGER_PHONE_CALL -> BlockCause.CALL_PERMISSION
         capability == CapabilityIds.TRIGGER_CONNECTIVITY_BT -> BlockCause.BLUETOOTH_PERMISSION
+        // 0.8: i dispositivi Bluetooth collegati si leggono da Android 12 col permesso; prima non si leggono.
+        capability == CapabilityIds.STATE_BLUETOOTH_CONNECTED ->
+            if (state.androidApi >= Build.VERSION_CODES.S) BlockCause.BLUETOOTH_PERMISSION else BlockCause.OTHER
+        capability == CapabilityIds.STATE_CALENDAR_BUSY ||
+            capability == CapabilityIds.TRIGGER_CALENDAR_EVENT -> BlockCause.CALENDAR_PERMISSION
         capability == CapabilityIds.ACTION_INVOKE_LLM ||
             capability == GenerativeContract.TOOL_WEB_SEARCH -> BlockCause.AI_NOT_READY
         capability.startsWith(SENSOR_TRIGGER_PREFIX) -> BlockCause.SENSOR_UNAVAILABLE
@@ -542,6 +559,8 @@ class AndroidCapabilityProbe internal constructor(
             // concedere (TextToSpeech, AudioManager, rete). Luminosità e rotazione solo col permesso
             // speciale «Modifica impostazioni di sistema».
             addAll(BASE_ACTIONS_041_CAPABILITIES)
+            // 0.8: la cassaforte dei segreti sta sul telefono e non chiede permessi: sempre disponibile.
+            add(CapabilityIds.ACTION_HTTP_REQUEST_SECRETS)
             if (state.writeSettingsGranted) addAll(WRITE_SETTINGS_CAPABILITIES)
             // 0.5.0, permessi permanenti: con `WRITE_SECURE_SETTINGS` la scrittura parametrica passa dal
             // ContentResolver (SECURE/GLOBAL; SYSTEM resta legato a «Modifica impostazioni di sistema»),
@@ -551,6 +570,11 @@ class AndroidCapabilityProbe internal constructor(
             // 0.5.1: «app aperta/chiusa» legge gli stessi eventi di utilizzo: stesso permesso, nessuno shell.
             if (state.usageStatsGranted) add(CapabilityIds.TRIGGER_APP_EVENT)
             if (state.notificationsGranted) add(ActionCapabilities.SHOW_NOTIFICATION)
+            // 0.8: «chiedimi prima» e le domande con pulsanti sono notifiche dell'app con i loro pulsanti.
+            if (state.notificationsGranted) {
+                add(CapabilityIds.RULE_CONFIRM)
+                add(CapabilityIds.ACTION_ASK)
+            }
             // 0.5.1: le macro sullo schermo servono col servizio di Accessibilità acceso E con le notifiche
             // concesse: la notifica «Argus sta usando lo schermo» con «Ferma» è il loro indicatore.
             if (state.accessibilityEnabled && state.notificationsGranted) add(ActionCapabilities.UI_STEPS)
@@ -572,6 +596,9 @@ class AndroidCapabilityProbe internal constructor(
                 // La reply statica è eseguita da ShizukuActionExecutor via NotificationReplyGateway:
                 // stesso canale del tool raw, quindi stesso grant.
                 add(ActionCapabilities.WHATSAPP_REPLY)
+                // 0.8: reply su Telegram/Signal/Google Messaggi e azioni sulla notifica, stesso listener.
+                add(CapabilityIds.ACTION_NOTIFICATION_REPLY)
+                add(CapabilityIds.ACTION_NOTIFICATION_ACTION)
             }
             // Telefonia (P2-2): grant runtime distinti per evento.
             if (state.receiveSmsGranted) add(CapabilityIds.TRIGGER_PHONE_SMS)
@@ -588,6 +615,16 @@ class AndroidCapabilityProbe internal constructor(
                 add(GenerativeContract.TOOL_WEB_SEARCH)
             }
             armableSensorKinds.forEach { add(CapabilityIds.triggerSensor(it)) }
+            // 0.8, condizioni di contesto con le API pubbliche: collegamento Wi-Fi e cuffie senza permessi
+            // (il nome della rete chiede anche l'identità Wi-Fi, già sopra), Bluetooth col permesso
+            // «dispositivi nelle vicinanze», calendario con READ_CALENDAR.
+            add(CapabilityIds.STATE_WIFI_CONNECTED)
+            add(CapabilityIds.STATE_HEADSET_CONNECTED)
+            if (state.publicBluetoothStateReadable) add(CapabilityIds.STATE_BLUETOOTH_CONNECTED)
+            if (state.readCalendarGranted) {
+                add(CapabilityIds.STATE_CALENDAR_BUSY)
+                add(CapabilityIds.TRIGGER_CALENDAR_EVENT)
+            }
         }
         val transient = if (shizukuTransient) {
             // Anche le chiavi di stato: se il Bluetooth non e' leggibile in pubblico, con Shizuku
@@ -625,6 +662,8 @@ class AndroidCapabilityProbe internal constructor(
                 add(ActionTypeIds.SHOW_NOTIFICATION)
                 add(TOOL_NOTIFY_SHOW)
             }
+            // 0.8: la domanda con pulsanti è una notifica dell'app.
+            if (state.notificationsGranted) add(ActionTypeIds.ASK)
             if (state.accessibilityEnabled && state.notificationsGranted) add(ActionTypeIds.UI_STEPS)
             // 0.8: send_intent non chiede permessi (il servizio solo col backend privilegiato, v. capability).
             add(ActionTypeIds.SEND_INTENT)
@@ -632,6 +671,7 @@ class AndroidCapabilityProbe internal constructor(
             if (state.telephonyPresent && state.callPhoneGranted) add(ActionTypeIds.CALL_NUMBER)
             if (state.telephonyPresent && state.callScreeningRoleHeld) add(ActionTypeIds.SCREEN_CALL)
             if (listenerGranted) add(GenerativeContract.TOOL_WHATSAPP_REPLY)
+            if (listenerGranted) addAll(NOTIFICATION_08_ACTION_TYPES)
             // Il compilatore usa SOLO manifest.available_tools: invoke_llm deve comparire qui,
             // altrimenti Hermes ripiega su una reply statica anche quando il runtime è pronto.
             if (generativeReady) {
@@ -672,8 +712,10 @@ class AndroidCapabilityProbe internal constructor(
             unavailableTools[ActionTypeIds.SHOW_NOTIFICATION] = "notification permission missing"
             unavailableTools[TOOL_NOTIFY_SHOW] = "notification permission missing"
         }
+        if (!state.notificationsGranted) unavailableTools[ActionTypeIds.ASK] = "notification permission missing"
         if (!listenerGranted) {
             unavailableTools[GenerativeContract.TOOL_WHATSAPP_REPLY] = REASON_NOTIFICATION_LISTENER
+            NOTIFICATION_08_ACTION_TYPES.forEach { unavailableTools[it] = REASON_NOTIFICATION_LISTENER }
         }
         if (!generativeReady) {
             unavailableTools[ActionTypeIds.INVOKE_LLM] = REASON_GENERATIVE_RUNTIME
@@ -725,6 +767,7 @@ class AndroidCapabilityProbe internal constructor(
         if (state.callPhoneGranted) add("call_phone")
         if (state.callScreeningRoleHeld) add("call_screening")
         if (state.readContactsGranted) add("read_contacts")
+        if (state.readCalendarGranted) add("read_calendar")
     }
 
     /** Capability `state.<chiave>` leggibili ORA senza Shizuku (tutte, tranne il Bluetooth senza permesso). */
@@ -750,6 +793,10 @@ class AndroidCapabilityProbe internal constructor(
         val IMPLEMENTED_SENSOR_KINDS: Set<SensorKind> = setOf(SensorKind.SIGNIFICANT_MOTION)
         const val REASON_NOTIFICATION_LISTENER = "notification access not granted"
 
+        /** 0.8: `notification_reply` e `notification_action`, pubblicati col listener delle notifiche. */
+        val NOTIFICATION_08_ACTION_TYPES: List<String> =
+            listOf(ActionTypeIds.NOTIFICATION_REPLY, ActionTypeIds.NOTIFICATION_ACTION)
+
         /**
          * 0.8 scaffold: capability delle famiglie nuove. Il probe non le pubblica mai (né in `available`, né
          * nel manifest: il modello non deve vederle) e ne riporta la causa [BlockCause.NOT_AVAILABLE_YET].
@@ -757,27 +804,17 @@ class AndroidCapabilityProbe internal constructor(
          * condizioni (permesso, hardware), insieme all'interruttore in `FeatureGates`.
          */
         val NOT_YET_AVAILABLE_CAPABILITIES: Set<String> = setOf(
-            CapabilityIds.RULE_CONFIRM,
             CapabilityIds.RULE_EXIT,
-            CapabilityIds.TRIGGER_CALENDAR_EVENT,
             CapabilityIds.TRIGGER_NFC_TAG,
             CapabilityIds.TRIGGER_NEXT_ALARM,
             CapabilityIds.TRIGGER_APP_USAGE,
             CapabilityIds.TRIGGER_USER_MODE_CHANGED,
             CapabilityIds.triggerSensor(SensorKind.SHAKE),
             CapabilityIds.triggerSensor(SensorKind.FLIP_FACE_DOWN),
-            CapabilityIds.STATE_WIFI_CONNECTED,
-            CapabilityIds.STATE_BLUETOOTH_CONNECTED,
-            CapabilityIds.STATE_HEADSET_CONNECTED,
-            CapabilityIds.STATE_CALENDAR_BUSY,
             CapabilityIds.STATE_STORED,
             CapabilityIds.STATE_USER_MODE,
-            CapabilityIds.ACTION_ASK,
             CapabilityIds.ACTION_SET_STORED,
             CapabilityIds.ACTION_SET_USER_MODE,
-            CapabilityIds.ACTION_NOTIFICATION_REPLY,
-            CapabilityIds.ACTION_NOTIFICATION_ACTION,
-            CapabilityIds.ACTION_HTTP_REQUEST_SECRETS,
         )
 
         /** Trigger di sistema senza Shizuku (0.4.1): schermo, batteria, uscita audio, modalità, media. */

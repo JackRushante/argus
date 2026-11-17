@@ -93,6 +93,8 @@ class RoomAuditSink(private val dao: AuditDao) : AuditSink {
             "validation_failed",
             "requirements_changed",
             "planner_failed",
+            // 0.8: l'utente ha eliminato un segreto della cassaforte che la regola usa.
+            "secret_deleted",
         )
     }
 }

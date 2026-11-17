@@ -1,6 +1,7 @@
 package dev.argus.engine.runtime
 import dev.argus.engine.model.*
 import java.time.Clock
+import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 import kotlin.math.*
@@ -63,15 +64,21 @@ class ConditionEvaluator(private val clock: Clock) {
         // chiuso. L'interprete P4 passa invece lo scope della singola esecuzione.
         is Condition.VarCompare -> variable?.let { compareVariables(c, it) } ?: Truth.UNKNOWN
         // 0.8 scaffold: non ancora valutabili ⇒ UNKNOWN, che fallisce chiuso anche sotto `not`.
-        is Condition.Weekday -> Truth.UNKNOWN
+        // Il giorno nel fuso della regola; un fuso illeggibile è UNKNOWN.
+        is Condition.Weekday -> runCatching { LocalDate.now(clock.withZone(ZoneId.of(c.tz))) }
+            .getOrNull()
+            ?.let { today -> Truth.of(Day.entries[today.dayOfWeek.ordinal] in c.days) }
+            ?: Truth.UNKNOWN
 
-        is Condition.WifiConnected -> Truth.UNKNOWN
+        is Condition.WifiConnected -> Truth.ofKnown(ConnectionFacts.wifi(state.facts.wifi, c.ssid))
 
-        is Condition.BluetoothConnected -> Truth.UNKNOWN
+        is Condition.BluetoothConnected -> Truth.ofKnown(ConnectionFacts.bluetooth(state.facts.bluetooth, c.device))
 
-        is Condition.HeadsetConnected -> Truth.UNKNOWN
+        is Condition.HeadsetConnected -> Truth.ofKnown(ConnectionFacts.headset(state.facts.audioOutputs, c.kind))
 
-        is Condition.CalendarBusy -> Truth.UNKNOWN
+        is Condition.CalendarBusy -> state.facts.calendarNow
+            ?.let { Truth.of(CalendarMatching.busy(it, clock.millis(), c.titleMatch, c.calendar)) }
+            ?: Truth.UNKNOWN
 
         is Condition.StoredCompare -> Truth.UNKNOWN
 
@@ -252,6 +259,9 @@ class ConditionEvaluator(private val clock: Clock) {
 
         companion object {
             fun of(value: Boolean): Truth = if (value) TRUE else FALSE
+
+            /** null = stato non leggibile. */
+            fun ofKnown(value: Boolean?): Truth = value?.let(::of) ?: UNKNOWN
         }
     }
 }
