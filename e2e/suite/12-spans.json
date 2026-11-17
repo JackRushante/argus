@@ -35,7 +35,7 @@
    }
   },
   "pre": [
-   "cmd media_session volume --stream 3 --set 3",
+   "cmd audio set-volume 3 3",
    "input keyevent KEYCODE_WAKEUP"
   ],
   "fire": {
@@ -56,7 +56,7 @@
   "cleanup": [
    "input keyevent KEYCODE_WAKEUP",
    "wm dismiss-keyguard",
-   "cmd media_session volume --stream 3 --set 7"
+   "cmd audio set-volume 3 7"
   ]
  },
  {
